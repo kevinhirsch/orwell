@@ -1,4 +1,4 @@
-Feature: 0067 — Presence grounding & motivated movement
+Feature: 0076 — Presence grounding & motivated movement
   The narrator stops inventing the room. Who is present and who exists are closed-set facts the
   engine owns and feeds every turn; the model voices the scene but never authors the roster or the
   floor plan. Houseguests keep full agency to leave the player's scene — but only for a reason,

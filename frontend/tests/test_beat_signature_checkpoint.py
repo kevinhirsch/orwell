@@ -57,8 +57,8 @@ def test_beat_signature_shape_from_sample_dicts():
         "evicted": 1,                  # count of non-active house members
         "evictedNames": [],            # ADR 0009 D3 Part B — names of those out of the house (none named here)
         "finished": False,
-        "room": None,                  # 0067 — player's live room (no `whereabouts` in this sample)
-        "present": [],                 # 0067 — present company names (none in this sample)
+        "room": None,                  # 0076 — player's live room (no `whereabouts` in this sample)
+        "present": [],                 # 0076 — present company names (none in this sample)
     }
 
 
@@ -69,7 +69,7 @@ def test_beat_signature_is_fail_safe_on_missing_fields():
     assert sig["hoh"] is None and sig["noms"] == [] and sig["vetoHolder"] is None
     assert sig["vetoUsed"] is False and sig["evicted"] == 0 and sig["finished"] is False
     assert sig["evictedNames"] == []  # ADR 0009 D3 Part B — no house ⇒ no out-of-house names
-    assert sig["room"] is None and sig["present"] == []  # 0067 — no whereabouts ⇒ neutral presence
+    assert sig["room"] is None and sig["present"] == []  # 0076 — no whereabouts ⇒ neutral presence
     # Non-dict args also fail safe.
     assert chat_helpers._beat_signature(None, None)["evicted"] == 0
     assert chat_helpers._beat_signature("x", 7)["finished"] is False

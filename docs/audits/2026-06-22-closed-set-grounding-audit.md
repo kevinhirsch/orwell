@@ -7,7 +7,7 @@
 
 A live transcript (2026-06-22, move-in night) showed the narrator **inventing the room** — placing
 houseguests where the engine hadn't, teleporting them between non-adjacent bedrooms, materializing
-a houseguest who existed nowhere. Investigation (feature **0067**) found this is not a one-off: it
+a houseguest who existed nowhere. Investigation (feature **0076**) found this is not a one-off: it
 is a **closed-set fact authored by the open set**, and the owner's question was the right one —
 *"if it appears here, isn't this systemic? How do we guardrail the LLM without compromising its
 ability to storytell — is it just whack-a-mole?"*
@@ -47,8 +47,8 @@ Status: ✅ grounded · ◐ partial · ❌ gap · n/a.
 | **What an NPC knows** (and may reveal) | ✅ knowledge-bounded `npcVoice` | ✅ npcVoice sentinel | ✅ | The model "cannot voice what this NPC never learned." The template for doing it right. |
 | **Where the game is set** (LA house) | ✅ base-prompt pin | ◐ no automated guard | ◐ | L22 fix (had relocated to the player's hometown). A setting-claim guard is unbuilt; low rate. |
 | **Casting/DR private content** → NPC mouths | ✅ filtered out of NPC voicing | ✅ npcVoice sentinel + base-prompt pin | ✅ | L25. Player-level/OOC channel has no NPC pathway. |
-| **Who is present / where people are** | ❌ → ✅ via **0067** | ❌ → ✅ via **0067** | ❌→◐ | **The trigger.** 0067 adds the per-turn occupancy feed + the presence desync guard. |
-| **Who exists** (roster / identity) | ◐ roster in state | ❌ → ✅ via **0067** | ❌→◐ | "Nia from nowhere." Folded into 0067's presence/identity guard (same scene fact). |
+| **Who is present / where people are** | ❌ → ✅ via **0076** | ❌ → ✅ via **0076** | ❌→◐ | **The trigger.** 0076 adds the per-turn occupancy feed + the presence desync guard. |
+| **Who exists** (roster / identity) | ◐ roster in state | ❌ → ✅ via **0076** | ❌→◐ | "Nia from nowhere." Folded into 0076's presence/identity guard (same scene fact). |
 | **Day / week / phase / titles** (HUD facts) | ✅ in context | ◐ relies on the OOC classifier (L36) | ◐ | The model occasionally narrates the wrong day/phase; candidate for a HUD-fact guard. |
 | **Relationship history / what was said before** | ◐ store-recall (L27) | ◐ no contradiction guard | ◐ | Continuity is the store *recalled*, not the chat *remembered* (L27/L27b). A "did this happen?" recall check is the natural next guard. |
 | **Pending decision / legal options** | ✅ decision card | ✅ engine validates the submission | ✅ | The card presents the legal set; the engine rejects an illegal choice. |
@@ -60,7 +60,7 @@ Status: ✅ grounded · ◐ partial · ❌ gap · n/a.
 1. **The set is small and enumerable.** The fear ("we'll be adding guardrails forever") is
    unfounded *for the closed set* — it is the rows above, not an open-ended list. The open set is
    infinite and is deliberately **never** guarded.
-2. **Two clear gaps**, both closed in spirit by **0067**: **presence** and **roster/identity** (one
+2. **Two clear gaps**, both closed in spirit by **0076**: **presence** and **roster/identity** (one
    scene fact, one guard).
 3. **Two partials worth a follow-on**, lower urgency: **HUD facts** (day/week/phase) and
    **relationship-history continuity** — each wants a small closed-set guard on the 0065 pattern
@@ -70,7 +70,7 @@ Status: ✅ grounded · ◐ partial · ❌ gap · n/a.
 
 ## Open items
 
-- **CSG-1 ☐ (0067)** — presence + roster/identity feed + desync guard. *Owner: feature 0067.*
+- **CSG-1 ☐ (0076)** — presence + roster/identity feed + desync guard. *Owner: feature 0076.*
 - **CSG-2 ☐** — HUD-fact (day/week/phase/title) pre-emission guard, if live play shows drift past
   the L36 OOC classifier. *Candidate; not started.*
 - **CSG-3 ☐** — relationship-history continuity guard (a recall-backed "did this actually happen?"

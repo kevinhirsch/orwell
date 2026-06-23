@@ -1,7 +1,7 @@
-# 0066 — Trust-gated confidences (a houseguest opens up to you)
+# 0075 — Trust-gated confidences (a houseguest opens up to you)
 
 > **Status:** 📝 **SPEC / sketch** (drafted 2026-06-22). **Gate (planned):** engine (Vitest +
-> dependency-cruiser + BDD `0066-trust-gated-confidences.feature`) and front-end (pytest, for the
+> dependency-cruiser + BDD `0075-trust-gated-confidences.feature`) and front-end (pytest, for the
 > draw-it-out lever + the no-cold-open guardrail). **Depends on:** 0001 (Vault Wall), 0002
 > (event visibility & pathway propagation / `surfaceInformationTo`), 0017/0026 (relationship math),
 > 0023 (consequence & memory fold), 0039 (deals — the favor/goodwill ledger), 0041 (soul / emotional

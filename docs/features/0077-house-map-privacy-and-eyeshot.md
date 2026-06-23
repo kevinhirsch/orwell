@@ -1,12 +1,12 @@
-# 0068 — House map, privacy & eyeshot (who you can see, who you can hear, who you have to track)
+# 0077 — House map, privacy & eyeshot (who you can see, who you can hear, who you have to track)
 
 > **Status:** 📝 **SPEC / sketch** (drafted 2026-06-22). **Gate (planned):** engine (Vitest +
-> dependency-cruiser + BDD `0068-house-map-privacy-and-eyeshot.feature`) and front-end (the L26
+> dependency-cruiser + BDD `0077-house-map-privacy-and-eyeshot.feature`) and front-end (the L26
 > "Where you are" gadget consumes the new sightline-scoped projection). **Depends on:** 0049 (house
 > presence — the floor plan, `assignRooms`, `rollOverhears`, `whereabouts`), 0002 (events/pathways &
 > knowledge vs. suspicion — tracked occupancy is *knowledge with a pathway*), 0038 (gossip diffusion
-> — a tracked sighting spreads NPC-to-NPC), 0067 (motivated movement — exits feed the sightings this
-> spec turns into knowledge). **Sibling of** 0067 (shares the presence machinery). **Vault Wall
+> — a tracked sighting spreads NPC-to-NPC), 0076 (motivated movement — exits feed the sightings this
+> spec turns into knowledge). **Sibling of** 0076 (shares the presence machinery). **Vault Wall
 > (mandate #2):** the *content* of a private scene stays sealed; only the *observable fact* of a
 > meeting — who was seen going where, who has been alone a while — can become player knowledge,
 > through a modeled pathway.
@@ -27,7 +27,7 @@ the player's "nearby" eyeshot. That conflation is why standing next to a closed 
 occupants. This feature splits the one relation into three layered over the rooms:
 
 1. **Movement graph (doors/passages)** — who can *walk* where. Stay-or-adjacent still binds
-   (`occupancyViolations`); 0067's motivated exits land on it.
+   (`occupancyViolations`); 0076's motivated exits land on it.
 2. **Sightline graph (eyeshot)** — which rooms/zones can *see into* which. Open-plan rooms see
    across; **closed rooms are opaque from outside.** This is what `whereabouts().nearby` is allowed
    to reveal — and it is *narrower* than adjacency.
@@ -139,7 +139,7 @@ form (0017) — the engine never says "they're scheming," it says who was seen, 
 - `GameSessionAdapter` — `whereabouts()` returns `{ present, visible, tracked }` (sightline-scoped +
   the tracked-belief layer); a witnessed movement records a tracked-occupancy observation;
   conspicuousness is derived per read (never stored — ADR 0002, like blocs 0043).
-- Migration: pre-0068 saves carry old rooms — map `bathroom`'s dropped bedroom edges, seat anyone in
+- Migration: pre-0077 saves carry old rooms — map `bathroom`'s dropped bedroom edges, seat anyone in
   a removed/renamed room into the nearest valid room on the next tick; new rooms simply become
   available. No save is lost (0007).
 
@@ -160,7 +160,7 @@ form (0017) — the engine never says "they're scheming," it says who was seen, 
 - **Privacy scarcity:** in the public core, a 1:1 is never private (always visible to co-present
   houseguests) — early game has few private seats, by construction.
 - **Determinism + calibration:** seeded; the society's base occupancy stays calibration-neutral
-  (the 0067/L21-L24 stream isolation holds — zones/sightline are read-side, not new shared draws).
+  (the 0076/L21-L24 stream isolation holds — zones/sightline are read-side, not new shared draws).
 
 ## Open questions / defaults (resolve at build)
 

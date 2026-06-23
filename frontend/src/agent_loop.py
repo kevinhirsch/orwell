@@ -4631,7 +4631,7 @@ async def stream_agent_loop(
         except Exception as _desync_err:
             logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
 
-        # 0067 — the PRESENCE/IDENTITY desync guard: catch the narration staging an off-scene or
+        # 0076 — the PRESENCE/IDENTITY desync guard: catch the narration staging an off-scene or
         # evicted houseguest as acting in the player's scene (the "invented/teleported room" class).
         # Closed-set only, post-turn, gentle next-turn re-ground (combines with the board check's).
         try:
