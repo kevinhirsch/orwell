@@ -47,8 +47,27 @@
     el.querySelector(".oes-x").addEventListener("click", () => {
       dismissedKey = el.querySelector(".oes-reason").textContent || "";
       el.style.display = "none";
+      _clearBodyInset();   // F-NEW-10: drop the banner's reserved space when it's dismissed
     });
     return el;
+  }
+
+  // F-NEW-10: the banner is position:fixed; top:0, so without compensation it OCCLUDES the top of
+  // the chat — worst exactly when connectivity is degraded. Reserve its height as body padding-top
+  // while it's shown (measured after display so offsetHeight is real), and release it on
+  // hide/dismiss. A CSS var carries the value so a reduced-motion-safe transition can hook it later.
+  function _setBodyInset(el) {
+    try {
+      const h = el.offsetHeight || 0;
+      document.body.style.setProperty("--oes-inset", h + "px");
+      document.body.style.paddingTop = h + "px";
+    } catch (_) {}
+  }
+  function _clearBodyInset() {
+    try {
+      document.body.style.removeProperty("--oes-inset");
+      document.body.style.paddingTop = "";
+    } catch (_) {}
   }
 
   function show(kind, title, reason) {
@@ -64,11 +83,13 @@
     const xBtn = el.querySelector(".oes-x");
     if (xBtn) xBtn.setAttribute("aria-label", "Dismiss this notice — " + String(title).replace(/^[^\p{L}\p{N}]+/u, "").trim());
     el.style.display = "block";
+    _setBodyInset(el);   // F-NEW-10: reserve the banner's height so it doesn't cover the chat
   }
   function hide() {
     dismissedKey = null; // healthy again — a future problem should always reshow
     const el = document.getElementById(ID);
     if (el) el.style.display = "none";
+    _clearBodyInset();   // F-NEW-10: release the reserved space when the banner goes away
   }
 
   // G8: while createCharacter is in flight (health reports busy:"creating"), a slow or even
