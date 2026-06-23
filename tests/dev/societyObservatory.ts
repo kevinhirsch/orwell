@@ -1,16 +1,26 @@
 /**
  * THE SOCIETY OBSERVATORY (dev harness — feature 0078 exploration; NOT wired into runtime/CI).
  *
- * A standalone, read-only simulation to PLAY with the per-NPC motivation dials before implementing
- * them for real. It reuses the engine's PURE functions (`assignRooms`, `richOffscreenStretch`, the
- * `RelationshipModel`) with DIAL-BIASED dependency functions, so we can watch how different character
- * dials reshape WHERE houseguests go (location) and WHO they talk to + HOW (friendly vs. game) —
- * without touching the orchestrator, the runtime, or the calibrated vote spine.
+ * A standalone, read-only simulation to PLAY with two prototype threads before implementing either
+ * for real:
+ *   1. the per-NPC motivation DIALS — how character reshapes WHERE houseguests go (location) and WHO
+ *      they talk to + HOW (friendly vs. game);
+ *   2. a realistic TIME BUDGET + the nightly AWAKE-SET economy — how a believable clock (a conversation
+ *      ~1h, each phase several real hours) thins the house toward late-night so the off-screen society
+ *      runs out of PEOPLE, not a beat counter.
+ *
+ * It reuses the engine's PURE functions (`assignRooms`, `richOffscreenStretch`, the `RelationshipModel`,
+ * and the `timeOfDay` helpers) with DIAL-BIASED dependency functions, so we can watch all of this WITHOUT
+ * touching the orchestrator, the runtime, or the calibrated vote spine.
  *
  * Run:  NODE_OPTIONS='--import tsx' node tests/dev/societyObservatory.ts
- *       (optional arg: a global "move-intent" multiplier, e.g. `... societyObservatory.ts 2.0`)
+ *       (optional args:  [moveIntent]  [minutesPerTick]   e.g. `... societyObservatory.ts 1.5 60`)
  *
- * This is a throwaway instrument. The `Dials` here are a PROTOTYPE, not the eventual CHARACTER schema.
+ * North star (owner ruling): TIME REALISM. The clock tracks a believable wall time; a "conversation
+ * tick" costs ~1h; each phase spans a real several-hour window of an actual day.
+ *
+ * This is a throwaway instrument. The `Dials` and the minute budget here are a PROTOTYPE, not the
+ * eventual CHARACTER schema or the live-engine cadence.
  */
 import { assignRooms } from "../../src/engine/presence";
 import { richOffscreenStretch } from "../../src/engine/offscreen";
@@ -20,7 +30,10 @@ import type { Houseguest } from "../../src/engine/characterFactory";
 import type { EdgeSignals, InteractionType } from "../../src/engine/relationshipConstants";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { InMemoryEventStore } from "../../src/adapters/inmemory/InMemoryEventStore";
-import { HOUSE_ROOMS, type Room } from "../../src/domain/house";
+import { type Room } from "../../src/domain/house";
+import {
+  awakeSet, bedtimeFor, TIME_OF_DAY_ORDER, TIME_OF_DAY_LABEL, type TimeOfDay,
+} from "../../src/engine/timeOfDay";
 import type { EntityId } from "../../src/domain/ids";
 
 // ── The prototype dial set (0..1; 0.5 = neutral) ──────────────────────────────────────────────
@@ -65,6 +78,39 @@ const DIALS_BY_ARCHETYPE: Record<string, Dials> = {
 };
 const dialsFor = (archetype: string): Dials => DIALS_BY_ARCHETYPE[archetype] ?? NEUTRAL;
 
+// ── The realistic clock (north star: TIME REALISM) ─────────────────────────────────────────────
+// Each phase maps to a real several-hour window of an actual day; the clock tracks minutes-from-
+// midnight. The day runs from 06:00 to 02:00 (the late-night tail wraps to a new morning). A "tick"
+// is one ~1h conversation slice (default 60 min), so a believable number of conversations fit in each
+// part of the day and the PHASE flips only when the clock crosses a real boundary — never per beat.
+const PHASE_WINDOW: Record<TimeOfDay, { start: number; end: number }> = {
+  morning:      { start:  6 * 60, end: 12 * 60 }, // 06:00–12:00  (6h)
+  afternoon:    { start: 12 * 60, end: 17 * 60 }, // 12:00–17:00  (5h)
+  evening:      { start: 17 * 60, end: 21 * 60 }, // 17:00–21:00  (4h)
+  night:        { start: 21 * 60, end: 24 * 60 }, // 21:00–24:00  (3h)
+  "late-night": { start: 24 * 60, end: 26 * 60 }, // 00:00–02:00  (2h, then a new morning)
+};
+const DAY_START_MIN = PHASE_WINDOW.morning.start;       // 06:00
+const DAY_END_MIN = PHASE_WINDOW["late-night"].end;     // 02:00 next day
+
+/** Which real phase a minutes-from-midnight clock sits in. */
+function phaseAt(min: number): TimeOfDay {
+  for (const p of TIME_OF_DAY_ORDER) if (min < PHASE_WINDOW[p].end) return p;
+  return "late-night";
+}
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+/** A believable wall-clock label (HH:MM) from minutes-from-midnight (wraps past 24h). */
+function hhmm(min: number): string {
+  const m = ((min % 1440) + 1440) % 1440;
+  return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
+}
+/** A short bedtime tag for the readout (e — evening, n — night, ☾ — late-night owl). */
+const BEDTIME_TAG: Record<TimeOfDay, string> = {
+  morning: "e", afternoon: "e", evening: "e", night: "n", "late-night": "☾",
+};
+/** No real player in the NPC-only observatory — a sentinel id the awake-set filter never matches. */
+const NO_PLAYER = "__observer__";
+
 // ── Scene-nature classes ──────────────────────────────────────────────────────────────────────
 const GAME: ReadonlySet<InteractionType> = new Set<InteractionType>(["alliance", "strategy", "conflict", "betrayal"]);
 const isGame = (t: InteractionType): boolean => GAME.has(t);
@@ -100,19 +146,37 @@ interface Obs {
   friendly: number;
   game: number;
   scenePartners: Map<EntityId, number>;
+  lateScenes: number; // scenes this NPC ran in night/late-night (the after-hours scheming window)
 }
-const freshObs = (): Obs => ({ room: new Map(), coPresent: new Map(), friendly: 0, game: 0, scenePartners: new Map() });
+const freshObs = (): Obs => ({ room: new Map(), coPresent: new Map(), friendly: 0, game: 0, scenePartners: new Map(), lateScenes: 0 });
 const bump = <K>(m: Map<K, number>, k: K, by = 1): void => { m.set(k, (m.get(k) ?? 0) + by); };
 const topN = <K>(m: Map<K, number>, n: number): [K, number][] =>
   [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
 
+/** Per-phase telemetry — the nightly presence economy: how the awake set + scene volume thin. */
+type PhaseStats = Record<TimeOfDay, { ticks: number; awakeSum: number; scenes: number }>;
+const freshPhaseStats = (): PhaseStats =>
+  Object.fromEntries(TIME_OF_DAY_ORDER.map((p) => [p, { ticks: 0, awakeSum: 0, scenes: 0 }])) as PhaseStats;
+
 // ── One simulated run ──────────────────────────────────────────────────────────────────────────
-function run(seed: number, moveIntent: number, warmup: number, observe: number) {
+interface RunOpts {
+  seed: number;
+  moveIntent: number;
+  warmupDays: number;
+  observeDays: number;
+  minutesPerTick: number;
+}
+
+function run(opts: RunOpts) {
+  const { seed, moveIntent, warmupDays, observeDays, minutesPerTick } = opts;
   const house: Houseguest[] = generateHouse(new SeededRandom(seed)).npcs;
   const ids = house.map((h) => h.id);
   const name = new Map(house.map((h) => [h.id, h.name] as const));
   const arche = new Map(house.map((h) => [h.id, h.character.archetype] as const));
   const dials = new Map(house.map((h) => [h.id, dialsFor(h.character.archetype)] as const));
+  // Character-driven bedtimes (PURE, byte-stable: derived from static stats, no rng) — the awake-set
+  // economy reads these. `social − physical` decides: the social game stays up, the comp-focused sleep.
+  const bedtime = new Map(house.map((h) => [h.id, bedtimeFor(h.character.stats)] as const));
   const hoh = ids[0]!; // a stand-in HOH so power-proximity has a target to court
 
   const rel = new RelationshipModel(0.6);
@@ -128,15 +192,24 @@ function run(seed: number, moveIntent: number, warmup: number, observe: number) 
 
   let occ: Map<EntityId, Room> | null = null;
   const obs = new Map<EntityId, Obs>(ids.map((id) => [id, freshObs()] as const));
+  const phaseStats = freshPhaseStats();
 
-  const tick = (record: boolean): void => {
-    occ = assignRooms(ids, occ, { rng: moveRng, affinity: dialPull, hoh });
+  // One ~1h conversation slice at a given phase, among the AWAKE houseguests only.
+  const tick = (phase: TimeOfDay, record: boolean): void => {
+    const awake = awakeSet({
+      active: ids, phase, player: NO_PLAYER, playerRetired: false, bedtimeOf: (id) => bedtime.get(id)!,
+    });
+    if (awake.length < 2) return; // play has run out of PEOPLE — the house is effectively asleep
+    occ = assignRooms(awake, occ, { rng: moveRng, affinity: dialPull, hoh });
     const scenes = richOffscreenStretch({
-      events, rng: socRng, npcs: ids, interactions: 4, edgeOf: dialEdge, occupancy: occ,
+      events, rng: socRng, npcs: awake, interactions: 4, edgeOf: dialEdge, occupancy: occ,
     });
     for (const s of scenes) rel.applyDirected(s.partner, s.initiator, s.type, socRng); // mirror the orchestrator fold
     if (!record) return;
-    // location + co-presence
+    const ps = phaseStats[phase];
+    ps.ticks++; ps.awakeSum += awake.length; ps.scenes += scenes.length;
+    const late = phase === "night" || phase === "late-night";
+    // location + co-presence (awake only)
     const byRoom = new Map<Room, EntityId[]>();
     for (const [id, room] of occ) { bump(obs.get(id)!.room, room); (byRoom.get(room) ?? byRoom.set(room, []).get(room)!).push(id); }
     for (const group of byRoom.values()) {
@@ -146,25 +219,36 @@ function run(seed: number, moveIntent: number, warmup: number, observe: number) 
     for (const s of scenes) {
       const o = obs.get(s.initiator)!;
       if (isGame(s.type)) o.game++; else o.friendly++;
+      if (late) o.lateScenes++;
       bump(o.scenePartners, s.partner);
     }
   };
 
-  for (let t = 0; t < warmup; t++) tick(false);   // let relationships + positions form
-  for (let t = 0; t < observe; t++) tick(true);    // measure
+  // Run whole DAYS: the clock walks 06:00 → 02:00 in `minutesPerTick` steps, the phase deriving from
+  // the real wall time, and naturally ends the night early once the awake set has emptied.
+  const runDay = (record: boolean): void => {
+    for (let clock = DAY_START_MIN; clock < DAY_END_MIN; clock += minutesPerTick) {
+      tick(phaseAt(clock), record);
+    }
+  };
+  for (let day = 0; day < warmupDays; day++) runDay(false); // let relationships + positions form
+  for (let day = 0; day < observeDays; day++) runDay(true);  // measure
 
-  return { ids, name, arche, dials, rel, obs };
+  return { ids, name, arche, dials, bedtime, rel, obs, phaseStats, minutesPerTick };
 }
 
 // ── Readout ──────────────────────────────────────────────────────────────────────────────────
-function report(seed: number, moveIntent: number): void {
-  const { ids, name, arche, rel, obs } = run(seed, moveIntent, 18, 18);
+function report(seed: number, moveIntent: number, minutesPerTick: number): void {
+  const { ids, name, arche, bedtime, rel, obs, phaseStats } =
+    run({ seed, moveIntent, warmupDays: 3, observeDays: 4, minutesPerTick });
   const label = (id: EntityId): string => `${name.get(id)} (${arche.get(id)})`;
+  const ticksPerDay = Math.ceil((DAY_END_MIN - DAY_START_MIN) / minutesPerTick);
 
-  console.log(`\n${"═".repeat(92)}`);
-  console.log(`  SOCIETY OBSERVATORY — seed ${seed}, move-intent ×${moveIntent.toFixed(2)}  (18 warmup + 18 observed ticks)`);
-  console.log(`${"═".repeat(92)}`);
-  console.log("  Each NPC: top room · who they kept ending up with · scene mix (friendly/game) · warmest bond / top threat\n");
+  console.log(`\n${"═".repeat(96)}`);
+  console.log(`  SOCIETY OBSERVATORY — seed ${seed}, move-intent ×${moveIntent.toFixed(2)}, ${minutesPerTick}min/conversation`);
+  console.log(`  (3 warmup + 4 observed days · day runs ${hhmm(DAY_START_MIN)}→${hhmm(DAY_END_MIN)} ≈ ${ticksPerDay} conversation slices)`);
+  console.log(`${"═".repeat(96)}`);
+  console.log("  Each NPC: bedtime · top room · who they kept ending up with · scene mix · warmest bond / top threat\n");
 
   for (const id of ids) {
     const o = obs.get(id)!;
@@ -176,9 +260,21 @@ function report(seed: number, moveIntent: number): void {
     const warm = topN(new Map(ids.filter((x) => x !== id).map((x) => [x, rel.edge(id, x).affinity])), 1)[0];
     const threat = topN(new Map(ids.filter((x) => x !== id).map((x) => [x, rel.edge(id, x).threat])), 1)[0];
     console.log(
-      `  ${label(id).padEnd(34)} ${(topRoom ? String(topRoom[0]) : "—").padEnd(13)}` +
+      `  ${BEDTIME_TAG[bedtime.get(id)!]} ${label(id).padEnd(34)} ${(topRoom ? String(topRoom[0]) : "—").padEnd(13)}` +
       ` with: ${partners.padEnd(22)} ${String(o.friendly).padStart(2)}f/${String(o.game).padStart(2)}g (${gamePct}% game)` +
       `  ♥ ${warm ? name.get(warm[0]) : "—"} / ⚔ ${threat ? name.get(threat[0]) : "—"}`,
+    );
+  }
+
+  // The nightly presence economy: how the awake set + scene volume thin toward late-night.
+  console.log(`\n  ── nightly presence economy (the house thins as people turn in; cast of ${ids.length}) ──`);
+  console.log(`     phase        window        avg awake   scenes`);
+  for (const p of TIME_OF_DAY_ORDER) {
+    const s = phaseStats[p];
+    const w = PHASE_WINDOW[p];
+    const avg = s.ticks ? (s.awakeSum / s.ticks).toFixed(1) : "—";
+    console.log(
+      `     ${TIME_OF_DAY_LABEL[p].padEnd(12)} ${`${hhmm(w.start)}–${hhmm(w.end)}`.padEnd(13)} ${String(avg).padStart(7)}   ${String(s.scenes).padStart(5)}`,
     );
   }
 
@@ -197,8 +293,33 @@ function report(seed: number, moveIntent: number): void {
   }
 }
 
+// ── Time-knob sweep ────────────────────────────────────────────────────────────────────────────
+// Vary minutes-per-conversation and watch the day compress: a realistic 60min keeps several
+// conversations per phase; a bloated cost burns whole periods per beat (the live bug we're fixing).
+function timeSweep(seed: number, moveIntent: number): void {
+  console.log(`\n${"═".repeat(96)}`);
+  console.log(`  TIME-KNOB SWEEP — seed ${seed}, move-intent ×${moveIntent.toFixed(2)}  (how the clock cadence reshapes a day)`);
+  console.log(`${"═".repeat(96)}`);
+  console.log(`  minutes/    slices    scenes/day    ── scenes per phase ──`);
+  console.log(`  convo       /day      (observed)    morn  aft  eve  night  late`);
+  for (const minutesPerTick of [30, 60, 120, 240]) {
+    const { phaseStats } = run({ seed, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick });
+    const ticksPerDay = Math.ceil((DAY_END_MIN - DAY_START_MIN) / minutesPerTick);
+    const per = (p: TimeOfDay): string => String(Math.round(phaseStats[p].scenes / 4)).padStart(4);
+    const totalScenes = TIME_OF_DAY_ORDER.reduce((a, p) => a + phaseStats[p].scenes, 0);
+    console.log(
+      `  ${String(minutesPerTick).padEnd(10)}  ${String(ticksPerDay).padStart(4)}      ${String(Math.round(totalScenes / 4)).padStart(6)}` +
+      `        ${per("morning")} ${per("afternoon")} ${per("evening")} ${per("night").padStart(5)} ${per("late-night").padStart(5)}`,
+    );
+  }
+  console.log(`\n  Read: at 60min a conversation is ~1h and each phase holds several; as the cost balloons`);
+  console.log(`  the same beats consume whole periods (fewer slices/day) — the "time races" bug, made visible.`);
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────────────────────
 const moveIntent = Number(process.argv[2] ?? "1.0");
-report(7, moveIntent);
-report(7, moveIntent * 2.2); // a second pass at higher move-intent — watch co-presence tighten
+const minutesPerTick = Number(process.argv[3] ?? "60");
+report(7, moveIntent, minutesPerTick);          // realistic clock — the dial + presence readout
+timeSweep(7, moveIntent);                        // how the clock cadence reshapes a day
+report(7, moveIntent * 2.2, minutesPerTick);     // a higher move-intent pass — watch co-presence tighten
 console.log("");
