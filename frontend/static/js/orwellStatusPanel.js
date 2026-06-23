@@ -170,7 +170,14 @@ import { onNarrowChange } from './platform.js';
         }
         #orwell-status .os-roster-h { opacity: .55; font-size: max(.8em, 11px); margin: .4rem 0 .15rem; }
         #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; max-height: 30vh; overflow: auto; }
-        #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
+        /* J3-19: subordinate the "who's who" roster so it reads as a reference column, not a
+           second body of content competing with the chat narration — a reduced type step and a
+           colour mixed toward the panel (the same treatment .os-row .os-k uses). The player's
+           own row (.os-you) keeps full weight as the one anchor the eye returns to. */
+        #orwell-status .os-hg {
+          display: flex; justify-content: space-between; gap: .5rem;
+          font-size: .92em; color: color-mix(in srgb, var(--fg, #9cdef2) 72%, var(--panel, #111));
+        }
         #orwell-status .os-hg.os-out { color: color-mix(in srgb, var(--fg, #9cdef2) 62%, var(--panel, #111)); text-decoration: line-through; }
         #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
         /* F4: the clean terminal/post-season state — shown instead of stale ceremony rows once the
