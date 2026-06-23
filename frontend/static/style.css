@@ -36758,6 +36758,29 @@ body.theme-frosted .modal {
   }
 }
 
+/* RESP-4 (#625): controls measured BELOW the real 44px touch floor — the gate had drifted to a
+   36px floor so these shipped green. !important beats the narrower/older rules that won on
+   specificity (e.g. `.chat-input-left > .input-icon-btn`, the J4-15 `.opt-dismiss` min-height:36,
+   the in-media `.export-dl-btn` min-width a child rule overrode). Scoped to ANY-pointer:coarse
+   (every touch-capable device — phones, tablets, touch laptops) rather than hover:none+pointer:
+   coarse, so the floor also covers touch-capable hybrids AND is honored by the responsive-matrix
+   gate's has-touch contexts (the J5-01 block's narrower query was invisible to the gate — RESP-4).
+   Pure mouse/desktop is unaffected (any-pointer:coarse is false there), so chrome stays compact. */
+@media (any-pointer: coarse) {
+  .icon-rail-btn,             /* collapsed sidebar icon rail: new-chat / theme / settings (34px) */
+  .user-bar-btn,              /* user-bar theme / settings (37w) */
+  .send-btn,                  /* composer send / new-chat button (37w in newchat mode) */
+  .input-icon-btn,            /* composer toolbar: attach / more-tools (36w) */
+  .export-dl-btn,             /* chat-meta export ▾ (36w) */
+  .scroll-nav-btn,            /* scroll-to-latest ▼ (38w) */
+  #orwell-scroll-bottom,      /* game scroll-to-latest (38×38, JS-injected) */
+  .gadget-rail-open,          /* mobile gadget-drawer opener (42w) */
+  .orwell-premiere-tutorial .opt-dismiss {  /* "Close guide" (36h) */
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
+
 /* GitHub Copilot device-flow connect block (model endpoints → API) */
 .adm-copilot-connect {
   margin-top: 10px;
