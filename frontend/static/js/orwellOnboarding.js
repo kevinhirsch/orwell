@@ -286,18 +286,22 @@
       </div>`;
     const row = card.querySelector(".ob-hold-actions");
 
-    // Refresh the model summary + the Start button's enabled state. Start requires a resolved chat
-    // (narrator) model — without one the house literally can't speak, so the season can't begin.
+    // Refresh the model summary + the Start button's enabled state. Start gates on a configured
+    // FEED (the same anyModelConfigured() signal route() uses to mount this wizard) — NOT on
+    // /api/default-chat resolving a concrete id. A feed guarantees the chat dispatch can resolve a
+    // narrator model at turn time (the fallback chain → first enabled endpoint), and the two probes
+    // can legitimately disagree (the default model may not be a literal catalog id yet). The chat
+    // summary is display-only; an unresolved id shows "resolving…" but never blocks Start.
     let _startBtn = null;
     const refresh = async () => {
-      const { chat, image } = await _setupModelSummary();
+      const [{ chat, image }, hasFeed] = await Promise.all([_setupModelSummary(), anyModelConfigured()]);
       const chatEl = card.querySelector(".ob-setup-chat b");
       const imgEl = card.querySelector(".ob-setup-image b");
-      if (chatEl) chatEl.textContent = chat || "— connect a feed —";
+      if (chatEl) chatEl.textContent = chat || (hasFeed ? "resolving from your feed…" : "— connect a feed —");
       if (imgEl) imgEl.textContent = image || "Auto-detect (Gemini)";
       if (_startBtn) {
-        _startBtn.disabled = !chat;
-        _startBtn.title = chat ? "" : "Connect a feed in Settings first — the house can't speak without a narrator model.";
+        _startBtn.disabled = !hasFeed;
+        _startBtn.title = hasFeed ? "" : "Connect a feed in Settings first — the house can't speak without a narrator model.";
       }
     };
     // Re-render when the player connects/changes a feed in Settings (no premature kickoff — this
