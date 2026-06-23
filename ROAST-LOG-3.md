@@ -17,6 +17,21 @@ run build`) and run on :8765 with the deterministic embedding fallback.
 > (NARR-7 / EVT-1 are NEW; LIVE-4 / LIVE-7 are the canonical BLOCKs I was asked to *verify*, recorded here
 > as engine-oracle corroboration, not re-roasts).
 
+> **GitHub issue tracking (added 2026-06-23).** Each actionable finding below is now tracked as a
+> GitHub issue; this ledger remains the evidence record (mechanism → file:line → falsifier). Map:
+>
+> | Finding | Issue | Finding | Issue |
+> |---|---|---|---|
+> | LIVE-7 | [#540](https://github.com/kevinhirsch/orwell/issues/540) | NARR-NEW-2 | [#549](https://github.com/kevinhirsch/orwell/issues/549) |
+> | LIVE-4 | [#541](https://github.com/kevinhirsch/orwell/issues/541) | NARR-NEW-3 | [#550](https://github.com/kevinhirsch/orwell/issues/550) |
+> | NARR-7 | [#542](https://github.com/kevinhirsch/orwell/issues/542) | NAME-1 / CARRY-2 | [#547](https://github.com/kevinhirsch/orwell/issues/547) |
+> | EVT-1 | [#569](https://github.com/kevinhirsch/orwell/issues/569) | CARRY-1 | [#545](https://github.com/kevinhirsch/orwell/issues/545) |
+> | NARR-NEW-1 | [#548](https://github.com/kevinhirsch/orwell/issues/548) | CARRY-3 (PO-confirm) | [#607](https://github.com/kevinhirsch/orwell/issues/607) |
+> | CARRY-4 (housekeeping) | [#608](https://github.com/kevinhirsch/orwell/issues/608) | | |
+>
+> Not filed (no product action): OPS-1 (environmental egress), CHAIN-1 / POS-1/2/3 (positives),
+> the loop-sweep clean re-verifications.
+
 ---
 
 ## OPS-1 · `[BLOCK — mission-controlling]` · VIEWED · The live-LLM lane is environmentally impossible here: OpenRouter (and every other LLM host) is NOT allowlisted

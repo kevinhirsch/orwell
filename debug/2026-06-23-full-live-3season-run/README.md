@@ -39,17 +39,19 @@ A distinct player character per season, created via **live casting**, with the r
 
 ## Findings this dataset backs
 
-Cross-reference `ROAST-LOG-3.md` (repo root) — the session-3 live-LLM ledger:
-- **LIVE-7** (BLOCK) — fabricated/ahead-of-engine eviction results: S1 impossible **8–7** tally;
+Cross-reference `ROAST-LOG-3.md` (repo root) — the session-3 live-LLM ledger. **GitHub issues in
+brackets** (added 2026-06-23; this dataset stays the evidence record):
+- **LIVE-7** (BLOCK) [#540] — fabricated/ahead-of-engine eviction results: S1 impossible **8–7** tally;
   S3 **conclude-ahead + self-counted majority** (repeatedly). The engine never hands the player a tally.
-- **LIVE-4** (BLOCK) — the staged eviction-reveal beats are advanced (consumed) but **not narrated**;
+- **LIVE-4** (BLOCK) [#541] — the staged eviction-reveal beats are advanced (consumed) but **not narrated**;
   the player on the block sees social scenes, not the votes against them. (The nom/veto *skip* did
   NOT reproduce on pro.)
-- **NARR-7** (BLOCK) — finale jurors are voice-anchorless; the model fabricates their identities.
+- **NARR-7** (BLOCK) [#542] — finale jurors are voice-anchorless; the model fabricates their identities.
+  (Structural rung: **EVT-1** [#569].)
 - **POS-1/2/3** — secret-ballot anonymization, pre-jury-evicted `conclude-season`, the live 0057
   hand-off + distinct-character casting, and grounding (0 leaks / 0 genuine cast inventions over 82
-  player-facing play turns) all hold.
-- **NARR-NEW-1/2/3** — finale jury-question loop; casting under-finalize when `casting.ready`;
-  player's authored hometown overwritten (Savannah → "Nashville").
-- **NAME-1 / CARRY-1..4** — cross-season name reuse + v0/legacy carryover (incl. the live "Vault"
-  term leak via `askProducers`).
+  player-facing play turns) all hold. *(Positives — not filed.)*
+- **NARR-NEW-1/2/3** [#548 / #549 / #550] — finale jury-question loop; casting under-finalize when
+  `casting.ready`; player's authored hometown overwritten (Savannah → "Nashville").
+- **NAME-1 / CARRY-1..4** [#547 (NAME-1/CARRY-2) · #545 (CARRY-1) · #607 (CARRY-3) · #608 (CARRY-4)] —
+  cross-season name reuse + v0/legacy carryover (incl. the live "Vault" term leak via `askProducers`).
