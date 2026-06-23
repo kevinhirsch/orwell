@@ -3196,6 +3196,20 @@ def save_assistant_response(
     # Only when the content didn't already carry an inline <think> block.
     if reasoning and reasoning.strip() and not md.get("thinking"):
         md["thinking"] = reasoning.strip()
+    # Don't persist a BLANK assistant turn. `full_response` can be truthy-but-empty
+    # (the agent loop appends "\n\n" round separators; a reasoning model can route its
+    # whole turn to the reasoning channel, or emit only a <think> block that extracts
+    # to ""), which the caller's `if full_response:` gate doesn't catch. Persisting it
+    # renders an empty bubble AND replays to the provider as an empty message on every
+    # later turn (the root of the OpenRouter/DeepSeek empty-message bug; the send-side
+    # chokepoint _sanitize_llm_messages is the matching belt). Keep a blank turn ONLY
+    # when there's reasoning worth showing (so the collapsed "Thinking" accordion
+    # survives a reload, ADR 0012 cross-session parity) — and then with normalized
+    # empty content, never stray whitespace.
+    if not (_content or "").strip():
+        if not md.get("thinking"):
+            return None
+        _content = ""
     sess.add_message(ChatMessage("assistant", _content, metadata=md))
 
     if not incognito:
