@@ -80,6 +80,8 @@ ${C_BOLD}OPTIONS${C_OFF} (env var in parens; flag overrides env)
   --name-prefix S      CT hostname / runner name prefix         (NAME_PREFIX, default orwell-runner)
   --runner-version V   actions/runner version, no 'v' (e.g. 2.319.1); empty = latest (RUNNER_VERSION)
   --token PAT          GitHub PAT (prefer GIT_TOKEN env)        (GIT_TOKEN)
+  --reg-token TOK      Pre-minted registration token (Settings → Actions → Runners → New runner);
+                       provisions with NO PAT — one token registers all runners  (REG_TOKEN_IN)
   --env-file PATH      Read GIT_TOKEN= from here                (ENV_FILE, default <repo>/data/.env)
   --remove             Unregister each runner + destroy its LXC (REMOVE=1)
   --yes                Skip the confirmation prompt             (ORWELL_NONINTERACTIVE=1)
@@ -110,6 +112,7 @@ TEMPLATE="${TEMPLATE:-}"
 NAME_PREFIX="${NAME_PREFIX:-orwell-runner}"
 RUNNER_VERSION="${RUNNER_VERSION:-}"
 GIT_TOKEN="${GIT_TOKEN:-}"
+REG_TOKEN_IN="${REG_TOKEN_IN:-}"
 REMOVE="${REMOVE:-0}"
 
 # data/.env (git-ignored) sits at <repo>/data/.env; this script lives at <repo>/deploy/runners/.
@@ -134,6 +137,7 @@ while [[ $# -gt 0 ]]; do
     --name-prefix)        NAME_PREFIX="${2:?--name-prefix needs a value}"; shift 2 ;;
     --runner-version)     RUNNER_VERSION="${2:?--runner-version needs a value}"; shift 2 ;;
     --token)              GIT_TOKEN="${2:?--token needs a value}"; shift 2 ;;
+    --reg-token)          REG_TOKEN_IN="${2:?--reg-token needs a value}"; shift 2 ;;
     --env-file)           ENV_FILE="${2:?--env-file needs a value}"; shift 2 ;;
     --remove)             REMOVE=1; shift ;;
     --yes|-y)             ORWELL_NONINTERACTIVE=1; shift ;;
@@ -170,7 +174,14 @@ load_token() {
   fi
   return 1
 }
-load_token || die "no GitHub PAT — set GIT_TOKEN, pass --token, or put GIT_TOKEN= in ${ENV_FILE} (needs repo + runner-registration scope)."
+# A pre-minted REGISTRATION TOKEN (--reg-token, copied from Settings → Actions → Runners → "New
+# self-hosted runner") lets you provision with NO PAT at all — one such token registers many runners
+# within its ~1h TTL. A PAT is then needed ONLY for --remove (to mint a remove-token).
+if [[ -n "$REG_TOKEN_IN" && "$REMOVE" != "1" ]]; then
+  msg "using a supplied --reg-token; no PAT needed for provisioning."
+else
+  load_token || die "no GitHub credential — either pass --reg-token <token> (from Settings → Actions → Runners → New self-hosted runner; no PAT, provisioning only), or set GIT_TOKEN / --token / GIT_TOKEN= in ${ENV_FILE} with repo + runner-registration scope."
+fi
 
 # Mint a registration ("registration-token") or removal ("remove-token") token via the REST API.
 # The PAT is sent in an Authorization header only — never on a command line that lands in `ps`.
@@ -432,8 +443,10 @@ do_provision() {
     ip="$(wait_for_net "$ctid")"
     msg "container network: ${ip}"
 
-    # Mint a FRESH short-lived registration token per runner; push it in as a 0600 file.
-    regtok="$(mint_token registration)"
+    # Registration token, pushed in as a 0600 file. With --reg-token, reuse the operator-supplied
+    # one for every runner (a single UI token registers many within its TTL); otherwise mint a fresh
+    # short-lived one per runner from the PAT.
+    if [[ -n "$REG_TOKEN_IN" ]]; then regtok="$REG_TOKEN_IN"; else regtok="$(mint_token registration)"; fi
     tokpath="$(push_secret "$ctid" "$regtok" /tmp/orwell-runner-token)"; unset regtok
 
     install_in_container "$ctid" "$name" "$tokpath"
