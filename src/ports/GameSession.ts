@@ -802,6 +802,14 @@ export interface HouseguestMoveResult {
  */
 export interface NpcVoiceView {
   houseguest: NamedRef;
+  /**
+   * Their public seat (NARR-7 / #542): `active` (still playing, voiced from inside the house),
+   * `jury` (evicted into the last-9 jury — still voiced at the finale, from the jury box), or
+   * `evicted` (out pre-jury). A non-active seat keeps its byte-stable public persona so the
+   * narrator can voice a juror consistently with who they actually are — only the live-game
+   * fields (whereabouts) go null. Vault-free: it says nothing about anyone's hidden state.
+   */
+  seat: "active" | "jury" | "evicted";
   /** The stable public persona facets (B61) — byte-stable across the whole season. */
   persona: {
     archetype?: string; strategyStyle?: string; background?: string;

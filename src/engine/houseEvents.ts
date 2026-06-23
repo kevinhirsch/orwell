@@ -68,7 +68,9 @@ export function nextHouseEvent(events: EventStore, rng: RandomnessSource, opts: 
   const prior = events.query({ type: "house-event" });
   const lastContent = prior.length > 0 ? prior[prior.length - 1]!.content : null;
   const pool = HOUSE_EVENT_POOL.filter((line) => lastContent === null || !lastContent.includes(line));
-  const line = pool[Math.floor(rng.next() * pool.length) % pool.length]!;
+  // ENG-3 (#628): rng.next() ∈ [0,1), so `Math.floor(rng.next() * pool.length)` is already in
+  // [0, pool.length) — the old trailing `% pool.length` was an unreachable dead branch. Removed.
+  const line = pool[Math.floor(rng.next() * pool.length)]!;
   const day = dayOfWeek(opts.phase);
   const stamp = day === null ? `Week ${opts.week}` : `Week ${opts.week}, day ${day}`;
   return `${stamp}: ${line}`;

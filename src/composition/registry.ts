@@ -470,6 +470,16 @@ export class GameSessionRegistry {
     };
     sb.session.setOnPersist(persist); // save-on-mutation (0030) / checkpoint-then-save (B41)
     sb.commands.setOnPersist(persist);
+    // R-BND (#628): fail-soft FE-driven enrichments (0062 zeitgeist, 0070 off-screen texture) persist
+    // DURABLY but must NOT bump the closed-set `beatSeq` or run the integrity checkpoint — they change
+    // PROSE only, not the board, and a background bump would trip a phantom single-tab stale-409 (the
+    // A-S3 fold-drop). So this mirrors the next-season-warm precedent: syncAdmin + invalidate the R3
+    // snapshot cache (the durable mirror changed) + a blind save — never `commit`.
+    sb.session.setOnBackgroundPersist((): void => {
+      sb.syncAdmin();
+      this.invalidateSnapshot(user);
+      this.saveUser(user);
+    });
     sb.admin.setResetDelegate(() => {
       this.resetUser(user); // the admin reset re-onboards the REAL game (B58/E5; B36/C12 route here)
     });
@@ -516,6 +526,12 @@ export class GameSessionRegistry {
             // (`rebuildSoulIndex` runs before the part that threw) — drop the dead graph's
             // queued embeds so they never crowd the fresh sandbox's.
             sb.engine.soul.discardPending();
+            // PERS-NEW-2 (#592): a future/incompatible-version save PARSES fine, so the corrupt belt
+            // never quarantines it — and the fresh sandbox's saves would then prune the user's own
+            // higher-schema save out of retention. Quarantine it off the live version path so it
+            // survives, recoverable on a downgrade. (Only on incompatibility — a different resume
+            // throw is a genuine fault we leave in place for inspection.)
+            if (!snapshotCompatible(snap)) this.saveStore?.quarantineIncompatible?.(user);
             sb = buildUserSandbox(user);
           }
         }

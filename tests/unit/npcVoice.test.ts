@@ -110,7 +110,14 @@ describe("B65 — the per-NPC knowledge bound (the canary on the per-NPC axis)",
       expect(st.toward.id).not.toBe(speaker.id);
       expect(st.toward.id).not.toBe(departed.id); // the departed hold no live stance line
     }
-    expect(s.npcVoice(departed.id)).toBeNull(); // the departed are voiced from the public record only
+    // NARR-7 (#542): the departed are NOW voiced (persona + seat), so the finale narrator can stage a
+    // juror consistently with who they are — but with NO live whereabouts (they're out of the house).
+    const departedVoice = s.npcVoice(departed.id)!;
+    expect(departedVoice).not.toBeNull();
+    expect(departedVoice.seat).not.toBe("active");
+    expect(departedVoice.whereabouts).toBeNull();
+    // The persona is the SAME public facets an active houseguest exposes (no Vault widening).
+    expect(departedVoice.persona.archetype).toBeTruthy();
   });
 });
 
