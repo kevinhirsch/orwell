@@ -768,6 +768,15 @@ def _beat_signature(status: dict, state: dict) -> dict:
         str(h.get("name")).strip() for h in out_of_house
         if isinstance(h.get("name"), str) and str(h.get("name")).strip()
     })
+    # 0067: the player's live room + who is in it with them (names), so the next turn can voice NPC
+    # arrivals/departures as beats instead of letting company silently pop in/out. Vault-free — it
+    # reads only the `whereabouts` projection the GAME CONTEXT already carries.
+    wa = state.get("whereabouts") if isinstance(state.get("whereabouts"), dict) else {}
+    room = wa.get("room")
+    present = sorted(
+        p.get("name") for p in (wa.get("present") or [])
+        if isinstance(p, dict) and p.get("name")
+    )
     return {
         "week": status.get("week"),
         "phase": (status.get("phase") or state.get("phase")),
@@ -779,6 +788,8 @@ def _beat_signature(status: dict, state: dict) -> dict:
         "evicted": evicted,
         "evictedNames": evicted_names,
         "finished": bool(state.get("finished")),
+        "room": room,
+        "present": present,
     }
 
 
@@ -906,6 +917,140 @@ async def record_post_turn_desync_check(user, narration: str) -> None:
             )
     except Exception as e:
         logger.warning("[orwell] post-turn desync check skipped for user=%s: %s", user, e)
+
+
+# ── 0067 — the PRESENCE / IDENTITY desync guard (the "reconcile" half) ─────────────────────── #
+#
+# The board desync check works because closed-set OUTCOMES (HOH/noms/veto/eviction) have crisp
+# textual claim patterns. Presence claims in prose are diffuse ("Ana leans against the window"), so a
+# scan can't safely EDIT live prose (that would risk gutting the storytelling the open set owns). This
+# guard mirrors the board check's SAFE shape instead: post-turn, it stashes a GENTLE next-turn
+# re-ground when the narration STAGES a houseguest AS ACTING in the player's scene whom the engine
+# places off-scene. Closed-set only (who is where / who exists) — never the prose, never the open set.
+#
+# HIGH-PRECISION by construction (a false positive nags the model on a clean turn):
+#   • flags ONLY a houseguest given an in-scene ACTION/SPEECH verb right after their name, who is
+#     either EVICTED (not in the house at all) or ACTIVE but in NEITHER the player's room NOR an
+#     adjacent room (entirely elsewhere). A NEARBY houseguest is never flagged — they can legitimately
+#     be glimpsed or overheard through a doorway (the momentPrompts contract).
+#   • SKIPS the whole turn if the player CHANGED ROOMS during it — a move turn is multi-scene (the
+#     narration may stage the room the player just left), the top false-positive source.
+#   • SKIPS pre-game / player-out-of-house (no whereabouts).
+
+# In-scene staging verbs (present/past/progressive). Movement-OUT verbs (left/leaves/exits) are
+# deliberately excluded — "Connor left the house weeks ago" is a legitimate past mention, not staging.
+_SCENE_VERBS = (
+    "says", "say", "said", "asks", "ask", "asked", "replies", "reply", "replied", "mutters",
+    "mutter", "muttered", "adds", "add", "added", "whispers", "whisper", "whispered", "grins",
+    "grin", "grinned", "grinning", "laughs", "laugh", "laughed", "laughing", "nods", "nod",
+    "nodded", "nodding", "shrugs", "shrug", "shrugged", "snorts", "snort", "snorted", "smirks",
+    "smirk", "smirked", "leans", "lean", "leaning", "leaned", "sits", "sitting", "sat", "stands",
+    "standing", "stood", "watches", "watch", "watching", "watched", "pauses", "pause", "paused",
+    "perches", "perched", "flashes", "flashed", "crosses", "crossed", "rolls", "rolled", "glances",
+    "glance", "glanced", "looks", "looking", "steps", "stepping", "stepped", "turns", "turning",
+    "swings", "swinging", "gestures", "gestured", "chimes", "calls", "scoffs", "sighs", "chuckles",
+)
+_VERB_ALT = "|".join(_SCENE_VERBS)
+
+
+def _stages_in_scene(narration: str, name: str) -> bool:
+    """True if `name` is STAGED as acting in the scene — their name (optionally possessive), then
+    within a word or two an in-scene verb, OR their name immediately before a quoted line. A whole-
+    token match, so a name is never caught as a substring. Conservative: a bare MENTION ("I heard
+    Maria won") never matches (no staging verb / no adjacent quote)."""
+    n = re.escape(name)
+    # "Nia perched", "Kendall pauses", "Ana's leaning", "Connor's been leaning" (≤2 filler words).
+    verb_pat = rf"\b{n}(?:['’]s)?\b(?:\s+\w+){{0,2}}\s+(?:{_VERB_ALT})\b"
+    if re.search(verb_pat, narration, re.IGNORECASE):
+        return True
+    # "Nia: 'I called this.'" / 'Ana "what is this?"' — a quoted line right after the name.
+    quote_pat = rf"\b{n}(?:['’]s)?\b\s*[:—-]?\s*[\"“]"
+    return bool(re.search(quote_pat, narration, re.IGNORECASE))
+
+
+def _presence_facts(state: dict) -> Optional[dict]:
+    """From a getGameState dict build {room, in_view, evicted, active_offscene} — or None when there
+    is no live scene to check (pre-game / player out of the house). `in_view` = the player's room +
+    every adjacent room's occupants (anyone legitimately seen or overheard); `active_offscene` =
+    living houseguests who are NEITHER in view; `evicted` = houseguests no longer in the house."""
+    if not isinstance(state, dict):
+        return None
+    wa = state.get("whereabouts")
+    if not isinstance(wa, dict) or not wa.get("room"):
+        return None  # no live scene → nothing to ground against
+    in_view: set = set()
+    for p in (wa.get("present") or []):
+        if isinstance(p, dict) and p.get("name"):
+            in_view.add(p["name"])
+    for nb in (wa.get("nearby") or []):
+        if isinstance(nb, dict):
+            for p in (nb.get("present") or []):
+                if isinstance(p, dict) and p.get("name"):
+                    in_view.add(p["name"])
+    evicted: set = set()
+    active_offscene: set = set()
+    for h in (state.get("house") or []):
+        if not isinstance(h, dict) or not h.get("name"):
+            continue
+        name = h["name"]
+        if (h.get("status") or "active") != "active":
+            evicted.add(name)
+        elif name not in in_view:
+            active_offscene.add(name)
+    return {"room": wa.get("room"), "in_view": in_view,
+            "evicted": evicted, "active_offscene": active_offscene}
+
+
+def _presence_desync_directive(narration: str, facts: dict) -> Optional[str]:
+    """A gentle re-ground directive when the narration STAGED an off-scene/evicted houseguest as
+    acting in the scene, or None. Bounded name lists; closed-set only."""
+    text = narration or ""
+    staged_evicted = sorted(n for n in facts["evicted"] if _stages_in_scene(text, n))[:_PRESENCE_MOVE_MAX_NAMES]
+    staged_offscene = sorted(n for n in facts["active_offscene"] if _stages_in_scene(text, n))[:_PRESENCE_MOVE_MAX_NAMES]
+    if not staged_evicted and not staged_offscene:
+        return None
+    room_label = str(facts["room"]).replace("-", " ")
+    clauses: list[str] = []
+    if staged_offscene:
+        clauses.append(
+            f"{_join_names(staged_offscene)} — the engine places them elsewhere in the house, NOT in "
+            f"the {room_label} or a room next to it"
+        )
+    if staged_evicted:
+        clauses.append(f"{_join_names(staged_evicted)} — already EVICTED, no longer in the house at all")
+    return (
+        "RE-GROUND ON WHO IS IN THE ROOM — last turn you voiced " + "; ".join(clauses) + ". Before your "
+        "next beat, re-read `whereabouts` and stage ONLY the houseguests the engine puts in the player's "
+        "room (a person one room over may be glimpsed or overheard, never in the room). Do not pull "
+        "someone in from elsewhere in the house, and never voice an evicted houseguest as present. The "
+        "engine's occupancy is the ground truth; reconcile to it."
+    )
+
+
+async def record_post_turn_presence_check(user, narration: str) -> None:
+    """Post-turn presence/identity guard (0067). Stash a gentle next-turn re-ground when the narration
+    staged an off-scene/evicted houseguest as acting in the scene. SKIPS a turn where the player
+    changed rooms (multi-scene/ambiguous). Combines with (never clobbers) a board re-ground already
+    stashed this turn. Fail-open — never raises, never blocks the finishing turn."""
+    try:
+        from src import orwell_engine
+        state = await orwell_engine.get_game_state(user=user)
+        facts = _presence_facts(state if isinstance(state, dict) else {})
+        if not facts:
+            return
+        # The player moved rooms during the turn ⇒ multi-scene; the narration may stage the room they
+        # just left. Skip rather than risk a false flag (the top false-positive source).
+        before = _LAST_BEAT_SIG.get(user)
+        if isinstance(before, dict) and before.get("room") and before.get("room") != facts["room"]:
+            return
+        directive = _presence_desync_directive(narration or "", facts)
+        if not directive:
+            return
+        existing = _DESYNC_REGROUND.get(user)
+        _DESYNC_REGROUND[user] = (existing + "\n\n" + directive) if existing else directive
+        logger.warning("[orwell] presence desync detected for user=%s — re-grounding next turn", user)
+    except Exception as e:
+        logger.warning("[orwell] post-turn presence check skipped for user=%s: %s", user, e)
 
 
 # ── 0065 Part C — the PRE-EMISSION outcome guard (same-turn, not next-turn) ──────────────── #
@@ -1181,6 +1326,56 @@ def _render_delta_line(delta: dict) -> Optional[str]:
     return "Since your last turn: " + "; ".join(parts) + "."
 
 
+def _join_names(names: list) -> str:
+    """Natural 'A', 'A and B', 'A, B and C' joining for a short cue line."""
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return names[0] if names else ""
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+# 0067 — the NARRATED-DEPARTURES cue. Increment #1 made present company HOLD the player's scene (they
+# leave rarely now, for a reason), but a departure was still SILENT: the houseguest simply stopped
+# appearing in `present`, so the narrator dropped them with no exit beat (the "people pop in and out"
+# complaint). This surfaces the per-turn presence diff — who LEFT and who JOINED the player's room
+# since last turn — as an additive cue so the model voices the coming/going as a real beat. ADDITIVE
+# (the full GAME CONTEXT occupancy stands), Vault-free, fail-open. Mirrors the 0065 "Since your last
+# turn" delta line. Gated on an UNCHANGED player room: if the player walked elsewhere, the cast change
+# is the player moving (the model already knows), not NPC drift — so we say nothing.
+_PRESENCE_MOVE_MAX_NAMES = 4
+
+
+def _render_presence_movement(prev: Optional[dict], cur: Optional[dict]) -> Optional[str]:
+    """A 'someone came/went' cue from two beat signatures, or None when there is nothing to voice
+    (no prior signature, the player changed rooms, or the room's company is unchanged)."""
+    if not isinstance(prev, dict) or not isinstance(cur, dict):
+        return None
+    pr, cr = prev.get("room"), cur.get("room")
+    if not pr or not cr or pr != cr:
+        return None  # player moved (or room unknown) — the cast change isn't NPC drift; stay quiet
+    before = set(prev.get("present") or [])
+    after = set(cur.get("present") or [])
+    departed = sorted(before - after)[:_PRESENCE_MOVE_MAX_NAMES]
+    arrived = sorted(after - before)[:_PRESENCE_MOVE_MAX_NAMES]
+    if not departed and not arrived:
+        return None
+    room_label = str(cr).replace("-", " ")
+    parts: list[str] = []
+    if departed:
+        verb = "has" if len(departed) == 1 else "have"
+        parts.append(f"{_join_names(departed)} {verb} left the {room_label}")
+    if arrived:
+        verb = "has" if len(arrived) == 1 else "have"
+        parts.append(f"{_join_names(arrived)} {verb} come into the {room_label}")
+    return (
+        "MOVEMENT IN THE ROOM (engine truth) — " + "; ".join(parts) + ". Voice it as a natural beat — "
+        "show them heading out or arriving — never let a houseguest simply vanish from or appear in the "
+        "scene without a beat. (The engine moves the houseguests; you only narrate it.)"
+    )
+
+
 async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
     """Fetch the engine delta since `last_seen_beat_seq` and render the additive 'Since your last
     turn' line — or None when there is no last-seen token (a fresh context — the full block stands),
@@ -1409,6 +1604,10 @@ async def apply_game_framing(
     # state read refreshes it — so we can fetch a "since your last turn" delta against it. None on a
     # fresh context (no prior turn) ⇒ no delta line, today's full context stands.
     _prev_seen_beat_seq = _LAST_BEAT_SEQ.get(user)
+    # 0067: the PREVIOUS turn's beat signature (room + present company), captured before this turn's
+    # checkpoint overwrites `_LAST_BEAT_SIG` — so we can diff the room's company and voice NPC
+    # arrivals/departures as beats. None on a fresh context ⇒ no movement cue (the full block stands).
+    _prev_presence_sig = _LAST_BEAT_SIG.get(user)
 
     # 1) Is the engine reachable AT ALL? This single call decides feeds-down — NOT the moment fetch.
     try:
@@ -1515,6 +1714,15 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _delta_line
         except Exception as e:
             logger.warning("[orwell] state-delta framing skipped for user=%s: %s", _gkey, e)
+        # 0067: voice NPC arrivals/departures in the player's room since last turn (additive, fail-open).
+        # `_LAST_BEAT_SIG[user]` was just refreshed to THIS turn's signature above, so diff against the
+        # previous one captured at the top of the turn. Only fires on an unchanged player room.
+        try:
+            _move_line = _render_presence_movement(_prev_presence_sig, _LAST_BEAT_SIG.get(user))
+            if _move_line:
+                gm_prompt = gm_prompt + "\n\n" + _move_line
+        except Exception as e:
+            logger.warning("[orwell] presence-movement framing skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING

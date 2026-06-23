@@ -40,6 +40,19 @@ export interface PresenceDeps {
    * stream — and from the off-screen society pairing on a calibration-neutral, un-weighted base occupancy.
    */
   movement?: (id: EntityId) => MovementProfile | null;
+  /**
+   * The player's CURRENT room (feature 0067) — the live scene. When set (the player-facing WEIGHTED
+   * pass only), an NPC who is already in this room uses `sceneMoveProb` for the stay-gate instead of
+   * their ordinary move rate, so present company holds a live conversation instead of churning out
+   * every tick. Absent (the calibration-neutral BASE pass) ⇒ no scene stickiness, behavior unchanged.
+   */
+  sceneRoom?: Room | null;
+  /**
+   * The (low) per-tick MOVE probability for an NPC standing in `sceneRoom` (feature 0067). Applies
+   * ONLY when `sceneRoom` is set and the NPC is in it. Consumes the SAME single stay-gate `rng.next()`
+   * draw as the ordinary path (only the THRESHOLD differs), so the per-NPC draw count is unchanged.
+   */
+  sceneMoveProb?: number;
 }
 
 /** The signed social deviation from center, used by both the move-rate and seek-pull nudges. */
@@ -105,7 +118,16 @@ export function assignRooms(
     // personality only moves the THRESHOLD it is compared against (no extra draw). This `rng` is the
     // DEDICATED movement stream (`presenceTick`), never the shared competition/vote stream, so however
     // the threshold shifts which branch is taken it cannot perturb calibration (the L21/L24 isolation).
-    if (here && deps.rng.next() >= moveProbFor(profile)) {
+    //
+    // 0067: present company holds the scene. When this NPC is in the PLAYER'S room (`sceneRoom`, set only
+    // on the weighted pass), the gate uses the low `sceneMoveProb` instead of their ordinary rate — they
+    // stay by default but keep full agency to leave (the low roll still fires, and the affinity-weighted
+    // destination below reads as a motivated exit). Still ONE draw, so the per-NPC draw count is unchanged.
+    const moveThreshold =
+      here !== undefined && here === deps.sceneRoom && deps.sceneMoveProb !== undefined
+        ? deps.sceneMoveProb
+        : moveProbFor(profile);
+    if (here && deps.rng.next() >= moveThreshold) {
       next.set(id, here); // most ticks, most people stay where they are
       continue;
     }

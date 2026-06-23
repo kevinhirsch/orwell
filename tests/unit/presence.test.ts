@@ -207,6 +207,129 @@ describe("personality-weighted movement (L21/L24)", () => {
   });
 });
 
+// --- present company holds the live scene (0067) -----------------------------------
+
+describe("present company holds the player's scene (0067)", () => {
+  const lone = [npc(1)] as const;
+  // The per-tick MOVE probability for a houseguest STARTING in a given room, measured by resetting them
+  // into that room each tick (so we read P(move | here) directly, isolated from where they wander after).
+  function moveRateFrom(room: Room, opts: { sceneRoom?: Room | null } = {}): number {
+    let moves = 0;
+    const trials = 600;
+    for (let s = 0; s < trials; s++) {
+      const prev = new Map<EntityId, Room>([[npc(1), room]]);
+      const next = assignRooms(lone, prev, {
+        rng: new SeededRandom(40_000 + s),
+        affinity: flatAffinity,
+        ...(opts.sceneRoom !== undefined
+          ? { sceneRoom: opts.sceneRoom, sceneMoveProb: PRESENCE.companionMoveProb }
+          : {}),
+      });
+      if (next.get(npc(1)) !== room) moves++;
+    }
+    return moves / trials;
+  }
+
+  it("a companion IN the player's room moves far less than the ordinary rate — but is never frozen", () => {
+    const scene = "living-room" as Room;
+    const heldRate = moveRateFrom(scene, { sceneRoom: scene });   // in the live scene → sticky
+    const looseRate = moveRateFrom(scene);                        // ordinary 0049 churn (no scene)
+    // The sticky rate tracks companionMoveProb (low); the ordinary rate tracks moveProb (high).
+    expect(heldRate).toBeLessThan(0.25);
+    expect(heldRate).toBeGreaterThan(0); // AGENCY: they still get up and leave sometimes — not pinned
+    expect(looseRate).toBeGreaterThan(0.45);
+    // The whole point: present company churns out of a live conversation MUCH less than the old behavior.
+    expect(looseRate - heldRate).toBeGreaterThan(0.3);
+  });
+
+  it("the scene stickiness applies ONLY to the player's room — elsewhere people roam normally", () => {
+    const scene = "living-room" as Room;
+    const elsewhere = "kitchen" as Room;
+    // Same sceneRoom set, but the NPC is standing ELSEWHERE: the stickiness must not touch them.
+    const awayRate = moveRateFrom(elsewhere, { sceneRoom: scene });
+    const ordinary = moveRateFrom(elsewhere);
+    expect(Math.abs(awayRate - ordinary)).toBeLessThan(0.06); // inert away from the scene
+    expect(awayRate).toBeGreaterThan(0.45);                    // still the ordinary, livelier churn
+  });
+
+  it("a held companion who DOES leave goes to an ADJACENT room — never a teleport (agency, grounded)", () => {
+    const scene = "living-room" as Room;
+    for (let s = 0; s < 400; s++) {
+      const prev = new Map<EntityId, Room>([[npc(1), scene]]);
+      const next = assignRooms(lone, prev, {
+        rng: new SeededRandom(90_000 + s),
+        affinity: flatAffinity,
+        sceneRoom: scene,
+        sceneMoveProb: PRESENCE.companionMoveProb,
+      });
+      expect(occupancyViolations(lone, next, prev)).toEqual([]); // stay or adjacent — never a jump
+    }
+  });
+
+  it("the scene lever is byte-identical + draw-identical when the NPC is NOT in the sceneRoom (calibration-safe)", () => {
+    // The lever applies ONLY when `here === sceneRoom`. For a houseguest standing anywhere else it must be
+    // provably inert — same destination AND same draw count, every seed. This is exactly why the BASE
+    // (calibration-load-bearing) pass — which never sets sceneRoom at all — stays byte-identical to pre-0067.
+    const npcRoom = "kitchen" as Room;
+    const sceneElsewhere = "hoh-room" as Room; // not the NPC's room (and not even adjacent to it)
+    function oneTick(withScene: boolean, seed: number): { room: Room; draws: number } {
+      let count = 0;
+      const base = new SeededRandom(seed);
+      const rng = {
+        next: () => { count++; return base.next(); },
+        int: (n: number) => base.int(n),
+        pick: <T,>(xs: readonly T[]) => base.pick(xs),
+        fork: (l: string) => base.fork(l),
+      };
+      const next = assignRooms(lone, new Map<EntityId, Room>([[npc(1), npcRoom]]), {
+        rng, affinity: flatAffinity,
+        ...(withScene ? { sceneRoom: sceneElsewhere, sceneMoveProb: PRESENCE.companionMoveProb } : {}),
+      });
+      return { room: next.get(npc(1))!, draws: count };
+    }
+    for (let s = 0; s < 200; s++) {
+      const off = oneTick(false, 600 + s);
+      const on = oneTick(true, 600 + s);
+      expect(on.room).toBe(off.room);   // identical outcome — the lever did not perturb a non-scene NPC
+      expect(on.draws).toBe(off.draws); // identical draw count — the stream is not re-phased
+    }
+  });
+});
+
+describe("present company holds the player's scene — live adapter (0067)", () => {
+  it("companions stay with the player across a continuous scene instead of churning out each tick", () => {
+    // For every seed that starts the player with company, run several off-screen ticks (the per-turn
+    // cadence) and measure how much of that ORIGINAL company is still with the player. Aggregated across
+    // seeds so it is a distribution fact, not a single-seed fluke. The contrast is stark: the pre-0067
+    // weighted churn (moveProb 0.6 ⇒ ~0.4 stay) decays retention to ~0.11 averaged over six ticks; the
+    // 0067 scene hold (companionMoveProb 0.12 ⇒ ~0.88 stay) keeps it near ~0.65. The player is never
+    // auto-moved (L21/L24), so the scene room itself stays put under them — asserted every tick.
+    const ticks = 6;
+    let retainedSum = 0;
+    let samples = 0;
+    let seedsWithCompany = 0;
+    for (let seed = 1; seed < 40; seed++) {
+      const { sb } = liveGame(seed);
+      const w0 = sb.session.whereabouts();
+      if (!w0 || w0.present.length === 0) continue;
+      seedsWithCompany++;
+      const companions = w0.present.map((p) => p.id);
+      const startRoom = w0.room;
+      for (let t = 0; t < ticks; t++) {
+        sb.session.presenceTick(new SeededRandom(7_000 + seed * 17 + t));
+        const w = sb.session.whereabouts()!;
+        expect(w.room).toBe(startRoom); // the player is held — the scene room is stable under them
+        const here = new Set(w.present.map((p) => p.id));
+        retainedSum += companions.filter((id) => here.has(id)).length / companions.length;
+        samples++;
+      }
+    }
+    expect(seedsWithCompany, "seeds that start with company").toBeGreaterThan(3);
+    // Comfortably above the ~0.11 the old per-tick churn would leave — present company holds the scene.
+    expect(retainedSum / samples).toBeGreaterThan(0.5);
+  });
+});
+
 // --- overhearing (gated, partial, traceable) ---------------------------------------
 
 function overhearFixture() {

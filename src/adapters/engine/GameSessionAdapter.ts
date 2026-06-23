@@ -17,6 +17,7 @@ import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
+import { PRESENCE } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
 import { HOUSE_ADJACENCY, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
@@ -1556,7 +1557,11 @@ export class GameSessionAdapter implements GameSession {
    * keeps the calibration-neutral base fully invariant to the personality constants (the NPCs cluster
    * around the same player room in both).
    */
-  private presenceDeps(rng: RandomnessSource, weighted: boolean): Parameters<typeof assignRooms>[2] {
+  private presenceDeps(
+    rng: RandomnessSource,
+    weighted: boolean,
+    sceneRoom?: Room | null,
+  ): Parameters<typeof assignRooms>[2] {
     const playerId = this.house?.player.id;
     return {
       rng,
@@ -1570,6 +1575,10 @@ export class GameSessionAdapter implements GameSession {
               // there is none (e.g. a standalone adapter without souls) so the term is a no-op there.
               volatility: this.soulObj(id)?.volatility ?? 0.5,
             }),
+            // 0067: only the player-facing WEIGHTED pass holds present company in the live scene. The
+            // calibration-neutral BASE pass NEVER gets a sceneRoom, so its shared-stream draw count is
+            // byte-identical to the pre-0067 build (the juryReach spine is untouched).
+            ...(sceneRoom ? { sceneRoom, sceneMoveProb: PRESENCE.companionMoveProb } : {}),
           }
         : {}),
     };
@@ -1634,14 +1643,17 @@ export class GameSessionAdapter implements GameSession {
     // falling back to the dedicated stream only when no shared rng is supplied (standalone/test callers).
     const assign = (previous: Occupancy | null, weighted: boolean): Map<EntityId, Room> => {
       const stream = weighted ? this.movementRng() : (rng ?? this.movementRng());
+      // 0067: present company holds the player's live scene — but ONLY in the weighted, player-facing view
+      // (the base pass stays calibration-neutral). No scene exists at premiere seating (no player room yet).
+      const sceneRoom = weighted ? playerRoom : null;
       if (!previous) {
         // Premiere seating — the ONE time everyone (the player included) is placed at once.
-        return assignRooms(this.presenceActive(), null, this.presenceDeps(stream, weighted));
+        return assignRooms(this.presenceActive(), null, this.presenceDeps(stream, weighted, sceneRoom));
       }
       // L21/L24: the PLAYER is a person — the engine NEVER auto-relocates them. Pin them (in BOTH views) at
       // their real room; the engine drives only the NPCs around the held player.
       const pinned = playerRoom ? new Map<EntityId, Room>([[me, playerRoom]]) : null;
-      return assignRooms(this.presenceActive().filter((id) => id !== me), previous, this.presenceDeps(stream, weighted), pinned);
+      return assignRooms(this.presenceActive().filter((id) => id !== me), previous, this.presenceDeps(stream, weighted, sceneRoom), pinned);
     };
 
     // The BASE draws from the SHARED `rng` FIRST — the same single un-weighted `assignRooms` call (same
