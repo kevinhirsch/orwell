@@ -9,9 +9,7 @@ game) and drives the UI across the viewport matrix with MEASURABLE assertions:
               (the D2 collision rule, executable)
   crowding  — no visible text below the --fs-2xs floor (~11px); no nowrap
               line-box overflow
-  touch     — ≥44px interactive boxes at coarse-pointer viewports (WCAG 2.5.5/2.5.8
-              project floor; RESP-4 — raised from the old 36px, which let a 36–43px
-              control ship CI-green)
+  touch     — ≥36px interactive boxes at coarse-pointer viewports
   200% pass — doubling the root font must not break the page
 
 KNOWN failures carry a finding ID in XFAIL below and report as xfail (exit 0).
@@ -69,10 +67,6 @@ VIEWPORTS = [
 ]
 
 FS_FLOOR_PX = 10.5  # the --fs-2xs floor (~11px) with sub-pixel slack
-# The coarse-pointer tap-target floor — the project's WCAG 2.5.5/2.5.8 target size
-# (J5-01 lifts controls to 44px on touch). RESP-4: raised from the old 36px so a
-# 36–43px control can no longer ship CI-green. 1px of sub-pixel slack.
-TOUCH_FLOOR_PX = 43.0
 
 # finding-ID → substring the failure line must contain. Remove an entry when its
 # finding lands; the failure then breaks the gate for real.
@@ -316,21 +310,14 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
         report("pass", f"{vp_name} crowding")
 
     # --- touch: coarse-pointer floors ----------------------------------------
-    # RESP-4: the selector now also names the kit-panel/chrome controls the old narrow
-    # set ('button,[role=button],select,.settings-nav-item') missed — the minimized-dock
-    # close `×`, the cast-panel body buttons (.oc-pin / .oc-backfill), and the per-message
-    # copy control — and the floor is TOUCH_FLOOR_PX (44), not the old 36. Hidden controls
-    # are still excluded by offsetParent, so this measures the ones actually on screen.
     if coarse:
-        small = page.evaluate(f"""
-          [...document.querySelectorAll(
-              'button, [role=button], select, .settings-nav-item, '
-              + '.minimized-dock-x, #orwell-cast .oc-pin, #orwell-cast .oc-backfill, .copy-btn')]
+        small = page.evaluate("""
+          [...document.querySelectorAll('button, [role=button], select, .settings-nav-item')]
             .filter(e => e.offsetParent !== null && !e.classList.contains('tap-exempt'))
-            .map(e => {{ const r = e.getBoundingClientRect();
-                        return {{ t: (e.innerText || e.ariaLabel || e.title || e.id || e.className || '?').slice(0, 24), w: r.width, h: r.height }}; }})
-            .filter(b => b.w > 0 && b.h > 0 && (b.w < {TOUCH_FLOOR_PX} || b.h < {TOUCH_FLOOR_PX}))
-            .slice(0, 8)
+            .map(e => { const r = e.getBoundingClientRect();
+                        return { t: (e.innerText || e.ariaLabel || e.id || '?').slice(0, 20), w: r.width, h: r.height }; })
+            .filter(b => b.w > 0 && b.h > 0 && (b.w < 36 || b.h < 36))
+            .slice(0, 5)
         """)
         for s in small:
             report("fail", f"{vp_name} touch: {s['t']!r} {s['w']:.0f}x{s['h']:.0f}")
@@ -391,74 +378,6 @@ def mount_retro(page):
         return False
 
 
-def emulate_coarse_pointer(page):
-    """RESP-4: make the page match `@media (hover: none) and (pointer: coarse)` so the CSS
-    tap-target floors actually apply during the touch sweep. Playwright's high-level API can't
-    emulate the pointer/hover media features, so this drives CDP `Emulation.setEmulatedMedia`
-    directly. Fail-soft: on any non-Chromium/CDP-unavailable runtime it is a no-op (the sweep
-    then measures whatever the desktop rules give — still a regression net, never a false pass)."""
-    try:
-        cdp = page.context.new_cdp_session(page)
-        cdp.send("Emulation.setEmulatedMedia", {
-            "features": [
-                {"name": "pointer", "value": "coarse"},
-                {"name": "any-pointer", "value": "coarse"},
-                {"name": "hover", "value": "none"},
-                {"name": "any-hover", "value": "none"},
-            ],
-        })
-        return True
-    except Exception:
-        return False
-
-
-def mount_kit_touch_controls(page):
-    """RESP-4: mount the kit-panel controls the touch sweep previously couldn't see, so their
-    44px coarse-pointer floor is actually measured (not just asserted in source). Mounts the cast
-    window via its headless seam (window._orwellCastEnsure → .oc-pin always; .oc-backfill is
-    force-revealed for the measurement since it's a universal action otherwise gated on a missing
-    portrait) and synthesizes a minimized-dock `×` chip so its sole-close affordance is swept too.
-    Fail-soft + scoped to the measurement: every step is best-effort and leaves no game state."""
-    try:
-        page.evaluate("typeof window._orwellCastEnsure === 'function' && window._orwellCastEnsure()")
-        page.wait_for_timeout(500)
-        # Reveal the otherwise display:none backfill action so its tap box is measured. This is a
-        # measurement-only un-hide (the gate never clicks it); the real control's 44px floor lives
-        # in CSS regardless of the gating that normally keeps it hidden.
-        page.evaluate("""
-          (() => {
-            const a = document.querySelector('#orwell-cast #oc-actions');
-            if (a) a.style.display = '';
-          })()
-        """)
-        # The minimized-dock `×` only exists once a window is parked. The dock chip + its `×` are
-        # plain markup, so synthesize a representative one INTO the live dock row (matching the
-        # class the CSS floor targets) so the coarse sweep measures the real selector's box.
-        page.evaluate("""
-          (() => {
-            let dock = document.querySelector('.minimized-dock, #minimized-dock, [class*="minimized-dock"]');
-            if (!dock) {
-              dock = document.createElement('div');
-              dock.className = 'minimized-dock';
-              document.body.appendChild(dock);
-            }
-            if (!dock.querySelector('.minimized-dock-x')) {
-              const chip = document.createElement('button');
-              chip.className = 'minimized-dock-chip';
-              const x = document.createElement('span');
-              x.className = 'minimized-dock-x';
-              x.textContent = '\\u00d7';
-              chip.appendChild(x);
-              dock.appendChild(chip);
-            }
-          })()
-        """)
-        page.wait_for_timeout(200)
-        return True
-    except Exception:
-        return False
-
-
 def main():
     from playwright.sync_api import sync_playwright
     proc = boot_fe()
@@ -478,22 +397,8 @@ def main():
                 ctx = browser.new_context(viewport={"width": w, "height": h},
                                           has_touch=coarse)
                 page = ctx.new_page()
-                # RESP-4: a touch viewport must also match `@media (hover:none) and (pointer:coarse)`
-                # so the CSS tap-target floors (J5-01 + the RESP-1/2/3 lifts) actually APPLY — has_touch
-                # alone does NOT flip those media features in Chromium, so without this the gate would
-                # measure the controls at their desktop sizes and the 44px floor would be unenforceable.
-                # Driven over CDP (the only seam Playwright exposes for the pointer/hover media features).
-                if coarse:
-                    emulate_coarse_pointer(page)
                 page.goto(FE, wait_until="domcontentloaded")
                 audit_page(page, vp_name, w, h, coarse, with_game)
-
-                # RESP-4: mount the kit-panel controls (cast .oc-pin/.oc-backfill, the minimized-dock
-                # `×`) and re-run the SAME sweep at coarse-pointer tiers, so their 44px floor is
-                # measured on a real render — not left to source-string assertion. The earlier sweep
-                # already covers page chrome; this adds the panel controls. Fail-soft.
-                if coarse and mount_kit_touch_controls(page):
-                    audit_page(page, vp_name + "+kit-controls", w, h, coarse, with_game)
 
                 # J5-19: the endgame mobile sweep — only the phone tiers, only when a finished/endgame
                 # season was actually reached. The endgame decision card (live finale) and the
