@@ -46,6 +46,9 @@ _SYSTEM = (
     "You are a Big Brother CASTING PRODUCER building the secret bible for ONE houseguest. "
     "Write a rich, believable, reality-TV-plausible person with real depth and a life that exists "
     "ENTIRELY on its own. Output STRICT JSON only (no prose around it), with these keys:\n"
+    '  "name": a realistic, common, pronounceable FIRST and LAST name (two words) for a reality-TV '
+    "contestant — diverse and ordinary, NEVER invented/fantasy/gibberish; do not reuse the houseguest's "
+    "current name.\n"
     '  "biography": a 2-3 sentence presentable backstory (life outside the house),\n'
     '  "physicalCharacteristics": { "heightBuild", "skinTone", "hair", "facialFeatures", '
     '"distinguishingMark", "ageLook", "style" } — short phrases; this single facet is what BOTH '
@@ -68,7 +71,7 @@ _SYSTEM = (
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
 # NOTE: `dayOnePerception` is INTENTIONALLY NOT authored here (anti-sycophancy) — the engine owns the
 # seeded, balanced Day-1 read. We never send it, so the authoring path carries zero player coupling.
-_PUBLIC_KEYS = ("biography", "physicalCharacteristics")
+_PUBLIC_KEYS = ("name", "biography", "physicalCharacteristics")
 _HIDDEN_KEYS = ("secrets", "trueGoals", "weakness")
 _PHYS_KEYS = ("heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style")
 
@@ -83,6 +86,33 @@ _BIO_MIN_CHARS = 80          # a coherent presentable backstory is more than a c
 _BIO_MIN_SENTENCES = 2       # >= 2 sentence terminators [.!?]
 _HIDDEN_ENTRY_MIN_CHARS = 12  # a real secret/weakness is more than a stray word
 _SENTENCE_TERMINATORS = re.compile(r"[.!?]")
+
+
+# The LLM-authored replacement display name guard — mirrors the engine's `isReasonableName`
+# (GameSessionAdapter): exactly two whitespace-separated tokens, each a plausible capitalized name part
+# (optional hyphen/apostrophe compound, e.g. "O'Neil"), 2-12 chars, with >= 1 vowel and no run of 4+
+# consecutive consonants. A name that fails is DROPPED from the write-back so the engine's seeded corpus
+# name (the deterministic floor) simply stands. Rejects "Nerighrengeinen Herneingenenin"; accepts
+# "Marcus Webb", "Priya Anand", "Mary-Kate O'Neil".
+_NAME_TOKEN = re.compile(r"^[A-Z][a-z]*([-'][A-Z]?[a-z]+)?$")
+_NAME_VOWEL = re.compile(r"[aeiouy]", re.I)
+_NAME_CONSONANT_RUN = re.compile(r"[bcdfghjklmnpqrstvwxz]{4,}", re.I)
+
+
+def _is_reasonable_name(s: str) -> bool:
+    tokens = (s or "").strip().split()
+    if len(tokens) != 2:
+        return False
+    for token in tokens:
+        if not (2 <= len(token) <= 12):
+            return False
+        if not _NAME_TOKEN.match(token):
+            return False
+        if not _NAME_VOWEL.search(token):
+            return False
+        if _NAME_CONSONANT_RUN.search(token):
+            return False
+    return True
 
 
 def _biography_meets_floor(bio: str) -> bool:
@@ -140,6 +170,17 @@ def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
     if obj is None:
         return None
     out: dict = {"houseguestId": houseguest_id}
+
+    if isinstance(obj.get("name"), str) and obj["name"].strip():
+        name = obj["name"].strip()
+        # Guard (mirrors the engine): only forward a reasonable two-token human name. A gibberish/
+        # fantasy/malformed name is DROPPED so the engine's seeded corpus name (the floor) stands.
+        if _is_reasonable_name(name):
+            out["name"] = name
+        else:
+            logger.warning(
+                f"[cast-authoring] unreasonable name for {houseguest_id} ({name!r}) — "
+                "dropping so the corpus name stands")
 
     if isinstance(obj.get("biography"), str) and obj["biography"].strip():
         bio = obj["biography"].strip()
