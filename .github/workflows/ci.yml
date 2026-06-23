@@ -203,11 +203,11 @@ jobs:
       - name: engine + system deploy smoke
         run: bash deploy/smoke.sh
 
-  # ── Front-end gate ──────────────────────────────────────────────────────────────
-  # The vendored Python app is outside the TS tooling. Compile-check it, run its pytest suite
-  # (app-admin 0029, game build 0032), and boot/browser/responsive-smoke the real app. PATH-GATED
-  # (`changes.frontend`): an engine-only PR skips it.
-  frontend:
+  # ── Front-end gate (SPLIT 3 ways so it fans out across the runner pool) ──────────
+  # The vendored Python app is outside the TS tooling. It used to be ONE ~7-min job (the CI long
+  # pole). Split into pytest / browser-smoke / responsive-matrix so a multi-runner pool runs them
+  # in PARALLEL. All three are PATH-GATED on `changes.frontend`; an engine-only PR skips them.
+  fe-pytest:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: self-hosted
@@ -227,11 +227,27 @@ jobs:
         run: pip install -r frontend/requirements.txt
       - name: pytest (app-admin 0029, game build 0032)
         run: cd frontend && python3 -m pytest tests/ -q
-      - name: boot smoke — real app, game-build gating (feature 0032)
-        run: cd frontend && python3 scripts/boot_smoke.py
-      # Cache the Playwright chromium download so the install is a near-no-op on a cache hit
-      # (it otherwise re-downloads the browser bundle every run). Keyed to the installed
-      # playwright version, so a dependency bump busts the cache automatically.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: syntax-check key front-end JS
+        run: |
+          node --check frontend/static/js/orwellOnboarding.js
+          node --check frontend/static/js/orwellStatusPanel.js
+
+  fe-browser:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install front-end deps
+        run: pip install -r frontend/requirements.txt
+      # Cache the Playwright chromium download (keyed to the installed playwright version).
       - name: resolve playwright version (cache key)
         id: pw
         run: |
@@ -242,24 +258,42 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
-      # NO `--with-deps`: that apt-installs the browser's system libs via sudo, which the
-      # self-hosted runner does not grant. Install ONLY the browser binary (into the user's
-      # ~/.cache, no root). The runner box must have the chromium system libs pre-installed
-      # ONCE (interactive sudo is fine for that one-time setup):
-      #   python3 -m playwright install-deps chromium   # or the distro's libnss3/libatk… set
+      # NO `--with-deps` (it apt-installs via sudo, which the self-hosted runner does not grant);
+      # the runner box has the chromium system libs pre-installed once (the provisioning script
+      # bakes them in). Install only the browser binary into ~/.cache.
       - name: install playwright chromium
         run: python3 -m playwright install chromium
+      - name: boot smoke — real app, game-build gating (feature 0032)
+        run: cd frontend && python3 scripts/boot_smoke.py
       - name: browser smoke — keep-set UI loads, no broken modules (feature 0032)
         run: cd frontend && python3 scripts/browser_smoke.py
+
+  fe-responsive:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install front-end deps
+        run: pip install -r frontend/requirements.txt
+      - name: resolve playwright version (cache key)
+        id: pw
+        run: |
+          pip install playwright
+          echo "version=$(pip show playwright | awk '/^Version:/ {print $2}')" >> "$GITHUB_OUTPUT"
+      - name: cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - name: install playwright chromium
+        run: python3 -m playwright install chromium
       - name: responsive matrix gate — viewports x surfaces (Stream S, ruling 16)
         run: cd frontend && python3 scripts/responsive_matrix.py
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: syntax-check key front-end JS
-        run: |
-          node --check frontend/static/js/orwellOnboarding.js
-          node --check frontend/static/js/orwellStatusPanel.js
 
   # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────
   #
@@ -277,7 +311,9 @@ jobs:
       - test
       - coverage
       - smoke
-      - frontend
+      - fe-pytest
+      - fe-browser
+      - fe-responsive
       - heavy-sims
     if: always()
     runs-on: self-hosted
@@ -289,7 +325,9 @@ jobs:
             test=${{ needs.test.result }}
             coverage=${{ needs.coverage.result }}
             smoke=${{ needs.smoke.result }}
-            frontend=${{ needs.frontend.result }}
+            fe-pytest=${{ needs.fe-pytest.result }}
+            fe-browser=${{ needs.fe-browser.result }}
+            fe-responsive=${{ needs.fe-responsive.result }}
             heavy-sims=${{ needs.heavy-sims.result }}
         run: |
           set -euo pipefail
