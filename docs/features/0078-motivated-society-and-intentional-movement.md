@@ -1,153 +1,141 @@
-# 0078 — Motivated off-screen society & intentional movement (who bonds is character-driven, not room-driven)
+# 0078 — Motivated off-screen society & intentional movement (co-presence earned, not arbitrary)
 
-> **Status:** 📝 **SPEC / sketch** (drafted 2026-06-23). **Gate (planned):** engine (Vitest +
-> dependency-cruiser + the **calibration pass** — `juryReach` + the gradient band re-verified on the
-> new model) and BDD `0078-motivated-society-and-intentional-movement.feature`. **Depends on:** 0002
-> (events/pathways — overhearing stays a modeled pathway), 0017/0026 (the relationship model — the
-> pairing signal), 0038 (the off-screen society this redesigns), 0041 (souls/motivation), 0049
-> (presence/movement — the assignment this makes goal-driven), 0066 (the awake-set gating stays).
-> **Unblocks** 0077 (house map / privacy & eyeshot): once this lands, the floor plan is provably
-> calibration-neutral, so 0077's layout folds in safely. **Vault Wall (mandate #2):** the society is
-> hidden; only an overheard *fragment* or a witnessed *meeting* reaches the player, through a pathway.
+> **Status:** 📝 **SPEC** (drafted 2026-06-23; **revised same day** — see owner direction). **Gate
+> (planned):** engine (Vitest + the **calibration pass** — `juryReach` + the gradient band re-verified
+> on the new movement model) and BDD `0078-motivated-society-and-intentional-movement.feature`.
+> **Depends on:** 0049 (presence/movement — the assignment this makes goal-driven), 0017/0026 (the
+> relationship model — the motivation signal), 0040 (deals), 0044 (blocs), 0041 (souls/agenda), 0038
+> (the off-screen society this enriches), 0066 (the awake set stays). **Relates to** 0077 (house map /
+> privacy) — this makes "who's in a room together" *meaningful*, which is what 0077's observation/
+> conspicuousness mechanics read. **Vault Wall (mandate #2):** the society is hidden; only an overheard
+> fragment or a witnessed meeting reaches the player, through a pathway.
 
-> **Owner direction (2026-06-23, this session):**
-> 1. *"I don't think characters should bond based arbitrarily on if they are in the same room. Their
->    motivations should be much more nuanced than that — character personality or motivations."*
-> 2. *"I have a problem with 'NPCs bumping into each other.' NPCs should act just as **intentional**
->    as the player would be in terms of location selection. Then the locations should be used to
->    **affect** gameplay."*
-> 3. (From the calibration discussion.) *The floor plan must never move a vote* — rearranging the
->    house is presentation; competitive outcomes must not depend on room topology.
+> **Owner direction (2026-06-23, this session — note the reversal):**
+> - *First draft (decouple):* the floor plan tipped a calibration gate because the society pairs
+>   co-present NPCs, so co-presence was the arbitrary *cause* of bonding. The first plan removed
+>   co-presence from pairing entirely (motivation-only) to decouple layout from calibration.
+> - **Owner reversed it:** *"I want motivation ON TOP OF co-presence… otherwise the ability to note
+>   who is in rooms together has less of an impact. Houseguests need to be in the same room for any
+>   gameplay conversations to happen. However, just because they are in the same room doesn't mean
+>   they are talking about the game — it could just be friendly conversation. But relationships can
+>   still build."*
+> - And (carried from earlier): *"NPCs should act just as **intentional** as the player would be in
+>   terms of location selection. Then the locations should be used to **affect** gameplay."*
+> - **Friendly (non-game) co-present conversations DO nudge the hidden weights** — affinity only, no
+>   strategic effect (owner, this session).
 
-## The defect this fixes
+## The model
 
-Today the off-screen society (0038) — the hidden NPC↔NPC scheming/bonding that runs between the
-player's turns — **pairs CO-PRESENT NPCs**: two houseguests the seeded, affinity-clustered room
-drift (0049) happened to drop in the same room may scheme or bond. Two things are wrong with that:
+**Co-presence is the gate; intentional movement is what makes it *earned*; motivation sets the
+*nature*.** Three layers, in order:
 
-1. **Bonding is room-driven, not motivation-driven.** *Who* an NPC schemes with is decided by an
-   arbitrary roll of where they drifted, not by who they actually want to work, fear, or betray. The
-   "NPCs bump into each other" model is the symptom — NPCs are passive particles, not intentional
-   players.
-2. **The floor plan is coupled to the calibrated vote spine.** Because pairing reads room
-   co-presence, and pairing → relationship folds → eviction votes, **any layout change shifts the
-   votes**. That is exactly why feature 0077's new floor plan tipped the gradient calibration gate
-   (`active jury-reach 5/6 < passive 6/6`): more rooms diluted co-presence, re-rolling the society.
-   Presentation should never touch a closed-set outcome (ADR 0005).
+### 1. Co-presence is REQUIRED for any off-screen interaction (kept — owner ruling)
 
-Both are the same root: **room co-presence is being used as the *cause* of social play**, when it
-should be a *setting* and a *consequence*.
+Two houseguests must be in the same room to have *any* scene — game or friendly. This is the current
+0038/E45 model, and it stays: it is what makes **"who's in a room together" matter** (the player can
+read it, 0077; a long private 1:1 is a tell). The floor plan therefore **stays connected to the
+game's balance by design** — location is *meant* to affect play. (Consequence: a *new* floor plan is a
+deliberate **calibration pass**, not a free change — see below.)
 
-## The redesign — motivation is the cause, location is the consequence
+### 2. Intentional movement makes co-presence meaningful, not arbitrary (the headline build)
 
-### 1. The society pairs by motivation + relationship, not co-presence
+The owner's objection was never co-presence itself — it was that NPCs *drift* into rooms semi-
+randomly, so bonding looked like luck. The fix is to make NPCs **choose where to go with intent**,
+exactly as the player does (`moveTo`): an NPC moves toward what their **motivation** wants —
 
-`richOffscreenStretch` selects who interacts with whom from the **relationship + motivation** layer,
-never from room occupancy:
+- **seek a bond** (gravitate to an ally / someone they're warming to),
+- **work a target** (corner a rival, a nominee, a vote they need),
+- **honor an agenda** (a deal partner 0040, a bloc 0044, a soul goal 0041),
+- **seek privacy** (pull someone into a quiet room to scheme),
+- **avoid a threat** (keep distance from someone dangerous).
 
-- **Tie strength & valence** (0026): a strong ally is who you bond with; a rising threat is who you
-  scheme against. Already half-present ("partners by tie strength") — this makes it the *whole*
-  selector, dropping the co-presence gate.
-- **Goals / agenda** (0041 souls, 0040 deals, 0044 strategic blocs): an NPC working a target, honoring
-  a deal, or shoring up a bloc pairs with the houseguest their *agenda* points at.
-- **Temperature** (0006): variance/initiative still rolls per moment, so it is not deterministic.
+So when two houseguests end up in a room together, it's usually because **one of them went looking
+for the other** — co-presence is the *result* of intent, not a dice roll. This replaces the 0049
+affinity-drift assignment with goal-driven positioning. It is **player-facing texture** (you can
+watch two rivals keep finding each other, an outsider hover at the edges) *and* the new
+calibration-load-bearing input (it changes who clusters → who interacts → votes), so it ships **with
+a calibration pass**.
 
-Because this selection **never reads `HOUSE_ROOMS`/adjacency/occupancy**, the society's pairing — and
-therefore every downstream vote — is **invariant to the floor plan by construction**. That is the
-decoupling: rearranging rooms cannot change who pairs, so it cannot move a vote.
+### 3. Co-presence ≠ game talk — motivation sets the nature, both build relationships
 
-### 2. The scene is *placed* in a room — location as consequence, for overhearing only
+Being in a room together yields an interaction, but **not every interaction is strategic**. The
+*nature* follows the pair's motivation + relationship read (this is largely the existing
+`natureWeights`, made explicit and rebalanced):
 
-Once the society decides a motivated pair interacts, the engine **sets the scene in the initiator's
-real room** (where their intentional movement, below, put them). Room placement is now a *downstream
-presentation/observation* fact, used **only** for:
+- **Game conversation** (scheme / strategy / conflict) — fires when motivation/relationship points
+  there (a threat to manage, an agenda to push). Folds the **strategic** weights (trust/threat) that
+  feed votes.
+- **Friendly conversation** (bonding, downtime, just hanging out) — the *default* texture of a house
+  that isn't always plotting. **Nudges affinity only** (the relationship warms), **no strategic
+  effect** (no scheming, no vote math) — owner ruling this session. Relationships still build.
 
-- **Overhearing** (0049 `rollOverhears`): a player (or NPC) one room over may catch a fragment — the
-  real, traceable `overheard:` pathway, unchanged. Location decides *who can observe*, never *who
-  bonds*.
-- **Conspicuousness** (0077): being *seen* slipping off together is information; the content stays
-  sealed.
+So the house feels alive with ordinary social life, and a strategic beat lands *because* it stands
+out against that — while *every* co-present scene still deepens the relationship layer (non-
+degradation 0007: nothing is inert).
 
-So location still **affects** gameplay (what you can observe, privacy, reach) — it just no longer
-**dictates** the social graph.
+## Location stays calibration-coupled — by design (the explicit trade)
 
-### 3. NPCs move intentionally (goal-driven), not by random drift
+Because co-presence gates interaction, the floor plan feeds the calibrated vote spine. The owner has
+**chosen** this (location must matter). The implication is recorded so it never surprises us again:
 
-Presence assignment (0049 `assignRooms`) becomes **motivated**: an NPC moves toward what their agenda
-wants — seek an ally to talk, seek a *private* room to scheme, follow or avoid a target, gravitate to
-where their plan lives — instead of the current affinity-cluster drift. The player already moves with
-full intent (`moveTo`); NPCs gain the same intentionality. This makes the *player-facing* house read
-as a cast of people pursuing goals (you can watch two rivals keep finding each other, an outsider
-hover at the edges), which is the texture the owner wants.
+- The **current 9-room house is the calibrated baseline** (green).
+- **Intentional movement** (this feature) changes clustering → it gets its own calibration pass here.
+- A **future floor-plan change** (e.g. the 0077 13-room layout, preserved as commit `2102264`) will
+  shift calibration and must land **with a deliberate re-tune pass** — it is *not* auto-safe. That is
+  the accepted cost of location mattering.
 
-> **Isolation note (the L21/L24 lesson holds, inverted).** Movement *weighting* was kept off the
-> calibration spine via a dedicated RNG stream. Here the move is bigger: the **society no longer
-> reads occupancy at all**, so movement (however intentional) is *purely player-facing* and cannot
-> perturb calibration regardless of stream. The calibration-load-bearing thing becomes the
-> motivation/relationship selection — which is already part of the seeded spine.
+## The calibration pass (load-bearing)
 
-### 4. Location-as-gameplay (the payoff, ties to 0077)
-
-With bonding decoupled, the floor plan is free to be a **gameplay surface**: privacy scarcity in the
-open core, a private room to pull someone aside, eyeshot/earshot, the conspicuousness of a long
-1:1 — all of 0077 — none of which can ever move a competitive outcome. The house is a *stage the
-player and NPCs act on with intent*, not a dice table that decides the game.
-
-## The calibration pass (load-bearing — this is most of the work)
-
-Dropping the co-presence gate **changes the society's behavior vs. current `main`** (different pairs,
-likely more scenes), so the seeded gates must be re-measured and, if needed, re-tuned:
+Intentional movement concentrates co-presence among motivated pairs, intensifying the society's
+relationship folds, so the gates are re-measured/re-tuned:
 
 - **`juryReach`** (20-seed band) and the **gradient** (active ≥ passive reach; active wins ≥ passive)
-  must pass on the new model. The anti-sycophancy floor is non-negotiable: playing the game must
-  never do worse than coasting (and must *win* more — the measured ~20% vs ~7%).
-- Re-tuning, if needed, uses the **owner-sanctioned levers** (`JURY_WEIGHTS`,
-  `decisionConstants.juryManagementWeight`, the society interaction rate), not ad-hoc hacks.
-- **Then** the 0077 floor plan is re-applied (commit `2102264`) and the gates are shown **byte-stable
-  across layouts** — the permanent decoupling guard (a test that swaps the floor plan and asserts
-  identical seeded vote outcomes).
+  must hold on the new model — the anti-sycophancy floor is non-negotiable (playing must never do
+  worse than coasting; the measured ~20% vs ~7% win edge must survive).
+- Re-tuning uses the **owner-sanctioned levers** (`JURY_WEIGHTS`, `decisionConstants.juryManagementWeight`,
+  the society interaction rate / move-intent strength), never ad-hoc hacks.
 
 > Reminder (verified this session): "reach jury" = survive to **final 11** — the jury is the last 9
-> evictees (`evictionOrder.slice(-9)`; `seatOf` uses `cast − 2 − 9 = 5` pre-jury evictions), the
-> final 2 are **not** jurors. The gates measure this correctly; the redesign must keep it so.
+> evictees (`evictionOrder.slice(-9)`; `seatOf` uses `cast − 2 − 9 = 5` pre-jury evictions); the final
+> 2 are not jurors. The gates measure this correctly; keep it so.
 
-## What must NOT change (the guardrails)
+## What must NOT change (guardrails)
 
-- **The Vault Wall** — the society stays hidden; only fragments/meetings surface via pathways.
-- **The daily-event invariant**, the **awake-set** night gating (0066), **seeded determinism**, and
-  **non-degradation** (every scene still records + folds + persists, 0023).
-- **The conversation is the game** — this enriches the hidden sim and the player-facing texture; it
-  does not add a dashboard or normalize the open set (`expressiveNonCollapse` stays green).
+- **The Vault Wall** — the society stays hidden; only fragments/meetings surface via pathways (0002).
+- **The daily-event invariant**, the **awake-set** night gating (0066 — asleep NPCs neither move nor
+  scheme), **seeded determinism**, **non-degradation** (every scene records + folds + persists, 0023).
+- **The conversation is the game** — this enriches the hidden sim + the player-facing texture; no
+  dashboard, no normalizing the open set (`expressiveNonCollapse` stays green).
+- The L21/L24 **movement-stream isolation** discipline: intentional movement still rides a dedicated/
+  calibrated stream as appropriate so the *mechanism* is reproducible.
 
 ## Testability (role-only; HARD rules)
 
-- **Decoupling (the headline):** a permanent test swaps the floor plan (e.g. 9-room ↔ 13-room) under
-  the same seed and asserts the society's pairing and the **final vote outcomes are identical** — the
-  proof that layout can never move a result.
-- **Motivation drives bonding:** across seeds, an NPC's off-screen partners correlate with their
-  *relationship/agenda* (strong tie / threat / deal target), not with room adjacency; shuffling rooms
-  does not change partners.
-- **Intentional movement:** an NPC with a motive toward a target trends toward that target's vicinity
-  more than a motiveless one (a goal-driven spread, like the L21/L24 social-aptitude test).
-- **Location still gates observation, not pairing:** overhearing/eyeshot still depend on rooms;
-  pairing does not.
-- **Calibration:** `juryReach` + gradient green on the new model AND with the 0077 floor plan applied.
+- **Co-presence still gates:** no off-screen scene fires between houseguests in different rooms.
+- **Movement is intentional:** an NPC with a motive toward a target (ally to bond, rival to work)
+  trends toward that target's vicinity measurably more than a motiveless one (a goal-driven spread,
+  like the L21/L24 social-aptitude test) — so co-presence correlates with agenda, not luck.
+- **Nature follows motivation:** a warm pair tends to a *friendly* scene (affinity-only fold, no
+  strategic move); a threatened/strategic pair tends to a *game* scene (strategic fold). Both record.
+- **Friendly builds, doesn't scheme:** a friendly scene raises affinity and folds **no** strategic
+  weight and triggers **no** vote-affecting change.
+- **Calibration:** `juryReach` + gradient green on the new movement model.
 - **Vault + determinism:** no sealed content leaks; same seed ⇒ same society + same outcomes.
 
 ## Phasing
 
-1. **Phase 1 — decouple.** Society pairs by motivation/relationship; scene placed in the initiator's
-   room for overhearing; re-verify/re-tune `juryReach` + gradient. *Unblocks 0077.*
-2. **Phase 2 — intentional movement.** Replace the affinity-drift assignment with goal-driven NPC
-   positioning (player-facing; calibration-irrelevant after Phase 1).
-3. **Phase 3 — fold in 0077.** Re-apply the floor plan + privacy/eyeshot; add the cross-layout
-   decoupling guard; land location-as-gameplay.
+1. **Phase 1 — intentional movement.** Replace affinity-drift assignment with goal-driven NPC
+   positioning (toward bonds/targets/privacy, away from threats). **Calibration pass** (`juryReach` +
+   gradient re-green). *This is the bulk of the work and the calibration risk.*
+2. **Phase 2 — nature clarity.** Make the game-vs-friendly split explicit and rebalanced so a house
+   has ample ordinary friendly life (affinity-only) and strategic beats stand out; verify friendly
+   folds affinity only.
 
 ## Open questions / defaults
 
-1. **Motivation signal weighting** — how much goal/agenda vs. raw tie-strength drives pairing; start
-   from the existing tie-strength selector and layer agenda in, tuned in the calibration pass.
-2. **Scene count** — without the co-presence gate the society could pair *more*; cap the per-tick
-   interaction count so the hidden layer stays bounded (it already is) and calibration stays sane.
-3. **Intentional movement vs. the awake set** — goal-driven movement composes with 0066 (asleep NPCs
-   don't move/scheme); confirm no double-count.
+1. **Move-intent strength** — how strongly motivation bends an NPC's room choice vs. staying put;
+   tune in the calibration pass (start modest so the house doesn't all collapse into one room).
+2. **Friendly:game ratio** — the baseline proportion of non-strategic scenes; start friendly-leaning
+   (most house life is downtime) and tune for drama density.
+3. **Privacy-seeking vs the open core** — a scheming pair seeking a private room ties into 0077; until
+   0077 lands, "seek privacy" is a soft room-preference, not a hard mechanic.
