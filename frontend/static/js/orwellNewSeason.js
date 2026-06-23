@@ -149,7 +149,7 @@
       });
       const d = r.ok ? await r.json() : null;
       if (!r.ok || !d) {
-        const err = (d && d.error) || "Couldn't start the next season — try again.";
+        const err = (d && d.error) || "The house wouldn't open just yet — try again.";
         setMsg(err, true);
         setBusy(false);
         return;
@@ -255,10 +255,12 @@
   }
 
   // Gentle in-reunion nudge: a soft pulse on the window (or its dock chip) so the path forward
-  // is never hidden if the player lingers. Reduced-motion safe (animation simply no-ops).
+  // is never hidden if the player lingers. TX-3: genuinely reduced-motion safe — WAAPI runs
+  // regardless of the CSS media query, so gate it explicitly here.
   function nudge() {
     try {
       if (!_win || !_win.el) return;
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
       _win.el.animate && _win.el.animate(
         [{ boxShadow: "0 0 0 0 transparent" },
          { boxShadow: "0 0 0 4px color-mix(in srgb, var(--accent, #6d4aff) 35%, transparent)" },

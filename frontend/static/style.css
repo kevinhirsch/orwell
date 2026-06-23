@@ -22188,6 +22188,14 @@ body:not(.welcome-ready) #welcome-screen {
     animation: none !important;
     transition: none !important;
   }
+  /* TX-4: `animation` doesn't inherit, so the success-checkmark kept animating under reduce.
+     Stop it AND force the visible static end-state (shown + fully drawn), never stuck-hidden. */
+  .toast .toast-checkmark,
+  .toast .toast-checkmark svg polyline {
+    animation: none !important;
+  }
+  .toast .toast-checkmark { opacity: 1 !important; transform: none !important; }
+  .toast .toast-checkmark svg polyline { stroke-dashoffset: 0 !important; }
 }
 
 /* ── Tasks ── */

@@ -118,9 +118,14 @@
     // After expand the body becomes scrollable; defer so layout settles first.
     window.requestAnimationFrame(function () {
       try { el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) {}
-      // a brief highlight so the eye lands on the right gadget
+      // a brief highlight so the eye lands on the right gadget. TX-5: cancel any in-flight flash and
+      // restart the animation (re-adding a present class won't restart a CSS animation), so a rapid
+      // repeat focus re-flashes instead of being cut short by the previous click's timer.
+      if (el._grailFlashTimer) clearTimeout(el._grailFlashTimer);
+      el.classList.remove("grail-focus-flash");
+      void el.offsetWidth; // force reflow so the keyframes can re-trigger
       el.classList.add("grail-focus-flash");
-      setTimeout(function () { el.classList.remove("grail-focus-flash"); }, 900);
+      el._grailFlashTimer = setTimeout(function () { el.classList.remove("grail-focus-flash"); el._grailFlashTimer = null; }, 900);
       // move focus into the gadget (its own header if focusable, else the gadget)
       var f = el.querySelector("[tabindex],button,a,[role='button']");
       try { (f || el).focus({ preventScroll: true }); } catch (_) { try { (f || el).focus(); } catch (_) {} }
