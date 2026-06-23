@@ -406,6 +406,14 @@ export interface CreateCharacterReq {
    * a no-op on a fresh (no prior game) creation. Absent/false ⇒ a normal fresh creation (re-run casting).
    */
   keepCharacter?: boolean;
+  /**
+   * Cross-season name memory (NAME-1 / #547) — names used by PRIOR seasons in the SAME game, so a new
+   * season's corpus-sampled cast AVOIDS them (replayability/sameness, mandate #4). Carries both full
+   * names and given names. ENGINE-INTERNAL: set on a confirmed restart from the dead season's roster
+   * (never part of the player tool's documented schema, like `confirmRestart`). Bounded & fail-soft —
+   * if the corpus has no headroom to honor every exclusion, the sampler relaxes it rather than failing.
+   */
+  priorCastNames?: string[];
 }
 
 export interface MomentPromptReq {
