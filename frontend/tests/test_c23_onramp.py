@@ -24,7 +24,7 @@ def test_game_build_marks_the_body():
 def test_onboarding_sequences_model_before_character():
     js = _read("static", "js", "orwellOnboarding.js")
     assert "anyModelConfigured" in js
-    assert "Production needs a feed source" in js          # J4: the model gate, game-framed
+    assert "Production needs the feeds" in js              # J4: the model gate, game-framed
     assert "The house is dark" in js                       # F5: engine-down holding card
 
 

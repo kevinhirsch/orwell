@@ -1,13 +1,17 @@
-// Orwell onboarding — one continuous, guided OOBE flow (P1 redesign; OOBE re-sequence 2026-06-20).
+// Orwell onboarding — one continuous, guided OOBE flow (P1 redesign; OOBE re-sequence 2026-06-20;
+// setup-wizard + premature-start fix 2026-06-23).
 //
 // The flow, in order:
 //   1. Settings → the player enters their LLM info (provider/key/model). The MODEL GATE (J4)
 //      below holds the flow until a feed is configured — production literally cannot speak
-//      without one.
-//   2. A WELCOME MODAL — kept as its own modal (NOT folded into the chat) — greets the player on
-//      EVERY fresh game/season and proceeds straight into the interview. Dismissing it opens the
-//      fresh interview session AND fires the producers' hidden kickoff — the producers reach out
-//      FIRST, before the player types anything.
+//      without one. OpenRouter is the default provider; deepseek-v4-pro the OOB narrator model and
+//      gemini-2.5-flash-image the OOB portrait model (src/settings.py DEFAULT_SETTINGS).
+//   2. The SETUP WIZARD (mountSetup) — its own modal — shows on EVERY fresh game/season. The only
+//      welcome copy is the framing line "Production needs the feeds"; the rest is feed/model SETUP
+//      borrowed from the Settings model controls (a model summary + a "Choose models" door into
+//      Settings). The season begins ONLY on the explicit "Start casting" button — NOT when a feed
+//      is probed (the premature-start fix). "Start casting" opens the fresh interview session AND
+//      fires the producers' hidden kickoff — the producers reach out FIRST.
 //   3. The casting interview proceeds in the chat (the engine's character-creation moment prompt
 //      + incremental updateCasting → createCharacter). The producers ask about the CAST PHOTO
 //      first; only THEN does the in-chat photo upload box pop up (orwellHeadshot.js) — it follows
@@ -230,23 +234,79 @@
     try { localStorage.removeItem(welcomeKey()); } catch (_) {}
   }
 
-  function mountWelcome(onProceed) {
+  // ── The SETUP WIZARD (pre-game) ──────────────────────────────────────────────────────────
+  // Replaces the old verbose welcome modal. The ONLY welcome copy is the framing line
+  // "Production needs the feeds" (per the owner request) — everything else is feed/model SETUP,
+  // borrowed from the Settings model controls. It is the single pre-game gate after a feed exists:
+  // it shows which models will run the season (the OOB defaults — deepseek-v4-pro narrator,
+  // gemini-2.5-flash-image portraits), lets the player open the real Settings model controls to
+  // pick their OpenRouter models, and ONLY starts the season on an explicit "Start casting".
+  //
+  // PREMATURE-START FIX: the casting kickoff used to fire the instant a feed was probed (the
+  // orwell:models-changed auto-advance ran straight to the welcome→kickoff), so the season began
+  // before the player could choose their models. Now the kickoff fires ONLY from this wizard's
+  // "Start casting" button; adding/changing a feed merely re-renders the wizard's model summary
+  // (and enables Start once a chat model resolves). The player owns the moment the game begins.
+  //
+  // The model summary is read from the same projections the chatbox + Settings use
+  // (GET /api/default-chat for the narrator, GET /api/auth/settings for image_model), so what the
+  // wizard shows is exactly what will run — no parallel source of truth.
+  async function _setupModelSummary() {
+    let chat = "", image = "";
+    try {
+      const r = await fetch("/api/default-chat", { credentials: "same-origin" });
+      if (r.ok) { const d = await r.json(); chat = (d && (d.model || d.default_model)) || ""; }
+    } catch (_) {}
+    try {
+      const r = await fetch("/api/auth/settings", { credentials: "same-origin" });
+      if (r.ok) { const d = await r.json(); image = (d && (d.image_model || (d.settings && d.settings.image_model))) || ""; }
+    } catch (_) {}
+    return { chat, image };
+  }
+
+  function mountSetup(onProceed) {
     if (document.getElementById("orwell-onboarding")) return;
     const el = buildOverlay();
-    el.setAttribute("aria-label", "Welcome to Big Brother");
+    el.setAttribute("aria-label", "Big Brother production setup");
+    el.setAttribute("data-ob-setup", ""); // tag so the model-change re-render can find + refresh it
     const card = el.querySelector(".ob-card");
     card.setAttribute("tabindex", "-1");
+    // The framing line + a compact model summary borrowed from Settings. "Auto-detect" is shown for
+    // an empty image_model (which resolves to the gemini default at generation time).
     card.innerHTML = `
       <div class="ob-hold">
-        <h1>Welcome to the house</h1>
-        <p class="ob-hold-sub">You're cast on <b>Big Brother</b>. One house, sixteen strangers,
-          one winner — and production is watching everything.</p>
-        <p class="ob-hold-sub">The producers are due any minute for your casting interview —
-          they'll reach out the moment you're ready.</p>
+        <h1>Production needs the feeds</h1>
+        <p class="ob-hold-sub">Pick the models that will run your season, then we'll roll. The
+          producers reach out the moment you're ready — they go first.</p>
+        <div class="ob-setup-models" aria-live="polite">
+          <p class="ob-hold-sub ob-setup-chat">Narrator model: <b>…</b></p>
+          <p class="ob-hold-sub ob-setup-image">Portrait model: <b>…</b></p>
+        </div>
         <div class="ob-hold-actions"></div>
       </div>`;
     const row = card.querySelector(".ob-hold-actions");
+
+    // Refresh the model summary + the Start button's enabled state. Start requires a resolved chat
+    // (narrator) model — without one the house literally can't speak, so the season can't begin.
+    let _startBtn = null;
+    const refresh = async () => {
+      const { chat, image } = await _setupModelSummary();
+      const chatEl = card.querySelector(".ob-setup-chat b");
+      const imgEl = card.querySelector(".ob-setup-image b");
+      if (chatEl) chatEl.textContent = chat || "— connect a feed —";
+      if (imgEl) imgEl.textContent = image || "Auto-detect (Gemini)";
+      if (_startBtn) {
+        _startBtn.disabled = !chat;
+        _startBtn.title = chat ? "" : "Connect a feed in Settings first — the house can't speak without a narrator model.";
+      }
+    };
+    // Re-render when the player connects/changes a feed in Settings (no premature kickoff — this
+    // only updates the summary + enables Start). Cleaned up on dismiss so it never leaks.
+    const onModels = () => { refresh(); };
+    window.addEventListener("orwell:models-changed", onModels);
+
     const dismiss = () => {
+      try { window.removeEventListener("orwell:models-changed", onModels); } catch (_) {}
       markWelcomeSeen();
       uninertBackground();
       // R7 (audit anim-F4): BRIDGE the welcome→cast-photo-box handoff. Removing the welcome overlay
@@ -262,26 +322,50 @@
         }, 4000);
       } catch (_) {}
       el.remove();
-      // The welcome modal is gone. OOBE re-sequence: dismissing the welcome IS the proceed —
-      // onProceed opens the fresh interview session and fires the producers' kickoff. The photo
-      // box now appears MID-interview (after the producers ask), not before, so there is no
-      // separate "image step" to hand off to here.
+      // Dismissing the setup wizard via "Start casting" IS the proceed — onProceed opens the fresh
+      // interview session and fires the producers' kickoff. The photo box appears MID-interview
+      // (after the producers ask), not before, so there is no separate "image step" to hand off to.
       setOnboardingActive(false);
       try { onProceed && onProceed(); } catch (_) {}
     };
+
+    // "Choose models" opens the REAL Settings model controls (the elements this wizard borrows
+    // from) so the player can pick their OpenRouter narrator/portrait models. It does NOT dismiss
+    // the wizard or start the game — Settings opens over it; on return the orwell:models-changed
+    // re-render reflects the new pick and Start enables. (Settings must not open behind the inert
+    // wall, so lift the inert + onboarding suppression while it's up, then restore on close isn't
+    // needed — the wizard is re-rendered on models-changed and the Settings modal manages itself.)
+    const choose = document.createElement("button");
+    choose.type = "button";
+    choose.className = "ob-btn";
+    choose.setAttribute("data-ob-choose-models", "");
+    choose.textContent = "Choose models";
+    choose.addEventListener("click", () => {
+      try { uninertBackground(); } catch (_) {}
+      try { openSettings(); } catch (_) {}
+      // Re-inert behind the (now-open) Settings modal so the wizard stays modal underneath; the
+      // Settings modal sits above. A short delay lets Settings mount first.
+      setTimeout(() => { try { inertBackground(el); } catch (_) {} }, 50);
+    });
+    row.appendChild(choose);
+
     const go = document.createElement("button");
     go.type = "button";
     go.className = "ob-btn ob-btn-primary";
-    go.setAttribute("data-ob-welcome-go", "");
-    go.textContent = "Meet the producers";
-    go.addEventListener("click", dismiss);
+    go.setAttribute("data-ob-setup-start", "");
+    go.textContent = "Start casting";
+    go.disabled = true; // enabled by refresh() once a narrator model resolves (avoids the async race)
+    go.addEventListener("click", () => { if (!go.disabled) dismiss(); });
     row.appendChild(go);
+    _startBtn = go;
+
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
     document.body.appendChild(el);
-    setOnboardingActive(true); // suppress the splash tip/tagline while the welcome is up
+    setOnboardingActive(true); // suppress the splash tip/tagline while the wizard is up
     inertBackground(el);
     trapFocus(el);
     try { go.focus(); } catch (_) {}
+    refresh(); // populate the model summary + Start enabled-state
   }
 
   // The remedy the J4 card names: the workspace's own settings trigger. Called AFTER
@@ -308,7 +392,7 @@
   };
 
   // Seam for the headless browser gate: mount the welcome modal on demand.
-  window._orwellWelcomeMount = function () { mountWelcome(); };
+  window._orwellWelcomeMount = function () { mountSetup(); };
 
   // L2: is the caller an admin? The J4 card offers "Open Settings → Add Models" only to
   // operators who can actually fix it. The old gate read `window._isAdmin`, which nothing in
@@ -584,7 +668,7 @@
         // pointed at setup — and a BUTTON that actually goes there (the copy's remedy must
         // be operable from the card; the page behind it is inert). Re-probe and continue.
         const admin = await isAdmin();
-        mountHolding("Production needs a feed source",
+        mountHolding("Production needs the feeds",
           "No chat model is configured yet, so the house can't speak. " +
           (admin ? "Open Settings → Add Models (or type /setup) to connect one — casting begins the moment a feed is live."
                  : "Ask your administrator to connect a model — casting begins the moment a feed is live."),
@@ -593,11 +677,12 @@
         return;
       }
       // Pre-game with a model configured: open the fresh interview session (F7), then show the
-      // WELCOME MODAL (on EVERY fresh game/season). OOBE re-sequence (2026-06-20): dismissing the
-      // welcome IS the proceed — onProceed opens the fresh interview session (idempotent: the
-      // SEAT_TAKEN_KEY one-shot makes the second call a no-op) and fires the producers' kickoff, so
-      // the interview opens AFTER the welcome (not after a photo). The chat is no longer locked for
-      // the photo; the photo box appears mid-interview once the producers ask (orwellHeadshot.js).
+      // SETUP WIZARD (on EVERY fresh game/season). The wizard is the pre-game gate: dismissing it
+      // via "Start casting" IS the proceed — onProceed opens the fresh interview session
+      // (idempotent: the SEAT_TAKEN_KEY one-shot makes the second call a no-op) and fires the
+      // producers' kickoff, so the interview opens AFTER the player confirms their models (NOT
+      // automatically when a feed is probed — the premature-start fix). The chat is no longer
+      // locked for the photo; the photo box appears mid-interview once the producers ask.
       await openFreshInterviewSession();
       // 0065 AUTHOR WARM: a model is configured and the season hasn't started — pre-seed + deeply author
       // the cast in the background NOW, before the interview, so it is fully authored before any portrait.
@@ -620,7 +705,7 @@
         try { clearWelcomeSeen(); } catch (_) {}
       }
       if (!welcomeSeen()) {
-        mountWelcome(onProceed); // its own modal; on "Meet the producers" it opens the interview
+        mountSetup(onProceed); // the pre-game setup wizard; "Start casting" opens the interview
       } else {
         // Already greeted this pre-game session (a reload mid-OOBE): don't re-show the welcome, but
         // still ensure the producers' kickoff has had its chance to open the interview (idempotent —
@@ -635,17 +720,16 @@
 
   // P1 OOBE auto-advance: the whole flow must move WITHOUT a manual page reload. The
   // route() above ran once on load; re-run it agentically on the signals that change what
-  // the flow should show — chiefly when the player configures an LLM model in Settings.
+  // the flow should show — chiefly when the player connects an LLM feed in Settings.
   //
-  //   Settings → LLM  →  welcome modal  →  image (required)  →  producers reach out first
-  //
-  // OOBE re-sequence:  Settings → LLM  →  welcome modal  →  producers reach out first  →
-  //                    photo box mid-interview (optional)
+  //   Settings → LLM feed  →  SETUP WIZARD (confirm models)  →  "Start casting"  →
+  //                           producers reach out first  →  photo box mid-interview (optional)
   //
   // models.js fires orwell:models-changed on the none→some transition. When it lands and a
-  // blocking holding card (e.g. "Production needs a feed source") is still up, clear it
-  // immediately (don't wait on its 5s re-probe) and re-evaluate so the welcome modal opens
-  // right away. A welcome modal already showing carries no holding tag, so it's left alone.
+  // blocking holding card (e.g. "Production needs the feeds") is still up, clear it immediately
+  // (don't wait on its 5s re-probe) and re-evaluate so the setup wizard opens right away. A setup
+  // wizard already showing carries no holding tag, so it's left alone — and it re-renders its own
+  // model summary via its internal listener WITHOUT starting the season (the premature-start fix).
   function _reRouteAfterModelConfig() {
     const open = document.getElementById("orwell-onboarding");
     if (open && open.hasAttribute("data-ob-holding")) {

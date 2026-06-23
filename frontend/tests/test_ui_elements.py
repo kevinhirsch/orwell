@@ -107,7 +107,7 @@ class TestOnboardingOverlay:
         assert "sidebar-new-chat-btn" in JS_ONBOARDING
 
     def test_holding_cards_remain(self):
-        assert "Production needs a feed source" in JS_ONBOARDING  # J4 model gate
+        assert "Production needs the feeds" in JS_ONBOARDING      # J4 model gate
         assert "The house is dark" in JS_ONBOARDING               # F5 engine down
 
     def test_holding_card_is_a_real_modal(self):
