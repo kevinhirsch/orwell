@@ -951,7 +951,13 @@ _STATUS_PAGE = """<!doctype html>
   th, td { text-align: left; padding: 4px 14px 4px 0; border-bottom: 1px solid #262a33; }
   th { opacity: .55; font-weight: 600; }
   td.num { text-align: right; padding-right: 0; }
-  .actions { margin: 18px 0; display: flex; gap: 12px; }
+  /* wrap so the maintenance-button row (and the log-source / retention rows) reflow on a phone
+     instead of forcing the layout viewport wider than the screen — this page is the recovery
+     surface an operator may open on mobile when the app shell is broken. */
+  .actions { margin: 18px 0; display: flex; gap: 12px; flex-wrap: wrap; }
+  /* the log-source <select> has long option text ("LLM I/O (live) — full prompt + …"); cap it to
+     the row so a wide native control can't push the page past the viewport on a phone. */
+  .actions select { max-width: 100%; }
   .btn { color: #9cdef2; border: 1px solid #355a66; border-radius: 8px;
          padding: 6px 12px; text-decoration: none; cursor: pointer;
          background: transparent; font: inherit; display: inline-block; }
@@ -1407,6 +1413,14 @@ const OPS_STEP_LABELS = {
   "update-reset": ["fetching latest code", "rebuilding engine", "stopping services", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
 };
 const OPS_TITLES = { "update": "Updating Orwell", "factory-reset": "Factory Reset (OOBE)", "update-reset": "Update + Reset" };
+// This panel tracks ONLY the three top-of-page maintenance actions. public-deployment / tls also
+// publish ops-status entries, but they have their OWN inline progress areas — surfacing them here
+// would render a titleless, label-less panel ("extraneous data"). Restrict to what this panel owns.
+const OPS_PANEL_ACTIONS = ["update", "factory-reset", "update-reset"];
+// A finished/failed run is only "now" for a short window. After it lapses the panel hides instead
+// of resurrecting a stale completion banner on every later page-load (the old d.latest behavior).
+const OPS_FRESH_MS = 120000;
+function opsFresh(s) { if (!s || !s.ts) return false; const t = Date.parse(s.ts); return isFinite(t) && (Date.now() - t) < OPS_FRESH_MS; }
 function opsMarkWatching(action) { try { localStorage.setItem(OPS_PROGRESS_KEY, action); } catch (e) {} }
 function opsClearWatching() { try { localStorage.removeItem(OPS_PROGRESS_KEY); } catch (e) {} }
 function opsGetWatching() { try { return localStorage.getItem(OPS_PROGRESS_KEY); } catch (e) { return null; } }
@@ -1422,17 +1436,23 @@ function renderOpsProgress(s) {
   opsPanel.style.display = "block";
   document.getElementById("ops-progress-title").textContent = OPS_TITLES[action] || action;
   document.getElementById("ops-progress-count").textContent = total ? ("step " + step + " / " + total) : "";
-  const pct = total ? Math.round((s.ok ? total : step) / total * 100) : (s.ok ? 100 : 0);
+  // Bar reflects steps actually COMPLETED so it never runs ahead of the ✓ rows: a step that is only
+  // in flight (●) is not done yet. completed = step-1 while a step runs (or after a failure on it),
+  // and all of them on success. (The old step/total read 60% the instant step 3 of 5 began.)
+  const completed = s.ok ? total : Math.max(0, step - 1);
+  const pct = total ? Math.round(completed / total * 100) : (s.ok ? 100 : 0);
   const bar = document.getElementById("ops-progress-bar");
   bar.style.width = pct + "%";
   bar.style.background = s.error ? "#e55" : (s.ok ? "#3cb46e" : "#9cdef2");
   const spinner = document.getElementById("ops-progress-spinner");
   spinner.style.display = s.running ? "inline-block" : "none";
-  // Build the step rows: done (✓), current (●), pending (○); the failed step gets ✗.
+  // Build the step rows from the STABLE phase labels: done (✓), current (●), pending (○), failed (✗).
+  // The live server message is NOT echoed into a row — it lives in the single message line below, so
+  // the same text can never appear twice (the "● refreshing front-end deps" + duplicate-line bug).
   const rows = [];
   const n = Math.max(total, labels.length, step);
   for (let i = 1; i <= n; i++) {
-    const label = (i === step && s.message && !s.ok) ? s.message.replace(/^FAILED:\\s*/, "") : (labels[i - 1] || ("step " + i));
+    const label = labels[i - 1] || ("step " + i);
     let mark, cls;
     if (s.error && i === step) { mark = "✗"; cls = "bad"; }
     else if (i < step || (s.ok && i <= total)) { mark = "✓"; cls = "ok"; }
@@ -1442,30 +1462,50 @@ function renderOpsProgress(s) {
     rows.push("<li><span class=\\"" + cls + "\\">" + mark + "</span> <span class=\\"" + labelCls + "\\">" + esc(label) + "</span></li>");
   }
   document.getElementById("ops-progress-steps").innerHTML = rows.join("");
+  // Single message line. Suppress it whenever it would merely repeat the current step's label —
+  // the deploy helper emits the phase name as the step message, so echoing it here was pure noise.
   const msgEl = document.getElementById("ops-progress-msg");
-  if (s.error) msgEl.innerHTML = '<span class="bad">' + esc(s.message || ("FAILED: " + s.error)) + " — see " + esc(s.log || "the ops log") + "</span>";
-  else if (s.ok) msgEl.innerHTML = '<span class="ok">' + esc(s.message || "done") + "</span>";
-  else if (s.running) msgEl.innerHTML = '<span class="sub">' + esc(s.message || "working…") + "</span>";
-  else msgEl.textContent = "";
+  const curLabel = (labels[step - 1] || "").trim();
+  const cleanMsg = (s.message || "").replace(/^FAILED:\\s*/, "").trim();
+  if (s.error) {
+    msgEl.innerHTML = '<span class="bad">' + esc(s.message || ("FAILED: " + s.error)) + " — see " + esc(s.log || "the ops log") + "</span>";
+  } else if (s.ok) {
+    msgEl.innerHTML = (cleanMsg && cleanMsg !== curLabel) ? '<span class="ok">' + esc(cleanMsg) + "</span>" : "";
+  } else if (s.running) {
+    msgEl.innerHTML = (cleanMsg && cleanMsg !== curLabel) ? '<span class="sub">' + esc(cleanMsg) + "</span>" : "";
+  } else {
+    msgEl.textContent = "";
+  }
 }
 async function pollOpsProgress() {
   try {
     const r = await fetch("/api/admin/ops-status", { credentials: "same-origin", cache: "no-store" });
     if (!r.ok) return;
     const d = await r.json();
+    const acts = d.actions || {};
+    const inPanel = a => OPS_PANEL_ACTIONS.indexOf(a) !== -1;
     const watching = opsGetWatching();
-    // Prefer the running action, else the one we were told to watch, else the most-recently stamped.
-    const action = d.running || (watching && d.actions && d.actions[watching] ? watching : d.latest);
-    const s = action && d.actions ? d.actions[action] : null;
-    renderOpsProgress(s);
-    if (s) {
-      if (s.running) opsMarkWatching(action);       // keep tracking this one across the reload
-      else if (watching === action && (s.ok || s.error)) {
-        // The action we were watching has finished — show its terminal state once, then stop
-        // re-asserting it so a later page-load doesn't resurrect a stale completed banner.
-        opsClearWatching();
-      }
+    // Decide what (if anything) is live RIGHT NOW, in priority order:
+    //   1. a running panel action,
+    //   2. the action we were told to watch (so a deliberate restart resumes its timeline),
+    //   3. the freshest terminal panel action — but ONLY while still fresh.
+    // Anything else (an old completed/failed run, or a tls/public-deployment entry) is NOT "now",
+    // so the panel hides rather than resurrecting a stale banner.
+    let action = (d.running && inPanel(d.running)) ? d.running : null;
+    let fromWatch = false;
+    if (!action && watching && inPanel(watching) && acts[watching]) { action = watching; fromWatch = true; }
+    if (!action) {
+      let best = null, bestTs = "";
+      for (const a of OPS_PANEL_ACTIONS) { const st = acts[a]; if (st && st.ts && st.ts > bestTs) { bestTs = st.ts; best = a; } }
+      if (best && opsFresh(acts[best])) action = best;
     }
+    const s = action ? acts[action] : null;
+    // A terminal state surfaced only via the freshness fallback must actually be fresh; a watched or
+    // running action always shows (the watched terminal covers the post-restart reload, then clears).
+    if (!s || (!s.running && !fromWatch && !opsFresh(s))) { renderOpsProgress(null); return; }
+    renderOpsProgress(s);
+    if (s.running) opsMarkWatching(action);          // keep tracking this one across the reload
+    else if (fromWatch && (s.ok || s.error)) opsClearWatching();  // shown once post-restart; stop re-asserting
   } catch (e) { /* transient (likely the restart) — the next poll retries */ }
 }
 // Mark which action to track the moment its button is clicked, so the timeline resumes after the
