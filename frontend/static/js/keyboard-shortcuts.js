@@ -141,7 +141,7 @@ export function initKeyboardShortcuts(modules) {
     if (openId) {
       _lastWindow = openId;
       const m = document.getElementById(openId);
-      const closeBtn = m && m.querySelector('.close-btn, .modal-close, [data-close]');
+      const closeBtn = m && m.querySelector('.close-btn, .modal-close, [data-close], .ow-close');
       if (closeBtn) closeBtn.click();
       else if (openId === 'settings-modal' && settingsModule) settingsModule.close();
       else { const t = el(_WINDOW_TRIGGERS[openId]); if (t) t.click(); }

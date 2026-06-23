@@ -1289,6 +1289,21 @@ if (!window._odyEscExpandGuard) {
       e.stopImmediatePropagation(); e.preventDefault();
       return;
     }
+    // #553: a visible Settings kit modal (.ow-window) dismisses on Escape with DIALOG semantics —
+    // from any focused field, like the old bespoke handler. This runs BEFORE the input guard below
+    // (which would otherwise swallow ESC whenever a settings input/select has focus). Inner
+    // integration/email edit form closes first; otherwise the window closes via its kit ×.
+    const _settingsWin = document.getElementById('settings-modal');
+    if (_settingsWin && _settingsWin.classList.contains('ow-window') && _isVisible(_settingsWin)) {
+      const innerForm = _settingsWin.querySelector('#unified-intg-form, #set-email-accounts-form');
+      if (innerForm && innerForm.style.display !== 'none' && innerForm.children.length > 0) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        innerForm.style.display = 'none'; innerForm.innerHTML = '';
+        return;
+      }
+      const owClose = _settingsWin.querySelector('.ow-close');
+      if (owClose) { e.preventDefault(); e.stopImmediatePropagation(); try { owClose.click(); } catch {} return; }
+    }
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     const expanded = document.querySelector('.doclib-card-expanded');

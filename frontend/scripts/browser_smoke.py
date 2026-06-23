@@ -453,6 +453,17 @@ def main() -> int:
                   f"sidebar Theme entry is visible under the game build ({sidebar_theme})")
             check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
                   f"other dropped Tools items stay hidden ({sidebar_theme})")
+            # Close the theme picker before the finale block — it's a legacy full-screen
+            # .modal (z~1001) and, left open, its scrim sits ABOVE the non-modal finale
+            # panel (z~501, correctly below a modal) and intercepts the trusted minimize
+            # click below. Test isolation only; closing it is the right teardown.
+            page.evaluate("""() => {
+              const t = document.getElementById('theme-modal');
+              if (!t || t.classList.contains('hidden')) return;
+              const c = t.querySelector('.close-btn, .modal-close, [data-close]');
+              if (c) c.click(); else t.classList.add('hidden');
+            }""")
+            page.wait_for_timeout(200)
 
             # T20: a game panel's minimize-to-dock BEHAVIOR — carried by the FINALE now
             # (the remaining kit game panel; H5 folded social into the sidebar). Mount the
@@ -529,7 +540,7 @@ def main() -> int:
             page.evaluate("""['theme-modal','settings-modal'].forEach(id => {
               const m = document.getElementById(id);
               if (m && !m.classList.contains('hidden')) {
-                const b = m.querySelector('.close-btn, .modal-close-btn, [data-action="close"]');
+                const b = m.querySelector('.ow-close, .close-btn, .modal-close-btn, [data-action="close"]');
                 if (b) b.click(); else m.classList.add('hidden');
               }
             })""")
@@ -843,13 +854,14 @@ def main() -> int:
               const vis = (m) => m && !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
               if (!vis(t) || !vis(s)) return { error: 'both must be open', theme: vis(t), settings: vis(s) };
               const r1 = t.querySelector('.modal-content').getBoundingClientRect();
-              const r2 = s.querySelector('.modal-content').getBoundingClientRect();
+              const r2 = s.getBoundingClientRect();  // #553: settings is the .ow-window itself
               const L = Math.max(r1.left, r2.left), R = Math.min(r1.right, r2.right);
               const T = Math.max(r1.top, r2.top), B = Math.min(r1.bottom, r2.bottom);
               if (R <= L || B <= T) return { error: 'contents do not overlap' };
               const el = document.elementFromPoint((L + R) / 2, (T + B) / 2);
-              const owner = el ? (el.closest('.modal') || {}).id || null : null;
-              const importants = [...document.querySelectorAll('.modal')]
+              // #553: settings is a kit .ow-window, theme a legacy .modal — one authority spans both.
+              const owner = el ? (el.closest('.modal, .ow-window') || {}).id || null : null;
+              const importants = [...document.querySelectorAll('.modal, .ow-window')]
                 .filter(m => m.style.getPropertyPriority('z-index') === 'important').map(m => m.id);
               return { owner, importants,
                        themeZ: parseInt(getComputedStyle(t).zIndex, 10) || 0,
@@ -862,11 +874,11 @@ def main() -> int:
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             g14esc = page.evaluate("""() => ({
-              settingsClosed: document.getElementById('settings-modal').classList.contains('hidden'),
+              settingsClosed: !document.getElementById('settings-modal'),
               themeOpen: !document.getElementById('theme-modal').classList.contains('hidden'),
             })""")
             check(g14esc.get("settingsClosed") is True and g14esc.get("themeOpen") is True,
-                  f"G14: Escape closes the top window (settings) FIRST ({g14esc})")
+                  f"G14: Escape closes the top window (settings kit modal) FIRST ({g14esc})")
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             check(page.evaluate("document.getElementById('theme-modal').classList.contains('hidden')") is True,
@@ -877,62 +889,39 @@ def main() -> int:
             page.focus("#user-bar-settings")
             page.click("#user-bar-settings")
             page.wait_for_timeout(400)
-            check(page.evaluate("__settings_open__ = !document.getElementById('settings-modal').classList.contains('hidden')") is True,
+            check(page.evaluate("!!document.getElementById('settings-modal')") is True,
                   "F8: settings opens from the focused gear")
             page.keyboard.press("Escape")
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(350)
             f8 = page.evaluate("""() => ({
-              closed: document.getElementById('settings-modal').classList.contains('hidden'),
+              closed: !document.getElementById('settings-modal'),
               focusBack: document.activeElement && document.activeElement.id === 'user-bar-settings',
             })""")
             check(f8.get("closed") is True, f"F8: Escape closes settings ({f8})")
             check(f8.get("focusBack") is True, f"F8: focus returns to the gear ({f8})")
 
-            # G2 (Lane G): launcher-agnostic restore — a minimized window must
-            # come back through the REAL restore path no matter which launcher
-            # the user hits. The gear (#user-bar-settings) is NOT the sidebar
-            # tool button modalManager's interceptor knew about, so this is the
-            # exact reported bug: minimize settings, click the gear, dead air.
+            # #553: Settings is now a MODAL dialog on the OrwellWindow kit — intentionally NOT
+            # minimizable (a scrim'd modal tucked to a dock chip is nonsense; Escape/× dismiss it).
+            # The launcher-agnostic minimize→restore contract is now exercised on the theme-modal
+            # (the legacy .modal family) below. Assert settings opens from the gear and carries no
+            # minimize affordance, then close it via its kit ×.
             page.click("#user-bar-settings")
             page.wait_for_timeout(300)
-            check(page.evaluate("!document.getElementById('settings-modal').classList.contains('hidden')") is True,
+            check(page.evaluate("!!document.getElementById('settings-modal')") is True,
                   "G2: settings opens from the gear")
-            # The injected `_` (trusted click) — modalManager injects
-            # .modal-minimize-btn, or wires the legacy .minimize-btn when
-            # app.js's dock got there first; either way it minimizes via
-            # modalManager.
-            page.click("#settings-modal .modal-minimize-btn, #settings-modal .minimize-btn")
-            page.wait_for_timeout(300)
-            g2min = page.evaluate("""() => {
-              const m = document.getElementById('settings-modal');
-              return { minimized: m.classList.contains('modal-minimized'),
-                       hidden: getComputedStyle(m).display === 'none',
-                       chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="settings-modal"]') };
-            }""")
-            check(g2min.get("minimized") is True and g2min.get("hidden") is True and g2min.get("chip") is True,
-                  f"G2: the `_` button minimizes settings to a dock chip ({g2min})")
-            page.click("#user-bar-settings")  # the launcher itself — trusted click
-            page.wait_for_timeout(300)
-            g2 = page.evaluate("""() => {
-              const m = document.getElementById('settings-modal');
-              return { visible: !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none',
-                       unminimized: !m.classList.contains('modal-minimized'),
-                       chipGone: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="settings-modal"]') };
-            }""")
-            check(g2.get("visible") is True and g2.get("unminimized") is True and g2.get("chipGone") is True,
-                  f"G2: clicking the gear RESTORES the minimized settings window ({g2})")
-            # Interactive: a trusted click INSIDE the restored window lands (no
-            # .modal-minimized pointer-events:none residue) — the Account tab
-            # takes the click and activates.
+            check(page.evaluate("!document.querySelector('#settings-modal .ow-min, #settings-modal .modal-minimize-btn, #settings-modal .minimize-btn')") is True,
+                  "G2/#553: the settings modal dialog has no minimize-to-dock button")
+            # Interactive: a trusted click INSIDE the window lands — the Account tab activates.
             page.click("#settings-modal [data-settings-tab='account']")
             page.wait_for_timeout(150)
             check(page.evaluate("document.querySelector(\"#settings-modal [data-settings-tab='account']\").classList.contains('active')") is True,
-                  "G2: the restored settings window is interactive (trusted click inside lands)")
-            # Same contract for EVERY window, launcher-agnostic: theme-modal,
-            # minimized for real, healed by an arbitrary opener that only
-            # removes `.hidden` (exactly what tool-theme-btn / the Settings →
-            # Appearance button do) — the observer must run the real restore.
-            page.evaluate("document.getElementById('settings-modal').querySelector('.close-btn').click()")
+                  "G2: the settings window is interactive (trusted click inside lands)")
+            page.evaluate("(document.querySelector('#settings-modal .ow-close')||{click(){}}).click()")
+            page.wait_for_timeout(250)
+            # The launcher-agnostic minimize→restore contract for the legacy .modal family
+            # (theme-modal): minimized for real, healed by an arbitrary opener that only removes
+            # `.hidden` (exactly what tool-theme-btn / Settings → Appearance do) — the observer
+            # must run the real restore.
             page.evaluate("document.getElementById('theme-modal').classList.remove('hidden')")
             page.wait_for_timeout(250)
             page.click("#theme-modal .modal-minimize-btn, #theme-modal .minimize-btn")
@@ -1867,7 +1856,7 @@ def main() -> int:
             # COMPUTED, not hand-listed: force one tab's cards admin-only and
             # its launcher hides and cannot be landed on.
             page.evaluate("window.__g13WasAdmin = !!window._isAdmin; window._isAdmin = false;")
-            page.evaluate("document.querySelector('#settings-modal .close-btn').click()")
+            page.evaluate("(document.querySelector('#settings-modal .ow-close')||{click(){}}).click()")
             page.wait_for_timeout(300)
             page.click("#user-bar-settings")
             page.wait_for_timeout(250)
@@ -1888,7 +1877,7 @@ def main() -> int:
             page.evaluate("""() => {
               document.querySelectorAll('[data-settings-panel="shortcuts"] .admin-card')
                 .forEach(c => c.classList.add('admin-only', 'g13-probe'));
-              document.querySelector('#settings-modal .close-btn').click();
+              (document.querySelector('#settings-modal .ow-close')||{click(){}}).click();
             }""")
             page.wait_for_timeout(300)
             page.click("#user-bar-settings")
@@ -1908,7 +1897,7 @@ def main() -> int:
               });
               window._isAdmin = window.__g13WasAdmin;
               const m = document.getElementById('settings-modal');
-              const b = m && m.querySelector('.close-btn');
+              const b = m && m.querySelector('.ow-close');
               if (b) b.click();
             }""")
             page.wait_for_timeout(300)
