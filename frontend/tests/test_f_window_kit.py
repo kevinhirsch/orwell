@@ -232,11 +232,34 @@ def test_sourcepin_a7_reduced_motion_strips_the_flyout():
     # open/minimize/close under reduced motion (the rule names all three + none).
     marker = "@media (prefers-reduced-motion: reduce) {"
     assert marker in js
-    block = js[js.index(marker): js.index(marker) + 200]
+    block = js[js.index(marker): js.index(marker) + 220]
     assert ".ow-anim-open" in block and ".ow-anim-minimize" in block and ".ow-anim-close" in block
+    # the restore fly-IN is stripped under reduced motion too (it joins the same rule)
+    assert ".ow-anim-restore" in block
     assert "animation: none" in block
     # and the JS short-circuits the fly when REDUCED() (no class, straight to done)
     assert "if (REDUCED()) { done(); return; }" in js
+
+
+def test_sourcepin_a7_restore_flyin_mirrors_the_minimize_flyout():
+    """restore↔minimize are mirror-image animations (just as open↔close are).
+
+    The window flies OUT to the dock on minimize and flies back IN from the dock
+    on restore, via a dedicated ow-restore keyframe that reverses ow-minimize
+    along the SAME fly-vector contract (--ow-fly-x/-y). reduced-motion strips it.
+    """
+    js = _read("static", "js", "orwellWindow.js")
+    # a NAMED restore keyframe that flies IN from the dock (translated + scaled-down → identity)
+    assert "@keyframes ow-restore" in js
+    assert ".ow-anim-restore" in js
+    # it reuses the SAME fly-vector contract as the minimize fly-out
+    assert "translate(var(--ow-fly-x, 0), var(--ow-fly-y, 0)) scale(.12)" in js
+    # the restore path computes the dock delta + applies the class — guarded by REDUCED()
+    restore = js[js.index("_afterDockRestore() {"):js.index("_afterDockRestore() {") + 2400]
+    assert "flyTargetRect()" in restore                 # fly FROM the dock chip
+    assert "setProperty('--ow-fly-x'" in restore
+    assert "classList.add('ow-anim-restore')" in restore
+    assert "if (!REDUCED())" in restore                 # reduced-motion skips the fly-in
 
 
 # ── 0054 Phase 2 — DOCKED kit mode ─────────────────────────────────────────
