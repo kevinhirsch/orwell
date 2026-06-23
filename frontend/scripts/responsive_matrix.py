@@ -9,7 +9,7 @@ game) and drives the UI across the viewport matrix with MEASURABLE assertions:
               (the D2 collision rule, executable)
   crowding  — no visible text below the --fs-2xs floor (~11px); no nowrap
               line-box overflow
-  touch     — ≥36px interactive boxes at coarse-pointer viewports
+  touch     — ≥44px interactive boxes at coarse-pointer viewports (WCAG 2.5.5)
   200% pass — doubling the root font must not break the page
 
 KNOWN failures carry a finding ID in XFAIL below and report as xfail (exit 0).
@@ -310,14 +310,28 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
         report("pass", f"{vp_name} crowding")
 
     # --- touch: coarse-pointer floors ----------------------------------------
+    # RESP-4 (#625): floor is the PROJECT 44px (WCAG 2.5.5), not the old 36px that let 36–43px
+    # controls ship green. Selectors widened past `button`/`select` to the kit + composer + game
+    # chrome that the narrow set missed (anchors-as-buttons, the gadget-rail/cast/window controls,
+    # the composer icon buttons, the scroll-to-latest fab). The gadget-rail drawer is opened first
+    # (fail-soft) so its panel controls are actually IN VIEW for the sweep instead of stowed.
     if coarse:
+        try:
+            page.evaluate("(document.querySelector('.gadget-rail-open,#gadget-rail-open')||{click(){}}).click()")
+            page.wait_for_timeout(350)
+        except Exception:
+            pass
         small = page.evaluate("""
-          [...document.querySelectorAll('button, [role=button], select, .settings-nav-item')]
+          [...document.querySelectorAll(
+             'button, [role=button], a[role=button], a.btn, select, .settings-nav-item,'
+             + '.input-icon-btn, .export-dl-btn, .scroll-nav-btn, #orwell-scroll-bottom,'
+             + '.gadget-rail-open, .gadget-rail-head button, .ow-controls button, .ow-dismiss,'
+             + '.minimized-dock-x, .oc-pin, .oc-backfill, .opt-dismiss')]
             .filter(e => e.offsetParent !== null && !e.classList.contains('tap-exempt'))
             .map(e => { const r = e.getBoundingClientRect();
                         return { t: (e.innerText || e.ariaLabel || e.id || '?').slice(0, 20), w: r.width, h: r.height }; })
-            .filter(b => b.w > 0 && b.h > 0 && (b.w < 36 || b.h < 36))
-            .slice(0, 5)
+            .filter(b => b.w > 0 && b.h > 0 && (b.w < 44 || b.h < 44))
+            .slice(0, 8)
         """)
         for s in small:
             report("fail", f"{vp_name} touch: {s['t']!r} {s['w']:.0f}x{s['h']:.0f}")
