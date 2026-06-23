@@ -143,6 +143,10 @@
       }
       #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
       #${CARD_ID} .odec-note { opacity: .80; font-size: .85rem; flex: 1; }
+      /* J4-20: the disabled-Confirm hint — quiet, italicized, sits beside the button; `hidden`
+         toggled in sync() so it shows only while Confirm can't be pressed. */
+      #${CARD_ID} .odec-hint { opacity: .7; font-size: .78rem; font-style: italic; flex-basis: 100%; order: 99; margin-top: -.2rem; }
+      #${CARD_ID} .odec-hint[hidden] { display: none; }
       #${CARD_ID} .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
       #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }
       /* Narrow: the note must not squeeze into a thin column beside the button —
@@ -181,7 +185,18 @@
     return null;
   }
 
-  function titleFor(kind) {
+  function titleFor(kind, binding) {
+    // J4-17: a binding first comp-round and a non-binding flavor round previously shared one
+    // title — only the button label/note differed, so the two looked identical at a glance. The
+    // binding round is the one that sets the approach the single outcome roll honors; a later
+    // round is color over an already-decided result. Title them distinctly so the stakes read
+    // from the heading, not just the fine print. (Copy only — the binding flag comes from the
+    // engine's PendingDecisionView; this asserts no board state.)
+    if (kind === "comp-round") {
+      return binding === false
+        ? "Competition round — keep pushing (no stakes)"
+        : "Competition round — set your approach";
+    }
     return {
       "nominations": "Nomination ceremony — your nominations",
       "veto-decision": "Power of Veto — your call",
@@ -205,6 +220,17 @@
     if (kind === "self-evict") return "Confirm — leave the game (final)";
     if (kind === "comp-round") return binding === false ? "Push through this round" : "Lock in your approach";
     return "Confirm — this is binding";
+  }
+
+  // J4-20 (WCAG 3.3.2): the instruction shown — and announced via aria-describedby — while Confirm
+  // is disabled, so the player knows what is still needed to enable it. Kind-aware so the hint names
+  // the actual missing input (a tone, two nominees, a single pick). Copy only — never a board claim.
+  function disabledHintFor(kind, pick, multi) {
+    if (kind === "nominations") return "Select 2 houseguests to enable Confirm.";
+    if (kind === "goodbye-message") return "Pick a tone to enable Confirm — your written message is optional.";
+    if (kind === "veto-decision") return "Choose to use the veto (and who to save) or not, to enable Confirm.";
+    if (multi) return `Select ${pick} to enable Confirm.`;
+    return "Make your selection above to enable Confirm.";
   }
 
   // F-NEW-5: a kind-specific (never auto-sent) prefill cue so the dramatic context
@@ -243,7 +269,7 @@
     // J4-02: role="form" makes this a named form landmark (AT users can reach it
     // via landmark navigation and know a binding decision is required).
     card.setAttribute("role", "form");
-    card.setAttribute("aria-label", titleFor(kind));
+    card.setAttribute("aria-label", titleFor(kind, pending.binding));
     // J4-12: link the card to the instruction note so SR users hear the decision
     // context + the "your selection only" / irreversibility instruction before
     // they Tab into options.
@@ -258,12 +284,16 @@
     // the same weight signal sighted users get from the tint.
     const risk = isHighStakes(kind);
     if (risk) card.classList.add("odec-risk");
+    // J4-04: expose the binding state as a data attribute so a non-binding staged comp-round
+    // (flavor over an already-decided result) is inspectable/testable — not only distinguishable
+    // via the confirm label. `pending.binding === false` ⇒ "false"; everything else binds ⇒ "true".
+    card.dataset.binding = String(pending.binding !== false);
 
     const head = document.createElement("div");
     head.className = "odec-head";
     // J5-20: append the risk badge after the title — "⚠ Irreversible" carries the stakes in
     // text + an icon, so the signal survives without color (the SR companion to the red tint).
-    head.innerHTML = `<span class="odec-title">${esc(titleFor(kind))}</span>`
+    head.innerHTML = `<span class="odec-title">${esc(titleFor(kind, pending.binding))}</span>`
       + (risk ? `<span class="odec-risk-badge" role="note">⚠ Irreversible — binding</span>` : "");
     // J5-21: the dismiss × is created here (so the keydown/Escape handler can reference it) but is
     // NOT appended to the head — it is appended to the card LAST (after the row) so it falls last in
@@ -316,13 +346,25 @@
     confirm.className = "odec-confirm"; confirm.type = "button";
     // 0006 staged-rounds: only the FIRST comp-round BINDS (the approach the single outcome roll honors);
     // later rounds are non-binding FLAVOR over an already-decided result (audit 2026-06-20) — phrase the
-    // confirm so a flavor round reads as "push through", never a fresh stakes commitment.
-    confirm.textContent = kind === "comp-round"
-      ? (pending.binding === false ? "Push through this round" : "Lock in your approach")
-      : "Confirm — this is binding";
+    // confirm so a flavor round reads as "push through", never a fresh stakes commitment. Single source
+    // of truth: confirmLabelFor (also reused on the error-recovery relabel).
+    confirm.textContent = confirmLabelFor(kind, pending.binding);
     confirm.disabled = true;
 
-    const sync = () => { confirm.disabled = buildPayload(kind, sel, textarea && textarea.value.trim(), useVeto) == null; };
+    // J4-20 (WCAG 3.3.2 — instructions on a disabled control): a disabled Confirm previously gave
+    // no hint about WHY it was disabled or WHAT to do. Add a hint that says what's still needed; it
+    // is announced to AT via the confirm button's aria-describedby and shown visibly only while the
+    // button is disabled (hidden once the move is legal, so it never clutters a ready card).
+    const hint = document.createElement("span");
+    hint.className = "odec-hint";
+    hint.id = CARD_ID + "-hint";
+    hint.textContent = disabledHintFor(kind, pick, multi);
+
+    const sync = () => {
+      confirm.disabled = buildPayload(kind, sel, textarea && textarea.value.trim(), useVeto) == null;
+      // J4-20: surface the hint only while Confirm can't be pressed.
+      hint.hidden = !confirm.disabled;
+    };
 
     const addChip = (label, value) => {
       const b = document.createElement("button");
@@ -445,7 +487,11 @@
       // the eviction vote. "never read from prose" is OOC engine-language that breaks the
       // fiction — reword to a player-facing line that still says the choice is the player's
       // (the button selection is what counts, not anything typed in chat).
-      note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your choice here is what counts — make it with the buttons.";
+      // J3-22: first-timer "binding" context — the Confirm button says "this is binding" but never
+      // says what binding MEANS. Spell it out for the genuinely irreversible kinds (the high-stakes
+      // set wears the ⚠ badge): once you confirm, it's locked and plays out — you can't take it back.
+      const base = multi ? `Select ${pick} — only a legal move counts.` : "Your choice here is what counts — make it with the buttons.";
+      note.textContent = risk ? base + " Once you confirm, it's locked in and plays out — there's no taking it back." : base;
     }
     row.appendChild(note);
     // 0061: a self-eviction confirmation gets an explicit CANCEL — declining must clear the engine
@@ -466,6 +512,10 @@
       row.appendChild(cancel);
     }
     row.appendChild(confirm);
+    // J4-20: the disabled-state hint rides in the row beside Confirm; sync() toggles its `hidden`.
+    // Cards that start with Confirm already enabled (free-text statements/questions, the non-binding
+    // flavor round, self-evict) never need it, so suppress it when Confirm is not initially disabled.
+    if (confirm.disabled) { hint.hidden = false; confirm.setAttribute("aria-describedby", hint.id); row.appendChild(hint); }
     card.appendChild(row);
 
     // J4-09: pre-declare the error region before it might be populated — dynamic
