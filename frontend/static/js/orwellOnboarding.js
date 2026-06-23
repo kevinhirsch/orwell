@@ -101,9 +101,30 @@
           border: 1px solid var(--border, #355a66);
         }
         #orwell-onboarding .ob-btn:hover { border-color: var(--fg, #9cdef2); }
+        /* J1-31: the welcome/setup/holding CTAs are the journey's FIRST interactive elements and
+           had no visible keyboard-focus ring (WCAG 2.4.7). Give every overlay button a clear
+           focus-visible ring keyed to --brand-color (matches the .list-item convention). */
+        #orwell-onboarding .ob-btn:focus-visible {
+          outline: none;
+          border-color: var(--brand-color, var(--red, #e06c75));
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-color, var(--red, #e06c75)) 70%, transparent);
+        }
         #orwell-onboarding .ob-btn-primary {
           background: var(--brand-color, var(--red, #e06c75)); color: var(--on-accent, #fff);
           border-color: transparent; font-weight: 600;
+        }
+        /* A double ring (bg gap + brand) so the primary CTA's focus is visible against its own fill. */
+        #orwell-onboarding .ob-btn-primary:focus-visible {
+          box-shadow: 0 0 0 2px var(--bg, #282c34), 0 0 0 4px var(--brand-color, var(--red, #e06c75));
+        }
+        /* J1-10: on a desktop viewport the 420px card filled ~10% of the field and read as
+           under-confident. Scale the card + title up a notch on wide screens so the first
+           impression carries more weight (no new imagery — that's a design call; this is pure
+           type/space). Mobile/narrow keeps the compact card unchanged. */
+        @media (min-width: 1024px) {
+          #orwell-onboarding .ob-card { width: 540px; padding: 2.2rem 2.2rem 1.9rem; }
+          #orwell-onboarding h1 { font-size: 1.85rem; }
+          #orwell-onboarding .ob-hold .ob-hold-sub { font-size: .9rem; }
         }
       </style>
       <div class="ob-card"></div>`;
