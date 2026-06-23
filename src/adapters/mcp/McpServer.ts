@@ -135,6 +135,10 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       // authored field is optional (the engine keeps the prior/seeded value for any omitted field) and
       // domain-validated (non-player-mirroring) inside the adapter, not here.
       if (!isStr(args["houseguestId"])) refuse("houseguestId", "a houseguest id (string)");
+      // The optional LLM-authored replacement display name — a string when present; the adapter
+      // domain-validates it (reasonable two-token name, non-colliding) and falls back to the corpus
+      // name if it doesn't pass, so a malformed name never fails the whole call.
+      if (args["name"] !== undefined && typeof args["name"] !== "string") refuse("name", "a string when present");
       return;
     case "preSeedCast":
       // 0065: optional explicit seed (tests/replays); default is real entropy minted in the adapter.

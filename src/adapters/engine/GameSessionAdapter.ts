@@ -57,6 +57,28 @@ function oneLine(s: string): string {
   return (s.split("\n")[0] ?? "").trim().slice(0, 120);
 }
 
+/**
+ * Is `s` a reasonable, real-sounding two-token human name? The structural gate on an LLM-authored
+ * replacement display name (`recordCastProfile.name`): exactly two whitespace-separated tokens, each a
+ * plausible capitalized name part (optional hyphen/apostrophe compound, e.g. "O'Neil"), 2–12 chars, with at least one
+ * vowel and no run of 4+ consecutive consonants. Rejects fantasy/gibberish ("Nerighrengeinen
+ * Herneingenenin"); accepts "Marcus Webb", "Priya Anand", "Mary-Kate O'Neil". Vault-free, pure.
+ */
+export function isReasonableName(s: string): boolean {
+  const tokens = s.trim().split(/\s+/);
+  if (tokens.length !== 2) return false;
+  const tokenRe = /^[A-Z][a-z]*([-'][A-Z]?[a-z]+)?$/;
+  const vowelRe = /[aeiouy]/i;
+  const consonantRunRe = /[bcdfghjklmnpqrstvwxz]{4,}/i;
+  for (const token of tokens) {
+    if (token.length < 2 || token.length > 12) return false;
+    if (!tokenRe.test(token)) return false;
+    if (!vowelRe.test(token)) return false;
+    if (consonantRunRe.test(token)) return false;
+  }
+  return true;
+}
+
 /** Order-sensitive id-list equality (0065 Part E ceremony-diff): same length + same ids in order. */
 function sameIds(a: readonly EntityId[], b: readonly EntityId[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i]);
@@ -947,9 +969,23 @@ export class GameSessionAdapter implements GameSession {
     }
 
     // Field NAMES only — never the values (a hidden value must never ride out on the result, §8).
-    const publicFields = (["biography", "physicalCharacteristics"] as const).filter((f) => req[f] !== undefined);
+    const publicFields = (["biography", "physicalCharacteristics"] as const).filter((f) => req[f] !== undefined) as string[];
     const hiddenFields = (["secrets", "trueGoals", "weakness", "dayOnePerception"] as const)
       .filter((f) => req[f] !== undefined);
+
+    // (0) PUBLIC NAME — the LLM-authored, real-sounding replacement display name. Accept it ONLY if it is a
+    // reasonable two-token human name AND it does not collide (case-insensitive) with any OTHER current
+    // houseguest or the player; otherwise the seeded corpus name (the deterministic floor) simply stands.
+    // A rejected name NEVER fails the whole call — the rest of the authored profile still applies.
+    if (req.name !== undefined) {
+      const name = req.name.trim();
+      const collides = name.toLowerCase() === ctx.playerName.toLowerCase()
+        || ctx.npcs.some((n) => n.id !== target.id && (n.name ?? "").trim().toLowerCase() === name.toLowerCase());
+      if (isReasonableName(name) && !collides) {
+        target.name = name;
+        publicFields.push("name");
+      }
+    }
 
     // (1) PUBLIC fold onto the byte-stable Character — these cross to the player.
     if (req.biography !== undefined) target.character.biography = req.biography;

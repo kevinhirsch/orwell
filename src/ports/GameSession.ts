@@ -973,6 +973,8 @@ export interface RecordCastProfileReq {
   /** Which houseguest this authored profile is for. */
   houseguestId: EntityId;
   // --- PUBLIC (crosses to the player; folded onto the byte-stable Character) ---
+  /** An LLM-generated, real-sounding replacement display name (public). Absent ⇒ the engine's seeded corpus name stands (the deterministic floor). Rejected if not a reasonable two-token human name. */
+  name?: string;
   /** A real multi-sentence backstory (the presentable parts). */
   biography?: string;
   /** The structured physical-characteristics facet (text↔image single source of truth). */
