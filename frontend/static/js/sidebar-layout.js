@@ -564,7 +564,7 @@ function _initChatSwipeToOpenSidebar() {
   // Areas where a horizontal drag means something else (their own scroll/drag).
   const EXCLUDE = [
     '#sidebar', '#icon-rail', '.modal', '.input-bar', '#message',
-    '#minimized-dock', '.minimized-dock-chip', '#dock-trash-zone',
+    '#minimized-dock', '.minimized-dock-chip',
     'pre', 'table', '.agent-tool-output', '.agent-thread-cmd',
     'input', 'textarea', 'select',
   ].join(', ');
@@ -577,7 +577,6 @@ function _initChatSwipeToOpenSidebar() {
     reset();
     if (!isNarrow()) return;
     if (!e.touches || e.touches.length !== 1) return;
-    if (window._chipDragging) return;
     const sb = document.getElementById('sidebar');
     if (sb && !sb.classList.contains('hidden')) return; // already open
     // Only in the chat / empty-chat view. Not when a document or PDF is open
@@ -602,7 +601,6 @@ function _initChatSwipeToOpenSidebar() {
 
   document.addEventListener('touchmove', (e) => {
     if (!track) return;
-    if (window._chipDragging) { track = false; return; }
     if (!e.touches || !e.touches.length) return;
     const dx = e.touches[0].clientX - sx;
     const dy = e.touches[0].clientY - sy;
