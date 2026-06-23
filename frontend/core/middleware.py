@@ -103,7 +103,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+        # SEC-4: the game build has no mic feature — deny the capability entirely so a same-origin
+        # XSS / compromised inherited module can't `getUserMedia({audio})`. The full inherited
+        # workspace (ORWELL_GAME_BUILD=0) keeps microphone=(self) for its voice features.
+        try:
+            from src.settings import game_build_enabled
+            _mic = "()" if game_build_enabled() else "(self)"
+        except Exception:
+            _mic = "(self)"
+        response.headers["Permissions-Policy"] = f"camera=(), microphone={_mic}, geolocation=()"
 
         is_https = (
             request.url.scheme == "https"

@@ -358,6 +358,7 @@ export function showToast(msg, durationOrOpts) {
       e.stopPropagation();
       e.preventDefault();
       toastEl.classList.remove('show');
+      toastEl.style.pointerEvents = ''; // TX-6: stop intercepting clicks during the exit slide
       onAction();
     });
     stack.appendChild(btn);
@@ -389,6 +390,7 @@ export function showToast(msg, durationOrOpts) {
       clearTimeout(toastEl._hideTimer);
       toastEl.classList.add('exiting');
       toastEl.classList.remove('show');
+      toastEl.style.pointerEvents = ''; // TX-6: stop intercepting top-right clicks during the exit slide
     });
     toastEl.appendChild(closeBtn);
 
