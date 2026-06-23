@@ -34,7 +34,11 @@ DEFAULT_SETTINGS = {
     # ON by default; the settings switch flips it on the LIVE engine (admin setTimeOfDay) with no restart.
     "time_of_day_enabled": True,
     "image_gen_enabled": True,
-    "image_model": "",
+    # OOB default image model. OpenRouter is the default provider and serves Google's Gemini
+    # flash-image models via /chat/completions; gemini-2.5-flash-image is the out-of-box pick.
+    # (Overridable in Settings → Image generation; the "Auto-detect" option resolves to the same
+    # family — see IMAGE_AUTODETECT_CANDIDATES in src/ai_interaction.py.)
+    "image_model": "google/gemini-2.5-flash-image",
     "image_quality": "medium",
     "vision_model": "",
     "vision_enabled": True,
@@ -173,7 +177,11 @@ DEFAULT_SETTINGS = {
     "task_endpoint_id": "",
     "task_model": "",
     "default_endpoint_id": "",
-    "default_model": "",
+    # OOB default chat model. OpenRouter is the default provider (added at first-run setup);
+    # deepseek-v4-pro is the out-of-box selected chat model. `default_endpoint_id` stays empty so
+    # resolution binds it to the first enabled endpoint (the OpenRouter one the setup wizard
+    # creates); the setup wizard also writes the endpoint id explicitly once it exists.
+    "default_model": "deepseek/deepseek-v4-pro",
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat
