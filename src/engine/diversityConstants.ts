@@ -4,9 +4,15 @@
  * and pool that the diversity floor reasons over lives HERE — no magnitude is hard-coded at a call
  * site (the existing grep gate covers it).
  *
- * The owner's LOCKED decisions (2026-06-19), baked in:
- *  1. Floors over the 15 NPCs: BIPOC ≥ 8, LGBTQ+ ≥ 2, gender roughly balanced, ages spread across
- *     bands (on the L18c age ≥ 21 floor). Validated/repaired like L28's CAPS.
+ * The owner's LOCKED decisions (2026-06-19; AMENDED 2026-06-23), baked in:
+ *  1. The cast reflects the REAL UNITED STATES, not a quota cast. Each identity axis (race/ethnicity,
+ *     gender, sexuality, age) is dealt to APPROXIMATE U.S. POPULATION RATES via population WEIGHTS
+ *     (`EthnicityIdentity.weight`, consumed by `diversity.ts`'s weighted deal), with a light FLOOR as a
+ *     small-cast safety net so a 15-person cast still visibly reflects the country. The weighted deal —
+ *     not the floor — sets the EXPECTED mix (~40% BIPOC, the U.S. figure); the floor only catches an
+ *     unlucky tail. (Earlier this was a flat BIPOC ≥ 8 floor over a BIPOC-heavy pool dealt UNIFORMLY,
+ *     which skewed casts to ~70% BIPOC — unrealistic; the weights fix the distribution at its source.)
+ *     Validated/repaired like L28's CAPS.
  *  2. Ethnicity is a FIRST-CLASS identity attribute (heritage / cultural identity — an authentic facet
  *     of a full character, never a stereotype kit). It grounds 0058's `physicalCharacteristics.skinTone`
  *     so the text and the portrait agree.
@@ -29,10 +35,20 @@
 
 // ── §3 — the four engine-guaranteed floors (over the 15 NPCs) ──────────────────────────────────────
 
-/** BIPOC representation floor: at least this many houseguests of color across the 15-cast (owner: ≥ 8). */
-export const MIN_BIPOC = 8;
+/**
+ * BIPOC representation FLOOR — a small-cast safety net, NOT the target. The expected BIPOC share is set
+ * by the population WEIGHTS below (~40%, the U.S. figure ⇒ ~6 of 15); this floor only repairs an unlucky
+ * tail UP so a 15-person cast never deals near-monochrome. Sized BELOW the weighted expectation so the
+ * realism comes from the deal, not from constant up-repair (owner amendment 2026-06-23: realistic-per-US).
+ */
+export const MIN_BIPOC = 4;
 
-/** LGBTQ+ representation floor: at least this many houseguests with a non-straight orientation (owner: ≥ 2). */
+/**
+ * LGBTQ+ representation floor: at least this many houseguests with a non-straight orientation (owner: ≥ 2).
+ * ≈13% of a 15-cast — realistic for a young-skewing reality cast (Gallup: ~7% of U.S. adults overall, but
+ * ~20%+ among the Gen-Z/Millennial ages a BB cast draws from), and the minimum the §4/§5 disclosure
+ * scenarios need (BOTH an out and a private queer houseguest). Kept at 2 under the 2026-06-23 amendment.
+ */
 export const MIN_QUEER = 2;
 
 /**
@@ -86,34 +102,51 @@ export interface EthnicityIdentity {
   bipoc: boolean;
   /** The grounded complexion cue feeding 0058's physicalCharacteristics.skinTone (plain English). */
   skinTone: string;
+  /**
+   * Relative U.S.-population WEIGHT for the seeded deal (owner amendment 2026-06-23). The weighted draw
+   * in `diversity.ts` makes a cast approximate real U.S. demographics rather than the old uniform draw
+   * over a BIPOC-heavy pool (which skewed ~70% BIPOC). The numbers are RELATIVE shares (the deal
+   * normalizes them) chosen so non-BIPOC ≈ 60% and BIPOC ≈ 40% of the mass — the U.S. figure — with the
+   * within-group split tracking real ancestry order (German/Irish lead the white share; Hispanic then
+   * Black lead the BIPOC share). The per-heritage cap (MAX_PER_ETHNICITY) flattens the high-weight
+   * heritages so no single one dominates while the group totals stay realistic.
+   */
+  weight: number;
 }
 
-/** BIPOC heritages — drawn first so the floor is comfortably satisfiable (≥8 of 15). Authentic, not reductive. */
+/**
+ * BIPOC heritages with U.S.-population weights (BIPOC mass ≈ 40 of the ~100 total). Authentic, not
+ * reductive. Hispanic leads, then Black, then Asian, with Native/Middle-Eastern/multiracial sparse —
+ * the real ancestry order. The weighted deal centers a cast near the U.S. ~40% BIPOC figure.
+ */
 export const BIPOC_ETHNICITIES: readonly EthnicityIdentity[] = [
-  { heritage: "Black American", bipoc: true, skinTone: "deep brown skin" },
-  { heritage: "Nigerian American", bipoc: true, skinTone: "rich dark complexion" },
-  { heritage: "Caribbean American", bipoc: true, skinTone: "warm brown skin" },
-  { heritage: "Mexican American", bipoc: true, skinTone: "warm tan complexion" },
-  { heritage: "Puerto Rican", bipoc: true, skinTone: "golden-brown skin" },
-  { heritage: "Dominican American", bipoc: true, skinTone: "medium brown skin" },
-  { heritage: "Chinese American", bipoc: true, skinTone: "light tan complexion" },
-  { heritage: "Filipino American", bipoc: true, skinTone: "warm tan complexion" },
-  { heritage: "Korean American", bipoc: true, skinTone: "fair warm complexion" },
-  { heritage: "South Asian American", bipoc: true, skinTone: "deep amber-toned skin" },
-  { heritage: "Vietnamese American", bipoc: true, skinTone: "light golden complexion" },
-  { heritage: "Native American", bipoc: true, skinTone: "warm reddish-brown skin" },
-  { heritage: "Middle Eastern American", bipoc: true, skinTone: "olive complexion" },
-  { heritage: "multiracial", bipoc: true, skinTone: "warm medium-brown skin" },
+  { heritage: "Black American", bipoc: true, skinTone: "deep brown skin", weight: 9 },
+  { heritage: "Nigerian American", bipoc: true, skinTone: "rich dark complexion", weight: 1.5 },
+  { heritage: "Caribbean American", bipoc: true, skinTone: "warm brown skin", weight: 2 },
+  { heritage: "Mexican American", bipoc: true, skinTone: "warm tan complexion", weight: 13 },
+  { heritage: "Puerto Rican", bipoc: true, skinTone: "golden-brown skin", weight: 3 },
+  { heritage: "Dominican American", bipoc: true, skinTone: "medium brown skin", weight: 2 },
+  { heritage: "Chinese American", bipoc: true, skinTone: "light tan complexion", weight: 1.5 },
+  { heritage: "Filipino American", bipoc: true, skinTone: "warm tan complexion", weight: 1.3 },
+  { heritage: "Korean American", bipoc: true, skinTone: "fair warm complexion", weight: 0.8 },
+  { heritage: "South Asian American", bipoc: true, skinTone: "deep amber-toned skin", weight: 1.3 },
+  { heritage: "Vietnamese American", bipoc: true, skinTone: "light golden complexion", weight: 0.7 },
+  { heritage: "Native American", bipoc: true, skinTone: "warm reddish-brown skin", weight: 1 },
+  { heritage: "Middle Eastern American", bipoc: true, skinTone: "olive complexion", weight: 0.7 },
+  { heritage: "multiracial", bipoc: true, skinTone: "warm medium-brown skin", weight: 2.5 },
 ];
 
-/** Non-BIPOC heritages — fill the remaining slots so the cast still reflects the whole country. */
+/**
+ * Non-BIPOC heritages with U.S.-population weights (white mass ≈ 60 of the ~100 total) — the cast still
+ * reflects the whole country. German/Irish/Italian lead, tracking real U.S. ancestry order.
+ */
 export const NON_BIPOC_ETHNICITIES: readonly EthnicityIdentity[] = [
-  { heritage: "Irish American", bipoc: false, skinTone: "fair freckled skin" },
-  { heritage: "Italian American", bipoc: false, skinTone: "light olive complexion" },
-  { heritage: "Polish American", bipoc: false, skinTone: "pale rosy complexion" },
-  { heritage: "German American", bipoc: false, skinTone: "fair skin" },
-  { heritage: "Greek American", bipoc: false, skinTone: "olive complexion" },
-  { heritage: "Scandinavian American", bipoc: false, skinTone: "pale fair skin" },
+  { heritage: "Irish American", bipoc: false, skinTone: "fair freckled skin", weight: 13 },
+  { heritage: "Italian American", bipoc: false, skinTone: "light olive complexion", weight: 12 },
+  { heritage: "Polish American", bipoc: false, skinTone: "pale rosy complexion", weight: 8 },
+  { heritage: "German American", bipoc: false, skinTone: "fair skin", weight: 16 },
+  { heritage: "Greek American", bipoc: false, skinTone: "olive complexion", weight: 5 },
+  { heritage: "Scandinavian American", bipoc: false, skinTone: "pale fair skin", weight: 6 },
 ];
 
 export const ALL_ETHNICITIES: readonly EthnicityIdentity[] = [...BIPOC_ETHNICITIES, ...NON_BIPOC_ETHNICITIES];
@@ -127,8 +160,12 @@ export const MAX_PER_ETHNICITY = 2;
 export type GenderPresentation = "man" | "woman" | "nonbinary";
 export const GENDER_PRESENTATIONS: readonly GenderPresentation[] = ["man", "woman", "nonbinary"];
 
-/** Nonbinary is sparse + realistic — at most this many across the 15-cast (still counts toward MIN_QUEER). */
-export const MAX_NONBINARY = 2;
+/**
+ * Nonbinary is sparse + realistic — at most this many across the 15-cast (still counts toward MIN_QUEER).
+ * Owner amendment 2026-06-23: capped at 1 (≈7% of a 15-cast already exceeds the U.S. nonbinary rate; the
+ * realistic figure for a young-skewing cast is 0–1).
+ */
+export const MAX_NONBINARY = 1;
 
 // ── §4 — the orientation model (organic, character-driven, Vault-walled) ───────────────────────────
 // Every houseguest has a seeded orientation. `queer` marks which count toward the LGBTQ+ floor. Plain
@@ -162,11 +199,13 @@ export const PUBLICLY_OUT_PROB = 0.6;
 
 /**
  * SATISFIABILITY MARGIN (documented, the L28 precedent's "12 builds / ≤2 each covers 15" note):
- *  • BIPOC: 14 BIPOC heritages × ≤2 each = 28 ≫ MIN_BIPOC(8) and ≫ 15 — comfortably satisfiable, and
- *    the floor (8) leaves 7 non-BIPOC slots, also comfortably filled (6 heritages × ≤2 = 12 ≥ 7).
- *  • Gender: MIN_PER_BINARY_GENDER(6)+6 = 12 ≤ 15, leaving 3 free (incl. ≤MAX_NONBINARY nonbinary).
+ *  • BIPOC: the WEIGHTED deal centers a 15-cast near the U.S. ~40% figure (~6 BIPOC); MIN_BIPOC(4) is a
+ *    tail safety net, not the target. 14 BIPOC heritages × ≤2 each = 28 ≫ 4, and the ~60% white mass is
+ *    comfortably filled (6 heritages × ≤2 = 12 ≥ the ~9 white slots). Floor ≤ deal expectation ⇒ repair
+ *    is rare, so the realism comes from the WEIGHTS, not from constant up-repair.
+ *  • Gender: MIN_PER_BINARY_GENDER(6)+6 = 12 ≤ 15, leaving 3 free (incl. ≤MAX_NONBINARY(1) nonbinary).
  *  • Age: 3 bands × MIN_PER_AGE_BAND(2) = 6 ≤ 15 — the remaining 9 skew young as before.
  *  • LGBTQ+: MIN_QUEER(2) ≤ 15 trivially; 5 queer orientations give variety.
- * The floors and L28's caps are JOINTLY satisfiable on a 15-cast with margin to spare.
+ * The weighted deal, the floors, and L28's caps are JOINTLY satisfiable on a 15-cast with margin to spare.
  */
-export const SATISFIABILITY_NOTE = "floors+caps jointly satisfiable on a 15-cast with margin (see SATISFIABILITY_MARGIN)";
+export const SATISFIABILITY_NOTE = "weighted deal + floors + caps jointly satisfiable on a 15-cast with margin (see SATISFIABILITY_MARGIN)";

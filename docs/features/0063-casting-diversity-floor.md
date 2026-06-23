@@ -183,11 +183,26 @@ showmance or pre-game tie**:
 
 ## 9. Open decisions for the owner
 
-1. **The exact floor numbers.** Recommendation for a 15-NPC cast (the genesis design as the anchor):
-   `MIN_BIPOC ≈ 5–6` (a third-plus of color), gender target **near-even** (e.g. `MIN_PER_GENDER ≈ 7`,
-   an 8/7-style split), age bands **≥ 1–2 each** in 30s and 40s+ (so it isn't all 20s),
-   `MIN_QUEER ≈ 1–2`. **Owner to set the precise numbers** — these are tunable constants and a single
-   ruling fixes them.
+> **OWNER RULING — 2026-06-23 (realistic-per-U.S.; resolves #1, amends the build).** The cast should
+> reflect the **real United States**, not a quota cast. Two changes landed:
+> - **The deal is U.S.-population WEIGHTED, not uniform.** Each `EthnicityIdentity` carries a relative
+>   population `weight` (`diversityConstants.ts`), consumed by a weighted draw in `diversity.ts`. The
+>   expected mix is now **≈40% BIPOC / ≈60% white** (the U.S. figure) instead of the old ~70% BIPOC skew
+>   that came from dealing **uniformly** over a BIPOC-heavy pool. The **floor** (`MIN_BIPOC` lowered
+>   **8 → 4**) is now only a small-cast tail safety net — the realism comes from the weights, not from
+>   constant up-repair. `MAX_NONBINARY` lowered **2 → 1** (realistic for a young 15-cast); `MIN_QUEER`
+>   stays **2** (≈13%, realistic for the young ages a reality cast draws from, and the §4/§5 minimum).
+>   Gender stays a near-even **6/6** binary floor. Verified by `diversity.test.ts` ("the weighted deal
+>   reflects U.S. population rates").
+> - **The engine OWNS `skinTone` (the "olive-skin collapse" fix).** The FE cast-authoring LLM re-authors
+>   the whole `physicalCharacteristics` block but is given the heritage only as context — it reliably
+>   defaulted skin tone to a generic "olive", silently discarding the heritage-grounded cue. The floor is
+>   an engine guarantee, so `recordCastProfile` now **re-grounds** the authored `skinTone` back to the
+>   seeded heritage (`GameSessionAdapter.ts`); the LLM still authors every other facet. The authoring
+>   skeleton (`orwell_cast_authoring.py`) now also passes `ethnicity` so the surrounding facets cohere.
+
+1. ~~**The exact floor numbers.**~~ **RESOLVED above (2026-06-23):** weighted deal to U.S. rates,
+   `MIN_BIPOC = 4` (tail floor), `MIN_QUEER = 2`, `MAX_NONBINARY = 1`, gender `6/6`, age bands `≥ 2` each.
 2. **Ethnicity: full identity attribute vs. appearance-grounded only.** *Recommendation:*
    **appearance-grounded-plus** — extend 0058's `skinTone` into a richer **complexion/heritage cue**
    that's countable for the floor and feeds the portrait + narration, **without** minting a named

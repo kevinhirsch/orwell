@@ -117,6 +117,7 @@ import {
   generateDiversityLayer, privateOrientationToVaultContent, showmancePlausible,
 } from "../../engine/diversity";
 import type { Orientation, GenderPresentation } from "../../engine/diversityConstants";
+import { ALL_ETHNICITIES } from "../../engine/diversityConstants";
 import { foldHiddenImpact } from "../../engine/consequence";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
@@ -953,7 +954,21 @@ export class GameSessionAdapter implements GameSession {
 
     // (1) PUBLIC fold onto the byte-stable Character — these cross to the player.
     if (req.biography !== undefined) target.character.biography = req.biography;
-    if (req.physicalCharacteristics !== undefined) target.character.physicalCharacteristics = req.physicalCharacteristics;
+    if (req.physicalCharacteristics !== undefined) {
+      target.character.physicalCharacteristics = req.physicalCharacteristics;
+      // 0063 RE-GROUND (the "olive-skin collapse" fix, 2026-06-23): the FE authoring LLM re-authors the
+      // WHOLE physicalCharacteristics block — including skinTone — but it is NOT given the houseguest's
+      // guaranteed heritage, so it reliably defaults skinTone to a generic "olive" and silently discards
+      // the engine's ethnicity-grounded, diversity-floored complexion. The diversity floor is an ENGINE
+      // GUARANTEE (text + portrait must agree with the seeded heritage, 0063 §3.2), so the engine — not
+      // the LLM — owns skinTone: overwrite the authored value back to the grounded cue. Prefer the live
+      // `groundedSkinTones` map (set by seedDiversity); fall back to deriving it from the houseguest's
+      // own ethnicity label (covers a post-restart author when the transient map is empty). The LLM still
+      // authors all the OTHER facets (build/hair/features/mark/style/ageLook) freely.
+      const grounded = this.groundedSkinTones[target.id]
+        ?? ALL_ETHNICITIES.find((e) => e.heritage === target.character.ethnicity)?.skinTone;
+      if (grounded) target.character.physicalCharacteristics.skinTone = grounded;
+    }
 
     // (2) HIDDEN: merge the authored fields over the prior profile so it stays complete. The prior is
     // the seeded floor (always present after seedDeepProfiles; regenerate deterministically if missing).

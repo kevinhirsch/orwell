@@ -110,6 +110,74 @@ describe("0063 — the four floors hold across seeds", () => {
   });
 });
 
+describe("0063 — the weighted deal reflects U.S. population rates (not a BIPOC-heavy uniform draw)", () => {
+  it("the BIPOC share centers near the U.S. ~40% figure across many seeds (never the old ~70% skew)", () => {
+    let bipocTotal = 0;
+    let castTotal = 0;
+    const perSeedShares: number[] = [];
+    for (let seed = 1; seed <= 80; seed++) {
+      const { layer } = layerForSeed(seed);
+      const pub = Object.values(layer.public);
+      const bipoc = pub.filter((p) => p.bipoc).length;
+      bipocTotal += bipoc;
+      castTotal += pub.length;
+      perSeedShares.push(bipoc / pub.length);
+    }
+    const mean = bipocTotal / castTotal;
+    // Centered on the real U.S. figure (~40% BIPOC), with comfortable tolerance for seed variance + the
+    // per-heritage cap. The hard regression guard is the UPPER bound: the old uniform draw over the
+    // BIPOC-heavy pool produced ~0.70 — the weighted deal must be well clear of that.
+    expect(mean, "mean BIPOC share").toBeGreaterThan(0.3);
+    expect(mean, "mean BIPOC share").toBeLessThan(0.55);
+    // And no systematic collapse to a single skew: the per-seed shares vary (a real cast isn't a constant).
+    expect(new Set(perSeedShares).size, "BIPOC share varies seed to seed").toBeGreaterThan(1);
+  });
+
+  it("the cast is majority non-BIPOC on the typical seed, matching the country (still ≥ the floor)", () => {
+    let majorityNonBipocSeeds = 0;
+    const SAMPLE = [1, 2, 3, 7, 13, 21, 42, 55, 99, 100, 256, 1000];
+    for (const seed of SAMPLE) {
+      const { layer } = layerForSeed(seed);
+      const pub = Object.values(layer.public);
+      const bipoc = pub.filter((p) => p.bipoc).length;
+      expect(bipoc, `seed ${seed} meets the floor`).toBeGreaterThanOrEqual(MIN_BIPOC);
+      if (bipoc < pub.length / 2) majorityNonBipocSeeds++;
+    }
+    // The U.S. is majority non-BIPOC; most seeds should reflect that (not a hard per-seed rule — variance).
+    expect(majorityNonBipocSeeds, "most seeds are majority non-BIPOC").toBeGreaterThan(SAMPLE.length / 2);
+  });
+});
+
+describe("0063 — the engine owns skinTone: FE authoring can't collapse it (the olive-skin fix)", () => {
+  it("recordCastProfile re-grounds an authored physicalCharacteristics.skinTone to the seeded heritage", () => {
+    const { sb } = liveGame("div-reground", 5);
+    const card = sb.session.getGameState().house.find((h) => h.status === "active")!;
+    const grounded = card.physicalCharacteristics!.skinTone; // the ethnicity-grounded cue
+    // Simulate the FE authoring LLM re-authoring the WHOLE facet and defaulting skin tone to a generic
+    // value DIFFERENT from the grounded heritage cue (the real-world failure: "olive everything").
+    const override = grounded.includes("olive") ? "deep brown skin" : "olive complexion";
+    const res = sb.session.recordCastProfile({
+      houseguestId: card.id,
+      physicalCharacteristics: {
+        heightBuild: "tall and lean", skinTone: override, hair: "short dark hair",
+        facialFeatures: "a square jaw", distinguishingMark: "a wrist tattoo",
+        ageLook: "fresh-faced, late-twenties look", style: "sporty and laid-back",
+      },
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === card.id)!;
+    // The engine kept the heritage-grounded skin tone; the LLM's generic override was discarded.
+    expect(after.physicalCharacteristics!.skinTone).toBe(grounded);
+    expect(after.physicalCharacteristics!.skinTone).not.toBe(override);
+    // The OTHER authored facets still landed (the LLM authors everything except the grounded skin tone).
+    expect(after.physicalCharacteristics!.hair).toBe("short dark hair");
+    // The portrait reads the re-grounded facet, so the picture agrees with the heritage too.
+    const pp = sb.session.getPortraitPrompt(card.id)!;
+    expect(pp.prompt).toContain(grounded);
+    expect(pp.prompt).not.toContain(override);
+  });
+});
+
 describe("0063 — ethnicity grounds the physical facet (text + portrait agree)", () => {
   it("each houseguest's physicalCharacteristics.skinTone equals their ethnicity-grounded cue", () => {
     const { sb } = liveGame("div-ground", 5);
