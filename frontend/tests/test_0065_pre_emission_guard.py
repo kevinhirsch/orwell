@@ -355,3 +355,131 @@ def _read_chat_helpers():
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(base, "routes", "chat_helpers.py"), encoding="utf-8") as fh:
         return fh.read()
+
+
+# ── #540 (LIVE-7): the eviction TALLY / self-counted "majority" before commit ─ #
+
+def test_pre_filter_matches_eviction_tally_and_majority():
+    # A numeric tally and a self-counted "majority"/"short" both reach the verify.
+    assert chat_helpers._sentence_has_closed_set_claim("The count is 8 votes to 7.")
+    assert chat_helpers._sentence_has_closed_set_claim("Seven. That's the majority.")
+    assert chat_helpers._sentence_has_closed_set_claim("She comes up one vote short.")
+
+
+def test_phantom_eviction_tally_is_held_mid_season(monkeypatch):
+    """A vote tally narrated during the EVICTION phase while the eviction hasn't committed (evicted
+    count unchanged) → HOLD. The engine never hands the player a tally — it is a fabrication."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 1, "phase": "eviction", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 0, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="eviction", evicted=0, week=1)  # eviction NOT committed
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "Eight to seven — the houseguest came up one vote short."))
+    assert emit is False
+    assert "TALLY" in chat_helpers._DESYNC_REGROUND[_USER]
+
+
+def test_self_counted_majority_is_held_mid_season(monkeypatch):
+    """A self-counted "that's the majority" conclusion before the engine commits → HOLD."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 1, "phase": "eviction", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 0, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="eviction", evicted=0, week=1)
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "That's six votes. Seven. That's the majority."))
+    assert emit is False
+    assert _USER in chat_helpers._DESYNC_REGROUND
+
+
+def test_eviction_tally_emits_once_committed(monkeypatch):
+    """Once the eviction has committed (evicted count moved), the result-stage narration emits."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 1, "phase": "eviction", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 0, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="eviction", evicted=1, week=1)  # someone really left
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "The vote was close, but the majority has spoken."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_close_votes_flavor_outside_eviction_phase_emits(monkeypatch):
+    """A "the votes look close" line OUTSIDE the eviction phase is flavor → never policed."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 2, "phase": "social", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 0, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="social", evicted=0, week=2)
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "If it came down to it, you'd want the majority on your side."))
+    assert emit is True
+
+
+# ── #561: a NON-NOMINEE staged AS on the block (wrong-nominee grounding) ───── #
+
+def _nominee_sig(phase="eviction", nom_names=("Sofia", "Mario"),
+                 active=("Sofia", "Mario", "Harrison", "Player")):
+    return {
+        "week": 6, "phase": phase, "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "nomNames": list(nom_names),
+        "activeNames": list(active), "vetoHolder": None, "vetoUsed": False,
+        "evicted": 2, "finished": False,
+    }
+
+
+def test_pre_filter_matches_nominee_status_language():
+    assert chat_helpers._sentence_has_nominee_status("Harrison is on the block tonight.")
+    assert chat_helpers._sentence_has_nominee_status("Two names are up for eviction.")
+    assert not chat_helpers._sentence_has_nominee_status("They chat quietly by the pool.")
+
+
+def test_wrong_nominee_named_on_the_block_is_held():
+    """A non-nominee active houseguest staged AS on the block → HOLD, re-ground names the real noms."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = _nominee_sig()
+    emit = _run(chat_helpers.screen_streamed_nominee(
+        _USER, "Two portraits glow: Sofia and Harrison are on the block. One walks out tonight."))
+    assert emit is False
+    rg = chat_helpers._DESYNC_REGROUND[_USER]
+    assert "ON THE BLOCK" in rg and "Sofia" in rg and "Mario" in rg
+
+
+def test_real_nominees_on_the_block_emit():
+    """Naming the REAL nominees on the block emits untouched."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = _nominee_sig()
+    emit = _run(chat_helpers.screen_streamed_nominee(
+        _USER, "Sofia and Mario are on the block; one of them leaves tonight."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_nominee_guard_skips_when_no_committed_noms():
+    """No committed 2-nominee set → uncertain, emit (never policed)."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = _nominee_sig(nom_names=())
+    emit = _run(chat_helpers.screen_streamed_nominee(
+        _USER, "Harrison might be on the block if the veto is used."))
+    assert emit is True
+
+
+def test_nominee_guard_scoped_to_nom_eviction_phases():
+    """Outside nom/veto-ceremony/eviction phases, nominee-status prose is flavor → emit."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = _nominee_sig(phase="social")
+    emit = _run(chat_helpers.screen_streamed_nominee(
+        _USER, "Harrison jokes he'd be on the block if he weren't so charming."))
+    assert emit is True
+
+
+def test_eviction_steer_appended_for_eviction_beats():
+    """LIVE-4 (#541): the agent loop appends the eviction-reveal steer for an eviction-stage beat."""
+    steer = agent_loop._eviction_reveal_steer("eviction-reveal", "a vote to evict NAME")
+    assert "LIVE EVICTION REVEAL" in steer
+    assert "a vote to evict NAME" in steer
+    assert "eviction-reveal" in agent_loop._EVICTION_STAGE_BEATS
+    src = _read_src()
+    assert "_eviction_reveal_steer(" in src

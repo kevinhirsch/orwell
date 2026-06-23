@@ -473,7 +473,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!r.ok) throw new Error("HTTP " + r.status);
+        if (!r.ok) throw Object.assign(new Error("HTTP " + r.status), { httpStatus: r.status });
         _userDismissed = true;   // this pending is handled — stop any boot re-assert loop
         _dismissedSig = _sig(pending);
         // G15: a bound decision mutates the game — nudge every panel through the
@@ -501,8 +501,20 @@
         // J4-08: restore the correct confirm label — mirrors the initial render,
         // including the self-evict irreversibility signal and non-binding round phrasing.
         confirm.textContent = confirmLabelFor(kind, pending.binding);
-        // J4-09: err is pre-declared with role="alert" — set textContent to trigger announcement
-        err.textContent = "That didn't go through (your move wasn't allowed, or the feed glitched). Adjust and try again, or decide in conversation.";
+        // F-NEW-6: branch the recovery copy on the HTTP status — the correct next step
+        // differs by failure mode and the player can't otherwise tell which. A 409 (the
+        // board moved since this card armed) self-heals via the rearm seam, so we say so;
+        // a 400 means the move itself was illegal (pick another); anything else (network
+        // exception with no httpStatus, or a 5xx) is a connection problem. J4-09: err is
+        // pre-declared role="alert" — setting textContent triggers the announcement.
+        const status = _ && _.httpStatus;
+        if (status === 409) {
+          err.textContent = "The board moved since this card appeared — refreshing the latest state. Try again in a moment, or decide in conversation.";
+        } else if (status === 400) {
+          err.textContent = "That move isn't legal right now — pick another, or decide in conversation.";
+        } else {
+          err.textContent = "Connection problem — that didn't reach the house. Try again, or decide in conversation.";
+        }
       }
     });
 
@@ -577,13 +589,19 @@
   // is already up, so it never re-nags a waved-away card. Fail-open everywhere.
   setInterval(async () => {
     try {
-      if (_userDismissed) return;                      // respect an explicit dismissal
       if (document.getElementById(CARD_ID)) return;    // a card is already showing
       if (!document.getElementById("chat-history")) return;
       const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
       if (!r.ok) return;
       const st = await r.json();
       const pending = st && st.pending && st.pending.kind ? st.pending : null;
+      // F-NEW-4: respect a dismissal PER SIGNATURE, not as a blanket flag — the old
+      // unconditional `if (_userDismissed) return` let a dismissed low-stakes pending
+      // suppress a genuinely DIFFERENT, later card (e.g. nominations) on this backstop.
+      // Stay silent ONLY for the EXACT card the player waved away (the F2 signature guard);
+      // a new pending surfaces normally without re-nagging the dismissed one. This still does
+      // NOT clear _userDismissed (no re-nag of the waved-away card).
+      if (_userDismissed && pending && _sig(pending) === _dismissedSig) return;
       if (pending && !document.getElementById(CARD_ID)) {
         window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending } }));
       }

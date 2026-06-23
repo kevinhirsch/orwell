@@ -38,10 +38,13 @@
     "target-other": "Shared target",
   };
   // The status carries the whole drama: a promise still live, one honored, one betrayed.
+  // F-NEW-12: each status carries a non-color GLYPH alongside its label, so open-vs-kept
+  // is distinguished by shape (not the green-vs-blue border alone) for protan/deutan + SR
+  // users (WCAG 1.4.1 / 4.1.3). The glyph is decorative-redundant to the text label.
   const STATUS_META = {
-    open:   { cls: "odl-open",   tag: "active",  hint: "Still standing" },
-    kept:   { cls: "odl-kept",   tag: "kept",    hint: "Honored" },
-    broken: { cls: "odl-broken", tag: "broken",  hint: "Broken" },
+    open:   { cls: "odl-open",   tag: "active",  glyph: "•", hint: "Still standing" },
+    kept:   { cls: "odl-kept",   tag: "kept",    glyph: "✓", hint: "Honored" },
+    broken: { cls: "odl-broken", tag: "broken",  glyph: "✕", hint: "Broken" },
   };
 
   async function getJSON(url) {
@@ -157,7 +160,7 @@
       body.appendChild(who); body.appendChild(kind);
       if (d.terms) body.appendChild(terms);
       const tag = document.createElement("span");
-      tag.className = "odl-tag"; tag.textContent = meta.tag;
+      tag.className = "odl-tag"; tag.textContent = (meta.glyph ? meta.glyph + " " : "") + meta.tag;
       row.appendChild(body); row.appendChild(tag);
       wrap.appendChild(row);
     }

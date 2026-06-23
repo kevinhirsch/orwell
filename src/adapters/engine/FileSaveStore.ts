@@ -122,6 +122,23 @@ export class FileSaveStore implements UserSaveStore {
     renameSync(dir, target);
   }
 
+  /**
+   * PERS-NEW-2 (#592): quarantine the newest save off the live `vNNNNNN.json` path (`.incompatible`)
+   * when a resume REJECTED it for an incompatible/future `snapshotVersion`. A future-version save
+   * parses fine, so `loadLatest` never `.corrupt`-quarantines it; without this belt the fresh
+   * sandbox's later saves would prune the user's own higher-schema save out of retention. Renaming it
+   * off the version-matching pattern protects it permanently (and keeps it recoverable on a downgrade).
+   */
+  quarantineIncompatible(user: string): void {
+    const dir = this.userDir(user);
+    const latest = this.latestVersion(dir);
+    if (latest <= 0) return;
+    const file = this.fileFor(dir, latest);
+    let target = `${file}.incompatible`;
+    for (let i = 1; existsSync(target); i++) target = `${file}.incompatible-${i}`;
+    try { renameSync(file, target); } catch { /* best-effort quarantine */ }
+  }
+
   /** The users with at least one durable save (B60/E11) — dir names are hex-encoded user ids. */
   listUsers(): string[] {
     if (!existsSync(this.dataDir)) return [];

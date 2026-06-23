@@ -212,6 +212,9 @@ def assert_public_profile_safe(env=None) -> None:
       - ALLOWED_ORIGINS unset/"*"/non-https
                                   CORS runs allow_credentials=True, so a "*" or http
                                   origin would reflect credentials to an arbitrary site
+      - ORWELL_BIND_HOST non-loopback
+                                  the app binds a public/wildcard interface directly,
+                                  bypassing the reverse-proxy/tunnel perimeter
     """
     env = os.environ if env is None else env
     if not _env_truthy(env.get("ORWELL_PUBLIC")):
@@ -237,12 +240,23 @@ def assert_public_profile_safe(env=None) -> None:
             "ALLOWED_ORIGINS is unset/'*'/non-https (credentialed CORS would reflect arbitrary or "
             "insecure origins — set it to your https domain(s))"
         )
+    # EXPOSE-1: a public deployment must sit BEHIND the cloudflared/Caddy perimeter, bound to
+    # loopback — never directly on a public/wildcard interface. ORWELL_BIND_HOST defaults to
+    # 127.0.0.1 (loopback, the value the status route reports); if an operator points it at
+    # 0.0.0.0 or a routable address the app is served in the clear, bypassing the proxy/TLS.
+    bind_host = (env.get("ORWELL_BIND_HOST") or "127.0.0.1").strip()
+    if bind_host.lower() not in ("127.0.0.1", "::1", "localhost"):
+        problems.append(
+            f"ORWELL_BIND_HOST={bind_host} (binds a public/non-loopback interface, bypassing the "
+            "reverse-proxy/tunnel perimeter — bind 127.0.0.1 and front it with cloudflared/Caddy)"
+        )
     if problems:
         raise RuntimeError(
             "Refusing to start an ORWELL_PUBLIC (internet-facing) deployment with an unsafe "
             "security posture:\n  - " + "\n  - ".join(problems) + "\n"
             "Fix these in data/.env (AUTH_ENABLED=true, LOCALHOST_BYPASS=false, SECURE_COOKIES=true, "
-            "ALLOWED_HOSTS=<your-domain>, ALLOWED_ORIGINS=https://<your-domain>) — or unset "
+            "ALLOWED_HOSTS=<your-domain>, ALLOWED_ORIGINS=https://<your-domain>, "
+            "ORWELL_BIND_HOST=127.0.0.1) — or unset "
             "ORWELL_PUBLIC for a trusted-LAN deployment. "
             "See docs/INSTALL.md -> Public deployment."
         )

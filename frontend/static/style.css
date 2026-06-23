@@ -3559,6 +3559,14 @@ body.bg-pattern-perlin-flow {
       opacity:0; transition:.15s;
     }
     .msg:hover .copy-btn { opacity:1; }
+    /* RESP-3: the per-message copy control is hover-revealed, so it is unreachable on a
+       coarse pointer (no hover). Mirror the code-block buttons' non-hover path: reveal it
+       on touch and lift it to the 44px tap floor (width grows past the glyph; the absolute
+       position keeps it pinned top-right). */
+    @media (hover: none) and (pointer: coarse) {
+      .copy-btn { opacity: .55; min-width: 44px; min-height: 44px; height: auto; }
+      .copy-btn:active { opacity: 1; }
+    }
     .role-timestamp {
       font-size:0.7rem; color:var(--color-muted-alt); font-weight:normal; margin-left:6px;
     }
@@ -36687,6 +36695,26 @@ body.theme-frosted .modal {
        reason the touch font-size catch-all above pins !important. */
     min-width: 44px !important;
     min-height: 44px !important;
+  }
+}
+
+/* RESP-1/2 (touch-target roundup): controls the J5-01 floor block above didn't cover —
+   the minimized-window dock row's only close `×` (16px, the sole close on every platform
+   after E95 removed drag-close) and the cast-panel body buttons (.oc-pin 28px / .oc-backfill
+   32px — "Generate cast portraits" is a universal action). Lift them to the 44px coarse-pointer
+   floor on TOUCH only so desktop chrome stays compact (same pattern as J5-01). Flex/centering
+   keeps the glyph/label centered as the box grows. */
+@media (hover: none) and (pointer: coarse) {
+  .minimized-dock-x {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    width: auto;
+    height: auto;
+  }
+  #orwell-cast .oc-pin,
+  #orwell-cast .oc-backfill {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 

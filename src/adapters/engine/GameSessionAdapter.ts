@@ -283,6 +283,16 @@ export class GameSessionAdapter implements GameSession {
   private live: LiveSeasonState | null = null;
   /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
   private onPersist?: () => void;
+  /**
+   * R-BND (#628): the BACKGROUND persist hook for fail-soft FE-driven write-backs (0062 zeitgeist,
+   * 0070 off-screen texture). These enrich PROSE only (no closed-set board change), so they must NOT
+   * route through the commit funnel — that would bump the `beatSeq` the FE reconciles on and make a
+   * background enrichment look like a board mutation (a phantom single-tab stale-409, the A-S3 fold-
+   * drop). The registry wires this to invalidate the snapshot cache + blind-save (the next-season-warm
+   * precedent), persisting durably WITHOUT a beat bump or integrity checkpoint. Absent on a standalone
+   * adapter ⇒ the write-backs fall back to the ordinary `persist()` (still correct; just no game loop).
+   */
+  private onBackgroundPersist?: () => void;
   /** Beat-event sink (wired by the registry to record player-witnessed events into the EventStore). */
   private onEvent?: (ev: BeatEvent) => void;
   /** Tracked promises (0039). Player-party deals only here; NPC↔NPC deals live off-screen in the Vault. */
@@ -390,6 +400,20 @@ export class GameSessionAdapter implements GameSession {
   /** Wire a persistence callback invoked after every mutation (durable save, 0030). */
   setOnPersist(fn: () => void): void {
     this.onPersist = fn;
+  }
+
+  /** R-BND (#628): wire the non-committing background-persist hook (durable save, no beatSeq bump). */
+  setOnBackgroundPersist(fn: () => void): void {
+    this.onBackgroundPersist = fn;
+  }
+
+  /**
+   * R-BND (#628): persist a fail-soft FE-driven enrichment WITHOUT bumping the closed-set `beatSeq`.
+   * Routes through the background hook (invalidate + blind save) when composed in the registry; falls
+   * back to the ordinary `persist()` on a standalone adapter (no game loop ⇒ nothing to desync).
+   */
+  private backgroundPersist(): void {
+    (this.onBackgroundPersist ?? this.onPersist)?.();
   }
 
   /**
@@ -830,10 +854,18 @@ export class GameSessionAdapter implements GameSession {
     // call always lands and never leaks a backstage miss into the fiction.
     const rid = this.resolveHouseguestVoiceId(idOrName);
     const npc = rid ? this.house.npcs.find((n) => n.id === rid) : undefined;
-    if (!npc || this.seatOf(npc.id) !== "active") return null; // only the living are voiced from inside
+    if (!npc) return null;
     const id = npc.id;
+    const seat = this.seatOf(id);
+    // NARR-7 (#542): a JURY/EVICTED seat is still VOICED — at the finale the prompt directs the
+    // model to stage all 9 jurors questioning the finalists, so a null voice anchor forced the model
+    // to FABRICATE juror biographies that contradict their seeded selves. The persona block below is
+    // the SAME byte-stable PUBLIC facets an active houseguest exposes (archetype/biography/demeanor/
+    // heritage…) — all freely on the public card all season — so this is no Vault widening: only
+    // whereabouts (a live in-house field) goes null, since a juror is no longer in the house.
+    const isActive = seat === "active";
 
-    const room = this.presence?.get(id) ?? null;
+    const room = isActive ? (this.presence?.get(id) ?? null) : null;
     const present: NamedRef[] = [];
     if (room && this.presence) {
       for (const [other, where] of this.presence) {
@@ -845,6 +877,7 @@ export class GameSessionAdapter implements GameSession {
       .filter((h) => h !== id && !evicted.has(h));
     return {
       houseguest: { id, name: npc.name },
+      seat,
       persona: {
         archetype: npc.character.archetype,
         strategyStyle: npc.character.strategyStyle,
@@ -4200,7 +4233,7 @@ export class GameSessionAdapter implements GameSession {
         mood: moodIn && moodIn.trim() ? sanitizeFlavor(moodIn) : base.slices.mood,
       },
     };
-    this.persist(); // durable (0030): the captured snapshot must survive a restart, frozen
+    this.backgroundPersist(); // R-BND (#628): durable, but NOT a board beat — no beatSeq bump
     return { accepted: true, source: "web_search" };
   }
 
@@ -4258,7 +4291,7 @@ export class GameSessionAdapter implements GameSession {
     const ev = events.find((e) => e.id === eventId);
     if (!ev || !ev.hidden) return { ok: false };
     this.textureOverrides.set(eventId, sanitized);
-    this.persist(); // durable (0030): voiced texture survives a restart byte-identical
+    this.backgroundPersist(); // R-BND (#628): durable, but NOT a board beat — no beatSeq bump
     return { ok: true };
   }
 

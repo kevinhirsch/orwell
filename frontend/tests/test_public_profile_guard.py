@@ -44,6 +44,24 @@ def test_refuses_each_unsafe_knob(key, bad):
     assert key in str(exc.value)  # the refusal NAMES the offending setting
 
 
+@pytest.mark.parametrize("bind", ["0.0.0.0", "::", "10.0.0.5"])
+def test_refuses_public_bind_host(bind):
+    # EXPOSE-1 (#623): a public profile must bind loopback and sit behind the proxy/tunnel; a
+    # non-loopback bind host is refused and NAMED.
+    env = dict(SAFE)
+    env["ORWELL_BIND_HOST"] = bind
+    with pytest.raises(RuntimeError) as exc:
+        assert_public_profile_safe(env)
+    assert "ORWELL_BIND_HOST" in str(exc.value)
+
+
+@pytest.mark.parametrize("bind", ["127.0.0.1", "::1", "localhost"])
+def test_allows_loopback_bind_host(bind):
+    env = dict(SAFE)
+    env["ORWELL_BIND_HOST"] = bind
+    assert_public_profile_safe(env)  # must not raise
+
+
 def test_refuses_unpinned_host():
     env = dict(SAFE)
     del env["ALLOWED_HOSTS"]

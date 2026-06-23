@@ -58,6 +58,11 @@
     el.classList.toggle("oes-degraded", kind === "degraded");
     el.querySelector(".oes-title").textContent = title;
     el.querySelector(".oes-reason").textContent = reason;
+    // A11Y-11: a bare "Dismiss" gives no context across the (down / degraded / reconnecting)
+    // variants — name WHAT is being dismissed so SR/voice users know (the title carries the
+    // variant, glyphs stripped so it reads cleanly).
+    const xBtn = el.querySelector(".oes-x");
+    if (xBtn) xBtn.setAttribute("aria-label", "Dismiss this notice — " + String(title).replace(/^[^\p{L}\p{N}]+/u, "").trim());
     el.style.display = "block";
   }
   function hide() {

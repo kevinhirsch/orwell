@@ -665,6 +665,11 @@ export class OrwellWindow {
   }
 
   open(opener) {
+    // TX-1: a re-open during the close fade must cancel the pending teardown and clear the
+    // latched close-animation class — otherwise finish() would tear THIS window down and the
+    // .ow-anim-close end-state would leave it invisible.
+    if (this._closeTimer) { clearTimeout(this._closeTimer); this._closeTimer = null; }
+    if (this.el) this.el.classList.remove('ow-anim-close');
     if (this.el && this.el.isConnected) { this.restore(); return this; }
     this.opener = opener || document.activeElement || null;
     // A prior _teardown() aborted this.ac; a fresh open (incl. the dock toggle's
@@ -856,11 +861,14 @@ export class OrwellWindow {
     // A docked window isn't in modalManager — tear it down directly (no chip, no
     // fly-to-dock: it lives in the rail flow).
     if (this._docked) { this._teardown(); return; }
-    const finish = () => Modals.close(this.o.id);   // closeFn → _teardown()
+    const finish = () => { this._closeTimer = null; Modals.close(this.o.id); };   // closeFn → _teardown()
     if (REDUCED()) { finish(); return; }
     // A7 [ruling #19]: scale+fade fly-away on close (the dedicated ow-close keyframe).
     this.el.classList.add('ow-anim-close');
-    setTimeout(finish, 190);
+    // TX-1: track the fade timer so a re-open() during the ~190ms fade can cancel it —
+    // otherwise the pending finish() tears down the freshly re-opened window, and the
+    // latched .ow-anim-close leaves it invisible. open() clears this + strips the class.
+    this._closeTimer = setTimeout(finish, 190);
   }
 
   _teardown() {

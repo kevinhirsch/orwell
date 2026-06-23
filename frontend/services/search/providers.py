@@ -414,11 +414,18 @@ def duckduckgo_search(query: str, count: int = 10, time_filter: Optional[str] = 
             logger.warning(f"DuckDuckGo HTML search failed: {e}")
             return []
 
+    # #611: the maintained package was renamed `duckduckgo-search` → `ddgs` (import `ddgs`). Prefer it,
+    # fall back to the legacy import name, then to the HTML scrape. `ddgs` is in the locked requirements
+    # so a default deploy has a WORKING DDG fallback even when SearXNG is unreachable.
+    DDGS = None
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS  # maintained package
     except ImportError:
-        logger.warning("duckduckgo-search package not installed; using HTML fallback")
-        return _html_fallback()
+        try:
+            from duckduckgo_search import DDGS  # legacy package name
+        except ImportError:
+            logger.warning("ddgs / duckduckgo-search package not installed; using HTML fallback")
+            return _html_fallback()
 
     timelimit = None
     if time_filter:
