@@ -480,8 +480,8 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "the player draws their OWN conclusions from what they see, you never assert them. " +
     "(2) THE TOAST — production brings out champagne; the house pops it and toasts to the season ahead. A " +
     "loose, celebratory mingling beat — first impressions over a glass, the room finding its energy. " +
-    "(3) PICK A BEDROOM — a REAL player choice: the house has bedrooms (the GAME CONTEXT/whereabouts names " +
-    "the rooms — typically two, e.g. \"bedroom a\" and \"bedroom b\"). Invite the player to go claim a bed " +
+    "(3) PICK A BEDROOM — a REAL player choice: the house has several bedrooms (the GAME CONTEXT/whereabouts " +
+    "names them, e.g. \"bedroom a\", \"bedroom b\", \"bedroom c\"). Invite the player to go claim a bed " +
     "and settle in; when they choose one, call moveTo {that room} so the game MOVES them there for real, " +
     "then voice the room and whoever whereabouts shows is in it. Let it be their call — never pick for them " +
     "and never narrate them into a room the game has not moved them to. " +

@@ -112,8 +112,14 @@ describe("ADR 0006 — the off-screen society pairs only the awake (the night ow
       if (awake.size >= npcs.length) continue; // need at least one asleep for the check to bite
       const beforeIds = new Set(sb.engine.events.query().map((e) => e.id));
       for (let t = 0; t < 8; t++) orch.advance(user, "offscreen-tick");
-      // The off-screen SOCIETY scenes are hidden pairwise events (witnessSet excludes the player).
-      const scenes = sb.engine.events.query().filter((e) => !beforeIds.has(e.id) && e.hidden && e.witnessSet.length === 2);
+      // The off-screen SOCIETY scenes are hidden pairwise events (witnessSet excludes the player). EXCLUDE
+      // gossip: a `gossip` event is belief DIFFUSION along the social graph (0038), not a live paired scene
+      // — a rumor can legitimately reach a houseguest who has since turned in (they learn it as it spreads),
+      // so it is NOT awake-gated. The awake invariant here is about the society's real-time SCENES only
+      // (ADR 0006), so scope to those; gossip diffusion has its own, separate model.
+      const scenes = sb.engine.events.query().filter(
+        (e) => !beforeIds.has(e.id) && e.hidden && e.witnessSet.length === 2 && e.type !== "gossip",
+      );
       for (const e of scenes) {
         for (const id of e.witnessSet) {
           if (id !== PLAYER) expect(awake.has(id), "an asleep houseguest schemed off-screen at night").toBe(true);

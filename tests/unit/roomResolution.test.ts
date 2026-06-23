@@ -61,13 +61,20 @@ describe("resolveRoom — the natural-name → room-id contract (the bug fix)", 
       ["living room", "living-room"],
       ["livingroom", "living-room"],
       ["the Living Room", "living-room"], // a stray "the" is just looser matching, still resolves below
-      ["lounge", "living-room"],
+      ["common area", "living-room"],
       ["kitchen", "kitchen"],
       ["KITCHEN", "kitchen"],
+      ["dining room", "dining-room"],   // 0077: the dining area is its own room
+      ["dining", "dining-room"],
+      ["hallway", "hallway"],           // 0077: the private-wing corridor
+      ["hall", "hallway"],
+      ["lounge", "lounge"],             // 0077: the lounge is its own room now (was → living room)
+      ["games room", "lounge"],
       ["backyard", "backyard"],
       ["back yard", "backyard"],
       ["yard", "backyard"],
       ["outside", "backyard"],
+      ["pool", "backyard"],
       ["HOH", "hoh-room"],
       ["hoh room", "hoh-room"],
       ["head of household", "hoh-room"],
@@ -77,6 +84,7 @@ describe("resolveRoom — the natural-name → room-id contract (the bug fix)", 
       ["pantry", "storage-room"],
       ["bedroom a", "bedroom-a"],
       ["Bedroom B", "bedroom-b"],
+      ["bedroom c", "bedroom-c"],       // 0077: the third bedroom
     ];
     for (const [name, expected] of cases) {
       const res = resolveRoom(name);
@@ -94,7 +102,7 @@ describe("resolveRoom — the natural-name → room-id contract (the bug fix)", 
     const noCtx = resolveRoom("bedroom");
     expect(noCtx.kind).toBe("ambiguous");
     if (noCtx.kind === "ambiguous") {
-      expect([...noCtx.candidates].sort()).toEqual(["bedroom-a", "bedroom-b"]);
+      expect([...noCtx.candidates].sort()).toEqual(["bedroom-a", "bedroom-b", "bedroom-c"]);
     }
     // Standing in a bedroom: a bare "bedroom" stays in the one they're in.
     expect(resolveRoom("bedroom", "bedroom-a")).toEqual({ kind: "ok", room: "bedroom-a" });
@@ -103,7 +111,7 @@ describe("resolveRoom — the natural-name → room-id contract (the bug fix)", 
     const adjToBedroom = HOUSE_ROOMS.find((r) => r !== "bedroom-a" && areAdjacent(r, "bedroom-a"))!;
     const fromAdj = resolveRoom("bedroom", adjToBedroom);
     expect(fromAdj.kind).toBe("ok");
-    if (fromAdj.kind === "ok") expect(["bedroom-a", "bedroom-b"]).toContain(fromAdj.room);
+    if (fromAdj.kind === "ok") expect(["bedroom-a", "bedroom-b", "bedroom-c"]).toContain(fromAdj.room);
   });
 
   it("loose prefix/substring matches resolve (kit → kitchen, back yard → backyard, storage → storage room)", () => {

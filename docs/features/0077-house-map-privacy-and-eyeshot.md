@@ -1,6 +1,12 @@
 # 0077 — House map, privacy & eyeshot (who you can see, who you can hear, who you have to track)
 
-> **Status:** 📝 **SPEC / sketch** (drafted 2026-06-22). **Gate (planned):** engine (Vitest +
+> **Status:** 🟡 **IN PROGRESS** (drafted 2026-06-22). **Shipped — phase 1 (the recent-BB floor
+> plan / movement graph):** rooms 9→13 (bathroom no longer adjacent to any bedroom; an open-plan
+> public core; a hallway chokepoint that tucks the private wing — bedrooms no longer adjacent to the
+> living room; a dining room, a third bedroom, and a lounge as its own room), `resolveRoom`/aliases
+> extended, calibration-safe (`juryReach` green). **Remaining:** the sightline (eyeshot) graph +
+> tracked occupancy (`{present, visible, tracked}`), the earshot/zone split, and the conspicuousness
+> read — the next increments. **Gate (planned):** engine (Vitest +
 > dependency-cruiser + BDD `0077-house-map-privacy-and-eyeshot.feature`) and front-end (the L26
 > "Where you are" gadget consumes the new sightline-scoped projection). **Depends on:** 0049 (house
 > presence — the floor plan, `assignRooms`, `rollOverhears`, `whereabouts`), 0002 (events/pathways &

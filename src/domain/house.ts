@@ -8,26 +8,40 @@
 import type { EntityId } from "./ids";
 
 export type Room =
-  | "kitchen" | "living-room" | "backyard" | "bedroom-a" | "bedroom-b"
-  | "hoh-room" | "bathroom" | "storage-room" | "diary-room";
+  | "kitchen" | "living-room" | "dining-room" | "backyard" | "hallway"
+  | "bedroom-a" | "bedroom-b" | "bedroom-c"
+  | "hoh-room" | "bathroom" | "lounge" | "storage-room" | "diary-room";
 
 export const HOUSE_ROOMS: readonly Room[] = [
-  "kitchen", "living-room", "backyard", "bedroom-a", "bedroom-b",
-  "hoh-room", "bathroom", "storage-room", "diary-room",
+  "kitchen", "living-room", "dining-room", "backyard", "hallway",
+  "bedroom-a", "bedroom-b", "bedroom-c",
+  "hoh-room", "bathroom", "lounge", "storage-room", "diary-room",
 ];
 
 /**
- * The floor plan. Symmetric by construction (asserted by the unit tests): the living room is
- * the hub; the HOH room sits up its own stairs; the diary room opens off the living room and
- * adjoins nothing else (it is PRIVATE — overhearing the diary room is impossible by data).
+ * The floor plan (feature 0077 — recent-BB layout). Symmetric by construction (asserted by the unit
+ * tests). An OPEN-PLAN PUBLIC CORE where privacy is impossible — the kitchen, living room, dining
+ * room, and backyard all open onto each other (the great room) — a HALLWAY that is the circulation
+ * chokepoint, and a PRIVATE WING reached through it (the three bedrooms, the bathroom, the lounge),
+ * so early-game privacy is genuinely scarce. The HOH room sits up its own stairs off the living room;
+ * the storage room opens off the kitchen; the diary room opens off the living room and adjoins nothing
+ * else (it is PRIVATE — overhearing the diary room is impossible by data). The BATHROOM is NOT adjacent
+ * to any bedroom (owner note, 0077) — it opens off the hallway like the rest of the private wing.
  */
 export const HOUSE_ADJACENCY: ReadonlyMap<Room, readonly Room[]> = new Map<Room, readonly Room[]>([
-  ["living-room", ["kitchen", "backyard", "bedroom-a", "bedroom-b", "hoh-room", "bathroom", "diary-room"]],
-  ["kitchen", ["living-room", "backyard", "storage-room"]],
+  // The open-plan public core — all mutually connected, plus the wing chokepoint + the HOH/diary stairs.
+  ["living-room", ["kitchen", "dining-room", "backyard", "hallway", "hoh-room", "diary-room"]],
+  ["kitchen", ["living-room", "dining-room", "backyard", "storage-room"]],
+  ["dining-room", ["living-room", "kitchen"]],
   ["backyard", ["living-room", "kitchen"]],
-  ["bedroom-a", ["living-room", "bathroom"]],
-  ["bedroom-b", ["living-room", "bathroom"]],
-  ["bathroom", ["living-room", "bedroom-a", "bedroom-b"]],
+  // The hallway — the only way into the private wing (you pass through it to reach a bedroom).
+  ["hallway", ["living-room", "bedroom-a", "bedroom-b", "bedroom-c", "bathroom", "lounge"]],
+  ["bedroom-a", ["hallway"]],
+  ["bedroom-b", ["hallway"]],
+  ["bedroom-c", ["hallway"]],
+  ["bathroom", ["hallway"]],   // NOT adjacent to any bedroom (owner note) — off the hallway.
+  ["lounge", ["hallway"]],
+  // The coveted private space (up its own stairs), the quick-meeting spot, and the sealed booth.
   ["hoh-room", ["living-room"]],
   ["storage-room", ["kitchen"]],
   ["diary-room", ["living-room"]],
@@ -59,29 +73,50 @@ export const WALKABLE_ROOMS: readonly Room[] = HOUSE_ROOMS.filter((r) => r !== "
 /**
  * Natural-name → room-id ALIASES (the forgiving `moveTo` map). Keys are normalized (see
  * `normalizeRoomName`): lowercase, spaces/underscores/hyphens collapsed to a single hyphen. These
- * cover the names a narrator or player naturally says — "living room"/"lounge", "backyard"/"yard",
- * "HOH"/"head of household", "bathroom"/"washroom", "pantry" (the storage room). The bare "bedroom"
- * is handled specially (it is AMBIGUOUS — two bedrooms) by `resolveRoom`, never here.
+ * cover the names a narrator or player naturally says — "living room"/"common area", "backyard"/"yard",
+ * "HOH"/"head of household", "bathroom"/"washroom", "pantry" (the storage room), "dining room",
+ * "hallway", "lounge". The bare "bedroom" is handled specially (it is AMBIGUOUS across the bedrooms)
+ * by `resolveRoom`, never here.
  */
 const ROOM_ALIASES: ReadonlyMap<string, Room> = new Map<string, Room>([
   ["kitchen", "kitchen"],
   ["living-room", "living-room"],
   ["livingroom", "living-room"],
   ["living", "living-room"],
-  ["lounge", "living-room"],
   ["common-room", "living-room"],
   ["common-area", "living-room"],
+  ["great-room", "living-room"],
+  // 0077: the dining area — its own room in the open-plan core.
+  ["dining-room", "dining-room"],
+  ["dining", "dining-room"],
+  ["dining-area", "dining-room"],
+  ["dining-table", "dining-room"],
+  // 0077: the circulation hallway into the private wing.
+  ["hallway", "hallway"],
+  ["hall", "hallway"],
+  ["corridor", "hallway"],
+  // 0077: the lounge — its own hangout now (was an alias for the living room).
+  ["lounge", "lounge"],
+  ["games-room", "lounge"],
+  ["game-room", "lounge"],
+  ["have-not-room", "lounge"],
+  ["have-not", "lounge"],
+  ["havenot", "lounge"],
   ["backyard", "backyard"],
   ["yard", "backyard"],
   ["outside", "backyard"],
   ["garden", "backyard"],
   ["patio", "backyard"],
+  ["pool", "backyard"],
   ["bedroom-a", "bedroom-a"],
   ["bedroom-1", "bedroom-a"],
   ["first-bedroom", "bedroom-a"],
   ["bedroom-b", "bedroom-b"],
   ["bedroom-2", "bedroom-b"],
   ["second-bedroom", "bedroom-b"],
+  ["bedroom-c", "bedroom-c"],
+  ["bedroom-3", "bedroom-c"],
+  ["third-bedroom", "bedroom-c"],
   ["hoh-room", "hoh-room"],
   ["hoh", "hoh-room"],
   ["hoh-suite", "hoh-room"],
@@ -123,7 +158,7 @@ export type RoomResolution =
  * forgiving by design so a guessed "bedroom" or "living room" never silently fails into a retry
  * loop (the real-log bug). Pure + deterministic + Vault-free (rooms are public):
  *   1. exact room id / known alias (case/space/hyphen-insensitive);
- *   2. the bare word "bedroom" / "bed" / "room" → AMBIGUOUS across the two bedrooms, but
+ *   2. the bare word "bedroom" / "bed" / "room" → AMBIGUOUS across the bedrooms, but
  *      DISAMBIGUATED to a single room when context allows: the player's CURRENT bedroom if they
  *      are already in one (stay), else a bedroom ADJACENT to where they stand, else bedroom-a;
  *   3. a loose substring/prefix match against the canonical names (e.g. "kit" → kitchen);
@@ -141,7 +176,7 @@ export function resolveRoom(name: string, currentRoom?: Room | null): RoomResolu
   if (alias) return { kind: "ok", room: alias };
 
   // 2. the ambiguous "bedroom" family — pick sensibly when we can, else report both.
-  const bedrooms: readonly Room[] = ["bedroom-a", "bedroom-b"];
+  const bedrooms: readonly Room[] = ["bedroom-a", "bedroom-b", "bedroom-c"];
   const isBedroomy = key === "bedroom" || key === "bedrooms" || key === "bed" || key === "room" || key === "beds";
   if (isBedroomy) {
     if (currentRoom && bedrooms.includes(currentRoom)) return { kind: "ok", room: currentRoom }; // already in one — stay
