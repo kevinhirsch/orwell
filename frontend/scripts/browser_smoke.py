@@ -2053,20 +2053,25 @@ def main() -> int:
             f4_seat0 = f4.input_value("#message")
             check(not f4_seat0.strip(),
                   f"P1: pre-game boot does NOT prefill the composer (no seat pre-prompt) ({f4_seat0!r})")
-            # the welcome modal is its own modal, shown on every fresh game/season; it now points the
-            # player at the casting INTERVIEW (the photo is asked for mid-interview, not up front)
+            # the SETUP WIZARD (its own modal, data-ob-setup), shown on every fresh game/season; the
+            # only welcome copy is the framing line "Production needs the feeds" and it shows the
+            # model SETUP (a narrator/portrait model summary + a "Choose models" door into Settings).
             f4_welcome = f4.evaluate(
-                "() => { const c = document.querySelector('#orwell-onboarding .ob-card');"
+                "() => { const c = document.querySelector('#orwell-onboarding[data-ob-setup] .ob-card');"
                 "  return c ? c.textContent : ''; }")
-            check("interview" in (f4_welcome or "").lower(),
-                  f"P1: the welcome modal greets and points at the casting interview ({(f4_welcome or '')[:80]!r})")
+            _wz = (f4_welcome or "").lower()
+            check("production needs the feeds" in _wz and ("model" in _wz or "casting" in _wz),
+                  f"P1: the setup wizard frames the feeds and shows model setup ({(f4_welcome or '')[:80]!r})")
             # the cast-photo box is HIDDEN at boot — it follows the producers' question, never the
-            # welcome (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)
+            # wizard (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)
             check(f4.evaluate("!document.getElementById('orwell-headshot')") is True,
                   "P1: the cast-photo box is hidden at boot (it follows the producers' question)")
-            # dismiss the welcome (its own modal) — dismissing IS the proceed: it opens the interview
-            if f4.query_selector("#orwell-onboarding [data-ob-welcome-go]"):
-                f4.click("#orwell-onboarding [data-ob-welcome-go]")
+            # PREMATURE-START FIX: the season begins ONLY on the explicit "Start casting" button (gated
+            # on a resolved narrator model — a feed is configured in this env, so it enables). Clicking
+            # it IS the proceed: it opens the interview + fires the producers' kickoff. Playwright's
+            # click auto-waits for the button to become enabled (after the async model summary resolves).
+            if f4.query_selector("#orwell-onboarding [data-ob-setup-start]"):
+                f4.click("#orwell-onboarding [data-ob-setup-start]")
                 f4.wait_for_timeout(800)
             # NO HARD GATE: the chat input + send are USABLE immediately — the interview runs before
             # any photo (the old "locked until a photo is secured" gate is retired).
