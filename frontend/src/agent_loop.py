@@ -4631,6 +4631,15 @@ async def stream_agent_loop(
         except Exception as _desync_err:
             logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
 
+        # 0067 — the PRESENCE/IDENTITY desync guard: catch the narration staging an off-scene or
+        # evicted houseguest as acting in the player's scene (the "invented/teleported room" class).
+        # Closed-set only, post-turn, gentle next-turn re-ground (combines with the board check's).
+        try:
+            from routes.chat_helpers import record_post_turn_presence_check
+            await record_post_turn_presence_check(owner, _turn_narration_full)
+        except Exception as _pres_err:
+            logger.warning(f"[orwell] post-turn presence check failed: {_pres_err}")
+
         # 0065 Part D — one Vault-free sync-ledger entry per live-game turn (observability). Records
         # the closed-set sync activity of THIS turn: the beatSeq it moved (before→after), the tools
         # it called (NAMES only), how many nudges fired / back-fills the FE made, whether a desync was

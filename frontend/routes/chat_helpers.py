@@ -919,6 +919,140 @@ async def record_post_turn_desync_check(user, narration: str) -> None:
         logger.warning("[orwell] post-turn desync check skipped for user=%s: %s", user, e)
 
 
+# ── 0067 — the PRESENCE / IDENTITY desync guard (the "reconcile" half) ─────────────────────── #
+#
+# The board desync check works because closed-set OUTCOMES (HOH/noms/veto/eviction) have crisp
+# textual claim patterns. Presence claims in prose are diffuse ("Ana leans against the window"), so a
+# scan can't safely EDIT live prose (that would risk gutting the storytelling the open set owns). This
+# guard mirrors the board check's SAFE shape instead: post-turn, it stashes a GENTLE next-turn
+# re-ground when the narration STAGES a houseguest AS ACTING in the player's scene whom the engine
+# places off-scene. Closed-set only (who is where / who exists) — never the prose, never the open set.
+#
+# HIGH-PRECISION by construction (a false positive nags the model on a clean turn):
+#   • flags ONLY a houseguest given an in-scene ACTION/SPEECH verb right after their name, who is
+#     either EVICTED (not in the house at all) or ACTIVE but in NEITHER the player's room NOR an
+#     adjacent room (entirely elsewhere). A NEARBY houseguest is never flagged — they can legitimately
+#     be glimpsed or overheard through a doorway (the momentPrompts contract).
+#   • SKIPS the whole turn if the player CHANGED ROOMS during it — a move turn is multi-scene (the
+#     narration may stage the room the player just left), the top false-positive source.
+#   • SKIPS pre-game / player-out-of-house (no whereabouts).
+
+# In-scene staging verbs (present/past/progressive). Movement-OUT verbs (left/leaves/exits) are
+# deliberately excluded — "Connor left the house weeks ago" is a legitimate past mention, not staging.
+_SCENE_VERBS = (
+    "says", "say", "said", "asks", "ask", "asked", "replies", "reply", "replied", "mutters",
+    "mutter", "muttered", "adds", "add", "added", "whispers", "whisper", "whispered", "grins",
+    "grin", "grinned", "grinning", "laughs", "laugh", "laughed", "laughing", "nods", "nod",
+    "nodded", "nodding", "shrugs", "shrug", "shrugged", "snorts", "snort", "snorted", "smirks",
+    "smirk", "smirked", "leans", "lean", "leaning", "leaned", "sits", "sitting", "sat", "stands",
+    "standing", "stood", "watches", "watch", "watching", "watched", "pauses", "pause", "paused",
+    "perches", "perched", "flashes", "flashed", "crosses", "crossed", "rolls", "rolled", "glances",
+    "glance", "glanced", "looks", "looking", "steps", "stepping", "stepped", "turns", "turning",
+    "swings", "swinging", "gestures", "gestured", "chimes", "calls", "scoffs", "sighs", "chuckles",
+)
+_VERB_ALT = "|".join(_SCENE_VERBS)
+
+
+def _stages_in_scene(narration: str, name: str) -> bool:
+    """True if `name` is STAGED as acting in the scene — their name (optionally possessive), then
+    within a word or two an in-scene verb, OR their name immediately before a quoted line. A whole-
+    token match, so a name is never caught as a substring. Conservative: a bare MENTION ("I heard
+    Maria won") never matches (no staging verb / no adjacent quote)."""
+    n = re.escape(name)
+    # "Nia perched", "Kendall pauses", "Ana's leaning", "Connor's been leaning" (≤2 filler words).
+    verb_pat = rf"\b{n}(?:['’]s)?\b(?:\s+\w+){{0,2}}\s+(?:{_VERB_ALT})\b"
+    if re.search(verb_pat, narration, re.IGNORECASE):
+        return True
+    # "Nia: 'I called this.'" / 'Ana "what is this?"' — a quoted line right after the name.
+    quote_pat = rf"\b{n}(?:['’]s)?\b\s*[:—-]?\s*[\"“]"
+    return bool(re.search(quote_pat, narration, re.IGNORECASE))
+
+
+def _presence_facts(state: dict) -> Optional[dict]:
+    """From a getGameState dict build {room, in_view, evicted, active_offscene} — or None when there
+    is no live scene to check (pre-game / player out of the house). `in_view` = the player's room +
+    every adjacent room's occupants (anyone legitimately seen or overheard); `active_offscene` =
+    living houseguests who are NEITHER in view; `evicted` = houseguests no longer in the house."""
+    if not isinstance(state, dict):
+        return None
+    wa = state.get("whereabouts")
+    if not isinstance(wa, dict) or not wa.get("room"):
+        return None  # no live scene → nothing to ground against
+    in_view: set = set()
+    for p in (wa.get("present") or []):
+        if isinstance(p, dict) and p.get("name"):
+            in_view.add(p["name"])
+    for nb in (wa.get("nearby") or []):
+        if isinstance(nb, dict):
+            for p in (nb.get("present") or []):
+                if isinstance(p, dict) and p.get("name"):
+                    in_view.add(p["name"])
+    evicted: set = set()
+    active_offscene: set = set()
+    for h in (state.get("house") or []):
+        if not isinstance(h, dict) or not h.get("name"):
+            continue
+        name = h["name"]
+        if (h.get("status") or "active") != "active":
+            evicted.add(name)
+        elif name not in in_view:
+            active_offscene.add(name)
+    return {"room": wa.get("room"), "in_view": in_view,
+            "evicted": evicted, "active_offscene": active_offscene}
+
+
+def _presence_desync_directive(narration: str, facts: dict) -> Optional[str]:
+    """A gentle re-ground directive when the narration STAGED an off-scene/evicted houseguest as
+    acting in the scene, or None. Bounded name lists; closed-set only."""
+    text = narration or ""
+    staged_evicted = sorted(n for n in facts["evicted"] if _stages_in_scene(text, n))[:_PRESENCE_MOVE_MAX_NAMES]
+    staged_offscene = sorted(n for n in facts["active_offscene"] if _stages_in_scene(text, n))[:_PRESENCE_MOVE_MAX_NAMES]
+    if not staged_evicted and not staged_offscene:
+        return None
+    room_label = str(facts["room"]).replace("-", " ")
+    clauses: list[str] = []
+    if staged_offscene:
+        clauses.append(
+            f"{_join_names(staged_offscene)} — the engine places them elsewhere in the house, NOT in "
+            f"the {room_label} or a room next to it"
+        )
+    if staged_evicted:
+        clauses.append(f"{_join_names(staged_evicted)} — already EVICTED, no longer in the house at all")
+    return (
+        "RE-GROUND ON WHO IS IN THE ROOM — last turn you voiced " + "; ".join(clauses) + ". Before your "
+        "next beat, re-read `whereabouts` and stage ONLY the houseguests the engine puts in the player's "
+        "room (a person one room over may be glimpsed or overheard, never in the room). Do not pull "
+        "someone in from elsewhere in the house, and never voice an evicted houseguest as present. The "
+        "engine's occupancy is the ground truth; reconcile to it."
+    )
+
+
+async def record_post_turn_presence_check(user, narration: str) -> None:
+    """Post-turn presence/identity guard (0067). Stash a gentle next-turn re-ground when the narration
+    staged an off-scene/evicted houseguest as acting in the scene. SKIPS a turn where the player
+    changed rooms (multi-scene/ambiguous). Combines with (never clobbers) a board re-ground already
+    stashed this turn. Fail-open — never raises, never blocks the finishing turn."""
+    try:
+        from src import orwell_engine
+        state = await orwell_engine.get_game_state(user=user)
+        facts = _presence_facts(state if isinstance(state, dict) else {})
+        if not facts:
+            return
+        # The player moved rooms during the turn ⇒ multi-scene; the narration may stage the room they
+        # just left. Skip rather than risk a false flag (the top false-positive source).
+        before = _LAST_BEAT_SIG.get(user)
+        if isinstance(before, dict) and before.get("room") and before.get("room") != facts["room"]:
+            return
+        directive = _presence_desync_directive(narration or "", facts)
+        if not directive:
+            return
+        existing = _DESYNC_REGROUND.get(user)
+        _DESYNC_REGROUND[user] = (existing + "\n\n" + directive) if existing else directive
+        logger.warning("[orwell] presence desync detected for user=%s — re-grounding next turn", user)
+    except Exception as e:
+        logger.warning("[orwell] post-turn presence check skipped for user=%s: %s", user, e)
+
+
 # ── 0065 Part C — the PRE-EMISSION outcome guard (same-turn, not next-turn) ──────────────── #
 #
 # `record_post_turn_desync_check` (above) catches a narrated-but-uncommitted outcome only AFTER the
