@@ -227,7 +227,38 @@
     try { var v = JSON.parse(lsGet(_orderKey()) || "null"); return Array.isArray(v) ? v : []; }
     catch (_) { return []; }
   }
-  function saveOrder(ids) { lsSet(_orderKey(), JSON.stringify(ids)); }
+  function saveOrder(ids) {
+    lsSet(_orderKey(), JSON.stringify(ids));   // offline/seed fallback (per-device)
+    // #637: the SYNCED value is the source of truth — persist the order through the 0064 layout
+    // store (LWW, fanned out via `layout-changed`) so it crosses devices and mirrors between two
+    // windows. localStorage stays as the offline fallback the synced value lands into.
+    try {
+      window.dispatchEvent(new CustomEvent("orwell:window-layout",
+        { detail: { id: "gadget-rail", state: { order: Array.isArray(ids) ? ids.slice() : [] } } }));
+    } catch (_) {}
+  }
+
+  // #637: apply a synced order arriving from the layout store (initial seed OR a peer window).
+  // Land it into the local fallback key WITHOUT re-emitting (saveOrder would echo), then re-apply.
+  var _applyingSyncedOrder = false;
+  function applySyncedOrder(ids) {
+    if (_applyingSyncedOrder || !Array.isArray(ids) || !ids.length) return;
+    var cur = loadOrder();
+    if (JSON.stringify(cur) === JSON.stringify(ids)) { applyOrder(); return; }  // already in step
+    _applyingSyncedOrder = true;
+    try {
+      lsSet(_orderKey(), JSON.stringify(ids));
+      applyOrder();
+      syncStrip();
+    } finally { _applyingSyncedOrder = false; }
+  }
+  function _onSyncedLayout(e) {
+    var d = e && e.detail;
+    if (!d || d.windowId !== "gadget-rail" || !d.state) return;
+    if (Array.isArray(d.state.order)) applySyncedOrder(d.state.order);
+  }
+  window.addEventListener("orwell:layout-seed", _onSyncedLayout);     // initial GET /layout
+  window.addEventListener("orwell:layout-changed", _onSyncedLayout);  // a peer window / device
 
   function gadgets() {
     if (!body) return [];

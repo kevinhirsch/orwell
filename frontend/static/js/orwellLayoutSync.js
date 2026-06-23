@@ -38,8 +38,18 @@
   }
 
   function seedFrom(windows) {
-    if (window._orwellSeedLayout) { try { window._orwellSeedLayout(windows || {}); return; } catch (_) {} }
-    rememberSeedOnly(windows || {});
+    if (window._orwellSeedLayout) { try { window._orwellSeedLayout(windows || {}); } catch (_) {} }
+    else rememberSeedOnly(windows || {});
+    // #637/#638: NON-kit consumers (the gadget rail's ORDER, the panel SIDE, game-POPUP dismiss)
+    // also live in this synced blob under synthetic ids. The kit ignores those fields (no matching
+    // window), so re-dispatch the whole blob as a local apply event they can read. Origin-free: a
+    // SEED apply is the durable store landing, not a peer echo, so every device applies it.
+    try {
+      var w = windows || {};
+      Object.keys(w).forEach(function (id) {
+        window.dispatchEvent(new CustomEvent('orwell:layout-seed', { detail: { windowId: id, state: w[id] || {} } }));
+      });
+    } catch (_) {}
   }
 
   function load() {
