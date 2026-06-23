@@ -1,4 +1,4 @@
-import { toolsFor } from "../../surfaces/tools/registry";
+import { toolsFor, DEBUG_VAULT_TOOL_NAMES } from "../../surfaces/tools/registry";
 import { EngineRefusal } from "../../domain/errors";
 import type { OutwardChannel, ToolDescriptor } from "../../surfaces/tools/registry";
 import type { PlayerSurface } from "../../surfaces/player/PlayerSurface";
@@ -192,7 +192,12 @@ export class McpServer {
   }
 
   private allows(name: string): boolean {
-    return this.listTools().some((t) => t.name === name);
+    if (this.listTools().some((t) => t.name === name)) return true;
+    // The owner-ruled DEBUG override of mandate #2: the live-Vault unseal (`producerVault`) is NOT in
+    // the advertised allowlist — it is a separate, out-of-band debug capability the admin/God-Mode
+    // channel alone may dispatch (by explicit name, fired behind an explicit FE "unseal"). The player
+    // channel can never reach it.
+    return this.channel === "admin/God Mode" && DEBUG_VAULT_TOOL_NAMES.has(name);
   }
 
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
@@ -320,6 +325,11 @@ export class McpServer {
         // L38 (admin/God-Mode only — gated by `allows()` above): drive the season to a crowned
         // winner so the post-season retrospective can unseal. Vault-free summary out; reads no Vault.
         return this.deps.admin.advanceToFinale();
+      case "producerVault":
+        // DEBUG (admin/God-Mode only — gated by `allows()` above): the owner-ruled OVERRIDE of mandate
+        // #2 — UNSEAL the LIVE Vault for operator debugging. The ONE Vault-reading tool; fired only
+        // behind an explicit FE "unseal". Reuses the session's retrospective render (scrubbed prose).
+        return this.deps.session.producerVaultDump();
       case "setTimeOfDay":
         // ADR 0006 (admin/God-Mode only): the FE settings switch flips the in-game clock at runtime.
         return this.deps.admin.setTimeOfDay(

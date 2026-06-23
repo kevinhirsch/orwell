@@ -1,0 +1,80 @@
+import { describe, it, expect } from "vitest";
+import { GameSessionRegistry } from "../../src/composition/registry";
+import {
+  DEBUG_VAULT_TOOLS, ADMIN_TOOLS, PLAYER_TOOLS, PLAYER_AGENT_LEVERS, toolsFor,
+} from "../../src/surfaces/tools/registry";
+import { npc } from "../../src/domain/ids";
+
+/**
+ * producerVault — the owner-ruled DEBUG override of mandate #2. Admin/God Mode is otherwise WALLED from
+ * the Vault; this one tool deliberately UNSEALS the LIVE hidden layer for operator debugging, behind an
+ * explicit FE "unseal". These tests prove (1) the breach is quarantined to one grep-able tool (the normal
+ * allowlists stay Vault-free), (2) the post-season retrospective gate is unchanged, (3) the override
+ * actually surfaces the live hidden layer through the admin MCP channel, and (4) the player channel can
+ * never reach it. HARD rule: roles only — no fixture names.
+ */
+
+const SENTINEL = "SENTINEL-producer-vault-hidden";
+
+function plantHidden(sb: ReturnType<GameSessionRegistry["sandboxFor"]>, tag: string): void {
+  // A hidden, player-excluded off-screen scene + a sealed Vault record — the secret layer.
+  sb.engine.events.record({
+    id: `pv-hidden:${tag}`, ts: 9_100_000, type: "conversation",
+    initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true, content: `${SENTINEL}-scene-${tag}`,
+  });
+  sb.engine.vault.writeHidden({ id: `pv-vault:${tag}`, kind: "hidden-attribute", content: `${SENTINEL}-vault-${tag}` });
+}
+
+function liveGame(user: string, seed: number) {
+  const reg = new GameSessionRegistry();
+  const sb = reg.sandboxFor(user);
+  sb.session.createCharacter({ playerName: "The Player", seed });
+  return { reg, sb };
+}
+
+describe("producerVault — the owner-ruled DEBUG live-Vault unseal (override of mandate #2)", () => {
+  it("is the SOLE Vault-reading tool — quarantined, admin-only, and not an agent lever", () => {
+    // The normal allowlists stay Vault-free: the `readsVault: false` literal-type guard still holds.
+    for (const t of ADMIN_TOOLS) expect(t.readsVault).toBe(false);
+    for (const t of PLAYER_TOOLS) expect(t.readsVault).toBe(false);
+    // The ONLY Vault reader in the system is producerVault, on the admin/God-Mode channel.
+    expect(DEBUG_VAULT_TOOLS.map((t) => t.name)).toEqual(["producerVault"]);
+    for (const t of DEBUG_VAULT_TOOLS) {
+      expect(t.readsVault).toBe(true);
+      expect(t.channel).toBe("admin/God Mode");
+    }
+    // DELIBERATELY NOT in the advertised allowlist (it's an out-of-band debug capability, not a tool)
+    // — so every "admin allowlist is Vault-free" guarantee stays literally true.
+    expect(toolsFor("admin/God Mode").some((t) => t.name === "producerVault")).toBe(false);
+    expect(toolsFor("player").some((t) => t.name === "producerVault")).toBe(false);
+    expect(PLAYER_AGENT_LEVERS).not.toContain("producerVault");
+  });
+
+  it("leaves the post-season retrospective gate UNCHANGED — null while the season is live", () => {
+    const { sb } = liveGame("pv-gate", 7);
+    expect(sb.session.seasonRetrospective()).toBeNull(); // still gated on the terminal `finished` state
+  });
+
+  it("UNSEALS the LIVE hidden layer — through the engine and the admin MCP channel", async () => {
+    const { sb } = liveGame("pv-unseal", 7);
+    plantHidden(sb, "x");
+    // The override returns the live hidden layer even though the season has NOT finished.
+    const dump = sb.session.producerVaultDump();
+    expect(dump).not.toBeNull();
+    expect(JSON.stringify(dump)).toContain(SENTINEL);
+    // And the same through the gated admin MCP seam the FE "unseal" calls.
+    const viaMcp = await sb.mcp.admin.callTool("producerVault", {});
+    expect(JSON.stringify(viaMcp)).toContain(SENTINEL);
+  });
+
+  it("returns null when there is no game at all (nothing to unseal)", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("pv-empty");
+    expect(sb.session.producerVaultDump()).toBeNull();
+  });
+
+  it("is REFUSED on the player channel — admin/God-Mode only (the player can never unseal)", async () => {
+    const { sb } = liveGame("pv-refuse", 7);
+    await expect(sb.mcp.player.callTool("producerVault", {})).rejects.toThrow();
+  });
+});

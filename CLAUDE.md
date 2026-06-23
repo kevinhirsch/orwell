@@ -73,6 +73,15 @@ leak-prone build is a **failure state**, not a partial success.
    enforced in code at the port/tool boundary, *never* by prompt wording. The model "cannot
    leak what it never receives." **God Mode / admin is walled from the Vault too** (the human
    has never read it and must not be able to — spoilers ruin the game above all else).
+   **The ONE sanctioned exception (owner-ruled DEBUG override): `producerVault`** — a live-Vault
+   *unseal* for operator debugging. It is deliberately quarantined and is NOT a hole in the wall for
+   normal play: it lives in `DEBUG_VAULT_TOOLS` (the *only* `readsVault: true` registry — the literal
+   `ToolDescriptor.readsVault: false` guard still holds for every advertised tool), is **out-of-band**
+   (never in the `toolsFor` allowlist), **admin/God-Mode channel only**, and fires **only** behind an
+   explicit FE "unseal" on `/admin/status` (hidden by default). Every "admin allowlist is Vault-free"
+   guarantee stays literally true; `tests/unit/producerVault.test.ts` is the gate. Do **not** "fix" it
+   as a leak — it is intentional; do **not** widen it (never the player channel, never an advertised
+   tool, never always-on).
 3. **Anti-sycophancy.** The deterministic core + seeded randomness decide outcomes; the LLM
    only *narrates*. Ground truth lives in the stores and is *queried*, never "remembered"
    and bent to please the player.
@@ -402,7 +411,9 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
 - Don't reference names in tests; don't ingest sample-save content as data.
 - Don't rely on prompt wording for the Vault Wall — enforce it in code.
 - Don't let the narrative layer decide or alter outcomes.
-- Don't expose Vault contents to **anyone** at runtime, including admin/God Mode.
+- Don't expose Vault contents to **anyone** at runtime, including admin/God Mode — with the **single
+  owner-ruled DEBUG exception** `producerVault` (the quarantined, out-of-band, admin-only, explicit-unseal
+  live-Vault dump; see mandate #2). Never extend Vault exposure beyond it.
 - Don't mislabel player-witnessed events as off-screen/secret.
 - Don't let persisted detail degrade over time.
 
