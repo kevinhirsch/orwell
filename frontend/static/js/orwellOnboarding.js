@@ -102,7 +102,7 @@
         }
         #orwell-onboarding .ob-btn:hover { border-color: var(--fg, #9cdef2); }
         #orwell-onboarding .ob-btn-primary {
-          background: var(--brand-color, var(--red, #e06c75)); color: var(--bg, #111);
+          background: var(--brand-color, var(--red, #e06c75)); color: var(--on-accent, #fff);
           border-color: transparent; font-weight: 600;
         }
       </style>
