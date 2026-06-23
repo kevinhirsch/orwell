@@ -148,7 +148,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             path="/",
         )
         if body.remember:
-            cookie_kwargs["max_age"] = 60 * 60 * 24 * 7  # 7 days
+            # #581: align the cookie lifetime with the server-side session TTL
+            # (default 24h; ORWELL_SESSION_TTL_HOURS overrides) instead of a fixed 7 days.
+            from core.auth import TOKEN_TTL
+            cookie_kwargs["max_age"] = TOKEN_TTL
         response.set_cookie(**cookie_kwargs)
         return {"ok": True, "username": username}
 

@@ -38,7 +38,7 @@ Across **every S3 screenshot (t-111 → t-345)**, House Status shows the player 
 `· running on empty`), while the player (Jolene Carter) is the active protagonist — winning HOH, voting,
 writing Diary-Room messages, shown active/un-grayed atop the Cast roster.
 - **Truth:** S3 engine state `started:true, persona:Jolene Carter, evicted:0→7`; `grep '"status":"evicted"'`
-  over the engine logs = **0**. The only real player eviction was **S2 t-105** (the *previous* player, Priya).
+  over the engine logs = **0**. The only real player eviction was **S2 t-105** (the *previous* player, the S2 player-persona).
 - **Root cause:** `frontend/static/js/orwellStatusPanel.js:81` `selfBadge()` returns "EVICTED" when
   `player.status === "evicted"`; that value is **stale from the prior season and never reset on the
   in-session `next-season` hand-off**. Tell-tale: **S1→S2** was clean (badge reset) because that boundary

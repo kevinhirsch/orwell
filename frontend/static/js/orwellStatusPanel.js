@@ -75,11 +75,25 @@ import { onNarrowChange } from './platform.js';
   // The player's OWN ceremony role from PUBLIC facts (HOH / on the block / veto) — derived by
   // id-comparison, never a "safe/target" read (0020). Returns "" when the player is just a
   // houseguest, or their out-of-game seat ("Evicted" / "Jury") when they're out.
+  // #556 (launch-blocker): after an IN-SESSION next-season hand-off (S1→S2 with no page reload),
+  // the engine's player.status could still read "evicted"/"jury" from the prior season, so an
+  // ACTIVE player was falsely badged EVICTED for the whole new season (S1→S2 was only ever clean
+  // because it involved a page reload). A player can only legitimately be out once an eviction has
+  // actually happened THIS season: the season is finished, week > 1, or at least one houseguest is
+  // already out. A pristine live season (not finished, week ≤ 1, nobody out) ⇒ the seat is stale.
+  function seatStale(status, state) {
+    const finished = !!(status && status.finished);
+    const week = (status && typeof status.week === "number") ? status.week : 0;
+    const house = (state && Array.isArray(state.house)) ? state.house : [];
+    const anyOut = house.some((h) => h && h.status && h.status !== "active");
+    return !(finished || week > 1 || anyOut);
+  }
+
   function selfBadge(status, state) {
     const me = state && state.player && state.player.id;
     const seat = state && state.player && state.player.status;
-    if (seat === "evicted") return "EVICTED";
-    if (seat === "jury") return "JURY";
+    if (seat === "evicted") return seatStale(status, state) ? "" : "EVICTED"; // #556
+    if (seat === "jury") return seatStale(status, state) ? "" : "JURY";
     if (!me || !status) return "";
     const idOf = (c) => (c && typeof c === "object" ? c.id : c);
     if (idOf(status.hoh) === me) return "HOH";

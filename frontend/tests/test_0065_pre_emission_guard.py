@@ -49,7 +49,8 @@ def _clean_state():
 
 # Board fakes. `evicted_status` controls how many house members read non-active; `finished` /
 # `hoh` let each test move (or not move) exactly the field its claim is checked against.
-def _board_fakes(monkeypatch, *, phase, evicted, finished=False, hoh="npc:1", week=4):
+def _board_fakes(monkeypatch, *, phase, evicted, finished=False, hoh="npc:1", week=4,
+                 noms=("npc:2", "npc:3"), veto_holder=None):
     house = [{"id": "player", "status": "active"}]
     for i in range(evicted):
         house.append({"id": f"npc:{100 + i}", "status": "evicted"})
@@ -59,8 +60,9 @@ def _board_fakes(monkeypatch, *, phase, evicted, finished=False, hoh="npc:1", we
         return {
             "week": week, "phase": phase,
             "hoh": {"id": hoh} if hoh else None,
-            "nominees": [{"id": "npc:2"}, {"id": "npc:3"}],
-            "veto": {"holder": None, "used": False, "players": []},
+            "nominees": [{"id": n} for n in (noms or [])],
+            "veto": {"holder": ({"id": veto_holder} if veto_holder else None),
+                     "used": False, "players": []},
             "pending": None, "beatSeq": 7,
         }
 
@@ -143,6 +145,86 @@ def test_real_winner_emits(monkeypatch):
     _board_fakes(monkeypatch, phase="finale", evicted=13, finished=True)  # season really ended
     emit = _run(chat_helpers.screen_streamed_outcome(
         _USER, "The houseguest is crowned the winner of the season."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+# ── #574 (NARR-8): nomination & veto-winner closed-set claims ──────────────── #
+
+def test_pre_filter_matches_nomination_and_veto_claims():
+    assert chat_helpers._sentence_has_closed_set_claim("She nominates two houseguests for eviction.")
+    assert chat_helpers._sentence_has_closed_set_claim("He puts the rivals on the block.")
+    assert chat_helpers._sentence_has_closed_set_claim("She wins the Power of Veto!")
+
+
+def test_phantom_nomination_is_held(monkeypatch):
+    """A nomination narrated in the nomination phase, but the nominee set never moved → HOLD."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 4, "phase": "nominations", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 2, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="nominations", evicted=2,
+                 noms=("npc:2", "npc:3"))  # nominee set did NOT change
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "At the ceremony, the Head of Household nominates two houseguests for eviction."))
+    assert emit is False
+    assert "NOMINATION" in chat_helpers._DESYNC_REGROUND[_USER]
+
+
+def test_real_nomination_emits(monkeypatch):
+    """The nominee set really moved → EMIT, no re-ground."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 4, "phase": "nominations", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 2, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="nominations", evicted=2,
+                 noms=("npc:4", "npc:5"))  # new nominees committed
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "The Head of Household puts two houseguests on the block."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_nomination_claim_outside_nom_phase_is_flavor(monkeypatch):
+    """"I might nominate you" outside the nomination beat is plan/flavor → EMIT (never policed)."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 4, "phase": "social", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 2, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="social", evicted=2, noms=("npc:2", "npc:3"))
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "She whispers that she might nominate the rivals for eviction next week."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_phantom_veto_winner_is_held(monkeypatch):
+    """A veto win narrated in the veto phase, but the veto holder never changed → HOLD."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 4, "phase": "veto", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 2, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="veto", evicted=2, veto_holder=None)  # no holder committed
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "After the comp, the underdog wins the Power of Veto."))
+    assert emit is False
+    assert "VETO" in chat_helpers._DESYNC_REGROUND[_USER]
+
+
+def test_real_veto_winner_emits(monkeypatch):
+    """The veto holder really changed → EMIT, no re-ground."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 4, "phase": "veto", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 2, "finished": False,
+    }
+    _board_fakes(monkeypatch, phase="veto", evicted=2, veto_holder="npc:2")  # a winner committed
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "After the comp, the underdog wins the Power of Veto."))
     assert emit is True
     assert _USER not in chat_helpers._DESYNC_REGROUND
 

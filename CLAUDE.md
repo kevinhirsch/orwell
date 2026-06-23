@@ -10,8 +10,8 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-20).** Specs now run
-through **0069** and the built set is **green** — the lone deliberate deferral is **0022 (MVP-2)**, and the
+**Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-23).** Specs now run
+through **0074** and the built set is **green** — the lone deliberate deferral is **0022 (MVP-2)**, and the
 reconciled per-feature index in `docs/features/README.md` is authoritative for built vs. spec-only — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
 priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
@@ -33,7 +33,10 @@ the window audit (`docs/audits/2026-06-11-dwe-window-audit.md`), the `OrwellWind
 MUST compose the kit.)* The game is **folded into the main chat**: the player-facing tier is the vendored
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
-`docs/features/` (through **0069** — 0067/0068 public-internet exposure + ADR 0007, 0069 token economy;
+`docs/features/` (through **0074** — 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
+0070 off-screen texture enrichment, 0071 defensive hardening (redaction + URL/path guards), 0072 the
+multi-platform gateway, 0073 the structural anti-sycophancy game-build wall (a CI gate), and 0074 local &
+tunable HTTPS (ADR 0014);
 0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
@@ -498,13 +501,15 @@ TS tooling (see `frontend/INTEGRATION.md`).
 
 ## Current status
 
-**Built BDD/TDD-first and feature-complete through the drafted spec set (0001–0069).** The eight
+**Built BDD/TDD-first and feature-complete through the drafted spec set (0001–0074).** The eight
 priority invariants, the MCP seam, the full weekly loop, per-user sandboxes, durable persistence, the
 live off-screen society, the endgame + interactive finale, the character-evolution linchpin (0041),
 deep character profiles (0058), seasons-as-levels, multi-device sync (0064), the LLM↔engine sync spine
 (0065), in-game time + the sleep economy (0066 / ADR 0006), public-internet exposure (0067/0068 / ADR
-0007), and the token economy + usage envelope (0069) are all in. The **one deliberate deferral is
-0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the UI).
+0007), the token economy + usage envelope (0069), off-screen texture enrichment (0070), defensive
+hardening (0071), the multi-platform gateway (0072), the structural anti-sycophancy game-build wall as
+a CI gate (0073), and local & tunable HTTPS (0074 / ADR 0014) are all in. The **one deliberate deferral
+is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the UI).
 
 **Trust the code over this prose — it drifts.** The authoritative sources, in order:
 - `docs/features/README.md` — the per-feature status index, reconciled against the source (built /
@@ -573,9 +578,9 @@ modifier; Character/Soul split; organic relationship model; veto "Houseguest's C
    is open — the bound's exact feel, and whether sleep cost reaches past competitions — per ADR 0006's
    "Open / to confirm".
 
-6. ✅ **Public exposure, cross-device consistency, location, token economy & the live mirror** — ADRs
-   **0007–0013**, all **accepted and built** (features 0067/0068 public exposure, 0069 token
-   economy/usage envelope, and the 0008/0011/0012 multi-window seams all shipped). Their *residual* open
+6. ✅ **Public exposure, cross-device consistency, location, token economy, the live mirror & local HTTPS** — ADRs
+   **0007–0014**, all **accepted and built** (features 0067/0068 public exposure, 0069 token
+   economy/usage envelope, 0074 local & tunable HTTPS (ADR 0014), and the 0008/0011/0012 multi-window seams all shipped). Their *residual* open
    items are **tuning, owed
    verification runs, and post-launch refactor** — **not** unbuilt architecture: ADR 0010 token-economy
    follow-ons (per-class `max_tokens` runtime-edit; model-aware reasoning sizing; ledger

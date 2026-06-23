@@ -60,6 +60,28 @@ describe("ADR 0006 — the clock runs and is surfaced (opt-in)", () => {
     expect(REST).toContain(rest);
   });
 
+  it("#537 — a staged competition does NOT advance the clock through a whole day", () => {
+    process.env.ORWELL_TIME_OF_DAY = "1";
+    const s = started();
+    // Walk the first HOH competition to its crown. It is STAGED: it pauses for the player's per-round
+    // approach and emits inert `comp-elimination` reveals. NONE of those presentation steps may advance
+    // the clock — only the substantive crown beat does. Capture the time-of-day across the whole comp.
+    const phases = new Set<string>();
+    for (let i = 0; i < 30; i++) {
+      const adv = s.advanceGame();
+      phases.add(s.gameStatus().timeOfDay!);
+      if (adv.pending) resolveLegally(s, adv.pending);
+      // Stop once the HOH is crowned (the comp resolved) — we only care about the comp itself.
+      if (adv.event?.beat === "hoh-competition") break;
+      if (adv.finished) break;
+    }
+    // Pre-fix, the per-round pauses cycled morning→afternoon→evening→night→late-night within this ONE
+    // competition (a whole day spent crowning one HOH). The clock now ticks on substantive play only, so
+    // a single competition occupies at most a couple of phases — never a full day's worth of them.
+    expect(phases.size).toBeLessThanOrEqual(2);
+    expect(phases.has("morning")).toBe(true); // the comp ran on the day it began, not a wrapped one
+  });
+
   it("the bedtime lever turns the player in: it rolls to the next morning and reads rested", () => {
     process.env.ORWELL_TIME_OF_DAY = "1";
     const s = started();

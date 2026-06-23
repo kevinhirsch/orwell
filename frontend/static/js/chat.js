@@ -3307,6 +3307,20 @@ import { isNarrow } from './platform.js';
     } finally {
       clearResponseTimeout();
       clearProcessingProbe();
+      // #615: a mid-stream engine-tool error (e.g. a 409 stale-beat) can throw out of the reader
+      // loop with a tool node still in `.running`. `tool_output` (which normally clears that node's
+      // 50ms _elapsedTicker / 100ms _waveInterval) never arrives, so the ticker fires forever on the
+      // orphaned node. The catch's `else` branch sweeps it, but only on the surfaced-error path —
+      // a thrown error that is caught/handled elsewhere (or any unexpected exit) skips it. Sweep
+      // here unconditionally as the backstop: clearing an already-cleared ticker is a no-op, and by
+      // finally-time this turn's reader has ended so any still-`.running` node is genuinely orphaned.
+      try {
+        document.querySelectorAll('.agent-thread-node.running').forEach(node => {
+          if (node._waveInterval) { clearInterval(node._waveInterval); node._waveInterval = null; }
+          if (node._elapsedTicker) { clearInterval(node._elapsedTicker); node._elapsedTicker = null; }
+          node.classList.remove('running');
+        });
+      } catch (_) {}
       // P1 (OOBE cutover): safety net — never leave the "finalizing" indicator stuck if the turn
       // ended (or errored) without any narration token to clear it.
       if (_orwellFinalizingActive) {

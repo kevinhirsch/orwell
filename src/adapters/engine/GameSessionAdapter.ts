@@ -113,7 +113,7 @@ import {
   newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
-  advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit,
+  advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
@@ -3379,10 +3379,20 @@ export class GameSessionAdapter implements GameSession {
       let ev: BeatEvent | null = null;
       if (!this.live!.pending && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
-        // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per advance, cycling toward
-        // late-night and wrapping to a new morning (banking a late night the player never ended). The
-        // diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
-        if (this.timeOfDayEnabled) advanceClock(this.live!);
+        // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per SUBSTANTIVE advance, cycling
+        // toward late-night and wrapping to a new morning (banking a late night the player never ended).
+        // The diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
+        //
+        // #537: the clock advances by SUBSTANTIVE PLAY — once per resolved ceremony/eviction/finale
+        // beat — never on a staged competition's per-round PRESENTATION (the `comp-round` PAUSES, which
+        // emit no event, and the inert `comp-elimination` reveal beats: no rng, no fold, no soul
+        // inflection — see `advanceCompetition`/`stagedTrajectoryNeutral`). Advancing on each of those
+        // cycled most of a day inside ONE competition (the HOH crowned at late-night the morning it
+        // began). The clock still INITIALIZES on the first advance (so the HUD/rest cue are live from
+        // turn one) even before the first substantive beat lands.
+        if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
+          advanceClock(this.live!);
+        }
         this.commit(ev);
       }
       // Surface the just-resolved beat (it is player-witnessed) so the finale reveal/result beats
@@ -3912,7 +3922,12 @@ export class GameSessionAdapter implements GameSession {
     return {
       started: this.house !== null,
       beatSeq: this.beatSeq, // 0065 Part A — the counter AFTER this advance/decision committed
-      event: ev ? { beat: ev.beat, content: this.humanize(ev.content) } : null,
+      // EVT-1 (#569): project the beat's PUBLIC participants (id + name only) alongside the prose, so
+      // ceremony result identities are structured, not prose-only. Vault-free — `participants` carries
+      // public houseguest ids, never hidden state.
+      event: ev
+        ? { beat: ev.beat, content: this.humanize(ev.content), participants: ev.participants.map((id) => this.named(id)!) }
+        : null,
       pending: this.pendingView(),
       status: this.gameStatus(),
       finished: !!s?.finished,

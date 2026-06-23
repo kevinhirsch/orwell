@@ -69,21 +69,72 @@ describe("loyalty (the ethereal↔static dial)", () => {
     expect(mixed.loyaltyStrength).toBeLessThan((0.8 + 0.8 + 0.45) / 3);
   });
 
-  it("a low-loyalty member with a stronger outside bond peels off BEFORE any betrayal", () => {
+  it("a low-loyalty member with a stronger MUTUAL outside bond defects off the bloc", () => {
     const rel = new RelationshipModel(0.5);
-    const [a, b, c] = trio(rel);
+    // A clique {a,b,c} where c's weakest inside tie is small enough to be beaten by a mutual outside
+    // bond, yet the inside edges are strong enough that c first clusters INTO the bloc (so the
+    // DEFECTION pass — not re-clustering — is what removes c).
+    const [a, b, c] = [npc(1), npc(2), npc(3)];
+    bond(rel, a, b, 0.9); bond(rel, a, c, 0.9); bond(rel, b, c, 0.6);
     const tempter = npc(8);
-    // A ONE-WAY infatuation: the member's pull outward is strong, but the tempter doesn't
-    // reciprocate enough to form a bloc edge — the tempter stays OUTSIDE the bloc.
-    const e = rel.edge(c!, tempter); e.trust = 0.95; e.affinity = 0.95;
+    // SOC-NEW-2 (#563): the outside attraction must be MUTUAL (both directions) to peel a member off —
+    // measured by the same `mutualBond` an inside tie is. A mutual c↔tempter of 0.75 beats c's weakest
+    // inside tie (b↔c=0.6) by the margin. The tempter stays COOL toward a and b (below the bloc-edge
+    // threshold), so it never clique-joins {a,b,c}; c clusters in first, then defects out.
+    bond(rel, c, tempter, 0.75);
+    bond(rel, a, tempter, 0.2); bond(rel, b, tempter, 0.2);
     const loyalties = (id: EntityId): number => (id === c ? 0.2 : 0.9);
-    const blocs = detectBlocs({ rel, active: [a!, b!, c!, tempter], loyaltyOf: loyalties });
-    const bloc = blocFor(blocs, a!);
+    const blocs = detectBlocs({ rel, active: [a, b, c, tempter], loyaltyOf: loyalties });
+    const bloc = blocFor(blocs, a);
     expect(bloc).toBeTruthy();
     expect(bloc!.members).not.toContain(c); // defected — and nothing stored existed to update
     // A HIGH-loyalty member under the same temptation stays.
-    const stays = detectBlocs({ rel, active: [a!, b!, c!, tempter], loyaltyOf: () => 0.9 });
-    expect(blocFor(stays, a!)!.members).toContain(c);
+    const stays = detectBlocs({ rel, active: [a, b, c, tempter], loyaltyOf: () => 0.9 });
+    expect(blocFor(stays, a)!.members).toContain(c);
+  });
+
+  it("an UNREQUITED outside infatuation does NOT peel a member off (#563)", () => {
+    const rel = new RelationshipModel(0.5);
+    const [a, b, c] = trio(rel);
+    const tempter = npc(8);
+    // A ONE-WAY infatuation: c's pull outward is strong, but `tempter` does not reciprocate (the
+    // reverse edge stays at the neutral default). A crush nobody returns is not a real outside tie, so
+    // it must NOT defect c — even a low-loyalty member stays put when the temptation is unrequited.
+    const e = rel.edge(c!, tempter); e.trust = 0.95; e.affinity = 0.95;
+    const loyalties = (id: EntityId): number => (id === c ? 0.2 : 0.9);
+    const blocs = detectBlocs({ rel, active: [a!, b!, c!, tempter], loyaltyOf: loyalties });
+    expect(blocFor(blocs, a!)!.members).toContain(c); // no mutual outside tie ⇒ no defection
+  });
+
+  it("#585 — defection is two-phase: the result is independent of member iteration order", () => {
+    // Two low-loyalty members of one cluster, each with a strong MUTUAL outside tie that beats their
+    // weakest inside tie. Under the old in-pass mutation, an early defection changed the cluster a
+    // later member was judged against (an order-dependent cascade). Two-phase decides both against the
+    // same immutable snapshot, so the outcome must not depend on the order the active set is given.
+    const build = (active: EntityId[]): RelationshipModel => {
+      const rel = new RelationshipModel(0.5);
+      const [a, b, c, d] = [npc(1), npc(2), npc(3), npc(4)];
+      // A four-clique with c and d the weak links.
+      bond(rel, a, b, 0.9); bond(rel, a, c, 0.9); bond(rel, a, d, 0.9);
+      bond(rel, b, c, 0.9); bond(rel, b, d, 0.9); bond(rel, c, d, 0.6);
+      // Each weak member has a mutual outside tie (to its own cool-toward-the-clique tempter) that
+      // beats its weakest inside tie (c↔d=0.6) by the margin.
+      const tc = npc(8), td = npc(9);
+      bond(rel, c, tc, 0.75); bond(rel, a, tc, 0.2); bond(rel, b, tc, 0.2); bond(rel, d, tc, 0.2);
+      bond(rel, d, td, 0.75); bond(rel, a, td, 0.2); bond(rel, b, td, 0.2); bond(rel, c, td, 0.2);
+      void active;
+      return rel;
+    };
+    const loyalties = (id: EntityId): number => (id === npc(3) || id === npc(4) ? 0.2 : 0.9);
+    const orderA = [npc(1), npc(2), npc(3), npc(4), npc(8), npc(9)];
+    const orderB = [npc(4), npc(3), npc(2), npc(1), npc(9), npc(8)];
+    const membersOf = (active: EntityId[]): string =>
+      JSON.stringify(detectBlocs({ rel: build(active), active, loyaltyOf: loyalties }).map((bl) => [...bl.members].sort()));
+    expect(membersOf(orderA)).toBe(membersOf(orderB));
+    // And concretely: BOTH weak members defect off the core {a,b}.
+    const core = blocFor(detectBlocs({ rel: build(orderA), active: orderA, loyaltyOf: loyalties }), npc(1));
+    expect(core!.members).not.toContain(npc(3));
+    expect(core!.members).not.toContain(npc(4));
   });
 });
 

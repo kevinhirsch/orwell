@@ -122,7 +122,7 @@ export function diffuseGossip(deps: {
   sceneType?: string;
 }): { factId: string; original: string } {
   const { knowledge, graph, rng, origin, fact, rounds, rel, subjects, sceneType } = deps;
-  const transmitProb = deps.transmitProb ?? 0.8;
+  const transmitProb = deps.transmitProb ?? GOSSIP.transmitProb;
   const decay = deps.decay ?? 0.7;
   const heard = sceneType ? GOSSIP_HEARD[sceneType] : undefined;
   /** The E44 receipt fold: listener → each subject (≠ self, ≠ player-holder), scaled by confidence. */

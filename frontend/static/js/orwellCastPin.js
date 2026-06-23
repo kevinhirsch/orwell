@@ -62,8 +62,14 @@
       "  min-height: 24px; padding: 0 .45rem; opacity: .8; }" +
       "#orwell-cast-pin .ocp-btn:hover, #orwell-cast-pin .ocp-btn:focus-visible { opacity: 1;" +
       "  background: rgba(255,255,255,.12); }" +
-      "#orwell-cast-pin .ocp-portraits { display: flex; gap: .4rem; }" +
-      "#orwell-cast-pin .ocp-face { flex: 1 1 0; min-width: 0; aspect-ratio: 1 / 1; border-radius: 8px;" +
+      // #554: a scrollable responsive grid (target ~4 across) rendering the FULL cast —
+      // active, jury AND evicted — instead of just two portraits. Capped height so the
+      // gadget stays compact in the rail; the grid scrolls when the cast overflows.
+      "#orwell-cast-pin .ocp-portraits { display: grid;" +
+      "  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: .35rem;" +
+      "  max-height: 188px; overflow-y: auto; overscroll-behavior: contain;" +
+      "  padding-right: 2px; }" +
+      "#orwell-cast-pin .ocp-face { min-width: 0; aspect-ratio: 1 / 1; border-radius: 8px;" +
       "  overflow: hidden; background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);" +
       "  display: flex; align-items: center; justify-content: center; }" +
       "#orwell-cast-pin .ocp-face img { width: 100%; height: 100%; object-fit: cover; }" +
@@ -127,15 +133,19 @@
     var roster = (data && Array.isArray(data.roster)) ? data.roster : [];
     if (!roster.length) { el.style.display = "none"; return; }
 
-    // Two small portraits side by side: prefer two ACTIVE houseguests (the live
-    // house), portraits first, then fill from whoever remains.
-    var active = roster.filter(function (h) { return !h.status || h.status === "active"; });
-    var pool = active.length ? active : roster;
-    var withFace = pool.filter(function (h) { return h.portrait; });
-    var pick = withFace.concat(pool.filter(function (h) { return !h.portrait; })).slice(0, 2);
+    // #554: render the FULL cast as a scrollable grid (active first, then jury/evicted —
+    // never drop later boots). The grid is height-capped + scrolls, so the gadget stays
+    // compact in the rail while still showing everyone.
+    function rank(h) {
+      var s = h && h.status;
+      if (!s || s === "active") return 0;
+      if (s === "jury") return 1;
+      return 2; // evicted / other
+    }
+    var ordered = roster.slice().sort(function (a, b) { return rank(a) - rank(b); });
 
     var faces = el.querySelector('[data-role="portraits"]');
-    faces.innerHTML = pick.map(faceHtml).join("") || '<div class="ocp-face"><span class="ocp-ph">👤</span></div>';
+    faces.innerHTML = ordered.map(faceHtml).join("") || '<div class="ocp-face"><span class="ocp-ph">👤</span></div>';
 
     var present = roster.filter(function (h) { return !h.status || h.status === "active"; }).length;
     var foot = el.querySelector('[data-role="foot"]');

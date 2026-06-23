@@ -313,6 +313,32 @@
   </div>
   <script nonce="{{CSP_NONCE}}">
   (function(){
+    // #614: per-user client-storage namespace. Many surfaces key localStorage by
+    // document.body.dataset.user (welcome-seen, composer draft, window geometry, cast-pin), but
+    // nothing ever SET it — so two accounts on ONE browser collapsed into the same empty ("")
+    // namespace and shared each other's transient client state. Set it as EARLY as possible from
+    // the session identity. Seed synchronously from the last-known value (instant, correct for the
+    // common single-account browser) then confirm via /api/auth/status — on a DIFFERENT user we
+    // re-key and refresh the namespace-sensitive panels through the single dispatcher.
+    try {
+      var seed = '';
+      try { seed = sessionStorage.getItem('orwell-current-user') || ''; } catch(_){}
+      if (seed && document.body) document.body.dataset.user = seed;
+      fetch('/api/auth/status', { credentials: 'same-origin' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          var u = (d && d.username) ? String(d.username) : '';
+          if (!document.body) return;
+          if (document.body.dataset.user !== u) {
+            document.body.dataset.user = u;
+            try { sessionStorage.setItem('orwell-current-user', u); } catch(_){}
+            // namespace changed mid-boot — let the per-user panels re-read their keyed state.
+            try { if (window.orwellGameChanged) window.orwellGameChanged('user-identified'); } catch(_){}
+          }
+        })
+        .catch(function(){});
+    } catch(_){}
+
     var el=document.getElementById('loader-wave');
     if(!el)return;
     // J1-29: honor prefers-reduced-motion — hold a static frame instead of animating the wave.
@@ -2524,6 +2550,7 @@
 <script type="module" src="/static/js/orwellEngineStatus.js"></script>  <!-- BB engine-down banner: visible OOC error reporting -->
 <script type="module" src="/static/js/orwellDecision.js"></script>  <!-- BB decisions: confirm-on-binding guardrail (Vault-free, C20) -->
 <script src="/static/js/orwellComposerDraft.js"></script>  <!-- BB composer draft: {text, drMode, pendingApproachId} survives refresh; DR mode restores BEFORE text (G17, audit F3/F5/F7) -->
+<script src="/static/js/orwellScrollBottom.js"></script>  <!-- #538: "see latest" floating scroll-to-bottom button (appears when scrolled up; unread badge; reduced-motion safe) -->
 <script type="module" src="/static/js/orwellChatHint.js"></script>  <!-- The one reusable chat-bar hint surface (OrwellChatHint.register/show); ships with NO active tips -->
 <script type="module" src="/static/js/orwellOocAside.js"></script>  <!-- L36: OOC aside channel — `((...))`/`ooc:` detection drives the player-input bubble style (the old composer tip is gone; hints live in orwellChatHint.js) -->
 <script src="/static/js/orwellPremiereTutorial.js"></script>  <!-- L31 (FE): the premiere is a light, one-time, dismissible tutorial card (week 1) — sets the weekly-rhythm expectation, never replaces the chat -->

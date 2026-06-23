@@ -1541,6 +1541,27 @@ _LULL_READY_RE = re.compile(
 )
 _LULL_SHORT_CHARS = 70  # a brief reply with no substance reads as a lull
 
+# #549: an explicit "finalize the casting" readiness signal that may appear in an otherwise
+# SUBSTANTIVE sentence (so it is NOT caught by the lull gate / _LULL_SHORT_CHARS). When the engine
+# already reports casting ready+finalizable, this is enough to finalize without the model having to
+# emit a literal "lock it in" — we correct the model's omission, we do not author content.
+_CASTING_READY_RE = re.compile(
+    r"\b(lock (it|me) in|put me in the house|start the (game|season)|let'?s start the (game|season)|"
+    r"i'?m ready (to|for) (start|play|go|the game)|finalize (my )?(casting|cast|character)|"
+    r"open the doors|send me in|i'?m ready to (enter|go in)|done with (the )?(casting|interview)|"
+    r"let'?s (begin|kick this off|get this (started|going))|ready to play)\b",
+    re.IGNORECASE,
+)
+
+
+def _player_signals_casting_ready(messages) -> bool:
+    """#549 — the player explicitly signalled they're ready to finalize casting, even in a long
+    sentence the lull gate would miss. A hidden production cue is never the player."""
+    last = (_extract_last_user_message(messages) or "").strip()
+    if not last or _is_production_cue(last):
+        return False
+    return bool(_CASTING_READY_RE.search(last) or _LULL_READY_RE.search(last))
+
 
 # A hidden PRODUCTION CUE is engine/FE-authored text injected as a user message (e.g. the post-photo
 # "continue the casting interview" auto-cue from orwellOnboarding.js via sendHiddenCue) — NOT the
@@ -4106,8 +4127,13 @@ async def stream_agent_loop(
                 # the stall counter — a string of mobile cancellations would otherwise reach the forced
                 # finalize on a name-only intake. `_emitted_visible` is False on such a turn.
                 _turn_was_cancelled = not _emitted_visible
-                if (not _created_this_turn and not _turn_was_cancelled
-                        and owner is not None and _player_turn_is_lull(messages)):
+                # #549: run the finalize check on a lull OR an explicit readiness signal — a player
+                # who is plainly ready in a substantive sentence ("let's start the game, I'll target
+                # the comp beasts") would otherwise skip this block entirely (not a short lull) and
+                # the engine-ready season would never start until they said a bare "lock it in".
+                _player_ready_signal = _player_signals_casting_ready(messages)
+                if (not _created_this_turn and not _turn_was_cancelled and owner is not None
+                        and (_player_turn_is_lull(messages) or _player_ready_signal)):
                     try:
                         from src import orwell_engine as _oec
                         _cs = await _oec.get_game_state(owner)
@@ -4127,7 +4153,11 @@ async def stream_agent_loop(
                     # had its un-forced chance this round and chose not to finalize) instead of
                     # requiring the full ~3-lull escalation; a mere short/disengaged lull still gets
                     # the gentler ramp. Still gated on engine `finalizable` (never mints a floater).
-                    _explicit_ready = bool(_LULL_READY_RE.search(_extract_last_user_message(messages) or ""))
+                    # #549: an explicit readiness signal (the broader _CASTING_READY_RE too, e.g.
+                    # "let's start the game") forces THIS turn when the engine is finalizable —
+                    # the player asked, the engine is ready, so finalize rather than re-interview.
+                    _explicit_ready = _player_ready_signal or bool(
+                        _LULL_READY_RE.search(_extract_last_user_message(messages) or ""))
                     if _ready and _finalizable:
                         # The interview is genuinely complete (name + backstory + motivation + a
                         # persona/strategy answer): nudge, then FORCE the finalize the engine accepts.

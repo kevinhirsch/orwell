@@ -3261,25 +3261,10 @@ function initializeEventListeners() {
     textarea.addEventListener('paste', () => {
       setTimeout(() => uiModule.autoResize(textarea), 1);
     });
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        // If ghost autocomplete is active, accept the suggestion instead of submitting
-        if (window._ghostAutocomplete && window._ghostAutocomplete.isActive()) {
-          e.preventDefault();
-          e.stopPropagation();
-          window._ghostAutocomplete.accept();
-          return;
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        // Check if already submitting before triggering form submission
-        const form = el('chat-form');
-        if (form) {
-         const submitBtn = form.querySelector('button[type="submit"]');
-         if (submitBtn) submitBtn.click();
-        }
-      }
-    });
+    // NOTE: the Enter-to-submit keydown handler lives once on `messageInput`
+    // below (~3832). A second handler here caused #532 (a sibling keydown firing
+    // after submit cleared the textarea → empty send); it was removed. Ghost
+    // autocomplete accept-on-Enter is preserved in that single handler.
   }
 
   // ── Ghost text autocomplete for /new and /create commands ──
@@ -3831,6 +3816,13 @@ function startOrwellApp() {
   if (messageInput) {
     messageInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        // If ghost autocomplete is active, accept the suggestion instead of submitting.
+        if (window._ghostAutocomplete && window._ghostAutocomplete.isActive()) {
+          e.preventDefault();
+          e.stopPropagation();
+          window._ghostAutocomplete.accept();
+          return;
+        }
         e.preventDefault();
         // OOBE image gate (P1): pre-game, Enter must not send (or open a new chat) until a cast
         // photo is secured — the image step is the player's first interaction. Fail-open guard

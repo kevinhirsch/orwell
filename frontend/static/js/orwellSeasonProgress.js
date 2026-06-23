@@ -245,11 +245,34 @@
     _ensureRailObserver(reflow);
   }
 
+  // ── the chat title (#557) ───────────────────────────────────────────────────
+  // The session is named "Casting interview" at casting and never renamed server-side, so the
+  // top-bar title (#current-meta) stayed stuck on it for the whole game. Once the season is LIVE
+  // we paint a season/week-based title here (the same poll that drives the bar/chip), so the
+  // title advances past casting. Pre-game we leave the casting title untouched. FE-only; no
+  // gamechanged dispatch — this only reads the Vault-free projection and sets DOM text.
+  function paintTitle(started, status, state, season) {
+    const metaEl = document.getElementById("current-meta");
+    if (!metaEl) return;
+    if (!started) return; // pre-game: keep the casting title
+    const postSeason = state && state.moment === "post-season";
+    const seasonPrefix = (typeof season === "number" && season >= 2) ? ("Season " + season + " · ") : "";
+    let title;
+    if (postSeason) {
+      title = seasonPrefix + "Finale";
+    } else {
+      const week = (status && status.week) || (state && state.week) || 1;
+      title = seasonPrefix + "Week " + week;
+    }
+    if (metaEl.textContent !== title) metaEl.textContent = title;
+  }
+
   // ── the refresh cycle ─────────────────────────────────────────────────────
   async function refresh() {
     // The chip is independent of game state — show "Season N" whenever N ≥ 2.
     const seasonResp = await jgetSafe("/api/orwell/season");
-    paintChip(seasonResp && typeof seasonResp.season === "number" ? seasonResp.season : 1);
+    const seasonNum = seasonResp && typeof seasonResp.season === "number" ? seasonResp.season : 1;
+    paintChip(seasonNum);
 
     const status = await jgetSafe("/api/orwell/status");
     const state = await jgetSafe("/api/orwell/state");
@@ -257,6 +280,7 @@
     // Pre-game (no started season) → no bar. Treat an honest {started:false} as pre-game.
     const started = (status && status.started !== false && typeof status.week === "number" && status.week >= 1) ||
                     (state && state.started === true);
+    paintTitle(started, status, state, seasonNum);
     if (!started) {
       _lastPct = 0;
       hideBar();

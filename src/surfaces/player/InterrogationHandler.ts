@@ -5,7 +5,7 @@
  */
 export class InterrogationHandler {
   static readonly NONCOMMITTAL =
-    "I can't confirm or deny what's in the Vault. You'll find that out through gameplay.";
+    "I can't confirm or deny that. You'll find that out through gameplay.";
 
   ask(_question: string): string {
     return InterrogationHandler.NONCOMMITTAL;

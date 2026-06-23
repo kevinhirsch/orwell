@@ -941,13 +941,28 @@ def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: s
     d.mkdir(parents=True, exist_ok=True)
     _ensure_cast_epoch(user)  # the per-cast URL version exists the moment any portrait is persisted
     filename = f"{_safe_id(houseguest_id)}.png"
-    (d / filename).write_bytes(png)
+    target = d / filename
+    # #531: detect an IN-PLACE byte replacement (a mid-season re-shoot off a changed facet —
+    # `generate_and_store` overwrites the same id+name file). The `?v=<epoch>` URL is otherwise
+    # byte-identical to the stale one, so with `Cache-Control: private, max-age=86400` a browser
+    # that cached the old face keeps showing it while a fresh session fetches the re-shot one.
+    replaced_in_place = target.exists()
+    target.write_bytes(png)
     manifest = load_manifest(user)
     entry = {"file": filename, "name": name, "source": source}
     if fingerprint:
         entry["fingerprint"] = fingerprint
     manifest[_safe_id(houseguest_id)] = entry
     _save_manifest(user, manifest)
+    if replaced_in_place:
+        # Rotate the cast cache epoch so EVERY portrait URL changes (`?v=<new>`) and the re-shot
+        # face is fetched fresh on every session/device. The other portraits' bytes are unchanged,
+        # so this only costs a one-time cache miss — never a re-shoot (generate-once still holds).
+        try:
+            _save_cast_epoch(user, secrets.token_hex(4))
+        except OSError as e:
+            logger.info("[portraits] could not rotate cast epoch on re-shoot for %s: %s",
+                        _safe_user(user), e)
     return filename
 
 
