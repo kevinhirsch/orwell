@@ -163,6 +163,80 @@ prompt-injection test (none exists today).
 
 ---
 
+## ISSUE-8 — Player/NPC location in chat text doesn't match the engine
+
+**Severity:** medium — presence grounding (ADR 0009 / feature 0076).
+
+**Root cause:** location has a single engine source of truth (`GameSessionAdapter.presence`,
+read through one Vault-free `whereabouts()` projection used by the HUD, the engine tool, and the
+moment prompt alike — no second store drifting). The mismatch is the **model improvising a
+houseguest's position without calling `moveTo`/`moveHouseguest`**. The narrated-move belt
+`_auto_move_npc` (`frontend/src/agent_loop.py:1851`) folds narrated moves back into the engine,
+but its pre-filter `_MOVE_SIGNAL_RE` (`agent_loop.py:1766`) only fires on **movement verbs** — a
+scene that simply *describes* an NPC as sitting/leaning/lounging in a room (invented static
+presence, no movement verb) never trips it, so the engine is never corrected and the next gadget
+poll snaps the NPC back, reproducing the contradiction. The pre-emission location guard
+(`chat_helpers.py:1236`) is deliberately scoped to *evicted*-in-a-room only, so an active NPC in
+the wrong room isn't caught before emission either.
+
+**Fix (smallest, lowest-risk):** broaden `_MOVE_SIGNAL_RE` (`agent_loop.py:1766`) to also fire the
+NPC-move extraction on *static* in-room presence language (sit/stand/lean/lounge/perched + a room
+word) — the same vocabulary `_EVICTED_PRESENCE_RE` already enumerates — so the existing
+fold-prose-into-engine belt fires on the case it currently skips. The constrained extraction
+returns `moves:[]` when nothing moved and the engine refuses anything illegal, so creative prose
+is not at risk. (Deferred, architecturally-correct fix: the engine `displayed`/`live`
+double-buffer noted in `docs/decisions/0009-...md:189-209` — not small.)
+
+**Files:** `frontend/src/agent_loop.py:1766,1851,3763-3867`;
+`frontend/routes/chat_helpers.py:1030,1236`; `src/engine/momentPrompts.ts:778-817`;
+`src/adapters/engine/GameSessionAdapter.ts:1804`.
+
+---
+
+## ISSUE-9 — Time-of-day advances far too quickly
+
+**Severity:** medium — pacing (feature 0066 / ADR 0006).
+
+**Root cause:** `advanceClock` advances the clock **one phase per `advanceBeat`**
+(`src/adapters/engine/GameSessionAdapter.ts:3382-3385`), and it fires on **every** beat —
+including the **inert, presentation-only staged comp-round beats** that are batched ~4–8 per
+competition (`STAGED_TARGET_ROUNDS`). So a single staged competition cycles the clock through the
+entire morning→…→late-night day and wraps to a new morning, all within one comp. The clock is
+coupled 1:1 to micro-beat count rather than to in-fiction day progression.
+
+**Fix:** exclude inert/presentation beats from the clock the same way the staged model already
+keeps them neutral for rng/fold/soul (`stagedTrajectoryNeutral` is the precedent) — i.e. only
+advance the clock on substantive/binding beats, or move it to a coarser day cadence (e.g. per
+ceremony-day boundary) so a single comp can't blow through the whole day. Tune against ADR 0006's
+"a week = 5 days" cadence.
+
+**Files:** `src/adapters/engine/GameSessionAdapter.ts:3378-3391`; `src/engine/liveSeason.ts:848`
+(`advanceClock`), `advanceBeat` beat-typing; `src/engine/timeOfDay.ts`.
+
+---
+
+## ISSUE-10 — Add a "see latest" / scroll-to-bottom button (feature request)
+
+**Severity:** low — UX affordance.
+
+**Request:** when the player has scrolled up and newer chat messages have arrived, show a
+down-arrow "see latest" button to jump back to the bottom.
+
+**Current state:** the chat already detects scroll position and *keeps the reader's place* when
+they're scrolled up (`frontend/static/js/chat.js:3817-3832`, `nearBottom` within 120px), but there
+is **no affordance to jump back to the latest** — the reader must scroll manually and has no
+indicator that new messages landed below.
+
+**Fix:** add a floating down-arrow button in the chat container that appears when
+`!nearBottom` (reuse the existing `nearBottom` computation), optionally with an unread/new-message
+badge, that scrolls to bottom (`uiModule.scrollHistory()` / `scrollHistoryInstant()`) and hides
+once at bottom. Pure FE; respect reduced-motion.
+
+**Files:** `frontend/static/js/chat.js:3817-3832` (scroll-position seam); chat container template +
+CSS.
+
+---
+
 ### Triage summary
 
 | # | Issue | Severity | Tier |
@@ -173,3 +247,6 @@ prompt-injection test (none exists today).
 | 5 | Typed text disappears → empty submit (double Enter handler) | medium | FE |
 | 3 | Repetitive cast features (uncapped hair/features) | medium | engine + FE |
 | 7 | Time-of-day chat↔HUD desync (narration not pinned) | medium | engine |
+| 8 | Player/NPC location text↔engine mismatch (moveTo under-call) | medium | FE |
+| 9 | Time-of-day advances too quickly (clock per micro-beat) | medium | engine |
+| 10 | "See latest" scroll-to-bottom button (feature request) | low | FE |
