@@ -87,6 +87,28 @@
         padding: 0; margin: 0; font: inherit; width: 100%; -webkit-appearance: none; appearance: none; }
       .ow-headshot-studio .hs-cand.sel { border-color: var(--brand-color, var(--accent, #4a9)); }
       .ow-headshot-studio .hs-cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      /* J3-15: a token-driven skeleton so an in-flight or broken thumbnail reads as "loading",
+         not a broken-image glyph. The shimmer plays while the tile carries .hs-loading (set until
+         the <img> fires load); a hard error swaps to .hs-broken (static placeholder, no shimmer).
+         Tokens (--panel / --border) keep it on-theme; reduced-motion freezes the sweep. */
+      .ow-headshot-studio .hs-cand.hs-loading,
+      .ow-headshot-studio .hs-libitem.hs-loading {
+        background: linear-gradient(100deg,
+          color-mix(in srgb, var(--panel, #11151c) 88%, transparent) 30%,
+          color-mix(in srgb, var(--border, #355a66) 60%, var(--panel, #11151c)) 50%,
+          color-mix(in srgb, var(--panel, #11151c) 88%, transparent) 70%);
+        background-size: 200% 100%; animation: hsSkeleton 1.1s ease-in-out infinite;
+      }
+      .ow-headshot-studio .hs-cand.hs-loading img,
+      .ow-headshot-studio .hs-libitem.hs-loading img { opacity: 0; }
+      .ow-headshot-studio .hs-cand.hs-broken,
+      .ow-headshot-studio .hs-libitem.hs-broken {
+        background: color-mix(in srgb, var(--panel, #11151c) 92%, var(--border, #355a66)); }
+      @keyframes hsSkeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+      @media (prefers-reduced-motion: reduce) {
+        .ow-headshot-studio .hs-cand.hs-loading,
+        .ow-headshot-studio .hs-libitem.hs-loading { animation: none;
+          background: color-mix(in srgb, var(--panel, #11151c) 88%, var(--border, #355a66)); } }
       .ow-headshot-studio .hs-cand:focus-visible, .ow-headshot-studio .hs-libpick:focus-visible {
         outline: 2px solid var(--brand-color, var(--accent, #4a9)); outline-offset: 2px; }
       .ow-headshot-studio .hs-lib { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border, #355a66); }
@@ -264,10 +286,24 @@
       if (!st.library.length) return "";
       return `<div class="hs-lib"><div class="hs-msg" style="margin-bottom:6px">Your headshots — tap one to use it</div>
         <div class="hs-libstrip">${st.library.map((h) =>
-          `<div class="hs-libitem${h.current ? " cur" : ""}">
+          `<div class="hs-libitem hs-loading${h.current ? " cur" : ""}">
              <button type="button" class="hs-libpick" data-pick="${esc(h.id)}" aria-pressed="${h.current ? "true" : "false"}" aria-label="${h.current ? "Current headshot" : "Use this saved headshot"}"><img src="${esc(h.ref)}" alt=""></button><button type="button" class="hs-libdel" data-del="${esc(h.id)}" title="Remove" aria-label="Remove headshot">×</button></div>`).join("")}</div></div>`;
     }
+    // J3-15: drive each thumbnail's skeleton/broken state off its <img>'s real load result, so a
+    // slow or failed portrait reads as "loading"/placeholder instead of a broken-image glyph. The
+    // tile (.hs-cand / .hs-libitem) mounts with .hs-loading; load clears it, error swaps .hs-broken.
+    function wireThumbStates(root) {
+      (root || document).querySelectorAll(".hs-cand.hs-loading img, .hs-libitem.hs-loading img").forEach((img) => {
+        const tile = img.closest(".hs-cand, .hs-libitem");
+        if (!tile) return;
+        const done = () => { tile.classList.remove("hs-loading"); };
+        if (img.complete && img.naturalWidth > 0) { done(); return; }
+        img.addEventListener("load", done, { once: true });
+        img.addEventListener("error", () => { tile.classList.remove("hs-loading"); tile.classList.add("hs-broken"); }, { once: true });
+      });
+    }
     function wireLibrary() {
+      wireThumbStates(body); // J3-15: skeleton/broken state for the saved-headshots strip too
       body.querySelectorAll("[data-pick]").forEach((d) => d.addEventListener("click", (e) => {
         if (e.target && e.target.closest("[data-del]")) return; // the × handles itself
         selectFromLibrary(d.dataset.pick);
@@ -309,12 +345,13 @@
         body.innerHTML = lib + `
           <div>${esc(_msg || "Pick your favorite — or generate 3 more.")}</div>
           <div class="hs-grid">${st.candidates.map((c, _n) =>
-            `<button type="button" class="hs-cand${st.selected === c.index ? " sel" : ""}" data-i="${c.index}" aria-pressed="${st.selected === c.index ? "true" : "false"}" aria-label="Portrait option ${_n + 1}"><img src="${esc(c.ref)}" alt=""></button>`).join("")}</div>
+            `<button type="button" class="hs-cand hs-loading${st.selected === c.index ? " sel" : ""}" data-i="${c.index}" aria-pressed="${st.selected === c.index ? "true" : "false"}" aria-label="Portrait option ${_n + 1}"><img src="${esc(c.ref)}" alt=""></button>`).join("")}</div>
           <div class="hs-actions">
             <button type="button" class="hs-btn" id="hs-use" ${st.selected === null ? "disabled" : ""}>Use this one</button>
             <button type="button" class="hs-btn hs-btn-ghost" id="hs-more">Generate 3 more</button>
             <button type="button" class="hs-btn hs-btn-ghost" id="hs-new">Upload a different photo</button>
           </div>`;
+        wireThumbStates(body);
         body.querySelectorAll(".hs-cand").forEach((d) => d.addEventListener("click", () => { st.selected = parseInt(d.dataset.i, 10); render(); }));
         body.querySelector("#hs-use").addEventListener("click", finalizeSelected);
         body.querySelector("#hs-more").addEventListener("click", studioGenerate);

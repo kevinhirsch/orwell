@@ -136,6 +136,15 @@
           #orwell-cast .oc-portrait img.oc-justin { animation: none; }
         }
         #orwell-cast .oc-ph { font-size: 1.6rem; opacity: .45; }
+        /* J2-15: per-houseguest monogram placeholder — a name-derived hue + the initial, so a
+           portrait-less roster still reads as 15 distinct people. Fills the square holder. The
+           hue comes from the name only (Vault-free); reduced-motion is irrelevant (no animation). */
+        #orwell-cast .oc-ph.oc-monogram {
+          width: 100%; height: 100%; opacity: 1; font-size: 1.5rem; font-weight: 700;
+          letter-spacing: .01em; line-height: 1; text-transform: uppercase;
+          background: hsl(var(--oc-mono-hue, 210) 42% 28%);
+          color: hsl(var(--oc-mono-hue, 210) 70% 88%);
+        }
         #orwell-cast .oc-name { margin-top: .35rem; font-size: .78rem; line-height: 1.25; word-break: break-word; }
         #orwell-cast .oc-name b { color: var(--fg, #9cdef2); }
         #orwell-cast .oc-status {
@@ -266,6 +275,19 @@
 
   const _cards = new Map(); // roster id → { el, holder, nameB, statusEl, name, status, portrait }
 
+  // J2-15: a stable hue (0–359) from the houseguest's NAME only — public, Vault-free, and the
+  // same on every render so a card's placeholder tint never flickers between polls. A small FNV-ish
+  // string hash keeps it deterministic without pulling in any dependency.
+  function nameHue(name) {
+    let h = 2166136261;
+    const s = name || "";
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = (h * 16777619) >>> 0;
+    }
+    return h % 360;
+  }
+
   function cardKey(hg) {
     // The roster route always sets a stable `id` (player → engine id or "player";
     // NPC → engine id or name); the name fallback here is purely defensive.
@@ -279,9 +301,16 @@
     entry.portrait = url || null;
     entry.holder.textContent = "";
     if (!url) {
+      // J2-15: until a portrait (0051) backfills, a single shared 👤 silhouette made the
+      // "meet 15 distinct people" payoff read as interchangeable placeholders. Render a
+      // per-houseguest monogram instead — the name's initial over a deterministic tint
+      // derived from the name (NOT any hidden/Vault attribute) — so every card is visibly
+      // its own person from the first frame. Pure presentation; zero new data.
       const ph = document.createElement("span");
-      ph.className = "oc-ph";
-      ph.textContent = "👤";
+      ph.className = "oc-ph oc-monogram";
+      const nm = (entry.name || "").trim();
+      ph.textContent = nm ? nm[0].toUpperCase() : "?";
+      ph.style.setProperty("--oc-mono-hue", String(nameHue(nm)));
       entry.holder.appendChild(ph);
       return;
     }

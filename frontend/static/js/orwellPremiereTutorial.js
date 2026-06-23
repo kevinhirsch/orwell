@@ -95,20 +95,42 @@
       "  border: 1px dashed color-mix(in srgb, var(--fg) 30%, transparent); border-radius: 12px;" +
       "  color: color-mix(in srgb, var(--fg) 86%, transparent); font-size: var(--fs-sm, .82rem);" +
       "  line-height: 1.5; }" +
+      // J2-10 / J1-20: the premiere's biggest beat was a hard single-frame pop-in. Stage the card's
+      // arrival with a gentle rise+fade so the apparatus lands with a little weight. Purely
+      // presentational — the card is byte-identical once settled; reduced-motion strips it (below).
+      ".orwell-premiere-tutorial.orwell-premiere-tutorial-in {" +
+      "  animation: orwellPremiereIn .42s cubic-bezier(0.22,0.61,0.36,1) both; }" +
+      "@keyframes orwellPremiereIn { from { opacity: 0; transform: translateY(8px); }" +
+      "  to { opacity: 1; transform: none; } }" +
       ".orwell-premiere-tutorial .opt-hd { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .3rem; }" +
       ".orwell-premiere-tutorial .opt-ttl { font-weight: 700; letter-spacing: .02em; }" +
       ".orwell-premiere-tutorial .opt-rhythm { font-weight: 600;" +
       "  color: color-mix(in srgb, var(--fg) 72%, transparent); }" +
+      // J2-13: a real affordance to DO the first move (the tutorial named the rhythm but offered no
+      // way to act). The CTA seeds the composer with an opener and focuses it — it never sends, so
+      // the player stays the author (ADR 0003). Sits in its own action row beside Close guide.
+      ".orwell-premiere-tutorial .opt-actions { display: flex; align-items: center; gap: .5rem;" +
+      "  flex-wrap: wrap; margin-top: .55rem; }" +
+      ".orwell-premiere-tutorial .opt-go { flex-shrink: 0; cursor: pointer;" +
+      "  background: color-mix(in srgb, var(--accent, var(--fg)) 16%, transparent);" +
+      "  border: 1px solid color-mix(in srgb, var(--accent, var(--fg)) 42%, transparent); color: inherit;" +
+      "  border-radius: 8px; font: inherit; font-size: .74rem; font-weight: 600; min-height: 44px;" + // 2.5.5 tap floor
+      "  padding: 0 .85rem; }" +
+      ".orwell-premiere-tutorial .opt-go:hover, .orwell-premiere-tutorial .opt-go:focus-visible {" +
+      "  background: color-mix(in srgb, var(--accent, var(--fg)) 26%, transparent); }" +
       ".orwell-premiere-tutorial .opt-dismiss { margin-left: auto; flex-shrink: 0; cursor: pointer;" +
       "  background: color-mix(in srgb, var(--fg) 9%, transparent);" +
       "  border: 1px solid color-mix(in srgb, var(--fg) 24%, transparent); color: inherit;" +
-      "  border-radius: 8px; font: inherit; font-size: .72rem; font-weight: 600; min-height: 36px;" + // J4-15: project tap floor
+      "  border-radius: 8px; font: inherit; font-size: .72rem; font-weight: 600; min-height: 44px;" + // J2-18 / 2.5.5: project tap floor (was 36px)
       "  padding: 0 .75rem; }" +
       ".orwell-premiere-tutorial .opt-dismiss:hover, .orwell-premiere-tutorial .opt-dismiss:focus-visible {" +
       "  background: color-mix(in srgb, var(--fg) 16%, transparent); }" +
       ".orwell-premiere-tutorial-out { opacity: 0; transition: opacity .2s ease; }" +
-      // J2-20: respect prefers-reduced-motion (consistent with orwellCast.js's portrait guard).
-      "@media (prefers-reduced-motion: reduce) { .orwell-premiere-tutorial-out { transition: none; } }";
+      // J2-20 / J2-10: respect prefers-reduced-motion (consistent with orwellCast.js's portrait
+      // guard) — strip BOTH the dismiss fade AND the J2-10 entrance staging.
+      "@media (prefers-reduced-motion: reduce) {" +
+      "  .orwell-premiere-tutorial-out { transition: none; }" +
+      "  .orwell-premiere-tutorial.orwell-premiere-tutorial-in { animation: none; } }";
     document.head.appendChild(st);
   }
 
@@ -149,10 +171,38 @@
         '<span aria-hidden="true">\u{1F528}</span> Nominations → ' +
         '<span aria-hidden="true">\u{1F48E}</span> Veto → ' +
         '<span aria-hidden="true">\u{1F5F3}️</span> Eviction.' +
+      '</div>' +
+      // J2-13: an affordance to DO the first move (close the gulf-of-execution).
+      '<div class="opt-actions">' +
+        '<button type="button" class="opt-go" aria-label="Start meeting the house — fills the message box with an opener">Meet the house \u{2192}</button>' +
       '</div>';
     bar.parentNode.insertBefore(card, bar);
     _mounted = true;
+    // J2-10 / J1-20: stage the entrance (reduced-motion guarded in CSS); drop the class once it
+    // plays so a later re-render/re-flow can't replay it.
+    card.classList.add("orwell-premiere-tutorial-in");
+    card.addEventListener("animationend", function () {
+      card.classList.remove("orwell-premiere-tutorial-in");
+    }, { once: true });
     card.querySelector(".opt-dismiss").addEventListener("click", function () { dismiss(card); });
+    var go = card.querySelector(".opt-go");
+    if (go) go.addEventListener("click", function () { firstMove(); });
+  }
+
+  // J2-13: seed the composer with a gentle opener and focus it — the player stays the author
+  // (ADR 0003: never send for them). Fail-soft if the composer isn't present. The card is left
+  // up (the rhythm guide is still useful) but we put the cursor where the next move happens.
+  function firstMove() {
+    var input = document.getElementById("message");
+    if (!input) return;
+    // Only seed an EMPTY composer — never clobber a draft the player has already started.
+    if (!input.value || !input.value.trim()) {
+      input.value = "I head out to find the other houseguests and start introducing myself.";
+      // Let the composer's own autosize / draft-save seams react to the change.
+      try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch (_) {}
+    }
+    try { input.focus(); } catch (_) {}
+    try { input.setSelectionRange(input.value.length, input.value.length); } catch (_) {}
   }
 
   // J5-16 (J4-27): the card is content-gated to week 1 but was only ever MOUNTED — never removed.
