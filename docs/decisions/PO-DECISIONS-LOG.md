@@ -11,6 +11,14 @@ live ledger of owner calls as they happen.
 
 ## 2026-06-23
 
+- **Standardize ALL UI into kits (epic #660).** Every player-tier UI surface must be built by
+  composing a shared kit (window/gadget/notice/settings-card/tabs/…), never hand-rolled — kits own
+  chrome, behavior, a11y, persistence, sync, and responsiveness. Recurring spacing/behavior/mobile
+  bugs are symptoms of un-kitted UI. Per-kit "done" = primitive exists + all instances migrated + a
+  convention gate + satisfies the persist/mirror (#643) and responsive/touch (#644) mandates. The
+  Settings window's mobile full-screen sheet is the template for kit windows on mobile; interim CSS
+  fixes are stopgaps, not the standard. Tracks #640/#641/#642/#643/#644/#658/#659.
+
 - **Blocs never cross the Vault Wall as an object — KEEP the invariant (#612, #624).** The emergent
   bloc/coalition structure stays computed-but-hidden; the player infers coalitions from observable
   behavior, never from a surfaced bloc roster/object. Closes #612 and #624 as *not planned*. Rationale:
