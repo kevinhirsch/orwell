@@ -87,6 +87,47 @@ export function initSidebarLayout(Storage, opts) {
   _syncRailSideFn = _syncRailSideCore;
   window.syncRailSide = syncRailSide;
 
+  // ── #637: the panel SIDE is a synced, last-write-wins field of the 0064 layout store ──
+  // The side persists locally (Storage.KEYS.SIDEBAR_SIDE) as the offline/seed fallback, but the
+  // SYNCED value (id "panel" {side}) is the source of truth: it crosses devices and mirrors live
+  // between two windows via the same `orwell:window-layout` → PATCH → `layout-changed` seam the kit
+  // uses. #552 stands: mobile reads the persisted side READ-ONLY (no swap), so a remote side still
+  // applies on mobile — it just can't be flipped there.
+  let _applyingSyncedSide = false;
+  function _curSide() {
+    const sb = document.getElementById('sidebar');
+    return sb && sb.classList.contains('right-side') ? 'right' : 'left';
+  }
+  function _emitSide(side) {
+    if (_applyingSyncedSide) return;   // never echo a remote apply back out
+    try {
+      window.dispatchEvent(new CustomEvent('orwell:window-layout',
+        { detail: { id: 'panel', state: { side: side === 'right' ? 'right' : 'left' } } }));
+    } catch (_) {}
+  }
+  function _applySyncedSide(side) {
+    if (side !== 'left' && side !== 'right') return;
+    if (_applyingSyncedSide) return;
+    const sb = document.getElementById('sidebar');
+    if (!sb) return;
+    const wantRight = side === 'right';
+    if (sb.classList.contains('right-side') === wantRight) return;   // already in step
+    _applyingSyncedSide = true;
+    try {
+      sb.classList.toggle('right-side', wantRight);
+      try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, side); } catch (_) {}
+      syncRailSide();
+      if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
+    } finally { _applyingSyncedSide = false; }
+  }
+  function _onSyncedLayoutSide(e) {
+    const d = e && e.detail;
+    if (!d || d.windowId !== 'panel' || !d.state) return;
+    _applySyncedSide(d.state.side);
+  }
+  window.addEventListener('orwell:layout-seed', _onSyncedLayoutSide);     // initial GET /layout
+  window.addEventListener('orwell:layout-changed', _onSyncedLayoutSide);  // a peer window / device
+
   // Restore sidebar side preference
   if (Storage.get(Storage.KEYS.SIDEBAR_SIDE) === 'right') {
     document.getElementById('sidebar').classList.add('right-side');
@@ -110,6 +151,7 @@ export function initSidebarLayout(Storage, opts) {
     try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, sidebar.classList.contains('right-side') ? 'right' : 'left'); } catch (_) {}
     syncRailSide();
     if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
+    _emitSide(_curSide());   // #637: fan the new side out (synced, LWW)
   }
   try { window._orwellToggleSidebarSide = toggleSidebarSide; } catch (_) {}
 
@@ -161,6 +203,7 @@ export function initSidebarLayout(Storage, opts) {
         sidebar.classList.toggle('right-side', wantRight);
         try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, side); } catch (_) {}
         if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
+        _emitSide(side);   // #637: fan the new side out (synced, LWW)
       }
     }
     const backdrop = document.getElementById('sidebar-backdrop');

@@ -26,11 +26,44 @@
     return "orwell-premiere-tutorial-dismissed:" +
       ((document.body && document.body.dataset.user) || "");
   }
+  // #638: the SYNCED layout-store id for this popup's dismiss state (the source of truth that
+  // survives reload, crosses devices, and mirrors between two windows). localStorage stays the
+  // offline/seed fallback. `_syncedDismissed` is the latest synced value seen this session.
+  var POPUP_ID = "popup:premiere-tutorial";
+  var _syncedDismissed = false;
   function hasDismissed() {
+    if (_syncedDismissed) return true;
     try { return localStorage.getItem(dismissKey()) === "1"; } catch (_) { return false; }
   }
   function markDismissed() {
     try { localStorage.setItem(dismissKey(), "1"); } catch (_) {}
+    // #638: fan the dismiss out as a synced, last-write-wins field via the 0064 layout seam.
+    if (!_applyingSynced) {
+      try {
+        window.dispatchEvent(new CustomEvent("orwell:window-layout",
+          { detail: { id: POPUP_ID, state: { dismissed: true } } }));
+      } catch (_) {}
+    }
+  }
+
+  // #638: apply a synced dismiss arriving from the layout store (initial seed OR a peer window) —
+  // remember it, write the local fallback (without re-emitting), and close the card live if shown.
+  var _applyingSynced = false;
+  function applySyncedDismiss() {
+    if (_syncedDismissed) { removeTutorial(); return; }
+    _syncedDismissed = true;
+    _applyingSynced = true;   // suppress the re-emit while WE land a remote/seed dismiss
+    try {
+      try { localStorage.setItem(dismissKey(), "1"); } catch (_) {}
+      var card = document.getElementById("orwell-premiere-tutorial");
+      if (card) dismiss(card);   // mirror the close in this window (no re-emit — guarded)
+      else removeTutorial();
+    } finally { _applyingSynced = false; }
+  }
+  function _onSyncedLayout(e) {
+    var d = e && e.detail;
+    if (!d || d.windowId !== POPUP_ID || !d.state) return;
+    if (d.state.dismissed === true) applySyncedDismiss();
   }
 
   function jgetSafe(url) {
@@ -150,6 +183,9 @@
   if (typeof window !== "undefined") {
     ready(refresh);
     window.addEventListener("orwell:gamechanged", refresh);
+    // #638: the synced dismiss seam (initial GET /layout seed + a peer window / device).
+    window.addEventListener("orwell:layout-seed", _onSyncedLayout);
+    window.addEventListener("orwell:layout-changed", _onSyncedLayout);
     // A new season resets the per-user gate only if the player un-dismissed; otherwise stays retired.
     window.addEventListener("orwell:gamechanged", function () { _mounted = false; });
     // Test/debug seam for the headless gate.
