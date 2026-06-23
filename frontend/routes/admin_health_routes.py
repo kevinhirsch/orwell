@@ -34,6 +34,7 @@ Boundaries:
 """
 
 import inspect
+import json
 import logging
 import os
 import platform
@@ -83,14 +84,23 @@ def _log_dirs() -> list:
     return out
 
 
+# On-disk logs that are ALREADY surfaced as a live ring source — listing them as a separate
+# "(file)" source duplicates the stream (and the file looked "full" beside a post-restart-blank
+# live view). The live ring is seeded from the archive at startup, so it represents the file fully.
+_RING_BACKED_LOG_FILES = {"llm-io.jsonl"}  # ↔ the "LLM I/O (live)" source
+
+
 def _log_files() -> list:
-    """On-disk log basenames across the viewer's data dirs (allowlist for the file tail)."""
+    """On-disk log basenames across the viewer's data dirs (allowlist for the file tail).
+
+    Excludes files already represented by a live ring source (e.g. llm-io.jsonl ↔ "LLM I/O
+    (live)") so the viewer never lists the same stream twice."""
     out: list = []
     seen: set = set()
     for d in _log_dirs():
         try:
             for n in sorted(os.listdir(d)):
-                if n in seen:
+                if n in seen or n in _RING_BACKED_LOG_FILES:
                     continue
                 if n.endswith((".log", ".jsonl")) and os.path.isfile(os.path.join(d, n)):
                     out.append(n)
@@ -98,6 +108,22 @@ def _log_files() -> list:
         except OSError:
             pass
     return out
+
+
+def _pretty_log_line(name: str, raw: str) -> str:
+    """Pretty-print a single log line for the file viewer. A ``.jsonl`` archive stores one JSON
+    object per line, which rendered as an unreadable one-liner; expand it to indented JSON so the
+    file viewer is legible (the pane is ``white-space: pre-wrap``, so newlines show). Plain
+    ``.log`` text and anything that isn't valid JSON is returned unchanged."""
+    if not name.endswith(".jsonl"):
+        return raw
+    s = raw.strip()
+    if not s or s[0] not in "{[":
+        return raw
+    try:
+        return json.dumps(json.loads(s), indent=2, ensure_ascii=False)
+    except (ValueError, TypeError):
+        return raw
 
 
 def _log_path(name: str) -> str:
@@ -595,6 +621,7 @@ def setup_admin_health_routes() -> APIRouter:
                 "frontend": {"lastError": None, "store": {}},
                 "tiersAgree": False,
                 "images": {"available": False},
+                "versions": _versions(),  # build/PR is git-derived — still resolvable when the DB/engine is down
                 "error": "health snapshot degraded — recovery actions remain available",
             }
 
@@ -653,7 +680,8 @@ def setup_admin_health_routes() -> APIRouter:
                     f.seek(start)
                     chunk = f.read(min(65536, max(0, size - start)))
                 text = chunk.decode("utf-8", "replace")
-                lines = [{"seq": start + i, "ts": None, "level": "", "logger": name, "msg": l}
+                lines = [{"seq": start + i, "ts": None, "level": "", "logger": name,
+                          "msg": _pretty_log_line(name, l)}
                          for i, l in enumerate(text.splitlines())]
                 return {"source": source, "next": size, "lines": lines[-500:]}
             except OSError:
@@ -1051,8 +1079,14 @@ const up = s => { s = Math.max(0, +s || 0); const d = (s/86400)|0, h = ((s%86400
 const B = (ok, t) => '<span class="' + (ok ? "ok" : "bad") + '">' + esc(t) + "</span>";
 function render(d) {
   const eng = d.engine || {}, emb = eng.embeddings || null, img = d.images || {},
-        st = (d.frontend || {}).store || {}, tc = eng.toolCalls || {};
+        st = (d.frontend || {}).store || {}, tc = eng.toolCalls || {}, ver = d.versions || {};
+  // The deployed build/PR version (vX.XX, X.XX = PR#/100) + short commit SHA — confirms WHICH
+  // build is live and that an Update actually landed. (The payload already carries it; show it.)
+  const build = (ver.frontend ? esc(ver.frontend) : "unknown") +
+    (ver.build ? " · " + esc(ver.build) : "") +
+    (ver.engine && ver.engine !== ver.frontend ? " · engine " + esc(ver.engine) : "");
   const rows = [
+    ["Build", build],
     ["Engine", B(!!eng.ok, eng.ok ? "REACHABLE" : "DOWN") + (eng.latencyMs != null ? " · " + esc(eng.latencyMs) + " ms" : "") + (eng.uptimeSeconds != null ? " · up " + esc(up(eng.uptimeSeconds)) : "") + (eng.error ? " · " + esc(eng.error) : "")],
     ["Tiers agree", B(!!d.tiersAgree, d.tiersAgree ? "YES" : "NO")],
     ["Embeddings", emb ? esc(emb.provider || "?") + " " + B(!emb.degraded, emb.degraded ? "DEGRADED" : "OK") : B(false, "UNKNOWN")],

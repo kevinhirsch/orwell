@@ -313,6 +313,60 @@ def _push_ring(record: dict, messages: List[Dict], resp: dict) -> None:
         pass
 
 
+# Bounded tail read when backfilling the live ring from the durable archive at startup.
+_SEED_TAIL_BYTES = 512 * 1024
+_ring_seeded = False
+
+
+def seed_ring_from_file(limit: int = 200) -> int:
+    """Backfill the in-memory LLMIO ring from the tail of the durable archive.
+
+    The 'LLM I/O (live)' ring is per-process and in-memory, so it is EMPTY after every restart
+    while llm-io.jsonl keeps the full history — which read as a bug (a blank live view beside a
+    full file) and made the file a redundant second source. Seeding the ring from the archive's
+    tail at startup makes the live view reflect recent history and lets the file be dropped from
+    the viewer's source list (no more duplicate stream).
+
+    Idempotent and startup-ordered: it MUST run before any record_llm_call so the seeded (older)
+    entries get LOWER seq numbers than subsequent live calls. Best-effort — any failure leaves
+    the ring empty rather than disturbing startup."""
+    global _ring_seeded
+    if _ring_seeded:
+        return 0
+    _ring_seeded = True
+    try:
+        path = trace_path()
+        if not os.path.isfile(path):
+            return 0
+        with open(path, "rb") as fh:
+            try:
+                fh.seek(-_SEED_TAIL_BYTES, os.SEEK_END)
+                partial = True
+            except OSError:
+                fh.seek(0)
+                partial = False
+            chunk = fh.read()
+        lines = chunk.decode("utf-8", "replace").splitlines()
+        if partial and len(lines) > 1:
+            lines = lines[1:]  # drop the (likely truncated) first line from a mid-file seek
+        n = 0
+        for ln in lines[-limit:]:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                rec = json.loads(ln)
+            except Exception:
+                continue
+            msgs = (rec.get("request") or {}).get("messages") or []
+            resp = rec.get("response") or {}
+            _push_ring(rec, msgs, resp)
+            n += 1
+        return n
+    except Exception:
+        return 0
+
+
 def _append_trace_file(record: dict) -> None:
     try:
         line = json.dumps(record, ensure_ascii=False)
