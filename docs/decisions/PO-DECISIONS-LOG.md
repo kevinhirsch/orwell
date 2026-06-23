@@ -11,6 +11,15 @@ live ledger of owner calls as they happen.
 
 ## 2026-06-23
 
+- **Live-LLM verification bar to CLEAR a model-behavior issue: ≥3 passes across DIFFERING scenarios.**
+  Because LLM behavior is stochastic, a single live pass is not evidence. A model-behavior / narration
+  issue (the live-LLM-gated set — e.g. #536/#540/#541/#542/#548/#549/#550/#561/#613) may only be
+  closed when its live-LLM verification passes **at least 3 times, each in a DIFFERENT scenario**
+  (different seed, game state/phase, cast, and/or framing — not the same prompt re-run). A single
+  REPRODUCE in any scenario blocks the close. Verification runs against the four engine-truth oracles;
+  the guardrail must hold across the varied conditions, not just one. (Egress allowlisted + key
+  provided 2026-06-23, so this is now runnable.)
+
 - **Standardize ALL UI into kits (epic #660).** Every player-tier UI surface must be built by
   composing a shared kit (window/gadget/notice/settings-card/tabs/…), never hand-rolled — kits own
   chrome, behavior, a11y, persistence, sync, and responsiveness. Recurring spacing/behavior/mobile

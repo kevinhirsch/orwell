@@ -30,7 +30,21 @@
   function pinKey() {
     return "orwell-cast-pinned:" + ((document.body && document.body.dataset.user) || "");
   }
-  function isPinned() { return lsGet(pinKey()) === "1"; }
+  function _isNarrow() {
+    try { return window.matchMedia("(max-width: 768px)").matches; } catch (_) { return false; }
+  }
+  // #656 — the Cast Photos gadget was missing on mobile: a phone player can't comfortably
+  // pin the floating cast window into the rail (windows are a desktop affordance), so the
+  // gadget — which only mounts/shows while pinned — never appeared. Fix: on a NARROW viewport
+  // the gadget DOCKS BY DEFAULT so it self-mounts and renders in the rail, UNLESS the player
+  // explicitly un-pinned it ("0"). Tri-state storage keeps desktop untouched: "1" = pinned,
+  // "0" = explicitly un-pinned, absent = undecided (desktop: floating; mobile: auto-docked).
+  function isPinned() {
+    var v = lsGet(pinKey());
+    if (v === "1") return true;
+    if (v === "0") return false;        // explicit un-pin wins on every viewport
+    return _isNarrow();                  // undecided: docked on mobile, floating on desktop
+  }
 
   function getJSON(url) {
     return fetch(url, { credentials: "same-origin" }).then(function (r) {
@@ -182,7 +196,9 @@
   // gadget's display re-syncs the rail visibility — no gamechanged dispatch
   // needed (which would route through the cast window's engine-gate).
   function setPinned(on) {
-    if (on) lsSet(pinKey(), "1"); else lsDel(pinKey());
+    // #656 — store an EXPLICIT un-pin ("0") rather than deleting the key, so the choice
+    // sticks on mobile (where absent ⇒ auto-docked). "1" = pinned, "0" = explicitly off.
+    lsSet(pinKey(), on ? "1" : "0");
     var el = ensureEl();
     if (on) {
       // pinning DOCKS the roster: close the floating cast window if open, render the gadget
@@ -191,9 +207,10 @@
     } else {
       el.style.display = "none";
       if (_timer) { clearTimeout(_timer); _timer = null; }
-      // un-pinning floats it back: re-open the full window (idempotent — the seam
-      // restores it if already open).
-      if (typeof window._orwellCastEnsure === "function") window._orwellCastEnsure();
+      // un-pinning floats it back: re-open the full window (idempotent — the seam restores
+      // it if already open). On a narrow viewport windows aren't a comfortable affordance,
+      // so a mobile un-pin just hides the gadget (no floating window pops up).
+      if (!_isNarrow() && typeof window._orwellCastEnsure === "function") window._orwellCastEnsure();
     }
   }
 
@@ -213,5 +230,11 @@
   } else { boot(); }
   window.addEventListener("orwell:gamechanged", function () {
     if (isPinned()) refresh().then(schedule);
+  });
+  // #656 — crossing the mobile breakpoint flips the undecided default (docked on narrow):
+  // re-hydrate so the gadget mounts/shows when entering a narrow viewport.
+  window.addEventListener("resize", function () {
+    if (isPinned()) { ensureEl(); refresh().then(schedule); }
+    else { var el = document.getElementById(ID); if (el) el.style.display = "none"; }
   });
 })();

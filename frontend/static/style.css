@@ -2000,13 +2000,36 @@ body.bg-pattern-perlin-flow {
       /* #551 — on mobile the gadget opener moves to the TOP-RIGHT (it pairs with
          the sidebar hamburger, which stays TOP-LEFT). Desktop is untouched. It
          must clear the chat header, so its z-index sits just under the hamburger
-         (210) and above header chrome. */
+         (210) and above header chrome.
+         #653 — it is a small, ICON-ONLY control that matches the hamburger's
+         treatment (same 30x30 box, transparent bg, currentColor stroke, 0.5
+         opacity) so the two top corners read as a matched pair — NOT a loud red
+         FAB. Every loud-FAB property from the desktop base (round shape, accent
+         fill, border, shadow, large size) is reset here. */
       .gadget-rail-open {
-        top: calc(env(safe-area-inset-top, 0px) + 10px);
-        right: 10px;
+        top: calc(env(safe-area-inset-top, 0px) + 12px);
+        right: 9px;
         bottom: auto;
         z-index: 209;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        border: none;
+        background: none;
+        box-shadow: none;
+        color: var(--hamburger-color, var(--fg));
+        opacity: 0.5;
+        padding: 0;
+        align-items: center;
+        justify-content: center;
+        -webkit-tap-highlight-color: transparent;
+        outline: none;
+        transition: opacity 0.15s;
       }
+      body[data-game-build] .gadget-rail-open { display: flex; }
+      .gadget-rail-open:hover,
+      .gadget-rail-open:active { opacity: 1; }
+      .gadget-rail-open svg { display: block; }
       /* #551/#552 — the sidebar hamburger reliably stays TOP-LEFT on mobile.
          Side-swap is a desktop power-feature (disabled on mobile in JS), so the
          body.hamburger-right flip must never apply here, or the hamburger and the
@@ -4631,6 +4654,17 @@ body.bg-pattern-perlin-flow {
       /* Chat bubbles — AI stretches full width, user stays compact */
       .msg { font-size: 0.85em; }
       .msg .body { font-size: 0.9em; }
+      /* #657 — mobile narration breathing room. On a phone the GM narration ran dense and
+         edge-to-edge: tighten nothing on desktop, but on narrow give the AI bubble a
+         comfortable reading rhythm — roomier line-height, real horizontal padding inside the
+         bubble, and clearer paragraph spacing. Scoped to mobile + the AI bubble so user
+         turns and desktop density are untouched. */
+      .msg-ai { padding: 12px 16px; line-height: 1.6; }
+      .msg-ai .body { line-height: 1.6; }
+      .msg-ai .body > * { margin-top: 12px; margin-bottom: 12px; }
+      .msg-ai .body > *:first-child { margin-top: 0; }
+      .msg-ai .body > *:last-child { margin-bottom: 0; }
+      .msg-ai .body p { margin-top: 12px; margin-bottom: 12px; }
       .msg-user { max-width: 90% !important; margin-left: auto; margin-right: 4px; }
       .msg-ai, .agent-thread { width: 100% !important; max-width: 100% !important; margin: 8px 0; }
       /* Prevent inner scrollable elements from trapping vertical scroll */

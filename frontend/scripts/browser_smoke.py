@@ -1368,8 +1368,8 @@ def main() -> int:
               return { hidden: getComputedStyle(el).display === 'none',
                        flag: localStorage.getItem('orwell-cast-pinned:' + user) };
             }""")
-            check(l12b.get("hidden") is True and l12b.get("flag") is None,
-                  f"L12: un-pinning hides the gadget and clears the persisted flag ({l12b})")
+            check(l12b.get("hidden") is True and l12b.get("flag") in (None, "0"),
+                  f"L12: un-pinning hides the gadget and the pin flag is un-set ({l12b})")
 
             # L13: the rail gadgets reorder and the order PERSISTS. Reorder now happens in an
             # explicit edit mode (iOS-jiggle / HASS-dashboard style) — a labeled header toggle
