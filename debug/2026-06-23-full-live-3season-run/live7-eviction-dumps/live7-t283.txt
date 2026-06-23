@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=5 playerStatus=active committed=false
+TALLY=null
+
+Big Brother02:47 AMThe Diary Room is quiet. The red light blinks — steady, patient. Two portraits glow on the monitor. One of them walks out the door tonight.

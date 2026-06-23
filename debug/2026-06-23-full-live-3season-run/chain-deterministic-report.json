@@ -1,0 +1,220 @@
+{
+  "seasons": [
+    {
+      "s": 1,
+      "feSeasonCounter": 1,
+      "rosterSize": 15,
+      "roster": [
+        "Alana Owens",
+        "Axel Knapp",
+        "Cesar Kim",
+        "Daniela Johnston",
+        "Iliana Yu",
+        "India Barnes",
+        "Jeremy Herrera",
+        "Kiara Hurley",
+        "Lorenzo Gibson",
+        "Lydia Mora",
+        "Malik Peterson",
+        "Mika Moreno",
+        "Parker Farrell",
+        "Ruby Fisher",
+        "Yusuf Vo"
+      ],
+      "finished": true,
+      "winner": "Avery Quinn",
+      "weeksPlayed": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "iterations": 355,
+      "finaleKinds": [
+        "finale-statement",
+        "finale-answer"
+      ],
+      "evictBeatSamples": [
+        "a vote to evict Axel Knapp",
+        "a vote to evict Axel Knapp",
+        "a vote to evict Daniela Johnston"
+      ],
+      "anomalies": [],
+      "finishedPhase": "finale",
+      "stalled": false
+    },
+    {
+      "s": 2,
+      "feSeasonCounter": 2,
+      "rosterSize": 15,
+      "roster": [
+        "Alejandro Park",
+        "Brendan Garcia",
+        "Chloe Fischer",
+        "Cora Morgan",
+        "Farrah Knapp",
+        "Harper Stafford",
+        "Hope Carey",
+        "Ian Maddox",
+        "Joseph Leon",
+        "Kaitlyn Coleman",
+        "Luis Lam",
+        "Maria Lowe",
+        "Myra Adams",
+        "Ray Carey",
+        "Wyatt Vega"
+      ],
+      "finished": true,
+      "winner": "Wyatt Vega",
+      "weeksPlayed": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "iterations": 355,
+      "finaleKinds": [
+        "finale-statement",
+        "finale-answer"
+      ],
+      "evictBeatSamples": [
+        "a vote to evict Hope Carey",
+        "a vote to evict Hope Carey",
+        "a vote to evict Ian Maddox"
+      ],
+      "anomalies": [],
+      "finishedPhase": "finale",
+      "stalled": false
+    },
+    {
+      "s": 3,
+      "feSeasonCounter": 3,
+      "rosterSize": 15,
+      "roster": [
+        "Claire Mullen",
+        "Dakota Higgins",
+        "Donovan Ibarra",
+        "Eddie Landry",
+        "Emily Medina",
+        "Ethan Harris",
+        "Hannah Hansen",
+        "Jada Singleton",
+        "Joseph Grant",
+        "Madison Olson",
+        "Nathan Caldwell",
+        "Vanessa Caldwell",
+        "Veronica Edwards",
+        "Weston Lowe",
+        "Yusuf Wall"
+      ],
+      "finished": true,
+      "winner": "Vanessa Caldwell",
+      "weeksPlayed": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "iterations": 355,
+      "finaleKinds": [
+        "finale-statement",
+        "finale-answer"
+      ],
+      "evictBeatSamples": [
+        "a vote to evict Claire Mullen",
+        "a vote to evict Dakota Higgins",
+        "a vote to evict Dakota Higgins"
+      ],
+      "anomalies": [],
+      "finishedPhase": "finale",
+      "stalled": false
+    }
+  ],
+  "crossSeason": {
+    "transition_1_to_2": {
+      "fromSeason": 1,
+      "toSeasonCounter": 2,
+      "kept": true,
+      "httpStatus": 200,
+      "newStarted": true,
+      "newPhase": "premiere",
+      "newWeek": 1,
+      "newBeatSeq": 1,
+      "newPending": null,
+      "playerPersisted": true,
+      "newRosterSize": 15,
+      "rosterChanged": true,
+      "rosterOverlap": []
+    },
+    "transition_2_to_3": {
+      "fromSeason": 2,
+      "toSeasonCounter": 3,
+      "kept": true,
+      "httpStatus": 200,
+      "newStarted": true,
+      "newPhase": "premiere",
+      "newWeek": 1,
+      "newBeatSeq": 1,
+      "newPending": null,
+      "playerPersisted": true,
+      "newRosterSize": 15,
+      "rosterChanged": true,
+      "rosterOverlap": []
+    },
+    "transition_3_to_4": {
+      "fromSeason": 3,
+      "toSeasonCounter": 4,
+      "kept": true,
+      "httpStatus": 200,
+      "newStarted": true,
+      "newPhase": "premiere",
+      "newWeek": 1,
+      "newBeatSeq": 1,
+      "newPending": null,
+      "playerPersisted": true,
+      "newRosterSize": 15,
+      "rosterChanged": true,
+      "rosterOverlap": []
+    }
+  },
+  "anomalies": [],
+  "fourthSeasonStart": {
+    "feSeasonCounter": 4,
+    "started": true,
+    "phase": "premiere",
+    "week": 1,
+    "beatSeq": 1,
+    "rosterSize": 15,
+    "pending": null
+  }
+}

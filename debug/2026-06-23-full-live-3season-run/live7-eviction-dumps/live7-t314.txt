@@ -1,0 +1,4 @@
+phase=veto-ceremony->eviction evicted=6 playerStatus=active committed=false
+TALLY=null
+
+Big BrotherThe Diary Room is quiet. The red light blinks — steady, patient. Two portraits glow on the monitor. This one's different. It's not two threats. It's not two locked boxes. It's Sofia Harper — the theatrical pilates instructor who's been performing since night one, silver-streaked undercut, won veto two weeks ago — and Mario Butler — your champagne-toast buddy, the forty-eight-year-old renaissance performer who can't do a push-up but somehow won veto last week. Everyone's favorite uncle. Sierra didn't use the veto. Her nominations stand. One of them walks out the door tonight. You could vote with the house — whatever way that's blowing. You could throw a chaos vote and watch the ripples. You could be the deciding ballot. But the red light doesn't care about any of that. It just wants a name. Who gets your vote, Nashville?

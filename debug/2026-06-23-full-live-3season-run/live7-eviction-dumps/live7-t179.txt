@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=1 playerStatus=active committed=false
+TALLY=null
+
+Big Brother01:50 AM The Diary Room is quiet. Just you, the camera, and the red light blinking steady on the wall. Two portraits glow on the monitor in front of you — Alondra on the left, Patricia on the right. One of them walks out the door tonight. You've been cooking all week with Valentina. The math is clear: Alondra's sweet but adrift — no comp threat, just burned her HOH, not the kind of player who comes back to haunt you. Patricia's a comp-beast who already has a veto win and nearly took two HOHs. If you let her stay, she's a locked-and-loaded threat every single week. But Alondra just handed you a cold goodbye message. And Patricia... Patricia's the kind of competitor who respects the game. Cutting her now is a power move. Keeping her is a risk you carry all summer. So — who gets your vote?
