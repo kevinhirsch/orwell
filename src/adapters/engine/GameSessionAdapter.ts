@@ -1079,6 +1079,25 @@ export class GameSessionAdapter implements GameSession {
    */
   seasonRetrospective(): RetrospectiveView | null {
     if (!this.live?.finished) return null; // the structural gate: no finished season, no unsealing
+    return this.buildVaultUnseal();
+  }
+
+  /**
+   * DEBUG producer's vault — the owner-ruled OVERRIDE of mandate #2 (admin/God Mode is otherwise
+   * walled from the Vault). This unseals the LIVE hidden layer for operator debugging WITHOUT the
+   * post-season `finished` gate above: the ONE sanctioned LIVE Vault reveal, admin-channel only and
+   * fired only behind an explicit FE "unseal" action, so it can never spoil a game by accident. It
+   * reuses the retrospective render below, so every row is the same scrubbed, name-resolved plain
+   * data (no raw ids/slugs). Returns null only when there is no game at all.
+   */
+  producerVaultDump(): RetrospectiveView | null {
+    if (!this.live) return null;
+    return this.buildVaultUnseal();
+  }
+
+  /** The shared Vault-unseal render used by BOTH the post-season retrospective and the debug dump. */
+  private buildVaultUnseal(): RetrospectiveView {
+    if (!this.live) throw new Error("buildVaultUnseal called without a live season");
     const nameOf = (id: EntityId): string => this.nameOf(id);
     const events = this.record?.events() ?? [];
     // The FE renders each row as "[type] content", so `type` must be a READABLE label (not a raw kind
@@ -1119,7 +1138,7 @@ export class GameSessionAdapter implements GameSession {
         votedFor: { id: votedFor, name: this.nameOf(votedFor) },
       })),
     }));
-    return { winner: this.named(this.live.winner), hiddenStory, twists, evictionVotes };
+    return { winner: this.live.winner ? this.named(this.live.winner) : null, hiddenStory, twists, evictionVotes };
   }
 
   /**

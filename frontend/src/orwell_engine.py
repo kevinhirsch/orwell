@@ -813,6 +813,19 @@ async def advance_to_finale(user: str | None = None) -> dict:
     return await _admin_call("advanceToFinale", {}, user=user)
 
 
+async def producer_vault(user: str | None = None) -> dict:
+    """DEBUG — the owner-ruled OVERRIDE of mandate #2 (admin/God Mode is otherwise walled from the
+    Vault). UNSEALS THIS user's LIVE hidden layer (off-screen scheming, NPC confessionals, secret
+    threads/ties, the sealed reserve twists, and the real eviction ballots) for operator debugging,
+    WITHOUT the post-season gate. Crosses the engine ADMIN channel as the out-of-band ``producerVault``
+    capability (not an advertised tool); fired only behind an explicit FE "unseal". Returns the same
+    scrubbed, name-resolved view as the post-season retrospective; ``{}``/null when no game exists.
+
+    This DELIBERATELY surfaces Vault content — it is the one sanctioned LIVE reveal. Keep it behind the
+    explicit unseal action; never wire it into any always-on/player surface."""
+    return await _admin_call("producerVault", {}, user=user)
+
+
 async def _probe_health_once() -> dict:
     """ONE /health probe. ``{"ok": True}`` when the engine answers 200, else ``{"ok": False, "error": …}``.
     Raises on a transport outage so the retry loop can give a momentary blip another try."""

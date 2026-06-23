@@ -1269,6 +1269,15 @@ export interface GameSession {
   seasonRetrospective(): RetrospectiveView | null;
 
   /**
+   * DEBUG producer's vault (owner-ruled override of mandate #2): the LIVE hidden layer, unsealed for
+   * operator debugging WITHOUT the post-season gate. The ONE sanctioned LIVE Vault-reading seam —
+   * admin/God-Mode channel ONLY, exposed through the quarantined `DEBUG_VAULT_TOOLS` registry (the
+   * only `readsVault: true` tools) and fired only behind an explicit FE "unseal" action. Returns the
+   * same scrubbed, name-resolved `RetrospectiveView` as the retrospective; `null` when no game exists.
+   */
+  producerVaultDump(): RetrospectiveView | null;
+
+  /**
    * The knowledge-bounded voicing projection for ONE active houseguest (B65 / ADR 0003 §8) —
    * everything the narrator may draw on to voice them, nothing they never learned. Null for an
    * unknown or non-active houseguest (the departed are voiced from the public record only).

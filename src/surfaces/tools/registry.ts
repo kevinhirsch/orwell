@@ -72,6 +72,39 @@ export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
   { name: "setTimeOfDay", channel: "admin/God Mode", readsVault: false, description: "ADR 0006: turn the in-game time-of-day clock + nightly sleep economy ON or OFF at runtime (the FE settings switch flips it here — no engine restart). { enabled: boolean }. A process-global override of the ORWELL_TIME_OF_DAY env default; resets on restart (the FE re-applies the persisted setting on boot). Vault-free." },
 ];
 
+/**
+ * A DEBUG tool that DELIBERATELY reads the Vault — the owner-ruled override of mandate #2 (admin/God
+ * Mode is otherwise walled from the Vault). It is a SEPARATE type from `ToolDescriptor` ON PURPOSE: the
+ * `readsVault: false` literal guard above stays intact for every normal tool, so a Vault reader can
+ * ONLY ever live in the one quarantined, grep-able `DEBUG_VAULT_TOOLS` list below — never silently in
+ * the player/admin allowlists. `channel` is pinned to admin/God Mode (never the player).
+ */
+export interface DebugVaultToolDescriptor {
+  name: string;
+  channel: "admin/God Mode";
+  readsVault: true;
+  description: string;
+}
+
+/**
+ * The ONLY Vault-reading tools in the system — the owner-ruled DEBUG override of mandate #2. Admin/God-
+ * Mode channel only, fired only behind an explicit FE "unseal", and kept OUT of the agent lever manifest
+ * (`DEBUG_VAULT_TOOL_NAMES`). Adding anything here is a conscious decision to breach the Vault Wall for
+ * an operator-debug surface; it must never reach the player channel.
+ */
+export const DEBUG_VAULT_TOOLS: readonly DebugVaultToolDescriptor[] = [
+  { name: "producerVault", channel: "admin/God Mode", readsVault: true, description: "DEBUG — owner-ruled override of mandate #2: UNSEAL this sandbox's LIVE hidden Vault layer (off-screen scheming, NPC confessionals, secret threads/ties, the sealed reserve twists, and the real eviction ballots) for operator debugging, WITHOUT the post-season gate. The ONE live Vault reveal — admin only, fired behind an explicit FE 'unseal'. Returns the same scrubbed, name-resolved view as the post-season retrospective; null when no game exists." },
+];
+
+/** The debug Vault-reader tool names — quarantined from the agent lever manifest + the no-leak sweeps. */
+export const DEBUG_VAULT_TOOL_NAMES: ReadonlySet<string> = new Set(DEBUG_VAULT_TOOLS.map((t) => t.name));
+
+/**
+ * The ADVERTISED Vault-free allowlist for a channel — UNCHANGED by the debug override. The producer's
+ * vault (mandate #2 override) is DELIBERATELY NOT here: it is a separate, out-of-band debug capability
+ * the admin channel dispatches by explicit name (see `DEBUG_VAULT_TOOLS` + `McpServer.allows`), never an
+ * advertised tool. Keeping this list pure means every "admin allowlist is Vault-free" guarantee holds.
+ */
 export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
   return channel === "player" ? PLAYER_TOOLS : ADMIN_TOOLS;
 }

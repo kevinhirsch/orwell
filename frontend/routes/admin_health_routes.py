@@ -847,6 +847,32 @@ def setup_admin_health_routes() -> APIRouter:
             "playerPlacement": summary.get("playerPlacement"),
         }
 
+    @router.post("/ops/producer-vault")
+    async def admin_producer_vault(request: Request):
+        """DEBUG — the owner-ruled OVERRIDE of mandate #2 (the status-page "Producer's Vault" unseal).
+
+        UNSEALS THIS admin's LIVE hidden Vault layer for operator debugging. UNLIKE every other admin
+        route, this one DELIBERATELY returns Vault content — it is the one sanctioned LIVE reveal,
+        crossing the engine's out-of-band ``producerVault`` admin capability. It is gated three ways:
+        ``require_admin`` here, the engine's separate admin token, and the explicit FE "unseal" the
+        button demands. It NEVER touches a live game's integrity — it only READS the hidden layer."""
+        require_admin(request)
+        user = None
+        try:
+            user = effective_user(request)
+        except Exception:
+            pass
+        from src import orwell_engine
+        try:
+            dump = await orwell_engine.producer_vault(user=user)
+        except Exception as e:
+            return {"ok": False, "reason": f"engine error: {e}"}
+        if not isinstance(dump, dict):
+            return {"ok": False, "reason": "no active game to unseal"}
+        logger.info("[ops] admin UNSEALED the producer's vault (debug override of mandate #2)")
+        # Pass the unsealed view straight through — this is the deliberate, sanctioned Vault reveal.
+        return {"ok": True, "vault": dump}
+
     @router.get("/debug-bundle")
     async def debug_bundle(request: Request):
         require_admin(request)
@@ -946,12 +972,23 @@ _STATUS_PAGE = """<!doctype html>
   <button type="button" class="btn" id="update-orwell" title="Pull latest, rebuild the engine, refresh front-end deps, and restart both services. The app briefly goes down (~30–60s) and reconnects automatically.">Update Orwell (pull + rebuild + restart)</button>
   <button type="button" class="btn" id="regen-portraits" title="Discard every stored cast portrait for your game and regenerate the full set (debug)">Regenerate cast portraits (debug)</button>
   <button type="button" class="btn" id="ff-finale" title="Drive your live season to a crowned winner so the post-season retrospective unseals (debug; reads no Vault)">Fast-forward to finale (debug)</button>
+  <button type="button" class="btn" id="producer-vault" style="border-color:#7a3b3b;color:#f0a6a6" title="DEBUG — UNSEAL the LIVE hidden Vault: off-screen scheming, NPC confessionals, secret ties, the sealed twists, and the real eviction votes. SPOILERS — this deliberately reveals your in-progress game's secrets (owner override of mandate #2). Hidden until you unseal.">Producer's Vault — Unseal (debug · SPOILERS)</button>
   <!-- BEGIN update-reset-combo lane button (self-contained; endpoint + logic live in routes/admin_update_reset_routes.py) -->
   <button type="button" class="btn" id="update-reset" style="border-color:#7a3b3b;color:#f0a6a6" title="DESTRUCTIVE — pulls latest, rebuilds, THEN resets to first-run OOBE: wipes ALL accounts, chats, memory, MCP configs, uploads, and every game. Keeps your API keys / LLM config so you don't re-enter them. Requires typing RESET.">Update + Reset (OOBE, keep API keys)</button>
   <!-- END update-reset-combo lane button -->
   <!-- BEGIN factory-oobe-reset lane button (self-contained; endpoint + logic live in routes/admin_reset_routes.py) -->
   <button type="button" class="btn" id="factory-reset" style="border-color:#7a3b3b;color:#f0a6a6" title="DESTRUCTIVE — wipe ALL accounts, chats, memory, MCP configs, uploads, and every game; return to first-run OOBE. Keeps your API-key/LLM config so you don't re-enter it. Requires typing RESET.">Factory Reset (OOBE)</button>
   <!-- END factory-oobe-reset lane button -->
+</div>
+<!-- DEBUG · owner override of mandate #2: the Producer's Vault unseal panel. HIDDEN by default
+     (display:none) — the live hidden layer appears here ONLY after an explicit "unseal" click +
+     spoiler confirm. This is the one place the admin surface deliberately shows Vault content. -->
+<div id="pv-panel" style="display:none;margin-top:14px;border:1px solid #7a3b3b;border-radius:8px;padding:12px;background:rgba(122,59,59,.08)">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <strong style="color:#f0a6a6">PRODUCER'S VAULT — live secrets (debug)</strong>
+    <button type="button" class="btn" id="pv-reseal" title="Hide the unsealed secrets again">Re-seal / hide</button>
+  </div>
+  <div id="pv-body" style="font-size:13px;line-height:1.5;white-space:pre-wrap"></div>
 </div>
 <div id="update-msg" class="sub" style="margin:-6px 0 8px"></div>
 <!-- BEGIN ops-progress lane: live step-by-step timeline for the running ops action (Update / -->
@@ -1198,6 +1235,49 @@ async function fastForwardFinale() {
   } catch (e) { opsMsg.textContent = "Request failed: " + e.message; }
 }
 document.getElementById("ff-finale").addEventListener("click", fastForwardFinale);
+// ── DEBUG · owner override of mandate #2: the Producer's Vault unseal ─────────────────────────────
+// HIDDEN by default. An explicit click + spoiler confirm UNSEALS the LIVE hidden layer into #pv-panel
+// — the one place the admin surface deliberately shows Vault content. Re-seal hides it again.
+function renderVault(v) {
+  if (!v) return "No active game to unseal.";
+  var out = [];
+  if (v.winner) out.push("WINNER (so far): " + esc(v.winner.name || ""));
+  var story = Array.isArray(v.hiddenStory) ? v.hiddenStory : [];
+  out.push("\\nHIDDEN LAYER (" + story.length + " entr" + (story.length === 1 ? "y" : "ies") + "):");
+  for (var i = 0; i < story.length; i++) out.push("  • [" + esc(story[i].type || "") + "] " + esc(story[i].content || ""));
+  var tw = Array.isArray(v.twists) ? v.twists : [];
+  if (tw.length) {
+    out.push("\\nSEALED TWISTS:");
+    for (var j = 0; j < tw.length; j++) out.push("  • " + esc(tw[j].kind || "") + (tw[j].firedWeek != null ? " — fired week " + esc(tw[j].firedWeek) : " — not fired"));
+  }
+  var ev = Array.isArray(v.evictionVotes) ? v.evictionVotes : [];
+  if (ev.length) {
+    out.push("\\nTRUE EVICTION VOTES:");
+    for (var k = 0; k < ev.length; k++) {
+      var w = ev[k];
+      var lines = (w.votes || []).map(function (x) { return esc((x.voter && x.voter.name) || "") + "→" + esc((x.votedFor && x.votedFor.name) || ""); });
+      out.push("  • Week " + esc(w.week) + " (out: " + esc((w.evictee && w.evictee.name) || "") + "): " + lines.join(", "));
+    }
+  }
+  return out.join("\\n");
+}
+async function unsealProducerVault() {
+  if (!confirm("UNSEAL THE PRODUCER'S VAULT?\\n\\nThis deliberately reveals your LIVE game's SECRETS — off-screen scheming, NPC confessionals, hidden ties, the sealed twists, and the real eviction votes. It overrides the God-Mode Vault wall (mandate #2) for debugging.\\n\\nThis WILL spoil your in-progress game. Continue?")) return;
+  var body = document.getElementById("pv-body");
+  var panel = document.getElementById("pv-panel");
+  body.textContent = "Unsealing…";
+  panel.style.display = "block";
+  try {
+    const r = await fetch("/api/admin/ops/producer-vault", { method: "POST", credentials: "same-origin" });
+    const d = await r.json();
+    body.textContent = d.ok ? renderVault(d.vault) : ("Could not unseal: " + esc((d && d.reason) || "unknown") + ".");
+  } catch (e) { body.textContent = "Request failed: " + e.message; }
+}
+document.getElementById("producer-vault").addEventListener("click", unsealProducerVault);
+document.getElementById("pv-reseal").addEventListener("click", function () {
+  document.getElementById("pv-body").textContent = "";
+  document.getElementById("pv-panel").style.display = "none";
+});
 // ── BEGIN update-reset-combo lane: destructive Update + Reset (pull+rebuild THEN OOBE; type RESET) ──
 // Pulls latest + rebuilds, THEN wipes everything to first-run OOBE — keeping the API-key/LLM config.
 // Demands an explicit typed "RESET" (not just an OK), then posts to the admin-gated endpoint in
