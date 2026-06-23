@@ -96,14 +96,16 @@ def test_sourcepin_gear_launcher_exists_in_markup():
 
 
 def test_smoke_exercises_the_launcher_restore_for_real():
-    # The browser gate must drive the reported scenario with TRUSTED clicks:
-    # minimize settings via the injected `_`, click the gear, assert visible +
-    # un-minimized + interactive — and heal theme-modal from an arbitrary
-    # un-hide (the launcher-agnostic belt).
+    # The browser gate must drive the launcher-agnostic restore with TRUSTED
+    # clicks. #553: Settings is now a kit MODAL dialog — intentionally NOT
+    # minimizable (a scrim'd modal docked to a chip is nonsense) — so the gate
+    # asserts settings opens from the gear, carries NO minimize affordance, and
+    # is interactive, then exercises the launcher-agnostic minimize→restore
+    # contract on the legacy .modal family (theme-modal): minimize for real,
+    # heal from an arbitrary un-hide (the observer belt runs the real restore).
     smoke = _read("scripts", "browser_smoke.py")
-    assert "G2 (Lane G): launcher-agnostic restore" in smoke
-    assert '"#settings-modal .modal-minimize-btn, #settings-modal .minimize-btn"' in smoke
     assert 'page.click("#user-bar-settings")' in smoke
-    assert "RESTORES the minimized settings window" in smoke
+    assert "G2/#553: the settings modal dialog has no minimize-to-dock button" in smoke
     assert "trusted click inside lands" in smoke
+    assert "G2: theme window minimizes to the dock" in smoke
     assert "heals the minimized theme window" in smoke

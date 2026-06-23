@@ -1464,7 +1464,11 @@
   </div>
 
   <!-- Settings Modal (all users) -->
-  <div id="settings-modal" class="modal hidden">
+  <!-- #553: Settings content lives in this hidden host; settings.js reparents .settings-modal-content
+       into an OrwellWindow kit modal at init (id="settings-modal") so it inherits the kit's unified
+       drag / z-authority / focus-trap / F5 cross-session geometry. The kit titlebar replaces the old
+       .modal-header; the "Peek" toggle is re-hosted into the kit titlebar. -->
+  <div id="settings-host" hidden>
     <div class="modal-content settings-modal-content" role="dialog" aria-label="Settings">
       <div class="modal-header">
         <h4><span style="vertical-align:-1px;margin-right:6px;font-size:var(--fs-md)">&#x2699;</span>Settings</h4>

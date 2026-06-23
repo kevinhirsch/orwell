@@ -97,5 +97,5 @@ def test_smoke_exercises_the_z_authority_for_real():
     assert "ABOVE the dock-restored window" in smoke
     assert "no .modal carries an inline !important z-index" in smoke
     assert "parked window holds NO inline !important z" in smoke
-    assert "Escape closes the top window (settings) FIRST" in smoke
+    assert "Escape closes the top window (settings kit modal) FIRST" in smoke
     assert "second Escape closes the dock-restored window" in smoke
