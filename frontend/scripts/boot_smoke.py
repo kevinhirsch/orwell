@@ -55,7 +55,9 @@ def boot(game_build: int, port: int):
         cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
     )
     base = f"http://127.0.0.1:{port}"
-    for _ in range(60):
+    # 120s boot budget — a loaded self-hosted runner during a merge wave can take
+    # well past 60s for uvicorn's first response (matches responsive_matrix.py / smoke.sh).
+    for _ in range(120):
         if proc.poll() is not None:
             sys.exit(f"FAIL — uvicorn exited early (game_build={game_build}); see /tmp/fe-boot-{port}.log")
         try:
