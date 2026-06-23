@@ -1197,6 +1197,14 @@ if (!window._odyEscExpandGuard) {
     if (cur === _zCounter) return;
     m.style.zIndex = String(++_zCounter);
   };
+  // A2 (#573, DWE audit F9): ONE z/focus authority across both window families.
+  // The legacy .modal ladder (above) and the OrwellWindow kit's modal tier used
+  // to be two separate counters that both started at 1000 — a kit modal pinned to
+  // a fixed 1001 could be painted UNDER a legacy .modal once _zCounter climbed past
+  // it. Expose the single monotonic allocator so the kit draws from THIS counter
+  // for its modal windows; visual order, dock order, and Escape order share one
+  // source of truth. (The kit's non-modal band 500–980 stays below 1000 by design.)
+  window._owNextModalZ = () => ++_zCounter;
   // Lane G14 (DWE audit F9b): this counter is the ONE z-authority for the
   // whole .modal family — the same ladder pickTopModal reads for Escape.
   // modalManager's _bringToFront defers here instead of stamping its own

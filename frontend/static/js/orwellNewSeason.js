@@ -266,6 +266,14 @@
       content: evicted ? buildEvictedBody() : buildBody(),
     });
     _win.open();
+    // F-NEW-13: this window has no × by design (it's the season hand-off; it auto-dismisses
+    // when the state moves on). Explain the missing close affordance so it doesn't read as a
+    // bug — minimize tucks it to the dock; it leaves on its own once you move forward.
+    try {
+      if (_win.el) {
+        _win.el.title = "This stays until you move on — it closes itself once the next season begins. Minimize to tuck it away.";
+      }
+    } catch (_) {}
     nudge();
   }
 

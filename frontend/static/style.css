@@ -9366,36 +9366,6 @@ body.hide-thinking .thinking-section { display: none !important; }
   font-variant-numeric: tabular-nums;
   color: var(--accent, var(--red));
 }
-/* Stall watchdog banner — shown when the stream has been silent for ~1min. */
-.stall-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px auto;
-  padding: 8px 12px;
-  max-width: 90%;
-  font-size: 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-warning, #f0ad4e) 12%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--color-warning, #f0ad4e) 40%, transparent);
-}
-.stall-banner-txt { flex: 1; opacity: 0.85; }
-.stall-banner-btn {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: none;
-  background: var(--accent, var(--red));
-  color: var(--on-accent, #fff);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.stall-banner-stop {
-  background: none;
-  color: var(--fg);
-  border: 1px solid var(--border);
-}
 .agent-thread-content {
   display: none;
   padding: 4px 0 2px 0;

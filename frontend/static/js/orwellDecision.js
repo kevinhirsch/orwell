@@ -207,6 +207,24 @@
     return "Confirm — this is binding";
   }
 
+  // F-NEW-5: a kind-specific (never auto-sent) prefill cue so the dramatic context
+  // of the locked-in decision carries into the player's next conversational turn —
+  // a single generic line lost the moment. Falls back to the generic cue.
+  function prefillCueFor(kind) {
+    const cues = {
+      nominations: "I've named my nominees — let's see the room when I say it out loud.",
+      "veto-decision": "I've decided on the veto — time to make it official at the ceremony.",
+      "finale-statement": "I've made my final case to the jury — let's see how it lands.",
+      "juror-question": "I've decided what to ask — let's hear their answer.",
+      "finale-answer": "I've cast my jury vote — let's see who takes it.",
+      "goodbye-message": "I've recorded my goodbye message — let's see how the house reacts.",
+      "comp-intent": "I've set my approach for this competition — let's compete.",
+      "comp-round": "I'm committing to this round — let's push on.",
+      "self-evict": "I've made my choice to walk — let's see how the house takes it.",
+    };
+    return cues[kind] || "I've made my decision — let's see how the house takes it.";
+  }
+
   function render(pending) {
     removeCard();
     if (!pending || !pending.kind) return;
@@ -487,9 +505,11 @@
         card.innerHTML = `<div class="odec-head"><span class="odec-title">✓ Locked in.</span></div>`;
         // The play continues in conversation: prefill (never auto-send) so the model
         // narrates the ceremony from FRESH engine state on the player's next turn.
+        // F-NEW-5: branch the prefill cue on the decision kind so the dramatic context
+        // carries over — a generic "I've made my decision" loses the moment.
         const box = document.getElementById("message");
         if (box && !box.value.trim()) {
-          box.value = "I've made my decision — let's see how the house takes it.";
+          box.value = prefillCueFor(kind);
           box.dispatchEvent(new Event("input", { bubbles: true }));
           box.focus();
         }

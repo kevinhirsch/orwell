@@ -216,8 +216,9 @@ def _versions() -> dict:
     """FE + engine build/version strings (no secrets) for one-glance triage."""
     out: dict = {}
     try:
-        from src.orwell_version import get_display_version
+        from src.orwell_version import get_display_version, get_build
         out["frontend"] = get_display_version()
+        out["build"] = get_build()
     except Exception as e:
         out["frontend"] = f"error: {type(e).__name__}"
     try:
@@ -563,6 +564,9 @@ async def _health_snapshot(user: str | None) -> dict:
         "frontend": frontend,
         "tiersAgree": tiers_agree,
         "images": images,
+        # Build + version (PR) for one-glance triage on the status page. version is the
+        # PR-derived "vX.XX"; build is the deployed checkout's short commit SHA.
+        "versions": _versions(),
     }
 
 

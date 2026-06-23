@@ -736,8 +736,15 @@ export class OrwellWindow {
     _stack.push(this);
     // J1-25: a modal window is pinned to the modal tier (just above its scrim), never
     // the kit band — and it is excluded from the band renormalization below.
+    // A2 (#573, DWE audit F9): ONE z-authority. Draw the modal z from ui.js's single
+    // monotonic counter (window._owNextModalZ) when present, so a kit modal and a
+    // legacy .modal can never out-climb each other (the old fixed Z_MODAL=1001 lost to
+    // a legacy modal once _zCounter passed it). Fallback to the fixed tier if ui.js
+    // hasn't loaded. The scrim follows just under whatever the window lands on.
     if (this.o.modal) {
-      this.el.style.zIndex = String(Z_MODAL);
+      const z = (typeof window._owNextModalZ === 'function') ? window._owNextModalZ() : Z_MODAL;
+      this.el.style.zIndex = String(z);
+      if (this._scrim) this._scrim.style.zIndex = String(z - 1);
     } else {
       if (_zTop >= Z_CEIL) { // renormalize the band (modal windows stay pinned)
         _zTop = Z_BASE;

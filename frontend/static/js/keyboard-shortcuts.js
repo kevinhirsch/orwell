@@ -4,13 +4,21 @@
 
 import { IS_MAC, isAltGrEvent } from './platform.js';
 
-const _defaultKeybinds = {
+// #586: the SINGLE source of truth for keybind defaults. The runtime keymap binds
+// from this table, and the Shortcuts settings tab (settings.js SHORTCUT_DEFAULTS)
+// and the /shortcuts slash command (slashCommands.js) both import it — so the
+// displayed/reset defaults can never drift from what's actually bound. Add or
+// rename a default HERE and the other two surfaces follow.
+export const DEFAULT_KEYBINDS = {
   search: 'ctrl+k', toggle_sidebar: 'ctrl+alt+b', new_session: 'ctrl+alt+n',
   fav_session: 'ctrl+alt+f', delete_session: 'ctrl+alt+d',
   cancel: 'escape', tts: 'alt+shift+t',
   settings: 'ctrl+,', focus_input: 'ctrl+/',
   open_theme: '',
 };
+// Internal alias kept so the existing loader/source-pins (test_s1s2_settings_wiring.py
+// asserts the literal `_defaultKeybinds`) stay byte-stable.
+const _defaultKeybinds = DEFAULT_KEYBINDS;
 
 export function _matchesCombo(e, combo, isMac = IS_MAC) {
   if (!combo) return false;
