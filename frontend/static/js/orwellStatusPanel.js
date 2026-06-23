@@ -177,6 +177,16 @@ import { onNarrowChange } from './platform.js';
            season is over (finished). */
         #orwell-status .os-done { margin: .2rem 0 .15rem; font-weight: 600; }
         #orwell-status .os-done .os-winner { color: var(--accent, var(--red, #e06c75)); }
+        /* J3-07/J3-08 (wayfinding): the PREMIERE objective + progress — the persistent answer to
+           "why hasn't HOH started, and how far am I?". Shown only during the premiere (it is the
+           current objective); the count is the player-mental-model NPC figure ("X of 15"). */
+        #orwell-status .os-premiere { margin: .2rem 0 .25rem; }
+        #orwell-status .os-prem-obj { font-weight: 600; }
+        #orwell-status .os-prem-obj .os-prem-count {
+          margin-left: .4rem; font-weight: 700;
+          color: var(--accent, #9cdef2);
+        }
+        #orwell-status .os-prem-left { opacity: .7; font-size: .9em; margin-top: .1rem; }
       </style>
       <div class="os-hdr" role="button" tabindex="0" aria-expanded="true" title="Collapse">
         <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-tod" id="os-tod" hidden title="Time of day in the house"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
@@ -184,6 +194,10 @@ import { onNarrowChange } from './platform.js';
       </div>
       <div class="os-body">
         <div class="os-done" id="os-done" hidden>Season complete<span id="os-done-winner"></span></div>
+        <div class="os-premiere" id="os-premiere" hidden>
+          <div class="os-prem-obj">Meet the house<span class="os-prem-count" id="os-prem-count"></span></div>
+          <div class="os-prem-left" id="os-prem-left" hidden></div>
+        </div>
         <div class="os-ceremony" id="os-ceremony">
           <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span><span class="os-rest" id="os-you-rest" hidden title="How rested you are — your own read"></span></div>
           <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
@@ -376,9 +390,44 @@ import { onNarrowChange } from './platform.js';
     el.style.display = "block";
   }
 
+  // J3-07/J3-08 (wayfinding): the PREMIERE objective + "X of 15 met" progress — the persistent,
+  // player-facing answer to "why hasn't HOH started, and how far am I?". Read from the engine's
+  // Vault-free `premiere` projection (PremiereIntrosView on getGameState). Shown ONLY during the
+  // premiere (it is the current objective) and hidden the moment it completes / the first HOH begins.
+  // metCount/total both include the player (they ARE met), so the player-mental-model figure is the
+  // NPC-only count (met-1 of total-1) to read as "X of 15". Public facets only — names + counts,
+  // never a number about a houseguest, a soul, or a standing.
+  function renderPremiere(el, state) {
+    const wrap = el.querySelector("#os-premiere");
+    if (!wrap) return;
+    const prem = state && state.premiere;
+    if (!prem || typeof prem !== "object" || prem.complete) { wrap.hidden = true; return; }
+    const total = Number(prem.total) - 1;     // NPCs only
+    const met = Number(prem.metCount) - 1;    // NPCs the player has met
+    if (!(total > 0) || !(met >= 0)) { wrap.hidden = true; return; }
+    const countEl = el.querySelector("#os-prem-count");
+    if (countEl) countEl.textContent = met + " of " + total + " met";
+    // The still-to-meet names (the same observable roster facets the engine exposes) — so the panel
+    // names the gap, not just a count. Bounded list; falls back to the count alone if absent.
+    const leftEl = el.querySelector("#os-prem-left");
+    if (leftEl) {
+      const names = Array.isArray(prem.remaining)
+        ? prem.remaining.map((fi) => fi && fi.houseguest && fi.houseguest.name).filter(Boolean)
+        : [];
+      if (names.length) {
+        leftEl.textContent = "Still to meet: " + names.join(", ");
+        leftEl.hidden = false;
+      } else {
+        leftEl.hidden = true;
+      }
+    }
+    wrap.hidden = false;
+  }
+
   // The memory wall: who's still in, who's gone, the attrition count, and the player's own
   // public role badge. All from getGameState().house[] + the ceremony status. No numbers.
   function renderRoster(el, st, state) {
+    renderPremiere(el, state);
     const badgeEl = el.querySelector("#os-you-badge");
     const badge = selfBadge(st, state);
     if (badge) { badgeEl.textContent = badge; badgeEl.hidden = false; }
