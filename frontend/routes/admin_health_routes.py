@@ -1409,12 +1409,16 @@ document.getElementById("update-orwell").addEventListener("click", updateOrwell)
 // "triggered then nothing" can never recur.
 const OPS_PROGRESS_KEY = "orwell.ops.watching";          // localStorage: the action we're tracking
 const OPS_STEP_LABELS = {
-  // The human phase names per action — index = step number (the script emits 1..total). These
-  // mirror the ops_progress_step() calls in the deploy scripts; a message from the server always
-  // wins for the CURRENT step, so a label drift never lies, it just pre-fills the upcoming rows.
+  // FALLBACK phase names only — used to label a COMPLETED step that this page never observed live
+  // (e.g. it was opened mid-run / after the restart). They must mirror the exact ops_progress_step()
+  // messages in the deploy scripts so the fallback never invents a step the updater didn't run. The
+  // server's live message is the source of truth for the current step and is what fills these in as
+  // the run progresses; these are never used to PRE-LIST steps the updater hasn't reached yet.
   "update": ["fetching latest code", "rebuilding engine", "refreshing front-end deps", "restarting services", "updated"],
   "factory-reset": ["stopping services", "preserving API keys / LLM config", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
-  "update-reset": ["fetching latest code", "rebuilding engine", "stopping services", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
+  // orwell-update-reset.sh emits exactly TWO steps (total=2) — the old 7-label list pre-populated
+  // fabricated rows that never matched what the updater reported.
+  "update-reset": ["updating (pull → rebuild → refresh deps)", "resetting to OOBE (keep API keys) + final restart"],
 };
 const OPS_TITLES = { "update": "Updating Orwell", "factory-reset": "Factory Reset (OOBE)", "update-reset": "Update + Reset" };
 // This panel tracks ONLY the three top-of-page maintenance actions. public-deployment / tls also
@@ -1429,54 +1433,58 @@ function opsMarkWatching(action) { try { localStorage.setItem(OPS_PROGRESS_KEY, 
 function opsClearWatching() { try { localStorage.removeItem(OPS_PROGRESS_KEY); } catch (e) {} }
 function opsGetWatching() { try { return localStorage.getItem(OPS_PROGRESS_KEY); } catch (e) { return null; } }
 const opsPanel = document.getElementById("ops-progress");
+// Live, per-action record of the messages the updater HAS actually reported this session
+// (step number → message), built up as we poll. Completed-step rows are labeled from what we
+// genuinely observed — never a guess — and we only fall back to the static labels for a step we
+// never saw (the page was opened mid-run / after the restart).
+const opsSeen = {};
 function renderOpsProgress(s) {
-  // s = a normalized status object from /api/admin/ops-status (or null). Hide the panel when
-  // there's nothing to show.
+  // s = a normalized status object from /api/admin/ops-status (or null). Hide when nothing is live.
   if (!s) { opsPanel.style.display = "none"; return; }
   const action = s.action || "ops";
-  const labels = OPS_STEP_LABELS[action] || [];
-  const total = s.total || labels.length || 0;
+  // The SERVER is authoritative for the count — the updater's own ops_progress_init <total> — so we
+  // never invent a step total from a client label list (that drifted: update-reset declares 2 steps,
+  // the old map listed 7). step is the live current step, clamped into range.
+  const total = s.total || 0;
   const step = Math.max(0, Math.min(s.step || 0, total || (s.step || 0)));
+  const cleanMsg = (s.message || "").replace(/^FAILED:\\s*/, "").trim();
+  // Record the live observation so a later render labels this completed step with what REALLY ran.
+  if (step >= 1 && cleanMsg) { (opsSeen[action] = opsSeen[action] || {})[step] = cleanMsg; }
+  const seen = opsSeen[action] || {};
+  const fallback = OPS_STEP_LABELS[action] || [];
+  const labelFor = i => seen[i] || fallback[i - 1] || ("step " + i);
   opsPanel.style.display = "block";
   document.getElementById("ops-progress-title").textContent = OPS_TITLES[action] || action;
   document.getElementById("ops-progress-count").textContent = total ? ("step " + step + " / " + total) : "";
-  // Bar reflects steps actually COMPLETED so it never runs ahead of the ✓ rows: a step that is only
-  // in flight (●) is not done yet. completed = step-1 while a step runs (or after a failure on it),
-  // and all of them on success. (The old step/total read 60% the instant step 3 of 5 began.)
+  // Bar = steps actually COMPLETED, never ahead of the ✓ rows (a step merely in flight is not done).
   const completed = s.ok ? total : Math.max(0, step - 1);
   const pct = total ? Math.round(completed / total * 100) : (s.ok ? 100 : 0);
   const bar = document.getElementById("ops-progress-bar");
   bar.style.width = pct + "%";
   bar.style.background = s.error ? "#e55" : (s.ok ? "#3cb46e" : "#9cdef2");
-  const spinner = document.getElementById("ops-progress-spinner");
-  spinner.style.display = s.running ? "inline-block" : "none";
-  // Build the step rows from the STABLE phase labels: done (✓), current (●), pending (○), failed (✗).
-  // The live server message is NOT echoed into a row — it lives in the single message line below, so
-  // the same text can never appear twice (the "● refreshing front-end deps" + duplicate-line bug).
+  document.getElementById("ops-progress-spinner").style.display = s.running ? "inline-block" : "none";
+  // Render ONLY the steps the updater has actually reached — completed (✓) plus the one in flight
+  // (●, labeled with the LIVE server message) or the one that failed (✗). On success the whole set
+  // is done. Future steps are NOT pre-listed, so the panel grows from real progress and shows no
+  // fabricated rows before the updater gets there.
+  const upto = s.ok ? total : step;   // step 0 (init) ⇒ no rows yet, just "starting…" below
   const rows = [];
-  const n = Math.max(total, labels.length, step);
-  for (let i = 1; i <= n; i++) {
-    const label = labels[i - 1] || ("step " + i);
-    let mark, cls;
-    if (s.error && i === step) { mark = "✗"; cls = "bad"; }
-    else if (i < step || (s.ok && i <= total)) { mark = "✓"; cls = "ok"; }
-    else if (i === step && s.running) { mark = "●"; cls = ""; }
-    else { mark = "○"; cls = "sub"; }
-    const labelCls = (cls === "sub") ? "sub" : "";
-    rows.push("<li><span class=\\"" + cls + "\\">" + mark + "</span> <span class=\\"" + labelCls + "\\">" + esc(label) + "</span></li>");
+  for (let i = 1; i <= upto; i++) {
+    let mark, cls, label;
+    if (s.error && i === step) { mark = "✗"; cls = "bad"; label = labelFor(i); }
+    else if (s.ok || i < step) { mark = "✓"; cls = "ok"; label = labelFor(i); }
+    else { mark = "●"; cls = ""; label = cleanMsg || labelFor(i); }   // current step — live message
+    rows.push("<li><span class=\\"" + cls + "\\">" + mark + "</span> <span>" + esc(label) + "</span></li>");
   }
   document.getElementById("ops-progress-steps").innerHTML = rows.join("");
-  // Single message line. Suppress it whenever it would merely repeat the current step's label —
-  // the deploy helper emits the phase name as the step message, so echoing it here was pure noise.
+  // Message line carries only what the rows don't already say: a failure's detail (+ which log), or
+  // the pre-first-step "starting…" note. The running step's live text already lives in its ● row and
+  // the success message in its final ✓ row, so neither is echoed here.
   const msgEl = document.getElementById("ops-progress-msg");
-  const curLabel = (labels[step - 1] || "").trim();
-  const cleanMsg = (s.message || "").replace(/^FAILED:\\s*/, "").trim();
   if (s.error) {
     msgEl.innerHTML = '<span class="bad">' + esc(s.message || ("FAILED: " + s.error)) + " — see " + esc(s.log || "the ops log") + "</span>";
-  } else if (s.ok) {
-    msgEl.innerHTML = (cleanMsg && cleanMsg !== curLabel) ? '<span class="ok">' + esc(cleanMsg) + "</span>" : "";
-  } else if (s.running) {
-    msgEl.innerHTML = (cleanMsg && cleanMsg !== curLabel) ? '<span class="sub">' + esc(cleanMsg) + "</span>" : "";
+  } else if (!s.ok && step === 0 && cleanMsg) {
+    msgEl.innerHTML = '<span class="sub">' + esc(cleanMsg) + "</span>";
   } else {
     msgEl.textContent = "";
   }
