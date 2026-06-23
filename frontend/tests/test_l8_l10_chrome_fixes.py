@@ -47,7 +47,11 @@ def test_model_state_save_updates_the_count_badge_specifically():
 
 def test_status_panel_roster_header_is_capitalized():
     js = _read("static", "js", "orwellStatusPanel.js")
-    assert '<div class="os-roster-h" id="os-roster-h">The House</div>' in js
+    # The static roster header reads "The House" (capital H) as a semantic heading (A11Y-9 added
+    # role="heading"/aria-level); assert the meaningful parts, not one brittle attribute-order string.
+    assert 'id="os-roster-h"' in js
+    assert 'class="os-roster-h"' in js
+    assert '>The House</div>' in js
     # the dynamic update of the same header matches the static markup
     assert '"The House · "' in js
     assert "The house" not in js
