@@ -2415,8 +2415,8 @@ import { isNarrow } from './platform.js';
                   // above, so the lifecycle tools it keyed on could never reach it.)
                   // runCompetition rides along: it is the single outcome authority, and a
                   // comp result moves exactly what the status HUD shows (HOH/veto/phase).
-                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter',
-                             'updateCasting', 'manageSandbox', 'runCompetition'].includes(json.tool)) {
+                  // FEJS-3: the trailing 8 also move public state the panels read — debounced.
+                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat'].includes(json.tool)) {
                     if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool);
                     if (json.tool === 'createCharacter') {
                       // E65: a season RESTART opens a FRESH chat (armed only by reset-progress /
@@ -3321,6 +3321,11 @@ import { isNarrow } from './platform.js';
           node.classList.remove('running');
         });
       } catch (_) {}
+      // TX-2: a background-completed stream can leave isStreaming true and the never-cancelled
+      // _textPauseTimer then mounts an orphan "Thinking" spinner into the now-FOREGROUND session.
+      // Cancel the pending spinner timer + sweep any spinner unconditionally here — both are
+      // idempotent no-ops when nothing is pending, so this is safe on every exit path.
+      try { _cancelThinkingTimer(); _removeThinkingSpinner(); } catch (_) {}
       // P1 (OOBE cutover): safety net — never leave the "finalizing" indicator stuck if the turn
       // ended (or errored) without any narration token to clear it.
       if (_orwellFinalizingActive) {

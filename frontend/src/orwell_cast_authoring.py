@@ -282,6 +282,11 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                 logger.warning(f"[cast-authoring] write-back failed for {hid}: {e}")
                 return 0
         if not (isinstance(res, dict) and res.get("accepted")):
+            # FEPY-5 (#621): a rejected/odd write-back was silently dropped here (unlike
+            # orwell_prewarm / orwell_zeitgeist) — a refused recordCastProfile was invisible. Log it so
+            # the no-op is diagnosable; the seeded floor still stands (best-effort, never aborts).
+            _reason = res.get("reason") if isinstance(res, dict) else f"non-dict result ({type(res).__name__})"
+            logger.warning(f"[cast-authoring] write-back not accepted for {hid}: {_reason or 'accepted=false'}")
             return 0
         # The write-back landed — signal this one NPC's completion so its portrait can shoot now (#7).
         if on_authored is not None:

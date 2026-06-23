@@ -296,13 +296,21 @@ import { onNarrowChange } from './platform.js';
       el.querySelector("#os-phase").textContent = "";
       { const t = el.querySelector("#os-tod"); if (t) t.hidden = true; } // ADR 0006: no clock post-season
       if (ceremonyEl) ceremonyEl.hidden = true;
+      const w = st.winner && st.winner.name;
       if (doneEl) {
         doneEl.hidden = false;
-        const w = st.winner && st.winner.name;
         doneEl.querySelector("#os-done-winner").innerHTML =
           w ? ' — winner: <span class="os-winner">' + esc(w) + "</span>" : "";
       }
-      _last = { phase: null, hoh: null, noms: null, veto: null }; // reset deltas; no ceremony to announce
+      // F-NEW-11: the highest-stakes event must reach SR users — announce the result once
+      // through the dedicated polite announcer (the winner is injected via innerHTML into a
+      // non-live node, so without this the season's end is silent). Guard on a change so a
+      // re-poll of the same finished state doesn't re-announce every cadence.
+      if (_last.done !== true) {
+        const a = el.querySelector("#os-announce");
+        if (a) a.textContent = w ? ("Season complete. The winner is " + w + ".") : "Season complete.";
+      }
+      _last = { phase: null, hoh: null, noms: null, veto: null, done: true }; // reset deltas; result announced above
       if (st._state !== undefined) renderRoster(el, st, st._state);
       el.style.display = "block";
       return;

@@ -186,7 +186,7 @@
     d.type = "button";
     d.className = "ob-btn";
     d.setAttribute("data-ob-dismiss", "");
-    d.textContent = "Continue anyway";
+    d.textContent = "Go in anyway"; // CONT-1: in-fiction dismiss (was the OOC "Continue anyway")
     d.addEventListener("click", dismiss);
     row.appendChild(d);
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
@@ -378,12 +378,12 @@
   // L2 (OOBE play-through): #rail-settings only un-hides the sidebar and scrolls — it does
   // NOT open the settings modal (see app.js). Clicking it left the player back at the chat
   // with no settings UI. The button that actually opens Settings is the user-bar gear
-  // (#user-bar-settings → settingsModule.open()), so prefer it; fall back to a direct module
-  // open if exposed, then to the rail button as a last resort.
+  // (#user-bar-settings → settings.js open()), so prefer it; fall back to the rail button
+  // as a last resort. (FEJS-2: dropped a dead `window.settingsModule` fallback — settings.js
+  // exports an ES-module default that is never attached to window, so it could never fire.)
   function openSettings() {
     const gear = document.getElementById("user-bar-settings");
     if (gear) { gear.click(); return; }
-    try { if (window.settingsModule && window.settingsModule.open) { window.settingsModule.open(); return; } } catch (_) {}
     const rail = document.getElementById("rail-settings");
     if (rail) rail.click();
   }

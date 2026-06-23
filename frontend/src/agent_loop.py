@@ -1474,6 +1474,36 @@ _FORCED_ADVANCE_NUDGE = (
     "resolved, then voice ONLY what it returns — never a result you guessed. If a player decision is "
     "now pending, present its options and wait for their choice.")
 
+# LIVE-4 (#541) — the eviction-reveal is the season's peak beat, and the model reliably CONSUMES it
+# (advanceGame drips one anonymized ballot per call) while narrating UNRELATED scenes, so the player
+# on the block never sees the votes land. This is the same "error-correct the omission, never
+# engine-author content" guardrail: when advanceGame returns an eviction-STAGE beat (the staged
+# reveal/result), we append a focused production note to the tool result steering the model to VOICE
+# the engine's returned ballot/result THIS turn — before any other scene, and before advancing again.
+# The engine already authored the content (`event.content`, e.g. "a vote to evict X" — anonymized by
+# E12); we only correct the omission of surfacing it. Eviction-stage beats whose content must reach the
+# player as the reveal it is:
+_EVICTION_STAGE_BEATS = {
+    "eviction-reveal", "eviction", "eviction-goodbye", "eviction-result", "final-eviction",
+}
+
+
+def _eviction_reveal_steer(beat: str, content: str) -> str:
+    """The focused production note that makes the model VOICE an eviction-stage beat the engine just
+    returned (LIVE-4 #541). Never authors content — it hands back the engine's own `event.content`
+    (which the secret-ballot reveal has already anonymized) and tells the model to narrate THAT."""
+    line = (content or "").strip()
+    quoted = f' The engine reveal you must voice: "{line}".' if line else ""
+    return (
+        "\n\n(Production note, not for the player.) This is the LIVE EVICTION REVEAL — the season's "
+        "peak beat. The engine just handed you the next reveal beat above; do NOT skip past it into a "
+        "backyard/alliance scene and do NOT advance again until you have narrated it to the player on "
+        "the block." + quoted + " Voice EXACTLY what the engine returned (the ballots are SECRET — read "
+        "'a vote to evict NAME' as the anonymized ballot it is; never attach it to a voter, never count "
+        "to a tally or declare a 'majority' yourself, and never name the evictee or a vote count before "
+        "the engine's own result beat states it). Surface the reveal first; the rest of the house can wait."
+    )
+
 # ── Casting finalize fallback (audit 2026-06-20: the game won't reliably START) ─────────────────
 # The pre-game twin of the advance stall-guard. The model reliably UNDER-CALLS createCharacter:
 # with casting.ready=true and the player asking to start, it keeps interviewing (often waiting on
@@ -2346,7 +2376,8 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
     # common case — and the open-set guarantee in the hot path).
     try:
         if (not chat_helpers._sentence_has_closed_set_claim(text)
-                and not chat_helpers._text_mentions_evicted_houseguest(owner, text)):
+                and not chat_helpers._text_mentions_evicted_houseguest(owner, text)
+                and not chat_helpers._sentence_has_nominee_status(text)):
             return text
     except Exception:
         return text
@@ -2365,6 +2396,11 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
             # sees it (never a later-turn correction, which would leave the conflict visible).
             if chat_helpers._text_mentions_evicted_houseguest(owner, part):
                 if not await chat_helpers.screen_streamed_location(owner, part):
+                    continue
+            # #561: a non-nominee staged AS on the block is a false closed-set fact (who is on the
+            # block is engine truth) — DROP it before the player sees it and re-ground next turn.
+            if chat_helpers._sentence_has_nominee_status(part):
+                if not await chat_helpers.screen_streamed_nominee(owner, part):
                     continue
         except Exception:
             pass  # any screening hiccup falls through to emit (conservatism)
@@ -2615,8 +2651,13 @@ def _empty_response_fallback(
 
     When a thinking model routes all tokens to reasoning_content (leaving
     content=""), full_response is empty but round_reasoning has content.
-    The reasoning was already streamed as {thinking:true} chunks — do not
-    re-emit it as a normal delta.  Just persist it and yield nothing.
+
+    FEPY-2 (#621): previously this persisted the reasoning but yielded NOTHING to the body,
+    leaving a BLANK GM bubble next to a populated Thinking accordion (the answer was routed
+    entirely into the reasoning channel — likelier on Flash). The empty-body JS fallback only
+    recovers inline `<think>` content, not channel-routed reasoning, so nothing recovered it.
+    Now, on an empty body with reasoning present, we RE-EMIT the reasoning as a non-thinking
+    body delta so the player actually sees the answer.
 
     Returns:
         (final_response: str, chunk: str | None)
@@ -2625,7 +2666,10 @@ def _empty_response_fallback(
     if full_response.strip() or tool_events:
         return full_response, None
     if round_reasoning.strip():
-        return round_reasoning, None
+        # FEPY-2: surface the channel-routed answer in the body bubble (non-thinking delta) instead
+        # of leaving it blank. It was streamed to the accordion as {thinking:true}; this body copy is
+        # what the player reads as the GM's reply.
+        return round_reasoning, f'data: {json.dumps({"delta": round_reasoning})}\n\n'
     _error_msg = "The model returned an empty response. Please try again or switch to a different model."
     return _error_msg, f'data: {json.dumps({"delta": _error_msg})}\n\n'
 
@@ -3485,7 +3529,11 @@ async def stream_agent_loop(
                     elif data.get("error"):
                         err_msg = data.get("error", "unknown")
                         logger.error(f"Agent round {round_num}: stream error: {err_msg}")
-                        yield f'data: {json.dumps({"delta": chr(10) + chr(10) + "*[Stream error: " + str(err_msg) + "]*"})}\n\n'
+                        # FEPY-1 (#621): a mid-stream upstream error must NOT land in the GM body bubble
+                        # (a casting 502/503/504 reads as in-fiction producer narration). Emit a typed
+                        # `error` SSE — the FE renders it as a styled error notice (chat.js `json.error`),
+                        # not reply-channel body text.
+                        yield f'data: {json.dumps({"error": str(err_msg)})}\n\n'
                 except json.JSONDecodeError:
                     if round_num == 1:
                         yield chunk
@@ -4599,6 +4647,15 @@ async def stream_agent_loop(
                 _turn_deal_nudges = 1  # model struck the deal itself — don't also back-fill one
 
             formatted = format_tool_result(desc, result)
+            # LIVE-4 (#541): an advanceGame that returned an eviction-STAGE beat gets a focused steer
+            # appended to its tool result, so the model VOICES the engine's reveal/result instead of
+            # consuming it silently while narrating an unrelated scene. Corrects the omission only —
+            # the content is the engine's own (anonymized) `event.content`, never authored here.
+            if _is_live_game and block.tool_type == "advanceGame" and isinstance(result, dict):
+                _ev = result.get("event")
+                if isinstance(_ev, dict) and str(_ev.get("beat") or "") in _EVICTION_STAGE_BEATS:
+                    formatted += _eviction_reveal_steer(str(_ev.get("beat") or ""),
+                                                         str(_ev.get("content") or ""))
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
 

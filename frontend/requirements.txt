@@ -46,5 +46,9 @@ mcp
 pyotp
 qrcode[pil]
 croniter
+# #611: the maintained DuckDuckGo client (the renamed `duckduckgo-search`). In the LOCKED set so a
+# default deploy has a working web-search fallback when SearXNG is unreachable
+# (services/search/providers.py imports `ddgs`, falls back to the legacy name, then an HTML scrape).
+ddgs
 pytest
 pytest-asyncio

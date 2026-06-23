@@ -135,6 +135,13 @@
       const entry = (box.value || "").trim();
       if (!entry) { box.focus(); return; }
       const pill = document.getElementById(PILL_ID);
+      // F-NEW-8: a confessional POST can exceed Doherty's 400ms; show an in-flight cue and
+      // guard against a double-submit (the capture-phase handler can re-fire on a fast second
+      // Enter). _drSubmitting gates re-entry; the pill text signals the recording is in flight.
+      if (form._drSubmitting) return;
+      form._drSubmitting = true;
+      const _label = pill && pill.firstElementChild;
+      if (_label) { pill.setAttribute("aria-live", "polite"); _label.textContent = "📔 Recording…"; }
       try {
         await submitDR(entry);
         box.value = "";
@@ -151,6 +158,9 @@
           pill.setAttribute("aria-live", "assertive");
           pill.firstElementChild.textContent = "📔 The Diary Room camera glitched — try again.";
         }
+      } finally {
+        // F-NEW-8: release the in-flight gate so a retry (after an error) can submit again.
+        form._drSubmitting = false;
       }
     }, true);
     box.addEventListener("keydown", (e) => {

@@ -492,6 +492,17 @@
     var c = clampW(w);
     if (c == null) return;
     rail.style.setProperty("--gadget-rail-width", c + "px");
+    _syncResizeAria(c);
+  }
+  // F-NEW-9: keep the slider's reported value (+ its viewport-relative max) in sync with the
+  // current rail width so AT announces the real number as the player nudges/drags it.
+  function _syncResizeAria(c) {
+    if (!resizeHandle) return;
+    var w = clampW(c == null ? currentWidth() : c);
+    if (w == null) return;
+    resizeHandle.setAttribute("aria-valuenow", String(w));
+    resizeHandle.setAttribute("aria-valuemax", String(maxW()));
+    resizeHandle.setAttribute("aria-valuetext", w + " pixels");
   }
   function persistWidth(w) {
     var c = clampW(w);
@@ -511,12 +522,17 @@
     if (resizeHandle && rail.contains(resizeHandle)) return resizeHandle;
     resizeHandle = document.createElement("div");
     resizeHandle.className = "gadget-rail-resize-handle";
-    resizeHandle.setAttribute("role", "separator");
+    // F-NEW-9: this handle is keyboard-OPERATED (arrows nudge the width), so it is a slider,
+    // not a non-interactive separator. role="slider" + the value range lets AT announce the
+    // current width and that it's adjustable.
+    resizeHandle.setAttribute("role", "slider");
     resizeHandle.setAttribute("aria-orientation", "vertical");
     resizeHandle.setAttribute("aria-label", "Resize the control room");
+    resizeHandle.setAttribute("aria-valuemin", String(MIN_W));
     resizeHandle.setAttribute("tabindex", "0");
     rail.appendChild(resizeHandle);
     wireResize(resizeHandle);
+    _syncResizeAria();
     return resizeHandle;
   }
 
