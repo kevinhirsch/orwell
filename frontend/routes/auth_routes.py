@@ -168,6 +168,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         token = request.cookies.get(SESSION_COOKIE)
         result = auth_manager.status(token)
         result["signup_enabled"] = auth_manager.signup_enabled
+        # Expose whether the operator has auth turned on so the FE can hide the
+        # account auth furniture (Logout / Change Password / 2FA) on a
+        # single-player, auth-off build where those controls are inert (J1-17).
+        result["auth_enabled"] = os.getenv("AUTH_ENABLED", "true").lower() != "false"
         # Include the caller's effective privileges so the frontend can
         # hide / dim UI controls the user isn't allowed to use. Admins get
         # ADMIN_PRIVILEGES (everything on), regular users get their stored
