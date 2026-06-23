@@ -62,7 +62,7 @@
       .ow-headshot-studio .hs-msg { opacity: .75; font-size: 12px; }
       .ow-headshot-studio .hs-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
       .ow-headshot-studio .hs-btn { font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
-        background: var(--brand-color, var(--accent, #4a9)); color: var(--bg, #111); border: 1px solid transparent; font-weight: 600; }
+        background: var(--brand-color, var(--accent, #4a9)); color: var(--on-accent, #fff); border: 1px solid transparent; font-weight: 600; }
       .ow-headshot-studio .hs-btn[disabled] { opacity: .5; cursor: default; }
       .ow-headshot-studio .hs-btn-ghost { background: transparent; color: var(--fg, #cfd8e3); border-color: var(--border, #355a66); font-weight: 400; }
       .ow-headshot-studio .hs-preview { width: 92px; height: 92px; border-radius: 8px; flex: none;
