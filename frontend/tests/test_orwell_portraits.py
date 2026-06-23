@@ -299,6 +299,48 @@ def test_changed_facet_prompt_reshoots_same_houseguest(tmp_portraits, monkeypatc
     assert fp_b and fp_b != fp_a  # the stored fingerprint tracks the new facet
 
 
+def test_reshoot_in_place_rotates_the_cache_epoch(tmp_portraits, monkeypatch):
+    """#531 — when portrait BYTES are replaced in place (a mid-season facet re-shoot), the cast
+    cache epoch must ROTATE so the `?v=<epoch>` URL changes and a browser holding the stale face
+    (Cache-Control: max-age=86400) fetches the re-shot one. Without this, both sessions diverge."""
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+
+    async def fake_gen(prompt, user, reference_png=None):
+        return b"PNG:" + prompt.encode()
+    monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
+
+    cast_a = [{"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "facet-A"}]
+    _run(orwell_portraits.generate_and_store(cast_a, "u", record_beats=False))
+    epoch_a = orwell_portraits._load_cast_epoch("u")
+    assert epoch_a  # an epoch was minted on first persist
+
+    # Same id+name, a CHANGED facet → bytes replaced in place → the epoch must rotate.
+    cast_b = [{"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "facet-B-deeper"}]
+    _run(orwell_portraits.generate_and_store(cast_b, "u", record_beats=False))
+    epoch_b = orwell_portraits._load_cast_epoch("u")
+    assert epoch_b and epoch_b != epoch_a, "cache epoch did not rotate on an in-place re-shoot"
+
+
+def test_first_generation_does_not_rotate_epoch(tmp_portraits, monkeypatch):
+    """#531 guard: a FIRST-time generation (no prior bytes) keeps the freshly-minted epoch stable —
+    only an in-place byte REPLACEMENT rotates it, so a clean season keeps one URL per houseguest."""
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+
+    async def fake_gen(prompt, user, reference_png=None):
+        return b"PNG:" + prompt.encode()
+    monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
+
+    cast = [
+        {"houseguestId": "npc:1", "name": "Houseguest One", "prompt": "facet-A"},
+        {"houseguestId": "npc:2", "name": "Houseguest Two", "prompt": "facet-B"},
+    ]
+    _run(orwell_portraits.generate_and_store(cast, "u", record_beats=False))
+    epoch_after_first = orwell_portraits._load_cast_epoch("u")
+    # Re-running with UNCHANGED facets shoots nothing new → no in-place replacement → stable epoch.
+    _run(orwell_portraits.generate_and_store(cast, "u", record_beats=False))
+    assert orwell_portraits._load_cast_epoch("u") == epoch_after_first
+
+
 def test_unchanged_facet_prompt_does_not_reshoot(tmp_portraits, monkeypatch):
     """An UNCHANGED prompt does NOT re-shoot — generate-once-per-season holds (single generation)."""
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)

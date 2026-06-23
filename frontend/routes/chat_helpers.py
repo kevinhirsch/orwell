@@ -824,6 +824,20 @@ _CLAIM_NEW_HOH_RE = re.compile(
     re.IGNORECASE,
 )
 _CLAIM_TALLY_RE = re.compile(r"\b\d+\s*(?:votes?|-)\s*(?:to|–|-)\s*\d+\b", re.IGNORECASE)
+# NARR-8 (#574): a NOMINATION was narrated as committed ("nominated X for eviction", "puts X on
+# the block", "the nominees are…"). Paired with the `noms` signature field — if the nominee set
+# didn't move, the engine never committed a nomination.
+_CLAIM_NOMINATED_RE = re.compile(
+    r"\b(?:nominat(?:e[sd]?|ing)|put(?:s|ting)?\s+(?:\w+\s+){0,3}?on the block|"
+    r"on the (?:chopping )?block|the nominees are|named (?:as )?(?:a )?nominee)\b",
+    re.IGNORECASE,
+)
+# NARR-8 (#574): a VETO WINNER was narrated ("wins the Power of Veto", "wins the veto", "the new
+# veto holder"). Paired with the `vetoHolder` signature field.
+_CLAIM_VETO_WINNER_RE = re.compile(
+    r"\bwins (?:the )?(?:power of veto|veto|pov)\b|\b(?:new )?veto (?:holder|winner)\b",
+    re.IGNORECASE,
+)
 # Phases where a numeric "N to M" reads as a FINALE jury tally (vs. a mid-season eviction count,
 # which we don't police here — the eviction claim does that).
 _FINALE_PHASES = ("finale", "final", "jury-vote", "jury_vote", "juryvote")
@@ -831,6 +845,12 @@ _FINALE_PHASES = ("finale", "final", "jury-vote", "jury_vote", "juryvote")
 # flavor). The new-HOH claim is scoped to these the way the tally claim is scoped to the finale —
 # so an HOH-flavored line outside the HOH beat is never rail-corrected (ADR 0005 principle #1).
 _HOH_PHASES = ("hoh",)
+# Phases where a "nominated / on the block" line reads as a COMMITTED nomination (the nomination
+# beat itself, and the veto ceremony where the replacement nominee is set). Outside these, the
+# language is plan/speculation flavor ("I might nominate you") — never rail-corrected.
+_NOM_PHASES = ("nom", "nominat", "veto-ceremony", "veto_ceremony", "vetoceremony", "ceremony")
+# Phases where "wins the veto" reads as a COMMITTED veto win (the veto competition beat).
+_VETO_PHASES = ("veto",)
 
 
 def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict) -> Optional[str]:
@@ -873,6 +893,20 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
           and after.get("hoh") == before.get("hoh")
           and not (before.get("hoh") is None and after.get("hoh") is not None)):
         desync = "a NEW HEAD OF HOUSEHOLD being crowned"
+    # (5) NARR-8 (#574): a NOMINATION was narrated, but the nominee set didn't move → no nomination
+    #     was committed. Scoped to the nomination / veto-ceremony phases (like the HOH branch),
+    #     so plan/speculation language outside the beat ("I might nominate you") is never policed.
+    elif (_CLAIM_NOMINATED_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_NOM_PHASES)
+          and (after.get("noms") or []) == (before.get("noms") or [])):
+        desync = "a NOMINATION (a houseguest being put on the block)"
+    # (6) NARR-8 (#574): a VETO WINNER was narrated, but the veto holder didn't change → no veto win
+    #     committed. Scoped to the veto phase; the fresh-win guard mirrors the HOH branch.
+    elif (_CLAIM_VETO_WINNER_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_VETO_PHASES)
+          and after.get("vetoHolder") == before.get("vetoHolder")
+          and not (before.get("vetoHolder") is None and after.get("vetoHolder") is not None)):
+        desync = "the POWER OF VETO being won"
 
     if not desync:
         return None
@@ -1093,6 +1127,8 @@ def _sentence_has_closed_set_claim(text: str) -> bool:
         or _CLAIM_WINNER_RE.search(text)
         or _CLAIM_NEW_HOH_RE.search(text)
         or _CLAIM_TALLY_RE.search(text)
+        or _CLAIM_NOMINATED_RE.search(text)
+        or _CLAIM_VETO_WINNER_RE.search(text)
     )
 
 
@@ -2543,6 +2579,14 @@ async def build_chat_context(
         _last = sess.history[-1]
         if getattr(_last, "role", None) == "user":
             mark_message_phase(_last, "casting")
+    # #530 (STRUCTURAL): once the season is live, stamp the live user turn `phase=game` — the
+    # durable season-start boundary the context build cuts on. With it, every pre-game turn
+    # before the boundary is excluded whether or not its own `casting` stamp ever landed, so a
+    # missed stamp at the finalize boundary can no longer leak the casting interview to NPCs.
+    elif game_active and getattr(sess, "history", None):
+        _last = sess.history[-1]
+        if getattr(_last, "role", None) == "user" and (getattr(_last, "metadata", None) or {}).get("phase") != "game":
+            mark_message_phase(_last, "game")
 
     # Capture used memories immediately
     used_memories = getattr(chat_processor, '_last_used_memories', [])
@@ -2567,7 +2611,12 @@ async def build_chat_context(
     # here so the model cannot leak the player's private strategy to the houseguests. The model
     # cannot leak what it never receives. Pre-game/casting turns keep the full transcript.
     _exclude_phases = {"casting"} if game_active else None
-    messages = preface + sess.get_context_messages(exclude_phases=_exclude_phases)
+    # #530: pair the per-message `casting` exclusion with the STRUCTURAL pre-game cut — when the
+    # season is live, drop every turn before the `game` boundary that isn't itself a live turn, so
+    # an unstamped pre-game turn (a missed `casting` stamp) is still excluded.
+    messages = preface + sess.get_context_messages(
+        exclude_phases=_exclude_phases, exclude_pre_game=bool(game_active),
+    )
 
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(

@@ -210,7 +210,9 @@ import * as modalManager from "./modalManager.js";
     if (playerIsFinalist && finale.stage === "statements") {
       addBtn("✍ Give your opening statement", "I give my opening statement to the jury: ");
     } else if (playerIsFinalist && finale.stage === "questions") {
-      for (const a of APPEALS) addBtn("→ " + a.label, `I answer the jury by making my "${a.id}" case.`);
+      // #616: prefill the HUMAN label, not the raw kebab id (e.g. "discredit-rival") — the id is
+      // machinery and must never land in the player's visible composer.
+      for (const a of APPEALS) addBtn("→ " + a.label, `I answer the jury by making my "${a.label}" case.`);
     } else if (!playerIsFinalist && finale.stage === "vote") {
       for (const f of finalists) addBtn("🗳 Vote for " + nameOf(f), `I cast my jury vote for ${nameOf(f)}.`);
     }

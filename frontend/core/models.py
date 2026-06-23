@@ -76,7 +76,8 @@ class Session:
             _session_manager._persist_message(self.id, message)
 
     def get_context_messages(
-        self, exclude_phases: Optional[set] = None
+        self, exclude_phases: Optional[set] = None,
+        exclude_pre_game: bool = False,
     ) -> List[Dict[str, Any]]:
         """Get messages in format for LLM API.
 
@@ -97,14 +98,41 @@ class Session:
         player's private casting strategy/OOC reads to the houseguests. The model
         cannot leak what it never receives. Pass ``{"casting"}`` on a live-game
         turn; display/history paths use raw ``history`` and are unaffected.
+
+        ``exclude_pre_game`` (#530 — STRUCTURAL casting-leak guard) makes the
+        exclusion independent of every casting turn being individually stamped.
+        The per-message ``phase == "casting"`` stamp can MISS (the finalize
+        boundary computes ``game_active`` once at turn-start; a turn persisted
+        without the stamp would otherwise leak). When the season is live, live
+        play turns are stamped ``phase == "game"`` — the season-start boundary.
+        With ``exclude_pre_game=True`` we drop EVERY turn before the first
+        ``"game"``-stamped turn (the boundary, by sequence) that is not itself a
+        live turn — so any UNSTAMPED pre-game turn is treated as casting and
+        excluded structurally, even if its ``"casting"`` stamp was never written.
         """
         phases = exclude_phases or set()
-        return [
-            msg.to_dict()
-            for msg in self.history
-            if (msg.metadata or {}).get("source") != "slash"
-            and (not phases or (msg.metadata or {}).get("phase") not in phases)
-        ]
+        # #530: the season-start boundary = the first live ("game") turn. Everything in scroll
+        # order before it is pre-game (casting / OOC setup), regardless of whether each turn got
+        # its per-message stamp. Index-based so it survives a stamp miss AND a DB reload.
+        boundary = -1
+        if exclude_pre_game:
+            for i, msg in enumerate(self.history):
+                if (msg.metadata or {}).get("phase") == "game":
+                    boundary = i
+                    break
+        result: List[Dict[str, Any]] = []
+        for i, msg in enumerate(self.history):
+            md = msg.metadata or {}
+            if md.get("source") == "slash":
+                continue
+            if phases and md.get("phase") in phases:
+                continue
+            # Structural pre-game cut: before the live boundary, keep ONLY turns already marked
+            # as live ("game"); drop everything else (stamped-casting AND unstamped pre-game).
+            if exclude_pre_game and boundary >= 0 and i < boundary and md.get("phase") != "game":
+                continue
+            result.append(msg.to_dict())
+        return result
 
     def get(self, key: str, default=None):
         """Dict-like access for compatibility."""

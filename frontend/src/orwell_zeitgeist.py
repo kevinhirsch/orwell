@@ -192,8 +192,17 @@ async def run_capture(owner: Optional[str]) -> dict:
     async def _write(snapshot: dict) -> dict:
         return await orwell_engine.record_world_snapshot(snapshot, user=owner)
 
-    return await capture_zeitgeist(research_fn, llm_fn, _write,
-                                   captured_for=captured_for, captured_at=captured_at)
+    result = await capture_zeitgeist(research_fn, llm_fn, _write,
+                                     captured_for=captured_for, captured_at=captured_at)
+    # #617: the zeitgeist landed on the live game — push a server-side "game-updated" so open
+    # pages reconcile now instead of waiting for the next poll. Best-effort/fail-soft.
+    if isinstance(result, dict) and result.get("accepted"):
+        try:
+            from src import orwell_game_session
+            orwell_game_session.publish_game_updated(owner)
+        except Exception:
+            pass
+    return result
 
 
 def kickoff_capture(owner: Optional[str]) -> None:

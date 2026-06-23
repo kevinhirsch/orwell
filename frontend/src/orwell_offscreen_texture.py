@@ -141,10 +141,19 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
         return await orwell_engine.record_offscreen_scene_texture(event_id, content, user=owner)
 
     try:
-        return await enrich_tick(get_skeletons, llm_fn, write_back)
+        result = await enrich_tick(get_skeletons, llm_fn, write_back)
     except Exception as exc:
         logger.warning("[offscreen-texture] run_enrich failed: %s", exc)
         return {"voiced": 0, "total": 0, "error": str(exc)}
+    # #617: voiced texture landed on the live game — push a server-side "game-updated" so open
+    # pages reconcile now instead of waiting for the next poll. Best-effort/fail-soft.
+    if isinstance(result, dict) and result.get("voiced"):
+        try:
+            from src import orwell_game_session
+            orwell_game_session.publish_game_updated(owner)
+        except Exception:
+            pass
+    return result
 
 
 # Per-user in-flight guard: prevents a second advance from launching an overlapping enrichment run
