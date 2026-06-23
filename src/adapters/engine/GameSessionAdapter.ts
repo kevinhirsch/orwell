@@ -4200,13 +4200,9 @@ export class GameSessionAdapter implements GameSession {
    * framing. Pre-game / no-snapshot ⇒ "" (the §8 fail-soft path; the prompt is unchanged). Public flavor
    * by construction — it reads ONLY the public snapshot, never a hidden number.
    */
-  private worldContext(_moment: string): string | undefined {
+  private worldContext(moment: string): string | undefined {
     if (!this.worldSnapshot || !this.house) return undefined;
-    // #580 (NARR-11): getMomentPrompt is the PLAYER'S narration prompt — every beat here is
-    // player-facing. Social and diary-room are player-PRESENT scenes, so they take the
-    // player-channel zeitgeist framing, NOT the off-screen "world you moved in with" framing
-    // (that channel is for NPC-only scenes the player isn't in). Framing precision, not a leak.
-    const channel = "player";
+    const channel = moment === "social" || moment === "diary-room" ? "offscreen" : "player";
     // 0062 HOH music perk: the player has LIVE music only when they hold it — the reigning HOH (the real-BB
     // luxury) or in the HOH room overhearing it; otherwise the music slice is frozen memory like the rest.
     const block = renderZeitgeist(this.worldSnapshot, {

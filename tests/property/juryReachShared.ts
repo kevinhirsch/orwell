@@ -106,7 +106,9 @@ export async function playSeed(seed: number): Promise<SeasonResult> {
   });
   const resolver = runtime.registry.resolver();
   const mcp = resolver("player", `jury-reach-${seed}`);
-  await mcp.callTool("createCharacter", { playerName: "The Player", seed });
+  // Pin the player archetype to the historical default ("floater"): #529 stopped fabricating a
+  // default archetype (absence ⇒ neutral 0.5 stats), which would shift this seeded calibration band.
+  await mcp.callTool("createCharacter", { playerName: "The Player", seed, archetype: "floater" });
 
   let finished = false;
   let winner: { id: string } | null = null;
