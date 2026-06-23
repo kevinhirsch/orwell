@@ -288,3 +288,29 @@ describe("L29 — narration and portrait share ONE appearance source", () => {
     expect(ctx).not.toContain("99999");
   });
 });
+
+describe("#534 — the in-game time of day is injected into the narrator context", () => {
+  it("voices THIS hour when timeOfDay is present, and instructs not to narrate a different one", () => {
+    const game = new GameSessionAdapter();
+    game.createCharacter({ playerName: "The Player", seed: 17 });
+    const base = game.getGameState();
+    const view = { ...base, timeOfDay: "evening" } as typeof base;
+    const ctx = renderGameContext(view);
+    expect(ctx).toContain("Time of day: evening");
+    // It must tell the model to set the scene at THIS hour and never drift to another time of day.
+    expect(ctx.toLowerCase()).toContain("never narrate a different time of day");
+  });
+
+  it("emits NO time-of-day line when timeOfDay is absent (byte-identical, clock-off default)", () => {
+    const game = new GameSessionAdapter();
+    game.createCharacter({ playerName: "The Player", seed: 17 });
+    const view = game.getGameState();
+    // Clock-off is the default: getGameState() carries no timeOfDay, so the context is unchanged.
+    expect(view.timeOfDay).toBeUndefined();
+    const ctx = renderGameContext(view);
+    expect(ctx).not.toContain("Time of day:");
+    // And explicitly: injecting the field and removing it round-trips to the same string.
+    const without = renderGameContext({ ...view, timeOfDay: undefined } as typeof view);
+    expect(without).toBe(ctx);
+  });
+});

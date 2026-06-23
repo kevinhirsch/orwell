@@ -168,7 +168,7 @@ A4_DIR="$(mktemp -d /tmp/orwell-smoke-a4-XXXXXX)"
 rm -rf "$A4_DIR"
 # And the A4 lint: no deploy script may fetch branch tips from raw.githubusercontent (E84) —
 # the bootstrap one-liner in comments/docs is the single sanctioned exception.
-if grep -n 'raw\.githubusercontent\.com' deploy/*.sh | grep -Ev '^[^:]+:[0-9]+:[[:space:]]*#' | grep -v 'grep' | grep -q .; then
+if grep -n 'raw\.githubusercontent\.com' $(git ls-files 'deploy/*.sh' 'deploy/**/*.sh') | grep -Ev '^[^:]+:[0-9]+:[[:space:]]*#' | grep -v 'grep' | grep -q .; then
   fail "a deploy script still fetches raw branch tips from GitHub (E84)"
 else
   pass "no deploy script fetches branch tips from GitHub (E84 closed)"

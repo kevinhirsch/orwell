@@ -319,7 +319,11 @@ jobs:
       # token-enforcing engine and drives a full turn — it needs the FE deps.
       - run: pip install -r frontend/requirements.txt
       - name: deploy scripts parse
-        run: for s in deploy/*.sh; do bash -n "$s"; done
+        # Enumerate EVERY tracked deploy shell script recursively (incl. nested dirs like
+        # deploy/expose/*.sh) — the old non-recursive `deploy/*.sh` glob silently skipped them (#618).
+        # The top-level + `**/` pathspecs together cover both the root and nested scripts (git's `**`
+        # alone does not match zero intermediate dirs).
+        run: for s in $(git ls-files 'deploy/*.sh' 'deploy/**/*.sh'); do bash -n "$s"; done
       - name: engine + system deploy smoke
         run: bash deploy/smoke.sh
 

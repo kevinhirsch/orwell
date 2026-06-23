@@ -60,6 +60,21 @@ export type Beat =
   // on BeatEvent only (the structural transition is the player's removal + the terminal `selfEvicted`).
   | "self-eviction";
 
+/**
+ * The INERT, presentation-only beats (0006 staged-rounds): a per-round staged-competition DROP. It
+ * carries NO rng, NO consequence fold, NO soul inflection (it falls through every commit side-effect
+ * switch) — pure re-telling of an already-fixed outcome (see `advanceCompetition` /
+ * `stagedTrajectoryNeutral`). The crown keeps its comp beat key (so its consequence still folds) and
+ * is NOT inert. Callers that gate substantive side-effects (e.g. the ADR-0006 clock, #537) consult this
+ * so an inert reveal can never perturb game state the same way it can never perturb the seeded stream.
+ */
+const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination"]);
+
+/** Whether a beat is an inert, presentation-only staged reveal (no rng / no fold / no clock advance). */
+export function isInertBeat(beat: Beat): boolean {
+  return INERT_BEATS.has(beat);
+}
+
 /** A player decision the live loop is blocked on until `applyDecision` resolves it. */
 export type PendingDecision =
   | { kind: "nominations"; by: EntityId; options: EntityId[]; pick: 2 }
@@ -1168,15 +1183,35 @@ function recordAppeal(f: FinaleProgress, finalist: EntityId, juror: EntityId, ap
 }
 
 /**
- * The appeal a finalist made to a juror — their recorded choice. With the 18-Q&A finale every juror
- * questions BOTH finalists (audit A6 ruling), so every (finalist, juror) pair is answered and the
- * `bestAppeal` fallback below is a NEVER-HIT safety guard (kept so a malformed script can't crash the
- * tally). The player answers their own 9; the NPC's 9 are its `bestAppeal` — symmetric by construction.
+ * The appeal a finalist made to a juror — their recorded choice, or `undefined` if NONE was made.
+ * With the 18-Q&A finale every juror questions BOTH finalists (audit A6 ruling), so in a complete
+ * finale every (finalist, juror) pair is answered; an absent appeal means the finalist DID NOT answer
+ * that juror (e.g. a player who skipped/abandoned the finale). SOC-NEW-4 (#567): we no longer launder
+ * a missing answer into `bestAppeal` (the argmax-OPTIMAL choice) — that scored not-answering as
+ * answering perfectly, a player-favoring anti-sycophancy violation. The caller floors a missing appeal.
  */
 function appealMade(
+  f: FinaleProgress, finalist: EntityId, juror: EntityId,
+): FinaleAppeal | undefined {
+  return f.appeals[finalist]?.[juror];
+}
+
+/**
+ * The finale-performance term for a finalist toward a juror. A RECORDED appeal scores by its actual
+ * `appealEffect`; an ABSENT appeal (the finalist never answered this juror) scores at the FLOOR — the
+ * weakest effect available against this juror, never the argmax-best. So failing to answer can never
+ * beat actually answering (SOC-NEW-4 / #567, anti-sycophancy).
+ */
+function appealPerf(
   f: FinaleProgress, finalist: EntityId, juror: EntityId, ctx: SeasonCtx, s: LiveSeasonState,
-): FinaleAppeal {
-  return f.appeals[finalist]?.[juror] ?? bestAppeal(edgeAsJuryRel(juror, finalist, ctx), mannerFor(s, juror, finalist));
+): number {
+  const rel = edgeAsJuryRel(juror, finalist, ctx);
+  const manner = mannerFor(s, juror, finalist);
+  const made = appealMade(f, finalist, juror);
+  if (made !== undefined) return appealEffect(made, rel, manner);
+  // No appeal made — score the floor (the worst appeal this juror could have heard), so not-answering
+  // is strictly no better than the weakest real answer.
+  return Math.min(...FINALE_APPEALS.map((a) => appealEffect(a, rel, manner)));
 }
 
 /** Begin the live finale: lock the Final 2, the last-9 jury, and the engine choreography. */
@@ -1213,7 +1248,7 @@ function precomputeVotes(s: LiveSeasonState, ctx: SeasonCtx, f: FinaleProgress, 
       JURY_WEIGHTS.gameRespect * gameRespectTerm(s.resume?.[fin] ?? 0, s.resume?.[otherFinalist(f.finalists, fin)] ?? 0);
     // Each juror questioned BOTH finalists (18-Q&A), so each has a recorded appeal here — scored
     // symmetrically by the same `appealEffect`; the player's own answers are exactly as weighted as the NPC's.
-    const perfFor = (fin: EntityId): number => appealEffect(appealMade(f, fin, juror, ctx, s), edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin));
+    const perfFor = (fin: EntityId): number => appealPerf(f, fin, juror, ctx, s);
     votes[juror] = castJuryVote(f.finalists, leanFor, perfFor, rng);
   }
   return votes;

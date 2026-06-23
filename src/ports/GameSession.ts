@@ -576,6 +576,14 @@ export interface NamedRef {
 export interface BeatEventView {
   beat: string;
   content: string;
+  /**
+   * EVT-1 (#569): the PUBLIC houseguests this beat is about (the new HOH, the nominees, the veto
+   * field, the evictee…), projected role-safe — id + name only, exactly the public roster facts the
+   * `content` prose already names. NON-VAULT by construction (it reads only `BeatEvent.participants`,
+   * which carries identities, never hidden/secret state), so a ceremony result's identities are
+   * structured for the surface instead of being prose-only. Absent ⇒ no participant beat (e.g. no event).
+   */
+  participants?: NamedRef[];
 }
 
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */

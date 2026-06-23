@@ -590,8 +590,9 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "they witnessed, never the hidden story, while the house is still playing.",
   "re-entry":
     "MOMENT — Re-entry. The player has RETURNED to a season in progress (a new session; the chat may " +
-    "be empty — the STORE remembers, the chat does not). Open with a fresh in-fiction morning scene in " +
-    "the house, grounded in the CURRENT week/phase and the recorded events below — never an " +
+    "be empty — the STORE remembers, the chat does not). Open with a fresh in-fiction scene in " +
+    "the house, set at the CURRENT time of day the engine reports below (never assume morning), " +
+    "grounded in the CURRENT week/phase and the recorded events below — never an " +
     "out-of-fiction recap dump, never an apology about absence, never invented happenings. Pick up the " +
     "live thread (a pending ceremony, a simmering rivalry) and put the player back IN the room.",
   "post-season":
@@ -852,6 +853,12 @@ export function renderGameContext(view: GameStateView): string {
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
     `- Phase: ${view.phase}${day === null ? "" : ` (day ${day} of the week)`}`,
+    // ADR 0006 — the in-game hour the HUD shows (one shared clock for the whole house). Voice THIS time of
+    // day and never narrate a different one (no "fresh morning" when the engine says evening). Guarded on
+    // the field's presence so a pre-game / clock-dormant view is byte-identical (no line emitted).
+    ...(view.timeOfDay
+      ? [`- Time of day: ${view.timeOfDay} (engine truth — set the scene at THIS hour; never narrate a different time of day than the engine reports).`]
+      : []),
     `- Houseguests remaining: ${remaining} of ${total} (use THIS exact number for any count — never`,
     "  do your own arithmetic about how many are left, on podiums, etc.).",
     ...ceremonyLines,
