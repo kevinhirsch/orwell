@@ -625,6 +625,28 @@ _LAST_BEAT_SEQ: dict = {}
 # changes ONLY when this turn progresses, so the check is inert and behavior is byte-identical.
 _LAST_FRAMED_BEAT_KEY: dict = {}
 
+# #670 — one-shot flag: did `_pre_resolve_npc_ceremony` walk a real beat for this user THIS turn? The
+# pre-resolve advances ONE engine-driven beat per turn at the top of the turn (ceremonies AND the long
+# staged finale, `_CEREMONY_RESOLVE_PHASES`). With "finale" now in the agent loop's `_ADVANCE_PHASES`,
+# the end-of-turn L39 forced-advance backstop could otherwise advance a SECOND beat the same turn —
+# skipping a finale-reveal beat (the staged jury vote must walk one beat per turn, E12-style). So the
+# agent loop CONSUMES this flag (`consume_pre_resolved_advance`) to treat the turn as already-progressed
+# (reset the staleness clock) AND suppress its backstop — exactly mirroring the `_peer_advanced` guard.
+_PRE_RESOLVED_ADVANCE: dict = {}
+
+
+def mark_pre_resolved_advance(user) -> None:
+    """Record that the pre-resolve walked a real beat for `user` this turn (#670 double-advance guard)."""
+    if user is not None:
+        _PRE_RESOLVED_ADVANCE[user] = True
+
+
+def consume_pre_resolved_advance(user) -> bool:
+    """Read-and-clear the pre-resolve-advanced flag for `user` (one-shot per turn). Returns True iff the
+    pre-resolve already walked a beat this turn, so the agent loop must not double-advance (#670)."""
+    return bool(_PRE_RESOLVED_ADVANCE.pop(user, False))
+
+
 # Count of 409 `stale-beat` rejections the FE reconciled this process-run — a sync-spine diagnostic
 # (the ledger hook, feature 0065 Part D, is a separate slice; this counter is its data source).
 _STALE_BEAT_REJECTIONS = 0
@@ -1772,6 +1794,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
                 return game_state  # reconciled — continue the turn framed against the (moved) board
             raise
         _refresh_beat_seq(user, adv)  # 0065: the advance response carries the new beatSeq — track it
+        mark_pre_resolved_advance(user)  # #670: a real beat walked this turn — the backstop must not double-advance
         # comp-intent (player in the field — engine pauses, never auto-decides), or resolve an NPC beat.
         # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
         # pre-resolve is otherwise silent on success, so a staged eviction walking one beat per turn
