@@ -40,12 +40,12 @@ warn() { echo -e "${C_RED}!${C_OFF} $*" >&2; }
 die()  { echo "ERROR: $*" >&2; exit 1; }
 
 # ── Constants ───────────────────────────────────────────────────────────────────────────────────
-OWNER_REPO="kevinhirsch/orwell"
+OWNER_REPO="${OWNER_REPO:-kevinhirsch/orwell}"
 REPO_URL="https://github.com/${OWNER_REPO}"
 API="https://api.github.com/repos/${OWNER_REPO}"
 RUNNER_LABELS="self-hosted"          # the label .github/workflows/ci.yml targets (runs-on: self-hosted)
 RUNNER_USER="runner"                 # the NON-root user the agent runs as inside each LXC
-RUNNER_HOME="/opt/actions-runner"
+RUNNER_HOME="${RUNNER_HOME:-}"       # derived per-repo AFTER flag parse (default /opt/actions-runner[-<repo>])
 
 usage() {
   cat <<EOF
@@ -82,6 +82,9 @@ ${C_BOLD}OPTIONS${C_OFF} (env var in parens; flag overrides env)
   --token PAT          GitHub PAT (prefer GIT_TOKEN env)        (GIT_TOKEN)
   --reg-token TOK      Pre-minted registration token (Settings → Actions → Runners → New runner);
                        provisions with NO PAT — one token registers all runners  (REG_TOKEN_IN)
+  --repo OWNER/NAME    Target repository (default kevinhirsch/orwell)            (OWNER_REPO)
+  --add-to-existing    Add a co-tenant runner for --repo onto the EXISTING CTIDs (ADD_EXISTING)
+                       (reuses each box's Node/Python/chromium; own dir+service)
   --env-file PATH      Read GIT_TOKEN= from here                (ENV_FILE, default <repo>/data/.env)
   --remove             Unregister each runner + destroy its LXC (REMOVE=1)
   --yes                Skip the confirmation prompt             (ORWELL_NONINTERACTIVE=1)
@@ -109,11 +112,12 @@ GATEWAY="${GATEWAY:-}"
 STORAGE="${STORAGE:-}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-}"
 TEMPLATE="${TEMPLATE:-}"
-NAME_PREFIX="${NAME_PREFIX:-orwell-runner}"
+NAME_PREFIX="${NAME_PREFIX:-}"       # derived per-repo AFTER flag parse
 RUNNER_VERSION="${RUNNER_VERSION:-}"
 GIT_TOKEN="${GIT_TOKEN:-}"
 REG_TOKEN_IN="${REG_TOKEN_IN:-}"
 REMOVE="${REMOVE:-0}"
+ADD_EXISTING="${ADD_EXISTING:-0}"
 
 # data/.env (git-ignored) sits at <repo>/data/.env; this script lives at <repo>/deploy/runners/.
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo .)"
@@ -138,12 +142,30 @@ while [[ $# -gt 0 ]]; do
     --runner-version)     RUNNER_VERSION="${2:?--runner-version needs a value}"; shift 2 ;;
     --token)              GIT_TOKEN="${2:?--token needs a value}"; shift 2 ;;
     --reg-token)          REG_TOKEN_IN="${2:?--reg-token needs a value}"; shift 2 ;;
+    --repo)               OWNER_REPO="${2:?--repo needs a value (owner/name)}"; shift 2 ;;
+    --add-to-existing)    ADD_EXISTING=1; shift ;;
     --env-file)           ENV_FILE="${2:?--env-file needs a value}"; shift 2 ;;
     --remove)             REMOVE=1; shift ;;
     --yes|-y)             ORWELL_NONINTERACTIVE=1; shift ;;
     *) die "unknown argument: $1 (try --help)" ;;
   esac
 done
+
+# ── Repo-scoped derivation (AFTER flags, so --repo wins) ──────────────────────────────────────────
+# Re-derive the repo URLs from the (possibly --repo-overridden) OWNER_REPO, and pick per-repo
+# NAME_PREFIX / RUNNER_HOME defaults. The point: a co-tenant runner for a DIFFERENT repo on the same
+# box gets its OWN install dir + runner name → its OWN systemd service, so it never clobbers the
+# runner already there. Explicit --name-prefix / RUNNER_HOME env still win.
+REPO_URL="https://github.com/${OWNER_REPO}"
+API="https://api.github.com/repos/${OWNER_REPO}"
+REPO_NAME="${OWNER_REPO##*/}"
+if [[ "$OWNER_REPO" == "kevinhirsch/orwell" ]]; then
+  NAME_PREFIX="${NAME_PREFIX:-orwell-runner}"
+  RUNNER_HOME="${RUNNER_HOME:-/opt/actions-runner}"
+else
+  NAME_PREFIX="${NAME_PREFIX:-${REPO_NAME}-runner}"
+  RUNNER_HOME="${RUNNER_HOME:-/opt/actions-runner-${REPO_NAME}}"
+fi
 
 # ── Host guards (mirror orwell.sh) ──────────────────────────────────────────────────────────────
 [[ "$(id -u)" -eq 0 ]] || die "run this on the Proxmox host as root."
@@ -454,9 +476,41 @@ do_provision() {
   done
 }
 
+# Add a SECOND (co-tenant) runner for --repo onto the EXISTING runner LXCs (CTID_BASE..+COUNT).
+# Reuses each box's already-installed Node/Python/chromium; installs a fresh runner into a per-repo
+# RUNNER_HOME with a per-repo name, so it co-exists with the runner already there (own svc).
+do_add_existing() {
+  msg "ADD co-tenant runners for ${OWNER_REPO} onto EXISTING CTIDs ${CTID_BASE}..$(( CTID_BASE + COUNT - 1 ))"
+  msg "    home=${RUNNER_HOME} prefix=${NAME_PREFIX} labels=${RUNNER_LABELS}"
+  if [[ -z "${ORWELL_NONINTERACTIVE:-}" && -t 0 && -t 1 ]] && command -v whiptail >/dev/null 2>&1; then
+    whiptail --title "$TITLE" --yesno \
+      "Add a SECOND runner for ${OWNER_REPO} to ${COUNT} EXISTING LXC(s)?\n\n  CTIDs ${CTID_BASE}..$(( CTID_BASE + COUNT - 1 ))\n  install dir ${RUNNER_HOME} · label ${RUNNER_LABELS}\n\nEach co-exists with the runner already on the box (own dir + service).\nProceed?" 16 72 \
+      || die "cancelled."
+  fi
+  local i ctid name regtok tokpath ip
+  for (( i=1; i<=COUNT; i++ )); do
+    ctid=$(( CTID_BASE + i - 1 )); name="$(runner_name_for "$i")"
+    echo
+    msg "── co-tenant ${i}/${COUNT}: ${name} (CTID ${ctid}) ──"
+    if ! ct_exists "$ctid"; then
+      warn "CTID ${ctid} does not exist — skipping (provision the base runners first)"
+      SUMMARY+=("${ctid}  ${name}  absent (skipped)")
+      continue
+    fi
+    ct_running "$ctid" || pct start "$ctid"
+    ip="$(wait_for_net "$ctid")"
+    if [[ -n "$REG_TOKEN_IN" ]]; then regtok="$REG_TOKEN_IN"; else regtok="$(mint_token registration)"; fi
+    tokpath="$(push_secret "$ctid" "$regtok" /tmp/orwell-runner-token)"; unset regtok
+    install_in_container "$ctid" "$name" "$tokpath"
+    SUMMARY+=("${ctid}  ${name}  ${ip}  online")
+  done
+}
+
 # ── Run ─────────────────────────────────────────────────────────────────────────────────────────
 if [[ "$REMOVE" == "1" ]]; then
   do_remove
+elif [[ "$ADD_EXISTING" == "1" ]]; then
+  do_add_existing
 else
   do_provision
 fi
@@ -466,6 +520,8 @@ echo
 echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
 if [[ "$REMOVE" == "1" ]]; then
   echo "  ${C_BOLD}${C_GRN}runner removal complete${C_OFF}"
+elif [[ "$ADD_EXISTING" == "1" ]]; then
+  echo "  ${C_BOLD}${C_GRN}${COUNT} co-tenant runner(s) added for ${OWNER_REPO}${C_OFF}"
 else
   echo "  ${C_BOLD}${C_GRN}${COUNT} runner(s) provisioned for ${OWNER_REPO}${C_OFF}"
 fi
