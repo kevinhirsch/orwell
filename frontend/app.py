@@ -1054,7 +1054,24 @@ async def _startup_event():
         except Exception as e:
             logger.warning(f"Tool index warmup failed (non-critical): {type(e).__name__}: {e}")
 
-    _startup_tasks.append(asyncio.create_task(_warmup_tool_index()))
+    # The RAG ToolIndex (ChromaDB-backed dynamic tool selection) is an inherited
+    # workspace subsystem. Orwell uses its own fixed permissioned allowlist + the
+    # keyword-fallback selection in agent_loop, so the game build never wires it.
+    # Skip the warmup entirely (no construction attempt) unless ChromaDB is
+    # explicitly configured. The full workspace (ORWELL_GAME_BUILD=0) keeps it.
+    def _toolindex_warmup_wanted() -> bool:
+        try:
+            from src.tool_index import _toolindex_wanted
+            return _toolindex_wanted()
+        except Exception:
+            return True
+    if _toolindex_warmup_wanted():
+        _startup_tasks.append(asyncio.create_task(_warmup_tool_index()))
+    else:
+        logger.info(
+            "Game build: RAG ToolIndex not wired (fixed permissioned allowlist + "
+            "keyword-fallback tool selection; set CHROMADB_HOST to enable RAG)."
+        )
     # Warmup: ping all known LLM endpoints to prime connections
     async def _warmup_endpoints():
         try:

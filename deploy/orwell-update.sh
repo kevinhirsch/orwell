@@ -310,6 +310,86 @@ fi
 mkdir -p "${APP_DIR}/data"
 printf '%s' "$PREV_SHA" > "$PREV_FILE"
 
+# ── Issue #636 — converge an existing box to the lean game build ───────────────────────────────
+# The FE is vendored from a larger workspace whose browser (Playwright NPX), ChromaDB RAG
+# ToolIndex, and RAG/Memory/Email built-in MCP servers have NO role in the Big Brother game.
+# The new code stops STARTING them in the game build, but a box updated from an older build may
+# still carry their leftovers (a warmed npx cache, an admin-added MCP-server DB row, a stale
+# CHROMADB_HOST). Clean those up so the updated box converges to the lean game build.
+#
+# Conservative + fail-soft by construction: every step only touches what genuinely exists, only
+# under the game build, and NEVER fails the update (each guarded; the function always returns 0).
+# Runs in-container after the deps refresh, before the restart, so the restart boots clean.
+game_build_on() {
+  # Mirror src.settings.game_build_enabled(): default ON; OFF only on an explicit falsey value.
+  local raw
+  raw="$(sed -n 's/^ORWELL_GAME_BUILD=//p' "$ENV_FILE" 2>/dev/null | tail -n1)"
+  [[ -n "$raw" ]] || raw="$(sed -n 's/^BBAI_GAME_BUILD=//p' "$ENV_FILE" 2>/dev/null | tail -n1)"
+  case "$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+    0|false|no|off|n) return 1 ;;   # full workspace — leave everything in place
+    *)                return 0 ;;   # unset/anything else ⇒ game build (the product default)
+  esac
+}
+
+cleanup_inherited_cruft() {
+  # Full workspace keeps everything inherited — nothing to clean.
+  game_build_on || { echo "==> full-workspace build: leaving inherited subsystems in place"; return 0; }
+
+  echo "==> game build: cleaning inherited-workspace cruft (browser MCP / ChromaDB / RAG-Memory-Email)"
+
+  # 1) Drop the @playwright/mcp npx cache entry if it was ever warmed. `npm cache npx ls/rm` is the
+  #    documented way; older npm lacks the `npx` subcommand, so fall back to pruning the on-disk
+  #    _npx cache dir. Both are best-effort and a miss is a no-op.
+  if command -v npm >/dev/null 2>&1; then
+    if npm cache npx ls >/dev/null 2>&1; then
+      npm cache npx rm "$(npm cache npx ls 2>/dev/null | awk '/@playwright\/mcp/{print $1}')" >/dev/null 2>&1 \
+        || npm cache npx rm '@playwright/mcp' >/dev/null 2>&1 || true
+    fi
+  fi
+  local npx_cache="${HOME:-/root}/.npm/_npx"
+  if [[ -d "$npx_cache" ]]; then
+    # Each entry is a hashed dir; only remove ones that actually pulled @playwright/mcp.
+    while IFS= read -r d; do
+      [[ -n "$d" ]] && rm -rf "$d" && echo "    removed npx cache entry: $d"
+    done < <(grep -rls '@playwright/mcp' "$npx_cache" 2>/dev/null \
+               | sed 's#/[^/]*$##' | sort -u || true)
+  fi
+
+  # 2) Drop any admin-added MCP-server DB rows referencing browser/playwright/memory/rag/email.
+  #    Built-in servers are NOT persisted (registered at boot), so this only ever touches a row an
+  #    operator added by hand. Guarded: skip silently if there's no sqlite3, no db, or no table.
+  local db="${APP_DIR}/data/app.db"
+  if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$db" ]]; then
+    if sqlite3 "$db" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_servers' LIMIT 1;" 2>/dev/null | grep -q 1; then
+      local pat="'%browser%' OR lower(name) LIKE '%playwright%' OR lower(command) LIKE '%playwright%' OR lower(args) LIKE '%@playwright/mcp%' OR lower(name) IN ('memory','rag','email') OR lower(id) IN ('memory','rag','email','builtin_browser')"
+      local before after
+      before="$(sqlite3 "$db" "SELECT count(*) FROM mcp_servers;" 2>/dev/null || echo 0)"
+      sqlite3 "$db" "DELETE FROM mcp_servers WHERE lower(name) LIKE ${pat};" 2>/dev/null || true
+      after="$(sqlite3 "$db" "SELECT count(*) FROM mcp_servers;" 2>/dev/null || echo 0)"
+      if [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]] && (( before > after )); then
+        echo "    removed $(( before - after )) inherited MCP-server config row(s) from app.db"
+      fi
+    fi
+  fi
+
+  # 3) Neutralize a stale CHROMADB_HOST/CHROMADB_PORT in data/.env: under the game build the RAG
+  #    ToolIndex is no longer wired, and a leftover CHROMADB_HOST would re-arm it. Comment the
+  #    line(s) out rather than delete, so flipping back to the full workspace is a one-line edit.
+  if [[ -f "$ENV_FILE" ]] && grep -qE '^[[:space:]]*CHROMADB_(HOST|PORT)=' "$ENV_FILE" 2>/dev/null; then
+    local tmp_env
+    tmp_env="$(mktemp "${APP_DIR}/data/.env.cruft.XXXXXX")"
+    sed -E 's/^([[:space:]]*CHROMADB_(HOST|PORT)=)/# disabled by orwell-update (game build, issue #636): \1/' \
+      "$ENV_FILE" > "$tmp_env" 2>/dev/null && {
+        chmod --reference="$ENV_FILE" "$tmp_env" 2>/dev/null || chmod 600 "$tmp_env"
+        mv "$tmp_env" "$ENV_FILE"
+        echo "    neutralized stale CHROMADB_HOST/PORT in data/.env (game build does not use RAG)"
+      } || rm -f "$tmp_env"
+  fi
+
+  return 0
+}
+cleanup_inherited_cruft || true
+
 
 # Login health panel (ruling #21, 2026-06-11): greet interactive container shells with live
 # health instead of a bare prompt. Time-bounded probes; guarded; can never block a login.
