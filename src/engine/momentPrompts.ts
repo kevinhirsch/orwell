@@ -336,7 +336,7 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    houseguest; it is the player's own space, never an in-game pathway.",
   "  • seasonRecap — the season's public arc straight from the recorded events (reigns, ceremonies,",
   "    evictions, deals). Use it for any recap or reunion beat — it is the record, never memory.",
-  "  • seasonRetrospective — POST-SEASON ONLY: opens the Producer's Vault for the FINISHED season —",
+  "  • seasonRetrospective — POST-SEASON ONLY: unseals the FINISHED season's hidden story —",
   "    the off-screen scheming, the confessionals, the twist that never fired. It returns nothing",
   "    while a season is live (the Wall is absolute in play); after the winner, it is the payoff.",
   "  • askProducers — answer a direct producer question without ever confirming or denying hidden content.",
@@ -586,7 +586,7 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +
     "game meant. The house plays on without them; you may recap the remaining season to its winner if " +
     "they want to watch, but they hold no power and cast no vote. Do not invent a path back in. The " +
-    "Producer's Vault stays SEALED until the season crowns a winner — offer the PUBLIC recap of what " +
+    "hidden story stays SEALED until the season crowns a winner — offer the PUBLIC recap of what " +
     "they witnessed, never the hidden story, while the house is still playing.",
   "re-entry":
     "MOMENT — Re-entry. The player has RETURNED to a season in progress (a new session; the chat may " +
@@ -626,7 +626,7 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "the PUBLIC ceremonies play out — who wins HOH, who is nominated, the veto, who is evicted — RESULTS " +
     "only, never the private scheming or diary-room confessionals happening in the house. Voice the " +
     "broadcasts and their growing read of who deserves to win; reveal no off-screen content. They cast " +
-    "their own vote at the finale. The Producer's Vault stays SEALED until the finale crowns a winner — " +
+    "their own vote at the finale. The hidden story stays SEALED until the finale crowns a winner — " +
     "never offer the hidden story while the house is still playing.",
   default:
     "MOMENT — Continue the game. Read getGameState, keep the house in motion true to the GAME " +

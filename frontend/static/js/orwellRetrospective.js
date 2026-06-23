@@ -149,8 +149,8 @@
       // J5-07: a real section heading (was <strong>, invisible to SR heading navigation — WCAG 1.3.1).
       // UX-4: the bare leading emoji is decorative — give an explicit accessible name
       // (emoji stripped) so a screen reader reads the heading, not "lock …".
-      const _vaultHd = el("h3", "margin:4px 0 4px;font-size:inherit", "🔓 The Producer's Vault");
-      _vaultHd.setAttribute("aria-label", "The Producer's Vault");
+      const _vaultHd = el("h3", "margin:4px 0 4px;font-size:inherit", "🔓 The Untold Story");
+      _vaultHd.setAttribute("aria-label", "The Untold Story");
       vaultWrap.appendChild(_vaultHd);
       if (unsealed.twists && unsealed.twists.length) {
         const t = el("div", "margin:4px 0;opacity:0.9");
@@ -199,8 +199,8 @@
         // ink tuned for the brand RED, which fails on this purple). And lift to the 44px tap floor.
         "margin-top:4px", "padding:10px 14px", "border-radius:8px", "cursor:pointer", "min-height:44px",
         "background:var(--accent, #6d4aff)", "color:#fff", "border:none", "font-size:13px", "font-family:inherit", "font-weight:600",
-      ].join(";"), "🔐 Open the Producer's Vault");
-      open.setAttribute("aria-label", "Open the Producer's Vault");  // UX-4: decorative lock emoji
+      ].join(";"), "🔐 Open the Untold Story");
+      open.setAttribute("aria-label", "Open the Untold Story");  // UX-4: decorative lock emoji
       open.addEventListener("click", async () => {
         try {
           const data = await getJSON("/api/orwell/retrospective");

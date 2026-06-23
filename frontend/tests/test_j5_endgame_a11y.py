@@ -108,9 +108,10 @@ def test_j5_done_timer_is_tracked_and_identity_checked():
 def test_j5_retrospective_uses_heading_elements():
     js = _read("static", "js", "orwellRetrospective.js")
     # The two vault section labels must be h3 elements (were <strong>, invisible to SR heading nav)
-    assert re.search(r'el\("h3",[^)]*"\🔓 The Producer\'s Vault"\)', js) or \
-        re.search(r'el\("h3"[^)]*Producer', js), \
-        "The Producer's Vault label must be an <h3>"
+    # #607: the v0 machinery term "Producer's Vault" was reworded to "The Untold Story".
+    assert re.search(r'el\("h3",[^)]*"\🔓 The Untold Story"\)', js) or \
+        re.search(r'el\("h3"[^)]*Untold', js), \
+        "The Untold Story label must be an <h3>"
     assert re.search(r'el\("h3"[^)]*How the votes really fell', js), \
         "'How the votes really fell' label must be an <h3>"
     # The pinned C17 substring must survive
@@ -122,7 +123,7 @@ def test_j5_retrospective_uses_heading_elements():
 def test_j5_unseal_button_contrast_and_tap_target():
     js = _read("static", "js", "orwellRetrospective.js")
     # find the open-vault button style list
-    open_btn = re.search(r'"🔐 Open the Producer\'s Vault"', js)
+    open_btn = re.search(r'"🔐 Open the Untold Story"', js)
     assert open_btn, "unseal button not found"
     region = js[max(0, open_btn.start() - 400):open_btn.end()]
     assert "color:#fff" in region, \

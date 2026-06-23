@@ -137,10 +137,14 @@ def require_privilege(request: Request, key: str) -> str:
     return user
 
 
-def owner_filter(query, model_cls, user: str, *, include_shared: bool = True):
+def owner_filter(query, model_cls, user: str, *, include_shared: bool = False):
     """Filter `query` so only rows owned by `user` (and optionally null-owner
     'shared' rows) come through. No-op when `user` is empty (single-user
-    mode). Returns the modified query."""
+    mode). Returns the modified query.
+
+    #588 (ADM-NEW-2): `include_shared` defaults to **False** — a NULL-owner row
+    must NOT be readable across users by default. A caller that genuinely wants
+    shared/global rows opts in explicitly with `include_shared=True`."""
     if not user:
         return query
     if include_shared:

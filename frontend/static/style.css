@@ -7025,6 +7025,20 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
            dvh already excludes the URL bar; this handles the safe area. */
         padding-bottom: env(safe-area-inset-bottom, 0px) !important;
       }
+      /* MOBILE FULL-SCREEN SHEET — the template for OrwellWindow-kit windows on
+         mobile (#644 / #553). Settings filled 100dvh but (a) a residual top margin
+         left a gap above the sheet and (b) the inner .settings-layout was capped at
+         ~85dvh-60px, so content cut off before the bottom. Reset the margin to 0 and
+         let the inner layout fill the full sheet, top edge to safe-area bottom. */
+      #settings-modal .settings-modal-content {
+        margin: 0 !important;
+        border-radius: 0 !important;
+      }
+      #settings-modal .settings-layout {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+      }
       /* Grab handle pill on the non-standard content classes too. Memory's
          desktop rule defines a radial-glow ::before later in the file —
          these body-prefixed selectors win the specificity battle on mobile. */
@@ -13982,6 +13996,10 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.03em;
+  /* Reset the browser default heading top margin — it stacked on the card's
+     padding-top and left an oversized gap above each section title
+     (Registration / Users / Add User). */
+  margin-top: 0;
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
