@@ -446,6 +446,55 @@ def _whereabouts_barrier_directive(whereabouts) -> Optional[str]:
     )
 
 
+def _premiere_progress_directive(premiere) -> Optional[str]:
+    """J3-13 (wayfinding) — surface the engine's meet-everyone progress as a CONSISTENT framing fact
+    during the premiere, so every redirect that gates the player at the HOH names the actual gap.
+
+    The audit found the premiere redirect was INCONSISTENT: the best redirect ("Eleven met, five left:
+    …") named the count, but the veto/eviction redirects described a nearby scene without it, leaving
+    the player no action plan. The count never relied on the model REMEMBERING — `getGameState` already
+    carries the engine-tracked `premiere` progress (PremiereIntrosView). This hands the model that fact
+    every premiere turn so it can always answer "why hasn't HOH started, and who's left to meet".
+
+    Vault-free by construction: only the public met/total counts + the still-to-meet NAMES (the same
+    observable roster facets `premiereIntros` exposes) — never a number about a houseguest, a soul, or a
+    standing. Returns None outside the premiere (no `premiere` field, or it is already complete), leaving
+    the turn framed exactly as before."""
+    if not isinstance(premiere, dict):
+        return None
+    if premiere.get("complete"):
+        return None
+    try:
+        total = int(premiere.get("total") or 0)
+        met = int(premiere.get("metCount") or 0)
+    except (TypeError, ValueError):
+        return None
+    # Both counts include the player (they ARE met); the player's mental model is "of the 15 OTHERS,
+    # how many have I met?" — so report the NPC-only figures (total-1, met-1) to match "X of 15".
+    npc_total = total - 1
+    npc_met = met - 1
+    if npc_total <= 0 or npc_met < 0:
+        return None
+    remaining = npc_total - npc_met
+    names = []
+    for fi in (premiere.get("remaining") or []):
+        if isinstance(fi, dict):
+            hg = fi.get("houseguest")
+            nm = str((hg or {}).get("name") or "").strip() if isinstance(hg, dict) else ""
+            if nm:
+                names.append(nm)
+    names_clause = (" Still to meet: " + _join_names(names) + "."
+                    if names else "")
+    return (
+        "PREMIERE GATE (state this CONSISTENTLY whenever the player drifts toward HOH/nominations/veto/"
+        f"eviction): the first HOH cannot begin until the player has met all {npc_total} other "
+        f"houseguests. So far they have met {npc_met} of {npc_total}; {remaining} still to go.{names_clause} "
+        "If the player reaches for a ceremony beat, redirect them WARMLY back to meeting the house and "
+        "ALWAYS name how many are left (and who) so they have a concrete next step — never gate them "
+        "with a vague 'not yet'."
+    )
+
+
 # ── The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine) ────────── #
 #
 # The pending-barrier above catches one desync class: the GM narrating PAST an open PLAYER
@@ -1987,6 +2036,15 @@ async def apply_game_framing(
             freeze_capture_whereabouts(user, game_state.get("whereabouts"))
         except Exception as e:
             logger.warning("[orwell] location grounding skipped for user=%s: %s", _gkey, e)
+        # J3-13 (wayfinding): during the premiere, surface the engine's meet-everyone progress so a
+        # ceremony-bound redirect ALWAYS names the gap (count + who's left), the audit's missing
+        # consistency. Vault-free public facets from the same in-hand snapshot. Best-effort / fail-open.
+        try:
+            _prem = _premiere_progress_directive(game_state.get("premiere"))
+            if _prem:
+                gm_prompt = gm_prompt + "\n\n" + _prem
+        except Exception as e:
+            logger.warning("[orwell] premiere progress framing skipped for user=%s: %s", _gkey, e)
         # The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): FIRST consume any
         # re-ground directive the previous turn's post-turn check stashed for this user (the
         # model narrated an outcome the engine never committed — pin it back to the board), then
