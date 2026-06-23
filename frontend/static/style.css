@@ -6711,6 +6711,21 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
       gap: 6px; margin-bottom: 12px;
     }
+    /* J1-06: the game-build "Show all themes" reveal — full-width row + a sub-grid for the
+       inherited (non-house) themes tucked behind it. */
+    .theme-show-all {
+      grid-column: 1 / -1;
+      background: transparent; border: 1px dashed var(--border); color: var(--fg);
+      border-radius: 8px; padding: 7px; font: inherit; font-size: 0.7rem; cursor: pointer;
+      opacity: 0.75; transition: opacity 0.12s, border-color 0.12s;
+    }
+    .theme-show-all:hover, .theme-show-all:focus-visible { opacity: 1; border-style: solid; border-color: var(--accent, var(--red)); }
+    .theme-extra {
+      grid-column: 1 / -1;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px;
+    }
+    /* beat the global .hidden / .theme-extra source-order tie (both 0,1,0) so collapsed = hidden */
+    .theme-extra.hidden { display: none; }
     .theme-swatch {
       border: 2px solid var(--border); border-radius: 8px; cursor: pointer;
       padding: 5px; text-align: center; font-size: 0.65rem; color: var(--fg);

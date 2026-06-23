@@ -913,8 +913,12 @@ export function initThemeUI() {
   const activeName = saved ? saved.name : DEFAULT_THEME;
   const customThemes = _loadCustomThemes();
 
-  // Render preset swatches
-  grid.innerHTML = Object.entries(THEMES).map(([name, c]) => `
+  // Render preset swatches. J1-06: in the game build the curated 5 house themes (0052) are diluted
+  // by ~16 inherited workspace themes (GPT/claude/cute/…) that shatter the Big Brother fiction
+  // (Hick's law + brand coherence). So under the game build, show the house themes first and tuck
+  // the rest behind a "Show all themes" reveal — power users keep them, and Customize is untouched.
+  // The full inherited workspace (no game build) renders every theme as before.
+  const _swatch = ([name, c]) => `
     <div class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}">
       <div class="theme-swatch-colors">
         <span style="background:${c.bg}"></span>
@@ -923,8 +927,33 @@ export function initThemeUI() {
         <span style="background:${c.red}"></span>
       </div>
       ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name.replace(/-/g, ' '))}
-    </div>
-  `).join('');
+    </div>`;
+  const _gameBuild = !!(document.body && document.body.hasAttribute('data-game-build'));
+  const _entries = Object.entries(THEMES);
+  if (_gameBuild) {
+    const houseEntries = _entries.filter(([, c]) => c.house);
+    const otherEntries = _entries.filter(([, c]) => !c.house);
+    // Keep the active (non-house) theme visible up-front so a power user's current pick isn't hidden.
+    const activeIsOther = otherEntries.some(([n]) => n === activeName);
+    grid.innerHTML = houseEntries.map(_swatch).join('')
+      + (otherEntries.length
+          ? `<button type="button" class="theme-show-all" id="theme-show-all" aria-expanded="${activeIsOther ? 'true' : 'false'}">`
+            + (activeIsOther ? 'Hide extra themes' : `Show all themes (${otherEntries.length})`)
+            + `</button><div class="theme-extra${activeIsOther ? '' : ' hidden'}" id="theme-extra">`
+            + otherEntries.map(_swatch).join('') + `</div>`
+          : '');
+    const _showAll = grid.querySelector('#theme-show-all');
+    const _extra = grid.querySelector('#theme-extra');
+    if (_showAll && _extra) {
+      _showAll.addEventListener('click', () => {
+        const open = _extra.classList.toggle('hidden');
+        _showAll.setAttribute('aria-expanded', open ? 'false' : 'true');
+        _showAll.textContent = open ? `Show all themes (${otherEntries.length})` : 'Hide extra themes';
+      });
+    }
+  } else {
+    grid.innerHTML = _entries.map(_swatch).join('');
+  }
 
   // Render custom theme swatches into separate card
   const userGrid = document.getElementById('themeUserGrid');
