@@ -377,16 +377,37 @@
   function _clearDropHints() {
     Array.prototype.forEach.call(body.children, function (c) { c.classList.remove("grail-drop-into"); });
   }
-  function _clearDrag() {
+  // #654 — settle/snap the dropped gadget back into its slot: clear the follow-finger
+  // translate and run the brief settle transition (.grail-settling), then strip both the
+  // drag + settle classes once it has landed. Reduced motion ⇒ no settle animation, just
+  // an immediate reset (the CSS .grail-settling rule is no-op'd under reduce).
+  function _settleDrop(el) {
+    if (!el) return;
+    el.style.removeProperty("--grail-dy");
+    el.classList.remove("grail-dragging");
+    el.classList.add("grail-settling");
+    if (el._grailSettleTimer) clearTimeout(el._grailSettleTimer);
+    el._grailSettleTimer = setTimeout(function () {
+      el.classList.remove("grail-settling");
+      el._grailSettleTimer = null;
+    }, 220);
+  }
+  function _clearDrag(settle) {
     if (_drag) {
       try { _drag.el.releasePointerCapture(_drag.pointerId); } catch (_) {}
-      _drag.el.classList.remove("grail-dragging");
+      if (settle) _settleDrop(_drag.el);
+      else { _drag.el.style.removeProperty("--grail-dy"); _drag.el.classList.remove("grail-dragging"); }
     }
     _clearDropHints();
     _drag = null;
   }
   function _beginDrag(el, e) {
-    _drag = { id: el.id, el: el, pointerId: e.pointerId };
+    // PICK-UP: capture the grab origin so the move can translate the gadget under the
+    // finger; lifting (scale + shadow) is the .grail-dragging treatment.
+    _drag = { id: el.id, el: el, pointerId: e.pointerId, startY: e.clientY };
+    el.classList.remove("grail-settling");
+    if (el._grailSettleTimer) { clearTimeout(el._grailSettleTimer); el._grailSettleTimer = null; }
+    el.style.setProperty("--grail-dy", "0px");
     el.classList.add("grail-dragging");
     try { el.setPointerCapture(e.pointerId); } catch (_) {}
   }
@@ -408,6 +429,9 @@
     }
     if (!_drag) return;
     e.preventDefault();
+    // MOVE: the grabbed gadget tracks the finger 1:1 via --grail-dy (no transition while
+    // dragging, set in CSS), so it visibly follows the touch as it moves up/down the rail.
+    _drag.el.style.setProperty("--grail-dy", (e.clientY - _drag.startY) + "px");
     var over = _gadgetFromPoint(e.clientX, e.clientY);
     _clearDropHints();
     if (over && over !== _drag.el) over.classList.add("grail-drop-into");
@@ -421,12 +445,12 @@
       var r = over.getBoundingClientRect();
       moveRelative(_drag.id, over.id, e.clientY > r.top + r.height / 2);
     }
-    _clearDrag();
+    _clearDrag(true);  // DROP: settle/snap back into the slot
   }
   body.addEventListener("pointerup", _endPointer);
   body.addEventListener("pointercancel", function () {
     if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
-    _lp = null; _clearDrag();
+    _lp = null; _clearDrag(true);
   });
   // Keyboard reorder while editing (accessible): arrows move the focused gadget; Esc leaves.
   body.addEventListener("keydown", function (e) {
@@ -457,8 +481,15 @@
       '.gadget-rail[data-edit="true"] .gadget-rail-body > *:nth-child(2n) { animation-delay: -.11s; }' +
       '.gadget-rail[data-edit="true"] .gadget-rail-body > *:nth-child(3n) { animation-delay: -.21s; }' +
       '.gadget-rail[data-edit="true"] .gadget-rail-body > * > * { pointer-events: none; }' +
+      // #654 — touch reorder PICK-UP → MOVE → DROP. The grabbed gadget lifts (scale + lift
+      // shadow), then follows the finger via the JS-set --grail-dy translate; transition is
+      // OFF while dragging so it tracks the pointer 1:1. On release .grail-settling animates
+      // the lift away as it lands back in its slot (the snap/settle).
       ".grail-dragging { animation: none !important; opacity: .92; cursor: grabbing;" +
-      "  transform: scale(1.03); z-index: 5; box-shadow: 0 10px 28px rgba(0,0,0,.4); }" +
+      "  transform: translateY(var(--grail-dy, 0px)) scale(1.04); z-index: 5;" +
+      "  box-shadow: 0 14px 32px rgba(0,0,0,.45); transition: none; }" +
+      ".grail-settling { transition: transform .2s cubic-bezier(.22,.61,.36,1), box-shadow .2s ease;" +
+      "  transform: translateY(0) scale(1); box-shadow: none; z-index: 5; }" +
       ".grail-drop-into { outline: 2px dashed color-mix(in srgb, var(--accent, #e06c75) 75%, transparent);" +
       "  outline-offset: -2px; border-radius: 10px; }" +
       "@keyframes grail-wiggle { 0%,100% { transform: rotate(-.55deg); } 50% { transform: rotate(.55deg); } }" +
@@ -466,10 +497,15 @@
       ".grail-focus-flash { animation: grail-focus-flash .9s ease; }" +
       "@keyframes grail-focus-flash { 0%,100% { box-shadow: none; } 20%,60% {" +
       "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #e06c75) 60%, transparent); } }" +
-      // reduced motion: no wiggle — a steady dashed outline signals 'editable' instead.
+      // reduced motion: no wiggle — a steady dashed outline signals 'editable' instead — and
+      // the touch-reorder lift/move/settle drops its scale + settle transition (#654): the
+      // grabbed gadget still follows the finger (the translate is the functional drag cue) but
+      // never scales or springs.
       "@media (prefers-reduced-motion: reduce) {" +
       '  .gadget-rail[data-edit="true"] .gadget-rail-body > * { animation: none;' +
-      "    outline: 1px dashed color-mix(in srgb, var(--fg) 35%, transparent); outline-offset: -2px; } }" +
+      "    outline: 1px dashed color-mix(in srgb, var(--fg) 35%, transparent); outline-offset: -2px; }" +
+      "  .grail-dragging { transform: translateY(var(--grail-dy, 0px)); }" +
+      "  .grail-settling { transition: none; transform: translateY(0); } }" +
       // the collapsed icon-strip is never editable here
       '.gadget-rail[data-collapsed="true"] .gadget-rail-body > * { animation: none; }';
     document.head.appendChild(st);
