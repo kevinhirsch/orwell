@@ -143,8 +143,8 @@
       }
       #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
       #${CARD_ID} .odec-note { opacity: .80; font-size: .85rem; flex: 1; }
-      /* J4-20: the disabled-Confirm hint — quiet, italicized, sits beside the button; `hidden`
-         toggled in sync() so it shows only while Confirm can't be pressed. */
+      /* J4-20: the disabled-Confirm hint — quiet, italicized, sits beside the button; its hidden
+         attribute is toggled in sync() so it shows only while Confirm can't be pressed. */
       #${CARD_ID} .odec-hint { opacity: .7; font-size: .78rem; font-style: italic; flex-basis: 100%; order: 99; margin-top: -.2rem; }
       #${CARD_ID} .odec-hint[hidden] { display: none; }
       #${CARD_ID} .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
