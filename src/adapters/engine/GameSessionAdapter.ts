@@ -1575,9 +1575,9 @@ export class GameSessionAdapter implements GameSession {
               // there is none (e.g. a standalone adapter without souls) so the term is a no-op there.
               volatility: this.soulObj(id)?.volatility ?? 0.5,
             }),
-            // 0067: only the player-facing WEIGHTED pass holds present company in the live scene. The
+            // 0076: only the player-facing WEIGHTED pass holds present company in the live scene. The
             // calibration-neutral BASE pass NEVER gets a sceneRoom, so its shared-stream draw count is
-            // byte-identical to the pre-0067 build (the juryReach spine is untouched).
+            // byte-identical to the pre-0076 build (the juryReach spine is untouched).
             ...(sceneRoom ? { sceneRoom, sceneMoveProb: PRESENCE.companionMoveProb } : {}),
           }
         : {}),
@@ -1643,7 +1643,7 @@ export class GameSessionAdapter implements GameSession {
     // falling back to the dedicated stream only when no shared rng is supplied (standalone/test callers).
     const assign = (previous: Occupancy | null, weighted: boolean): Map<EntityId, Room> => {
       const stream = weighted ? this.movementRng() : (rng ?? this.movementRng());
-      // 0067: present company holds the player's live scene — but ONLY in the weighted, player-facing view
+      // 0076: present company holds the player's live scene — but ONLY in the weighted, player-facing view
       // (the base pass stays calibration-neutral). No scene exists at premiere seating (no player room yet).
       const sceneRoom = weighted ? playerRoom : null;
       if (!previous) {

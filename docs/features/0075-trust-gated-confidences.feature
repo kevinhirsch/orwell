@@ -1,4 +1,4 @@
-Feature: 0066 — Trust-gated confidences (a houseguest opens up to you)
+Feature: 0075 — Trust-gated confidences (a houseguest opens up to you)
   A houseguest confides a real secret in the player only when they have a REASON to —
   an earned bond, a banked favor, an owed debt — and the strength of that reason decides
   HOW MUCH of the secret is told. The engine decides whether, which, how much, and whether

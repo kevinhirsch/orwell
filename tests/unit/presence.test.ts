@@ -207,9 +207,9 @@ describe("personality-weighted movement (L21/L24)", () => {
   });
 });
 
-// --- present company holds the live scene (0067) -----------------------------------
+// --- present company holds the live scene (0076) -----------------------------------
 
-describe("present company holds the player's scene (0067)", () => {
+describe("present company holds the player's scene (0076)", () => {
   const lone = [npc(1)] as const;
   // The per-tick MOVE probability for a houseguest STARTING in a given room, measured by resetting them
   // into that room each tick (so we read P(move | here) directly, isolated from where they wander after).
@@ -269,7 +269,7 @@ describe("present company holds the player's scene (0067)", () => {
   it("the scene lever is byte-identical + draw-identical when the NPC is NOT in the sceneRoom (calibration-safe)", () => {
     // The lever applies ONLY when `here === sceneRoom`. For a houseguest standing anywhere else it must be
     // provably inert — same destination AND same draw count, every seed. This is exactly why the BASE
-    // (calibration-load-bearing) pass — which never sets sceneRoom at all — stays byte-identical to pre-0067.
+    // (calibration-load-bearing) pass — which never sets sceneRoom at all — stays byte-identical to pre-0076.
     const npcRoom = "kitchen" as Room;
     const sceneElsewhere = "hoh-room" as Room; // not the NPC's room (and not even adjacent to it)
     function oneTick(withScene: boolean, seed: number): { room: Room; draws: number } {
@@ -296,13 +296,13 @@ describe("present company holds the player's scene (0067)", () => {
   });
 });
 
-describe("present company holds the player's scene — live adapter (0067)", () => {
+describe("present company holds the player's scene — live adapter (0076)", () => {
   it("companions stay with the player across a continuous scene instead of churning out each tick", () => {
     // For every seed that starts the player with company, run several off-screen ticks (the per-turn
     // cadence) and measure how much of that ORIGINAL company is still with the player. Aggregated across
-    // seeds so it is a distribution fact, not a single-seed fluke. The contrast is stark: the pre-0067
+    // seeds so it is a distribution fact, not a single-seed fluke. The contrast is stark: the pre-0076
     // weighted churn (moveProb 0.6 ⇒ ~0.4 stay) decays retention to ~0.11 averaged over six ticks; the
-    // 0067 scene hold (companionMoveProb 0.12 ⇒ ~0.88 stay) keeps it near ~0.65. The player is never
+    // 0076 scene hold (companionMoveProb 0.12 ⇒ ~0.88 stay) keeps it near ~0.65. The player is never
     // auto-moved (L21/L24), so the scene room itself stays put under them — asserted every tick.
     const ticks = 6;
     let retainedSum = 0;

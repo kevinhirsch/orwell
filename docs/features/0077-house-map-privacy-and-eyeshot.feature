@@ -1,4 +1,4 @@
-Feature: 0068 — House map, privacy & eyeshot
+Feature: 0077 — House map, privacy & eyeshot
   The house has a recent-BB floor plan and three separate relations over it: a movement graph
   (doors), a sightline graph (what you can see — narrower than adjacency, opaque through closed
   doors), and an earshot graph (what you can rarely, partially overhear — muffled by doors,

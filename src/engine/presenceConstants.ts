@@ -14,7 +14,7 @@ export interface PresenceConstants {
   /** Chance a houseguest moves rooms on a tick at all (otherwise they stay put). */
   moveProb: number;
   /**
-   * Chance an NPC who is CURRENTLY IN THE PLAYER'S ROOM moves on a tick (feature 0067). Far lower
+   * Chance an NPC who is CURRENTLY IN THE PLAYER'S ROOM moves on a tick (feature 0076). Far lower
    * than `moveProb`: present company is mid-scene with the player, so they STAY by default — the
    * old `moveProb` (tuned for a tick = a chunk of house-time) churned ~60% of the room out from under
    * a live conversation every turn (the pop-in/pop-out immersion bug). They keep full agency to leave

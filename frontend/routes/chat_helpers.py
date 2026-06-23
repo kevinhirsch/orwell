@@ -768,7 +768,7 @@ def _beat_signature(status: dict, state: dict) -> dict:
         str(h.get("name")).strip() for h in out_of_house
         if isinstance(h.get("name"), str) and str(h.get("name")).strip()
     })
-    # 0067: the player's live room + who is in it with them (names), so the next turn can voice NPC
+    # 0076: the player's live room + who is in it with them (names), so the next turn can voice NPC
     # arrivals/departures as beats instead of letting company silently pop in/out. Vault-free — it
     # reads only the `whereabouts` projection the GAME CONTEXT already carries.
     wa = state.get("whereabouts") if isinstance(state.get("whereabouts"), dict) else {}
@@ -919,7 +919,7 @@ async def record_post_turn_desync_check(user, narration: str) -> None:
         logger.warning("[orwell] post-turn desync check skipped for user=%s: %s", user, e)
 
 
-# ── 0067 — the PRESENCE / IDENTITY desync guard (the "reconcile" half) ─────────────────────── #
+# ── 0076 — the PRESENCE / IDENTITY desync guard (the "reconcile" half) ─────────────────────── #
 #
 # The board desync check works because closed-set OUTCOMES (HOH/noms/veto/eviction) have crisp
 # textual claim patterns. Presence claims in prose are diffuse ("Ana leans against the window"), so a
@@ -1028,7 +1028,7 @@ def _presence_desync_directive(narration: str, facts: dict) -> Optional[str]:
 
 
 async def record_post_turn_presence_check(user, narration: str) -> None:
-    """Post-turn presence/identity guard (0067). Stash a gentle next-turn re-ground when the narration
+    """Post-turn presence/identity guard (0076). Stash a gentle next-turn re-ground when the narration
     staged an off-scene/evicted houseguest as acting in the scene. SKIPS a turn where the player
     changed rooms (multi-scene/ambiguous). Combines with (never clobbers) a board re-ground already
     stashed this turn. Fail-open — never raises, never blocks the finishing turn."""
@@ -1336,7 +1336,7 @@ def _join_names(names: list) -> str:
     return ", ".join(names[:-1]) + f" and {names[-1]}"
 
 
-# 0067 — the NARRATED-DEPARTURES cue. Increment #1 made present company HOLD the player's scene (they
+# 0076 — the NARRATED-DEPARTURES cue. Increment #1 made present company HOLD the player's scene (they
 # leave rarely now, for a reason), but a departure was still SILENT: the houseguest simply stopped
 # appearing in `present`, so the narrator dropped them with no exit beat (the "people pop in and out"
 # complaint). This surfaces the per-turn presence diff — who LEFT and who JOINED the player's room
@@ -1604,7 +1604,7 @@ async def apply_game_framing(
     # state read refreshes it — so we can fetch a "since your last turn" delta against it. None on a
     # fresh context (no prior turn) ⇒ no delta line, today's full context stands.
     _prev_seen_beat_seq = _LAST_BEAT_SEQ.get(user)
-    # 0067: the PREVIOUS turn's beat signature (room + present company), captured before this turn's
+    # 0076: the PREVIOUS turn's beat signature (room + present company), captured before this turn's
     # checkpoint overwrites `_LAST_BEAT_SIG` — so we can diff the room's company and voice NPC
     # arrivals/departures as beats. None on a fresh context ⇒ no movement cue (the full block stands).
     _prev_presence_sig = _LAST_BEAT_SIG.get(user)
@@ -1714,7 +1714,7 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _delta_line
         except Exception as e:
             logger.warning("[orwell] state-delta framing skipped for user=%s: %s", _gkey, e)
-        # 0067: voice NPC arrivals/departures in the player's room since last turn (additive, fail-open).
+        # 0076: voice NPC arrivals/departures in the player's room since last turn (additive, fail-open).
         # `_LAST_BEAT_SIG[user]` was just refreshed to THIS turn's signature above, so diff against the
         # previous one captured at the top of the turn. Only fires on an unchanged player room.
         try:

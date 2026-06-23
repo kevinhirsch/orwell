@@ -1,4 +1,4 @@
-"""Feature 0067 — the PRESENCE / IDENTITY desync guard (FE half, the "reconcile" piece).
+"""Feature 0076 — the PRESENCE / IDENTITY desync guard (FE half, the "reconcile" piece).
 
 The narrator inventing/teleporting houseguests into a scene is a closed-set FACT error (who is where /
 who exists). Like the 0065 board guard, this is caught POST-TURN with a gentle next-turn re-ground —

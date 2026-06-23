@@ -1,4 +1,4 @@
-"""Feature 0067 — the NARRATED-DEPARTURES cue (FE half).
+"""Feature 0076 — the NARRATED-DEPARTURES cue (FE half).
 
 Increment #1 (engine) made present company HOLD the player's scene, so a houseguest leaves rarely
 and for a reason. This half makes the leaving (and arriving) VISIBLE: the per-turn beat signature
