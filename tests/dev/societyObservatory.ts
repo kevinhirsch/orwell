@@ -32,7 +32,7 @@ import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { InMemoryEventStore } from "../../src/adapters/inmemory/InMemoryEventStore";
 import { type Room } from "../../src/domain/house";
 import {
-  awakeSet, bedtimeFor, TIME_OF_DAY_ORDER, TIME_OF_DAY_LABEL, type TimeOfDay,
+  bedtimeFor, SLEEP, TIME_OF_DAY_ORDER, TIME_OF_DAY_LABEL, type TimeOfDay,
 } from "../../src/engine/timeOfDay";
 import type { EntityId } from "../../src/domain/ids";
 
@@ -78,20 +78,23 @@ const DIALS_BY_ARCHETYPE: Record<string, Dials> = {
 };
 const dialsFor = (archetype: string): Dials => DIALS_BY_ARCHETYPE[archetype] ?? NEUTRAL;
 
-// ── The realistic clock (north star: TIME REALISM) ─────────────────────────────────────────────
-// Each phase maps to a real several-hour window of an actual day; the clock tracks minutes-from-
-// midnight. The day runs from 06:00 to 02:00 (the late-night tail wraps to a new morning). A "tick"
-// is one ~1h conversation slice (default 60 min), so a believable number of conversations fit in each
-// part of the day and the PHASE flips only when the clock crosses a real boundary — never per beat.
+// ── The realistic clock as a SLEEP ECONOMY (north star: TIME REALISM; owner ruling 2026-06-23) ──
+// A full, continuous 24h RING. The WAKING day cascades 08:00→00:00; LATE-NIGHT IS THE SLEEP BLOCK
+// (00:00–08:00, 8h), looping straight back to 08:00 morning — no dead gap. Minutes are linear from the
+// 08:00 day start (480) to the next 08:00 (1920); the sleep block is [1440,1920) and DISPLAYS as
+// 00:00–08:00 via hhmm's wrap. A "tick" is one ~1h slice (default 60 min). The trade: every hour a
+// houseguest stays awake PAST MIDNIGHT (1440) cuts into their 8h sleep → a graded rest deficit (below).
 const PHASE_WINDOW: Record<TimeOfDay, { start: number; end: number }> = {
-  morning:      { start:  6 * 60, end: 12 * 60 }, // 06:00–12:00  (6h)
-  afternoon:    { start: 12 * 60, end: 17 * 60 }, // 12:00–17:00  (5h)
+  morning:      { start:  8 * 60, end: 13 * 60 }, // 08:00–13:00  (5h)
+  afternoon:    { start: 13 * 60, end: 17 * 60 }, // 13:00–17:00  (4h)
   evening:      { start: 17 * 60, end: 21 * 60 }, // 17:00–21:00  (4h)
   night:        { start: 21 * 60, end: 24 * 60 }, // 21:00–24:00  (3h)
-  "late-night": { start: 24 * 60, end: 26 * 60 }, // 00:00–02:00  (2h, then a new morning)
+  "late-night": { start: 24 * 60, end: 32 * 60 }, // 00:00–08:00  (8h SLEEP BLOCK → loops to morning)
 };
-const DAY_START_MIN = PHASE_WINDOW.morning.start;       // 06:00
-const DAY_END_MIN = PHASE_WINDOW["late-night"].end;     // 02:00 next day
+const DAY_START_MIN = PHASE_WINDOW.morning.start;            // 08:00
+const DAY_END_MIN = PHASE_WINDOW["late-night"].end;          // 08:00 next day (32:00)
+const SLEEP_BLOCK_START = PHASE_WINDOW["late-night"].start;  // 24:00 (midnight) — sleep starts here
+const SLEEP_BLOCK_HOURS = (DAY_END_MIN - SLEEP_BLOCK_START) / 60; // 8h
 
 /** Which real phase a minutes-from-midnight clock sits in. */
 function phaseAt(min: number): TimeOfDay {
@@ -104,12 +107,29 @@ function hhmm(min: number): string {
   const m = ((min % 1440) + 1440) % 1440;
   return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
 }
-/** A short bedtime tag for the readout (e — evening, n — night, ☾ — late-night owl). */
+/** A short bedtime tag for the readout (e — early/evening, n — night, ☾ — owl into the sleep block). */
 const BEDTIME_TAG: Record<TimeOfDay, string> = {
   morning: "e", afternoon: "e", evening: "e", night: "n", "late-night": "☾",
 };
-/** No real player in the NPC-only observatory — a sentinel id the awake-set filter never matches. */
-const NO_PLAYER = "__observer__";
+
+/**
+ * A houseguest's CONCRETE clock bedtime (minutes on the day ring) — the graded refinement of the
+ * engine's 3-bucket `bedtimeFor`. Same signal (`social − physical`) and the same SLEEP thresholds, just
+ * translated to a wall time so the sleep trade is graded: deep/early sleepers bed by 21:00 (bank the
+ * whole 8h block, zero deficit); night sleepers bed ~22:30–00:00; social OWLS push PAST midnight into
+ * the block (≈ 00:00→05:00 by owl strength), banking less sleep. (The live-engine follow-on would grade
+ * its awake-set/deficit the same way — here we go finer than the phase-based `awakeSet` on purpose.)
+ */
+function clockBedtimeMin(stats: { physical: number; social: number }): number {
+  const owl = stats.social - stats.physical;
+  if (owl <= SLEEP.earlySleeperBelow) return 21 * 60;                 // 21:00 — deep/early sleeper
+  if (owl <= SLEEP.nightOwlAbove) {
+    const t = (owl - SLEEP.earlySleeperBelow) / (SLEEP.nightOwlAbove - SLEEP.earlySleeperBelow); // 0..1
+    return Math.round(22.5 * 60 + t * (24 * 60 - 22.5 * 60));         // 22:30 → 00:00 (night sleeper)
+  }
+  const t = Math.min(1, (owl - SLEEP.nightOwlAbove) / 0.33);          // owl strength past the line
+  return Math.round(SLEEP_BLOCK_START + t * (5 * 60));                // 00:00 → 05:00 (into the block)
+}
 
 // ── Scene-nature classes ──────────────────────────────────────────────────────────────────────
 const GAME: ReadonlySet<InteractionType> = new Set<InteractionType>(["alliance", "strategy", "conflict", "betrayal"]);
@@ -146,7 +166,7 @@ interface Obs {
   friendly: number;
   game: number;
   scenePartners: Map<EntityId, number>;
-  lateScenes: number; // scenes this NPC ran in night/late-night (the after-hours scheming window)
+  lateScenes: number; // scenes this NPC initiated INSIDE the sleep block (the time bought with lost sleep)
 }
 const freshObs = (): Obs => ({ room: new Map(), coPresent: new Map(), friendly: 0, game: 0, scenePartners: new Map(), lateScenes: 0 });
 const bump = <K>(m: Map<K, number>, k: K, by = 1): void => { m.set(k, (m.get(k) ?? 0) + by); };
@@ -174,9 +194,10 @@ function run(opts: RunOpts) {
   const name = new Map(house.map((h) => [h.id, h.name] as const));
   const arche = new Map(house.map((h) => [h.id, h.character.archetype] as const));
   const dials = new Map(house.map((h) => [h.id, dialsFor(h.character.archetype)] as const));
-  // Character-driven bedtimes (PURE, byte-stable: derived from static stats, no rng) — the awake-set
-  // economy reads these. `social − physical` decides: the social game stays up, the comp-focused sleep.
+  // Character-driven bedtimes (PURE, byte-stable: derived from static stats, no rng). `bedtime` is the
+  // engine's 3-bucket read (for the tag); `bedMin` is the graded clock bedtime the sleep economy runs on.
   const bedtime = new Map(house.map((h) => [h.id, bedtimeFor(h.character.stats)] as const));
+  const bedMin = new Map(house.map((h) => [h.id, clockBedtimeMin(h.character.stats)] as const));
   const hoh = ids[0]!; // a stand-in HOH so power-proximity has a target to court
 
   const rel = new RelationshipModel(0.6);
@@ -194,21 +215,23 @@ function run(opts: RunOpts) {
   const obs = new Map<EntityId, Obs>(ids.map((id) => [id, freshObs()] as const));
   const phaseStats = freshPhaseStats();
 
-  // One ~1h conversation slice at a given phase, among the AWAKE houseguests only.
-  const tick = (phase: TimeOfDay, record: boolean): void => {
-    const awake = awakeSet({
-      active: ids, phase, player: NO_PLAYER, playerRetired: false, bedtimeOf: (id) => bedtime.get(id)!,
-    });
-    if (awake.length < 2) return; // play has run out of PEOPLE — the house is effectively asleep
+  // One ~1h slice at a given clock minute, among the AWAKE houseguests only. Awake iff the clock hasn't
+  // passed their personal bedtime — so the sleep block (after midnight) thins to the deepest owls, then
+  // empties, and the night ends because play runs out of PEOPLE (no curfew), not a timer.
+  const tick = (phase: TimeOfDay, clock: number, record: boolean): void => {
+    const awake = ids.filter((id) => clock < bedMin.get(id)!);
+    // Count presence for EVERY observed tick (incl. the empty late-night tail) so the economy shows the
+    // house thinning toward zero; only RUN the society when ≥2 are still up to have a scene.
+    if (record) { phaseStats[phase].ticks++; phaseStats[phase].awakeSum += awake.length; }
+    if (awake.length < 2) return; // everyone who was up has gone to bed — the house is asleep
     occ = assignRooms(awake, occ, { rng: moveRng, affinity: dialPull, hoh });
     const scenes = richOffscreenStretch({
       events, rng: socRng, npcs: awake, interactions: 4, edgeOf: dialEdge, occupancy: occ,
     });
     for (const s of scenes) rel.applyDirected(s.partner, s.initiator, s.type, socRng); // mirror the orchestrator fold
     if (!record) return;
-    const ps = phaseStats[phase];
-    ps.ticks++; ps.awakeSum += awake.length; ps.scenes += scenes.length;
-    const late = phase === "night" || phase === "late-night";
+    phaseStats[phase].scenes += scenes.length;
+    const late = phase === "late-night"; // initiated inside the 8h sleep block — bought with lost sleep
     // location + co-presence (awake only)
     const byRoom = new Map<Room, EntityId[]>();
     for (const [id, room] of occ) { bump(obs.get(id)!.room, room); (byRoom.get(room) ?? byRoom.set(room, []).get(room)!).push(id); }
@@ -228,25 +251,25 @@ function run(opts: RunOpts) {
   // the real wall time, and naturally ends the night early once the awake set has emptied.
   const runDay = (record: boolean): void => {
     for (let clock = DAY_START_MIN; clock < DAY_END_MIN; clock += minutesPerTick) {
-      tick(phaseAt(clock), record);
+      tick(phaseAt(clock), clock, record);
     }
   };
   for (let day = 0; day < warmupDays; day++) runDay(false); // let relationships + positions form
   for (let day = 0; day < observeDays; day++) runDay(true);  // measure
 
-  return { ids, name, arche, dials, bedtime, rel, obs, phaseStats, minutesPerTick };
+  return { ids, name, arche, dials, bedtime, bedMin, rel, obs, phaseStats, minutesPerTick };
 }
 
 // ── Readout ──────────────────────────────────────────────────────────────────────────────────
 function report(seed: number, moveIntent: number, minutesPerTick: number): void {
-  const { ids, name, arche, bedtime, rel, obs, phaseStats } =
+  const { ids, name, arche, bedtime, bedMin, rel, obs, phaseStats } =
     run({ seed, moveIntent, warmupDays: 3, observeDays: 4, minutesPerTick });
   const label = (id: EntityId): string => `${name.get(id)} (${arche.get(id)})`;
   const ticksPerDay = Math.ceil((DAY_END_MIN - DAY_START_MIN) / minutesPerTick);
 
   console.log(`\n${"═".repeat(96)}`);
   console.log(`  SOCIETY OBSERVATORY — seed ${seed}, move-intent ×${moveIntent.toFixed(2)}, ${minutesPerTick}min/conversation`);
-  console.log(`  (3 warmup + 4 observed days · day runs ${hhmm(DAY_START_MIN)}→${hhmm(DAY_END_MIN)} ≈ ${ticksPerDay} conversation slices)`);
+  console.log(`  (3 warmup + 4 observed days · waking ${hhmm(DAY_START_MIN)}→00:00, sleep block 00:00→08:00 ≈ ${ticksPerDay} slices/day)`);
   console.log(`${"═".repeat(96)}`);
   console.log("  Each NPC: bedtime · top room · who they kept ending up with · scene mix · warmest bond / top threat\n");
 
@@ -275,6 +298,25 @@ function report(seed: number, moveIntent: number, minutesPerTick: number): void 
     const avg = s.ticks ? (s.awakeSum / s.ticks).toFixed(1) : "—";
     console.log(
       `     ${TIME_OF_DAY_LABEL[p].padEnd(12)} ${`${hhmm(w.start)}–${hhmm(w.end)}`.padEnd(13)} ${String(avg).padStart(7)}   ${String(s.scenes).padStart(5)}`,
+    );
+  }
+
+  // The sleep economy: who traded sleep for after-midnight scheming, and the deficit they'll carry into
+  // the next comp. `slept` is hours of the 8h block actually slept; `deficit` (0..1) ∝ hours awake past
+  // midnight; `late` is the scenes they bought with that lost sleep. Sorted by deficit (the owls on top).
+  console.log(`\n  ── sleep economy (stay up to scheme ⇒ bank less sleep ⇒ rest deficit into next comp) ──`);
+  console.log(`     houseguest                         bedtime   slept/${SLEEP_BLOCK_HOURS}h   deficit   late scenes`);
+  const sleepRows = ids.map((id) => {
+    const awakeInBlockH = Math.max(0, bedMin.get(id)! - SLEEP_BLOCK_START) / 60;
+    return {
+      id, late: obs.get(id)!.lateScenes,
+      slept: SLEEP_BLOCK_HOURS - awakeInBlockH,
+      deficit: clamp01(awakeInBlockH / SLEEP_BLOCK_HOURS),
+    };
+  }).sort((a, b) => b.deficit - a.deficit);
+  for (const r of sleepRows) {
+    console.log(
+      `     ${label(r.id).padEnd(34)} ${hhmm(bedMin.get(r.id)!).padStart(5)}     ${r.slept.toFixed(1).padStart(4)}h     ${r.deficit.toFixed(2).padStart(5)}      ${String(r.late).padStart(4)}`,
     );
   }
 
