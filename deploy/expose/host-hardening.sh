@@ -22,10 +22,11 @@ apt-get update -y
 apt-get install -y ufw fail2ban unattended-upgrades
 
 echo "==> Firewall (ufw): default deny incoming, allow outgoing"
-ufw --force reset
-ufw default deny incoming
-ufw default allow outgoing
-
+# Lockout-safe ordering: put the SSH allow rule in place BEFORE the default-deny is enabled, and do
+# NOT `ufw --force reset` first. A reset wipes all rules and leaves the deny-incoming default active
+# during the window before the SSH allow lands — any failure under `set -Eeuo pipefail` in that gap
+# aborts with no SSH rule ⇒ remote lockout (and every re-run discards coexisting rules). ufw rule
+# adds are idempotent, so we set the allows first, then the defaults, then enable last.
 if [ "$ALLOW_SSH_FROM" = "any" ]; then
   ufw allow "${SSH_PORT}/tcp" comment 'ssh'
 else
@@ -39,6 +40,10 @@ if [ "$MODE" = "proxy" ]; then
 else
   echo "    MODE=tunnel: NOT opening 80/443 — the connector dials out, nothing inbound but SSH"
 fi
+
+# Defaults applied AFTER the SSH allow exists, then enable last. (deny incoming / allow outgoing.)
+ufw default deny incoming
+ufw default allow outgoing
 ufw --force enable
 ufw status verbose
 
