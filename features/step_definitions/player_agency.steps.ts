@@ -59,7 +59,8 @@ Then("the player's chosen tone folds into the evictee's manner toward the player
   assert.equal(ev.beat, "eviction-goodbye");
   assert.equal(ev.participants[0], PLAYER);
   // The fold honors the player's CHOICE (goodbyeMannerFor), exactly as an NPC tone would fold.
-  assert.equal(s.mannerByEvictee![evictee]![PLAYER]!.disrespected, true);
+  // SOC-NEW-1: the tone is recorded as the `goodbye` field (applied with precedence in juryLean).
+  assert.equal(s.mannerByEvictee![evictee]![PLAYER]!.goodbye, "cold");
 });
 
 // --- E37: the player-juror question ----------------------------------------------

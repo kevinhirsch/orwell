@@ -11,7 +11,8 @@ import type { RelationshipModel, InteractionType } from "../../engine/relationsh
 import { foldHiddenImpact, foldGenerativeConsequence } from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
 import type { Occupancy } from "../../domain/house";
-import { StaleBeatError } from "../../domain/errors";
+import { StaleBeatError, EngineRefusal } from "../../domain/errors";
+import { IMAGE_BUDGET } from "../../engine/imageConstants";
 
 const INTERACTION_KINDS: ReadonlySet<string> = new Set<InteractionType>([
   "alliance", "gossip", "conflict", "bonding", "strategy", "showmance", "betrayal",
@@ -65,6 +66,20 @@ export class EngineCommandsAdapter implements EngineCommands {
   /** E21: the beat window the fold budget counts within, plus the per-edge tallies inside it. */
   private foldBeatKey = "";
   private readonly foldCounts = new Map<string, number>();
+  /**
+   * IMG-NEW-1: the image-generation budget tallies (`IMAGE_BUDGET`). Generation is the most
+   * expensive lever, so a per-TURN (beat-window) and per-WEEK ceiling bounds the in-game re-shoot
+   * paths (facet re-shoot, manual backfill, the studio's "regenerate"). The season-start move-in
+   * portrait set is EXEMPT (`moveInPortraitExempt`) — detected structurally as the FIRST image for a
+   * houseguest, so the bounded one-time cast shoot never trips the cap while every RE-generation of an
+   * already-portrayed houseguest counts. Keyed like `foldCounts`: the count resets when the window
+   * (beat / week) rolls over. Tallies are in-memory (a restart re-opens the budget — a restart is no
+   * cheap abuse loop), but the EXEMPTION reads the persisted event log, so it stays correct across one.
+   */
+  private imageTurnKey = "";
+  private imageTurnCount = 0;
+  private imageWeekKey = "";
+  private imageWeekCount = 0;
   /**
    * R3 (Part E latency tail) — an incremental cache for `currentBeatKey`. The window key is "the latest
    * recorded `season:` event id"; the log is APPEND-ONLY, so that latest id is MONOTONIC — it can only move
@@ -323,6 +338,27 @@ export class EngineCommandsAdapter implements EngineCommands {
     // has consequence and memory ("recorded or it didn't happen"). Player-witnessed by construction
     // (the witness set is the player — they saw it); never hidden. No hidden-layer write: the image
     // is built only from the player's visible state, so showing it is the player's own knowledge.
+
+    // IMG-NEW-1: enforce the generation budget (`IMAGE_BUDGET`). The season-start MOVE-IN portrait
+    // (the FIRST image for a houseguest) is exempt — a bounded one-time cast cost; every RE-generation
+    // of an already-portrayed houseguest is metered against the per-turn + per-week caps so a looping
+    // model / button-masher / public-exposure abuser has an engine-side spend ceiling. Refused past the
+    // cap with a typed `EngineRefusal` (HTTP 400) so the FE generation loop can stop re-shooting.
+    if (!IMAGE_BUDGET.moveInPortraitExempt || this.hasPriorImageFor(req.houseguestId)) {
+      const turnKey = this.currentBeatKey();
+      if (turnKey !== this.imageTurnKey) { this.imageTurnKey = turnKey; this.imageTurnCount = 0; }
+      const weekKey = String((this.boardProvider?.() as { week?: number } | undefined)?.week ?? "");
+      if (weekKey !== this.imageWeekKey) { this.imageWeekKey = weekKey; this.imageWeekCount = 0; }
+      if (this.imageTurnCount >= IMAGE_BUDGET.perTurnCap) {
+        throw new EngineRefusal(`image budget exhausted for this turn (max ${IMAGE_BUDGET.perTurnCap} generations)`);
+      }
+      if (this.imageWeekCount >= IMAGE_BUDGET.perWeekCap) {
+        throw new EngineRefusal(`image budget exhausted for this week (max ${IMAGE_BUDGET.perWeekCap} generations)`);
+      }
+      this.imageTurnCount += 1;
+      this.imageWeekCount += 1;
+    }
+
     // Monotonic, restart-safe id off the store size (same discipline as recordInteraction, B40).
     const n = this.events.count();
     const eventId = `evt:image:${n}`;
@@ -333,5 +369,16 @@ export class EngineCommandsAdapter implements EngineCommands {
     });
     this.onPersist?.(); // durable save (0030): the image beat survives a restart
     return { eventId };
+  }
+
+  /**
+   * IMG-NEW-1 exemption: has this houseguest ALREADY had an image shown? The first image per
+   * houseguest is the move-in/season-start portrait (exempt from the budget); a second or later one is
+   * a metered RE-generation. Reads the persisted `image-shown` log (the same `content` `recordImageBeat`
+   * writes), so the exemption stays correct across a restart even though the in-memory tallies reset.
+   */
+  private hasPriorImageFor(houseguestId: EntityId): boolean {
+    const marker = `image shown to the player: ${houseguestId} (`;
+    return this.events.query({ type: "image-shown" }).some((e) => e.content.startsWith(marker));
   }
 }

@@ -50,6 +50,33 @@ export const MANNER_THRESHOLDS = {
   threatBlindside: 0.4,
 } as const;
 
+/**
+ * SOC-NEW-1/5 — the manner read is DYNAMIC on the actual relationship, not flat booleans summed.
+ * Two things are graded off the game numbers: a grievance's SEVERITY (a deeply-trusted betrayal
+ * stings more than a marginal one) and a clean cut's RESPECT (a feared rival earns it; an ignored
+ * floater nets ~neutral, not a flat lift). And the goodbye is applied with bounded PRECEDENCE — a
+ * warm send-off can soften a betrayal's sting but can NEVER launder it positive (the prior additive
+ * merge let a costless warm tone cancel ~40% of a betrayal). The player never sees any of these (0020).
+ */
+export const MANNER_GRADING = {
+  /**
+   * The floor a categorical GRIEVANCE (betrayal/blindside) is graded down to. Severity scales from
+   * this floor (a just-over-threshold move) to 1.0 (a total betrayal / a total blindside) — a real
+   * betrayal is never trivialized toward zero, but how badly it landed tracks the relationship.
+   */
+  grievanceFloor: 0.55,
+  /**
+   * A warm/respectful goodbye softens a standing grievance by AT MOST this fraction — PRECEDENCE,
+   * not addition. The lean can ease toward zero but never crosses it: a kind word is the last thing
+   * said, not a pardon for the move that put them on the block.
+   */
+  goodbyeSoftenMax: 0.25,
+  /** A warm/respectful goodbye's small independent LIFT on a clean (non-grievance) departure. */
+  goodbyeWarmLift: 0.12,
+  /** A cold goodbye's independent STING — its own minor grievance, never itself laundered away. */
+  goodbyeColdSting: 0.18,
+} as const;
+
 /** Engine-scored finale APPEAL magnitudes (`appealEffect`), all bounded to [0,1]. */
 export const APPEAL = {
   /** `mend` lands on a grievance (blindside/betrayal/disrespect); is mostly wasted without one. */

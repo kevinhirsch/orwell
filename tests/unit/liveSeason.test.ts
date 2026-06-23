@@ -190,8 +190,11 @@ describe("live weekly loop (incremental 0011)", () => {
     applyDecision(s, { kind: "eviction-vote", vote: evictee }, ctx);
     drainEvictionReveal(s, ctx, new SeededRandom(5));
     expect(s.evictionOrder).toContain(evictee);
-    // A manner toward the HOH was recorded (responsible: the HOH put them up).
-    expect(s.mannerByEvictee?.[evictee]?.[npc(1)]).toEqual({ betrayed: true });
+    // A manner toward the HOH was recorded (responsible: the HOH put them up). SOC-NEW-1: a betrayal,
+    // now GRADED by how deeply they were trusted (trust 0.9 ⇒ a near-full betrayal intensity).
+    const hohManner = s.mannerByEvictee?.[evictee]?.[npc(1)]!;
+    expect(hohManner.betrayed).toBe(true);
+    expect(hohManner.intensity).toBeGreaterThan(0.8);
   });
 
   it("records eviction manner toward the PLAYER too — jury management cuts both ways (A5)", () => {
@@ -208,8 +211,10 @@ describe("live weekly loop (incremental 0011)", () => {
     drainEvictionReveal(s, ctx, new SeededRandom(5));               // drive the staged reveal to the result
     expect(s.evictionOrder).toContain(evictee);
     // The exemption is gone: the player is recorded among the responsible houseguests (read at the reveal,
-    // before any goodbye overlay).
-    expect(s.mannerByEvictee?.[evictee]?.[PLAYER]).toEqual({ betrayed: true });
+    // before any goodbye overlay). SOC-NEW-1: a betrayal graded by the trust violated (0.9 ⇒ near-full).
+    const playerManner = s.mannerByEvictee?.[evictee]?.[PLAYER]!;
+    expect(playerManner.betrayed).toBe(true);
+    expect(playerManner.intensity).toBeGreaterThan(0.8);
   });
 });
 

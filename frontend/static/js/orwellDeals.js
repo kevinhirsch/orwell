@@ -103,7 +103,7 @@
         }
         #orwell-deals .odl-broken .odl-terms { text-decoration: line-through; }
       </style>
-      <div class="odl-hd">🤝 Your deals</div>
+      <div class="odl-hd" role="heading" aria-level="3"><span aria-hidden="true">🤝 </span>Your deals</div>
       <div id="odl-list"></div>`;
     // Mount into the control-room gadget rail (0054), under the status panel; fall back to the
     // sidebar (then body) — never floating, never document.body first.

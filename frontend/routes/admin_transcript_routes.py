@@ -9,9 +9,19 @@ Read-ONLY retrieval of any user's chat transcripts for the app administrator
   GET /api/admin/transcripts/{session_id}          — full export (json|md)
 
 Boundaries (recorded in the ruling):
-  * Transcripts hold only player-visible content — NO Vault risk by construction
-    (the transcript is the played record the player already saw; the Vault Wall
-    is enforced upstream at the engine's tool boundary, never here).
+  * Transcripts hold player-visible content — the played record the player
+    already saw. The LIVE Vault Wall is enforced upstream at the engine's tool
+    boundary (never here), so no in-progress hidden state (souls, relationship/
+    threat numbers, a running game's off-screen scheming) can ever appear.
+  * SANCTIONED EXCEPTION (owner ruling, ADM-NEW-1): a FINISHED game's
+    ``seasonRetrospective`` unseal — the engine's one post-season Vault-unseal —
+    lands in the transcript as a GM tool node like any other, and the export
+    forwards it verbatim. So this is NOT "no Vault risk by construction": it is
+    the accepted intersection of ruling #14's operator read-access and a season
+    that has ALREADY ENDED. It is content the player already read in their own
+    completed game (story, not numbers — no soul/relationship/stat figure
+    crosses), and it never breaches the God-Mode-Vault wall for a LIVE game
+    (mandate #2) — only a game that is over.
   * They DO include the player's Diary-Room entries (player-level OOC) — an
     accepted operator capability for a self-hosted box; the admin UI copy notes it.
   * READ-ONLY. There is no edit/delete verb on this surface (E93's

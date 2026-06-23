@@ -159,7 +159,7 @@ import { onNarrowChange } from './platform.js';
           <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
           <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
         </div>
-        <div class="os-roster-h" id="os-roster-h">The House</div>
+        <div class="os-roster-h" id="os-roster-h" role="heading" aria-level="3">The House</div>
         <div class="os-roster" id="os-roster"></div>
       </div>
       <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
