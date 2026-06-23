@@ -31,15 +31,6 @@ import { isNarrow } from './platform.js';
   let API_BASE = '';
   let currentAbort = null;
   let isStreaming = false;
-  // Continuous stall watchdog: while streaming, if the SSE stream produces
-  // NOTHING for STALL_THRESHOLD_MS (no deltas, no tool heartbeat — tools beat
-  // every 2s, so a full minute of silence means it's genuinely stuck or the
-  // model quietly stopped), surface a non-destructive "still working?" prompt
-  // instead of silently hanging. Replaces relying only on the tab-refocus
-  // recovery (which fired only on visibilitychange and silently reloaded).
-  let _stallWatchdog = null;
-  let _stallBannerShown = false;
-  const STALL_THRESHOLD_MS = 60000;
   let _sendInFlight = false;   // covers the window from click → streaming start
   let _displayOverride = null; // Override visible user bubble text (hides injected prompts)
   let _hideUserBubble = false; // Skip user bubble entirely (e.g. continue after stop)
@@ -300,13 +291,11 @@ import { isNarrow } from './platform.js';
       submitBtn.dataset.mode = 'streaming';
       submitBtn.dataset.phase = 'processing';
       isStreaming = true;
-      _startStallWatchdog();
     } else if (state === 'idle') {
       submitBtn.dataset.mode = '';
       delete submitBtn.dataset.phase;
       submitBtn.classList.remove('recording');
       isStreaming = false;
-      _stopStallWatchdog();
       // Defer to global updater which handles mic/newchat/send modes
       if (window._updateSendBtnIcon) {
         setTimeout(window._updateSendBtnIcon, 50);
@@ -3575,55 +3564,10 @@ import { isNarrow } from './platform.js';
     return true;
   }
 
-  function _removeStallBanner() {
-    const b = document.getElementById('stall-banner');
-    if (b) b.remove();
-    _stallBannerShown = false;
-  }
-  function _showStallBanner(secs) {
-    if (document.getElementById('stall-banner')) return;
-    _stallBannerShown = true;
-    const box = document.getElementById('chat-history');
-    if (!box) return;
-    const bar = document.createElement('div');
-    bar.id = 'stall-banner';
-    bar.className = 'stall-banner';
-    const mins = Math.floor(secs / 60);
-    const label = mins >= 1 ? `${mins}m` : `${secs}s`;
-    bar.innerHTML = `<span class="stall-banner-txt">Quiet for ${label} — still working?</span>`;
-    const cont = document.createElement('button');
-    cont.className = 'stall-banner-btn';
-    cont.textContent = 'Nudge it';
-    cont.title = 'Stop the stalled stream and ask it to continue';
-    cont.addEventListener('click', () => {
-      _removeStallBanner();
-      const mi = uiModule.el('message');
-      if (mi) {
-        mi.value = 'Are you still working? If you stopped, continue exactly where you left off and finish the task.';
-        const sb = document.querySelector('.send-btn');
-        if (sb) sb.click();
-      }
-    });
-    const stop = document.createElement('button');
-    stop.className = 'stall-banner-btn stall-banner-stop';
-    stop.textContent = 'Stop';
-    stop.addEventListener('click', () => { _removeStallBanner(); abortCurrentRequest(true); });
-    bar.appendChild(cont);
-    bar.appendChild(stop);
-    box.appendChild(bar);
-    if (uiModule.scrollHistory) uiModule.scrollHistory();
-  }
-  function _startStallWatchdog() {
-    // Disabled: the server-side stall detector / auto-continue (agent
-    // loop-breaker) handles quiet/stalled streams now, so the manual
-    // "Quiet for Nm — still working?" banner is redundant (and annoying).
-    if (_stallWatchdog) { clearInterval(_stallWatchdog); _stallWatchdog = null; }
-    _removeStallBanner();
-  }
-  function _stopStallWatchdog() {
-    if (_stallWatchdog) { clearInterval(_stallWatchdog); _stallWatchdog = null; }
-    _removeStallBanner();
-  }
+  // (Removed FEJS-6: the dead stall-banner machinery + the deliberately-disabled
+  // _startStallWatchdog/_stopStallWatchdog. The server-side stall detector +
+  // auto-continue loop-breaker supersede the old "still working?" banner; see
+  // CLAUDE.md "Front-end client conventions".)
 
   /** Show a "Cancelled by user" record in `holder` and persist an empty
    *  assistant placeholder server-side so the turn survives a refresh.

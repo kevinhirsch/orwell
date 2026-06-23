@@ -8,6 +8,7 @@ const searchModule = null;
 import { clearDockSide } from './modalSnap.js';
 import { sortModelIds } from './modelSort.js';
 import { isAltGrEvent } from './platform.js';
+import { DEFAULT_KEYBINDS } from './keyboard-shortcuts.js';
 
 let initialized = false;
 let modalEl = null;
@@ -1816,18 +1817,10 @@ function syncPrivacyCheckboxes() {
    SHORTCUTS TAB
    ═══════════════════════════════════════════ */
 
-const SHORTCUT_DEFAULTS = {
-  search:         'ctrl+k',
-  toggle_sidebar: 'ctrl+alt+b', // SET-NEW-3: match the live keymap default (_defaultKeybinds)
-  new_session:    'ctrl+alt+n',
-  fav_session:    'ctrl+alt+f',
-  delete_session: 'ctrl+alt+d',
-  cancel:         'escape',
-  tts:            'alt+shift+t',
-  settings:       'ctrl+,',
-  focus_input:    'ctrl+/',
-  open_theme:     '',
-};
+// #586: single source of truth — the defaults come straight from the runtime
+// keymap's DEFAULT_KEYBINDS (keyboard-shortcuts.js). The displayed/reset defaults
+// in this tab therefore always match exactly what the runtime binds.
+const SHORTCUT_DEFAULTS = { ...DEFAULT_KEYBINDS };
 
 const SHORTCUT_ICONS = {
   search:         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>',
