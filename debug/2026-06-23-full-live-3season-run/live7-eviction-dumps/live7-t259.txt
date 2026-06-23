@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=4 playerStatus=active committed=false
+TALLY=null
+
+Big Brother02:34 AMThe Diary Room settles around you — the red light steady, the monitor glowing. But it's different now. It's been different since she left. Nashville. Best ride-or-die I ever had. Valentina would've ticked it off on her fingers by now. Luca's the locked box — but he just cracked open for you. Michael's loud — but loud means predictable. So who's more useful to keep? Then she'd flash that gap-toothed grin and wait for you to catch up. But she's not here. Just you, the camera, and this vote. Two portraits. One choice. And somewhere out there, your El Paso is watching. Who walks out the door tonight, Nashville?

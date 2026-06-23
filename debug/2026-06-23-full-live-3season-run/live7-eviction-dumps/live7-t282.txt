@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=5 playerStatus=active committed=false
+TALLY=5-4
+
+Big BrotherThe Diary Room door clicks shut behind you. The red light blinks on — steady, patient, familiar now after six weeks. Two portraits glow on the monitor: Michael Levine on the left, Patricia Wilkins on the right. Michael — the nurse from Charleston, loud and abrasive, survived a 5-4 vote last week. On the block for the second time in a row. He's been blunt since night one, but he's also been exactly who he says he is. Patricia — the comp-beast from Queens, veto winner, HOH contender. A firefighter who's been a threat since she first stepped on that beam. She's powerful, strategic, and if she stays, she's dangerous every single week. One of them walks out the door tonight.

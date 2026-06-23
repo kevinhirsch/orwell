@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=3 playerStatus=active committed=false
+TALLY=null
+
+Big BrotherThe Diary Room settles around you — the red light steady, the monitor glowing. Two portraits. One vote. Reese Walter. The engineer from Oklahoma City. Former HOH. Sharp, analytical, three steps ahead of everyone since night one. Too smart to leave in the game. Bailey Jacobs. Forty-nine. Close-cropped fade. Quiet, steady, unreadable — the woman who nearly beat you in that veto and has been outlasting expectations ever since. Valentina's gone. The storage-room debriefs are over. This vote is yours alone. Who walks out the door tonight?

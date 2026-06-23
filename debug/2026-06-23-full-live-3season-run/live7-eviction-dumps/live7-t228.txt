@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=3 playerStatus=active committed=false
+TALLY=null
+
+Big BrotherThe Diary Room is quiet — just you, the camera, and the red light blinking steady. Two portraits glow on the monitor: Reese Walter on the left, Bailey Jacobs on the right. Valentina's gone. The storage-room debriefs are over. But the game doesn't stop, and this vote is yours alone to cast. Reese — sharp, analytical, a former HOH who's been three steps ahead since night one. Bailey — steady, unreadable, the woman who almost beat you in veto and has been quietly outlasting everyone. One of them walks out that door tonight. The house is waiting. Who gets your vote?

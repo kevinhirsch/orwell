@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=3 playerStatus=active committed=false
+TALLY=null
+
+Big Brother02:16 AM The Diary Room is quiet. The red light blinks — steady, patient. Two portraits glow on the monitor: Reese Walter on the left, Bailey Jacobs on the right. One of them walks out the door tonight. Valentina's voice echoes in your head: Take this thing all the way. For both of us. You've run the numbers. Reese is the analyst — the engineer who's been calculating every move since night one. Bailey is the underdog — quiet, steady, the woman who almost beat you in that veto and has been outlasting expectations ever since. Two threats. One vote. The house is waiting. Who do you vote to evict?

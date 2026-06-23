@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=2 playerStatus=active committed=false
+TALLY=null
+
+Big Brother01:56 AMThe Diary Room is quiet. Just you, the camera, and the red light blinking steady. Two portraits glow on the monitor — Alondra on the left, Patricia on the right. One of them walks out the door tonight.
