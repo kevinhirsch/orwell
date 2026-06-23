@@ -131,6 +131,21 @@ function clockBedtimeMin(stats: { physical: number; social: number }): number {
   return Math.round(SLEEP_BLOCK_START + t * (5 * 60));                // 00:00 → 05:00 (into the block)
 }
 
+// ── Late-night cluster curve: the few who stay up should find EACH OTHER ───────────────────────
+// First cut exposed a wrinkle — the DEEPEST owl often ends up awake alone, paying full sleep cost for
+// almost no scheming. So add a SLIGHT, night-depth-ramped co-location pull: it is 0 during waking hours
+// (the daytime movement rule is unchanged) and ramps 00:00 → 05:00 to an additive `strength` floor folded
+// into the movement pull, so awake owls gravitate to whatever room already has people (even weak ties /
+// rivals congregate at 2am). Tunable — the lever for WHEN staying up pays for the sleep it costs.
+const LATE_CLUSTER_DEFAULT = 0.6;
+function clusterBoost(clock: number, strength: number): number {
+  if (clock < SLEEP_BLOCK_START) return 0;                          // daytime: no co-location nudge
+  // Strong from the FIRST sleep-block tick (midnight is the fullest late tick — the gathering should be
+  // live the moment it's "late"), ramping the last bit deeper as the house empties toward the small hours.
+  const frac = Math.min(1, (clock - SLEEP_BLOCK_START) / (3 * 60)); // 0 at 00:00 → 1 by 03:00
+  return strength * (0.6 + 0.4 * frac);                             // 0.6× at midnight → full by 03:00
+}
+
 // ── Scene-nature classes ──────────────────────────────────────────────────────────────────────
 const GAME: ReadonlySet<InteractionType> = new Set<InteractionType>(["alliance", "strategy", "conflict", "betrayal"]);
 const isGame = (t: InteractionType): boolean => GAME.has(t);
@@ -185,10 +200,11 @@ interface RunOpts {
   warmupDays: number;
   observeDays: number;
   minutesPerTick: number;
+  lateCluster: number; // strength of the late-night co-location pull (the cluster curve)
 }
 
 function run(opts: RunOpts) {
-  const { seed, moveIntent, warmupDays, observeDays, minutesPerTick } = opts;
+  const { seed, moveIntent, warmupDays, observeDays, minutesPerTick, lateCluster } = opts;
   const house: Houseguest[] = generateHouse(new SeededRandom(seed)).npcs;
   const ids = house.map((h) => h.id);
   const name = new Map(house.map((h) => [h.id, h.name] as const));
@@ -207,18 +223,27 @@ function run(opts: RunOpts) {
   const moveRng = new SeededRandom(seed * 7 + 1);
   const socRng = new SeededRandom(seed * 13 + 3);
 
+  // The pull `assignRooms` reads. `currentClock` is set each tick so the LATE-NIGHT cluster floor can
+  // ramp in after midnight (0 by day ⇒ daytime movement is unchanged). The floor is added to every
+  // pair's pull, so occupied rooms accrue weight and the awake owls gravitate together.
+  let currentClock = DAY_START_MIN;
   const dialPull = (a: EntityId, b: EntityId): number =>
-    movePull(dials.get(a)!, rel.edge(a, b), b === hoh, moveIntent);
+    movePull(dials.get(a)!, rel.edge(a, b), b === hoh, moveIntent) + clusterBoost(currentClock, lateCluster);
   const dialEdge = (a: EntityId, b: EntityId): EdgeSignals => tiltedEdge(dials.get(a)!, rel.edge(a, b));
 
   let occ: Map<EntityId, Room> | null = null;
   const obs = new Map<EntityId, Obs>(ids.map((id) => [id, freshObs()] as const));
   const phaseStats = freshPhaseStats();
+  // Late-block co-presence (the cluster signal, independent of the per-tick scene cap): over late ticks
+  // where ≥2 are still up, how many of the awake share a room with another awake person vs. sit alone.
+  let lateCompany = 0;
+  let lateAlone = 0;
 
   // One ~1h slice at a given clock minute, among the AWAKE houseguests only. Awake iff the clock hasn't
   // passed their personal bedtime — so the sleep block (after midnight) thins to the deepest owls, then
   // empties, and the night ends because play runs out of PEOPLE (no curfew), not a timer.
   const tick = (phase: TimeOfDay, clock: number, record: boolean): void => {
+    currentClock = clock; // so dialPull's late-night cluster floor knows how deep into the night it is
     const awake = ids.filter((id) => clock < bedMin.get(id)!);
     // Count presence for EVERY observed tick (incl. the empty late-night tail) so the economy shows the
     // house thinning toward zero; only RUN the society when ≥2 are still up to have a scene.
@@ -237,6 +262,11 @@ function run(opts: RunOpts) {
     for (const [id, room] of occ) { bump(obs.get(id)!.room, room); (byRoom.get(room) ?? byRoom.set(room, []).get(room)!).push(id); }
     for (const group of byRoom.values()) {
       for (const a of group) for (const b of group) if (a !== b) bump(obs.get(a)!.coPresent, b);
+    }
+    if (late) { // the cluster signal: did the awake owls find each other, or scatter into solo rooms?
+      for (const group of byRoom.values()) {
+        if (group.length >= 2) lateCompany += group.length; else lateAlone += group.length;
+      }
     }
     // conversation (nature + partner), credited to the initiator
     for (const s of scenes) {
@@ -257,18 +287,18 @@ function run(opts: RunOpts) {
   for (let day = 0; day < warmupDays; day++) runDay(false); // let relationships + positions form
   for (let day = 0; day < observeDays; day++) runDay(true);  // measure
 
-  return { ids, name, arche, dials, bedtime, bedMin, rel, obs, phaseStats, minutesPerTick };
+  return { ids, name, arche, dials, bedtime, bedMin, rel, obs, phaseStats, lateCompany, lateAlone, minutesPerTick };
 }
 
 // ── Readout ──────────────────────────────────────────────────────────────────────────────────
-function report(seed: number, moveIntent: number, minutesPerTick: number): void {
+function report(seed: number, moveIntent: number, minutesPerTick: number, lateCluster: number): void {
   const { ids, name, arche, bedtime, bedMin, rel, obs, phaseStats } =
-    run({ seed, moveIntent, warmupDays: 3, observeDays: 4, minutesPerTick });
+    run({ seed, moveIntent, warmupDays: 3, observeDays: 4, minutesPerTick, lateCluster });
   const label = (id: EntityId): string => `${name.get(id)} (${arche.get(id)})`;
   const ticksPerDay = Math.ceil((DAY_END_MIN - DAY_START_MIN) / minutesPerTick);
 
   console.log(`\n${"═".repeat(96)}`);
-  console.log(`  SOCIETY OBSERVATORY — seed ${seed}, move-intent ×${moveIntent.toFixed(2)}, ${minutesPerTick}min/conversation`);
+  console.log(`  SOCIETY OBSERVATORY — seed ${seed}, move-intent ×${moveIntent.toFixed(2)}, ${minutesPerTick}min/conversation, cluster ${lateCluster.toFixed(2)}`);
   console.log(`  (3 warmup + 4 observed days · waking ${hhmm(DAY_START_MIN)}→00:00, sleep block 00:00→08:00 ≈ ${ticksPerDay} slices/day)`);
   console.log(`${"═".repeat(96)}`);
   console.log("  Each NPC: bedtime · top room · who they kept ending up with · scene mix · warmest bond / top threat\n");
@@ -338,14 +368,14 @@ function report(seed: number, moveIntent: number, minutesPerTick: number): void 
 // ── Time-knob sweep ────────────────────────────────────────────────────────────────────────────
 // Vary minutes-per-conversation and watch the day compress: a realistic 60min keeps several
 // conversations per phase; a bloated cost burns whole periods per beat (the live bug we're fixing).
-function timeSweep(seed: number, moveIntent: number): void {
+function timeSweep(seed: number, moveIntent: number, lateCluster: number): void {
   console.log(`\n${"═".repeat(96)}`);
   console.log(`  TIME-KNOB SWEEP — seed ${seed}, move-intent ×${moveIntent.toFixed(2)}  (how the clock cadence reshapes a day)`);
   console.log(`${"═".repeat(96)}`);
   console.log(`  minutes/    slices    scenes/day    ── scenes per phase ──`);
   console.log(`  convo       /day      (observed)    morn  aft  eve  night  late`);
   for (const minutesPerTick of [30, 60, 120, 240]) {
-    const { phaseStats } = run({ seed, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick });
+    const { phaseStats } = run({ seed, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick, lateCluster });
     const ticksPerDay = Math.ceil((DAY_END_MIN - DAY_START_MIN) / minutesPerTick);
     const per = (p: TimeOfDay): string => String(Math.round(phaseStats[p].scenes / 4)).padStart(4);
     const totalScenes = TIME_OF_DAY_ORDER.reduce((a, p) => a + phaseStats[p].scenes, 0);
@@ -358,10 +388,41 @@ function timeSweep(seed: number, moveIntent: number): void {
   console.log(`  the same beats consume whole periods (fewer slices/day) — the "time races" bug, made visible.`);
 }
 
+// ── Cluster-knob sweep ─────────────────────────────────────────────────────────────────────────
+// Vary the late-night cluster strength and watch whether the (same, shrinking) awake owls actually
+// FIND each other: avg awake-late is fixed by bedtimes — only co-location moves, so more clustering ⇒
+// more late-block scenes for the same people ⇒ staying up finally buys scheming.
+function clusterSweep(seed: number, moveIntent: number, minutesPerTick: number): void {
+  // The late-night population is tiny per seed (a handful of overlapping owls), so a single seed is
+  // noisy — average over several to read the curve cleanly.
+  const seeds = [seed, 11, 13, 19, 23, 31];
+  console.log(`\n${"═".repeat(96)}`);
+  console.log(`  CLUSTER-KNOB SWEEP — move-intent ×${moveIntent.toFixed(2)}, ${minutesPerTick}min/conversation, mean over ${seeds.length} seeds`);
+  console.log(`  (do the late-night owls find each other? avg awake-late is fixed by bedtimes — only co-location moves)`);
+  console.log(`${"═".repeat(96)}`);
+  console.log(`  cluster    co-present %   late scenes/day`);
+  for (const lateCluster of [0, 0.3, 0.6, 1.0, 1.6]) {
+    let company = 0, alone = 0, scenes = 0;
+    for (const s of seeds) {
+      const r = run({ seed: s, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick, lateCluster });
+      company += r.lateCompany; alone += r.lateAlone; scenes += r.phaseStats["late-night"].scenes;
+    }
+    const rate = company + alone ? Math.round((100 * company) / (company + alone)) : 0;
+    const scenesPerDay = (scenes / (seeds.length * 4)).toFixed(1);
+    console.log(`  ${lateCluster.toFixed(2).padEnd(9)}  ${String(rate).padStart(5)}%        ${scenesPerDay.padStart(6)}`);
+  }
+  console.log(`\n  Read: the lever is CO-PRESENT % — how many of the still-up owls share a room (vs. sit alone).`);
+  console.log(`  It rises with cluster, so staying up starts to buy company/scheming. (The deepest solo tail —`);
+  console.log(`  ticks with only ONE owl up — can't be helped by clustering; that's a bedtime-overlap question,`);
+  console.log(`  not a co-location one. Scenes/day is capped per tick, so it moves less than co-presence.)`);
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────────────────────
 const moveIntent = Number(process.argv[2] ?? "1.0");
 const minutesPerTick = Number(process.argv[3] ?? "60");
-report(7, moveIntent, minutesPerTick);          // realistic clock — the dial + presence readout
-timeSweep(7, moveIntent);                        // how the clock cadence reshapes a day
-report(7, moveIntent * 2.2, minutesPerTick);     // a higher move-intent pass — watch co-presence tighten
+const lateCluster = Number(process.argv[4] ?? String(LATE_CLUSTER_DEFAULT));
+report(7, moveIntent, minutesPerTick, lateCluster);       // realistic clock — dials + presence + sleep readout
+timeSweep(7, moveIntent, lateCluster);                    // how the clock cadence reshapes a day
+clusterSweep(7, moveIntent, minutesPerTick);              // when does late-night clustering make staying up pay?
+report(7, moveIntent * 2.2, minutesPerTick, lateCluster); // higher move-intent pass — watch co-presence tighten
 console.log("");
