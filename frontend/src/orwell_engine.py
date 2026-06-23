@@ -394,13 +394,6 @@ async def create_character(player_name: str | None = None, *, archetype=None, st
         _CREATING_IN_FLIGHT -= 1
 
 
-async def get_portrait_prompt(houseguest_id: str, user: str | None = None) -> dict:
-    """Feature 0051: the Vault-free portrait prompt for one houseguest, built from public
-    appearance facets + the per-season style anchor. Used to (re)generate a missing portrait.
-    Returns ``{ houseguestId, name, prompt }``."""
-    return await _call("getPortraitPrompt", {"id": houseguest_id}, user=user)
-
-
 async def pre_seed_cast(seed: int | None = None, user: str | None = None) -> dict:
     """Feature 0065: pre-warm the player-INDEPENDENT cast off the season seed BEFORE the casting
     interview ends, so the FE can deeply author it (``record_cast_profile``) and the portrait prompts
@@ -449,13 +442,6 @@ async def record_world_snapshot(snapshot: dict, user: str | None = None) -> dict
     image port); empty slices keep the fallback's value (non-degradation). Returns
     ``{ accepted, source }``. Public flavor only — no Vault, no game input."""
     return await _call("recordWorldSnapshot", snapshot, user=user)
-
-
-async def record_image_beat(houseguest_id: str, image_ref: str, user: str | None = None) -> dict:
-    """Feature 0051: record that a generated portrait was SHOWN to the player — a
-    player-witnessed beat (recorded-or-it-didn't-happen). ``image_ref`` is the stored
-    filename/URL. Vault-free; the engine logs it like any player-present scene."""
-    return await _call("recordImageBeat", {"houseguestId": houseguest_id, "imageRef": image_ref}, user=user)
 
 
 async def get_offscreen_scene_skeletons(user: str | None = None) -> list:

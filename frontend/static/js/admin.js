@@ -2422,6 +2422,13 @@ function initHealthLogs() {
   function render(d) {
     const eng = d.engine || {};
     const rows = [];
+    // Build (deployed checkout's short commit SHA) + version (PR-derived "vX.XX"), for
+    // one-glance "what is running here?" triage. Absent on a history-less/old engine ⇒ skipped.
+    const ver = d.versions || {};
+    const verBits = [];
+    if (ver.build) verBits.push(esc(String(ver.build)));
+    if (ver.frontend) verBits.push(esc(String(ver.frontend)));
+    if (verBits.length) rows.push(row('Build · version', verBits.join(' · ')));
     let engineVal = badge(!!eng.ok, eng.ok ? 'REACHABLE' : 'DOWN');
     if (eng.latencyMs != null) engineVal += ` ${esc(String(eng.latencyMs))} ms`;
     if (eng.uptimeSeconds != null) engineVal += ` · up ${esc(fmtUptime(eng.uptimeSeconds))}`;
