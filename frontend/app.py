@@ -991,6 +991,16 @@ app.router.lifespan_context = _lifespan
 async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
+    # Backfill the in-memory LLM I/O ring from its durable archive BEFORE any model call, so the
+    # "LLM I/O (live)" status-page view isn't blank after a restart (the ring is per-process; the
+    # file persists). Must run pre-traffic so seeded history keeps lower seq than live calls.
+    try:
+        from src import llm_trace as _llm_trace
+        _seeded = _llm_trace.seed_ring_from_file()
+        if _seeded:
+            logger.info("LLM I/O live ring seeded with %d archived record(s)", _seeded)
+    except Exception as _e:
+        logger.debug("LLM I/O ring seed skipped: %s", _e)
     webhook_manager.set_loop(asyncio.get_running_loop())
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.
