@@ -276,3 +276,91 @@ the platform recovers / `main` is fixed.
   LIVE-7 (ballot drip, result only at `beat="eviction"`; ambiguous mid-drip).
 - **[LATENT/POLISH, NEW]** EVT-1 — `BeatEventView` drops `participants`; ceremony result identity is prose-only
   (the missing structural rung under the LIVE-4/LIVE-7 fixes).
+
+---
+---
+
+# Companion ledger — LIVE-LLM lane, session 3 (branch `claude/relaxed-thompson-0grtx8`)
+
+> The following is a **second, independently-run** session-3 ledger, merged here so both auditors'
+> findings live in one file. **Note the environmental contradiction with OPS-1 above:** this run was
+> performed on a host where egress to `openrouter.ai` *was* reachable, so it could drive the live model
+> where the `gallant-euler` run (above) was egress-blocked. Both are retained as-is; the divergence is a
+> host/environment difference, not a product finding.
+
+# Orwell Pre-Launch Audit — LIVE-LLM lane (session 3)
+
+> Branch `claude/relaxed-thompson-0grtx8`. This is the **third** auditor ledger — companion to
+> `ROAST-LOG.md` (Waves 1–3 + PR #519 live run) and `AUDIT-LOG.md` (the VERIFIED-FIXED ledger).
+> Every entry here is **NEW or a live VERIFICATION of an open BLOCK** — cross-checked absent-as-fixed
+> from both prior ledgers. Mission: the live browser playthrough lane the prior sessions could not run
+> (egress to openrouter.ai was blocked then; now allowlisted).
+>
+> Reasoning standard: evidence → mechanism → theory; engine = ground truth; everything VIEWED, not
+> inferred; every finding logged with file:line + a falsifier. HARD STOP: log/trace only — no product
+> code changes until the operator authorizes at the peer-review gate.
+
+## Stack / method
+- Engine (TS) on :8765, FE (FastAPI) on :7000, narration DeepSeek V4 (pro/flash) via OpenRouter.
+- Model configured via Settings API (`POST /api/model-endpoints` + `POST /api/auth/settings`), never source.
+- Four per-turn oracles (harness §5): leak / engine-grounding (phase/hoh/noms/veto/beatSeq before↔after) /
+  invented-name vs roster / outcome-fidelity. Engine is the oracle for every parity claim.
+
+## Priority verification targets (from PR #519 + Wave 3)
+- **LIVE-4** `[BLOCK]` — staged-comp advance-cascade silently skips nomination + veto ceremonies. Repro pro→flash.
+- **LIVE-7** `[BLOCK-candidate]` — narration fabricates eviction result ahead of engine, which contradicts it.
+- **NARR-7** `[BLOCK-candidate]` — jurors voice-anchorless at finale (npcVoice null for non-active). Drive to finale + fresh-session finale.
+
+---
+
+## Findings (live)
+
+### CHAIN-1 · `[VERIFY — CLEAN]` · operator-requested · Three seasons end-to-end + into the start of the fourth — seasons-as-levels chain holds
+- **Method:** model-free deterministic engine drive (the harness s4ff method — `advanceGame`+`submitDecision` autoResolve over `POST /player/call X-Orwell-User:admin`, EchoNarrator, byte-faithful closed-set loop) for each season to `finished`, then the **real FE 0057 transition** `POST /api/orwell/next-season {confirm:true,keep:true}` between seasons. Engine = ground truth. Artifact: `.audit-telemetry/shots/chain/report.json` (gitignored).
+- **Result — every oracle GREEN across S1→S2→S3→into S4:**
+  - **Completion:** all 3 seasons reached a crowned winner (S1 Avery Quinn [the player], S2 Wyatt Vega, S3 Vanessa Caldwell), 14 weeks each, finale staged (`finale-statement`/`finale-answer` pendings).
+  - **Season counter (0057):** monotonic **1→2→3→4** (`GET /api/orwell/season`); each transition `kept=true`, HTTP 200.
+  - **Character persistence (0056):** player **"Avery Quinn" (social/floater)** carried through all 3 transitions — verified at S4 start via `getGameState.player.name`.
+  - **Fresh cast each season:** `rosterChanged=true`, **roster overlap = 0** between consecutive seasons (no name reuse; new 15-cast every level).
+  - **Clean start of the 4th:** counter=4, `started`, **premiere / week 1 / beatSeq 1**, fresh 15-cast, **no phantom pending bleed** (`pending=null` — the 0057/`remember_pending` clear of the prior juror-vote holds).
+  - **Vault Wall + secret ballot:** **0 anomalies** — every player-visible beat + `recap`/`getGameState` projection scanned for numeric stat/soul/relationship/`hidden:true`/prose `npc:id` and per-voter eviction attribution; none crossed across all 3 seasons (~1065 advance beats).
+- **Caveat (test-artifact, not a defect):** 3 engine `getVisibleState` failures in engine `/health` were **my harness calling a non-player-channel tool name** (`getVisibleState` is rejected HTTP 400 on the player channel; the FE uses `getVisibleStateFor`/proxied reads) — the engine correctly refused it. Not a product finding.
+- **Scope note:** this drive is **deterministic/model-free** — it proves the closed-set **chain integrity** (transitions, counter, persistence, Vault, clean re-start) robustly and restart-resiliently; it does **not** exercise LLM narration of the finale or the season hand-off. The live-narration of those junctures (NARR-7 finale persona; the new-season chat hand-off) is covered separately in the live-LLM lane below. **Falsifier:** any season failing to crown a winner, a counter that skips/repeats, a carried-character name change, a non-zero roster overlap, a non-premiere 4th-season start, a phantom pending, or any Vault/ballot leak — none observed.
+
+### NARR-7 · `[BLOCK-candidate → CONFIRMED LIVE]` · pro · VIEWED · Finale jurors are voice-anchorless — the live model FABRICATES juror identities with no grounding, in a fresh session
+- **Setup:** distinct S1 character (Marcus Webb, comp-beast), deterministic fast-forward to the finale, then the **live pro model drove the finale in a FRESH empty chat** (the re-entry condition — zero juror history). Player reached Final 2; 8 jurors seated. Artifacts: `.audit-telemetry/shots/finale-s1/{transcript.txt,ledger.json}` (gitignored).
+- **Mechanism confirmed at the live boundary (3 independent proofs):**
+  1. `npcVoice(juror npc:3)` → **null**; `npcVoice(active finalist npc:8)` → full voice (`persona/knows/suspects/stances`). The voice tool is gated on `seat==="active"` (`GameSessionAdapter.ts:809`).
+  2. The actual 35,291-char finale `systemPrompt` lists every juror as bare **`- Name (jury)`** — while active finalists get descriptors (`Deja Bass — loyali…`). Roster weave strips non-active (`momentPrompts.ts:725`).
+  3. **No juror persona data anywhere in the prompt:** every seeded juror vocation (`postal`, `special-education`, `pharmaceutical`, `ghost-tour`, `art-gallery`, …) is **absent** from the systemPrompt (grep = 0 hits). The demeanor words that DO appear belong to *active* houseguests or to generic voicing instructions.
+- **Empirical failure (the live result):** lacking any anchor, the model **confabulated detailed, individuated juror biographies** — ages, hometowns, physiques, jobs, demeanors it was never given. Graded against the seeds:
+  - Greta Lin (seed: *special-education aide*, floater, deadpan-dry) → narrated **"24, business student from San Jose"** — vocation/age **fabricated, mismatched**.
+  - Rosie Oliver (seed: *art-gallery assistant*, analyst) → narrated **"48, the oldest person in this room"** — invented.
+  - Allison Watson (seed: *postal carrier*, flirt) → narrated **"45, postal carrier from Nashville"** — vocation coincidentally right, age/city invented.
+  - Harper (seed: *social-butterfly, warm-bubbly*) → "the house's sunshine all season" (on-model) but also "quiet challenge"/"unreadable" (off-model). 
+  The voices are *vivid and distinct* — but **invented, not recalled**, so they don't match the jurors' season-long seeded selves and contradict them outright in at least one case. This is precisely the "store recalled, never chat remembered" failure (ADR 0003 / mandate #4): a juror's identity must survive eviction via the store, but the projection drops it the instant `seat!=="active"`.
+- **Differential:** not a Vault leak (these are public facets that SHOULD project); not persona drift within a season (holds while active). The defect is the **projection gate** — eviction silently strips a houseguest's public, Vault-free identity from every narration path. A re-entry/fresh-session finale (this run) gets it worst: zero chat history ⇒ 100% confabulation. **Falsifier:** a finale prompt that carries each juror's public archetype/demeanor/vocation (Vault-free, already in `getGameState`), yielding seeded-consistent juror voices. **Confidence:** HIGH. **Fix direction (for the gate, not now):** project public facets (archetype/demeanor/vocation/hometown) for non-active houseguests in the roster weave + a juror-scoped voice read at the finale — all Vault-free (they already sit in `getGameState.house[]`).
+
+### NARR-NEW-1 · `[POLISH·high candidate]` · pro · OBSERVED (needs full-live confirmation) · The live finale did not reach the vote reveal — it looped on per-juror "choose your appeal" cards
+- **Evidence:** the finale drive ran 12 turns; T3–T12 surfaced **9 consecutive `finale-answer` ("Jury question — choose your appeal") decision cards** and the game stayed `phase=finale, finished=false, pending=None` — the **jury-VOTE reveal / winner crowning never arrived** within the cap. The model kept returning to juror questions rather than advancing into the staged vote reveal.
+- **Differential / caveat:** could be (a) a finale-completion under-call (the B5/L39 "won't advanceGame" family, here at the vote-reveal seam) or (b) an artifact of my 12-turn cap / opt[0] card resolution. **Not yet a confirmed defect** — flagged to confirm in the full-live run (higher turn cap, real persona answers). **Falsifier:** the full-live finale crowning a winner within a bounded number of post-question turns.
+
+## Full-live run — Season 1 (pro, distinct character "Marcus Webb" via live casting)
+
+Live casting produced a faithful distinct character (*"The no-nonsense firefighter… comp-beast, physical standout, Firefighter out of Cleveland, 34"*) in ONE turn — the casting seam works well on pro. The player reached the week-1 eviction on the block and was evicted pre-jury. Artifacts: `.audit-telemetry/shots/live-full/{ledger.json, live7-*.txt}`, FE `data/app.db` (gitignored).
+
+### LIVE-7 · `[BLOCK-candidate → CONFIRMED LIVE]` · pro · VIEWED · Narration fabricates an IMPOSSIBLE eviction tally ahead of the engine's anonymized reveal
+- **Evidence:** at the week-1 eviction (player Marcus Webb nominated, veto not used), the live narration concluded his eviction + exit interview: *"Eight to seven, Marcus. One of the closest early votes we've seen … came up one vote short."* (full text: `live7-t47.txt`). The host announced a **specific tally of 8–7**.
+- **Why it's a fabrication (two independent proofs):** (1) **mathematically impossible** — week 1 has **13 eligible voters** (16 cast − HOH Hailey − 2 noms), so 8+7 = 15 cannot occur; (2) the engine **never hands the player a tally** — its secret-ballot reveal drips anonymized ballots (`event.beat: eviction-reveal, content: "a vote to evict Marcus Webb"`, confirmed by a direct `advanceGame` probe), and the count is sealed until the 0048 retrospective. The model invented "8–7" wholesale and surfaced it as the host's announcement.
+- **Mechanism:** identical to PR #519's LIVE-7 — nothing forbids the model from narrating the eviction CONCLUSION (named result + tally + walk-out) before/instead of the engine's per-ballot reveal. NARR-8 (FE pre-emission guard) does not police a fabricated *tally* outside finale phases (`_CLAIM_TALLY_RE` is scoped to `_FINALE_PHASES`), so a mid-season invented tally passes unguarded. **Differential:** the eviction OUTCOME (Marcus out) matched the engine here (so not an outcome contradiction), but the **tally is fabricated and impossible** — a narration-fidelity violation at the season's peak moment. **Falsifier:** narration that voices only the engine's anonymized ballots ("a vote to evict …") and the committed result, never an invented N–M count. **Confidence:** HIGH.
+
+### LIVE-4 · `[BLOCK]` · pro · VIEWED · The eviction-reveal beats are advanced (consumed) but NOT narrated — the player on the block never sees the votes against them; the nom/veto SKIP did NOT reproduce
+- **Two-part result:**
+  1. **The PR #519 nom/veto SKIP did NOT reproduce on pro this run.** The nomination ceremony (T24: *"You're on the block. Hailey Lowe…"*) and the veto ceremony (T34: *"The veto ceremony is over… 'I've decided not to use the Power of Veto'"*) were **both narrated in real time**. So that specific skip is intermittent / seed- or tier-dependent, **not** a deterministic pro failure.
+  2. **BUT the LIVE-4 MECHANISM reproduced at the eviction reveal.** From T34→T47 the engine sat at `phase=eviction` while `advanceGame` was called ~28 times (beat 75→103+), each consuming one staged `eviction-reveal` ballot — yet the model narrated **backyard alliance scenes** (Marcus↔Harper, then Marcus↔Stephanie) for ~10 player-turns and even narrated *"an eviction tomorrow"* while the engine was actively revealing the votes. A DB scan of all 60 session messages found **0 messages concluding the eviction** until T45+ and only 2 mentioning a vote at all. The player on the block saw the ballots against them dripped **silently in the engine**, surfaced only at the very end. This is exactly the LIVE-4 pathology (ceremony beats advanced without being narrated), localized to the eviction reveal.
+- **Caveat (driver interaction):** my driver sends social persona lines during `eviction`, which the model followed into alliance scenes — a real player on the block would also socialize, but the model should still surface the active eviction reveal rather than narrate it as a future event. **Falsifier:** narration that surfaces the staged eviction ballots as they are advanced. **Confidence:** MED-HIGH (mechanism HIGH; the nom/veto-skip non-reproduction is the notable nuance).
+
+### POS-1 · `[POSITIVE — keep]` · pro · VIEWED · Secret-ballot anonymization + pre-jury-evicted hand-off both hold live
+- The eviction reveal dripped **anonymized** ballots (*"a vote to evict Marcus Webb"*, never per-voter) — the secret-ballot guarantee (audit E12) held live. When the player was evicted pre-jury, `POST /api/orwell/conclude-season` cleanly fast-forwarded the house to a crowned winner (Harper Jacobson, 13 weeks) → post-season (LW10) — the pre-jury-evicted lifecycle works.
+
+_(full-live run continuing: S2 "Priya" → S3 "Jolene" → into S4 "Desmond")_
