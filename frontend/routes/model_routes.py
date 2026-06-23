@@ -1650,7 +1650,20 @@ def setup_model_routes(model_discovery):
             if not settings.get("default_endpoint_id"):
                 from src.endpoint_resolver import _first_chat_model
                 settings["default_endpoint_id"] = ep.id
-                settings["default_model"] = _first_chat_model(model_ids) or ""
+                # Honor the configured/OOB default chat model (e.g. deepseek-v4-pro) when THIS
+                # endpoint actually serves it — so adding the OpenRouter feed binds the default to
+                # the intended model rather than whatever the provider happens to list first.
+                # Only fall back to the first chat model when the configured one isn't in the
+                # catalog (so the default is never a model this provider can't serve).
+                _desired = (settings.get("default_model") or "").strip()
+                _serves = bool(_desired) and any(
+                    _desired.lower() == str(mid).lower()
+                    or _desired.lower() in str(mid).lower()
+                    or str(mid).lower() in _desired.lower()
+                    for mid in (model_ids or [])
+                )
+                if not _serves:
+                    settings["default_model"] = _first_chat_model(model_ids) or ""
                 _save_settings(settings)
             _invalidate_models_cache()
             _local_probe_cache["data"] = None

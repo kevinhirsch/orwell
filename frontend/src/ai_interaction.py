@@ -58,6 +58,20 @@ def set_rag_manager(rag_mgr, personal_docs_mgr=None):
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url, build_headers, build_models_url
 
 
+# Auto-detect image-model candidates, tried in order when no image_model is configured (the
+# settings "Auto-detect"/"default" option, i.e. an empty image_model). OpenRouter is the default
+# provider and serves Google's Gemini flash-image models via /chat/completions, so the Gemini ids
+# LEAD — the OOB "default" therefore resolves to gemini-2.5-flash-image (the product default). The
+# OpenAI ids remain as fallbacks for an OpenAI/Azure-direct setup. The exact `google/`-prefixed id
+# leads each family so the catalog match (_resolve_model: exact-before-partial) can't partial-match
+# a non-image chat sibling such as `google/gemini-2.5-flash`.
+IMAGE_AUTODETECT_CANDIDATES = (
+    "google/gemini-2.5-flash-image", "gemini-2.5-flash-image",
+    "google/gemini-3-flash-image", "gemini-3-flash-image",
+    "gpt-image-1.5", "gpt-image-1", "dall-e-3",
+)
+
+
 def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Dict]:
     """Resolve a model specifier to (endpoint_url, model_id, headers).
 
@@ -1645,9 +1659,9 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     if quality == "medium" and _settings.get("image_quality"):
         quality = _settings["image_quality"]
 
-    # Auto-detect best available image model if still not set
+    # Auto-detect best available image model if still not set (Gemini-first; see the constant)
     if not model_spec:
-        for candidate in ("gpt-image-1.5", "gpt-image-1", "dall-e-3"):
+        for candidate in IMAGE_AUTODETECT_CANDIDATES:
             try:
                 _resolve_model(candidate, owner=owner)
                 model_spec = candidate

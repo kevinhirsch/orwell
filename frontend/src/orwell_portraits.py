@@ -570,7 +570,7 @@ def image_generation_available(user: Optional[str]) -> bool:
     We only report unavailable when generation is disabled or there is genuinely no usable
     endpoint.
     """
-    from src.ai_interaction import _resolve_model, has_image_capable_endpoint
+    from src.ai_interaction import _resolve_model, has_image_capable_endpoint, IMAGE_AUTODETECT_CANDIDATES
 
     enabled, model_spec, _ = _image_settings(user)
     if not enabled:
@@ -581,7 +581,7 @@ def image_generation_available(user: Optional[str]) -> bool:
     candidates = []
     if model_spec and _is_image_model(model_spec):
         candidates.append(model_spec)
-    candidates += ["gpt-image-1.5", "gpt-image-1", "dall-e-3"]
+    candidates += list(IMAGE_AUTODETECT_CANDIDATES)
     for cand in candidates:
         if not cand:
             continue
@@ -811,7 +811,7 @@ async def _generate_one(prompt: str, user: Optional[str],
     person, the variety directive carries the differentiation from the rest of the cast.
     """
     import httpx
-    from src.ai_interaction import _resolve_model
+    from src.ai_interaction import _resolve_model, IMAGE_AUTODETECT_CANDIDATES
 
     enabled, model_spec, quality = _image_settings(user)
     if not enabled or not prompt:
@@ -831,7 +831,7 @@ async def _generate_one(prompt: str, user: Optional[str],
         model_spec = ""
 
     if not model_spec:
-        for candidate in ("gpt-image-1.5", "gpt-image-1", "dall-e-3"):
+        for candidate in IMAGE_AUTODETECT_CANDIDATES:
             try:
                 _resolve_model(candidate, owner=user or None)
                 model_spec = candidate
