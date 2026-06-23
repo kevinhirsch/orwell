@@ -84,28 +84,30 @@ describe("0051 — portrait prompts (Vault-free builder)", () => {
   });
 });
 
-describe("0051 — createCharacter portrait prompts (full cast, Vault-free)", () => {
-  it("returns one portrait prompt for the whole cast (player + 15 NPCs)", () => {
+describe("0051 — createCharacter portrait prompts (cast NPCs, Vault-free)", () => {
+  it("returns one portrait prompt per NPC; the PLAYER is excluded (#529 — no name-hash face)", () => {
     const adapter = new GameSessionAdapter();
     const view = adapter.createCharacter({ playerName: "The Player", seed: 42 });
     expect(view.portraitPrompts).toBeDefined();
-    // The full cast: the player plus every NPC.
-    expect(view.portraitPrompts!.length).toBe(view.house.length + 1);
+    // #529: the player authored no look, so they get NO improvised portrait — the cast pipeline
+    // covers the 15 generated NPCs only (the player's avatar is FE-owned, never name-hash derived).
+    expect(view.portraitPrompts!.length).toBe(view.house.length);
     for (const pp of view.portraitPrompts!) {
       expect(pp.houseguestId).toBeTruthy();
       expect(pp.name).toBeTruthy();
       expect(pp.prompt).toContain("photorealistic");
     }
-    // The player is included (the full cast, not just NPCs).
-    expect(view.portraitPrompts!.some((p) => p.houseguestId === PLAYER)).toBe(true);
+    // The player is NOT in the cast portrait set.
+    expect(view.portraitPrompts!.some((p) => p.houseguestId === PLAYER)).toBe(false);
   });
 
   it("same seed draws the SAME style anchor; a different seed (usually) draws a different one", () => {
     const anchorOf = (seed: number): string => {
       const a = new GameSessionAdapter();
-      a.createCharacter({ playerName: "The Player", seed });
-      // The anchor is the shared photorealistic prefix every prompt carries; lift it from a prompt.
-      const pp = a.getPortraitPrompt(PLAYER)!;
+      const v = a.createCharacter({ playerName: "The Player", seed });
+      // The anchor is the shared photorealistic prefix every prompt carries; lift it from an NPC's
+      // prompt (the player has no portrait — #529).
+      const pp = a.getPortraitPrompt(v.house[0]!.id as EntityId)!;
       return pp.prompt.split(". Subject:")[0]!;
     };
     // Same seed → identical anchor, every time.
@@ -160,13 +162,13 @@ describe("0051 — sentinel sweep: hidden-layer content NEVER reaches a portrait
     const adapter2 = new GameSessionAdapter();
     adapter2.restore(snap);
 
-    const targets: (EntityId)[] = [snap.house!.npcs[0]!.id, PLAYER];
-    for (const id of targets) {
-      const pp = adapter2.getPortraitPrompt(id)!;
-      expect(pp).not.toBeNull();
-      expect(pp.prompt).not.toContain(SENTINEL);
-      expect(pp.prompt).not.toContain("99999"); // no hidden stat leaked
-    }
+    // The NPC yields a clean prompt; the PLAYER yields NO prompt at all (#529 — no name-hash face),
+    // which is the strongest no-leak guarantee for the player: nothing to draw, nothing to leak.
+    const pp = adapter2.getPortraitPrompt(snap.house!.npcs[0]!.id)!;
+    expect(pp).not.toBeNull();
+    expect(pp.prompt).not.toContain(SENTINEL);
+    expect(pp.prompt).not.toContain("99999"); // no hidden stat leaked
+    expect(adapter2.getPortraitPrompt(PLAYER)).toBeNull();
     // The full cast response is clean too.
     const fresh = new GameSessionAdapter();
     const view = fresh.createCharacter({ playerName: "The Player", seed: 9 });
@@ -180,7 +182,8 @@ describe("0051 — portraitStyleAnchor persistence (non-degradation)", () => {
   it("survives a save → load round-trip and keeps the same look", () => {
     const adapter = new GameSessionAdapter();
     const view = adapter.createCharacter({ playerName: "The Player", seed: 42 });
-    const beforeAnchor = adapter.getPortraitPrompt(PLAYER)!.prompt.split(". Subject:")[0]!;
+    // Lift the anchor from an NPC prompt (the player has no portrait — #529).
+    const beforeAnchor = adapter.getPortraitPrompt(view.house[0]!.id as EntityId)!.prompt.split(". Subject:")[0]!;
 
     const snap = adapter.snapshot();
     expect(snap.portraitStyleAnchor).toBeTruthy();
@@ -194,14 +197,16 @@ describe("0051 — portraitStyleAnchor persistence (non-degradation)", () => {
 
   it("a legacy save with no anchor (but a seed) re-seeds a stable, declared anchor", () => {
     const adapter = new GameSessionAdapter();
-    adapter.createCharacter({ playerName: "The Player", seed: 77 });
+    const view = adapter.createCharacter({ playerName: "The Player", seed: 77 });
+    const npcId = view.house[0]!.id as EntityId;
     const snap = adapter.snapshot();
     // Simulate a pre-0051 save: drop the anchor field, keep the seed.
     delete (snap as { portraitStyleAnchor?: string }).portraitStyleAnchor;
 
     const restored = new GameSessionAdapter();
     restored.restore(snap);
-    const pp = restored.getPortraitPrompt(PLAYER)!;
+    // Lift the anchor from an NPC prompt (the player has no portrait — #529).
+    const pp = restored.getPortraitPrompt(npcId)!;
     expect(pp).not.toBeNull();
     const anchor = pp.prompt.split(". Subject:")[0]!;
     expect(STYLE_ANCHOR_VARIANTS as readonly string[]).toContain(anchor);

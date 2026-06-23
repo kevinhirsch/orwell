@@ -1130,6 +1130,121 @@ async def record_post_turn_presence_check(user, narration: str) -> None:
         logger.warning("[orwell] post-turn presence check skipped for user=%s: %s", user, e)
 
 
+# ── NARR-3 (#613) — the INVENTED-HOUSEGUEST roster-validation backstop (post-turn re-ground) ──── #
+#
+# "EXACT names, never invent" is the moment prompt's "THE most important rule" — yet it was enforced by
+# NOTHING structural (the closed-set outcome / evicted-location / wrong-nominee guards all assume a name
+# that EXISTS in the roster; an INVENTED houseguest slips past all three). Houseguest invention is the
+# single most immersion-shattering grounding break, and the moment runtime points at a tier the audit
+# says invents cast — so this wires the missing structural backstop the issue asks for.
+#
+# It mirrors the presence guard's SAFE shape — a POST-TURN gentle re-ground, NOT a streamed scrub of
+# prose (a false hold on creative prose is worse than a missed phantom; ADR 0005 #1). HIGH-PRECISION by
+# construction, because creative prose is full of capitalized two-token phrases (Big Brother, Diary
+# Room, Power of Veto, the Have-Not room, real-world references in banter):
+#   • flags ONLY a Capitalized two-token name STAGED as acting/speaking in the scene (`_stages_in_scene`
+#     — the same in-scene verb/quote binding the presence guard uses), so a bare mention or a place
+#     name never matches;
+#   • that is NEITHER an active NOR an out-of-house roster name (full-name OR first-name match, both
+#     directions), AND whose first token is not a known game proper noun (Big/Diary/Power/Head/Have/
+#     etc.) — a hard allowlist of the BB lexicon that would otherwise read as a two-token Name;
+#   • SKIPS pre-game / casting and the finale (a juror name legitimately returns).
+# A match only stashes a next-turn re-ground (never edits this turn's prose), so the worst case of a
+# residual false positive is one gentle, ignorable nudge — never lost storytelling.
+
+# Capitalized two-token sequences ("Marcus Webb", "Devon Hale") — the shape a houseguest full name
+# takes in narration. Single capitalized tokens are deliberately NOT matched (far too many legitimate
+# capitalized words in prose); a two-token Capitalized run bound to a scene verb is the precise signal.
+_TWO_TOKEN_NAME_RE = re.compile(r"\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b")
+# Game/house proper nouns whose FIRST token would otherwise make a two-token Name (Big Brother, Diary
+# Room, Power [of Veto], Head [of Household], Have Not, Memory Wall, Jury House, Veto Ceremony, etc.).
+# A first-token allowlist is enough — these never start a real houseguest first name in practice, and
+# keeping it to the first token is robust to the varied second tokens.
+_GAME_LEXICON_FIRST = {
+    "big", "diary", "power", "head", "have", "memory", "jury", "veto", "house", "living",
+    "storage", "golden", "block", "final", "america", "production", "big-brother", "room",
+}
+# Capitalized words that legitimately START a sentence/clause (articles, pronouns, demeanors) and would
+# otherwise form a spurious two-token "Name" with the following capitalized word ("The Diary", "She
+# Marcus"). A first-token allowlist of these keeps the guard off ordinary prose.
+_NAME_STOPWORDS_FIRST = {
+    "the", "a", "an", "this", "that", "these", "those", "his", "her", "their", "your", "our", "my",
+    "you", "i", "we", "he", "she", "they", "it", "and", "but", "or", "then", "now", "so", "as",
+}
+
+
+def _sentence_names_invented(sentence: str, known_first: set, known_full: set) -> Optional[str]:
+    """Return a Capitalized two-token name this sentence STAGES as acting in the scene that is NOT any
+    known roster name (active or out-of-house), or None. `known_first` = lowercase first tokens of every
+    roster name; `known_full` = lowercase full roster names. High-precision: requires `_stages_in_scene`
+    binding (an in-scene verb/quote right after the name) and excludes the BB game lexicon, so a place
+    name, a bare mention, or a real houseguest never matches."""
+    if not sentence or not sentence.strip():
+        return None
+    for m in _TWO_TOKEN_NAME_RE.finditer(sentence):
+        first_l = m.group(1).lower()
+        second_l = m.group(2).lower()
+        full = f"{m.group(1)} {m.group(2)}"
+        full_l = full.lower()
+        if first_l in _NAME_STOPWORDS_FIRST:
+            continue  # a leading article/pronoun + a capitalized word — not a houseguest name
+        if first_l in _GAME_LEXICON_FIRST or second_l in _GAME_LEXICON_FIRST:
+            continue  # a game/house proper noun (either token), not a houseguest
+        if first_l in known_first or full_l in known_full:
+            continue  # matches a real roster name (full or by first name) — legitimate
+        # An out-of-roster two-token Name — only flag if it is STAGED as acting in THIS sentence.
+        if _stages_in_scene(sentence, full):
+            return full
+    return None
+
+
+async def record_post_turn_roster_check(user, narration: str) -> None:
+    """NARR-3 (#613) post-turn roster-validation backstop. Stash a gentle next-turn re-ground when the
+    narration STAGED a houseguest name that exists in NEITHER the active nor the out-of-house roster —
+    i.e. an INVENTED cast member. Closed-set only (who exists). Names come from the cached turn-start
+    signature (`activeNames` + `evictedNames`) — no per-turn fetch. SKIPS pre-game (no roster) and the
+    finale (jurors return). Combines with (never clobbers) any re-ground already stashed this turn.
+    Fail-open — never raises, never blocks the finishing turn."""
+    try:
+        sig = _LAST_BEAT_SIG.get(user)
+        if not sig:
+            return  # pre-game / no baseline → nothing to ground against
+        if str(sig.get("phase") or "").lower().startswith(_FINALE_PHASES):
+            return  # jurors legitimately reappear by name in the finale
+        roster = list(sig.get("activeNames") or []) + list(sig.get("evictedNames") or [])
+        roster = [n for n in roster if isinstance(n, str) and n.strip()]
+        if not roster:
+            return  # no roster yet (casting) → the name-corpus isn't established; don't guess
+        known_full = {n.strip().lower() for n in roster}
+        known_first = {n.split()[0].lower() for n in roster if n.split()}
+        invented: list[str] = []
+        seen: set = set()
+        for sentence in re.split(r"(?<=[.!?\n])", narration or ""):
+            who = _sentence_names_invented(sentence, known_first, known_full)
+            if who and who.lower() not in seen:
+                seen.add(who.lower())
+                invented.append(who)
+            if len(invented) >= _PRESENCE_MOVE_MAX_NAMES:
+                break
+        if not invented:
+            return
+        directive = (
+            "RE-GROUND ON THE ACTUAL CAST — last turn you voiced " + _join_names(invented) + " as if "
+            "they were in the house, but no such houseguest exists. The cast is a FIXED roster the engine "
+            "owns; you must NEVER invent a houseguest. Re-read the live roster (gameStatus / "
+            "getGameState) and voice ONLY the houseguests who are actually in the season — use their "
+            "EXACT names, and never introduce a name that is not on the roster."
+        )
+        existing = _DESYNC_REGROUND.get(user)
+        _DESYNC_REGROUND[user] = (existing + "\n\n" + directive) if existing else directive
+        logger.warning(
+            "[orwell] invented-houseguest detected for user=%s (%s) — re-grounding next turn",
+            user, ", ".join(invented),
+        )
+    except Exception as e:
+        logger.warning("[orwell] post-turn roster check skipped for user=%s: %s", user, _exc_detail(e))
+
+
 # ── 0065 Part C — the PRE-EMISSION outcome guard (same-turn, not next-turn) ──────────────── #
 #
 # `record_post_turn_desync_check` (above) catches a narrated-but-uncommitted outcome only AFTER the

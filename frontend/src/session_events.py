@@ -39,6 +39,49 @@ _SUBS: Dict[str, Set[asyncio.Queue]] = {}
 _RING: Dict[str, Deque[str]] = {}
 _RING_MAX = 8
 
+# SYNC-RING-1 (#571): keep the ring after the LAST subscriber leaves for a short grace, rather than
+# popping it immediately. For the dominant one-tab topology, a transient SSE drop empties `_SUBS[sid]`
+# and used to take the ring with it — so a `run-started` published in the disconnect→reconnect gap was
+# lost from both the (empty) fan-out AND the (now-gone) ring, making the native-EventSource reconnect
+# replay empty exactly when there's a single viewer who just blipped. We mirror `agent_runs`'
+# `_EVICT_GRACE_S`: arm a delayed teardown on the last disconnect, cancelled the instant a new
+# subscriber re-attaches. Bounded + Vault-free (the ring holds id/seq/type only).
+_RING_EVICT_GRACE_S = 180
+# session_id -> the armed teardown task (so a re-subscribe can cancel it)
+_RING_EVICT_TASKS: Dict[str, "asyncio.Task"] = {}
+
+
+def _cancel_ring_evict(session_id: str) -> None:
+    """Cancel any armed ring teardown for `session_id` (a new subscriber arrived)."""
+    task = _RING_EVICT_TASKS.pop(session_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+def _schedule_ring_evict(session_id: str) -> None:
+    """Arm a grace-period teardown of the replay ring after the LAST subscriber left (#571). The ring
+    survives a transient one-tab reconnect; only a viewer who stays gone past the grace loses it. Re-arms
+    idempotently; cancelled by `_cancel_ring_evict` on re-subscribe. Skips entirely if there's no event
+    loop (e.g. a synchronous test teardown) so behavior degrades to the prior immediate-pop."""
+    _cancel_ring_evict(session_id)
+
+    async def _evict() -> None:
+        try:
+            await asyncio.sleep(_RING_EVICT_GRACE_S)
+        except asyncio.CancelledError:
+            return
+        # Only tear down if STILL nobody is viewing (a re-subscribe both cancels this task and would
+        # have repopulated _SUBS — this is belt-and-braces against a race).
+        if not _SUBS.get(session_id):
+            _RING.pop(session_id, None)
+        _RING_EVICT_TASKS.pop(session_id, None)
+
+    try:
+        _RING_EVICT_TASKS[session_id] = asyncio.create_task(_evict())
+    except RuntimeError:
+        # No running loop (sync test teardown / shutdown) — fall back to the prior immediate behavior.
+        _RING.pop(session_id, None)
+
 # Only replay the event TYPES that are an "attach / reconcile" invitation an idle peer
 # could have missed. Anything else (heartbeats, future fire-and-forget pings) is not
 # worth re-delivering and would only add reconnect noise.
@@ -82,6 +125,9 @@ async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
     then live events, with periodic keepalive comments."""
     q: asyncio.Queue = asyncio.Queue(maxsize=256)
     _SUBS.setdefault(session_id, set()).add(q)
+    # A viewer (re)attached — cancel any armed ring teardown so a transient one-tab reconnect keeps
+    # its replay ring (#571).
+    _cancel_ring_evict(session_id)
     try:
         yield _fmt("connected", {"session": session_id, "ts": time.time()})
         # Replay-on-connect: hand a late window the recent invitation events it may have
@@ -103,9 +149,11 @@ async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
             subs.discard(q)
             if not subs:
                 _SUBS.pop(session_id, None)
-                # No viewers left — drop the ring too so a stale invitation can't be
-                # replayed to a window that reconnects much later (the run is long gone).
-                _RING.pop(session_id, None)
+                # No viewers left — keep the ring for a short grace (#571) rather than dropping it
+                # immediately, so a transient one-tab SSE blip can still replay an invitation
+                # published in the disconnect→reconnect gap. A viewer that stays gone past the grace
+                # loses the (by-then-stale) ring; a re-subscribe cancels the teardown.
+                _schedule_ring_evict(session_id)
 
 
 def subscriber_count(session_id: str) -> int:

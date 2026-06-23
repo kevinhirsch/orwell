@@ -50,7 +50,11 @@ function freshSeason(seed: number): UserSandbox {
   const reg = new GameSessionRegistry();
   const user = "sts";
   const sb = reg.sandboxFor(user);
-  sb.session.createCharacter({ playerName: "The Player", seed });
+  // Supply an explicit archetype so the player has a DETERMINED (non-defaulted) stat profile: post-#529
+  // an absent archetype yields NEUTRAL stats (the engine never fabricates player canon), which would
+  // make this off-screen-sim seed measure the defaulted-player path. The scheduler drama under test is
+  // independent of the player's archetype; pinning it keeps the seeded trajectory stable.
+  sb.session.createCharacter({ playerName: "The Player", archetype: "floater", seed });
   const orch = new Orchestrator(reg, new FakeClock(), { seed });
   let finished = false;
   for (let i = 0; i < SIM_TICKS; i++) {

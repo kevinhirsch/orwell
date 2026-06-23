@@ -40,7 +40,7 @@
   var REGISTRY = [
     { id: "orwell-status",   icon: "📋", title: "House Status",   order: 1 },
     { id: "orwell-deals",    icon: "🤝", title: "Your Deals",     order: 2 },
-    { id: "orwell-cast-pin", icon: "👥", title: "The Cast",       order: 3 },
+    { id: "orwell-cast-pin", icon: "👥", title: "Pinned Cast",    order: 3 },
     { id: "orwell-presence", icon: "🧭", title: "Where You Are",  order: 4 },
     { id: "orwell-night",    icon: "🌙", title: "Nightfall",      order: 5 },
     { id: "orwell-finale",   icon: "🏆", title: "The Finale",     order: 6 },

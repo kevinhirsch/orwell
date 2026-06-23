@@ -2555,8 +2555,12 @@ function initializeEventListeners() {
     'rail-new-chat':       '#rail-new-session',
   };
 
-  // Keys hidden by default on first run (no localStorage yet)
-  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn', 'text-emojis']);
+  // Keys hidden by default on first run (no localStorage yet).
+  // NOTE: 'text-emojis' is NOT listed here — it isn't a UI_VIS_MAP key, so the
+  // applyUIVis loop never consults this Set for it. Its default-OFF is owned by
+  // applyTextEmojis(state['text-emojis'] === true) below (SET-NEW-2: removing the
+  // dead duplicate so there is one source of truth for that default).
+  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn']);
 
   // Keys that need admin to toggle off (reserved for future use)
   const UI_VIS_ADMIN_ONLY = new Set([]);

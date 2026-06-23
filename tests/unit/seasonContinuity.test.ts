@@ -6,8 +6,9 @@ import type { CreateCharacterReq } from "../../src/ports/GameSession";
 /**
  * Feature 0056 — season-to-season character continuity. A confirmed restart can KEEP the existing
  * houseguest (the same static CHARACTER returns to a NEW cast) or RECREATE (fresh casting). Carry-
- * over is byte-faithful because the player's CHARACTER is seed-independent (stats = archetype bias,
- * appearance = hash of the name). HARD rule: roles only — no fixture names asserted as canonical.
+ * over is byte-faithful because the player's CHARACTER is seed-independent (stats = archetype bias;
+ * the player's APPEARANCE is empty — #529: the engine never improvises a player look from a name
+ * hash). HARD rule: roles only — no fixture names asserted as canonical.
  */
 
 const SEASON_1: CreateCharacterReq = {
@@ -89,6 +90,38 @@ describe("0056 — keep the existing character (standalone fidelity)", () => {
     expect(json).not.toMatch(/"physical":\s*0?\.\d/);
     expect(json).not.toMatch(/"mental":\s*0?\.\d/);
     expect(json).not.toMatch(/"social":\s*0?\.\d/);
+  });
+});
+
+describe("NAME-1 (#547) — cross-season name memory: a new season avoids prior seasons' names", () => {
+  const givenNames = (view: ReturnType<GameSessionAdapter["getGameState"]>): Set<string> =>
+    new Set(view.house.map((h) => h.name.split(" ")[0]!));
+
+  it("season 2's cast shares NO given name (and no full name) with season 1's cast", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ ...SEASON_1 });
+    const s1Full = new Set(castNames(s.getGameState()));
+    const s1Given = givenNames(s.getGameState());
+
+    // A confirmed restart (new seed) — the new cast must avoid the dead season's names.
+    s.createCharacter({ confirmRestart: true, keepCharacter: true, seed: 9001 });
+    const s2 = s.getGameState();
+    // No full-name AND no given-name recurrence across the cutover (the cross-season memory).
+    for (const name of castNames(s2)) expect(s1Full.has(name)).toBe(false);
+    for (const g of givenNames(s2)) expect(s1Given.has(g)).toBe(false);
+  });
+
+  it("accumulates across THREE seasons (memory chains, never resets to one season)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ ...SEASON_1 });
+    const seen = new Set<string>(givenNames(s.getGameState()));
+    for (const seed of [1001, 2002]) {
+      s.createCharacter({ confirmRestart: true, keepCharacter: true, seed });
+      for (const g of givenNames(s.getGameState())) {
+        expect(seen.has(g), "a given name recurred across the multi-season game").toBe(false);
+        seen.add(g);
+      }
+    }
   });
 });
 

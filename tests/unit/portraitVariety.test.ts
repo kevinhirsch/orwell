@@ -62,10 +62,11 @@ describe("G24/B — per-subject shot variation, deterministic per season", () =>
     const adapter = new GameSessionAdapter();
     const view = adapter.createCharacter({ playerName: "The Player", seed: 1234 });
     const prompts = view.portraitPrompts!.map((p) => p.prompt);
-    expect(prompts.length).toBeGreaterThanOrEqual(16);
+    // #529: the cast pipeline covers the 15 generated NPCs (the player has no name-hash portrait).
+    expect(prompts.length).toBeGreaterThanOrEqual(15);
 
     const pick = (re: RegExp) => new Set(prompts.map((p) => p.match(re)?.[1] ?? ""));
-    // 16 subjects over pools of 10/8/8 — sameness would be 1 distinct value; require real spread.
+    // 15 subjects over pools of 10/8/8 — sameness would be 1 distinct value; require real spread.
     expect(pick(/Expression: ([^.]+)\./).size).toBeGreaterThanOrEqual(4);
     expect(pick(/Framing: ([^.]+)\./).size).toBeGreaterThanOrEqual(3);
     expect(pick(/Setting: (.+)$/).size).toBeGreaterThanOrEqual(3);

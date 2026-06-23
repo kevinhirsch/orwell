@@ -1997,6 +1997,25 @@ body.bg-pattern-perlin-flow {
       .gadget-rail[data-collapsed="true"] .gadget-rail-strip { display: none; }
       .gadget-rail-toggle, .gadget-rail-swap { display: none; }
       body[data-game-build] .gadget-rail-open { display: block; }
+      /* #551 — on mobile the gadget opener moves to the TOP-RIGHT (it pairs with
+         the sidebar hamburger, which stays TOP-LEFT). Desktop is untouched. It
+         must clear the chat header, so its z-index sits just under the hamburger
+         (210) and above header chrome. */
+      .gadget-rail-open {
+        top: calc(env(safe-area-inset-top, 0px) + 10px);
+        right: 10px;
+        bottom: auto;
+        z-index: 209;
+      }
+      /* #551/#552 — the sidebar hamburger reliably stays TOP-LEFT on mobile.
+         Side-swap is a desktop power-feature (disabled on mobile in JS), so the
+         body.hamburger-right flip must never apply here, or the hamburger and the
+         gadget opener would collide on the right edge. */
+      body.hamburger-right .hamburger-btn,
+      .hamburger-btn {
+        left: 9px;
+        right: auto;
+      }
       body[data-gadget-side="left"] #gadget-rail { left: 0; right: auto;
         transform: translateX(-102%); border: none; border-right: 1px solid var(--border); }
       body[data-gadget-side="left"] #gadget-rail.grail-open { transform: translateX(0); }
@@ -2333,6 +2352,38 @@ body.bg-pattern-perlin-flow {
       background: color-mix(in srgb, var(--fg) 10%, transparent);
       border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
     }
+
+    /* NARR-9 — the LIVE-stream producer aside. The reload path styles the whole
+       bubble (.msg-ooc-producer); the live stream renders the reply incrementally
+       into an existing holder, so the wrapper class can't be toggled mid-stream.
+       processWithThinking wraps a fully-`((...))`-wrapped reply in this inner div
+       instead, giving the same quiet, dashed, badged "to production" treatment.
+       Theme-token driven (works across every house theme). */
+    .ooc-producer-aside {
+      border: 1px dashed color-mix(in srgb, var(--fg) 28%, transparent);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: color-mix(in srgb, var(--fg) 4%, transparent);
+      font-style: italic;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
+      opacity: 0.92;
+    }
+    .ooc-producer-aside::before {
+      content: 'production';
+      display: inline-block;
+      margin-bottom: 4px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    }
+    .ooc-producer-aside > :first-child:not(::before) { margin-top: 0; }
 
     /* The ONE reusable chat-bar hint surface (orwellChatHint.js). It spans the same
        width as the chat input bar (the 0 8px horizontal margin mirrors the bar's own
@@ -9229,6 +9280,25 @@ body.hide-thinking .thinking-section { display: none !important; }
 @keyframes thread-pulse {
   0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 20%, transparent); }
   50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 10%, transparent); }
+}
+
+/* TRANS-2 (#627): DECORATIVE infinite loops (the agent-thread running pulse — the
+   most-seen game animation — and the gadget-rail / rail-notification pulse family)
+   had no prefers-reduced-motion guard, and a >5s infinite loop also trips WCAG
+   2.2.2. Honor a shared `.decorative-loop` class so future loops opt in and coverage
+   can't silently drift; the current decorative pulses are listed explicitly too.
+   Loading/streaming spinners (TRANS-4, a product decision) are deliberately EXCLUDED
+   — they convey essential "still working" status. */
+@media (prefers-reduced-motion: reduce) {
+  .decorative-loop,
+  .agent-thread-node.running .agent-thread-dot,
+  .rail-minimized::after,
+  .rail-notes-badge.fired,
+  .tool-notes-dot,
+  .icon-rail-btn.rail-notify::before,
+  .list-item.stream-complete {
+    animation: none !important;
+  }
 }
 .agent-thread-node.error .agent-thread-dot {
   background: var(--color-error);

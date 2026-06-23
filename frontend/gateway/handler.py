@@ -176,10 +176,18 @@ async def _narrate_gateway_turn(
     Uses the app-level model configuration (same as the web chat).  Returns the
     assistant's reply text, or raises on failure.
     """
+    # NARR-1 (#620): `_resolve_llm_fn` lives in `orwell_cast_authoring`, NOT `agent_loop` — the old
+    # import raised ImportError every turn, so the gateway ALWAYS returned the "not configured"
+    # placeholder and never actually narrated. It is ALSO an async resolver keyed by `owner` that
+    # returns an `LlmFn` taking a `messages: list[dict]` and returning a string (no `system=`/`stream=`
+    # kwargs). Use the real contract: resolve over the user's model, then pass a system + user message
+    # pair (the resolver hands the whole list to the completion).
+    llm_fn = None
     try:
-        from src.agent_loop import _resolve_llm_fn  # type: ignore[attr-defined]
-        llm_fn = _resolve_llm_fn()
-    except Exception:
+        from src.orwell_cast_authoring import _resolve_llm_fn  # type: ignore[attr-defined]
+        llm_fn = await _resolve_llm_fn(user)
+    except Exception as exc:
+        logger.warning("gateway _narrate_gateway_turn: model resolve failed: %s", exc)
         llm_fn = None
 
     if llm_fn is None:
@@ -189,14 +197,13 @@ async def _narrate_gateway_turn(
             "Set a default model in Orwell settings to enable messaging-platform play."
         )
 
-    messages = [{"role": "user", "content": user_message}]
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
     try:
-        result = await llm_fn(
-            system=system_prompt,
-            messages=messages,
-            stream=False,
-        )
-        # result may be a string or a dict with a "content" key depending on the adapter
+        result = await llm_fn(messages)
+        # The resolver's LlmFn returns the assembled assistant text; tolerate a dict shape too.
         if isinstance(result, str):
             return result
         if isinstance(result, dict):

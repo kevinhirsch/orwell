@@ -927,6 +927,14 @@ export class GameSessionAdapter implements GameSession {
     const npc = this.house.npcs.find((n) => n.id === id);
     const subject = id === this.house.player.id ? this.house.player : npc;
     if (!subject) return null;
+    // #529: the human authors no look, so the player's appearance stays empty — NEVER improvise a
+    // player portrait from a name hash. With no authored appearance (and no structured facet), there
+    // is nothing to draw, so emit no prompt at all rather than a fabricated one.
+    if (id === this.house.player.id
+      && !subject.character.appearance
+      && subject.character.physicalCharacteristics === undefined) {
+      return null;
+    }
     return buildPortraitPrompt(
       subject.id,
       subject.name,
@@ -2126,7 +2134,18 @@ export class GameSessionAdapter implements GameSession {
     // supplying these regenerates the SAME houseguest in the new season; explicit fields still win,
     // so the player may tweak on the way through. No hidden number is read.
     const carried = (this.house && req.confirmRestart && req.keepCharacter) ? this.carryOverFields() : null;
-    const effReq: CreateCharacterReq = carried ? { ...carried, ...req, keepCharacter: false } : req;
+    // NAME-1 (#547): on ANY confirmed restart capture the dead season's cast names so the next season's
+    // corpus-sampled cast avoids them (cross-season diversity). This is the only point the prior cast
+    // still exists, before the reset; it rides `effReq` through `onRestart` into the fresh sandbox.
+    const priorCastNames = (this.house && req.confirmRestart)
+      ? this.priorSeasonNames(req.priorCastNames)
+      : req.priorCastNames;
+    const effReq: CreateCharacterReq = {
+      ...(carried ?? {}),
+      ...req,
+      ...(carried ? { keepCharacter: false } : {}),
+      ...(priorCastNames && priorCastNames.length ? { priorCastNames } : {}),
+    };
     // Non-degradation at its single most destructive point (B36/audit A2): an already-started game is
     // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
     // call, a network caller) is a no-op returning the current state — the prior save is left intact.
@@ -2227,6 +2246,8 @@ export class GameSessionAdapter implements GameSession {
       ...(merged.privateStrategy ? { privateStrategy: merged.privateStrategy } : {}),
       ...(merged.motivation ? { motivation: merged.motivation } : {}),
       ...(merged.interviewNotes.length ? { interviewNotes: merged.interviewNotes } : {}),
+      // NAME-1 (#547): the corpus-sampled cast avoids prior seasons' names (bounded, fail-soft).
+      ...(effReq.priorCastNames && effReq.priorCastNames.length ? { priorCastNames: effReq.priorCastNames } : {}),
     });
     // 0065 — when adopting a pre-warmed cast, keep the freshly-built PLAYER but swap in the warmed NPCs
     // (which carry any FE-authored §3 depth). The warmed NPCs are byte-identical to the floor
@@ -2342,6 +2363,34 @@ export class GameSessionAdapter implements GameSession {
       ...(p.motivation ? { motivation: p.motivation } : {}),
       ...(notes.length ? { interviewNotes: notes } : {}),
     };
+  }
+
+  /**
+   * NAME-1 (#547) — the names the NEXT season's corpus-sampled cast should AVOID: the dead season's
+   * full cast roster (player + NPCs) merged with any names already carried over from earlier seasons
+   * (so the exclusion accumulates across a multi-season game). BOUNDED: capped at `MAX_PRIOR_NAMES`
+   * (most-recent-wins) so it can never grow unbounded; the engine floor honors it fail-soft (it relaxes
+   * the exclusion rather than starving the sampler when the corpus runs short). No hidden state is read.
+   */
+  private priorSeasonNames(carried?: readonly string[]): string[] {
+    const MAX_PRIOR_NAMES = 240; // ~15 seasons of names — generous headroom, still bounded
+    const names: string[] = [];
+    if (this.house) {
+      names.push(this.house.player.name);
+      for (const n of this.house.npcs) names.push(n.name);
+    }
+    if (carried) names.push(...carried);
+    // De-dup, keep the MOST RECENT (this season's roster first) within the cap.
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of names) {
+      const name = (raw ?? "").trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+      if (out.length >= MAX_PRIOR_NAMES) break;
+    }
+    return out;
   }
 
   /**

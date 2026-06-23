@@ -16,8 +16,15 @@ import re
 
 # ── patterns ──────────────────────────────────────────────────────────────────
 
-# <think>…</think> blocks (reasoning tokens emitted by some models)
-_REASONING_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+# Reasoning blocks emitted inline by some models. The browser splits the model's separate `reasoning`
+# stream channel into the Thinking accordion (it never enters the assembled reply the gateway sees), so
+# the residual risk here is reasoning emitted INLINE in the content channel as a tag. Cover the common
+# tag spellings (<think>, <thinking>, <reasoning>, <thought>) case-insensitively — NARR-1 (#620): the
+# old single `<think>` pattern would miss a `<thinking>`/`<reasoning>` block on a model that uses them.
+_REASONING_RE = re.compile(
+    r"<(think|thinking|thought|reasoning)\b[^>]*>.*?</\1>",
+    re.DOTALL | re.IGNORECASE,
+)
 
 # [OPERATOR: …] operator-aside markers (internal production notes)
 _OPERATOR_ASIDE_RE = re.compile(r"\[OPERATOR:.*?\]", re.DOTALL)

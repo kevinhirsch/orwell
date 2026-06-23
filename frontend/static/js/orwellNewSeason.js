@@ -132,7 +132,21 @@
     const setBusy = (b) => { _busy = b; buttons.forEach((btn) => { btn.disabled = b; }); };
 
     buttons.forEach((btn) => {
-      btn.addEventListener("click", () => startNextSeason(btn.dataset.keep === "1", setMsg, setBusy));
+      btn.addEventListener("click", async () => {
+        const keep = btn.dataset.keep === "1";
+        // F-NEW-2 (Nielsen H5): "Recast from scratch" is irreversible — it discards
+        // the player's entire houseguest identity and re-runs the casting interview.
+        // Gate it behind the same styledConfirm used for the factory/progress resets.
+        // (Keeping the houseguest is non-destructive, so it commits straight away.)
+        if (!keep && window.styledConfirm) {
+          const ok = await window.styledConfirm(
+            "Recast from scratch?\n\nThis discards your current houseguest entirely — their identity, backstory and portrait — and runs the casting interview again from the start. This can't be undone.",
+            { confirmText: "Recast", danger: true }
+          );
+          if (!ok) return;
+        }
+        startNextSeason(keep, setMsg, setBusy);
+      });
     });
     return wrap;
   }
@@ -201,6 +215,15 @@
     const btn = wrap.querySelector("#ons-conclude");
     btn.addEventListener("click", async () => {
       if (_busy) return;
+      // F-NEW-3 (Nielsen H5): "See how it ends" is one-way — it fast-forwards through
+      // every remaining week to the finale and can't be undone. Confirm before committing.
+      if (window.styledConfirm) {
+        const ok = await window.styledConfirm(
+          "See how it ends?\n\nThis fast-forwards the rest of the season straight to the finale — skipping every remaining week. You can't return to play them out. This can't be undone.",
+          { confirmText: "Fast-forward", danger: true }
+        );
+        if (!ok) return;
+      }
       _busy = true; btn.disabled = true; setMsg("Playing out the rest of the season…");
       try {
         const r = await fetch("/api/orwell/conclude-season", { method: "POST", credentials: "same-origin" });

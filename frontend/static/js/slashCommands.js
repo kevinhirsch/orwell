@@ -4933,7 +4933,7 @@ async function _cmdShortcuts(args, ctx) {
   // Try to load user keybinds from settings
   let keybinds = {
     search: 'ctrl+k',
-    toggle_sidebar: 'ctrl+b',
+    toggle_sidebar: 'ctrl+alt+b', // SET-NEW-3: match the live keymap default (_defaultKeybinds)
     new_session: 'ctrl+alt+n',
     star_session: 'ctrl+alt+s',
     delete_session: 'ctrl+alt+d',

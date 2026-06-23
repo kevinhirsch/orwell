@@ -142,6 +142,23 @@ import { onNarrowChange } from './platform.js';
         #orwell-status .os-row .os-k { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
         #orwell-status .os-noms { color: var(--red, #e06c75); }
+        /* TRANS-3: a brief delta highlight when a power row CHANGES (HOH / noms / veto /
+           phase) so a ceremony reveal is never a silent text swap. Theme-token driven. */
+        #orwell-status .os-changed {
+          animation: os-row-flash 1.6s ease-out 1;
+          border-radius: 4px;
+        }
+        @keyframes os-row-flash {
+          0%   { background: color-mix(in srgb, var(--accent, #9cdef2) 42%, transparent); }
+          100% { background: transparent; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          /* No motion — a static tint that lingers then is cleared by the JS timeout. */
+          #orwell-status .os-changed {
+            animation: none;
+            background: color-mix(in srgb, var(--accent, #9cdef2) 22%, transparent);
+          }
+        }
         /* Offline dot (U5): the feed reconnecting, not gone — last-known stays visible. */
         #orwell-status .os-stale { color: #e0a500; margin-left: .35rem; font-size: .7em; vertical-align: middle; }
         /* Memory wall (C21): the roster a real houseguest can see. Public facts only. */
@@ -249,6 +266,25 @@ import { onNarrowChange } from './platform.js';
 
   // A3: announce only what CHANGED, in show terms — never a full re-read per poll.
   let _last = { phase: null, hoh: null, noms: null, veto: null };
+
+  // TRANS-3 (#627): the power-transition / ceremony reveal used to land as a silent
+  // textContent swap (no crown drop, no row flash) — when the narrator under-calls
+  // the change degraded to an invisible flip. Give the CHANGED HUD row a brief delta
+  // highlight (the delta is already computed for the SR announce). The CSS is
+  // prefers-reduced-motion-gated: a static tint with no motion under `reduce`.
+  function flashRow(el, sel) {
+    try {
+      const node = el.querySelector(sel);
+      if (!node) return;
+      node.classList.remove("os-changed");
+      void node.offsetWidth;            // restart the animation if it fires again quickly
+      node.classList.add("os-changed");
+      const clear = () => node.classList.remove("os-changed");
+      node.addEventListener("animationend", clear, { once: true });
+      setTimeout(clear, 2200);          // belt-and-suspenders (reduced-motion never fires animationend)
+    } catch (_) {}
+  }
+
   function announceDeltas(el, st, names) {
     const a = el.querySelector("#os-announce");
     if (!a) return;
@@ -258,10 +294,10 @@ import { onNarrowChange } from './platform.js';
       hoh: names.hoh, noms: names.noms, veto: names.veto,
     };
     if (_last.phase !== null) {
-      if (cur.phase !== _last.phase) msgs.push(cur.phase + ".");
-      if (cur.hoh !== _last.hoh && cur.hoh !== "—") msgs.push("Head of Household: " + cur.hoh + ".");
-      if (cur.noms !== _last.noms && cur.noms !== "—") msgs.push("On the block: " + cur.noms + ".");
-      if (cur.veto !== _last.veto && cur.veto !== "—") msgs.push("Veto: " + cur.veto + ".");
+      if (cur.phase !== _last.phase) { msgs.push(cur.phase + "."); flashRow(el, "#os-phase"); }
+      if (cur.hoh !== _last.hoh && cur.hoh !== "—") { msgs.push("Head of Household: " + cur.hoh + "."); flashRow(el, "#os-hoh"); }
+      if (cur.noms !== _last.noms && cur.noms !== "—") { msgs.push("On the block: " + cur.noms + "."); flashRow(el, "#os-noms"); }
+      if (cur.veto !== _last.veto && cur.veto !== "—") { msgs.push("Veto: " + cur.veto + "."); flashRow(el, "#os-veto"); }
     }
     _last = cur;
     if (msgs.length) a.textContent = msgs.join(" ");

@@ -107,7 +107,7 @@
     card.innerHTML =
       '<div class="opt-hd">' +
         '<span class="opt-ttl">Welcome to the house — premiere week</span>' +
-        '<button type="button" class="opt-dismiss" title="Won\'t show again" aria-label="Dismiss the premiere guide">Close guide</button>' +
+        '<button type="button" class="opt-dismiss" title="Won\'t show again" aria-label="Close guide — won\'t show again">Close guide</button>' +
       '</div>' +
       '<div>Talk to anyone, wander any room — the house keeps playing around you. ' +
       'You\'ll need to cross paths with all fifteen houseguests before Production calls the first HOH competition.</div>' +
