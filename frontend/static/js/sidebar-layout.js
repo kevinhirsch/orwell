@@ -100,6 +100,12 @@ export function initSidebarLayout(Storage, opts) {
   function toggleSidebarSide() {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
+    // #552 — side-swap is a DESKTOP power-feature. On a narrow viewport the two
+    // swap entry points (shift-click + the ⇄ dock button) plus the mobile open
+    // path disagreed, so a tap appeared to flip sides "randomly" and there is no
+    // room for both edges anyway. Disable swap entirely on mobile; the last
+    // desktop-configured side stays persisted and is applied read-only on mobile.
+    if (isNarrow()) return;
     sidebar.classList.toggle('right-side');
     try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, sidebar.classList.contains('right-side') ? 'right' : 'left'); } catch (_) {}
     syncRailSide();
@@ -144,10 +150,12 @@ export function initSidebarLayout(Storage, opts) {
     const cc = document.getElementById('chat-container');
     if (isNarrow() && cc && cc.classList.contains('compare-active')) return;
     _userToggledSidebar = true;
-    // Optionally place the sidebar on a specific edge (the swipe gesture passes
-    // the direction). Persist it + re-anchor the doc panel, same as a
-    // shift-click on the hamburger.
-    if (side === 'left' || side === 'right') {
+    // #552 — the swipe gesture used to pick (and PERSIST) the side from the swipe
+    // DIRECTION, which silently mutated the configured side and made the hamburger
+    // jump. On mobile we now honor the persisted side READ-ONLY: open on whatever
+    // edge was last configured (on desktop), never mutate it from a swipe. On
+    // desktop the explicit `side` arg is still honored + persisted.
+    if (!isNarrow() && (side === 'left' || side === 'right')) {
       const wantRight = side === 'right';
       if (sidebar.classList.contains('right-side') !== wantRight) {
         sidebar.classList.toggle('right-side', wantRight);
@@ -184,16 +192,12 @@ export function initSidebarLayout(Storage, opts) {
           sidebar.classList.add('hidden');
           if (backdrop) backdrop.classList.remove('visible');
         } else {
-          // Mobile: the hamburger always opens the sidebar from the RIGHT.
-          // (Not persisted — keeps the desktop side preference untouched.)
-          if (!sidebar.classList.contains('right-side')) {
-            sidebar.classList.add('right-side');
-            if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
-            // Sync hamburger position immediately so it matches the sidebar side
-            // before the sidebar becomes visible — avoids the flash where the
-            // sidebar opens on the right but the hamburger is still on the left.
-            syncRailSide();
-          }
+          // #552 — the hamburger used to FORCE the sidebar to the right on every
+          // mobile open, overriding the player's last-configured side and making
+          // the side state inconsistent (the "random flip"). Honor the persisted
+          // side read-only instead: open on whatever edge `right-side` already
+          // reflects (restored from SIDEBAR_SIDE at init), never mutate it here.
+          syncRailSide();
           // Opening sidebar — blur keyboard first, then open after layout settles
           if (document.activeElement && document.activeElement !== document.body
               && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {

@@ -212,18 +212,42 @@ def test_ring_replays_recent_invitations_but_not_unbounded():
         "a non-invitation event must NOT be ringed (avoid reconnect noise)"
 
 
-def test_ring_dropped_when_last_viewer_leaves():
-    """When the last viewer disconnects the ring is dropped, so a window reconnecting much later
-    isn't handed a stale invitation to a long-finished run."""
+def test_ring_survives_a_transient_disconnect_within_grace():
+    """SYNC-RING-1 (#571): when the last viewer disconnects the ring is NOT dropped immediately — it
+    survives a short grace, so a transient one-tab SSE blip can still replay an invitation published in
+    the disconnect→reconnect gap. (The old behavior popped it the instant the last viewer left, which
+    made reconnect replay empty in the dominant single-tab case.)"""
     async def main():
-        sid = "adr0012-ring-drop"
+        sid = "adr0012-ring-grace"
         session_events.publish(sid, "run-started")
         # First subscriber connects and immediately leaves (drain returns once quiet, then aclose()).
         await _drain_subscribe(sid)
+        # The ring is still present (grace armed), so a reconnect right now replays the invitation.
+        present = session_events._ring_snapshot(sid)
+        # A re-subscribe must CANCEL the armed teardown and keep the ring intact.
+        await _drain_subscribe(sid)
+        after_resub = session_events._ring_snapshot(sid)
+        return present, after_resub
+
+    present, after_resub = _run(main())
+    assert present != [], "the ring survives the last-viewer disconnect for the grace period (#571)"
+    assert after_resub != [], "a re-subscribe cancels the teardown and keeps the ring"
+
+
+def test_ring_dropped_after_grace_expires(monkeypatch):
+    """After the grace expires with NO viewer re-attaching, the ring IS torn down — so a window
+    reconnecting much later isn't handed a stale invitation to a long-finished run."""
+    monkeypatch.setattr(session_events, "_RING_EVICT_GRACE_S", 0.01)
+
+    async def main():
+        sid = "adr0012-ring-drop"
+        session_events.publish(sid, "run-started")
+        await _drain_subscribe(sid)        # last viewer leaves → grace armed (0.01s)
+        await asyncio.sleep(0.05)          # let the teardown fire
         return session_events._ring_snapshot(sid)
 
     snapshot = _run(main())
-    assert snapshot == [], "the ring is cleared once no viewers remain"
+    assert snapshot == [], "the ring is cleared once the grace expires with no viewers"
 
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────

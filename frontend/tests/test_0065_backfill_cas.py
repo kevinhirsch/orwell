@@ -245,12 +245,19 @@ def test_normal_turn_move_never_self_409s(monkeypatch):
     assert chat_helpers.stale_beat_rejections() == 0
 
 
-# ── 3. a stale 409 on a back-fill is reconciled-and-SKIPPED (not retried), no exception escapes ─── #
+# ── 3. a stale 409 on a back-fill is reconciled-and-RE-ATTEMPTED against the fresh beatSeq (#591) ── #
+#
+# #591 (A-S3) reversed the prior reconcile-and-SKIP: the engine throws StaleBeatError BEFORE folding
+# (fail-closed, at-most-once), so the write provably did not land — and a recordInteraction back-fill is
+# often a scene's ONLY consequence fold (mandate #4 — "a novel move must never evaporate"). So the belt
+# now reconciles to the fresh beatSeq and RE-ATTEMPTS the same mutation once. These tests are the #591
+# falsifier: a stale token on a back-fill's sole call, asserting the fold STILL lands exactly once after
+# reconcile (not dropped).
 
-def test_record_backfill_stale_409_is_skipped_and_reconciled(monkeypatch):
-    """A back-fill hitting a stale 409 (the board moved under it) reconciles via the existing desync
-    spine and SKIPS — it returns False (re-derivable next turn), counts the rejection, stashes a
-    re-ground, and never raises and never retries."""
+def test_record_backfill_stale_409_is_reattempted_and_lands(monkeypatch):
+    """A recordInteraction back-fill hitting a stale 409 (the board moved under it) reconciles to the
+    fresh beatSeq and RE-ATTEMPTS — the fold lands exactly once (#591), it does NOT evaporate. The
+    engine threw before folding, so the single retry cannot double-apply."""
     chat_helpers._LAST_BEAT_SEQ["owner"] = 4   # stale token
     record_calls = {"n": 0}
 
@@ -260,7 +267,11 @@ def test_record_backfill_stale_409_is_skipped_and_reconciled(monkeypatch):
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
                           expected_beat_seq=None, user=None):
         record_calls["n"] += 1
-        raise _stale_409(9)                    # board moved on to 9 under us
+        # First call carries the stale token (4) → 409; the reconcile refreshes last-seen to 9, so the
+        # RE-ATTEMPT carries 9 and the engine accepts it (the fold lands).
+        if expected_beat_seq != 9:
+            raise _stale_409(9)                # board moved on to 9 under the stale write
+        return {"recorded": True, "beatSeq": 10}
 
     # the board re-read on reconcile
     async def fake_status(user=None):
@@ -275,14 +286,45 @@ def test_record_backfill_stale_409_is_skipped_and_reconciled(monkeypatch):
     monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
 
     out = _run(al._auto_record_scene("a bond", "talk", HOUSE, "url", "m", {}, "owner"))
-    assert out is False, "a stale back-fill is SKIPPED (re-derives next turn), never re-applied"
-    assert record_calls["n"] == 1, "the back-fill is NOT retried (not the double-apply case)"
+    assert out is True, "the fold lands after the reconcile+re-attempt — it does not evaporate (#591)"
+    assert record_calls["n"] == 2, "stale once, then re-attempted exactly once against the fresh seq"
     assert chat_helpers.stale_beat_rejections() == 1
-    assert chat_helpers.last_beat_seq("owner") == 9        # refreshed off the 409 + the re-read
+    assert chat_helpers.last_beat_seq("owner") == 10       # refreshed off the successful retry's response
+
+
+def test_record_backfill_stale_twice_gives_up_no_stomp(monkeypatch):
+    """If the board moves AGAIN under the retry (a second consecutive stale 409), the belt reconciles
+    and gives up — it returns False (re-derives next turn), never blind-loops into a stomp."""
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 4
+    record_calls = {"n": 0}
+
+    async def fake_llm(*a, **k):
+        return '{"withIds":["npc:3"],"kind":"bonding","content":"a bond"}'
+
+    async def fake_record(content, with_ids=None, kind=None, consequence=None,
+                          expected_beat_seq=None, user=None):
+        record_calls["n"] += 1
+        raise _stale_409(9 + record_calls["n"])  # always stale — the board keeps moving
+
+    async def fake_status(user=None):
+        return {"week": 3, "phase": "veto", "pending": None, "veto": {}, "beatSeq": 99}
+
+    async def fake_state(user=None, **kw):
+        return {"week": 3, "phase": "veto", "finished": False, "house": [], "beatSeq": 99}
+
+    monkeypatch.setattr(llm_core, "llm_call_async", fake_llm)
+    monkeypatch.setattr(orwell_engine, "record_interaction", fake_record)
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+    out = _run(al._auto_record_scene("a bond", "talk", HOUSE, "url", "m", {}, "owner"))
+    assert out is False, "a second consecutive stale 409 gives up (re-derives next turn)"
+    assert record_calls["n"] == 2, "tried once + re-attempted once, then stopped (no blind loop)"
+    assert chat_helpers.stale_beat_rejections() == 2       # both 409s reconciled/counted
     assert "owner" in chat_helpers._DESYNC_REGROUND        # next turn re-grounds to the moved board
 
 
-def test_make_deal_backfill_stale_409_is_skipped(monkeypatch):
+def test_make_deal_backfill_stale_409_is_reattempted(monkeypatch):
     chat_helpers._LAST_BEAT_SEQ["owner"] = 4
     calls = {"n": 0}
 
@@ -291,7 +333,9 @@ def test_make_deal_backfill_stale_409_is_skipped(monkeypatch):
 
     async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, user=None):
         calls["n"] += 1
-        raise _stale_409(15)
+        if expected_beat_seq != 15:
+            raise _stale_409(15)
+        return {"deal": True, "beatSeq": 16}
 
     async def fake_status(user=None):
         return {"week": 4, "phase": "eviction", "pending": None, "veto": {}, "beatSeq": 15}
@@ -305,13 +349,13 @@ def test_make_deal_backfill_stale_409_is_skipped(monkeypatch):
     monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
 
     out = _run(al._auto_record_deal("we shake on it", "deal", HOUSE, "url", "m", {}, "owner"))
-    assert out is False
-    assert calls["n"] == 1                                  # not retried
+    assert out is True                                      # re-attempted against the fresh seq (#591)
+    assert calls["n"] == 2                                  # stale once, then re-attempted once
     assert chat_helpers.stale_beat_rejections() == 1
-    assert chat_helpers.last_beat_seq("owner") == 15
+    assert chat_helpers.last_beat_seq("owner") == 16        # off the successful retry's response
 
 
-def test_move_backfill_stale_409_is_skipped(monkeypatch):
+def test_move_backfill_stale_409_is_reattempted(monkeypatch):
     chat_helpers._LAST_BEAT_SEQ["owner"] = 4
     calls = {"n": 0}
 
@@ -320,7 +364,9 @@ def test_move_backfill_stale_409_is_skipped(monkeypatch):
 
     async def fake_move_to(room, expected_beat_seq=None, user=None):
         calls["n"] += 1
-        raise _stale_409(22)
+        if expected_beat_seq != 22:
+            raise _stale_409(22)
+        return {"whereabouts": {"room": room}, "beatSeq": 23}
 
     async def fake_status(user=None):
         return {"week": 5, "phase": "hoh-competition", "pending": None, "veto": {}, "beatSeq": 22}
@@ -334,10 +380,10 @@ def test_move_backfill_stale_409_is_skipped(monkeypatch):
     monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
 
     out = _run(al._auto_move_player("You head to the kitchen.", "I head to the kitchen", "url", "m", {}, "owner"))
-    assert out is False
-    assert calls["n"] == 1
+    assert out is True                                      # re-attempted against the fresh seq (#591)
+    assert calls["n"] == 2
     assert chat_helpers.stale_beat_rejections() == 1
-    assert chat_helpers.last_beat_seq("owner") == 22
+    assert chat_helpers.last_beat_seq("owner") == 23
 
 
 def test_e22_fallback_stale_409_is_skipped(monkeypatch):

@@ -112,6 +112,14 @@ def test_move_signal_regex_targets_movement_language():
                 "I'll head up to the HOH room", "I drift toward the backyard", "I slip into bedroom-a",
                 "I stroll to the lounge", "moving to the kitchen"]:
         assert rx.search(hit), hit
+    # #536 / ISSUE-8: STATIC in-room presence language (no movement verb) must ALSO trip the belt — a
+    # houseguest described sitting/leaning/lounging in a room is invented static presence the NPC-move
+    # extraction needs to reconcile against the engine.
+    for hit in ["she sits at the kitchen counter", "he leans against the backyard fence",
+                "they lounge in the living room", "perched on the bathroom counter",
+                "standing in the storage room", "sprawled across the bedroom floor",
+                "lingering by the HOH room door"]:
+        assert rx.search(hit), hit
     for miss in ["I tell her she looks tired", "what time is it in-game?",
                  "I think Cynthia is lying to me", "who is HOH right now?"]:
         assert not rx.search(miss), miss

@@ -1558,6 +1558,60 @@ def _casting_substance_nudge(next_ask: str, missing: list) -> str:
             f"{gap}. When they answer, file it immediately with updateCasting. Keep the interview "
             "moving — backstory, why they came, how they plan to play — until casting is complete.")
 
+
+# #529 — required-field gap labels for the casting-incomplete REFUSE-AND-SURFACE steer. The engine no
+# longer fabricates player canon (no name-hash appearance, no DEFAULT_ARCHETYPE, no placeholder
+# background): a required field absent ⇒ createCharacter is refused, and the FE must ASK the player for
+# it rather than let the engine invent it. These map the engine's `missing` field ids to a player-facing
+# ask; an unknown id falls through to its raw label (never fabricated content).
+_CASTING_FIELD_LABELS = {
+    "name": "their name",
+    "playerName": "their name",
+    "archetype": "what kind of player they are (their archetype / game identity)",
+    "personaArchetype": "what kind of player they are (their archetype / game identity)",
+    "strategy": "how they plan to play the game (their strategy)",
+    "strategyStyle": "how they plan to play the game (their strategy)",
+    "personaStrategyStyle": "how they plan to play the game (their strategy)",
+    "backstory": "their backstory — who they are outside the house",
+    "motivation": "why they came to play",
+}
+
+
+def _casting_incomplete_steer(missing: list) -> str:
+    """#529 production note when a FORCED createCharacter was REFUSED `casting-incomplete`: the engine
+    will NOT invent canon about the human player, so a required casting field is genuinely still missing.
+    Steer the model to ASK the player for the named gap(s) and file the answer with updateCasting — it
+    must NOT re-call createCharacter (the engine will refuse again) and must NEVER make up the answer."""
+    labels: list[str] = []
+    seen: set = set()
+    for m in (missing or []):
+        key = str(m).strip()
+        if not key:
+            continue
+        label = _CASTING_FIELD_LABELS.get(key, key)
+        if label not in seen:
+            seen.add(label)
+            labels.append(label)
+    gap = _join_casting_labels(labels) if labels else "a required casting detail they haven't given yet"
+    return ("(Production note, not for the player.) The season did NOT start: casting is incomplete — "
+            "we still need " + gap + ". The game will not invent anything about the player, so you must "
+            "ASK them for it directly and file their answer with updateCasting. Do NOT call "
+            "createCharacter again until they've supplied it, and NEVER make up the missing detail "
+            "yourself — ask the player, in character, and wait for their answer.")
+
+
+def _join_casting_labels(items: list) -> str:
+    """Oxford-comma join for the casting gap labels (kept tiny + local to avoid a wider import)."""
+    items = [i for i in items if i]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
 # closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
@@ -1754,32 +1808,51 @@ def _validate_consequence(raw, valid_ids) -> dict | None:
 #     already bumped beatSeq. So the SELF-409 risk is real: if we attached a stale last-seen token we
 #     would 409 our own back-fill on a perfectly normal turn. We defeat that by refreshing last-seen
 #     from EVERY response (`_refresh_beat_seq`) — every read and every mutation, including these ones.
-#   • They are LOW-value, re-derivable side effects (the scene/deal/move can be banked again next
-#     turn). They are NOT the double-apply case. So a stale 409 here is NOT reconciled-then-retried:
-#     it means the board genuinely moved under the back-fill, so we RECONCILE via the existing desync
-#     spine (`_handle_stale_beat` — re-ground next turn, count it) and SKIP the back-fill entirely.
-#     We never blind-retry into a stomp and never let the exception escape.
+#   • On a stale 409 the engine threw `StaleBeatError` BEFORE any mutation/fold (fail-closed, at-most-
+#     once — see issue #591 / A-S3): the write provably did not land. So a RE-ATTEMPT against the
+#     refreshed `beatSeq` is SAFE and cannot double-apply. For `recordInteraction` the back-fill is
+#     frequently the SOLE record of a player↔NPC scene, so SKIPPING it on a 409 silently EVAPORATES that
+#     scene's only consequence fold (mandate #4 / ADR-0005 #4 — "a novel move must never evaporate").
+#     So we now RE-ATTEMPT once against the reconciled token rather than skip. A second consecutive 409
+#     (the board moved AGAIN under the retry) reconciles-and-skips as before — re-derivable next turn —
+#     so we never blind-loop into a stomp and never let the exception escape.
 async def _backfill_with_cas(owner, fn, *args, **kwargs):
     """Issue an FE back-fill mutating engine call (`record_interaction`/`make_deal`/`move_to`) with the
     0065 Part A compare-and-swap token attached, refreshing last-seen from its response.
 
-    Returns the engine response dict on success, or None when a stale 409 was reconciled-and-skipped
-    (the board moved under the back-fill — re-derivable next turn). Re-raises any NON-stale error so the
-    caller's own fail-closed `except` handles it exactly as today.
+    On a stale 409 the engine refused the write BEFORE folding (fail-closed), so we reconcile to the
+    fresh `beatSeq` (`_handle_stale_beat`) and RE-ATTEMPT the same mutation ONCE against it — issue #591:
+    a `recordInteraction` back-fill is often a scene's only consequence fold and must not evaporate, and
+    the pre-write throw makes a single retry double-apply-safe. A second consecutive stale 409 is
+    reconciled-and-skipped (the move re-derives next turn).
+
+    Returns the engine response dict on success, or None when the write could not land (a second stale
+    409, or a None retry result). Re-raises any NON-stale error so the caller's own fail-closed `except`
+    handles it exactly as today.
 
     Why this is safe (the no-self-409 contract): last-seen is refreshed from EVERY engine response this
     turn (reads AND mutations), so the token attached here is the freshest the FE has seen — a normal
     turn never 409s itself. A stale 409 means a genuine concurrent move (another device / the 0064
-    queued-turn case), which we reconcile and skip rather than stomp."""
+    queued-turn case), which we reconcile and re-attempt once before giving up."""
     from routes import chat_helpers as _ch
     try:
         result = await fn(*args, expected_beat_seq=_ch.last_beat_seq(owner), **kwargs)
     except Exception as _e:
         if _ch._is_stale_beat_error(_e):
-            # The board moved under this back-fill — reconcile (re-ground next turn, counted) and SKIP.
-            # Do NOT retry: the scene/deal/move is re-derivable on the next turn against the moved board.
+            # The board moved under this back-fill — reconcile (refresh last-seen to the fresh beatSeq,
+            # re-read the board, count it). The write did NOT land (the engine threw before folding), so
+            # RE-ATTEMPT once against the reconciled token rather than drop the scene's only fold (#591).
             await _ch._handle_stale_beat(owner, _e)
-            return None
+            try:
+                result = await fn(*args, expected_beat_seq=_ch.last_beat_seq(owner), **kwargs)
+            except Exception as _e2:
+                if _ch._is_stale_beat_error(_e2):
+                    # Board moved AGAIN under the retry — reconcile and give up (re-derivable next turn).
+                    await _ch._handle_stale_beat(owner, _e2)
+                    return None
+                raise  # a non-stale error on the retry → caller's fail-closed handler deals with it
+            _ch._refresh_beat_seq(owner, result if isinstance(result, dict) else {})
+            return result
         raise  # a non-stale error → let the caller's fail-closed handler deal with it as before
     # CRITICAL: refresh last-seen from the back-fill's own response so a LATER mutation this same turn
     # (e.g. the pre-resolve advance) attaches the freshest token and never self-409s.
@@ -1811,13 +1884,21 @@ _HOUSE_ROOMS = (
 # A deliberately BROAD pre-filter — movement language is varied ("I head to the kitchen", "let's go
 # out back", "I wander into the living room", "walk over to the bedroom", "step into the bathroom").
 # A missed signal means a lost move (the immersion bug); a false hit only costs a rare extraction
-# call that returns room:null. So we err wide and let the extraction be the gatekeeper. The room
-# words anchor it (kitchen/backyard/bedroom/bathroom/lounge/HOH/storage/diary) plus the
-# go/head/walk/move/wander/step/slip/stroll verbs.
+# call that returns room:null / moves:[]. So we err wide and let the extraction be the gatekeeper. The
+# room words anchor it (kitchen/backyard/bedroom/bathroom/lounge/HOH/storage/diary) plus the
+# go/head/walk/move/wander/step/slip/stroll verbs AND static in-room presence language
+# (sit/stand/lean/lounge/perched/sprawled/linger — issue #536 / ISSUE-8): a scene that simply
+# DESCRIBES a houseguest sitting/leaning/lounging in a room is invented static presence with no
+# movement verb, so the NPC-move belt never tripped and the board snapped them back. The same room +
+# static-presence vocabulary `_EVICTED_PRESENCE_RE` already enumerates anchors it; the constrained
+# extraction still returns moves:[] when nothing actually relocated and the engine refuses illegal
+# moves, so broadening here never risks creative prose.
 _MOVE_SIGNAL_RE = re.compile(
     r"\b("
     r"go|going|head(?:ing)?|walk(?:ing)?|moves?|moving|wander(?:ing)?|stroll(?:ing)?|"
     r"drift(?:ing)?|slip(?:ping)?|steps?|stepping|"
+    r"sits?|sitting|sat|stands?|standing|stood|leans?|leaning|leaned|lounges?|lounging|lounged|"
+    r"perched|sprawled|lingers?|lingering|lingered|"
     r"kitchen|living[\s-]?room|lounge|backyard|back ?yard|bedrooms?|bathroom|"
     r"hoh[\s-]?room|head of household|storage[\s-]?room|diary[\s-]?room"
     r")\b", re.I)
@@ -4233,6 +4314,25 @@ async def stream_agent_loop(
                                     messages.append({"role": "system", "content": _CASTING_FORCED_NOTE})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
+                                # #529 — REFUSE-AND-SURFACE: the engine no longer fabricates player canon
+                                # (appearance/archetype/strategy) from a name hash; a required casting field
+                                # absent ⇒ `createRefused: casting-incomplete`. We must NOT loop the model on
+                                # a "finalize" nudge (it would re-issue the same refused call); instead we
+                                # surface the GAP so the model asks the player for the missing field. Do not
+                                # march the stall counter further on a refusal (it isn't the model stalling —
+                                # the interview is genuinely incomplete), and yield to the player to answer.
+                                if _eng.get("createRefused"):
+                                    _missing = _eng.get("missing") or _eng.get("missingFields") or []
+                                    if owner is not None:
+                                        _CASTING_STALL_LEVEL[owner] = _clv  # undo this turn's bump
+                                    logger.info(
+                                        "[orwell] forced createCharacter REFUSED (casting-incomplete, "
+                                        f"missing={_missing}) — surfacing the gap, round {round_num} "
+                                        f"user={owner}")
+                                    messages.append({"role": "system",
+                                                     "content": _casting_incomplete_steer(_missing)})
+                                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                    continue
                                 logger.warning("[orwell] forced createCharacter did not start the "
                                                f"season (res={_cres!r}); falling back to a nudge")
                             except Exception as _e:
@@ -4726,6 +4826,16 @@ async def stream_agent_loop(
             await record_post_turn_presence_check(owner, _turn_narration_full)
         except Exception as _pres_err:
             logger.warning(f"[orwell] post-turn presence check failed: {_pres_err}")
+
+        # NARR-3 (#613) — the INVENTED-HOUSEGUEST roster-validation backstop: catch the narration
+        # staging a houseguest name that is on NEITHER the active nor the out-of-house roster (an
+        # invented cast member — the most immersion-shattering grounding break, previously caught by
+        # nothing structural). Closed-set only, post-turn, gentle next-turn re-ground.
+        try:
+            from routes.chat_helpers import record_post_turn_roster_check
+            await record_post_turn_roster_check(owner, _turn_narration_full)
+        except Exception as _roster_err:
+            logger.warning(f"[orwell] post-turn roster check failed: {_roster_err}")
 
         # 0065 Part D — one Vault-free sync-ledger entry per live-game turn (observability). Records
         # the closed-set sync activity of THIS turn: the beatSeq it moved (before→after), the tools

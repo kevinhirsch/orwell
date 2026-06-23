@@ -423,7 +423,11 @@
       // disabled until a tone is picked and nothing else explained why.
       note.textContent = "Pick a tone — that's what binds. Your written message is optional.";
     } else {
-      note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your selection only — never read from prose.";
+      // UX-9: this note is the card's aria-describedby source, announced at nominations /
+      // the eviction vote. "never read from prose" is OOC engine-language that breaks the
+      // fiction — reword to a player-facing line that still says the choice is the player's
+      // (the button selection is what counts, not anything typed in chat).
+      note.textContent = multi ? `Select ${pick} — only a legal move counts.` : "Your choice here is what counts — make it with the buttons.";
     }
     row.appendChild(note);
     // 0061: a self-eviction confirmation gets an explicit CANCEL — declining must clear the engine
