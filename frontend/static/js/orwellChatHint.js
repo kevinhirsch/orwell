@@ -68,34 +68,35 @@ let _notice = null;   // #642: the OrwellNotice kit instance for the (single) li
 
 // ── LIQUID GLASS (body.theme-frosted) ────────────────────────────────────────
 // The hint card composes the OrwellNotice kit (kind "guide"); orwellNotice.js + style.css
-// already frost .on-card / .on-guide, so the hint shell gets the kit glass for free. We
-// inject this tiny module-local rule as a belt-and-suspenders: it re-asserts the kit glass
-// material on the hint's OWN .orwell-chat-hint hook class (added in show()) so the hint reads
-// as the SAME liquid-glass material as the rest of the kit even if a future .orwell-chat-hint
-// rule ever set a solid bg, or the cascade ordered against the kit rule. It mirrors the static
-// .on-card frosted rim+float box-shadow (~style.css 37587) for consistency and puts the kit
-// text-shadow on the body copy. No accent-hued text. Wrapped in prefers-reduced-transparency:
-// no-preference so this runtime-injected !important rule (appended AFTER the linked stylesheet,
-// so it'd win on source order at equal specificity) NEVER overrides style.css's a11y OPAQUE
-// fallback (body.theme-frosted .on-card) under prefers-reduced-transparency:reduce. Idempotent.
+// already paint .on-card / .on-guide as the ONE LIGHT GLASS (the kube music-player light fill),
+// so the hint shell gets that light glass for free on BOTH tiers (Full adds SVG refraction;
+// Frosted a CSS blur). We inject this tiny module-local rule as a belt-and-suspenders: it
+// re-asserts the SAME LIGHT GLASS on the hint's OWN .orwell-chat-hint hook class (added in
+// show()) so the hint reads identically even if a future .orwell-chat-hint rule ever set a
+// solid bg, or the cascade ordered against the kit rule. Owner ruling: "there should be no old
+// dark glass at all"; "the old dark glass shouldn't be the frosted fallback" — so the inline
+// DARK-veil glass that used to live here (and made the FROSTED fallback dark) is RETIRED; this
+// is now the light glass for BOTH tiers (no :not(.glass-full) scope). Wrapped in prefers-
+// reduced-transparency:no-preference so this runtime-injected !important rule NEVER overrides
+// style.css's a11y OPAQUE fallback under prefers-reduced-transparency:reduce. Idempotent.
 function _ensureGlassCss() {
   if (typeof document === 'undefined' || document.getElementById('orwell-chat-hint-glass-css')) return;
   const st = document.createElement('style');
   st.id = 'orwell-chat-hint-glass-css';
   st.textContent =
     '@media (prefers-reduced-transparency: no-preference) {' +
+    /* The ONE LIGHT GLASS for BOTH tiers (Full adds SVG refraction on top via liquidGlass.js). */
     'body.theme-frosted .on-card.orwell-chat-hint {' +
-    '  background-color: var(--ow-glass-veil-dark) !important;' +
-    '  background-image: linear-gradient(180deg, var(--ow-glass-veil-light) 0%, rgba(255,255,255,0.03) 100%) !important;' +
-    '  backdrop-filter: var(--ow-glass-backdrop) !important;' +
-    '  -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;' +
+    '  background-color: var(--ow-glass-light-color) !important;' +
+    '  background-image: var(--ow-glass-light-fill) !important;' +
+    '  -webkit-backdrop-filter: blur(3px) saturate(180%) !important;' +
+    '  backdrop-filter: blur(3px) saturate(180%) !important;' +
     '  border-radius: var(--ow-glass-radius) !important;' +
     '  box-shadow:' +
-    '    inset 0 0 0 0.5px rgba(255,255,255,0.12),' +
-    '    inset 2px -2px 2px -1px rgba(255,255,255,0.42),' +
-    '    inset -1px 1px 2px -1px rgba(255,255,255,0.16),' +
-    '    var(--ow-glass-float) !important; }' +
-    'body.theme-frosted .on-card.orwell-chat-hint .on-body { text-shadow: var(--ow-glass-text-shadow); } }';
+    '    inset 0 1px 0 rgba(255,255,255,0.65),' +
+    '    inset 0 0 0 0.5px rgba(255,255,255,0.30),' +
+    '    0 12px 36px rgba(0,0,0,0.10) !important; }' +
+    'body.theme-frosted .on-card.orwell-chat-hint .on-body { text-shadow: 0 1px 1px rgba(255,255,255,0.45); } }';
   document.head.appendChild(st);
 }
 

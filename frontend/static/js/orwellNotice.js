@@ -168,37 +168,32 @@
       "@media (prefers-reduced-motion: reduce) {" +
       "  .on-card.on-anim-in, .on-card.on-anim-out, .on-card.on-anim-banner-in { animation: none; } }" +
       // ── LIQUID GLASS (body.theme-frosted) ──────────────────────────────────────
-      // Under the glass theme the notice card must read as the SAME kit material as the
-      // windows/gadgets, not a solid --panel slab. style.css ALREADY frosts .on-card
-      // (background/backdrop/radius/rim+float box-shadow/text-shadow, all with !important).
-      // The ONLY thing the static !important rule does NOT beat are the kit's OWN, more-
-      // specific solid-bg skins below (.on-guide sets box-shadow:none; .on-sev-warn /
-      // .on-sev-error layer a solid var(--panel) bg; .on-decision/.on-continue/.on-system-
-      // notice retint the border). So we neutralize those skins' SOLID backgrounds under
-      // theme-frosted (here, inline, where they were authored) and let the static kit glass
-      // win — re-asserting the kit material with !important so the result is the kit glass
-      // regardless of cascade order. The accent/severity meaning stays in the BORDER only
-      // (no accent-hued TEXT, no solid fill). Wrapped in prefers-reduced-transparency:
-      // no-preference so these runtime-injected !important rules (appended AFTER the linked
-      // stylesheet, so they'd win on source order at equal specificity) NEVER override
-      // style.css's a11y OPAQUE fallback under prefers-reduced-transparency:reduce.
+      // Under the glass theme the notice card reads as the SAME ONE LIGHT GLASS as the
+      // windows/sidebar — the kube music-player light fill. style.css now paints that light
+      // glass for `body.theme-frosted .on-card` on BOTH tiers (Full = SVG refraction, Frosted
+      // = CSS blur). Owner ruling: "there should be no old dark glass at all"; "the old dark
+      // glass shouldn't be the frosted fallback". So the inline DARK-veil glass that used to
+      // live here (and made the FROSTED fallback dark) is RETIRED — it must NOT re-introduce a
+      // dark fill on top of the style.css light glass.
+      //
+      // The ONLY thing the static light-glass rule does NOT beat are the kit's OWN, more-
+      // specific SOLID-bg skins (.on-sev-warn / .on-sev-error layer a solid var(--panel) wash;
+      // .on-guide layers a faint solid wash + box-shadow:none). So we NEUTRALIZE just those
+      // skins' solid backgrounds under theme-frosted (let the style.css light glass show
+      // through); the severity/kind MEANING stays in the BORDER only (no accent-hued TEXT, no
+      // solid fill). Applies to BOTH tiers (no :not(.glass-full) scope — the fill is uniform).
+      // Wrapped in prefers-reduced-transparency:no-preference so these runtime-injected rules
+      // (appended AFTER the linked stylesheet) NEVER override style.css's a11y OPAQUE fallback
+      // under prefers-reduced-transparency:reduce.
       "@media (prefers-reduced-transparency: no-preference) {" +
-      "body.theme-frosted .on-card," +
       "body.theme-frosted .on-card.on-guide," +
       "body.theme-frosted .on-card.on-sev-warn," +
       "body.theme-frosted .on-card.on-sev-error {" +
-      "  background-color: var(--ow-glass-veil-dark) !important;" +
-      "  background-image: linear-gradient(180deg, var(--ow-glass-veil-light) 0%, rgba(255,255,255,0.03) 100%) !important;" +
-      "  backdrop-filter: var(--ow-glass-backdrop) !important;" +
-      "  -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;" +
-      "  border-radius: var(--ow-glass-radius) !important;" +
-      // mirror the static .on-card frosted rim+float box-shadow (~style.css 37587) so the
-      // .on-guide skin's box-shadow:none can't flatten the glass off the card.
-      "  box-shadow:" +
-      "    inset 0 0 0 0.5px rgba(255,255,255,0.12)," +
-      "    inset 2px -2px 2px -1px rgba(255,255,255,0.42)," +
-      "    inset -1px 1px 2px -1px rgba(255,255,255,0.16)," +
-      "    var(--ow-glass-float) !important; }" +
+      // Replace the skins' SOLID --panel fill with the ONE LIGHT GLASS (the kube fill, the same
+      // tokens style.css paints on .on-card) so the skinned cards match the rest of the kit — NO
+      // dark veil. The severity/kind MEANING stays in the BORDER (set by the skins above).
+      "  background-color: var(--ow-glass-light-color) !important;" +
+      "  background-image: var(--ow-glass-light-fill) !important; }" +
       "body.theme-frosted .on-card { text-shadow: var(--ow-glass-text-shadow); } }";
     document.head.appendChild(st);
   }

@@ -179,33 +179,37 @@
         #${CARD_ID} .odec-confirm { width: 100%; padding: .6rem .95rem; }
       }
       /* ── LIQUID GLASS (body.theme-frosted) ──────────────────────────────────────
-         The decision card surface must read as the SAME kit glass as the rest of the
+         The decision card surface must read as the SAME ONE LIGHT GLASS as the rest of the
          family. The common path hosts #${CARD_ID} INSIDE the OrwellNotice kit card
-         (.on-card.on-decision), where it already goes FLAT (transparent/no chrome) so the
-         glass comes from the kit (.on-card, frosted by style.css + orwellNotice.js). In the
-         FALLBACK path (no kit → mounted bare into #chat-history) the card carries its OWN
-         solid var(--panel) bg, so glass IT directly here. We also neutralize the .odec-risk
-         skin's SOLID var(--panel) wash (the eviction-red MEANING stays in the BORDER), and
-         we DELIBERATELY DO NOT touch .odec-confirm — the primary CONFIRM button keeps its
-         sanctioned system-blue CTA fill (the one tinted action per view). The whole block is
-         scoped to prefers-reduced-transparency:no-preference so the fallback card honors the
-         a11y opaque preference (its base solid var(--panel) bg stands under reduce; the kit-
-         hosted path is opaqued by style.css's .on-card a11y rule). */
+         (.on-card.on-decision), where it goes FLAT (transparent/no chrome) so the glass comes
+         from the kit (.on-card, painted the kube LIGHT glass by style.css). In the FALLBACK
+         path (no kit → mounted bare into #chat-history) the card carries its OWN solid
+         var(--panel) bg, so we glass IT directly here — with the ONE LIGHT GLASS, not a dark
+         veil. Owner ruling: "there should be no old dark glass at all"; "the old dark glass
+         shouldn't be the frosted fallback". The inline DARK-veil glass that used to live here
+         (and made the FROSTED fallback dark) is RETIRED. We also neutralize the .odec-risk
+         skin's SOLID var(--panel) wash (the eviction-red MEANING stays in the BORDER), and we
+         DELIBERATELY DO NOT touch .odec-confirm — the primary CONFIRM button keeps its
+         sanctioned system-blue CTA fill (the one tinted action per view). Applies to BOTH tiers
+         (no :not(.glass-full) — the light fill is uniform; Full adds SVG refraction on top via
+         liquidGlass.js). Scoped to prefers-reduced-transparency:no-preference so the fallback
+         card honors the a11y opaque preference under reduce. */
       @media (prefers-reduced-transparency: no-preference) {
+      /* The ONE LIGHT GLASS for BOTH tiers (Full adds SVG refraction on top). */
       body.theme-frosted #${CARD_ID},
       body.theme-frosted #${CARD_ID}.odec-risk {
-        background-color: var(--ow-glass-veil-dark);
-        background-image: linear-gradient(180deg, var(--ow-glass-veil-light) 0%, rgba(255,255,255,0.03) 100%);
-        -webkit-backdrop-filter: var(--ow-glass-backdrop);
-        backdrop-filter: var(--ow-glass-backdrop);
+        background-color: var(--ow-glass-light-color);
+        background-image: var(--ow-glass-light-fill);
+        -webkit-backdrop-filter: blur(3px) saturate(180%);
+        backdrop-filter: blur(3px) saturate(180%);
         border-radius: var(--ow-glass-radius);
-        /* mirror the static .on-card frosted rim+float box-shadow (~style.css 37587). */
+        /* The light-glass rim + soft light shadow (matches style.css's ONE LIGHT GLASS). */
         box-shadow:
-          inset 0 0 0 0.5px rgba(255,255,255,0.12),
-          inset 2px -2px 2px -1px rgba(255,255,255,0.42),
-          inset -1px 1px 2px -1px rgba(255,255,255,0.16),
-          var(--ow-glass-float);
-        text-shadow: var(--ow-glass-text-shadow);
+          inset 0 1px 0 rgba(255,255,255,0.65),
+          inset 0 0 0 0.5px rgba(255,255,255,0.30),
+          0 12px 36px rgba(0,0,0,0.10);
+        color: #16191f;
+        text-shadow: 0 1px 1px rgba(255,255,255,0.45);
       }
       /* When hosted inside the kit card the inner decision card stays flat (the kit IS the
          glass) — keep it transparent under theme-frosted so it never double-glasses. */

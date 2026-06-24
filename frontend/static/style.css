@@ -37327,12 +37327,27 @@ body.theme-frosted .modal {
      RIM (the key "tell"). NO hue; the only color is the backdrop infusing through.
      Minimal fill — the rim does the work. */
   --ow-glass-veil-light: rgba(255,255,255,0.06);  /* faint neutral lift              */
-  --ow-glass-veil-dark: rgba(18,20,24,0.16);       /* faint neutral anchor (legibility)*/
+  /* --ow-glass-veil-dark: RETIRED for the glass theme. The owner ruling is "there should
+     be no old dark glass at all" — BOTH glass tiers are now the kube.io music-player LIGHT
+     glass. The variable is kept defined ONLY as a last-ditch fallback token for any non-glass
+     path that might still reference it; the glass theme (body.theme-frosted) MUST NOT use it.  */
+  --ow-glass-veil-dark: rgba(18,20,24,0.16);       /* (legacy token — not used by the glass theme)*/
+  /* THE ONE LIGHT GLASS (kube.io music player — `[--glass-rgb:#FFFFFF] --glass-bg-alpha:60%`,
+     i.e. rgba(255,255,255,0.60), with a light rim and a soft light box-shadow). Both Full and
+     Frosted tiers paint this identical light fill; the ONLY difference between tiers is the
+     refraction layer (Full = the SVG vector-field displacement via liquidGlass.js; Frosted =
+     the CSS blur below). Cite: docs/design/liquid-glass/LIQUID_GLASS_REFERENCE.md §"Regular"
+     (light, luminous, content-legible) + ADAPTIVE_LEGIBILITY_REFERENCE.md §4 (kube refraction). */
+  --ow-glass-light-fill: linear-gradient(180deg,
+    rgba(255,255,255,0.62) 0%,
+    rgba(255,255,255,0.52) 100%);
+  --ow-glass-light-color: rgba(255,255,255,0.60);   /* the kube 0.60 white-ish translucent fill */
   --ow-glass-text-shadow: 0 1px 3px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.55);
 }
-/* The glass FILL is a FAINT neutral smoky-grey (Apple ios_glass_over_dark): a thin
-   dark anchor + a thin white lift. The luminous DIRECTIONAL edge rim lives in the
-   box-shadow (the Apple-Materials block below). No hue, minimal fill, faint blur. */
+/* The glass FILL is the ONE LIGHT glass (kube.io music player — rgba(255,255,255,0.60)
+   with a light top-down lift), painted identically for BOTH tiers (Full + Frosted). The
+   old dark veil is RETIRED (owner: "there should be no old dark glass at all"). The
+   luminous edge rim + soft light shadow live in the box-shadow blocks below. */
 body.theme-frosted .ow-window,
 body.theme-frosted .og-card,
 body.theme-frosted .chat-input-bar,
@@ -37340,13 +37355,13 @@ body.theme-frosted #sidebar,
 body.theme-frosted .icon-rail,
 body.theme-frosted .modal-content,
 body.theme-frosted .on-card,
-/* CHROME surfaces folded onto the ONE neutral glass material (Apple HIG Materials —
+/* CHROME surfaces folded onto the ONE light glass material (Apple HIG Materials —
    "controls sit on top of a system material, not directly on content"; tab/tool bars,
    menus, popovers, sheets all adopt Regular glass). Highest-traffic first: settings/
    theme/memory/integrations panels (.admin-card), the chat top bar, the model picker
    (button + menu/popover), the toast (a transient banner), the tool indicator, and the
-   attachment cards/skeletons. They share the windows' colorless veil — no per-surface
-   glass, no hue, color comes through from the backdrop. */
+   attachment cards/skeletons. They share the windows' LIGHT glass — no per-surface
+   glass, no dark veil; color comes through from the backdrop, lensed/blurred by tier. */
 body.theme-frosted .admin-card,
 body.theme-frosted .chat-top-bar,
 body.theme-frosted .model-picker-menu,
@@ -37355,11 +37370,8 @@ body.theme-frosted .toast,
 body.theme-frosted .tool-indicator,
 body.theme-frosted .attach-card,
 body.theme-frosted .attach-image-skeleton {
-  background-color: var(--ow-glass-veil-dark) !important;
-  background-image:
-    linear-gradient(180deg,
-      var(--ow-glass-veil-light) 0%,
-      rgba(255,255,255,0.03) 100%) !important;
+  background-color: var(--ow-glass-light-color) !important;
+  background-image: var(--ow-glass-light-fill) !important;
 }
 /* A subtle text-shadow on glass body copy guarantees legibility on the very      */
 /* brightest animated-bg frames (the SVG tint + this shadow = AA at both extremes).*/
@@ -37419,6 +37431,14 @@ body.theme-frosted #sidebar {
   body.theme-frosted.sidebar-collapsed .chat-container { padding-left: 74px; }          /* 48 + 10 + 16 */
   body.theme-frosted.hamburger-right:not(.sidebar-collapsed) .chat-container { padding-left: 16px; padding-right: 234px; }
   body.theme-frosted.hamburger-right.sidebar-collapsed .chat-container { padding-left: 16px; padding-right: 74px; }
+  /* The welcome hero is absolute-centered on the chat-container's full width (left:50%),
+     so the floating-sidebar inset pushed it LEFT of the composer (which centers in the
+     padded content area). Shift it by half the inset delta so it centers UNDER the chat
+     box: offset = (padding-left − padding-right) / 2  (234−16)/2=109, (74−16)/2=29. */
+  body.theme-frosted:not(.sidebar-collapsed) #welcome-screen { left: calc(50% + 109px); }
+  body.theme-frosted.sidebar-collapsed #welcome-screen { left: calc(50% + 29px); }
+  body.theme-frosted.hamburger-right:not(.sidebar-collapsed) #welcome-screen { left: calc(50% - 109px); }
+  body.theme-frosted.hamburger-right.sidebar-collapsed #welcome-screen { left: calc(50% - 29px); }
 }
 
 /* ── The notice kit (.on-card) — same NEUTRAL liquid glass as the windows/cards ─*/
@@ -38397,16 +38417,17 @@ body.theme-frosted .msg-user :not(pre) > code {
    read as one small glass pill consistent with the chrome above. (The no-accent-on-
    text rule below also neutralizes their old red label/border to --fg.) */
 body.theme-frosted .thinking-section {
-  border: 1px solid rgba(255,255,255,0.12) !important;
+  border: 1px solid rgba(255,255,255,0.55) !important;
   border-radius: var(--ow-radius-inner, 14px) !important;
-  background-color: var(--ow-glass-veil-dark) !important;
-  background-image:
-    linear-gradient(180deg, var(--ow-glass-veil-light) 0%, rgba(255,255,255,0.03) 100%) !important;
-  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
-  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  /* The ONE LIGHT GLASS — same kube fill as every other glass surface (no old dark veil). */
+  background-color: var(--ow-glass-light-color) !important;
+  background-image: var(--ow-glass-light-fill) !important;
+  -webkit-backdrop-filter: blur(3px) saturate(180%) !important;
+  backdrop-filter: blur(3px) saturate(180%) !important;
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.20),
-    0 4px 14px rgba(0,0,0,0.18) !important;
+    inset 0 1px 0 rgba(255,255,255,0.65),
+    inset 0 0 0 0.5px rgba(255,255,255,0.30),
+    0 4px 14px rgba(0,0,0,0.10) !important;
 }
 body.theme-frosted .thinking-header {
   background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
@@ -38585,94 +38606,101 @@ body.has-wallpaper {
 }
 
 /* ============================================================================ */
-/* FULL GLASS tier (body.glass-full) — the kube.io "Liquid Glass" music-player    */
-/* CLEAR look, retuned from the foggy baseline.                                   */
+/* THE ONE LIGHT GLASS — both tiers (body.theme-frosted) — the kube.io music-     */
+/* player "Liquid Glass" CLEAR/LIGHT look. NO dark glass anywhere.                 */
 /* ----------------------------------------------------------------------------  */
-/* Owner direction + Apple HIG (docs/design/liquid-glass/LIQUID_GLASS_REFERENCE.md): */
-/*   "Liquid Glass forms a distinct FUNCTIONAL layer for controls and navigation   */
-/*    elements — like tab bars and sidebars — that floats above the content layer"  */
-/*   "Don't use Liquid Glass in the CONTENT layer."                                 */
-/* So Full Glass splits the world in two:                                          */
-/*   • FUNCTIONAL CHROME  → the clear music-player glass: a LIGHT translucent fill   */
-/*     (~0.60, the "Glass Background Opacity" preset), LOW blur (Blur 1.0), and the  */
-/*     strong SVG refraction from liquidGlass.js riding on top (Chromium) — so the   */
-/*     wallpaper shows THROUGH, lensed at the rim. Reads like the Apple light        */
-/*     sidebar (lg_hig_sidebar_extend_correct): light, see-through, text-legible.    */
-/*   • CHAT BUBBLES (CONTENT)  → NOT glass. Refraction + the frosted blur material   */
-/*     are stripped; a restrained, legible content fill stands instead, so the       */
-/*     wallpaper shows in the GAPS between bubbles and the chrome floats above.      */
-/* These rules sit AFTER the theme-frosted baseline so they win at equal specificity */
-/* under glass-full only; the Frosted tier (theme-frosted WITHOUT glass-full) keeps  */
-/* its blurred frost unchanged. The adaptive layer (adaptiveGlass.js) still sets an  */
-/* inline background-COLOR veil for legibility; our LIGHT fill is a background-IMAGE  */
-/* layer that composites OVER it (so they don't fight — the light wash dominates the */
-/* faint adaptive veil and the chrome reads light).                                  */
+/* Owner ruling: "there should be no old dark glass at all"; "every light surface  */
+/* needs the SAME properties — the kube music player recreated everywhere". So     */
+/* BOTH tiers (Full Glass = theme-frosted+glass-full, Frosted = theme-frosted)     */
+/* paint this IDENTICAL light fill. The ONLY difference between tiers is the        */
+/* refraction layer:                                                               */
+/*   • FULL  → the strong SVG vector-field displacement from liquidGlass.js rides   */
+/*     on top (Chromium) — so the wallpaper shows THROUGH, lensed at the rim.       */
+/*   • FROSTED → the CSS `backdrop-filter: blur() saturate()` below (no SVG).       */
+/* Apple HIG (docs/design/liquid-glass/LIQUID_GLASS_REFERENCE.md): Liquid Glass     */
+/* forms a distinct FUNCTIONAL layer that floats above content; the Regular variant */
+/* is LIGHT, luminous and content-legible (lg_hig_sidebar_extend_correct: light,    */
+/* see-through, text-legible). The kube technique is the web replication of the     */
+/* refraction (ADAPTIVE_LEGIBILITY_REFERENCE.md §4). These rules sit AFTER the      */
+/* theme-frosted baseline so they win at equal specificity. adaptiveGlass.js now    */
+/* STANDS DOWN under theme-frosted (BOTH tiers), so no per-surface dark veil fights */
+/* this fixed light fill.                                                           */
 
-/* ── FUNCTIONAL CHROME: the LIGHT, clear music-player glass ─────────────────── */
-body.glass-full #sidebar,
-body.glass-full .icon-rail,
-body.glass-full .chat-input-bar,
-body.glass-full .chat-top-bar,
-body.glass-full .ow-window,
-body.glass-full .modal-content,
-body.glass-full .admin-card,
-body.glass-full .model-picker-menu,
-body.glass-full .og-card,
-body.glass-full .on-card,
-body.glass-full .toast,
-body.glass-full .dropdown,
-body.glass-full .overflow-menu,
-body.glass-full .cp-popover {
-  /* GLASS BACKGROUND OPACITY ≈ 0.60 — a LIGHT, white-ish translucent fill (NOT the
-     dark veil). Painted as a background-IMAGE flat wash so it layers OVER the adaptive
-     inline background-color (which the JS sets !important and CSS can't beat); the light
-     wash dominates that faint dark veil, so the panel reads LIGHT and see-through.
-     A gentle top-down lift keeps a hint of the lit-glass sheen. */
-  background-image: linear-gradient(180deg,
-    rgba(255,255,255,0.62) 0%,
-    rgba(255,255,255,0.52) 100%) !important;
-  /* BLUR LEVEL 1.0 — low. The refraction (JS, on Chromium) is the effect; on the CSS
-     fallback this stays a CLEAR low-blur light glass, never a milky fog. The JS sets its
-     own inline SVG-filter backdrop with !important and outranks this; this value is the
-     graceful fallback for the surfaces past the cap / non-Chromium. */
+/* ── THE LIGHT GLASS surface (kube music player) — BOTH tiers ──────────────── */
+/* Wrapped in prefers-reduced-transparency:no-preference so this LATER rule never re-
+   introduces translucency over the a11y SOLID fallback (the body.theme-frosted opaque
+   block earlier in this file fires under reduced-transparency:reduce and must win). */
+@media (prefers-reduced-transparency: no-preference) {
+body.theme-frosted #sidebar,
+body.theme-frosted .icon-rail,
+body.theme-frosted .chat-input-bar,
+body.theme-frosted .chat-top-bar,
+body.theme-frosted .ow-window,
+body.theme-frosted .modal-content,
+body.theme-frosted .admin-card,
+body.theme-frosted .model-picker-menu,
+body.theme-frosted .og-card,
+body.theme-frosted .on-card,
+body.theme-frosted .toast,
+body.theme-frosted .tool-indicator,
+body.theme-frosted .attach-card,
+body.theme-frosted .attach-image-skeleton,
+body.theme-frosted .dropdown,
+body.theme-frosted .overflow-menu,
+body.theme-frosted .cp-popover {
+  /* GLASS BACKGROUND OPACITY ≈ 0.60 (the kube preset) — a LIGHT, white-ish translucent
+     fill. Set BOTH the background-color AND a top-down background-image lift so no dark
+     veil can ever show underneath (item 2: retire the dark veil for the glass theme). */
+  background-color: var(--ow-glass-light-color) !important;
+  background-image: var(--ow-glass-light-fill) !important;
+  /* FROSTED tier: a CLEAR low-blur light glass (the kube "Blur 1.0" feel), never a milky
+     fog. FULL tier: liquidGlass.js sets its own inline SVG-filter backdrop with !important
+     and outranks this — the SVG refraction IS the effect there, so this blur is the
+     graceful Frosted-tier (and non-Chromium) value. ONE light glass; only the refraction
+     differs by tier. */
   -webkit-backdrop-filter: blur(3px) saturate(180%) !important;
   backdrop-filter: blur(3px) saturate(180%) !important;
-  /* A bright, light-glass rim (the panel is light now, so a white inner hairline + a soft
-     light outer edge read as the Apple light sidebar's crisp edge). */
+  /* The light-glass rim + soft light box-shadow (kube `0 4px 20px rgba(0,0,0,0.08)`,
+     deepened a touch for the larger app panels): a white inner hairline + a soft light
+     outer edge = the Apple light sidebar's crisp edge. NO dark slab. */
   border-color: rgba(255,255,255,0.55) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.65),
     inset 0 0 0 0.5px rgba(255,255,255,0.30),
-    0 12px 36px rgba(0,0,0,0.22) !important;
+    0 12px 36px rgba(0,0,0,0.10) !important;
 }
-/* Text on the LIGHT chrome must be DARK to stay legible (Apple light sidebar reads dark
-   ink on light glass). adaptiveGlass.js flips ink only for SMALL bars; the sidebar/window
-   are "large" and keep light --fg by its model — which would vanish on our light fill. So
-   force a dark ink + a faint light halo on the functional chrome under glass-full. (The
-   adaptive ink override is inline; we use a higher-specificity selector + !important and,
-   for the sidebar, target it directly so it wins.) */
-body.glass-full #sidebar,
-body.glass-full #sidebar *,
-body.glass-full .icon-rail,
-body.glass-full .icon-rail *,
-body.glass-full .chat-input-bar,
-body.glass-full .chat-top-bar,
-body.glass-full .ow-window .ow-body,
-body.glass-full .modal-content,
-body.glass-full .admin-card,
-body.glass-full .dropdown,
-body.glass-full .overflow-menu,
-body.glass-full .cp-popover {
+}
+/* Text on the LIGHT glass must be DARK to stay legible (Apple light sidebar reads dark
+   ink on light glass). adaptiveGlass.js stands down under the glass theme now, so the
+   ink is driven here for BOTH tiers: force a dark ink + a faint light halo on the
+   functional chrome. */
+body.theme-frosted #sidebar,
+body.theme-frosted #sidebar *,
+body.theme-frosted .icon-rail,
+body.theme-frosted .icon-rail *,
+body.theme-frosted .chat-input-bar,
+body.theme-frosted .chat-top-bar,
+body.theme-frosted .ow-window .ow-body,
+body.theme-frosted .modal-content,
+body.theme-frosted .admin-card,
+body.theme-frosted .on-card,
+body.theme-frosted .toast,
+body.theme-frosted .tool-indicator,
+body.theme-frosted .thinking-section,
+body.theme-frosted .thinking-section .thinking-header,
+body.theme-frosted .dropdown,
+body.theme-frosted .overflow-menu,
+body.theme-frosted .cp-popover {
   color: #16191f !important;
   text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
 }
 /* Keep accent/branded buttons + icon glyphs from being forced to body ink where they
    carry their own color (links, the send button, status accents). Restrict the blanket
    dark-ink to text-bearing structural nodes; let explicitly-coloured controls keep theirs. */
-body.glass-full #sidebar a,
-body.glass-full #sidebar button,
-body.glass-full .icon-rail a,
-body.glass-full .icon-rail button {
+body.theme-frosted #sidebar a,
+body.theme-frosted #sidebar button,
+body.theme-frosted .icon-rail a,
+body.theme-frosted .icon-rail button {
   text-shadow: 0 1px 1px rgba(255,255,255,0.4) !important;
 }
 

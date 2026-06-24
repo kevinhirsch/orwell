@@ -167,7 +167,12 @@
   var MAX_LIVE_SURFACES = 20;        // desktop hard cap on simultaneously-refracted elements
   var MAX_LIVE_SURFACES_MOBILE = 8;  // small-screen hard cap (GPU-cheap; CSS glass for the rest)
   var MOBILE_W = 768;                // ≤ this viewport width ⇒ the mobile cap applies
-  var SIZE_BUCKET = 8;               // round W/H to this grid so near-equal sizes share a map
+  var SIZE_BUCKET = 8;               // (legacy) coarse size grid — NO LONGER USED by the rounded-rect
+                                     // path: the map is now generated at the element's EXACT px W×H and
+                                     // applied 1:1 (the non-square fix), so the cache keys on exact size.
+                                     // Same-size gadget cards still collide on one map; off-grid unique
+                                     // elements get their own exact-fit filter (correct — stretching a
+                                     // bucketed map to a non-square box was the bug). Kept for reference.
   var RESIZE_DEBOUNCE_MS = 140;      // coalesce a resize-drag burst into one re-map
   var MAP_RES_CAP = 1024;            // cap a map's canvas dimension (perf + the SVG res ceiling)
 
@@ -286,6 +291,28 @@
     return prof; // magnitude weight at this depth
   }
 
+  // ── FIXED-PX-BAND, MIDDLE-STRETCHED displacement map (the kube fix) ────────────
+  // The article's key constraint: the displacement magnitude is SYMMETRIC around
+  // the bezel and ORTHOGONAL to the border — computed once on a radial "half-slice"
+  // and reused around the perimeter ("Circles let us form rounded rectangles by
+  // STRETCHING THE MIDDLE"). So for a rounded RECTANGLE the bezel ramp must be a
+  // FIXED PIXEL WIDTH on all four sides, and only the flat NEUTRAL (128,128) center
+  // is stretched. The previous build coupled the band to BOTH axes
+  // (`band = min(EDGE, min(cw,ch)/2)`) and the filter then STRETCHED the bucketed
+  // map to the element via objectBoundingBox — which warped the ramps on non-square
+  // elements (the short top banner became all-ramp with no neutral center; the tall
+  // sidebar smeared the backdrop). The fix here:
+  //   • The map is generated at the element's EXACT pixel W×H (see filterFor) and the
+  //     filter region is userSpaceOnUse at that exact size, so it maps 1:1 — NO
+  //     aspect-warping stretch. (filterFor keeps the rim at the true edge.)
+  //   • The bezel ramp is a FIXED-PX width per axis (bandX/bandY, each = EDGE),
+  //     INDEPENDENT of the other axis, so all four sides ramp over the same physical
+  //     px on a wide, tall, or square element alike.
+  //   • Each band is CLAMPED so it can never exceed just-under half that axis — a
+  //     flat neutral center ALWAYS remains (the ramps never meet). A very short or
+  //     narrow element keeps a crisp undistorted middle with only thin rim lensing.
+  // Corners blend the two axes' inward pushes; the squircle profile shapes each
+  // axis's falloff (Apple's convex squircle, SQUIRCLE_N=4).
   function buildMapDataUrl(w, h, radius, scale) {
     var cw = Math.min(MAP_RES_CAP, Math.max(8, Math.round(w)));
     var ch = Math.min(MAP_RES_CAP, Math.max(8, Math.round(h)));
@@ -295,8 +322,17 @@
     var ctx = canvas.getContext("2d");
     var img = ctx.createImageData(cw, ch);
     var data = img.data;
-    var r = Math.min(radius, Math.min(cw, ch) / 2);
-    var band = Math.min(EDGE, Math.min(cw, ch) / 2);
+    // FIXED-PX bands per axis, clamped so a neutral center always survives. The
+    // 0.5px back-off (and the 1px floor) guarantee bandX < cw/2, bandY < ch/2:
+    // the left+right ramps never meet, the top+bottom ramps never meet → there is
+    // always at least one neutral column AND one neutral row in the middle. On a
+    // short banner the vertical ramps stay a thin EDGE-wide rim; the wide middle
+    // stays crisp. (For the MAP_RES_CAP-shrunk axis the band scales with it so the
+    // ramp stays a fixed FRACTION of the element, still leaving a neutral center.)
+    var sx = cw / Math.max(1, Math.round(w)); // canvas px per element px on X (≤1 only if capped)
+    var sy = ch / Math.max(1, Math.round(h));
+    var bandX = Math.max(1, Math.min(EDGE * sx, cw / 2 - 0.5));
+    var bandY = Math.max(1, Math.min(EDGE * sy, ch / 2 - 0.5));
 
     // Specular rim map (white, alpha = highlight intensity), built in the SAME loop.
     var specCanvas = null, specData = null, lx = 0, ly = 0;
@@ -310,58 +346,50 @@
     }
 
     for (var y = 0; y < ch; y++) {
+      // Per-row vertical depth/push, fixed-px from the nearer of top/bottom.
+      var distY = Math.min(y, ch - 1 - y);          // px from nearer horizontal edge
+      var tY = distY < bandY ? distY / bandY : 1;    // 0 at edge → 1 at band inner
+      var pushY = distY < bandY ? squircleProfile(tY) : 0; // 0..1 magnitude
+      var dirY = y < ch / 2 ? 1 : -1;                // inward (toward center)
       for (var x = 0; x < cw; x++) {
-        // Signed distance to the rounded-rect boundary (negative inside). We use
-        // the standard rounded-rect SDF: distance from the inner core box plus the
-        // corner radius treatment, so corners ramp like the straight edges.
-        var qx = Math.abs(x - cw / 2) - (cw / 2 - r);
-        var qy = Math.abs(y - ch / 2) - (ch / 2 - r);
-        var ax = Math.max(qx, 0);
-        var ay = Math.max(qy, 0);
-        var outside = Math.sqrt(ax * ax + ay * ay) + Math.min(Math.max(qx, qy), 0) - r;
-        // `outside` < 0 inside the shape; depth inward from the edge = -outside.
-        var depth = -outside; // 0 at the boundary, grows toward center
+        // Per-column horizontal depth/push, fixed-px from the nearer of left/right.
+        var distX = Math.min(x, cw - 1 - x);
+        var tX = distX < bandX ? distX / bandX : 1;
+        var pushX = distX < bandX ? squircleProfile(tX) : 0;
+        var dirX = x < cw / 2 ? 1 : -1;
 
         var dr = 0; // x displacement (signed, -1..1 before *scale)
         var dg = 0; // y displacement
 
-        if (depth >= 0 && depth < band) {
-          var t = depth / band; // 0 at edge → 1 at inner band boundary
-          var mag = squircleProfile(t); // 0..1 magnitude weight (high at edge)
-          // Inward normal direction: derive from which boundary side is nearest.
-          // Component toward center per axis, weighted by how "edge-like" that
-          // axis is (so corners blend both). Use the rounded-rect gradient.
-          var nx = 0;
-          var ny = 0;
-          // Distance to left/right and top/bottom edges (in canvas px).
-          var distX = Math.min(x, cw - 1 - x);
-          var distY = Math.min(y, ch - 1 - y);
-          // The nearer edge dominates that axis's inward push.
-          var pushX = distX < band ? (1 - distX / band) : 0;
-          var pushY = distY < band ? (1 - distY / band) : 0;
-          // Direction toward center: positive x-disp on the LEFT edge (push right),
-          // negative on the RIGHT edge (push left); same logic for y.
-          nx = (x < cw / 2 ? 1 : -1) * pushX;
-          ny = (y < ch / 2 ? 1 : -1) * pushY;
-          // Normalize the combined push and scale by the squircle magnitude.
+        if (pushX > 0 || pushY > 0) {
+          // Inward normal: each axis contributes its own fixed-px ramp magnitude;
+          // corners blend both (a true rounded-rect inward push), edges are
+          // single-axis. Normalize the direction, keep the magnitude = the stronger
+          // (edge-closest) of the two axis ramps so a corner isn't double-bright.
+          var nx = dirX * pushX;
+          var ny = dirY * pushY;
           var len = Math.sqrt(nx * nx + ny * ny) || 1;
+          var mag = Math.max(pushX, pushY); // squircle magnitude weight at this depth
           dr = (nx / len) * mag;
           dg = (ny / len) * mag;
 
-          // Specular rim: the OUTWARD unit normal is -(inward). The highlight is
-          // strong where it faces the fixed light (dot>0), tightened by POWER, and
-          // confined to the OUTER fraction (SPEC_BAND) of the edge band so it reads
-          // as a thin lit line on the rim, not a wide wash.
+          // Specular rim: OUTWARD unit normal is -(inward), confined to the OUTER
+          // SPEC_BAND fraction of the edge band so it reads as a thin lit line. The
+          // rim depth uses the SAME nearest-edge fraction (min tX/tY for the axis in
+          // play) so the highlight hugs the very edge on every side, square or not.
           if (specData) {
-            var ux = -(nx / len), uy = -(ny / len);
-            var ndotl = ux * lx + uy * ly;
-            if (ndotl > 0 && t < SPEC_BAND) {
-              var rim = 1 - t / SPEC_BAND;                 // 1 at edge → 0 at band inner
-              var s = Math.pow(ndotl, SPEC_POWER) * rim * SPEC_GAIN;
-              var a = Math.max(0, Math.min(SPEC_ALPHA_MAX, s));
-              var si = (y * cw + x) * 4;
-              specData[si] = 255; specData[si + 1] = 255; specData[si + 2] = 255;
-              specData[si + 3] = Math.round(a * 255);
+            var tEdge = Math.min(pushX > 0 ? tX : 1, pushY > 0 ? tY : 1);
+            if (tEdge < SPEC_BAND) {
+              var ux = -(nx / len), uy = -(ny / len);
+              var ndotl = ux * lx + uy * ly;
+              if (ndotl > 0) {
+                var rim = 1 - tEdge / SPEC_BAND;            // 1 at edge → 0 at band inner
+                var s = Math.pow(ndotl, SPEC_POWER) * rim * SPEC_GAIN;
+                var a = Math.max(0, Math.min(SPEC_ALPHA_MAX, s));
+                var si = (y * cw + x) * 4;
+                specData[si] = 255; specData[si + 1] = 255; specData[si + 2] = 255;
+                specData[si + 3] = Math.round(a * 255);
+              }
             }
           }
         }
@@ -407,10 +435,14 @@
     return svg;
   }
 
+  // The map is now generated at the element's EXACT px size and the filter region is
+  // userSpaceOnUse at that SAME size (1:1, no stretch — the non-square fix). So the
+  // cache key is the exact rounded W×H: many same-size gadget cards still collide on
+  // ONE map/filter (a rail of identical cards stays cheap), while a unique large
+  // element (sidebar/banner/composer/window) gets its own exact-fit filter — which is
+  // correct, since stretching a bucketed map to a non-square box is exactly the bug.
   function bucketKey(w, h, scale) {
-    var bw = Math.round(w / SIZE_BUCKET) * SIZE_BUCKET;
-    var bh = Math.round(h / SIZE_BUCKET) * SIZE_BUCKET;
-    return bw + "x" + bh + "x" + RADIUS + "x" + scale;
+    return Math.round(w) + "x" + Math.round(h) + "x" + RADIUS + "x" + scale;
   }
 
   // ── Concave round-knob displacement map (the kube.io switch "lip bezel") ──────
@@ -521,32 +553,35 @@
     var id = "owlg-" + (filterCount++);
     var filter = document.createElementNS(SVG_NS, "filter");
     filter.setAttribute("id", id);
-    // ── EDGE-ALIGNMENT FIX (owner: "refraction looks slightly off to the left of
-    // the blue button") ────────────────────────────────────────────────────────
-    // Previously the filter region + feImage were sized in userSpaceOnUse to the
-    // BUCKETED map dimensions (map.w × map.h, W/H rounded to the 8px SIZE_BUCKET
-    // grid) and pinned at x=0,y=0. When the element's true rendered size differed
-    // from its bucket (rounding, or fractional flex/DPR sizes), the rim band landed
-    // at `map.w`/`map.h` instead of the real edge — pulled INWARD by up to a bucket,
-    // so the lensing/specular seam sat left of the actual right edge. Switching the
-    // filter region to objectBoundingBox (0,0,1,1) and the feImage to 100%×100%
-    // (preserveAspectRatio="none") makes the ONE shared bucketed map stretch to fill
-    // each element's EXACT box, so the rim band hugs the true edge on every surface
-    // regardless of size — and the same cached filter now fits every box (the bucket
-    // still shares the dataURL for perf). primitiveUnits stays the default
-    // (userSpaceOnUse), so feDisplacementMap `scale` remains in px (unchanged).
-    filter.setAttribute("filterUnits", "objectBoundingBox");
+    // ── NON-SQUARE / EDGE-ALIGNMENT FIX (1:1 exact-size map, no aspect stretch) ──
+    // A previous edit set the region to objectBoundingBox(0,0,1,1) + feImage 100%×100%
+    // (preserveAspectRatio="none") to fix a composer right-edge seam. That STRETCHES
+    // the (then bucketed) displacement map to the element box — which WARPS the bezel
+    // ramps on non-square elements: the short top banner became all-ramp (no neutral
+    // center) and the tall sidebar smeared the backdrop instead of clean rim lensing.
+    //
+    // Fix: the map is now generated at the element's EXACT px W×H (buildMapDataUrl /
+    // bucketKey) with FIXED-PX bezel bands + a stretched neutral middle, and the filter
+    // region + feImage are sized in userSpaceOnUse to those SAME exact px dimensions and
+    // pinned at x=0,y=0. So the map maps 1:1 onto the element with NO aspect-warping
+    // stretch: the rim band is a fixed px width on all four sides, the neutral center is
+    // crisp, and the rim still hugs the TRUE edge (map dims == element dims, re-mapped on
+    // resize via applyTo) — keeping the composer right-edge alignment win without the
+    // inward seam. primitiveUnits stays the default (userSpaceOnUse) ⇒ feDisplacementMap
+    // `scale` remains in px (unchanged). map.w/map.h already honor MAP_RES_CAP.
+    var fw = map.w, fh = map.h;
+    filter.setAttribute("filterUnits", "userSpaceOnUse");
     filter.setAttribute("x", "0");
     filter.setAttribute("y", "0");
-    filter.setAttribute("width", "1");
-    filter.setAttribute("height", "1");
+    filter.setAttribute("width", String(fw));
+    filter.setAttribute("height", String(fh));
     filter.setAttribute("color-interpolation-filters", "sRGB");
 
     var feImage = document.createElementNS(SVG_NS, "feImage");
     feImage.setAttribute("x", "0");
     feImage.setAttribute("y", "0");
-    feImage.setAttribute("width", "100%");
-    feImage.setAttribute("height", "100%");
+    feImage.setAttribute("width", String(fw));
+    feImage.setAttribute("height", String(fh));
     feImage.setAttribute("result", "displacement_map");
     feImage.setAttribute("preserveAspectRatio", "none");
     feImage.setAttributeNS(XLINK_NS, "xlink:href", map.url);
@@ -619,10 +654,12 @@
       var feSpec = document.createElementNS(SVG_NS, "feImage");
       feSpec.setAttribute("x", "0");
       feSpec.setAttribute("y", "0");
-      // 100%×100% over the element box (matches the displacement feImage) so the
-      // specular rim aligns with the true edge too — see the EDGE-ALIGNMENT FIX note.
-      feSpec.setAttribute("width", "100%");
-      feSpec.setAttribute("height", "100%");
+      // Exact-px (matches the displacement feImage, userSpaceOnUse) so the specular
+      // rim maps 1:1 to the element and hugs the true edge on every side — see the
+      // NON-SQUARE / EDGE-ALIGNMENT FIX note. The specular pass stays ON for EVERY
+      // refracted surface (SPEC_ENABLE): "without specular highlight, it's not glass."
+      feSpec.setAttribute("width", String(fw));
+      feSpec.setAttribute("height", String(fh));
       feSpec.setAttribute("preserveAspectRatio", "none");
       feSpec.setAttribute("result", "specular_layer");
       feSpec.setAttributeNS(XLINK_NS, "xlink:href", map.specUrl);

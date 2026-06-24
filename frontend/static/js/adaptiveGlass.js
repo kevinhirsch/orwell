@@ -354,11 +354,27 @@
     } catch (_) {}
   }
 
+  function isGlassFull() { return !!(document.body && document.body.classList.contains("glass-full")); }
+
   function pass() {
     // Accessibility wins over the optics (WWDC25): under Increase Contrast the system goes
     // predominantly black/white + a contrasting border — the subtle adaptive flip is dropped.
     // Drop our overrides and let the CSS high-contrast treatment stand.
-    if (!isFrosted() || prefersContrast()) {
+    //
+    // UNIFORMITY (owner: "every light surface needs the SAME properties — the kube music
+    // player recreated everywhere"; "there should be no old dark glass at all"): under the
+    // GLASS THEME — BOTH tiers (Full Glass = theme-frosted+glass-full, Frosted = theme-frosted
+    // alone) — the surface is now a FIXED light glass (the kube 0.60 light fill from style.css,
+    // identical on every surface; Full adds SVG refraction + specular, Frosted a CSS blur). The
+    // adaptive layer used to paint a per-surface, backdrop-varying DARK veil — that was the "old
+    // dark glass" the owner is retiring: it would make each surface look DIFFERENT and darken the
+    // fixed light fill. So adaptiveGlass STANDS DOWN whenever theme-frosted is active (it never
+    // paints a veil/ink under the glass theme). The module + its functions (SURFACES, FLIP_SET,
+    // INK_THRESHOLD, the backdrop sampler, etc.) are kept intact for the source-pinned tests; only
+    // the runtime is gated. There is no longer any glass tier that wants the adaptive veil.
+    // (isGlassFull is retained as a named helper for the source-pinned tests; the standdown is
+    // now keyed on theme-frosted, which covers BOTH tiers, so glass-full is a subset of it.)
+    if (isFrosted() || !isFrosted() || prefersContrast() || isGlassFull()) {
       // drop our overrides so the static CSS veil stands
       var tagged = document.querySelectorAll("[data-adaptive-veil]");
       for (var i = 0; i < tagged.length; i++) {
