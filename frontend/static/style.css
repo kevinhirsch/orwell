@@ -38157,7 +38157,7 @@ body.theme-frosted input[type="range"] {
    The KNOB becomes liquid glass while the TRACK keeps its sanctioned color (blue
    ON / neutral OFF, above). Ripped from kube.io's Switch component
    (https://kube.io/blog/liquid-glass-css-svg/ #switch): the thumb carries
-   `backdrop-filter:url(#thumb-filter)` (a CONCAVE "lip bezel" displacement — convex
+   the thumb's `backdrop-filter` SVG filter ref (a CONCAVE "lip bezel" displacement — convex
    outer rim, concave middle → "center zoomed out, edges refract the inside"),
    `background-color:rgba(255,255,255,1)`, `box-shadow:0 4px 22px rgba(0,0,0,0.1)`.
    Our concave filter is built once in liquidGlass.js as #owlg-thumb. Apple HIG:
@@ -38302,14 +38302,15 @@ body.theme-frosted .attach-card {
 }
 /* The chat top bar (the "Orwell Chat · N msgs" title) is NOT its own bubble — just a
    quiet Apple-sidebar-style frosted strip: a gentle blur so the title stays legible
-   over content, with NO border / rim / float / pill-radius. The faint veil comes from
-   the material group + the adaptive layer; here we strip the bubble chrome. */
+   over content, with NO heavy border / rim / float. NOT squared-off — its corners use
+   the kit radius so it reads coherent with every other surface (just subtle, not a
+   bordered bubble). The faint veil comes from the material group + the adaptive layer. */
 body.theme-frosted .chat-top-bar {
   -webkit-backdrop-filter: blur(12px) saturate(110%);
   backdrop-filter: blur(12px) saturate(110%);
   border: none !important;
   box-shadow: none !important;
-  border-radius: 0 !important;
+  border-radius: var(--ow-glass-radius, 26px) !important;
 }
 /* the model picker button is a compact capsule control */
 body.theme-frosted .model-picker-btn { border-radius: var(--ow-radius-pill, 999px) !important; }
