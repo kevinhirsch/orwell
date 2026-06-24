@@ -1013,11 +1013,14 @@ def main() -> int:
             g16.goto(base + "/", wait_until="load", timeout=30000)
             g16.wait_for_selector("#orwell-status", state="visible", timeout=15000)
             # F1, the act: collapse the HUD via its header (trusted click).
-            g16.click("#orwell-status .os-hdr")
+            # #640: the status panel composes the OrwellGadget kit — its header is the kit's
+            # .og-head and the collapsed class is the kit's .og-collapsed (the E71 per-user+game
+            # persistence key is unchanged, owned by the panel via persistCollapsed:false).
+            g16.click("#orwell-status .og-head")
             f1_keys = g16.evaluate("""() => {
               const user = (document.body && document.body.dataset.user) || '';
               return {
-                collapsed: document.getElementById('orwell-status').classList.contains('os-collapsed'),
+                collapsed: document.getElementById('orwell-status').classList.contains('og-collapsed'),
                 keys: Object.keys(localStorage).filter(k => k.startsWith('orwell-status-collapsed')),
                 expected: 'orwell-status-collapsed:The Player:' + user,
               };
@@ -1070,8 +1073,8 @@ def main() -> int:
             g16.wait_for_selector("#orwell-status", state="visible", timeout=15000)
             f1_after = g16.evaluate("""() => {
               const hud = document.getElementById('orwell-status');
-              const hdr = hud && hud.querySelector('.os-hdr');
-              return { collapsed: !!hud && hud.classList.contains('os-collapsed'),
+              const hdr = hud && hud.querySelector('.og-head');  // #640: the kit's header
+              return { collapsed: !!hud && hud.classList.contains('og-collapsed'),
                        expanded: hdr ? hdr.getAttribute('aria-expanded') : null };
             }""")
             check(f1_after.get("collapsed") is True and f1_after.get("expanded") == "false",
@@ -1735,7 +1738,7 @@ def main() -> int:
                 [...svg.querySelectorAll('path,circle,rect,line,polyline,polygon,ellipse')]
                   .map(n => n.tagName + ':' + GEOM.map(a => n.getAttribute(a) || '').join(','))
                   .join('|');
-              const iconSel = { 'rail-game-status': '.os-hdr svg' };
+              const iconSel = { 'rail-game-status': '.og-head svg' };  // #640: the kit header
               const entries = [...rail.querySelectorAll('.icon-rail-btn[data-rail-source]')].map(btn => {
                 const src = document.getElementById(btn.dataset.railSource);
                 const srcSvg = src && src.querySelector(iconSel[btn.id] || 'svg');

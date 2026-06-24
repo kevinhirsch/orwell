@@ -31,10 +31,12 @@ _LOCK = threading.Lock()
 # malformed client can never write a wild value that throws the window off-screen on another device.
 #
 # #637/#638 extend the SAME store to a few synthetic ids — the gadget rail's ORDER (id
-# "gadget-rail"), the panel SIDE (id "panel"), and game-POPUP shown/dismissed state (id
-# "popup:<name>"). They reuse the per-field last-write-wins merge + the `layout-changed` fan-out;
-# all are Vault-free (an order, a left/right enum, a shown/dismissed bool carry no game secret).
-_BOOL_FIELDS = ("open", "minimized", "docked", "dismissed", "shown")
+# "gadget-rail"), the panel SIDE (id "panel"), game-POPUP shown/dismissed state (id
+# "popup:<name>"), and (#640, the OrwellGadget kit) per-gadget COLLAPSED state (id
+# "gadget:<id>"). They reuse the per-field last-write-wins merge + the `layout-changed`
+# fan-out; all are Vault-free (an order, a left/right enum, a shown/dismissed/collapsed
+# bool carry no game secret).
+_BOOL_FIELDS = ("open", "minimized", "docked", "dismissed", "shown", "collapsed")
 _NUM_FIELDS = ("x", "y", "w", "h")
 _NUM_MIN, _NUM_MAX = -20000.0, 20000.0
 _MAX_WINDOWS = 64          # a hard cap on tracked windows per user (the kit has a handful)

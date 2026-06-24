@@ -104,40 +104,24 @@ import { onNarrowChange } from './platform.js';
     return "";
   }
 
+  // #640: compose the OrwellGadget kit (collapsible). The kit owns the card shell, the
+  // collapsible header (role=button + chevron + the persisted/synced collapse), and the rail
+  // mount. This panel's DYNAMIC header line (Week N / phase / time-of-day / stale-dot) renders
+  // into the kit's TITLE slot — so the live readout still reads as the card title, exactly as
+  // before — and everything else renders in the body. Only this gadget's own inner CSS stays here.
+  let _gadget = null;
   function ensurePanel() {
     let el = document.getElementById(ID);
     if (el) return el;
-    el = document.createElement("section");
-    el.id = ID;
-    el.setAttribute("aria-label", "Game status");
-    // A3: announcements happen via the dedicated delta announcer below — a live region
-    // on a root that toggles display:none and swaps every field per poll announces
-    // nothing useful (either silence or a full re-read with no sense of what changed).
-    el.innerHTML = `
-      <style>
-        /* E64: sidebar chrome, not a window — static flow, full sidebar width. */
-        #orwell-status {
-          display: none;
-          margin: var(--space-2) var(--space-2) 0;
-          padding: var(--space-2) var(--space-3);
-          background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
-          color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 10px;
-          font-family: 'Fira Code', ui-monospace, monospace;
-          font-size: var(--fs-xs); line-height: 1.5;
-        }
-        #orwell-status .os-hdr {
-          display: flex; align-items: baseline; gap: .4rem;
-          margin-bottom: .3rem; font-weight: 600; letter-spacing: .03em;
-          cursor: pointer; user-select: none;
-        }
+    if (!document.getElementById("orwell-status-css")) {
+      const st = document.createElement("style");
+      st.id = "orwell-status-css";
+      st.textContent = `
+        /* the dynamic header line (Week / phase / tod / rest), rendered into the kit title slot */
         #orwell-status .os-ttl { display: flex; align-items: baseline; gap: .4rem; flex: 1; min-width: 0; flex-wrap: wrap; }
-        #orwell-status .os-hdr .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
-        #orwell-status .os-hdr .os-tod { opacity: .85; font-weight: 400; font-size: .92em; }
+        #orwell-status .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
+        #orwell-status .os-tod { opacity: .85; font-weight: 400; font-size: .92em; }
         #orwell-status .os-rest { opacity: .6; font-weight: 400; font-style: italic; margin-left: .45em; font-size: .9em; }
-        #orwell-status .os-chev { opacity: .55; margin-left: auto; transition: transform .15s; }
-        #orwell-status.os-collapsed .os-chev { transform: rotate(-90deg); }
-        #orwell-status.os-collapsed .os-body { display: none; }
         #orwell-status .os-row { display: flex; gap: .4rem; }
         #orwell-status .os-row .os-k { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
@@ -193,13 +177,38 @@ import { onNarrowChange } from './platform.js';
           margin-left: .4rem; font-weight: 700;
           color: var(--accent, #9cdef2);
         }
-        #orwell-status .os-prem-left { opacity: .7; font-size: .9em; margin-top: .1rem; }
-      </style>
-      <div class="os-hdr" role="button" tabindex="0" aria-expanded="true" title="Collapse">
-        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-tod" id="os-tod" hidden title="Time of day in the house"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
-        <span class="os-chev" aria-hidden="true">▾</span>
-      </div>
-      <div class="os-body">
+        #orwell-status .os-prem-left { opacity: .7; font-size: .9em; margin-top: .1rem; }`;
+      document.head.appendChild(st);
+    }
+
+    // Compose the kit (collapsible). persistCollapsed:false — this panel keeps its OWN E71
+    // per-user+GAME collapse key (a richer scoping than the kit's per-user); the kit renders the
+    // chevron + role=button header + toggle wiring + DOM state, and delegates persistence here.
+    // 0054: the kit mounts into the rail (sidebar → body fallback). NB: this panel's legacy
+    // fallback anchored after #sessions-section; the kit's fallback is the sidebar root — both
+    // land it in the sidebar when there's no rail, which is all the E64 placement requires.
+    _gadget = window.OrwellGadgetKit.create({
+      id: ID, title: "House Status", ariaLabel: "Game status",
+      collapsible: true, persistCollapsed: false,
+      // E71: this panel owns a richer per-user+GAME collapse key than the kit's per-user one — so
+      // it persists in the kit's onCollapse hook (fired on every header toggle), keyed to _gameKey.
+      onCollapse: (on) => {
+        try { localStorage.setItem(storageKey("orwell-status-collapsed"), on ? "1" : ""); } catch (_) {}
+      },
+    });
+    const body = _gadget.ensure();
+    el = _gadget.el;
+    // The DYNAMIC header line (Week / phase / tod / stale-dot) renders into the kit TITLE slot —
+    // so the live readout still reads as the card title exactly as before. Replace the static title.
+    const titleSlot = el.querySelector(".og-title");
+    titleSlot.classList.add("os-ttl");
+    titleSlot.removeAttribute("role"); titleSlot.removeAttribute("aria-level");
+    titleSlot.innerHTML =
+      '<span id="os-week">Week —</span>' +
+      '<span class="os-phase" id="os-phase"></span>' +
+      '<span class="os-tod" id="os-tod" hidden title="Time of day in the house"></span>' +
+      '<span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span>';
+    body.innerHTML = `
         <div class="os-done" id="os-done" hidden>Season complete<span id="os-done-winner"></span></div>
         <div class="os-premiere" id="os-premiere" hidden>
           <div class="os-prem-obj">Meet the house<span class="os-prem-count" id="os-prem-count"></span></div>
@@ -213,39 +222,13 @@ import { onNarrowChange } from './platform.js';
         </div>
         <div class="os-roster-h" id="os-roster-h" role="heading" aria-level="3">The House</div>
         <div class="os-roster" id="os-roster"></div>
-      </div>
-      <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
+        <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
 
-    // 0054: prefer the control-room gadget rail; fall back to the sidebar (E64) then body.
-    const rail = document.getElementById("gadget-rail-body");
-    const sidebar = document.getElementById("sidebar");
-    const sessions = document.getElementById("sessions-section");
-    if (rail) {
-      rail.appendChild(el);
-    } else if (sessions && sessions.parentElement) {
-      sessions.parentElement.insertBefore(el, sessions.nextSibling);
-    } else if (sidebar) {
-      sidebar.appendChild(el);
-    } else {
-      document.body.appendChild(el); // headless/degraded DOM — still functional
-    }
-
-    // Collapse in place (sidebar chrome, not a dock park) — persisted per user+game.
-    const hdr = el.querySelector(".os-hdr");
-    const setCollapsed = (on) => {
-      el.classList.toggle("os-collapsed", !!on);
-      hdr.setAttribute("aria-expanded", on ? "false" : "true");
-      // A11Y-5: the accessible name must reflect the CURRENT action, not a stale static title —
-      // a collapsed toggle that still reads "Collapse" inverts the affordance for SR/voice users.
-      hdr.setAttribute("aria-label", on ? "Expand game status" : "Collapse game status");
-      hdr.setAttribute("title", on ? "Expand" : "Collapse");
-      try { localStorage.setItem(storageKey("orwell-status-collapsed"), on ? "1" : ""); } catch (_) {}
-    };
-    const toggle = () => setCollapsed(!el.classList.contains("os-collapsed"));
-    hdr.addEventListener("click", toggle);
-    hdr.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
-    });
+    // Collapse persistence stays E71 per user+game — the kit drives the DOM (class + chevron +
+    // aria-expanded/label) AND fires onCollapse above, which writes the per-game key. So this
+    // setter is just _gadget.setCollapsed; a header toggle, a boot restore, and a season re-apply
+    // all flow through the one path (and persist the right key).
+    const setCollapsed = (on) => _gadget.setCollapsed(!!on);
     try {
       if (localStorage.getItem(storageKey("orwell-status-collapsed")) === "1") setCollapsed(true);
     } catch (_) {}

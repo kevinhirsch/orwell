@@ -1861,6 +1861,51 @@ body.bg-pattern-perlin-flow {
     body[data-gadget-side="left"] #gadget-rail { order: -1; border-left: none;
       border-right: 1px solid var(--border); box-shadow: 4px 0 12px rgba(0,0,0,0.08); }
     body[data-gadget-side="left"] #sidebar { order: 1; }
+    /* ── THE OrwellGadget KIT FAMILY (.og-*) — #640 ─────────────────────────────
+       The canonical per-gadget card chrome, the rail counterpart of the .ow-* window
+       family. Every rail gadget composes orwellGadget.js, which ALSO injects this family
+       at runtime (ensureCss) so it works before style.css loads; this copy is the
+       source-of-truth declaration the house themes (0052) + the frost layer paint and the
+       convention gate pins (mirroring how .ow-* / .gadget-rail-* live here). It deliberately
+       MATCHES the visual language every hand-rolled gadget used (margin/padding/the
+       70%-panel mix/border/10px radius/Fira mono/fs-xs/line-height) so a migrated gadget
+       renders identically. Keep this and the runtime ensureCss() in orwellGadget.js in sync. */
+    .og-card {
+      display: none;
+      margin: var(--space-2, .4rem) var(--space-2, .4rem) 0;
+      padding: var(--space-2, .4rem) var(--space-3, .55rem);
+      background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
+      color: var(--fg, #9cdef2);
+      border: 1px solid var(--border, #355a66); border-radius: 10px;
+      font-family: 'Fira Code', ui-monospace, monospace;
+      font-size: var(--fs-xs, .72rem); line-height: 1.5;
+    }
+    .og-card .og-head {
+      display: flex; align-items: center; gap: .4rem; margin: 0 0 .35rem;
+      font-weight: 600; letter-spacing: .03em;
+    }
+    .og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }
+    .og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }
+    .og-card .og-icon { flex: 0 0 auto; }
+    .og-card .og-title {
+      flex: 1 1 auto; min-width: 0;
+      color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .og-card .og-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: .25rem; }
+    .og-card .og-act {
+      flex: 0 0 auto; background: rgba(255,255,255,.06);
+      border: 1px solid var(--border, #355a66); color: inherit; cursor: pointer;
+      border-radius: 6px; font: inherit; font-size: .68rem;
+      min-height: 24px; padding: 0 .45rem; opacity: .8;
+    }
+    .og-card .og-act:hover, .og-card .og-act:focus-visible { opacity: 1; background: rgba(255,255,255,.12); }
+    .og-card .og-chev { flex: 0 0 auto; opacity: .55; margin-left: .1rem; transition: transform .15s; }
+    .og-card.og-collapsed .og-chev { transform: rotate(-90deg); }
+    .og-card.og-collapsed .og-body { display: none; }
+    .og-card .og-body { overflow-wrap: anywhere; }
+    .og-card .og-empty { opacity: .6; font-style: italic; }
+    @media (prefers-reduced-motion: reduce) { .og-card .og-chev { transition: none; } }
     /* game-build gate: no rail in the full inherited workspace */
     body:not([data-game-build]) #gadget-rail,
     body:not([data-game-build]) #gadget-rail-open { display: none !important; }
@@ -36688,6 +36733,7 @@ body.theme-frosted .modal {
   .gadget-rail-head button,
   .ow-controls button,
   .ow-dismiss,
+  .og-card .og-act,
   #gadget-rail-strip [data-grail-gadget],
   #gadget-rail-strip button {
     /* !important beats the kit's runtime-injected `.ow-controls button { min-width:24px }`

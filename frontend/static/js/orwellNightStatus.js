@@ -40,6 +40,11 @@
     "late-night": ["🌌", "Late night"],
   };
 
+  // #640: compose the OrwellGadget kit (the .og-* card chrome — header/body/empty-state, the
+  // rail mount + content-driven visibility). Only this gadget's own inner CSS (the nightfall
+  // label/quiet treatment) stays here; the card shell + header are the kit's. The kit's TITLE is
+  // a static "Nightfall"; the dynamic time-of-day phase (🌅 Morning …) renders in the BODY.
+  let _gadget = null;
   function ensureEl() {
     let el = document.getElementById(ID);
     if (el) return el;
@@ -47,44 +52,25 @@
       const st = document.createElement("style");
       st.id = "orwell-night-css";
       st.textContent = `
-        #orwell-night {
-          display: none;
-          margin: var(--space-2) var(--space-2) 0;
-          padding: var(--space-2) var(--space-3);
-          background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
-          color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 10px;
-          font-family: 'Fira Code', ui-monospace, monospace;
-          font-size: var(--fs-xs); line-height: 1.5;
-        }
-        #orwell-night .onight-hd {
+        #orwell-night .onight-phase {
+          display: flex; align-items: center; gap: .4rem; margin: 0 0 .3rem;
+          font-weight: 600; letter-spacing: .03em;
           color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
-          margin: 0 0 .3rem; font-weight: 600; letter-spacing: .03em;
-          display: flex; align-items: center; gap: .4rem;
         }
-        #orwell-night .onight-body { overflow-wrap: anywhere; }
+        #orwell-night .onight-list { overflow-wrap: anywhere; }
         #orwell-night .onight-label { opacity: .6; }
         #orwell-night .onight-quiet { opacity: .6; font-style: italic; }`;
       document.head.appendChild(st);
     }
-    el = document.createElement("section");
-    el.id = ID;
-    // A11Y-1: aria-label landmark only — NOT a live region on the root (re-rendering every poll
-    // would re-announce the unchanged nightfall state). A hidden child announces only on change.
-    el.setAttribute("aria-label", "Nightfall");
-    el.innerHTML = `<div class="onight-hd" data-role="head"></div>` +
-      `<div class="onight-body" data-role="body"></div>` +
-      `<span data-role="announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></span>`;
     // 0054: prefer the control-room gadget rail, beside the other ambient house gadgets (presence).
-    const rail = document.getElementById("gadget-rail-body");
-    const sidebar = document.getElementById("sidebar");
-    const anchor = document.getElementById("orwell-presence") || document.getElementById("orwell-status");
-    if (rail && anchor && anchor.parentElement === rail) rail.insertBefore(el, anchor.nextSibling);
-    else if (rail) rail.appendChild(el);
-    else if (anchor && anchor.parentElement) anchor.parentElement.insertBefore(el, anchor.nextSibling);
-    else if (sidebar) sidebar.appendChild(el);
-    else document.body.appendChild(el);
-    return el;
+    _gadget = window.OrwellGadgetKit.create({ id: ID, title: "Nightfall", icon: "🌙", ariaLabel: "Nightfall" });
+    const body = _gadget.ensure("orwell-presence");
+    // A11Y-1: a live region is NOT the card root (re-rendering every poll would re-announce the
+    // unchanged state). The phase line + the turned-in list + a hidden polite announcer (changes only).
+    body.innerHTML = `<div class="onight-phase" data-role="phase"></div>` +
+      `<div class="onight-list" data-role="body"></div>` +
+      `<span data-role="announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></span>`;
+    return _gadget.el;
   }
 
   function esc(s) {
@@ -98,11 +84,11 @@
     const el = ensureEl();
     const tod = state && state.started ? state.timeOfDay : null;
     // Only while the in-game clock is actually running (the feature is on); otherwise the gadget is silent.
-    if (!tod || !TOD[tod]) { el.style.display = "none"; el.removeAttribute("title"); _lastAnnounced = null; return; }
+    if (!tod || !TOD[tod]) { _gadget.hide(); el.removeAttribute("title"); _lastAnnounced = null; return; }
     const [emoji, label] = TOD[tod];
 
-    // HEADER: the phase indicator (emoji + label).
-    el.querySelector("[data-role='head']").innerHTML =
+    // PHASE LINE: the time-of-day indicator (emoji + label) at the top of the card body.
+    el.querySelector("[data-role='phase']").innerHTML =
       '<span aria-hidden="true">' + emoji + "</span><span>" + esc(label) + "</span>";
 
     // BODY: who has turned in for the night (Vault-free; the engine's observable `asleep` list).
@@ -128,7 +114,7 @@
       if (ann) ann.textContent = announce;
       _lastAnnounced = announce;
     }
-    el.style.display = "block";
+    _gadget.show();
   }
 
   async function tick() {
