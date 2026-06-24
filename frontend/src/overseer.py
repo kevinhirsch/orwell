@@ -47,14 +47,21 @@ LEVELS = ("observation", "action", "anomaly", "escalation")
 
 
 def overseer_enabled() -> bool:
-    """Feature 0079 runtime overseer — OPT-IN, default OFF. Set ``ORWELL_OVERSEER`` to
-    ``1``/``true``/``yes``/``on`` to enable the live shadow hook; unset (or any falsey value) ⇒ the
-    deterministic floor stands and the loop runs exactly as before. Read from the env so an operator
-    flips it without a restart (mirrors ``settings.game_build_enabled``)."""
+    """Feature 0079 runtime overseer — OPT-IN, default OFF. The admin Settings toggle
+    (``overseer_enabled`` in settings.json, set from the status page — increment 5) is the PRIMARY
+    control and wins whenever it is explicitly set; the ``ORWELL_OVERSEER`` env var
+    (``1``/``true``/``yes``/``on``) is the headless fallback when no toggle has been chosen. Unset
+    everywhere ⇒ the deterministic floor stands and the loop runs exactly as before. Fail-soft: a
+    broken settings read degrades to the env var (config must never raise into the loop)."""
+    try:
+        from src.settings import get_setting
+        val = get_setting("overseer_enabled", None)
+        if val is not None:
+            return bool(val)
+    except Exception:
+        pass
     raw = os.getenv("ORWELL_OVERSEER")
-    if raw is None:
-        return False
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    return raw is not None and raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 @dataclass(frozen=True)

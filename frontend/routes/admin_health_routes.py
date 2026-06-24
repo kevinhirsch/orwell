@@ -697,11 +697,12 @@ def setup_admin_health_routes() -> APIRouter:
         """The LLM I/O trace toggle + log-retention horizon + the live total-size
         readout (the universal logging setting on the status page). Best-effort."""
         require_admin(request)
-        from src import llm_trace
+        from src import llm_trace, overseer
         from src.settings import get_setting
         total = llm_trace.total_log_bytes()
         return {
             "traceEnabled": bool(get_setting("llm_trace_enabled", True)),
+            "overseerEnabled": bool(overseer.overseer_enabled()),
             "retentionDays": llm_trace.retention_days(),
             "choices": llm_trace.RETENTION_CHOICES,
             "totalBytes": total,
@@ -714,7 +715,7 @@ def setup_admin_health_routes() -> APIRouter:
         """Persist the trace toggle and/or retention horizon. Lowering the horizon
         trims immediately so the freed space shows up at once."""
         require_admin(request)
-        from src import llm_trace
+        from src import llm_trace, overseer
         from src.settings import load_settings, save_settings
         try:
             body = await request.json()
@@ -726,6 +727,9 @@ def setup_admin_health_routes() -> APIRouter:
         changed = False
         if "traceEnabled" in body:
             settings["llm_trace_enabled"] = bool(body["traceEnabled"])
+            changed = True
+        if "overseerEnabled" in body:
+            settings["overseer_enabled"] = bool(body["overseerEnabled"])
             changed = True
         if "retentionDays" in body:
             try:
@@ -741,6 +745,7 @@ def setup_admin_health_routes() -> APIRouter:
         result = llm_trace.trim_logs(None)
         return {
             "traceEnabled": bool(settings.get("llm_trace_enabled", True)),
+            "overseerEnabled": bool(overseer.overseer_enabled()),
             "retentionDays": llm_trace.retention_days(),
             "totalBytes": result["totalBytes"],
             "totalHuman": result["totalHuman"],
@@ -1074,6 +1079,14 @@ _STATUS_PAGE = """<!doctype html>
   </label>
   <button type="button" class="btn" id="trim-now" title="Trim every managed logfile to the selected horizon right now">Trim now</button>
   <span id="retmsg" class="sub"></span>
+</div>
+<h1 style="margin-top:26px">RUNTIME OVERSEER</h1>
+<div class="sub">The runtime loop overseer (feature 0079) watches the engine↔LLM loop; when a symptom trips it diagnoses the root cause and logs it to the <strong>Overseer (live)</strong> stream above. <strong>Shadow mode</strong> — it diagnoses and logs but does not act (the existing guardrails still do), so enabling it is safe and changes nothing the player sees. The <code>ORWELL_OVERSEER</code> env var is the headless fallback when this toggle is unset.</div>
+<div class="actions" style="margin:8px 0;align-items:center;flex-wrap:wrap">
+  <label class="sub" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+    <input type="checkbox" id="overseer-toggle"> enable the runtime overseer (shadow mode)
+  </label>
+  <span id="overseermsg" class="sub"></span>
 </div>
 <div id="err"></div>
 <script nonce="{{CSP_NONCE}}">
@@ -1590,7 +1603,8 @@ async function loadOps() {
 loadOps();
 // ── log retention + LLM I/O trace controls ──
 const retGrid = document.getElementById("retgrid"), retDays = document.getElementById("ret-days"),
-      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg");
+      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg"),
+      overseerToggle = document.getElementById("overseer-toggle"), overseerMsg = document.getElementById("overseermsg");
 function retBytes(n) { n = Math.max(0, +n || 0); const u = ["B","KB","MB","GB"]; let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (i ? n.toFixed(1) : (n|0)) + " " + u[i]; }
 function renderRetention(d) {
@@ -1612,6 +1626,7 @@ async function loadRetention() {
     retDays.innerHTML = (d.choices || []).map(c => '<option value="' + esc(c.days) + '">' + esc(c.label) + "</option>").join("");
     retDays.value = String(d.retentionDays);
     traceToggle.checked = !!d.traceEnabled;
+    if (overseerToggle) overseerToggle.checked = !!d.overseerEnabled;
     renderRetention(d);
   } catch (e) {}
 }
@@ -1626,6 +1641,16 @@ async function saveRetention(body, note) {
   } catch (e) { retMsg.innerHTML = '<span class="bad">save failed</span>'; }
 }
 traceToggle.addEventListener("change", () => saveRetention({ traceEnabled: traceToggle.checked }));
+if (overseerToggle) overseerToggle.addEventListener("change", async () => {
+  overseerMsg.textContent = "saving…";
+  try {
+    const r = await fetch("/api/admin/logs/retention", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overseerEnabled: overseerToggle.checked }) });
+    const d = await r.json();
+    overseerToggle.checked = !!d.overseerEnabled;
+    overseerMsg.textContent = overseerToggle.checked ? "on" : "off";
+  } catch (e) { overseerMsg.innerHTML = '<span class="bad">save failed</span>'; }
+});
 retDays.addEventListener("change", () => saveRetention({ retentionDays: +retDays.value }, "applying horizon…"));
 document.getElementById("trim-now").addEventListener("click", async () => {
   retMsg.textContent = "trimming…";
