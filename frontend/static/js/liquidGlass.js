@@ -94,8 +94,8 @@
   // Perf caps. Mobile gets a HARD-LOWER cap (small GPUs; the refraction is the most
   // expensive thing on the page). collectTargets() reads activeMaxSurfaces() so the
   // cap follows the viewport live (a rotate/resize re-evaluates on the next pass).
-  var MAX_LIVE_SURFACES = 14;        // desktop hard cap on simultaneously-refracted elements
-  var MAX_LIVE_SURFACES_MOBILE = 6;  // small-screen hard cap (GPU-cheap)
+  var MAX_LIVE_SURFACES = 16;        // desktop hard cap on simultaneously-refracted elements
+  var MAX_LIVE_SURFACES_MOBILE = 8;  // small-screen hard cap (GPU-cheap)
   var MOBILE_W = 768;                // ≤ this viewport width ⇒ the mobile cap applies
   var SIZE_BUCKET = 8;               // round W/H to this grid so near-equal sizes share a map
   var RESIZE_DEBOUNCE_MS = 140;      // coalesce a resize-drag burst into one re-map
@@ -114,8 +114,14 @@
     ".chat-input-bar",
     "#sidebar",
     ".modal-content",
+    ".og-card",                    // the control-room gadget cards (prioritized — "gadgets first")
+    // Transient menus & popovers: small + short-lived, so they refract when open and
+    // share size buckets (one map per size). Usually only 1–2 are open at once, so they
+    // sit comfortably under the cap. watchMounts() also schedules a pass when they mount.
+    ".dropdown",
+    ".overflow-menu",
+    ".cp-popover",
     ".on-card",                    // the notice kit
-    ".og-card",                    // the gadget cards (lowest priority)
   ];
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
@@ -578,7 +584,7 @@
           for (var j = 0; j < m.addedNodes.length; j++) {
             var n = m.addedNodes[j];
             if (n.nodeType !== 1) continue;
-            var sel = ".ow-window, .chat-input-bar, .og-card, .on-card, .modal-content, #minimized-dock, .minimized-dock-chip";
+            var sel = ".ow-window, .chat-input-bar, .og-card, .on-card, .modal-content, #minimized-dock, .minimized-dock-chip, .dropdown, .overflow-menu, .cp-popover";
             if (
               n.matches &&
               (n.matches(sel) || (n.querySelector && n.querySelector(sel)))
