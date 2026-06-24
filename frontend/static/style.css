@@ -37558,6 +37558,30 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   border-radius: var(--ow-glass-radius-inner) !important;
 }
 
+/* The notice/banner DISMISS (.on-dismiss) is NOT a glass button — it's a quiet,
+   integrated inline ✕ that belongs to the banner (Apple notification/alert dismiss),
+   not a floating glass puck. Undo the glass-chip morph the generic .on-card button
+   rule applies, restoring the kit's quiet inline affordance (transparent, no blur,
+   no disc, no lift) while keeping the 44px hit target + the subtle hover wash. */
+body.theme-frosted .on-card .on-dismiss {
+  background: none !important;
+  background-color: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 8px !important;
+  transform: none !important;
+  filter: none !important;
+  opacity: .55;
+}
+body.theme-frosted .on-card .on-dismiss:hover,
+body.theme-frosted .on-card .on-dismiss:focus-visible {
+  opacity: 1;
+  background: rgba(255,255,255,.08) !important;  /* a quiet wash, not a glass disc */
+  transform: none !important;
+}
+
 /* prefers-reduced-transparency already forces these SOLID (the a11y block above):  */
 /* it sets background-image/backdrop-filter to none; add the radius/shadow reset so  */
 /* the solid surface doesn't keep a glass float that implies translucency.          */
@@ -37761,13 +37785,14 @@ body.theme-frosted .ow-titlebar {
   position: relative;
 }
 /* Title CENTERED in the band (macOS), absolutely centered so the left traffic-light
-   cluster doesn't shove it. SF Semibold ~15px, zero tracking, full-contrast. */
+   cluster doesn't shove it. SF Semibold at the macOS titlebar metric (~13px — compare
+   nr_icon_composer "podcasts.icon"), zero tracking, full-contrast. */
 body.theme-frosted .ow-title {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   max-width: 60%; text-align: center;
   font-family: var(--ow-ui-font);
   font-weight: var(--ow-fw-semibold, 600);
-  font-size: 15px;
+  font-size: 13px;
   letter-spacing: 0 !important;  /* SF needs no tracking */
   line-height: 1;
   color: var(--fg, #fff);
