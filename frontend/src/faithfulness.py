@@ -139,6 +139,44 @@ def should_judge(*, claim_bearing: bool, engaged_scene: bool) -> bool:
         return False
 
 
+# ── the active-mode dispatch seam (the *act*) — trigger-only, mandate-walled ────────
+
+
+def dispatch_correction(verdict, actions: dict) -> dict:
+    """Feature 0081 ``active``-mode dispatch seam — route a :class:`FaithfulnessVerdict` to the
+    caller's correction action for its lever. Mirrors :func:`src.overseer.dispatch_lever`.
+
+    ``actions`` maps ``{lever_name -> zero-arg callable}`` where each callable PERFORMS the diegetic
+    correction (``adopt`` → canonicalize the open-set detail via recordInteraction; ``reframe`` /
+    ``reground`` → queue the next-turn re-ground) and returns a truthy "applied" signal. This function
+    looks up ``verdict.lever`` and INVOKES its callable — nothing else.
+
+    **Trigger-only by construction (mandate #3):** it only *invokes* the caller's callable; it NEVER
+    bends an outcome, computes a magnitude, or authors content. THE WALL is upstream —
+    :meth:`FaithfulnessJudge.verdict_from_reply` already rejected ``adopt`` for any non-``open`` slip —
+    so by the time a verdict reaches here an ``adopt`` lever is guaranteed open-set.
+
+    Returns ``{'lever': str, 'applied': bool, 'reason': str}``. ``'none'`` (and a ``None``/garbage
+    verdict, or no action provided for the lever) is a no-op. **Fail-soft:** a raising callable ⇒
+    ``applied=False`` (swallowed, never propagated)."""
+    lever = getattr(verdict, "lever", None)
+    if not isinstance(lever, str) or lever not in FAITH_LEVERS:
+        return {"lever": str(lever) if lever is not None else "", "applied": False,
+                "reason": "no lever to dispatch"}
+    if lever == "none":
+        return {"lever": lever, "applied": False, "reason": "none — no correction"}
+    action = actions.get(lever) if isinstance(actions, dict) else None
+    if action is None:
+        # In P3 only 'adopt' is wired; 'reframe'/'reground' land in P4 — until then, no-op (not error).
+        return {"lever": lever, "applied": False, "reason": "no action provided for lever"}
+    try:
+        applied = bool(action())   # TRIGGER-ONLY: invoke the caller's diegetic correction.
+        return {"lever": lever, "applied": applied,
+                "reason": "applied" if applied else "action declined"}
+    except Exception as e:
+        return {"lever": lever, "applied": False, "reason": f"{type(e).__name__}: {e}"}
+
+
 # ── the port + the deterministic stub (the *what*, no model) ───────────────────────
 
 

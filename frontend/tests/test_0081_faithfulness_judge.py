@@ -22,6 +22,7 @@ from src.faithfulness import (
     DeterministicFaithfulnessJudge,
     FaithfulnessJudge,
     FaithfulnessVerdict,
+    dispatch_correction,
     should_judge,
 )
 
@@ -180,3 +181,53 @@ def test_a_broken_projection_does_not_crash_the_prompt():
     # default=str makes json.dumps tolerate it; either way the builder must never raise.
     prompt = _judge("").build_prompt("line", {"weird": _Unserializable()})
     assert "NARRATION:" in prompt and "PROJECTION:" in prompt
+
+
+# ── dispatch_correction — the trigger-only active-mode seam (mirrors dispatch_lever) ──
+
+def _fv(lever, classification="open"):
+    return FaithfulnessVerdict("persona", classification, lever)
+
+
+def test_dispatch_correction_invokes_exactly_the_lever_action():
+    """Trigger-only (mandate #3): for a verdict whose lever is wired, exactly that action runs and is
+    the only side effect — dispatch authors nothing itself."""
+    calls = []
+    actions = {lev: (lambda l=lev: (calls.append(l) or True))
+               for lev in ("adopt", "reframe", "reground")}
+    r = dispatch_correction(_fv("adopt"), actions)
+    assert calls == ["adopt"]
+    assert set(r.keys()) == {"lever", "applied", "reason"}
+    assert r["lever"] == "adopt" and r["applied"] is True
+
+
+def test_dispatch_correction_none_lever_is_a_noop():
+    ran = []
+    r = dispatch_correction(_fv("none"), {"none": lambda: ran.append(1) or True})
+    assert ran == [] and r["applied"] is False         # 'none' never invokes an action
+
+
+def test_dispatch_correction_no_action_for_lever_is_a_noop():
+    # reframe/reground aren't wired until P4 — an unwired lever is a no-op, not an error.
+    r = dispatch_correction(_fv("reframe", "closed"), {})
+    assert r["applied"] is False and r["lever"] == "reframe"
+
+
+def test_dispatch_correction_raising_action_is_failsoft():
+    def _boom():
+        raise RuntimeError("correction exploded")
+    r = dispatch_correction(_fv("adopt"), {"adopt": _boom})   # must not raise
+    assert r["applied"] is False and r["lever"] == "adopt"
+
+
+def test_dispatch_correction_out_of_set_lever_is_rejected():
+    ran = []
+    rogue = FaithfulnessVerdict("persona", "open", "frobnicate")
+    r = dispatch_correction(rogue, {"frobnicate": lambda: ran.append(1) or True})
+    assert ran == [] and r["applied"] is False         # only FAITH_LEVERS are ever routed
+
+
+def test_dispatch_correction_none_verdict_is_a_noop():
+    ran = []
+    r = dispatch_correction(None, {lev: (lambda: ran.append(1)) for lev in FAITH_LEVERS})
+    assert ran == [] and r["applied"] is False

@@ -1,7 +1,7 @@
 """Feature 0081 — the SHADOW-mode faithfulness hook (P2b: the agent-loop wiring).
 
 The judge (P2a) is wired into the live loop at the post-turn seam (beside the 0079 overseer hook) by
-``_faith_shadow_check`` + ``_faith_build_projection`` in ``src/agent_loop.py``. This lane proves the
+``_faith_check`` + ``_faith_build_projection`` in ``src/agent_loop.py``. This lane proves the
 wiring's behavior at the unit grain, mirroring the 0080 active-overseer lane:
 
   * SHADOW logs a detected slip to the OVERSEER ring and **does NOT correct** (no recordInteraction);
@@ -18,7 +18,7 @@ import asyncio
 import json
 import pathlib
 
-from src.agent_loop import _faith_build_projection, _faith_shadow_check
+from src.agent_loop import _faith_build_projection, _faith_check
 
 
 def _run(coro):
@@ -84,7 +84,7 @@ def test_shadow_logs_a_slip_and_does_not_correct(monkeypatch, tmp_path):
     corrected = []
     monkeypatch.setattr("src.orwell_engine.record_interaction", lambda *a, **k: corrected.append(1))
 
-    _run(_faith_shadow_check("you pulled off the veto", claim_bearing=True,
+    _run(_faith_check("you pulled off the veto", claim_bearing=True,
                              engaged_scene=False, owner="u1"))
 
     # exactly one slip logged, on the OVERSEER ring, with the faith:<dimension> kind + the lever.
@@ -103,7 +103,7 @@ def test_a_faithful_turn_logs_nothing(monkeypatch, tmp_path):
     _patch_llm(monkeypatch, json.dumps(
         {"dimension": "none", "classification": "none", "lever": "none", "rationale": ""}))
     logged = _capture_log(monkeypatch)
-    _run(_faith_shadow_check("you and a houseguest talk strategy", claim_bearing=False,
+    _run(_faith_check("you and a houseguest talk strategy", claim_bearing=False,
                              engaged_scene=True, owner="u1"))
     assert logged == []                                # a non-slip verdict surfaces nothing
 
@@ -119,7 +119,7 @@ def test_no_model_is_a_noop(monkeypatch, tmp_path):
         return None
     monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _none)
     logged = _capture_log(monkeypatch)
-    _run(_faith_shadow_check("you won HOH", claim_bearing=True, engaged_scene=False, owner="u1"))
+    _run(_faith_check("you won HOH", claim_bearing=True, engaged_scene=False, owner="u1"))
     assert logged == []
 
 
@@ -131,7 +131,7 @@ def test_off_mode_never_resolves_a_model(monkeypatch, tmp_path):
         resolved.append(1)
         return lambda p: "{}"
     monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _fake_resolve)
-    _run(_faith_shadow_check("you won HOH", claim_bearing=True, engaged_scene=False, owner="u1"))
+    _run(_faith_check("you won HOH", claim_bearing=True, engaged_scene=False, owner="u1"))
     assert resolved == []                              # off ⇒ the judge path is never entered
 
 
@@ -145,7 +145,7 @@ def test_a_turn_with_no_claim_and_no_scene_never_wakes(monkeypatch, tmp_path):
         resolved.append(1)
         return lambda p: "{}"
     monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _fake_resolve)
-    _run(_faith_shadow_check("the house is quiet for a moment", claim_bearing=False,
+    _run(_faith_check("the house is quiet for a moment", claim_bearing=False,
                              engaged_scene=False, owner="u1"))
     assert resolved == []
 
@@ -192,6 +192,83 @@ _AGENT_LOOP_SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "agent_l
 
 def test_source_pin_agent_loop_wires_the_shadow_hook():
     src = _AGENT_LOOP_SRC.read_text()
-    assert "_faith_shadow_check" in src                # the hook is called…
+    assert "_faith_check" in src                # the hook is called…
     assert "faithfulness_mode" in src                  # …gated on the dedicated dial…
     assert "_sentence_has_closed_set_claim" in src     # …reusing the 0065 claim-bearing pre-filter.
+    assert "dispatch_correction" in src                # …and the active-mode dispatch seam (P3).
+
+
+# ── P3: ACTIVE-mode adopt + the load-bearing wall ──────────────────────────────────
+
+def _patch_auto_record(monkeypatch):
+    """Capture calls to the 0055 record machinery the adopt path reuses (so we can prove WHEN it
+    fires). Returns the capture list."""
+    recorded = []
+
+    async def _fake_record(*a, **k):
+        recorded.append((a, k))
+        return True
+    monkeypatch.setattr("src.agent_loop._auto_record_scene", _fake_record)
+    return recorded
+
+
+def test_active_adopt_canonicalizes_an_open_set_slip(monkeypatch, tmp_path):
+    """In ACTIVE mode an OPEN-set adopt verdict canonicalizes the detail via the 0055 record
+    machinery, and emits BOTH the detection line and the O3 adopt marker."""
+    _set_mode(monkeypatch, tmp_path, "active")
+    _patch_engine_reads(monkeypatch)
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "persona", "classification": "open", "lever": "adopt",
+         "rationale": "a harmless backyard detail"}))
+    logged = _capture_log(monkeypatch)
+    recorded = _patch_auto_record(monkeypatch)
+
+    _run(_faith_check("they mention a hammock that was never established", claim_bearing=False,
+                      engaged_scene=True, owner="u1", endpoint_url="http://x", model="m",
+                      headers={}, last_user="hi"))
+
+    assert len(recorded) == 1                          # adopt fired: the scene was recorded
+    kinds = [a[1] for (a, k) in logged]
+    assert "faith:persona" in kinds                    # the detection line…
+    assert "faith:adopt:persona" in kinds              # …and the O3 adopt marker (auditable)
+
+
+def test_load_bearing_a_closed_set_slip_is_never_adopted(monkeypatch, tmp_path):
+    """THE LOAD-BEARING TEST (mandate #3): in ACTIVE mode a closed-set slip is NEVER adopted — the
+    recordInteraction machinery is never reached, so a misnarration can never canonicalize a
+    closed-set outcome. We try BOTH a clean closed-set verdict (reframe) AND a reply that asks to
+    adopt a closed-set slip (which the wall rejects upstream, at parse)."""
+    _set_mode(monkeypatch, tmp_path, "active")
+    _patch_engine_reads(monkeypatch)
+    recorded = _patch_auto_record(monkeypatch)
+    _capture_log(monkeypatch)
+
+    # a) a clean CLOSED-set reframe verdict — never adopts.
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "board", "classification": "closed", "lever": "reframe", "rationale": "x"}))
+    _run(_faith_check("you pulled off the veto", claim_bearing=True, engaged_scene=False, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    # b) a reply ASKING to adopt a closed slip — the wall rejects it at parse (verdict -> None).
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "board", "classification": "closed", "lever": "adopt", "rationale": "x"}))
+    _run(_faith_check("you pulled off the veto", claim_bearing=True, engaged_scene=False, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    assert recorded == []                              # recordInteraction NEVER fired for closed-set
+
+
+def test_shadow_never_adopts_even_an_open_set_slip(monkeypatch, tmp_path):
+    """SHADOW logs an open-set slip but never corrects — adopt belongs to ACTIVE only."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    _patch_engine_reads(monkeypatch)
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "persona", "classification": "open", "lever": "adopt", "rationale": "x"}))
+    logged = _capture_log(monkeypatch)
+    recorded = _patch_auto_record(monkeypatch)
+
+    _run(_faith_check("they mention a hammock", claim_bearing=False, engaged_scene=True, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    assert len(logged) == 1 and logged[0][0][1] == "faith:persona"   # logged the detection…
+    assert recorded == []                                            # …but never adopted

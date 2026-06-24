@@ -2270,6 +2270,12 @@ async def _faith_build_projection(owner) -> dict:
         gs = await _oe.get_game_state(owner)
         if isinstance(gs, dict):
             proj["board"] = {k: gs.get(k) for k in _BOARD_FIELDS if k in gs}
+            # the active roster (Vault-free: public id + name) — feeds the judge's leak/persona read
+            # AND the adopt path's recordInteraction, so adopt never depends on loop-local _house scope.
+            proj["roster"] = [{"id": h.get("id"), "name": h.get("name")}
+                              for h in (gs.get("house") or [])
+                              if isinstance(h, dict) and h.get("id") and h.get("name")
+                              and h.get("status", "active") == "active"]
     except Exception:
         pass
     try:
@@ -2282,22 +2288,32 @@ async def _faith_build_projection(owner) -> dict:
     return proj
 
 
-async def _faith_shadow_check(narration, *, claim_bearing, engaged_scene, owner,
-                              beat_before=None) -> None:
-    """Feature 0081 P2 — the SHADOW-mode faithfulness check (LOG-ONLY). On a claim-bearing or engaged
-    turn, judge the finalized narration against the player's Vault-free projection and LOG any slip to
-    the OVERSEER ring. NO correction here — adopt/reframe land in P3/P4; even in `active` mode this
-    only logs until those wire in. Live-only (needs a utility model ⇒ the seeded floor is byte-
-    identical) and FAIL-SOFT (the judge must never hurt a turn). The deterministic 0065 pre-stream
-    guard remains the floor; this adds only the live semantic layer, post-turn."""
+async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
+                       endpoint_url=None, model=None, headers=None, last_user=None) -> None:
+    """Feature 0081 — the live faithfulness check (P2 shadow detection + P3 active 'adopt').
+
+    On a claim-bearing or engaged turn, judge the finalized narration against the player's Vault-free
+    projection. ALWAYS surface a detected slip on the OVERSEER ring (shadow + active both LOG). In
+    ``active`` mode, additionally DISPATCH the diegetic correction (trigger-only via
+    :func:`dispatch_correction`):
+
+      * ``adopt`` (open-set) — canonicalize the narrated detail by recording the scene (reusing the
+        0055 :func:`_auto_record_scene` extraction + recordInteraction), tagged **O3** for audit. The
+        roster comes from the Vault-free projection, so adopt never depends on loop-local ``_house``.
+      * ``reframe`` / ``reground`` (closed-set) — wired in P4; until then they log + defer (no-op).
+
+    THE WALL holds upstream — :meth:`FaithfulnessJudge.verdict_from_reply` already guarantees
+    ``adopt`` ⇒ open-set — so no correction here can ever bend a closed-set outcome. Live-only (no
+    utility model ⇒ the seeded floor stands, byte-identical) and FAIL-SOFT (never hurts a turn)."""
     try:
-        from src.faithfulness import faithfulness_mode, should_judge, FaithfulnessJudge
-        if faithfulness_mode() not in ("shadow", "active"):
+        from src.faithfulness import (faithfulness_mode, should_judge, FaithfulnessJudge,
+                                      dispatch_correction)
+        mode = faithfulness_mode()
+        if mode not in ("shadow", "active"):
             return
         if not should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene)):
             return
-        # live-only carve-out (ruling D4): no utility model ⇒ the deterministic floor stands,
-        # byte-identical — the judge never runs in a seeded lane.
+        # live-only carve-out (ruling D4): no utility model ⇒ nothing runs (seeded lanes unchanged).
         _llm = None
         try:
             from src.orwell_cast_authoring import _resolve_llm_fn
@@ -2313,16 +2329,43 @@ async def _faith_shadow_check(narration, *, claim_bearing, engaged_scene, owner,
         if _faith_insp.isawaitable(_raw):
             _raw = await asyncio.wait_for(_raw, timeout=12)   # bounded: a slow judge must not hang
         verdict = judge.verdict_from_reply(_raw, narration or "", projection)
-        if verdict is not None and verdict.is_slip:
-            # P2 SHADOW: surface the slip on the OVERSEER ring; do NOT correct.
-            from src import log_rings as _lr
+        if verdict is None or not verdict.is_slip:
+            return
+
+        from src import log_rings as _lr
+        # 1) ALWAYS surface the detection (shadow + active both log).
+        _tag = "active: correcting" if mode == "active" else "shadow: logged, not corrected"
+        _lr.record_overseer(
+            "anomaly", f"faith:{verdict.dimension}",
+            f"faithfulness {verdict.classification}-set slip ({verdict.dimension}) — proposed "
+            f"lever '{verdict.lever}' [{_tag}]: {verdict.rationale}",
+            lever=verdict.lever, beat_before=beat_before, ok=False, user=owner)
+        if mode != "active":
+            return
+
+        # 2) ACTIVE — dispatch the diegetic correction (trigger-only). P3 wires 'adopt' (open-set
+        #    canonicalization via the 0055 record machinery); reframe/reground land in P4. The async
+        #    record runs FIRST, then the sync dispatch callable just reports whether it applied.
+        _adopt_ok = {"v": False}
+        if verdict.lever == "adopt":
+            try:
+                _roster = projection.get("roster") or []
+                _adopt_ok["v"] = bool(await _auto_record_scene(
+                    narration, last_user, _roster, endpoint_url, model, headers, owner))
+            except Exception:
+                _adopt_ok["v"] = False
+        _disp = dispatch_correction(verdict, {"adopt": (lambda: _adopt_ok["v"])})
+
+        # O3 — tag what became canon via a faithfulness ADOPT, distinct from a normal record, so the
+        # operator can audit exactly what entered canon through recovery.
+        if verdict.lever == "adopt":
             _lr.record_overseer(
-                "anomaly", f"faith:{verdict.dimension}",
-                f"faithfulness {verdict.classification}-set slip ({verdict.dimension}) — proposed "
-                f"lever '{verdict.lever}' [shadow: logged, not corrected]: {verdict.rationale}",
-                lever=verdict.lever, beat_before=beat_before, ok=False, user=owner)
+                "action", f"faith:adopt:{verdict.dimension}",
+                f"adopted an open-set slip as canon via recordInteraction (O3) — "
+                f"{'recorded' if _disp.get('applied') else 'nothing recordable'}: {verdict.rationale}",
+                lever="adopt", beat_before=beat_before, ok=bool(_disp.get("applied")), user=owner)
     except Exception as _e:
-        logger.debug(f"[orwell] faithfulness shadow check skipped: {_e}")
+        logger.debug(f"[orwell] faithfulness check skipped: {_e}")
 
 
 # The CASTING twin of _auto_record_scene. The casting preamble tells the model to "record the
@@ -5296,10 +5339,12 @@ async def stream_agent_loop(
                 _faith_claim = bool(_sentence_has_closed_set_claim(_turn_narration_full or ""))
             except Exception:
                 _faith_claim = False
-            await _faith_shadow_check(
+            await _faith_check(
                 _turn_narration_full, claim_bearing=_faith_claim,
                 engaged_scene=bool(_want_record), owner=owner,
-                beat_before=_ledger_beat_seq_before)
+                beat_before=_ledger_beat_seq_before,
+                endpoint_url=endpoint_url, model=model, headers=headers,
+                last_user=_extract_last_user_message(messages))
         except Exception as _faith_err:  # fail-soft: the faithfulness gate must never hurt a turn
             logger.debug(f"[orwell] faithfulness gate skipped: {_faith_err}")
 
