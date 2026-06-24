@@ -1,10 +1,11 @@
-"""Feature 0079 — increment 4: the live shadow-hook integration + the opt-in env gate.
+"""Feature 0079 — the live overseer hook integration + the opt-in gate.
 
-The reasoning-tier module (overseer.py) is unit-tested in test_0079_overseer.py; this file
-covers the agent_loop.py wiring — the ORWELL_OVERSEER flag (default OFF) and a source-pin that
-the shadow hook is wired into the live turn loop (build Signals -> DeterministicOverseer ->
-record_overseer), diagnose-and-LOG only (no lever is applied; the existing guardrails still act).
-Name-agnostic — roles only.
+The reasoning-tier module (overseer.py) is unit-tested in test_0079_overseer.py and
+test_0079_overseer_reasoning.py; this file covers the agent_loop.py WIRING — the opt-in gate
+(default OFF) and a source-pin that the live turn loop builds Signals, runs the SPARSE gate, drives
+the REASONING tier (LlmOverseer over the utility model) with a fail-soft deterministic fallback, and
+LOGS the verdict. It diagnose-and-LOGs only — no lever is applied here (the inline guardrails are the
+overseer's hands and already act during the turn). Name-agnostic — roles only.
 """
 
 import os
@@ -26,14 +27,20 @@ def test_overseer_enabled_only_for_truthy_flag(monkeypatch):
         assert overseer.overseer_enabled() is False, repr(falsey)
 
 
-def test_agent_loop_wires_the_shadow_hook():
+def test_agent_loop_wires_the_reasoning_hook():
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "src", "agent_loop.py"), encoding="utf-8").read()
-    # the live turn loop gates on the flag, builds Signals, runs the overseer, and logs the verdict
+    # the live turn loop gates on the flag, builds Signals, runs the SPARSE gate, drives the
+    # REASONING tier (with the deterministic fallback), and logs the verdict
     assert "overseer_enabled()" in src
-    assert "DeterministicOverseer" in src and "Signals(" in src
+    assert "Signals(" in src and "should_assess(" in src
+    assert "LlmOverseer" in src and "DeterministicOverseer" in src   # reasoning tier + fail-soft floor
+    assert "_resolve_llm_fn" in src and "verdict_from_reply" in src  # the async model-drive path
     assert "record_overseer(" in src
-    # SHADOW mode: the verdict is recorded, never executed — no lever-application call exists
+    # the completed Signals carry the 0065 sync telemetry (desync + beatSeq before/after)
+    _hook = src.split("overseer_enabled()")[1][:1600]
+    assert "desync=" in _hook and "beat_seq_after=" in _hook
+    # diagnose-and-LOG only: the verdict is recorded, never executed — no lever-application call
     assert ".execute(" not in src.split("overseer_enabled()")[1][:1200]
 
 
