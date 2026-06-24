@@ -117,7 +117,7 @@ import {
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor, socialSwayScale } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -1865,6 +1865,19 @@ export class GameSessionAdapter implements GameSession {
   awakeAmong(ids: readonly EntityId[]): EntityId[] {
     const awake = this.awakeNow();
     return awake ? ids.filter((id) => awake.has(id)) : [...ids];
+  }
+
+  /**
+   * 0066 Phase-2: the off-screen fold-magnitude scale (≤1) for a scene's INITIATOR — a tired houseguest
+   * sways the house LESS (reduced EFFECTIVENESS, never a personality change; the scene's nature is
+   * unchanged). Returns 1 (no scaling) when the clock is off ⇒ the hidden society + its seeded calibration
+   * spine are BYTE-IDENTICAL; reduced sway only on the live clock-ON path, keyed off the same hidden rest
+   * deficit the competition fold consumes. No number crosses the wall.
+   */
+  socialFoldScale(id: EntityId): number {
+    if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 1;
+    const deficit = id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.live, this.statsOf(id), id);
+    return socialSwayScale(deficit);
   }
 
   /**

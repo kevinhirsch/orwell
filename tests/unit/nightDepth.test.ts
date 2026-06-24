@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  phaseForDepth, bedtimeDepthFor, restDeficitForDepth, TIME_OF_DAY_ORDER,
+  phaseForDepth, bedtimeDepthFor, restDeficitForDepth, socialSwayScale, SOCIAL_SWAY_FLOOR, TIME_OF_DAY_ORDER,
 } from "../../src/engine/timeOfDay";
 import { advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit } from "../../src/engine/liveSeason";
 import type { LiveSeasonState } from "../../src/engine/liveSeason";
@@ -90,6 +90,21 @@ describe("advanceClock — advances the hidden depth, projects the phase, wraps 
     const late = { nightDepth: 0.95, evictionOrder: [] } as unknown as LiveSeasonState; // ran deep into late-night
     playerTurnIn(late, "player");
     expect(playerRestDeficit(late)).toBeGreaterThan(0); // a late night ⇒ a real cost
+  });
+});
+
+describe("socialSwayScale — a tired houseguest sways the house LESS (effectiveness, floored)", () => {
+  it("is 1 when rested (byte-identical), drops monotonically, and never below the floor", () => {
+    expect(socialSwayScale(0)).toBe(1); // rested ⇒ no scaling ⇒ the off-screen fold is unchanged
+    expect(socialSwayScale(1)).toBe(SOCIAL_SWAY_FLOOR);
+    expect(socialSwayScale(2)).toBe(SOCIAL_SWAY_FLOOR);  // clamped
+    let prev = 2;
+    for (let d = 0; d <= 1.0001; d += 0.1) {
+      const v = socialSwayScale(d);
+      expect(v).toBeLessThanOrEqual(prev);
+      expect(v).toBeGreaterThanOrEqual(SOCIAL_SWAY_FLOOR);
+      prev = v;
+    }
   });
 });
 

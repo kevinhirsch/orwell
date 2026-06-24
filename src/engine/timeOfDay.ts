@@ -201,3 +201,16 @@ export function bedtimeDepthFor(stats: BedtimeStats, id?: string): number {
 export function restDeficitForDepth(depth: number): number {
   return clamp((depth - 0.8) / 0.2, 0, 1); // 0 through `night` (≤0.8) → 1 at the bitter end (1.0)
 }
+
+// 0066 Phase-2: a tired houseguest is less able to MOVE THE NEEDLE socially — the magnitude of the
+// relationship fold their scenes drive on others is dampened (EFFECTIVENESS, never a personality change:
+// the scene's nature is unchanged, only how far it shifts the other's belief). Floored so even a wrecked
+// houseguest still has SOME sway. `SOCIAL_SWAY_DAMP` = the dampening at a full deficit.
+export const SOCIAL_SWAY_DAMP = 0.6;
+export const SOCIAL_SWAY_FLOOR = 0.4;
+
+/** The fold-magnitude scale (≤1) for a houseguest carrying `deficit` rest debt. 1 at deficit 0 (rested ⇒
+ *  byte-identical), dropping to the floor at a full deficit. Symmetric: worse at warming AND at souring. */
+export function socialSwayScale(deficit: number): number {
+  return Math.max(SOCIAL_SWAY_FLOOR, 1 - SOCIAL_SWAY_DAMP * clamp(deficit, 0, 1));
+}

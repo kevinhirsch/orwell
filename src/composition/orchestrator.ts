@@ -4,6 +4,7 @@ import type { SessionSnapshot } from "../engine/sessionSnapshot";
 import { toGameState } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
+import { RELATIONSHIP_CONSTANTS, scaleImpact } from "../engine/relationshipConstants";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
@@ -526,7 +527,17 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
   for (const s of scenes) {
-    sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
+    // 0066 Phase-2: a tired INITIATOR sways the partner LESS (reduced effectiveness, never a personality
+    // change). Scale is 1 when the clock is off ⇒ this is the EXACT prior `applyDirected` call (same rng
+    // draws) ⇒ byte-identical to the calibration spine; the scaled path fires only on the live clock-ON game.
+    const swayScale = sandbox.session.socialFoldScale(s.initiator);
+    if (swayScale === 1) {
+      sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
+    } else {
+      sandbox.engine.relationships.applyImpactDirected(
+        s.partner, s.initiator, scaleImpact(RELATIONSHIP_CONSTANTS.IMPACT[s.type], swayScale), rng,
+      );
+    }
     // NOTE (audit 2026-06-18): whole-house transitivity for OFF-SCREEN NPC↔NPC scenes (co-present
     // bystanders reading a scene by structural balance) was prototyped here but destabilized the
     // tuned jury-reach calibration gate (a passive player's finale wins crept past the cap) — the
