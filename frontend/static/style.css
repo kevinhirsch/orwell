@@ -38043,6 +38043,24 @@ body.theme-frosted .settings-nav-item.active {
 }
 body.theme-frosted .settings-nav-item.active svg { opacity: 1; color: #fff; }
 
+/* ── Settings title follows macOS System Settings: LEFT over the content column ──
+   System Settings is a sidebar app — the traffic lights sit over the sidebar and
+   the pane title is LEFT-aligned at the top of the CONTENT pane, not centered in
+   the window band. So the Settings window (a sidebar layout) overrides the kit's
+   centered title to sit left, offset ≈ the sidebar width so it lands above the
+   content (clear of the traffic lights). Every OTHER window keeps the kit's
+   centered title (they're normal macOS windows). Desktop tier only — the mobile
+   settings layout (<769px) collapses the sidebar, so it keeps the centered title.
+   No back/forward chevrons: we have no pane-nav history to mirror. */
+@media (min-width: 769px) {
+  body.theme-frosted #settings-modal .ow-title {
+    left: 154px;
+    transform: translateY(-50%);
+    text-align: left;
+    max-width: calc(100% - 174px);
+  }
+}
+
 /* ── Settings sidebar tabs are macOS list ROWS, not glass action chips ──────────
    The generic in-window button-glass treatment (`.ow-window .ow-body button`,
    specificity 0,3,2) was pilling EVERY settings nav tab — a translucent fill, a
