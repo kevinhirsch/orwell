@@ -37526,6 +37526,7 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-chi
   body.theme-frosted .on-card,
   body.theme-frosted .chat-input-bar,
   body.theme-frosted #sidebar,
+  body.theme-frosted .icon-rail,
   body.theme-frosted .modal-content,
   body.theme-frosted .dropdown,
   body.theme-frosted #minimized-dock.ow-has-rows,
@@ -38353,38 +38354,49 @@ body.theme-frosted .toast {
   border-left: 3px solid rgba(255,255,255,0.28) !important;
 }
 
-/* ── CHAT BUBBLES — translucent glass MATERIAL (neutral veil + blur + rim) ─────
-   Apple HIG: content-layer chat reads THROUGH a thin glass. We give .msg-ai /
-   .msg-user / the OOC variants the colorless veil + a soft blur + a thin rim +
-   the bubble radius they already own. NOT added to JS refraction (perf — many
-   bubbles on screen). Legible: --fg text + a hair of text-shadow floor. */
+/* ── CHAT BUBBLES = CONTENT layer (Apple HIG: NOT Liquid Glass) — BOTH tiers ───
+   Apple HIG: "Don't use Liquid Glass in the content layer." Chat messages are
+   CONTENT, so they are NOT a glass pane in EITHER tier — the wallpaper shows in the
+   GAPS between bubbles while the functional glass floats above. A restrained, legible
+   dark scrim stands instead of a foggy glass veil (the old dark-veil glass made the
+   FROSTED tier bubbles unreadable: a light-ish veil under light --fg text). They are
+   identical in Full and Frosted (the one place tiers should differ only by refraction,
+   bubbles aren't glass in either, so no divergence). NOT refracted by the JS (perf;
+   removed from SELECTORS); this also neutralizes any stray inline backdrop-filter. */
 body.theme-frosted .msg-ai,
 body.theme-frosted .msg-user,
 body.theme-frosted .msg-ooc,
 body.theme-frosted .msg-ooc-producer {
-  background-color: var(--ow-glass-veil-dark) !important;
-  background-image:
-    linear-gradient(180deg,
-      var(--ow-glass-veil-light) 0%,
-      rgba(255,255,255,0.03) 100%) !important;
-  -webkit-backdrop-filter: var(--ow-glass-backdrop, blur(22px) saturate(108%) brightness(1.18));
-  backdrop-filter: var(--ow-glass-backdrop, blur(22px) saturate(108%) brightness(1.18));
-  border: 1px solid rgba(255,255,255,0.12) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.18),
-    0 4px 16px rgba(0,0,0,0.18) !important;
+  /* NO blur, NO glass material — content, not a functional glass pane. */
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background-color: transparent !important;
+  /* A restrained content fill (a faint dark scrim) for a stable text ground without
+     reading as a panel. The wallpaper still shows clearly in the gaps between bubbles. */
+  background-image: linear-gradient(180deg,
+    rgba(12,14,18,0.36) 0%,
+    rgba(12,14,18,0.28) 100%) !important;
+  border: 1px solid rgba(255,255,255,0.10) !important;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18) !important;
 }
+/* Bubble text is LIGHT --fg with a legibility shadow (content over a photo) — they are
+   content, so light ink on the faint dark scrim, not the dark-ink light-glass chrome. */
 body.theme-frosted .msg-ai .body,
-body.theme-frosted .msg-user .body {
-  text-shadow: var(--ow-glass-text-shadow);
+body.theme-frosted .msg-user .body,
+body.theme-frosted .msg-ai,
+body.theme-frosted .msg-user {
+  color: var(--fg, #fff) !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.75), 0 0 2px rgba(0,0,0,0.55) !important;
 }
-/* the OOC asides keep their quieter dashed identity — a thinner translucent veil
+/* the OOC asides keep their quieter dashed identity — an even fainter scrim
    so they still read as a backstage aside, not a full bubble. */
 body.theme-frosted .msg-user.msg-ooc,
 body.theme-frosted .msg-ooc.msg-ooc-producer {
-  background-color: color-mix(in srgb, var(--fg) 6%, transparent) !important;
+  background-image: linear-gradient(180deg,
+    rgba(12,14,18,0.20) 0%,
+    rgba(12,14,18,0.14) 100%) !important;
   border-style: dashed !important;
-  border-color: color-mix(in srgb, var(--fg) 26%, transparent) !important;
+  border-color: rgba(255,255,255,0.22) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.10) !important;
 }
 
@@ -38704,49 +38716,33 @@ body.theme-frosted .icon-rail button {
   text-shadow: 0 1px 1px rgba(255,255,255,0.4) !important;
 }
 
-/* ── CHAT BUBBLES = CONTENT layer (Apple HIG: NOT Liquid Glass) ──────────────── */
-/* Strip the glass material + any refraction from the bubbles. They are content, so the
-   wallpaper shows in the GAPS between them and the functional glass floats above. A
-   restrained, legible fill stands instead of a glass pane — quiet, never foggy. The JS
-   no longer refracts them (removed from SELECTORS); this also neutralizes any stray
-   inline backdrop-filter the baseline set. The adaptive layer still floors legibility
-   with its inline background-color scrim (low over the wallpaper), which is the correct
-   CONTENT treatment (a quiet ground for the text), so we DON'T re-add glass on top. */
-body.glass-full .msg-ai,
-body.glass-full .msg-user,
-body.glass-full .msg-ooc,
-body.glass-full .msg-ooc-producer {
-  /* NO blur, NO glass material — content, not a functional glass pane. */
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  /* A restrained, near-transparent content fill (a faint dark scrim) layered over the
-     adaptive inline veil for a stable text ground without reading as a panel. The
-     wallpaper still shows clearly in the gaps between bubbles. */
-  background-image: linear-gradient(180deg,
-    rgba(12,14,18,0.36) 0%,
-    rgba(12,14,18,0.28) 100%) !important;
-  border: 1px solid rgba(255,255,255,0.10) !important;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.18) !important;
+/* LIGHT-ON-LIGHT GUARD — some text controls inside the light-glass chrome set their
+   OWN light --fg with HIGHER specificity than the blanket chrome dark-ink rule above,
+   so they survived as light text on the light glass (unreadable):
+     • the chat title ".chat-meta-overlay #current-meta" (its own color-mix(--fg))
+     • the composer "textarea#message" + ::placeholder ((1,1,1) specificity)
+     • the composer icon buttons (.input-icon-btn sets color:var(--fg))
+   Force them to the SAME dark ink the chrome uses. (The send-btn / blue CTAs keep their
+   own colored backgrounds — they're not in this list.) Pinned by browser_smoke.py's
+   computed-contrast probe so light-on-light can't silently return. */
+body.theme-frosted .chat-meta-overlay,
+body.theme-frosted .chat-meta-overlay #current-meta,
+body.theme-frosted .chat-meta-overlay:hover,
+body.theme-frosted .chat-input-bar textarea#message,
+body.theme-frosted .chat-input-bar .input-icon-btn {
+  color: #16191f !important;
 }
-/* Bubble text stays the theme's LIGHT --fg with a legibility shadow (content over a
-   photo) — they are content, so light ink on the faint dark scrim, not the dark-ink
-   light-glass chrome treatment above. */
-body.glass-full .msg-ai .body,
-body.glass-full .msg-user .body,
-body.glass-full .msg-ai,
-body.glass-full .msg-user {
-  color: var(--fg, #fff) !important;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.75), 0 0 2px rgba(0,0,0,0.55) !important;
+body.theme-frosted .chat-input-bar textarea#message::placeholder {
+  /* a clearly-secondary but legible dark placeholder on the light glass (~4.6:1) */
+  color: rgba(22,25,31,0.58) !important;
 }
-/* The OOC asides stay quieter (their dashed backstage identity), even fainter scrim. */
-body.glass-full .msg-user.msg-ooc,
-body.glass-full .msg-ooc.msg-ooc-producer {
-  background-image: linear-gradient(180deg,
-    rgba(12,14,18,0.20) 0%,
-    rgba(12,14,18,0.14) 100%) !important;
-  border-style: dashed !important;
-  border-color: rgba(255,255,255,0.22) !important;
-}
+
+/* ── CHAT BUBBLES = CONTENT layer ─────────────────────────────────────────────
+   The bubble content treatment (NO glass material, faint dark scrim, light ink +
+   legibility shadow) is now scoped to body.theme-frosted ABOVE so it covers BOTH
+   tiers (Full + Frosted) — bubbles are content in either, never a glass pane. The
+   former glass-full-only override lived here and left the FROSTED tier as a foggy
+   dark-veil glass pane (unreadable). Consolidated; nothing tier-specific remains. */
 
 /* a11y: prefers-reduced-transparency already forces the theme-frosted set SOLID (the
    block earlier in this file). glass-full layers on top of theme-frosted, so those
@@ -38768,10 +38764,12 @@ body.glass-full .msg-ooc.msg-ooc-producer {
   body.glass-full .dropdown,
   body.glass-full .overflow-menu,
   body.glass-full .cp-popover,
-  body.glass-full .msg-ai,
-  body.glass-full .msg-user,
-  body.glass-full .msg-ooc,
-  body.glass-full .msg-ooc-producer {
+  /* bubbles are content in BOTH tiers (consolidated above), so drop their scrim
+     under reduced transparency for both, not just glass-full. */
+  body.theme-frosted .msg-ai,
+  body.theme-frosted .msg-user,
+  body.theme-frosted .msg-ooc,
+  body.theme-frosted .msg-ooc-producer {
     background-image: none !important;
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;

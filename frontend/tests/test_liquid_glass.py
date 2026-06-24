@@ -220,7 +220,9 @@ def test_reduced_transparency_solid_fallback():
     assert "@media (prefers-reduced-transparency: reduce)" in CSS
     # the solid fallback drops backdrop-filter to none under that query.
     block = CSS[CSS.index("@media (prefers-reduced-transparency: reduce)"):]
-    assert "backdrop-filter: none" in block[:1200]
+    # window widened: the reduced-transparency selector list grew with the kit rollout
+    # (the icon-rail a11y fallback among others), pushing the declaration block down.
+    assert "backdrop-filter: none" in block[:1600]
     # the JS ALSO bails (no inline filter that would defeat the CSS solid fallback).
     assert "reducedTransparency" in JS
     assert "prefers-reduced-transparency" in JS

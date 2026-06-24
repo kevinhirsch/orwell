@@ -143,6 +143,55 @@ def main() -> int:
                 }""")
                 if not lg.get("supported") or lg.get("tagged", 0) > 0:
                     break
+
+            # LIGHT-ON-LIGHT GUARD (owner: "'Orwell Chat' is light-on-light... can we check for
+            # that"). On the LIGHT glass chrome (the kube music-player fill, rgba(255,255,255,0.6)),
+            # text MUST be dark ink or it's unreadable. Several controls (the chat title, the
+            # composer textarea/placeholder, the input icons) set their OWN light --fg with higher
+            # specificity than the blanket chrome dark-ink rule, which is exactly how the title +
+            # chat bar regressed. Probe the computed text color of each on light-glass chrome and
+            # assert it is DARK (relative luminance well below the light surface), so light-on-light
+            # can't silently come back. theme-frosted is still applied here (added for the
+            # refraction check above); we measure before restoring frosted-off.
+            lol = page.evaluate(
+                """() => {
+                  // WCAG relative luminance from a computed `rgb(...)`/`rgba(...)` string.
+                  const lum = (c) => {
+                    const m = (c || '').match(/[\\d.]+/g);
+                    if (!m || m.length < 3) return null;
+                    const f = [m[0], m[1], m[2]].map(v => {
+                      const s = (+v) / 255;
+                      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+                    });
+                    return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2];
+                  };
+                  const probe = (sel) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return { sel, missing: true };
+                    const cs = getComputedStyle(el);
+                    return { sel, color: cs.color, lum: lum(cs.color) };
+                  };
+                  const bar = document.querySelector('.chat-input-bar');
+                  const surfLum = bar ? lum(getComputedStyle(bar).backgroundColor) : null;
+                  return {
+                    surfLum,
+                    title: probe('.chat-meta-overlay #current-meta'),
+                    textarea: probe('.chat-input-bar textarea#message'),
+                    icon: probe('.chat-input-bar .input-icon-btn'),
+                  };
+                }"""
+            )
+            # The chrome text controls must be DARK ink (luminance < 0.4) on the light glass.
+            # (A light surface measures high luminance; light text on it is the bug.)
+            for _name in ("title", "textarea", "icon"):
+                _p = lol.get(_name) or {}
+                if _p.get("missing"):
+                    continue  # element legitimately absent — nothing to mis-color
+                _l = _p.get("lum")
+                check(_l is not None and _l < 0.4,
+                      f"no light-on-light: {_name} text is dark ink on the light glass "
+                      f"(lum={_l}, color={_p.get('color')})")
+
             page.evaluate("() => document.body.classList.remove('theme-frosted')")  # restore frosted-off
             try:
                 page.evaluate("() => window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh()")
