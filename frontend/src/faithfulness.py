@@ -237,30 +237,45 @@ class FaithfulnessJudge:
     _MAX_NARRATION = 4000   # bound the narration we judge (cost + prompt-size guard)
     _MAX_PROJECTION = 6000   # bound the serialized projection
 
+    # The dimension descriptions per JUNCTION context — the four labels (FAITH_DIMENSIONS) are stable,
+    # but what each means depends on where the narration happens, so the casting interview isn't judged
+    # against an in-game board it has no concept of (P5: the casting / premiere / preview junctions).
+    _DIMENSION_HELP = {
+        "in-game": (
+            "board=contradicts a board fact (HOH/noms/veto/eviction/vote/winner); persona=a houseguest "
+            "acts against their established PUBLIC persona; leak=asserts hidden machinery or a fact "
+            "with no in-fiction pathway to the player; omission=a pending beat was narrated around but "
+            "not advanced."),
+        "casting": (
+            "board=contradicts a casting fact the player gave (their name, stated background, strategy "
+            "or preferences); persona=the producer breaks the casting-interview producer voice; "
+            "leak=reveals hidden casting/seeding machinery or pre-decides the cast; omission=re-asks or "
+            "ignores something the player already answered."),
+    }
+
     def __init__(self, llm_fn, fallback: Optional[FaithfulnessJudgePort] = None):
         self._llm_fn = llm_fn
         self._fallback: FaithfulnessJudgePort = fallback or DeterministicFaithfulnessJudge()
 
     # -- prompt construction (Vault-free: only the caller-supplied narration + projection) --------
 
-    def _prompt(self, narration: str, projection: Any) -> str:
+    def _prompt(self, narration: str, projection: Any, context: str = "in-game") -> str:
         narr = (narration or "")[: self._MAX_NARRATION]
         try:
             proj = json.dumps(projection, sort_keys=True, default=str)[: self._MAX_PROJECTION]
         except Exception:
             proj = "{}"
+        dim_help = self._DIMENSION_HELP.get(context, self._DIMENSION_HELP["in-game"])
+        where = ("the CASTING INTERVIEW (before the game starts)" if context == "casting"
+                 else "a live Big Brother game")
         return (
-            "You are the NARRATION-FAITHFULNESS judge for a single-player Big Brother game. You are "
-            "given (1) the NARRATION just shown to the player and (2) the player's Vault-free "
-            "PROJECTION — the live board plus everything the player legitimately knows. Judge ONLY "
-            "whether the narration is faithful to that projection. You never receive hidden/secret "
-            "state, so treat any assertion that goes BEYOND the projection as a potential leak, never "
-            "as fact.\n"
+            f"You are the NARRATION-FAITHFULNESS judge for {where}. You are given (1) the NARRATION "
+            "just shown to the player and (2) the player's Vault-free PROJECTION — what the player "
+            "legitimately knows + the relevant engine state. Judge ONLY whether the narration is "
+            "faithful to that projection. You never receive hidden/secret state, so treat any "
+            "assertion that goes BEYOND the projection as a potential leak, never as fact.\n"
             "Decide three things:\n"
-            f"  dimension: one of {list(FAITH_DIMENSIONS)} or \"none\" — board=contradicts a board "
-            "fact (HOH/noms/veto/eviction/vote/winner); persona=a houseguest acts against their "
-            "established PUBLIC persona; leak=asserts hidden machinery or a fact with no in-fiction "
-            "pathway to the player; omission=a pending beat was narrated around but not advanced.\n"
+            f"  dimension: one of {list(FAITH_DIMENSIONS)} or \"none\" — {dim_help}\n"
             f"  classification: one of {list(FAITH_CLASSES)} — open=texture the engine never decided "
             "(a detail/flavor/minor social beat); closed=an actual outcome or state the engine owns.\n"
             f"  lever: one of {list(FAITH_LEVERS)} — none=faithful; adopt=an OPEN-set slip, make the "
@@ -274,10 +289,11 @@ class FaithfulnessJudge:
             "NARRATION:\n" + narr + "\nPROJECTION:\n" + proj
         )
 
-    def build_prompt(self, narration: str, projection: Any = None) -> str:
+    def build_prompt(self, narration: str, projection: Any = None, context: str = "in-game") -> str:
         """Public alias of the Vault-free prompt builder, so the live async hook can drive the model
-        call itself (await) and reuse the EXACT same prompt as :meth:`assess`."""
-        return self._prompt(narration, projection)
+        call itself (await) and reuse the EXACT same prompt as :meth:`assess`. ``context`` selects the
+        junction framing (``in-game`` default, or ``casting``)."""
+        return self._prompt(narration, projection, context)
 
     # -- reply parsing (strict: out-of-contract => fallback; the adopt wall) -----------------------
 
@@ -347,12 +363,13 @@ class FaithfulnessJudge:
             except Exception:
                 return None
 
-    def assess(self, narration: str, projection: Any = None) -> Optional["FaithfulnessVerdict"]:
+    def assess(self, narration: str, projection: Any = None,
+               context: str = "in-game") -> Optional["FaithfulnessVerdict"]:
         """Sync judge: build the Vault-free prompt, call the model, validate. Fail-soft to the
         deterministic floor on any error. The trigger (:func:`should_judge`) is checked by the CALLER
         (the live hook), since its inputs come from the turn, not from the narration alone."""
         try:
-            raw = self._llm_fn(self._prompt(narration, projection))
+            raw = self._llm_fn(self._prompt(narration, projection, context))
             return self.verdict_from_reply(raw, narration, projection)
         except Exception:
             try:

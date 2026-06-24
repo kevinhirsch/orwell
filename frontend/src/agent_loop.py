@@ -2288,6 +2288,24 @@ async def _faith_build_projection(owner) -> dict:
     return proj
 
 
+async def _faith_build_casting_projection(owner) -> dict:
+    """The Vault-free projection for the CASTING junction (P5): the player's own casting answers +
+    readiness state. These are the player's OWN inputs (not secret), so the judge can catch the
+    producer contradicting / re-asking them or pre-deciding the cast. ``get_game_state`` is a
+    Vault-free projection by the engine's contract. Fail-soft to ``{}``."""
+    proj: dict = {}
+    try:
+        from src import orwell_engine as _oe
+        gs = await _oe.get_game_state(owner)
+        if isinstance(gs, dict):
+            if isinstance(gs.get("casting"), dict):
+                proj["casting"] = gs["casting"]
+            proj["started"] = bool(gs.get("started"))
+    except Exception:
+        pass
+    return proj
+
+
 # The mandate-safe CLOSED-set corrections: each only QUEUES a next-turn prose directive in the 0065
 # _DESYNC_REGROUND seam — never a board mutation. The engine's outcome always stands; only how the
 # model narrates next turn changes.
@@ -2327,7 +2345,8 @@ def _faith_queue_reground(owner, directive) -> bool:
 
 
 async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
-                       endpoint_url=None, model=None, headers=None, last_user=None) -> None:
+                       endpoint_url=None, model=None, headers=None, last_user=None,
+                       projection=None, context="in-game") -> None:
     """Feature 0081 — the live faithfulness check (P2 shadow detection + P3 active 'adopt').
 
     On a claim-bearing or engaged turn, judge the finalized narration against the player's Vault-free
@@ -2360,13 +2379,14 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
             _llm = None
         if _llm is None:
             return
-        projection = await _faith_build_projection(owner)
+        # the junction may pass its own Vault-free projection (e.g. casting); else build the in-game one.
+        _proj = projection if projection is not None else await _faith_build_projection(owner)
         judge = FaithfulnessJudge(_llm)
         import inspect as _faith_insp
-        _raw = _llm(judge.build_prompt(narration or "", projection))
+        _raw = _llm(judge.build_prompt(narration or "", _proj, context))
         if _faith_insp.isawaitable(_raw):
             _raw = await asyncio.wait_for(_raw, timeout=12)   # bounded: a slow judge must not hang
-        verdict = judge.verdict_from_reply(_raw, narration or "", projection)
+        verdict = judge.verdict_from_reply(_raw, narration or "", _proj)
         if verdict is None or not verdict.is_slip:
             return
 
@@ -2388,7 +2408,7 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
         _adopt_ok = {"v": False}
         if verdict.lever == "adopt":
             try:
-                _roster = projection.get("roster") or []
+                _roster = _proj.get("roster") or []
                 _adopt_ok["v"] = bool(await _auto_record_scene(
                     narration, last_user, _roster, endpoint_url, model, headers, owner))
             except Exception:
@@ -5411,6 +5431,22 @@ async def stream_agent_loop(
                 last_user=_extract_last_user_message(messages))
         except Exception as _faith_err:  # fail-soft: the faithfulness gate must never hurt a turn
             logger.debug(f"[orwell] faithfulness gate skipped: {_faith_err}")
+
+    # 0081 P5 — the CASTING junction. The in-game hook above is gated to live-game turns, so the
+    # casting interview (a separate mode) gets its OWN faithfulness check against a casting projection
+    # (the player's own answers + readiness). Premiere + preview are live-game and already covered
+    # above (the in-game projection carries the roster + the pending decision). Live-only + fail-soft.
+    if game_mode == "casting" and owner:
+        try:
+            _cast_narr = "\n".join(t for t in round_texts if t)
+            _cast_proj = await _faith_build_casting_projection(owner)
+            await _faith_check(
+                _cast_narr, claim_bearing=False, engaged_scene=True, owner=owner,
+                endpoint_url=endpoint_url, model=model, headers=headers,
+                last_user=_extract_last_user_message(messages),
+                projection=_cast_proj, context="casting")
+        except Exception as _cast_faith_err:  # fail-soft: never hurt the casting turn
+            logger.debug(f"[orwell] casting faithfulness gate skipped: {_cast_faith_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.

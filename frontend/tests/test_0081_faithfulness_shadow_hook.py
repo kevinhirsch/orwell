@@ -376,3 +376,54 @@ def test_an_existing_reground_is_not_clobbered(monkeypatch, tmp_path):
                       endpoint_url="http://x", model="m", headers={}, last_user="hi"))
 
     assert store["u1"] == "EXISTING 0065 DESYNC RE-GROUND"  # untouched
+
+
+# ── P5: the casting junction + premiere/preview coverage ────────────────────────────
+
+def test_casting_junction_judges_with_a_casting_projection_and_prompt(monkeypatch, tmp_path):
+    """The casting junction passes its OWN Vault-free projection (the player's answers) and the
+    casting context, so the judge reasons about the interview, not an in-game board."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    captured = {}
+
+    async def _fake_resolve(owner):
+        def _llm(prompt):
+            captured["prompt"] = prompt
+            return json.dumps({"dimension": "board", "classification": "closed",
+                               "lever": "reground", "rationale": "re-asked a name already given"})
+        return _llm
+    monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _fake_resolve)
+    logged = _capture_log(monkeypatch)
+
+    _run(_faith_check("So, what should we call you?", claim_bearing=False, engaged_scene=True,
+                      owner="u1", endpoint_url="http://x", model="m", headers={},
+                      last_user="I already told you — call me the underdog",
+                      projection={"casting": {"name": "the underdog"}}, context="casting"))
+
+    assert "CASTING INTERVIEW" in captured["prompt"]     # the casting-framed prompt was used…
+    assert "the underdog" in captured["prompt"]          # …with the casting projection included
+    assert len(logged) == 1 and logged[0][0][1] == "faith:board"
+
+
+def test_in_game_projection_covers_premiere_and_preview(monkeypatch):
+    """Premiere (invented-cast) and preview (decision) faithfulness ride the IN-GAME hook because the
+    Vault-free projection already carries the ROSTER (premiere) and the board's PENDING (preview) —
+    so those two junctions need no separate seam."""
+    async def _state(*a, **k):
+        return {"phase": "premiere", "pending": {"kind": "nominate"},
+                "house": [{"id": "npc:1", "name": "A nominee-to-be", "status": "active"}]}
+
+    async def _visible(*a, **k):
+        return {}
+    monkeypatch.setattr("src.orwell_engine.get_game_state", _state)
+    monkeypatch.setattr("src.orwell_engine.get_visible_state", _visible)
+
+    proj = _run(_faith_build_projection("u1"))
+    assert proj["roster"] == [{"id": "npc:1", "name": "A nominee-to-be"}]   # premiere: the roster
+    assert proj["board"].get("pending") == {"kind": "nominate"}             # preview: the decision
+
+
+def test_source_pin_casting_junction_is_wired():
+    src = _AGENT_LOOP_SRC.read_text()
+    assert "_faith_build_casting_projection" in src      # the casting projection builder…
+    assert 'context="casting"' in src                    # …and the casting-context call.

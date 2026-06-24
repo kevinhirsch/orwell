@@ -231,3 +231,24 @@ def test_dispatch_correction_none_verdict_is_a_noop():
     ran = []
     r = dispatch_correction(None, {lev: (lambda: ran.append(1)) for lev in FAITH_LEVERS})
     assert ran == [] and r["applied"] is False
+
+
+# ── P5: the junction context switches the prompt framing (casting vs in-game) ──────
+
+def test_build_prompt_context_switches_the_junction_framing():
+    """The four dimension labels are stable, but their MEANING is junction-specific — the casting
+    interview must not be judged against an in-game board it has no concept of."""
+    j = _judge("")
+    ingame = j.build_prompt("x", {}, "in-game")
+    casting = j.build_prompt("x", {}, "casting")
+    assert "live Big Brother game" in ingame and "HOH/noms" in ingame
+    assert "CASTING INTERVIEW" in casting and "casting fact" in casting
+    assert "HOH/noms" not in casting                    # the in-game board framing is gone at casting
+    # the WALL framing is present in BOTH contexts — the mandate doesn't relax at a junction.
+    assert "NEVER change a closed-set OUTCOME" in ingame
+    assert "NEVER change a closed-set OUTCOME" in casting
+
+
+def test_unknown_context_falls_back_to_in_game_framing():
+    prompt = _judge("").build_prompt("x", {}, "nonsense")
+    assert "HOH/noms" in prompt                          # an unknown context degrades to in-game
