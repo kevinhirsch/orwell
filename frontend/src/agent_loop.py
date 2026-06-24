@@ -4149,6 +4149,228 @@ async def stream_agent_loop(
                                 break  # one scene shown, state committed — done this turn
                             # else: silent commit failed — fall through to the re-prompt below.
 
+                        # ── 0080 ACTIVE OVERSEER — the reasoning tier as the PRIMARY actor at the stall
+                        # junction (Model D: primary + floor). STRICTLY ADDITIVE-IN-FRONT: when the
+                        # overseer is in `active` mode AND a real utility model resolves AND the sparse
+                        # 0079 symptom-gate trips, the overseer's LLM-judged VERDICT decides which
+                        # correction fires — and each lever ROUTES THROUGH THE EXISTING action code below
+                        # (§5). It NEVER authors an outcome (trigger-only, §7): every lever only triggers
+                        # the same deterministic engine action the heuristic floor would. On mode!='active',
+                        # no model, a gate miss, a None verdict, a non-applied dispatch, OR ANY error, we
+                        # FALL THROUGH to the existing heuristic guardrails (the L39b force + the text
+                        # nudges below) BYTE-IDENTICALLY — the seeded lanes never wire a model, so they are
+                        # unchanged and need no re-baseline (§6). The whole block is fail-soft: the overseer
+                        # must never hurt a turn. The 0079 post-turn shadow hook still records separately.
+                        try:
+                            from src.overseer import overseer_mode as _ov_mode
+                            if _ov_mode() == "active":
+                                _ov_llm_a = None
+                                try:
+                                    from src.orwell_cast_authoring import _resolve_llm_fn as _ov_resolve
+                                    _ov_llm_a = await _ov_resolve(owner)
+                                except Exception:
+                                    _ov_llm_a = None
+                                if _ov_llm_a is not None:
+                                    # Build the SAME Vault-free Signals the post-turn hook implies for this
+                                    # stall: parked at an advance phase, the play was quiet, no progression
+                                    # tool fired (we are in the _want_advance block precisely because of
+                                    # that). The beatSeq before/after frames the unmoved-beat symptom; the
+                                    # 0065 desync flag and any engaged-scene-with-no-record carry through so
+                                    # the overseer can pick propose-record / reinject-delta when warranted.
+                                    from src.overseer import (Signals as _OvSignals,
+                                                              should_assess as _ov_should,
+                                                              LlmOverseer as _OvLlm,
+                                                              DeterministicOverseer as _OvDet)
+                                    _ov_after_a, _ov_desync_a = _ledger_beat_seq_before, False
+                                    try:
+                                        from routes import chat_helpers as _ov_cha
+                                        _ov_after_a = _ov_cha.last_beat_seq(owner)
+                                        _ov_desync_a = owner in getattr(_ov_cha, "_DESYNC_REGROUND", {})
+                                    except Exception:
+                                        pass
+                                    _ov_sig_a = _OvSignals(
+                                        in_advance_phase=True,
+                                        play_quiet=bool(_is_lull),
+                                        engaged_scene=bool(_want_record),
+                                        recorded_interaction=bool(_recorded),
+                                        progression_tool_called=bool(_progressed),
+                                        io_error=any(isinstance(ev, dict) and ev.get("error")
+                                                     for ev in (tool_events or [])),
+                                        desync=bool(_ov_desync_a),
+                                        beat_seq_before=_ledger_beat_seq_before,
+                                        beat_seq_after=_ov_after_a,
+                                    )
+                                    if _ov_should(_ov_sig_a):
+                                        # Reasoning verdict, FAIL-SOFT to the deterministic floor; the inline
+                                        # model call is BOUNDED (a slow overseer must not stall the turn —
+                                        # on timeout we drop to the heuristic verdict, which itself maps to
+                                        # nudge/force here so the floor still fires).
+                                        _ov_inst = _OvLlm(_ov_llm_a)
+                                        _ov_verdict_a = None
+                                        try:
+                                            import inspect as _ov_insp
+                                            _ov_rawc = _ov_llm_a(_ov_inst.build_prompt(_ov_sig_a))
+                                            if _ov_insp.isawaitable(_ov_rawc):
+                                                _ov_rawc = await asyncio.wait_for(_ov_rawc, timeout=12)
+                                            _ov_verdict_a = _ov_inst.verdict_from_reply(_ov_rawc, _ov_sig_a)
+                                        except Exception:
+                                            _ov_verdict_a = _OvDet().assess(_ov_sig_a)
+                                        # `hold` (and a None verdict) take NO action ⇒ fall through to the
+                                        # heuristic floor unchanged. Only an ACTIONABLE lever dispatches.
+                                        if _ov_verdict_a is not None and _ov_verdict_a.lever != "hold":
+                                            from src.overseer import dispatch_lever as _ov_dispatch
+                                            # The control-flow each lever takes once it APPLIES — set by the
+                                            # action callable so the post-dispatch code mirrors exactly what
+                                            # the matching guardrail would do (continue / break). Default is
+                                            # to fall through (no flow seized) so a no-op never strands the
+                                            # turn away from the floor.
+                                            _ov_flow = {"act": None}
+
+                                            # force-advance / propose-record need to AWAIT engine work, but
+                                            # the dispatch contract wants zero-arg SYNC callables — so the
+                                            # awaited work runs inline below and these flags record whether it
+                                            # APPLIED; the dispatch callables just return the flag.
+                                            _ov_applied_flags = {"force-advance": False,
+                                                                 "propose-record": False}
+
+                                            async def _ov_do_force_advance() -> bool:
+                                                _ok = False
+                                                _fok = True
+                                                try:
+                                                    _gs_now2 = await _oe.get_game_state(owner)
+                                                    _beat_now2 = ((_gs_now2 or {}).get("week"),
+                                                                  (_gs_now2 or {}).get("phase"),
+                                                                  (_gs_now2 or {}).get("moment"))
+                                                    if _beat_key_at_read is None or _beat_now2 != _beat_key_at_read:
+                                                        _fok = False
+                                                        logger.info(
+                                                            "[orwell] overseer force-advance SKIPPED — beat "
+                                                            f"moved since read ({_beat_key_at_read} -> "
+                                                            f"{_beat_now2}) round {round_num} user={owner}")
+                                                except Exception as _fe:
+                                                    _fok = False
+                                                    logger.warning(
+                                                        "[orwell] overseer force-advance re-read failed, "
+                                                        f"skipping: {type(_fe).__name__}: {_fe}".rstrip(': '))
+                                                if _fok and await _commit_advance_silently(
+                                                        f"overseer force stall L{_level}"):
+                                                    messages.append({"role": "system",
+                                                                     "content": _FORCED_ADVANCE_NUDGE})
+                                                    _ov_flow["act"] = "yield-continue"
+                                                    _ok = True
+                                                return _ok
+
+                                            async def _ov_do_propose_record() -> bool:
+                                                # propose-record ⇒ the existing 0055 record-backfill
+                                                # (_auto_record_scene). The ENGINE owns the magnitude; the
+                                                # descriptor is shape-only. The beat does not advance — the
+                                                # consequence is banked and the turn ends.
+                                                _ok = await _auto_record_scene(
+                                                    cleaned_round, _extract_last_user_message(messages),
+                                                    _house, endpoint_url, model, headers, owner)
+                                                if _ok:
+                                                    _ov_flow["act"] = "break"
+                                                return bool(_ok)
+
+                                            # Pre-run the async levers so the dispatch callables are sync &
+                                            # zero-arg (per the shared contract) but the real awaited work has
+                                            # already happened; the callable just reports applied/no-op.
+                                            if _ov_verdict_a.lever == "force-advance":
+                                                _ov_applied_flags["force-advance"] = await _ov_do_force_advance()
+                                            elif _ov_verdict_a.lever == "propose-record":
+                                                _ov_applied_flags["propose-record"] = await _ov_do_propose_record()
+
+                                            def _ov_nudge() -> bool:
+                                                # nudge ⇒ inject the existing graduated stall text nudge and
+                                                # re-prompt (the same rung the floor would pick for _level).
+                                                # Returns True ⇒ dispatch_lever reports it applied.
+                                                _txt = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]
+                                                messages.append({"role": "system", "content": _txt})
+                                                _ov_flow["act"] = "yield-continue"
+                                                return True
+
+                                            def _ov_reinject_delta() -> bool:
+                                                # reinject-delta ⇒ re-inject the 0065 stateDelta for the next
+                                                # round (fix the INPUT, never the output). A flagged desync
+                                                # already has a RE-GROUND directive queued for the next turn,
+                                                # so re-prompt now to consume it; otherwise queue a re-ground.
+                                                try:
+                                                    from routes import chat_helpers as _ov_chd
+                                                    if owner not in getattr(_ov_chd, "_DESYNC_REGROUND", {}):
+                                                        _ov_chd._DESYNC_REGROUND[owner] = (
+                                                            "RE-GROUND ON THE BOARD — your view drifted from "
+                                                            "the engine. Read the current GAME CONTEXT before "
+                                                            "you narrate, and voice only what it states.")
+                                                except Exception:
+                                                    pass
+                                                _ov_flow["act"] = "yield-continue"
+                                                return True
+
+                                            def _ov_escalate() -> bool:
+                                                # escalate ⇒ surface a fault to God-Mode health + back off
+                                                # (out-of-toolbox; never force). We log and FALL THROUGH so
+                                                # the deterministic floor still handles pacing this turn.
+                                                # Returns True (the fault surfaced); _ov_flow stays None so the
+                                                # control-flow backs off to the floor rather than re-prompting.
+                                                logger.warning(
+                                                    "[orwell] overseer escalate: "
+                                                    f"{_ov_verdict_a.kind} — {_ov_verdict_a.diagnosis} "
+                                                    f"(round {round_num} user={owner})")
+                                                try:  # surface to the OVERSEER ring as an escalation fault
+                                                    from src import log_rings as _ov_lresc
+                                                    _ov_lresc.record_overseer(
+                                                        "escalation", _ov_verdict_a.kind,
+                                                        f"overseer escalated (out of toolbox): "
+                                                        f"{_ov_verdict_a.diagnosis}",
+                                                        lever="escalate", beat_before=_ledger_beat_seq_before,
+                                                        beat_after=_ov_after_a, ok=False, user=owner)
+                                                except Exception:
+                                                    pass
+                                                _ov_flow["act"] = None  # back off — let the floor proceed
+                                                return True
+
+                                            _ov_actions = {
+                                                "nudge": _ov_nudge,
+                                                "force-advance": (
+                                                    lambda: _ov_applied_flags["force-advance"]),
+                                                "propose-record": (
+                                                    lambda: _ov_applied_flags["propose-record"]),
+                                                "reinject-delta": _ov_reinject_delta,
+                                                "escalate": _ov_escalate,
+                                            }
+                                            _ov_disp = _ov_dispatch(_ov_verdict_a, _ov_actions)
+                                            if _ov_disp and _ov_disp.get("applied"):
+                                                # Log the executed lever to the OVERSEER ring as an `action`
+                                                # (§8 observability) — distinct from a shadow `observation`.
+                                                # `escalate` already recorded its own `escalation` fault in
+                                                # the callable, so don't double-log it here.
+                                                if _ov_verdict_a.lever != "escalate":
+                                                    try:
+                                                        from src import log_rings as _ov_lr2
+                                                        _ov_lr2.record_overseer(
+                                                            "action", _ov_verdict_a.kind,
+                                                            f"active overseer pulled '{_ov_verdict_a.lever}': "
+                                                            f"{_ov_verdict_a.diagnosis}",
+                                                            lever=_ov_verdict_a.lever,
+                                                            beat_before=_ledger_beat_seq_before,
+                                                            beat_after=_ov_after_a, ok=True, user=owner)
+                                                    except Exception:
+                                                        pass
+                                                # Take the SAME control-flow the matching guardrail would so
+                                                # the beat moves. force-advance/nudge/reinject-delta re-prompt
+                                                # (yield agent_step + continue); propose-record banked the
+                                                # fold and ends the turn (break); escalate backs off (falls
+                                                # through to the heuristic floor below).
+                                                if _ov_flow["act"] == "yield-continue":
+                                                    _ov_step = json.dumps({"type": "agent_step", "round": round_num + 1})
+                                                    yield f'data: {_ov_step}\n\n'
+                                                    continue
+                                                if _ov_flow["act"] == "break":
+                                                    break
+                                                # else (escalate / no flow): fall through to the floor.
+                        except Exception as _ov_act_err:  # fail-soft: never let the overseer hurt a turn
+                            logger.debug(f"[orwell] active overseer dispatch skipped: {_ov_act_err}")
+
                         # L39(b) SAFETY NET: the model has been nudged through every text rung across
                         # several turns and STILL won't advance (the "not a single beat advanced" stall).
                         # Pull the engine lever ourselves — one beat, deterministically resolved — then

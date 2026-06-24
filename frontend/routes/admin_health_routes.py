@@ -700,9 +700,13 @@ def setup_admin_health_routes() -> APIRouter:
         from src import llm_trace, overseer
         from src.settings import get_setting
         total = llm_trace.total_log_bytes()
+        mode = overseer.overseer_mode()  # 0080: 'off' | 'shadow' | 'active'
         return {
             "traceEnabled": bool(get_setting("llm_trace_enabled", True)),
-            "overseerEnabled": bool(overseer.overseer_enabled()),
+            # 0080: the 3-state mode is authoritative; overseerEnabled stays for back-compat
+            # (true iff the mode is not 'off').
+            "overseerMode": mode,
+            "overseerEnabled": mode != "off",
             "retentionDays": llm_trace.retention_days(),
             "choices": llm_trace.RETENTION_CHOICES,
             "totalBytes": total,
@@ -728,8 +732,19 @@ def setup_admin_health_routes() -> APIRouter:
         if "traceEnabled" in body:
             settings["llm_trace_enabled"] = bool(body["traceEnabled"])
             changed = True
-        if "overseerEnabled" in body:
-            settings["overseer_enabled"] = bool(body["overseerEnabled"])
+        # 0080: the 3-state mode is the primary control. When set, it is authoritative — clear the
+        # legacy binary key so it can never shadow the chosen mode in overseer_mode()'s resolution.
+        if "overseerMode" in body:
+            mode = body["overseerMode"]
+            if isinstance(mode, str) and mode in overseer.OVERSEER_MODES:
+                settings["overseer_mode"] = mode
+                settings.pop("overseer_enabled", None)
+                changed = True
+        elif "overseerEnabled" in body:
+            # Legacy binary toggle (back-compat): True -> shadow, False -> off, written through the
+            # 3-state key so the new control reflects it.
+            settings["overseer_mode"] = "shadow" if bool(body["overseerEnabled"]) else "off"
+            settings.pop("overseer_enabled", None)
             changed = True
         if "retentionDays" in body:
             try:
@@ -743,9 +758,11 @@ def setup_admin_health_routes() -> APIRouter:
             save_settings(settings)
         # Apply the (possibly new) horizon now so the size readout reflects it.
         result = llm_trace.trim_logs(None)
+        mode = overseer.overseer_mode()  # 0080: resolved post-save (the source of truth)
         return {
             "traceEnabled": bool(settings.get("llm_trace_enabled", True)),
-            "overseerEnabled": bool(overseer.overseer_enabled()),
+            "overseerMode": mode,
+            "overseerEnabled": mode != "off",
             "retentionDays": llm_trace.retention_days(),
             "totalBytes": result["totalBytes"],
             "totalHuman": result["totalHuman"],
@@ -1081,10 +1098,15 @@ _STATUS_PAGE = """<!doctype html>
   <span id="retmsg" class="sub"></span>
 </div>
 <h1 style="margin-top:26px">RUNTIME OVERSEER</h1>
-<div class="sub">The runtime loop overseer (feature 0079) watches the engine↔LLM loop; when a symptom trips it diagnoses the root cause and logs it to the <strong>Overseer (live)</strong> stream above. <strong>Shadow mode</strong> — it diagnoses and logs but does not act (the existing guardrails still do), so enabling it is safe and changes nothing the player sees. The <code>ORWELL_OVERSEER</code> env var is the headless fallback when this toggle is unset.</div>
+<div class="sub">The runtime loop overseer (feature 0079/0080) watches the engine↔LLM loop; when a symptom trips it diagnoses the root cause and logs it to the <strong>Overseer (live)</strong> stream above. <strong>Off</strong> — the deterministic floor stands (default). <strong>Shadow</strong> (0079) — it diagnoses and logs but does not act (the existing guardrails still do), so it is safe and changes nothing the player sees. <strong>Active</strong> (0080) — its verdict drives the correction live (the guardrails become the fail-soft floor; live-LLM only). The <code>ORWELL_OVERSEER_MODE</code> / <code>ORWELL_OVERSEER</code> env vars are the headless fallback when this control is unset.</div>
 <div class="actions" style="margin:8px 0;align-items:center;flex-wrap:wrap">
-  <label class="sub" style="display:flex;align-items:center;gap:6px;cursor:pointer">
-    <input type="checkbox" id="overseer-toggle"> enable the runtime overseer (shadow mode)
+  <label class="sub" style="display:flex;align-items:center;gap:6px">
+    overseer mode
+    <select id="overseer-toggle">
+      <option value="off">off — diagnostic floor (default)</option>
+      <option value="shadow">shadow — diagnose &amp; log (0079)</option>
+      <option value="active">active — act on the verdict (0080)</option>
+    </select>
   </label>
   <span id="overseermsg" class="sub"></span>
 </div>
@@ -1626,7 +1648,8 @@ async function loadRetention() {
     retDays.innerHTML = (d.choices || []).map(c => '<option value="' + esc(c.days) + '">' + esc(c.label) + "</option>").join("");
     retDays.value = String(d.retentionDays);
     traceToggle.checked = !!d.traceEnabled;
-    if (overseerToggle) overseerToggle.checked = !!d.overseerEnabled;
+    // 0080: the 3-state control reflects overseerMode; fall back to the legacy overseerEnabled flag.
+    if (overseerToggle) overseerToggle.value = d.overseerMode || (d.overseerEnabled ? "shadow" : "off");
     renderRetention(d);
   } catch (e) {}
 }
@@ -1645,10 +1668,10 @@ if (overseerToggle) overseerToggle.addEventListener("change", async () => {
   overseerMsg.textContent = "saving…";
   try {
     const r = await fetch("/api/admin/logs/retention", { method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overseerEnabled: overseerToggle.checked }) });
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overseerMode: overseerToggle.value }) });
     const d = await r.json();
-    overseerToggle.checked = !!d.overseerEnabled;
-    overseerMsg.textContent = overseerToggle.checked ? "on" : "off";
+    overseerToggle.value = d.overseerMode || (d.overseerEnabled ? "shadow" : "off");
+    overseerMsg.textContent = overseerToggle.value;
   } catch (e) { overseerMsg.innerHTML = '<span class="bad">save failed</span>'; }
 });
 retDays.addEventListener("change", () => saveRetention({ retentionDays: +retDays.value }, "applying horizon…"));

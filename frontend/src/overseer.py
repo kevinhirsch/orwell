@@ -45,23 +45,101 @@ LEVERS = ("hold", "nudge", "force-advance", "propose-record", "reinject-delta", 
 # The verdict levels — MUST equal log_rings._OVERSEER_LEVELS so record_overseer accepts them.
 LEVELS = ("observation", "action", "anomaly", "escalation")
 
+# Feature 0080 — the 3-state runtime-overseer mode (extends 0079's binary toggle):
+#   'off'    — the deterministic floor stands; the loop runs exactly as before (default).
+#   'shadow' — the 0079 behavior: the overseer diagnoses + LOGS, the inline guardrails still act.
+#   'active' — the 0080 behavior: the overseer's verdict DRIVES the correction (LIVE-only; the
+#              deterministic guardrails are the fail-soft floor underneath).
+OVERSEER_MODES = ("off", "shadow", "active")
 
-def overseer_enabled() -> bool:
-    """Feature 0079 runtime overseer — OPT-IN, default OFF. The admin Settings toggle
-    (``overseer_enabled`` in settings.json, set from the status page — increment 5) is the PRIMARY
-    control and wins whenever it is explicitly set; the ``ORWELL_OVERSEER`` env var
-    (``1``/``true``/``yes``/``on``) is the headless fallback when no toggle has been chosen. Unset
-    everywhere ⇒ the deterministic floor stands and the loop runs exactly as before. Fail-soft: a
-    broken settings read degrades to the env var (config must never raise into the loop)."""
+# The truthy spellings of the legacy ORWELL_OVERSEER env flag (its presence ⇒ 'shadow').
+_TRUTHY = ("1", "true", "yes", "on")
+
+
+def overseer_mode() -> str:
+    """Feature 0080 — resolve the 3-state runtime-overseer mode (one of :data:`OVERSEER_MODES`).
+
+    Settings-first, fail-soft. Resolution order (the first that yields a value wins):
+      1. settings ``overseer_mode`` — if it is one of :data:`OVERSEER_MODES`;
+      2. else the legacy settings ``overseer_enabled`` — if present: ``True`` → ``'shadow'``,
+         ``False`` → ``'off'`` (the 0079 toggle still works untouched);
+      3. else the env ``ORWELL_OVERSEER_MODE`` — if it is one of :data:`OVERSEER_MODES`;
+      4. else the legacy env ``ORWELL_OVERSEER`` — truthy (``1``/``true``/``yes``/``on``) →
+         ``'shadow'``, anything else → ``'off'``;
+      5. else ``'off'``.
+
+    A broken settings read degrades to the env path (steps 3–4) and NEVER raises into the loop —
+    config must never crash the turn."""
+    # 1) + 2) — the settings tier (the admin UI control). A broken read drops to the env path.
     try:
         from src.settings import get_setting
-        val = get_setting("overseer_enabled", None)
-        if val is not None:
-            return bool(val)
+        mode = get_setting("overseer_mode", None)
+        if isinstance(mode, str) and mode in OVERSEER_MODES:
+            return mode
+        legacy = get_setting("overseer_enabled", None)
+        if legacy is not None:
+            return "shadow" if bool(legacy) else "off"
     except Exception:
         pass
+    # 3) the explicit 3-state env knob.
+    env_mode = os.getenv("ORWELL_OVERSEER_MODE")
+    if env_mode is not None and env_mode.strip().lower() in OVERSEER_MODES:
+        return env_mode.strip().lower()
+    # 4) the legacy binary env flag (truthy ⇒ shadow).
     raw = os.getenv("ORWELL_OVERSEER")
-    return raw is not None and raw.strip().lower() in ("1", "true", "yes", "on")
+    if raw is not None and raw.strip().lower() in _TRUTHY:
+        return "shadow"
+    # 5) the default — the deterministic floor stands.
+    return "off"
+
+
+def overseer_enabled() -> bool:
+    """Feature 0079 runtime overseer — OPT-IN, default OFF. Back-compat shim over the 0080
+    3-state :func:`overseer_mode`: enabled iff the mode is not ``'off'`` (i.e. ``'shadow'`` or
+    ``'active'``). The admin Settings toggle and the ``ORWELL_OVERSEER`` env fallback still resolve
+    exactly as in 0079 (they flow through :func:`overseer_mode`'s legacy branches). Fail-soft: a
+    broken settings read degrades to the env var (config must never raise into the loop)."""
+    return overseer_mode() != "off"
+
+
+def dispatch_lever(verdict, actions: dict) -> dict:
+    """Feature 0080 ``active``-mode dispatch seam — route a :class:`Verdict` to the caller's
+    deterministic action for its lever.
+
+    ``actions`` maps ``{lever_name -> zero-arg callable}`` where each callable PERFORMS the
+    deterministic, engine-triggering action (the existing inline guardrail path) and returns a
+    truthy "applied" signal. This function looks up ``verdict.lever`` and INVOKES its callable —
+    nothing else.
+
+    **Trigger-only by construction (the mandate boundary, §7):** it only *invokes* the caller's
+    callable; it NEVER computes an outcome, a magnitude, or any content — the engine still owns all
+    of that. The overseer decides *whether/when to pull*, never *what*.
+
+    Returns ``{'lever': str, 'applied': bool, 'reason': str}``:
+      * ``'hold'`` (or a ``None``/garbage verdict, or no action provided for the lever) →
+        ``applied=False`` (a no-op, with a reason).
+      * **Fail-soft:** a callable that raises → ``applied=False`` (the error is swallowed, never
+        propagated — the deterministic floor catches the symptom next).
+    """
+    # A None / garbage verdict (no usable lever) — nothing to dispatch.
+    lever = getattr(verdict, "lever", None)
+    if not isinstance(lever, str) or lever not in LEVERS:
+        return {"lever": str(lever) if lever is not None else "", "applied": False,
+                "reason": "no lever to dispatch"}
+    # 'hold' is the deliberate no-op (logged as an observation upstream).
+    if lever == "hold":
+        return {"lever": lever, "applied": False, "reason": "hold — no action"}
+    # No action wired for this lever this turn — a no-op, not an error.
+    action = actions.get(lever) if isinstance(actions, dict) else None
+    if action is None:
+        return {"lever": lever, "applied": False, "reason": "no action provided for lever"}
+    try:
+        applied = bool(action())   # TRIGGER-ONLY: invoke the caller's deterministic action.
+        return {"lever": lever, "applied": applied,
+                "reason": "applied" if applied else "action declined"}
+    except Exception as e:
+        # Fail-soft: a raising action never propagates — the deterministic floor still stands.
+        return {"lever": lever, "applied": False, "reason": f"{type(e).__name__}: {e}"}
 
 
 @dataclass(frozen=True)
