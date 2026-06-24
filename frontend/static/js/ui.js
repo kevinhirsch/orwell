@@ -1186,44 +1186,99 @@ if (!window._odyEscExpandGuard) {
   // research get re-appended on each open). Result: opening compare AFTER
   // cookbook can render compare UNDER it. Bumping the z-index on every
   // open guarantees most-recently-opened wins both visually AND for ESC.
-  let _zCounter = 1000;
+  // A2 (#573, DWE audit F9): THE single z/focus authority for the whole window
+  // system — both the legacy .modal family AND the OrwellWindow kit's non-modal
+  // band draw from this ONE object. Before this, there were two disconnected
+  // counters: ui.js's `_zCounter` (1000+, the .modal ladder) and the kit's
+  // private `_zTop` (500–980, orwellWindow.js). "Topmost / focused" was decided
+  // by two sources that agreed only by the convention of a numeric gap — a kit
+  // window raised after a modal could climb into the modal's range with no
+  // structural floor stopping it. OrwellZ fixes that structurally:
+  //   • ONE monotonic tick (`_tick`) — every raise (window OR modal) advances it,
+  //     so "most recently focused, across every surface" is globally unambiguous.
+  //   • TWO bands enforce the family ordering by construction (banner > modal >
+  //     window, per the DWE audit): a modal's z always lands ≥ MODAL_FLOOR, a kit
+  //     window's z always lands in [WINDOW_FLOOR, MODAL_FLOOR), so a modal can
+  //     NEVER be painted under a kit window regardless of which was touched last.
+  //   • The kit-band tick saturates one below the modal floor and renormalizes
+  //     (the kit's old `_zTop` ceiling behavior, now owned here) so it can't leak
+  //     across the gap; the modal band is unbounded upward (statics live above it).
+  const OrwellZ = (() => {
+    const WINDOW_FLOOR = 500;   // kit non-modal band floor (was orwellWindow.js Z_BASE)
+    const WINDOW_CEIL = 980;    // kit band ceiling before renormalize (was Z_CEIL)
+    const MODAL_FLOOR = 1000;   // .modal family + kit modal tier floor
+    let _tick = MODAL_FLOOR;    // the one monotonic counter; modal z == _tick
+    let _winTick = WINDOW_FLOOR; // kit-band sub-cursor, saturated below MODAL_FLOOR
+    return {
+      // Allocate the next modal z. Monotonic, unbounded upward — the .modal
+      // ladder and the kit's modal:true windows both call this, so they share
+      // one ladder and can never out-climb each other.
+      nextModalZ() { return ++_tick; },
+      // Allocate the next kit-window z. Advances the SAME global tick (so focus
+      // order is one truth) but maps into the kit band, renormalizing the open
+      // kit stack when it would touch the modal floor. `restack(els)` re-lays the
+      // currently-open kit windows bottom→top so a renormalize keeps their order.
+      nextWindowZ(restack) {
+        _tick++;
+        if (_winTick >= WINDOW_CEIL) {
+          _winTick = WINDOW_FLOOR;
+          if (typeof restack === 'function') {
+            try { restack((els) => els.forEach((el) => { if (el) el.style.zIndex = String(++_winTick); })); } catch (_) {}
+          }
+        }
+        return ++_winTick;
+      },
+      // The current top of the modal ladder (for the re-entry guard below).
+      modalTop() { return _tick; },
+    };
+  })();
   const _isVisible = (m) => !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
   const _promote = (m) => {
     if (!m?.classList?.contains('modal') || !_isVisible(m)) return;
     // Re-entry guard: setting style.zIndex itself fires the observer that
     // calls us back. Skip if this element is already pinned to the top
-    // (matches the current counter) so we don't spin into an infinite loop.
+    // (matches the current modal ladder top) so we don't spin into a loop.
     const cur = parseInt(m.style.zIndex, 10) || 0;
-    if (cur === _zCounter) return;
-    m.style.zIndex = String(++_zCounter);
+    if (cur === OrwellZ.modalTop()) return;
+    m.style.zIndex = String(OrwellZ.nextModalZ());
   };
-  // A2 (#573, DWE audit F9): ONE z/focus authority across both window families.
-  // The legacy .modal ladder (above) and the OrwellWindow kit's modal tier used
-  // to be two separate counters that both started at 1000 — a kit modal pinned to
-  // a fixed 1001 could be painted UNDER a legacy .modal once _zCounter climbed past
-  // it. Expose the single monotonic allocator so the kit draws from THIS counter
-  // for its modal windows; visual order, dock order, and Escape order share one
-  // source of truth. (The kit's non-modal band 500–980 stays below 1000 by design.)
-  window._owNextModalZ = () => ++_zCounter;
+  // Expose the single allocator for both families. The kit draws its MODAL tier
+  // from `_owNextModalZ` (so a kit modal and a legacy .modal share one ladder)
+  // and its NON-MODAL band from `_owNextWindowZ` (so the kit band rides the same
+  // global tick — one source of truth for "topmost / focused", with the band
+  // offsets keeping modals structurally above kit windows).
+  window._owNextModalZ = () => OrwellZ.nextModalZ();
+  window._owNextWindowZ = (restack) => OrwellZ.nextWindowZ(restack);
+  window.OrwellZ = OrwellZ;
   // Lane G14 (DWE audit F9b): this counter is the ONE z-authority for the
   // whole .modal family — the same ladder pickTopModal reads for Escape.
   // modalManager's _bringToFront defers here instead of stamping its own
   // second counter (the old _modalTopZ 300s, written with !important), so
   // visual order, dock-restore order, and Escape order can never disagree.
   window._owPromoteModal = _promote;
-  // F8 (DWE audit / Lane F wave 3): closing a modal returns focus to its
-  // opener — for the WHOLE .modal family, from this one observer. On the
-  // hidden→visible transition we stash the element that had focus; on
-  // visible→hidden we restore it, but ONLY when focus still sits inside the
-  // closing modal or fell to <body> (never yank it from somewhere the user
-  // has since moved it).
+  // F8 / A2 (#573, DWE audit F9): ONE focus-return implementation for the whole
+  // window system. Closing a surface returns focus to its opener, but ONLY when
+  // focus still sits inside the closing surface or fell to <body> (never yank it
+  // from somewhere the user has since moved it). Before A2 there were TWO copies
+  // of this rule — this observer's `_restoreFocus` (the .modal family) and the
+  // kit's own copy in orwellWindow.js `_teardown` — that could drift. The kit now
+  // delegates to this single helper (window._owReturnFocus); the .modal observer
+  // calls it with the closing modal as the "inside" container.
+  const _returnFocus = (opener, container) => {
+    if (!opener || !opener.isConnected || typeof opener.focus !== 'function') return;
+    const active = document.activeElement;
+    if (active && active !== document.body && container && container.contains && container.contains(active)) {
+      // focus is still inside the closing surface → safe to return it
+    } else if (active && active !== document.body) {
+      return;  // the user moved focus elsewhere — don't yank it back
+    }
+    try { opener.focus(); } catch {}
+  };
+  window._owReturnFocus = _returnFocus;
   const _restoreFocus = (m) => {
     const opener = m._owOpener;
     m._owOpener = null;
-    if (!opener || !opener.isConnected || typeof opener.focus !== 'function') return;
-    const active = document.activeElement;
-    if (active && active !== document.body && !m.contains(active)) return;
-    try { opener.focus(); } catch {}
+    _returnFocus(opener, m);
   };
   const _trackVisibility = (m) => {
     if (!m?.classList?.contains('modal')) return;
