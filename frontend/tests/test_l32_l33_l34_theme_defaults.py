@@ -143,7 +143,8 @@ def test_l34_kit_window_frosts_under_theme_frosted():
     assert "body.theme-frosted .ow-window" in block
     # It uses the translucent + blur treatment, not a solid fill.
     assert "color-mix(in srgb, var(--panel" in block
-    assert "backdrop-filter: blur(24px)" in block
+    # Liquid-glass pass (2026-06-24): blur deepened 24px → 32px for the refractive look.
+    assert "backdrop-filter: blur(32px)" in block
 
 
 def test_l34_a6_kit_titlebar_rides_the_root_frost_no_own_filter():
@@ -198,6 +199,19 @@ def test_l34_gadget_rail_frosts_too():
     block = _frosted_bg_block(css)
     assert "body.theme-frosted .gadget-rail" in block, \
         "the control-room gadget rail must frost with the rest of the chrome (L34)"
+
+
+def test_liquid_glass_gadget_cards_frost():
+    # Liquid-glass pass (2026-06-24): each OrwellGadget kit card (.og-card) is its
+    # own frosted pane under the frosted theme — translucent tint + its own blur +
+    # a bright rim — so the control-room rail reads as stacked glass, not opaque tiles.
+    css = _read("static", "style.css")
+    m = re.search(r"body\.theme-frosted \.og-card\s*\{([^}]*)\}", css, re.S)
+    assert m, "the .og-card must have a frosted-glass rule"
+    rule = m.group(1)
+    assert "color-mix(in srgb, var(--panel" in rule, "card must use a translucent tint, not a solid fill"
+    assert "backdrop-filter: blur(" in rule, "card must carry its own backdrop blur (glass pane)"
+    assert "inset 0 1px 0" in rule, "card must have the bright top rim (liquid-glass edge)"
 
 
 def test_l34_kit_titlebar_has_no_solid_background_in_the_kit_css():

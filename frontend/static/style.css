@@ -36399,14 +36399,39 @@ body.theme-frosted .ow-window {
   /* Tinted base color (set separately so the shorthand can't swallow it);
      much more transparent than before so what's behind actually shows
      through. The blur catches whatever pixels are below. */
-  background-color: color-mix(in srgb, var(--panel, var(--bg)) 32%, transparent) !important;
+  background-color: color-mix(in srgb, var(--panel, var(--bg)) 20%, transparent) !important;
+  /* Liquid-glass sheen: a brighter specular wash down the top so the glass reads
+     as a lit, refractive pane (not a flat tinted panel). Kept dark-tinted overall
+     so light --fg text stays legible over busy content behind the blur. */
   background-image: linear-gradient(180deg,
-    color-mix(in srgb, var(--fg, #fff) 14%, transparent) 0%,
-    color-mix(in srgb, var(--fg, #fff)  4%, transparent) 26%,
-    transparent 55%) !important;
-  backdrop-filter: blur(24px) saturate(170%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(170%) !important;
-  border-color: color-mix(in srgb, var(--fg) 22%, transparent) !important;
+    color-mix(in srgb, var(--fg, #fff) 24%, transparent) 0%,
+    color-mix(in srgb, var(--fg, #fff)  9%, transparent) 20%,
+    transparent 58%) !important;
+  backdrop-filter: blur(32px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(190%) !important;
+  border-color: color-mix(in srgb, var(--fg) 34%, transparent) !important;
+  /* The signature liquid-glass edge: keep the drop shadow, add a bright 1px top
+     rim (light catching the glass) + a faint inner glow for depth. */
+  box-shadow: var(--win-shadow),
+              inset 0 1px 0 color-mix(in srgb, var(--fg) 40%, transparent),
+              inset 0 0 24px color-mix(in srgb, var(--fg) 6%, transparent) !important;
+}
+/* Liquid glass on the gadget kit (#642): each .og-card becomes its own frosted
+   pane (matching the .ow-window treatment) so the control-room rail reads as
+   stacked glass, not opaque tiles. The rail container already frosts (it shares
+   the .ow-window glass rule above); the cards add their own blur + bright rim +
+   sheen so they lift off it as legible panes. */
+body.theme-frosted .og-card {
+  background-color: color-mix(in srgb, var(--panel, var(--bg)) 24%, transparent) !important;
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--fg, #fff) 18%, transparent) 0%,
+    color-mix(in srgb, var(--fg, #fff)  6%, transparent) 24%,
+    transparent 60%) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border-color: color-mix(in srgb, var(--fg) 28%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 34%, transparent),
+              0 4px 14px rgba(0,0,0,0.18) !important;
 }
 /* F-S2-A (audit 2026-06-21): the pre-game cast-photo dialog (#orwell-headshot) is a GATING window
    that floats over the LIVE producer interview (the 2026-06-20 re-sequence made the photo optional
