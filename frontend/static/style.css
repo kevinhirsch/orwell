@@ -3345,34 +3345,6 @@ body.bg-pattern-perlin-flow {
       45% { text-shadow: 0 0 10px color-mix(in srgb, var(--accent, var(--red)) 60%, transparent); }
       100% { text-shadow: 0 0 0 color-mix(in srgb, var(--accent, var(--red)) 0%, transparent); }
     }
-    /* Inline remove-from-recent button — only shown on Recent rows. */
-    .model-picker-list .mp-remove-dot {
-      flex: 0 0 auto;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 24px;
-      height: 24px;
-      margin: -4px -4px -4px 2px;
-      padding: 0;
-      border: none;
-      background: transparent;
-      cursor: pointer;
-      color: color-mix(in srgb, var(--fg) 28%, transparent);
-      font-family: inherit;
-      font-size: 15px;
-      line-height: 1;
-      transition: color 0.15s ease, opacity 0.15s ease, transform 0.12s ease;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .model-picker-list .mp-remove-dot:hover {
-      color: var(--red, #ff5555);
-      transform: scale(1.1);
-    }
-    .model-picker-list .mp-remove-dot:focus-visible {
-      outline: none;
-      color: var(--red, #ff5555);
-    }
     /* First-run hint when a large catalog has no Recent/Favorites yet. */
     .model-picker-list .mp-empty-hint {
       flex-direction: column;
@@ -3458,14 +3430,14 @@ body.bg-pattern-perlin-flow {
        selectors are in those lists). Here we close the legibility gaps that are local
        to the picker's INNER controls: several set their OWN light `var(--fg)` mix and
        so survived as light-on-light on the light glass (the favorite dot, the
-       remove-from-recent dot, the provider-group chevron). Apple's
+       provider-group chevron). Apple's
        rule on the Regular material is dark ink over a light glass — never light-on-light
        (LIQUID_GLASS_REFERENCE §"Regular"; ADAPTIVE_LEGIBILITY_REFERENCE §1 — small/large
        elements adapt their symbols to the backdrop; menus are a "big" element so the
        legible state is dark-ink, not a flip). Apple defines glass by LENSING, not a
        stroke, so any definition edge is a soft luminous hairline, never a hard
-       var(--border). NO accent hue on TEXT; the favorite/remove dots are sanctioned
-       NON-text status accents and keep their hue. Scoped to body.theme-frosted so the
+       var(--border). NO accent hue on TEXT; the favorite dot is a sanctioned
+       NON-text status accent and keeps its hue. Scoped to body.theme-frosted so the
        Normal tier keeps its flat look.
 
        Ref menus/popovers: lg_hig_toolbar_after.png + lg_hig_ios_glass_over_light.png
@@ -3480,8 +3452,8 @@ body.bg-pattern-perlin-flow {
          be light-on-light. */
       --fg: #16191f;
     }
-    /* The favorite + remove dots are sanctioned NON-text STATUS accents (a ● / ×),
-       not body text — but their RESTING (inactive) color was a light var(--fg) mix that
+    /* The favorite dot is a sanctioned NON-text STATUS accent (a ●), not body
+       text — but its RESTING (inactive) color was a light var(--fg) mix that
        vanished on the light glass. Give the resting state a legible muted DARK ink; the
        ACTIVE favorite keeps its accent hue (a status indicator, not text). */
     body.theme-frosted .model-picker-list .mp-fav-dot:not(.active) {
@@ -3490,9 +3462,6 @@ body.bg-pattern-perlin-flow {
     body.theme-frosted .model-picker-list .mp-fav-dot:not(.active):hover,
     body.theme-frosted .model-picker-list .mp-fav-dot:not(.active):focus-visible {
       color: rgba(22,25,31,0.72);
-    }
-    body.theme-frosted .model-picker-list .mp-remove-dot {
-      color: rgba(22,25,31,0.42);
     }
     /* Provider-group chevron is a dark monochrome symbol on the light glass. */
     body.theme-frosted .model-picker-list .mp-provider-chevron {

@@ -35,11 +35,6 @@ function _pushRecent(mid) {
   next.unshift(mid);
   _saveList(RECENT_KEY, next.slice(0, RECENT_MAX));
 }
-function _removeRecent(mid) {
-  if (!mid) return;
-  const next = _loadRecent().filter(x => x !== mid);
-  _saveList(RECENT_KEY, next);
-}
 function _loadFavorites() { return _loadList(FAVORITES_KEY); }
 function _toggleFavorite(mid) {
   const favs = _loadFavorites();
@@ -283,7 +278,7 @@ function _initModelPickerDropdown() {
       el.textContent = label;
       listEl.appendChild(el);
     }
-    function _addRow(m, onRemove) {
+    function _addRow(m) {
       const row = document.createElement('div');
       row.className = 'model-switch-item';
       if (m.stale) {
@@ -352,20 +347,6 @@ function _initModelPickerDropdown() {
       });
       row.appendChild(favDot);
 
-      // Remove-from-recent button (shown only for Recent section items).
-      if (onRemove) {
-        const rmBtn = document.createElement('button');
-        rmBtn.type = 'button';
-        rmBtn.className = 'mp-remove-dot';
-        rmBtn.textContent = '×';
-        rmBtn.title = 'Remove from recent';
-        rmBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          onRemove();
-        });
-        row.appendChild(rmBtn);
-      }
-
       row.addEventListener('click', () => _pick(m));
       listEl.appendChild(row);
     }
@@ -397,10 +378,7 @@ function _initModelPickerDropdown() {
         _addSection('Recent');
         recentModels.forEach(m => {
           shown.add(m.mid);
-          _addRow(m, () => {
-            _removeRecent(m.mid);
-            _populate('');
-          });
+          _addRow(m);
         });
       }
     }

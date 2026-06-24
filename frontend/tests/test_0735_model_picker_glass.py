@@ -9,7 +9,7 @@ so a refactor can't silently regress it):
     --ow-glass-* tokens / kube light fill the OrwellWindow + Notice kits use).
   * DARK INK (#16191f family) on the light glass for every text node — model name,
     provider/endpoint label, section labels, the selected/active row, the button
-    label, the favorite/remove dots' resting state. NO light-on-light anywhere.
+    label, the favorite dot's resting state. NO light-on-light anywhere.
   * SOFT LUMINOUS hairlines (rgba(255,255,255,0.14) family), NOT a hard dark
     var(--border) stroke (Apple defines glass by lensing, not stroke).
   * NO accent HUE on TEXT (mandate). The favorite-status dot keeps its accent only as
@@ -100,14 +100,10 @@ def test_picker_text_nodes_are_dark_ink():
     )
 
 
-def test_fav_and_remove_dots_have_legible_resting_ink():
+def test_fav_dot_has_legible_resting_ink():
     fav = _rule("body.theme-frosted .model-picker-list .mp-fav-dot:not(.active)")
-    rm = _rule("body.theme-frosted .model-picker-list .mp-remove-dot")
     assert re.search(r"22\s*,\s*25\s*,\s*31", fav), (
         "the resting favorite dot must be a legible muted DARK ink on the light glass"
-    )
-    assert re.search(r"22\s*,\s*25\s*,\s*31", rm), (
-        "the resting remove-from-recent dot must be a legible muted DARK ink"
     )
 
 
@@ -129,7 +125,6 @@ def test_no_accent_hue_on_picker_text_under_glass():
     # None of the picker's TEXT-bearing dark-ink rules may paint var(--accent)/--red.
     for needle in (
         "body.theme-frosted .model-picker-list .mp-fav-dot:not(.active)",
-        "body.theme-frosted .model-picker-list .mp-remove-dot",
         "body.theme-frosted .model-picker-list .mp-provider-chevron",
     ):
         body = _rule(needle)
