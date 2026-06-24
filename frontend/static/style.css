@@ -38667,8 +38667,6 @@ body.theme-frosted .tool-indicator {
    text color, and are governed by their own rules above. */
 body.theme-frosted a,
 body.theme-frosted .red-text,
-body.theme-frosted .thinking-header-left,
-body.theme-frosted .tool-indicator.active,
 body.theme-frosted #research-toggle-btn.active,
 body.theme-frosted #research-toggle-btn.research-running,
 body.theme-frosted .section-header-btn.active,
@@ -38677,6 +38675,23 @@ body.theme-frosted .setup-clickable-provider:hover,
 body.theme-frosted .setup-clickable-code:hover,
 body.theme-frosted .welcome-eye {
   color: var(--fg) !important;
+}
+/* ── #759: two TRANSIENT chrome surfaces sit OUTSIDE the dark-ink chrome scope ──────
+   The "Thinking" accordion header label (.thinking-header-left) and the ACTIVE tool
+   chip (.tool-indicator.active) both directly paint their OWN text — the thinking
+   label at var(--red) (base) and the active chip at var(--red) (base, line ~2893) —
+   and the accent-neutralize block above only routed them to var(--fg), which for the
+   glass theme on LIGHT glass is a LIGHT ink (measured ~1.13:1 — invisible). Apple's
+   light toolbar/sidebar over light glass renders DARK monochrome ink ("text … becoming
+   darker when the underlying content is light" — HIG Color; lg_hig_legibility_primary_label
+   shows the dark glyph on the light glass tile). Flip BOTH to the SAME dark ink the
+   functional chrome uses (#16191f), with a LIGHT halo (not the dark --ow-glass-text-shadow,
+   which under dark ink reads as a dirty smudge — #725 pattern). NON-text accents (the
+   spinner/dot, the chip background tint) are untouched — only TEXT goes neutral dark. */
+body.theme-frosted .thinking-header-left,
+body.theme-frosted .tool-indicator.active {
+  color: #16191f !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
 }
 /* Catch-all for any element painting the accent onto its OWN text via the tokens.
    Scoped to body.theme-frosted; uses :where() to stay at zero specificity cost on the
