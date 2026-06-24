@@ -1374,9 +1374,19 @@ _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
 # loop and nudge the model — non-disruptive first, escalating — rather than auto-
 # advancing (the owner's call: keep the dynamic DM, error-correct the omission).
 # The phase set + cap + nudge texts are deliberately tunable.
+#
+# #670: these are matched against the engine's `phase` (GameSessionAdapter.syncProjection →
+# s.beat, or "finale" when finished) — NOT the `moment` string. The staged finale reports
+# phase="finale" for every beat (the player-finalist's moment is "jury-finale", a player-juror's
+# is "jury"), so "finale" — not "jury-finale" (a MOMENT, never a phase) — is what belongs here.
+# The old "jury-finale" entry was dead (it never matched a phase), leaving the L39 forced-advance
+# backstop blind to the long staged finale where the model most reliably under-calls advanceGame.
+# Double-advance is prevented by the `_pre_resolved` gate on the backstop below: the pre-resolve
+# (`_CEREMONY_RESOLVE_PHASES`, which also covers "finale") already walks ONE beat per turn, so the
+# backstop must not advance a second time the same turn.
 _ADVANCE_PHASES = {
     "premiere", "hoh-competition", "nominations", "veto-competition",
-    "veto-ceremony", "eviction", "jury-finale", "twist-reveal",
+    "veto-ceremony", "eviction", "finale", "twist-reveal",
 }
 _PROGRESSION_TOOLS = {"advanceGame", "submitDecision"}
 # A PREVIEW (runCompetition) reports a ceremony's already-decided winner but commits NOTHING. Previewing
@@ -3839,14 +3849,24 @@ async def stream_agent_loop(
                     _runway_holding = _ch._RUNWAY_LEFT.get(owner or "", 0) > 0
                 except Exception:
                     _runway_holding = False
+                # #670: did the pre-resolve already walk a real beat THIS turn (a ceremony OR a staged
+                # finale beat)? Read-and-clear it (one-shot). If so the turn ALREADY progressed, so it
+                # is not a stall — reset the staleness clock (below) and suppress the backstop (further
+                # down) so we never advance a SECOND beat the same turn (which would skip a finale-reveal
+                # beat). Mirrors the `_peer_advanced` guard. Fail-open: any hiccup ⇒ False (no suppression).
+                try:
+                    _pre_resolved = _ch.consume_pre_resolved_advance(owner or "")
+                except Exception:
+                    _pre_resolved = False
                 # Track staleness: this finishing block runs once per player turn. A turn that
-                # advanced — or that the runway is intentionally holding — resets the clock; otherwise
-                # the beat has sat one more turn. The lull-nudge waits until the night has genuinely
+                # advanced — or that the runway is intentionally holding, or that the pre-resolve already
+                # walked a beat (#670) — resets the clock; otherwise the beat has sat one more turn. The
+                # lull-nudge waits until the night has genuinely
                 # stopped moving (>= grace), so engaging play, a just-started beat, AND a deliberately
                 # held social runway are never shoved (owner ruling 2026-06-18 + the runway fix).
                 if owner:
                     _TURNS_SINCE_PROGRESS[owner] = (
-                        0 if (_progressed or _runway_holding)
+                        0 if (_progressed or _runway_holding or _pre_resolved)
                         else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1)
                 # P1: the effective grace is SHORTER in the guided first week (pacing only) and the
                 # standard grace otherwise (the hint lags a turn, defaulting safe to the standard).
@@ -4057,7 +4077,7 @@ async def stream_agent_loop(
                     # nudge → another narration) ONLY when nothing visible has been shown yet, where a
                     # single fresh narration is exactly what's wanted. The per-turn cap and the persisted
                     # `_ADVANCE_STALL_LEVEL` escalation are unchanged.
-                    if _want_advance and _phase in _ADVANCE_PHASES and not _peer_advanced:
+                    if _want_advance and _phase in _ADVANCE_PHASES and not _peer_advanced and not _pre_resolved:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
                         _turn_advance_nudges += 1
                         if owner:
@@ -4177,7 +4197,11 @@ async def stream_agent_loop(
                     # NPC approach in the lingering window: the lull hasn't gone stale (so we're not yet
                     # advancing the week) — if a houseguest wants the player, bring THEM over in chat now,
                     # so the social life stays alive without a notification panel ever telling the player.
-                    if _want_approach and _phase in _ADVANCE_PHASES:
+                    # #670: "finale" was ADDED to _ADVANCE_PHASES for the forced-advance backstop only —
+                    # the staged finale is a one-beat-per-turn reveal, NOT a lingering window, so an NPC
+                    # approach there would interrupt the jury vote with a side scene. Exclude it (preserves
+                    # the prior behavior — the finale was never an approach phase).
+                    if _want_approach and _phase in _ADVANCE_PHASES and _phase != "finale":
                         _inits = []
                         try:
                             from src import orwell_engine as _oe2

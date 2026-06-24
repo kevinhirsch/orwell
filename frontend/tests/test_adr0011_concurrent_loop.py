@@ -88,8 +88,9 @@ def test_framing_stashes_the_beat_key():
 def test_advance_nudge_is_gated_on_not_peer_advanced():
     js = _read("src", "agent_loop.py")
     assert "_peer_advanced_since_framing(" in js
-    # the advance / forced-advance branch no longer fires when a peer moved the beat
-    assert "if _want_advance and _phase in _ADVANCE_PHASES and not _peer_advanced:" in js
+    # the advance / forced-advance branch no longer fires when a peer moved the beat (nor when the
+    # pre-resolve already walked a beat this turn — the #670 double-advance guard, same precedent)
+    assert "if _want_advance and _phase in _ADVANCE_PHASES and not _peer_advanced and not _pre_resolved:" in js
     # a detected peer-advance resets the staleness clock + clears the persisted escalation
     assert "_peer_advanced = True" in js
     assert "_TURNS_SINCE_PROGRESS[owner] = 0" in js
