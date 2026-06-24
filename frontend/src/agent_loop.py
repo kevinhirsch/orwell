@@ -2131,6 +2131,15 @@ async def _auto_mark_premiere_intros(narration, owner) -> int:
                                f"{type(e).__name__}: {e}".rstrip(': '))
     if marked:
         logger.info(f"[orwell] auto-marked {marked} premiere intro(s) user={owner}")
+        try:  # 0079: the premiere belt is an overseer correction — log it
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "premiere-belt",
+                f"auto-marked {marked} premiere introduction(s) as met "
+                f"(the model narrated the meet but skipped markHouseguestMet)",
+                lever="mark-met", ok=True, user=owner)
+        except Exception:
+            pass
     return marked
 
 
@@ -2196,6 +2205,15 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         obj = _last_json_object_with_key(raw, "withIds")
         if obj is None:
             logger.info(f"[orwell] auto-record: no parseable JSON (len={len(raw)})")
+            try:  # 0079: a real gap the overseer log should surface (social play may fold no impact)
+                from src import log_rings as _lr
+                _lr.record_overseer(
+                    "anomaly", "gap-repair",
+                    f"a player↔house scene recorded nothing and the repair extraction returned "
+                    f"no parseable JSON (len={len(raw)}) — social play may have folded no impact",
+                    lever="propose-record", ok=False, user=owner)
+            except Exception:
+                pass
             return False
         valid = {h.get("id") for h in house}
         ids = [i for i in (obj.get("withIds") or []) if i in valid]
@@ -2215,6 +2233,16 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
             return False
         logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
                     f"edges={len(consequence['edges']) if consequence else 0}) user={owner}")
+        try:  # 0079: surface this gap-repair on the overseer diagnostic log
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "gap-repair",
+                f"recorded a missed player↔house scene (kind={kind}, "
+                f"with={len(ids)} houseguest(s), "
+                f"edges={len(consequence['edges']) if consequence else 0})",
+                lever="propose-record", ok=True, user=owner)
+        except Exception:
+            pass
         return True
     except Exception as _e:
         logger.warning(f"[orwell] auto-record failed: {_e}")
@@ -4178,6 +4206,15 @@ async def stream_agent_loop(
                             if _force_ok and await _commit_advance_silently(f"forced stall L{_level}"):
                                 logger.info(f"[orwell] FORCED advanceGame (stall L{_level}, phase={_phase}) "
                                             f"round {round_num} user={owner}")
+                                try:  # 0079: a forced advance is a notable overseer correction
+                                    from src import log_rings as _lr
+                                    _lr.record_overseer(
+                                        "anomaly", "stall-force",
+                                        f"forced advanceGame after the model ignored every nudge "
+                                        f"(stall L{_level}, phase={_phase})",
+                                        lever="force-advance", ok=True, user=owner)
+                                except Exception:
+                                    pass
                                 messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
                                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                 continue
@@ -4191,6 +4228,14 @@ async def stream_agent_loop(
                         else:
                             _nudge, _why = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)], f"stall L{_level}"
                         logger.info(f"[orwell] advance nudge ({_why}, phase={_phase}) round {round_num} user={owner}")
+                        try:  # 0079: surface the pacing nudge on the overseer diagnostic log
+                            from src import log_rings as _lr
+                            _lr.record_overseer(
+                                "action", "stall-nudge",
+                                f"nudged the model to advance ({_why}, phase={_phase})",
+                                lever="nudge", ok=True, user=owner)
+                        except Exception:
+                            pass
                         messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
@@ -4877,6 +4922,35 @@ async def stream_agent_loop(
             auto_backfills=(_turn_record_nudges + _turn_deal_nudges + _turn_move_nudges
                             + _turn_npc_move_nudges),
         )
+
+        # 0079 — the runtime loop overseer (SHADOW mode; opt-in, default OFF via ORWELL_OVERSEER).
+        # One holistic, Vault-free, post-turn diagnosis of the engine<->LLM loop: build structural
+        # Signals from this turn's telemetry, run the cheap symptom-gate, and if it trips, log the
+        # overseer's verdict to the OVERSEER ring. SHADOW = diagnose + log ONLY; it applies NO lever
+        # (the existing guardrails still do the acting), so behaviour is unchanged and the seeded
+        # lanes stay byte-identical. Fail-soft + off by default — the deterministic floor stands.
+        try:
+            from src.overseer import overseer_enabled, Signals, DeterministicOverseer
+            if overseer_enabled():
+                _ov_names = {ev.get("tool") for ev in (tool_events or []) if isinstance(ev, dict)}
+                _ov_sig = Signals(
+                    in_advance_phase=(_phase in _ADVANCE_PHASES),
+                    play_quiet=bool(_is_lull),
+                    engaged_scene=bool(_want_record),
+                    recorded_interaction=bool(_ov_names & _RECORD_TOOLS),
+                    progression_tool_called=bool(_ov_names & _PROGRESSION_TOOLS),
+                    io_error=any(isinstance(ev, dict) and ev.get("error") for ev in (tool_events or [])),
+                    beat_seq_before=_ledger_beat_seq_before,
+                )
+                _ov_verdict = DeterministicOverseer().assess(_ov_sig)
+                if _ov_verdict is not None:
+                    from src import log_rings as _lr
+                    _lr.record_overseer(
+                        _ov_verdict.level, _ov_verdict.kind, _ov_verdict.diagnosis,
+                        lever=_ov_verdict.lever, beat_before=_ledger_beat_seq_before,
+                        ok=True, user=owner)
+        except Exception as _ov_err:  # fail-soft: the overseer must never hurt a turn
+            logger.debug(f"[orwell] overseer shadow hook skipped: {_ov_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.
