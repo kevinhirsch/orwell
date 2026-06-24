@@ -20,7 +20,7 @@
   "use strict";
 
   // Surfaces that carry the glass material (mirror style.css's frosted set + liquidGlass).
-  var SURFACES = ".ow-window, .chat-input-bar, #sidebar, .modal-content, .og-card, .on-card, #minimized-dock.ow-has-rows, .dropdown, .overflow-menu, .cp-popover";
+  var SURFACES = ".ow-window, .chat-input-bar, #sidebar, .icon-rail, .modal-content, .og-card, .on-card, #minimized-dock.ow-has-rows, .dropdown, .overflow-menu, .cp-popover";
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
   // Apple's adaptation is SIZE-DEPENDENT (WWDC25 219 + HIG Color):
@@ -35,13 +35,21 @@
   //     adaptive veil mute a bright backdrop just enough to keep them legible.
   // The only darkening Apple sanctions is the Clear variant's literal 35% dimmer over bright
   // media (not used here — our surfaces carry text, so Regular is correct).
-  var VEIL_MIN = 14;          // % --panel at a dark backdrop (translucent/lit) — both sizes
-  var VEIL_MAX_SMALL = 30;    // small bars stay CLEAR (the symbol flip does the legibility work)
-  var VEIL_MAX_LARGE = 58;    // large surfaces don't flip → glass adapts (mutes) to keep light text legible
-  var VEIL_FULL_AT = 0.5;     // linear-Y at which the veil reaches its cap (steeper ramp; bright haze mutes enough)
+  var VEIL_MIN = 14;             // % --panel at a dark backdrop (translucent/lit) — both sizes
+  var VEIL_MAX_SMALL = 22;       // small bars stay genuinely CLEAR (the symbol flip does the legibility work)
+  var VEIL_MAX_LARGE = 48;       // large surfaces don't flip → glass mutes, but stays translucent (no opaque slab)
+  // Linear-Y at which each veil reaches its cap. Small bars cross over WITH the ink flip
+  // (steeper); large surfaces ramp gently so a bright backdrop still shows through the glass
+  // ("adjusted luminosity," not a wall — Apple Regular over light content).
+  var VEIL_FULL_AT_SMALL = 0.35;
+  var VEIL_FULL_AT_LARGE = 0.62;
   // Small bars/tiles that FLIP (everything else in SURFACES is treated as large / no-flip).
   var FLIP_SET = ".chat-input-bar, .og-card, #minimized-dock.ow-has-rows";
-  var INK_THRESHOLD = 0.36;   // LINEAR-Y flip point (research): backdrop above this ⇒ DARK ink
+  // LINEAR-Y flip point: backdrop above this ⇒ DARK ink. The WCAG black-vs-white crossover is
+  // L≈0.18; the small bar's own veil darkens the effective background a touch, so the flip
+  // sits just above it at 0.22 (≈ perceptual mid-grey sRGB≈0.5). 0.36 fired far too late —
+  // surfaces over a perceptually half-bright backdrop kept light ink and washed out.
+  var INK_THRESHOLD = 0.22;
   var INK_DARK = "#11151c";   // dark symbol/label colour over bright backdrops
   var DEBOUNCE_MS = 120;
   var SAMPLE_GRID = 5;        // NxN samples across the surface's backdrop region
@@ -304,10 +312,10 @@
       // SMALL bars stay CLEAR (low veil); LARGE surfaces don't flip, so their glass adapts
       // (a stronger veil over bright) to keep the light --fg symbols legible.
       var vmax = small ? VEIL_MAX_SMALL : VEIL_MAX_LARGE;
-      // Steeper ramp: reach the cap by VEIL_FULL_AT (bright haze has only moderate LINEAR
-      // luminance, so a 1:1 ramp under-mutes). Large surfaces must mute enough that the
-      // light --fg symbols stay legible over a bright backdrop (they don't flip).
-      var f = clamp(L / VEIL_FULL_AT, 0, 1);
+      // Reach the cap by the per-size full-mute point. Small bars cross over WITH the ink
+      // flip (steeper); large surfaces ramp gently so a bright backdrop still shows through
+      // (Apple "adjusted luminosity," never an opaque slab).
+      var f = clamp(L / (small ? VEIL_FULL_AT_SMALL : VEIL_FULL_AT_LARGE), 0, 1);
       var pct = Math.round(clamp(VEIL_MIN + (vmax - VEIL_MIN) * f, VEIL_MIN, vmax));
       el.style.setProperty("background-color",
         "color-mix(in srgb, var(--panel, var(--bg)) " + pct + "%, transparent)", "important");
@@ -321,7 +329,9 @@
       } else {
         // SMALL+dark, or any LARGE surface: keep light --fg (large elements never flip).
         el.style.removeProperty("color");
-        el.style.setProperty("text-shadow", "0 1px 2px rgba(0,0,0,0.32)", "important");
+        // Stronger dark halo: light ink lingers on near-threshold mid-tones (the transition
+        // band), so floor its legibility there until the flip takes over.
+        el.style.setProperty("text-shadow", "0 1px 3px rgba(0,0,0,0.55)", "important");
         el.setAttribute("data-adaptive-ink", "light");
       }
     } catch (_) {}

@@ -68,7 +68,9 @@
   // are a single pass. A tiny CSS blur fallback rides alongside in case the SVG
   // chain is partially honored. Kept modest so the lens reads SHARPER than the
   // 24px CSS baseline (the refraction is the point — not more frost).
-  var FILTER_BLUR = 8;       // px — stdDeviation of the in-filter <feGaussianBlur>
+  var FILTER_BLUR = 16;      // px — stdDeviation of the in-filter <feGaussianBlur> (8 let sharp
+                             // text behind a menu over the dark chat bleed through; Apple's
+                             // Regular material dissolves the backdrop into soft washes)
   var CSS_BLUR_FALLBACK = 2; // px — thin CSS blur layered with the SVG url()
   var BACKDROP_SAT = 180;    // % saturate, matching the baseline's lively glass
   // In-filter tint/lift (feComponentTransfer linear slope+intercept): a subtle
@@ -90,10 +92,13 @@
   // wide glossy band. On a large flat surface (the composer bar) a wide/bright rim pools
   // into a harsh horizontal streak; keep it a hairline that hugs the very edge and stays
   // subtle, so it reads as a reflective edge, not a wash.
-  var SPEC_POWER = 4.0;      // exponent — higher = tighter/sharper highlight arc
+  var SPEC_POWER = 6.0;      // exponent — higher = tighter/sharper highlight arc (collapse the
+                             // bright part to the lit corner/edge instead of smearing the top)
   var SPEC_GAIN = 1.0;       // multiply the raw specular before clamping (brightness of the rim)
-  var SPEC_ALPHA_MAX = 0.42; // cap the rim's peak opacity (subtle, not a glossy band)
-  var SPEC_BAND = 0.22;      // fraction of EDGE band the rim occupies (thin hairline near the edge)
+  var SPEC_ALPHA_MAX = 0.50; // peak rim opacity — brighter is fine once the band is a true hairline
+                             // (a crisp bright line reads "lit"; a dim wide one reads "glossy")
+  var SPEC_BAND = 0.10;      // fraction of EDGE band the rim occupies — ~2px hairline, not a 6-10px
+                             // band (Apple's lit edge in the refs is 1-2px)
 
   // Perf caps. Mobile gets a HARD-LOWER cap (small GPUs; the refraction is the most
   // expensive thing on the page). collectTargets() reads activeMaxSurfaces() so the
@@ -117,6 +122,7 @@
     "#minimized-dock.ow-has-rows", // the iOS Control-Center dock module
     ".chat-input-bar",
     "#sidebar",
+    ".icon-rail",                  // the collapsed floating sidebar rail (frosted theme)
     ".modal-content",
     ".og-card",                    // the control-room gadget cards (prioritized — "gadgets first")
     // Transient menus & popovers: small + short-lived, so they refract when open and

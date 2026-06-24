@@ -66,9 +66,11 @@ def test_size_aware_flip_small_clear_large_muted():
 
 
 def test_linear_luminance_and_threshold():
-    # proper sRGB→linear luminance (not gamma-encoded), flip at the researched Y > 0.36.
+    # proper sRGB→linear luminance (not gamma-encoded). Flip at the WCAG black-vs-white
+    # crossover (L≈0.18), nudged up to 0.22 for the small bar's own veil darkening — 0.36
+    # fired far too late (a perceptually half-bright backdrop kept light ink and washed out).
     assert "0.2126" in JS and "Math.pow" in JS and "12.92" in JS  # sRGB→linear
-    assert re.search(r"INK_THRESHOLD\s*=\s*0\.36", JS)
+    assert re.search(r"INK_THRESHOLD\s*=\s*0\.22", JS)
     assert "INK_DARK" in JS and 'setProperty("color", INK_DARK' in JS
     assert "data-adaptive-ink" in JS
 

@@ -37333,6 +37333,7 @@ body.theme-frosted .ow-window,
 body.theme-frosted .og-card,
 body.theme-frosted .chat-input-bar,
 body.theme-frosted #sidebar,
+body.theme-frosted .icon-rail,
 body.theme-frosted .modal-content,
 body.theme-frosted .on-card {
   background-color: var(--ow-glass-veil-dark) !important;
@@ -37352,6 +37353,48 @@ body.theme-frosted #sidebar {
 @media (prefers-reduced-motion: reduce) {
   /* Static bg under reduced-motion → the shadow is unnecessary; keep it light.    */
   :root { --ow-glass-text-shadow: 0 1px 1px rgba(0,0,0,.4); }
+}
+
+/* ── Floating, detached glass sidebar (Apple "sidebar over content") ───────────
+   In the frosted theme the sidebar — and its collapsed icon-rail — DETACH from the
+   docked column and float as inset, all-corners-rounded glass panels, with the chat
+   and the desktop wallpaper extending BENEATH them (the "extend content beneath
+   sidebar, correct" pattern: lg_hig_sidebar_extend_correct, the Mount Fuji sidebar).
+   The collapsed state stays — it just becomes a narrow floating glass rail. Desktop
+   only; mobile keeps its overlay-drawer behaviour (the @media ≤768 rules below). */
+@media (min-width: 769px) {
+  /* Geometry only — the glass material/rim/radius come from the shared frosted rules
+     (the sidebar + rail are added to those selector lists), so the floating panel is
+     the SAME glass as the windows, just detached and inset. */
+  body.theme-frosted #sidebar,
+  body.theme-frosted .icon-rail {
+    position: fixed;
+    top: 50px;                 /* clear the fixed hamburger + the top bar */
+    left: 10px;
+    bottom: 12px;
+    height: auto;
+    border-right-width: 1px !important;   /* float = full border, not just a docked right edge */
+    z-index: 120;
+    overflow: hidden;
+  }
+  /* Right-side sidebar floats on the right edge instead. */
+  body.theme-frosted.hamburger-right #sidebar,
+  body.theme-frosted.hamburger-right .icon-rail,
+  body.theme-frosted #sidebar.right-side,
+  body.theme-frosted .icon-rail.right-side {
+    left: auto; right: 10px;
+  }
+  /* Reserve the floating panel's footprint so the chat content stays readable, while
+     the wallpaper still shows THROUGH/UNDER the glass (content extends beneath). The
+     panel itself is fixed/out-of-flow, so this padding is what insets the messages. */
+  body.theme-frosted .chat-container {
+    transition: padding-left 0.25s cubic-bezier(0.22,0.61,0.36,1),
+                padding-right 0.25s cubic-bezier(0.22,0.61,0.36,1);
+  }
+  body.theme-frosted:not(.sidebar-collapsed) .chat-container { padding-left: 234px; }  /* 208 + 10 + 16 */
+  body.theme-frosted.sidebar-collapsed .chat-container { padding-left: 74px; }          /* 48 + 10 + 16 */
+  body.theme-frosted.hamburger-right:not(.sidebar-collapsed) .chat-container { padding-left: 16px; padding-right: 234px; }
+  body.theme-frosted.hamburger-right.sidebar-collapsed .chat-container { padding-left: 16px; padding-right: 74px; }
 }
 
 /* ── The notice kit (.on-card) — same NEUTRAL liquid glass as the windows/cards ─*/
@@ -37525,6 +37568,8 @@ body.theme-frosted .ow-window,
 body.theme-frosted .og-card,
 body.theme-frosted .on-card,
 body.theme-frosted .chat-input-bar,
+body.theme-frosted #sidebar,
+body.theme-frosted .icon-rail,
 body.theme-frosted .modal-content {
   border-radius: var(--ow-glass-radius) !important;
   backdrop-filter: var(--ow-glass-backdrop) !important;
