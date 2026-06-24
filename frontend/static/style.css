@@ -21840,25 +21840,41 @@ body.gallery-selecting .gallery-dl-btn,
   container-name: settings-modal;
 }
 
-/* Issue #208 — anchor the Settings window to the TOP of the chat area instead
-   of vertically centering it. The base .modal uses `align-items:center`, so a
-   centered window grows and shrinks around its own midpoint when you switch
-   between tabs whose content differs in height (Add Models vs. Shortcuts,
-   etc.). That makes the in-modal nav rail — and the whole window — appear to
-   jump up and down between pages. Pinning the top edge keeps the nav rail and
-   surrounding layout visually stable; the panel only ever grows downward.
-   Desktop only: on mobile the panel is a full-height bottom sheet that is
-   already top-stable, and a margin there would push it past the viewport. The
-   drag/dock code clears this margin (sets inline margin:0) the moment a window
-   is dragged, so moving the window still works exactly as before. */
+/* #553 — Settings is hosted INSIDE the OrwellWindow kit: #settings-modal is the
+   .ow-window, and the kit's titlebar + .ow-body provide the frame and scrolling.
+   The .settings-modal-content must therefore FILL the kit body, not float inside
+   it as a fixed-width, top-margined card — otherwise it renders as a "box-in-a-box"
+   with a dead top band (the old Issue-#208 7vh centering hack, meaningless inside
+   the kit body) and a dead right margin (the clamp() floor resolving narrower than
+   the body). Filling the body also SATISFIES the original Issue-#208 intent — a
+   top-anchored, non-jumping nav rail — by construction: the kit window is already
+   top-stable (it never recenters on tab switch), so the nav rail is pinned to the
+   top of a stable body and no longer jumps between tabs of differing height. The
+   .ow-body owns the frame (border/radius/shadow) and the scrolling (overflow:auto),
+   so the content drops its own card frame here to avoid double-framing. This makes
+   the drag/dock inline `margin:0` clear a no-op (margin is already 0), so nothing
+   regresses there. Desktop only — mobile (≤768px) keeps its full-height bottom-sheet
+   rules (earlier in this file) byte-unchanged. */
 @media (min-width: 769px) {
-  #settings-modal { align-items: flex-start; }
-  #settings-modal .settings-modal-content { margin-top: 7vh; }
+  #settings-modal.ow-window > .ow-body > .settings-modal-content {
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    /* No own height cap — the content sizes to its layout (min-height:400px) and
+       the .ow-body owns the viewport cap + scrolling (overflow:auto). Forcing
+       height:100% here collapses the panel because the .ow-body is height:auto. */
+    max-height: none;
+    /* The .ow-window IS the frame — don't double-frame inside the kit body. */
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    animation: none;
+  }
 }
 @media (max-height: 700px) {
   /* S2: short viewports (125%-scaled laptops, landscape phones) — let the modal shrink. */
   .settings-layout { min-height: 0; }
-  #settings-modal .settings-modal-content { margin-top: 3vh; }
 }
 
 .settings-modal-content .modal-header {
@@ -21870,6 +21886,18 @@ body.gallery-selecting .gallery-dl-btn,
   display: flex;
   min-height: 400px;
   max-height: calc(min(85dvh, 720px) - 60px);
+}
+
+/* #553 — kit-hosted on desktop, drop the legacy 85dvh-60px cap on the inner
+   layout: the content no longer carries its own height cap (the .ow-body owns the
+   viewport cap + scrolling), so the layout should size to its content (its own
+   min-height:400px floor still applies) and let the .ow-body scroll when taller.
+   When the kit sets an inline height (resize/dock) the [style*="height"] / docked
+   rules below take over and make the layout flex-fill. */
+@media (min-width: 769px) {
+  #settings-modal.ow-window > .ow-body > .settings-modal-content .settings-layout {
+    max-height: none;
+  }
 }
 
 .settings-modal-content[style*="height"],
