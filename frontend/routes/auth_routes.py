@@ -516,6 +516,26 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 except (TypeError, ValueError):
                     raise HTTPException(400, f"{key} must be an integer")
                 val = max(lo, min(val, hi))
+            # #764: the login background source + per-source cosmetic settings are
+            # validated so the pre-auth page can only ever be fed a valid value.
+            if key == "login_background":
+                from src.settings import LOGIN_BACKGROUND_SOURCES
+                if str(val).strip().lower() not in LOGIN_BACKGROUND_SOURCES:
+                    raise HTTPException(400, "Invalid login_background")
+                val = str(val).strip().lower()
+            if key == "login_gradient_preset":
+                from src.settings import LOGIN_GRADIENT_PRESETS
+                if str(val).strip().lower() not in LOGIN_GRADIENT_PRESETS:
+                    raise HTTPException(400, "Invalid login_gradient_preset")
+                val = str(val).strip().lower()
+            if key in ("login_background_photo_url", "login_particles_color"):
+                val = str(val or "").strip()
+            if key in ("login_gradient_speed", "login_gradient_intensity",
+                       "login_particles_density", "login_particles_speed"):
+                try:
+                    val = float(val)
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f"{key} must be a number")
             current[key] = val
         _save_settings(current)
         # ADR 0006: apply an in-game-clock switch flip to the LIVE engine immediately (no restart) —
@@ -527,6 +547,88 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             except Exception:
                 pass
         return current
+
+    # ---- Login background (#764) ----
+    #
+    # The login page is PRE-AUTH. This GET is the ONLY login-related value exposed
+    # without auth, and it returns ONLY the cosmetic source enum + an optional
+    # (validated) photo URL — never anything sensitive. Writes go through the
+    # admin-gated POST /api/auth/settings (login_background / login_background_photo_url),
+    # validated below.
+
+    @router.get("/login-background")
+    async def get_login_background():
+        """PUBLIC, cosmetic-only: the login page's animated-background config.
+
+        Returns ONLY {source, photo_url, gradient{...}, particles{...}} — a
+        validated enum + cosmetic numbers/URL. Nothing sensitive.
+        """
+        from src.settings import login_background_config
+        return login_background_config()
+
+    @router.post("/login-background/photo")
+    async def upload_login_background_photo(request: Request):
+        """ADMIN ONLY: upload a login-background photo.
+
+        Stores the image under static/img/login/ (served pre-auth by the /static
+        mount) and points login_background_photo_url at it. Returns the URL. This
+        is an admin-gated WRITE; the pre-auth page only ever READS the cosmetic
+        URL via the public GET above.
+        """
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(400, "No file uploaded")
+
+        # Validate the content type + extension against an image allowlist.
+        _ALLOWED = {
+            "image/jpeg": ".jpg", "image/png": ".png",
+            "image/webp": ".webp", "image/gif": ".gif",
+        }
+        ctype = (getattr(upload, "content_type", "") or "").lower()
+        ext = _ALLOWED.get(ctype)
+        if not ext:
+            raise HTTPException(400, "Unsupported image type (use JPEG, PNG, WebP, or GIF)")
+
+        data = await upload.read()
+        if not data:
+            raise HTTPException(400, "Empty file")
+        # Cap the upload size (cosmetic wallpaper — 8 MB is generous).
+        if len(data) > 8 * 1024 * 1024:
+            raise HTTPException(413, "Image too large (max 8 MB)")
+
+        import os as _os
+        from src.constants import STATIC_DIR
+        # Fixed filename (overwrite on re-upload) inside a dedicated subdir so the
+        # path is never attacker-controlled — no part of it comes from user input.
+        dest_dir = _os.path.join(STATIC_DIR, "img", "login")
+        _os.makedirs(dest_dir, exist_ok=True)
+        # Clean out any prior login wallpaper so stale files don't accumulate.
+        for prev in ("uploaded.jpg", "uploaded.png", "uploaded.webp", "uploaded.gif"):
+            try:
+                _os.remove(_os.path.join(dest_dir, prev))
+            except OSError:
+                pass
+        fname = "uploaded" + ext
+        # Atomic-ish write: temp file then replace, so a concurrent pre-auth read
+        # never sees a half-written wallpaper.
+        tmp = _os.path.join(dest_dir, fname + ".tmp")
+        with open(tmp, "wb") as f:
+            f.write(data)
+        _os.replace(tmp, _os.path.join(dest_dir, fname))
+
+        # Cache-bust the URL so a re-upload is picked up immediately.
+        import time as _time
+        url = f"/static/img/login/{fname}?v={int(_time.time())}"
+        settings = _load_settings()
+        settings["login_background_photo_url"] = url
+        settings["login_background"] = "photo"  # selecting an upload implies the photo source
+        _save_settings(settings)
+        return {"ok": True, "photo_url": url}
 
     # ---- Integrations CRUD ----
 

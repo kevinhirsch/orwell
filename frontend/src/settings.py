@@ -33,6 +33,23 @@ DEFAULT_SETTINGS = {
     # ADR 0006 - the in-game time-of-day clock + nightly sleep economy (the engine's ORWELL_TIME_OF_DAY).
     # ON by default; the settings switch flips it on the LIVE engine (admin setTimeOfDay) with no restart.
     "time_of_day_enabled": True,
+    # #764 - the animated background SOURCE behind the (pre-auth) login glass panel.
+    # Cosmetic-only enum; the login page reads it via the PUBLIC GET
+    # /api/auth/login-background. One of: gradient (default) | photo | particles | bundled.
+    "login_background": "gradient",
+    # Optional photo URL used only when login_background == "photo" (http(s) or a
+    # same-origin "/" path; anything else is ignored). Set by the admin URL field OR
+    # by the admin photo UPLOAD (which stores the file and points this at it). Cosmetic.
+    "login_background_photo_url": "",
+    # Gradient cosmetic settings — a named palette PRESET + drift speed + intensity.
+    # preset: sunset | aurora (default) | ocean | gold | lavender.
+    "login_gradient_preset": "aurora",
+    "login_gradient_speed": 26,        # seconds per drift cycle (8..60)
+    "login_gradient_intensity": 1.0,   # 0.4..1.4
+    # Particle cosmetic settings — density + speed + dot color.
+    "login_particles_density": 64,     # 12..160
+    "login_particles_speed": 0.25,     # 0.05..1.2
+    "login_particles_color": "",       # blank ⇒ default neutral white (client floor)
     "image_gen_enabled": True,
     # OOB default image model. OpenRouter is the default provider and serves Google's Gemini
     # flash-image models via /chat/completions; gemini-2.5-flash-image is the out-of-box pick.
@@ -484,6 +501,71 @@ def get_setting(key: str, default: Any = None) -> Any:
         ov["ui_control"] = GAME_UI_CONTROL_SECTION
         return ov
     return val
+
+
+# #764 — the COSMETIC-ONLY login background config. The login page is PRE-AUTH,
+# so this is the ONLY login-related value exposed without auth: a source enum,
+# per-source cosmetic settings, and an optional photo URL — never anything
+# sensitive (no secrets, no user data, no other settings).
+LOGIN_BACKGROUND_SOURCES = ("gradient", "photo", "particles", "bundled")
+LOGIN_GRADIENT_PRESETS = ("sunset", "aurora", "ocean", "gold", "lavender")
+
+
+def _clampf(v, lo, hi, dflt):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return dflt
+    return max(lo, min(hi, v))
+
+
+def login_background_config() -> dict:
+    """Return the cosmetic login-background config.
+
+    Shape: {source, photo_url, gradient:{preset,speed,intensity},
+            particles:{density,speed,color}}.
+
+    Validated/clamped so a hand-edited settings.json can never feed the pre-auth
+    page anything but known enums + sane numbers/URL. Default source is 'gradient'.
+    """
+    s = load_settings()
+    source = str(s.get("login_background", "gradient")).strip().lower()
+    if source not in LOGIN_BACKGROUND_SOURCES:
+        source = "gradient"
+
+    photo_url = str(s.get("login_background_photo_url", "") or "").strip()
+    # Only http(s) or a same-origin "/" path; anything else is dropped.
+    if photo_url and not (
+        photo_url.startswith("http://")
+        or photo_url.startswith("https://")
+        or photo_url.startswith("/")
+    ):
+        photo_url = ""
+
+    preset = str(s.get("login_gradient_preset", "aurora")).strip().lower()
+    if preset not in LOGIN_GRADIENT_PRESETS:
+        preset = "aurora"
+
+    color = str(s.get("login_particles_color", "") or "").strip()
+    # cosmetic-safe color only (hex / rgb(a) / simple named); else blank → client floor.
+    import re as _re
+    if color and not _re.match(r"^(#[0-9a-fA-F]{3,8}|rgba?\([\d.,\s%]+\)|[a-zA-Z]+)$", color):
+        color = ""
+
+    return {
+        "source": source,
+        "photo_url": photo_url,
+        "gradient": {
+            "preset": preset,
+            "speed": _clampf(s.get("login_gradient_speed", 26), 8, 60, 26),
+            "intensity": _clampf(s.get("login_gradient_intensity", 1.0), 0.4, 1.4, 1.0),
+        },
+        "particles": {
+            "density": int(_clampf(s.get("login_particles_density", 64), 12, 160, 64)),
+            "speed": _clampf(s.get("login_particles_speed", 0.25), 0.05, 1.2, 0.25),
+            "color": color,
+        },
+    }
 
 
 def is_setting_overridden(key: str) -> bool:
