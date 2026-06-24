@@ -147,3 +147,57 @@ export function restStatusFor(latestPhaseAwake: TimeOfDay): RestStatus {
   if (latestPhaseAwake === "night") return "tired";
   return "rested";
 }
+
+// --- Continuous "night depth" (0066 Phase-2; gated) -----------------------------------------------
+//
+// The 5 phases are too coarse to grade the sleep trade or vary bedtimes by character. A hidden,
+// continuous `nightDepth` (0 = start of morning … 1 = the bitter end of late-night) carries that
+// richness; the PUBLIC surface stays the same 5-phase enum, PROJECTED via `phaseForDepth` (the FE/HUD
+// is unchanged). All ENGINE-only and only ever non-zero when the opt-in clock is running, so the
+// seeded calibration spine stays byte-identical (depth absent ⇒ 0 ⇒ every helper below returns its
+// pre-feature value). No rng anywhere here — a bedtime is DERIVED, never rolled.
+
+const clamp = (x: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, x));
+
+/** Project the hidden depth (0..1) onto the public 5-phase band — even fifths, `late-night` last. */
+export function phaseForDepth(depth: number): TimeOfDay {
+  const i = Math.min(TIME_OF_DAY_ORDER.length - 1, Math.floor(clamp(depth, 0, 1) * TIME_OF_DAY_ORDER.length));
+  return TIME_OF_DAY_ORDER[i]!;
+}
+
+/** A small deterministic string→[0,1) hash (FNV-1a; NO rng, NO imports) for per-NPC chronotype spread. */
+function hashUnit(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+/**
+ * A houseguest's CHRONOTYPE turn-in DEPTH (0..1): how deep into the night they stay before bed. It is
+ * its OWN axis — the `social − physical` lean (the social game stays up; the comp-focused protect sleep)
+ * blended with a DETERMINISTIC per-NPC variation hashed off the id — so two similar-stat houseguests
+ * still differ, yet a bedtime is byte-stable for the season and draws no randomness. Maps to roughly
+ * `evening` for the earliest birds → deep `late-night` for the strongest owls. With no `id` (the legacy
+ * call shape) the chronotype variation is omitted — a pure function of stats, stable as before.
+ */
+export function bedtimeDepthFor(stats: BedtimeStats, id?: string): number {
+  const lean = clamp((stats.social - stats.physical) / 0.5, -1, 1); // social → owl (+), comp-focused → early (−)
+  const jitter = id ? hashUnit(id) * 2 - 1 : 0;                     // deterministic per-NPC spread, ∈ [−1, 1)
+  const chrono = clamp(0.6 * lean + 0.4 * jitter, -1, 1);
+  return 0.45 + ((chrono + 1) / 2) * 0.5;                           // ∈ [0.45, 0.95]: evening → deep late-night
+}
+
+/**
+ * The GRADED hidden rest deficit (0..1) carried into a competition by how deep into the night one was up
+ * (the continuous replacement for the binary `SLEEP.deficitByLatestPhase`). A healthy night (bed by the
+ * end of `night`, depth ≤ 0.8) carries NONE — preserving the ENG-NEW-1 fairness invariant (no archetype
+ * sleep tax on a normal night) — and the cost ramps only WITHIN `late-night` (0.8 → 1.0), so the deeper
+ * into the small hours you ran, the more it bites. Bounded; combined with the outcome `sleepPenalty`
+ * weight, never a raw number to the player.
+ */
+export function restDeficitForDepth(depth: number): number {
+  return clamp((depth - 0.8) / 0.2, 0, 1); // 0 through `night` (≤0.8) → 1 at the bitter end (1.0)
+}

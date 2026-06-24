@@ -117,7 +117,7 @@ import {
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, bedtimeFor } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -1851,7 +1851,7 @@ export class GameSessionAdapter implements GameSession {
         phase: this.live.timeOfDay,
         player: this.house.player.id,
         playerRetired: this.live.playerRetired ?? false,
-        bedtimeOf: (id) => bedtimeFor(this.statsOf(id)),
+        bedtimeOf: (id) => phaseForDepth(bedtimeDepthFor(this.statsOf(id), id)), // chronotype-aware (0066 Phase-2)
       }),
     );
   }
@@ -3108,7 +3108,7 @@ export class GameSessionAdapter implements GameSession {
       // returns 0, so the seeded calibration spine (juryReach / UAT) is BYTE-IDENTICAL to the pre-feature model.
       restOf: (id) => {
         if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
-        return id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.live, this.statsOf(id));
+        return id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.live, this.statsOf(id), id);
       },
       // Derived loyalty (0043): disposition (static CHARACTER) × current soul state — feeds the
       // emergent bloc term. Derived per read; never stored (decision 0002).
