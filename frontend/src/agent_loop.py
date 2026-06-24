@@ -2249,6 +2249,82 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         return False
 
 
+# ── Feature 0081 — the narration-FAITHFULNESS gate (the overseer's second role) ────────────────
+# Where _auto_record_scene / the stall belts above error-correct the model's UNDER-calls (pacing /
+# gap-repair), this judges the model's MIS-narration: prose that contradicts the board, drifts a
+# houseguest's persona, leaks hidden machinery, or drops a beat. P2 is SHADOW-mode only (judge + log,
+# no correction); the adopt/reframe correction lands in P3/P4. Vault-free, live-only, fail-soft.
+
+async def _faith_build_projection(owner) -> dict:
+    """Assemble the Vault-free PROJECTION the faithfulness judge reasons over: the live board (the
+    closed-set fields, mirroring chat_helpers._beat_signature) + the player's known visible state.
+    BOTH are Vault-free engine projections (getGameState / getVisibleStateFor) — no Vault handle is
+    ever touched, so a leak is caught as "an assertion beyond this projection", never by reading
+    hidden state (mandate #2). Fail-soft to a partial/empty dict on any read error."""
+    proj: dict = {}
+    _BOARD_FIELDS = ("week", "phase", "pending", "hoh", "hohName", "noms", "nomNames",
+                     "activeNames", "vetoHolder", "vetoUsed", "evicted", "evictedNames",
+                     "finished", "room", "present")
+    try:
+        from src import orwell_engine as _oe
+        gs = await _oe.get_game_state(owner)
+        if isinstance(gs, dict):
+            proj["board"] = {k: gs.get(k) for k in _BOARD_FIELDS if k in gs}
+    except Exception:
+        pass
+    try:
+        from src import orwell_engine as _oe
+        vs = await _oe.get_visible_state(owner)
+        if isinstance(vs, dict):
+            proj["visible"] = vs
+    except Exception:
+        pass
+    return proj
+
+
+async def _faith_shadow_check(narration, *, claim_bearing, engaged_scene, owner,
+                              beat_before=None) -> None:
+    """Feature 0081 P2 — the SHADOW-mode faithfulness check (LOG-ONLY). On a claim-bearing or engaged
+    turn, judge the finalized narration against the player's Vault-free projection and LOG any slip to
+    the OVERSEER ring. NO correction here — adopt/reframe land in P3/P4; even in `active` mode this
+    only logs until those wire in. Live-only (needs a utility model ⇒ the seeded floor is byte-
+    identical) and FAIL-SOFT (the judge must never hurt a turn). The deterministic 0065 pre-stream
+    guard remains the floor; this adds only the live semantic layer, post-turn."""
+    try:
+        from src.faithfulness import faithfulness_mode, should_judge, FaithfulnessJudge
+        if faithfulness_mode() not in ("shadow", "active"):
+            return
+        if not should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene)):
+            return
+        # live-only carve-out (ruling D4): no utility model ⇒ the deterministic floor stands,
+        # byte-identical — the judge never runs in a seeded lane.
+        _llm = None
+        try:
+            from src.orwell_cast_authoring import _resolve_llm_fn
+            _llm = await _resolve_llm_fn(owner)
+        except Exception:
+            _llm = None
+        if _llm is None:
+            return
+        projection = await _faith_build_projection(owner)
+        judge = FaithfulnessJudge(_llm)
+        import inspect as _faith_insp
+        _raw = _llm(judge.build_prompt(narration or "", projection))
+        if _faith_insp.isawaitable(_raw):
+            _raw = await asyncio.wait_for(_raw, timeout=12)   # bounded: a slow judge must not hang
+        verdict = judge.verdict_from_reply(_raw, narration or "", projection)
+        if verdict is not None and verdict.is_slip:
+            # P2 SHADOW: surface the slip on the OVERSEER ring; do NOT correct.
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "anomaly", f"faith:{verdict.dimension}",
+                f"faithfulness {verdict.classification}-set slip ({verdict.dimension}) — proposed "
+                f"lever '{verdict.lever}' [shadow: logged, not corrected]: {verdict.rationale}",
+                lever=verdict.lever, beat_before=beat_before, ok=False, user=owner)
+    except Exception as _e:
+        logger.debug(f"[orwell] faithfulness shadow check skipped: {_e}")
+
+
 # The CASTING twin of _auto_record_scene. The casting preamble tells the model to "record the
 # player's answers AS THEY LAND with updateCasting," but it reliably UNDER-CALLS it — and unlike every
 # other under-call-prone seam (recordInteraction/makeDeal/moveTo/markHouseguestMet, each belted),
@@ -5207,6 +5283,25 @@ async def stream_agent_loop(
                             beat_after=_ov_beat_after, ok=True, user=owner)
         except Exception as _ov_err:  # fail-soft: the overseer must never hurt a turn
             logger.debug(f"[orwell] overseer hook skipped: {_ov_err}")
+
+        # 0081 P2 — the narration-FAITHFULNESS gate (SHADOW: judge + log, no correction). Its OWN
+        # dial (faithfulness_mode), independent of the overseer above. Runs once per turn, post-turn,
+        # on a claim-bearing (reusing the 0065 closed-set-claim pre-filter) or engaged turn; live-only
+        # + fail-soft. The deterministic 0065 guard stays the pre-stream floor — this is the post-turn
+        # semantic layer.
+        try:
+            _faith_claim = False
+            try:
+                from routes.chat_helpers import _sentence_has_closed_set_claim
+                _faith_claim = bool(_sentence_has_closed_set_claim(_turn_narration_full or ""))
+            except Exception:
+                _faith_claim = False
+            await _faith_shadow_check(
+                _turn_narration_full, claim_bearing=_faith_claim,
+                engaged_scene=bool(_want_record), owner=owner,
+                beat_before=_ledger_beat_seq_before)
+        except Exception as _faith_err:  # fail-soft: the faithfulness gate must never hurt a turn
+            logger.debug(f"[orwell] faithfulness gate skipped: {_faith_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.

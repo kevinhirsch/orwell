@@ -22,15 +22,19 @@ judge is Vault-free BY CONSTRUCTION: it compares the narration only against the 
 Vault-free projection, so a leak is caught as "an assertion outside what the player legitimately
 knows", never by reading the Vault.
 
-This module is the role's home. **P1 ships only the dial** (zero behavior change); the
-``FaithfulnessJudge``, the ``adopt`` / ``reframe`` levers, and the agent-loop hook land in the
+This module is the role's home. The **dial** (P1) and the **judge** (P2 — detection + the verdict
+contract, with the deterministic stub that keeps seeded lanes byte-identical) live here; the
+agent-loop hook, the ``adopt`` / ``reframe`` correction dispatch, and the junctions land in the
 following increments. Every public function swallows its own errors and degrades to a safe default —
 config must never crash the turn.
 """
 
 from __future__ import annotations
 
+import json
 import os
+from dataclasses import dataclass
+from typing import Any, Optional, Protocol
 
 # Feature 0081 — the 3-state faithfulness dial, independent of the 0079/0080 overseer_mode():
 #   'off'    — the judge never runs (default).
@@ -74,3 +78,218 @@ def faithfulness_enabled() -> bool:
     ``'active'``). Mirrors :func:`src.overseer.overseer_enabled` for symmetry, so callers can gate
     on a single boolean when they don't care which non-off state is live."""
     return faithfulness_mode() != "off"
+
+
+# ── the faithfulness verdict contract (the *what*) ─────────────────────────────────
+
+# The four ways narration can be UNfaithful — the dimensions the judge evaluates.
+#   board    — contradicts a board fact (who is HOH / nominated / veto holder / evicted / the vote).
+#   persona  — a houseguest acts against their established PUBLIC persona.
+#   leak     — asserts hidden machinery or a fact with no in-fiction pathway to the player.
+#   omission — a beat the board says is pending was narrated around but not advanced.
+FAITH_DIMENSIONS = ("board", "persona", "leak", "omission")
+
+# The ADR-0005 classification of a detected slip. 'open' = texture the engine never owned; 'closed' =
+# an actual outcome/state the engine owns; 'none' = no slip. This is THE split the whole role turns
+# on: open slips may be adopted as canon, closed slips may only be reframed/re-grounded — never bent.
+FAITH_CLASSES = ("open", "closed", "none")
+
+# The correction levers — the *small hands* for this role.
+#   none     — the narration is faithful; nothing to do (the healthy turn).
+#   adopt    — an OPEN-set slip: canonicalize the narrated detail (wired in P3). ONLY valid for 'open'.
+#   reframe  — a CLOSED-set slip with a plausible in-fiction reinterpretation (irony/rumor/misbelief).
+#   reground — a CLOSED-set slip with no plausible reframe: re-ground the model next turn (P4).
+# THE WALL (mandate #3): no lever changes a closed-set OUTCOME, and 'adopt' is rejected for any
+# classification other than 'open' (enforced in ``verdict_from_reply``). The engine's result stands.
+FAITH_LEVERS = ("none", "adopt", "reframe", "reground")
+
+
+@dataclass(frozen=True)
+class FaithfulnessVerdict:
+    """The judge's conclusion on ONE narration turn: which dimension is unfaithful (if any), the
+    ADR-0005 classification, exactly one lever, and a one-line rationale. All fields are Vault-free
+    tokens — they hand off straight to the log ring. ``rationale`` is the model's open-set 'why'; it
+    never carries a number or a magnitude (the engine owns those)."""
+
+    dimension: str        # one of FAITH_DIMENSIONS, or "none"
+    classification: str   # one of FAITH_CLASSES
+    lever: str            # one of FAITH_LEVERS
+    rationale: str = ""
+    confident: bool = True
+
+    @property
+    def is_slip(self) -> bool:
+        """True iff this verdict names a real slip to act on — a concrete lever AND a concrete
+        classification. ``none``/``none`` is the healthy turn (logged by no one)."""
+        return self.lever != "none" and self.classification != "none"
+
+
+# ── the sparse trigger (the *when*) ────────────────────────────────────────────────
+
+
+def should_judge(*, claim_bearing: bool, engaged_scene: bool) -> bool:
+    """The cheap precondition for waking the faithfulness judge (parallel to
+    :func:`src.overseer.should_assess`): run ONLY on turns where faithfulness is at stake — a turn
+    that made a closed-set board claim (the model asserted an outcome) OR an engaged player↔NPC scene
+    (where persona / leak / omission slips live). A pure lull with neither trips nothing, so the judge
+    stays sparse in time even though its coverage is wide. Fail-soft: a bad input never raises."""
+    try:
+        return bool(claim_bearing) or bool(engaged_scene)
+    except Exception:
+        return False
+
+
+# ── the port + the deterministic stub (the *what*, no model) ───────────────────────
+
+
+class FaithfulnessJudgePort(Protocol):
+    def assess(self, narration: str, projection: Any = None) -> Optional["FaithfulnessVerdict"]: ...
+
+
+class DeterministicFaithfulnessJudge:
+    """The stub adapter — NEVER calls a model and NEVER flags a slip (always ``None``). Seeded /
+    no-model lanes wire this, so the faithfulness role is a pure no-op there and the lanes stay
+    byte-identical (the live-only carve-out, ruling D4). The deterministic FLOOR for closed-set board
+    lies already exists separately as the 0065 pre-emission guard; this judge adds only the LIVE
+    semantic layer on top, so with no model there is simply nothing extra to do."""
+
+    def assess(self, narration: str = "", projection: Any = None) -> Optional["FaithfulnessVerdict"]:
+        return None
+
+
+class FaithfulnessJudge:
+    """The reasoning tier — an injected ``llm_fn`` judges the narration against the player's Vault-free
+    PROJECTION only and proposes one lever. **Vault-free by construction**: the judge holds no Vault
+    handle; it can only reason over the narration + the projection the caller passes, so a leak is
+    caught as "an assertion beyond what the player legitimately knows", never by reading the Vault.
+
+    **Fail-soft and walled**: any error, unparseable reply, or out-of-contract field routes to the
+    ``fallback`` (default :class:`DeterministicFaithfulnessJudge` ⇒ ``None``). A reply can NEVER bend a
+    closed-set outcome (no lever does that), and an ``adopt`` proposed for a non-open slip is rejected
+    to the floor — the one move the role must never make."""
+
+    _MAX_NARRATION = 4000   # bound the narration we judge (cost + prompt-size guard)
+    _MAX_PROJECTION = 6000   # bound the serialized projection
+
+    def __init__(self, llm_fn, fallback: Optional[FaithfulnessJudgePort] = None):
+        self._llm_fn = llm_fn
+        self._fallback: FaithfulnessJudgePort = fallback or DeterministicFaithfulnessJudge()
+
+    # -- prompt construction (Vault-free: only the caller-supplied narration + projection) --------
+
+    def _prompt(self, narration: str, projection: Any) -> str:
+        narr = (narration or "")[: self._MAX_NARRATION]
+        try:
+            proj = json.dumps(projection, sort_keys=True, default=str)[: self._MAX_PROJECTION]
+        except Exception:
+            proj = "{}"
+        return (
+            "You are the NARRATION-FAITHFULNESS judge for a single-player Big Brother game. You are "
+            "given (1) the NARRATION just shown to the player and (2) the player's Vault-free "
+            "PROJECTION — the live board plus everything the player legitimately knows. Judge ONLY "
+            "whether the narration is faithful to that projection. You never receive hidden/secret "
+            "state, so treat any assertion that goes BEYOND the projection as a potential leak, never "
+            "as fact.\n"
+            "Decide three things:\n"
+            f"  dimension: one of {list(FAITH_DIMENSIONS)} or \"none\" — board=contradicts a board "
+            "fact (HOH/noms/veto/eviction/vote/winner); persona=a houseguest acts against their "
+            "established PUBLIC persona; leak=asserts hidden machinery or a fact with no in-fiction "
+            "pathway to the player; omission=a pending beat was narrated around but not advanced.\n"
+            f"  classification: one of {list(FAITH_CLASSES)} — open=texture the engine never decided "
+            "(a detail/flavor/minor social beat); closed=an actual outcome or state the engine owns.\n"
+            f"  lever: one of {list(FAITH_LEVERS)} — none=faithful; adopt=an OPEN-set slip, make the "
+            "detail canon (ONLY valid when classification=open); reframe=a CLOSED-set slip you can "
+            "reinterpret in-fiction (irony/rumor/misbelief); reground=a CLOSED-set slip with no "
+            "plausible reframe.\n"
+            "You may NEVER change a closed-set OUTCOME to match the narration — the engine's result "
+            "stands; reframe/reground only change how the narration is read next, never the board.\n"
+            'Reply with ONE JSON object: {"dimension":"...","classification":"...","lever":"...",'
+            '"rationale":"<one line>"}.\n'
+            "NARRATION:\n" + narr + "\nPROJECTION:\n" + proj
+        )
+
+    def build_prompt(self, narration: str, projection: Any = None) -> str:
+        """Public alias of the Vault-free prompt builder, so the live async hook can drive the model
+        call itself (await) and reuse the EXACT same prompt as :meth:`assess`."""
+        return self._prompt(narration, projection)
+
+    # -- reply parsing (strict: out-of-contract => fallback; the adopt wall) -----------------------
+
+    @staticmethod
+    def _extract_json(text) -> Optional[dict]:
+        """Parse the first JSON object out of the model reply. ``None`` if there is none / it is not
+        an object — which routes the caller to the deterministic fallback."""
+        if not isinstance(text, str):
+            return None
+        try:
+            obj = json.loads(text)
+            return obj if isinstance(obj, dict) else None
+        except Exception:
+            pass
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                obj = json.loads(text[start : end + 1])
+                return obj if isinstance(obj, dict) else None
+            except Exception:
+                return None
+        return None
+
+    def verdict_from_reply(
+        self, raw, narration: str = "", projection: Any = None
+    ) -> Optional["FaithfulnessVerdict"]:
+        """Turn a model reply into a :class:`FaithfulnessVerdict`, STRICTLY. An unparseable reply or
+        any out-of-contract token routes to the fallback. THE WALL: an ``adopt`` lever paired with any
+        classification other than ``open`` is rejected to the floor — a misnarration may never
+        canonicalize a closed-set outcome (mandate #3). Exposed alongside :meth:`build_prompt` so the
+        async live hook reuses the identical validation as the sync :meth:`assess` path."""
+        try:
+            parsed = self._extract_json(raw)
+            if not parsed:
+                return self._fallback.assess(narration, projection)
+
+            dimension = parsed.get("dimension")
+            classification = parsed.get("classification")
+            lever = parsed.get("lever")
+            rationale = parsed.get("rationale", "")
+
+            # Strict contract: every token must be in-set (dimension may also be the inert "none").
+            if dimension != "none" and dimension not in FAITH_DIMENSIONS:
+                return self._fallback.assess(narration, projection)
+            if classification not in FAITH_CLASSES:
+                return self._fallback.assess(narration, projection)
+            if lever not in FAITH_LEVERS:
+                return self._fallback.assess(narration, projection)
+            if not isinstance(rationale, str):
+                rationale = ""
+
+            # THE WALL (mandate #3): 'adopt' is only ever valid for an OPEN-set slip. A reply that
+            # proposes adopting a CLOSED-set (or unclassified) slip is rejected — the one thing the
+            # role must never do is let a misnarration canonicalize a closed-set outcome.
+            if lever == "adopt" and classification != "open":
+                return self._fallback.assess(narration, projection)
+
+            return FaithfulnessVerdict(
+                dimension=dimension if dimension in FAITH_DIMENSIONS else "none",
+                classification=classification,
+                lever=lever,
+                rationale=rationale[:400],
+            )
+        except Exception:
+            try:
+                return self._fallback.assess(narration, projection)
+            except Exception:
+                return None
+
+    def assess(self, narration: str, projection: Any = None) -> Optional["FaithfulnessVerdict"]:
+        """Sync judge: build the Vault-free prompt, call the model, validate. Fail-soft to the
+        deterministic floor on any error. The trigger (:func:`should_judge`) is checked by the CALLER
+        (the live hook), since its inputs come from the turn, not from the narration alone."""
+        try:
+            raw = self._llm_fn(self._prompt(narration, projection))
+            return self.verdict_from_reply(raw, narration, projection)
+        except Exception:
+            try:
+                return self._fallback.assess(narration, projection)
+            except Exception:
+                return None
