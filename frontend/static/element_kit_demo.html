@@ -74,7 +74,9 @@
     .ek-wins { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
     .ek-wins .ow-window { position: static !important; inset: auto !important; transform: none !important;
       margin: 0 !important; width: 300px !important; max-width: 100%; }
-    .ek-wins .og-card { position: static !important; width: 280px; }
+    /* .og-card is display:none by default (the rail flips it to block via show());
+       the demo isn't in a rail, so reveal it here. */
+    .ek-wins .og-card { position: static !important; display: block !important; width: 280px; }
     #ek-notices .on-card, #ek-chathint .on-card, #ek-chathint .orwell-chat-hint {
       position: static !important; inset: auto !important; transform: none !important; margin: 0 !important; max-width: 100%; }
   </style>
@@ -217,8 +219,8 @@
 
     <!-- GADGET (OrwellGadget kit) -->
     <section class="ek-card">
-      <h2>Gadget — OrwellGadgetKit.create(…)</h2>
-      <p class="ek-note">A rail gadget (<code>.og-card</code>) with <code>.og-head</code> + <code>.og-body</code>, an action button, and the collapse chevron (its header carries the system-blue <code>:focus-visible</code> ring).</p>
+      <h2>Gadgets — OrwellGadgetKit.create(…)</h2>
+      <p class="ek-note">The rail gadget kit (<code>.og-card</code> with <code>.og-head</code> + <code>.og-body</code>, action buttons, collapse chevron, system-blue <code>:focus-visible</code> header ring). Every real player-tier gadget KIND, instantiated live: <strong>House Status</strong> ("The House" HUD) · <strong>Your Deals</strong> · <strong>Where You Are</strong> · <strong>Nightfall</strong> (time/presence) · <strong>Cast</strong> · <strong>Alliances</strong>.</p>
       <div class="ek-wins" id="ek-gadget"></div>
     </section>
 
@@ -266,6 +268,11 @@
   <script src="/static/js/orwellGadgetRail.js"></script>
   <script src="/static/js/orwellGadget.js"></script>
   <script src="/static/js/orwellNotice.js"></script>
+  <!-- The real SVG-refraction layer: it generates the #owlg-thumb concave lip-bezel
+       filter the .ow-switch / .ow-slider knobs reference at body.glass-full, so the
+       switches render as LIQUID GLASS (Chromium-only progressive enhancement; the CSS
+       frost stands elsewhere). Must load after the .ow-* surfaces exist. -->
+  <script src="/static/js/liquidGlass.js"></script>
   <script type="module" src="/static/js/orwellElements.js"></script>
 </body>
 </html>

@@ -181,7 +181,7 @@ def test_demo_is_a_full_kit_reference_with_composite_sections():
     assert "Atomic elements" in DEMO and "Composite kits" in DEMO
     # a headed section per composite kit (window / notice / gadget / decision).
     for heading in ("Windows — OrwellWindowKit", "Notifications — OrwellNoticeKit",
-                    "Gadget — OrwellGadgetKit", "Decision — OrwellDecision"):
+                    "Gadgets — OrwellGadgetKit", "Decision — OrwellDecision"):
         assert heading in DEMO, f"demo missing composite section: {heading}"
 
 
@@ -209,6 +209,27 @@ def test_demo_gadget_and_decision_present():
     assert "orwell-decision-card" in DEMO
     for cls in ("odec-prompt", "odec-opt", "odec-confirm"):
         assert cls in DEMO, f"decision demo missing .{cls}"
+
+
+def test_demo_shows_all_gadget_kinds():
+    # the owner's ask: ALL gadget kinds present, not one generic card. The driver
+    # instantiates every real player-tier gadget type via the kit.
+    for title in ('"House Status"', '"Your Deals"', '"Where You Are"',
+                  '"Nightfall"', '"Cast"', '"Alliances"'):
+        assert title in DRIVER, f"gadget driver missing {title}"
+    # the demo's gadget section is revealed (the .og-card default is display:none).
+    assert "og-card { position: static !important; display: block" in DEMO
+
+
+def test_demo_switch_is_real_liquid_glass():
+    # the .ow-switch knob must take the REAL #owlg-thumb SVG refraction — which only
+    # exists if liquidGlass.js is loaded on the demo page (it generates the filter).
+    assert "/static/js/liquidGlass.js" in DEMO, "demo must load liquidGlass.js for switch refraction"
+    # and the kit CSS still references that filter on the switch knob at Full Glass.
+    assert 'url("#owlg-thumb")' in KIT
+    assert "body.glass-full .ow-switch .ow-switch-track::before" in KIT
+    # the demo shows a switch off + on (verifiable).
+    assert "ow-switch" in DEMO
 
 
 def test_demo_driver_is_demo_only_not_shipped():

@@ -133,29 +133,86 @@
     relocate(hint.el, "ek-chathint");
   }
 
-  function buildGadget() {
-    var g = window.OrwellGadgetKit.create({
-      id: "ek-gadget-demo",
-      title: "Alliances",
-      collapsible: true,
-    });
-    // mount() falls back to #sidebar/body when there is no rail; build + relocate instead.
+  // Build one gadget via the kit, fill its body with representative content, relocate it.
+  function makeGadget(opts, bodyHtml, actions) {
+    var g = window.OrwellGadgetKit.create(opts);
+    // mount() falls back to #sidebar/body when there is no rail; _build + relocate instead.
     var el = g._build ? g._build() : g.el;
-    var body = g.body;
-    if (body) {
-      body.innerHTML = '<p style="margin:0 0 6px">A rail gadget card — <code>.og-card</code>' +
-        ' with <code>.og-head</code> + <code>.og-body</code>.</p>' +
-        '<p style="margin:0;opacity:.7" class="og-empty">No confirmed alliances yet.</p>';
-    }
-    if (g.addAction) {
-      try { g.addAction({ label: "Open", onClick: function () {} }); } catch (_) {}
-    }
+    (actions || []).forEach(function (a) {
+      if (g.addAction) { try { g.addAction(a); } catch (_) {} }
+    });
+    if (g.body) g.body.innerHTML = bodyHtml;
     relocate(el, "ek-gadget");
+    return g;
+  }
+
+  function buildGadgets() {
+    // ALL the real player-tier gadget KINDS (owner: "all of them there"). Each is the
+    // same OrwellGadget .og-card kit, instantiated with the real gadget's title/icon +
+    // representative static body (the live ones are driven by engine state — here we
+    // show the SHAPE so the kit surface is verifiable without the engine):
+
+    // 1) HOUSE STATUS — the rich status HUD ("The House"); orwellStatusPanel.js. The
+    //    real one carries week/phase in the title slot + the ceremony rows + the roster.
+    var status = makeGadget(
+      { id: "ek-g-status", title: "House Status", ariaLabel: "Game status", collapsible: true },
+      '<div class="os-ceremony">' +
+      '  <div class="os-you">You <span class="os-badge">HOH</span></div>' +
+      '  <div class="os-row"><span class="os-k">HOH</span><span class="os-v">You</span></div>' +
+      '  <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms">Two houseguests</span></div>' +
+      '  <div class="os-row"><span class="os-k">Veto</span><span class="os-v">In play</span></div>' +
+      '</div>' +
+      '<div class="os-roster-h" role="heading" aria-level="3">The House</div>' +
+      '<div class="os-roster" style="opacity:.85">11 houseguests remain</div>'
+    );
+    // the real status panel writes week/phase into the .og-title slot — mirror that.
+    try {
+      var ts = status.el && status.el.querySelector(".og-title");
+      if (ts) ts.innerHTML = '<span>Week 4</span> <span class="os-phase" style="opacity:.7">· Veto Ceremony</span>';
+    } catch (_) {}
+
+    // 2) YOUR DEALS — orwellDeals.js (🤝)
+    makeGadget(
+      { id: "ek-g-deals", title: "Your Deals", icon: "🤝", ariaLabel: "Your deals", collapsible: true },
+      '<div style="opacity:.9">Final 2 — <strong>active</strong></div>' +
+      '<div style="opacity:.7;font-size:.92em;margin-top:2px">Made Week 2 · holding</div>'
+    );
+
+    // 3) WHERE YOU ARE — orwellPresence.js (🧭)
+    makeGadget(
+      { id: "ek-g-presence", title: "Where You Are", icon: "🧭", ariaLabel: "Where you are" },
+      '<div><strong>The Kitchen</strong></div>' +
+      '<div style="opacity:.78;font-size:.92em;margin-top:2px">Also here: 3 houseguests</div>'
+    );
+
+    // 4) NIGHTFALL — orwellNightStatus.js (🌙) — the time-of-day / presence economy gadget
+    makeGadget(
+      { id: "ek-g-night", title: "Nightfall", icon: "🌙", ariaLabel: "Nightfall" },
+      '<div><strong>Late night</strong></div>' +
+      '<div style="opacity:.78;font-size:.92em;margin-top:2px">The house is winding down — 4 still awake</div>'
+    );
+
+    // 5) CAST — orwellCastPin.js (👥), with the real Open / Un-pin actions
+    makeGadget(
+      { id: "ek-g-cast", title: "Cast", icon: "👥", role: "group", ariaLabel: "Cast", collapsible: true },
+      '<div style="opacity:.85">11 active · 4 jury</div>',
+      [
+        { label: "Open", title: "Open the full cast window", dataset: { act: "open" }, onClick: function () {} },
+        { label: "Un-pin", title: "Un-pin back to a floating window", dataset: { act: "unpin" }, onClick: function () {} },
+      ]
+    );
+
+    // 6) ALLIANCES — a plain OrwellGadget .og-card (the bare kit shape).
+    makeGadget(
+      { id: "ek-g-alliances", title: "Alliances", collapsible: true },
+      '<p style="margin:0;opacity:.7" class="og-empty">No confirmed alliances yet.</p>',
+      [{ label: "Open", onClick: function () {} }]
+    );
   }
 
   whenReady(function () {
     buildWindows();
     buildNotices();
-    buildGadget();
+    buildGadgets();
   });
 })();

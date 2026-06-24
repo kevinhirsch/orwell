@@ -180,7 +180,9 @@ JS) to color the filled portion on WebKit. `:focus-visible` ring; `:disabled`.
 (not in the app nav — for screenshot verification). It shows "what everything accessible in a
 kit looks like" in two tiers:
 
-1. **Atomic elements** — every OrwellElement primitive in every state (above).
+1. **Atomic elements** — every OrwellElement primitive in every state (above). The demo also
+   loads `liquidGlass.js` so the `.ow-switch` / `.ow-slider` knobs take the real `#owlg-thumb`
+   SVG refraction at Full Glass (the switches render as actual liquid glass, not flat discs).
 2. **Composite kits** — LIVE instances, instantiated through each kit's own seam by the
    demo-only driver `frontend/static/js/orwellElements.js` (loaded ONLY by the demo page —
    never by the app shell):
@@ -192,8 +194,10 @@ kit looks like" in two tiers:
    - **Notifications (OrwellNoticeKit):** an `.on-card` in each severity (info/warn/error) with
      the unified monochrome `.on-icon` set; the top system **banner** (`placement:"top-banner"`);
      and the **chat-hint** (the `OrwellChatHint` composition — kind "guide").
-   - **Gadget (OrwellGadgetKit):** an `.og-card` with `.og-head` + `.og-body`, an action button,
-     and the collapse chevron (system-blue `:focus-visible` header ring).
+   - **Gadgets (OrwellGadgetKit):** every real player-tier gadget KIND, instantiated live as
+     `.og-card` (with `.og-head` + `.og-body`, action buttons, collapse chevron, system-blue
+     `:focus-visible` header ring): House Status ("The House" HUD), Your Deals, Where You Are,
+     Nightfall (time/presence), Cast, and a plain Alliances card.
    - **Decision (OrwellDecision):** a `.odec-*` card with prompt + selectable option buttons +
      a confirm action + an instruction note, plus the `.odec-risk` binding/irreversible variant.
 
