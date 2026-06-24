@@ -2288,6 +2288,44 @@ async def _faith_build_projection(owner) -> dict:
     return proj
 
 
+# The mandate-safe CLOSED-set corrections: each only QUEUES a next-turn prose directive in the 0065
+# _DESYNC_REGROUND seam — never a board mutation. The engine's outcome always stands; only how the
+# model narrates next turn changes.
+_FAITH_REFRAME_DIRECTIVE = (
+    "FAITHFULNESS RE-FRAME — your last narration asserted an OUTCOME the board does not support (the "
+    "engine's result is the source of truth and stands). Do NOT repeat or build on that claim. On "
+    "your next beat, play it as an in-fiction MISREAD — a rumor, a premature assumption, wishful "
+    "thinking — that the live board quietly corrects. Re-read the GAME CONTEXT and narrate from where "
+    "the board ACTUALLY is.")
+
+_FAITH_REGROUND_DIRECTIVE = (
+    "RE-GROUND ON THE BOARD — your last narration drifted from the engine truth. Read the current "
+    "GAME CONTEXT and voice ONLY what it states; do not repeat or build on the drifted claim.")
+
+_FAITH_VISIBLE_DIRECTIVE = (
+    "FAITHFULNESS CORRECTION — your last narration stated something the board does not support. On "
+    "your next beat, briefly and in character set the record straight for the player, then continue "
+    "from the live board (the engine's result stands).")
+
+
+def _faith_queue_reground(owner, directive) -> bool:
+    """Queue a NEXT-TURN re-ground directive (reusing the 0065 ``_DESYNC_REGROUND`` seam) — the ONLY
+    thing a closed-set faithfulness correction ever does. It NEVER mutates the board; it steers how
+    the model narrates next turn (``apply_game_framing`` pops it into the next prompt). Won't clobber
+    an existing re-ground (a 0065 desync takes precedence). Returns True iff it queued one."""
+    try:
+        from routes import chat_helpers as _ch
+        store = getattr(_ch, "_DESYNC_REGROUND", None)
+        if store is None or owner is None:
+            return False
+        if owner in store:
+            return False  # a re-ground is already queued (board correction in flight) — leave it
+        store[owner] = directive
+        return True
+    except Exception:
+        return False
+
+
 async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
                        endpoint_url=None, model=None, headers=None, last_user=None) -> None:
     """Feature 0081 — the live faithfulness check (P2 shadow detection + P3 active 'adopt').
@@ -2343,9 +2381,10 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
         if mode != "active":
             return
 
-        # 2) ACTIVE — dispatch the diegetic correction (trigger-only). P3 wires 'adopt' (open-set
-        #    canonicalization via the 0055 record machinery); reframe/reground land in P4. The async
-        #    record runs FIRST, then the sync dispatch callable just reports whether it applied.
+        # 2) ACTIVE — dispatch the diegetic correction (trigger-only). Each lever performs a
+        #    mandate-safe action: 'adopt' RECORDS an open-set detail (the only durable write, and
+        #    never a board outcome); 'reframe'/'reground' only QUEUE a next-turn prose re-ground.
+        #    NONE of them ever mutates a closed-set outcome — the engine's result always stands.
         _adopt_ok = {"v": False}
         if verdict.lever == "adopt":
             try:
@@ -2354,16 +2393,41 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     narration, last_user, _roster, endpoint_url, model, headers, owner))
             except Exception:
                 _adopt_ok["v"] = False
-        _disp = dispatch_correction(verdict, {"adopt": (lambda: _adopt_ok["v"])})
 
-        # O3 — tag what became canon via a faithfulness ADOPT, distinct from a normal record, so the
-        # operator can audit exactly what entered canon through recovery.
+        def _do_reframe() -> bool:
+            # closed-set, reframable: queue a NEXT-TURN directive steering the model to play the false
+            # claim as an in-fiction misread (rumor / premature / wishful). Engine outcome stands.
+            return _faith_queue_reground(owner, _FAITH_REFRAME_DIRECTIVE)
+
+        def _do_reground() -> bool:
+            # closed-set, un-reframable: route by the configurable fallback (owner ruling O1). All
+            # three keep the truth unbent; only 'log-only' queues nothing.
+            from src.faithfulness import faithfulness_unreframable_mode
+            _fb = faithfulness_unreframable_mode()
+            if _fb == "log-only":
+                return False
+            return _faith_queue_reground(
+                owner, _FAITH_VISIBLE_DIRECTIVE if _fb == "visible" else _FAITH_REGROUND_DIRECTIVE)
+
+        _disp = dispatch_correction(verdict, {
+            "adopt": (lambda: _adopt_ok["v"]),
+            "reframe": _do_reframe,
+            "reground": _do_reground,
+        })
+
+        # Log the correction taken — adopt gets its O3 marker; reframe/reground note the queued
+        # next-turn directive. The board is NEVER mutated by any of these (the mandate gate).
+        _applied = bool(_disp.get("applied"))
         if verdict.lever == "adopt":
-            _lr.record_overseer(
-                "action", f"faith:adopt:{verdict.dimension}",
-                f"adopted an open-set slip as canon via recordInteraction (O3) — "
-                f"{'recorded' if _disp.get('applied') else 'nothing recordable'}: {verdict.rationale}",
-                lever="adopt", beat_before=beat_before, ok=bool(_disp.get("applied")), user=owner)
+            _msg = ("adopted an open-set slip as canon via recordInteraction (O3) — "
+                    f"{'recorded' if _applied else 'nothing recordable'}")
+        else:
+            _msg = (f"queued a next-turn {verdict.lever} for a closed-set slip "
+                    f"({'applied' if _applied else 'deferred'}) — engine outcome unchanged")
+        _lr.record_overseer(
+            "action", f"faith:{verdict.lever}:{verdict.dimension}",
+            f"{_msg}: {verdict.rationale}",
+            lever=verdict.lever, beat_before=beat_before, ok=_applied, user=owner)
     except Exception as _e:
         logger.debug(f"[orwell] faithfulness check skipped: {_e}")
 

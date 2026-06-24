@@ -80,6 +80,34 @@ def faithfulness_enabled() -> bool:
     return faithfulness_mode() != "off"
 
 
+# Feature 0081 / owner ruling O1 — the configurable fallback for a CLOSED-set slip with NO plausible
+# in-fiction reframe. ALL THREE keep the engine truth UNBENT; they differ only in what the player sees
+# next turn:
+#   'reground'  — re-inject the board truth as a SILENT next-turn re-ground (default).
+#   'log-only'  — record the violation and take no corrective action.
+#   'visible'   — steer a brief, in-character course-correction the player can see.
+FAITH_UNREFRAMABLE_MODES = ("reground", "log-only", "visible")
+
+
+def faithfulness_unreframable_mode() -> str:
+    """Resolve the un-reframable-fallback mode (one of :data:`FAITH_UNREFRAMABLE_MODES`; owner ruling
+    O1). Settings ``faithfulness_unreframable`` wins, env ``ORWELL_FAITHFULNESS_UNREFRAMABLE`` is the
+    headless fallback, default ``'reground'``. Fail-soft — a broken read degrades to the default and
+    never raises. None of the three ever bends a closed-set outcome; the engine's result always
+    stands."""
+    try:
+        from src.settings import get_setting
+        m = get_setting("faithfulness_unreframable", None)
+        if isinstance(m, str) and m in FAITH_UNREFRAMABLE_MODES:
+            return m
+    except Exception:
+        pass
+    env = os.getenv("ORWELL_FAITHFULNESS_UNREFRAMABLE")
+    if env is not None and env.strip().lower() in FAITH_UNREFRAMABLE_MODES:
+        return env.strip().lower()
+    return "reground"
+
+
 # ── the faithfulness verdict contract (the *what*) ─────────────────────────────────
 
 # The four ways narration can be UNfaithful — the dimensions the judge evaluates.

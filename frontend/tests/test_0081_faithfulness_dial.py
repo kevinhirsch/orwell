@@ -19,9 +19,11 @@ import pathlib
 
 
 from src.faithfulness import (
+    FAITH_UNREFRAMABLE_MODES,
     FAITHFULNESS_MODES,
     faithfulness_enabled,
     faithfulness_mode,
+    faithfulness_unreframable_mode,
 )
 
 
@@ -180,3 +182,36 @@ def test_source_pin_admin_status_wires_the_faithfulness_dial():
     assert "faithfulness_mode" in src         # the settings key written
     # …and it is genuinely a SECOND control, not a rename of the overseer one.
     assert "overseer-toggle" in src
+
+
+# ── the un-reframable fallback dial (owner ruling O1) ──────────────────────────────
+
+def test_unreframable_modes_tuple_is_the_three_options():
+    assert FAITH_UNREFRAMABLE_MODES == ("reground", "log-only", "visible")
+
+
+def test_unreframable_defaults_to_reground(monkeypatch, tmp_path):
+    from src.settings import save_settings
+    _isolate_settings(monkeypatch, tmp_path)
+    monkeypatch.delenv("ORWELL_FAITHFULNESS_UNREFRAMABLE", raising=False)
+    save_settings({})
+    assert faithfulness_unreframable_mode() == "reground"
+
+
+def test_unreframable_resolves_each_mode_from_settings(monkeypatch, tmp_path):
+    from src.settings import save_settings
+    _isolate_settings(monkeypatch, tmp_path)
+    monkeypatch.delenv("ORWELL_FAITHFULNESS_UNREFRAMABLE", raising=False)
+    for m in FAITH_UNREFRAMABLE_MODES:
+        save_settings({"faithfulness_unreframable": m})
+        assert faithfulness_unreframable_mode() == m
+
+
+def test_unreframable_env_fallback_then_garbage_degrades_to_reground(monkeypatch, tmp_path):
+    from src.settings import save_settings
+    _isolate_settings(monkeypatch, tmp_path)
+    save_settings({})
+    monkeypatch.setenv("ORWELL_FAITHFULNESS_UNREFRAMABLE", "visible")
+    assert faithfulness_unreframable_mode() == "visible"
+    monkeypatch.setenv("ORWELL_FAITHFULNESS_UNREFRAMABLE", "nonsense")
+    assert faithfulness_unreframable_mode() == "reground"   # garbage ⇒ the safe default

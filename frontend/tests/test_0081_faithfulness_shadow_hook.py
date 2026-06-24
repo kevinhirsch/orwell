@@ -46,6 +46,27 @@ def _set_mode(monkeypatch, tmp_path, mode):
     save_settings({"faithfulness_mode": mode})
 
 
+def _set_modes(monkeypatch, tmp_path, mode, unreframable=None):
+    """Set both the faithfulness dial and (optionally) the un-reframable fallback, env cleared."""
+    from src.settings import save_settings
+    _isolate_settings(monkeypatch, tmp_path)
+    monkeypatch.delenv("ORWELL_FAITHFULNESS_MODE", raising=False)
+    monkeypatch.delenv("ORWELL_FAITHFULNESS_UNREFRAMABLE", raising=False)
+    s = {"faithfulness_mode": mode}
+    if unreframable is not None:
+        s["faithfulness_unreframable"] = unreframable
+    save_settings(s)
+
+
+def _patch_reground_store(monkeypatch):
+    """Replace chat_helpers._DESYNC_REGROUND with a fresh dict we can inspect (the next-turn re-ground
+    seam the closed-set corrections write to)."""
+    from routes import chat_helpers
+    store = {}
+    monkeypatch.setattr(chat_helpers, "_DESYNC_REGROUND", store)
+    return store
+
+
 async def _fake_state(*a, **k):
     # a Vault-free board projection — plus a bogus field to prove the whitelist drops it.
     return {"week": 2, "phase": "veto", "vetoHolder": "npc:1", "evicted": 3, "secretXYZ": "NOPE"}
@@ -272,3 +293,86 @@ def test_shadow_never_adopts_even_an_open_set_slip(monkeypatch, tmp_path):
 
     assert len(logged) == 1 and logged[0][0][1] == "faith:persona"   # logged the detection…
     assert recorded == []                                            # …but never adopted
+
+
+# ── P4: reframe / reground — closed-set corrections only queue a next-turn directive ──
+
+def test_active_reframe_queues_a_directive_and_never_mutates_the_board(monkeypatch, tmp_path):
+    """THE MANDATE GATE (P4): an active CLOSED-set reframe only QUEUES a next-turn prose directive —
+    it never records, advances, or otherwise mutates the board. The engine's outcome stands."""
+    _set_modes(monkeypatch, tmp_path, "active")
+    _patch_engine_reads(monkeypatch)
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "board", "classification": "closed", "lever": "reframe",
+         "rationale": "contradicts the board"}))
+    _capture_log(monkeypatch)
+    store = _patch_reground_store(monkeypatch)
+    recorded = _patch_auto_record(monkeypatch)             # detect any board write
+
+    _run(_faith_check("you pulled off the veto", claim_bearing=True, engaged_scene=False, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    assert "u1" in store and "RE-FRAME" in store["u1"]     # a next-turn reframe directive queued…
+    assert recorded == []                                  # …and NOTHING mutated the board
+
+
+def test_unreframable_default_reground_queues_a_silent_directive(monkeypatch, tmp_path):
+    _set_modes(monkeypatch, tmp_path, "active")            # default un-reframable = reground
+    _patch_engine_reads(monkeypatch)
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "board", "classification": "closed", "lever": "reground", "rationale": "x"}))
+    _capture_log(monkeypatch)
+    store = _patch_reground_store(monkeypatch)
+    recorded = _patch_auto_record(monkeypatch)
+
+    _run(_faith_check("you pulled off the veto", claim_bearing=True, engaged_scene=False, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    assert "u1" in store and "RE-GROUND" in store["u1"]
+    assert recorded == []                                  # never mutates the board
+
+
+def test_unreframable_log_only_queues_nothing_but_still_logs(monkeypatch, tmp_path):
+    _set_modes(monkeypatch, tmp_path, "active", "log-only")
+    _patch_engine_reads(monkeypatch)
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "board", "classification": "closed", "lever": "reground", "rationale": "x"}))
+    logged = _capture_log(monkeypatch)
+    store = _patch_reground_store(monkeypatch)
+
+    _run(_faith_check("you pulled off the veto", claim_bearing=True, engaged_scene=False, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    assert store == {}                                     # log-only: no directive queued…
+    assert len(logged) >= 1                                # …but the slip is still surfaced
+
+
+def test_unreframable_visible_queues_a_visible_correction(monkeypatch, tmp_path):
+    _set_modes(monkeypatch, tmp_path, "active", "visible")
+    _patch_engine_reads(monkeypatch)
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "board", "classification": "closed", "lever": "reground", "rationale": "x"}))
+    _capture_log(monkeypatch)
+    store = _patch_reground_store(monkeypatch)
+
+    _run(_faith_check("you pulled off the veto", claim_bearing=True, engaged_scene=False, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    assert "u1" in store and "CORRECTION" in store["u1"]   # a player-visible course-correct, next turn
+
+
+def test_an_existing_reground_is_not_clobbered(monkeypatch, tmp_path):
+    """A 0065 desync re-ground already in flight takes precedence — the faithfulness reframe won't
+    overwrite the board-correction directive."""
+    _set_modes(monkeypatch, tmp_path, "active")
+    _patch_engine_reads(monkeypatch)
+    _patch_llm(monkeypatch, json.dumps(
+        {"dimension": "board", "classification": "closed", "lever": "reframe", "rationale": "x"}))
+    _capture_log(monkeypatch)
+    store = _patch_reground_store(monkeypatch)
+    store["u1"] = "EXISTING 0065 DESYNC RE-GROUND"
+
+    _run(_faith_check("you pulled off the veto", claim_bearing=True, engaged_scene=False, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    assert store["u1"] == "EXISTING 0065 DESYNC RE-GROUND"  # untouched
