@@ -110,33 +110,24 @@
     return out;
   }
 
+  // #640: compose the OrwellGadget kit (the .og-* card chrome + the rail mount + content-driven
+  // visibility). The kit's static TITLE is "Where You Are" (the registry label); the dynamic
+  // "Room — who's with you" line + the nearby rooms render in the card BODY. Only this gadget's
+  // own inner CSS (the room/quiet treatment) stays here.
+  let _gadget = null;
   function ensureEl() {
     let el = document.getElementById(ID);
     if (el) return el;
-    // Sidebar chrome, NOT a floating strip (user verdict): a fixed bottom-center bar
-    // covered the composer/chat. Dock it in #sidebar next to the game gadgets, mirroring
-    // #orwell-status / #orwell-social (ruling #3/E64/H5) — static flow, full sidebar
-    // width, no z-index, in the sidebar drawer on mobile like every other section.
     if (!document.getElementById("orwell-presence-css")) {
       const st = document.createElement("style");
       st.id = "orwell-presence-css";
       st.textContent = `
-        #orwell-presence {
-          display: none;
-          margin: var(--space-2) var(--space-2) 0;
-          padding: var(--space-2) var(--space-3);
-          background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
-          color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 10px;
-          font-family: 'Fira Code', ui-monospace, monospace;
-          font-size: var(--fs-xs); line-height: 1.5;
-        }
-        #orwell-presence .opres-hd {
+        #orwell-presence .opres-here {
           color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
           margin: 0 0 .3rem; font-weight: 600; letter-spacing: .03em;
           overflow-wrap: anywhere;
         }
-        #orwell-presence .opres-body { overflow-wrap: anywhere; }
+        #orwell-presence .opres-nearby { overflow-wrap: anywhere; }
         #orwell-presence .opres-room { display: block; }
         #orwell-presence .opres-room .opres-r {
           color: color-mix(in srgb, var(--fg, #9cdef2) 70%, var(--panel, #111));
@@ -144,26 +135,16 @@
         #orwell-presence .opres-quiet { opacity: .6; font-style: italic; }`;
       document.head.appendChild(st);
     }
-    el = document.createElement("section");
-    el.id = ID;
-    // A11Y-1: do NOT make the root a live region — re-writing head/body every 25s poll would
-    // re-announce the unchanged room to a screen reader 2-3x/min. A dedicated hidden child gets
-    // only the CHANGED header string (the #os-announce delta pattern from orwellStatusPanel).
-    el.innerHTML = `<div class="opres-hd" data-role="head"></div>` +
-      `<div class="opres-body" data-role="body"></div>` +
+    // 0054: prefer the control-room gadget rail (under the status HUD when present).
+    _gadget = window.OrwellGadgetKit.create({ id: ID, title: "Where You Are", icon: "🧭", ariaLabel: "Where you are" });
+    const body = _gadget.ensure("orwell-status");
+    // A11Y-1: do NOT make the card root a live region — re-writing head/body every 25s poll would
+    // re-announce the unchanged room to a screen reader 2-3x/min. A dedicated hidden child gets only
+    // the CHANGED header string (the #os-announce delta pattern from orwellStatusPanel).
+    body.innerHTML = `<div class="opres-here" data-role="head"></div>` +
+      `<div class="opres-nearby" data-role="body"></div>` +
       `<span data-role="announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></span>`;
-    // Mount inside the sidebar, beside the other game gadgets (the status HUD /
-    // "Wants a word"). Fall back to the session list, then the sidebar, then body.
-    // 0054: prefer the control-room gadget rail (under the other gadgets when present).
-    const rail = document.getElementById("gadget-rail-body");
-    const sidebar = document.getElementById("sidebar");
-    const anchor = document.getElementById("orwell-status");
-    if (rail && anchor && anchor.parentElement === rail) rail.insertBefore(el, anchor.nextSibling);
-    else if (rail) rail.appendChild(el);
-    else if (anchor && anchor.parentElement) anchor.parentElement.insertBefore(el, anchor.nextSibling);
-    else if (sidebar) sidebar.appendChild(el);
-    else document.body.appendChild(el);
-    return el;
+    return _gadget.el;
   }
 
   function esc(s) {
@@ -173,7 +154,7 @@
 
   function render(w) {
     const el = ensureEl();
-    if (!w || !w.room) { el.style.display = "none"; _lastAnnounced = null; return; }
+    if (!w || !w.room) { _gadget.hide(); _lastAnnounced = null; return; }
     el.dataset.room = w.room;
 
     // One dedup scope across the whole visible view (present + every nearby room).
@@ -205,7 +186,7 @@
           ':</span> ' + esc(join(n.present)) + "</span>")
         .join("");
     }
-    el.style.display = "block";
+    _gadget.show();
   }
 
   async function tick() {

@@ -62,12 +62,13 @@ def test_presence_strip_is_mounted_and_ambient():
     assert "orwellPresence.js" in html
 
     js = open(os.path.join(FRONTEND, "static", "js", "orwellPresence.js"), encoding="utf-8").read()
-    # Ambient, never click-to-act: it is now docked as sidebar chrome ("Where you are"),
-    # mirroring the status HUD gadget — NO interactive control at all (the old
-    # floating dismiss strip covered the composer/chat), and the module never POSTs anywhere
-    # (reads state + whereabouts only).
+    # Ambient, never click-to-act: it is a rail gadget ("Where You Are") that composes the
+    # OrwellGadget kit (#640) — NO interactive control at all (the old floating dismiss strip
+    # covered the composer/chat), and the module never POSTs anywhere (reads state + whereabouts).
     assert js.count("addEventListener(\"click\"") == 0
-    assert "getElementById(\"sidebar\")" in js          # mounted INTO #sidebar, not a fixed strip
+    # #640: the rail/sidebar mount is the kit's job now — the gadget composes the kit, which
+    # owns the #gadget-rail-body → #sidebar → body fallback chain (one place).
+    assert "OrwellGadgetKit.create(" in js              # composes the kit (mounted by it)
     assert "POST" not in js and "method:" not in js
     assert "/api/orwell/whereabouts" in js and "/api/orwell/state" in js
     # Game-build gated + fail-open.

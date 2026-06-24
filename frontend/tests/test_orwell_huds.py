@@ -37,8 +37,10 @@ def test_sourcepin_status_panel_is_sidebar_chrome_not_a_window():
     assert "makeWindowDraggable" not in src, "E64: no drag"
     assert "modalManager" not in src, "E64: no dock/minimize"
     assert "POS_KEY" not in src, "E64: no saved window position"
-    assert 'getElementById("sidebar")' in src, "E64: mounts inside #sidebar"
-    assert '"sessions-section"' in src, "E64: docks below the session list"
+    # #640: it's a RAIL GADGET (composes the OrwellGadget kit), not a window — the kit owns the
+    # mount (#gadget-rail-body → #sidebar → body), so the panel itself no longer hand-wires it.
+    assert "OrwellGadgetKit.create(" in src, "#640: composes the gadget kit"
+    assert "OrwellWindowKit.create(" not in src, "E64: still not a window"
 
 
 def test_status_panel_keeps_poll_render_and_announcer():

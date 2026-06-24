@@ -108,6 +108,17 @@ def test_popup_dismiss_is_a_synced_bool():
     assert layout.get_layout("u")["windows"]["popup:premiere-tutorial"]["dismissed"] is True
 
 
+def test_gadget_collapse_is_a_synced_bool():
+    # #640 (the OrwellGadget kit): a rail gadget's COLLAPSED state syncs through the SAME store
+    # under a synthetic "gadget:<id>" id, reusing the per-field LWW merge + the fan-out.
+    saved = layout.patch_layout("u", "gadget:orwell-status", {"collapsed": True})
+    assert saved == {"collapsed": True}
+    assert layout.get_layout("u")["windows"]["gadget:orwell-status"]["collapsed"] is True
+    # last-write-wins flips it back
+    layout.patch_layout("u", "gadget:orwell-status", {"collapsed": False})
+    assert layout.get_layout("u")["windows"]["gadget:orwell-status"]["collapsed"] is False
+
+
 def test_two_devices_converge_on_the_new_fields():
     """LWW parity: a write from 'device A' is what BOTH devices read back (the synced value is the
     single source of truth) — the cross-device convergence #637/#638 require."""

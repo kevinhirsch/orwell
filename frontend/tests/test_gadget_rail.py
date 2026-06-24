@@ -82,11 +82,15 @@ def test_controller_persists_state_and_gates_on_content():
 
 
 def test_hud_gadgets_prefer_the_rail():
-    # each HUD gadget mounts into the rail when present, with the sidebar as fallback
+    # #640: the rail mount (with the sidebar → body fallback) is now the OrwellGadget kit's job —
+    # the gadgets compose the kit and no longer hand-wire the mount. The fallback chain lives once,
+    # in orwellGadget.js; assert the kit owns it, and that the HUD gadgets compose the kit.
+    kit = _read("static", "js", "orwellGadget.js")
+    assert 'getElementById("gadget-rail-body")' in kit
+    assert 'getElementById("sidebar")' in kit          # fallback preserved (kit-owned)
     for f in ("orwellStatusPanel.js", "orwellPresence.js"):
         js = _read("static", "js", f)
-        assert 'getElementById("gadget-rail-body")' in js, f
-        assert 'getElementById("sidebar")' in js, f   # fallback preserved
+        assert "OrwellGadgetKit.create(" in js, f
 
 
 # ── the GADGET REGISTRY — the single source of truth both views derive from ───

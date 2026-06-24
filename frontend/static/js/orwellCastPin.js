@@ -54,28 +54,14 @@
   }
 
   // ── the compact gadget element (lives in the rail body) ────────────────────
+  // #640: compose the OrwellGadget kit (the .og-* card chrome + the rail mount + content-driven
+  // visibility + the header action buttons). Only this gadget's own inner CSS (the portrait grid)
+  // stays here; the card shell + header ("👥 Cast" + Open / Un-pin actions) are the kit's.
   function ensureCss() {
     if (document.getElementById("orwell-cast-pin-css")) return;
     var st = document.createElement("style");
     st.id = "orwell-cast-pin-css";
     st.textContent = "" +
-      "#orwell-cast-pin { display: none; margin: var(--space-2, .4rem) var(--space-2, .4rem) 0;" +
-      "  padding: var(--space-2, .4rem) var(--space-3, .55rem);" +
-      "  background: color-mix(in srgb, var(--panel, #111) 70%, transparent);" +
-      "  color: var(--fg, #9cdef2); border: 1px solid var(--border, #355a66); border-radius: 10px;" +
-      "  font-family: 'Fira Code', ui-monospace, monospace; font-size: var(--fs-xs, .72rem); }" +
-      // header wraps at a narrow rail width so the title + buttons never overlap.
-      "#orwell-cast-pin .ocp-hd { display: flex; align-items: center; gap: .4rem;" +
-      "  flex-wrap: wrap; margin-bottom: .35rem; }" +
-      "#orwell-cast-pin .ocp-ttl { flex: 1 1 auto; min-width: 0; font-weight: 600; letter-spacing: .03em;" +
-      "  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" +
-      "  color: color-mix(in srgb, var(--fg, #9cdef2) 80%, var(--panel, #111)); }" +
-      "#orwell-cast-pin .ocp-btn { flex: 0 0 auto; background: rgba(255,255,255,.06);" +
-      "  border: 1px solid var(--border, #355a66);" +
-      "  color: inherit; cursor: pointer; border-radius: 6px; font: inherit; font-size: .68rem;" +
-      "  min-height: 24px; padding: 0 .45rem; opacity: .8; }" +
-      "#orwell-cast-pin .ocp-btn:hover, #orwell-cast-pin .ocp-btn:focus-visible { opacity: 1;" +
-      "  background: rgba(255,255,255,.12); }" +
       // #554: a scrollable responsive grid (target ~4 across) rendering the FULL cast —
       // active, jury AND evicted — instead of just two portraits. Capped height so the
       // gadget stays compact in the rail; the grid scrolls when the cast overflows.
@@ -94,32 +80,19 @@
     document.head.appendChild(st);
   }
 
+  var _gadget = null;
   function ensureEl() {
     var el = document.getElementById(ID);
     if (el) return el;
     ensureCss();
-    el = document.createElement("section");
-    el.id = ID;
-    el.setAttribute("role", "group");
-    el.setAttribute("aria-label", "Cast");
-    el.innerHTML =
-      '<div class="ocp-hd">' +
-        '<span class="ocp-ttl">Cast</span>' +
-        '<button type="button" class="ocp-btn" data-act="open" title="Open the full cast window">Open</button>' +
-        '<button type="button" class="ocp-btn" data-act="unpin" title="Un-pin back to a floating window">Un-pin</button>' +
-      '</div>' +
+    _gadget = window.OrwellGadgetKit.create({ id: ID, title: "Cast", icon: "👥", role: "group", ariaLabel: "Cast" });
+    var body = _gadget.ensure();
+    _gadget.addAction({ label: "Open", title: "Open the full cast window", dataset: { act: "open" }, onClick: openFullWindow });
+    _gadget.addAction({ label: "Un-pin", title: "Un-pin back to a floating window", dataset: { act: "unpin" }, onClick: function () { setPinned(false); } });
+    body.innerHTML =
       '<div class="ocp-portraits" data-role="portraits"></div>' +
       '<div class="ocp-foot" data-role="foot"></div>';
-    // Mount into the 0054 gadget rail (its content-driven visibility shows the rail
-    // when a gadget has content). Fall back to the sidebar, then body.
-    var rail = document.getElementById("gadget-rail-body");
-    var sidebar = document.getElementById("sidebar");
-    if (rail) rail.appendChild(el);
-    else if (sidebar) sidebar.appendChild(el);
-    else document.body.appendChild(el);
-    el.querySelector('[data-act="open"]').addEventListener("click", openFullWindow);
-    el.querySelector('[data-act="unpin"]').addEventListener("click", function () { setPinned(false); });
-    return el;
+    return _gadget.el;
   }
 
   function openFullWindow() {
@@ -143,9 +116,9 @@
 
   function render(data) {
     var el = ensureEl();
-    if (!isPinned()) { el.style.display = "none"; return; }
+    if (!isPinned()) { _gadget.hide(); return; }
     var roster = (data && Array.isArray(data.roster)) ? data.roster : [];
-    if (!roster.length) { el.style.display = "none"; return; }
+    if (!roster.length) { _gadget.hide(); return; }
 
     // #554: render the FULL cast as a scrollable grid (active first, then jury/evicted —
     // never drop later boots). The grid is height-capped + scrolls, so the gadget stays
@@ -171,11 +144,11 @@
     var generating = !!(data && data.imagesAvailable) && total != null && have != null && total > have;
     _pollDelay = generating ? FAST_POLL_MS : POLL_MS;
 
-    el.style.display = "block";
+    _gadget.show();
   }
 
   function refresh() {
-    if (!isPinned()) { var el = document.getElementById(ID); if (el) el.style.display = "none"; return Promise.resolve(); }
+    if (!isPinned()) { if (_gadget) _gadget.hide(); else { var el = document.getElementById(ID); if (el) el.style.display = "none"; } return Promise.resolve(); }
     return getJSON("/api/orwell/roster").then(render).catch(function (e) {
       if (window.OrwellReport) window.OrwellReport.fail("castpin", "roster-fetch", e);
       // fail open: keep whatever's shown
@@ -199,13 +172,13 @@
     // #656 — store an EXPLICIT un-pin ("0") rather than deleting the key, so the choice
     // sticks on mobile (where absent ⇒ auto-docked). "1" = pinned, "0" = explicitly off.
     lsSet(pinKey(), on ? "1" : "0");
-    var el = ensureEl();
+    ensureEl();
     if (on) {
       // pinning DOCKS the roster: close the floating cast window if open, render the gadget
       if (window._orwellCastClose) window._orwellCastClose();
       refresh().then(schedule);
     } else {
-      el.style.display = "none";
+      _gadget.hide();
       if (_timer) { clearTimeout(_timer); _timer = null; }
       // un-pinning floats it back: re-open the full window (idempotent — the seam restores
       // it if already open). On a narrow viewport windows aren't a comfortable affordance,
