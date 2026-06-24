@@ -910,8 +910,13 @@ export function playerRestDeficit(s: LiveSeasonState): number {
  * player kept the house up); on a normal night everyone — owls included — carries little/none, and the
  * mental favorite wins their mental comp cleanly. Now GRADED + chronotype-aware, never a trait penalty.
  */
-export function npcRestDeficit(s: LiveSeasonState, stats: { physical: number; social: number }, id?: EntityId): number {
-  const bedDepth = bedtimeDepthFor(stats, id);
+export function npcRestDeficit(
+  s: LiveSeasonState,
+  stats: { physical: number; social: number },
+  id?: EntityId,
+  bedDepthOverride?: number,
+): number {
+  const bedDepth = bedDepthOverride ?? bedtimeDepthFor(stats, id);
   const nightPeak = s.lastSleepDepth ?? 0;
   return restDeficitForDepth(Math.min(bedDepth, nightPeak));
 }

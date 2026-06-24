@@ -214,3 +214,10 @@ export const SOCIAL_SWAY_FLOOR = 0.4;
 export function socialSwayScale(deficit: number): number {
   return Math.max(SOCIAL_SWAY_FLOOR, 1 - SOCIAL_SWAY_DAMP * clamp(deficit, 0, 1));
 }
+
+// 0066 Phase-2: a CHARACTER conflict drains the houseguest in it, so they turn in EARLIER that night
+// (the emotional dimension flows conflict → earlier bedtime — sleep debt never AUTHORS conflict; the
+// causation runs the other way). Each conflict pulls their effective turn-in depth earlier; floored so
+// they never bed before the early-evening. Engine-only; the player never sees a number.
+export const CONFLICT_BEDTIME_DRAIN = 0.08;
+export const BEDTIME_DEPTH_FLOOR = 0.4;
