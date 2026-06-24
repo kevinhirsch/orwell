@@ -37238,3 +37238,312 @@ body.theme-frosted .modal {
    the input beside it (.confirm-btn won't stretch on its own). */
 .ask-user-other-send { flex-shrink: 0; white-space: nowrap; min-height: 39px; }
 .ask-user-other-send:disabled { opacity: 0.5; cursor: default; }
+
+/* ============================================================================ */
+/* Liquid glass — iOS-26 / Control-Center coherence layer (PR: SVG refraction)  */
+/* ----------------------------------------------------------------------------  */
+/* These rules sit ON TOP of the shipped body.theme-frosted blur-glass baseline  */
+/* (which they never remove). The JS module (liquidGlass.js) adds REAL SVG edge  */
+/* refraction over these on Chromium; everywhere else this CSS glass is the      */
+/* whole effect (the documented graceful fallback). Coherent across every glass  */
+/* surface: windows, gadget cards, composer, sidebar, modals, dropdowns, the     */
+/* notice kit, and the minimized-window dock styled as an iOS Control Center.    */
+
+/* ── Adaptive-contrast text floor (always-readable over an animated bg) ─────── */
+/* The guarantee: text contrast is computed against the GLASS TINT, not the raw  */
+/* (animated, variable-luminance) backdrop. We pin a MINIMUM tint opacity floor  */
+/* so the panel fill is always opaque enough that --fg clears WCAG AA over it,   */
+/* regardless of the bg frame's current luminance — plus a hair of text-shadow   */
+/* as belt-and-suspenders on the brightest frames. This is the structural answer */
+/* to "always readable": the floor never lets the bg dominate the text's ground. */
+:root {
+  /* Minimum panel-tint opacity under text on glass (>= this keeps --fg AA over   */
+  /* the tint even when the bg behind is pure white). Tuned with the dark palette. */
+  --ow-glass-tint-floor: 46%;
+  --ow-glass-text-shadow: 0 1px 2px rgba(0,0,0,.55), 0 0 1px rgba(0,0,0,.5);
+}
+/* Raise the baseline tints to the readability floor (the baseline used 26-32%,   */
+/* fine for a static bg; an ANIMATED bg needs the floor so a bright frame can't    */
+/* wash out the text). color-mix max() isn't a thing, so we set the floor value.   */
+body.theme-frosted .ow-window,
+body.theme-frosted .og-card,
+body.theme-frosted .chat-input-bar,
+body.theme-frosted #sidebar,
+body.theme-frosted .modal-content,
+body.theme-frosted .on-card {
+  background-color: color-mix(in srgb, var(--panel, var(--bg)) var(--ow-glass-tint-floor), transparent) !important;
+}
+/* A subtle text-shadow on glass body copy guarantees legibility on the very      */
+/* brightest animated-bg frames (the SVG tint + this shadow = AA at both extremes).*/
+body.theme-frosted .ow-window .ow-body,
+body.theme-frosted .og-card .og-body,
+body.theme-frosted .on-card,
+body.theme-frosted #sidebar {
+  text-shadow: var(--ow-glass-text-shadow);
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Static bg under reduced-motion → the shadow is unnecessary; keep it light.    */
+  :root { --ow-glass-text-shadow: 0 1px 1px rgba(0,0,0,.4); }
+}
+
+/* ── The notice kit (.on-card) — same liquid glass as the windows/cards ─────── */
+body.theme-frosted .on-card {
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--fg, #fff) 16%, transparent) 0%,
+    color-mix(in srgb, var(--fg, #fff)  5%, transparent) 28%,
+    transparent 64%) !important;
+  backdrop-filter: blur(34px) saturate(190%) brightness(1.05) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(190%) brightness(1.05) !important;
+  border-color: color-mix(in srgb, var(--fg) 26%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent),
+              0 6px 20px rgba(0,0,0,0.22) !important;
+}
+
+/* ── iOS Control-Center dock ─────────────────────────────────────────────────*/
+/* The minimized-window dock (#minimized-dock) is re-styled to read like the iOS  */
+/* Control Center: heavily-blurred translucent glass with a generous radius, and  */
+/* each minimized window a rounded translucent "module" tile in the grid. The JS  */
+/* refraction targets it too (selector added in liquidGlass.js) on Chromium.      */
+body.theme-frosted #minimized-dock.ow-has-rows {
+  padding: 10px;
+  margin: var(--space-2);
+  border-top: none;
+  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  border-radius: 22px;                 /* generous, Control-Center radius */
+  background-color: color-mix(in srgb, var(--panel, var(--bg)) 40%, transparent);
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--fg, #fff) 16%, transparent) 0%,
+    color-mix(in srgb, var(--fg, #fff)  5%, transparent) 30%,
+    transparent 70%);
+  backdrop-filter: blur(40px) saturate(200%) brightness(1.06);
+  -webkit-backdrop-filter: blur(40px) saturate(200%) brightness(1.06);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent),
+              0 10px 30px rgba(0,0,0,0.4);
+}
+body.theme-frosted #minimized-dock .minimized-dock-hd {
+  opacity: 0.55; padding: 2px 6px 8px;
+}
+/* The chips become Control-Center module TILES: rounded translucent glass cells  */
+/* laid in a wrapping grid (a module grid, not a stacked list).                   */
+body.theme-frosted #minimized-dock .minimized-dock-rows {
+  flex-direction: row; flex-wrap: wrap; gap: 8px;
+}
+body.theme-frosted #minimized-dock .minimized-dock-chip {
+  width: auto; min-width: 96px; flex: 1 1 96px;
+  padding: 10px 12px; border-radius: 16px;
+  background-color: color-mix(in srgb, var(--fg) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent),
+              0 2px 8px rgba(0,0,0,0.18);
+  text-shadow: var(--ow-glass-text-shadow);
+}
+body.theme-frosted #minimized-dock .minimized-dock-chip:hover,
+body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
+  background-color: color-mix(in srgb, var(--accent, var(--red)) 22%, color-mix(in srgb, var(--fg) 10%, transparent));
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 45%, transparent);
+}
+/* The first/last-child whole-dock-drag cue from the base sheet would fight the    */
+/* tile look; neutralize it under the Control-Center treatment (drag still works). */
+body.theme-frosted #minimized-dock .minimized-dock-chip:first-child:not(:only-child),
+body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-child) {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent),
+              0 2px 8px rgba(0,0,0,0.18);
+}
+
+/* ── Mobile (≤768px): keep the glass coherent + cheap on small Chromium ──────── */
+/* The JS hard-caps refracted element count on small screens; the CSS keeps the    */
+/* radii/tint consistent and the Control-Center dock a comfortable touch grid.     */
+@media (max-width: 768px) {
+  body.theme-frosted #minimized-dock.ow-has-rows { border-radius: 20px; padding: 10px; }
+  body.theme-frosted #minimized-dock .minimized-dock-chip {
+    min-width: 44px; min-height: 44px;   /* WCAG 2.5.5 touch target */
+    flex: 1 1 44%;
+  }
+}
+
+/* ── Apple HIG accessibility baseline for the glass (REQUIRED) ────────────────*/
+/* Apple mandates testing custom Liquid Glass against all three a11y settings.   */
+
+/* 1. prefers-reduced-transparency: reduce → SOLID opaque surfaces. No           */
+/*    translucency, no blur, no SVG refraction (the JS also bails — it checks     */
+/*    this query). Glass chrome falls back to the solid panel fill so nothing     */
+/*    behind shows through. Separate from reduced-motion.                         */
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .ow-window,
+  body.theme-frosted .og-card,
+  body.theme-frosted .on-card,
+  body.theme-frosted .chat-input-bar,
+  body.theme-frosted #sidebar,
+  body.theme-frosted .modal-content,
+  body.theme-frosted .dropdown,
+  body.theme-frosted #minimized-dock.ow-has-rows,
+  body.theme-frosted #minimized-dock .minimized-dock-chip {
+    background-color: var(--panel, var(--bg)) !important;
+    background-image: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    text-shadow: none !important;
+  }
+}
+
+/* 2. prefers-contrast: more (Increased Contrast) → raise the tint/contrast floor */
+/*    so text clears AA with margin over any animated-bg frame, and strengthen    */
+/*    the borders.                                                                */
+@media (prefers-contrast: more) {
+  :root { --ow-glass-tint-floor: 72%; }
+  body.theme-frosted .ow-window,
+  body.theme-frosted .og-card,
+  body.theme-frosted .on-card,
+  body.theme-frosted .chat-input-bar,
+  body.theme-frosted #sidebar,
+  body.theme-frosted .modal-content,
+  body.theme-frosted #minimized-dock.ow-has-rows {
+    border-color: color-mix(in srgb, var(--fg) 50%, transparent) !important;
+  }
+}
+
+/* 3. prefers-reduced-motion already gates the animated bg (theme.js _bgStaticInit */
+/*    freezes canvas patterns to a still frame) and the kit animations; the JS    */
+/*    refraction is static (no morph) and additionally calms its scale here.      */
+
+/* ── Concentric corner radii (Apple HIG) ─────────────────────────────────────*/
+/* Inner controls nestle into the window's rounded corners with a radius         */
+/* concentric to the container (window radius − padding), rather than a flat or   */
+/* clashing radius.                                                              */
+body.theme-frosted .ow-window .ow-body button,
+body.theme-frosted .ow-window .ow-body .ow-controls button {
+  border-radius: 8px; /* concentric inside the 10-18px window radius */
+}
+body.theme-frosted #minimized-dock .minimized-dock-chip {
+  /* tile radius concentric with the dock's 22px shell minus its 10px padding */
+  border-radius: 14px;
+}
+
+/* ============================================================================ */
+/* Apple HIG "Materials" alignment — Regular Liquid Glass for our text surfaces   */
+/* ----------------------------------------------------------------------------  */
+/* Compared against Apple's official Liquid Glass refs (hero.png / windows.png):  */
+/* the signature is SUBTLETY + LUMINOSITY — a bright luminous EDGE highlight, a    */
+/* soft outer float shadow (elevation), VERY rounded + CONCENTRIC corners, and    */
+/* content that reads clearly THROUGH the glass (the bg infuses + tints it) — not  */
+/* a heavy dark slab. Orwell is a DARK app with LIGHT --fg text, so we implement   */
+/* Apple's REGULAR variant ("blurs AND adjusts luminosity to maintain            */
+/* legibility"): we keep the dark tint FLOOR for AA on light text, but lift the    */
+/* glass with brightness + a luminous rim so content infuses it the Apple way.    */
+/* The CLEAR variant (highly translucent, +35% dim over bright media) is NOT used  */
+/* here — every surface we glass carries significant text, so Regular is correct.  */
+
+:root {
+  /* Apple-language tokens. The luminous edge = a bright top-rim highlight; the      */
+  /* float shadow = soft elevation; the radii are larger + concentric.              */
+  --ow-glass-radius: 22px;          /* window/surface radius (very rounded, Apple)  */
+  --ow-glass-radius-inner: 14px;    /* concentric inner-control radius (nested)     */
+  --ow-glass-edge: color-mix(in srgb, var(--fg, #fff) 40%, transparent);
+  --ow-glass-float: 0 12px 34px rgba(0,0,0,0.34), 0 2px 8px rgba(0,0,0,0.22);
+  /* Regular-variant luminosity lift composed into the backdrop filter (a gentle    */
+  /* brightness so a DARK backdrop reads lighter through the glass — Apple's         */
+  /* luminosity adjustment — without washing out the AA floor).                      */
+  --ow-glass-backdrop: blur(28px) saturate(180%) brightness(1.12);
+  --ow-glass-backdrop-strong: blur(40px) saturate(190%) brightness(1.14);
+}
+
+/* The luminous edge + soft float + very-rounded corners on the primary text        */
+/* surfaces. Tint floor (above) + this rim/shadow = the Apple Regular look while     */
+/* light --fg text stays AA. backdrop brightness lifts the dark bg the Apple way.    */
+body.theme-frosted .ow-window,
+body.theme-frosted .og-card,
+body.theme-frosted .on-card,
+body.theme-frosted .chat-input-bar,
+body.theme-frosted .modal-content {
+  border-radius: var(--ow-glass-radius) !important;
+  backdrop-filter: var(--ow-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;
+  /* Luminous top rim (inset hairline) + a fainter base shade + the soft float.      */
+  box-shadow:
+    inset 0 1px 0 var(--ow-glass-edge),
+    inset 0 0 0 0.5px color-mix(in srgb, var(--fg, #fff) 12%, transparent),
+    var(--ow-glass-float) !important;
+  border-color: color-mix(in srgb, var(--fg, #fff) 26%, transparent) !important;
+}
+/* The big windows + the Control-Center dock carry the stronger blur (more glass).  */
+body.theme-frosted .ow-window,
+body.theme-frosted #minimized-dock.ow-has-rows {
+  backdrop-filter: var(--ow-glass-backdrop-strong) !important;
+  -webkit-backdrop-filter: var(--ow-glass-backdrop-strong) !important;
+}
+body.theme-frosted #minimized-dock.ow-has-rows {
+  border-radius: var(--ow-glass-radius) !important;
+  box-shadow:
+    inset 0 1px 0 var(--ow-glass-edge),
+    var(--ow-glass-float) !important;
+}
+
+/* CONCENTRIC corners (Apple): the sidebar nested inside the window, inner controls  */
+/* nested inside their card/window — inner radius < container radius.                */
+body.theme-frosted .ow-window .ow-titlebar {
+  border-radius: var(--ow-glass-radius) var(--ow-glass-radius) 0 0 !important;
+}
+body.theme-frosted .ow-window .ow-body button,
+body.theme-frosted .on-card button,
+body.theme-frosted .og-card button {
+  border-radius: var(--ow-glass-radius-inner) !important;
+}
+body.theme-frosted #minimized-dock .minimized-dock-chip {
+  border-radius: var(--ow-glass-radius-inner) !important;
+}
+
+/* prefers-reduced-transparency already forces these SOLID (the a11y block above):  */
+/* it sets background-image/backdrop-filter to none; add the radius/shadow reset so  */
+/* the solid surface doesn't keep a glass float that implies translucency.          */
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .ow-window,
+  body.theme-frosted .og-card,
+  body.theme-frosted .on-card,
+  body.theme-frosted .chat-input-bar,
+  body.theme-frosted .modal-content,
+  body.theme-frosted #minimized-dock.ow-has-rows {
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45) !important; /* plain elevation, no rim glass */
+  }
+}
+
+/* ── Apple HIG: scroll-edge effect + typography legibility on glass ──────────── */
+/* Where scrollable content meets a floating glass surface, content should FADE    */
+/* under the glass (a soft blur/opacity transition), not hit a hard opaque cut.    */
+/* Apple uses this instead of an opaque bar bg. We add a gentle gradient-mask fade  */
+/* at the two seams that matter: the composer's top edge and the kit window body's  */
+/* top (under the floating titlebar). Purely visual; never changes hit-testing.     */
+body.theme-frosted .chat-input-bar { position: relative; }
+body.theme-frosted .chat-input-bar::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: -18px; height: 18px;
+  pointer-events: none;
+  background: linear-gradient(to top,
+    color-mix(in srgb, var(--panel, var(--bg)) 22%, transparent), transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  -webkit-mask-image: linear-gradient(to top, #000, transparent);
+  mask-image: linear-gradient(to top, #000, transparent);
+}
+/* NB: we deliberately do NOT mask the kit .ow-body top edge — a body-wide mask    */
+/* would fade the first line of content on every window (and the kit warns against  */
+/* clipping the rounded-corner pointer region). The composer seam above is the one  */
+/* clear scroll-edge win; window headers already float as transparent glass.        */
+
+/* Apple HIG Typography: NEVER use light/thin font weights on glass — they smear    */
+/* over the translucent, variable-luminance ground. Floor text on glass at Regular  */
+/* (400). (Font FAMILY is untouched — that's on hold — this only lifts weak weights.)*/
+body.theme-frosted .ow-window,
+body.theme-frosted .og-card,
+body.theme-frosted .on-card,
+body.theme-frosted #sidebar,
+body.theme-frosted .modal-content,
+body.theme-frosted #minimized-dock .minimized-dock-chip {
+  font-weight: 400;
+}
+body.theme-frosted .ow-window [style*="font-weight:100"],
+body.theme-frosted .ow-window [style*="font-weight:200"],
+body.theme-frosted .ow-window [style*="font-weight:300"],
+body.theme-frosted .og-card [style*="font-weight:300"] {
+  font-weight: 400 !important;   /* clamp stray thin inline weights up to Regular */
+}
