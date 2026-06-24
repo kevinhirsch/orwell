@@ -115,7 +115,7 @@
            chosen size persists under winsize-orwell-cast. */
         #orwell-cast {
           width: min(360px, 92vw);
-          font-family: 'Fira Code', ui-monospace, monospace;
+          font-family: var(--mono, monospace);
         }
         #orwell-cast .oc-grid {
           display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));

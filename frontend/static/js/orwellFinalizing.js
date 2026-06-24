@@ -30,7 +30,7 @@
         border: 1px solid var(--border, #355a66); border-radius: 10px;
         background: color-mix(in srgb, var(--panel, #111) 92%, var(--brand-color, var(--red, #e06c75)) 8%);
         color: var(--fg, #9cdef2);
-        font-family: 'Fira Code', ui-monospace, monospace; font-size: .82rem; line-height: 1.4;
+        font-family: var(--mono, monospace); font-size: .82rem; line-height: 1.4;
         animation: ow-finalizing-in .25s ease-out;
       }
       #${ID} .ow-fin-dot {

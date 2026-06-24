@@ -71,7 +71,7 @@ import * as modalManager from "./modalManager.js";
       <style>
         #orwell-finale {
           width: 240px; display: none;
-          font-family: 'Fira Code', ui-monospace, monospace; font-size: .74rem;
+          font-family: var(--mono, monospace); font-size: .74rem;
         }
         #orwell-finale .ofin-stage { opacity: .6; margin: 0 0 .4rem; letter-spacing: .03em; }
         #orwell-finale .ofin-final {

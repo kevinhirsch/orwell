@@ -70,7 +70,7 @@
           position: fixed; inset: 0; z-index: 99999;
           display: flex; align-items: center; justify-content: center;
           background: color-mix(in srgb, var(--bg, #282c34) 88%, black);
-          font-family: 'Fira Code', ui-monospace, monospace;
+          font-family: var(--mono, monospace);
         }
         #orwell-onboarding .ob-card {
           width: 420px; max-width: 92vw; max-height: 90vh; overflow: auto;

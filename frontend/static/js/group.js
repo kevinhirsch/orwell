@@ -847,14 +847,14 @@ async function _streamToHolder(modelIdx, sessionId, msg, holderEl, abortCtrl) {
           else if (json.type === 'tool_start') {
             const toolDiv = document.createElement('div');
             toolDiv.className = 'agent-tool-event';
-            toolDiv.style.cssText = 'font-size:11px;opacity:0.5;padding:2px 0;font-family:monospace;';
+            toolDiv.style.cssText = 'font-size:11px;opacity:0.5;padding:2px 0;font-family:var(--mono, monospace);';
             toolDiv.textContent = `⚙ ${json.tool || 'tool'}${json.command ? ': ' + json.command.substring(0, 60) : ''}`;
             bodyEl.appendChild(toolDiv);
           }
           else if (json.type === 'tool_output') {
             const outDiv = document.createElement('div');
             outDiv.className = 'agent-tool-output';
-            outDiv.style.cssText = 'font-size:10px;opacity:0.4;padding:2px 0;font-family:monospace;max-height:60px;overflow:hidden;';
+            outDiv.style.cssText = 'font-size:10px;opacity:0.4;padding:2px 0;font-family:var(--mono, monospace);max-height:60px;overflow:hidden;';
             outDiv.textContent = (json.output || '').substring(0, 200);
             bodyEl.appendChild(outDiv);
           }

@@ -4920,7 +4920,7 @@ import { isNarrow } from './platform.js';
         _researchAvgDuration = data.avg_duration || null;
         _researchTimerEl = document.createElement('div');
         _researchTimerEl.className = 'research-timer';
-        _researchTimerEl.style.cssText = 'font-size:0.8em; opacity:0.6; margin-top:4px; font-family:monospace;';
+        _researchTimerEl.style.cssText = 'font-size:0.8em; opacity:0.6; margin-top:4px; font-family:var(--mono, monospace);';
         spinner.element.parentNode.insertBefore(_researchTimerEl, spinner.element.nextSibling);
         _researchTimerInterval = setInterval(() => {
           if (!_researchTimerEl) return;

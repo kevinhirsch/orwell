@@ -57,7 +57,7 @@
       "  color: var(--fg, #9cdef2);" +
       "  border: 1px solid var(--border, #355a66); border-radius: 10px;" +
       // Shared type system (#709): sans family + label PRESET for gadget rows.
-      "  font-family: var(--ow-ui-font, -apple-system, BlinkMacSystemFont, Inter, sans-serif);" +
+      "  font-family: var(--ow-ui-font, sans-serif);" +
       "  font-size: var(--ow-fs-label, .8125rem); line-height: 1.5; }" +
       // The header: icon + Title-Case title + optional actions. Uses the heading PRESET +
       // the semibold weight token (the title colour mixed toward the panel). The whole

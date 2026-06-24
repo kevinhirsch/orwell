@@ -35,7 +35,7 @@ class Spinner {
     }
     const span = document.createElement('span');
     span.className = 'ai-spinner';
-    span.style.cssText = 'font-family: monospace; white-space: pre;';
+    span.style.cssText = 'font-family: var(--mono, monospace); white-space: pre;';
     this.element = span;
     this.updateDisplay();
     return span;
@@ -44,7 +44,7 @@ class Spinner {
   _createSineWaveElement() {
     const wrapper = document.createElement('span');
     wrapper.className = 'ai-spinner ai-spinner-sinewave';
-    wrapper.style.cssText = 'font-family: monospace; white-space: pre; display: inline-flex; align-items: center; gap: 6px;';
+    wrapper.style.cssText = 'font-family: var(--mono, monospace); white-space: pre; display: inline-flex; align-items: center; gap: 6px;';
 
     const canvas = document.createElement('canvas');
     canvas.width = 50;
@@ -128,7 +128,7 @@ class Spinner {
   _createWhirlpoolElement() {
     const wrapper = document.createElement('span');
     wrapper.className = 'ai-spinner ai-spinner-whirlpool';
-    wrapper.style.cssText = 'font-family: monospace; white-space: pre; display: inline-flex; align-items: center; gap: 6px;';
+    wrapper.style.cssText = 'font-family: var(--mono, monospace); white-space: pre; display: inline-flex; align-items: center; gap: 6px;';
 
     const size = this._wpSize || 18;
     const canvas = document.createElement('canvas');
