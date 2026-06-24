@@ -55,12 +55,21 @@ Feature: Narration-faithfulness gate — the GM never visibly errs (ground the p
     And the correction falls through to a reframe or a backend re-ground
     And no closed-set outcome, board value, or eligibility is ever rewritten to match the narration
 
-  Scenario: An un-reframable closed-set slip is re-grounded in the backend with no visible retraction
+  Scenario: An un-reframable closed-set slip uses the configurable fallback (default quiet re-ground)
     Given a started game in active mode where a closed-set slip has no plausible in-fiction reframe
+    And the un-reframable fallback setting is at its default
     When the faithfulness judge classifies the slip as closed-set and un-reframable
     Then the corrected state delta is re-injected so the false claim dies at the source
     And the violation is logged with full context
     And no visible player-facing retraction is emitted and the engine truth stands going forward
+    And every fallback option leaves the engine truth unbent
+
+  Scenario: Faithfulness has its own dial, independent of the pacing role
+    Given a started game with the pacing role set to active and the faithfulness role set to shadow
+    When a claim-bearing turn produces a contradiction and a separate turn stalls at an advance phase
+    Then the faithfulness contradiction is logged but not corrected
+    But the pacing stall is still acted on by the active pacing role
+    And an admin can move the faithfulness dial to active without changing the pacing dial
 
   Scenario: A persona or in-bounds violation is reframed
     Given a started game in active mode

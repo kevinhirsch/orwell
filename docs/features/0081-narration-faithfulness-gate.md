@@ -1,6 +1,7 @@
 # 0081 — Narration-faithfulness gate (the overseer's second role: grounding & graceful recovery)
 
-> **Status:** 📝 **SPEC** (drafted 2026-06-24). The **second overseer role** that
+> **Status:** 📝 **SPEC** (drafted + owner-ruled 2026-06-24; the mandate boundary and rulings O1/O2/O4 are
+> closed — see §10). The **second overseer role** that
 > [0079](./0079-runtime-overseer-and-diagnostic-log.feature) deliberately deferred ("the narration
 > **faithfulness gate** … a *separate, future* role, deliberately not in this feature"). Where 0079/0080
 > watch **pacing & gap-repair** (the model *under*-calls — a scene folds zero impact, the game freezes),
@@ -157,7 +158,7 @@ When the judge flags a slip (already streamed), `active` mode recovers it so it 
 |---|---|---|---|
 | **open-set** (flavor/detail the engine never fixed) | **`adopt`** | the model's invented detail is **recorded as canonical** via `recordInteraction` — the claim **becomes true**; nothing downstream contradicts it because it is now the record | **open-set only**; no closed-set field is touched, so **no outcome bent** — this is ADR 0005's "record the open set faithfully," not sycophancy |
 | **closed-set, reframable** | **`reframe`** | the **next** turn is steered to absorb the slip diegetically — the false claim becomes an in-fiction **misbelief** (dramatic irony, a rumor just debunked, an NPC's bluff, premature celebration); the player reads intentional storytelling | **presentation only**; the engine truth is **never** changed — the model is steered on *how to frame*, it still **authors** the prose (ADR 0003) |
-| **closed-set, un-reframable** (no plausible in-fiction reframe) | **`reinject-delta`** (backend re-ground) **+ log; no visible retraction** | the corrected closed-set `stateDelta` is re-injected so the false claim **dies at the source** and never propagates; the violation is logged with full context; the engine truth simply **stands** going forward | fixes the model's **input**, never the output; **no clumsy player-facing retraction** is emitted — the model is corrected, not the player *(my reading of "set in backend as stated above"; §10 O1)* |
+| **closed-set, un-reframable** (no plausible in-fiction reframe) | **backend-configurable** (owner-ruled O1) — default **`reinject-delta`** (quiet re-ground) **+ log; no visible retraction** | a backend setting `overseer.faithfulness.unreframable ∈ { reground, log-only, visible }` selects the fallback: **`reground`** *(default)* re-injects the corrected closed-set `stateDelta` so the false claim **dies at the source** and never propagates (logged, no visible retraction); **`log-only`** records the violation and takes no corrective action; **`visible`** emits an explicit player-facing correction | every option keeps the engine truth **unbent**; `reground` fixes the model's **input**, never the output, and emits **no** retraction — the model is corrected, not the player |
 | **leak / persona** | **`reframe`** (or **`escalate`** if structural) | a hidden-fact leak is reframed as suspicion/rumor (presentation only); a structural token leak (`npc:<id>`/aside) is surfaced to God-Mode health and the scrub tightened | never confirms the hidden fact; a structural leak **surfaces**, never silently rides |
 | **faithful** | **`hold`** | nothing — logged as an `observation` | — |
 
@@ -188,11 +189,14 @@ A junction beat that asserts nothing checkable is not claim-bearing → the judg
 
 ### 4.6 Folding into the overseer — modes, port, log (reuse, not rebuild)
 
-- **3-state mode, shared.** The faithfulness role rides the **same** `off`/`shadow`/`active` mode 0080
-  introduced. `off` — judge never runs. `shadow` — judge runs on claim-bearing turns and **logs**
-  violations (no correction). `active` — judge runs, **corrects** (adopt/reframe/re-ground), and logs
-  every attempt. *(An optional per-role override — pacing `active` while faithfulness `shadow` — is a
-  small future knob, §10 O2; the default is one mode governs both roles.)*
+- **Its own 3-state dial (owner-ruled O2).** The faithfulness role has its **own** `off`/`shadow`/`active`
+  dial, **independent** of the 0080 pacing dial — so an operator can run pacing `active` while faithfulness
+  stays `shadow` (or any mix). This matters: faithfulness-`active` is the riskier role (an LLM judging the
+  LLM + canonicalizing open-set slips), so it should roll out on its own clock. `off` — judge never runs.
+  `shadow` — judge runs on claim-bearing turns and **logs** violations (no correction). `active` — judge
+  runs, **corrects** (adopt/reframe/configurable-fallback), and logs every attempt. The two dials share the
+  same shape, the same `OverseerPort`, and the same `OVERSEER` log; they differ only in which role they
+  gate.
 - **Port, extended.** `OverseerPort` gains `assessFaithfulness(claim) → FaithfulnessVerdict` beside the
   0079 `assess`. `DeterministicOverseer` returns **`faithful` / `hold` always** (no model ⇒ no judging ⇒
   the floor stands; seeded lanes byte-identical). The 0079 `verdict_from_reply` contract guard extends to
@@ -257,16 +261,18 @@ Diagnostic log (G1b, FE — 0079 ring reused):
 - [ ] **Anti-sycophancy guard (load-bearing):** a unit test proves a flagged **closed-set** claim can
       **never** route to `adopt` — it falls through to `reframe` / backend re-ground; **no closed-set field
       is ever rewritten to match narration** (`lever == adopt ⇒ class == open-set`).
-- [ ] **Un-reframable → backend re-ground:** a closed-set slip with no plausible reframe re-injects the
-      corrected delta + logs with full context and emits **no visible player-facing retraction**.
+- [ ] **Un-reframable → configurable fallback:** a closed-set slip with no plausible reframe routes to the
+      `overseer.faithfulness.unreframable` setting — default `reground` (re-inject the corrected delta + log,
+      **no visible retraction**), or `log-only`, or `visible`; **all three keep the engine truth unbent**.
 - [ ] **Vault-free judge:** the judge holds **no `VaultStore`** handle; a "leak" is caught as an
       assertion outside `knownProjection`, not by Vault comparison; `npm run test:arch` stays green; the
       log is sentinel-clean on the player **and** admin canaries (0001).
 - [ ] **Junction coverage:** the gate fires at the casting / premiere / preview-decision junctions with
       the same detect-and-correct behavior (the folded-in 0082 scope).
-- [ ] **Folds into the overseer:** rides the shared 3-state mode (`shadow` = log-only, `active` =
-      correct+log); every attempt lands in the `OVERSEER` ring with `{dimension, class, claim, truth,
-      lever, ok}`; `reframe` **steers**, never authors (the model writes the prose — ADR 0003).
+- [ ] **Folds into the overseer:** rides its **own** 3-state dial, independent of the pacing dial (`shadow`
+      = log-only, `active` = correct+log); every attempt lands in the `OVERSEER` ring with `{dimension,
+      class, claim, truth, lever, ok}`; `reframe` **steers**, never authors (the model writes the prose —
+      ADR 0003).
 - [ ] **Fail-soft / determinism:** judge unavailable/`off` ⇒ the 0065 guard + reasoning scrub +
       `expressiveNonCollapse` behave exactly as today; seeded UAT/BDD/calibration lanes **byte-identical**
       via `DeterministicOverseer`; **no** re-baseline.
@@ -276,7 +282,12 @@ Diagnostic log (G1b, FE — 0079 ring reused):
 ## 7. Anti-sycophancy & the mandate boundary (explicit — read before approving)
 
 This role puts an **LLM judging the LLM**, and (in `active`) lets a caught slip change what is canonical.
-It stays inside the mandate **iff every one of these holds** (each a §6/§8 gate):
+**The owner explicitly confirmed the boundary (2026-06-24): "keep the wall" — `adopt` the open set, `reframe`
+the closed set, never bend a consequential outcome to match narration even when the player would not
+notice.** ("Invisible to the player" is not the safety test; *"does it move a consequential outcome"* is —
+`adopt` already covers every harmless/invisible slip, so the only thing closed-set bending would add is
+letting the model's mistake decide the game, which is exactly mandate #3's prohibition.) It stays inside the
+mandate **iff every one of these holds** (each a §6/§8 gate):
 
 1. **Adopt is open-set only.** `lever == adopt ⇒ class == open-set`. A closed-set field (outcome / board /
    eligibility / Vault) is **never** made true to match narration. This single guard **is** the
@@ -335,12 +346,15 @@ should have re-grounded* — recoverable, never an outcome-bend. The classifier 
 
 ## 10. Open decisions (owner rulings needed)
 
-| # | Decision | Recommendation |
+All but O3 were ruled by the owner on 2026-06-24 (recorded here):
+
+| # | Decision | Ruling |
 |---|---|---|
-| **O1** | Un-reframable closed-set slip behavior — my reading of *"set in backend as stated above"* is **backend re-ground (`reinject-delta`) + log, no visible player-facing retraction**. Confirm? (Alt: a minimal visible re-ground; or silent log-only.) | **backend re-ground + log, no visible retraction** — corrects the model, not the player; truth stands |
-| **O2** | Mode shape — one shared 3-state mode governs **both** overseer roles, or a per-role override (pacing `active` while faithfulness `shadow`)? | **shared mode** for the MVP; per-role override as a later knob if operators want to trust pacing before faithfulness |
-| **O3** | Adopt durability — does an `adopt` need a distinct `OVERSEER`/ledger marker (vs. a normal model-driven `recordInteraction`) so canonicalized-from-a-slip detail is auditable? | **yes, a marker** — cheap, and it keeps "what became canon via recovery" inspectable |
-| **O4** | Junction depth — ship all three junctions (casting / premiere / preview) in the first cut, or land the in-game loop first and layer junctions? | **all three** (you chose "one combined spec") — but implement loop-first, junctions as the second increment within this feature |
+| **B0** | **The mandate boundary** — does "correct cleverly with engine levers" permit bending a consequential outcome to match narration when the player would not notice? | ✅ **RESOLVED — "keep the wall."** No. `adopt` the open set; `reframe` the closed set; a consequential outcome is **never** bent (mandate #3). §7. |
+| **O1** | Un-reframable closed-set slip behavior. | ✅ **RESOLVED — backend-configurable** `overseer.faithfulness.unreframable ∈ { reground (default), log-only, visible }`; all three keep the truth unbent (§4.4). |
+| **O2** | Mode shape — shared dial vs. per-role. | ✅ **RESOLVED — its own dial.** Faithfulness gets an independent `off`/`shadow`/`active`, so the riskier role rolls out on its own clock (§4.6). |
+| **O3** | Adopt durability — does an `adopt` need a distinct `OVERSEER`/ledger marker (vs. a normal model-driven `recordInteraction`) so canonicalized-from-a-slip detail is auditable? | ➖ **OPEN (impl detail).** Recommendation: **yes, a marker** — cheap, and it keeps "what became canon via recovery" inspectable. |
+| **O4** | Junction depth — all three junctions at once vs. loop-first. | ✅ **RESOLVED — combined spec, all three** (casting / premiere / preview), implemented **loop-first** with the junctions as the second increment within this feature. |
 
 ## 11. Dependencies & traceability
 
