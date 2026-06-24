@@ -36712,6 +36712,30 @@ body.theme-frosted #theme-popup .admin-card {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
+/* Settings window only: the nested panel cards (Chat Area, Sidebar, Account,
+   etc.) reuse .admin-card, which here picks up the #765 .ow-window glass
+   treatment above — an opaque gray slab inside the already-frosted Settings
+   window (glass-on-glass / panels-on-panels). The Settings window is meant to
+   read as ONE coherent glass surface, so make its nested cards fully transparent
+   and strip their own border/shadow/blur — they stay as content GROUPINGS
+   (heading + spacing; .settings-section keeps its hairline top-border as a
+   divider), not opaque panes. Scoped to #settings-modal so the admin panel's
+   own .admin-card glass (#765) is untouched. The controls/labels inside keep
+   their ink + styling. */
+body.theme-frosted #settings-modal .admin-card,
+body.theme-frosted #settings-modal .vis-card,
+body.theme-frosted #settings-modal .vis-row {
+  background-color: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* .vis-row keeps its hover affordance — a faint wash, not a panel fill. */
+body.theme-frosted #settings-modal .vis-row:hover {
+  background-color: color-mix(in srgb, var(--fg) 7%, transparent) !important;
+}
 /* Subtle inner light highlight + softer shadow on the heavier surfaces */
 body.theme-frosted .modal-content,
 body.theme-frosted .doclib-modal-content,
