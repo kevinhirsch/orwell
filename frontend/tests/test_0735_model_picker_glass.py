@@ -9,8 +9,7 @@ so a refactor can't silently regress it):
     --ow-glass-* tokens / kube light fill the OrwellWindow + Notice kits use).
   * DARK INK (#16191f family) on the light glass for every text node — model name,
     provider/endpoint label, section labels, the selected/active row, the button
-    label, the "+" add-models control, the favorite/remove dots' resting state.
-    NO light-on-light anywhere.
+    label, the favorite/remove dots' resting state. NO light-on-light anywhere.
   * SOFT LUMINOUS hairlines (rgba(255,255,255,0.14) family), NOT a hard dark
     var(--border) stroke (Apple defines glass by lensing, not stroke).
   * NO accent HUE on TEXT (mandate). The favorite-status dot keeps its accent only as
@@ -101,14 +100,6 @@ def test_picker_text_nodes_are_dark_ink():
     )
 
 
-def test_add_models_button_is_dark_ink_not_light_on_light():
-    body = _rule("body.theme-frosted .model-picker-action-btn")
-    assert DARK_INK.search(body), (
-        "the '+' add-models button glyph must be dark ink on the light glass "
-        "(it previously inherited a light color-mix(--fg 66%) = light-on-light)"
-    )
-
-
 def test_fav_and_remove_dots_have_legible_resting_ink():
     fav = _rule("body.theme-frosted .model-picker-list .mp-fav-dot:not(.active)")
     rm = _rule("body.theme-frosted .model-picker-list .mp-remove-dot")
@@ -133,23 +124,10 @@ def test_picker_menu_border_is_soft_luminous_hairline():
     )
 
 
-def test_add_models_button_border_is_luminous_hairline():
-    body = _rule("body.theme-frosted .model-picker-action-btn")
-    m = re.search(r"border-color:\s*([^;]+)", body)
-    assert m and "rgba(255,255,255" in m.group(1).replace(" ", ""), (
-        "the '+' button border must be a soft luminous hairline, not the hard "
-        "dark var(--border) it carried in the flat theme"
-    )
-    assert "var(--border)" not in body, (
-        "the '+' button must not paint var(--border) under the glass theme"
-    )
-
-
 # ── 4. NO accent HUE on TEXT; the active fav dot is the only sanctioned exception ─
 def test_no_accent_hue_on_picker_text_under_glass():
     # None of the picker's TEXT-bearing dark-ink rules may paint var(--accent)/--red.
     for needle in (
-        "body.theme-frosted .model-picker-action-btn",
         "body.theme-frosted .model-picker-list .mp-fav-dot:not(.active)",
         "body.theme-frosted .model-picker-list .mp-remove-dot",
         "body.theme-frosted .model-picker-list .mp-provider-chevron",

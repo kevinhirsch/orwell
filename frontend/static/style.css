@@ -3242,52 +3242,6 @@ body.bg-pattern-perlin-flow {
       animation: picker-roll-down 0.15s ease-in forwards;
     }
     .model-picker-menu.hidden { display: none; }
-    .model-picker-action-row {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      margin-bottom: 4px;
-    }
-    .model-picker-menu.no-models .model-picker-action-row {
-      margin-bottom: 0;
-    }
-    .model-picker-action-btn {
-      appearance: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 30px;
-      height: 30px;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      background: color-mix(in srgb, var(--fg) 4%, transparent);
-      color: color-mix(in srgb, var(--fg) 66%, transparent);
-      cursor: pointer;
-      padding: 0;
-      overflow: hidden;
-      transform: translateX(0) scale(1);
-      transition: opacity 0.16s ease, transform 0.18s ease, border-color 0.15s, color 0.15s, background 0.15s;
-    }
-    .model-picker-action-btn:hover,
-    .model-picker-action-btn:focus-visible {
-      border-color: var(--red);
-      color: var(--fg);
-      background: color-mix(in srgb, var(--red) 10%, var(--panel));
-      outline: none;
-    }
-    .model-picker-action-btn.primary {
-      color: var(--red);
-      background: color-mix(in srgb, var(--red) 8%, transparent);
-    }
-    .model-picker-action-btn svg {
-      width: 14px;
-      height: 14px;
-      transition: transform 0.28s ease;
-    }
-    .model-picker-action-btn:hover svg,
-    .model-picker-action-btn:focus-visible svg {
-      transform: rotate(90deg);
-    }
     .model-picker-list {
       max-height: min(280px, 50dvh);
       overflow-y: auto;
@@ -3503,8 +3457,8 @@ body.bg-pattern-perlin-flow {
        grouped "CHROME surfaces" rules in THE ORWELL DESIGN SYSTEM block — these
        selectors are in those lists). Here we close the legibility gaps that are local
        to the picker's INNER controls: several set their OWN light `var(--fg)` mix and
-       so survived as light-on-light on the light glass (the "+" add-models button, the
-       favorite dot, the remove-from-recent dot, the provider-group chevron). Apple's
+       so survived as light-on-light on the light glass (the favorite dot, the
+       remove-from-recent dot, the provider-group chevron). Apple's
        rule on the Regular material is dark ink over a light glass — never light-on-light
        (LIQUID_GLASS_REFERENCE §"Regular"; ADAPTIVE_LEGIBILITY_REFERENCE §1 — small/large
        elements adapt their symbols to the backdrop; menus are a "big" element so the
@@ -3525,19 +3479,6 @@ body.bg-pattern-perlin-flow {
          already get, applied to the model picker so its inner rows/dots/buttons can't
          be light-on-light. */
       --fg: #16191f;
-    }
-    /* The "+" add-models button: a quiet glass control on the light material — dark ink
-       glyph + a SOFT LUMINOUS hairline (not the hard dark var(--border) it carried). */
-    body.theme-frosted .model-picker-action-btn {
-      border-color: rgba(255,255,255,0.14) !important;
-      background: rgba(255,255,255,0.16);
-      color: #16191f !important;
-    }
-    body.theme-frosted .model-picker-action-btn:hover,
-    body.theme-frosted .model-picker-action-btn:focus-visible {
-      border-color: rgba(255,255,255,0.28) !important;
-      background: rgba(255,255,255,0.30);
-      color: #16191f !important;
     }
     /* The favorite + remove dots are sanctioned NON-text STATUS accents (a ● / ×),
        not body text — but their RESTING (inactive) color was a light var(--fg) mix that

@@ -3,7 +3,6 @@
 
 import { providerLogo } from './providers.js';
 import uiModule from './ui.js';
-import settingsModule from './settings.js';
 import { sortModelObjects } from './modelSort.js';
 import { isNarrow } from './platform.js';
 
@@ -136,27 +135,6 @@ function _initModelPickerDropdown() {
         menu.classList.add('hidden');
       }
     }, 200);
-  }
-
-  function _openPickerShortcut(kind) {
-    _close();
-    try {
-      if (kind === 'cookbook') {
-        if (window.cookbookModule && typeof window.cookbookModule.open === 'function') {
-          window.cookbookModule.open();
-        } else {
-          const btn = document.getElementById('tool-cookbook-btn') || document.getElementById('rail-cookbook');
-          if (btn) btn.click();
-          else location.hash = '#cookbook';
-        }
-      } else if (kind === 'settings') {
-        if (settingsModule && typeof settingsModule.open === 'function') settingsModule.open();
-      } else if (window.adminModule && typeof window.adminModule.open === 'function') {
-        window.adminModule.open('services');
-      } else if (settingsModule && typeof settingsModule.open === 'function') {
-        settingsModule.open('services');
-      }
-    } catch (_) {}
   }
 
   // Local endpoint health — only probed for LOCAL endpoints, since
@@ -621,13 +599,6 @@ function _initModelPickerDropdown() {
   menu.addEventListener('keydown', (e) => {
     _handlePickerKeydown(e, listEl, '.model-switch-item', _close);
   });
-  const addModelsBtn = document.getElementById('model-picker-add-models-btn');
-  if (addModelsBtn) {
-    addModelsBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      _openPickerShortcut('models');
-    });
-  }
   document.addEventListener('click', (e) => {
     if (!menu.classList.contains('hidden') && !menu.contains(e.target) && e.target !== btn) {
       _close();
