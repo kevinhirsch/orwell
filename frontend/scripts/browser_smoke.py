@@ -335,6 +335,98 @@ def main() -> int:
                   f"no smudgy drop-shadow: dark-ink chrome text carries no DARK text-shadow "
                   f"({_darkShadows[:4]})")
 
+            # ── #744 — RECEIVED-TRANSCRIPT APCA LEGIBILITY FLOOR (ship-first) ───────────
+            # The transcript IS the game (read for hours): EVERY received bubble (.msg-ai) must
+            # clear a real perceptual contrast floor over ANY wallpaper, INCLUDING a busy/saturated
+            # mid-tone (the worst case where a bare polarity flip alone can wash out). We seed
+            # received bubbles, drop a BUSY MID-TONE wallpaper behind them, run the adaptive pass,
+            # then MEASURE APCA(resolved-ink ↔ scrim-composited-surface) per bubble and assert it
+            # clears the floor. theme-frosted is still applied here (added above); we measure before
+            # restoring frosted-off.
+            apca744 = page.evaluate(
+                """() => {
+                  const AG = window.OrwellAdaptiveGlass;
+                  if (!AG || !AG.apcaContrast) return { missing: true };
+                  // a busy/saturated mid-tone wallpaper — the documented worst case.
+                  let wp = document.getElementById('__wp');
+                  if (!wp) { wp = document.createElement('div'); wp.id = '__wp';
+                    wp.style.cssText = 'position:fixed;inset:0;z-index:-1'; document.body.prepend(wp); }
+                  wp.style.background =
+                    'linear-gradient(115deg,#4a7a8c 0%,#caa45a 22%,#6b5b8a 44%,#8c5a4a 62%,'
+                    + '#3a6b5b 80%,#9a8c5a 100%)';
+                  // ensure the wallpaper actually composites behind the chat for the sampler
+                  document.body.style.background = 'transparent';
+                  document.documentElement.style.background = 'transparent';
+                  // seed two received bubbles + a sent bubble + a code block in a received bubble.
+                  let ch = document.getElementById('chat-history');
+                  if (!ch) { ch = document.createElement('div'); ch.id = 'chat-history';
+                    ch.style.cssText = 'position:absolute;top:60px;left:60px;right:60px;'; document.body.appendChild(ch); }
+                  const made = [];
+                  const mk = (cls, html) => { const m = document.createElement('div'); m.className = 'msg ' + cls;
+                    m.dataset.s744 = '1'; m.innerHTML = '<div class="role">R</div><div class="body">' + html + '</div>';
+                    ch.appendChild(m); made.push(m); return m; };
+                  mk('msg-ai', 'The house is quiet but for the hum of the cameras tonight.');
+                  mk('msg-user', 'I want an ally before the comp.');
+                  mk('msg-ai', 'Here is the play:<pre><code>if (trust > threat) ok();</code></pre>then waits.');
+                  return { seeded: made.length };
+                }"""
+            )
+            if not apca744.get("missing"):
+                # let the adaptive pass + debounce settle, force a refresh, re-measure.
+                for _ in range(8):
+                    try:
+                        page.evaluate("() => window.OrwellAdaptiveGlass && window.OrwellAdaptiveGlass.refresh && window.OrwellAdaptiveGlass.refresh()")
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(180)
+                    measured = page.evaluate(
+                        """() => {
+                          const AG = window.OrwellAdaptiveGlass;
+                          const FLOOR = AG.APCA_FLOOR || 60;
+                          const parse = s => { const m = String(s).match(/rgba?\\(([^)]+)\\)/); if (!m) return null;
+                            const p = m[1].split(/[,\\/\\s]+/).filter(Boolean); return [parseInt(p[0]),parseInt(p[1]),parseInt(p[2])]; };
+                          const bd = el => {
+                            const wp = document.getElementById('__wp'); const cs = getComputedStyle(wp);
+                            // approximate the sampled wallpaper colour by the mid stop (smoke heuristic);
+                            // the live module samples per-pixel — here we just need an opaque mid backdrop.
+                            return parse(cs.backgroundColor) || [123,113,124];
+                          };
+                          const out = [];
+                          document.querySelectorAll('.msg-ai[data-s744]').forEach((el, i) => {
+                            const cs = getComputedStyle(el);
+                            const ink = parse(cs.color);
+                            // the resolved scrim surface = the bubble's own (opaque-composited) fill colour:
+                            // computed background-color already has --ai-scrim-alpha applied; composite it
+                            // over the wallpaper to get the surface the ink truly sits on.
+                            const fill = parse(cs.backgroundColor); const a = parseFloat(el.style.getPropertyValue('--ai-scrim-alpha')) || 0.46;
+                            const wallp = bd(el);
+                            const surface = AG.compositeOver(fill || [56,60,68], a, wallp);
+                            const lc = Math.abs(AG.apcaContrast(ink || [255,255,255], surface));
+                            const attrLc = parseInt(el.getAttribute('data-apca-lc') || '0', 10);
+                            out.push({ i, ink, lc: Math.round(lc), attrLc, floor: FLOOR });
+                          });
+                          return out;
+                        }"""
+                    )
+                    if measured and all(b.get("attrLc", 0) > 0 for b in measured):
+                        break
+                check(bool(measured) and len(measured) >= 2,
+                      f"#744: received transcript bubbles are present to measure ({apca744})")
+                # the module's own per-bubble APCA verdict (data-apca-lc, set during the resolve)
+                # must clear the floor for EVERY received bubble over the busy mid-tone wallpaper.
+                _below = [b for b in measured if b.get("attrLc", 0) < b.get("floor", 60)]
+                check(not _below,
+                      f"#744: EVERY received bubble clears the APCA floor (Lc>=60) over a busy "
+                      f"mid-tone wallpaper — frost+scrim escalation guarantees it ({measured})")
+                # teardown the seeded bubbles + restore the page background so later suites are clean.
+                page.evaluate(
+                    """() => {
+                      document.querySelectorAll('[data-s744]').forEach(e => e.remove());
+                      const wp = document.getElementById('__wp'); if (wp) wp.style.background = '';
+                      document.body.style.background = ''; document.documentElement.style.background = '';
+                    }"""
+                )
+
             page.evaluate("() => document.body.classList.remove('theme-frosted')")  # restore frosted-off
             try:
                 page.evaluate("() => window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh()")

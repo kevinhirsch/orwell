@@ -38508,12 +38508,27 @@ body.theme-frosted .toast {
 body.theme-frosted .msg-ai {
   /* hug the text like Apple's received bubble (the base sets a fixed 85% width). */
   width: fit-content !important;
+  /* #744 — THE TRANSCRIPT IS THE GAME (read for hours), so a received bubble must NEVER
+     drop below a real contrast floor over ANY wallpaper — and it must do that with FROST
+     ONLY (this bubble is deliberately NOT in the JS SVG-refraction set; refraction over a
+     busy mid-tone wallpaper is exactly what kills legibility). So we floor the frost: an
+     OPAQUE-ENOUGH translucent scrim under the bubble (Apple's own move — the legibility
+     reference `lg_hig_legibility_primary_label.png` shows a LIGHT frosted glass tile staying
+     legible over a busy yellow/blue diagonal precisely because the material is opaque enough
+     to be a backstop, not a flat plate). The scrim alpha is a CSS var so adaptiveGlass.js can
+     ESCALATE it per-bubble (raise it toward opaque) when the measured APCA(Lc) on the resolved
+     ink↔backdrop pair fails the floor for THIS bubble's backdrop — a LOCAL per-bubble escalation,
+     never a global body tint (that's #739, out of scope here). The 0.46 default is the worst-case
+     floor: dark frost + white ink clears APCA Lc 60 over a mid-tone wall, while a clear/dark wall
+     still reads as glass (the wallpaper COLOR still blooms through the saturate). */
+  --ai-scrim-alpha: 0.46;
   -webkit-backdrop-filter: blur(22px) saturate(180%) !important;
   backdrop-filter: blur(22px) saturate(180%) !important;
   /* neutral translucent frost — the high saturate lets the wallpaper COLOR bloom
-     through (Apple's bubbles pick up the wall), while a light dark floor keeps white
-     text legible across any backdrop (lightens over light, darkens over dark). */
-  background-color: rgba(56,60,68,0.28) !important;
+     through (Apple's bubbles pick up the wall), while the floored dark scrim keeps white
+     text legible across any backdrop (over a DARK wall the wall does the work; over a
+     BRIGHT or BUSY MID-TONE wall this opaque-enough scrim is the legibility backstop). */
+  background-color: rgba(56,60,68,var(--ai-scrim-alpha,0.46)) !important;
   background-image: none !important;
   border: none !important;
   box-shadow: none !important;

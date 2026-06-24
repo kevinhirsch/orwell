@@ -44,7 +44,31 @@
   var BUBBLE_ADAPTIVE = ".msg-ai";
   // the LIGHT frost a received bubble takes over a BRIGHT backdrop (Apple's light received
   // bubble) — a near-white translucent material that reads with the dark INK_DARK label.
-  var BUBBLE_LIGHT_FROST = "rgba(245,246,248,0.62)";
+  // The DARK frost (over a dark/mid wall) is the CSS default (rgba(56,60,68,a)); its alpha
+  // is the CSS var --ai-scrim-alpha so we can ESCALATE it per-bubble (see #744 below).
+  var BUBBLE_LIGHT_RGB = [245, 246, 248];   // near-white frost tint over a BRIGHT wall
+  var BUBBLE_DARK_RGB = [56, 60, 68];       // neutral dark frost tint (matches style.css default)
+
+  // ── #744 — APCA legibility floor for the RECEIVED transcript ──────────────────
+  // The chat transcript IS the game (read for hours) and is the most-cited legibility gap.
+  // Polarity-flip ALONE (a dark-ink/light-ink choice at a single Y threshold) is not enough:
+  // over a BUSY or SATURATED MID-TONE wallpaper neither pure-dark nor pure-white ink clears a
+  // real contrast floor through a thin frost. So after we pick ink polarity we measure the
+  // ACTUAL perceptual contrast with APCA (the algorithm WCAG 3 / the bronze guidance use), and
+  // if it fails we ESCALATE this ONE bubble's scrim toward opaque until it clears. This is a
+  // LOCAL per-bubble escalation (the CSS var --ai-scrim-alpha on that element) — NOT a global
+  // theme-tinted body state (#739, blocked on #730); we stay strictly local and Vault-free.
+  //
+  // FLOOR = Lc 60. APCA "bronze" puts Lc 60 as the floor for fluent body text (the next rung,
+  // Lc 75/90, is for fine/small text). The transcript is body prose read for a long sitting, so
+  // 60 is the defensible minimum — high enough to never be the cited gap, low enough that a clear
+  // wallpaper still reads as glass rather than a solid plate. (APCA Lc is unsigned-magnitude here;
+  // we take |Lc| because polarity is already chosen.)
+  var APCA_FLOOR = 60;
+  // Per-bubble scrim escalation band: start at the CSS default and climb toward near-opaque.
+  var SCRIM_BASE = 0.46;     // mirrors the style.css --ai-scrim-alpha default (worst-case floor)
+  var SCRIM_MAX = 0.92;      // near-opaque cap — still a frost, never a flat solid slab
+  var SCRIM_STEP = 0.06;     // climb granularity when APCA fails for this bubble's backdrop
 
   // Apple's adaptation is SIZE-DEPENDENT (WWDC25 219 + HIG Color):
   //   • SMALL bars/tiles (toolbars, tab bars — our composer bar, gadget tiles, the dock):
@@ -85,6 +109,50 @@
   // Proper relative luminance: sRGB → linear, then Rec.709 weights (matches Apple/WCAG).
   function _lin(c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
   function relLum(r, g, b) { return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b); }
+
+  // ── APCA (Accessible Perceptual Contrast Algorithm, the WCAG 3 / SAPC-APCA model) ──
+  // A faithful, dependency-free port of the APCA-W3 0.1.9 core (the public-domain reference by
+  // Andrew Somers / Myndex). We use it for the #744 transcript legibility floor: unlike WCAG 2's
+  // luminance-ratio (which over/under-states contrast on mid-tones and for light-on-dark), APCA
+  // models perceived lightness contrast and is polarity-aware — the right tool for "does this ink
+  // clear a floor over THIS backdrop." Returns Lc (lightness contrast); sign encodes polarity, so
+  // callers take Math.abs() when polarity is already chosen.
+  function _apcaY(r, g, b) {
+    // sRGB → screen luminance (APCA uses simple ^2.4 on 0..1, NOT the WCAG piecewise curve).
+    var Rs = Math.pow(r / 255, 2.4), Gs = Math.pow(g / 255, 2.4), Bs = Math.pow(b / 255, 2.4);
+    return 0.2126729 * Rs + 0.7151522 * Gs + 0.0721750 * Bs;
+  }
+  function apcaContrast(txt, bg) {
+    // txt/bg = [r,g,b]. Constants are the APCA-W3 0.1.9 published values.
+    var Ytxt = _apcaY(txt[0], txt[1], txt[2]);
+    var Ybg = _apcaY(bg[0], bg[1], bg[2]);
+    var BLK_THRS = 0.022, BLK_CLMP = 1.414;
+    var SCALE_BoW = 1.14, SCALE_WoB = 1.14;
+    var LO_CLIP = 0.1, DELTA_MIN = 0.0005;
+    // soft-clamp blacks
+    Ytxt = Ytxt > BLK_THRS ? Ytxt : Ytxt + Math.pow(BLK_THRS - Ytxt, BLK_CLMP);
+    Ybg = Ybg > BLK_THRS ? Ybg : Ybg + Math.pow(BLK_THRS - Ybg, BLK_CLMP);
+    if (Math.abs(Ybg - Ytxt) < DELTA_MIN) return 0;
+    var out;
+    if (Ybg > Ytxt) {            // normal polarity: dark text on lighter bg
+      out = (Math.pow(Ybg, 0.56) - Math.pow(Ytxt, 0.57)) * SCALE_BoW;
+      out = out < LO_CLIP ? 0 : out - 0.027;
+    } else {                     // reverse polarity: light text on darker bg
+      out = (Math.pow(Ybg, 0.65) - Math.pow(Ytxt, 0.62)) * SCALE_WoB;
+      out = out > -LO_CLIP ? 0 : out + 0.027;
+    }
+    return out * 100;            // Lc
+  }
+  // Composite an opaque scrim (tint at alpha) over an opaque backdrop → the effective bubble
+  // surface the ink actually sits on (standard src-over alpha blend; backdrop alpha = 1).
+  function compositeOver(tint, alpha, backdrop) {
+    var a = clamp(alpha, 0, 1);
+    return [
+      Math.round(tint[0] * a + backdrop[0] * (1 - a)),
+      Math.round(tint[1] * a + backdrop[1] * (1 - a)),
+      Math.round(tint[2] * a + backdrop[2] * (1 - a)),
+    ];
+  }
   function prefersContrast() {
     try { return !!(window.matchMedia && window.matchMedia("(prefers-contrast: more)").matches); } catch (_) { return false; }
   }
@@ -319,6 +387,48 @@
     return null;
   }
 
+  // Average RGB of the backdrop behind `rect` (viewport px). Returns [r,g,b] or null. Used by
+  // the #744 APCA floor — we need the backdrop COLOUR (not just its luminance) so we can composite
+  // the scrim over it and measure the real ink↔surface contrast.
+  function backdropAvgColor(rect) {
+    var vw = window.innerWidth || 1280, vh = window.innerHeight || 800;
+    var bd = buildBackdrop();
+    if (bd && bd.cv && !bd.tainted) {
+      var sx = bd.w / vw, sy = bd.h / vh, rs = 0, gs = 0, bs = 0, n = 0;
+      for (var gy = 0; gy < SAMPLE_GRID; gy++) {
+        for (var gx = 0; gx < SAMPLE_GRID; gx++) {
+          var vx = rect.left + (rect.width * (gx + 0.5)) / SAMPLE_GRID;
+          var vy = rect.top + (rect.height * (gy + 0.5)) / SAMPLE_GRID;
+          var ix = clamp(Math.round(vx * sx), 0, bd.w - 1), iy = clamp(Math.round(vy * sy), 0, bd.h - 1);
+          try { var d = bd.ctx.getImageData(ix, iy, 1, 1).data; rs += d[0]; gs += d[1]; bs += d[2]; n++; } catch (_) {}
+        }
+      }
+      if (n) return [Math.round(rs / n), Math.round(gs / n), Math.round(bs / n)];
+    }
+    if (bd && bd.base) return [bd.base[0], bd.base[1], bd.base[2]];
+    return null;
+  }
+
+  // #744 — for a received bubble over a sampled backdrop, pick the polarity (per the existing
+  // linear-Y flip), then ESCALATE this bubble's scrim alpha until the APCA(ink↔composited-surface)
+  // contrast clears APCA_FLOOR (or we hit SCRIM_MAX). Returns { ink, frostRgb, scrimAlpha, lc }.
+  // The surface the ink truly sits on = the frost tint composited over the wallpaper at scrimAlpha
+  // (the bubble blurs the wall but the scrim is opaque-over the blurred result), so that is what we
+  // measure. Polarity-flip alone is the floor; the scrim escalation is the guarantee.
+  function resolveBubbleScrim(L, bgRgb) {
+    var dark = L >= INK_THRESHOLD;          // bright backdrop → DARK ink + light frost
+    var ink = dark ? parseColor(INK_DARK).slice(0, 3) : [255, 255, 255];
+    var frost = dark ? BUBBLE_LIGHT_RGB : BUBBLE_DARK_RGB;
+    var a = SCRIM_BASE, lc = 0, surface;
+    for (;;) {
+      surface = compositeOver(frost, a, bgRgb);
+      lc = Math.abs(apcaContrast(ink, surface));
+      if (lc >= APCA_FLOOR || a >= SCRIM_MAX) break;
+      a = Math.min(SCRIM_MAX, a + SCRIM_STEP);
+    }
+    return { ink: ink, frostRgb: frost, scrimAlpha: a, lc: lc, dark: dark };
+  }
+
   // ── apply ───────────────────────────────────────────────────────────────────
   function isFrosted() { return !!(document.body && document.body.classList.contains("theme-frosted")); }
 
@@ -340,19 +450,35 @@
       // only bubbles under the glass theme), so the old per-surface dark veil can't crawl back.
       var isBubble = false; try { isBubble = el.matches(BUBBLE_ADAPTIVE); } catch (_) {}
       if (isBubble) {
-        if (L >= INK_THRESHOLD) {
-          el.style.setProperty("background-color", BUBBLE_LIGHT_FROST, "important");
+        // #744 — guarantee the transcript clears the APCA floor over ANY wallpaper. Sample the
+        // backdrop COLOUR (not just L), pick polarity, then escalate THIS bubble's scrim alpha
+        // until APCA(ink↔composited-surface) ≥ APCA_FLOOR. Frost-only, local, Vault-free.
+        var bg = backdropAvgColor({ left: r.left, top: r.top, width: r.width, height: r.height });
+        if (!bg) { // no readable backdrop colour → fall back to the CSS default (already floored at SCRIM_BASE)
+          el.style.removeProperty("background-color"); el.style.removeProperty("color");
+          el.style.removeProperty("text-shadow"); el.style.removeProperty("--ai-scrim-alpha");
+          el.removeAttribute("data-adaptive-veil"); el.removeAttribute("data-adaptive-ink");
+          el.removeAttribute("data-apca-lc");
+          return;
+        }
+        var s = resolveBubbleScrim(L, bg);
+        // Drive the scrim alpha through the CSS var so the floored fill (style.css) and the JS
+        // escalation share ONE source of truth; set the frost tint + ink to match the polarity.
+        el.style.setProperty("--ai-scrim-alpha", s.scrimAlpha.toFixed(3));
+        el.style.setProperty("background-color",
+          "rgba(" + s.frostRgb[0] + "," + s.frostRgb[1] + "," + s.frostRgb[2] + ",var(--ai-scrim-alpha))", "important");
+        if (s.dark) {
           el.style.setProperty("color", INK_DARK, "important");
           el.style.setProperty("text-shadow", "none", "important");
-          el.setAttribute("data-adaptive-veil", "bubble");
           el.setAttribute("data-adaptive-ink", "dark");
         } else {
-          el.style.removeProperty("background-color");
+          // white ink over the dark frost — keep the legibility halo from the CSS default.
           el.style.removeProperty("color");
-          el.style.removeProperty("text-shadow");
-          el.removeAttribute("data-adaptive-veil");
-          el.removeAttribute("data-adaptive-ink");
+          el.style.setProperty("text-shadow", "0 1px 2px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.40)", "important");
+          el.setAttribute("data-adaptive-ink", "light");
         }
+        el.setAttribute("data-adaptive-veil", "bubble");
+        el.setAttribute("data-apca-lc", Math.round(s.lc));   // probe hook for the smoke test
         return;
       }
       var small = false;
@@ -443,8 +569,10 @@
       el.style.removeProperty("background-color");
       el.style.removeProperty("color");
       el.style.removeProperty("text-shadow");
+      el.style.removeProperty("--ai-scrim-alpha");   // #744 — drop the per-bubble scrim escalation too
       el.removeAttribute("data-adaptive-veil");
       el.removeAttribute("data-adaptive-ink");
+      el.removeAttribute("data-apca-lc");
     }
   }
 
@@ -475,7 +603,13 @@
       ["(prefers-reduced-transparency: reduce)", "(prefers-contrast: more)"].forEach(function (q) {
         try { var mq = window.matchMedia(q); (mq.addEventListener ? mq.addEventListener : mq.addListener).call(mq, "change", schedule); } catch (_) {}
       });
-      window.OrwellAdaptiveGlass = { refresh: schedule, _pass: pass };
+      // #744 — expose the APCA helpers + the floor so the browser-smoke probe can MEASURE the
+      // resolved fg/bg pair clears the floor (and the source-pinned test can assert their presence).
+      window.OrwellAdaptiveGlass = {
+        refresh: schedule, _pass: pass,
+        apcaContrast: apcaContrast, compositeOver: compositeOver,
+        resolveBubbleScrim: resolveBubbleScrim, APCA_FLOOR: APCA_FLOOR,
+      };
     } catch (_) {
       try { window.OrwellAdaptiveGlass = { refresh: function () {} }; } catch (__) {}
     }
