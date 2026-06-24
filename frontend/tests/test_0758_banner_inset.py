@@ -109,3 +109,61 @@ def test_gadget_rail_and_top_chrome_consume_inset_in_css():
     assert "top: var(--on-banner-inset, 0px)" in css or "top: var(--on-banner-inset,0px)" in css, (
         "the mobile sidebar / icon-rail drawers must dock below the banner (top = the inset) (#758)."
     )
+
+
+# ── #758b: the single banner host re-measures on EVERY height change (stacked cards / wrap / font) ─
+def test_banner_inset_recomputes_on_host_resize():
+    """One host (#orwell-notice-banner) holds ALL stacked top banners; setBannerInset fires only on
+    show()/update()/hide(), so the inset went STALE when the host height changed for any OTHER reason
+    — a 2nd card stacking, copy wrapping at a new viewport width, or a late web-font swap — and the
+    banner overlapped content. A ResizeObserver on the host recomputes the inset on every rendered-
+    height change so it always equals the host's true total height (#758b)."""
+    js = _read("static", "js", "orwellNotice.js")
+    assert "ResizeObserver" in js, (
+        "orwellNotice.js must observe the banner host with a ResizeObserver so the inset tracks the "
+        "host's live height (stacked cards / wraps / font-swap), not just show()/update() (#758b)."
+    )
+    # the observer is attached to the banner host and recomputes/clears the inset
+    host_i = js.index("function ensureBannerHost")
+    ro_window = js[host_i:host_i + 1200]
+    assert "ResizeObserver" in ro_window and ".observe(" in ro_window, (
+        "the ResizeObserver must be wired in ensureBannerHost and observe the host element (#758b)."
+    )
+    assert "setBannerInset" in ro_window and "clearBannerInset" in ro_window, (
+        "on a host-height change the observer must re-run setBannerInset (and clear when empty) (#758b)."
+    )
+    # measure via the sub-pixel box and round UP so a fractional line can't leave a 1px sliver over content
+    assert "getBoundingClientRect" in js and "Math.ceil" in js, (
+        "setBannerInset must measure the host via getBoundingClientRect and round up (#758b)."
+    )
+
+
+# ── #764: ONE monochrome icon set in the kit; engine-status routes through it (no baked glyphs) ───
+def test_notice_kit_owns_one_monochrome_icon_set():
+    js = _read("static", "js", "orwellNotice.js")
+    # a single per-severity icon set drawn in currentColor (monochrome), resolved by the kit
+    assert "NOTICE_ICONS" in js and "resolveIcon" in js, (
+        "the OrwellNotice kit must own ONE icon set (NOTICE_ICONS) + a resolveIcon() so every notice "
+        "and banner shares one icon language (#764)."
+    )
+    # the glyphs are inline SVG stroked in currentColor (monochrome — tints with severity), not emoji
+    assert 'stroke="currentColor"' in js, "the kit icons must be monochrome SVG in currentColor (#764)."
+    # info / warn / error keys exist and a system-notice derives its icon from severity
+    for key in ("info:", "warn:", "error:"):
+        assert key in js, "the kit icon set must define the %s severity glyph (#764)." % key
+    assert "SEVERITY_ICON" in js, "a system-notice must derive its icon from severity (#764)."
+
+
+def test_engine_status_routes_icons_through_the_kit_not_baked_titles():
+    js = _read("static", "js", "orwellEngineStatus.js")
+    # the engine-status titles no longer bake in a glyph (the old "📡"/"⚠"/"🎬" mixed colour emoji
+    # with the kit's mono symbols) — the icon is the kit's severity-derived monochrome glyph.
+    for glyph in ("📡", "⚠", "🎬"):
+        assert glyph not in js, (
+            "orwellEngineStatus.js must NOT bake the %r glyph into a title — the icon comes from the "
+            "OrwellNotice kit's monochrome set via severity (#764)." % glyph
+        )
+    # it still drives severity (error for down, warn for degraded) which the kit maps to an icon
+    assert 'kind === "down" ? "error" : "warn"' in js, (
+        "engine-status must keep driving severity (error/warn) so the kit picks the matching icon (#764)."
+    )

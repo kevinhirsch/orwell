@@ -67,6 +67,45 @@
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   };
 
+  // #764 — ONE consistent icon language for every notice + banner. The kit owns a single set of
+  // Apple-style MONOCHROME glyphs (inline SVG, stroked in currentColor so they tint with the
+  // severity, never a mix of full-colour emoji + text symbols). Consumers pass a SEMANTIC key via
+  // the `icon` option (or none — a system-notice auto-derives its icon from `severity`), so the
+  // icon language can never drift per-caller (the old bug: orwellEngineStatus baked "📡"/"⚠" into
+  // the title string, so a colour emoji sat next to a mono symbol). An unknown `icon` string still
+  // renders verbatim as text (back-compat for any bespoke glyph), but the named keys are the rule.
+  // 20x20 viewBox, currentColor, aria-hidden (the title carries the meaning for SR/colour-blind).
+  var _svg = function (paths) {
+    return '<svg class="on-ic-svg" viewBox="0 0 20 20" width="1em" height="1em" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" ' +
+      'aria-hidden="true" focusable="false">' + paths + '</svg>';
+  };
+  var NOTICE_ICONS = {
+    // a filled-circle "i" — neutral information
+    info: _svg('<circle cx="10" cy="10" r="7.5"/><path d="M10 9v4.2"/><circle cx="10" cy="6.4" r=".4" fill="currentColor" stroke="none"/>'),
+    // a triangle "!" — a warning / degraded state (amber tint via on-sev-warn)
+    warn: _svg('<path d="M10 3.2 18 16.5H2L10 3.2Z"/><path d="M10 8.2v3.4"/><circle cx="10" cy="14.1" r=".5" fill="currentColor" stroke="none"/>'),
+    // a circle "!" — an error / hard outage (red tint via on-sev-error)
+    error: _svg('<circle cx="10" cy="10" r="7.5"/><path d="M10 6v4.6"/><circle cx="10" cy="13.6" r=".5" fill="currentColor" stroke="none"/>'),
+  };
+  // system-notice severity → icon key (a degraded/reconnecting banner reads as a warning, a hard
+  // outage as an error). One mapping, so the engine-status states share the notice icon family.
+  var SEVERITY_ICON = { info: "info", warn: "warn", error: "error" };
+
+  // Resolve the icon HTML for a notice: an explicit named key wins; else a system-notice derives
+  // it from severity; else nothing. Returns { html } for an SVG glyph, { text } for a raw glyph,
+  // or null. (The raw-text branch keeps any bespoke caller glyph working unchanged.)
+  function resolveIcon(opts) {
+    var key = opts.icon;
+    if (key && NOTICE_ICONS[key]) return { html: NOTICE_ICONS[key] };
+    if (key) return { text: key };                       // a bespoke glyph string — render verbatim
+    if (opts.kind === "system-notice") {                 // auto-derive from severity (the banner path)
+      var sk = SEVERITY_ICON[opts.severity || "info"];
+      if (sk && NOTICE_ICONS[sk]) return { html: NOTICE_ICONS[sk] };
+    }
+    return null;
+  }
+
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -103,7 +142,12 @@
       "  box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45)); }" +
       // The header row: icon + title + the dismiss affordance.
       ".on-card .on-head { display: flex; align-items: baseline; gap: .5rem; }" +
-      ".on-card .on-icon { flex: 0 0 auto; opacity: .9; }" +
+      // #764: the icon is a MONOCHROME glyph (inline SVG in currentColor, or a bespoke text glyph).
+      // Center it on the title's cap-height (the head is baseline-aligned) and size it to ~1.15em so
+      // it reads as a peer of the title across the info/warn/error severities (which only retint it).
+      ".on-card .on-icon { flex: 0 0 auto; opacity: .9; align-self: center; display: inline-flex;" +
+      "  line-height: 0; font-size: 1.15em; }" +
+      ".on-card .on-ic-svg { width: 1em; height: 1em; display: block; }" +
       ".on-card .on-title { flex: 1 1 auto; min-width: 0; font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; }" +
       ".on-card .on-body { margin-top: .35rem; }" +
       ".on-card .on-body:empty { display: none; }" +
@@ -264,6 +308,16 @@
 
   // The top system-banner host (a fixed full-width bar at the top of the viewport). Created
   // lazily on body. A SEPARATE anchor from the above-composer zone — same base chrome.
+  //
+  // #758b — the reserved inset must always equal the host's LIVE height, which is the union of
+  // EVERY top-banner card currently stacked in it (engine-status + a reconnecting notice + any
+  // other top-banner notice all mount HERE — there is ONE fixed host, never two systems). The
+  // height changes for reasons no show()/update()/hide() call catches: copy wraps differently when
+  // the viewport WIDTH changes, the web-font swaps in late (font-display:swap) and re-wraps, or a
+  // second card mounts via a path that doesn't re-measure. Any of those left the inset stale and
+  // the banner overlapped content. A ResizeObserver on the host re-runs setBannerInset on EVERY
+  // rendered-height change, so the inset tracks the true total of all banners at all times. (The
+  // explicit setBannerInset calls in show()/update() stay as the immediate, RO-independent path.)
   function ensureBannerHost() {
     var host = document.getElementById(BANNER_ID);
     if (host) return host;
@@ -271,6 +325,16 @@
     host = document.createElement("div");
     host.id = BANNER_ID;
     document.body.appendChild(host);
+    if (typeof ResizeObserver !== "undefined") {
+      try {
+        new ResizeObserver(function () {
+          // Re-measure on any height change; when the host has emptied (last banner gone) release
+          // the inset entirely so we never leave phantom padding behind.
+          if (host.children.length) setBannerInset(host);
+          else clearBannerInset();
+        }).observe(host);
+      } catch (_) {}
+    }
     return host;
   }
 
@@ -278,9 +342,12 @@
   // the top of the chat (worst exactly when connectivity is degraded). Reserve its height as body
   // padding-top while shown, release it when gone. A CSS var carries the value (a reduced-motion-
   // safe transition can hook it later). Mirrors the old orwellEngineStatus --oes-inset behaviour.
+  // #758b: measure via getBoundingClientRect (sub-pixel, the SAME box the FE consumers read) and
+  // round UP, so a fractional line-height can never leave a 1px sliver of banner over the content.
   function setBannerInset(host) {
     try {
-      var h = (host && host.offsetHeight) || 0;
+      var rect = host && host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+      var h = rect ? Math.ceil(rect.height) : ((host && host.offsetHeight) || 0);
       document.body.style.setProperty("--on-banner-inset", h + "px");
       document.body.style.paddingTop = h + "px";
       _emitBannerInset(h);
@@ -361,6 +428,24 @@
     return "note";
   };
 
+  // #764: render (or refresh, or remove) the leading icon from the kit's ONE monochrome set —
+  // an explicit semantic key, else severity-derived for a system-notice. Idempotent: it reuses
+  // the existing .on-icon node, creates it as the FIRST child of .on-head when newly needed, and
+  // removes it when the resolution yields nothing. No-op if the head isn't built yet.
+  OrwellNotice.prototype._renderIcon = function () {
+    var head = this.head;
+    if (!head) return;
+    var spec = resolveIcon(this.o);
+    var ic = head.querySelector(".on-icon");
+    if (!spec) { if (ic) ic.remove(); return; }
+    if (!ic) {
+      ic = document.createElement("span");
+      ic.className = "on-icon"; ic.setAttribute("aria-hidden", "true");
+      head.insertBefore(ic, head.firstChild);   // lead the title row
+    }
+    if (spec.html) ic.innerHTML = spec.html; else { ic.textContent = spec.text; }
+  };
+
   OrwellNotice.prototype._build = function () {
     ensureCss();
     var kind = this.o.kind;
@@ -378,12 +463,11 @@
 
     var head = document.createElement("div");
     head.className = "on-head";
-    if (this.o.icon) {
-      var ic = document.createElement("span");
-      ic.className = "on-icon"; ic.setAttribute("aria-hidden", "true");
-      ic.textContent = this.o.icon;
-      head.appendChild(ic);
-    }
+    this.head = head;
+    // #764: the icon comes from the kit's ONE monochrome set (semantic key or severity-derived),
+    // never a baked-in title glyph — so every notice + banner shares one icon language. Rendered
+    // FIRST so it leads the title row (the helper prepends into .on-head).
+    this._renderIcon();
     // A titled notice gets a heading; a title-less one (a hint) just keeps an empty head row
     // (its content lives in the body). update() can fill the title later (the banner pattern).
     var title = document.createElement("span");
@@ -480,10 +564,12 @@
   OrwellNotice.prototype.update = function (patch) {
     patch = patch || {};
     if (!this.el) this._build();
+    var iconDirty = false;
     if (patch.severity != null && this.o.kind === "system-notice") {
       this.el.classList.remove("on-sev-info", "on-sev-warn", "on-sev-error");
       this.o.severity = patch.severity;
       this.el.classList.add("on-sev-" + patch.severity);
+      iconDirty = true;   // #764: a system-notice's icon is severity-derived — refresh it too
     }
     if (patch.title != null) {
       this.o.title = patch.title;
@@ -492,10 +578,11 @@
       this.el.setAttribute("aria-label", patch.title);
       if (this.dismissBtn) this.dismissBtn.setAttribute("aria-label", "Dismiss — " + patch.title);
     }
-    if (patch.icon != null) {
-      var ic = this.el.querySelector(".on-icon");
-      if (ic) ic.textContent = patch.icon;
-    }
+    if (patch.icon != null) { this.o.icon = patch.icon; iconDirty = true; }
+    // #764: re-render the icon from the kit's ONE monochrome set (explicit key, else severity-
+    // derived) so a state transition (degraded → down) keeps a consistent icon language — never a
+    // baked-in title glyph. Creates the .on-icon node if the notice had none before.
+    if (iconDirty) this._renderIcon();
     if (patch.body != null) this.setBody(patch.body);
     if (this._isBanner() && this.el.isConnected) {
       var host = document.getElementById(BANNER_ID);

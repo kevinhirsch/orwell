@@ -68,23 +68,28 @@
     if (_notice) _notice.hide();
   }
 
+  // #764: titles carry NO baked-in glyph anymore — the icon is the OrwellNotice kit's severity-
+  // derived monochrome glyph (.on-icon), so engine-status shares ONE icon language with every other
+  // notice/banner (the old satellite/warning/clapperboard emoji baked into the title string mixed
+  // colour emoji with the kit's mono symbols). show()'s severity (error=down, warn=degraded) drives it.
+
   // G8: while createCharacter is in flight (health reports busy:"creating"), a slow or even
   // timed-out engine probe is casting being finalized — NOT an outage. Hold in-fiction (amber),
   // never the red "engine unavailable" banner.
   function showHolding() {
-    show("degraded", "🎬 Production is building the house…", "Casting is being finalized — the live feeds return in a moment.");
+    show("degraded", "Production is building the house…", "Casting is being finalized — the live feeds return in a moment.");
   }
 
   // Issue 1: a brief, transient outage is being retried — show a SOFT amber "reconnecting…"
   // line (it recovers on its own) instead of the hard red "engine unavailable".
   function showReconnecting() {
-    show("degraded", "📡 Reconnecting to Big Brother…", "The live feeds blinked — restoring the connection.");
+    show("degraded", "Reconnecting to Big Brother…", "The live feeds blinked — restoring the connection.");
   }
 
   async function refresh() {
     try {
       const r = await fetch("/api/orwell/health", { credentials: "same-origin" });
-      if (!r.ok) { show("down", "⚠ Big Brother engine unavailable.", "The app couldn't reach the game service. The show can't load until it's back."); return; }
+      if (!r.ok) { show("down", "Big Brother engine unavailable.", "The app couldn't reach the game service. The show can't load until it's back."); return; }
       const d = await r.json();
       const busy = !!(d && d.busy === "creating"); // G8: createCharacter in flight
       const reconnecting = !!(d && d.reconnecting); // Issue 1: transient outage being retried
@@ -92,19 +97,19 @@
         if (busy) { showHolding(); return; } // a probe timeout DURING creation is not an outage
         if (reconnecting) { showReconnecting(); return; } // a momentary blip — recovering, not down
         const reason = (d && d.error ? "Reason: " + d.error + " " : "") + (d && d.engineUrl ? "(" + d.engineUrl + ") " : "");
-        show("down", "⚠ Big Brother engine unavailable.", reason + "The show can't load until it's back.");
+        show("down", "Big Brother engine unavailable.", reason + "The show can't load until it's back.");
       } else if (d.lastError && d.lastError.error) {
         if (busy) { showHolding(); return; } // mid-creation hiccups hold in-fiction too
         // Engine reachable, but a recent call failed — a technical problem worth reporting honestly.
         const le = d.lastError;
-        show("degraded", "⚠ Big Brother engine reported a problem.", (le.tool ? le.tool + ": " : "") + le.error);
+        show("degraded", "Big Brother engine reported a problem.", (le.tool ? le.tool + ": " : "") + le.error);
       } else {
         hide();
       }
     } catch (_) {
       // The FE route itself failed — surface the most likely truth rather than going silent.
       if (window.OrwellReport) window.OrwellReport.fail("engine-status", "health-fetch", _); // G11: fail open, never silent
-      show("down", "⚠ Big Brother engine unavailable.", "The app couldn't reach the game service.");
+      show("down", "Big Brother engine unavailable.", "The app couldn't reach the game service.");
     }
   }
 

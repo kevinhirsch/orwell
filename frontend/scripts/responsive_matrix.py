@@ -401,8 +401,14 @@ def _intersects(a, b):
 # window / sidebar / rail / composer may sit UNDER the banner, and the lowest window stays in the
 # viewport (compressed, not shifted off the bottom). The banner is position:fixed; the body
 # padding-top only re-flows in-flow content — the fixed layer must consume --on-banner-inset.
+#
+# #758b — when MULTIPLE top banners stack (engine-status + a reconnecting notice + …, all in the
+# ONE #orwell-notice-banner host), the reserved inset must equal the host's TOTAL live height, so
+# nothing is covered by any banner. This sweep forces TWO banners (incl. a long multi-line one that
+# wraps) and asserts BOTH that --on-banner-inset == the host height AND that no chrome sits under
+# the combined stack.
 def audit_banner(page, vp_name, width, height):
-    # Force a deterministic top banner via the notice kit's own API, then open a top-slotted kit
+    # Force TWO deterministic top banners via the notice kit's own API, then open a top-slotted kit
     # window (+ a TALL one to prove compression) and show the rail. Fail-soft: if the kit/seam
     # isn't present (a degraded chrome-only DOM) the sweep no-ops rather than flaking.
     # The tall-window COMPRESSION probe runs on the wide tier only: on the narrow tier kit windows
@@ -419,6 +425,14 @@ def audit_banner(page, vp_name, width, height):
                                    title: 'System: connection lost', placement: 'top-banner', persistDismiss: false });
               if (n.setBody) n.setBody('The house is offline — reconnecting…');
               n.show();
+              // #758b: a SECOND, long multi-line banner (engine-status style) so the host stacks two
+              // cards and its height wraps — exercising the union-inset / re-measure path.
+              const n2 = K.create({ id: 'matrix-banner-2', kind: 'system-notice', severity: 'warn',
+                                    title: 'Big Brother engine unavailable.', placement: 'top-banner', persistDismiss: false });
+              if (n2.setBody) n2.setBody('The app could not reach the game service at http://127.0.0.1:8765 — '
+                + 'connection refused. The show cannot load until it is back. A long reason that wraps to '
+                + 'several lines on a narrow viewport, exercising the height-measurement race.');
+              n2.show();
             } catch (_) { return false; }
             try {
               if (window.OrwellWindowKit) {
@@ -441,6 +455,8 @@ def audit_banner(page, vp_name, width, height):
         """() => {
             const host = document.getElementById('orwell-notice-banner');
             const br = host ? host.getBoundingClientRect() : null;
+            const insetVar = parseFloat(getComputedStyle(document.body).getPropertyValue('--on-banner-inset')) || 0;
+            const cardCount = host ? host.children.length : 0;
             const sels = ['.ow-window', '#sidebar', '#gadget-rail', '.chat-input-bar', '#chat-form'];
             const rows = []; let lowestWin = -1;
             for (const sel of sels) {
@@ -453,14 +469,22 @@ def audit_banner(page, vp_name, width, height):
                 if (sel === '.ow-window' && r.bottom > lowestWin) lowestWin = r.bottom;
               });
             }
-            return { bannerBottom: br ? br.bottom : 0, rows, lowestWin };
+            return { bannerBottom: br ? br.bottom : 0, bannerHeight: br ? br.height : 0,
+                     insetVar: insetVar, cardCount: cardCount, rows, lowestWin };
         }"""
     )
     bb = m["bannerBottom"]
     if bb <= 1:
         report("pass", f"{vp_name} banner-inset (banner did not render)")
-        page.evaluate("(document.getElementById('matrix-banner')||{}).remove&&document.getElementById('matrix-banner').remove()")
+        page.evaluate("['matrix-banner','matrix-banner-2'].forEach(id=>{const e=document.getElementById(id);if(e)e.remove();})")
         return
+    # #758b: the reserved inset must equal the host's TOTAL live height (the union of ALL stacked
+    # top banners) — a stale/short inset is exactly how the engine-status banner covered content.
+    if abs(m["insetVar"] - m["bannerHeight"]) > 2:
+        report("fail", f"{vp_name} banner-inset: --on-banner-inset {m['insetVar']:.0f} != banner host height "
+                       f"{m['bannerHeight']:.0f} ({m['cardCount']} stacked banners — the union must be reserved)")
+    else:
+        report("pass", f"{vp_name} banner-inset union ({m['cardCount']} banners, inset {m['insetVar']:.0f}px == host)")
     under = [r for r in m["rows"] if r["top"] < bb - 2]   # 2px grace
     for r in under:
         report("fail", f"{vp_name} banner-inset: {r['sel']} top {r['top']:.0f} is under the banner bottom {bb:.0f}")
@@ -473,7 +497,7 @@ def audit_banner(page, vp_name, width, height):
     if not under and not off_bottom:
         report("pass", f"{vp_name} banner-inset ({len(m['rows'])} surfaces all below the banner"
                        f"{', in-viewport' if wide else ''})")
-    # tear the forced banner + probe windows back down so the rest of the sweep measures clean
+    # tear the forced banners + probe windows back down so the rest of the sweep measures clean
     page.evaluate(
         """() => {
             ['matrix-banner-win','matrix-banner-tall'].forEach(id => {
