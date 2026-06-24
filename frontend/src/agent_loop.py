@@ -4186,6 +4186,15 @@ async def stream_agent_loop(
                             if _force_ok and await _commit_advance_silently(f"forced stall L{_level}"):
                                 logger.info(f"[orwell] FORCED advanceGame (stall L{_level}, phase={_phase}) "
                                             f"round {round_num} user={owner}")
+                                try:  # 0079: a forced advance is a notable overseer correction
+                                    from src import log_rings as _lr
+                                    _lr.record_overseer(
+                                        "anomaly", "stall-force",
+                                        f"forced advanceGame after the model ignored every nudge "
+                                        f"(stall L{_level}, phase={_phase})",
+                                        lever="force-advance", ok=True, user=owner)
+                                except Exception:
+                                    pass
                                 messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
                                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                 continue
@@ -4199,6 +4208,14 @@ async def stream_agent_loop(
                         else:
                             _nudge, _why = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)], f"stall L{_level}"
                         logger.info(f"[orwell] advance nudge ({_why}, phase={_phase}) round {round_num} user={owner}")
+                        try:  # 0079: surface the pacing nudge on the overseer diagnostic log
+                            from src import log_rings as _lr
+                            _lr.record_overseer(
+                                "action", "stall-nudge",
+                                f"nudged the model to advance ({_why}, phase={_phase})",
+                                lever="nudge", ok=True, user=owner)
+                        except Exception:
+                            pass
                         messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
