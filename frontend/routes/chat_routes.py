@@ -213,7 +213,12 @@ def _recover_empty_session_model(sess, session_id: str, owner: str | None = None
             visible = cached
         if not visible:
             return False
-        model = visible[0]
+        # Pick the first CHAT model, not raw visible[0]: an endpoint that serves both
+        # chat and image models (e.g. OpenRouter with a "*-flash-image" portrait model
+        # in its list) must never recover a chat session onto the image model — that's
+        # the "empty/weird responses going to gemini" bug.
+        from src.endpoint_resolver import _first_chat_model
+        model = _first_chat_model(visible)
         if not isinstance(model, str) or not model.strip():
             return False
         model = model.strip()

@@ -28,9 +28,21 @@ _NON_CHAT_MODEL = (
 
 
 def _first_chat_model(models) -> Optional[str]:
-    """First model that isn't an embedding/tts/etc.; falls back to models[0]."""
-    for m in (models or []):
-        if not any(p in str(m).lower() for p in _NON_CHAT_MODEL):
+    """First chat-capable model — never an embedding/tts/etc. AND never a text→image
+    model (a chat default of e.g. "google/gemini-3.1-flash-image" can't complete chat,
+    it returns an empty/garbage reply). Prefers a clean chat model; if every entry is
+    excluded, returns the first non-image one over an image one; only an all-image list
+    falls through to models[0]."""
+    from src.llm_core import is_image_model
+    models = list(models or [])
+    for m in models:
+        if any(p in str(m).lower() for p in _NON_CHAT_MODEL):
+            continue
+        if is_image_model(m):
+            continue
+        return m
+    for m in models:
+        if not is_image_model(m):
             return m
     return (models[0] if models else None)
 

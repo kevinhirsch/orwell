@@ -252,29 +252,16 @@ def _consume_gen_detail() -> Optional[str]:
     return d
 
 
-# Recognized text→image model families — the Python mirror of settings.js `_isImageModel`.
-# A non-image (chat) model resolves fine but can't generate: POSTing it to /images/generations
-# 400s instantly. This keeps such a model from being treated as available or attempted, so the
-# pipeline never 400-loops on a mis-set model and `image_generation_available` stays truthful
-# (G20's reconciler and the Health "portraits N/M" counter both gate on it).
-_IMAGE_MODEL_FAMILIES = (
-    "gpt-image", "dall-e", "dalle",
-    "flux", "stable-diffusion", "sdxl", "sd3", "sd-", "playground-v",
-    "imagen", "ideogram", "recraft", "kolors", "kandinsky", "pixart",
-    "firefly", "titan-image", "aura-flow", "hidream", "seedream",
-    "qwen-image", "wan2", "janus", "omnigen", "cogview", "chroma",
-    "lumina", "nano-banana", "photon", "phoenix", "luma-photon",
+# Text→image model classification now lives in src.llm_core (the single source of truth
+# shared with the chat-model selectors, so an image model can never resolve AS a chat model).
+# Re-exported here under the historical names this module's callers/tests use. A non-image
+# (chat) model resolves fine but can't generate: POSTing it to /images/generations 400s
+# instantly, so `image_generation_available` and G20's reconciler gate on `_is_image_model`.
+from src.llm_core import (  # noqa: E402
+    is_image_model as _is_image_model,
+    _IMAGE_MODEL_FAMILIES,
+    _VISION_MARKERS,
 )
-_VISION_MARKERS = ("vision", "-vl", "understand", "caption", "ocr", "embed", "rerank")
-
-
-def _is_image_model(model_id: Optional[str]) -> bool:
-    lower = str(model_id or "").lower()
-    if any(kw in lower for kw in _IMAGE_MODEL_FAMILIES):
-        return True
-    if "image" in lower or "text-to-image" in lower or "t2i" in lower:
-        return not any(m in lower for m in _VISION_MARKERS)
-    return False
 
 
 def _provider_error_reason(resp) -> Optional[str]:
