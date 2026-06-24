@@ -260,12 +260,26 @@ function ensureCss() {
   document.head.appendChild(st);
 }
 
+// #758: a top system-banner (orwellNotice.js, position:fixed) reserves its height on <body> as
+// --on-banner-inset. Kit windows are position:fixed, so the body padding-top can't move them — the
+// kit consumes the inset directly: the clamp top floor starts BELOW the banner and the window's
+// max-height shrinks by it, so a top-slotted window sits under the banner AND the stack COMPRESSES
+// into the remaining viewport (it never runs off the bottom). Read live (default 0); the banner
+// broadcasts orwell:banner-inset, which re-runs the global re-clamp below.
+function bannerInset() {
+  try {
+    const v = parseFloat(getComputedStyle(document.body).getPropertyValue('--on-banner-inset'));
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  } catch (_) { return 0; }
+}
+
 // Explicit viewport clamp (audit note on norm c: never rely on cursor physics).
 function clampPos(left, top, w, h) {
   const margin = 4;
+  const topFloor = margin + bannerInset();  // #758: never clamp a window UP under a top banner
   return {
     left: Math.max(margin, Math.min(window.innerWidth - Math.max(w, 60) - margin, left)),
-    top: Math.max(margin, Math.min(window.innerHeight - Math.min(h, 200) - margin, top)),
+    top: Math.max(topFloor, Math.min(window.innerHeight - Math.min(h, 200) - margin, top)),
   };
 }
 
@@ -617,8 +631,9 @@ export class OrwellWindow {
     if (this.el.style.display === 'none') return;
     // 3. Shrink-to-fit FIRST so the post-shrink size drives the position clamp.
     const r0 = this.el.getBoundingClientRect();
+    const inset = bannerInset();  // #758: subtract a top banner so a tall window COMPRESSES to fit
     const maxW = window.innerWidth - 8;
-    const maxH = window.innerHeight - 8;
+    const maxH = window.innerHeight - inset - 8;
     if (r0.width > maxW) {
       this.el.style.width = Math.max(this.o.minWidth, maxW) + 'px';
       this.el.style.maxWidth = 'none';
@@ -634,11 +649,12 @@ export class OrwellWindow {
     //    we want the WHOLE window in view whenever it now fits, so pull left/top back so
     //    the right/bottom edges land inside too (never past the 4px margin on either side).
     const m = 4;
+    const topFloor = m + inset;  // #758: the top floor clears the banner
     const r = this.el.getBoundingClientRect();
     let left = Math.max(m, Math.min(window.innerWidth - r.width - m, r.left));
-    let top = Math.max(m, Math.min(window.innerHeight - r.height - m, r.top));
-    if (left < m) left = m;   // wider than the viewport (already min-clamped above) — pin left
-    if (top < m) top = m;     // taller than the viewport — pin top
+    let top = Math.max(topFloor, Math.min(window.innerHeight - r.height - m, r.top));
+    if (left < m) left = m;            // wider than the viewport (already min-clamped above) — pin left
+    if (top < topFloor) top = topFloor; // taller than the viewport — pin just below the banner
     if (Math.abs(left - r.left) > 0.5 || Math.abs(top - r.top) > 0.5) {
       this.el.style.left = left + 'px'; this.el.style.top = top + 'px';
       this.el.style.right = 'auto'; this.el.style.bottom = 'auto'; this.el.style.transform = 'none';
@@ -1042,6 +1058,11 @@ function onViewportResize() {
   _reclampRaf = (window.requestAnimationFrame || ((fn) => setTimeout(fn, 120)))(reclampOpenWindows);
 }
 window.addEventListener('resize', onViewportResize);
+// #758: a top system-banner show/hide/copy-change shifts the available top band — re-clamp every
+// open window through the SAME rAF-debounced pass (so a banner appearing pushes a top-slotted
+// window below it and compresses the stack; disappearing lets it climb back). The banner
+// (orwellNotice.js) broadcasts orwell:banner-inset on set/clear.
+window.addEventListener('orwell:banner-inset', onViewportResize);
 
 // The .ow-* family is page-global chrome (the .ow-dismiss affordance is used by
 // non-window surfaces that may render before any window exists) — inject at load.

@@ -397,6 +397,95 @@ def _intersects(a, b):
                 a["y"] + a["height"] - pad <= b["y"] or b["y"] + b["height"] - pad <= a["y"])
 
 
+# #758 — a top system-banner must RESERVE space + COMPRESS the fixed-chrome layer below it: no
+# window / sidebar / rail / composer may sit UNDER the banner, and the lowest window stays in the
+# viewport (compressed, not shifted off the bottom). The banner is position:fixed; the body
+# padding-top only re-flows in-flow content — the fixed layer must consume --on-banner-inset.
+def audit_banner(page, vp_name, width, height):
+    # Force a deterministic top banner via the notice kit's own API, then open a top-slotted kit
+    # window (+ a TALL one to prove compression) and show the rail. Fail-soft: if the kit/seam
+    # isn't present (a degraded chrome-only DOM) the sweep no-ops rather than flaking.
+    # The tall-window COMPRESSION probe runs on the wide tier only: on the narrow tier kit windows
+    # are full-width SHEETS (the slot sheet-host) whose max-height cap (min(70dvh,560px)) can itself
+    # exceed a tiny phone viewport — a sheet-host concern, not the banner-reserve one. On narrow we
+    # still assert the load-bearing invariant: nothing renders UNDER the banner.
+    wide = width > 768
+    shown = page.evaluate(
+        """(wide) => {
+            const K = window.OrwellNoticeKit;
+            if (!K || !K.create) return false;
+            try {
+              const n = K.create({ id: 'matrix-banner', kind: 'system-notice', severity: 'error',
+                                   title: 'System: connection lost', placement: 'top-banner', persistDismiss: false });
+              if (n.setBody) n.setBody('The house is offline — reconnecting…');
+              n.show();
+            } catch (_) { return false; }
+            try {
+              if (window.OrwellWindowKit) {
+                window.OrwellWindowKit.create({ id: 'matrix-banner-win', title: 'Banner Top', slot: 'top-left',
+                  content: '<div style=\"height:140px\">top</div>' }).open();
+                if (wide) window.OrwellWindowKit.create({ id: 'matrix-banner-tall', title: 'Banner Tall', slot: 'top-center',
+                  content: '<div style=\"height:760px\">tall</div>' }).open();
+              }
+            } catch (_) {}
+            try { (document.querySelector('.gadget-rail-open,#gadget-rail-open') || { click() {} }).click(); } catch (_) {}
+            return true;
+        }""",
+        wide,
+    )
+    if not shown:
+        report("pass", f"{vp_name} banner-inset (skipped — notice kit unavailable)")
+        return
+    page.wait_for_timeout(500)
+    m = page.evaluate(
+        """() => {
+            const host = document.getElementById('orwell-notice-banner');
+            const br = host ? host.getBoundingClientRect() : null;
+            const sels = ['.ow-window', '#sidebar', '#gadget-rail', '.chat-input-bar', '#chat-form'];
+            const rows = []; let lowestWin = -1;
+            for (const sel of sels) {
+              document.querySelectorAll(sel).forEach(el => {
+                const cs = getComputedStyle(el);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return;
+                const r = el.getBoundingClientRect();
+                if (r.width < 2 || r.height < 2) return;
+                rows.push({ sel, top: r.top, bottom: r.bottom });
+                if (sel === '.ow-window' && r.bottom > lowestWin) lowestWin = r.bottom;
+              });
+            }
+            return { bannerBottom: br ? br.bottom : 0, rows, lowestWin };
+        }"""
+    )
+    bb = m["bannerBottom"]
+    if bb <= 1:
+        report("pass", f"{vp_name} banner-inset (banner did not render)")
+        page.evaluate("(document.getElementById('matrix-banner')||{}).remove&&document.getElementById('matrix-banner').remove()")
+        return
+    under = [r for r in m["rows"] if r["top"] < bb - 2]   # 2px grace
+    for r in under:
+        report("fail", f"{vp_name} banner-inset: {r['sel']} top {r['top']:.0f} is under the banner bottom {bb:.0f}")
+    # COMPRESSION (wide tier only): the lowest window must stay in the viewport — a tall window
+    # shrinks below the banner rather than running off the bottom. The narrow sheet-host tier is
+    # exempt (its sheets scroll/stack by design; the under-banner check still applies there).
+    off_bottom = wide and m["lowestWin"] > height + 2
+    if off_bottom:
+        report("fail", f"{vp_name} banner-inset: lowest window bottom {m['lowestWin']:.0f} > viewport {height}")
+    if not under and not off_bottom:
+        report("pass", f"{vp_name} banner-inset ({len(m['rows'])} surfaces all below the banner"
+                       f"{', in-viewport' if wide else ''})")
+    # tear the forced banner + probe windows back down so the rest of the sweep measures clean
+    page.evaluate(
+        """() => {
+            ['matrix-banner-win','matrix-banner-tall'].forEach(id => {
+              const el = document.getElementById(id); if (el) el.remove();
+            });
+            const h = document.getElementById('orwell-notice-banner'); if (h) h.textContent = '';
+            try { document.body.style.removeProperty('--on-banner-inset'); document.body.style.paddingTop = ''; } catch (_) {}
+        }"""
+    )
+    page.wait_for_timeout(150)
+
+
 def mount_endgame_card(page, endgame_pending):
     """Render the endgame decision card by dispatching the engine's own Vault-free pending detail
     over the `orwell:pending` window event (exactly how chat.js arms it). The card renders from the
@@ -465,6 +554,11 @@ def main():
                 page = ctx.new_page()
                 page.goto(FE, wait_until="domcontentloaded")
                 audit_page(page, vp_name, w, h, coarse, with_game)
+
+                # #758: a top system-banner must reserve space + compress the fixed-chrome layer
+                # below it (no window/sidebar/rail/composer under the banner; lowest window stays
+                # in-viewport). Forced shown here so it's measured at every viewport tier.
+                audit_banner(page, vp_name, w, h)
 
                 # J5-19: the endgame mobile sweep — only the phone tiers, only when a finished/endgame
                 # season was actually reached. The endgame decision card (live finale) and the

@@ -20,6 +20,20 @@
   const TOP_BASE = 52;     // below the app header
   const BOTTOM_BASE = 12;  // fallback only — the live value tracks the composer
 
+  // #758: a top system-banner (orwellNotice.js, position:fixed) reserves its height as
+  // --on-banner-inset on <body>. Slotted panels are viewport-fixed, so the body padding-top
+  // can't move them — they must consume the inset themselves: every top anchor starts BELOW the
+  // banner and the clamp band shrinks by it, so a top-slotted window sits below the banner AND
+  // the stack compresses into the remaining viewport (never runs off the bottom). Read live
+  // (default 0) so show/hide/copy-change are picked up; the banner broadcasts orwell:banner-inset
+  // (listened to below) and a resize also re-stacks.
+  function bannerInset() {
+    try {
+      const v = parseFloat(getComputedStyle(document.body).getPropertyValue("--on-banner-inset"));
+      return Number.isFinite(v) && v > 0 ? v : 0;
+    } catch (_) { return 0; }
+  }
+
   // The composer is a fixed bottom bar; bottom-anchored slots (the presence strip,
   // the Windows dock) must clear it or they cover the textbox. init.js keeps
   // --composer-clearance synced to the composer's height (ResizeObserver) — the same
@@ -130,7 +144,10 @@
         if (r.height > 0) base = Math.max(base, Math.round(r.bottom) + GAP);
       }
     } catch (_) {}
-    return base;
+    // #758: clear a top system-banner too — the mobile hamburger is itself offset below the
+    // banner (style.css), so its measured bottom already clears it; the fallback constant adds
+    // the inset directly for the no-hamburger case.
+    return Math.max(base, (TOP_BASE - 8) + bannerInset());
   }
 
   function restackNarrowSheets() {
@@ -158,13 +175,17 @@
   // panel fully into view. Only when the panel is itself bigger than the viewport do
   // we fall back to the sliver guarantee (≥200px of a tall panel's top, 4px margin).
   function clampPos(left, top, w, h) {
+    // #758: the top floor is the banner inset + the 4px margin, never bare 4px — a clamped panel
+    // can never be pulled up UNDER a top system-banner. The bottom edge is unchanged, so a tall
+    // panel COMPRESSES into [inset+4, innerHeight-4] rather than overrunning the banner.
+    const topFloor = 4 + bannerInset();
     const maxLeft = window.innerWidth - w - 4;
     const maxTop = window.innerHeight - h - 4;
     return {
       left: maxLeft >= 4 ? Math.max(4, Math.min(maxLeft, left))
         : Math.max(4, Math.min(window.innerWidth - 60 - 4, left)),       // wider than viewport
-      top: maxTop >= 4 ? Math.max(4, Math.min(maxTop, top))
-        : Math.max(4, Math.min(window.innerHeight - Math.min(h, 200) - 4, top)),  // taller than viewport
+      top: maxTop >= topFloor ? Math.max(topFloor, Math.min(maxTop, top))
+        : Math.max(topFloor, Math.min(window.innerHeight - Math.min(h, 200) - 4, top)),  // taller than viewport
     };
   }
 
@@ -177,7 +198,9 @@
     if (NARROW.matches) { restackNarrowSheets(); return; } // F3: the sheet host owns narrow
     if (dragInProgress()) return; // F2: the gesture owns the position until drop
     const list = slots[name];
-    const safeT = TOP_BASE, safeB = bottomBase();
+    // #758: top-anchored slots start BELOW a top system-banner (inset reserved on <body>); the
+    // per-entry clampPos then keeps the whole stack inside [inset+4, innerHeight-4], compressing it.
+    const safeT = TOP_BASE + bannerInset(), safeB = bottomBase();
     let cursor = name.startsWith("top") ? safeT : safeB;
     for (const entry of list) {
       const el = entry.el;
@@ -264,6 +287,10 @@
   }
 
   window.addEventListener("resize", restackAll);
+  // #758: a top system-banner appearing / disappearing / changing height shifts every top anchor —
+  // a CSS-var change fires no event, so the banner broadcasts orwell:banner-inset on set/clear and
+  // we re-stack (cheap; idempotent setStyle writes mean an unchanged inset is a no-op).
+  window.addEventListener("orwell:banner-inset", restackAll);
   NARROW.addEventListener("change", () => {
     // Crossing the breakpoint re-lays out under the new tier's rules — the
     // sheet host on narrow (F3), slot anchors + offsets on wide.

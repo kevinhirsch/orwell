@@ -738,13 +738,12 @@ body.bg-pattern-perlin-flow {
     /* Fixed hamburger — always visible, toggles sidebar */
     .hamburger-btn {
       position: fixed;
-      /* Yield to a top banner when one is shown. The engine-status banner is a full-width
-         position:fixed card (z-index 11000) whose painted area spans the whole top strip and
-         intercepts pointer events; the hamburger is position:fixed too, so without this it sits
-         UNDER the banner card and clicks are swallowed (the fe-browser smoke's #hamburger-btn
-         click timed out once the banner became non-dismissable). The notice kit publishes the
-         banner height as --on-banner-inset on <body>; drop the hamburger below it (no banner ⇒
-         the var is 0 ⇒ the 12px baseline wins). Mirrors the floating-sidebar inset pattern. */
+      /* Yield to a top banner when one is shown (base branch + #758). The engine-status banner is
+         a full-width position:fixed card whose painted area spans the top strip and intercepts
+         pointer events; the hamburger is position:fixed too, so without this it sits UNDER the
+         banner and clicks are swallowed. The notice kit publishes the banner height as
+         --on-banner-inset on <body>; drop the hamburger below it (no banner ⇒ var is 0 ⇒ the 12px
+         baseline wins). Mirrors the floating-sidebar inset pattern. */
       top: max(12px, calc(var(--on-banner-inset, 0px) + 6px));
       left: 9px;
       right: auto;
@@ -2054,7 +2053,11 @@ body.bg-pattern-perlin-flow {
     /* ── mobile: the rail is a right slide-over drawer ───────────────────────── */
     @media (max-width: 768px) {
       .gadget-rail {
-        position: fixed; top: 0; right: 0; height: 100%; height: 100dvh;
+        /* #758: the mobile rail is a fixed slide-over drawer — it consumes the top system-banner's
+           reserved inset (--on-banner-inset) so it docks BELOW the banner and its height shrinks to
+           the remaining viewport, never overlapping the banner nor overrunning the bottom. */
+        position: fixed; top: var(--on-banner-inset, 0px); right: 0;
+        height: calc(100% - var(--on-banner-inset, 0px)); height: calc(100dvh - var(--on-banner-inset, 0px));
         width: min(300px, 86vw); z-index: 60; flex-shrink: 0;
         transform: translateX(102%); box-shadow: -6px 0 20px rgba(0,0,0,.35);
         transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -2080,7 +2083,8 @@ body.bg-pattern-perlin-flow {
          FAB. Every loud-FAB property from the desktop base (round shape, accent
          fill, border, shadow, large size) is reset here. */
       .gadget-rail-open {
-        top: calc(env(safe-area-inset-top, 0px) + 12px);
+        /* #758: clear a top system-banner (fixed control; body padding-top doesn't move it). */
+        top: calc(env(safe-area-inset-top, 0px) + 12px + var(--on-banner-inset, 0px));
         right: 9px;
         bottom: auto;
         z-index: 209;
@@ -4640,7 +4644,10 @@ body.bg-pattern-perlin-flow {
       /* Sidebar overlays chat on mobile */
       .sidebar {
         position: fixed !important;
-        top: 0; bottom: 0; left: 0;
+        /* #758: the mobile sidebar is a fixed slide-over — the body padding-top can't move it, so
+           it consumes the top system-banner's reserved inset itself: dock below the banner and
+           shrink its height to fit, never sitting under it. */
+        top: var(--on-banner-inset, 0px); bottom: 0; left: 0;
         z-index: 200;
         width: 80% !important;
         max-width: 340px;
@@ -4771,7 +4778,7 @@ body.bg-pattern-perlin-flow {
       /* Incognito indicator — right side next to hamburger on mobile */
       .incognito-indicator {
         position: fixed;
-        top: 12px;
+        top: calc(12px + var(--on-banner-inset, 0px));  /* #758: clear a top system-banner */
         left: auto !important;
         right: 48px !important;
         transform: none;
@@ -4785,7 +4792,9 @@ body.bg-pattern-perlin-flow {
       .icon-rail.mobile-mini {
         display: flex !important;
         position: fixed;
-        top: 0; bottom: 0; left: 0;
+        /* #758: the mini icon-rail is a fixed left strip — dock below a top system-banner and
+           shrink to the remaining height so it never sits under the banner. */
+        top: var(--on-banner-inset, 0px); bottom: 0; left: 0;
         z-index: 200;
         width: 48px;
         box-shadow: 2px 0 12px rgba(0,0,0,0.4);
@@ -4864,7 +4873,7 @@ body.bg-pattern-perlin-flow {
       .mobile-new-chat-btn {
         display: flex;
         position: fixed;
-        top: 12px;
+        top: calc(12px + var(--on-banner-inset, 0px));  /* #758: clear a top system-banner */
         left: 8px;
         z-index: 210;
         width: 32px;

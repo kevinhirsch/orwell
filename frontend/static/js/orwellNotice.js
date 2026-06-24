@@ -283,12 +283,26 @@
       var h = (host && host.offsetHeight) || 0;
       document.body.style.setProperty("--on-banner-inset", h + "px");
       document.body.style.paddingTop = h + "px";
+      _emitBannerInset(h);
     } catch (_) {}
   }
   function clearBannerInset() {
     try {
       document.body.style.removeProperty("--on-banner-inset");
       document.body.style.paddingTop = "";
+      _emitBannerInset(0);
+    } catch (_) {}
+  }
+  // #758: a top banner is position:fixed, so the body padding-top above only re-flows the
+  // IN-FLOW content (the chat column + the relative-flow desktop sidebar/rail). The FIXED-chrome
+  // layer (kit windows + the slot engine, the mobile rail/sidebar drawers, the top corner
+  // controls) must ALSO reserve the banner's height and COMPRESS below it — they read
+  // --on-banner-inset, but a CSS-var change fires no event, so broadcast a tiny window signal on
+  // every set/clear. The window kit's slot/clamp math + the gadget rail listen for it and re-place
+  // (resize already covers the height-change path; this covers banner show/hide and copy changes).
+  function _emitBannerInset(h) {
+    try {
+      window.dispatchEvent(new CustomEvent("orwell:banner-inset", { detail: { inset: h } }));
     } catch (_) {}
   }
 
