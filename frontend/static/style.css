@@ -38392,14 +38392,24 @@ body.theme-frosted .msg-user {
   border: none !important;
   box-shadow: none !important;
 }
-/* Bubble text rides the glass as crisp WHITE vibrancy + a legibility shadow (content
-   over a photo / a tinted glass), on BOTH the received frost and the blue sent bubble. */
-body.theme-frosted .msg-ai,
-body.theme-frosted .msg-ai .body,
+/* SENT bubbles are ALWAYS the blue fill + white text (never adapt). */
 body.theme-frosted .msg-user,
 body.theme-frosted .msg-user .body {
   color: #fff !important;
   text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.40) !important;
+}
+/* RECEIVED bubbles DEFAULT to white over the dark frost (over a dark wallpaper / the dark
+   animation). adaptiveGlass.js FLIPS them to dark ink + a light frost over a BRIGHT
+   wallpaper (Apple Messages received-bubble polarity) by setting an inline color on .msg-ai;
+   the .body uses `inherit` so it FOLLOWS that adaptive colour (otherwise its own colour rule
+   would block the flip). Non-important defaults so the inline adaptive colour wins. */
+body.theme-frosted .msg-ai {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.40);
+}
+body.theme-frosted .msg-ai .body {
+  color: inherit !important;
+  text-shadow: inherit !important;
 }
 /* the OOC asides keep their quieter dashed backstage identity — a fainter neutral
    frost (not the blue sent fill, not a full received bubble). */

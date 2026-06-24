@@ -36,6 +36,16 @@
   ].join(", ");
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
+  // The ONLY surfaces that adapt under the glass theme: the RECEIVED chat bubbles. Apple's
+  // Messages received bubble flips polarity with the wallpaper — a LIGHT frost + DARK ink
+  // over a bright wall, a DARK frost + LIGHT ink over a dark one. Chrome does NOT adapt (it
+  // is a FIXED light glass; the old per-surface dark veil is retired and must not return),
+  // and the SENT (blue) bubble never adapts (always blue + white). So this is just .msg-ai.
+  var BUBBLE_ADAPTIVE = ".msg-ai";
+  // the LIGHT frost a received bubble takes over a BRIGHT backdrop (Apple's light received
+  // bubble) — a near-white translucent material that reads with the dark INK_DARK label.
+  var BUBBLE_LIGHT_FROST = "rgba(245,246,248,0.62)";
+
   // Apple's adaptation is SIZE-DEPENDENT (WWDC25 219 + HIG Color):
   //   • SMALL bars/tiles (toolbars, tab bars — our composer bar, gadget tiles, the dock):
   //     the glass stays CLEAR and the SYMBOLS FLIP light↔dark to mirror the backdrop
@@ -324,6 +334,27 @@
         el.removeAttribute("data-adaptive-veil"); el.removeAttribute("data-adaptive-ink");
         return;
       }
+      // CHAT BUBBLE polarity (Apple Messages received bubble). Over a BRIGHT wallpaper the
+      // bubble becomes a LIGHT frost + DARK ink; over a DARK one it keeps the CSS dark frost
+      // + light ink (we just clear our overrides). Chrome never reaches here (pass() sends
+      // only bubbles under the glass theme), so the old per-surface dark veil can't crawl back.
+      var isBubble = false; try { isBubble = el.matches(BUBBLE_ADAPTIVE); } catch (_) {}
+      if (isBubble) {
+        if (L >= INK_THRESHOLD) {
+          el.style.setProperty("background-color", BUBBLE_LIGHT_FROST, "important");
+          el.style.setProperty("color", INK_DARK, "important");
+          el.style.setProperty("text-shadow", "none", "important");
+          el.setAttribute("data-adaptive-veil", "bubble");
+          el.setAttribute("data-adaptive-ink", "dark");
+        } else {
+          el.style.removeProperty("background-color");
+          el.style.removeProperty("color");
+          el.style.removeProperty("text-shadow");
+          el.removeAttribute("data-adaptive-veil");
+          el.removeAttribute("data-adaptive-ink");
+        }
+        return;
+      }
       var small = false;
       try { small = el.matches(FLIP_SET); } catch (_) {}
       // SMALL bars stay CLEAR (low veil); LARGE surfaces don't flip, so their glass adapts
@@ -374,24 +405,46 @@
     // the runtime is gated. There is no longer any glass tier that wants the adaptive veil.
     // (isGlassFull is retained as a named helper for the source-pinned tests; the standdown is
     // now keyed on theme-frosted, which covers BOTH tiers, so glass-full is a subset of it.)
-    if (isFrosted() || !isFrosted() || prefersContrast() || isGlassFull()) {
-      // drop our overrides so the static CSS veil stands
-      var tagged = document.querySelectorAll("[data-adaptive-veil]");
-      for (var i = 0; i < tagged.length; i++) {
-        tagged[i].style.removeProperty("background-color");
-        tagged[i].style.removeProperty("color");
-        tagged[i].style.removeProperty("text-shadow");
-        tagged[i].removeAttribute("data-adaptive-veil");
-        tagged[i].removeAttribute("data-adaptive-ink");
+    // Accessibility wins: under Increase Contrast the system goes black/white + a border;
+    // drop ALL our overrides and let the CSS high-contrast treatment stand.
+    if (prefersContrast()) { _dropTagged(null); return; }
+
+    // GLASS THEME (BOTH tiers — theme-frosted): the CHROME is a FIXED light glass (the kube
+    // 0.60 fill; Full adds SVG refraction, Frosted a CSS blur). The old per-surface, backdrop-
+    // varying DARK veil is RETIRED and must NOT crawl back — so chrome STANDS DOWN. The ONLY
+    // adaptive surfaces are the RECEIVED chat bubbles (.msg-ai), which flip polarity like
+    // Apple's Messages (light frost+dark ink over a bright wall, dark frost+light ink over a
+    // dark one). So: clear every NON-bubble override, then run the adaptive pass on bubbles.
+    // (isGlassFull is retained as a named helper for the source-pinned tests; the standdown is
+    // keyed on theme-frosted, which covers BOTH tiers, so glass-full is a subset of it.)
+    if (isFrosted() || isGlassFull()) {
+      _dropTagged(BUBBLE_ADAPTIVE);   // chrome (+ anything non-bubble) drops; bubbles kept
+      buildBackdrop();                // unified backdrop canvas; bubbles sample it
+      var nodes = document.querySelectorAll(BUBBLE_ADAPTIVE);
+      for (var j = 0; j < nodes.length; j++) {
+        var el = nodes[j];
+        if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue;
+        applyTo(el);
       }
       return;
     }
-    buildBackdrop(); // build the unified backdrop canvas once per pass; surfaces sample it
-    var nodes = document.querySelectorAll(SURFACES);
-    for (var j = 0; j < nodes.length; j++) {
-      var el = nodes[j];
-      if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue;
-      applyTo(el);
+
+    // No glass theme → full standdown (the static CSS stands).
+    _dropTagged(null);
+  }
+
+  // Remove our inline overrides from previously-tagged elements. keepSel (a selector) is
+  // spared so a bubble's live adaptive ink isn't cleared on the same pass that re-applies it.
+  function _dropTagged(keepSel) {
+    var tagged = document.querySelectorAll("[data-adaptive-veil],[data-adaptive-ink]");
+    for (var i = 0; i < tagged.length; i++) {
+      var el = tagged[i];
+      if (keepSel) { try { if (el.matches(keepSel)) continue; } catch (_) {} }
+      el.style.removeProperty("background-color");
+      el.style.removeProperty("color");
+      el.style.removeProperty("text-shadow");
+      el.removeAttribute("data-adaptive-veil");
+      el.removeAttribute("data-adaptive-ink");
     }
   }
 
