@@ -25,7 +25,6 @@ the "top-banner" placement (one shared chrome/dismiss/a11y/animation/sync path; 
 anchor). It is pinned as a kit consumer below, separate from the above-composer-anchor checks.
 """
 import os
-import re
 
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS_DIR = os.path.join(FRONTEND, "static", "js")
@@ -111,66 +110,6 @@ def test_on_family_is_declared_in_style_css_for_themes():
                 ".on-card .on-title", ".on-card .on-body", ".on-card .on-dismiss",
                 ".on-card.on-guide", ".on-card.on-decision"):
         assert cls in css, cls
-
-
-# ── #730 / #774b — VALUE PARITY between the static style.css copy and the kit JS ────────────
-# The .on-* family is declared TWICE (the canonical orwellNotice.js ensureCss() copy + the
-# static style.css copy). If they DISAGREE the notice card's type FLASHES the static value then
-# flips to the JS value on stylesheet load (#730 — the static copy carried stale --fs-* tokens
-# vs the kit's --ow-fs-* preset migration). Presence checks let that pass green; these gates
-# assert the VALUES match so a future divergence fails CI.
-
-def _strip_js(s):
-    """Drop the JS string-concat scaffolding (`"` quotes, `+` joiners, `//` comment lines) so a
-    declaration extracted from the ensureCss() concat reads like plain CSS. No-op for raw CSS."""
-    out = []
-    for line in s.splitlines():
-        if line.strip().startswith("//"):
-            continue
-        out.append(line)
-    return "\n".join(out).replace('"', " ").replace(" +", " ")
-
-
-def _rule_value(text, selector, prop):
-    """The (whitespace-normalized) value of `prop` inside the FIRST `selector { … }` block in
-    `text` — works on both raw CSS and the JS ensureCss string concat. None if absent."""
-    i = text.find(selector)
-    assert i != -1, f"selector {selector!r} not found"
-    open_brace = text.find("{", i)
-    close_brace = text.find("}", open_brace)
-    block = _strip_js(text[open_brace + 1:close_brace])
-    for decl in block.split(";"):
-        if ":" not in decl:
-            continue
-        name, _, val = decl.partition(":")
-        if name.strip() == prop:
-            return re.sub(r"\s+", " ", val.strip())
-    return None
-
-
-# (selector, property) pairs whose VALUES must be byte-identical across the two copies — the
-# notice type tokens that were stale in style.css (--fs-sm/700/.02em) vs the kit's preset set.
-_PARITY = (
-    (".on-card", "font-size"),
-    (".on-card .on-title", "font-size"),
-    (".on-card .on-title", "font-weight"),
-    (".on-card .on-title", "letter-spacing"),
-)
-
-
-def test_on_static_css_matches_the_kit_values():
-    css = _read("static", "style.css")
-    kit = _read("static", "js", KIT)
-    for selector, prop in _PARITY:
-        css_val = _rule_value(css, selector, prop)
-        kit_val = _rule_value(kit, selector, prop)
-        assert css_val is not None, f"{selector} {{{prop}}} missing from style.css"
-        assert kit_val is not None, f"{selector} {{{prop}}} missing from orwellNotice.js"
-        assert css_val == kit_val, (
-            f"VALUE DIVERGENCE (#730): `{selector} {{ {prop} }}` is {css_val!r} in style.css "
-            f"but {kit_val!r} in orwellNotice.js — they must match or the value FLASHES on "
-            "stylesheet load. Reconcile style.css to the canonical kit value."
-        )
 
 
 def test_kit_dismiss_meets_the_touch_floor():

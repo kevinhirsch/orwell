@@ -2851,7 +2851,7 @@ function initLoginBackground() {
 
     <div class="admin-model-form-row" style="align-items:center;gap:8px;">
       <label for="adm-loginbg-source" class="admin-toggle-label" style="flex:0 0 70px;">Source</label>
-      <select id="adm-loginbg-source" style="flex:1;padding:6px;">
+      <select id="adm-loginbg-source" class="ow-select" style="flex:1;">
         <option value="gradient">Animated gradient</option>
         <option value="particles">Particles</option>
         <option value="photo">Photo</option>
@@ -2863,7 +2863,7 @@ function initLoginBackground() {
     <div id="adm-loginbg-grp-gradient" class="adm-loginbg-group" style="margin-top:8px;">
       <div class="admin-model-form-row" style="align-items:center;gap:8px;">
         <label for="adm-loginbg-preset" class="admin-toggle-label" style="flex:0 0 70px;">Palette</label>
-        <select id="adm-loginbg-preset" style="flex:1;padding:6px;">
+        <select id="adm-loginbg-preset" class="ow-select" style="flex:1;">
           <option value="aurora">Aurora</option>
           <option value="sunset">Sunset</option>
           <option value="ocean">Ocean</option>
@@ -2873,12 +2873,12 @@ function initLoginBackground() {
       </div>
       <div class="admin-model-form-row" style="align-items:center;gap:8px;">
         <label for="adm-loginbg-gspeed" class="admin-toggle-label" style="flex:0 0 70px;">Speed</label>
-        <input id="adm-loginbg-gspeed" type="range" min="8" max="60" step="1" style="flex:1;">
+        <input id="adm-loginbg-gspeed" type="range" class="ow-slider" min="8" max="60" step="1" style="flex:1;">
         <span id="adm-loginbg-gspeed-val" class="admin-toggle-sub" style="flex:0 0 46px;text-align:right;"></span>
       </div>
       <div class="admin-model-form-row" style="align-items:center;gap:8px;">
         <label for="adm-loginbg-gint" class="admin-toggle-label" style="flex:0 0 70px;">Intensity</label>
-        <input id="adm-loginbg-gint" type="range" min="0.4" max="1.4" step="0.05" style="flex:1;">
+        <input id="adm-loginbg-gint" type="range" class="ow-slider" min="0.4" max="1.4" step="0.05" style="flex:1;">
         <span id="adm-loginbg-gint-val" class="admin-toggle-sub" style="flex:0 0 46px;text-align:right;"></span>
       </div>
     </div>
@@ -2887,37 +2887,37 @@ function initLoginBackground() {
     <div id="adm-loginbg-grp-particles" class="adm-loginbg-group" style="margin-top:8px;">
       <div class="admin-model-form-row" style="align-items:center;gap:8px;">
         <label for="adm-loginbg-pdensity" class="admin-toggle-label" style="flex:0 0 70px;">Density</label>
-        <input id="adm-loginbg-pdensity" type="range" min="12" max="160" step="1" style="flex:1;">
+        <input id="adm-loginbg-pdensity" type="range" class="ow-slider" min="12" max="160" step="1" style="flex:1;">
         <span id="adm-loginbg-pdensity-val" class="admin-toggle-sub" style="flex:0 0 46px;text-align:right;"></span>
       </div>
       <div class="admin-model-form-row" style="align-items:center;gap:8px;">
         <label for="adm-loginbg-pspeed" class="admin-toggle-label" style="flex:0 0 70px;">Speed</label>
-        <input id="adm-loginbg-pspeed" type="range" min="0.05" max="1.2" step="0.05" style="flex:1;">
+        <input id="adm-loginbg-pspeed" type="range" class="ow-slider" min="0.05" max="1.2" step="0.05" style="flex:1;">
         <span id="adm-loginbg-pspeed-val" class="admin-toggle-sub" style="flex:0 0 46px;text-align:right;"></span>
       </div>
       <div class="admin-model-form-row" style="align-items:center;gap:8px;">
         <label for="adm-loginbg-pcolor" class="admin-toggle-label" style="flex:0 0 70px;">Dot color</label>
-        <input id="adm-loginbg-pcolor" type="text" placeholder="default (white) — e.g. #9cdef2" style="flex:1;padding:6px;">
+        <input id="adm-loginbg-pcolor" type="text" class="ow-field" placeholder="default (white) — e.g. #9cdef2" style="flex:1;">
       </div>
     </div>
 
     <!-- Photo settings -->
     <div id="adm-loginbg-grp-photo" class="adm-loginbg-group" style="margin-top:8px;">
       <div class="admin-model-form-row" style="align-items:center;gap:8px;">
-        <button class="admin-btn-sm" id="adm-loginbg-upload-btn" type="button">Upload image…</button>
+        <button class="ow-btn ow-btn-secondary" id="adm-loginbg-upload-btn" type="button">Upload image…</button>
         <input id="adm-loginbg-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">
         <span id="adm-loginbg-upload-status" class="admin-toggle-sub" style="flex:1;"></span>
       </div>
       <div class="admin-model-form-row" style="align-items:center;gap:8px;">
         <label for="adm-loginbg-photourl" class="admin-toggle-label" style="flex:0 0 70px;">or URL</label>
-        <input id="adm-loginbg-photourl" type="text" placeholder="https://… or /static/…" style="flex:1;padding:6px;">
+        <input id="adm-loginbg-photourl" type="text" class="ow-field" placeholder="https://… or /static/…" style="flex:1;">
       </div>
     </div>
 
     <div class="admin-model-form-row" style="align-items:center;gap:8px;margin-top:10px;">
       <span style="flex:1"></span>
       <span id="adm-loginbg-msg" class="admin-toggle-sub"></span>
-      <button class="admin-btn-add" id="adm-loginbg-save" type="button" style="width:80px;text-align:center;">Save</button>
+      <button class="ow-btn ow-btn-prominent" id="adm-loginbg-save" type="button" style="min-width:80px;text-align:center;">Save</button>
     </div>
 
     <!-- Element-kit demo link (#773) — a Developer/Design reference of the shared

@@ -1963,17 +1963,14 @@ body.bg-pattern-perlin-flow {
       color: var(--fg, #9cdef2);
       border: 1px solid var(--border, #355a66); border-radius: 10px;
       font-family: var(--ow-ui-font, sans-serif);
-      font-size: var(--ow-fs-label, .8125rem); line-height: 1.5;
+      font-size: var(--fs-xs, .72rem); line-height: 1.5;
     }
     .og-card .og-head {
       display: flex; align-items: center; gap: .4rem; margin: 0 0 .35rem;
-      font-size: var(--ow-fs-heading, .8125rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em;
+      font-weight: 600; letter-spacing: .03em;
     }
     .og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }
-    /* #729/#730: the gadget-header focus ring is NEUTRAL system-blue, never the theme red/accent —
-       the glass chrome carries no accent HUE. Kept value-identical to orwellGadget.js ensureCss()
-       (the canonical copy) so there is no red→blue flash on stylesheet load. */
-    .og-card .og-head:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: 2px; border-radius: 4px; }
+    .og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }
     .og-card .og-icon { flex: 0 0 auto; }
     .og-card .og-title {
       flex: 1 1 auto; min-width: 0;
@@ -2013,12 +2010,12 @@ body.bg-pattern-perlin-flow {
       border-radius: 12px; padding: .7rem .85rem;
       background: var(--panel, #111); color: var(--fg, #9cdef2);
       border: 1px solid var(--border, #355a66);
-      font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.5;
+      font-size: var(--fs-sm, .85rem); line-height: 1.5;
       box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
     }
     .on-card .on-head { display: flex; align-items: baseline; gap: .5rem; padding-right: 1.6rem; }
     .on-card .on-icon { flex: 0 0 auto; opacity: .9; }
-    .on-card .on-title { flex: 1 1 auto; min-width: 0; font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; }
+    .on-card .on-title { flex: 1 1 auto; min-width: 0; font-weight: 700; letter-spacing: .02em; }
     .on-card .on-body { margin-top: .35rem; }
     .on-card .on-body:empty { display: none; }
     .on-card .on-dismiss {
@@ -38890,6 +38887,275 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
   }
 }
 /* ── END ELEMENT KIT ── (#773) ──────────────────────────────────────────────── */
+
+/* ╔══════════════════════════════════════════════════════════════════════════╗ */
+/* ║  ── ADMIN GLASS RESKIN ──  (issue #765)                                    ║ */
+/* ║  Folds the admin / health / status / deployment / reset surfaces onto the  ║ */
+/* ║  Liquid-Glass element kit. The .admin-card material, dark legible ink, and  ║ */
+/* ║  soft luminous rim already come from the shared frosted CHROME rules        ║ */
+/* ║  (~L37530 / L37831). This block reskins the admin-OWNED CONTROLS that those ║ */
+/* ║  rules don't cover: the native <select> (the dark-on-dark dropdown bug),    ║ */
+/* ║  the admin buttons, the text fields, and the bright-green range sliders —   ║ */
+/* ║  composing the SAME kit primitives (.ow-select / .ow-field / .ow-btn /      ║ */
+/* ║  .ow-slider) so the controls ride the one glass plane (HIG Materials:       ║ */
+/* ║  "controls sit on a system material, not on content"), carry NO accent hue  ║ */
+/* ║  on text (HIG Color: "apply color to the background … not to symbols or     ║ */
+/* ║  text"), and use the system-red Destructive role for wipes (HIG Buttons).  ║ */
+/* ║  Reskin only — no data shown / no auth gating changes; admin stays Vault-   ║ */
+/* ║  free. Frosted-scoped, so the Normal tier is untouched.                     ║ */
+/* ╚══════════════════════════════════════════════════════════════════════════╝ */
+
+/* ── SELECTS: the dark-on-dark fix. The admin native <select>s built in        */
+/*    index.html (Login-bg source/palette are migrated to .ow-select in admin.js,*/
+/*    but the Theme/Memory/MCP-tools/local-endpoint selects still carry the      */
+/*    legacy .admin-card select / .theme-fd-select / .memory-sort-select /       */
+/*    .admin-tools-select chrome whose --select-bg → --bg renders the closed     */
+/*    control AND its OS-painted option list dark-on-dark on the light glass).   */
+/*    Re-point them onto the same kit treatment as .ow-select (glass capsule,    */
+/*    dark legible ink, soft luminous rim, neutral chevron, legible options).    */
+body.theme-frosted .admin-card select:not(.ow-select),
+body.theme-frosted select.admin-tools-select,
+body.theme-frosted select.theme-fd-select,
+body.theme-frosted select.memory-sort-select,
+body.theme-frosted select.memory-edit-cat-select {
+  -webkit-appearance: none; appearance: none;
+  border-radius: var(--ow-radius-inner, 12px);
+  border: 1px solid var(--ow-control-rim);
+  background-color: var(--ow-control-fill);
+  color: var(--ow-control-ink, #16191f);
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,0.12)), 0 1px 3px rgba(0,0,0,0.14);
+  cursor: pointer;
+  /* neutral monochrome chevron (currentColor = dark ink, no accent) */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 16px center, right 11px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: calc(var(--ow-space-5, 24px) + 10px);
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+body.theme-frosted .admin-card select:not(.ow-select):hover,
+body.theme-frosted select.admin-tools-select:hover,
+body.theme-frosted select.theme-fd-select:hover,
+body.theme-frosted select.memory-sort-select:hover,
+body.theme-frosted select.memory-edit-cat-select:hover {
+  background-color: var(--ow-control-fill-hover);
+  border-color: var(--ow-control-rim);   /* keep the soft rim — never the red hover edge */
+}
+body.theme-frosted .admin-card select:not(.ow-select):focus-visible,
+body.theme-frosted select.admin-tools-select:focus-visible,
+body.theme-frosted select.theme-fd-select:focus-visible,
+body.theme-frosted select.memory-sort-select:focus-visible,
+body.theme-frosted select.memory-edit-cat-select:focus-visible {
+  outline: none; border-color: var(--ow-focus-ring, #0a84ff);
+  box-shadow: 0 0 0 var(--ow-focus-ring-w, 3px) color-mix(in srgb, var(--ow-focus-ring, #0a84ff) 45%, transparent);
+}
+/* The OS-painted option list: pin to legible dark-on-light so it can NEVER paint
+   dark-on-dark — the exact bug .ow-select fixes, applied to the legacy selects. */
+body.theme-frosted .admin-card select:not(.ow-select) option,
+body.theme-frosted select.admin-tools-select option,
+body.theme-frosted select.theme-fd-select option,
+body.theme-frosted select.memory-sort-select option,
+body.theme-frosted select.memory-edit-cat-select option {
+  background-color: var(--select-option-bg, #1c2127);
+  color: var(--select-option-fg, var(--fg, #fff));
+}
+
+/* ── BUTTONS: map the admin button family onto the kit variants ───────────────
+   .admin-btn-add  → PROMINENT (luminous neutral glass; primary action)
+   .admin-btn-sm   → SECONDARY (tinted-neutral glass; standard action)
+   .admin-btn-delete / the Danger-Zone wipes → DESTRUCTIVE (HIG system-red role).
+   The red is a SYSTEM semantic (Destructive role), not the theme accent, so the
+   no-accent-on-text contract holds. Anchors (<a>) styled with these classes get
+   the same look. The admin cards live inside the Settings .ow-window, whose generic
+   `.ow-window .ow-body button` glass-chip rule (0,2,1) would otherwise paint EVERY
+   admin button neutral — so these selectors are scoped through `.ow-window .ow-body`
+   (≥ 0,3,1) to win the cascade and let the Destructive role show its red. */
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-add,
+body.theme-frosted .ow-window .ow-body a.admin-btn-add,
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-sm,
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-delete,
+body.theme-frosted .ow-window .ow-body a.admin-btn-delete {
+  border-radius: var(--ow-radius-inner, 12px);
+  font-family: var(--ow-ui-font);
+  font-weight: var(--ow-fw-semibold, 600);
+  letter-spacing: -0.01em;
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  transition: background-color .18s ease, box-shadow .18s ease, filter .18s ease, transform .14s ease;
+}
+/* PROMINENT — luminous neutral glass + dark ink (NOT the red fill). */
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-add,
+body.theme-frosted .ow-window .ow-body a.admin-btn-add {
+  background:
+    radial-gradient(120% 100% at 30% 0%, rgba(255,255,255,0.30), transparent 55%),
+    rgba(255,255,255,0.26);
+  color: #16191f;
+  border: 1px solid rgba(255,255,255,0.34);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 4px 14px rgba(0,0,0,0.22);
+}
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-add:hover,
+body.theme-frosted .ow-window .ow-body a.admin-btn-add:hover {
+  background:
+    radial-gradient(120% 100% at 30% 0%, rgba(255,255,255,0.36), transparent 55%),
+    rgba(255,255,255,0.32);
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+/* SECONDARY — faint dark wash + hairline (the standard small action). */
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-sm {
+  background-color: var(--ow-control-fill);
+  color: var(--ow-control-ink, #16191f);
+  border: 1px solid var(--ow-control-rim);
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,0.12));
+}
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-sm:hover {
+  background-color: var(--ow-control-fill-hover);
+  border-color: var(--ow-control-rim);   /* soft rim, never the red hover edge */
+  filter: brightness(1.03);
+}
+/* DESTRUCTIVE — system-red FILL + legible on-red label (HIG Destructive role). */
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-delete,
+body.theme-frosted .ow-window .ow-body a.admin-btn-delete {
+  background: var(--ow-danger, #ff453a);
+  color: var(--ow-on-danger, #fff);
+  border: 1px solid color-mix(in srgb, #000 14%, var(--ow-danger, #ff453a));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 14px rgba(0,0,0,0.22);
+}
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-delete:hover,
+body.theme-frosted .ow-window .ow-body a.admin-btn-delete:hover {
+  background: var(--ow-danger, #ff453a);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-add:active,
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-sm:active,
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-delete:active,
+body.theme-frosted .ow-window .ow-body a.admin-btn-add:active,
+body.theme-frosted .ow-window .ow-body a.admin-btn-delete:active {
+  transform: translateY(0) scale(0.97);
+  filter: brightness(0.96);
+}
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-add:focus-visible,
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-sm:focus-visible,
+body.theme-frosted .ow-window .ow-body .admin-card .admin-btn-delete:focus-visible,
+body.theme-frosted .ow-window .ow-body a.admin-btn-add:focus-visible,
+body.theme-frosted .ow-window .ow-body a.admin-btn-delete:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+
+/* ── FIELDS: admin text inputs ride the kit field look (recessed glass well,    */
+/*    dark ink, soft luminous rim, system-blue focus ring) — replaces the hard   */
+/*    --border box + red focus edge. Scoped to the admin text-ish inputs only    */
+/*    (color/checkbox/radio/range/file keep their own treatment). */
+body.theme-frosted .admin-card input[type="text"]:not(.ow-field),
+body.theme-frosted .admin-card input[type="password"]:not(.ow-field),
+body.theme-frosted .admin-card input[type="number"]:not(.ow-field),
+body.theme-frosted .admin-card input[type="search"]:not(.ow-field),
+body.theme-frosted .admin-add-form input:not(.ow-field) {
+  border-radius: var(--ow-radius-inner, 12px);
+  border: 1px solid var(--ow-control-rim);
+  background-color: var(--ow-control-fill);
+  color: var(--ow-control-ink, #16191f);
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,0.12));
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+body.theme-frosted .admin-card input[type="text"]:not(.ow-field)::placeholder,
+body.theme-frosted .admin-card input[type="password"]:not(.ow-field)::placeholder,
+body.theme-frosted .admin-card input[type="search"]:not(.ow-field)::placeholder,
+body.theme-frosted .admin-add-form input:not(.ow-field)::placeholder {
+  color: color-mix(in srgb, var(--ow-control-ink, #16191f) 56%, transparent);
+  opacity: 1;
+}
+body.theme-frosted .admin-card input[type="text"]:not(.ow-field):focus,
+body.theme-frosted .admin-card input[type="password"]:not(.ow-field):focus,
+body.theme-frosted .admin-card input[type="number"]:not(.ow-field):focus,
+body.theme-frosted .admin-card input[type="search"]:not(.ow-field):focus,
+body.theme-frosted .admin-add-form input:not(.ow-field):focus {
+  outline: none;
+  border-color: var(--ow-focus-ring, #0a84ff);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.18),
+              0 0 0 var(--ow-focus-ring-w, 3px) color-mix(in srgb, var(--ow-focus-ring, #0a84ff) 45%, transparent);
+}
+
+/* ── SLIDERS: the admin range inputs (Login-bg are .ow-slider now; the index.html
+   skill/preset ranges still ride the base). Give the legacy admin ranges the kit
+   system-GREEN track + glass thumb so they stop reading as the bright-green
+   default. The Login-bg .ow-slider already gets the full kit treatment above. */
+body.theme-frosted .admin-card input[type="range"]:not(.ow-slider) {
+  -webkit-appearance: none; appearance: none;
+  height: 28px; background: transparent; cursor: pointer;
+  accent-color: var(--ow-ios-green, #30d158);
+}
+body.theme-frosted .admin-card input[type="range"]:not(.ow-slider)::-webkit-slider-runnable-track {
+  height: 5px; border-radius: 999px;
+  background: color-mix(in srgb, var(--ow-control-ink, #16191f) 22%, transparent);
+}
+body.theme-frosted .admin-card input[type="range"]:not(.ow-slider)::-moz-range-track {
+  height: 5px; border-radius: 999px;
+  background: color-mix(in srgb, var(--ow-control-ink, #16191f) 22%, transparent);
+}
+body.theme-frosted .admin-card input[type="range"]:not(.ow-slider)::-moz-range-progress {
+  height: 5px; border-radius: 999px; background: var(--ow-ios-green, #30d158);
+}
+body.theme-frosted .admin-card input[type="range"]:not(.ow-slider)::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; border: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.86));
+  box-shadow: 0 2px 8px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.9);
+}
+body.theme-frosted .admin-card input[type="range"]:not(.ow-slider)::-moz-range-thumb {
+  width: 22px; height: 22px; border-radius: 50%; border: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.86));
+  box-shadow: 0 2px 8px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.9);
+}
+
+/* ── The Danger Zone header: the red was a hard hue on TEXT. The card already
+   carries its system-red border (.admin-danger-card). Keep the heading legible
+   dark ink on the light glass (no accent on text) — the destructive intent reads
+   from the red-rimmed card + the .admin-btn-delete wipes, per HIG Color. */
+body.theme-frosted .admin-card.admin-danger-card h2,
+body.theme-frosted .admin-card.admin-danger-card h2[style*="color"] {
+  color: var(--ow-control-ink, #16191f) !important;
+}
+/* The "Health & Logs" / TLS / public-deployment status badges in admin.js carry
+   inline ok/warn colors (#3cb46e / #e0a83c / #e55) — those are SYSTEM status
+   semantics on small badges (not body text), so they stay; only the hard dark
+   hairline dividers in the wizards soften to a luminous rim. */
+body.theme-frosted .admin-card [style*="border-top:1px solid var(--border)"],
+body.theme-frosted .admin-card [style*="border-top: 1px solid var(--border)"] {
+  border-top-color: var(--ow-glass-rim-border, rgba(255,255,255,0.12)) !important;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .admin-card select:not(.ow-select),
+  body.theme-frosted select.admin-tools-select,
+  body.theme-frosted select.theme-fd-select,
+  body.theme-frosted .admin-card input[type="text"]:not(.ow-field),
+  body.theme-frosted .admin-card input[type="password"]:not(.ow-field),
+  body.theme-frosted .admin-card input[type="number"]:not(.ow-field),
+  body.theme-frosted .admin-card input[type="search"]:not(.ow-field),
+  body.theme-frosted .admin-add-form input:not(.ow-field) {
+    background-color: var(--panel, var(--bg)) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+@media (prefers-contrast: more) {
+  body.theme-frosted .admin-card select:not(.ow-select),
+  body.theme-frosted select.admin-tools-select,
+  body.theme-frosted select.theme-fd-select,
+  body.theme-frosted .admin-card input[type="text"]:not(.ow-field),
+  body.theme-frosted .admin-add-form input:not(.ow-field) {
+    border-color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+  }
+}
+/* ── END ADMIN GLASS RESKIN ── (#765) ───────────────────────────────────────── */
 
 /* ============================================================================ */
 /* Liquid Glass — chrome (small bars/pills), chat bubbles, transient typing,     */

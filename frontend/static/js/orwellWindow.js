@@ -741,17 +741,6 @@ export class OrwellWindow {
     } catch (_) {}
   }
 
-  /** #779: drop any persisted slot drag-offset and re-anchor to the slot BASE (e.g. a modal's
-   *  top-center). Mirrors the titlebar Home-key reset, but callable programmatically — a modal
-   *  dialog (Settings) calls this on every open so a position dragged/tiled in a PAST session can
-   *  never auto-pull it off-center on a fresh open. Drag within the open session still works (the
-   *  next drag re-saves an offset); no-op for a window without a persisted slot. */
-  recenter() {
-    if (!this._slot || !this.o.slotKey) return;
-    try { localStorage.removeItem('orwell-slot-offset:' + this.o.slotKey + ':' + ((document.body && document.body.dataset.user) || '')); } catch (_) {}
-    try { this._slot.restack(); } catch (_) {}
-  }
-
   open(opener) {
     // TX-1: a re-open during the close fade must cancel the pending teardown and clear the
     // latched close-animation class — otherwise finish() would tear THIS window down and the

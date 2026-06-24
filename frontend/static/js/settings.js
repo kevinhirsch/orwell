@@ -5492,17 +5492,9 @@ export function open(tab) {
   // #553: was it already on screen? (the kit window is connected only while open). Drives the
   // first-open-only focus + admin lazy-init below, replacing the old `.hidden` class check.
   const _wasHidden = !(win && win.el && win.el.isConnected);
-  // Show via the kit: builds (or restores) the .ow-window, mounts the scrim + focus-trap
-  // (modal:true), and raises to the single z-authority.
+  // Show via the kit: builds (or restores) the .ow-window, restores the F5 cross-session geometry,
+  // mounts the scrim + focus-trap (modal:true), and raises to the single z-authority. NO re-center.
   if (win) win.open(document.activeElement);
-  // #779: Settings is a modal dialog — it must OPEN CENTERED (the kit's modal default slot is
-  // top-center), never auto-pulled to the right edge by a stale slot drag-offset / a right-half
-  // tile saved in a PAST session. Clear that persisted offset + any lingering edge-dock CSS state
-  // on every open so a fresh open is always centered. Manual drag still works within the open
-  // session (the next drag re-saves an offset); legitimate re-tiling by the user this session is
-  // unaffected — only a STALE cross-session position is dropped.
-  if (win && typeof win.recenter === 'function') win.recenter();
-  try { clearDockSide('right', modalEl); clearDockSide('left', modalEl); } catch (_) {}
   _ensurePeekInTitlebar();   // re-host the salvaged Peek toggle into the kit titlebar
   syncAdminVisibility();
   // Resolve which tab to show, respecting admin visibility (C30 / settings ruling):
