@@ -117,7 +117,7 @@ import {
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationClockCost } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -1957,6 +1957,25 @@ export class GameSessionAdapter implements GameSession {
     return Math.max(BEDTIME_DEPTH_FLOOR, base - CONFLICT_BEDTIME_DRAIN * conflicts);
   }
 
+  /** Advance the clock by an activity's time cost, then run the night-end bookkeeping if the day WRAPPED
+   *  (the house ran to the bitter end) — the single funnel for every clock advance (game beats AND player
+   *  conversations). The wrap is a genuine night-end (accrue fatigue once); a turnIn is handled separately. */
+  private tickClock(step?: number): void {
+    if (!this.live) return;
+    const wasRetired = this.live.playerRetired ?? false;
+    advanceClock(this.live, step); // step undefined ⇒ advanceClock's default substantive-beat step
+    if (!wasRetired && this.live.timeOfDay === DAY_START && (this.live.nightDepth ?? 0) === 0) this.accrueNightFatigue();
+    this.rollNightConflicts();
+  }
+
+  /** 0066 Phase-2: a player CONVERSATION advances the play-clock by its kind's time cost (substantive
+   *  scenes read longer than casual chat). Wired from `EngineCommandsAdapter.recordInteraction` (the
+   *  player-witnessed scene record) via the registry. Gated ⇒ no-op (byte-identical) when the clock is off. */
+  advanceClockForConversation(kind: string): void {
+    if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return;
+    this.tickClock(conversationClockCost(kind));
+  }
+
   /** Clear the per-night conflict tally at the moment the day rolls over (a fresh morning at depth 0) —
    *  tonight's fights don't follow anyone into tomorrow. Called right after the clock advances / the player
    *  turns in; a no-op mid-day (still the same night) and harmless at game start (empty). */
@@ -3523,30 +3542,24 @@ export class GameSessionAdapter implements GameSession {
       let ev: BeatEvent | null = null;
       if (!this.live!.pending && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
-        // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per SUBSTANTIVE advance, cycling
-        // toward late-night and wrapping to a new morning (banking a late night the player never ended).
-        // The diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
+        // ADR 0006 (opt-in): the in-game clock moves by PLAY — by how long the activity TAKES (0066
+        // Phase-2 activity-aware budget), cycling toward late-night and wrapping to a new morning (banking
+        // a late night the player never ended). Dormant (byte-identical) unless the clock is enabled.
         //
-        // #537: the clock advances by SUBSTANTIVE PLAY — once per resolved ceremony/eviction/finale
-        // beat — never on a staged competition's per-round PRESENTATION (the `comp-round` PAUSES, which
-        // emit no event, and the inert `comp-elimination` reveal beats: no rng, no fold, no soul
-        // inflection — see `advanceCompetition`/`stagedTrajectoryNeutral`). Advancing on each of those
-        // cycled most of a day inside ONE competition (the HOH crowned at late-night the morning it
-        // began). The clock still INITIALIZES on the first advance (so the HUD/rest cue are live from
-        // turn one) even before the first substantive beat lands.
+        // #537: advance only on SUBSTANTIVE play — never on a staged competition's per-round PRESENTATION
+        // (the `comp-round` PAUSES emit no event; the inert `comp-elimination`/reveal beats carry no rng,
+        // no fold, no soul inflection — see `advanceCompetition`/`stagedTrajectoryNeutral`). Advancing on
+        // each of those cycled most of a day inside ONE competition. The clock still INITIALIZES on the
+        // first advance (HUD/rest cue live from turn one) even before the first substantive beat lands.
         //
-        // 0066 Phase-2 (PR #715): the graded sleep economy — chronotype bedtimes + continuous night
-        // depth + the night-end fatigue/conflict bookkeeping — rides this SAME substantive-play gate, so
-        // it never over-advances on inert staged-comp beats either. On the bare init advance `advanceClock`
-        // only initializes (returns early), so the bookkeeping below is a harmless no-op there: rest
-        // deficit is 0 (no night ran) and the conflict tally is still empty.
+        // 0066 Phase-2: `tickClock` advances the clock (default substantive-beat step — the upstream-tuned
+        // cadence the calibration/society tests assume; per-BEAT differentiation didn't survive the beat
+        // taxonomy, since staged comps fire only inert beats) and runs the night-end fatigue/conflict
+        // bookkeeping once on a wrap. On the bare init advance `advanceClock` only initializes, so that
+        // bookkeeping is a harmless no-op. Player CONVERSATIONS advance it separately, by their kind's time
+        // cost, via `advanceClockForConversation` (the recordInteraction hook).
         if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
-          const wasRetired = this.live!.playerRetired ?? false;
-          advanceClock(this.live!);
-          // A genuine night-end is the WRAP (the house ran to the bitter end) — NOT the morning after a
-          // turnIn (that night already accrued). Detect: a fresh morning we did NOT reach via retirement.
-          if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? 0) === 0) this.accrueNightFatigue();
-          this.rollNightConflicts();
+          this.tickClock();
         }
         this.commit(ev);
       }

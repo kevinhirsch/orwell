@@ -239,3 +239,16 @@ export function accrueFatigue(prevMeter: number, lastNightDeficit: number): numb
 export function combinedRestDeficit(immediate: number, fatigueMeter: number): number {
   return clamp(immediate + FATIGUE_WEIGHT * fatigueMeter, 0, 1);
 }
+
+// 0066 Phase-2: the ACTIVITY-AWARE time budget (owner-approved table, 2026-06-24). A player CONVERSATION
+// advances the play-clock by how long it plausibly TAKES — anchored on 0.05 depth ≈ 1 waking hour (16h
+// waking day = 0.8 depth). Gated: only consumed when the opt-in clock is running, so the seeded
+// calibration spine is byte-identical. (Game BEATS keep the upstream-tuned flat substantive-beat advance —
+// per-beat differentiation didn't survive the beat taxonomy, since staged comps fire only inert beats.)
+const CLOCK_COST_CONVERSATION_CASUAL = 0.05;      // bonding / gossip — downtime chat (~1h)
+const CLOCK_COST_CONVERSATION_SUBSTANTIVE = 0.075; // strategy / alliance / conflict / showmance — a real scene (~1.5h)
+const SUBSTANTIVE_CONVERSATION: ReadonlySet<string> = new Set(["strategy", "alliance", "conflict", "showmance", "betrayal"]);
+/** The depth a player CONVERSATION consumes, by its interaction `kind` (substantive scenes read longer). */
+export function conversationClockCost(kind: string): number {
+  return SUBSTANTIVE_CONVERSATION.has(kind) ? CLOCK_COST_CONVERSATION_SUBSTANTIVE : CLOCK_COST_CONVERSATION_CASUAL;
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   phaseForDepth, bedtimeDepthFor, restDeficitForDepth, socialSwayScale, SOCIAL_SWAY_FLOOR,
-  accrueFatigue, combinedRestDeficit, TIME_OF_DAY_ORDER,
+  accrueFatigue, combinedRestDeficit, conversationClockCost, TIME_OF_DAY_ORDER,
 } from "../../src/engine/timeOfDay";
 import { advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit } from "../../src/engine/liveSeason";
 import type { LiveSeasonState } from "../../src/engine/liveSeason";
@@ -130,6 +130,24 @@ describe("multi-night fatigue — a STRING of late nights compounds; a rested ni
     expect(combinedRestDeficit(0.3, 0.8)).toBeGreaterThan(0.3); // accumulated fatigue adds on top
     expect(combinedRestDeficit(1, 1)).toBe(1);          // bounded
     expect(combinedRestDeficit(0, 0.5)).toBeGreaterThan(combinedRestDeficit(0, 0.2)); // monotonic in the meter
+  });
+});
+
+describe("activity-aware time budget — a player conversation advances the clock by how long it takes", () => {
+  it("conversationClockCost: a substantive scene reads longer than casual chat; both pass time", () => {
+    expect(conversationClockCost("strategy")).toBeGreaterThan(conversationClockCost("bonding"));
+    expect(conversationClockCost("alliance")).toBe(conversationClockCost("strategy"));
+    expect(conversationClockCost("gossip")).toBe(conversationClockCost("bonding"));
+    expect(conversationClockCost("bonding")).toBeGreaterThan(0);
+  });
+
+  it("advanceClock takes a per-activity step (a bigger activity moves the day more)", () => {
+    const a = { nightDepth: 0.3, timeOfDay: "afternoon", evictionOrder: [] } as unknown as LiveSeasonState;
+    advanceClock(a, 0.05);
+    const b = { nightDepth: 0.3, timeOfDay: "afternoon", evictionOrder: [] } as unknown as LiveSeasonState;
+    advanceClock(b, 0.12);
+    expect(b.nightDepth! - 0.3).toBeGreaterThan(a.nightDepth! - 0.3); // the larger step advanced further
+    expect(a.nightDepth).toBeCloseTo(0.35);
   });
 });
 

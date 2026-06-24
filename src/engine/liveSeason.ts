@@ -878,11 +878,11 @@ export function firstCeremonyBeatResolved(s: LiveSeasonState): boolean {
 // "time races" lurch), and the depth grades the sleep trade. Tunable; ~14 beats fill a full day.
 const NIGHT_DEPTH_STEP = 0.07;
 
-export function advanceClock(s: LiveSeasonState): void {
+export function advanceClock(s: LiveSeasonState, step: number = NIGHT_DEPTH_STEP): void {
   if (s.finished) return;
   if (s.playerRetired) { s.nightDepth = 0; s.timeOfDay = DAY_START; s.playerRetired = false; return; }
   if (s.nightDepth === undefined) { s.nightDepth = 0; s.timeOfDay = DAY_START; return; }
-  const next = s.nightDepth + NIGHT_DEPTH_STEP;
+  const next = s.nightDepth + step;
   if (next >= 1) {
     // A full night passed without the player turning in — they outlasted the whole house (Principle 6
     // is theirs: nobody sent them to bed). They wake the next morning running on empty (depth 1).

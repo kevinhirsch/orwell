@@ -89,6 +89,9 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // scene recorded N turns ago stays recall-able IN FULL across a restart (it used to vanish on
   // restore — the event record survived but the NPC could no longer recall the scene).
   commands.setSoulMemo((hg, content) => session.recordSceneMemory(hg, content));
+  // 0066 Phase-2: a recorded PLAYER conversation advances the play-clock by its kind's time cost (gated ⇒
+  // no-op when the clock is off, so the seeded calibration spine is byte-identical).
+  commands.setConversationClock((kind) => session.advanceClockForConversation(kind));
   // Per-NPC voicing (B65 / ADR 0003 §8): the session projects ONE houseguest's legitimate
   // knowledge + hunches so the narrator can voice them without inventing or omnisciently leaking.
   session.setNpcKnowledgeProviders({

@@ -44,6 +44,8 @@ const MAX_FOLDS_PER_PAIR_PER_BEAT = 3;
 export class EngineCommandsAdapter implements EngineCommands {
   /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
   private onPersist?: () => void;
+  /** 0066 Phase-2 play-clock: advance in-game time when the PLAYER has a conversation. Unset ⇒ no-op. */
+  private conversationClock?: (kind: string) => void;
   /** The living houseguests an interaction may name (B39); when unset, validation is skipped (standalone). */
   private livingProvider?: () => Iterable<EntityId>;
   /** The live occupancy ground truth (0049); when unset, scenes are placeless (standalone — prior behavior). */
@@ -102,6 +104,12 @@ export class EngineCommandsAdapter implements EngineCommands {
   /** Wire a persistence callback invoked after every state-mutating command (0030). */
   setOnPersist(fn: () => void): void {
     this.onPersist = fn;
+  }
+
+  /** 0066 Phase-2: wire the play-clock so a recorded PLAYER conversation advances in-game time by its
+   *  kind's cost (the registry points this at `session.advanceClockForConversation`). Unset ⇒ no-op. */
+  setConversationClock(fn: (kind: string) => void): void {
+    this.conversationClock = fn;
   }
 
   /** Wire the living-houseguest set so a recorded interaction can't name an evicted/unknown player (B39). */
@@ -262,6 +270,11 @@ export class EngineCommandsAdapter implements EngineCommands {
       });
       if (this.soulMemo) for (const w of witnessSet) if (w !== PLAYER) this.soulMemo(w, rationale);
     }
+    // 0066 Phase-2: a player conversation costs in-game time (the play-clock). recordInteraction is
+    // player-witnessed only, so this fires exactly on the player's own scenes; the cost follows the kind
+    // (substantive scenes read longer). Gated downstream ⇒ no-op when the clock is off. Before persist so
+    // the advanced clock is captured in the same save.
+    if (req.kind) this.conversationClock?.(req.kind);
     this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart
     return { eventId };
   }
