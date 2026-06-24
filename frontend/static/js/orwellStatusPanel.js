@@ -75,11 +75,25 @@ import { onNarrowChange } from './platform.js';
   // The player's OWN ceremony role from PUBLIC facts (HOH / on the block / veto) — derived by
   // id-comparison, never a "safe/target" read (0020). Returns "" when the player is just a
   // houseguest, or their out-of-game seat ("Evicted" / "Jury") when they're out.
+  // #556 (launch-blocker): after an IN-SESSION next-season hand-off (S1→S2 with no page reload),
+  // the engine's player.status could still read "evicted"/"jury" from the prior season, so an
+  // ACTIVE player was falsely badged EVICTED for the whole new season (S1→S2 was only ever clean
+  // because it involved a page reload). A player can only legitimately be out once an eviction has
+  // actually happened THIS season: the season is finished, week > 1, or at least one houseguest is
+  // already out. A pristine live season (not finished, week ≤ 1, nobody out) ⇒ the seat is stale.
+  function seatStale(status, state) {
+    const finished = !!(status && status.finished);
+    const week = (status && typeof status.week === "number") ? status.week : 0;
+    const house = (state && Array.isArray(state.house)) ? state.house : [];
+    const anyOut = house.some((h) => h && h.status && h.status !== "active");
+    return !(finished || week > 1 || anyOut);
+  }
+
   function selfBadge(status, state) {
     const me = state && state.player && state.player.id;
     const seat = state && state.player && state.player.status;
-    if (seat === "evicted") return "EVICTED";
-    if (seat === "jury") return "JURY";
+    if (seat === "evicted") return seatStale(status, state) ? "" : "EVICTED"; // #556
+    if (seat === "jury") return seatStale(status, state) ? "" : "JURY";
     if (!me || !status) return "";
     const idOf = (c) => (c && typeof c === "object" ? c.id : c);
     if (idOf(status.hoh) === me) return "HOH";
@@ -90,44 +104,45 @@ import { onNarrowChange } from './platform.js';
     return "";
   }
 
+  // #640: compose the OrwellGadget kit (collapsible). The kit owns the card shell, the
+  // collapsible header (role=button + chevron + the persisted/synced collapse), and the rail
+  // mount. This panel's DYNAMIC header line (Week N / phase / time-of-day / stale-dot) renders
+  // into the kit's TITLE slot — so the live readout still reads as the card title, exactly as
+  // before — and everything else renders in the body. Only this gadget's own inner CSS stays here.
+  let _gadget = null;
   function ensurePanel() {
     let el = document.getElementById(ID);
     if (el) return el;
-    el = document.createElement("section");
-    el.id = ID;
-    el.setAttribute("aria-label", "Game status");
-    // A3: announcements happen via the dedicated delta announcer below — a live region
-    // on a root that toggles display:none and swaps every field per poll announces
-    // nothing useful (either silence or a full re-read with no sense of what changed).
-    el.innerHTML = `
-      <style>
-        /* E64: sidebar chrome, not a window — static flow, full sidebar width. */
-        #orwell-status {
-          display: none;
-          margin: var(--space-2) var(--space-2) 0;
-          padding: var(--space-2) var(--space-3);
-          background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
-          color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 10px;
-          font-family: 'Fira Code', ui-monospace, monospace;
-          font-size: var(--fs-xs); line-height: 1.5;
-        }
-        #orwell-status .os-hdr {
-          display: flex; align-items: baseline; gap: .4rem;
-          margin-bottom: .3rem; font-weight: 600; letter-spacing: .03em;
-          cursor: pointer; user-select: none;
-        }
+    if (!document.getElementById("orwell-status-css")) {
+      const st = document.createElement("style");
+      st.id = "orwell-status-css";
+      st.textContent = `
+        /* the dynamic header line (Week / phase / tod / rest), rendered into the kit title slot */
         #orwell-status .os-ttl { display: flex; align-items: baseline; gap: .4rem; flex: 1; min-width: 0; flex-wrap: wrap; }
-        #orwell-status .os-hdr .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
-        #orwell-status .os-hdr .os-tod { opacity: .85; font-weight: 400; font-size: .92em; }
+        #orwell-status .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
+        #orwell-status .os-tod { opacity: .85; font-weight: 400; font-size: .92em; }
         #orwell-status .os-rest { opacity: .6; font-weight: 400; font-style: italic; margin-left: .45em; font-size: .9em; }
-        #orwell-status .os-chev { opacity: .55; margin-left: auto; transition: transform .15s; }
-        #orwell-status.os-collapsed .os-chev { transform: rotate(-90deg); }
-        #orwell-status.os-collapsed .os-body { display: none; }
         #orwell-status .os-row { display: flex; gap: .4rem; }
         #orwell-status .os-row .os-k { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
         #orwell-status .os-noms { color: var(--red, #e06c75); }
+        /* TRANS-3: a brief delta highlight when a power row CHANGES (HOH / noms / veto /
+           phase) so a ceremony reveal is never a silent text swap. Theme-token driven. */
+        #orwell-status .os-changed {
+          animation: os-row-flash 1.6s ease-out 1;
+          border-radius: 4px;
+        }
+        @keyframes os-row-flash {
+          0%   { background: color-mix(in srgb, var(--accent, #9cdef2) 42%, transparent); }
+          100% { background: transparent; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          /* No motion — a static tint that lingers then is cleared by the JS timeout. */
+          #orwell-status .os-changed {
+            animation: none;
+            background: color-mix(in srgb, var(--accent, #9cdef2) 22%, transparent);
+          }
+        }
         /* Offline dot (U5): the feed reconnecting, not gone — last-known stays visible. */
         #orwell-status .os-stale { color: #e0a500; margin-left: .35rem; font-size: .7em; vertical-align: middle; }
         /* Memory wall (C21): the roster a real houseguest can see. Public facts only. */
@@ -139,20 +154,66 @@ import { onNarrowChange } from './platform.js';
         }
         #orwell-status .os-roster-h { opacity: .55; font-size: max(.8em, 11px); margin: .4rem 0 .15rem; }
         #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; max-height: 30vh; overflow: auto; }
-        #orwell-status .os-hg { display: flex; justify-content: space-between; gap: .5rem; }
+        /* J3-19: subordinate the "who's who" roster so it reads as a reference column, not a
+           second body of content competing with the chat narration — a reduced type step and a
+           colour mixed toward the panel (the same treatment .os-row .os-k uses). The player's
+           own row (.os-you) keeps full weight as the one anchor the eye returns to. */
+        #orwell-status .os-hg {
+          display: flex; justify-content: space-between; gap: .5rem;
+          font-size: .92em; color: color-mix(in srgb, var(--fg, #9cdef2) 72%, var(--panel, #111));
+        }
         #orwell-status .os-hg.os-out { color: color-mix(in srgb, var(--fg, #9cdef2) 62%, var(--panel, #111)); text-decoration: line-through; }
         #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
         /* F4: the clean terminal/post-season state — shown instead of stale ceremony rows once the
            season is over (finished). */
         #orwell-status .os-done { margin: .2rem 0 .15rem; font-weight: 600; }
         #orwell-status .os-done .os-winner { color: var(--accent, var(--red, #e06c75)); }
-      </style>
-      <div class="os-hdr" role="button" tabindex="0" aria-expanded="true" title="Collapse">
-        <span class="os-ttl"><span id="os-week">Week —</span><span class="os-phase" id="os-phase"></span><span class="os-tod" id="os-tod" hidden title="Time of day in the house"></span><span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span></span>
-        <span class="os-chev" aria-hidden="true">▾</span>
-      </div>
-      <div class="os-body">
+        /* J3-07/J3-08 (wayfinding): the PREMIERE objective + progress — the persistent answer to
+           "why hasn't HOH started, and how far am I?". Shown only during the premiere (it is the
+           current objective); the count is the player-mental-model NPC figure ("X of 15"). */
+        #orwell-status .os-premiere { margin: .2rem 0 .25rem; }
+        #orwell-status .os-prem-obj { font-weight: 600; }
+        #orwell-status .os-prem-obj .os-prem-count {
+          margin-left: .4rem; font-weight: 700;
+          color: var(--accent, #9cdef2);
+        }
+        #orwell-status .os-prem-left { opacity: .7; font-size: .9em; margin-top: .1rem; }`;
+      document.head.appendChild(st);
+    }
+
+    // Compose the kit (collapsible). persistCollapsed:false — this panel keeps its OWN E71
+    // per-user+GAME collapse key (a richer scoping than the kit's per-user); the kit renders the
+    // chevron + role=button header + toggle wiring + DOM state, and delegates persistence here.
+    // 0054: the kit mounts into the rail (sidebar → body fallback). NB: this panel's legacy
+    // fallback anchored after #sessions-section; the kit's fallback is the sidebar root — both
+    // land it in the sidebar when there's no rail, which is all the E64 placement requires.
+    _gadget = window.OrwellGadgetKit.create({
+      id: ID, title: "House Status", ariaLabel: "Game status",
+      collapsible: true, persistCollapsed: false,
+      // E71: this panel owns a richer per-user+GAME collapse key than the kit's per-user one — so
+      // it persists in the kit's onCollapse hook (fired on every header toggle), keyed to _gameKey.
+      onCollapse: (on) => {
+        try { localStorage.setItem(storageKey("orwell-status-collapsed"), on ? "1" : ""); } catch (_) {}
+      },
+    });
+    const body = _gadget.ensure();
+    el = _gadget.el;
+    // The DYNAMIC header line (Week / phase / tod / stale-dot) renders into the kit TITLE slot —
+    // so the live readout still reads as the card title exactly as before. Replace the static title.
+    const titleSlot = el.querySelector(".og-title");
+    titleSlot.classList.add("os-ttl");
+    titleSlot.removeAttribute("role"); titleSlot.removeAttribute("aria-level");
+    titleSlot.innerHTML =
+      '<span id="os-week">Week —</span>' +
+      '<span class="os-phase" id="os-phase"></span>' +
+      '<span class="os-tod" id="os-tod" hidden title="Time of day in the house"></span>' +
+      '<span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span>';
+    body.innerHTML = `
         <div class="os-done" id="os-done" hidden>Season complete<span id="os-done-winner"></span></div>
+        <div class="os-premiere" id="os-premiere" hidden>
+          <div class="os-prem-obj">Meet the house<span class="os-prem-count" id="os-prem-count"></span></div>
+          <div class="os-prem-left" id="os-prem-left" hidden></div>
+        </div>
         <div class="os-ceremony" id="os-ceremony">
           <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span><span class="os-rest" id="os-you-rest" hidden title="How rested you are — your own read"></span></div>
           <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
@@ -161,39 +222,13 @@ import { onNarrowChange } from './platform.js';
         </div>
         <div class="os-roster-h" id="os-roster-h" role="heading" aria-level="3">The House</div>
         <div class="os-roster" id="os-roster"></div>
-      </div>
-      <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
+        <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
 
-    // 0054: prefer the control-room gadget rail; fall back to the sidebar (E64) then body.
-    const rail = document.getElementById("gadget-rail-body");
-    const sidebar = document.getElementById("sidebar");
-    const sessions = document.getElementById("sessions-section");
-    if (rail) {
-      rail.appendChild(el);
-    } else if (sessions && sessions.parentElement) {
-      sessions.parentElement.insertBefore(el, sessions.nextSibling);
-    } else if (sidebar) {
-      sidebar.appendChild(el);
-    } else {
-      document.body.appendChild(el); // headless/degraded DOM — still functional
-    }
-
-    // Collapse in place (sidebar chrome, not a dock park) — persisted per user+game.
-    const hdr = el.querySelector(".os-hdr");
-    const setCollapsed = (on) => {
-      el.classList.toggle("os-collapsed", !!on);
-      hdr.setAttribute("aria-expanded", on ? "false" : "true");
-      // A11Y-5: the accessible name must reflect the CURRENT action, not a stale static title —
-      // a collapsed toggle that still reads "Collapse" inverts the affordance for SR/voice users.
-      hdr.setAttribute("aria-label", on ? "Expand game status" : "Collapse game status");
-      hdr.setAttribute("title", on ? "Expand" : "Collapse");
-      try { localStorage.setItem(storageKey("orwell-status-collapsed"), on ? "1" : ""); } catch (_) {}
-    };
-    const toggle = () => setCollapsed(!el.classList.contains("os-collapsed"));
-    hdr.addEventListener("click", toggle);
-    hdr.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
-    });
+    // Collapse persistence stays E71 per user+game — the kit drives the DOM (class + chevron +
+    // aria-expanded/label) AND fires onCollapse above, which writes the per-game key. So this
+    // setter is just _gadget.setCollapsed; a header toggle, a boot restore, and a season re-apply
+    // all flow through the one path (and persist the right key).
+    const setCollapsed = (on) => _gadget.setCollapsed(!!on);
     try {
       if (localStorage.getItem(storageKey("orwell-status-collapsed")) === "1") setCollapsed(true);
     } catch (_) {}
@@ -235,6 +270,25 @@ import { onNarrowChange } from './platform.js';
 
   // A3: announce only what CHANGED, in show terms — never a full re-read per poll.
   let _last = { phase: null, hoh: null, noms: null, veto: null };
+
+  // TRANS-3 (#627): the power-transition / ceremony reveal used to land as a silent
+  // textContent swap (no crown drop, no row flash) — when the narrator under-calls
+  // the change degraded to an invisible flip. Give the CHANGED HUD row a brief delta
+  // highlight (the delta is already computed for the SR announce). The CSS is
+  // prefers-reduced-motion-gated: a static tint with no motion under `reduce`.
+  function flashRow(el, sel) {
+    try {
+      const node = el.querySelector(sel);
+      if (!node) return;
+      node.classList.remove("os-changed");
+      void node.offsetWidth;            // restart the animation if it fires again quickly
+      node.classList.add("os-changed");
+      const clear = () => node.classList.remove("os-changed");
+      node.addEventListener("animationend", clear, { once: true });
+      setTimeout(clear, 2200);          // belt-and-suspenders (reduced-motion never fires animationend)
+    } catch (_) {}
+  }
+
   function announceDeltas(el, st, names) {
     const a = el.querySelector("#os-announce");
     if (!a) return;
@@ -244,10 +298,10 @@ import { onNarrowChange } from './platform.js';
       hoh: names.hoh, noms: names.noms, veto: names.veto,
     };
     if (_last.phase !== null) {
-      if (cur.phase !== _last.phase) msgs.push(cur.phase + ".");
-      if (cur.hoh !== _last.hoh && cur.hoh !== "—") msgs.push("Head of Household: " + cur.hoh + ".");
-      if (cur.noms !== _last.noms && cur.noms !== "—") msgs.push("On the block: " + cur.noms + ".");
-      if (cur.veto !== _last.veto && cur.veto !== "—") msgs.push("Veto: " + cur.veto + ".");
+      if (cur.phase !== _last.phase) { msgs.push(cur.phase + "."); flashRow(el, "#os-phase"); }
+      if (cur.hoh !== _last.hoh && cur.hoh !== "—") { msgs.push("Head of Household: " + cur.hoh + "."); flashRow(el, "#os-hoh"); }
+      if (cur.noms !== _last.noms && cur.noms !== "—") { msgs.push("On the block: " + cur.noms + "."); flashRow(el, "#os-noms"); }
+      if (cur.veto !== _last.veto && cur.veto !== "—") { msgs.push("Veto: " + cur.veto + "."); flashRow(el, "#os-veto"); }
     }
     _last = cur;
     if (msgs.length) a.textContent = msgs.join(" ");
@@ -282,13 +336,21 @@ import { onNarrowChange } from './platform.js';
       el.querySelector("#os-phase").textContent = "";
       { const t = el.querySelector("#os-tod"); if (t) t.hidden = true; } // ADR 0006: no clock post-season
       if (ceremonyEl) ceremonyEl.hidden = true;
+      const w = st.winner && st.winner.name;
       if (doneEl) {
         doneEl.hidden = false;
-        const w = st.winner && st.winner.name;
         doneEl.querySelector("#os-done-winner").innerHTML =
           w ? ' — winner: <span class="os-winner">' + esc(w) + "</span>" : "";
       }
-      _last = { phase: null, hoh: null, noms: null, veto: null }; // reset deltas; no ceremony to announce
+      // F-NEW-11: the highest-stakes event must reach SR users — announce the result once
+      // through the dedicated polite announcer (the winner is injected via innerHTML into a
+      // non-live node, so without this the season's end is silent). Guard on a change so a
+      // re-poll of the same finished state doesn't re-announce every cadence.
+      if (_last.done !== true) {
+        const a = el.querySelector("#os-announce");
+        if (a) a.textContent = w ? ("Season complete. The winner is " + w + ".") : "Season complete.";
+      }
+      _last = { phase: null, hoh: null, noms: null, veto: null, done: true }; // reset deltas; result announced above
       if (st._state !== undefined) renderRoster(el, st, st._state);
       el.style.display = "block";
       return;
@@ -318,9 +380,44 @@ import { onNarrowChange } from './platform.js';
     el.style.display = "block";
   }
 
+  // J3-07/J3-08 (wayfinding): the PREMIERE objective + "X of 15 met" progress — the persistent,
+  // player-facing answer to "why hasn't HOH started, and how far am I?". Read from the engine's
+  // Vault-free `premiere` projection (PremiereIntrosView on getGameState). Shown ONLY during the
+  // premiere (it is the current objective) and hidden the moment it completes / the first HOH begins.
+  // metCount/total both include the player (they ARE met), so the player-mental-model figure is the
+  // NPC-only count (met-1 of total-1) to read as "X of 15". Public facets only — names + counts,
+  // never a number about a houseguest, a soul, or a standing.
+  function renderPremiere(el, state) {
+    const wrap = el.querySelector("#os-premiere");
+    if (!wrap) return;
+    const prem = state && state.premiere;
+    if (!prem || typeof prem !== "object" || prem.complete) { wrap.hidden = true; return; }
+    const total = Number(prem.total) - 1;     // NPCs only
+    const met = Number(prem.metCount) - 1;    // NPCs the player has met
+    if (!(total > 0) || !(met >= 0)) { wrap.hidden = true; return; }
+    const countEl = el.querySelector("#os-prem-count");
+    if (countEl) countEl.textContent = met + " of " + total + " met";
+    // The still-to-meet names (the same observable roster facets the engine exposes) — so the panel
+    // names the gap, not just a count. Bounded list; falls back to the count alone if absent.
+    const leftEl = el.querySelector("#os-prem-left");
+    if (leftEl) {
+      const names = Array.isArray(prem.remaining)
+        ? prem.remaining.map((fi) => fi && fi.houseguest && fi.houseguest.name).filter(Boolean)
+        : [];
+      if (names.length) {
+        leftEl.textContent = "Still to meet: " + names.join(", ");
+        leftEl.hidden = false;
+      } else {
+        leftEl.hidden = true;
+      }
+    }
+    wrap.hidden = false;
+  }
+
   // The memory wall: who's still in, who's gone, the attrition count, and the player's own
   // public role badge. All from getGameState().house[] + the ceremony status. No numbers.
   function renderRoster(el, st, state) {
+    renderPremiere(el, state);
     const badgeEl = el.querySelector("#os-you-badge");
     const badge = selfBadge(st, state);
     if (badge) { badgeEl.textContent = badge; badgeEl.hidden = false; }

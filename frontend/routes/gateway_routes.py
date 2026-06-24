@@ -6,9 +6,17 @@ Mounts at /gateway/:
   GET  /gateway/status                  — admin read: registered platforms + pair count
 
 Auth posture:
-  - The /webhook endpoint is intentionally unauthenticated (platforms POST here without
-    a session cookie).  Identity is proven via the pairing store: unpaired identities
-    are rejected before reaching the engine.
+  - The /webhook endpoint is unauthenticated by default (platforms POST here without a session
+    cookie).  Identity is proven via the pairing store: unpaired identities are rejected before
+    reaching the engine.  For a PUBLIC deployment, transport auth is available (and recommended):
+      • ORWELL_GATEWAY_WEBHOOK_SECRET — a gateway-wide shared secret. When set, EVERY inbound
+        webhook must carry a matching ``X-Orwell-Gateway-Secret`` header (constant-time compare)
+        or it is rejected 403 (FAIL-CLOSED). Unset ⇒ dormant (#559).
+      • TELEGRAM_WEBHOOK_SECRET — a per-platform secret (Telegram echoes it in
+        ``X-Telegram-Bot-Api-Secret-Token``); opt-in, applied by the adapter's verify_webhook.
+  - The turn path is rate-limited per identity (ORWELL_GATEWAY_RATE_MAX /
+    ORWELL_GATEWAY_RATE_WINDOW_S) and honors the paired user's ``max_messages_per_day`` daily cap,
+    so the gateway can't be used to bypass the browser path's limits (#560).
   - /pair/verify is session-authenticated (the web UI user is doing the pairing —
     they must be logged in to bind their orwell account).
   - /status is admin-gated (operational visibility only).
@@ -16,7 +24,9 @@ Auth posture:
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException
@@ -29,12 +39,40 @@ from gateway.pairing import (
     pair,
     is_rate_limited,
     paired_identities,
+    get_paired_user,
 )
 from gateway import platform_registry
+from gateway import turn_limits
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/gateway", tags=["gateway"])
+
+# SEC-2 (#559): a gateway-wide shared secret. Unlike the per-platform ``verify_webhook`` hook
+# (opt-in, e.g. TELEGRAM_WEBHOOK_SECRET), this is platform-agnostic and FAIL-CLOSED: the moment
+# ORWELL_GATEWAY_WEBHOOK_SECRET is configured, EVERY inbound webhook must carry a matching
+# X-Orwell-Gateway-Secret header (constant-time compare) or it is rejected 403 — so a public
+# deployment can require transport auth across all platforms with one env var. Unset ⇒ the guard
+# is dormant (local/trusted behaviour unchanged), and the per-platform hook still applies.
+
+
+def _gateway_secret() -> Optional[str]:
+    return (os.environ.get("ORWELL_GATEWAY_WEBHOOK_SECRET") or "").strip() or None
+
+
+def _gateway_secret_ok(headers) -> bool:
+    """When a gateway secret is configured, require a matching X-Orwell-Gateway-Secret header.
+
+    Fail-closed: configured-but-missing/mismatched ⇒ False. No secret configured ⇒ True (dormant).
+    """
+    secret = _gateway_secret()
+    if not secret:
+        return True
+    try:
+        sent = headers.get("X-Orwell-Gateway-Secret") or ""
+    except Exception:
+        sent = ""
+    return hmac.compare_digest(sent, secret)
 
 
 # ── webhook: inbound message from a messaging platform ───────────────────────
@@ -58,6 +96,10 @@ async def platform_webhook(platform_id: str, request: Request):
     adapter = platform_registry.get(platform_id)
     if adapter is None:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {platform_id!r}")
+
+    # SEC-2 (#559, fail-closed): a configured gateway-wide secret is required across all platforms.
+    if not _gateway_secret_ok(request.headers):
+        raise HTTPException(status_code=403, detail="Webhook verification failed")
 
     # SEC-2 (opt-in): if the adapter has a configured webhook secret, verify the platform's
     # signature header before trusting the body-supplied identity. No secret ⇒ unchanged.
@@ -86,6 +128,25 @@ async def platform_webhook(platform_id: str, request: Request):
         )
         await adapter.send(platform_identity, reply)
         return {"ok": True, "action": "pair-code-issued"}
+
+    # SEC-3 (#560): the turn path runs a real LLM call. Throttle per identity and enforce the
+    # per-user daily cap (the browser path's gate) so the gateway can't be used to bypass it.
+    if turn_limits.is_rate_limited(platform_identity):
+        await adapter.send(
+            platform_identity,
+            "You're sending turns too quickly. Please wait a moment and try again.",
+        )
+        return {"ok": True, "action": "rate-limited"}
+
+    _user = get_paired_user(platform_identity)
+    if _user is not None:
+        _auth = getattr(getattr(request.app, "state", None), "auth_manager", None)
+        if turn_limits.daily_cap_exceeded(_user, _auth):
+            await adapter.send(
+                platform_identity,
+                "You've reached your daily message limit. Please try again in 24 hours.",
+            )
+            return {"ok": True, "action": "daily-cap-reached"}
 
     # Normal turn: route to the gateway handler
     reply = await handle_platform_turn(

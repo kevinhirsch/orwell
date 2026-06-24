@@ -132,7 +132,21 @@
     const setBusy = (b) => { _busy = b; buttons.forEach((btn) => { btn.disabled = b; }); };
 
     buttons.forEach((btn) => {
-      btn.addEventListener("click", () => startNextSeason(btn.dataset.keep === "1", setMsg, setBusy));
+      btn.addEventListener("click", async () => {
+        const keep = btn.dataset.keep === "1";
+        // F-NEW-2 (Nielsen H5): "Recast from scratch" is irreversible — it discards
+        // the player's entire houseguest identity and re-runs the casting interview.
+        // Gate it behind the same styledConfirm used for the factory/progress resets.
+        // (Keeping the houseguest is non-destructive, so it commits straight away.)
+        if (!keep && window.styledConfirm) {
+          const ok = await window.styledConfirm(
+            "Recast from scratch?\n\nThis discards your current houseguest entirely — their identity, backstory and portrait — and runs the casting interview again from the start. This can't be undone.",
+            { confirmText: "Recast", danger: true }
+          );
+          if (!ok) return;
+        }
+        startNextSeason(keep, setMsg, setBusy);
+      });
     });
     return wrap;
   }
@@ -149,7 +163,7 @@
       });
       const d = r.ok ? await r.json() : null;
       if (!r.ok || !d) {
-        const err = (d && d.error) || "Couldn't start the next season — try again.";
+        const err = (d && d.error) || "The house wouldn't open just yet — try again.";
         setMsg(err, true);
         setBusy(false);
         return;
@@ -201,6 +215,15 @@
     const btn = wrap.querySelector("#ons-conclude");
     btn.addEventListener("click", async () => {
       if (_busy) return;
+      // F-NEW-3 (Nielsen H5): "See how it ends" is one-way — it fast-forwards through
+      // every remaining week to the finale and can't be undone. Confirm before committing.
+      if (window.styledConfirm) {
+        const ok = await window.styledConfirm(
+          "See how it ends?\n\nThis fast-forwards the rest of the season straight to the finale — skipping every remaining week. You can't return to play them out. This can't be undone.",
+          { confirmText: "Fast-forward", danger: true }
+        );
+        if (!ok) return;
+      }
       _busy = true; btn.disabled = true; setMsg("Playing out the rest of the season…");
       try {
         const r = await fetch("/api/orwell/conclude-season", { method: "POST", credentials: "same-origin" });
@@ -243,6 +266,14 @@
       content: evicted ? buildEvictedBody() : buildBody(),
     });
     _win.open();
+    // F-NEW-13: this window has no × by design (it's the season hand-off; it auto-dismisses
+    // when the state moves on). Explain the missing close affordance so it doesn't read as a
+    // bug — minimize tucks it to the dock; it leaves on its own once you move forward.
+    try {
+      if (_win.el) {
+        _win.el.title = "This stays until you move on — it closes itself once the next season begins. Minimize to tuck it away.";
+      }
+    } catch (_) {}
     nudge();
   }
 
@@ -255,10 +286,12 @@
   }
 
   // Gentle in-reunion nudge: a soft pulse on the window (or its dock chip) so the path forward
-  // is never hidden if the player lingers. Reduced-motion safe (animation simply no-ops).
+  // is never hidden if the player lingers. TX-3: genuinely reduced-motion safe — WAAPI runs
+  // regardless of the CSS media query, so gate it explicitly here.
   function nudge() {
     try {
       if (!_win || !_win.el) return;
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
       _win.el.animate && _win.el.animate(
         [{ boxShadow: "0 0 0 0 transparent" },
          { boxShadow: "0 0 0 4px color-mix(in srgb, var(--accent, #6d4aff) 35%, transparent)" },

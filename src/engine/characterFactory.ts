@@ -208,7 +208,9 @@ export function isCorpusName(fullName: string): boolean {
 /**
  * Seeded sampling WITHOUT replacement per season: unique full names AND unique given names
  * within a house (the show never casts two same-named houseguests in a season). The corpora
- * are raw material — which name lands on which archetype is entirely the seed's draw.
+ * are raw material — which name lands on which archetype is entirely the seed's draw. The
+ * pre-seeded `used`/`usedGiven` sets carry CROSS-SEASON memory (NAME-1 / #547) so a new season's
+ * cast avoids names used by prior seasons in the same game.
  */
 function uniqueName(rng: RandomnessSource, used: Set<string>, usedGiven: Set<string>): string {
   for (let guard = 0; guard < 1000; guard++) {
@@ -555,10 +557,40 @@ export function generateHiddenElements(rng: RandomnessSource, fit?: HiddenElemen
   return out;
 }
 
-export function generateHouse(rng: RandomnessSource): { npcs: Houseguest[] } {
+/**
+ * Pre-seed a fresh season's used-name sets from PRIOR seasons' names (NAME-1 / #547) so the corpus
+ * path stops repeating across a game. BOUNDED & fail-soft: the exclusion is only honored while the
+ * corpus keeps comfortable headroom for the 15-cast (we never starve the sampler — `uniqueName`'s
+ * guard would otherwise throw). Given names are the scarcer corpus (500 vs 805 surnames), so we
+ * cap the carried-over given-name exclusion to leave at least `NAME_HEADROOM` fresh given names.
+ */
+const NAME_HEADROOM = NPC_COUNT * 4;
+function seedPriorNames(
+  priorNames: readonly string[] | undefined,
+  used: Set<string>,
+  usedGiven: Set<string>,
+): void {
+  if (!priorNames || priorNames.length === 0) return;
+  const givenBudget = Math.max(0, GIVEN_NAMES.length - NAME_HEADROOM);
+  for (const raw of priorNames) {
+    const name = raw.trim();
+    if (!name) continue;
+    if (name.includes(" ")) used.add(name); // full-name exclusion (cheap — surnames are plentiful)
+    const given = name.split(" ")[0]!;
+    // Only exclude a given name while there is headroom; otherwise let it recur (real names do).
+    if (GIVEN_NAMES.includes(given) && usedGiven.size < givenBudget) usedGiven.add(given);
+  }
+}
+
+export function generateHouse(
+  rng: RandomnessSource,
+  priorNames?: readonly string[],
+): { npcs: Houseguest[] } {
   const specs = curatedArchetypes(rng, NPC_COUNT);
   const used = new Set<string>();
   const usedGiven = new Set<string>();
+  // NAME-1 (#547): avoid names used by prior seasons in the same game (bounded, fail-soft).
+  seedPriorNames(priorNames, used, usedGiven);
   // Draw order on the MAIN stream (name, style, stats, background, volatility) is preserved exactly;
   // appearance is generated off a SIDE rng (hashed off the name) so the cosmetic 0004 amendment
   // never perturbs competition-relevant generation (keeps seeded house composition byte-stable).
@@ -644,14 +676,39 @@ export interface OobeInput {
 const VOL_OF: Record<Disposition, number> = { clash: 0.7, bond: 0.3, neutral: 0.5 };
 
 /**
- * The MEDIAN default spec for a player who never supplied a recognizable archetype (C6):
- * the floater — balanced, unremarkable aptitudes. NEVER `ARCHETYPES[0]` (the comp-beast),
- * which silently granted a typo'd or early finalization the strongest stats in the game
- * (anti-sycophancy via fallback). Guarded by test: the default's stats are not the global max.
+ * The placeholder archetype slot the player carries when they supplied no recognizable archetype
+ * (the `Character.archetype` field is non-optional, so a value must sit here). It is a NEUTRAL slot
+ * ONLY — it NO LONGER seeds the player's stats. The floater bias used to be dealt as a fabricated
+ * identity (#529): a typo'd/early finalization silently received a real, biased stat profile the
+ * human never authored. The engine must never INVENT player canon — so when the archetype is absent
+ * the stats are NEUTRAL/unbiased (see `NEUTRAL_PLAYER_STATS`), this slot is just the placeholder, and
+ * `archetypeDefaulted` flags that the field is unauthored. (NEVER `ARCHETYPES[0]` — the comp-beast.)
  */
 export const DEFAULT_ARCHETYPE: Archetype = "floater";
 
-/** The ONLY human-authored profile, produced at first-run character creation. */
+/**
+ * The stat profile for a player who authored NO archetype (#529). Perfectly neutral/unbiased —
+ * NOT a fabricated archetype bias. Absence ⇒ empty/neutral, never invented. Sits comfortably inside
+ * `NPC_STAT_RANGE`, so it never min-maxes and never grants an edge (anti-sycophancy via fallback).
+ */
+export const NEUTRAL_PLAYER_STATS: { physical: number; mental: number; social: number } =
+  { physical: 0.5, mental: 0.5, social: 0.5 };
+
+/**
+ * The ONLY human-authored profile, produced at first-run character creation.
+ *
+ * Engine contract (#529 — the engine NEVER invents canon about the human player; absence ⇒
+ * empty/neutral, never fabricated). `name` is the ONE hard-required field (throws when missing —
+ * the test sandbox + heavy UAT rely on a name-only intake, so this is the only throw here; the
+ * "refuse to finalize on a missing required field" hard stop lives at the FE boundary, not here).
+ * For every other field, ABSENCE yields empty/neutral state, never improvised content:
+ *  - APPEARANCE/age/presentation: when the human authored no look, they stay EMPTY (`""`/0) — the
+ *    player portrait is NEVER improvised from a name hash (the old `generateAppearance(name hash)`
+ *    is gone). `getPortraitPrompt` returns null for an empty player appearance.
+ *  - ARCHETYPE/stats: absent ⇒ NEUTRAL/unbiased stats (`NEUTRAL_PLAYER_STATS`), a neutral volatility,
+ *    `archetypeDefaulted: true`, and an EMPTY persona — never the fabricated "floater" identity.
+ *  - BACKGROUND: absent ⇒ EMPTY (`""`) — never a placeholder presented as canon.
+ */
 export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
   // Validation: a profile can't be half-authored. `name` is the required field.
   if (!input || typeof input.name !== "string" || input.name.trim().length === 0) {
@@ -659,10 +716,11 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
   }
   const defaulted = !(input.archetype && SPEC_OF.has(input.archetype));
   const spec = defaulted ? SPEC_OF.get(DEFAULT_ARCHETYPE)! : SPEC_OF.get(input.archetype!)!;
-  const strategyStyle = input.strategyStyle && spec.styles.includes(input.strategyStyle)
+  // Stats come from the AUTHORED archetype only. Unauthored ⇒ neutral/unbiased (#529): never deal a
+  // fabricated archetype's bias to a human who never chose it.
+  const stats = defaulted ? { ...NEUTRAL_PLAYER_STATS } : { ...spec.bias };
+  const strategyStyle = !defaulted && input.strategyStyle && spec.styles.includes(input.strategyStyle)
     ? input.strategyStyle : spec.styles[0]!;
-  // The player's public appearance is seed-stable per authored name (the player has no NPC rng).
-  const appearanceRng = new SeededRandom(hashSeed(input.name.trim()));
   // The casting interview seeds the Soul memory (0050): the house's long-term memory starts with
   // who the player said they were. These are the player's OWN pre-game memories — recallable and
   // persisted (0007/0030), never an NPC pathway (the interview is OOC; no one witnessed it).
@@ -672,30 +730,37 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
       .map((n) => n.trim()).filter((n) => n.length > 0)
       .map((n) => `casting interview — ${n}`),
   ];
+  // The player's self-described persona is THEIR words only (display/narration). Unlike NPCs, it does
+  // NOT fall back to a canonical archetype label — an unauthored persona stays empty (#529): the
+  // engine never speaks a persona the human never typed.
+  const personaArchetype = input.personaArchetype?.trim();
+  const personaStrategyStyle = input.personaStrategyStyle?.trim();
   return {
     id: PLAYER,
     name: input.name.trim(),
     authored: "oobe",
     character: {
+      // A non-optional slot must hold a value; when unauthored this is the neutral PLACEHOLDER only —
+      // the stats above are already neutral, so it grants nothing. `archetypeDefaulted` marks it unauthored.
       archetype: spec.archetype,
       strategyStyle,
-      // Derived & balanced (anti-sycophancy, 0006): aptitudes come from the authored archetype,
-      // NOT free allocation — so the player can never min-max past the NPC bounds.
-      stats: { ...spec.bias },
-      background: input.backstory?.trim() || "human-authored at first-run character creation (OOBE)",
-      ...generateAppearance(appearanceRng),
+      stats,
+      // Absent backstory ⇒ EMPTY (#529): never present a placeholder background as authored canon.
+      background: input.backstory?.trim() || "",
+      // No name-hash appearance (#529): the human authored no look, so it stays empty — the portrait
+      // is never improvised from a name hash.
+      appearance: "",
+      age: 0,
+      presentation: "",
       // The player authors their own hidden material (`privateStrategy`); the typed hidden-element pool
       // is for generated NPCs only, so the player's stays empty.
       hiddenElements: [],
     },
-    soul: { emotionalBaseline: 0.5, volatility: VOL_OF[spec.disposition], emotionalState: 0.5, emotionalHistory: [], memory: interviewMemory },
-    // The player's self-described persona (their words), kept for the narrative voice even when it
-    // diverges from the canonical archetype/style that drive the hidden stats. Falls back to the
-    // canonical labels so the view always has something to show.
-    persona: {
-      archetype: input.personaArchetype?.trim() || spec.archetype,
-      strategyStyle: input.personaStrategyStyle?.trim() || strategyStyle,
-    },
+    soul: { emotionalBaseline: 0.5, volatility: defaulted ? VOL_OF.neutral : VOL_OF[spec.disposition], emotionalState: 0.5, emotionalHistory: [], memory: interviewMemory },
+    // Only the player's OWN words populate the persona; absent ⇒ omitted entirely (no canonical fallback).
+    ...((personaArchetype || personaStrategyStyle)
+      ? { persona: { ...(personaArchetype ? { archetype: personaArchetype } : {}), ...(personaStrategyStyle ? { strategyStyle: personaStrategyStyle } : {}) } }
+      : {}),
     ...(input.privateStrategy?.trim() ? { privateStrategy: input.privateStrategy.trim() } : {}),
     ...(input.motivation?.trim() ? { motivation: input.motivation.trim() } : {}),
     ...(defaulted ? { archetypeDefaulted: true } : {}),
@@ -710,10 +775,12 @@ export function startNewGame(
     personaArchetype?: string; personaStrategyStyle?: string;
     /** Casting-interview deepeners (0050): authored material that seeds Character/Soul. */
     backstory?: string; privateStrategy?: string; motivation?: string; interviewNotes?: string[];
+    /** NAME-1 (#547): prior seasons' names this game's new cast should avoid (bounded, fail-soft). */
+    priorCastNames?: readonly string[];
   },
 ): GameHouse {
   const rng = new SeededRandom(opts.seed);
-  const npcs = generateHouse(rng).npcs;
+  const npcs = generateHouse(rng, opts.priorCastNames).npcs;
   const player = runPlayerOOBE({
     name: opts.playerName,
     ...(opts.archetype ? { archetype: opts.archetype } : {}),

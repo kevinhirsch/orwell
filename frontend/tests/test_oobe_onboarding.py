@@ -175,13 +175,14 @@ def test_producers_open_with_a_hidden_kickoff_on_welcome_dismiss():
 
 
 def test_welcome_dismiss_runs_the_kickoff():
-    # The welcome's onProceed opens the fresh interview session then fires the producers' kickoff.
+    # The setup wizard's onProceed ("Start casting") opens the fresh interview session then fires the
+    # producers' kickoff — the season begins on the player's explicit confirm, not on feed-probe.
     onb = _read("static", "js", "orwellOnboarding.js")
     route = onb[onb.index("async function route"):]
     assert "const onProceed" in route
     assert "openFreshInterviewSession" in route
     assert "_orwellOpenGameAfterCasting" in route
-    assert "mountWelcome(onProceed)" in route
+    assert "mountSetup(onProceed)" in route
 
 
 def test_resume_cue_after_photo_exists():
@@ -214,29 +215,40 @@ def test_the_hidden_cue_seam_exists_in_chat():
     assert "_hideUserBubble" in js
 
 
-# ── 3. The WELCOME MODAL (kept as its own modal) ────────────────────────────────────────
+# ── 3. The SETUP WIZARD (pre-game model setup; replaces the verbose welcome modal) ──────
+# Owner request (2026-06-23): set the LLM/models in a wizard-like step BEFORE the game starts,
+# borrowing the Settings model controls, showing NO welcome data apart from the framing line
+# "Production needs the feeds". And the premature-start bug: adding a feed used to start the
+# season before the player could pick their models — now the season begins only on "Start casting".
 
-def test_welcome_modal_is_its_own_modal_not_in_chat():
+def _setup_seg(onb):
+    """The mountSetup function body (helper-robust slice: from the fn to the next top-level fn)."""
+    start = onb.index("function mountSetup")
+    end = onb.index("function openSettings", start)
+    return onb[start:end]
+
+
+def test_setup_wizard_is_its_own_modal_not_in_chat():
     onb = _read("static", "js", "orwellOnboarding.js")
-    assert "function mountWelcome" in onb
+    assert "function mountSetup" in onb
     # it is a real dialog overlay (aria-modal), the same overlay machinery as the holding cards
     assert 'aria-modal", "true"' in onb
-    # it greets and frames the casting interview (the producers reach out next)
-    seg = onb[onb.index("function mountWelcome"):]
-    seg = seg[: seg.index("\n  }\n")]
-    assert "Welcome to the house" in seg
-    assert "casting interview" in seg
+    # the ONLY welcome copy is the framing line; the rest is feed/model setup
+    seg = _setup_seg(onb)
+    assert "Production needs the feeds" in seg
+    # the old verbose welcome copy is gone
+    assert "Welcome to the house" not in onb
 
 
-def test_welcome_modal_shows_on_every_fresh_season():
-    # OOBE re-sequence: the welcome shows on EVERY fresh game/season (not once per account). The
-    # per-user seen-marker only debounces page RELOADS within the same pre-game session; the restart
-    # entry points CLEAR it so a new season greets again.
+def test_setup_wizard_shows_on_every_fresh_season():
+    # The wizard shows on EVERY fresh game/season (not once per account). The per-user seen-marker
+    # only debounces page RELOADS within the same pre-game session; the restart entry points CLEAR
+    # it so a new season sets up again.
     onb = _read("static", "js", "orwellOnboarding.js")
     assert "orwell-welcome-seen" in onb
     assert "document.body.dataset.user" in onb or "document.body && document.body.dataset.user" in onb
     assert "welcomeSeen()" in onb and "markWelcomeSeen()" in onb
-    # the marker is cleared at restart so the welcome re-shows for a fresh season
+    # the marker is cleared at restart so the wizard re-shows for a fresh season
     assert "function clearWelcomeSeen" in onb
     # _orwellMarkRestart clears it (both restart entry points call markRestart)
     mr = onb[onb.index("window._orwellMarkRestart"):]
@@ -245,71 +257,77 @@ def test_welcome_modal_shows_on_every_fresh_season():
     # it is shown from route() only pre-game (started === false), after the model gate
     route = onb[onb.index("async function route"):]
     assert "if (!welcomeSeen())" in route
-    assert "mountWelcome(onProceed)" in route
+    assert "mountSetup(onProceed)" in route
 
 
-def test_welcome_reshows_after_a_backend_reset_via_fresh_intake():
+def test_setup_wizard_reshows_after_a_backend_reset_via_fresh_intake():
     # A BACKEND/host factory reset runs server-side and never reaches the FE restart hooks
-    # (settings.js / orwellNewSeason.js), so the per-user welcome marker can go stale and skip the
-    # welcome on the new season's first open. route() detects a genuinely fresh casting (the engine
-    # intake is empty — casting.known has no captured fields) with NO interview yet underway and
-    # clears the stale marker so the welcome greets again — without re-popping on a same-session
-    # mid-interview reload.
+    # (settings.js / orwellNewSeason.js), so the per-user marker can go stale and skip the wizard on
+    # the new season's first open. route() detects a genuinely fresh casting (the engine intake is
+    # empty — casting.known has no captured fields) with NO interview yet underway and clears the
+    # stale marker so the wizard shows again — without re-popping on a same-session mid-interview reload.
     onb = _read("static", "js", "orwellOnboarding.js")
     route = onb[onb.index("async function route"):]
-    # the fresh-intake signal is server-derived (casting.known empty), gated on whether the interview
-    # has actually begun — NOT the per-tab seat flag (route() sets that flag every pre-game load, so a
-    # same-tab reload after a host reset kept it true and skipped the welcome — Thing 1).
     assert "st.casting.known" in route
     assert "_intakeEmpty" in route and "!_conversationHasAssistantTurn()" in route
     assert "!_seatTakenBefore" not in route   # the per-tab seat-flag gate is retired
-    # the stale marker is cleared so the welcome re-shows, BEFORE the !welcomeSeen() gate
+    # the stale marker is cleared so the wizard re-shows, BEFORE the !welcomeSeen() gate
     clear_at = route.index("clearWelcomeSeen()")
     gate_at = route.index("if (!welcomeSeen())")
     assert clear_at < gate_at
 
 
-def test_welcome_modal_sequenced_after_the_model_gate():
+def test_setup_wizard_sequenced_after_the_model_gate():
     onb = _read("static", "js", "orwellOnboarding.js")
     route = onb[onb.index("async function route"):]
-    # the model gate (J4) returns BEFORE the welcome modal mounts — production needs a feed first
-    assert route.index("anyModelConfigured") < route.index("mountWelcome(onProceed)")
-    assert "Production needs a feed source" in onb
+    # the model gate (J4) returns BEFORE the wizard mounts — production needs a feed first
+    assert route.index("anyModelConfigured") < route.index("mountSetup(onProceed)")
+    # the framing line (the user's exact phrase) is the J4 holding card title AND the wizard h1
+    assert "Production needs the feeds" in onb
+    assert "Production needs a feed source" not in onb
 
 
-def test_welcome_modal_proceeds_into_the_interview():
+def test_setup_wizard_starts_only_on_explicit_confirm_not_on_feed_probe():
+    # The PREMATURE-START FIX: the season begins on the wizard's "Start casting" button, NOT
+    # automatically when a feed is probed. The kickoff (_orwellOpenGameAfterCasting) is reached
+    # through onProceed, which fires from the Start button's dismiss — never from the model-change
+    # listener (which only re-renders the wizard's model summary).
     onb = _read("static", "js", "orwellOnboarding.js")
-    seg = onb[onb.index("function mountWelcome"):]
-    seg = seg[: seg.index("\n  }\n")]
-    # the welcome's primary action proceeds (no data entry; it IS the welcome, not a blocker)
-    assert "Meet the producers" in seg
+    seg = _setup_seg(onb)
+    assert "Start casting" in seg
+    assert "data-ob-setup-start" in seg
+    # the Start button gates on a resolved chat model (no narrator ⇒ disabled)
+    assert "_startBtn" in seg and "disabled" in seg
     # dismissing marks it seen and runs onProceed (open the interview + producers' kickoff)
     assert "markWelcomeSeen()" in seg
     assert "onProceed && onProceed()" in seg
+    # the model-change listener re-renders (refresh) but does NOT proceed/kickoff
+    assert "orwell:models-changed" in seg and "refresh" in seg
 
 
-def test_welcome_modal_copy_drops_the_photo_first_framing():
-    # OOBE re-sequence: the welcome no longer says the cast photo is "first up" — the producers reach
-    # out first, and the photo comes mid-interview.
+def test_setup_wizard_borrows_the_settings_model_controls():
+    # Owner request: copy the elements from the Settings page. The wizard shows the model summary
+    # (read from the same projections the chatbox/Settings use) and a "Choose models" door into the
+    # real Settings model controls — no parallel source of truth.
     onb = _read("static", "js", "orwellOnboarding.js")
-    seg = onb[onb.index("function mountWelcome"):]
-    seg = seg[: seg.index("\n  }\n")]
-    assert "Welcome to the house" in seg
-    assert "One house, sixteen strangers,\n          one winner — and production is watching everything." in seg
-    # the photo-FIRST line is gone; the welcome frames the producers reaching out
-    assert "First up: your cast photo" not in seg
-    assert "they'll reach out the moment you're ready" in seg
-    # the dropped ordered-list scaffolding is still gone
-    assert "ob-steps" not in seg
-    assert "ob-step-n" not in seg
+    seg = _setup_seg(onb)
+    assert "Choose models" in seg
+    assert "data-ob-choose-models" in seg
+    assert "openSettings" in seg
+    # the summary is read from the chatbox/Settings projections, not a separate store
+    assert "/api/default-chat" in onb
+    assert "image_model" in onb
+    # narrator + portrait model rows
+    assert "Narrator model" in seg
+    assert "Portrait model" in seg
 
 
-# ── 3b. Auto-advance after the model is configured (no manual reload) ──────────────────
+# ── 3b. Auto-advance after the model is configured (no manual reload, no premature start) ──
 
-def test_flow_auto_advances_after_model_config_without_a_reload():
-    # P1 OOBE overhaul (item 4): once the player configures an LLM model in Settings, the flow
-    # must re-evaluate and proceed to the welcome modal WITHOUT a page reload. models.js fires
-    # orwell:models-changed on the none→some transition; onboarding listens and re-runs route().
+def test_flow_re_renders_after_model_config_without_a_reload():
+    # Once the player connects/changes a feed in Settings, the wizard must re-evaluate WITHOUT a page
+    # reload — but it must NOT start the season (premature-start fix). models.js fires
+    # orwell:models-changed on the none→some transition; onboarding listens.
     models = _read("static", "js", "models.js")
     assert "orwell:models-changed" in models
     assert "_modelsAvailable" in models       # the none→some guard
@@ -318,22 +336,21 @@ def test_flow_auto_advances_after_model_config_without_a_reload():
     # the re-route clears a stale holding card immediately (not on the 5s re-probe)
     assert "_reRouteAfterModelConfig" in onb
     assert "data-ob-holding" in onb           # only a holding card is auto-dismissed
-    # the re-route ultimately calls route() so the welcome modal opens
+    # the re-route ultimately calls route()
     seg = onb[onb.index("function _reRouteAfterModelConfig"):]
     seg = seg[: seg.index("\n  }")]
     assert "route()" in seg
 
 
 def test_splash_tips_are_suppressed_during_onboarding():
-    # P1 OOBE overhaul (item 3): the welcome splash's rotating gameplay tips + the "house is
-    # waiting" tagline must NOT show during the welcome modal / cast-photo step (they bleed
-    # through behind the surface). A body flag drives a CSS suppression.
+    # The welcome splash's rotating gameplay tips + the "house is waiting" tagline must NOT show
+    # during the setup wizard / cast-photo step (they bleed through behind the surface). A body flag
+    # drives a CSS suppression.
     onb = _read("static", "js", "orwellOnboarding.js")
     assert "setOnboardingActive" in onb
     assert 'classList.toggle("ow-onboarding"' in onb
-    # the welcome modal arms it on mount
-    seg = onb[onb.index("function mountWelcome"):]
-    seg = seg[: seg.index("\n  }\n")]
+    # the wizard arms it on mount
+    seg = _setup_seg(onb)
     assert "setOnboardingActive(true)" in seg
     css = _read("static", "css", "game-trim.css")
     # both onboarding flags hide the splash tip + tagline
@@ -456,3 +473,66 @@ def test_thing2_cast_photo_is_a_pill_not_an_auto_open():
     # the pill's click is what opens the box
     pill = hs[hs.index("function showPill"):hs.index("function removePill")]
     assert "mount()" in pill and "hs-choose-btn" in pill
+
+
+# ── 6. Welcome polish (#606 cluster: J1-31 focus ring, J1-10 desktop weight) + J1-30 producers copy ──
+
+def test_welcome_ctas_have_a_focus_visible_ring():
+    # J1-31: the onboarding overlay buttons are the journey's FIRST interactive elements and must
+    # carry a visible keyboard-focus ring (WCAG 2.4.7). The ring is keyed to --brand-color (theme
+    # token) — never a hardcoded color — and the primary CTA gets a double ring so its focus reads
+    # against its own fill.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    assert ".ob-btn:focus-visible" in onb
+    assert ".ob-btn-primary:focus-visible" in onb
+    # the ring uses the theme brand token, not a hardcoded white/bg
+    seg = onb[onb.index(".ob-btn:focus-visible"):onb.index(".ob-btn-primary:focus-visible")]
+    assert "var(--brand-color" in seg
+    assert "box-shadow" in seg
+
+
+def test_primary_cta_uses_on_accent_token_not_hardcoded_white():
+    # The accent CTA's text uses the --on-accent token (the project's contrast contract for accent
+    # fills), never a hardcoded white/--bg.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    seg = onb[onb.index(".ob-btn-primary {"):]
+    seg = seg[: seg.index("}")]
+    assert "var(--on-accent" in seg
+
+
+def test_welcome_card_scales_up_on_desktop():
+    # J1-10: the 420px card filled ~10% of a desktop viewport and read as under-confident. A wide
+    # (>=1024px) media query scales the card + title up for visual weight — pure type/space (no new
+    # imagery, which is a design call) and mobile/narrow keeps the compact card.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    assert "@media (min-width: 1024px)" in onb
+    seg = onb[onb.index("@media (min-width: 1024px)"):]
+    seg = seg[: seg.index("}\n      </style>") + 1] if "}\n      </style>" in seg else seg[:400]
+    assert ".ob-card" in seg and "width: 540px" in seg
+
+
+def test_pre_token_wait_copy_is_in_universe_in_the_game_build():
+    # J1-30: the pre-token wait (most visible right after "Start casting") read as OOC lag
+    # ("Processing request…"). In the game build the GENERIC waiting stages get a production voice;
+    # the literal strings remain as the non-game-build fallback.
+    chat = _read("static", "js", "chat.js")
+    assert "function _waitLabel" in chat
+    # the in-universe copy is producers-framed and gated on the game build
+    seg = chat[chat.index("function _waitLabel"):]
+    seg = seg[: seg.index("\n  }")]
+    assert "isGameBuild()" in seg
+    assert "producers" in seg.lower()
+    # the generic spinner stages route through the helper (with the literal fallback preserved)
+    assert "_waitLabel('init', 'Initializing')" in chat
+    assert "_waitLabel('waiting', 'Processing request')" in chat
+    assert "_waitLabel('still', 'Still waiting for model')" in chat
+
+
+def test_pre_token_copy_stays_consistent_with_producers_framing():
+    # CONVENTION: the FE's in-universe "producers" voice must stay consistent with the engine-side
+    # framing (apply_game_framing's PRE_GAME_PROMPT casts the show's voice as the PRODUCER). The
+    # pre-token wait copy uses the same "producers" framing — no competing fiction.
+    ch = _read("routes", "chat_helpers.py")
+    assert "PRODUCER" in ch  # the pre-game framing voice
+    chat = _read("static", "js", "chat.js")
+    assert "producers" in chat[chat.index("function _waitLabel"):chat.index("function _waitLabel") + 600].lower()

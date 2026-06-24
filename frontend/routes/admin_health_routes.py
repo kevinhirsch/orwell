@@ -34,6 +34,7 @@ Boundaries:
 """
 
 import inspect
+import json
 import logging
 import os
 import platform
@@ -83,14 +84,23 @@ def _log_dirs() -> list:
     return out
 
 
+# On-disk logs that are ALREADY surfaced as a live ring source — listing them as a separate
+# "(file)" source duplicates the stream (and the file looked "full" beside a post-restart-blank
+# live view). The live ring is seeded from the archive at startup, so it represents the file fully.
+_RING_BACKED_LOG_FILES = {"llm-io.jsonl"}  # ↔ the "LLM I/O (live)" source
+
+
 def _log_files() -> list:
-    """On-disk log basenames across the viewer's data dirs (allowlist for the file tail)."""
+    """On-disk log basenames across the viewer's data dirs (allowlist for the file tail).
+
+    Excludes files already represented by a live ring source (e.g. llm-io.jsonl ↔ "LLM I/O
+    (live)") so the viewer never lists the same stream twice."""
     out: list = []
     seen: set = set()
     for d in _log_dirs():
         try:
             for n in sorted(os.listdir(d)):
-                if n in seen:
+                if n in seen or n in _RING_BACKED_LOG_FILES:
                     continue
                 if n.endswith((".log", ".jsonl")) and os.path.isfile(os.path.join(d, n)):
                     out.append(n)
@@ -98,6 +108,22 @@ def _log_files() -> list:
         except OSError:
             pass
     return out
+
+
+def _pretty_log_line(name: str, raw: str) -> str:
+    """Pretty-print a single log line for the file viewer. A ``.jsonl`` archive stores one JSON
+    object per line, which rendered as an unreadable one-liner; expand it to indented JSON so the
+    file viewer is legible (the pane is ``white-space: pre-wrap``, so newlines show). Plain
+    ``.log`` text and anything that isn't valid JSON is returned unchanged."""
+    if not name.endswith(".jsonl"):
+        return raw
+    s = raw.strip()
+    if not s or s[0] not in "{[":
+        return raw
+    try:
+        return json.dumps(json.loads(s), indent=2, ensure_ascii=False)
+    except (ValueError, TypeError):
+        return raw
 
 
 def _log_path(name: str) -> str:
@@ -216,8 +242,9 @@ def _versions() -> dict:
     """FE + engine build/version strings (no secrets) for one-glance triage."""
     out: dict = {}
     try:
-        from src.orwell_version import get_display_version
+        from src.orwell_version import get_display_version, get_build
         out["frontend"] = get_display_version()
+        out["build"] = get_build()
     except Exception as e:
         out["frontend"] = f"error: {type(e).__name__}"
     try:
@@ -563,6 +590,9 @@ async def _health_snapshot(user: str | None) -> dict:
         "frontend": frontend,
         "tiersAgree": tiers_agree,
         "images": images,
+        # Build + version (PR) for one-glance triage on the status page. version is the
+        # PR-derived "vX.XX"; build is the deployed checkout's short commit SHA.
+        "versions": _versions(),
     }
 
 
@@ -591,6 +621,7 @@ def setup_admin_health_routes() -> APIRouter:
                 "frontend": {"lastError": None, "store": {}},
                 "tiersAgree": False,
                 "images": {"available": False},
+                "versions": _versions(),  # build/PR is git-derived — still resolvable when the DB/engine is down
                 "error": "health snapshot degraded — recovery actions remain available",
             }
 
@@ -619,6 +650,7 @@ def setup_admin_health_routes() -> APIRouter:
             {"id": "live", "label": "Front-end (live)"},
             {"id": "io", "label": "Engine I/O (live) — every tool call in/out"},
             {"id": "llmio", "label": "LLM I/O (live) — full prompt + response + reasoning"},
+            {"id": "overseer", "label": "Overseer (live) — diagnoses & corrections"},
         ]
         for name in _log_files():
             sources.append({"id": f"file:{name}", "label": f"{name} (file)"})
@@ -637,6 +669,9 @@ def setup_admin_health_routes() -> APIRouter:
         if source == "llmio":
             nxt, lines = log_rings.LLMIO.since(since)
             return {"source": source, "next": nxt, "lines": lines}
+        if source == "overseer":
+            nxt, lines = log_rings.OVERSEER.since(since)
+            return {"source": source, "next": nxt, "lines": lines}
         if source.startswith("file:"):
             name = source[5:]
             if name not in _log_files():  # strict allowlist — no traversal, ever
@@ -649,7 +684,8 @@ def setup_admin_health_routes() -> APIRouter:
                     f.seek(start)
                     chunk = f.read(min(65536, max(0, size - start)))
                 text = chunk.decode("utf-8", "replace")
-                lines = [{"seq": start + i, "ts": None, "level": "", "logger": name, "msg": l}
+                lines = [{"seq": start + i, "ts": None, "level": "", "logger": name,
+                          "msg": _pretty_log_line(name, l)}
                          for i, l in enumerate(text.splitlines())]
                 return {"source": source, "next": size, "lines": lines[-500:]}
             except OSError:
@@ -661,11 +697,12 @@ def setup_admin_health_routes() -> APIRouter:
         """The LLM I/O trace toggle + log-retention horizon + the live total-size
         readout (the universal logging setting on the status page). Best-effort."""
         require_admin(request)
-        from src import llm_trace
+        from src import llm_trace, overseer
         from src.settings import get_setting
         total = llm_trace.total_log_bytes()
         return {
             "traceEnabled": bool(get_setting("llm_trace_enabled", True)),
+            "overseerEnabled": bool(overseer.overseer_enabled()),
             "retentionDays": llm_trace.retention_days(),
             "choices": llm_trace.RETENTION_CHOICES,
             "totalBytes": total,
@@ -678,7 +715,7 @@ def setup_admin_health_routes() -> APIRouter:
         """Persist the trace toggle and/or retention horizon. Lowering the horizon
         trims immediately so the freed space shows up at once."""
         require_admin(request)
-        from src import llm_trace
+        from src import llm_trace, overseer
         from src.settings import load_settings, save_settings
         try:
             body = await request.json()
@@ -690,6 +727,9 @@ def setup_admin_health_routes() -> APIRouter:
         changed = False
         if "traceEnabled" in body:
             settings["llm_trace_enabled"] = bool(body["traceEnabled"])
+            changed = True
+        if "overseerEnabled" in body:
+            settings["overseer_enabled"] = bool(body["overseerEnabled"])
             changed = True
         if "retentionDays" in body:
             try:
@@ -705,6 +745,7 @@ def setup_admin_health_routes() -> APIRouter:
         result = llm_trace.trim_logs(None)
         return {
             "traceEnabled": bool(settings.get("llm_trace_enabled", True)),
+            "overseerEnabled": bool(overseer.overseer_enabled()),
             "retentionDays": llm_trace.retention_days(),
             "totalBytes": result["totalBytes"],
             "totalHuman": result["totalHuman"],
@@ -951,7 +992,13 @@ _STATUS_PAGE = """<!doctype html>
   th, td { text-align: left; padding: 4px 14px 4px 0; border-bottom: 1px solid #262a33; }
   th { opacity: .55; font-weight: 600; }
   td.num { text-align: right; padding-right: 0; }
-  .actions { margin: 18px 0; display: flex; gap: 12px; }
+  /* wrap so the maintenance-button row (and the log-source / retention rows) reflow on a phone
+     instead of forcing the layout viewport wider than the screen — this page is the recovery
+     surface an operator may open on mobile when the app shell is broken. */
+  .actions { margin: 18px 0; display: flex; gap: 12px; flex-wrap: wrap; }
+  /* the log-source <select> has long option text ("LLM I/O (live) — full prompt + …"); cap it to
+     the row so a wide native control can't push the page past the viewport on a phone. */
+  .actions select { max-width: 100%; }
   .btn { color: #9cdef2; border: 1px solid #355a66; border-radius: 8px;
          padding: 6px 12px; text-decoration: none; cursor: pointer;
          background: transparent; font: inherit; display: inline-block; }
@@ -1033,6 +1080,14 @@ _STATUS_PAGE = """<!doctype html>
   <button type="button" class="btn" id="trim-now" title="Trim every managed logfile to the selected horizon right now">Trim now</button>
   <span id="retmsg" class="sub"></span>
 </div>
+<h1 style="margin-top:26px">RUNTIME OVERSEER</h1>
+<div class="sub">The runtime loop overseer (feature 0079) watches the engine↔LLM loop; when a symptom trips it diagnoses the root cause and logs it to the <strong>Overseer (live)</strong> stream above. <strong>Shadow mode</strong> — it diagnoses and logs but does not act (the existing guardrails still do), so enabling it is safe and changes nothing the player sees. The <code>ORWELL_OVERSEER</code> env var is the headless fallback when this toggle is unset.</div>
+<div class="actions" style="margin:8px 0;align-items:center;flex-wrap:wrap">
+  <label class="sub" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+    <input type="checkbox" id="overseer-toggle"> enable the runtime overseer (shadow mode)
+  </label>
+  <span id="overseermsg" class="sub"></span>
+</div>
 <div id="err"></div>
 <script nonce="{{CSP_NONCE}}">
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1041,8 +1096,14 @@ const up = s => { s = Math.max(0, +s || 0); const d = (s/86400)|0, h = ((s%86400
 const B = (ok, t) => '<span class="' + (ok ? "ok" : "bad") + '">' + esc(t) + "</span>";
 function render(d) {
   const eng = d.engine || {}, emb = eng.embeddings || null, img = d.images || {},
-        st = (d.frontend || {}).store || {}, tc = eng.toolCalls || {};
+        st = (d.frontend || {}).store || {}, tc = eng.toolCalls || {}, ver = d.versions || {};
+  // The deployed build/PR version (vX.XX, X.XX = PR#/100) + short commit SHA — confirms WHICH
+  // build is live and that an Update actually landed. (The payload already carries it; show it.)
+  const build = (ver.frontend ? esc(ver.frontend) : "unknown") +
+    (ver.build ? " · " + esc(ver.build) : "") +
+    (ver.engine && ver.engine !== ver.frontend ? " · engine " + esc(ver.engine) : "");
   const rows = [
+    ["Build", build],
     ["Engine", B(!!eng.ok, eng.ok ? "REACHABLE" : "DOWN") + (eng.latencyMs != null ? " · " + esc(eng.latencyMs) + " ms" : "") + (eng.uptimeSeconds != null ? " · up " + esc(up(eng.uptimeSeconds)) : "") + (eng.error ? " · " + esc(eng.error) : "")],
     ["Tiers agree", B(!!d.tiersAgree, d.tiersAgree ? "YES" : "NO")],
     ["Embeddings", emb ? esc(emb.provider || "?") + " " + B(!emb.degraded, emb.degraded ? "DEGRADED" : "OK") : B(false, "UNKNOWN")],
@@ -1399,73 +1460,115 @@ document.getElementById("update-orwell").addEventListener("click", updateOrwell)
 // "triggered then nothing" can never recur.
 const OPS_PROGRESS_KEY = "orwell.ops.watching";          // localStorage: the action we're tracking
 const OPS_STEP_LABELS = {
-  // The human phase names per action — index = step number (the script emits 1..total). These
-  // mirror the ops_progress_step() calls in the deploy scripts; a message from the server always
-  // wins for the CURRENT step, so a label drift never lies, it just pre-fills the upcoming rows.
+  // FALLBACK phase names only — used to label a COMPLETED step that this page never observed live
+  // (e.g. it was opened mid-run / after the restart). They must mirror the exact ops_progress_step()
+  // messages in the deploy scripts so the fallback never invents a step the updater didn't run. The
+  // server's live message is the source of truth for the current step and is what fills these in as
+  // the run progresses; these are never used to PRE-LIST steps the updater hasn't reached yet.
   "update": ["fetching latest code", "rebuilding engine", "refreshing front-end deps", "restarting services", "updated"],
   "factory-reset": ["stopping services", "preserving API keys / LLM config", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
-  "update-reset": ["fetching latest code", "rebuilding engine", "stopping services", "wiping front-end store", "scrubbing game sandboxes", "restarting services", "OOBE ready"],
+  // orwell-update-reset.sh emits exactly TWO steps (total=2) — the old 7-label list pre-populated
+  // fabricated rows that never matched what the updater reported.
+  "update-reset": ["updating (pull → rebuild → refresh deps)", "resetting to OOBE (keep API keys) + final restart"],
 };
 const OPS_TITLES = { "update": "Updating Orwell", "factory-reset": "Factory Reset (OOBE)", "update-reset": "Update + Reset" };
+// This panel tracks ONLY the three top-of-page maintenance actions. public-deployment / tls also
+// publish ops-status entries, but they have their OWN inline progress areas — surfacing them here
+// would render a titleless, label-less panel ("extraneous data"). Restrict to what this panel owns.
+const OPS_PANEL_ACTIONS = ["update", "factory-reset", "update-reset"];
+// A finished/failed run is only "now" for a short window. After it lapses the panel hides instead
+// of resurrecting a stale completion banner on every later page-load (the old d.latest behavior).
+const OPS_FRESH_MS = 120000;
+function opsFresh(s) { if (!s || !s.ts) return false; const t = Date.parse(s.ts); return isFinite(t) && (Date.now() - t) < OPS_FRESH_MS; }
 function opsMarkWatching(action) { try { localStorage.setItem(OPS_PROGRESS_KEY, action); } catch (e) {} }
 function opsClearWatching() { try { localStorage.removeItem(OPS_PROGRESS_KEY); } catch (e) {} }
 function opsGetWatching() { try { return localStorage.getItem(OPS_PROGRESS_KEY); } catch (e) { return null; } }
 const opsPanel = document.getElementById("ops-progress");
+// Live, per-action record of the messages the updater HAS actually reported this session
+// (step number → message), built up as we poll. Completed-step rows are labeled from what we
+// genuinely observed — never a guess — and we only fall back to the static labels for a step we
+// never saw (the page was opened mid-run / after the restart).
+const opsSeen = {};
 function renderOpsProgress(s) {
-  // s = a normalized status object from /api/admin/ops-status (or null). Hide the panel when
-  // there's nothing to show.
+  // s = a normalized status object from /api/admin/ops-status (or null). Hide when nothing is live.
   if (!s) { opsPanel.style.display = "none"; return; }
   const action = s.action || "ops";
-  const labels = OPS_STEP_LABELS[action] || [];
-  const total = s.total || labels.length || 0;
+  // The SERVER is authoritative for the count — the updater's own ops_progress_init <total> — so we
+  // never invent a step total from a client label list (that drifted: update-reset declares 2 steps,
+  // the old map listed 7). step is the live current step, clamped into range.
+  const total = s.total || 0;
   const step = Math.max(0, Math.min(s.step || 0, total || (s.step || 0)));
+  const cleanMsg = (s.message || "").replace(/^FAILED:\\s*/, "").trim();
+  // Record the live observation so a later render labels this completed step with what REALLY ran.
+  if (step >= 1 && cleanMsg) { (opsSeen[action] = opsSeen[action] || {})[step] = cleanMsg; }
+  const seen = opsSeen[action] || {};
+  const fallback = OPS_STEP_LABELS[action] || [];
+  const labelFor = i => seen[i] || fallback[i - 1] || ("step " + i);
   opsPanel.style.display = "block";
   document.getElementById("ops-progress-title").textContent = OPS_TITLES[action] || action;
   document.getElementById("ops-progress-count").textContent = total ? ("step " + step + " / " + total) : "";
-  const pct = total ? Math.round((s.ok ? total : step) / total * 100) : (s.ok ? 100 : 0);
+  // Bar = steps actually COMPLETED, never ahead of the ✓ rows (a step merely in flight is not done).
+  const completed = s.ok ? total : Math.max(0, step - 1);
+  const pct = total ? Math.round(completed / total * 100) : (s.ok ? 100 : 0);
   const bar = document.getElementById("ops-progress-bar");
   bar.style.width = pct + "%";
   bar.style.background = s.error ? "#e55" : (s.ok ? "#3cb46e" : "#9cdef2");
-  const spinner = document.getElementById("ops-progress-spinner");
-  spinner.style.display = s.running ? "inline-block" : "none";
-  // Build the step rows: done (✓), current (●), pending (○); the failed step gets ✗.
+  document.getElementById("ops-progress-spinner").style.display = s.running ? "inline-block" : "none";
+  // Render ONLY the steps the updater has actually reached — completed (✓) plus the one in flight
+  // (●, labeled with the LIVE server message) or the one that failed (✗). On success the whole set
+  // is done. Future steps are NOT pre-listed, so the panel grows from real progress and shows no
+  // fabricated rows before the updater gets there.
+  const upto = s.ok ? total : step;   // step 0 (init) ⇒ no rows yet, just "starting…" below
   const rows = [];
-  const n = Math.max(total, labels.length, step);
-  for (let i = 1; i <= n; i++) {
-    const label = (i === step && s.message && !s.ok) ? s.message.replace(/^FAILED:\\s*/, "") : (labels[i - 1] || ("step " + i));
-    let mark, cls;
-    if (s.error && i === step) { mark = "✗"; cls = "bad"; }
-    else if (i < step || (s.ok && i <= total)) { mark = "✓"; cls = "ok"; }
-    else if (i === step && s.running) { mark = "●"; cls = ""; }
-    else { mark = "○"; cls = "sub"; }
-    const labelCls = (cls === "sub") ? "sub" : "";
-    rows.push("<li><span class=\\"" + cls + "\\">" + mark + "</span> <span class=\\"" + labelCls + "\\">" + esc(label) + "</span></li>");
+  for (let i = 1; i <= upto; i++) {
+    let mark, cls, label;
+    if (s.error && i === step) { mark = "✗"; cls = "bad"; label = labelFor(i); }
+    else if (s.ok || i < step) { mark = "✓"; cls = "ok"; label = labelFor(i); }
+    else { mark = "●"; cls = ""; label = cleanMsg || labelFor(i); }   // current step — live message
+    rows.push("<li><span class=\\"" + cls + "\\">" + mark + "</span> <span>" + esc(label) + "</span></li>");
   }
   document.getElementById("ops-progress-steps").innerHTML = rows.join("");
+  // Message line carries only what the rows don't already say: a failure's detail (+ which log), or
+  // the pre-first-step "starting…" note. The running step's live text already lives in its ● row and
+  // the success message in its final ✓ row, so neither is echoed here.
   const msgEl = document.getElementById("ops-progress-msg");
-  if (s.error) msgEl.innerHTML = '<span class="bad">' + esc(s.message || ("FAILED: " + s.error)) + " — see " + esc(s.log || "the ops log") + "</span>";
-  else if (s.ok) msgEl.innerHTML = '<span class="ok">' + esc(s.message || "done") + "</span>";
-  else if (s.running) msgEl.innerHTML = '<span class="sub">' + esc(s.message || "working…") + "</span>";
-  else msgEl.textContent = "";
+  if (s.error) {
+    msgEl.innerHTML = '<span class="bad">' + esc(s.message || ("FAILED: " + s.error)) + " — see " + esc(s.log || "the ops log") + "</span>";
+  } else if (!s.ok && step === 0 && cleanMsg) {
+    msgEl.innerHTML = '<span class="sub">' + esc(cleanMsg) + "</span>";
+  } else {
+    msgEl.textContent = "";
+  }
 }
 async function pollOpsProgress() {
   try {
     const r = await fetch("/api/admin/ops-status", { credentials: "same-origin", cache: "no-store" });
     if (!r.ok) return;
     const d = await r.json();
+    const acts = d.actions || {};
+    const inPanel = a => OPS_PANEL_ACTIONS.indexOf(a) !== -1;
     const watching = opsGetWatching();
-    // Prefer the running action, else the one we were told to watch, else the most-recently stamped.
-    const action = d.running || (watching && d.actions && d.actions[watching] ? watching : d.latest);
-    const s = action && d.actions ? d.actions[action] : null;
-    renderOpsProgress(s);
-    if (s) {
-      if (s.running) opsMarkWatching(action);       // keep tracking this one across the reload
-      else if (watching === action && (s.ok || s.error)) {
-        // The action we were watching has finished — show its terminal state once, then stop
-        // re-asserting it so a later page-load doesn't resurrect a stale completed banner.
-        opsClearWatching();
-      }
+    // Decide what (if anything) is live RIGHT NOW, in priority order:
+    //   1. a running panel action,
+    //   2. the action we were told to watch (so a deliberate restart resumes its timeline),
+    //   3. the freshest terminal panel action — but ONLY while still fresh.
+    // Anything else (an old completed/failed run, or a tls/public-deployment entry) is NOT "now",
+    // so the panel hides rather than resurrecting a stale banner.
+    let action = (d.running && inPanel(d.running)) ? d.running : null;
+    let fromWatch = false;
+    if (!action && watching && inPanel(watching) && acts[watching]) { action = watching; fromWatch = true; }
+    if (!action) {
+      let best = null, bestTs = "";
+      for (const a of OPS_PANEL_ACTIONS) { const st = acts[a]; if (st && st.ts && st.ts > bestTs) { bestTs = st.ts; best = a; } }
+      if (best && opsFresh(acts[best])) action = best;
     }
+    const s = action ? acts[action] : null;
+    // A terminal state surfaced only via the freshness fallback must actually be fresh; a watched or
+    // running action always shows (the watched terminal covers the post-restart reload, then clears).
+    if (!s || (!s.running && !fromWatch && !opsFresh(s))) { renderOpsProgress(null); return; }
+    renderOpsProgress(s);
+    if (s.running) opsMarkWatching(action);          // keep tracking this one across the reload
+    else if (fromWatch && (s.ok || s.error)) opsClearWatching();  // shown once post-restart; stop re-asserting
   } catch (e) { /* transient (likely the restart) — the next poll retries */ }
 }
 // Mark which action to track the moment its button is clicked, so the timeline resumes after the
@@ -1500,7 +1603,8 @@ async function loadOps() {
 loadOps();
 // ── log retention + LLM I/O trace controls ──
 const retGrid = document.getElementById("retgrid"), retDays = document.getElementById("ret-days"),
-      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg");
+      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg"),
+      overseerToggle = document.getElementById("overseer-toggle"), overseerMsg = document.getElementById("overseermsg");
 function retBytes(n) { n = Math.max(0, +n || 0); const u = ["B","KB","MB","GB"]; let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (i ? n.toFixed(1) : (n|0)) + " " + u[i]; }
 function renderRetention(d) {
@@ -1522,6 +1626,7 @@ async function loadRetention() {
     retDays.innerHTML = (d.choices || []).map(c => '<option value="' + esc(c.days) + '">' + esc(c.label) + "</option>").join("");
     retDays.value = String(d.retentionDays);
     traceToggle.checked = !!d.traceEnabled;
+    if (overseerToggle) overseerToggle.checked = !!d.overseerEnabled;
     renderRetention(d);
   } catch (e) {}
 }
@@ -1536,6 +1641,16 @@ async function saveRetention(body, note) {
   } catch (e) { retMsg.innerHTML = '<span class="bad">save failed</span>'; }
 }
 traceToggle.addEventListener("change", () => saveRetention({ traceEnabled: traceToggle.checked }));
+if (overseerToggle) overseerToggle.addEventListener("change", async () => {
+  overseerMsg.textContent = "saving…";
+  try {
+    const r = await fetch("/api/admin/logs/retention", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overseerEnabled: overseerToggle.checked }) });
+    const d = await r.json();
+    overseerToggle.checked = !!d.overseerEnabled;
+    overseerMsg.textContent = overseerToggle.checked ? "on" : "off";
+  } catch (e) { overseerMsg.innerHTML = '<span class="bad">save failed</span>'; }
+});
 retDays.addEventListener("change", () => saveRetention({ retentionDays: +retDays.value }, "applying horizon…"));
 document.getElementById("trim-now").addEventListener("click", async () => {
   retMsg.textContent = "trimming…";

@@ -113,7 +113,7 @@ import {
   newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
-  advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit,
+  advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
@@ -283,6 +283,16 @@ export class GameSessionAdapter implements GameSession {
   private live: LiveSeasonState | null = null;
   /** Save-on-mutation hook (0030); the registry wires it to persist the user's snapshot. */
   private onPersist?: () => void;
+  /**
+   * R-BND (#628): the BACKGROUND persist hook for fail-soft FE-driven write-backs (0062 zeitgeist,
+   * 0070 off-screen texture). These enrich PROSE only (no closed-set board change), so they must NOT
+   * route through the commit funnel — that would bump the `beatSeq` the FE reconciles on and make a
+   * background enrichment look like a board mutation (a phantom single-tab stale-409, the A-S3 fold-
+   * drop). The registry wires this to invalidate the snapshot cache + blind-save (the next-season-warm
+   * precedent), persisting durably WITHOUT a beat bump or integrity checkpoint. Absent on a standalone
+   * adapter ⇒ the write-backs fall back to the ordinary `persist()` (still correct; just no game loop).
+   */
+  private onBackgroundPersist?: () => void;
   /** Beat-event sink (wired by the registry to record player-witnessed events into the EventStore). */
   private onEvent?: (ev: BeatEvent) => void;
   /** Tracked promises (0039). Player-party deals only here; NPC↔NPC deals live off-screen in the Vault. */
@@ -390,6 +400,20 @@ export class GameSessionAdapter implements GameSession {
   /** Wire a persistence callback invoked after every mutation (durable save, 0030). */
   setOnPersist(fn: () => void): void {
     this.onPersist = fn;
+  }
+
+  /** R-BND (#628): wire the non-committing background-persist hook (durable save, no beatSeq bump). */
+  setOnBackgroundPersist(fn: () => void): void {
+    this.onBackgroundPersist = fn;
+  }
+
+  /**
+   * R-BND (#628): persist a fail-soft FE-driven enrichment WITHOUT bumping the closed-set `beatSeq`.
+   * Routes through the background hook (invalidate + blind save) when composed in the registry; falls
+   * back to the ordinary `persist()` on a standalone adapter (no game loop ⇒ nothing to desync).
+   */
+  private backgroundPersist(): void {
+    (this.onBackgroundPersist ?? this.onPersist)?.();
   }
 
   /**
@@ -834,10 +858,18 @@ export class GameSessionAdapter implements GameSession {
     // call always lands and never leaks a backstage miss into the fiction.
     const rid = this.resolveHouseguestVoiceId(idOrName);
     const npc = rid ? this.house.npcs.find((n) => n.id === rid) : undefined;
-    if (!npc || this.seatOf(npc.id) !== "active") return null; // only the living are voiced from inside
+    if (!npc) return null;
     const id = npc.id;
+    const seat = this.seatOf(id);
+    // NARR-7 (#542): a JURY/EVICTED seat is still VOICED — at the finale the prompt directs the
+    // model to stage all 9 jurors questioning the finalists, so a null voice anchor forced the model
+    // to FABRICATE juror biographies that contradict their seeded selves. The persona block below is
+    // the SAME byte-stable PUBLIC facets an active houseguest exposes (archetype/biography/demeanor/
+    // heritage…) — all freely on the public card all season — so this is no Vault widening: only
+    // whereabouts (a live in-house field) goes null, since a juror is no longer in the house.
+    const isActive = seat === "active";
 
-    const room = this.presence?.get(id) ?? null;
+    const room = isActive ? (this.presence?.get(id) ?? null) : null;
     const present: NamedRef[] = [];
     if (room && this.presence) {
       for (const [other, where] of this.presence) {
@@ -849,6 +881,7 @@ export class GameSessionAdapter implements GameSession {
       .filter((h) => h !== id && !evicted.has(h));
     return {
       houseguest: { id, name: npc.name },
+      seat,
       persona: {
         archetype: npc.character.archetype,
         strategyStyle: npc.character.strategyStyle,
@@ -898,6 +931,14 @@ export class GameSessionAdapter implements GameSession {
     const npc = this.house.npcs.find((n) => n.id === id);
     const subject = id === this.house.player.id ? this.house.player : npc;
     if (!subject) return null;
+    // #529: the human authors no look, so the player's appearance stays empty — NEVER improvise a
+    // player portrait from a name hash. With no authored appearance (and no structured facet), there
+    // is nothing to draw, so emit no prompt at all rather than a fabricated one.
+    if (id === this.house.player.id
+      && !subject.character.appearance
+      && subject.character.physicalCharacteristics === undefined) {
+      return null;
+    }
     return buildPortraitPrompt(
       subject.id,
       subject.name,
@@ -2149,7 +2190,18 @@ export class GameSessionAdapter implements GameSession {
     // supplying these regenerates the SAME houseguest in the new season; explicit fields still win,
     // so the player may tweak on the way through. No hidden number is read.
     const carried = (this.house && req.confirmRestart && req.keepCharacter) ? this.carryOverFields() : null;
-    const effReq: CreateCharacterReq = carried ? { ...carried, ...req, keepCharacter: false } : req;
+    // NAME-1 (#547): on ANY confirmed restart capture the dead season's cast names so the next season's
+    // corpus-sampled cast avoids them (cross-season diversity). This is the only point the prior cast
+    // still exists, before the reset; it rides `effReq` through `onRestart` into the fresh sandbox.
+    const priorCastNames = (this.house && req.confirmRestart)
+      ? this.priorSeasonNames(req.priorCastNames)
+      : req.priorCastNames;
+    const effReq: CreateCharacterReq = {
+      ...(carried ?? {}),
+      ...req,
+      ...(carried ? { keepCharacter: false } : {}),
+      ...(priorCastNames && priorCastNames.length ? { priorCastNames } : {}),
+    };
     // Non-degradation at its single most destructive point (B36/audit A2): an already-started game is
     // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
     // call, a network caller) is a no-op returning the current state — the prior save is left intact.
@@ -2250,6 +2302,8 @@ export class GameSessionAdapter implements GameSession {
       ...(merged.privateStrategy ? { privateStrategy: merged.privateStrategy } : {}),
       ...(merged.motivation ? { motivation: merged.motivation } : {}),
       ...(merged.interviewNotes.length ? { interviewNotes: merged.interviewNotes } : {}),
+      // NAME-1 (#547): the corpus-sampled cast avoids prior seasons' names (bounded, fail-soft).
+      ...(effReq.priorCastNames && effReq.priorCastNames.length ? { priorCastNames: effReq.priorCastNames } : {}),
     });
     // 0065 — when adopting a pre-warmed cast, keep the freshly-built PLAYER but swap in the warmed NPCs
     // (which carry any FE-authored §3 depth). The warmed NPCs are byte-identical to the floor
@@ -2365,6 +2419,34 @@ export class GameSessionAdapter implements GameSession {
       ...(p.motivation ? { motivation: p.motivation } : {}),
       ...(notes.length ? { interviewNotes: notes } : {}),
     };
+  }
+
+  /**
+   * NAME-1 (#547) — the names the NEXT season's corpus-sampled cast should AVOID: the dead season's
+   * full cast roster (player + NPCs) merged with any names already carried over from earlier seasons
+   * (so the exclusion accumulates across a multi-season game). BOUNDED: capped at `MAX_PRIOR_NAMES`
+   * (most-recent-wins) so it can never grow unbounded; the engine floor honors it fail-soft (it relaxes
+   * the exclusion rather than starving the sampler when the corpus runs short). No hidden state is read.
+   */
+  private priorSeasonNames(carried?: readonly string[]): string[] {
+    const MAX_PRIOR_NAMES = 240; // ~15 seasons of names — generous headroom, still bounded
+    const names: string[] = [];
+    if (this.house) {
+      names.push(this.house.player.name);
+      for (const n of this.house.npcs) names.push(n.name);
+    }
+    if (carried) names.push(...carried);
+    // De-dup, keep the MOST RECENT (this season's roster first) within the cap.
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of names) {
+      const name = (raw ?? "").trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+      if (out.length >= MAX_PRIOR_NAMES) break;
+    }
+    return out;
   }
 
   /**
@@ -3441,10 +3523,24 @@ export class GameSessionAdapter implements GameSession {
       let ev: BeatEvent | null = null;
       if (!this.live!.pending && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
-        // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per advance, cycling toward
-        // late-night and wrapping to a new morning (banking a late night the player never ended). The
-        // diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
-        if (this.timeOfDayEnabled) {
+        // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per SUBSTANTIVE advance, cycling
+        // toward late-night and wrapping to a new morning (banking a late night the player never ended).
+        // The diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
+        //
+        // #537: the clock advances by SUBSTANTIVE PLAY — once per resolved ceremony/eviction/finale
+        // beat — never on a staged competition's per-round PRESENTATION (the `comp-round` PAUSES, which
+        // emit no event, and the inert `comp-elimination` reveal beats: no rng, no fold, no soul
+        // inflection — see `advanceCompetition`/`stagedTrajectoryNeutral`). Advancing on each of those
+        // cycled most of a day inside ONE competition (the HOH crowned at late-night the morning it
+        // began). The clock still INITIALIZES on the first advance (so the HUD/rest cue are live from
+        // turn one) even before the first substantive beat lands.
+        //
+        // 0066 Phase-2 (PR #715): the graded sleep economy — chronotype bedtimes + continuous night
+        // depth + the night-end fatigue/conflict bookkeeping — rides this SAME substantive-play gate, so
+        // it never over-advances on inert staged-comp beats either. On the bare init advance `advanceClock`
+        // only initializes (returns early), so the bookkeeping below is a harmless no-op there: rest
+        // deficit is 0 (no night ran) and the conflict tally is still empty.
+        if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
           const wasRetired = this.live!.playerRetired ?? false;
           advanceClock(this.live!);
           // A genuine night-end is the WRAP (the house ran to the bitter end) — NOT the morning after a
@@ -3983,7 +4079,12 @@ export class GameSessionAdapter implements GameSession {
     return {
       started: this.house !== null,
       beatSeq: this.beatSeq, // 0065 Part A — the counter AFTER this advance/decision committed
-      event: ev ? { beat: ev.beat, content: this.humanize(ev.content) } : null,
+      // EVT-1 (#569): project the beat's PUBLIC participants (id + name only) alongside the prose, so
+      // ceremony result identities are structured, not prose-only. Vault-free — `participants` carries
+      // public houseguest ids, never hidden state.
+      event: ev
+        ? { beat: ev.beat, content: this.humanize(ev.content), participants: ev.participants.map((id) => this.named(id)!) }
+        : null,
       pending: this.pendingView(),
       status: this.gameStatus(),
       finished: !!s?.finished,
@@ -4174,9 +4275,12 @@ export class GameSessionAdapter implements GameSession {
    * framing. Pre-game / no-snapshot ⇒ "" (the §8 fail-soft path; the prompt is unchanged). Public flavor
    * by construction — it reads ONLY the public snapshot, never a hidden number.
    */
-  private worldContext(moment: string): string | undefined {
+  private worldContext(_moment: string): string | undefined {
     if (!this.worldSnapshot || !this.house) return undefined;
-    const channel = moment === "social" || moment === "diary-room" ? "offscreen" : "player";
+    // #580 (NARR-11, PO ruling 2026-06-23): getMomentPrompt is the PLAYER'S narration prompt —
+    // every beat here is player-facing. Social/diary-room are player-PRESENT, so they take the
+    // player-channel zeitgeist framing, not the off-screen "world you moved in with" framing.
+    const channel = "player";
     // 0062 HOH music perk: the player has LIVE music only when they hold it — the reigning HOH (the real-BB
     // luxury) or in the HOH room overhearing it; otherwise the music slice is frozen memory like the rest.
     const block = renderZeitgeist(this.worldSnapshot, {
@@ -4256,7 +4360,7 @@ export class GameSessionAdapter implements GameSession {
         mood: moodIn && moodIn.trim() ? sanitizeFlavor(moodIn) : base.slices.mood,
       },
     };
-    this.persist(); // durable (0030): the captured snapshot must survive a restart, frozen
+    this.backgroundPersist(); // R-BND (#628): durable, but NOT a board beat — no beatSeq bump
     return { accepted: true, source: "web_search" };
   }
 
@@ -4314,7 +4418,7 @@ export class GameSessionAdapter implements GameSession {
     const ev = events.find((e) => e.id === eventId);
     if (!ev || !ev.hidden) return { ok: false };
     this.textureOverrides.set(eventId, sanitized);
-    this.persist(); // durable (0030): voiced texture survives a restart byte-identical
+    this.backgroundPersist(); // R-BND (#628): durable, but NOT a board beat — no beatSeq bump
     return { ok: true };
   }
 

@@ -9,7 +9,7 @@ game) and drives the UI across the viewport matrix with MEASURABLE assertions:
               (the D2 collision rule, executable)
   crowding  — no visible text below the --fs-2xs floor (~11px); no nowrap
               line-box overflow
-  touch     — ≥36px interactive boxes at coarse-pointer viewports
+  touch     — ≥44px interactive boxes at coarse-pointer viewports (WCAG 2.5.5)
   200% pass — doubling the root font must not break the page
 
 KNOWN failures carry a finding ID in XFAIL below and report as xfail (exit 0).
@@ -98,7 +98,10 @@ def boot_fe():
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
         cwd=FE_DIR, stdout=open(f"/tmp/fe-matrix-{PORT}.log", "w"), stderr=subprocess.STDOUT, env=env)
-    for _ in range(60):
+    # 120s boot budget: on a loaded self-hosted runner (the whole CI fan-out
+    # hammering one host during a merge wave) uvicorn's first 200 can take well
+    # past 30s. Matches the deploy/smoke.sh FE-boot wait so neither flakes.
+    for _ in range(240):
         try:
             if httpx.get(FE, timeout=1).status_code == 200:
                 return proc
@@ -310,14 +313,28 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
         report("pass", f"{vp_name} crowding")
 
     # --- touch: coarse-pointer floors ----------------------------------------
+    # RESP-4 (#625): floor is the PROJECT 44px (WCAG 2.5.5), not the old 36px that let 36–43px
+    # controls ship green. Selectors widened past `button`/`select` to the kit + composer + game
+    # chrome that the narrow set missed (anchors-as-buttons, the gadget-rail/cast/window controls,
+    # the composer icon buttons, the scroll-to-latest fab). The gadget-rail drawer is opened first
+    # (fail-soft) so its panel controls are actually IN VIEW for the sweep instead of stowed.
     if coarse:
+        try:
+            page.evaluate("(document.querySelector('.gadget-rail-open,#gadget-rail-open')||{click(){}}).click()")
+            page.wait_for_timeout(350)
+        except Exception:
+            pass
         small = page.evaluate("""
-          [...document.querySelectorAll('button, [role=button], select, .settings-nav-item')]
+          [...document.querySelectorAll(
+             'button, [role=button], a[role=button], a.btn, select, .settings-nav-item,'
+             + '.input-icon-btn, .export-dl-btn, .scroll-nav-btn, #orwell-scroll-bottom,'
+             + '.gadget-rail-open, .gadget-rail-head button, .ow-controls button, .ow-dismiss,'
+             + '.minimized-dock-x, .oc-pin, .oc-backfill, .opt-dismiss')]
             .filter(e => e.offsetParent !== null && !e.classList.contains('tap-exempt'))
             .map(e => { const r = e.getBoundingClientRect();
                         return { t: (e.innerText || e.ariaLabel || e.id || '?').slice(0, 20), w: r.width, h: r.height }; })
-            .filter(b => b.w > 0 && b.h > 0 && (b.w < 36 || b.h < 36))
-            .slice(0, 5)
+            .filter(b => b.w > 0 && b.h > 0 && (b.w < 44 || b.h < 44))
+            .slice(0, 8)
         """)
         for s in small:
             report("fail", f"{vp_name} touch: {s['t']!r} {s['w']:.0f}x{s['h']:.0f}")
@@ -418,15 +435,20 @@ def main():
 
                 # G6: the settings tab rail keeps its LEFT orientation in any
                 # modal wider than the 480 token (explicit user preference);
-                # top-bar stacking is the last resort below it. Force-open is
-                # scoped to this measurement and restored — the legacy click
-                # selector below predates the rail buttons and opens nothing.
+                # top-bar stacking is the last resort below it. #553: Settings is
+                # now a kit OrwellWindow built lazily on first open — so #settings-modal
+                # does NOT exist until opened. Open it for real (the gear fires
+                # settings.js open(); a programmatic .click() works regardless of the
+                # gear's own visibility), measure, then close via the kit ×.
+                page.evaluate(
+                    "(document.getElementById('user-bar-settings') ||"
+                    " document.getElementById('tool-settings-btn') ||"
+                    " document.getElementById('rail-settings') || {click(){}}).click()")
+                page.wait_for_timeout(350)  # let the kit window mount + the open fade settle
                 rail = page.evaluate("""
                   (() => {
                     const overlay = document.querySelector('#settings-modal');
                     if (!overlay) return null;
-                    const wasHidden = overlay.classList.contains('hidden');
-                    if (wasHidden) overlay.classList.remove('hidden');
                     const m = overlay.querySelector('.settings-modal-content');
                     const r = overlay.querySelector('.settings-sidebar');
                     const p = overlay.querySelector('.settings-panels');
@@ -436,10 +458,12 @@ def main():
                       out = { modalW: m.getBoundingClientRect().width,
                               left: rb.x < pb.x && rb.height > rb.width };
                     }
-                    if (wasHidden) overlay.classList.add('hidden');
                     return out;
                   })()
                 """)
+                page.evaluate(
+                    "(document.querySelector('#settings-modal .ow-close') || {click(){}}).click()")
+                page.wait_for_timeout(250)  # let the close fly-away finish + the node teardown
                 if rail is None:
                     report("fail", f"{vp_name} settings-rail: modal nodes missing")
                 elif rail["modalW"] > 480 and not rail["left"]:

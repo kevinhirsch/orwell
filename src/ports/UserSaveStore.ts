@@ -27,4 +27,12 @@ export interface UserSaveStore {
    * the retired season's record stays on disk for inspection). Optional.
    */
   resetUser?(user: string): void;
+  /**
+   * PERS-NEW-2 (#592): a quarantine belt PARALLEL to the corrupt-quarantine, for a save that PARSED
+   * fine but was REJECTED by the resume (a future/incompatible `snapshotVersion`). Rename the newest
+   * version off the `vNNNNNN.json` path (`.incompatible`) so the fresh sandbox's later saves can never
+   * prune the user's own higher-schema save out of retention — it stays on disk, recoverable on a
+   * downgrade. Best-effort; a no-op when no save exists. Optional.
+   */
+  quarantineIncompatible?(user: string): void;
 }

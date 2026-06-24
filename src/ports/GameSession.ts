@@ -406,6 +406,14 @@ export interface CreateCharacterReq {
    * a no-op on a fresh (no prior game) creation. Absent/false ⇒ a normal fresh creation (re-run casting).
    */
   keepCharacter?: boolean;
+  /**
+   * Cross-season name memory (NAME-1 / #547) — names used by PRIOR seasons in the SAME game, so a new
+   * season's corpus-sampled cast AVOIDS them (replayability/sameness, mandate #4). Carries both full
+   * names and given names. ENGINE-INTERNAL: set on a confirmed restart from the dead season's roster
+   * (never part of the player tool's documented schema, like `confirmRestart`). Bounded & fail-soft —
+   * if the corpus has no headroom to honor every exclusion, the sampler relaxes it rather than failing.
+   */
+  priorCastNames?: string[];
 }
 
 export interface MomentPromptReq {
@@ -576,6 +584,14 @@ export interface NamedRef {
 export interface BeatEventView {
   beat: string;
   content: string;
+  /**
+   * EVT-1 (#569): the PUBLIC houseguests this beat is about (the new HOH, the nominees, the veto
+   * field, the evictee…), projected role-safe — id + name only, exactly the public roster facts the
+   * `content` prose already names. NON-VAULT by construction (it reads only `BeatEvent.participants`,
+   * which carries identities, never hidden/secret state), so a ceremony result's identities are
+   * structured for the surface instead of being prose-only. Absent ⇒ no participant beat (e.g. no event).
+   */
+  participants?: NamedRef[];
 }
 
 /** A decision the live loop is blocked on until the player resolves it (0011 + the finale, 0037). */
@@ -794,6 +810,14 @@ export interface HouseguestMoveResult {
  */
 export interface NpcVoiceView {
   houseguest: NamedRef;
+  /**
+   * Their public seat (NARR-7 / #542): `active` (still playing, voiced from inside the house),
+   * `jury` (evicted into the last-9 jury — still voiced at the finale, from the jury box), or
+   * `evicted` (out pre-jury). A non-active seat keeps its byte-stable public persona so the
+   * narrator can voice a juror consistently with who they actually are — only the live-game
+   * fields (whereabouts) go null. Vault-free: it says nothing about anyone's hidden state.
+   */
+  seat: "active" | "jury" | "evicted";
   /** The stable public persona facets (B61) — byte-stable across the whole season. */
   persona: {
     archetype?: string; strategyStyle?: string; background?: string;

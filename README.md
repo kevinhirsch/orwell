@@ -17,14 +17,14 @@ deliberately out of the model's way (see
 
 > **Status: built and playable.** The engine (TypeScript/Node 22) and the chat front-end
 > (Python/FastAPI) are implemented BDD/TDD-first and run as two services over a
-> permissioned MCP boundary. The drafted spec set is built and green **through 0069** — the
+> permissioned MCP boundary. The drafted spec set is built and green **through 0074** — the
 > eight priority invariants, the full gameplay loop, per-user sandboxes, durable persistence,
 > the live off-screen society, the interactive finale, the character-evolution linchpin,
 > deep character profiles, seasons-as-levels, in-game time & the nightly sleep economy,
 > multi-device sync, public-internet exposure, and the metered token economy — with **0022**
 > (the rich-UI MVP-2) the one deliberate deferral. Specs **0070–0073** (the Hermes-integration
 > wave: off-screen texture, defensive hardening, the multi-platform gateway, and the structural
-> game-build CI wall) are **authored and queued**, not yet built. The reconciled per-feature
+> game-build CI wall) and **0074** (local & tunable HTTPS, ADR 0014) are **built and green**. The reconciled per-feature
 > index in [`docs/features/README.md`](docs/features/README.md) is authoritative for
 > built-vs-deferred, and `npm test` is the live gate.
 
@@ -512,7 +512,7 @@ Hard rules for the test suite:
 
 ## Status & roadmap
 
-The original milestones **M1–M8** and the built spec set **0001–0069** are shipped — the eight
+The original milestones **M1–M8** and the built spec set **0001–0074** are shipped — the eight
 priority invariants, the MCP seam, the gameplay loop, per-user sandboxes, durable saves, the live
 off-screen society, the endgame and interactive finale, the character-evolution linchpin (souls
 evolve live and bend behavior), the born-deep deep-character profiles, the seasons-as-levels lane,
@@ -521,7 +521,8 @@ nightly sleep economy, public-internet exposure, and the metered token economy. 
 game UI / MVP-2) is the **one deliberate deferral** (by [ADR 0003](docs/decisions/0003-conversation-is-the-game.md),
 the chat *is* the UI). The newest specs **0070–0073** — the Hermes-integration wave (off-screen
 texture enrichment, defensive hardening, the multi-platform messaging gateway, and a structural
-game-build CI wall) — are **authored and queued**, not yet built.
+game-build CI wall) — and **0074** (local & tunable HTTPS, [ADR 0014](docs/decisions/0014-local-and-tunable-https.md))
+are **built and green**.
 
 Live status is deliberately **not** duplicated in prose here (it drifts):
 
@@ -554,11 +555,11 @@ The last item, the **embedding provider** for semantic soul recall
 served through a worker-thread bridge — with the deterministic fake as the test adapter and the
 whole-process fallback when the model is unavailable.
 
-The decision log has since grown to **[ADRs 0001–0013](docs/decisions/)** — adding split-authority
+The decision log has since grown to **[ADRs 0001–0014](docs/decisions/)** — adding split-authority
 by openness (0005), the in-game time/sleep economy (0006), public-internet exposure (0007),
 cross-device chat consistency (0008), location single-source-of-truth (0009), token-economy
 architecture (0010), concurrent engine-drive guardrails (0011), the two-window "Messenger mirror"
-(0012), and model-authored cast photos (0013) — **all accepted and built**. Their residual open
+(0012), model-authored cast photos (0013), and local & tunable HTTPS (0014) — **all accepted and built**. Their residual open
 items are tuning, owed verification runs, and post-launch refactor (`docs/REFACTOR-ROADMAP.md`), not
 unbuilt architecture; the source-verified status is the
 [open-items snapshot](docs/audits/2026-06-21-open-items-verification.md).

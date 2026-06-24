@@ -313,6 +313,32 @@
   </div>
   <script nonce="{{CSP_NONCE}}">
   (function(){
+    // #614: per-user client-storage namespace. Many surfaces key localStorage by
+    // document.body.dataset.user (welcome-seen, composer draft, window geometry, cast-pin), but
+    // nothing ever SET it — so two accounts on ONE browser collapsed into the same empty ("")
+    // namespace and shared each other's transient client state. Set it as EARLY as possible from
+    // the session identity. Seed synchronously from the last-known value (instant, correct for the
+    // common single-account browser) then confirm via /api/auth/status — on a DIFFERENT user we
+    // re-key and refresh the namespace-sensitive panels through the single dispatcher.
+    try {
+      var seed = '';
+      try { seed = sessionStorage.getItem('orwell-current-user') || ''; } catch(_){}
+      if (seed && document.body) document.body.dataset.user = seed;
+      fetch('/api/auth/status', { credentials: 'same-origin' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          var u = (d && d.username) ? String(d.username) : '';
+          if (!document.body) return;
+          if (document.body.dataset.user !== u) {
+            document.body.dataset.user = u;
+            try { sessionStorage.setItem('orwell-current-user', u); } catch(_){}
+            // namespace changed mid-boot — let the per-user panels re-read their keyed state.
+            try { if (window.orwellGameChanged) window.orwellGameChanged('user-identified'); } catch(_){}
+          }
+        })
+        .catch(function(){});
+    } catch(_){}
+
     var el=document.getElementById('loader-wave');
     if(!el)return;
     // J1-29: honor prefers-reduced-motion — hold a static frame instead of animating the wave.
@@ -1337,7 +1363,7 @@
          THAT gadget. Built dynamically so an icon can never mismatch or outlive its gadget. -->
     <div class="gadget-rail-strip" id="gadget-rail-strip" aria-label="Control-room gadgets"></div>
   </aside>
-  <button id="gadget-rail-open" class="gadget-rail-open" type="button" title="The House" aria-label="Open the control room" hidden>📋</button>
+  <button id="gadget-rail-open" class="gadget-rail-open" type="button" title="The House" aria-label="Open the control room" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg></button>
   <button id="scroll-bottom-btn" class="scroll-nav-btn" title="Scroll to bottom">▼</button>
   <script nonce="{{CSP_NONCE}}">
   (function(){
@@ -1438,7 +1464,11 @@
   </div>
 
   <!-- Settings Modal (all users) -->
-  <div id="settings-modal" class="modal hidden">
+  <!-- #553: Settings content lives in this hidden host; settings.js reparents .settings-modal-content
+       into an OrwellWindow kit modal at init (id="settings-modal") so it inherits the kit's unified
+       drag / z-authority / focus-trap / F5 cross-session geometry. The kit titlebar replaces the old
+       .modal-header; the "Peek" toggle is re-hosted into the kit titlebar. -->
+  <div id="settings-host" hidden>
     <div class="modal-content settings-modal-content" role="dialog" aria-label="Settings">
       <div class="modal-header">
         <h4><span style="vertical-align:-1px;margin-right:6px;font-size:var(--fs-md)">&#x2699;</span>Settings</h4>
@@ -1960,7 +1990,7 @@
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>Profile picture</h2>
             <div id="settings-headshot"></div>
           </div>
-          <div class="admin-card">
+          <div class="admin-card" id="settings-pw-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Change Password</h2>
             <div class="settings-col">
               <input id="settings-pw-current" type="password" placeholder="Current password" autocomplete="current-password" style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-family:inherit;font-size:var(--fs-sm);">
@@ -2505,6 +2535,8 @@
 <script src="/static/js/orwellSlots.js"></script>  <!-- BB anchor slots: floaters position by slot, never coordinate (E91/S11) -->
 <script type="module" src="/static/js/orwellWindow.js"></script>  <!-- THE window kit (Lane F): one window class + .ow-* family every surface composes -->
 <script src="/static/js/orwellGadgetRail.js"></script>  <!-- 0054: control-room gadget rail (hosts the HUD gadgets; collapse/side-swap/mobile drawer) -->
+<script src="/static/js/orwellGadget.js"></script>  <!-- #640: THE gadget kit — one card class + .og-* family every rail gadget composes (sibling to OrwellWindow) -->
+<script src="/static/js/orwellNotice.js"></script>  <!-- #642: THE notice kit — one card class + .on-* family every ABOVE-COMPOSER affordance composes (guide/decision/system-notice/continue); sibling to OrwellWindow/OrwellGadget -->
 <script type="module" src="/static/js/orwellStatusPanel.js"></script>  <!-- BB status HUD: week/phase/HOH/noms/veto (Vault-free) -->
 <!-- NPC "wants a word" approaches are NOT a player-facing panel (owner ruling 2026-06-18): an NPC
      wanting to connect is in-fiction intent that must reach the player through CHAT (the GM voices
@@ -2524,6 +2556,7 @@
 <script type="module" src="/static/js/orwellEngineStatus.js"></script>  <!-- BB engine-down banner: visible OOC error reporting -->
 <script type="module" src="/static/js/orwellDecision.js"></script>  <!-- BB decisions: confirm-on-binding guardrail (Vault-free, C20) -->
 <script src="/static/js/orwellComposerDraft.js"></script>  <!-- BB composer draft: {text, drMode, pendingApproachId} survives refresh; DR mode restores BEFORE text (G17, audit F3/F5/F7) -->
+<script src="/static/js/orwellScrollBottom.js"></script>  <!-- #538: "see latest" floating scroll-to-bottom button (appears when scrolled up; unread badge; reduced-motion safe) -->
 <script type="module" src="/static/js/orwellChatHint.js"></script>  <!-- The one reusable chat-bar hint surface (OrwellChatHint.register/show); ships with NO active tips -->
 <script type="module" src="/static/js/orwellOocAside.js"></script>  <!-- L36: OOC aside channel — `((...))`/`ooc:` detection drives the player-input bubble style (the old composer tip is gone; hints live in orwellChatHint.js) -->
 <script src="/static/js/orwellPremiereTutorial.js"></script>  <!-- L31 (FE): the premiere is a light, one-time, dismissible tutorial card (week 1) — sets the weekly-rhythm expectation, never replaces the chat -->

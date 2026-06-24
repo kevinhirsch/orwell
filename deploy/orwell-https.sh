@@ -36,7 +36,7 @@
 set -euo pipefail
 
 MODE=""; LOCAL_NAMES=""; DOMAINS=""; DNS_PROVIDER=""; DNS_TOKEN="${ORWELL_TLS_DNS_API_TOKEN:-}"
-ACME_EMAIL=""; ASSUME_YES=0; NO_RESTART=0; DRY_RUN=0; PRINT_ONLY=0
+ACME_EMAIL=""; ASSUME_YES=0; NO_RESTART=0; DRY_RUN=0; PRINT_ONLY=0; MODE_GIVEN=""
 CT_HOSTNAME_SET="${CT_HOSTNAME:+1}"
 CT_HOSTNAME="${CT_HOSTNAME:-orwell}"
 
@@ -44,13 +44,13 @@ usage() { sed -n '3,40p' "${BASH_SOURCE[0]:-/dev/null}" | sed 's/^# \{0,1\}//'; 
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --mode)          MODE="${2:-}"; shift 2 ;;
+    --mode)          MODE="${2:-}"; MODE_GIVEN=1; shift 2 ;;
     --local-names)   LOCAL_NAMES="${2:-}"; shift 2 ;;
     --domains)       DOMAINS="${2:-}"; shift 2 ;;
     --dns-provider)  DNS_PROVIDER="${2:-}"; shift 2 ;;
     --dns-token)     DNS_TOKEN="${2:-}"; shift 2 ;;
     --acme-email)    ACME_EMAIL="${2:-}"; shift 2 ;;
-    --disable)       MODE="off"; shift ;;
+    --disable)       MODE="off"; MODE_GIVEN=1; shift ;;
     --yes|-y)        ASSUME_YES=1; shift ;;
     --no-restart)    NO_RESTART=1; shift ;;
     --dry-run)       DRY_RUN=1; shift ;;

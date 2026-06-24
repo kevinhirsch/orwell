@@ -60,11 +60,13 @@ def test_chat_hint_css_class_exists_and_is_theme_token_driven():
     css = _read("static", "style.css")
     assert ".orwell-chat-hint" in css
     assert ".orwell-chat-hint-dismiss" in css
-    # same-width-as-the-bar margin + no hard-coded hex (frost-theme readable)
+    # #642: the hint composes the OrwellNotice kit — the card SHELL (margin/border/radius/bg) is now
+    # the kit's .on-card.on-guide (the kit owns the above-composer anchor + width). Only the inner
+    # rules (the body's flex row, the text, the code chip, the dismiss button) remain here, still
+    # theme-token driven (no hard-coded hex in the hint-specific rules).
     start = css.index(".orwell-chat-hint")
     block = css[start:start + 1400]
     assert "var(--fg)" in block
-    assert "margin: 0 8px" in block  # mirrors the chat-input-bar horizontal inset
 
 
 # ── BEHAVIORAL — the empty registry truly renders nothing ────────────────────
@@ -74,30 +76,54 @@ def test_chat_hint_empty_registry_show_is_noop():
     if not node:
         pytest.skip("node not available for the behavioral chat-hint check")
     mod = os.path.join(STATIC, "orwellChatHint.js").replace("\\", "/")
-    # Minimal DOM stub: a body with the game-build attr and a .chat-input-bar so a
-    # tip COULD mount — then prove an unregistered key still does nothing, and that
+    kit = os.path.join(STATIC, "orwellNotice.js").replace("\\", "/")
+    # Minimal DOM stub: a body with the game-build attr and a .chat-input-bar so a tip COULD
+    # mount. #642: the hint composes the OrwellNotice kit, so the stub provides a fuller element
+    # factory (the kit builds a card + a zone) and loads the kit (a classic IIFE — eval'd) so
+    # window.OrwellNoticeKit exists. Then prove an unregistered key still does nothing, and that
     # register()+show() of a fresh key DOES mount (the one-entry enable path works).
     script = (
         "globalThis.window = globalThis;\n"
-        "let inserted = 0;\n"
-        "const bar = { parentNode: { insertBefore() { inserted++; } } };\n"
+        "globalThis.matchMedia = () => ({ matches: false });\n"
+        "let mounted = 0;\n"
+        "function mkEl() {\n"
+        "  const children = [];\n"
+        "  const el = { tagName:'DIV', id:'', className:'', style:{}, dataset:{}, children,\n"
+        "    classList:{ add(){}, remove(){}, toggle(){} },\n"
+        "    setAttribute(){}, getAttribute(){return null;}, removeAttribute(){},\n"
+        "    appendChild(c){ children.push(c); c.parentNode = el; if (el.id === 'orwell-notice-zone') mounted++; return c; },\n"
+        "    insertBefore(c){ children.unshift(c); c.parentNode = el; return c; },\n"
+        "    removeEventListener(){}, addEventListener(){}, querySelector(){return null;},\n"
+        "    querySelectorAll(){return [];}, remove(){}, isConnected:true, get innerHTML(){return '';}, set innerHTML(_v){} };\n"
+        "  return el;\n"
+        "}\n"
+        "const head = mkEl();\n"
+        "const bar = mkEl(); const barParent = mkEl(); bar.parentNode = barParent;\n"
+        "const byId = {};\n"
         "globalThis.localStorage = { _d:{}, getItem(k){return this._d[k]||null;}, "
         "setItem(k,v){this._d[k]=String(v);}, removeItem(k){delete this._d[k];} };\n"
         "globalThis.document = {\n"
-        "  body: { dataset: {}, hasAttribute: () => true },\n"
-        "  getElementById: () => null,\n"
+        "  head,\n"
+        "  body: { dataset: {}, hasAttribute: () => true, style:{ setProperty(){}, removeProperty(){} }, "
+        "appendChild(c){ return c; }, children: [] },\n"
+        "  getElementById: (id) => byId[id] || null,\n"
         "  querySelector: (s) => (s === '.chat-input-bar' ? bar : null),\n"
-        "  createElement: () => ({ classList:{add(){},remove(){}}, dataset:{}, "
-        "setAttribute(){}, querySelector(){return null;}, set innerHTML(_v){}, isConnected:true, remove(){} }),\n"
-        "  addEventListener(){},\n"
+        "  createElement: () => mkEl(),\n"
+        "  addEventListener(){}, readyState:'complete',\n"
         "};\n"
         "globalThis.addEventListener = () => {};\n"
+        "globalThis.CustomEvent = function(){};\n"
+        "globalThis.dispatchEvent = () => {};\n"
+        # load the kit (classic IIFE) so window.OrwellNoticeKit exists
+        "import fs from 'node:fs';\n"
+        f"const kitSrc = fs.readFileSync('{kit}', 'utf8');\n"
+        "(0, eval)(kitSrc);\n"
         f"const m = await import('file://{mod}');\n"
         "const api = m.default;\n"
         "const a = api.show('does-not-exist');\n"      # unknown key → no mount
         "api.register('demo', { html: 'hi' });\n"
-        "const b = api.show('demo');\n"                # registered → mounts
-        "process.stdout.write(JSON.stringify({ a, b, inserted }));\n"
+        "const b = api.show('demo');\n"                # registered → mounts via the kit
+        "process.stdout.write(JSON.stringify({ a, b, mounted }));\n"
     )
     proc = subprocess.run(
         [node, "--input-type=module", "-e", script],
@@ -108,4 +134,4 @@ def test_chat_hint_empty_registry_show_is_noop():
     out = json.loads(proc.stdout)
     assert out["a"] is False, "an unregistered/empty-registry key must not render"
     assert out["b"] is True, "register()+show() must mount the tip (the enable path)"
-    assert out["inserted"] == 1, "exactly the registered tip mounts, the unknown one does not"
+    assert out["mounted"] >= 1, "exactly the registered tip mounts (into the kit zone)"

@@ -38,10 +38,13 @@
     "target-other": "Shared target",
   };
   // The status carries the whole drama: a promise still live, one honored, one betrayed.
+  // F-NEW-12: each status carries a non-color GLYPH alongside its label, so open-vs-kept
+  // is distinguished by shape (not the green-vs-blue border alone) for protan/deutan + SR
+  // users (WCAG 1.4.1 / 4.1.3). The glyph is decorative-redundant to the text label.
   const STATUS_META = {
-    open:   { cls: "odl-open",   tag: "active",  hint: "Still standing" },
-    kept:   { cls: "odl-kept",   tag: "kept",    hint: "Honored" },
-    broken: { cls: "odl-broken", tag: "broken",  hint: "Broken" },
+    open:   { cls: "odl-open",   tag: "active",  glyph: "•", hint: "Still standing" },
+    kept:   { cls: "odl-kept",   tag: "kept",    glyph: "✓", hint: "Honored" },
+    broken: { cls: "odl-broken", tag: "broken",  glyph: "✕", hint: "Broken" },
   };
 
   async function getJSON(url) {
@@ -55,30 +58,17 @@
     if (el) el.style.display = "none";
   }
 
-  // Sidebar chrome, mirroring orwellSocial.js's ensure/mount pattern (ruling #3/E64): a <section>
-  // in the control-room gadget rail (0054), display CONTENT-DRIVEN by render().
+  // #640: compose the OrwellGadget kit (the .og-* card chrome + the rail mount + content-driven
+  // visibility). The card shell + header ("🤝 Your Deals") are the kit's; only this gadget's own
+  // inner CSS (the deal-row treatment) stays here. Display is CONTENT-DRIVEN by render().
+  let _gadget = null;
   function ensureSection() {
     let el = document.getElementById(ID);
     if (el) return el;
-    el = document.createElement("section");
-    el.id = ID;
-    el.setAttribute("aria-label", "Your deals");
-    el.innerHTML = `
-      <style>
-        #orwell-deals {
-          display: none;
-          margin: var(--space-2) var(--space-2) 0;
-          padding: var(--space-2) var(--space-3);
-          background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
-          color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 10px;
-          font-family: 'Fira Code', ui-monospace, monospace;
-          font-size: var(--fs-xs); line-height: 1.5;
-        }
-        #orwell-deals .odl-hd {
-          color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
-          margin: 0 0 .35rem; font-weight: 600; letter-spacing: .03em;
-        }
+    if (!document.getElementById("orwell-deals-css")) {
+      const st = document.createElement("style");
+      st.id = "orwell-deals-css";
+      st.textContent = `
         #orwell-deals .odl-row {
           display: flex; align-items: flex-start; gap: .4rem; margin: .3rem 0;
           background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
@@ -101,28 +91,14 @@
           flex: 0 0 auto; font-size: .62rem; text-transform: uppercase; letter-spacing: .05em;
           opacity: .65; padding-top: .1rem;
         }
-        #orwell-deals .odl-broken .odl-terms { text-decoration: line-through; }
-      </style>
-      <div class="odl-hd" role="heading" aria-level="3"><span aria-hidden="true">🤝 </span>Your deals</div>
-      <div id="odl-list"></div>`;
-    // Mount into the control-room gadget rail (0054), under the status panel; fall back to the
-    // sidebar (then body) — never floating, never document.body first.
-    const rail = document.getElementById("gadget-rail-body");
-    const sidebar = document.getElementById("sidebar");
-    const status = document.getElementById("orwell-status");
-    const anchor = status || document.getElementById("sessions-section");
-    if (rail && anchor && anchor.parentElement === rail) {
-      rail.insertBefore(el, anchor.nextSibling);
-    } else if (rail) {
-      rail.appendChild(el);
-    } else if (anchor && anchor.parentElement) {
-      anchor.parentElement.insertBefore(el, anchor.nextSibling);
-    } else if (sidebar) {
-      sidebar.appendChild(el);
-    } else {
-      document.body.appendChild(el);
+        #orwell-deals .odl-broken .odl-terms { text-decoration: line-through; }`;
+      document.head.appendChild(st);
     }
-    return el;
+    // Mount into the control-room gadget rail (0054), under the status panel (anchor).
+    _gadget = window.OrwellGadgetKit.create({ id: ID, title: "Your Deals", icon: "🤝", ariaLabel: "Your deals" });
+    const body = _gadget.ensure("orwell-status");
+    body.innerHTML = `<div id="odl-list"></div>`;
+    return _gadget.el;
   }
 
   // The other party (deals are always player + one houseguest); never render the player's own row.
@@ -133,11 +109,11 @@
   }
 
   function render(deals) {
-    const el = ensureSection();
+    ensureSection();
     const list = Array.isArray(deals) ? deals : [];
     const wrap = document.getElementById("odl-list");
     wrap.innerHTML = "";
-    if (!list.length) { el.style.display = "none"; return; } // content-driven: no deals, no box
+    if (!list.length) { _gadget.hide(); return; } // content-driven: no deals, no box
     // Live promises first, then settled ones (kept/broken) for the record.
     const order = { open: 0, kept: 1, broken: 2 };
     const sorted = list.slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
@@ -157,11 +133,11 @@
       body.appendChild(who); body.appendChild(kind);
       if (d.terms) body.appendChild(terms);
       const tag = document.createElement("span");
-      tag.className = "odl-tag"; tag.textContent = meta.tag;
+      tag.className = "odl-tag"; tag.textContent = (meta.glyph ? meta.glyph + " " : "") + meta.tag;
       row.appendChild(body); row.appendChild(tag);
       wrap.appendChild(row);
     }
-    el.style.display = "block";
+    _gadget.show();
   }
 
   // Test/headless seam: drive the panel without a live engine (mirrors _orwellSocialDrive…).

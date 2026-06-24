@@ -991,6 +991,16 @@ app.router.lifespan_context = _lifespan
 async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
+    # Backfill the in-memory LLM I/O ring from its durable archive BEFORE any model call, so the
+    # "LLM I/O (live)" status-page view isn't blank after a restart (the ring is per-process; the
+    # file persists). Must run pre-traffic so seeded history keeps lower seq than live calls.
+    try:
+        from src import llm_trace as _llm_trace
+        _seeded = _llm_trace.seed_ring_from_file()
+        if _seeded:
+            logger.info("LLM I/O live ring seeded with %d archived record(s)", _seeded)
+    except Exception as _e:
+        logger.debug("LLM I/O ring seed skipped: %s", _e)
     webhook_manager.set_loop(asyncio.get_running_loop())
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.
@@ -1054,7 +1064,24 @@ async def _startup_event():
         except Exception as e:
             logger.warning(f"Tool index warmup failed (non-critical): {type(e).__name__}: {e}")
 
-    _startup_tasks.append(asyncio.create_task(_warmup_tool_index()))
+    # The RAG ToolIndex (ChromaDB-backed dynamic tool selection) is an inherited
+    # workspace subsystem. Orwell uses its own fixed permissioned allowlist + the
+    # keyword-fallback selection in agent_loop, so the game build never wires it.
+    # Skip the warmup entirely (no construction attempt) unless ChromaDB is
+    # explicitly configured. The full workspace (ORWELL_GAME_BUILD=0) keeps it.
+    def _toolindex_warmup_wanted() -> bool:
+        try:
+            from src.tool_index import _toolindex_wanted
+            return _toolindex_wanted()
+        except Exception:
+            return True
+    if _toolindex_warmup_wanted():
+        _startup_tasks.append(asyncio.create_task(_warmup_tool_index()))
+    else:
+        logger.info(
+            "Game build: RAG ToolIndex not wired (fixed permissioned allowlist + "
+            "keyword-fallback tool selection; set CHROMADB_HOST to enable RAG)."
+        )
     # Warmup: ping all known LLM endpoints to prime connections
     async def _warmup_endpoints():
         try:

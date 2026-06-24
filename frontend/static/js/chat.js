@@ -31,15 +31,6 @@ import { isNarrow } from './platform.js';
   let API_BASE = '';
   let currentAbort = null;
   let isStreaming = false;
-  // Continuous stall watchdog: while streaming, if the SSE stream produces
-  // NOTHING for STALL_THRESHOLD_MS (no deltas, no tool heartbeat — tools beat
-  // every 2s, so a full minute of silence means it's genuinely stuck or the
-  // model quietly stopped), surface a non-destructive "still working?" prompt
-  // instead of silently hanging. Replaces relying only on the tab-refocus
-  // recovery (which fired only on visibilitychange and silently reloaded).
-  let _stallWatchdog = null;
-  let _stallBannerShown = false;
-  const STALL_THRESHOLD_MS = 60000;
   let _sendInFlight = false;   // covers the window from click → streaming start
   let _displayOverride = null; // Override visible user bubble text (hides injected prompts)
   let _hideUserBubble = false; // Skip user bubble entirely (e.g. continue after stop)
@@ -62,6 +53,20 @@ import { isNarrow } from './platform.js';
   // player (mirrors _setRoleModelLabel for the resolved-model path).
   function _senderLabel(modelLabel) {
     return isGameBuild() ? 'Big Brother' : (modelLabel || '');
+  }
+  // J1-30 (immersion): the pre-token wait — most visible right after the player's first deliberate
+  // action ("Start casting"), where a generic "Processing request…" reads as lag/OOC. In the game
+  // build, dress the GENERIC waiting stages in a production voice so the gap feels like the show
+  // rolling, not the app stalling. Endpoint-DIAGNOSTIC states (online/offline/latency/countdown)
+  // stay literal — they are operator truth a player rarely sees and must not be fictionalised.
+  function _waitLabel(stage, fallback) {
+    if (!isGameBuild()) return fallback;
+    switch (stage) {
+      case 'init':    return 'The producers are rolling';
+      case 'waiting': return 'The producers are talking it over';
+      case 'still':   return 'The producers are still deliberating';
+      default:        return fallback;
+    }
   }
   function _setRoleModelLabel(roleEl, requestedModel, actualModel, opts) {
     if (!roleEl) return;
@@ -300,13 +305,11 @@ import { isNarrow } from './platform.js';
       submitBtn.dataset.mode = 'streaming';
       submitBtn.dataset.phase = 'processing';
       isStreaming = true;
-      _startStallWatchdog();
     } else if (state === 'idle') {
       submitBtn.dataset.mode = '';
       delete submitBtn.dataset.phase;
       submitBtn.classList.remove('recording');
       isStreaming = false;
-      _stopStallWatchdog();
       // Defer to global updater which handles mic/newchat/send modes
       if (window._updateSendBtnIcon) {
         setTimeout(window._updateSendBtnIcon, 50);
@@ -1008,7 +1011,7 @@ import { isNarrow } from './platform.js';
       holder.style.position = 'relative';
       
       // Create spinner
-      spinner = spinnerModule.create('Initializing', 'right', 'wave');
+      spinner = spinnerModule.create(_waitLabel('init', 'Initializing'), 'right', 'wave');
       currentSpinner = spinner;
       const bodyDiv = holder.querySelector('.body');
       bodyDiv.appendChild(spinner.createElement());
@@ -1022,7 +1025,7 @@ import { isNarrow } from './platform.js';
         spinner.updateMessage('Researching');
         setTimeout(() => spinner.updateMessage('Analyzing sources'), 1500);
       } else {
-        spinner.updateMessage('Processing request');
+        spinner.updateMessage(_waitLabel('waiting', 'Processing request'));
         const endpointUrlForProbe = sessionModule.getCurrentEndpointUrl ? sessionModule.getCurrentEndpointUrl() : null;
         if (endpointUrlForProbe && modelName) {
           processingProbeTimer = setTimeout(async () => {
@@ -1034,7 +1037,7 @@ import { isNarrow } from './platform.js';
               const status = await _probeCurrentEndpointStatus(endpointUrlForProbe, processingProbeAbort.signal);
               if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
               if (!status) {
-                spinner.updateMessage('Still waiting for model');
+                spinner.updateMessage(_waitLabel('still', 'Still waiting for model'));
               } else if (status.alive) {
                 const latency = status.latency_ms ? ` (${status.latency_ms}ms)` : '';
                 spinner.updateMessage(`Endpoint online${latency}; waiting for first token`);
@@ -1066,7 +1069,7 @@ import { isNarrow } from './platform.js';
               }
             } catch (e) {
               if (e && e.name !== 'AbortError' && spinner && spinner.element && !accumulated) {
-                spinner.updateMessage('Still waiting for model');
+                spinner.updateMessage(_waitLabel('still', 'Still waiting for model'));
               }
             } finally {
               processingProbeAbort = null;
@@ -2415,8 +2418,8 @@ import { isNarrow } from './platform.js';
                   // above, so the lifecycle tools it keyed on could never reach it.)
                   // runCompetition rides along: it is the single outcome authority, and a
                   // comp result moves exactly what the status HUD shows (HOH/veto/phase).
-                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter',
-                             'updateCasting', 'manageSandbox', 'runCompetition'].includes(json.tool)) {
+                  // FEJS-3: the trailing 8 also move public state the panels read — debounced.
+                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat'].includes(json.tool)) {
                     if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool);
                     if (json.tool === 'createCharacter') {
                       // E65: a season RESTART opens a FRESH chat (armed only by reset-progress /
@@ -3307,6 +3310,25 @@ import { isNarrow } from './platform.js';
     } finally {
       clearResponseTimeout();
       clearProcessingProbe();
+      // #615: a mid-stream engine-tool error (e.g. a 409 stale-beat) can throw out of the reader
+      // loop with a tool node still in `.running`. `tool_output` (which normally clears that node's
+      // 50ms _elapsedTicker / 100ms _waveInterval) never arrives, so the ticker fires forever on the
+      // orphaned node. The catch's `else` branch sweeps it, but only on the surfaced-error path —
+      // a thrown error that is caught/handled elsewhere (or any unexpected exit) skips it. Sweep
+      // here unconditionally as the backstop: clearing an already-cleared ticker is a no-op, and by
+      // finally-time this turn's reader has ended so any still-`.running` node is genuinely orphaned.
+      try {
+        document.querySelectorAll('.agent-thread-node.running').forEach(node => {
+          if (node._waveInterval) { clearInterval(node._waveInterval); node._waveInterval = null; }
+          if (node._elapsedTicker) { clearInterval(node._elapsedTicker); node._elapsedTicker = null; }
+          node.classList.remove('running');
+        });
+      } catch (_) {}
+      // TX-2: a background-completed stream can leave isStreaming true and the never-cancelled
+      // _textPauseTimer then mounts an orphan "Thinking" spinner into the now-FOREGROUND session.
+      // Cancel the pending spinner timer + sweep any spinner unconditionally here — both are
+      // idempotent no-ops when nothing is pending, so this is safe on every exit path.
+      try { _cancelThinkingTimer(); _removeThinkingSpinner(); } catch (_) {}
       // P1 (OOBE cutover): safety net — never leave the "finalizing" indicator stuck if the turn
       // ended (or errored) without any narration token to clear it.
       if (_orwellFinalizingActive) {
@@ -3556,55 +3578,10 @@ import { isNarrow } from './platform.js';
     return true;
   }
 
-  function _removeStallBanner() {
-    const b = document.getElementById('stall-banner');
-    if (b) b.remove();
-    _stallBannerShown = false;
-  }
-  function _showStallBanner(secs) {
-    if (document.getElementById('stall-banner')) return;
-    _stallBannerShown = true;
-    const box = document.getElementById('chat-history');
-    if (!box) return;
-    const bar = document.createElement('div');
-    bar.id = 'stall-banner';
-    bar.className = 'stall-banner';
-    const mins = Math.floor(secs / 60);
-    const label = mins >= 1 ? `${mins}m` : `${secs}s`;
-    bar.innerHTML = `<span class="stall-banner-txt">Quiet for ${label} — still working?</span>`;
-    const cont = document.createElement('button');
-    cont.className = 'stall-banner-btn';
-    cont.textContent = 'Nudge it';
-    cont.title = 'Stop the stalled stream and ask it to continue';
-    cont.addEventListener('click', () => {
-      _removeStallBanner();
-      const mi = uiModule.el('message');
-      if (mi) {
-        mi.value = 'Are you still working? If you stopped, continue exactly where you left off and finish the task.';
-        const sb = document.querySelector('.send-btn');
-        if (sb) sb.click();
-      }
-    });
-    const stop = document.createElement('button');
-    stop.className = 'stall-banner-btn stall-banner-stop';
-    stop.textContent = 'Stop';
-    stop.addEventListener('click', () => { _removeStallBanner(); abortCurrentRequest(true); });
-    bar.appendChild(cont);
-    bar.appendChild(stop);
-    box.appendChild(bar);
-    if (uiModule.scrollHistory) uiModule.scrollHistory();
-  }
-  function _startStallWatchdog() {
-    // Disabled: the server-side stall detector / auto-continue (agent
-    // loop-breaker) handles quiet/stalled streams now, so the manual
-    // "Quiet for Nm — still working?" banner is redundant (and annoying).
-    if (_stallWatchdog) { clearInterval(_stallWatchdog); _stallWatchdog = null; }
-    _removeStallBanner();
-  }
-  function _stopStallWatchdog() {
-    if (_stallWatchdog) { clearInterval(_stallWatchdog); _stallWatchdog = null; }
-    _removeStallBanner();
-  }
+  // (Removed FEJS-6: the dead stall-banner machinery + the deliberately-disabled
+  // _startStallWatchdog/_stopStallWatchdog. The server-side stall detector +
+  // auto-continue loop-breaker supersede the old "still working?" banner; see
+  // CLAUDE.md "Front-end client conventions".)
 
   /** Show a "Cancelled by user" record in `holder` and persist an empty
    *  assistant placeholder server-side so the turn survives a refresh.

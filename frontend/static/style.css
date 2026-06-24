@@ -959,58 +959,7 @@ body.bg-pattern-perlin-flow {
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
 
-    /* Mobile: chips are icon-only round pills. Tap to restore, drag toward
-       the trash zone at top-center to close. touch-action:none lets the
-       pointermove listener claim the gesture instead of the page scroll. */
     @media (max-width: 768px) {
-      /* E95: rows in the sidebar drawer on mobile too — same shape as desktop. */
-      .minimized-dock-chip.chip-free-drag {
-        box-shadow: 0 8px 22px rgba(0,0,0,0.55),
-                    0 0 0 2px color-mix(in srgb, var(--accent, var(--red)) 50%, transparent) !important;
-      }
-      /* Long-press hint — chip swells and settles while the detach timer
-         counts down so the user feels feedback before the bubble peels out
-         of the chain. Returns to scale(1) at the end so there's no visual
-         jump when the timer fires and the chip becomes a free-drag puck. */
-      .minimized-dock-chip.chip-long-press {
-        background:
-          radial-gradient(circle at 30% 25%, color-mix(in srgb, #fff 28%, transparent), transparent 36%),
-          linear-gradient(135deg,
-            color-mix(in srgb, var(--accent, var(--red)) 34%, var(--panel, var(--bg))),
-            color-mix(in srgb, #7dd3fc 26%, var(--panel, var(--bg))) 52%,
-            color-mix(in srgb, #f0abfc 22%, var(--panel, var(--bg))));
-        border-color: color-mix(in srgb, var(--accent, var(--red)) 72%, #fff 12%) !important;
-        animation: chip-long-press-pulse 0.82s ease-in-out infinite;
-        z-index: 10030;
-      }
-      .minimized-dock-chip.chip-long-press::before {
-        content: '';
-        position: absolute;
-        inset: -96px;
-        border-radius: inherit;
-        background:
-          radial-gradient(circle,
-            color-mix(in srgb, var(--accent, var(--red)) 42%, transparent) 0 18%,
-            color-mix(in srgb, #7dd3fc 34%, transparent) 34%,
-            color-mix(in srgb, #f0abfc 30%, transparent) 50%,
-            transparent 72%);
-        pointer-events: none;
-        z-index: -1;
-        animation: chip-long-press-ripple 0.82s ease-out infinite;
-      }
-      @keyframes chip-long-press-pulse {
-        0%, 100% { transform: scale(1); }
-        50%      { transform: scale(1.42);
-                   box-shadow: 0 14px 42px rgba(0,0,0,0.66),
-                               0 0 0 16px color-mix(in srgb, var(--accent, var(--red)) 42%, transparent),
-                               0 0 72px color-mix(in srgb, #7dd3fc 44%, transparent),
-                               0 0 118px color-mix(in srgb, #f0abfc 32%, transparent); }
-      }
-      @keyframes chip-long-press-ripple {
-        0%   { opacity: 0.92; transform: scale(0.08); }
-        72%  { opacity: 0.28; transform: scale(3.6); }
-        100% { opacity: 0; transform: scale(5.4); }
-      }
       /* Chip whose modal is currently open — accent ring so the user can
          tell at a glance which floating bubble belongs to the visible
          modal. Tap it to minimize. */
@@ -1021,73 +970,10 @@ body.bg-pattern-perlin-flow {
       }
       .minimized-dock-chip.chip-active svg { opacity: 1; }
     }
-    /* Magnetic close zone — slides in from the side opposite the chip's
-       starting position so it never overlaps the dock. Always accent
-       color, larger than the chips, snappy spring transition. */
-    #dock-trash-zone {
-      position: fixed;
-      left: 50%;
-      width: 88px; height: 88px;
-      border-radius: 50%;
-      background: var(--accent, var(--red, #e53935));
-      color: var(--on-accent, #fff);
-      display: flex; align-items: center; justify-content: center;
-      pointer-events: none;
-      opacity: 0;
-      z-index: 9000;
-      box-shadow: 0 8px 28px color-mix(in srgb, var(--accent, var(--red, #e53935)) 55%, transparent);
-      transition: opacity 0.18s ease,
-                  transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
-                  box-shadow 0.18s ease;
-    }
-    /* Off-screen start position depends on which side the chip is on so
-       the X slides in from the opposite edge with a snappy overshoot. */
-    #dock-trash-zone[data-side="top"]    { transform: translateX(-50%) translateY(-180%) scale(0.7); }
-    #dock-trash-zone[data-side="bottom"] { transform: translateX(-50%) translateY(180%) scale(0.7); }
-    #dock-trash-zone.visible {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0) scale(1);
-    }
-    #dock-trash-zone.engaged {
-      transform: translateX(-50%) translateY(0) scale(1.22);
-      box-shadow: 0 0 0 14px color-mix(in srgb, var(--accent, var(--red, #e53935)) 22%, transparent),
-                  0 12px 36px color-mix(in srgb, var(--accent, var(--red, #e53935)) 60%, transparent);
-    }
-    /* Whirlpool ring — fades in when chip is in capture range and spins
-       continuously, then bursts on drop. */
-    #dock-trash-zone .whirlpool {
-      position: absolute; inset: -8px;
-      border-radius: 50%;
-      border: 2px solid transparent;
-      border-top-color: rgba(255,255,255,0.9);
-      border-right-color: rgba(255,255,255,0.55);
-      border-bottom-color: rgba(255,255,255,0.25);
-      opacity: 0;
-      pointer-events: none;
-      animation: whirlpool-spin 0.85s linear infinite;
-      transition: opacity 0.15s ease;
-    }
-    #dock-trash-zone.engaged .whirlpool { opacity: 1; }
-    #dock-trash-zone.dropping .whirlpool {
-      opacity: 1;
-      animation: whirlpool-burst 0.36s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    }
-    /* When a chip is swirling into the trash X, its inline `rotate(720deg)`
-       drags every child + ::after badge along with it — the count/dot pill
-       spinning looks chaotic. Fade those out fast at the start of the close
-       so visually only the icon glyph rotates. */
-    .minimized-dock-chip.chip-trashing > :not(svg),
-    .minimized-dock-chip.chip-trashing::after,
-    .minimized-dock-chip.chip-trashing::before {
-      opacity: 0 !important;
-      transition: opacity 0.16s ease-out !important;
-    }
+    /* Shared spinner keyframe — used by the whirlpool spinner system
+       (spinner.js, settings.js inline status spinners). Kept after the
+       #573 A0 trash-zone removal because those consumers still reference it. */
     @keyframes whirlpool-spin { to { transform: rotate(360deg); } }
-    @keyframes whirlpool-burst {
-      0%   { transform: rotate(0deg) scale(1);   opacity: 1; }
-      60%  { transform: rotate(540deg) scale(1.5); opacity: 0.6; }
-      100% { transform: rotate(900deg) scale(2.2); opacity: 0; }
-    }
 
     /* Email chip badges:
        - email-lib-modal chip: "1" badge when an email is expanded
@@ -1975,6 +1861,107 @@ body.bg-pattern-perlin-flow {
     body[data-gadget-side="left"] #gadget-rail { order: -1; border-left: none;
       border-right: 1px solid var(--border); box-shadow: 4px 0 12px rgba(0,0,0,0.08); }
     body[data-gadget-side="left"] #sidebar { order: 1; }
+    /* ── THE OrwellGadget KIT FAMILY (.og-*) — #640 ─────────────────────────────
+       The canonical per-gadget card chrome, the rail counterpart of the .ow-* window
+       family. Every rail gadget composes orwellGadget.js, which ALSO injects this family
+       at runtime (ensureCss) so it works before style.css loads; this copy is the
+       source-of-truth declaration the house themes (0052) + the frost layer paint and the
+       convention gate pins (mirroring how .ow-* / .gadget-rail-* live here). It deliberately
+       MATCHES the visual language every hand-rolled gadget used (margin/padding/the
+       70%-panel mix/border/10px radius/Fira mono/fs-xs/line-height) so a migrated gadget
+       renders identically. Keep this and the runtime ensureCss() in orwellGadget.js in sync. */
+    .og-card {
+      display: none;
+      margin: var(--space-2, .4rem) var(--space-2, .4rem) 0;
+      padding: var(--space-2, .4rem) var(--space-3, .55rem);
+      background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
+      color: var(--fg, #9cdef2);
+      border: 1px solid var(--border, #355a66); border-radius: 10px;
+      font-family: 'Fira Code', ui-monospace, monospace;
+      font-size: var(--fs-xs, .72rem); line-height: 1.5;
+    }
+    .og-card .og-head {
+      display: flex; align-items: center; gap: .4rem; margin: 0 0 .35rem;
+      font-weight: 600; letter-spacing: .03em;
+    }
+    .og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }
+    .og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }
+    .og-card .og-icon { flex: 0 0 auto; }
+    .og-card .og-title {
+      flex: 1 1 auto; min-width: 0;
+      color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .og-card .og-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: .25rem; }
+    .og-card .og-act {
+      flex: 0 0 auto; background: rgba(255,255,255,.06);
+      border: 1px solid var(--border, #355a66); color: inherit; cursor: pointer;
+      border-radius: 6px; font: inherit; font-size: .68rem;
+      min-height: 24px; padding: 0 .45rem; opacity: .8;
+    }
+    .og-card .og-act:hover, .og-card .og-act:focus-visible { opacity: 1; background: rgba(255,255,255,.12); }
+    .og-card .og-chev { flex: 0 0 auto; opacity: .55; margin-left: .1rem; transition: transform .15s; }
+    .og-card.og-collapsed .og-chev { transform: rotate(-90deg); }
+    .og-card.og-collapsed .og-body { display: none; }
+    .og-card .og-body { overflow-wrap: anywhere; }
+    .og-card .og-empty { opacity: .6; font-style: italic; }
+    @media (prefers-reduced-motion: reduce) { .og-card .og-chev { transition: none; } }
+    /* ── THE OrwellNotice KIT FAMILY (.on-*) — #642 ─────────────────────────────
+       The canonical ABOVE-COMPOSER affordance chrome — the third DWE kit, sibling to the
+       .ow-* (windows) and .og-* (rail gadgets) families. Every above-composer affordance
+       composes orwellNotice.js, which ALSO injects this family at runtime (ensureCss) so it
+       works before style.css loads; this copy is the source-of-truth declaration the house
+       themes (0052) + the frost layer paint and the convention gate (test_on_notice_kit.py)
+       pins (mirroring how .ow-* / .og-* live here). Keep this and the runtime ensureCss() in
+       orwellNotice.js in sync. */
+    #orwell-notice-zone {
+      display: flex; flex-direction: column; gap: var(--space-2, .45rem);
+      margin: 0 auto var(--space-2, .45rem); width: 100%; max-width: 760px;
+      pointer-events: none;
+    }
+    #orwell-notice-zone:empty { display: none; margin: 0; }
+    .on-card {
+      position: relative; pointer-events: auto;
+      border-radius: 12px; padding: .7rem .85rem;
+      background: var(--panel, #111); color: var(--fg, #9cdef2);
+      border: 1px solid var(--border, #355a66);
+      font-size: var(--fs-sm, .85rem); line-height: 1.5;
+      box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
+    }
+    .on-card .on-head { display: flex; align-items: baseline; gap: .5rem; padding-right: 1.6rem; }
+    .on-card .on-icon { flex: 0 0 auto; opacity: .9; }
+    .on-card .on-title { flex: 1 1 auto; min-width: 0; font-weight: 700; letter-spacing: .02em; }
+    .on-card .on-body { margin-top: .35rem; }
+    .on-card .on-body:empty { display: none; }
+    .on-card .on-dismiss {
+      position: absolute; top: .15rem; right: .2rem;
+      min-width: 44px; min-height: 44px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: none; background: none; color: inherit; cursor: pointer;
+      opacity: .65; border-radius: 8px; font: inherit; font-size: 1rem;
+    }
+    .on-card .on-dismiss:hover, .on-card .on-dismiss:focus-visible { opacity: 1; background: rgba(255,255,255,.08); }
+    .on-card.on-guide {
+      background: color-mix(in srgb, var(--fg, #9cdef2) 5%, transparent);
+      border-style: dashed; border-color: color-mix(in srgb, var(--fg, #9cdef2) 30%, transparent);
+      box-shadow: none;
+    }
+    .on-card.on-decision { border-color: var(--accent, var(--red, #e06c75)); }
+    .on-card.on-system-notice { border-color: color-mix(in srgb, var(--fg, #9cdef2) 28%, transparent); }
+    .on-card.on-sev-warn {
+      border-color: var(--color-warning, #f0ad4e);
+      background: linear-gradient(0deg, color-mix(in srgb, var(--color-warning, #f0ad4e) 8%, transparent), color-mix(in srgb, var(--color-warning, #f0ad4e) 8%, transparent)), var(--panel, #111);
+    }
+    .on-card.on-sev-error {
+      border-color: var(--color-error, var(--red, #e06c75));
+      background: linear-gradient(0deg, color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 10%, transparent), color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 10%, transparent)), var(--panel, #111);
+    }
+    .on-card.on-continue { border-color: color-mix(in srgb, var(--accent, #e06c75) 50%, var(--border, #355a66)); }
+    @keyframes on-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @keyframes on-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(4px); } }
+    .on-card.on-anim-in { animation: on-in .22s cubic-bezier(0.22,0.61,0.36,1) both; }
+    .on-card.on-anim-out { animation: on-out .2s ease both; }
+    @media (prefers-reduced-motion: reduce) { .on-card.on-anim-in, .on-card.on-anim-out { animation: none; } }
     /* game-build gate: no rail in the full inherited workspace */
     body:not([data-game-build]) #gadget-rail,
     body:not([data-game-build]) #gadget-rail-open { display: none !important; }
@@ -1997,6 +1984,48 @@ body.bg-pattern-perlin-flow {
       .gadget-rail[data-collapsed="true"] .gadget-rail-strip { display: none; }
       .gadget-rail-toggle, .gadget-rail-swap { display: none; }
       body[data-game-build] .gadget-rail-open { display: block; }
+      /* #551 — on mobile the gadget opener moves to the TOP-RIGHT (it pairs with
+         the sidebar hamburger, which stays TOP-LEFT). Desktop is untouched. It
+         must clear the chat header, so its z-index sits just under the hamburger
+         (210) and above header chrome.
+         #653 — it is a small, ICON-ONLY control that matches the hamburger's
+         treatment (same 30x30 box, transparent bg, currentColor stroke, 0.5
+         opacity) so the two top corners read as a matched pair — NOT a loud red
+         FAB. Every loud-FAB property from the desktop base (round shape, accent
+         fill, border, shadow, large size) is reset here. */
+      .gadget-rail-open {
+        top: calc(env(safe-area-inset-top, 0px) + 12px);
+        right: 9px;
+        bottom: auto;
+        z-index: 209;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        border: none;
+        background: none;
+        box-shadow: none;
+        color: var(--hamburger-color, var(--fg));
+        opacity: 0.5;
+        padding: 0;
+        align-items: center;
+        justify-content: center;
+        -webkit-tap-highlight-color: transparent;
+        outline: none;
+        transition: opacity 0.15s;
+      }
+      body[data-game-build] .gadget-rail-open { display: flex; }
+      .gadget-rail-open:hover,
+      .gadget-rail-open:active { opacity: 1; }
+      .gadget-rail-open svg { display: block; }
+      /* #551/#552 — the sidebar hamburger reliably stays TOP-LEFT on mobile.
+         Side-swap is a desktop power-feature (disabled on mobile in JS), so the
+         body.hamburger-right flip must never apply here, or the hamburger and the
+         gadget opener would collide on the right edge. */
+      body.hamburger-right .hamburger-btn,
+      .hamburger-btn {
+        left: 9px;
+        right: auto;
+      }
       body[data-gadget-side="left"] #gadget-rail { left: 0; right: auto;
         transform: translateX(-102%); border: none; border-right: 1px solid var(--border); }
       body[data-gadget-side="left"] #gadget-rail.grail-open { transform: translateX(0); }
@@ -2334,24 +2363,53 @@ body.bg-pattern-perlin-flow {
       border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
     }
 
+    /* NARR-9 — the LIVE-stream producer aside. The reload path styles the whole
+       bubble (.msg-ooc-producer); the live stream renders the reply incrementally
+       into an existing holder, so the wrapper class can't be toggled mid-stream.
+       processWithThinking wraps a fully-`((...))`-wrapped reply in this inner div
+       instead, giving the same quiet, dashed, badged "to production" treatment.
+       Theme-token driven (works across every house theme). */
+    .ooc-producer-aside {
+      border: 1px dashed color-mix(in srgb, var(--fg) 28%, transparent);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: color-mix(in srgb, var(--fg) 4%, transparent);
+      font-style: italic;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
+      opacity: 0.92;
+    }
+    .ooc-producer-aside::before {
+      content: 'production';
+      display: inline-block;
+      margin-bottom: 4px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    }
+    .ooc-producer-aside > :first-child:not(::before) { margin-top: 0; }
+
     /* The ONE reusable chat-bar hint surface (orwellChatHint.js). It spans the same
        width as the chat input bar (the 0 8px horizontal margin mirrors the bar's own
        inset) and shares its visual language — fully theme-token driven (derives from
        --fg) so the frosted house themes stay readable. SHIPS WITH NO ACTIVE TIPS; the
        class is ready for any future composer hint via OrwellChatHint.register/show. */
-    .orwell-chat-hint {
+    /* (issue 642) the chat hint composes the OrwellNotice kit (kind "guide") for its SHELL now
+       (.on-card.on-guide owns the bg/border/radius/padding/animation). Only the hint-SPECIFIC
+       inner rules remain — the body lays its text + dismiss button out in a row. */
+    .orwell-chat-hint .on-body {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin: 0 8px 6px;
-      padding: 7px 12px;
-      border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
-      border-radius: 10px;
-      background: color-mix(in srgb, var(--fg) 5%, transparent);
-      color: color-mix(in srgb, var(--fg) 78%, transparent);
       font-size: 12.5px;
       line-height: 1.4;
-      animation: msg-enter 0.3s ease-out both;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
     }
     .orwell-chat-hint-text { flex: 1 1 auto; }
     .orwell-chat-hint code {
@@ -3559,6 +3617,14 @@ body.bg-pattern-perlin-flow {
       opacity:0; transition:.15s;
     }
     .msg:hover .copy-btn { opacity:1; }
+    /* RESP-3: the per-message copy control is hover-revealed, so it is unreachable on a
+       coarse pointer (no hover). Mirror the code-block buttons' non-hover path: reveal it
+       on touch and lift it to the 44px tap floor (width grows past the glyph; the absolute
+       position keeps it pinned top-right). */
+    @media (hover: none) and (pointer: coarse) {
+      .copy-btn { opacity: .55; min-width: 44px; min-height: 44px; height: auto; }
+      .copy-btn:active { opacity: 1; }
+    }
     .role-timestamp {
       font-size:0.7rem; color:var(--color-muted-alt); font-weight:normal; margin-left:6px;
     }
@@ -4572,6 +4638,17 @@ body.bg-pattern-perlin-flow {
       /* Chat bubbles — AI stretches full width, user stays compact */
       .msg { font-size: 0.85em; }
       .msg .body { font-size: 0.9em; }
+      /* #657 — mobile narration breathing room. On a phone the GM narration ran dense and
+         edge-to-edge: tighten nothing on desktop, but on narrow give the AI bubble a
+         comfortable reading rhythm — roomier line-height, real horizontal padding inside the
+         bubble, and clearer paragraph spacing. Scoped to mobile + the AI bubble so user
+         turns and desktop density are untouched. */
+      .msg-ai { padding: 12px 16px; line-height: 1.6; }
+      .msg-ai .body { line-height: 1.6; }
+      .msg-ai .body > * { margin-top: 12px; margin-bottom: 12px; }
+      .msg-ai .body > *:first-child { margin-top: 0; }
+      .msg-ai .body > *:last-child { margin-bottom: 0; }
+      .msg-ai .body p { margin-top: 12px; margin-bottom: 12px; }
       .msg-user { max-width: 90% !important; margin-left: auto; margin-right: 4px; }
       .msg-ai, .agent-thread { width: 100% !important; max-width: 100% !important; margin: 8px 0; }
       /* Prevent inner scrollable elements from trapping vertical scroll */
@@ -6652,6 +6729,21 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
       gap: 6px; margin-bottom: 12px;
     }
+    /* J1-06: the game-build "Show all themes" reveal — full-width row + a sub-grid for the
+       inherited (non-house) themes tucked behind it. */
+    .theme-show-all {
+      grid-column: 1 / -1;
+      background: transparent; border: 1px dashed var(--border); color: var(--fg);
+      border-radius: 8px; padding: 7px; font: inherit; font-size: 0.7rem; cursor: pointer;
+      opacity: 0.75; transition: opacity 0.12s, border-color 0.12s;
+    }
+    .theme-show-all:hover, .theme-show-all:focus-visible { opacity: 1; border-style: solid; border-color: var(--accent, var(--red)); }
+    .theme-extra {
+      grid-column: 1 / -1;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px;
+    }
+    /* beat the global .hidden / .theme-extra source-order tie (both 0,1,0) so collapsed = hidden */
+    .theme-extra.hidden { display: none; }
     .theme-swatch {
       border: 2px solid var(--border); border-radius: 8px; cursor: pointer;
       padding: 5px; text-align: center; font-size: 0.65rem; color: var(--fg);
@@ -6665,7 +6757,14 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     .theme-swatch-colors span {
       width: 15px; height: 15px; border-radius: 50%;
       margin-left: -5px;
-      border: 1.5px solid color-mix(in srgb, var(--fg) 12%, transparent);
+      /* J1-24: the preview dots are a theme's OWN colors (its near-black bg dot,
+         etc.), so a border keyed to the page's --fg vanishes when a dark dot sits
+         on a dark tile. Use a background-independent dual ring instead — a light
+         inner edge + a dark outer edge — so every dot reads on any theme. */
+      border: none;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.45),
+        0 0 0 1px rgba(0, 0, 0, 0.45);
     }
     .theme-swatch-colors span:first-child { margin-left: 0; }
     .theme-custom-label { font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--fg) 50%, transparent); text-transform: uppercase; letter-spacing: 0.06em; margin: 10px 0 6px; }
@@ -6965,6 +7064,20 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
            skill card's footer (Delete / Edit / Run) isn't hidden under it.
            dvh already excludes the URL bar; this handles the safe area. */
         padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+      }
+      /* MOBILE FULL-SCREEN SHEET — the template for OrwellWindow-kit windows on
+         mobile (#644 / #553). Settings filled 100dvh but (a) a residual top margin
+         left a gap above the sheet and (b) the inner .settings-layout was capped at
+         ~85dvh-60px, so content cut off before the bottom. Reset the margin to 0 and
+         let the inner layout fill the full sheet, top edge to safe-area bottom. */
+      #settings-modal .settings-modal-content {
+        margin: 0 !important;
+        border-radius: 0 !important;
+      }
+      #settings-modal .settings-layout {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
       }
       /* Grab handle pill on the non-standard content classes too. Memory's
          desktop rule defines a radial-glow ::before later in the file —
@@ -9222,6 +9335,25 @@ body.hide-thinking .thinking-section { display: none !important; }
   0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 20%, transparent); }
   50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 10%, transparent); }
 }
+
+/* TRANS-2 (#627): DECORATIVE infinite loops (the agent-thread running pulse — the
+   most-seen game animation — and the gadget-rail / rail-notification pulse family)
+   had no prefers-reduced-motion guard, and a >5s infinite loop also trips WCAG
+   2.2.2. Honor a shared `.decorative-loop` class so future loops opt in and coverage
+   can't silently drift; the current decorative pulses are listed explicitly too.
+   Loading/streaming spinners (TRANS-4, a product decision) are deliberately EXCLUDED
+   — they convey essential "still working" status. */
+@media (prefers-reduced-motion: reduce) {
+  .decorative-loop,
+  .agent-thread-node.running .agent-thread-dot,
+  .rail-minimized::after,
+  .rail-notes-badge.fired,
+  .tool-notes-dot,
+  .icon-rail-btn.rail-notify::before,
+  .list-item.stream-complete {
+    animation: none !important;
+  }
+}
 .agent-thread-node.error .agent-thread-dot {
   background: var(--color-error);
 }
@@ -9287,36 +9419,6 @@ body.hide-thinking .thinking-section { display: none !important; }
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--accent, var(--red));
-}
-/* Stall watchdog banner — shown when the stream has been silent for ~1min. */
-.stall-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px auto;
-  padding: 8px 12px;
-  max-width: 90%;
-  font-size: 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-warning, #f0ad4e) 12%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--color-warning, #f0ad4e) 40%, transparent);
-}
-.stall-banner-txt { flex: 1; opacity: 0.85; }
-.stall-banner-btn {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: none;
-  background: var(--accent, var(--red));
-  color: var(--on-accent, #fff);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.stall-banner-stop {
-  background: none;
-  color: var(--fg);
-  border: 1px solid var(--border);
 }
 .agent-thread-content {
   display: none;
@@ -13934,6 +14036,10 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.03em;
+  /* Reset the browser default heading top margin — it stacked on the card's
+     padding-top and left an oversized gap above each section title
+     (Registration / Users / Add User). */
+  margin-top: 0;
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
@@ -21734,25 +21840,41 @@ body.gallery-selecting .gallery-dl-btn,
   container-name: settings-modal;
 }
 
-/* Issue #208 — anchor the Settings window to the TOP of the chat area instead
-   of vertically centering it. The base .modal uses `align-items:center`, so a
-   centered window grows and shrinks around its own midpoint when you switch
-   between tabs whose content differs in height (Add Models vs. Shortcuts,
-   etc.). That makes the in-modal nav rail — and the whole window — appear to
-   jump up and down between pages. Pinning the top edge keeps the nav rail and
-   surrounding layout visually stable; the panel only ever grows downward.
-   Desktop only: on mobile the panel is a full-height bottom sheet that is
-   already top-stable, and a margin there would push it past the viewport. The
-   drag/dock code clears this margin (sets inline margin:0) the moment a window
-   is dragged, so moving the window still works exactly as before. */
+/* #553 — Settings is hosted INSIDE the OrwellWindow kit: #settings-modal is the
+   .ow-window, and the kit's titlebar + .ow-body provide the frame and scrolling.
+   The .settings-modal-content must therefore FILL the kit body, not float inside
+   it as a fixed-width, top-margined card — otherwise it renders as a "box-in-a-box"
+   with a dead top band (the old Issue-#208 7vh centering hack, meaningless inside
+   the kit body) and a dead right margin (the clamp() floor resolving narrower than
+   the body). Filling the body also SATISFIES the original Issue-#208 intent — a
+   top-anchored, non-jumping nav rail — by construction: the kit window is already
+   top-stable (it never recenters on tab switch), so the nav rail is pinned to the
+   top of a stable body and no longer jumps between tabs of differing height. The
+   .ow-body owns the frame (border/radius/shadow) and the scrolling (overflow:auto),
+   so the content drops its own card frame here to avoid double-framing. This makes
+   the drag/dock inline `margin:0` clear a no-op (margin is already 0), so nothing
+   regresses there. Desktop only — mobile (≤768px) keeps its full-height bottom-sheet
+   rules (earlier in this file) byte-unchanged. */
 @media (min-width: 769px) {
-  #settings-modal { align-items: flex-start; }
-  #settings-modal .settings-modal-content { margin-top: 7vh; }
+  #settings-modal.ow-window > .ow-body > .settings-modal-content {
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    /* No own height cap — the content sizes to its layout (min-height:400px) and
+       the .ow-body owns the viewport cap + scrolling (overflow:auto). Forcing
+       height:100% here collapses the panel because the .ow-body is height:auto. */
+    max-height: none;
+    /* The .ow-window IS the frame — don't double-frame inside the kit body. */
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+    animation: none;
+  }
 }
 @media (max-height: 700px) {
   /* S2: short viewports (125%-scaled laptops, landscape phones) — let the modal shrink. */
   .settings-layout { min-height: 0; }
-  #settings-modal .settings-modal-content { margin-top: 3vh; }
 }
 
 .settings-modal-content .modal-header {
@@ -21764,6 +21886,18 @@ body.gallery-selecting .gallery-dl-btn,
   display: flex;
   min-height: 400px;
   max-height: calc(min(85dvh, 720px) - 60px);
+}
+
+/* #553 — kit-hosted on desktop, drop the legacy 85dvh-60px cap on the inner
+   layout: the content no longer carries its own height cap (the .ow-body owns the
+   viewport cap + scrolling), so the layout should size to its content (its own
+   min-height:400px floor still applies) and let the .ow-body scroll when taller.
+   When the kit sets an inline height (resize/dock) the [style*="height"] / docked
+   rules below take over and make the layout flex-fill. */
+@media (min-width: 769px) {
+  #settings-modal.ow-window > .ow-body > .settings-modal-content .settings-layout {
+    max-height: none;
+  }
 }
 
 .settings-modal-content[style*="height"],
@@ -22188,6 +22322,14 @@ body:not(.welcome-ready) #welcome-screen {
     animation: none !important;
     transition: none !important;
   }
+  /* TX-4: `animation` doesn't inherit, so the success-checkmark kept animating under reduce.
+     Stop it AND force the visible static end-state (shown + fully drawn), never stuck-hidden. */
+  .toast .toast-checkmark,
+  .toast .toast-checkmark svg polyline {
+    animation: none !important;
+  }
+  .toast .toast-checkmark { opacity: 1 !important; transform: none !important; }
+  .toast .toast-checkmark svg polyline { stroke-dashoffset: 0 !important; }
 }
 
 /* ── Tasks ── */
@@ -36672,11 +36814,55 @@ body.theme-frosted .modal {
   .gadget-rail-head button,
   .ow-controls button,
   .ow-dismiss,
+  .og-card .og-act,
   #gadget-rail-strip [data-grail-gadget],
   #gadget-rail-strip button {
     /* !important beats the kit's runtime-injected `.ow-controls button { min-width:24px }`
        (appended to <head> after style.css, so it'd win on source order otherwise) — the same
        reason the touch font-size catch-all above pins !important. */
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
+
+/* RESP-1/2 (touch-target roundup): controls the J5-01 floor block above didn't cover —
+   the minimized-window dock row's only close `×` (16px, the sole close on every platform
+   after E95 removed drag-close) and the cast-panel body buttons (.oc-pin 28px / .oc-backfill
+   32px — "Generate cast portraits" is a universal action). Lift them to the 44px coarse-pointer
+   floor on TOUCH only so desktop chrome stays compact (same pattern as J5-01). Flex/centering
+   keeps the glyph/label centered as the box grows. */
+@media (hover: none) and (pointer: coarse) {
+  .minimized-dock-x {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    width: auto;
+    height: auto;
+  }
+  #orwell-cast .oc-pin,
+  #orwell-cast .oc-backfill {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* RESP-4 (#625): controls measured BELOW the real 44px touch floor — the gate had drifted to a
+   36px floor so these shipped green. !important beats the narrower/older rules that won on
+   specificity (e.g. `.chat-input-left > .input-icon-btn`, the J4-15 `.opt-dismiss` min-height:36,
+   the in-media `.export-dl-btn` min-width a child rule overrode). Scoped to ANY-pointer:coarse
+   (every touch-capable device — phones, tablets, touch laptops) rather than hover:none+pointer:
+   coarse, so the floor also covers touch-capable hybrids AND is honored by the responsive-matrix
+   gate's has-touch contexts (the J5-01 block's narrower query was invisible to the gate — RESP-4).
+   Pure mouse/desktop is unaffected (any-pointer:coarse is false there), so chrome stays compact. */
+@media (any-pointer: coarse) {
+  .icon-rail-btn,             /* collapsed sidebar icon rail: new-chat / theme / settings (34px) */
+  .user-bar-btn,              /* user-bar theme / settings (37w) */
+  .send-btn,                  /* composer send / new-chat button (37w in newchat mode) */
+  .input-icon-btn,            /* composer toolbar: attach / more-tools (36w) */
+  .export-dl-btn,             /* chat-meta export ▾ (36w) */
+  .scroll-nav-btn,            /* scroll-to-latest ▼ (38w) */
+  #orwell-scroll-bottom,      /* game scroll-to-latest (38×38, JS-injected) */
+  .gadget-rail-open,          /* mobile gadget-drawer opener (42w) */
+  .orwell-premiere-tutorial .opt-dismiss {  /* "Close guide" (36h) */
     min-width: 44px !important;
     min-height: 44px !important;
   }

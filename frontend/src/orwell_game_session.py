@@ -75,6 +75,24 @@ def bind_game_session(user: str | None, session_id: str) -> str:
         return sid
 
 
+def publish_game_updated(user: str | None) -> None:
+    """0064 §B/D (#617) — server-push a "game-updated" ping to every device on the user's canonical
+    game session so open pages reconcile their HUD instantly instead of waiting for the next poll.
+
+    Shared helper so BACKGROUND FE-driven write-backs (cast authoring, prewarm, zeitgeist, off-screen
+    texture) can fire the same push the route layer's `_publish_game_updated` does after a mutation —
+    those enrichment tasks mutate engine state but historically never pushed, leaving pages stale
+    (SYNC-STALE). Vault-free: a session id + a change-type string only, no body. Best-effort — a
+    publish failure (no binding yet, no event bus) must never break the background task."""
+    try:
+        from src import session_events
+        sid = get_game_session(user)
+        if sid:
+            session_events.publish(sid, "game-updated")
+    except Exception:
+        pass
+
+
 def clear_game_session(user: str | None) -> None:
     """Unbind the user's canonical game session (a season reset / new season). The next resolve
     mints a clean binding for the new season, so a dead season's transcript never rides along."""

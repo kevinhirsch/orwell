@@ -4,9 +4,11 @@
  * full-name+persona pairing is hard-coded anywhere (the amended 0004 do-not: "no fixed cast").
  *
  * Composition: 300+ given names, mixed gender and origin, weighted toward the show's 20–40
- * casting demographic (the 1985–2005 birth cohort). The legacy Bible's sample names (Ryne,
- * Marcus, Felix) are EXCLUDED by policy and guarded by test. Single-token `[A-Z][a-z]+` forms
- * only (keeps the 0004 display-name shape stable).
+ * casting demographic (the 1985–2005 birth cohort). Only the 3 DISTINCTIVE Bible sample names
+ * (Ryne, Marcus, Felix) are banned by the replayability BDD's deny-list; other common names that
+ * also appeared in v0 (e.g. Camila, Elena) are NOT individually banned — common-name recurrence is
+ * intentional (real names repeat) and is separately bounded across seasons by the cross-season
+ * used-name memory (NAME-1, #547). Single-token `[A-Z][a-z]+` forms only (keeps the 0004 shape).
  */
 export const GIVEN_NAMES: readonly string[] = [
   // — A —

@@ -73,16 +73,51 @@ def test_sourcepin_bring_to_front_defers_to_the_one_authority():
 
 
 def test_sourcepin_ui_exposes_the_promote_helper():
-    # ui.js owns the ONE counter and must export its promote for modalManager;
+    # ui.js owns the ONE authority and must export its promote for modalManager;
     # the ladder it exposes is the same one the Escape arbiter reads.
     ui = _read("static", "js", "ui.js")
     assert re.search(r"window\._owPromoteModal\s*=\s*_promote", ui), \
         "ui.js must expose _promote as window._owPromoteModal"
     assert "pickTopModal" in ui
-    # The counter it guards stays plain-inline (the IDL setter, no priority).
+    # The promote stamps a plain-inline z drawn from the single authority's modal
+    # ladder (the IDL setter, no !important priority).
     promote_body = ui.split("const _promote = (m) =>")[1].split("};")[0]
-    assert "m.style.zIndex = String(++_zCounter)" in promote_body
+    assert "OrwellZ.nextModalZ()" in promote_body, \
+        "promote must draw from the single OrwellZ authority's modal ladder"
     assert "important" not in promote_body
+
+
+def test_sourcepin_one_z_authority_object_unifies_both_bands():
+    # A2 (#573, DWE audit F9): the kit's old private `_zTop` and ui.js's old
+    # `_zCounter` are now ONE authority object — OrwellZ — that advances one
+    # monotonic tick and offers a band per family. The kit's non-modal band is
+    # allocated through it (window._owNextWindowZ) and its modal tier through
+    # window._owNextModalZ, so "topmost / focused" has a single source of truth.
+    ui = _read("static", "js", "ui.js")
+    assert "const OrwellZ = (() =>" in ui, "ui.js must define the single OrwellZ authority"
+    assert "window._owNextModalZ = () => OrwellZ.nextModalZ()" in ui
+    assert "window._owNextWindowZ = (restack) => OrwellZ.nextWindowZ(restack)" in ui
+    # The kit must no longer own a private z counter — it draws from the authority.
+    win = _read("static", "js", "orwellWindow.js")
+    assert "window._owNextWindowZ" in win, \
+        "the kit must allocate its non-modal band through window._owNextWindowZ"
+    assert "let _zTop" not in win, "the kit's private _zTop counter must be gone"
+
+
+def test_sourcepin_one_focus_return_implementation():
+    # A2: the two focus-return paths (the .modal observer's _restoreFocus and the
+    # kit's _teardown copy) are unified onto one helper — window._owReturnFocus.
+    ui = _read("static", "js", "ui.js")
+    assert "window._owReturnFocus = _returnFocus" in ui, \
+        "ui.js must expose the single focus-return helper"
+    # _restoreFocus (the .modal observer) delegates to the shared helper.
+    restore_body = ui.split("const _restoreFocus = (m) =>")[1].split("};")[0]
+    assert "_returnFocus(opener, m)" in restore_body, \
+        ".modal focus-return must delegate to the shared helper"
+    # The kit delegates to the same helper on close.
+    win = _read("static", "js", "orwellWindow.js")
+    assert "window._owReturnFocus(opener" in win, \
+        "the kit must delegate focus-return to window._owReturnFocus"
 
 
 def test_smoke_exercises_the_z_authority_for_real():
@@ -97,5 +132,5 @@ def test_smoke_exercises_the_z_authority_for_real():
     assert "ABOVE the dock-restored window" in smoke
     assert "no .modal carries an inline !important z-index" in smoke
     assert "parked window holds NO inline !important z" in smoke
-    assert "Escape closes the top window (settings) FIRST" in smoke
+    assert "Escape closes the top window (settings kit modal) FIRST" in smoke
     assert "second Escape closes the dock-restored window" in smoke

@@ -40,7 +40,7 @@
   var REGISTRY = [
     { id: "orwell-status",   icon: "📋", title: "House Status",   order: 1 },
     { id: "orwell-deals",    icon: "🤝", title: "Your Deals",     order: 2 },
-    { id: "orwell-cast-pin", icon: "👥", title: "The Cast",       order: 3 },
+    { id: "orwell-cast-pin", icon: "👥", title: "Pinned Cast",    order: 3 },
     { id: "orwell-presence", icon: "🧭", title: "Where You Are",  order: 4 },
     { id: "orwell-night",    icon: "🌙", title: "Nightfall",      order: 5 },
     { id: "orwell-finale",   icon: "🏆", title: "The Finale",     order: 6 },
@@ -118,9 +118,14 @@
     // After expand the body becomes scrollable; defer so layout settles first.
     window.requestAnimationFrame(function () {
       try { el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) {}
-      // a brief highlight so the eye lands on the right gadget
+      // a brief highlight so the eye lands on the right gadget. TX-5: cancel any in-flight flash and
+      // restart the animation (re-adding a present class won't restart a CSS animation), so a rapid
+      // repeat focus re-flashes instead of being cut short by the previous click's timer.
+      if (el._grailFlashTimer) clearTimeout(el._grailFlashTimer);
+      el.classList.remove("grail-focus-flash");
+      void el.offsetWidth; // force reflow so the keyframes can re-trigger
       el.classList.add("grail-focus-flash");
-      setTimeout(function () { el.classList.remove("grail-focus-flash"); }, 900);
+      el._grailFlashTimer = setTimeout(function () { el.classList.remove("grail-focus-flash"); el._grailFlashTimer = null; }, 900);
       // move focus into the gadget (its own header if focusable, else the gadget)
       var f = el.querySelector("[tabindex],button,a,[role='button']");
       try { (f || el).focus({ preventScroll: true }); } catch (_) { try { (f || el).focus(); } catch (_) {} }
@@ -222,7 +227,38 @@
     try { var v = JSON.parse(lsGet(_orderKey()) || "null"); return Array.isArray(v) ? v : []; }
     catch (_) { return []; }
   }
-  function saveOrder(ids) { lsSet(_orderKey(), JSON.stringify(ids)); }
+  function saveOrder(ids) {
+    lsSet(_orderKey(), JSON.stringify(ids));   // offline/seed fallback (per-device)
+    // #637: the SYNCED value is the source of truth — persist the order through the 0064 layout
+    // store (LWW, fanned out via `layout-changed`) so it crosses devices and mirrors between two
+    // windows. localStorage stays as the offline fallback the synced value lands into.
+    try {
+      window.dispatchEvent(new CustomEvent("orwell:window-layout",
+        { detail: { id: "gadget-rail", state: { order: Array.isArray(ids) ? ids.slice() : [] } } }));
+    } catch (_) {}
+  }
+
+  // #637: apply a synced order arriving from the layout store (initial seed OR a peer window).
+  // Land it into the local fallback key WITHOUT re-emitting (saveOrder would echo), then re-apply.
+  var _applyingSyncedOrder = false;
+  function applySyncedOrder(ids) {
+    if (_applyingSyncedOrder || !Array.isArray(ids) || !ids.length) return;
+    var cur = loadOrder();
+    if (JSON.stringify(cur) === JSON.stringify(ids)) { applyOrder(); return; }  // already in step
+    _applyingSyncedOrder = true;
+    try {
+      lsSet(_orderKey(), JSON.stringify(ids));
+      applyOrder();
+      syncStrip();
+    } finally { _applyingSyncedOrder = false; }
+  }
+  function _onSyncedLayout(e) {
+    var d = e && e.detail;
+    if (!d || d.windowId !== "gadget-rail" || !d.state) return;
+    if (Array.isArray(d.state.order)) applySyncedOrder(d.state.order);
+  }
+  window.addEventListener("orwell:layout-seed", _onSyncedLayout);     // initial GET /layout
+  window.addEventListener("orwell:layout-changed", _onSyncedLayout);  // a peer window / device
 
   function gadgets() {
     if (!body) return [];
@@ -341,16 +377,37 @@
   function _clearDropHints() {
     Array.prototype.forEach.call(body.children, function (c) { c.classList.remove("grail-drop-into"); });
   }
-  function _clearDrag() {
+  // #654 — settle/snap the dropped gadget back into its slot: clear the follow-finger
+  // translate and run the brief settle transition (.grail-settling), then strip both the
+  // drag + settle classes once it has landed. Reduced motion ⇒ no settle animation, just
+  // an immediate reset (the CSS .grail-settling rule is no-op'd under reduce).
+  function _settleDrop(el) {
+    if (!el) return;
+    el.style.removeProperty("--grail-dy");
+    el.classList.remove("grail-dragging");
+    el.classList.add("grail-settling");
+    if (el._grailSettleTimer) clearTimeout(el._grailSettleTimer);
+    el._grailSettleTimer = setTimeout(function () {
+      el.classList.remove("grail-settling");
+      el._grailSettleTimer = null;
+    }, 220);
+  }
+  function _clearDrag(settle) {
     if (_drag) {
       try { _drag.el.releasePointerCapture(_drag.pointerId); } catch (_) {}
-      _drag.el.classList.remove("grail-dragging");
+      if (settle) _settleDrop(_drag.el);
+      else { _drag.el.style.removeProperty("--grail-dy"); _drag.el.classList.remove("grail-dragging"); }
     }
     _clearDropHints();
     _drag = null;
   }
   function _beginDrag(el, e) {
-    _drag = { id: el.id, el: el, pointerId: e.pointerId };
+    // PICK-UP: capture the grab origin so the move can translate the gadget under the
+    // finger; lifting (scale + shadow) is the .grail-dragging treatment.
+    _drag = { id: el.id, el: el, pointerId: e.pointerId, startY: e.clientY };
+    el.classList.remove("grail-settling");
+    if (el._grailSettleTimer) { clearTimeout(el._grailSettleTimer); el._grailSettleTimer = null; }
+    el.style.setProperty("--grail-dy", "0px");
     el.classList.add("grail-dragging");
     try { el.setPointerCapture(e.pointerId); } catch (_) {}
   }
@@ -372,6 +429,9 @@
     }
     if (!_drag) return;
     e.preventDefault();
+    // MOVE: the grabbed gadget tracks the finger 1:1 via --grail-dy (no transition while
+    // dragging, set in CSS), so it visibly follows the touch as it moves up/down the rail.
+    _drag.el.style.setProperty("--grail-dy", (e.clientY - _drag.startY) + "px");
     var over = _gadgetFromPoint(e.clientX, e.clientY);
     _clearDropHints();
     if (over && over !== _drag.el) over.classList.add("grail-drop-into");
@@ -385,12 +445,12 @@
       var r = over.getBoundingClientRect();
       moveRelative(_drag.id, over.id, e.clientY > r.top + r.height / 2);
     }
-    _clearDrag();
+    _clearDrag(true);  // DROP: settle/snap back into the slot
   }
   body.addEventListener("pointerup", _endPointer);
   body.addEventListener("pointercancel", function () {
     if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
-    _lp = null; _clearDrag();
+    _lp = null; _clearDrag(true);
   });
   // Keyboard reorder while editing (accessible): arrows move the focused gadget; Esc leaves.
   body.addEventListener("keydown", function (e) {
@@ -421,8 +481,15 @@
       '.gadget-rail[data-edit="true"] .gadget-rail-body > *:nth-child(2n) { animation-delay: -.11s; }' +
       '.gadget-rail[data-edit="true"] .gadget-rail-body > *:nth-child(3n) { animation-delay: -.21s; }' +
       '.gadget-rail[data-edit="true"] .gadget-rail-body > * > * { pointer-events: none; }' +
+      // #654 — touch reorder PICK-UP → MOVE → DROP. The grabbed gadget lifts (scale + lift
+      // shadow), then follows the finger via the JS-set --grail-dy translate; transition is
+      // OFF while dragging so it tracks the pointer 1:1. On release .grail-settling animates
+      // the lift away as it lands back in its slot (the snap/settle).
       ".grail-dragging { animation: none !important; opacity: .92; cursor: grabbing;" +
-      "  transform: scale(1.03); z-index: 5; box-shadow: 0 10px 28px rgba(0,0,0,.4); }" +
+      "  transform: translateY(var(--grail-dy, 0px)) scale(1.04); z-index: 5;" +
+      "  box-shadow: 0 14px 32px rgba(0,0,0,.45); transition: none; }" +
+      ".grail-settling { transition: transform .2s cubic-bezier(.22,.61,.36,1), box-shadow .2s ease;" +
+      "  transform: translateY(0) scale(1); box-shadow: none; z-index: 5; }" +
       ".grail-drop-into { outline: 2px dashed color-mix(in srgb, var(--accent, #e06c75) 75%, transparent);" +
       "  outline-offset: -2px; border-radius: 10px; }" +
       "@keyframes grail-wiggle { 0%,100% { transform: rotate(-.55deg); } 50% { transform: rotate(.55deg); } }" +
@@ -430,10 +497,15 @@
       ".grail-focus-flash { animation: grail-focus-flash .9s ease; }" +
       "@keyframes grail-focus-flash { 0%,100% { box-shadow: none; } 20%,60% {" +
       "  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #e06c75) 60%, transparent); } }" +
-      // reduced motion: no wiggle — a steady dashed outline signals 'editable' instead.
+      // reduced motion: no wiggle — a steady dashed outline signals 'editable' instead — and
+      // the touch-reorder lift/move/settle drops its scale + settle transition (#654): the
+      // grabbed gadget still follows the finger (the translate is the functional drag cue) but
+      // never scales or springs.
       "@media (prefers-reduced-motion: reduce) {" +
       '  .gadget-rail[data-edit="true"] .gadget-rail-body > * { animation: none;' +
-      "    outline: 1px dashed color-mix(in srgb, var(--fg) 35%, transparent); outline-offset: -2px; } }" +
+      "    outline: 1px dashed color-mix(in srgb, var(--fg) 35%, transparent); outline-offset: -2px; }" +
+      "  .grail-dragging { transform: translateY(var(--grail-dy, 0px)); }" +
+      "  .grail-settling { transition: none; transform: translateY(0); } }" +
       // the collapsed icon-strip is never editable here
       '.gadget-rail[data-collapsed="true"] .gadget-rail-body > * { animation: none; }';
     document.head.appendChild(st);
@@ -487,6 +559,17 @@
     var c = clampW(w);
     if (c == null) return;
     rail.style.setProperty("--gadget-rail-width", c + "px");
+    _syncResizeAria(c);
+  }
+  // F-NEW-9: keep the slider's reported value (+ its viewport-relative max) in sync with the
+  // current rail width so AT announces the real number as the player nudges/drags it.
+  function _syncResizeAria(c) {
+    if (!resizeHandle) return;
+    var w = clampW(c == null ? currentWidth() : c);
+    if (w == null) return;
+    resizeHandle.setAttribute("aria-valuenow", String(w));
+    resizeHandle.setAttribute("aria-valuemax", String(maxW()));
+    resizeHandle.setAttribute("aria-valuetext", w + " pixels");
   }
   function persistWidth(w) {
     var c = clampW(w);
@@ -506,12 +589,17 @@
     if (resizeHandle && rail.contains(resizeHandle)) return resizeHandle;
     resizeHandle = document.createElement("div");
     resizeHandle.className = "gadget-rail-resize-handle";
-    resizeHandle.setAttribute("role", "separator");
+    // F-NEW-9: this handle is keyboard-OPERATED (arrows nudge the width), so it is a slider,
+    // not a non-interactive separator. role="slider" + the value range lets AT announce the
+    // current width and that it's adjustable.
+    resizeHandle.setAttribute("role", "slider");
     resizeHandle.setAttribute("aria-orientation", "vertical");
     resizeHandle.setAttribute("aria-label", "Resize the control room");
+    resizeHandle.setAttribute("aria-valuemin", String(MIN_W));
     resizeHandle.setAttribute("tabindex", "0");
     rail.appendChild(resizeHandle);
     wireResize(resizeHandle);
+    _syncResizeAria();
     return resizeHandle;
   }
 

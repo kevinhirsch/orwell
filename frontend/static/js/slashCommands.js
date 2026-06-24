@@ -18,6 +18,7 @@ import spinnerModule from './spinner.js';
 import themeModule from './theme.js';
 import workspaceModule from './workspace.js';
 import settingsModule from './settings.js';
+import { DEFAULT_KEYBINDS } from './keyboard-shortcuts.js';
 // Game build (feature 0032): workspace verticals removed — null stubs for guarded usage sites.
 const documentModule = null, cookbookModule = null, EVAL_PROMPTS = {};
 
@@ -4930,16 +4931,10 @@ async function _cmdSetup(args, ctx) {
 // ── Shortcuts ──
 
 async function _cmdShortcuts(args, ctx) {
-  // Try to load user keybinds from settings
-  let keybinds = {
-    search: 'ctrl+k',
-    toggle_sidebar: 'ctrl+b',
-    new_session: 'ctrl+alt+n',
-    star_session: 'ctrl+alt+s',
-    delete_session: 'ctrl+alt+d',
-    admin_panel: 'ctrl+shift+u',
-    cancel: 'escape',
-  };
+  // #586: defaults come straight from the runtime keymap's single source of truth
+  // (DEFAULT_KEYBINDS in keyboard-shortcuts.js) so /shortcuts can never drift from
+  // what's actually bound or from what the Shortcuts settings tab displays.
+  let keybinds = { ...DEFAULT_KEYBINDS };
 
   try {
     const res = await fetch(`${API_BASE}/api/auth/settings`, { credentials: 'same-origin' });
@@ -4949,7 +4944,7 @@ async function _cmdShortcuts(args, ctx) {
     }
   } catch (e) {}
 
-  const formatCombo = (combo) => combo.split('+').map(p => {
+  const formatCombo = (combo) => (combo || '').split('+').filter(Boolean).map(p => {
     if (p === 'ctrl') return 'Ctrl';
     if (p === 'alt') return 'Alt';
     if (p === 'shift') return 'Shift';
@@ -4957,17 +4952,25 @@ async function _cmdShortcuts(args, ctx) {
     return p.charAt(0).toUpperCase() + p.slice(1);
   }).join('+');
 
-  const entries = [
-    [formatCombo(keybinds.search), 'Search conversations'],
-    [formatCombo(keybinds.toggle_sidebar), 'Toggle sidebar'],
-    [formatCombo(keybinds.new_session), 'New session'],
-    [formatCombo(keybinds.star_session), 'Star / unstar session'],
-    [formatCombo(keybinds.delete_session), 'Delete session'],
-    [formatCombo(keybinds.admin_panel), 'Admin panel'],
-    [formatCombo(keybinds.cancel), 'Cancel stream / close panel'],
-    ['Enter', 'Send message'],
-    ['Shift+Enter', 'New line'],
-  ];
+  // Labels for the canonical rebindable actions (the DEFAULT_KEYBINDS keys).
+  // J1-33: align to the in-app vocabulary ("Chats" / "New Chat" / "Settings").
+  const ACTION_LABELS = {
+    search: 'Search chats',
+    toggle_sidebar: 'Toggle sidebar',
+    new_session: 'New chat',
+    fav_session: 'Favorite chat',
+    delete_session: 'Delete chat',
+    cancel: 'Cancel stream / close panel',
+    tts: 'Play / stop TTS',
+    settings: 'Open Settings',
+    focus_input: 'Focus chat input',
+    open_theme: 'Open theme',
+  };
+  const entries = Object.keys(DEFAULT_KEYBINDS)
+    .filter((action) => formatCombo(keybinds[action]))   // skip unbound (empty) actions
+    .map((action) => [formatCombo(keybinds[action]), ACTION_LABELS[action] || action]);
+  entries.push(['Enter', 'Send message']);
+  entries.push(['Shift+Enter', 'New line']);
   const maxKey = Math.max(...entries.map(e => e[0].length));
   const lines = entries.map(([key, desc]) => `  ${key.padEnd(maxKey + 2)}${desc}`);
   const body = await typewriterReply('Keyboard shortcuts:');

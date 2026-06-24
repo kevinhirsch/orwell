@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=3 playerStatus=active committed=false
+TALLY=null
+
+Big BrotherThe Diary Room is quiet. The red light blinks — steady, patient. Two portraits on the monitor. One of them walks out the door tonight. Valentina's not here to game it out with you anymore, but the vote is yours alone to cast.

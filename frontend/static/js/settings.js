@@ -3,14 +3,23 @@
 
 import uiModule from './ui.js';
 import { makeWindowDraggable } from './windowDrag.js';
+// #553: Settings composes the OrwellWindow kit (unified drag / z / focus-trap / F5 geometry).
+// The kit is loaded once via its own <script type=module> (index.html) which publishes the
+// window.OrwellWindowKit global — we consume that global (same as orwellFinale.js etc.) rather than
+// importing the module here, which would instantiate a SECOND copy with its own window stack.
 // Game build (feature 0032): workspace verticals removed.
 const searchModule = null;
 import { clearDockSide } from './modalSnap.js';
 import { sortModelIds } from './modelSort.js';
 import { isAltGrEvent } from './platform.js';
+import { DEFAULT_KEYBINDS } from './keyboard-shortcuts.js';
 
 let initialized = false;
 let modalEl = null;
+// #553: the OrwellWindow kit instance hosting the settings content, and the salvaged
+// "Peek" toggle (re-hosted from the old .modal-header into the kit titlebar on first open).
+let win = null;
+let _peekBtn = null;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) { return uiModule.esc(s); }
@@ -44,69 +53,60 @@ function initTabs() {
 }
 
 /* ── Dragging ── */
-function initDrag() {
-  const header = modalEl.querySelector('.modal-header');
-  const content = modalEl.querySelector('.settings-modal-content');
-  if (!header || !content) return;
-  // Skip interactive controls in the header (e.g. the opacity slider) so
-  // grabbing them doesn't start a window-drag.
-  makeWindowDraggable(modalEl, {
-    content,
-    header,
-    skipSelector: 'button, input, select, .theme-opacity-wrap',
-    enableDock: true,
-  });
-}
-
-function resetWindowPlacement() {
-  const content = modalEl && modalEl.querySelector('.settings-modal-content');
+// #553: build the OrwellWindow kit modal that hosts the settings content. The static
+// #settings-host (index.html) holds .settings-modal-content (the sidebar + panels); we lift it
+// into the kit, drop the legacy .modal-header (the kit titlebar provides the title + close), and
+// salvage the "Peek" toggle to re-host into the kit titlebar on first open. The kit OWNS drag,
+// the single z-authority, the focus-trap/scrim (modal:true), Escape (ui.js arbiter), and the F5
+// cross-session geometry (slotKey) — so the bespoke makeWindowDraggable/modalSnap/focus-trap/
+// backdrop are all retired below. The window id stays "settings-modal" so every modalEl.* query,
+// keyboard-shortcuts wiring, and the /settings open path keep working.
+function initKitWindow() {
+  const host = el('settings-host');
+  const content = host ? host.querySelector('.settings-modal-content') : null;
   if (!content) return;
-  const hadLeft = modalEl.classList.contains('modal-left-docked');
-  const hadRight = modalEl.classList.contains('modal-right-docked');
-  modalEl.classList.remove('modal-left-docked', 'modal-right-docked');
-  if (hadLeft) clearDockSide('left', modalEl);
-  if (hadRight) clearDockSide('right', modalEl);
-  if (content._leftDockNavObs) {
-    try { content._leftDockNavObs.navObs && content._leftDockNavObs.navObs.disconnect(); } catch (_) {}
-    try { window.removeEventListener('resize', content._leftDockNavObs.reanchor); } catch (_) {}
-    delete content._leftDockNavObs;
-  }
-  delete content._preDockSnapshot;
-  delete content._dockSide;
-  delete content._dockSuspended;
-  delete content.dataset._tilePreSnap;
-  delete content.dataset._tileZone;
-  [
-    'position', 'left', 'top', 'right', 'bottom', 'margin', 'transform',
-    'width', 'height', 'max-width', 'max-height', 'border-radius', 'transition',
-  ].forEach(prop => content.style.removeProperty(prop));
+  // IMPORTANT: leave `content` inside #settings-host (in the document, just hidden) until the kit's
+  // first open() moves it into the .ow-body. getElementById (el()) finds elements in display:none
+  // subtrees but NOT detached ones, so every init wiring (`el('set-…')`) must run while the content
+  // is still document-attached. The legacy .modal-header (h4 + close ✖) and the Peek re-host are
+  // therefore deferred to first open (_promoteChrome) — not removed here.
+  win = window.OrwellWindowKit.create({
+    id: 'settings-modal',
+    title: 'Settings',
+    modal: true,            // scrim + inert background + focus-trap + Escape via ui.js (audit J1-25/F7)
+    // A modal dialog dismisses on Escape (the old settings behavior); the kit's dismissTop()
+    // MINIMIZES a minimizable window but CLOSES a non-minimizable one — so a modal dialog must opt
+    // out of minimize (a scrim'd modal tucked to a dock chip is nonsense anyway).
+    minimizable: false,
+    slotKey: 'settings',    // F5: one persisted-geometry scheme (position restored across sessions)
+    resizable: true,
+    minWidth: 320, minHeight: 320,
+    content,                // appended into .ow-body on first open() (moved out of #settings-host)
+  });
 }
 
-/* ── Close on backdrop / X ── */
-function initClose() {
-  modalEl.querySelector('.close-btn').addEventListener('click', close);
-  modalEl.addEventListener('mousedown', e => {
-    if (uiModule.isTouchInsideModal()) return;
-    if (e.target === modalEl) close();
-  });
-  document.addEventListener('keydown', e => {
-    if (e.key !== 'Escape' || !modalEl || modalEl.classList.contains('hidden')) return;
-    // If an integration edit/add form is open inside the modal, close
-    // just that — don't dismiss the whole settings modal. (Pressing
-    // ESC mid-edit and losing the modal was a fast-typing footgun.)
-    const innerForm = modalEl.querySelector('#unified-intg-form, #set-email-accounts-form');
-    if (innerForm && innerForm.style.display !== 'none' && innerForm.children.length > 0) {
-      e.preventDefault();
-      e.stopPropagation();
-      innerForm.style.display = 'none';
-      innerForm.innerHTML = '';
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    close();
-  });
+// #553: on first open the kit has built its titlebar and moved the content into .ow-body. Lift the
+// "Peek" toggle into the kit titlebar (before min/close) and drop the now-redundant legacy
+// .modal-header (its h4 + close ✖ are replaced by the kit chrome). Idempotent — runs each open,
+// no-ops once promoted.
+function _ensurePeekInTitlebar() {
+  if (!win || !win.el) return;
+  const controls = win.el.querySelector('.ow-controls');
+  const peek = win.el.querySelector('#settings-opacity-wrap');
+  if (controls && peek && peek.parentElement !== controls) controls.insertBefore(peek, controls.firstChild);
+  const legacyHeader = win.el.querySelector('.modal-header');
+  if (legacyHeader) legacyHeader.remove();
 }
+
+// #553: retired — the kit owns geometry (the F5 slot-offset restored across sessions). The old
+// modalSnap dock/re-center scheme (which re-centered on every open, the "doesn't remember its
+// location" bug) is gone. Kept as a no-op so any stray caller is harmless.
+function resetWindowPlacement() {}
+
+/* ── Close (#553): the kit titlebar × + the modal scrim own pointer-dismiss, and the ui.js Escape
+   arbiter owns the keyboard — its settings branch closes the inner integration/email form first,
+   then the window via the kit ×. Nothing bespoke to wire here now. */
+function initClose() {}
 
 /* ── Appearance-tab opacity slider ──
    Mirrors the Theme customizer's slider: fades the settings modal's
@@ -115,7 +115,9 @@ function initClose() {
    (no element opacity). Only shown/active on the Appearance tab. */
 const _SETTINGS_PEEK = 55; // % opacity when the Peek toggle is on
 function _applySettingsOpacity(on) {
-  const content = modalEl && modalEl.querySelector('.settings-modal-content, .modal-content');
+  // #553: fade the KIT FRAME (.ow-window) — the visible card is now the kit window, not a nested
+  // .settings-modal-content. Fall back to modalEl (the content node) if the kit isn't built yet.
+  const content = (win && win.el) || modalEl;
   if (!content) return;
   const cards = content.querySelectorAll('.admin-card');
   if (on) {
@@ -1816,18 +1818,10 @@ function syncPrivacyCheckboxes() {
    SHORTCUTS TAB
    ═══════════════════════════════════════════ */
 
-const SHORTCUT_DEFAULTS = {
-  search:         'ctrl+k',
-  toggle_sidebar: 'ctrl+b',
-  new_session:    'ctrl+alt+n',
-  fav_session:    'ctrl+alt+f',
-  delete_session: 'ctrl+alt+d',
-  cancel:         'escape',
-  tts:            'alt+shift+t',
-  settings:       'ctrl+,',
-  focus_input:    'ctrl+/',
-  open_theme:     '',
-};
+// #586: single source of truth — the defaults come straight from the runtime
+// keymap's DEFAULT_KEYBINDS (keyboard-shortcuts.js). The displayed/reset defaults
+// in this tab therefore always match exactly what the runtime binds.
+const SHORTCUT_DEFAULTS = { ...DEFAULT_KEYBINDS };
 
 const SHORTCUT_ICONS = {
   search:         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>',
@@ -1842,22 +1836,27 @@ const SHORTCUT_ICONS = {
   open_theme:     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 5-5 3 3 0 0 0-3-3h-2a3 3 0 0 1-3-3 5 5 0 0 1 5-5"/></svg>',
 };
 
+// J1-33: vocabulary drift — these used "conversations / session / Toggle Window"
+// while the live UI calls them "Chats" (sidebar section), "New Chat" / "Search"
+// (sidebar buttons) and "Settings" (the gear / /settings). Align the shortcut
+// labels to the in-app vocabulary so nothing teaches a second name for the same
+// thing.
 const SHORTCUT_LABELS = {
-  search:         'Search conversations',
+  search:         'Search chats',
   toggle_sidebar: 'Toggle sidebar',
-  new_session:    'New session',
-  fav_session:    'Favorite session',
-  delete_session: 'Delete session',
+  new_session:    'New chat',
+  fav_session:    'Favorite chat',
+  delete_session: 'Delete chat',
   cancel:         'Cancel / close',
   tts:            'Play/stop TTS',
-  settings:       'Toggle Window',
+  settings:       'Open Settings',
   focus_input:    'Focus chat input',
   open_theme:     'Open Theme',
 };
 
 const SHORTCUT_CATEGORIES = [
   { name: 'Navigation', keys: ['search', 'toggle_sidebar', 'focus_input', 'settings'] },
-  { name: 'Sessions', keys: ['new_session', 'fav_session', 'delete_session'] },
+  { name: 'Chats', keys: ['new_session', 'fav_session', 'delete_session'] },
   { name: 'Tools', keys: ['tts', 'cancel'] },
   { name: 'Open Tools', keys: ['open_theme'] },
 ];
@@ -2137,6 +2136,20 @@ function initAccount() {
         const initial = (d.username || '?')[0].toUpperCase();
         avatarEl.textContent = initial;
       }
+      // J1-17: auth furniture (Logout / Change Password / 2FA) is enterprise IA
+      // that only makes sense when the operator has auth turned on. On a
+      // single-player, auth-off build those controls are inert, so hide them —
+      // the account card still shows the player's name + profile picture studio.
+      // Default to showing them when the field is absent (older engine / safety).
+      const authOff = d && d.auth_enabled === false;
+      if (authOff) {
+        const logoutBtn = el('settings-logout-btn');
+        if (logoutBtn) logoutBtn.style.display = 'none';
+        const pwCard = el('settings-pw-card');
+        if (pwCard) pwCard.style.display = 'none';
+        const tfaCard = el('settings-2fa-card');
+        if (tfaCard) tfaCard.style.display = 'none';
+      }
     }).catch(() => {});
 
   // Visible post-login build version (mirrors the login-screen footer). Derived
@@ -2371,9 +2384,16 @@ function initAccount() {
 }
 
 function initAll() {
-  modalEl = el('settings-modal');
+  // #553: build the kit window FIRST (it lifts .settings-modal-content out of #settings-host).
+  // modalEl is the live kit element, re-resolved on each open() (the kit rebuilds on open after a
+  // close→teardown). Everything below queries modalEl, so the content must be in place first.
+  initKitWindow();
+  // modalEl = the STABLE content node (.settings-modal-content). The kit builds its .ow-window
+  // lazily on open() and rebuilds it after a close→teardown, but it always re-appends THIS same
+  // content node (win.o.content) into the fresh .ow-body — so this reference stays valid for every
+  // modalEl.querySelector(...) across the window's whole lifecycle. (Show/hide/focus go via `win`.)
+  modalEl = (win && win.o && win.o.content) || el('settings-modal');
   initTabs();
-  initDrag();
   initClose();
   initOpacityToggle();
   initialized = true;
@@ -2410,7 +2430,7 @@ function notifyIntegrationsChanged() {
 }
 
 async function initReminderSettings() {
-  const root = el('settings-modal');
+  const root = modalEl;  // #553: content node (kit builds lazily; el('settings-modal') is null pre-open)
   if (!root || !root.querySelector('[data-settings-panel="reminders"]')) return;
 
   // Public URL field (used for deep-links in outgoing alert emails)
@@ -2830,7 +2850,7 @@ async function initReminderSettings() {
 }
 
 async function initEmailAccountsSettings() {
-  const root = el('settings-modal');
+  const root = modalEl;  // #553: content node (kit builds lazily; el('settings-modal') is null pre-open)
   if (!root || !root.querySelector('[data-settings-panel="email"]')) return;
   const manageBtn = el('set-email-open-integrations');
   if (manageBtn && manageBtn.dataset.bound !== '1') {
@@ -3046,7 +3066,7 @@ async function initEmailAccountsSettings() {
 }
 
 async function initEmailSettings() {
-  const root = el('settings-modal');
+  const root = modalEl;  // #553: content node (kit builds lazily; el('settings-modal') is null pre-open)
   if (!root || !root.querySelector('[data-settings-panel="email"]')) return;
 
   // Load current email config
@@ -5419,13 +5439,14 @@ function _settingsTrapKeydown(e) {
 export function open(tab) {
   if (!initialized) initAll();
   syncAppearanceCheckboxes();
-  const _wasHidden = modalEl.classList.contains('hidden');
-  if (_wasHidden) {
-    resetWindowPlacement();
-  }
-  modalEl.classList.remove('hidden');
+  // #553: was it already on screen? (the kit window is connected only while open). Drives the
+  // first-open-only focus + admin lazy-init below, replacing the old `.hidden` class check.
+  const _wasHidden = !(win && win.el && win.el.isConnected);
+  // Show via the kit: builds (or restores) the .ow-window, restores the F5 cross-session geometry,
+  // mounts the scrim + focus-trap (modal:true), and raises to the single z-authority. NO re-center.
+  if (win) win.open(document.activeElement);
+  _ensurePeekInTitlebar();   // re-host the salvaged Peek toggle into the kit titlebar
   syncAdminVisibility();
-  const content = modalEl.querySelector('.settings-modal-content');
   // Resolve which tab to show, respecting admin visibility (C30 / settings ruling):
   // LLM config (services/ai) and the admin tabs are .admin-only, so a non-admin must
   // never LAND on one — its panel would only 403. They default to `account` instead.
@@ -5455,36 +5476,19 @@ export function open(tab) {
     window.adminModule._initData();
   }
   if (_wasHidden) {
-    _settingsPrevFocus = document.activeElement;
-    document.addEventListener('keydown', _settingsTrapKeydown, true);
+    // #553: the kit modal traps focus + returns it to the opener on close. We just place the
+    // initial focus on the active tab (more useful than the kit's first-focusable default).
     const firstStop = modalEl.querySelector('[data-settings-tab].active') || _settingsFocusables()[0];
     if (firstStop) { try { firstStop.focus(); } catch (_) {} }
   }
 }
 
 export function close() {
-  if (!modalEl) return;
-  // S7-1: drop the focus trap and return focus to whatever opened the modal.
-  document.removeEventListener('keydown', _settingsTrapKeydown, true);
-  if (_settingsPrevFocus && typeof _settingsPrevFocus.focus === 'function') {
-    try { _settingsPrevFocus.focus(); } catch (_) {}
-  }
-  _settingsPrevFocus = null;
-  // Always clear the appearance-tab body class so the rest of the app
-  // doesn't keep its dimmed state if the modal got closed mid-tab.
+  // #553: the kit owns the close animation, focus-return, and scrim teardown. We only clear the
+  // appearance-tab dim state so it can't linger if the window closed mid-tab.
   document.body.classList.remove('settings-appearance-open');
   syncAppearanceOpacity(false); // clear any opacity-slider fade
-  const content = modalEl.querySelector('.modal-content, .settings-modal-content');
-  if (content && !content.classList.contains('modal-closing')) {
-    content.classList.add('modal-closing');
-    content.addEventListener('animationend', () => {
-      modalEl.classList.add('hidden');
-      content.classList.remove('modal-closing');
-    }, { once: true });
-    setTimeout(() => { if (!modalEl.classList.contains('hidden')) { modalEl.classList.add('hidden'); content.classList.remove('modal-closing'); } }, 250);
-  } else {
-    modalEl.classList.add('hidden');
-  }
+  if (win) win.close();
 }
 
 const settingsModule = { open, close, initIntegrations, initUnifiedIntegrations, syncAdminVisibility, refreshAiModelEndpoints };

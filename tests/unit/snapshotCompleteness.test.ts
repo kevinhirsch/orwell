@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileSaveStore } from "../../src/adapters/engine/FileSaveStore";
@@ -91,6 +91,33 @@ describe("B40 — an unknown snapshot version is rejected, not crashed on", () =
 
     // restore() surfaces the incompatibility loudly (the rollback path expects a current-version save).
     expect(() => reg2.restore("u", bad)).toThrow(/snapshot version/);
+  });
+
+  it("PERS-NEW-2 (#592): a rejected future-version save is QUARANTINED so fresh saves can't prune it out", () => {
+    const dir = freshDir();
+    const reg = startedGame(dir);
+    reg.saveUser("u");
+    const store = new FileSaveStore(dir);
+    const bad = { ...store.loadLatest("u")!, snapshotVersion: 999 } as SessionSnapshot; // higher schema
+    store.saveFor("u", bad);
+
+    // A fresh registry rejects the future save → fresh sandbox (no resume), and quarantines it.
+    const reg2 = new GameSessionRegistry(new FileSaveStore(dir));
+    reg2.sandboxFor("u"); // triggers the rejected resume + quarantine belt
+
+    // Drive enough fresh-game saves to blow past the retention window (RETAIN_RECENT=5).
+    const sb = reg2.sandboxFor("u");
+    sb.session.createCharacter({ playerName: "P", seed: 3 });
+    for (let i = 0; i < 8; i++) reg2.saveUser("u");
+
+    // The original higher-schema save survived as a `.incompatible` file — retention never touched it.
+    const userDir = join(dir, Buffer.from("u", "utf8").toString("hex"));
+    const files = readdirSync(userDir);
+    expect(files.some((f) => f.endsWith(".incompatible")), `quarantine file present in ${files.join(",")}`).toBe(true);
+    // And the quarantined snapshot is still the higher-schema one (recoverable on a downgrade).
+    const quarantined = files.find((f) => f.endsWith(".incompatible"))!;
+    const recovered = JSON.parse(readFileSync(join(userDir, quarantined), "utf8")) as SessionSnapshot;
+    expect(recovered.snapshotVersion).toBe(999);
   });
 
   it("a versionless legacy save still migrates forward (resumes)", () => {

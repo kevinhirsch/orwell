@@ -52,6 +52,8 @@ def test_beat_signature_shape_from_sample_dicts():
         "pending": "eviction-vote",
         "hoh": "npc:3",
         "noms": ["npc:1", "npc:2"],   # sorted
+        "nomNames": [],                # #561 — nominee names (none named in this sample)
+        "activeNames": [],             # #561 — active roster names (none named in this sample)
         "vetoHolder": "npc:4",
         "vetoUsed": True,
         "evicted": 1,                  # count of non-active house members

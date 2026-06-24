@@ -129,16 +129,24 @@ def test_sourcepin_wave3_shared_dismiss_affordance():
     # banner to docked sidebar chrome ("Where you are"), which has no dismiss affordance.
     # orwellRetrospective.js MIGRATED onto the kit (0054 Phase 2) — it carries the kit's own
     # close button now, not a bespoke ow-dismiss banner.
-    for f in ("orwellEngineStatus.js",):
-        js = _read("static", "js", f)
-        assert "ow-dismiss" in js, f                 # the dismissable banner surfaces adopt it
+    # #642: the engine-status banner MIGRATED off the window kit's .ow-dismiss onto the
+    # OrwellNotice kit (a top-banner system-notice) — its dismiss is the notice kit's shared
+    # .on-dismiss now (one shared dismiss affordance, the owner add-on). It no longer carries
+    # ow-dismiss; the notice ratchet (test_on_notice_kit.py) pins its kit membership.
+    eng = _read("static", "js", "orwellEngineStatus.js")
+    assert "OrwellNoticeKit.create(" in eng, "engine-status composes the OrwellNotice kit (#642)"
+    assert "ow-dismiss" not in eng, "engine-status no longer hand-borrows the window kit's dismiss"
 
 
 def test_sourcepin_wave3_modal_family_focus_return():
     ui = _read("static", "js", "ui.js")
     assert "_owOpener" in ui                         # opener stashed on hidden->visible
     assert "_restoreFocus" in ui                     # restored on visible->hidden
-    assert "!m.contains(active)" in ui               # never yank focus the user moved
+    # A2 (#573): the "never yank focus the user moved" rule now lives in the ONE
+    # shared focus-return helper (window._owReturnFocus) both families call — the
+    # guard is `container.contains(active)` there, not an inlined `!m.contains`.
+    assert "window._owReturnFocus = _returnFocus" in ui
+    assert "container.contains(active)" in ui         # never yank focus the user moved
 
 
 def test_sourcepin_wave3_decision_card_escape_is_dismiss_only():
@@ -232,11 +240,34 @@ def test_sourcepin_a7_reduced_motion_strips_the_flyout():
     # open/minimize/close under reduced motion (the rule names all three + none).
     marker = "@media (prefers-reduced-motion: reduce) {"
     assert marker in js
-    block = js[js.index(marker): js.index(marker) + 200]
+    block = js[js.index(marker): js.index(marker) + 220]
     assert ".ow-anim-open" in block and ".ow-anim-minimize" in block and ".ow-anim-close" in block
+    # the restore fly-IN is stripped under reduced motion too (it joins the same rule)
+    assert ".ow-anim-restore" in block
     assert "animation: none" in block
     # and the JS short-circuits the fly when REDUCED() (no class, straight to done)
     assert "if (REDUCED()) { done(); return; }" in js
+
+
+def test_sourcepin_a7_restore_flyin_mirrors_the_minimize_flyout():
+    """restore↔minimize are mirror-image animations (just as open↔close are).
+
+    The window flies OUT to the dock on minimize and flies back IN from the dock
+    on restore, via a dedicated ow-restore keyframe that reverses ow-minimize
+    along the SAME fly-vector contract (--ow-fly-x/-y). reduced-motion strips it.
+    """
+    js = _read("static", "js", "orwellWindow.js")
+    # a NAMED restore keyframe that flies IN from the dock (translated + scaled-down → identity)
+    assert "@keyframes ow-restore" in js
+    assert ".ow-anim-restore" in js
+    # it reuses the SAME fly-vector contract as the minimize fly-out
+    assert "translate(var(--ow-fly-x, 0), var(--ow-fly-y, 0)) scale(.12)" in js
+    # the restore path computes the dock delta + applies the class — guarded by REDUCED()
+    restore = js[js.index("_afterDockRestore() {"):js.index("_afterDockRestore() {") + 2400]
+    assert "flyTargetRect()" in restore                 # fly FROM the dock chip
+    assert "setProperty('--ow-fly-x'" in restore
+    assert "classList.add('ow-anim-restore')" in restore
+    assert "if (!REDUCED())" in restore                 # reduced-motion skips the fly-in
 
 
 # ── 0054 Phase 2 — DOCKED kit mode ─────────────────────────────────────────

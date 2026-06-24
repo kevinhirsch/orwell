@@ -2555,8 +2555,12 @@ function initializeEventListeners() {
     'rail-new-chat':       '#rail-new-session',
   };
 
-  // Keys hidden by default on first run (no localStorage yet)
-  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn', 'text-emojis']);
+  // Keys hidden by default on first run (no localStorage yet).
+  // NOTE: 'text-emojis' is NOT listed here — it isn't a UI_VIS_MAP key, so the
+  // applyUIVis loop never consults this Set for it. Its default-OFF is owned by
+  // applyTextEmojis(state['text-emojis'] === true) below (SET-NEW-2: removing the
+  // dead duplicate so there is one source of truth for that default).
+  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn']);
 
   // Keys that need admin to toggle off (reserved for future use)
   const UI_VIS_ADMIN_ONLY = new Set([]);
@@ -3261,25 +3265,10 @@ function initializeEventListeners() {
     textarea.addEventListener('paste', () => {
       setTimeout(() => uiModule.autoResize(textarea), 1);
     });
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        // If ghost autocomplete is active, accept the suggestion instead of submitting
-        if (window._ghostAutocomplete && window._ghostAutocomplete.isActive()) {
-          e.preventDefault();
-          e.stopPropagation();
-          window._ghostAutocomplete.accept();
-          return;
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        // Check if already submitting before triggering form submission
-        const form = el('chat-form');
-        if (form) {
-         const submitBtn = form.querySelector('button[type="submit"]');
-         if (submitBtn) submitBtn.click();
-        }
-      }
-    });
+    // NOTE: the Enter-to-submit keydown handler lives once on `messageInput`
+    // below (~3832). A second handler here caused #532 (a sibling keydown firing
+    // after submit cleared the textarea → empty send); it was removed. Ghost
+    // autocomplete accept-on-Enter is preserved in that single handler.
   }
 
   // ── Ghost text autocomplete for /new and /create commands ──
@@ -3831,6 +3820,13 @@ function startOrwellApp() {
   if (messageInput) {
     messageInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        // If ghost autocomplete is active, accept the suggestion instead of submitting.
+        if (window._ghostAutocomplete && window._ghostAutocomplete.isActive()) {
+          e.preventDefault();
+          e.stopPropagation();
+          window._ghostAutocomplete.accept();
+          return;
+        }
         e.preventDefault();
         // OOBE image gate (P1): pre-game, Enter must not send (or open a new chat) until a cast
         // photo is secured — the image step is the player's first interaction. Fail-open guard

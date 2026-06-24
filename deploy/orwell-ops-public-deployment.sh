@@ -201,9 +201,10 @@ do_apply() {
     ops_progress_step 2 "installing the tunnel connector"
     install_cloudflared
     echo "==> registering the cloudflared connector service"
-    # The token is read from its 0600 file straight into the install argv — never echoed. The
-    # command's own stdout can include the token on some versions, so it is silenced.
-    if cloudflared service install "$(cat "$TOKEN_FILE")" >/dev/null 2>&1; then
+    # The token is passed via the TUNNEL_TOKEN env var (never argv → never in `ps`/`/proc/<pid>/cmdline`),
+    # matching the DNS-token sibling (orwell-ops-tls.sh). The command's own stdout can include the token
+    # on some versions, so it is silenced. cloudflared reads TUNNEL_TOKEN when no token arg is given.
+    if TUNNEL_TOKEN="$(cat "$TOKEN_FILE")" cloudflared service install >/dev/null 2>&1; then
       echo "==> cloudflared service installed"
     else
       echo "WARN: 'cloudflared service install' returned non-zero (it may already be installed)"

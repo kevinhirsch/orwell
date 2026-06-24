@@ -234,8 +234,51 @@ def test_build_chat_context_wires_the_in_game_exclusion():
     with open(os.path.join(FRONTEND, "routes", "chat_helpers.py"), encoding="utf-8") as f:
         src = f.read()
     assert '_exclude_phases = {"casting"} if game_active else None' in src
-    assert "get_context_messages(exclude_phases=_exclude_phases)" in src
+    assert "exclude_phases=_exclude_phases" in src
     assert 'mark_message_phase(_last, "casting")' in src
+    # #530: the STRUCTURAL pre-game cut is wired (exclude_pre_game) and the live boundary is stamped.
+    assert "exclude_pre_game=bool(game_active)" in src
+    assert 'mark_message_phase(_last, "game")' in src
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. #530 STRUCTURAL — an UNSTAMPED pre-game (casting) turn must STILL be excluded
+#    once the game is live, so a missed `casting` stamp at the finalize boundary
+#    can never leak the interview to the in-game narrator.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_unstamped_pre_game_turn_is_still_excluded_structurally():
+    # The stamp MISSED on the casting turns (metadata empty). The only durable signal is the
+    # live `game` boundary on the first in-game user turn. The structural cut must still drop
+    # every pre-game turn before that boundary — the unstamped casting answer included.
+    sess = Session(
+        id="s5", name="n", endpoint_url="u", model="m",
+        history=[
+            # UNSTAMPED casting interview (the bug: the phase stamp never landed).
+            ChatMessage("user", f"private read: {CASTING_SENTINEL}", metadata={}),
+            ChatMessage("assistant", "producer: welcome to the cast", metadata={}),
+            # The season went live — this live user turn carries the `game` boundary stamp.
+            ChatMessage("user", INGAME_TOKEN, metadata={"phase": "game"}),
+            ChatMessage("assistant", "narrator: the houseguests gather", metadata={}),
+        ],
+    )
+    ingame = sess.get_context_messages(exclude_phases={"casting"}, exclude_pre_game=True)
+    blob = " ".join(m["content"] for m in ingame)
+    assert CASTING_SENTINEL not in blob, "unstamped casting turn leaked into the in-game context"
+    # Live play from the boundary onward is intact.
+    assert INGAME_TOKEN in blob
+    assert "houseguests gather" in blob
+
+
+def test_pre_game_path_keeps_unstamped_interview_when_not_live():
+    # Before the season is live (no `exclude_pre_game`), the full interview is still visible to
+    # the producer channel — the cut is scoped to live turns only.
+    sess = Session(
+        id="s6", name="n", endpoint_url="u", model="m",
+        history=[ChatMessage("user", f"private: {CASTING_SENTINEL}", metadata={})],
+    )
+    full = sess.get_context_messages(exclude_phases=None, exclude_pre_game=False)
+    assert CASTING_SENTINEL in " ".join(m["content"] for m in full)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

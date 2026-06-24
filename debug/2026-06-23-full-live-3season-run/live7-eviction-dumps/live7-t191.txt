@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=2 playerStatus=active committed=false
+TALLY=null
+
+Big BrotherThe Diary Room is quiet. The red light blinks steady. The vote has been cast — Alondra Eaton has been evicted. The house has spoken. Now it's just you, the camera, and one last word. This goodbye message is yours — Alondra will see it after the season. She was your first HOH. She put Freya and Patricia on the block. And you two had... friction. She gave you a cold goodbye. So the question is:

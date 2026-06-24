@@ -37,8 +37,11 @@ def test_l31_per_user_dismiss_persists_once():
     assert "document.body.dataset.user" in js
     assert "localStorage.setItem" in js and "localStorage.getItem" in js
     assert "hasDismissed()" in js
-    # a real dismiss control
-    assert "opt-dismiss" in js
+    # #642: the guide composes the OrwellNotice kit — the dismiss control is the kit's corner ×
+    # (dismissible:true) wired through onDismiss → the premiere's own (synced) dismiss persistence.
+    assert "OrwellNoticeKit.create(" in js, "the guide must compose the OrwellNotice kit (#642)"
+    assert "dismissible: true" in js
+    assert "onDismiss" in js
 
 
 def test_l31_shows_only_in_premiere_week():
@@ -71,6 +74,51 @@ def test_l31_css_is_theme_token_driven():
     m = re.search(r"orwell-premiere-tutorial-css.*?textContent\s*=(.*?);\n", js, re.S)
     assert m, "tutorial CSS block not found"
     css = m.group(1)
-    assert "var(--fg)" in css
-    # no hard-coded hex colors — derive from theme tokens so the house themes stay readable
+    # #642: the card SHELL moved to the kit (.on-card.on-guide); only the premiere-specific inner
+    # rules (the rhythm line + the CTA row) remain — still theme-token driven (the CTA uses
+    # var(--accent)/var(--fg) mixes), and still no hard-coded hex.
+    assert "var(--fg)" in css or "var(--accent" in css
     assert "#" not in css, "L31 tutorial CSS must be theme-token driven (no hex)"
+
+
+def test_j2_13_offers_an_action_affordance():
+    """J2-13: the tutorial must give a way to DO the first move, not only name the rhythm."""
+    js = _read("static", "js", "orwellPremiereTutorial.js")
+    # a CTA control + the seam that fills the composer and focuses it (the player still authors).
+    assert "opt-go" in js, "premiere tutorial should carry a 'first move' CTA"
+    assert "function firstMove" in js
+    # it seeds the live composer (#message) and never auto-sends — ADR 0003 keeps the player author.
+    assert 'getElementById("message")' in js
+    assert ".focus()" in js
+    # never clobber an in-progress draft
+    assert "input.value.trim()" in js
+
+
+def test_j2_10_entrance_staging_is_reduced_motion_guarded():
+    """J2-10 / J1-20: the premiere card stages its arrival, and reduced-motion strips it.
+
+    #642: the entrance staging (rise+fade) + its reduced-motion guard moved into the OrwellNotice
+    kit (.on-card.on-anim-in, stripped under prefers-reduced-motion). The guide composes the kit,
+    so the staging it inherits is reduced-motion-safe by construction — assert it on the kit."""
+    js = _read("static", "js", "orwellPremiereTutorial.js")
+    assert "OrwellNoticeKit.create(" in js, "the guide composes the kit (which owns the entrance)"
+    kit = _read("static", "js", "orwellNotice.js")
+    assert "on-anim-in" in kit, "the kit owns the mount entrance staging"
+    assert "@keyframes on-in" in kit, "entrance keyframes missing in the kit"
+    m = re.search(r"prefers-reduced-motion: reduce.*?animation: none.*?\}", kit, re.S)
+    assert m, "the kit's reduced-motion media block must strip the entrance animation"
+    assert "on-anim-in" in m.group(0), \
+        "the kit entrance must be named in the prefers-reduced-motion block"
+
+
+def test_j2_18_controls_meet_the_tap_floor():
+    """J2-18 / WCAG 2.5.5: the premiere card's controls clear the 44px coarse-pointer floor.
+
+    #642: the dismiss control is now the OrwellNotice kit's corner × (44px in the kit + style.css);
+    the premiere keeps its own "Meet the house" CTA (>=44px). So the floor holds across both: the
+    CTA in the premiere module, the dismiss in the kit."""
+    js = _read("static", "js", "orwellPremiereTutorial.js")
+    assert "min-height: 36px" not in js, "premiere control still below the 44px tap floor"
+    assert "min-height: 44px" in js, "the premiere CTA should be >= 44px"
+    kit = _read("static", "js", "orwellNotice.js")
+    assert "min-width: 44px" in kit and "min-height: 44px" in kit, "the kit dismiss is >= 44px"

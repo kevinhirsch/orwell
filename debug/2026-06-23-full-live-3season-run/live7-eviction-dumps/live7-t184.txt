@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=1 playerStatus=active committed=false
+TALLY=null
+
+Big Brother01:54 AM The Diary Room is quiet. Just you, the camera, and the red light blinking steady. Two portraits glow on the monitor — Alondra on the left, Patricia on the right. One of them walks out the door tonight. You've been cooking all week. Now it's time to name it. Who gets your vote?

@@ -141,6 +141,36 @@ def _current_user_is_admin(request: Request, user: str | None) -> bool:
         return False
 
 
+def _resolve_registered_endpoint(request: Request, user: str | None, endpoint_id: str):
+    """Resolve a registered, enabled model endpoint by id to ``(base_url, api_key, chat_url)``
+    for a session model switch/create. Raises ``HTTPException(400)`` when it can't resolve.
+
+    Owner scoping mirrors the READ paths (``/api/models``, ``/api/default-chat``): admins —
+    and single-user mode — see, and therefore may SET, every endpoint; non-admins are scoped
+    to their own. Without the admin bypass an admin could see a model in the picker yet hit
+    "Failed to set model" for any endpoint they don't personally own — a shared/null-owner
+    row, or one whose owner stamp went stale when an OOBE reset rebuilt the accounts but
+    preserved the endpoint rows (exactly the reported regression)."""
+    from core.database import ModelEndpoint
+    from src.auth_helpers import owner_filter
+    from src.endpoint_resolver import build_chat_url, normalize_base
+    _db = SessionLocal()
+    try:
+        q = _db.query(ModelEndpoint).filter(
+            ModelEndpoint.id == endpoint_id,
+            ModelEndpoint.is_enabled == True,  # noqa: E712
+        )
+        if user and not _current_user_is_admin(request, user):
+            q = owner_filter(q, ModelEndpoint, user)
+        ep = q.first()
+        if not ep:
+            raise HTTPException(400, "Model endpoint no longer exists")
+        base_url = ep.base_url or ""
+        return base_url, (ep.api_key or ""), build_chat_url(normalize_base(base_url))
+    finally:
+        _db.close()
+
+
 def _reject_raw_endpoint_url_for_non_admin(
     request: Request,
     user: str | None,
@@ -333,25 +363,9 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         endpoint_base_url = ""
         _reject_raw_endpoint_url_for_non_admin(request, user, endpoint_id, endpoint_url)
         if endpoint_id and endpoint_id.strip():
-            from core.database import ModelEndpoint
-            from src.auth_helpers import owner_filter
-            from src.endpoint_resolver import build_chat_url, normalize_base
-            _db = SessionLocal()
-            try:
-                q = _db.query(ModelEndpoint).filter(
-                    ModelEndpoint.id == endpoint_id.strip(),
-                    ModelEndpoint.is_enabled == True,
-                )
-                if user:
-                    q = owner_filter(q, ModelEndpoint, user)
-                endpoint_row = q.first()
-                if not endpoint_row:
-                    raise HTTPException(400, "Model endpoint no longer exists")
-                endpoint_base_url = endpoint_row.base_url or ""
-                endpoint_api_key = endpoint_row.api_key or ""
-                endpoint_url = build_chat_url(normalize_base(endpoint_base_url))
-            finally:
-                _db.close()
+            endpoint_base_url, endpoint_api_key, endpoint_url = _resolve_registered_endpoint(
+                request, user, endpoint_id.strip()
+            )
 
         if not endpoint_url and not skip_val:
             raise HTTPException(400, "endpoint_url is required (choose from /api/models)")
@@ -376,13 +390,11 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                                  headers=validation_headers)
             if not ids:
                 raise HTTPException(400, "Cannot reach /v1/models")
-            # Default to the first CHAT model — endpoints often list embedding/
-            # tts/whisper models first (e.g. text-embedding-ada-002), which
-            # can't hold a conversation.
-            _NON_CHAT = ("text-embedding", "embedding", "tts-", "whisper",
-                         "text-moderation", "moderation-", "dall-e", "rerank")
-            chat_ids = [m for m in ids if not any(p in m.lower() for p in _NON_CHAT)]
-            model_to_use = (chat_ids or ids)[0]
+            # Default to the first CHAT model — endpoints often list embedding/tts/whisper
+            # (e.g. text-embedding-ada-002) or text→image models (e.g. "*-flash-image")
+            # which can't hold a conversation. _first_chat_model excludes both.
+            from src.endpoint_resolver import _first_chat_model
+            model_to_use = _first_chat_model(ids) or ids[0]
         else:
             from src.llm_core import list_model_ids
             import os as _os
@@ -472,25 +484,9 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             endpoint_api_key = ""
             endpoint_base_url = ""
             if endpoint_id:
-                from core.database import ModelEndpoint
-                from src.auth_helpers import owner_filter
-                from src.endpoint_resolver import build_chat_url, normalize_base
-                _db = SessionLocal()
-                try:
-                    q = _db.query(ModelEndpoint).filter(
-                        ModelEndpoint.id == endpoint_id,
-                        ModelEndpoint.is_enabled == True,
-                    )
-                    if user:
-                        q = owner_filter(q, ModelEndpoint, user)
-                    ep = q.first()
-                    if not ep:
-                        raise HTTPException(400, "Model endpoint no longer exists")
-                    endpoint_base_url = ep.base_url or ""
-                    endpoint_api_key = ep.api_key or ""
-                    endpoint_url = build_chat_url(normalize_base(endpoint_base_url))
-                finally:
-                    _db.close()
+                endpoint_base_url, endpoint_api_key, endpoint_url = _resolve_registered_endpoint(
+                    request, user, endpoint_id
+                )
             session.model = model
             session.endpoint_url = endpoint_url
             # Update auth headers from the endpoint's stored API key

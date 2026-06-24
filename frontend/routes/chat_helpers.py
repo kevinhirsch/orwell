@@ -446,6 +446,55 @@ def _whereabouts_barrier_directive(whereabouts) -> Optional[str]:
     )
 
 
+def _premiere_progress_directive(premiere) -> Optional[str]:
+    """J3-13 (wayfinding) — surface the engine's meet-everyone progress as a CONSISTENT framing fact
+    during the premiere, so every redirect that gates the player at the HOH names the actual gap.
+
+    The audit found the premiere redirect was INCONSISTENT: the best redirect ("Eleven met, five left:
+    …") named the count, but the veto/eviction redirects described a nearby scene without it, leaving
+    the player no action plan. The count never relied on the model REMEMBERING — `getGameState` already
+    carries the engine-tracked `premiere` progress (PremiereIntrosView). This hands the model that fact
+    every premiere turn so it can always answer "why hasn't HOH started, and who's left to meet".
+
+    Vault-free by construction: only the public met/total counts + the still-to-meet NAMES (the same
+    observable roster facets `premiereIntros` exposes) — never a number about a houseguest, a soul, or a
+    standing. Returns None outside the premiere (no `premiere` field, or it is already complete), leaving
+    the turn framed exactly as before."""
+    if not isinstance(premiere, dict):
+        return None
+    if premiere.get("complete"):
+        return None
+    try:
+        total = int(premiere.get("total") or 0)
+        met = int(premiere.get("metCount") or 0)
+    except (TypeError, ValueError):
+        return None
+    # Both counts include the player (they ARE met); the player's mental model is "of the 15 OTHERS,
+    # how many have I met?" — so report the NPC-only figures (total-1, met-1) to match "X of 15".
+    npc_total = total - 1
+    npc_met = met - 1
+    if npc_total <= 0 or npc_met < 0:
+        return None
+    remaining = npc_total - npc_met
+    names = []
+    for fi in (premiere.get("remaining") or []):
+        if isinstance(fi, dict):
+            hg = fi.get("houseguest")
+            nm = str((hg or {}).get("name") or "").strip() if isinstance(hg, dict) else ""
+            if nm:
+                names.append(nm)
+    names_clause = (" Still to meet: " + _join_names(names) + "."
+                    if names else "")
+    return (
+        "PREMIERE GATE (state this CONSISTENTLY whenever the player drifts toward HOH/nominations/veto/"
+        f"eviction): the first HOH cannot begin until the player has met all {npc_total} other "
+        f"houseguests. So far they have met {npc_met} of {npc_total}; {remaining} still to go.{names_clause} "
+        "If the player reaches for a ceremony beat, redirect them WARMLY back to meeting the house and "
+        "ALWAYS name how many are left (and who) so they have a concrete next step — never gate them "
+        "with a vague 'not yet'."
+    )
+
+
 # ── The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine) ────────── #
 #
 # The pending-barrier above catches one desync class: the GM narrating PAST an open PLAYER
@@ -625,6 +674,28 @@ _LAST_BEAT_SEQ: dict = {}
 # changes ONLY when this turn progresses, so the check is inert and behavior is byte-identical.
 _LAST_FRAMED_BEAT_KEY: dict = {}
 
+# #670 — one-shot flag: did `_pre_resolve_npc_ceremony` walk a real beat for this user THIS turn? The
+# pre-resolve advances ONE engine-driven beat per turn at the top of the turn (ceremonies AND the long
+# staged finale, `_CEREMONY_RESOLVE_PHASES`). With "finale" now in the agent loop's `_ADVANCE_PHASES`,
+# the end-of-turn L39 forced-advance backstop could otherwise advance a SECOND beat the same turn —
+# skipping a finale-reveal beat (the staged jury vote must walk one beat per turn, E12-style). So the
+# agent loop CONSUMES this flag (`consume_pre_resolved_advance`) to treat the turn as already-progressed
+# (reset the staleness clock) AND suppress its backstop — exactly mirroring the `_peer_advanced` guard.
+_PRE_RESOLVED_ADVANCE: dict = {}
+
+
+def mark_pre_resolved_advance(user) -> None:
+    """Record that the pre-resolve walked a real beat for `user` this turn (#670 double-advance guard)."""
+    if user is not None:
+        _PRE_RESOLVED_ADVANCE[user] = True
+
+
+def consume_pre_resolved_advance(user) -> bool:
+    """Read-and-clear the pre-resolve-advanced flag for `user` (one-shot per turn). Returns True iff the
+    pre-resolve already walked a beat this turn, so the agent loop must not double-advance (#670)."""
+    return bool(_PRE_RESOLVED_ADVANCE.pop(user, False))
+
+
 # Count of 409 `stale-beat` rejections the FE reconciled this process-run — a sync-spine diagnostic
 # (the ledger hook, feature 0065 Part D, is a separate slice; this counter is its data source).
 _STALE_BEAT_REJECTIONS = 0
@@ -754,6 +825,12 @@ def _beat_signature(status: dict, state: dict) -> dict:
         n.get("id") for n in (status.get("nominees") or [])
         if isinstance(n, dict) and n.get("id")
     )
+    # #561: the nominee NAMES (the same projection the House Status gadget renders) so the
+    # pre-emission guard can reject a non-nominee staged AS a nominee without a per-sentence fetch.
+    nom_names = sorted({
+        str(n.get("name")).strip() for n in (status.get("nominees") or [])
+        if isinstance(n, dict) and isinstance(n.get("name"), str) and str(n.get("name")).strip()
+    })
     veto = status.get("veto") if isinstance(status.get("veto"), dict) else {}
     pending = status.get("pending")
     pending_kind = pending.get("kind") if isinstance(pending, dict) else None
@@ -767,6 +844,14 @@ def _beat_signature(status: dict, state: dict) -> dict:
     evicted_names = sorted({
         str(h.get("name")).strip() for h in out_of_house
         if isinstance(h.get("name"), str) and str(h.get("name")).strip()
+    })
+    # #561: the ACTIVE roster names (still in the house) — so the nominee guard can tell a real
+    # houseguest staged AS a nominee (a grounding error) from incidental prose, without flagging a
+    # name the model invented (which is a different, name-corpus problem out of this guard's scope).
+    active_names = sorted({
+        str(h.get("name")).strip() for h in house
+        if isinstance(h, dict) and (h.get("status") or "active") == "active"
+        and isinstance(h.get("name"), str) and str(h.get("name")).strip()
     })
     # 0076: the player's live room + who is in it with them (names), so the next turn can voice NPC
     # arrivals/departures as beats instead of letting company silently pop in/out. Vault-free — it
@@ -783,6 +868,8 @@ def _beat_signature(status: dict, state: dict) -> dict:
         "pending": pending_kind,
         "hoh": hoh,
         "noms": noms,
+        "nomNames": nom_names,
+        "activeNames": active_names,
         "vetoHolder": _id(veto.get("holder")),
         "vetoUsed": bool(veto.get("used")),
         "evicted": evicted,
@@ -824,13 +911,50 @@ _CLAIM_NEW_HOH_RE = re.compile(
     re.IGNORECASE,
 )
 _CLAIM_TALLY_RE = re.compile(r"\b\d+\s*(?:votes?|-)\s*(?:to|–|-)\s*\d+\b", re.IGNORECASE)
+# LIVE-7 (#540): the eviction RESULT narrated as a count/majority during the staged secret-ballot
+# reveal — "that's the majority", "N votes to evict … the majority", "comes up one vote short". The
+# engine's reveal only ever hands over ANONYMIZED ballots ("a vote to evict X"); it never gives the
+# player a count, and the result is sealed until the last vote commits. So any self-counted "majority"
+# / "short" conclusion during the eviction phase is a fabrication narrated AHEAD of the commit beat.
+_CLAIM_EVICT_RESULT_RE = re.compile(
+    r"\bthe majority\b|\b(?:reach(?:es|ed|ing)?|has|have|that'?s|secur(?:es|ed))\s+(?:the\s+|a\s+)?majority\b|"
+    r"\bmajority\s+(?:to\s+evict|vote)\b|\bcome[sd]?\s+up\s+(?:\w+\s+){0,2}?(?:vote|votes)\s+short\b|"
+    r"\bone\s+(?:vote\s+)?short\b",
+    re.IGNORECASE,
+)
+# NARR-8 (#574): a NOMINATION was narrated as committed ("nominated X for eviction", "puts X on
+# the block", "the nominees are…"). Paired with the `noms` signature field — if the nominee set
+# didn't move, the engine never committed a nomination.
+_CLAIM_NOMINATED_RE = re.compile(
+    r"\b(?:nominat(?:e[sd]?|ing)|put(?:s|ting)?\s+(?:\w+\s+){0,3}?on the block|"
+    r"on the (?:chopping )?block|the nominees are|named (?:as )?(?:a )?nominee)\b",
+    re.IGNORECASE,
+)
+# NARR-8 (#574): a VETO WINNER was narrated ("wins the Power of Veto", "wins the veto", "the new
+# veto holder"). Paired with the `vetoHolder` signature field.
+_CLAIM_VETO_WINNER_RE = re.compile(
+    r"\bwins (?:the )?(?:power of veto|veto|pov)\b|\b(?:new )?veto (?:holder|winner)\b",
+    re.IGNORECASE,
+)
 # Phases where a numeric "N to M" reads as a FINALE jury tally (vs. a mid-season eviction count,
 # which we don't police here — the eviction claim does that).
 _FINALE_PHASES = ("finale", "final", "jury-vote", "jury_vote", "juryvote")
+# LIVE-7 (#540): the eviction phase (mid-season eviction AND the final-eviction beat). During the
+# staged secret-ballot reveal the engine NEVER hands the player a tally or a "majority" conclusion —
+# it drips anonymized ballots and the result lands only on the commit beat (`evicted` count moves). So
+# in these phases a numeric tally OR a self-counted majority/short is a phantom narrated ahead of the
+# commit. (`final-eviction` startswith `final`, already in `_FINALE_PHASES`; both sets cover it.)
+_EVICTION_PHASES = ("eviction", "final-eviction", "final_eviction")
 # Phases where "wins HOH" / "the new HOH" reads as a COMMITTED crown (vs. mid-week reflection or
 # flavor). The new-HOH claim is scoped to these the way the tally claim is scoped to the finale —
 # so an HOH-flavored line outside the HOH beat is never rail-corrected (ADR 0005 principle #1).
 _HOH_PHASES = ("hoh",)
+# Phases where a "nominated / on the block" line reads as a COMMITTED nomination (the nomination
+# beat itself, and the veto ceremony where the replacement nominee is set). Outside these, the
+# language is plan/speculation flavor ("I might nominate you") — never rail-corrected.
+_NOM_PHASES = ("nom", "nominat", "veto-ceremony", "veto_ceremony", "vetoceremony", "ceremony")
+# Phases where "wins the veto" reads as a COMMITTED veto win (the veto competition beat).
+_VETO_PHASES = ("veto",)
 
 
 def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict) -> Optional[str]:
@@ -863,6 +987,16 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
           and str(after.get("phase") or "").lower().startswith(_FINALE_PHASES)
           and not after.get("finished")):
         desync = "a FINAL VOTE TALLY (the jury count)"
+    # (3b) LIVE-7 (#540): a vote TALLY or a self-counted "majority"/"short" conclusion narrated during
+    #      the EVICTION phase while the eviction has NOT committed (the `evicted` count didn't move).
+    #      The engine's staged reveal hands over anonymized ballots only — it never gives a tally and
+    #      never lets the player count to a result; the outcome lands only on the commit beat. So a
+    #      tally/majority here is a phantom the model invented ahead of the engine. Scoped to the
+    #      eviction phase (creative "the votes are close" flavor outside the beat is never policed).
+    elif ((_CLAIM_TALLY_RE.search(text) or _CLAIM_EVICT_RESULT_RE.search(text))
+          and str(after.get("phase") or "").lower().startswith(_EVICTION_PHASES)
+          and after.get("evicted") == before.get("evicted")):
+        desync = "an EVICTION VOTE TALLY / RESULT (the count is sealed until the engine commits the eviction)"
     # (4) A new HOH was narrated, but the HOH id didn't change → no new reign was committed.
     #     `after.hoh` must equal `before.hoh` AND not be a fresh crown (before was empty).
     #     Scoped to HOH phases (like the tally branch): outside the HOH beat, "the new HOH…" /
@@ -873,6 +1007,20 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
           and after.get("hoh") == before.get("hoh")
           and not (before.get("hoh") is None and after.get("hoh") is not None)):
         desync = "a NEW HEAD OF HOUSEHOLD being crowned"
+    # (5) NARR-8 (#574): a NOMINATION was narrated, but the nominee set didn't move → no nomination
+    #     was committed. Scoped to the nomination / veto-ceremony phases (like the HOH branch),
+    #     so plan/speculation language outside the beat ("I might nominate you") is never policed.
+    elif (_CLAIM_NOMINATED_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_NOM_PHASES)
+          and (after.get("noms") or []) == (before.get("noms") or [])):
+        desync = "a NOMINATION (a houseguest being put on the block)"
+    # (6) NARR-8 (#574): a VETO WINNER was narrated, but the veto holder didn't change → no veto win
+    #     committed. Scoped to the veto phase; the fresh-win guard mirrors the HOH branch.
+    elif (_CLAIM_VETO_WINNER_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_VETO_PHASES)
+          and after.get("vetoHolder") == before.get("vetoHolder")
+          and not (before.get("vetoHolder") is None and after.get("vetoHolder") is not None)):
+        desync = "the POWER OF VETO being won"
 
     if not desync:
         return None
@@ -1053,6 +1201,121 @@ async def record_post_turn_presence_check(user, narration: str) -> None:
         logger.warning("[orwell] post-turn presence check skipped for user=%s: %s", user, e)
 
 
+# ── NARR-3 (#613) — the INVENTED-HOUSEGUEST roster-validation backstop (post-turn re-ground) ──── #
+#
+# "EXACT names, never invent" is the moment prompt's "THE most important rule" — yet it was enforced by
+# NOTHING structural (the closed-set outcome / evicted-location / wrong-nominee guards all assume a name
+# that EXISTS in the roster; an INVENTED houseguest slips past all three). Houseguest invention is the
+# single most immersion-shattering grounding break, and the moment runtime points at a tier the audit
+# says invents cast — so this wires the missing structural backstop the issue asks for.
+#
+# It mirrors the presence guard's SAFE shape — a POST-TURN gentle re-ground, NOT a streamed scrub of
+# prose (a false hold on creative prose is worse than a missed phantom; ADR 0005 #1). HIGH-PRECISION by
+# construction, because creative prose is full of capitalized two-token phrases (Big Brother, Diary
+# Room, Power of Veto, the Have-Not room, real-world references in banter):
+#   • flags ONLY a Capitalized two-token name STAGED as acting/speaking in the scene (`_stages_in_scene`
+#     — the same in-scene verb/quote binding the presence guard uses), so a bare mention or a place
+#     name never matches;
+#   • that is NEITHER an active NOR an out-of-house roster name (full-name OR first-name match, both
+#     directions), AND whose first token is not a known game proper noun (Big/Diary/Power/Head/Have/
+#     etc.) — a hard allowlist of the BB lexicon that would otherwise read as a two-token Name;
+#   • SKIPS pre-game / casting and the finale (a juror name legitimately returns).
+# A match only stashes a next-turn re-ground (never edits this turn's prose), so the worst case of a
+# residual false positive is one gentle, ignorable nudge — never lost storytelling.
+
+# Capitalized two-token sequences ("Marcus Webb", "Devon Hale") — the shape a houseguest full name
+# takes in narration. Single capitalized tokens are deliberately NOT matched (far too many legitimate
+# capitalized words in prose); a two-token Capitalized run bound to a scene verb is the precise signal.
+_TWO_TOKEN_NAME_RE = re.compile(r"\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b")
+# Game/house proper nouns whose FIRST token would otherwise make a two-token Name (Big Brother, Diary
+# Room, Power [of Veto], Head [of Household], Have Not, Memory Wall, Jury House, Veto Ceremony, etc.).
+# A first-token allowlist is enough — these never start a real houseguest first name in practice, and
+# keeping it to the first token is robust to the varied second tokens.
+_GAME_LEXICON_FIRST = {
+    "big", "diary", "power", "head", "have", "memory", "jury", "veto", "house", "living",
+    "storage", "golden", "block", "final", "america", "production", "big-brother", "room",
+}
+# Capitalized words that legitimately START a sentence/clause (articles, pronouns, demeanors) and would
+# otherwise form a spurious two-token "Name" with the following capitalized word ("The Diary", "She
+# Marcus"). A first-token allowlist of these keeps the guard off ordinary prose.
+_NAME_STOPWORDS_FIRST = {
+    "the", "a", "an", "this", "that", "these", "those", "his", "her", "their", "your", "our", "my",
+    "you", "i", "we", "he", "she", "they", "it", "and", "but", "or", "then", "now", "so", "as",
+}
+
+
+def _sentence_names_invented(sentence: str, known_first: set, known_full: set) -> Optional[str]:
+    """Return a Capitalized two-token name this sentence STAGES as acting in the scene that is NOT any
+    known roster name (active or out-of-house), or None. `known_first` = lowercase first tokens of every
+    roster name; `known_full` = lowercase full roster names. High-precision: requires `_stages_in_scene`
+    binding (an in-scene verb/quote right after the name) and excludes the BB game lexicon, so a place
+    name, a bare mention, or a real houseguest never matches."""
+    if not sentence or not sentence.strip():
+        return None
+    for m in _TWO_TOKEN_NAME_RE.finditer(sentence):
+        first_l = m.group(1).lower()
+        second_l = m.group(2).lower()
+        full = f"{m.group(1)} {m.group(2)}"
+        full_l = full.lower()
+        if first_l in _NAME_STOPWORDS_FIRST:
+            continue  # a leading article/pronoun + a capitalized word — not a houseguest name
+        if first_l in _GAME_LEXICON_FIRST or second_l in _GAME_LEXICON_FIRST:
+            continue  # a game/house proper noun (either token), not a houseguest
+        if first_l in known_first or full_l in known_full:
+            continue  # matches a real roster name (full or by first name) — legitimate
+        # An out-of-roster two-token Name — only flag if it is STAGED as acting in THIS sentence.
+        if _stages_in_scene(sentence, full):
+            return full
+    return None
+
+
+async def record_post_turn_roster_check(user, narration: str) -> None:
+    """NARR-3 (#613) post-turn roster-validation backstop. Stash a gentle next-turn re-ground when the
+    narration STAGED a houseguest name that exists in NEITHER the active nor the out-of-house roster —
+    i.e. an INVENTED cast member. Closed-set only (who exists). Names come from the cached turn-start
+    signature (`activeNames` + `evictedNames`) — no per-turn fetch. SKIPS pre-game (no roster) and the
+    finale (jurors return). Combines with (never clobbers) any re-ground already stashed this turn.
+    Fail-open — never raises, never blocks the finishing turn."""
+    try:
+        sig = _LAST_BEAT_SIG.get(user)
+        if not sig:
+            return  # pre-game / no baseline → nothing to ground against
+        if str(sig.get("phase") or "").lower().startswith(_FINALE_PHASES):
+            return  # jurors legitimately reappear by name in the finale
+        roster = list(sig.get("activeNames") or []) + list(sig.get("evictedNames") or [])
+        roster = [n for n in roster if isinstance(n, str) and n.strip()]
+        if not roster:
+            return  # no roster yet (casting) → the name-corpus isn't established; don't guess
+        known_full = {n.strip().lower() for n in roster}
+        known_first = {n.split()[0].lower() for n in roster if n.split()}
+        invented: list[str] = []
+        seen: set = set()
+        for sentence in re.split(r"(?<=[.!?\n])", narration or ""):
+            who = _sentence_names_invented(sentence, known_first, known_full)
+            if who and who.lower() not in seen:
+                seen.add(who.lower())
+                invented.append(who)
+            if len(invented) >= _PRESENCE_MOVE_MAX_NAMES:
+                break
+        if not invented:
+            return
+        directive = (
+            "RE-GROUND ON THE ACTUAL CAST — last turn you voiced " + _join_names(invented) + " as if "
+            "they were in the house, but no such houseguest exists. The cast is a FIXED roster the engine "
+            "owns; you must NEVER invent a houseguest. Re-read the live roster (gameStatus / "
+            "getGameState) and voice ONLY the houseguests who are actually in the season — use their "
+            "EXACT names, and never introduce a name that is not on the roster."
+        )
+        existing = _DESYNC_REGROUND.get(user)
+        _DESYNC_REGROUND[user] = (existing + "\n\n" + directive) if existing else directive
+        logger.warning(
+            "[orwell] invented-houseguest detected for user=%s (%s) — re-grounding next turn",
+            user, ", ".join(invented),
+        )
+    except Exception as e:
+        logger.warning("[orwell] post-turn roster check skipped for user=%s: %s", user, _exc_detail(e))
+
+
 # ── 0065 Part C — the PRE-EMISSION outcome guard (same-turn, not next-turn) ──────────────── #
 #
 # `record_post_turn_desync_check` (above) catches a narrated-but-uncommitted outcome only AFTER the
@@ -1093,6 +1356,9 @@ def _sentence_has_closed_set_claim(text: str) -> bool:
         or _CLAIM_WINNER_RE.search(text)
         or _CLAIM_NEW_HOH_RE.search(text)
         or _CLAIM_TALLY_RE.search(text)
+        or _CLAIM_EVICT_RESULT_RE.search(text)  # LIVE-7 (#540): self-counted majority/short
+        or _CLAIM_NOMINATED_RE.search(text)
+        or _CLAIM_VETO_WINNER_RE.search(text)
     )
 
 
@@ -1272,6 +1538,106 @@ async def screen_streamed_location(user, sentence: str) -> bool:
     except Exception as e:
         logger.warning("[orwell] pre-emission location guard skipped for user=%s: %s", user, _exc_detail(e))
         return True  # fail-open: never suppress on an error.
+
+
+# ── #561 — the PRE-EMISSION WRONG-NOMINEE guard (a non-nominee staged AS on the block) ─────────── #
+#
+# Who is on the block is CLOSED-SET engine truth (the same `nominees` the House Status gadget renders).
+# The #574 nomination branch catches a nomination narrated that NEVER committed (the nominee set didn't
+# move); it does NOT catch the model naming the WRONG active houseguest as a nominee while a real
+# nominee set exists (#561: the eviction DR named "Harrison" on the block when the noms were Sofia +
+# Mario). This guard mirrors the location guard's SAFE triple-gate shape: it fires ONLY when, during a
+# nomination/eviction phase with a KNOWN nominee set, a sentence binds an ACTIVE non-nominee houseguest
+# to explicit on-the-block / nominee / up-for-eviction language. High-precision by construction:
+#   • only an ACTIVE roster name (not a nominee) — an invented name is a different problem, out of scope;
+#   • only when bound (tight window) to committed nominee language ("on the block", "up for eviction",
+#     "is a nominee", "facing eviction") — plan/speculation ("I might nominate you") never matches;
+#   • only in the nom/veto-ceremony/eviction phases AND only when the engine actually has 2 nominees.
+_NOMINEE_STATUS_RE = re.compile(
+    r"\bon the (?:chopping )?block\b|\bup for eviction\b|\bfacing eviction\b|\b(?:is|are|as)\s+(?:a\s+)?nominees?\b|"
+    r"\bnominated for eviction\b|\bon the block tonight\b",
+    re.IGNORECASE,
+)
+_NOMINEE_BIND_WINDOW = 60
+_NOMINEE_GUARD_PHASES = ("nom", "nominat", "veto-ceremony", "veto_ceremony", "vetoceremony",
+                         "eviction", "final-eviction", "final_eviction")
+
+
+def _sentence_names_wrong_nominee(sentence: str, nom_names, active_names) -> Optional[str]:
+    """Return an ACTIVE non-nominee houseguest NAME this sentence stages AS being on the block, or
+    None. Triple gate: nominee-status language present in the sentence + an active non-nominee name +
+    that name bound within `_NOMINEE_BIND_WINDOW` chars of the status language. Real nominees and
+    invented names never match (the latter is out of scope — names come from the live roster)."""
+    if not sentence or not active_names:
+        return None
+    if not _NOMINEE_STATUS_RE.search(sentence):
+        return None
+    nom_set = {str(n).strip().lower() for n in (nom_names or [])}
+    for name in active_names:
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if name.strip().lower() in nom_set:
+            continue  # a real nominee — legitimate
+        variants = [name]
+        first = name.split()[0]
+        if len(first) >= 3 and first != name:
+            variants.append(first)
+        for v in variants:
+            if v.strip().lower() in nom_set:
+                continue  # first name collides with a real nominee's first name — don't flag
+            for m in re.finditer(r"\b" + re.escape(v) + r"\b", sentence, re.IGNORECASE):
+                window = sentence[max(0, m.start() - _NOMINEE_BIND_WINDOW): m.end() + _NOMINEE_BIND_WINDOW]
+                if _NOMINEE_STATUS_RE.search(window):
+                    return name
+    return None
+
+
+async def screen_streamed_nominee(user, sentence: str) -> bool:
+    """#561 — verify ONE streamed sentence does not stage an ACTIVE non-nominee houseguest AS being on
+    the block, BEFORE the player sees it. Returns:
+
+      • True  → EMIT (no wrong-nominee staging; or we are uncertain).
+      • False → HOLD/DROP (a non-nominee was named on the block — a false closed-set fact) and stash the
+                existing `_DESYNC_REGROUND` next-turn backstop naming the REAL nominees.
+
+    Names come from the cached turn-start signature (`_LAST_BEAT_SIG`). Scoped to nom/eviction phases
+    with a real 2-nominee set. Fail-open: any hiccup returns True (emit)."""
+    try:
+        if not sentence or not sentence.strip():
+            return True
+        sig = _LAST_BEAT_SIG.get(user)
+        if not sig:
+            return True
+        if not str(sig.get("phase") or "").lower().startswith(_NOMINEE_GUARD_PHASES):
+            return True
+        nom_names = sig.get("nomNames") or []
+        active_names = sig.get("activeNames") or []
+        if len(nom_names) < 2 or not active_names:
+            return True  # no committed nominee set to ground against → uncertain, emit.
+        who = _sentence_names_wrong_nominee(sentence, nom_names, active_names)
+        if not who:
+            return True
+        _DESYNC_REGROUND[user] = (
+            "RE-GROUND ON WHO IS ON THE BLOCK — last turn you named " + who + " as a nominee, but the "
+            "engine's nominees are " + _join_names(sorted(nom_names)) + " (the same names the House "
+            "Status panel shows). Who is on the block is engine truth, not yours to improvise: re-read "
+            "the live `nominees` and name ONLY those houseguests as up for eviction — never a houseguest "
+            "who is not on the block, and never drop a real nominee."
+        )
+        logger.warning(
+            "[orwell] pre-emission guard HELD a wrong-nominee claim for user=%s — dropped before "
+            "emission, re-grounding next turn", user,
+        )
+        return False
+    except Exception as e:
+        logger.warning("[orwell] pre-emission nominee guard skipped for user=%s: %s", user, _exc_detail(e))
+        return True  # fail-open: never suppress on an error.
+
+
+def _sentence_has_nominee_status(text: str) -> bool:
+    """Cheap pre-filter for the wrong-nominee guard: does `text` contain on-the-block / nominee
+    language at all? Keeps prose with no nominee-status language off the screening path."""
+    return bool(text and text.strip() and _NOMINEE_STATUS_RE.search(text))
 
 
 # ── 0065 Part E2 — weave the engine DELTA into the moment context (additive, concise) ─────────── #
@@ -1477,6 +1843,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
                 return game_state  # reconciled — continue the turn framed against the (moved) board
             raise
         _refresh_beat_seq(user, adv)  # 0065: the advance response carries the new beatSeq — track it
+        mark_pre_resolved_advance(user)  # #670: a real beat walked this turn — the backstop must not double-advance
         # comp-intent (player in the field — engine pauses, never auto-decides), or resolve an NPC beat.
         # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
         # pre-resolve is otherwise silent on success, so a staged eviction walking one beat per turn
@@ -1692,6 +2059,15 @@ async def apply_game_framing(
             freeze_capture_whereabouts(user, game_state.get("whereabouts"))
         except Exception as e:
             logger.warning("[orwell] location grounding skipped for user=%s: %s", _gkey, e)
+        # J3-13 (wayfinding): during the premiere, surface the engine's meet-everyone progress so a
+        # ceremony-bound redirect ALWAYS names the gap (count + who's left), the audit's missing
+        # consistency. Vault-free public facets from the same in-hand snapshot. Best-effort / fail-open.
+        try:
+            _prem = _premiere_progress_directive(game_state.get("premiere"))
+            if _prem:
+                gm_prompt = gm_prompt + "\n\n" + _prem
+        except Exception as e:
+            logger.warning("[orwell] premiere progress framing skipped for user=%s: %s", _gkey, e)
         # The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): FIRST consume any
         # re-ground directive the previous turn's post-turn check stashed for this user (the
         # model narrated an outcome the engine never committed — pin it back to the board), then
@@ -2543,6 +2919,14 @@ async def build_chat_context(
         _last = sess.history[-1]
         if getattr(_last, "role", None) == "user":
             mark_message_phase(_last, "casting")
+    # #530 (STRUCTURAL): once the season is live, stamp the live user turn `phase=game` — the
+    # durable season-start boundary the context build cuts on. With it, every pre-game turn
+    # before the boundary is excluded whether or not its own `casting` stamp ever landed, so a
+    # missed stamp at the finalize boundary can no longer leak the casting interview to NPCs.
+    elif game_active and getattr(sess, "history", None):
+        _last = sess.history[-1]
+        if getattr(_last, "role", None) == "user" and (getattr(_last, "metadata", None) or {}).get("phase") != "game":
+            mark_message_phase(_last, "game")
 
     # Capture used memories immediately
     used_memories = getattr(chat_processor, '_last_used_memories', [])
@@ -2567,7 +2951,12 @@ async def build_chat_context(
     # here so the model cannot leak the player's private strategy to the houseguests. The model
     # cannot leak what it never receives. Pre-game/casting turns keep the full transcript.
     _exclude_phases = {"casting"} if game_active else None
-    messages = preface + sess.get_context_messages(exclude_phases=_exclude_phases)
+    # #530: pair the per-message `casting` exclusion with the STRUCTURAL pre-game cut — when the
+    # season is live, drop every turn before the `game` boundary that isn't itself a live turn, so
+    # an unstamped pre-game turn (a missed `casting` stamp) is still excluded.
+    messages = preface + sess.get_context_messages(
+        exclude_phases=_exclude_phases, exclude_pre_game=bool(game_active),
+    )
 
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(
@@ -2888,6 +3277,20 @@ def save_assistant_response(
     # Only when the content didn't already carry an inline <think> block.
     if reasoning and reasoning.strip() and not md.get("thinking"):
         md["thinking"] = reasoning.strip()
+    # Don't persist a BLANK assistant turn. `full_response` can be truthy-but-empty
+    # (the agent loop appends "\n\n" round separators; a reasoning model can route its
+    # whole turn to the reasoning channel, or emit only a <think> block that extracts
+    # to ""), which the caller's `if full_response:` gate doesn't catch. Persisting it
+    # renders an empty bubble AND replays to the provider as an empty message on every
+    # later turn (the root of the OpenRouter/DeepSeek empty-message bug; the send-side
+    # chokepoint _sanitize_llm_messages is the matching belt). Keep a blank turn ONLY
+    # when there's reasoning worth showing (so the collapsed "Thinking" accordion
+    # survives a reload, ADR 0012 cross-session parity) — and then with normalized
+    # empty content, never stray whitespace.
+    if not (_content or "").strip():
+        if not md.get("thinking"):
+            return None
+        _content = ""
     sess.add_message(ChatMessage("assistant", _content, metadata=md))
 
     if not incognito:

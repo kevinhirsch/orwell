@@ -77,6 +77,25 @@ class TestReasoningBlocks:
         assert "The narration ends." in result
 
 
+class TestReasoningTagVariants:
+    """NARR-1 (#620): the scrub now strips the common reasoning-tag spellings, not just <think>."""
+
+    @pytest.mark.parametrize("tag", ["thinking", "thought", "reasoning"])
+    def test_strips_other_reasoning_tag_spellings(self, tag):
+        text = f"Narration before. <{tag}>hidden chain of thought</{tag}> Narration after."
+        result = scrub_for_platform(text)
+        assert f"<{tag}>" not in result
+        assert "hidden chain of thought" not in result
+        assert "Narration before." in result
+        assert "Narration after." in result
+
+    def test_reasoning_tag_is_case_insensitive(self):
+        text = "Before <THINK>caps reasoning</THINK> after."
+        result = scrub_for_platform(text)
+        assert "caps reasoning" not in result
+        assert "Before" in result and "after." in result
+
+
 class TestOperatorAsides:
     def test_strips_operator_aside(self):
         text = "You win. [OPERATOR: advance to nominations] The crowd cheers."

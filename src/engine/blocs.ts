@@ -114,21 +114,34 @@ export function detectBlocs(deps: BlocDeps): Bloc[] {
     }
   }
 
-  // 3) Per-member defection (pre-betrayal): low loyalty + a stronger bond outside ⇒ peel off.
+  // 3) Per-member defection (pre-betrayal): low loyalty + a stronger MUTUAL bond outside ⇒ peel off.
+  // ENG-NEW-3 (#585): decide every defection against the IMMUTABLE pre-pass snapshot of each cluster
+  // FIRST, then apply them all — never mutate the Set we are still scanning. Mutating mid-pass made the
+  // result order-dependent (an early defection changed the `weakestInside`/outside split seen by a later
+  // member, a cascade that depended on iteration order). Two-phase makes the read a pure function of the
+  // input graph.
+  // SOC-NEW-2 (#563): the outside attraction must be MUTUAL (both directions), the same bond an inside
+  // edge is measured by — a one-way crush from outside cannot peel a member off (we compared a one-way
+  // `bondOf` against a mutual `weakestInside`, so an unrequited outside affection wrongly triggered).
   const clusters = [...new Set(blocOf.values())].filter((s) => s.size >= 2);
+  const toDefect: Array<{ cluster: Set<EntityId>; member: EntityId }> = [];
   for (const cluster of clusters) {
-    for (const m of [...cluster]) {
+    const snapshot = [...cluster]; // immutable: every member is judged against the same cluster
+    for (const m of snapshot) {
       if (loyaltyOf(m) >= BLOC.defectionLoyalty) continue;
-      const inside = [...cluster].filter((x) => x !== m);
+      const inside = snapshot.filter((x) => x !== m);
       if (inside.length === 0) continue;
       const weakestInside = Math.min(...inside.map((x) => mutualBond(rel, m, x)));
       const outside = active.filter((x) => x !== m && !cluster.has(x));
-      const bestOutside = outside.length ? Math.max(...outside.map((x) => bondOf(rel, m, x))) : 0;
+      const bestOutside = outside.length ? Math.max(...outside.map((x) => mutualBond(rel, m, x))) : 0;
       if (bestOutside > weakestInside + BLOC.defectionMargin) {
-        cluster.delete(m);
-        blocOf.delete(m);
+        toDefect.push({ cluster, member: m });
       }
     }
+  }
+  for (const { cluster, member } of toDefect) {
+    cluster.delete(member);
+    blocOf.delete(member);
   }
 
   // 4) Project each surviving cluster into a derived, transient Bloc.

@@ -82,20 +82,59 @@ describe("0015 — character creation (OOBE)", () => {
     expect(new Set(NAME_CORPORA.surnames).size).toBe(NAME_CORPORA.surnames.length);
   });
 
-  it("C6: a missing/typo'd archetype defaults to the MEDIAN spec, never the strongest — and is surfaced", () => {
+  it("C6/#529: an absent archetype yields NEUTRAL stats (no fabricated identity) and is surfaced", () => {
     const p = runPlayerOOBE({ name: "Author" }); // no archetype supplied
-    expect(p.character.archetype).toBe(DEFAULT_ARCHETYPE);
     expect(p.archetypeDefaulted).toBe(true);
+    // #529: absence ⇒ NEUTRAL/unbiased stats, NOT the fabricated "floater" bias. The engine never
+    // deals an archetype's stat profile to a human who never chose one.
+    expect(p.character.stats).toEqual({ physical: 0.5, mental: 0.5, social: 0.5 });
+    const floaterBias = ARCHETYPES.find((s) => s.archetype === DEFAULT_ARCHETYPE)!.bias;
+    expect(p.character.stats).not.toEqual(floaterBias);
     // The default's stats are NOT the global max of any aptitude (anti-sycophancy via fallback is dead).
     const globalMax = Math.max(...ARCHETYPES.flatMap((s) => [s.bias.physical, s.bias.mental, s.bias.social]));
     for (const v of Object.values(p.character.stats)) expect(v).toBeLessThan(globalMax);
     // A recognized archetype is honored and NOT flagged.
     const q = runPlayerOOBE({ name: "Author", archetype: "mastermind" });
     expect(q.archetypeDefaulted).toBeUndefined();
+    expect(q.character.stats).toEqual(ARCHETYPES.find((s) => s.archetype === "mastermind")!.bias);
     // The defaulted flag crosses to the casting card (qualitative surface only).
     const s = new GameSessionAdapter();
     const view = s.createCharacter({ playerName: "Author", seed: 7 });
     expect(view.player!.castingCard!.defaulted).toBe(true);
+  });
+
+  it("#529: the engine never fabricates player canon — absence yields EMPTY, not invented content", () => {
+    // Name-only intake: appearance/age/presentation/background must NOT be improvised.
+    const p = runPlayerOOBE({ name: "Author" });
+    // (a) NO name-hash-derived appearance — the player authored no look, so it stays empty.
+    expect(p.character.appearance).toBe("");
+    expect(p.character.age).toBe(0);
+    expect(p.character.presentation).toBe("");
+    // A different name must NOT yield a different (i.e. name-hash-improvised) appearance.
+    const q = runPlayerOOBE({ name: "Someone Else Entirely" });
+    expect(q.character.appearance).toBe("");
+    expect(q.character.age).toBe(0);
+    expect(q.character.presentation).toBe("");
+    // (b) NO placeholder background presented as canon.
+    expect(p.character.background).toBe("");
+    // (c) NO invented persona — only the player's OWN words populate it; absent ⇒ omitted.
+    expect(p.persona).toBeUndefined();
+    // Authored fields ARE honored (absence ⇒ empty, presence ⇒ kept).
+    const authored = runPlayerOOBE({ name: "Author", backstory: "a long road here", personaArchetype: "the quiet one" });
+    expect(authored.character.background).toContain("long road");
+    expect(authored.persona).toEqual({ archetype: "the quiet one" });
+    // The neutral stats still sit inside the cast's bounds (no min-maxing).
+    expect(playerAptitudesWithinNpcBounds(p)).toBe(true);
+  });
+
+  it("#529: a name-only player produces NO improvised portrait prompt (no name-hash face)", () => {
+    const s = new GameSessionAdapter();
+    const view = s.createCharacter({ playerName: "Author", seed: 7 });
+    // The player authored no look, so there is nothing to draw — no fabricated portrait prompt.
+    expect(s.getPortraitPrompt(view.player!.id)).toBeNull();
+    // NPCs (engine-generated looks) still get prompts — only the human is appearance-empty.
+    const anyNpc = view.house[0]!;
+    expect(s.getPortraitPrompt(anyNpc.id)).not.toBeNull();
   });
 
   it("E39/C7: with NO explicit seed, the same player name does not replay the identical season", () => {

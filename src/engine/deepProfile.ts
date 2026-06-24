@@ -2,7 +2,7 @@ import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
-import { hashSeed } from "./characterFactory";
+import { hashSeed, spreadFacet } from "./characterFactory";
 import type { Archetype, Character, Houseguest } from "./characterFactory";
 import { THREAD } from "./threadConstants";
 
@@ -186,6 +186,15 @@ const STYLE_DESC = [
   "minimalist monochrome",
 ];
 
+// #533: the salient look axes — hair, facial features, and style — were drawn with an INDEPENDENT
+// per-NPC `rng.pick()`, with NO cast-wide spread cap, so a 15-cast could deal the same "platinum-blond
+// bob" five times (the repetitive-cast bug). These are the L28-style SPREAD caps (the same discipline
+// skinTone/build/ethnicity already use via `spreadFacet`/`MAX_PER_*`): the cast is DEALT each facet with
+// each value used at most this many times, instead of independent per-NPC picks.
+export const MAX_PER_HAIR = 2;
+export const MAX_PER_FACIAL = 2;
+export const MAX_PER_STYLE = 2;
+
 /** An age-look cue keyed off the houseguest's age band — keeps the look age-appropriate (0058 §3). */
 export function ageLookFor(age: number): string {
   if (age < 25) return "youthful, early-twenties energy";
@@ -196,18 +205,43 @@ export function ageLookFor(age: number): string {
 }
 
 /**
- * Deterministically build the structured physical facet for one houseguest off a SIDE rng. The
- * age-look reads the houseguest's PUBLIC age so words and picture agree (L29/L23).
+ * Pre-dealt, cast-wide PHYSICAL spread for the salient look axes (#533): each entry is one NPC's
+ * dealt hair / facial / style, capped cast-wide so no value piles up (`MAX_PER_*`). Built once per
+ * cast off a seeded side rng and indexed positionally with the cast iteration, exactly the way
+ * `characterFactory` deals `builds` over `BUILDS`.
  */
-export function generatePhysicalCharacteristics(rng: RandomnessSource, age: number): PhysicalCharacteristics {
+export interface PhysicalSpread {
+  hair: string;
+  facial: string;
+  style: string;
+}
+
+/** Deal the salient look axes cast-wide with L28-style spread caps (#533). Deterministic per seed. */
+export function dealCastPhysicalSpread(rng: RandomnessSource, count: number): PhysicalSpread[] {
+  const hair = spreadFacet(rng, HAIR_DESC, count, MAX_PER_HAIR);
+  const facial = spreadFacet(rng, FACIAL, count, MAX_PER_FACIAL);
+  const style = spreadFacet(rng, STYLE_DESC, count, MAX_PER_STYLE);
+  return Array.from({ length: count }, (_, i) => ({ hair: hair[i]!, facial: facial[i]!, style: style[i]! }));
+}
+
+/**
+ * Deterministically build the structured physical facet for one houseguest off a SIDE rng. The
+ * age-look reads the houseguest's PUBLIC age so words and picture agree (L29/L23). When a cast-wide
+ * `spread` is supplied (#533) the salient axes (hair/facial/style) come from the spread-capped deal
+ * instead of independent per-NPC picks; absent, it falls back to the per-NPC `rng.pick()` (a lone
+ * profile with no cast context — e.g. a single-card regeneration).
+ */
+export function generatePhysicalCharacteristics(
+  rng: RandomnessSource, age: number, spread?: PhysicalSpread,
+): PhysicalCharacteristics {
   return {
     heightBuild: rng.pick(HEIGHT_BUILD),
     skinTone: rng.pick(SKIN_TONE),
-    hair: rng.pick(HAIR_DESC),
-    facialFeatures: rng.pick(FACIAL),
+    hair: spread ? spread.hair : rng.pick(HAIR_DESC),
+    facialFeatures: spread ? spread.facial : rng.pick(FACIAL),
     distinguishingMark: rng.pick(MARKS),
     ageLook: ageLookFor(age),
-    style: rng.pick(STYLE_DESC),
+    style: spread ? spread.style : rng.pick(STYLE_DESC),
   };
 }
 
@@ -846,13 +880,18 @@ export function generateCastDeepLayer(seed: number, npcs: readonly Houseguest[])
   // order is seed-stable; the conditioning reads only the NPC's OWN Character, so the layer stays
   // player-INDEPENDENT.
   const caps = newCastSpreadCaps();
+  // #533: deal the salient look axes (hair/facial/style) CAST-WIDE with spread caps off a dedicated
+  // side rng, indexed positionally with the seed-stable cast iteration — so no value piles up across
+  // the 15-cast (the repetitive-cast bug), the same L28 discipline skinTone/build/ethnicity already use.
+  const physicalSpread = dealCastPhysicalSpread(new SeededRandom(hashSeed(`${seed}:deep-physical-spread`)), npcs.length);
+  let ix = 0;
   for (const hg of npcs) {
     const pubRng = new SeededRandom(hashSeed(`${seed}:deep-public:${hg.name}`));
     const hidRng = new SeededRandom(hashSeed(`${seed}:deep-hidden:${hg.name}`));
     const thrRng = new SeededRandom(hashSeed(`${seed}:deep-thread:${hg.name}`));
     pub[hg.id] = {
       biography: generateBiography(pubRng, hg.character),
-      physicalCharacteristics: generatePhysicalCharacteristics(pubRng, hg.character.age),
+      physicalCharacteristics: generatePhysicalCharacteristics(pubRng, hg.character.age, physicalSpread[ix++]),
     };
     // The narrative TEXT rides a DEDICATED per-NPC sub-stream (#392 RNG-isolation): the conditioned
     // secrets/goals/weakness draw off this key, NEVER `hidRng` — so the outcome-relevant `dayOnePerception`

@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# A single self-hosted runner serializes every job, so a superseded commit would
+# otherwise tie the runner up finishing a run nobody is waiting on. Cancel the
+# in-flight run for a ref the moment a newer commit arrives. Keyed per ref, so
+# main and each PR have independent groups.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ── Path filters ────────────────────────────────────────────────────────────
   #
@@ -26,7 +34,7 @@ jobs:
   # bottom (`if: always()`) is the ONE required check — it passes when no needed job FAILED/was
   # CANCELLED (a SKIP counts as a pass). Point branch protection at `ci-gate`, not the individual jobs.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       engine: ${{ steps.filter.outputs.engine }}
       frontend: ${{ steps.filter.outputs.frontend }}
@@ -98,7 +106,7 @@ jobs:
   test:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -117,35 +125,27 @@ jobs:
       - run: pip install -r frontend/requirements.txt
       - run: npm run test:ci
 
-  # ── Heavy simulation lane (split + sharded for wall-clock — NOT a reduction in scope) ──────────
+  # ── Heavy simulation lane (ONE job — consolidated for the single self-hosted runner) ──────────
   #
   # Plays the full-game UAT, the juryReach calibration gate, and the calibration-gradient gate to
-  # completion — the same files `test:ci` excludes. Every matrix leg is a one-file-per-runner SHARD so
-  # the lane's wall-clock is the single slowest leg (target ≤ ~180s), with no cross-file contention.
-  # Nothing is dropped — the whole functional suite still runs exactly once per CI run, across runners.
+  # completion — the same files `test:ci` excludes — via `npm run test:heavy`, which runs all five
+  # heavy files in ONE vitest process. Vitest fans them out across the runner's cores internally.
   #
-  # Lanes / sharding (each ≤ ~180s; see the PR body's per-lane wall-time table):
-  #   uat-12seed-{a,b,c} — the 12-seed never-veto UAT, sharded 3×4 seeds. PER-SEED assertions only
-  #                        (no cross-seed aggregate), so each shard asserts INDEPENDENTLY — no recombine.
-  #   uat-5seed          — 5-seed always-veto UAT (already ≤180s).
-  #   uat-decisions      — decision-type coverage over seeds 1-5 (already ≤180s).
-  #   gradient-{0,1}     — the gradient passive+active sweeps, sharded 2×3 seeds, then aggregated.
+  # This used to be 15 sharded jobs (uat ×3, jury ×5 + aggregate, gradient ×3 + aggregate) so the play
+  # fanned out across many PARALLEL GitHub-hosted runners. On a SINGLE self-hosted runner those jobs
+  # serialize anyway, and each one repeats checkout + `npm ci` + build (plus artifact upload/download
+  # for the jury/gradient aggregates) — pure overhead with zero parallelism benefit. Collapsing to one
+  # job pays the setup cost ONCE. Nothing is dropped: run UNSHARDED, juryReach.property.test.ts and
+  # calibrationGradient.property.test.ts each play their full seed set and assert the full band INLINE
+  # (the same gate the shard+aggregate pair reconstructs) — see each file's header. Re-shard only if a
+  # second runner is added or the hosted lanes come back.
   #
-  # The juryReach calibration gate is sharded SEPARATELY in `jury-shard` + `jury-aggregate` below (it
-  # uploads/recombines per-season artifacts). The gradient mirrors that shard+aggregate pattern in its
-  # own `gradient-aggregate` job. All band assertions live in the aggregate jobs; the shards only play.
-  #
-  # PATH-GATED (`changes.heavy`): runs only when calibration-relevant files change. On a skip the legs
-  # don't run — `ci-gate` reports the required green status so a docs/frontend-only PR never deadlocks.
+  # PATH-GATED (`changes.heavy`): runs only when calibration-relevant files change. On a skip it
+  # doesn't run — `ci-gate` reports the required green status so a docs/frontend-only PR never deadlocks.
   heavy-sims:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        sim: [uat-12seed-a, uat-12seed-b, uat-12seed-c, uat-5seed, uat-decisions]
-    name: heavy-sims (${{ matrix.sim }})
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -153,131 +153,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run test:heavy:${{ matrix.sim }}
-
-  # The juryReach calibration gate, SHARDED across runners (~464s as one file historically). The 20
-  # passive seeded seasons are independent and per-season seeded, so each shard plays a contiguous
-  # 4-seed slice (5 shards × 4 = 20, no overlap) and UPLOADS its per-season measurements as an
-  # artifact. NO band assertion happens here — a slice can't see the distribution. `jury-aggregate`
-  # downloads all five artifacts, recombines the full 20, and runs the SINGLE distribution assertion.
-  # Bands and seed count are UNCHANGED — only WHERE the seeds are played moved.
-  jury-shard:
-    needs: changes
-    if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3, 4]
-    name: jury-shard (${{ matrix.shard }})
-    env:
-      JURY_SHARDS: "5"
-      JURY_SHARD: ${{ matrix.shard }}
-      JURY_RESULTS_DIR: jury-results
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run test:heavy:jury
-      - name: upload shard results
-        uses: actions/upload-artifact@v4
-        with:
-          name: jury-shard-${{ matrix.shard }}
-          path: jury-results/jury-shard-${{ matrix.shard }}.json
-          if-no-files-found: error
-          retention-days: 1
-
-  # Recombine every jury shard and assert the full-20 calibration band — the SAME floor/ceiling reach
-  # band, rare-F2-win ceiling, and earned-win teeth the pre-shard single-file gate ran. Green only if
-  # the full-20 band holds. Depends on every shard (so all artifacts exist) and downloads them into one dir.
-  jury-aggregate:
-    # `changes` must be a DIRECT need so `needs.changes.outputs.heavy` resolves in the `if:` below
-    # (the needs context exposes only direct dependencies — without it the guard reads empty ⇒ the
-    # band assertion would silently never run). `jury-shard` already needs `changes`, so ordering holds.
-    needs: [changes, jury-shard]
-    if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    name: jury-aggregate (full-20 band)
-    env:
-      JURY_RESULTS_DIR: jury-results
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: download all jury shard artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: jury-shard-*
-          path: jury-results
-          merge-multiple: true
-      - run: npm run test:heavy:jury:aggregate
-
-  # The calibration-gradient gate, SHARDED across runners (~321s as one file historically — 6 seeds,
-  # each a passive+active full-season pair). The seeds are independent and per-seed seeded, so each
-  # shard plays a contiguous 2-seed slice (3 shards × 2 = 6, no overlap) and UPLOADS its per-seed
-  # measurements. NO band assertion in a shard — the active-vs-passive monotonic band needs the whole
-  # distribution; `gradient-aggregate` recombines and asserts it. Policy/seeds/band UNCHANGED.
-  gradient-shard:
-    needs: changes
-    if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2]
-    name: gradient-shard (${{ matrix.shard }})
-    env:
-      GRADIENT_SHARDS: "3"
-      GRADIENT_SHARD: ${{ matrix.shard }}
-      GRADIENT_RESULTS_DIR: gradient-results
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run test:heavy:gradient
-      - name: upload shard results
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradient-shard-${{ matrix.shard }}
-          path: gradient-results/gradient-shard-${{ matrix.shard }}.json
-          if-no-files-found: error
-          retention-days: 1
-
-  # Recombine every gradient shard and assert the full monotonic band (active ≥ passive). Green only
-  # if the full band holds. Depends on every shard so all artifacts exist.
-  gradient-aggregate:
-    # `changes` must be a DIRECT need so `needs.changes.outputs.heavy` resolves in the `if:` below
-    # (the needs context exposes only direct dependencies — without it the guard reads empty ⇒ the
-    # band assertion would silently never run). `gradient-shard` already needs `changes`, so ordering holds.
-    needs: [changes, gradient-shard]
-    if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    name: gradient-aggregate (full band)
-    env:
-      GRADIENT_RESULTS_DIR: gradient-results
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: download all gradient shard artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: gradient-shard-*
-          path: gradient-results
-          merge-multiple: true
-      - run: npm run test:heavy:gradient:aggregate
+      - run: npm run test:heavy
 
   # ── Coverage gate ──────────────────────────────────────────────────────────────
   # Per-directory branch thresholds in vitest.config.ts — coverage can no longer silently regress
@@ -287,7 +163,7 @@ jobs:
   coverage:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -303,7 +179,7 @@ jobs:
   smoke:
     needs: changes
     if: needs.changes.outputs.deploy == 'true'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -319,18 +195,22 @@ jobs:
       # token-enforcing engine and drives a full turn — it needs the FE deps.
       - run: pip install -r frontend/requirements.txt
       - name: deploy scripts parse
-        run: for s in deploy/*.sh; do bash -n "$s"; done
+        # Enumerate EVERY tracked deploy shell script recursively (incl. nested dirs like
+        # deploy/expose/*.sh) — the old non-recursive `deploy/*.sh` glob silently skipped them (#618).
+        # The top-level + `**/` pathspecs together cover both the root and nested scripts (git's `**`
+        # alone does not match zero intermediate dirs).
+        run: for s in $(git ls-files 'deploy/*.sh' 'deploy/**/*.sh'); do bash -n "$s"; done
       - name: engine + system deploy smoke
         run: bash deploy/smoke.sh
 
-  # ── Front-end gate ──────────────────────────────────────────────────────────────
-  # The vendored Python app is outside the TS tooling. Compile-check it, run its pytest suite
-  # (app-admin 0029, game build 0032), and boot/browser/responsive-smoke the real app. PATH-GATED
-  # (`changes.frontend`): an engine-only PR skips it.
-  frontend:
+  # ── Front-end gate (SPLIT 3 ways so it fans out across the runner pool) ──────────
+  # The vendored Python app is outside the TS tooling. It used to be ONE ~7-min job (the CI long
+  # pole). Split into pytest / browser-smoke / responsive-matrix so a multi-runner pool runs them
+  # in PARALLEL. All three are PATH-GATED on `changes.frontend`; an engine-only PR skips them.
+  fe-pytest:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -347,13 +227,59 @@ jobs:
         run: pip install -r frontend/requirements.txt
       - name: pytest (app-admin 0029, game build 0032)
         run: cd frontend && python3 -m pytest tests/ -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: syntax-check key front-end JS
+        run: |
+          node --check frontend/static/js/orwellOnboarding.js
+          node --check frontend/static/js/orwellStatusPanel.js
+
+  fe-browser:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install front-end deps
+        run: pip install -r frontend/requirements.txt
+      # Cache the Playwright chromium download (keyed to the installed playwright version).
+      - name: resolve playwright version (cache key)
+        id: pw
+        run: |
+          pip install playwright
+          echo "version=$(pip show playwright | awk '/^Version:/ {print $2}')" >> "$GITHUB_OUTPUT"
+      - name: cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      # NO `--with-deps` (it apt-installs via sudo, which the self-hosted runner does not grant);
+      # the runner box has the chromium system libs pre-installed once (the provisioning script
+      # bakes them in). Install only the browser binary into ~/.cache.
+      - name: install playwright chromium
+        run: python3 -m playwright install chromium
       - name: boot smoke — real app, game-build gating (feature 0032)
         run: cd frontend && python3 scripts/boot_smoke.py
-      # Cache the Playwright chromium download so the install is a near-no-op on a cache hit
-      # (it otherwise re-downloads the browser bundle every run). Keyed to the installed
-      # playwright version, so a dependency bump busts the cache automatically. `install
-      # --with-deps` still runs (apt deps are quick / already present); only the ~100MB+
-      # browser download is what the cache elides.
+      - name: browser smoke — keep-set UI loads, no broken modules (feature 0032)
+        run: cd frontend && python3 scripts/browser_smoke.py
+
+  fe-responsive:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install front-end deps
+        run: pip install -r frontend/requirements.txt
       - name: resolve playwright version (cache key)
         id: pw
         run: |
@@ -365,18 +291,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
-        run: python3 -m playwright install --with-deps chromium
-      - name: browser smoke — keep-set UI loads, no broken modules (feature 0032)
-        run: cd frontend && python3 scripts/browser_smoke.py
+        run: python3 -m playwright install chromium
       - name: responsive matrix gate — viewports x surfaces (Stream S, ruling 16)
         run: cd frontend && python3 scripts/responsive_matrix.py
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: syntax-check key front-end JS
-        run: |
-          node --check frontend/static/js/orwellOnboarding.js
-          node --check frontend/static/js/orwellStatusPanel.js
 
   # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────
   #
@@ -394,14 +311,12 @@ jobs:
       - test
       - coverage
       - smoke
-      - frontend
+      - fe-pytest
+      - fe-browser
+      - fe-responsive
       - heavy-sims
-      - jury-shard
-      - jury-aggregate
-      - gradient-shard
-      - gradient-aggregate
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: resolve overall CI status
         env:
@@ -410,12 +325,10 @@ jobs:
             test=${{ needs.test.result }}
             coverage=${{ needs.coverage.result }}
             smoke=${{ needs.smoke.result }}
-            frontend=${{ needs.frontend.result }}
+            fe-pytest=${{ needs.fe-pytest.result }}
+            fe-browser=${{ needs.fe-browser.result }}
+            fe-responsive=${{ needs.fe-responsive.result }}
             heavy-sims=${{ needs.heavy-sims.result }}
-            jury-shard=${{ needs.jury-shard.result }}
-            jury-aggregate=${{ needs.jury-aggregate.result }}
-            gradient-shard=${{ needs.gradient-shard.result }}
-            gradient-aggregate=${{ needs.gradient-aggregate.result }}
         run: |
           set -euo pipefail
           echo "Needed job results: $RESULTS"

@@ -107,7 +107,7 @@ class TestOnboardingOverlay:
         assert "sidebar-new-chat-btn" in JS_ONBOARDING
 
     def test_holding_cards_remain(self):
-        assert "Production needs a feed source" in JS_ONBOARDING  # J4 model gate
+        assert "Production needs the feeds" in JS_ONBOARDING      # J4 model gate
         assert "The house is dark" in JS_ONBOARDING               # F5 engine down
 
     def test_holding_card_is_a_real_modal(self):
@@ -232,11 +232,12 @@ class TestStatusHUD:
         assert "catch" in JS_STATUS or "try" in JS_STATUS
 
     def test_status_is_sidebar_chrome(self):
-        # E64 (ruling #3): the status HUD is a permanent sidebar section — the old
-        # draggable-window pin is retired with the ruling.
+        # E64 (ruling #3): the status HUD is a permanent rail/sidebar section, not a
+        # draggable window. #640: it composes the OrwellGadget kit, which owns the mount
+        # (#gadget-rail-body → #sidebar → body) — so the panel no longer hand-wires it.
         src = JS_STATUS
         assert "makeWindowDraggable" not in src
-        assert 'getElementById("sidebar")' in src
+        assert "OrwellGadgetKit.create(" in src
 
     # -- Route contracts (C-level) -------------------------------------------
 

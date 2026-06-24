@@ -89,13 +89,40 @@
     try { window.dispatchEvent(new CustomEvent("orwell:drmode", { detail: { active: drMode } })); } catch (_) {}
   }
 
+  // #655 — on a narrow viewport the Diary-Room affordance lives in the sidebar drawer (or its
+  // icon-rail mirror). Tapping it used to leave the drawer OPEN, covering the composer that
+  // just entered DR mode — so the player saw nothing happen ("it doesn't open"). Close the
+  // mobile drawer so the in-composer DR pill + placeholder are actually visible.
+  function closeMobileSidebar() {
+    try {
+      if (!window.matchMedia || !window.matchMedia("(max-width: 768px)").matches) return;
+      const sb = document.getElementById("sidebar");
+      if (sb && !sb.classList.contains("hidden")) sb.classList.add("hidden");
+      const backdrop = document.getElementById("sidebar-backdrop");
+      if (backdrop) backdrop.classList.remove("visible");
+      if (typeof window.syncRailSide === "function") window.syncRailSide();
+    } catch (_) { /* fail-open: opening DR mode must never throw */ }
+  }
+
   function enterDRMode() {
+    // #655 — make the open path RELIABLE (was flaky): the composer form/pill may not exist yet
+    // when the affordance is tapped (a race on fresh load / right after a game starts). Wire the
+    // composer and build the pill on demand; if the composer box still isn't in the DOM, defer
+    // one frame and retry ONCE rather than silently no-op'ing (the old `return` was the flake).
+    wireComposer();
     const box = composerBox();
     const pill = ensurePill();
-    if (!box || !pill) return;
+    if (!box || !pill) {
+      if (!enterDRMode._retried) {
+        enterDRMode._retried = true;
+        requestAnimationFrame(() => { enterDRMode._retried = false; enterDRMode(); });
+      }
+      return;
+    }
     drMode = true;
     pill.style.display = "flex";
     document.body.classList.add("orwell-dr-mode");
+    closeMobileSidebar();
     _returnPlaceholder = box.placeholder;
     box.placeholder = "Tell the producers what you're really thinking…";
     box.focus();
@@ -135,6 +162,13 @@
       const entry = (box.value || "").trim();
       if (!entry) { box.focus(); return; }
       const pill = document.getElementById(PILL_ID);
+      // F-NEW-8: a confessional POST can exceed Doherty's 400ms; show an in-flight cue and
+      // guard against a double-submit (the capture-phase handler can re-fire on a fast second
+      // Enter). _drSubmitting gates re-entry; the pill text signals the recording is in flight.
+      if (form._drSubmitting) return;
+      form._drSubmitting = true;
+      const _label = pill && pill.firstElementChild;
+      if (_label) { pill.setAttribute("aria-live", "polite"); _label.textContent = "📔 Recording…"; }
       try {
         await submitDR(entry);
         box.value = "";
@@ -151,6 +185,9 @@
           pill.setAttribute("aria-live", "assertive");
           pill.firstElementChild.textContent = "📔 The Diary Room camera glitched — try again.";
         }
+      } finally {
+        // F-NEW-8: release the in-flight gate so a retry (after an error) can submit again.
+        form._drSubmitting = false;
       }
     }, true);
     box.addEventListener("keydown", (e) => {

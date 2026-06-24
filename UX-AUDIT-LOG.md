@@ -10,6 +10,19 @@ Subject: **Orwell** — immersive single-player Big Brother social-game web app 
 
 ---
 
+## 🔗 GitHub issue tracking (added 2026-06-23)
+
+The remaining open **UX Phase-4 polish** `J*` items in this ledger are tracked as one umbrella issue,
+[**#606**](https://github.com/kevinhirsch/orwell/issues/606) (decision-card copy, wayfinding, premiere
+motion, theme/cast IA, contrast misses, incl. **J1-30**). This ledger stays the per-finding evidence
+record; #606 is the live status tracker for the open set. `J*` items already marked `FIXED`/`VERIFIED`
+below (and in `docs/audits/2026-06-21-open-items-verification.md`) need no issue. A few cross-cutting
+UX findings escalated to their own issues (e.g. **UX-1** → [#616](https://github.com/kevinhirsch/orwell/issues/616);
+the **UX-2..10** roundup → [#626](https://github.com/kevinhirsch/orwell/issues/626)); the full
+finding-code → issue map lives at the top of `ROAST-LOG.md`.
+
+---
+
 ## 📌 OPEN ITEMS — consolidated (reconciled 2026-06-21)
 
 > The single up-to-date view of what's left. The per-journey tables below are the source detail; this section
@@ -376,6 +389,23 @@ Scope authorized by the owner ("include the finalize fix in this set"). Six conf
 - **J2-14** (tok/s in-game), **J2-16** (red focus border on benign cards) — judgment calls (is the telemetry/red intended?) — owner ruling needed.
 - **J2-17** (themed-accent CTA contrast 3.29:1), **J2-18** (mobile FAB overlaps tutorial) — per-theme / responsive-fiddly; need a token-level on-color solution + responsive testing.
 - **Design-level:** J2-05/09 cast IA, J2-10 premiere staging, J2-13 tutorial affordance, J2-15 avatar identity → Phase-4 backlog.
+
+## Phase-4 — premiere motion / visual / staging cluster (gated set, issue #606)
+
+The premiere/tutorial polish cluster (J2-10, J1-20, J2-13, J2-15, J2-18, J3-15). All fixes are FE
+presentation only, theme-token-driven, and reduced-motion guarded.
+
+| ID | Disposition | Fix | File |
+|---|---|---|---|
+| **J2-13** | FIXED | The premiere tutorial named the weekly rhythm but offered no way to ACT (gulf-of-execution). Added a "Meet the house →" CTA that seeds the composer (`#message`) with an opener and focuses it — it never sends, so the player stays the author (ADR 0003); never clobbers an in-progress draft. | `static/js/orwellPremiereTutorial.js` |
+| **J2-10 / J1-20** | FIXED (FE half) | The premiere card hard-cut in. Added a gentle rise+fade entrance (`orwellPremiereIn`), self-removing after one play; stripped under `prefers-reduced-motion` alongside the existing dismiss-fade guard. Purely presentational — byte-identical once settled. (The fuller engine-staged premiere apparatus remains backlog; this addresses the FE tutorial-card pop-in.) | `static/js/orwellPremiereTutorial.js` |
+| **J2-15** | FIXED (FE presentation) | 16 identical 👤 silhouettes at premiere → a per-houseguest monogram (name initial over a name-derived, Vault-free hue, stable across polls) so a portrait-less roster reads as distinct people from frame one. Portraits (0051) still backfill on top. | `static/js/orwellCast.js` |
+| **J3-15** | FIXED | Casting cast-photo thumbnails showed broken/placeholder states with no loading affordance. Added a token-driven (`--panel`/`--border`) skeleton shimmer driven off each `<img>`'s real load result (`hs-loading` until load, `hs-broken` on error) for both the candidate grid and the saved-headshots strip; reduced-motion freezes the sweep. | `static/js/orwellHeadshot.js` |
+| **J2-18** | FIXED / already-mitigated | The "mobile FAB overlaps the tutorial card" evidence predated #551, which moved the gadget opener to a small icon-only top-right control (the tutorial card sits at the bottom above the composer — no overlap). Also bumped the tutorial's `Close guide` (and the new CTA) from 36px to the 44px tap floor (WCAG 2.5.5). | `static/js/orwellPremiereTutorial.js` |
+
+**Validation:** `node --check` clean; the full FE pytest suite green (2 environmental model-pool skips,
+unchanged from baseline); `responsive_matrix.py` green; source-pin tests added/extended
+(`test_l31_premiere_tutorial.py`, `test_g22_cast_progressive_render.py`, `test_g26_headshot_fe.py`).
 
 ## Journey 3 — capture-phase findings + specialist consolidation (DONE)
 

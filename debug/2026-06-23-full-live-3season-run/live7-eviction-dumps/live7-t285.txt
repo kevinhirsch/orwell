@@ -1,0 +1,4 @@
+phase=eviction->eviction evicted=5 playerStatus=active committed=false
+TALLY=null
+
+Big Brother02:48 AM The Diary Room is quiet. The red light blinks. Two portraits on the monitor: Michael Levine on the left, Patricia Wilkins on the right. The house is waiting. I need a name, Jolene. Just one name — Michael or Patricia. Who's walking out that door tonight?

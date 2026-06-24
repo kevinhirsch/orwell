@@ -27,7 +27,7 @@ def test_account_tab_ships_a_profile_picture_card_with_a_mount():
 
 def test_settings_mounts_the_shared_studio_into_the_account_card():
     js = _read("static/js/settings.js")
-    acct = js[js.index("function initAccount"):js.index("function initAccount") + 2000]
+    acct = js[js.index("function initAccount"):js.index("function initAccount") + 3000]
     assert "window.OrwellHeadshotStudio.mount" in acct
     assert "el('settings-headshot')" in acct
     # it refreshes the avatar so the circle reflects a change made here

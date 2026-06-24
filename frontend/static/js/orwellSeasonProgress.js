@@ -137,7 +137,15 @@
     let out = 0;
     const house = state && Array.isArray(state.house) ? state.house : [];
     for (const h of house) if (h && h.status && h.status !== "active") out += 1;
-    const playerOut = state && state.player && state.player.status && state.player.status !== "active";
+    // #555/#556: an in-session season hand-off can leave the engine projection carrying the PRIOR
+    // season's terminal player.status into a pristine new season. Mirror orwellStatusPanel's
+    // seatStale(): the player's "out" status is real only if the season is finished, past week 1,
+    // or someone else is already out — otherwise it's stale and must NOT inflate the bar (~7%).
+    const finished = !!(status && status.finished);
+    const week = (status && typeof status.week === "number") ? status.week : 0;
+    const seatStale = !(finished || week > 1 || out > 0);
+    const playerOut = state && state.player && state.player.status
+      && state.player.status !== "active" && !seatStale;
     if (playerOut) out += 1;
 
     // Within-week fraction from the ceremony phase (status.phase is the live ceremony beat).
@@ -211,6 +219,8 @@
     const chip = ensureChip();
     if (typeof season === "number" && season >= 2) {
       chip.textContent = "Season " + season;
+      // UX-6: reflect the live season in the accessible name (was a static "Season number").
+      chip.setAttribute("aria-label", "Season " + season);
       chip.style.display = "block";
       positionChip(chip); // clear the gadget rail (avoids the reported header overlap)
     } else {
@@ -245,11 +255,34 @@
     _ensureRailObserver(reflow);
   }
 
+  // ── the chat title (#557) ───────────────────────────────────────────────────
+  // The session is named "Casting interview" at casting and never renamed server-side, so the
+  // top-bar title (#current-meta) stayed stuck on it for the whole game. Once the season is LIVE
+  // we paint a season/week-based title here (the same poll that drives the bar/chip), so the
+  // title advances past casting. Pre-game we leave the casting title untouched. FE-only; no
+  // gamechanged dispatch — this only reads the Vault-free projection and sets DOM text.
+  function paintTitle(started, status, state, season) {
+    const metaEl = document.getElementById("current-meta");
+    if (!metaEl) return;
+    if (!started) return; // pre-game: keep the casting title
+    const postSeason = state && state.moment === "post-season";
+    const seasonPrefix = (typeof season === "number" && season >= 2) ? ("Season " + season + " · ") : "";
+    let title;
+    if (postSeason) {
+      title = seasonPrefix + "Finale";
+    } else {
+      const week = (status && status.week) || (state && state.week) || 1;
+      title = seasonPrefix + "Week " + week;
+    }
+    if (metaEl.textContent !== title) metaEl.textContent = title;
+  }
+
   // ── the refresh cycle ─────────────────────────────────────────────────────
   async function refresh() {
     // The chip is independent of game state — show "Season N" whenever N ≥ 2.
     const seasonResp = await jgetSafe("/api/orwell/season");
-    paintChip(seasonResp && typeof seasonResp.season === "number" ? seasonResp.season : 1);
+    const seasonNum = seasonResp && typeof seasonResp.season === "number" ? seasonResp.season : 1;
+    paintChip(seasonNum);
 
     const status = await jgetSafe("/api/orwell/status");
     const state = await jgetSafe("/api/orwell/state");
@@ -257,6 +290,7 @@
     // Pre-game (no started season) → no bar. Treat an honest {started:false} as pre-game.
     const started = (status && status.started !== false && typeof status.week === "number" && status.week >= 1) ||
                     (state && state.started === true);
+    paintTitle(started, status, state, seasonNum);
     if (!started) {
       _lastPct = 0;
       hideBar();

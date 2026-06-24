@@ -74,7 +74,9 @@ def boot():
         cwd=ROOT, env=env, stdout=open(f"/tmp/fe-browser-{PORT}.log", "w"), stderr=subprocess.STDOUT,
     )
     base = f"http://127.0.0.1:{PORT}"
-    for _ in range(60):
+    # 120s boot budget — a loaded self-hosted runner during a merge wave can take
+    # well past 60s for uvicorn's first response (matches responsive_matrix.py / smoke.sh).
+    for _ in range(120):
         if proc.poll() is not None:
             sys.exit(f"FAIL — uvicorn exited early; see /tmp/fe-browser-{PORT}.log")
         try:
@@ -453,6 +455,17 @@ def main() -> int:
                   f"sidebar Theme entry is visible under the game build ({sidebar_theme})")
             check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
                   f"other dropped Tools items stay hidden ({sidebar_theme})")
+            # Close the theme picker before the finale block — it's a legacy full-screen
+            # .modal (z~1001) and, left open, its scrim sits ABOVE the non-modal finale
+            # panel (z~501, correctly below a modal) and intercepts the trusted minimize
+            # click below. Test isolation only; closing it is the right teardown.
+            page.evaluate("""() => {
+              const t = document.getElementById('theme-modal');
+              if (!t || t.classList.contains('hidden')) return;
+              const c = t.querySelector('.close-btn, .modal-close, [data-close]');
+              if (c) c.click(); else t.classList.add('hidden');
+            }""")
+            page.wait_for_timeout(200)
 
             # T20: a game panel's minimize-to-dock BEHAVIOR — carried by the FINALE now
             # (the remaining kit game panel; H5 folded social into the sidebar). Mount the
@@ -529,7 +542,7 @@ def main() -> int:
             page.evaluate("""['theme-modal','settings-modal'].forEach(id => {
               const m = document.getElementById(id);
               if (m && !m.classList.contains('hidden')) {
-                const b = m.querySelector('.close-btn, .modal-close-btn, [data-action="close"]');
+                const b = m.querySelector('.ow-close, .close-btn, .modal-close-btn, [data-action="close"]');
                 if (b) b.click(); else m.classList.add('hidden');
               }
             })""")
@@ -843,13 +856,14 @@ def main() -> int:
               const vis = (m) => m && !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
               if (!vis(t) || !vis(s)) return { error: 'both must be open', theme: vis(t), settings: vis(s) };
               const r1 = t.querySelector('.modal-content').getBoundingClientRect();
-              const r2 = s.querySelector('.modal-content').getBoundingClientRect();
+              const r2 = s.getBoundingClientRect();  // #553: settings is the .ow-window itself
               const L = Math.max(r1.left, r2.left), R = Math.min(r1.right, r2.right);
               const T = Math.max(r1.top, r2.top), B = Math.min(r1.bottom, r2.bottom);
               if (R <= L || B <= T) return { error: 'contents do not overlap' };
               const el = document.elementFromPoint((L + R) / 2, (T + B) / 2);
-              const owner = el ? (el.closest('.modal') || {}).id || null : null;
-              const importants = [...document.querySelectorAll('.modal')]
+              // #553: settings is a kit .ow-window, theme a legacy .modal — one authority spans both.
+              const owner = el ? (el.closest('.modal, .ow-window') || {}).id || null : null;
+              const importants = [...document.querySelectorAll('.modal, .ow-window')]
                 .filter(m => m.style.getPropertyPriority('z-index') === 'important').map(m => m.id);
               return { owner, importants,
                        themeZ: parseInt(getComputedStyle(t).zIndex, 10) || 0,
@@ -862,11 +876,11 @@ def main() -> int:
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             g14esc = page.evaluate("""() => ({
-              settingsClosed: document.getElementById('settings-modal').classList.contains('hidden'),
+              settingsClosed: !document.getElementById('settings-modal'),
               themeOpen: !document.getElementById('theme-modal').classList.contains('hidden'),
             })""")
             check(g14esc.get("settingsClosed") is True and g14esc.get("themeOpen") is True,
-                  f"G14: Escape closes the top window (settings) FIRST ({g14esc})")
+                  f"G14: Escape closes the top window (settings kit modal) FIRST ({g14esc})")
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             check(page.evaluate("document.getElementById('theme-modal').classList.contains('hidden')") is True,
@@ -877,62 +891,39 @@ def main() -> int:
             page.focus("#user-bar-settings")
             page.click("#user-bar-settings")
             page.wait_for_timeout(400)
-            check(page.evaluate("__settings_open__ = !document.getElementById('settings-modal').classList.contains('hidden')") is True,
+            check(page.evaluate("!!document.getElementById('settings-modal')") is True,
                   "F8: settings opens from the focused gear")
             page.keyboard.press("Escape")
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(350)
             f8 = page.evaluate("""() => ({
-              closed: document.getElementById('settings-modal').classList.contains('hidden'),
+              closed: !document.getElementById('settings-modal'),
               focusBack: document.activeElement && document.activeElement.id === 'user-bar-settings',
             })""")
             check(f8.get("closed") is True, f"F8: Escape closes settings ({f8})")
             check(f8.get("focusBack") is True, f"F8: focus returns to the gear ({f8})")
 
-            # G2 (Lane G): launcher-agnostic restore — a minimized window must
-            # come back through the REAL restore path no matter which launcher
-            # the user hits. The gear (#user-bar-settings) is NOT the sidebar
-            # tool button modalManager's interceptor knew about, so this is the
-            # exact reported bug: minimize settings, click the gear, dead air.
+            # #553: Settings is now a MODAL dialog on the OrwellWindow kit — intentionally NOT
+            # minimizable (a scrim'd modal tucked to a dock chip is nonsense; Escape/× dismiss it).
+            # The launcher-agnostic minimize→restore contract is now exercised on the theme-modal
+            # (the legacy .modal family) below. Assert settings opens from the gear and carries no
+            # minimize affordance, then close it via its kit ×.
             page.click("#user-bar-settings")
             page.wait_for_timeout(300)
-            check(page.evaluate("!document.getElementById('settings-modal').classList.contains('hidden')") is True,
+            check(page.evaluate("!!document.getElementById('settings-modal')") is True,
                   "G2: settings opens from the gear")
-            # The injected `_` (trusted click) — modalManager injects
-            # .modal-minimize-btn, or wires the legacy .minimize-btn when
-            # app.js's dock got there first; either way it minimizes via
-            # modalManager.
-            page.click("#settings-modal .modal-minimize-btn, #settings-modal .minimize-btn")
-            page.wait_for_timeout(300)
-            g2min = page.evaluate("""() => {
-              const m = document.getElementById('settings-modal');
-              return { minimized: m.classList.contains('modal-minimized'),
-                       hidden: getComputedStyle(m).display === 'none',
-                       chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="settings-modal"]') };
-            }""")
-            check(g2min.get("minimized") is True and g2min.get("hidden") is True and g2min.get("chip") is True,
-                  f"G2: the `_` button minimizes settings to a dock chip ({g2min})")
-            page.click("#user-bar-settings")  # the launcher itself — trusted click
-            page.wait_for_timeout(300)
-            g2 = page.evaluate("""() => {
-              const m = document.getElementById('settings-modal');
-              return { visible: !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none',
-                       unminimized: !m.classList.contains('modal-minimized'),
-                       chipGone: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="settings-modal"]') };
-            }""")
-            check(g2.get("visible") is True and g2.get("unminimized") is True and g2.get("chipGone") is True,
-                  f"G2: clicking the gear RESTORES the minimized settings window ({g2})")
-            # Interactive: a trusted click INSIDE the restored window lands (no
-            # .modal-minimized pointer-events:none residue) — the Account tab
-            # takes the click and activates.
+            check(page.evaluate("!document.querySelector('#settings-modal .ow-min, #settings-modal .modal-minimize-btn, #settings-modal .minimize-btn')") is True,
+                  "G2/#553: the settings modal dialog has no minimize-to-dock button")
+            # Interactive: a trusted click INSIDE the window lands — the Account tab activates.
             page.click("#settings-modal [data-settings-tab='account']")
             page.wait_for_timeout(150)
             check(page.evaluate("document.querySelector(\"#settings-modal [data-settings-tab='account']\").classList.contains('active')") is True,
-                  "G2: the restored settings window is interactive (trusted click inside lands)")
-            # Same contract for EVERY window, launcher-agnostic: theme-modal,
-            # minimized for real, healed by an arbitrary opener that only
-            # removes `.hidden` (exactly what tool-theme-btn / the Settings →
-            # Appearance button do) — the observer must run the real restore.
-            page.evaluate("document.getElementById('settings-modal').querySelector('.close-btn').click()")
+                  "G2: the settings window is interactive (trusted click inside lands)")
+            page.evaluate("(document.querySelector('#settings-modal .ow-close')||{click(){}}).click()")
+            page.wait_for_timeout(250)
+            # The launcher-agnostic minimize→restore contract for the legacy .modal family
+            # (theme-modal): minimized for real, healed by an arbitrary opener that only removes
+            # `.hidden` (exactly what tool-theme-btn / Settings → Appearance do) — the observer
+            # must run the real restore.
             page.evaluate("document.getElementById('theme-modal').classList.remove('hidden')")
             page.wait_for_timeout(250)
             page.click("#theme-modal .modal-minimize-btn, #theme-modal .minimize-btn")
@@ -1022,11 +1013,14 @@ def main() -> int:
             g16.goto(base + "/", wait_until="load", timeout=30000)
             g16.wait_for_selector("#orwell-status", state="visible", timeout=15000)
             # F1, the act: collapse the HUD via its header (trusted click).
-            g16.click("#orwell-status .os-hdr")
+            # #640: the status panel composes the OrwellGadget kit — its header is the kit's
+            # .og-head and the collapsed class is the kit's .og-collapsed (the E71 per-user+game
+            # persistence key is unchanged, owned by the panel via persistCollapsed:false).
+            g16.click("#orwell-status .og-head")
             f1_keys = g16.evaluate("""() => {
               const user = (document.body && document.body.dataset.user) || '';
               return {
-                collapsed: document.getElementById('orwell-status').classList.contains('os-collapsed'),
+                collapsed: document.getElementById('orwell-status').classList.contains('og-collapsed'),
                 keys: Object.keys(localStorage).filter(k => k.startsWith('orwell-status-collapsed')),
                 expected: 'orwell-status-collapsed:The Player:' + user,
               };
@@ -1079,8 +1073,8 @@ def main() -> int:
             g16.wait_for_selector("#orwell-status", state="visible", timeout=15000)
             f1_after = g16.evaluate("""() => {
               const hud = document.getElementById('orwell-status');
-              const hdr = hud && hud.querySelector('.os-hdr');
-              return { collapsed: !!hud && hud.classList.contains('os-collapsed'),
+              const hdr = hud && hud.querySelector('.og-head');  // #640: the kit's header
+              return { collapsed: !!hud && hud.classList.contains('og-collapsed'),
                        expanded: hdr ? hdr.getAttribute('aria-expanded') : null };
             }""")
             check(f1_after.get("collapsed") is True and f1_after.get("expanded") == "false",
@@ -1303,20 +1297,21 @@ def main() -> int:
                   f"0057: the new-season window is sized and inside the viewport (no overflow) ({sea_ns})")
             sea.close()
 
-            # F6 tail (wave 3): the engine-down banner's dismiss is the shared
-            # .ow-dismiss affordance (>=24px, kit CSS) — presence/retro are pinned in pytest.
+            # #642: the engine-down banner MIGRATED onto the OrwellNotice kit (a top-banner
+            # system-notice). Its dismiss is the kit's shared .on-dismiss affordance (>=44px touch
+            # floor, kit CSS) now — not the window kit's .ow-dismiss.
             page.evaluate("window.orwellRefreshEngineStatus && window.orwellRefreshEngineStatus()")
             page.wait_for_timeout(600)
             ban = page.evaluate("""() => {
-              const b = document.querySelector('#orwell-engine-status .oes-x');
+              const b = document.querySelector('#orwell-engine-status .on-dismiss');
               if (!b) return { present: false };
               const r = b.getBoundingClientRect();
-              return { present: true, owDismiss: b.classList.contains('ow-dismiss'),
+              return { present: true, onDismiss: b.classList.contains('on-dismiss'),
                        w: Math.round(r.width), h: Math.round(r.height) };
             }""")
             if ban.get("present"):
-                check(ban.get("owDismiss") is True and ban.get("w", 0) >= 24 and ban.get("h", 0) >= 24,
-                      f"F6: banner dismiss is the shared ow-dismiss affordance ({ban})")
+                check(ban.get("onDismiss") is True and ban.get("w", 0) >= 44 and ban.get("h", 0) >= 44,
+                      f"#642: banner dismiss is the shared OrwellNotice .on-dismiss affordance ({ban})")
 
             # F-3 (the ratchet, runtime half): every window-like surface on the page
             # is KIT-MANAGED — floating game panels carry [data-ow-window], and the
@@ -1368,8 +1363,8 @@ def main() -> int:
               return { hidden: getComputedStyle(el).display === 'none',
                        flag: localStorage.getItem('orwell-cast-pinned:' + user) };
             }""")
-            check(l12b.get("hidden") is True and l12b.get("flag") is None,
-                  f"L12: un-pinning hides the gadget and clears the persisted flag ({l12b})")
+            check(l12b.get("hidden") is True and l12b.get("flag") in (None, "0"),
+                  f"L12: un-pinning hides the gadget and the pin flag is un-set ({l12b})")
 
             # L13: the rail gadgets reorder and the order PERSISTS. Reorder now happens in an
             # explicit edit mode (iOS-jiggle / HASS-dashboard style) — a labeled header toggle
@@ -1728,7 +1723,9 @@ def main() -> int:
             # Collapse the sidebar for REAL (the hamburger), then compare
             # per-entry drawing signatures between the two states.
             page.evaluate("""() => {  // clear floaters that could sit over the hamburger
-              const ban = document.querySelector('#orwell-engine-status .oes-x');
+              // #642: the engine-status banner is an OrwellNotice top-banner now — its dismiss is
+              // the kit's .on-dismiss (was .oes-x). Clear it so it can't sit over the hamburger.
+              const ban = document.querySelector('#orwell-engine-status .on-dismiss');
               if (ban) ban.click();
             }""")
             page.wait_for_timeout(350)
@@ -1744,7 +1741,7 @@ def main() -> int:
                 [...svg.querySelectorAll('path,circle,rect,line,polyline,polygon,ellipse')]
                   .map(n => n.tagName + ':' + GEOM.map(a => n.getAttribute(a) || '').join(','))
                   .join('|');
-              const iconSel = { 'rail-game-status': '.os-hdr svg' };
+              const iconSel = { 'rail-game-status': '.og-head svg' };  // #640: the kit header
               const entries = [...rail.querySelectorAll('.icon-rail-btn[data-rail-source]')].map(btn => {
                 const src = document.getElementById(btn.dataset.railSource);
                 const srcSvg = src && src.querySelector(iconSel[btn.id] || 'svg');
@@ -1867,7 +1864,7 @@ def main() -> int:
             # COMPUTED, not hand-listed: force one tab's cards admin-only and
             # its launcher hides and cannot be landed on.
             page.evaluate("window.__g13WasAdmin = !!window._isAdmin; window._isAdmin = false;")
-            page.evaluate("document.querySelector('#settings-modal .close-btn').click()")
+            page.evaluate("(document.querySelector('#settings-modal .ow-close')||{click(){}}).click()")
             page.wait_for_timeout(300)
             page.click("#user-bar-settings")
             page.wait_for_timeout(250)
@@ -1888,7 +1885,7 @@ def main() -> int:
             page.evaluate("""() => {
               document.querySelectorAll('[data-settings-panel="shortcuts"] .admin-card')
                 .forEach(c => c.classList.add('admin-only', 'g13-probe'));
-              document.querySelector('#settings-modal .close-btn').click();
+              (document.querySelector('#settings-modal .ow-close')||{click(){}}).click();
             }""")
             page.wait_for_timeout(300)
             page.click("#user-bar-settings")
@@ -1908,7 +1905,7 @@ def main() -> int:
               });
               window._isAdmin = window.__g13WasAdmin;
               const m = document.getElementById('settings-modal');
-              const b = m && m.querySelector('.close-btn');
+              const b = m && m.querySelector('.ow-close');
               if (b) b.click();
             }""")
             page.wait_for_timeout(300)
@@ -2053,20 +2050,25 @@ def main() -> int:
             f4_seat0 = f4.input_value("#message")
             check(not f4_seat0.strip(),
                   f"P1: pre-game boot does NOT prefill the composer (no seat pre-prompt) ({f4_seat0!r})")
-            # the welcome modal is its own modal, shown on every fresh game/season; it now points the
-            # player at the casting INTERVIEW (the photo is asked for mid-interview, not up front)
+            # the SETUP WIZARD (its own modal, data-ob-setup), shown on every fresh game/season; the
+            # only welcome copy is the framing line "Production needs the feeds" and it shows the
+            # model SETUP (a narrator/portrait model summary + a "Choose models" door into Settings).
             f4_welcome = f4.evaluate(
-                "() => { const c = document.querySelector('#orwell-onboarding .ob-card');"
+                "() => { const c = document.querySelector('#orwell-onboarding[data-ob-setup] .ob-card');"
                 "  return c ? c.textContent : ''; }")
-            check("interview" in (f4_welcome or "").lower(),
-                  f"P1: the welcome modal greets and points at the casting interview ({(f4_welcome or '')[:80]!r})")
+            _wz = (f4_welcome or "").lower()
+            check("production needs the feeds" in _wz and ("model" in _wz or "casting" in _wz),
+                  f"P1: the setup wizard frames the feeds and shows model setup ({(f4_welcome or '')[:80]!r})")
             # the cast-photo box is HIDDEN at boot — it follows the producers' question, never the
-            # welcome (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)
+            # wizard (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)
             check(f4.evaluate("!document.getElementById('orwell-headshot')") is True,
                   "P1: the cast-photo box is hidden at boot (it follows the producers' question)")
-            # dismiss the welcome (its own modal) — dismissing IS the proceed: it opens the interview
-            if f4.query_selector("#orwell-onboarding [data-ob-welcome-go]"):
-                f4.click("#orwell-onboarding [data-ob-welcome-go]")
+            # PREMATURE-START FIX: the season begins ONLY on the explicit "Start casting" button (gated
+            # on a resolved narrator model — a feed is configured in this env, so it enables). Clicking
+            # it IS the proceed: it opens the interview + fires the producers' kickoff. Playwright's
+            # click auto-waits for the button to become enabled (after the async model summary resolves).
+            if f4.query_selector("#orwell-onboarding [data-ob-setup-start]"):
+                f4.click("#orwell-onboarding [data-ob-setup-start]")
                 f4.wait_for_timeout(800)
             # NO HARD GATE: the chat input + send are USABLE immediately — the interview runs before
             # any photo (the old "locked until a photo is secured" gate is retired).

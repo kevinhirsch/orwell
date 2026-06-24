@@ -87,6 +87,47 @@ export function initSidebarLayout(Storage, opts) {
   _syncRailSideFn = _syncRailSideCore;
   window.syncRailSide = syncRailSide;
 
+  // ── #637: the panel SIDE is a synced, last-write-wins field of the 0064 layout store ──
+  // The side persists locally (Storage.KEYS.SIDEBAR_SIDE) as the offline/seed fallback, but the
+  // SYNCED value (id "panel" {side}) is the source of truth: it crosses devices and mirrors live
+  // between two windows via the same `orwell:window-layout` → PATCH → `layout-changed` seam the kit
+  // uses. #552 stands: mobile reads the persisted side READ-ONLY (no swap), so a remote side still
+  // applies on mobile — it just can't be flipped there.
+  let _applyingSyncedSide = false;
+  function _curSide() {
+    const sb = document.getElementById('sidebar');
+    return sb && sb.classList.contains('right-side') ? 'right' : 'left';
+  }
+  function _emitSide(side) {
+    if (_applyingSyncedSide) return;   // never echo a remote apply back out
+    try {
+      window.dispatchEvent(new CustomEvent('orwell:window-layout',
+        { detail: { id: 'panel', state: { side: side === 'right' ? 'right' : 'left' } } }));
+    } catch (_) {}
+  }
+  function _applySyncedSide(side) {
+    if (side !== 'left' && side !== 'right') return;
+    if (_applyingSyncedSide) return;
+    const sb = document.getElementById('sidebar');
+    if (!sb) return;
+    const wantRight = side === 'right';
+    if (sb.classList.contains('right-side') === wantRight) return;   // already in step
+    _applyingSyncedSide = true;
+    try {
+      sb.classList.toggle('right-side', wantRight);
+      try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, side); } catch (_) {}
+      syncRailSide();
+      if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
+    } finally { _applyingSyncedSide = false; }
+  }
+  function _onSyncedLayoutSide(e) {
+    const d = e && e.detail;
+    if (!d || d.windowId !== 'panel' || !d.state) return;
+    _applySyncedSide(d.state.side);
+  }
+  window.addEventListener('orwell:layout-seed', _onSyncedLayoutSide);     // initial GET /layout
+  window.addEventListener('orwell:layout-changed', _onSyncedLayoutSide);  // a peer window / device
+
   // Restore sidebar side preference
   if (Storage.get(Storage.KEYS.SIDEBAR_SIDE) === 'right') {
     document.getElementById('sidebar').classList.add('right-side');
@@ -100,10 +141,17 @@ export function initSidebarLayout(Storage, opts) {
   function toggleSidebarSide() {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
+    // #552 — side-swap is a DESKTOP power-feature. On a narrow viewport the two
+    // swap entry points (shift-click + the ⇄ dock button) plus the mobile open
+    // path disagreed, so a tap appeared to flip sides "randomly" and there is no
+    // room for both edges anyway. Disable swap entirely on mobile; the last
+    // desktop-configured side stays persisted and is applied read-only on mobile.
+    if (isNarrow()) return;
     sidebar.classList.toggle('right-side');
     try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, sidebar.classList.contains('right-side') ? 'right' : 'left'); } catch (_) {}
     syncRailSide();
     if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
+    _emitSide(_curSide());   // #637: fan the new side out (synced, LWW)
   }
   try { window._orwellToggleSidebarSide = toggleSidebarSide; } catch (_) {}
 
@@ -144,15 +192,18 @@ export function initSidebarLayout(Storage, opts) {
     const cc = document.getElementById('chat-container');
     if (isNarrow() && cc && cc.classList.contains('compare-active')) return;
     _userToggledSidebar = true;
-    // Optionally place the sidebar on a specific edge (the swipe gesture passes
-    // the direction). Persist it + re-anchor the doc panel, same as a
-    // shift-click on the hamburger.
-    if (side === 'left' || side === 'right') {
+    // #552 — the swipe gesture used to pick (and PERSIST) the side from the swipe
+    // DIRECTION, which silently mutated the configured side and made the hamburger
+    // jump. On mobile we now honor the persisted side READ-ONLY: open on whatever
+    // edge was last configured (on desktop), never mutate it from a swipe. On
+    // desktop the explicit `side` arg is still honored + persisted.
+    if (!isNarrow() && (side === 'left' || side === 'right')) {
       const wantRight = side === 'right';
       if (sidebar.classList.contains('right-side') !== wantRight) {
         sidebar.classList.toggle('right-side', wantRight);
         try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, side); } catch (_) {}
         if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
+        _emitSide(side);   // #637: fan the new side out (synced, LWW)
       }
     }
     const backdrop = document.getElementById('sidebar-backdrop');
@@ -184,16 +235,12 @@ export function initSidebarLayout(Storage, opts) {
           sidebar.classList.add('hidden');
           if (backdrop) backdrop.classList.remove('visible');
         } else {
-          // Mobile: the hamburger always opens the sidebar from the RIGHT.
-          // (Not persisted — keeps the desktop side preference untouched.)
-          if (!sidebar.classList.contains('right-side')) {
-            sidebar.classList.add('right-side');
-            if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
-            // Sync hamburger position immediately so it matches the sidebar side
-            // before the sidebar becomes visible — avoids the flash where the
-            // sidebar opens on the right but the hamburger is still on the left.
-            syncRailSide();
-          }
+          // #552 — the hamburger used to FORCE the sidebar to the right on every
+          // mobile open, overriding the player's last-configured side and making
+          // the side state inconsistent (the "random flip"). Honor the persisted
+          // side read-only instead: open on whatever edge `right-side` already
+          // reflects (restored from SIDEBAR_SIDE at init), never mutate it here.
+          syncRailSide();
           // Opening sidebar — blur keyboard first, then open after layout settles
           if (document.activeElement && document.activeElement !== document.body
               && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
@@ -517,7 +564,7 @@ function _initChatSwipeToOpenSidebar() {
   // Areas where a horizontal drag means something else (their own scroll/drag).
   const EXCLUDE = [
     '#sidebar', '#icon-rail', '.modal', '.input-bar', '#message',
-    '#minimized-dock', '.minimized-dock-chip', '#dock-trash-zone',
+    '#minimized-dock', '.minimized-dock-chip',
     'pre', 'table', '.agent-tool-output', '.agent-thread-cmd',
     'input', 'textarea', 'select',
   ].join(', ');
@@ -530,7 +577,6 @@ function _initChatSwipeToOpenSidebar() {
     reset();
     if (!isNarrow()) return;
     if (!e.touches || e.touches.length !== 1) return;
-    if (window._chipDragging) return;
     const sb = document.getElementById('sidebar');
     if (sb && !sb.classList.contains('hidden')) return; // already open
     // Only in the chat / empty-chat view. Not when a document or PDF is open
@@ -555,7 +601,6 @@ function _initChatSwipeToOpenSidebar() {
 
   document.addEventListener('touchmove', (e) => {
     if (!track) return;
-    if (window._chipDragging) { track = false; return; }
     if (!e.touches || !e.touches.length) return;
     const dx = e.touches[0].clientX - sx;
     const dy = e.touches[0].clientY - sy;

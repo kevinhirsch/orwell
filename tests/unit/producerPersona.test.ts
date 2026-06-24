@@ -113,9 +113,10 @@ describe("the producer is EXCLUDED from the cast / portraits / whereabouts", () 
     s.getMomentPrompt({});
     const view = s.createCharacter({ playerName: "The Player", seed: 5 });
 
-    // Exactly one portrait per cast member (player + 15 NPCs) — none extra for the producer.
-    expect(view.portraitPrompts!.length).toBe(view.house.length + 1);
+    // Exactly one portrait per NPC (the player has no name-hash portrait, #529) — none for the producer.
+    expect(view.portraitPrompts!.length).toBe(view.house.length);
     expect(view.portraitPrompts!.some((pp) => pp.houseguestId === "producer")).toBe(false);
+    expect(view.portraitPrompts!.some((pp) => pp.houseguestId === "player")).toBe(false);
     // getPortraitPrompt has no entry for a producer id.
     expect(s.getPortraitPrompt("producer" as never)).toBeNull();
   });

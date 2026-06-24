@@ -52,8 +52,8 @@ def test_l11_cast_window_default_is_smaller():
 
 def test_l12_cast_pin_gadget_registers_in_rail():
     js = _read("static", "js", "orwellCastPin.js")
-    # mounts into the 0054 gadget rail body
-    assert 'getElementById("gadget-rail-body")' in js
+    # #640: composes the OrwellGadget kit, which mounts it into the 0054 gadget rail body
+    assert "OrwellGadgetKit.create(" in js
     # sourced from the cast roster
     assert "/api/orwell/roster" in js
     # two small portraits side by side (the compact gadget)

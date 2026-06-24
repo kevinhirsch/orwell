@@ -64,6 +64,96 @@ def test_bad_window_id_or_empty_state_stores_nothing():
     assert layout.get_layout("u")["windows"] == {}
 
 
+# ── #637/#638: the SYNTHETIC synced fields (gadget order, panel side, popup dismiss) ──────────
+
+def test_panel_side_is_a_bounded_enum():
+    saved = layout.patch_layout("u", "panel", {"side": "right"})
+    assert saved == {"side": "right"}
+    assert layout.get_layout("u")["windows"]["panel"]["side"] == "right"
+    # last-write-wins on the same field
+    layout.patch_layout("u", "panel", {"side": "left"})
+    assert layout.get_layout("u")["windows"]["panel"]["side"] == "left"
+
+
+def test_panel_side_rejects_garbage_enum():
+    # an out-of-enum side is dropped → empty state → nothing stored
+    assert layout.patch_layout("u", "panel", {"side": "up"}) == {}
+    assert layout.patch_layout("u", "panel", {"side": 1}) == {}
+    assert layout.get_layout("u")["windows"] == {}
+
+
+def test_gadget_order_is_a_bounded_clean_id_list():
+    saved = layout.patch_layout("u", "gadget-rail",
+                                {"order": ["orwell-status", "orwell-deals", "orwell-status", 7, ""]})
+    # de-duplicated, non-string / empty ids dropped, original order preserved
+    assert saved == {"order": ["orwell-status", "orwell-deals"]}
+    assert layout.get_layout("u")["windows"]["gadget-rail"]["order"] == ["orwell-status", "orwell-deals"]
+
+
+def test_gadget_order_empty_or_non_list_is_dropped():
+    assert layout.patch_layout("u", "gadget-rail", {"order": []}) == {}
+    assert layout.patch_layout("u", "gadget-rail", {"order": "nope"}) == {}
+    assert layout.get_layout("u")["windows"] == {}
+
+
+def test_gadget_order_is_length_bounded():
+    big = ["g" + str(i) for i in range(500)]
+    saved = layout.patch_layout("u", "gadget-rail", {"order": big})
+    assert len(saved["order"]) == layout._MAX_ORDER_LEN
+
+
+def test_popup_dismiss_is_a_synced_bool():
+    saved = layout.patch_layout("u", "popup:premiere-tutorial", {"dismissed": True})
+    assert saved == {"dismissed": True}
+    assert layout.get_layout("u")["windows"]["popup:premiere-tutorial"]["dismissed"] is True
+
+
+def test_gadget_collapse_is_a_synced_bool():
+    # #640 (the OrwellGadget kit): a rail gadget's COLLAPSED state syncs through the SAME store
+    # under a synthetic "gadget:<id>" id, reusing the per-field LWW merge + the fan-out.
+    saved = layout.patch_layout("u", "gadget:orwell-status", {"collapsed": True})
+    assert saved == {"collapsed": True}
+    assert layout.get_layout("u")["windows"]["gadget:orwell-status"]["collapsed"] is True
+    # last-write-wins flips it back
+    layout.patch_layout("u", "gadget:orwell-status", {"collapsed": False})
+    assert layout.get_layout("u")["windows"]["gadget:orwell-status"]["collapsed"] is False
+
+
+def test_two_devices_converge_on_the_new_fields():
+    """LWW parity: a write from 'device A' is what BOTH devices read back (the synced value is the
+    single source of truth) — the cross-device convergence #637/#638 require."""
+    layout.patch_layout("u", "panel", {"side": "right"})
+    layout.patch_layout("u", "gadget-rail", {"order": ["orwell-deals", "orwell-status"]})
+    layout.patch_layout("u", "popup:premiere-tutorial", {"dismissed": True})
+    a = layout.get_layout("u")["windows"]
+    b = layout.get_layout("u")["windows"]   # a second device reads the same store
+    assert a == b
+    assert a["panel"]["side"] == "right"
+    assert a["gadget-rail"]["order"] == ["orwell-deals", "orwell-status"]
+    assert a["popup:premiere-tutorial"]["dismissed"] is True
+
+
+def test_new_fields_publish_layout_changed_for_the_mirror(monkeypatch):
+    """A PATCH to a synthetic id must fan `layout-changed` over the canonical session (the realtime
+    two-window mirror), carrying only the Vault-free field — never a body / Vault."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setattr(ogs, "get_game_session", lambda user: "sess-canon")
+    published = []
+    monkeypatch.setattr(session_events, "publish", lambda sid, ev, data=None: published.append((sid, ev, data)))
+
+    client = TestClient(_app(), raise_server_exceptions=False)
+    for wid, st in (("panel", {"side": "right"}),
+                    ("gadget-rail", {"order": ["orwell-status", "orwell-deals"]}),
+                    ("popup:premiere-tutorial", {"dismissed": True})):
+        r = client.patch("/api/orwell/layout", json={"windowId": wid, "state": st, "origin": "tab-A"})
+        assert r.status_code == 200
+    assert len(published) == 3
+    for sid, ev, data in published:
+        assert sid == "sess-canon" and ev == "layout-changed" and data["origin"] == "tab-A"
+        blob = repr(data).lower()
+        assert "secret" not in blob and "vault" not in blob
+
+
 # ── the routes ───────────────────────────────────────────────────────────────
 
 def test_get_layout_empty_default(monkeypatch):
@@ -156,3 +246,54 @@ def test_sessionsync_dispatches_layout_changed():
     src = _read("static", "js", "sessionSync.js")
     assert "layout-changed" in src
     assert "orwell:layout-changed" in src
+
+
+# ── #637/#638: the synthetic-field consumers reuse the SAME seam (no parallel sync) ───────────
+
+def test_layout_sync_seeds_non_kit_consumers():
+    """The initial GET /layout must hand the synthetic-id state to non-kit consumers (the gadget
+    rail / panel / popups) via a local apply event — not only the kit's window seed."""
+    src = _read("static", "js", "orwellLayoutSync.js")
+    assert "orwell:layout-seed" in src
+
+
+def test_gadget_rail_order_syncs_through_the_layout_store():
+    src = _read("static", "js", "orwellGadgetRail.js")
+    # saveOrder emits through the SAME capture event the kit uses (no parallel sync)
+    assert 'id: "gadget-rail"' in src and "order:" in src
+    assert "orwell:window-layout" in src
+    # and it applies a synced order arriving from the seed OR a peer window (the realtime mirror)
+    assert "orwell:layout-seed" in src and "orwell:layout-changed" in src
+    assert "applySyncedOrder" in src
+    # localStorage stays as the offline/seed fallback
+    assert "_orderKey" in src and "lsSet(_orderKey()" in src
+
+
+def test_panel_side_syncs_through_the_layout_store():
+    src = _read("static", "js", "sidebar-layout.js")
+    assert "id: 'panel'" in src and "side:" in src
+    assert "orwell:window-layout" in src
+    assert "orwell:layout-seed" in src and "orwell:layout-changed" in src
+    assert "_applySyncedSide" in src
+    # the local Storage key is still written (the offline/seed fallback #552 reads read-only on mobile)
+    assert "Storage.KEYS.SIDEBAR_SIDE" in src
+
+
+def test_premiere_popup_dismiss_syncs_through_the_layout_store():
+    src = _read("static", "js", "orwellPremiereTutorial.js")
+    assert 'id: POPUP_ID' in src and 'POPUP_ID = "popup:premiere-tutorial"' in src
+    assert "dismissed: true" in src
+    assert "orwell:window-layout" in src
+    assert "orwell:layout-seed" in src and "orwell:layout-changed" in src
+    assert "applySyncedDismiss" in src
+    # the per-user localStorage key remains the offline/seed fallback
+    assert "dismissKey()" in src
+
+
+def test_synthetic_field_consumers_never_dispatch_gamechanged():
+    """g15 invariant: these new seams must only LISTEN; the single `orwell:gamechanged` dispatcher
+    stays in platform.js. None of the three may mint one ad-hoc."""
+    for f in ("orwellGadgetRail.js", "sidebar-layout.js", "orwellPremiereTutorial.js", "orwellLayoutSync.js"):
+        src = _read("static", "js", f)
+        assert "new CustomEvent('orwell:gamechanged'" not in src
+        assert 'new CustomEvent("orwell:gamechanged"' not in src

@@ -47,7 +47,27 @@ ADMIN_ENTITLEMENTS = frozenset({"manage_llm_settings", "manage_users"})
 DEFAULT_AUTH_PATH = os.path.join(
     Path(__file__).parent.parent, "data", "auth.json"
 )
-TOKEN_TTL = 60 * 60 * 24 * 7  # 7 days
+def _token_ttl_seconds() -> int:
+    """Session token lifetime in seconds.
+
+    Tightened for public exposure (#581): the previous 7-day default is a wide
+    window for a stolen/leaked cookie on an internet-facing deployment. Default
+    is now 24h, configurable via ORWELL_SESSION_TTL_HOURS (clamped to a sane
+    1h..30d range; a bad value falls back to the 24h default).
+    """
+    raw = (os.getenv("ORWELL_SESSION_TTL_HOURS", "") or "").strip()
+    hours = 24
+    if raw:
+        try:
+            parsed = float(raw)
+            if 1 <= parsed <= 24 * 30:
+                hours = parsed
+        except ValueError:
+            pass
+    return int(hours * 60 * 60)
+
+
+TOKEN_TTL = _token_ttl_seconds()  # default 24h; ORWELL_SESSION_TTL_HOURS overrides
 
 # Usernames the auth + middleware layer reserve as internal "synthetic owner"
 # sentinels; they must never belong to a real account. The most dangerous is

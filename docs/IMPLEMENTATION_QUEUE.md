@@ -12,6 +12,11 @@ tracks can run **in parallel** once their deps are met.
 > in `docs/features/` + a new item appended here**; the only known deferrals are listed in
 > `CLAUDE.md` → "Remaining work" (0022 MVP-2, the Proxmox host smoke, the real relational/vector
 > adapters, full MCP/JSON-RPC).
+>
+> **GitHub issue tracking (added 2026-06-23):** this file is a historical work record (the B/C/D/U/L
+> lanes are ✅ DONE). New and remaining open work is now tracked as **GitHub issues** (labelled
+> `type:*` / `area:*`), not appended here — e.g. the Proxmox host smoke → [#577](https://github.com/kevinhirsch/orwell/issues/577).
+> The finding-code → issue map for the audit ledgers lives at the top of `ROAST-LOG.md`.
 
 **Agent split (suggested, not strict):**
 - **Claude Code → the TypeScript engine** (`src/`) — it has built the hexagonal core.

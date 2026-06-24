@@ -185,6 +185,38 @@ export function scrubReasoningPreamble(text) {
   return rest;
 }
 
+// NARR-10 (whole-body pass — game build). scrubReasoningPreamble is a *preamble*
+// stripper by design: it only drops a CONTIGUOUS LEADING run, so an operator-aside
+// line or a raw `npc:<id>` token that appears AFTER narration starts is never
+// reached and leaks verbatim into the public bubble. This is the missing whole-body
+// pass: it (a) drops any standalone line that is a pure operator/planning line
+// (anywhere in the body, not just the top) and (b) redacts any raw `npc:\d+` engine
+// id wherever it appears, including mid-sentence. HIGH-PRECISION — a line is only
+// dropped when it OPENS with an operator phrase AND carries no quoted dialogue (a
+// leading/embedded quote means it's NPC speech), so ordinary in-character prose is
+// never touched. The redaction strips the bare id token (and a trailing `-`/`:`/`(`
+// separator) so the houseguest's name the engine usually appends survives clean.
+const _RAW_NPC_ID_GLOBAL_RE = /\bnpc:\d+\b[ \t]*(?:[-–—:(]\s*)?/gi;
+
+// NARR-9: the OOC-aside wrap markers (mirror orwellOocAside.detectOocAside's
+// contract — a WHOLE-message `((...))` wrap, or a leading `ooc:` prefix). Kept
+// here as the single render engine both the live and reload paths funnel through.
+const _OOC_WHOLE_WRAP_RE = /^\s*\(\(([\s\S]*?)\)\)\s*$/;
+const _OOC_LEADING_PREFIX_RE = /^\s*ooc\s*:\s*/i;
+
+export function redactRawIds(text) {
+  if (!text) return text;
+  const lines = String(text).split('\n');
+  const kept = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed && _REASONING_LINE_RE.test(line) && !/["“]/.test(trimmed)) continue;
+    kept.push(line);
+  }
+  // Redact any raw engine id token left in the body (keeps the trailing name).
+  return kept.join('\n').replace(_RAW_NPC_ID_GLOBAL_RE, '');
+}
+
 export function normalizeThinkingMarkup(text) {
   if (!text) return text;
   let normalized = text;
@@ -532,6 +564,28 @@ export function processWithThinking(text) {
       // that never got tagged as thinking — scrub it before render so engine
       // machinery + the cast roster never reach the player.
       reply = (scrubReasoningPreamble(reply) || '').trim();
+      // NARR-10: the preamble scrub only catches a LEADING run. A mid-body
+      // operator aside or a raw npc:<id> echoed from a tool result survives it,
+      // so run the whole-body pass too (drop standalone operator lines anywhere,
+      // redact raw ids everywhere). Belt-and-suspenders, content channel only.
+      reply = (redactRawIds(reply) || '').trim();
+    }
+    // NARR-9: the GM marks an OUT-OF-CHARACTER answer by wrapping its WHOLE reply
+    // in `((...))` (the momentPrompts contract). The reload renderer reclassifies
+    // it (chatRenderer detectOocAside) but the LIVE stream did not, so the player
+    // read literal double-parens mid-turn. Detect the full wrap here — the single
+    // render engine both paths share — strip the markers, and emit the reply inside
+    // a styled producer-aside wrapper so it reads as a quiet word to production, not
+    // a spoken-in-room line. Only a WHOLE-message wrap qualifies (never a heuristic
+    // guess on free narration); mirrors orwellOocAside.detectOocAside's contract.
+    let oocAside = false;
+    if (reply) {
+      const m = reply.match(_OOC_WHOLE_WRAP_RE);
+      if (m && (m[1] || '').trim()) { reply = m[1].trim(); oocAside = true; }
+      else if (_OOC_LEADING_PREFIX_RE.test(reply)) {
+        reply = reply.replace(_OOC_LEADING_PREFIX_RE, '').trim();
+        oocAside = true;
+      }
     }
     // Prepend the reasoning accordion (collapsed by default), then the clean
     // reply. The accordion is debug-only chrome; it never touches the reply text.
@@ -541,7 +595,10 @@ export function processWithThinking(text) {
         if (block && block.trim()) gbHtml += createThinkingSection(block, index, thinkingTime);
       });
     }
-    if (reply) gbHtml += mdToHtml(reply);
+    if (reply) {
+      const replyHtml = mdToHtml(reply);
+      gbHtml += oocAside ? `<div class="ooc-producer-aside">${replyHtml}</div>` : replyHtml;
+    }
     return _useSvgEmoji() ? svgifyEmoji(gbHtml) : gbHtml;
   }
 
@@ -921,6 +978,7 @@ const markdownModule = {
   normalizeThinkingMarkup,
   startsWithReasoningPrefix,
   scrubReasoningPreamble,
+  redactRawIds,
   renderMermaid
 };
 

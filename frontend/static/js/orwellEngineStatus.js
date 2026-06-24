@@ -1,16 +1,24 @@
 // Orwell engine-status banner — VISIBLE error reporting when the game engine has a problem.
 // The in-character "live feeds are down" chat line keeps players in the show, but the operator (and
 // a confused player) needs an honest, out-of-character signal that something is actually broken. This
-// is that signal: a small fixed banner driven by /api/orwell/health with two severities:
+// is that signal: a top-of-viewport banner driven by /api/orwell/health with two severities:
 //   • RED   — the engine is unreachable (connection refused / timeout / wrong URL);
 //   • AMBER — the engine is up but a recent tool call FAILED (`lastError`: a technical problem like a
 //     corrupt-save 500 or a failing action), naming the tool + reason so it's actionable.
-// Self-contained, fail-open (if its own fetch fails, it shows the warning), no deps.
+// Fail-open (if its own fetch fails, it shows the warning), no deps beyond the notice kit.
+//
+// #642 (owner add-on): the banner is a first-class OrwellNotice kit consumer — a "system-notice"
+// kind at the "top-banner" placement, so it shares the kit's chrome, ONE dismiss affordance (the
+// 44px .on-dismiss), role/aria-live=alert semantics, reduced-motion-safe slide-in, and the
+// body-inset compensation (now kit-owned: --on-banner-inset). It KEEPS its top-anchored,
+// full-width placement (a global outage signal, not an above-composer affordance) and the
+// dismissed-key behaviour (re-show only when the message changes; reset on healthy). The G8
+// busy/creating hold + the reconnecting/holding variants are unchanged.
 (function () {
   "use strict";
 
   const POLL_MS = 15000;
-  const ID = "orwell-engine-status";
+  const NOTICE_ID = "orwell-engine-status";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -18,52 +26,48 @@
 
   let timer = null;
   let dismissedKey = null; // the exact message the user dismissed — reshow only if it changes
+  let _notice = null;      // the OrwellNotice kit instance (lazily created on first show)
 
-  function ensureBanner() {
-    let el = document.getElementById(ID);
-    if (el) return el;
-    el = document.createElement("div");
-    el.id = ID;
-    el.setAttribute("role", "alert");
-    el.innerHTML = `
-      <style>
-        #${ID} {
-          position: fixed; top: 0; left: 0; right: 0; z-index: 11000; display: none;
-          color: #fff; font-family: 'Fira Code', ui-monospace, monospace;
-          font-size: .76rem; line-height: 1.4; padding: .5rem .8rem; text-align: center;
-          box-shadow: 0 2px 10px rgba(0,0,0,.4);
-        }
-        #${ID}.oes-down { background: #7f1d1d; }
-        #${ID}.oes-degraded { background: #92400e; }
-        #${ID} b { letter-spacing: .03em; }
-        #${ID} .oes-reason { opacity: .85; }
-        /* F6 tail: the dismiss is the shared .ow-dismiss affordance (kit CSS),
-           positioned for the banner. */
-        #${ID} .oes-x { position: absolute; right: .5rem; top: .15rem; }
-      </style>
-      <span><b class="oes-title"></b> <span class="oes-reason"></span></span>
-      <button type="button" class="oes-x ow-dismiss" title="Dismiss" aria-label="Dismiss">×</button>`;
-    document.body.appendChild(el);
-    el.querySelector(".oes-x").addEventListener("click", () => {
-      dismissedKey = el.querySelector(".oes-reason").textContent || "";
-      el.style.display = "none";
+  // Lazily create the kit notice (top-banner system-notice). Fail-open: with the kit absent the
+  // module simply does nothing (no banner) rather than throwing.
+  function ensureNotice() {
+    if (_notice) return _notice;
+    if (!window.OrwellNoticeKit) return null;
+    _notice = window.OrwellNoticeKit.create({
+      id: NOTICE_ID,
+      kind: "system-notice",
+      placement: "top-banner",
+      severity: "error",
+      role: "alert",                 // preserve the assertive announcement
+      title: "",
+      dismissible: true,
+      // A connectivity problem is transient — NEVER a "dismissed forever" bit: the dismissed-key
+      // logic below re-shows it when the message changes / a new problem appears.
+      persistDismiss: false,
+      onDismiss: function () {
+        // Remember the exact reason waved off (so the same problem stays dismissed, a new one shows).
+        dismissedKey = _lastReason;
+      },
     });
-    return el;
+    return _notice;
   }
 
+  let _lastReason = "";
+
   function show(kind, title, reason) {
-    const el = ensureBanner();
     if (dismissedKey && dismissedKey === reason) return; // already waved off this exact problem
-    el.classList.toggle("oes-down", kind === "down");
-    el.classList.toggle("oes-degraded", kind === "degraded");
-    el.querySelector(".oes-title").textContent = title;
-    el.querySelector(".oes-reason").textContent = reason;
-    el.style.display = "block";
+    const n = ensureNotice();
+    if (!n) return;
+    _lastReason = reason;
+    const severity = kind === "down" ? "error" : "warn";
+    // Mount (idempotent) then re-skin in place — a state transition (down → reconnecting) reuses
+    // the same element (no flicker) and re-measures the body inset for the new copy.
+    n.show();
+    n.update({ severity: severity, title: title, body: reason });
   }
   function hide() {
     dismissedKey = null; // healthy again — a future problem should always reshow
-    const el = document.getElementById(ID);
-    if (el) el.style.display = "none";
+    if (_notice) _notice.hide();
   }
 
   // G8: while createCharacter is in flight (health reports busy:"creating"), a slow or even

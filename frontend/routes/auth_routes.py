@@ -148,7 +148,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             path="/",
         )
         if body.remember:
-            cookie_kwargs["max_age"] = 60 * 60 * 24 * 7  # 7 days
+            # #581: align the cookie lifetime with the server-side session TTL
+            # (default 24h; ORWELL_SESSION_TTL_HOURS overrides) instead of a fixed 7 days.
+            from core.auth import TOKEN_TTL
+            cookie_kwargs["max_age"] = TOKEN_TTL
         response.set_cookie(**cookie_kwargs)
         return {"ok": True, "username": username}
 
@@ -165,6 +168,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         token = request.cookies.get(SESSION_COOKIE)
         result = auth_manager.status(token)
         result["signup_enabled"] = auth_manager.signup_enabled
+        # Expose whether the operator has auth turned on so the FE can hide the
+        # account auth furniture (Logout / Change Password / 2FA) on a
+        # single-player, auth-off build where those controls are inert (J1-17).
+        result["auth_enabled"] = os.getenv("AUTH_ENABLED", "true").lower() != "false"
         # Include the caller's effective privileges so the frontend can
         # hide / dim UI controls the user isn't allowed to use. Admins get
         # ADMIN_PRIVILEGES (everything on), regular users get their stored

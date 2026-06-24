@@ -150,14 +150,18 @@ describe("0062 — adapter integration (frozen, persisted, Vault-free, fail-soft
     expect(JSON.stringify(s.worldSnapshotView())).toBe(expected);
   });
 
-  it("§5 colors BOTH the player moment prompt AND the off-screen (social) moment", () => {
+  it("§5 colors the player moment prompt; player-present social beats use the PLAYER channel (#580)", () => {
     const s = started(7);
     const player = s.getMomentPrompt({ moment: "premiere" }).systemPrompt;
     const social = s.getMomentPrompt({ moment: "social" }).systemPrompt;
     expect(player).toMatch(/world you all moved in with/i);
     expect(player).toMatch(/frozen as of move-in/i);
+    // #580 (PO ruling 2026-06-23): social/diary-room are PLAYER-PRESENT beats, so getMomentPrompt
+    // frames them on the PLAYER channel — NOT the off-screen "off-screen life too" framing (that
+    // channel is for NPC-only scenes, still exercised via worldSnapshotView().offscreenPrompt).
     expect(social).toMatch(/world you all moved in with/i);
-    expect(social).toMatch(/off-screen life too/i); // the NPC-to-NPC reach (channel two)
+    expect(social).toMatch(/frozen as of move-in/i);
+    expect(social).not.toMatch(/off-screen life too/i);
   });
 
   it("§6 the FE write-back replaces the fallback and freezes byte-stable", () => {

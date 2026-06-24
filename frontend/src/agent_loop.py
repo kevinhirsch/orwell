@@ -1374,9 +1374,19 @@ _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
 # loop and nudge the model — non-disruptive first, escalating — rather than auto-
 # advancing (the owner's call: keep the dynamic DM, error-correct the omission).
 # The phase set + cap + nudge texts are deliberately tunable.
+#
+# #670: these are matched against the engine's `phase` (GameSessionAdapter.syncProjection →
+# s.beat, or "finale" when finished) — NOT the `moment` string. The staged finale reports
+# phase="finale" for every beat (the player-finalist's moment is "jury-finale", a player-juror's
+# is "jury"), so "finale" — not "jury-finale" (a MOMENT, never a phase) — is what belongs here.
+# The old "jury-finale" entry was dead (it never matched a phase), leaving the L39 forced-advance
+# backstop blind to the long staged finale where the model most reliably under-calls advanceGame.
+# Double-advance is prevented by the `_pre_resolved` gate on the backstop below: the pre-resolve
+# (`_CEREMONY_RESOLVE_PHASES`, which also covers "finale") already walks ONE beat per turn, so the
+# backstop must not advance a second time the same turn.
 _ADVANCE_PHASES = {
     "premiere", "hoh-competition", "nominations", "veto-competition",
-    "veto-ceremony", "eviction", "jury-finale", "twist-reveal",
+    "veto-ceremony", "eviction", "finale", "twist-reveal",
 }
 _PROGRESSION_TOOLS = {"advanceGame", "submitDecision"}
 # A PREVIEW (runCompetition) reports a ceremony's already-decided winner but commits NOTHING. Previewing
@@ -1474,6 +1484,36 @@ _FORCED_ADVANCE_NUDGE = (
     "resolved, then voice ONLY what it returns — never a result you guessed. If a player decision is "
     "now pending, present its options and wait for their choice.")
 
+# LIVE-4 (#541) — the eviction-reveal is the season's peak beat, and the model reliably CONSUMES it
+# (advanceGame drips one anonymized ballot per call) while narrating UNRELATED scenes, so the player
+# on the block never sees the votes land. This is the same "error-correct the omission, never
+# engine-author content" guardrail: when advanceGame returns an eviction-STAGE beat (the staged
+# reveal/result), we append a focused production note to the tool result steering the model to VOICE
+# the engine's returned ballot/result THIS turn — before any other scene, and before advancing again.
+# The engine already authored the content (`event.content`, e.g. "a vote to evict X" — anonymized by
+# E12); we only correct the omission of surfacing it. Eviction-stage beats whose content must reach the
+# player as the reveal it is:
+_EVICTION_STAGE_BEATS = {
+    "eviction-reveal", "eviction", "eviction-goodbye", "eviction-result", "final-eviction",
+}
+
+
+def _eviction_reveal_steer(beat: str, content: str) -> str:
+    """The focused production note that makes the model VOICE an eviction-stage beat the engine just
+    returned (LIVE-4 #541). Never authors content — it hands back the engine's own `event.content`
+    (which the secret-ballot reveal has already anonymized) and tells the model to narrate THAT."""
+    line = (content or "").strip()
+    quoted = f' The engine reveal you must voice: "{line}".' if line else ""
+    return (
+        "\n\n(Production note, not for the player.) This is the LIVE EVICTION REVEAL — the season's "
+        "peak beat. The engine just handed you the next reveal beat above; do NOT skip past it into a "
+        "backyard/alliance scene and do NOT advance again until you have narrated it to the player on "
+        "the block." + quoted + " Voice EXACTLY what the engine returned (the ballots are SECRET — read "
+        "'a vote to evict NAME' as the anonymized ballot it is; never attach it to a voter, never count "
+        "to a tally or declare a 'majority' yourself, and never name the evictee or a vote count before "
+        "the engine's own result beat states it). Surface the reveal first; the rest of the house can wait."
+    )
+
 # ── Casting finalize fallback (audit 2026-06-20: the game won't reliably START) ─────────────────
 # The pre-game twin of the advance stall-guard. The model reliably UNDER-CALLS createCharacter:
 # with casting.ready=true and the player asking to start, it keeps interviewing (often waiting on
@@ -1528,6 +1568,60 @@ def _casting_substance_nudge(next_ask: str, missing: list) -> str:
             f"{gap}. When they answer, file it immediately with updateCasting. Keep the interview "
             "moving — backstory, why they came, how they plan to play — until casting is complete.")
 
+
+# #529 — required-field gap labels for the casting-incomplete REFUSE-AND-SURFACE steer. The engine no
+# longer fabricates player canon (no name-hash appearance, no DEFAULT_ARCHETYPE, no placeholder
+# background): a required field absent ⇒ createCharacter is refused, and the FE must ASK the player for
+# it rather than let the engine invent it. These map the engine's `missing` field ids to a player-facing
+# ask; an unknown id falls through to its raw label (never fabricated content).
+_CASTING_FIELD_LABELS = {
+    "name": "their name",
+    "playerName": "their name",
+    "archetype": "what kind of player they are (their archetype / game identity)",
+    "personaArchetype": "what kind of player they are (their archetype / game identity)",
+    "strategy": "how they plan to play the game (their strategy)",
+    "strategyStyle": "how they plan to play the game (their strategy)",
+    "personaStrategyStyle": "how they plan to play the game (their strategy)",
+    "backstory": "their backstory — who they are outside the house",
+    "motivation": "why they came to play",
+}
+
+
+def _casting_incomplete_steer(missing: list) -> str:
+    """#529 production note when a FORCED createCharacter was REFUSED `casting-incomplete`: the engine
+    will NOT invent canon about the human player, so a required casting field is genuinely still missing.
+    Steer the model to ASK the player for the named gap(s) and file the answer with updateCasting — it
+    must NOT re-call createCharacter (the engine will refuse again) and must NEVER make up the answer."""
+    labels: list[str] = []
+    seen: set = set()
+    for m in (missing or []):
+        key = str(m).strip()
+        if not key:
+            continue
+        label = _CASTING_FIELD_LABELS.get(key, key)
+        if label not in seen:
+            seen.add(label)
+            labels.append(label)
+    gap = _join_casting_labels(labels) if labels else "a required casting detail they haven't given yet"
+    return ("(Production note, not for the player.) The season did NOT start: casting is incomplete — "
+            "we still need " + gap + ". The game will not invent anything about the player, so you must "
+            "ASK them for it directly and file their answer with updateCasting. Do NOT call "
+            "createCharacter again until they've supplied it, and NEVER make up the missing detail "
+            "yourself — ask the player, in character, and wait for their answer.")
+
+
+def _join_casting_labels(items: list) -> str:
+    """Oxford-comma join for the casting gap labels (kept tiny + local to avoid a wider import)."""
+    items = [i for i in items if i]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
 # closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
@@ -1540,6 +1634,27 @@ _LULL_READY_RE = re.compile(
     re.IGNORECASE,
 )
 _LULL_SHORT_CHARS = 70  # a brief reply with no substance reads as a lull
+
+# #549: an explicit "finalize the casting" readiness signal that may appear in an otherwise
+# SUBSTANTIVE sentence (so it is NOT caught by the lull gate / _LULL_SHORT_CHARS). When the engine
+# already reports casting ready+finalizable, this is enough to finalize without the model having to
+# emit a literal "lock it in" — we correct the model's omission, we do not author content.
+_CASTING_READY_RE = re.compile(
+    r"\b(lock (it|me) in|put me in the house|start the (game|season)|let'?s start the (game|season)|"
+    r"i'?m ready (to|for) (start|play|go|the game)|finalize (my )?(casting|cast|character)|"
+    r"open the doors|send me in|i'?m ready to (enter|go in)|done with (the )?(casting|interview)|"
+    r"let'?s (begin|kick this off|get this (started|going))|ready to play)\b",
+    re.IGNORECASE,
+)
+
+
+def _player_signals_casting_ready(messages) -> bool:
+    """#549 — the player explicitly signalled they're ready to finalize casting, even in a long
+    sentence the lull gate would miss. A hidden production cue is never the player."""
+    last = (_extract_last_user_message(messages) or "").strip()
+    if not last or _is_production_cue(last):
+        return False
+    return bool(_CASTING_READY_RE.search(last) or _LULL_READY_RE.search(last))
 
 
 # A hidden PRODUCTION CUE is engine/FE-authored text injected as a user message (e.g. the post-photo
@@ -1703,32 +1818,51 @@ def _validate_consequence(raw, valid_ids) -> dict | None:
 #     already bumped beatSeq. So the SELF-409 risk is real: if we attached a stale last-seen token we
 #     would 409 our own back-fill on a perfectly normal turn. We defeat that by refreshing last-seen
 #     from EVERY response (`_refresh_beat_seq`) — every read and every mutation, including these ones.
-#   • They are LOW-value, re-derivable side effects (the scene/deal/move can be banked again next
-#     turn). They are NOT the double-apply case. So a stale 409 here is NOT reconciled-then-retried:
-#     it means the board genuinely moved under the back-fill, so we RECONCILE via the existing desync
-#     spine (`_handle_stale_beat` — re-ground next turn, count it) and SKIP the back-fill entirely.
-#     We never blind-retry into a stomp and never let the exception escape.
+#   • On a stale 409 the engine threw `StaleBeatError` BEFORE any mutation/fold (fail-closed, at-most-
+#     once — see issue #591 / A-S3): the write provably did not land. So a RE-ATTEMPT against the
+#     refreshed `beatSeq` is SAFE and cannot double-apply. For `recordInteraction` the back-fill is
+#     frequently the SOLE record of a player↔NPC scene, so SKIPPING it on a 409 silently EVAPORATES that
+#     scene's only consequence fold (mandate #4 / ADR-0005 #4 — "a novel move must never evaporate").
+#     So we now RE-ATTEMPT once against the reconciled token rather than skip. A second consecutive 409
+#     (the board moved AGAIN under the retry) reconciles-and-skips as before — re-derivable next turn —
+#     so we never blind-loop into a stomp and never let the exception escape.
 async def _backfill_with_cas(owner, fn, *args, **kwargs):
     """Issue an FE back-fill mutating engine call (`record_interaction`/`make_deal`/`move_to`) with the
     0065 Part A compare-and-swap token attached, refreshing last-seen from its response.
 
-    Returns the engine response dict on success, or None when a stale 409 was reconciled-and-skipped
-    (the board moved under the back-fill — re-derivable next turn). Re-raises any NON-stale error so the
-    caller's own fail-closed `except` handles it exactly as today.
+    On a stale 409 the engine refused the write BEFORE folding (fail-closed), so we reconcile to the
+    fresh `beatSeq` (`_handle_stale_beat`) and RE-ATTEMPT the same mutation ONCE against it — issue #591:
+    a `recordInteraction` back-fill is often a scene's only consequence fold and must not evaporate, and
+    the pre-write throw makes a single retry double-apply-safe. A second consecutive stale 409 is
+    reconciled-and-skipped (the move re-derives next turn).
+
+    Returns the engine response dict on success, or None when the write could not land (a second stale
+    409, or a None retry result). Re-raises any NON-stale error so the caller's own fail-closed `except`
+    handles it exactly as today.
 
     Why this is safe (the no-self-409 contract): last-seen is refreshed from EVERY engine response this
     turn (reads AND mutations), so the token attached here is the freshest the FE has seen — a normal
     turn never 409s itself. A stale 409 means a genuine concurrent move (another device / the 0064
-    queued-turn case), which we reconcile and skip rather than stomp."""
+    queued-turn case), which we reconcile and re-attempt once before giving up."""
     from routes import chat_helpers as _ch
     try:
         result = await fn(*args, expected_beat_seq=_ch.last_beat_seq(owner), **kwargs)
     except Exception as _e:
         if _ch._is_stale_beat_error(_e):
-            # The board moved under this back-fill — reconcile (re-ground next turn, counted) and SKIP.
-            # Do NOT retry: the scene/deal/move is re-derivable on the next turn against the moved board.
+            # The board moved under this back-fill — reconcile (refresh last-seen to the fresh beatSeq,
+            # re-read the board, count it). The write did NOT land (the engine threw before folding), so
+            # RE-ATTEMPT once against the reconciled token rather than drop the scene's only fold (#591).
             await _ch._handle_stale_beat(owner, _e)
-            return None
+            try:
+                result = await fn(*args, expected_beat_seq=_ch.last_beat_seq(owner), **kwargs)
+            except Exception as _e2:
+                if _ch._is_stale_beat_error(_e2):
+                    # Board moved AGAIN under the retry — reconcile and give up (re-derivable next turn).
+                    await _ch._handle_stale_beat(owner, _e2)
+                    return None
+                raise  # a non-stale error on the retry → caller's fail-closed handler deals with it
+            _ch._refresh_beat_seq(owner, result if isinstance(result, dict) else {})
+            return result
         raise  # a non-stale error → let the caller's fail-closed handler deal with it as before
     # CRITICAL: refresh last-seen from the back-fill's own response so a LATER mutation this same turn
     # (e.g. the pre-resolve advance) attaches the freshest token and never self-409s.
@@ -1760,13 +1894,21 @@ _HOUSE_ROOMS = (
 # A deliberately BROAD pre-filter — movement language is varied ("I head to the kitchen", "let's go
 # out back", "I wander into the living room", "walk over to the bedroom", "step into the bathroom").
 # A missed signal means a lost move (the immersion bug); a false hit only costs a rare extraction
-# call that returns room:null. So we err wide and let the extraction be the gatekeeper. The room
-# words anchor it (kitchen/backyard/bedroom/bathroom/lounge/HOH/storage/diary) plus the
-# go/head/walk/move/wander/step/slip/stroll verbs.
+# call that returns room:null / moves:[]. So we err wide and let the extraction be the gatekeeper. The
+# room words anchor it (kitchen/backyard/bedroom/bathroom/lounge/HOH/storage/diary) plus the
+# go/head/walk/move/wander/step/slip/stroll verbs AND static in-room presence language
+# (sit/stand/lean/lounge/perched/sprawled/linger — issue #536 / ISSUE-8): a scene that simply
+# DESCRIBES a houseguest sitting/leaning/lounging in a room is invented static presence with no
+# movement verb, so the NPC-move belt never tripped and the board snapped them back. The same room +
+# static-presence vocabulary `_EVICTED_PRESENCE_RE` already enumerates anchors it; the constrained
+# extraction still returns moves:[] when nothing actually relocated and the engine refuses illegal
+# moves, so broadening here never risks creative prose.
 _MOVE_SIGNAL_RE = re.compile(
     r"\b("
     r"go|going|head(?:ing)?|walk(?:ing)?|moves?|moving|wander(?:ing)?|stroll(?:ing)?|"
     r"drift(?:ing)?|slip(?:ping)?|steps?|stepping|"
+    r"sits?|sitting|sat|stands?|standing|stood|leans?|leaning|leaned|lounges?|lounging|lounged|"
+    r"perched|sprawled|lingers?|lingering|lingered|"
     r"kitchen|living[\s-]?room|lounge|backyard|back ?yard|bedrooms?|bathroom|"
     r"hoh[\s-]?room|head of household|storage[\s-]?room|diary[\s-]?room"
     r")\b", re.I)
@@ -1989,6 +2131,15 @@ async def _auto_mark_premiere_intros(narration, owner) -> int:
                                f"{type(e).__name__}: {e}".rstrip(': '))
     if marked:
         logger.info(f"[orwell] auto-marked {marked} premiere intro(s) user={owner}")
+        try:  # 0079: the premiere belt is an overseer correction — log it
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "premiere-belt",
+                f"auto-marked {marked} premiere introduction(s) as met "
+                f"(the model narrated the meet but skipped markHouseguestMet)",
+                lever="mark-met", ok=True, user=owner)
+        except Exception:
+            pass
     return marked
 
 
@@ -2054,6 +2205,15 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         obj = _last_json_object_with_key(raw, "withIds")
         if obj is None:
             logger.info(f"[orwell] auto-record: no parseable JSON (len={len(raw)})")
+            try:  # 0079: a real gap the overseer log should surface (social play may fold no impact)
+                from src import log_rings as _lr
+                _lr.record_overseer(
+                    "anomaly", "gap-repair",
+                    f"a player↔house scene recorded nothing and the repair extraction returned "
+                    f"no parseable JSON (len={len(raw)}) — social play may have folded no impact",
+                    lever="propose-record", ok=False, user=owner)
+            except Exception:
+                pass
             return False
         valid = {h.get("id") for h in house}
         ids = [i for i in (obj.get("withIds") or []) if i in valid]
@@ -2073,6 +2233,16 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
             return False
         logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
                     f"edges={len(consequence['edges']) if consequence else 0}) user={owner}")
+        try:  # 0079: surface this gap-repair on the overseer diagnostic log
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "gap-repair",
+                f"recorded a missed player↔house scene (kind={kind}, "
+                f"with={len(ids)} houseguest(s), "
+                f"edges={len(consequence['edges']) if consequence else 0})",
+                lever="propose-record", ok=True, user=owner)
+        except Exception:
+            pass
         return True
     except Exception as _e:
         logger.warning(f"[orwell] auto-record failed: {_e}")
@@ -2325,7 +2495,8 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
     # common case — and the open-set guarantee in the hot path).
     try:
         if (not chat_helpers._sentence_has_closed_set_claim(text)
-                and not chat_helpers._text_mentions_evicted_houseguest(owner, text)):
+                and not chat_helpers._text_mentions_evicted_houseguest(owner, text)
+                and not chat_helpers._sentence_has_nominee_status(text)):
             return text
     except Exception:
         return text
@@ -2344,6 +2515,11 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
             # sees it (never a later-turn correction, which would leave the conflict visible).
             if chat_helpers._text_mentions_evicted_houseguest(owner, part):
                 if not await chat_helpers.screen_streamed_location(owner, part):
+                    continue
+            # #561: a non-nominee staged AS on the block is a false closed-set fact (who is on the
+            # block is engine truth) — DROP it before the player sees it and re-ground next turn.
+            if chat_helpers._sentence_has_nominee_status(part):
+                if not await chat_helpers.screen_streamed_nominee(owner, part):
                     continue
         except Exception:
             pass  # any screening hiccup falls through to emit (conservatism)
@@ -2594,8 +2770,13 @@ def _empty_response_fallback(
 
     When a thinking model routes all tokens to reasoning_content (leaving
     content=""), full_response is empty but round_reasoning has content.
-    The reasoning was already streamed as {thinking:true} chunks — do not
-    re-emit it as a normal delta.  Just persist it and yield nothing.
+
+    FEPY-2 (#621): previously this persisted the reasoning but yielded NOTHING to the body,
+    leaving a BLANK GM bubble next to a populated Thinking accordion (the answer was routed
+    entirely into the reasoning channel — likelier on Flash). The empty-body JS fallback only
+    recovers inline `<think>` content, not channel-routed reasoning, so nothing recovered it.
+    Now, on an empty body with reasoning present, we RE-EMIT the reasoning as a non-thinking
+    body delta so the player actually sees the answer.
 
     Returns:
         (final_response: str, chunk: str | None)
@@ -2604,7 +2785,10 @@ def _empty_response_fallback(
     if full_response.strip() or tool_events:
         return full_response, None
     if round_reasoning.strip():
-        return round_reasoning, None
+        # FEPY-2: surface the channel-routed answer in the body bubble (non-thinking delta) instead
+        # of leaving it blank. It was streamed to the accordion as {thinking:true}; this body copy is
+        # what the player reads as the GM's reply.
+        return round_reasoning, f'data: {json.dumps({"delta": round_reasoning})}\n\n'
     _error_msg = "The model returned an empty response. Please try again or switch to a different model."
     return _error_msg, f'data: {json.dumps({"delta": _error_msg})}\n\n'
 
@@ -3464,7 +3648,11 @@ async def stream_agent_loop(
                     elif data.get("error"):
                         err_msg = data.get("error", "unknown")
                         logger.error(f"Agent round {round_num}: stream error: {err_msg}")
-                        yield f'data: {json.dumps({"delta": chr(10) + chr(10) + "*[Stream error: " + str(err_msg) + "]*"})}\n\n'
+                        # FEPY-1 (#621): a mid-stream upstream error must NOT land in the GM body bubble
+                        # (a casting 502/503/504 reads as in-fiction producer narration). Emit a typed
+                        # `error` SSE — the FE renders it as a styled error notice (chat.js `json.error`),
+                        # not reply-channel body text.
+                        yield f'data: {json.dumps({"error": str(err_msg)})}\n\n'
                 except json.JSONDecodeError:
                     if round_num == 1:
                         yield chunk
@@ -3689,14 +3877,24 @@ async def stream_agent_loop(
                     _runway_holding = _ch._RUNWAY_LEFT.get(owner or "", 0) > 0
                 except Exception:
                     _runway_holding = False
+                # #670: did the pre-resolve already walk a real beat THIS turn (a ceremony OR a staged
+                # finale beat)? Read-and-clear it (one-shot). If so the turn ALREADY progressed, so it
+                # is not a stall — reset the staleness clock (below) and suppress the backstop (further
+                # down) so we never advance a SECOND beat the same turn (which would skip a finale-reveal
+                # beat). Mirrors the `_peer_advanced` guard. Fail-open: any hiccup ⇒ False (no suppression).
+                try:
+                    _pre_resolved = _ch.consume_pre_resolved_advance(owner or "")
+                except Exception:
+                    _pre_resolved = False
                 # Track staleness: this finishing block runs once per player turn. A turn that
-                # advanced — or that the runway is intentionally holding — resets the clock; otherwise
-                # the beat has sat one more turn. The lull-nudge waits until the night has genuinely
+                # advanced — or that the runway is intentionally holding, or that the pre-resolve already
+                # walked a beat (#670) — resets the clock; otherwise the beat has sat one more turn. The
+                # lull-nudge waits until the night has genuinely
                 # stopped moving (>= grace), so engaging play, a just-started beat, AND a deliberately
                 # held social runway are never shoved (owner ruling 2026-06-18 + the runway fix).
                 if owner:
                     _TURNS_SINCE_PROGRESS[owner] = (
-                        0 if (_progressed or _runway_holding)
+                        0 if (_progressed or _runway_holding or _pre_resolved)
                         else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1)
                 # P1: the effective grace is SHORTER in the guided first week (pacing only) and the
                 # standard grace otherwise (the hint lags a turn, defaulting safe to the standard).
@@ -3907,7 +4105,7 @@ async def stream_agent_loop(
                     # nudge → another narration) ONLY when nothing visible has been shown yet, where a
                     # single fresh narration is exactly what's wanted. The per-turn cap and the persisted
                     # `_ADVANCE_STALL_LEVEL` escalation are unchanged.
-                    if _want_advance and _phase in _ADVANCE_PHASES and not _peer_advanced:
+                    if _want_advance and _phase in _ADVANCE_PHASES and not _peer_advanced and not _pre_resolved:
                         _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
                         _turn_advance_nudges += 1
                         if owner:
@@ -4008,6 +4206,15 @@ async def stream_agent_loop(
                             if _force_ok and await _commit_advance_silently(f"forced stall L{_level}"):
                                 logger.info(f"[orwell] FORCED advanceGame (stall L{_level}, phase={_phase}) "
                                             f"round {round_num} user={owner}")
+                                try:  # 0079: a forced advance is a notable overseer correction
+                                    from src import log_rings as _lr
+                                    _lr.record_overseer(
+                                        "anomaly", "stall-force",
+                                        f"forced advanceGame after the model ignored every nudge "
+                                        f"(stall L{_level}, phase={_phase})",
+                                        lever="force-advance", ok=True, user=owner)
+                                except Exception:
+                                    pass
                                 messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
                                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                 continue
@@ -4021,13 +4228,25 @@ async def stream_agent_loop(
                         else:
                             _nudge, _why = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)], f"stall L{_level}"
                         logger.info(f"[orwell] advance nudge ({_why}, phase={_phase}) round {round_num} user={owner}")
+                        try:  # 0079: surface the pacing nudge on the overseer diagnostic log
+                            from src import log_rings as _lr
+                            _lr.record_overseer(
+                                "action", "stall-nudge",
+                                f"nudged the model to advance ({_why}, phase={_phase})",
+                                lever="nudge", ok=True, user=owner)
+                        except Exception:
+                            pass
                         messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
                     # NPC approach in the lingering window: the lull hasn't gone stale (so we're not yet
                     # advancing the week) — if a houseguest wants the player, bring THEM over in chat now,
                     # so the social life stays alive without a notification panel ever telling the player.
-                    if _want_approach and _phase in _ADVANCE_PHASES:
+                    # #670: "finale" was ADDED to _ADVANCE_PHASES for the forced-advance backstop only —
+                    # the staged finale is a one-beat-per-turn reveal, NOT a lingering window, so an NPC
+                    # approach there would interrupt the jury vote with a side scene. Exclude it (preserves
+                    # the prior behavior — the finale was never an approach phase).
+                    if _want_approach and _phase in _ADVANCE_PHASES and _phase != "finale":
                         _inits = []
                         try:
                             from src import orwell_engine as _oe2
@@ -4106,8 +4325,13 @@ async def stream_agent_loop(
                 # the stall counter — a string of mobile cancellations would otherwise reach the forced
                 # finalize on a name-only intake. `_emitted_visible` is False on such a turn.
                 _turn_was_cancelled = not _emitted_visible
-                if (not _created_this_turn and not _turn_was_cancelled
-                        and owner is not None and _player_turn_is_lull(messages)):
+                # #549: run the finalize check on a lull OR an explicit readiness signal — a player
+                # who is plainly ready in a substantive sentence ("let's start the game, I'll target
+                # the comp beasts") would otherwise skip this block entirely (not a short lull) and
+                # the engine-ready season would never start until they said a bare "lock it in".
+                _player_ready_signal = _player_signals_casting_ready(messages)
+                if (not _created_this_turn and not _turn_was_cancelled and owner is not None
+                        and (_player_turn_is_lull(messages) or _player_ready_signal)):
                     try:
                         from src import orwell_engine as _oec
                         _cs = await _oec.get_game_state(owner)
@@ -4127,7 +4351,11 @@ async def stream_agent_loop(
                     # had its un-forced chance this round and chose not to finalize) instead of
                     # requiring the full ~3-lull escalation; a mere short/disengaged lull still gets
                     # the gentler ramp. Still gated on engine `finalizable` (never mints a floater).
-                    _explicit_ready = bool(_LULL_READY_RE.search(_extract_last_user_message(messages) or ""))
+                    # #549: an explicit readiness signal (the broader _CASTING_READY_RE too, e.g.
+                    # "let's start the game") forces THIS turn when the engine is finalizable —
+                    # the player asked, the engine is ready, so finalize rather than re-interview.
+                    _explicit_ready = _player_ready_signal or bool(
+                        _LULL_READY_RE.search(_extract_last_user_message(messages) or ""))
                     if _ready and _finalizable:
                         # The interview is genuinely complete (name + backstory + motivation + a
                         # persona/strategy answer): nudge, then FORCE the finalize the engine accepts.
@@ -4153,6 +4381,25 @@ async def stream_agent_loop(
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
                                     messages.append({"role": "system", "content": _CASTING_FORCED_NOTE})
+                                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                    continue
+                                # #529 — REFUSE-AND-SURFACE: the engine no longer fabricates player canon
+                                # (appearance/archetype/strategy) from a name hash; a required casting field
+                                # absent ⇒ `createRefused: casting-incomplete`. We must NOT loop the model on
+                                # a "finalize" nudge (it would re-issue the same refused call); instead we
+                                # surface the GAP so the model asks the player for the missing field. Do not
+                                # march the stall counter further on a refusal (it isn't the model stalling —
+                                # the interview is genuinely incomplete), and yield to the player to answer.
+                                if _eng.get("createRefused"):
+                                    _missing = _eng.get("missing") or _eng.get("missingFields") or []
+                                    if owner is not None:
+                                        _CASTING_STALL_LEVEL[owner] = _clv  # undo this turn's bump
+                                    logger.info(
+                                        "[orwell] forced createCharacter REFUSED (casting-incomplete, "
+                                        f"missing={_missing}) — surfacing the gap, round {round_num} "
+                                        f"user={owner}")
+                                    messages.append({"role": "system",
+                                                     "content": _casting_incomplete_steer(_missing)})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
                                 logger.warning("[orwell] forced createCharacter did not start the "
@@ -4569,6 +4816,15 @@ async def stream_agent_loop(
                 _turn_deal_nudges = 1  # model struck the deal itself — don't also back-fill one
 
             formatted = format_tool_result(desc, result)
+            # LIVE-4 (#541): an advanceGame that returned an eviction-STAGE beat gets a focused steer
+            # appended to its tool result, so the model VOICES the engine's reveal/result instead of
+            # consuming it silently while narrating an unrelated scene. Corrects the omission only —
+            # the content is the engine's own (anonymized) `event.content`, never authored here.
+            if _is_live_game and block.tool_type == "advanceGame" and isinstance(result, dict):
+                _ev = result.get("event")
+                if isinstance(_ev, dict) and str(_ev.get("beat") or "") in _EVICTION_STAGE_BEATS:
+                    formatted += _eviction_reveal_steer(str(_ev.get("beat") or ""),
+                                                         str(_ev.get("content") or ""))
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
 
@@ -4640,6 +4896,16 @@ async def stream_agent_loop(
         except Exception as _pres_err:
             logger.warning(f"[orwell] post-turn presence check failed: {_pres_err}")
 
+        # NARR-3 (#613) — the INVENTED-HOUSEGUEST roster-validation backstop: catch the narration
+        # staging a houseguest name that is on NEITHER the active nor the out-of-house roster (an
+        # invented cast member — the most immersion-shattering grounding break, previously caught by
+        # nothing structural). Closed-set only, post-turn, gentle next-turn re-ground.
+        try:
+            from routes.chat_helpers import record_post_turn_roster_check
+            await record_post_turn_roster_check(owner, _turn_narration_full)
+        except Exception as _roster_err:
+            logger.warning(f"[orwell] post-turn roster check failed: {_roster_err}")
+
         # 0065 Part D — one Vault-free sync-ledger entry per live-game turn (observability). Records
         # the closed-set sync activity of THIS turn: the beatSeq it moved (before→after), the tools
         # it called (NAMES only), how many nudges fired / back-fills the FE made, whether a desync was
@@ -4656,6 +4922,69 @@ async def stream_agent_loop(
             auto_backfills=(_turn_record_nudges + _turn_deal_nudges + _turn_move_nudges
                             + _turn_npc_move_nudges),
         )
+
+        # 0079 — the runtime loop overseer (opt-in, default OFF via the admin toggle / ORWELL_OVERSEER).
+        # One holistic, Vault-free, post-turn diagnosis of the engine<->LLM loop. The symptom-gate is
+        # SPARSE (a healthy turn trips nothing). On a symptom it runs the REASONING tier (LlmOverseer
+        # over the user's utility model) for a wide-eyed root-cause read, FAIL-SOFT to the deterministic
+        # verdict when no model resolves or the call errors, and logs the verdict to the OVERSEER ring.
+        # It does NOT pull levers here: the inline guardrails above ARE the overseer's deterministic
+        # hands (they already nudged / advanced / backfilled this turn), so the post-turn tier is the
+        # intelligent DIAGNOSIS + audit layer over them — re-acting here would double-fire or override
+        # the tuned pacing grace. Fail-soft throughout; off by default ⇒ the loop runs exactly as before.
+        try:
+            from src.overseer import (overseer_enabled, should_assess, Signals,
+                                      DeterministicOverseer, LlmOverseer)
+            if overseer_enabled():
+                _ov_names = {ev.get("tool") for ev in (tool_events or []) if isinstance(ev, dict)}
+                _ov_beat_after, _ov_desync = None, False
+                try:
+                    from routes import chat_helpers as _ov_ch
+                    _ov_beat_after = _ov_ch.last_beat_seq(owner)
+                    _ov_desync = owner in getattr(_ov_ch, "_DESYNC_REGROUND", set())
+                except Exception:
+                    pass
+                _ov_sig = Signals(
+                    in_advance_phase=(_phase in _ADVANCE_PHASES),
+                    play_quiet=bool(_is_lull),
+                    engaged_scene=bool(_want_record),
+                    recorded_interaction=bool(_ov_names & _RECORD_TOOLS),
+                    progression_tool_called=bool(_ov_names & _PROGRESSION_TOOLS),
+                    io_error=any(isinstance(ev, dict) and ev.get("error") for ev in (tool_events or [])),
+                    desync=bool(_ov_desync),
+                    beat_seq_before=_ledger_beat_seq_before,
+                    beat_seq_after=_ov_beat_after,
+                )
+                if should_assess(_ov_sig):
+                    # Resolve the user's UTILITY model (the same resolver the cast-authoring path uses);
+                    # absent ⇒ the deterministic floor simply stands.
+                    _ov_llm = None
+                    try:
+                        from src.orwell_cast_authoring import _resolve_llm_fn
+                        _ov_llm = await _resolve_llm_fn(owner)
+                    except Exception:
+                        _ov_llm = None
+                    _ov_verdict = None
+                    if _ov_llm is not None:
+                        _ov = LlmOverseer(_ov_llm)  # reuse its Vault-free prompt + strict validation
+                        try:
+                            import inspect as _ov_inspect
+                            _ov_raw = _ov_llm(_ov.build_prompt(_ov_sig))
+                            if _ov_inspect.isawaitable(_ov_raw):
+                                _ov_raw = await asyncio.wait_for(_ov_raw, timeout=15)
+                            _ov_verdict = _ov.verdict_from_reply(_ov_raw, _ov_sig)
+                        except Exception:
+                            _ov_verdict = DeterministicOverseer().assess(_ov_sig)
+                    else:
+                        _ov_verdict = DeterministicOverseer().assess(_ov_sig)
+                    if _ov_verdict is not None:
+                        from src import log_rings as _lr
+                        _lr.record_overseer(
+                            _ov_verdict.level, _ov_verdict.kind, _ov_verdict.diagnosis,
+                            lever=_ov_verdict.lever, beat_before=_ledger_beat_seq_before,
+                            beat_after=_ov_beat_after, ok=True, user=owner)
+        except Exception as _ov_err:  # fail-soft: the overseer must never hurt a turn
+            logger.debug(f"[orwell] overseer hook skipped: {_ov_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.

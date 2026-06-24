@@ -44,9 +44,11 @@ def test_approach_nudge_is_wired_into_the_lingering_window():
     # Fires only in the lingering window: a lull that is NOT progressed and NOT yet stale.
     assert "_want_approach = (_is_lull and (not _progressed) and (not _stale)" in js
     assert "_turn_approach_nudges < _MAX_APPROACH_NUDGES_PER_TURN" in js
-    # Folded into the same fetch gate, and only on an advance-eligible (social) phase.
+    # Folded into the same fetch gate, and only on an advance-eligible (social) phase — but NOT the
+    # staged finale (#670 added "finale" to _ADVANCE_PHASES for the backstop only; the finale is a
+    # one-beat-per-turn reveal, not a lingering window, so an approach there is excluded).
     assert "or _want_approach or _want_reapproach:" in js
-    assert "if _want_approach and _phase in _ADVANCE_PHASES:" in js
+    assert "if _want_approach and _phase in _ADVANCE_PHASES and _phase != \"finale\":" in js
     # Reads the GM-only socialInitiatives lever (the same intent the panel used to leak to the player).
     assert "_oe2.social_initiatives(owner)" in js
     assert "await _approach_nudge" not in js  # it is a plain string builder, not a coroutine

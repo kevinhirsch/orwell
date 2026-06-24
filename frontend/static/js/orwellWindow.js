@@ -11,8 +11,9 @@
 //   • one z-authority for the window band (modals stay above; banner above all)
 //     + click-to-front + a visible focused state (audit F9)
 //   • minimize-to-dock with the ruling-#19 fly-out toward the dock and a
-//     fly-away on close; open keeps the E97 fade+scale; prefers-reduced-motion
-//     strips ALL of it (audit F4)
+//     fly-away on close; restore mirrors minimize with a fly-IN from the dock,
+//     and open keeps the E97 fade+scale (open↔close and minimize↔restore are
+//     mirror-image motions); prefers-reduced-motion strips ALL of it (audit F4)
 //   • ONE geometry-persistence scheme: the slot offset, clamped at restore
 //     (S11/E91) — kit windows never mint their own position keys (audit F5)
 //   • focus management: focus-return to the opener on close (audit F8),
@@ -30,10 +31,31 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { makeWindowResizable } from './windowResize.js';
 import { isNarrow } from './platform.js';
 
+// A2 (#573, DWE audit F9): the kit no longer owns a PRIVATE z counter. The kit's
+// non-modal band (the old `_zTop` 500–980) is now allocated by THE single window
+// authority `window.OrwellZ` (ui.js), the same monotonic tick the .modal family
+// and the kit's modal tier draw from — so "topmost / focused" has one source of
+// truth across kit windows AND legacy modals/overlays. The band offsets in OrwellZ
+// keep kit windows structurally below modals (no more agreement-by-numeric-gap).
+// Fallback (ui.js not yet loaded): a local band counter preserves the old behavior.
 const Z_BASE = 500;          // the window band: above the legacy panel stamps
 const Z_CEIL = 980;          //   (modalManager's 300s), below modals (1000+)
-let _zTop = Z_BASE;
+let _zFallback = Z_BASE;     // used ONLY when window._owNextWindowZ is absent
 const _stack = [];           // open, un-minimized kit windows, bottom → top
+
+// Allocate the next kit-window z through the single authority when present, else
+// the local fallback band. On a fallback renormalize the open stack is re-laid in
+// order (mirroring OrwellZ's restack hook) so stacking order survives the wrap.
+function nextWindowZ() {
+  if (typeof window._owNextWindowZ === 'function') {
+    return window._owNextWindowZ((apply) => apply(_stack.filter((w) => !w.o.modal).map((w) => w.el)));
+  }
+  if (_zFallback >= Z_CEIL) {
+    _zFallback = Z_BASE;
+    for (const w of _stack) { if (!w.o.modal && w.el) w.el.style.zIndex = String(++_zFallback); }
+  }
+  return ++_zFallback;
+}
 
 // ── opt-in modal tier (audit J1-25 / J1-23) ────────────────────────────────
 // A kit window created with `modal:true` becomes a PROPER modal dialog: a backdrop
@@ -155,12 +177,23 @@ function ensureCss() {
       from { opacity: 1; transform: scale(1); }
       to   { opacity: 0; transform: scale(.9); }
     }
+    /* ow-restore is the MIRROR of ow-minimize: the window flies back IN from the
+       dock chip (starts AT the dock — translated + scaled-down + faded) and lands
+       at identity, so minimize↔restore read as one reversible motion (open↔close
+       already mirror via ow-open/ow-close). Same fly-vector contract (--ow-fly-x/-y,
+       set by _afterDockRestore to the dock delta); the keyframe owns the motion. */
+    @keyframes ow-restore {
+      from { opacity: 0; transform: translate(var(--ow-fly-x, 0), var(--ow-fly-y, 0)) scale(.12); }
+      to   { opacity: 1; transform: translate(0, 0) scale(1); }
+    }
     .ow-anim-open { animation: ow-open .18s ease-out; }
     /* pronounced Win7 easing on the minimize fly-out; a quicker fade on close */
     .ow-anim-minimize { animation: ow-minimize .27s cubic-bezier(.5,-0.2,.4,1) forwards; }
     .ow-anim-close { animation: ow-close .18s cubic-bezier(.45,.05,.55,.95) forwards; }
+    /* the restore fly-IN mirrors the minimize fly-OUT (reversed easing/duration) */
+    .ow-anim-restore { animation: ow-restore .27s cubic-bezier(.6,0,.5,1.2); }
     @media (prefers-reduced-motion: reduce) {
-      .ow-anim-open, .ow-anim-minimize, .ow-anim-close, .ow-scrim { animation: none; }
+      .ow-anim-open, .ow-anim-minimize, .ow-anim-close, .ow-anim-restore, .ow-scrim { animation: none; }
     }
     /* ── 0054 Phase 2 — DOCKED kit mode ───────────────────────────────────────
        A docked window mounts its WHOLE element as a child of #gadget-rail-body
@@ -665,6 +698,11 @@ export class OrwellWindow {
   }
 
   open(opener) {
+    // TX-1: a re-open during the close fade must cancel the pending teardown and clear the
+    // latched close-animation class — otherwise finish() would tear THIS window down and the
+    // .ow-anim-close end-state would leave it invisible.
+    if (this._closeTimer) { clearTimeout(this._closeTimer); this._closeTimer = null; }
+    if (this.el) this.el.classList.remove('ow-anim-close');
     if (this.el && this.el.isConnected) { this.restore(); return this; }
     this.opener = opener || document.activeElement || null;
     // A prior _teardown() aborted this.ac; a fresh open (incl. the dock toggle's
@@ -731,14 +769,20 @@ export class OrwellWindow {
     _stack.push(this);
     // J1-25: a modal window is pinned to the modal tier (just above its scrim), never
     // the kit band — and it is excluded from the band renormalization below.
+    // A2 (#573, DWE audit F9): ONE z-authority. Draw the modal z from ui.js's single
+    // monotonic counter (window._owNextModalZ) when present, so a kit modal and a
+    // legacy .modal can never out-climb each other (the old fixed Z_MODAL=1001 lost to
+    // a legacy modal once _zCounter passed it). Fallback to the fixed tier if ui.js
+    // hasn't loaded. The scrim follows just under whatever the window lands on.
     if (this.o.modal) {
-      this.el.style.zIndex = String(Z_MODAL);
+      const z = (typeof window._owNextModalZ === 'function') ? window._owNextModalZ() : Z_MODAL;
+      this.el.style.zIndex = String(z);
+      if (this._scrim) this._scrim.style.zIndex = String(z - 1);
     } else {
-      if (_zTop >= Z_CEIL) { // renormalize the band (modal windows stay pinned)
-        _zTop = Z_BASE;
-        for (const w of _stack) { if (!w.o.modal && w.el) w.el.style.zIndex = String(++_zTop); }
-      }
-      this.el.style.zIndex = String(++_zTop);
+      // A2: the non-modal band is allocated by the single authority (window.
+      // _owNextWindowZ in ui.js), which advances the SAME global tick the modal
+      // ladder uses and renormalizes the open kit stack at the band ceiling.
+      this.el.style.zIndex = String(nextWindowZ());
     }
     for (const w of _stack) w.el && w.el.classList.toggle('ow-focused', w === this);
   }
@@ -791,6 +835,27 @@ export class OrwellWindow {
     this.el.style.transform = ''; this.el.style.opacity = '';
     if (this._slot) this._slot.restack();
     this.raise();
+    // A7 [ruling #19] mirror: a restore is the fly-IN that reverses minimize's
+    // fly-OUT — the window flies back from the dock chip to its place. Computed
+    // AFTER restack/raise so the delta targets the FINAL geometry. The keyframe
+    // owns the motion (same --ow-fly-x/-y contract); reduced-motion skips it.
+    if (!REDUCED()) {
+      try {
+        const from = flyTargetRect();                 // the dock chip (the fly-out's target)
+        const to = this.el.getBoundingClientRect();    // where the window lands
+        const dx = (from.left + (from.width || 32) / 2) - (to.left + to.width / 2);
+        const dy = (from.top + (from.height || 24) / 2) - (to.top + to.height / 2);
+        this.el.style.setProperty('--ow-fly-x', dx + 'px');
+        this.el.style.setProperty('--ow-fly-y', dy + 'px');
+        this.el.classList.add('ow-anim-restore');
+        setTimeout(() => {
+          if (!this.el) return;
+          this.el.classList.remove('ow-anim-restore');
+          this.el.style.removeProperty('--ow-fly-x');
+          this.el.style.removeProperty('--ow-fly-y');
+        }, 290);
+      } catch (_) {}
+    }
     try { this.o.onRestore && this.o.onRestore(); } catch (_) {}
   }
 
@@ -856,11 +921,14 @@ export class OrwellWindow {
     // A docked window isn't in modalManager — tear it down directly (no chip, no
     // fly-to-dock: it lives in the rail flow).
     if (this._docked) { this._teardown(); return; }
-    const finish = () => Modals.close(this.o.id);   // closeFn → _teardown()
+    const finish = () => { this._closeTimer = null; Modals.close(this.o.id); };   // closeFn → _teardown()
     if (REDUCED()) { finish(); return; }
     // A7 [ruling #19]: scale+fade fly-away on close (the dedicated ow-close keyframe).
     this.el.classList.add('ow-anim-close');
-    setTimeout(finish, 190);
+    // TX-1: track the fade timer so a re-open() during the ~190ms fade can cancel it —
+    // otherwise the pending finish() tears down the freshly re-opened window, and the
+    // latched .ow-anim-close leaves it invisible. open() clears this + strips the class.
+    this._closeTimer = setTimeout(finish, 190);
   }
 
   _teardown() {
@@ -871,6 +939,11 @@ export class OrwellWindow {
     saveParked(this.o.id, false); // F2 (G16): a closed window forgets its parked state
     this.ac.abort();
     const opener = this.opener;
+    // A2: capture whether focus was inside this window BEFORE removing it, so the
+    // shared focus-return helper can apply the same "only if focus is still inside
+    // (or fell to body)" rule the .modal family uses. Removing this.el drops any
+    // inner focus to <body>, which the helper also treats as safe to return.
+    const focusWasInside = !!(this.el && document.activeElement && this.el.contains(document.activeElement));
     if (this.el) { this.el.remove(); this.el = null; }
     // A dock-toggle re-home keeps the same instance + the module's _win reference,
     // so skip the consumer's onClose reset and the focus-return (open() refocuses).
@@ -878,8 +951,13 @@ export class OrwellWindow {
     // 0064: a genuine close (not a dock re-home) syncs the closed state to other devices.
     this._emit({ open: false, minimized: false });
     try { this.o.onClose && this.o.onClose(); } catch (_) {}
-    // audit F8: focus returns to the opener
-    if (opener && opener.isConnected && typeof opener.focus === 'function') {
+    // audit F8 / A2 (#573): focus returns to the opener through THE single
+    // focus-return helper (window._owReturnFocus, ui.js) shared with the .modal
+    // family — one implementation of the restore rule, no drift. Fallback to a
+    // direct focus when ui.js hasn't loaded (keeps the old behavior).
+    if (typeof window._owReturnFocus === 'function') {
+      window._owReturnFocus(opener, focusWasInside ? document.body : null);
+    } else if (opener && opener.isConnected && typeof opener.focus === 'function') {
       try { opener.focus(); } catch (_) {}
     }
   }

@@ -102,3 +102,17 @@ export function orwellGameChanged(reason) {
 }
 
 if (typeof window !== 'undefined') window.orwellGameChanged = orwellGameChanged;
+
+// #570: a backgrounded tab misses cross-device game-updated server pushes (the panels' polls are
+// gated on `!document.hidden`, and the server-push reconcile may be dropped while hidden), so it
+// can sit stale for a whole poll cycle after the user returns. When the tab REGAINS visibility,
+// route a reconcile through THE single dispatcher (never an ad-hoc `orwell:gamechanged`) so every
+// game panel refreshes immediately — catching up on anything that changed while we were away. The
+// helper is debounced + fail-open, and a no-op outside the game build (no panels listening).
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      try { orwellGameChanged('tab-visible'); } catch (_) { /* fail open */ }
+    }
+  });
+}

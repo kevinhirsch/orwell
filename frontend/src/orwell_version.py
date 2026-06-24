@@ -111,3 +111,37 @@ def get_version() -> str:
 def get_display_version() -> str:
     """The build version with the conventional ``v`` prefix, e.g. ``v3.60``."""
     return f"v{get_version()}"
+
+
+# Build identifier = the deployed checkout's short commit SHA (the exact build),
+# distinct from the PR-derived VERSION above. Cached; safe fallback when git is
+# unavailable (tarball deploy / no .git / git off PATH) so the UI never errors.
+_cached_build: Optional[str] = None
+
+
+def _compute_build(root: Path = _REPO_ROOT) -> str:
+    """The short commit SHA of the checkout at ``root`` ("unknown" on any failure)."""
+    override = os.environ.get("ORWELL_FE_BUILD")
+    if override:
+        return override.strip() or "unknown"
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        sha = out.stdout.strip()
+        return sha if (out.returncode == 0 and sha) else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def get_build() -> str:
+    """The deployed checkout's short commit SHA (cached), e.g. ``e0a7eb3``."""
+    global _cached_build
+    if _cached_build is None:
+        _cached_build = _compute_build()
+    return _cached_build
+

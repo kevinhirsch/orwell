@@ -282,6 +282,11 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                 logger.warning(f"[cast-authoring] write-back failed for {hid}: {e}")
                 return 0
         if not (isinstance(res, dict) and res.get("accepted")):
+            # FEPY-5 (#621): a rejected/odd write-back was silently dropped here (unlike
+            # orwell_prewarm / orwell_zeitgeist) — a refused recordCastProfile was invisible. Log it so
+            # the no-op is diagnosable; the seeded floor still stands (best-effort, never aborts).
+            _reason = res.get("reason") if isinstance(res, dict) else f"non-dict result ({type(res).__name__})"
+            logger.warning(f"[cast-authoring] write-back not accepted for {hid}: {_reason or 'accepted=false'}")
             return 0
         # The write-back landed — signal this one NPC's completion so its portrait can shoot now (#7).
         if on_authored is not None:
@@ -313,6 +318,31 @@ async def _resolve_llm_fn(owner: Optional[str]) -> Optional[LlmFn]:
     if not url or not model:
         return None
     candidates = [(url, model, headers)] + (resolve_utility_fallback_candidates(owner=owner) or [])
+
+    # #546: an image-only model (dall-e / flux / gpt-image / …) resolves fine as an endpoint but can
+    # NOT do JSON/chat authoring — POSTing prose messages to it degrades silently (empty/garbage text
+    # ⇒ the parse fails and the write-back no-ops). Drop any image-only candidate so we only keep a
+    # real text/chat model. Fail-soft: if that empties the list, return None and the engine's
+    # deterministic floor simply stands (same as "no model configured").
+    try:
+        from src.orwell_portraits import _is_image_model
+    except Exception:
+        _is_image_model = None  # type: ignore
+    if _is_image_model is not None:
+        kept = [(u, m, h) for (u, m, h) in candidates if not _is_image_model(m)]
+        if len(kept) != len(candidates):
+            dropped = [m for (_u, m, _h) in candidates if _is_image_model(m)]
+            logger.warning(
+                "[utility-llm] skipping image-only model(s) %s for JSON authoring — "
+                "they cannot do text/chat completion", dropped,
+            )
+        candidates = kept
+        if not candidates:
+            logger.warning(
+                "[utility-llm] no text/chat utility model resolved (only image model(s)) — "
+                "keeping the engine deterministic floor"
+            )
+            return None
 
     # ADR 0010: the background-authoring reasoning budget (admin-overridable). Fail-open.
     _policy = None
@@ -414,7 +444,19 @@ async def run_authoring(cast: list[dict], owner: Optional[str],
     async def _write(profile: dict) -> dict:
         return await orwell_engine.record_cast_profile(profile, user=owner)
 
-    return await author_cast(cast, llm_fn, write or _write, on_authored)
+    # Only the DEFAULT sink mutates the LIVE cast; a `write` override targets the next-season
+    # holding store (which deliberately does not touch the live board), so don't push for it.
+    is_live_write = write is None
+    written = await author_cast(cast, llm_fn, write or _write, on_authored)
+    # #617: enrichment landed on the live game — push a server-side "game-updated" so open pages
+    # reconcile now instead of waiting for the next poll. Best-effort/fail-soft.
+    if written and is_live_write:
+        try:
+            from src import orwell_game_session
+            orwell_game_session.publish_game_updated(owner)
+        except Exception:
+            pass
+    return written
 
 
 def kickoff_authoring(cast: list[dict], owner: Optional[str],

@@ -66,12 +66,46 @@ def _find_npx() -> str:
 # image_gen / memory / rag / email still run as stdio MCP servers — each
 # carries hundreds of LOC of unique IMAP / HTTP / manager logic not worth
 # duplicating into the native path right now.
-_BUILTIN_SERVERS = {
+#
+# image_gen is KEPT in the game build (Orwell uses it for in-character
+# portraits/headshots — feature 0051). memory / rag / email are inherited
+# workspace verticals with NO role in the Big Brother game loop; the game build
+# already withholds their tools from the agent manifest (settings.GAME_DROP_SET),
+# so it should not even CONNECT them. They register only in the full workspace
+# (ORWELL_GAME_BUILD=0).
+_BUILTIN_SERVERS_ALWAYS = {
     "image_gen":  ("mcp_servers/image_gen_server.py",  "Built-in: Image Generation"),
+}
+
+# Inherited-workspace servers — registered only when NOT the game build.
+_BUILTIN_SERVERS_WORKSPACE_ONLY = {
     "memory":     ("mcp_servers/memory_server.py",     "Built-in: Memory"),
     "rag":        ("mcp_servers/rag_server.py",        "Built-in: RAG"),
     "email":      ("mcp_servers/email_server.py",      "Built-in: Email"),
 }
+
+# Full union (every built-in Python server that exists). Kept for definition
+# lookups (e.g. the crash-reconnect path in McpManager) regardless of which
+# subset the current build actually connects.
+_BUILTIN_SERVERS = {**_BUILTIN_SERVERS_ALWAYS, **_BUILTIN_SERVERS_WORKSPACE_ONLY}
+
+
+def _builtin_servers_for_build() -> dict:
+    """The built-in Python MCP servers to CONNECT for the current build.
+
+    The game build connects only `image_gen` (used for in-character portraits —
+    feature 0051). The inherited memory / rag / email verticals have no role in
+    the Big Brother game loop and their tools are already withheld from the agent
+    manifest (settings.GAME_DROP_SET), so the game build does not start them at
+    all. The full workspace (ORWELL_GAME_BUILD=0) connects everything.
+    """
+    try:
+        from src.settings import game_build_enabled
+        if game_build_enabled():
+            return dict(_BUILTIN_SERVERS_ALWAYS)
+    except Exception:  # pragma: no cover - defensive: never block startup on this probe
+        pass
+    return dict(_BUILTIN_SERVERS)
 
 # NPX-based built-in servers (run via npx, not Python)
 _BUILTIN_NPX_SERVERS = {
@@ -115,7 +149,17 @@ async def register_builtin_servers(mcp_manager):
         except BaseException as e:
             logger.warning(f"Built-in MCP server {name} error: {type(e).__name__}: {e}")
 
-    for server_id, (script, name) in _BUILTIN_SERVERS.items():
+    servers_to_connect = _builtin_servers_for_build()
+    # In the game build, note the inherited servers we deliberately do NOT start
+    # (their tools are already dropped from the agent manifest — GAME_DROP_SET).
+    skipped = [sid for sid in _BUILTIN_SERVERS if sid not in servers_to_connect]
+    if skipped:
+        logger.info(
+            "Game build: not starting inherited built-in MCP servers "
+            f"({', '.join(sorted(skipped))}); only Image Generation is registered."
+        )
+
+    for server_id, (script, name) in servers_to_connect.items():
         script_path = os.path.join(base_dir, script)
         if not os.path.exists(script_path):
             logger.warning(f"Built-in MCP server script not found: {script_path}")

@@ -78,7 +78,7 @@ def test_panel_surfaces_every_deal_kind_and_status():
 
 def test_panel_mounts_into_the_gadget_rail():
     js = JS()
-    # 0054: prefer the control-room gadget rail, fall back to the sidebar (never document.body first)
-    assert "gadget-rail-body" in js
-    assert "sidebar" in js
+    # #640: composes the OrwellGadget kit, which mounts it into the control-room rail (with the
+    # sidebar → body fallback the kit owns in one place — never document.body first).
+    assert "OrwellGadgetKit.create(" in js
     assert "orwell:gamechanged" in js  # refreshes on a new season

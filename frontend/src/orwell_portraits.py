@@ -252,29 +252,16 @@ def _consume_gen_detail() -> Optional[str]:
     return d
 
 
-# Recognized text→image model families — the Python mirror of settings.js `_isImageModel`.
-# A non-image (chat) model resolves fine but can't generate: POSTing it to /images/generations
-# 400s instantly. This keeps such a model from being treated as available or attempted, so the
-# pipeline never 400-loops on a mis-set model and `image_generation_available` stays truthful
-# (G20's reconciler and the Health "portraits N/M" counter both gate on it).
-_IMAGE_MODEL_FAMILIES = (
-    "gpt-image", "dall-e", "dalle",
-    "flux", "stable-diffusion", "sdxl", "sd3", "sd-", "playground-v",
-    "imagen", "ideogram", "recraft", "kolors", "kandinsky", "pixart",
-    "firefly", "titan-image", "aura-flow", "hidream", "seedream",
-    "qwen-image", "wan2", "janus", "omnigen", "cogview", "chroma",
-    "lumina", "nano-banana", "photon", "phoenix", "luma-photon",
+# Text→image model classification now lives in src.llm_core (the single source of truth
+# shared with the chat-model selectors, so an image model can never resolve AS a chat model).
+# Re-exported here under the historical names this module's callers/tests use. A non-image
+# (chat) model resolves fine but can't generate: POSTing it to /images/generations 400s
+# instantly, so `image_generation_available` and G20's reconciler gate on `_is_image_model`.
+from src.llm_core import (  # noqa: E402
+    is_image_model as _is_image_model,
+    _IMAGE_MODEL_FAMILIES,
+    _VISION_MARKERS,
 )
-_VISION_MARKERS = ("vision", "-vl", "understand", "caption", "ocr", "embed", "rerank")
-
-
-def _is_image_model(model_id: Optional[str]) -> bool:
-    lower = str(model_id or "").lower()
-    if any(kw in lower for kw in _IMAGE_MODEL_FAMILIES):
-        return True
-    if "image" in lower or "text-to-image" in lower or "t2i" in lower:
-        return not any(m in lower for m in _VISION_MARKERS)
-    return False
 
 
 def _provider_error_reason(resp) -> Optional[str]:
@@ -570,7 +557,7 @@ def image_generation_available(user: Optional[str]) -> bool:
     We only report unavailable when generation is disabled or there is genuinely no usable
     endpoint.
     """
-    from src.ai_interaction import _resolve_model, has_image_capable_endpoint
+    from src.ai_interaction import _resolve_model, has_image_capable_endpoint, IMAGE_AUTODETECT_CANDIDATES
 
     enabled, model_spec, _ = _image_settings(user)
     if not enabled:
@@ -581,7 +568,7 @@ def image_generation_available(user: Optional[str]) -> bool:
     candidates = []
     if model_spec and _is_image_model(model_spec):
         candidates.append(model_spec)
-    candidates += ["gpt-image-1.5", "gpt-image-1", "dall-e-3"]
+    candidates += list(IMAGE_AUTODETECT_CANDIDATES)
     for cand in candidates:
         if not cand:
             continue
@@ -811,7 +798,7 @@ async def _generate_one(prompt: str, user: Optional[str],
     person, the variety directive carries the differentiation from the rest of the cast.
     """
     import httpx
-    from src.ai_interaction import _resolve_model
+    from src.ai_interaction import _resolve_model, IMAGE_AUTODETECT_CANDIDATES
 
     enabled, model_spec, quality = _image_settings(user)
     if not enabled or not prompt:
@@ -831,7 +818,7 @@ async def _generate_one(prompt: str, user: Optional[str],
         model_spec = ""
 
     if not model_spec:
-        for candidate in ("gpt-image-1.5", "gpt-image-1", "dall-e-3"):
+        for candidate in IMAGE_AUTODETECT_CANDIDATES:
             try:
                 _resolve_model(candidate, owner=user or None)
                 model_spec = candidate
@@ -941,13 +928,28 @@ def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: s
     d.mkdir(parents=True, exist_ok=True)
     _ensure_cast_epoch(user)  # the per-cast URL version exists the moment any portrait is persisted
     filename = f"{_safe_id(houseguest_id)}.png"
-    (d / filename).write_bytes(png)
+    target = d / filename
+    # #531: detect an IN-PLACE byte replacement (a mid-season re-shoot off a changed facet —
+    # `generate_and_store` overwrites the same id+name file). The `?v=<epoch>` URL is otherwise
+    # byte-identical to the stale one, so with `Cache-Control: private, max-age=86400` a browser
+    # that cached the old face keeps showing it while a fresh session fetches the re-shot one.
+    replaced_in_place = target.exists()
+    target.write_bytes(png)
     manifest = load_manifest(user)
     entry = {"file": filename, "name": name, "source": source}
     if fingerprint:
         entry["fingerprint"] = fingerprint
     manifest[_safe_id(houseguest_id)] = entry
     _save_manifest(user, manifest)
+    if replaced_in_place:
+        # Rotate the cast cache epoch so EVERY portrait URL changes (`?v=<new>`) and the re-shot
+        # face is fetched fresh on every session/device. The other portraits' bytes are unchanged,
+        # so this only costs a one-time cache miss — never a re-shoot (generate-once still holds).
+        try:
+            _save_cast_epoch(user, secrets.token_hex(4))
+        except OSError as e:
+            logger.info("[portraits] could not rotate cast epoch on re-shoot for %s: %s",
+                        _safe_user(user), e)
     return filename
 
 

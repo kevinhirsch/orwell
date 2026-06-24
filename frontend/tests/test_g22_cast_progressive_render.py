@@ -180,6 +180,25 @@ def test_kept_g9_lever_g20_copy_and_g11_reporting_survive():
         "both fetch paths still report through the G11 hook"
 
 
+def test_j2_15_placeholder_is_a_per_houseguest_monogram():
+    """J2-15: a portrait-less roster must read as distinct people, not 15 identical 👤.
+
+    The placeholder now renders a name-initial monogram over a name-derived hue (Vault-free:
+    derived ONLY from the public name, the same every render so it never flickers)."""
+    js = _js()
+    sp = _block(js, "function setPortrait(", "function makeCard(")
+    assert "oc-monogram" in sp, "placeholder should use the monogram class"
+    # the glyph is the name's initial, the tint comes from the deterministic name hash
+    assert "nameHue(" in js, "a deterministic name→hue helper must exist"
+    assert "--oc-mono-hue" in js
+    # the monogram CSS exists and is hue-driven (theme-aware), not a hard-coded fill
+    assert ".oc-ph.oc-monogram" in js
+    assert "var(--oc-mono-hue" in js
+    # the hue is derived from the NAME only — never a hidden/Vault attribute
+    nh = _block(js, "function nameHue(", "function cardKey(")
+    assert "name" in nh and "hg." not in nh, "nameHue must read the name string, not a roster field"
+
+
 def test_render_only_touches_roster_fields_the_route_returns():
     """Vault-free by construction: the card builders read exactly the public
     roster card fields (id / name / status / isPlayer / portrait) — no other

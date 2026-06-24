@@ -116,11 +116,43 @@ function defaultFrostedFor(_name) {
 }
 
 // ── Custom theme persistence ──
-function _loadCustomThemes() {
-  return Storage.getJSON(CUSTOM_THEMES_KEY, {});
+// #582: the cross-device merge was additive-only (server themes filled in missing local ones),
+// with NO record of a deletion — so a theme deleted on one device resurrected from a stale server
+// copy on the next sync. We now carry a TOMBSTONE per deleted name (last-writer-wins): the stored
+// blob keeps a reserved `__deleted__` map { name: deletedAtMs } and every theme is stamped with an
+// `_updatedAt`. The merge skips (or removes) a server theme whose tombstone is at least as new as
+// its update, and tombstones themselves merge LWW — so deletion propagates and never resurrects.
+// The reserved key lives INSIDE the synced blob (the existing PUT/GET carries it across devices),
+// and is stripped at the _loadCustomThemes chokepoint so no theme consumer ever sees it.
+const TOMBSTONE_KEY = '__deleted__';
+function _loadRaw() {
+  const raw = Storage.getJSON(CUSTOM_THEMES_KEY, {});
+  return (raw && typeof raw === 'object') ? raw : {};
 }
-function _saveCustomThemes(obj) {
-  Storage.setJSON(CUSTOM_THEMES_KEY, obj);
+function _loadCustomThemes() {
+  const raw = _loadRaw();
+  const out = {};
+  for (const k of Object.keys(raw)) {
+    if (k === TOMBSTONE_KEY) continue; // reserved — never a theme
+    out[k] = raw[k];
+  }
+  return out;
+}
+function _loadTombstones() {
+  const t = _loadRaw()[TOMBSTONE_KEY];
+  return (t && typeof t === 'object') ? t : {};
+}
+// `themes` is the visible theme map (no reserved key); `tombstones` (optional) replaces the stored
+// tombstone map, otherwise the existing one is preserved.
+function _saveCustomThemes(themes, tombstones) {
+  const blob = {};
+  for (const k of Object.keys(themes || {})) {
+    if (k === TOMBSTONE_KEY) continue;
+    blob[k] = themes[k];
+  }
+  const tomb = tombstones || _loadTombstones();
+  if (tomb && Object.keys(tomb).length) blob[TOMBSTONE_KEY] = tomb;
+  Storage.setJSON(CUSTOM_THEMES_KEY, blob);
 }
 export function saveCustomTheme(name, colors, opts) {
   const ct = _loadCustomThemes();
@@ -138,26 +170,33 @@ export function saveCustomTheme(name, colors, opts) {
     if (opts.bgEffectSize !== undefined) entry.bgEffectSize = opts.bgEffectSize;
     if (opts.frosted !== undefined) entry.frosted = !!opts.frosted;
   }
+  entry._updatedAt = Date.now();      // LWW stamp
   ct[name] = entry;
-  _saveCustomThemes(ct);
-  _syncCustomThemesToServer(ct);
+  // Re-creating a previously deleted theme supersedes its tombstone.
+  const tomb = _loadTombstones();
+  if (tomb[name]) delete tomb[name];
+  _saveCustomThemes(ct, tomb);
+  _syncCustomThemesToServer();
   initThemeUI();
   return 'ok';
 }
 export function deleteCustomTheme(name) {
   const ct = _loadCustomThemes();
   delete ct[name];
-  _saveCustomThemes(ct);
-  _syncCustomThemesToServer(ct);
+  const tomb = _loadTombstones();
+  tomb[name] = Date.now();            // tombstone — LWW against any incoming copy
+  _saveCustomThemes(ct, tomb);
+  _syncCustomThemesToServer();
   initThemeUI();
 }
-function _syncCustomThemesToServer(ct) {
+function _syncCustomThemesToServer() {
   try {
+    // Push the full stored blob (themes + the reserved tombstone map) so deletions propagate.
     fetch('/api/prefs/custom-themes', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ value: ct }),
+      body: JSON.stringify({ value: _loadRaw() }),
     }).catch(e => console.warn('Theme sync (custom) failed:', e));
   } catch (e) { console.warn('Theme sync (custom) error:', e); }
 }
@@ -874,9 +913,18 @@ export function initThemeUI() {
   const activeName = saved ? saved.name : DEFAULT_THEME;
   const customThemes = _loadCustomThemes();
 
-  // Render preset swatches
-  grid.innerHTML = Object.entries(THEMES).map(([name, c]) => `
-    <div class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}">
+  // Render preset swatches. J1-06: in the game build the curated 5 house themes (0052) are diluted
+  // by ~16 inherited workspace themes (GPT/claude/cute/…) that shatter the Big Brother fiction
+  // (Hick's law + brand coherence). So under the game build, show the house themes first and tuck
+  // the rest behind a "Show all themes" reveal — power users keep them, and Customize is untouched.
+  // The full inherited workspace (no game build) renders every theme as before.
+  // J1-24: the abstract 3-dot row undersold what a theme looks like. Paint the
+  // tile itself in the theme's OWN bg + fg so the swatch is a mini-preview (you
+  // see the real surface + text colour), with the accent dots as a secondary
+  // signal. The dual-ring dot CSS keeps each dot legible on any tile.
+  const _swatch = ([name, c]) => `
+    <div class="theme-swatch theme-swatch--preview${name === activeName ? ' active' : ''}" data-theme="${name}"
+         style="background:${c.bg};color:${c.fg};border-color:${c.panel};">
       <div class="theme-swatch-colors">
         <span style="background:${c.bg}"></span>
         <span style="background:${c.panel}"></span>
@@ -884,8 +932,33 @@ export function initThemeUI() {
         <span style="background:${c.red}"></span>
       </div>
       ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name.replace(/-/g, ' '))}
-    </div>
-  `).join('');
+    </div>`;
+  const _gameBuild = !!(document.body && document.body.hasAttribute('data-game-build'));
+  const _entries = Object.entries(THEMES);
+  if (_gameBuild) {
+    const houseEntries = _entries.filter(([, c]) => c.house);
+    const otherEntries = _entries.filter(([, c]) => !c.house);
+    // Keep the active (non-house) theme visible up-front so a power user's current pick isn't hidden.
+    const activeIsOther = otherEntries.some(([n]) => n === activeName);
+    grid.innerHTML = houseEntries.map(_swatch).join('')
+      + (otherEntries.length
+          ? `<button type="button" class="theme-show-all" id="theme-show-all" aria-expanded="${activeIsOther ? 'true' : 'false'}">`
+            + (activeIsOther ? 'Hide extra themes' : `Show all themes (${otherEntries.length})`)
+            + `</button><div class="theme-extra${activeIsOther ? '' : ' hidden'}" id="theme-extra">`
+            + otherEntries.map(_swatch).join('') + `</div>`
+          : '');
+    const _showAll = grid.querySelector('#theme-show-all');
+    const _extra = grid.querySelector('#theme-extra');
+    if (_showAll && _extra) {
+      _showAll.addEventListener('click', () => {
+        const open = _extra.classList.toggle('hidden');
+        _showAll.setAttribute('aria-expanded', open ? 'false' : 'true');
+        _showAll.textContent = open ? `Show all themes (${otherEntries.length})` : 'Hide extra themes';
+      });
+    }
+  } else {
+    grid.innerHTML = _entries.map(_swatch).join('');
+  }
 
   // Render custom theme swatches into separate card
   const userGrid = document.getElementById('themeUserGrid');
@@ -2369,12 +2442,30 @@ async function _initWithSync() {
     const data = await res.json();
     if (data.value && typeof data.value === 'object') {
       const local = _loadCustomThemes();
-      // Merge: server themes fill in missing local ones
+      const localTomb = _loadTombstones();
+      const serverTomb = (data.value[TOMBSTONE_KEY] && typeof data.value[TOMBSTONE_KEY] === 'object')
+        ? data.value[TOMBSTONE_KEY] : {};
       let changed = false;
-      for (const [name, colors] of Object.entries(data.value)) {
-        if (!local[name]) { local[name] = colors; changed = true; }
+      // #582: merge tombstones LWW (keep the latest deletion timestamp per name).
+      for (const [name, ts] of Object.entries(serverTomb)) {
+        const t = Number(ts) || 0;
+        if (!localTomb[name] || t > localTomb[name]) { localTomb[name] = t; changed = true; }
       }
-      if (changed) _saveCustomThemes(local);
+      // A live local theme that a NEWER tombstone deletes is removed (the deletion wins).
+      for (const name of Object.keys(local)) {
+        const upd = Number(local[name] && local[name]._updatedAt) || 0;
+        if (localTomb[name] && localTomb[name] >= upd) { delete local[name]; changed = true; }
+      }
+      // Server themes fill in missing local ones — UNLESS a tombstone at least as new as the
+      // server copy's update deletes it (so a deleted theme never resurrects from a stale copy).
+      for (const [name, colors] of Object.entries(data.value)) {
+        if (name === TOMBSTONE_KEY) continue;
+        if (local[name]) continue;
+        const upd = Number(colors && colors._updatedAt) || 0;
+        if (localTomb[name] && localTomb[name] >= upd) continue; // tombstoned — skip resurrection
+        local[name] = colors; changed = true;
+      }
+      if (changed) _saveCustomThemes(local, localTomb);
     }
   } catch (e) { console.warn('Custom theme server sync failed:', e); }
   initThemeUI();

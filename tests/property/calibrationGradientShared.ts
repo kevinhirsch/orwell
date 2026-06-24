@@ -122,14 +122,20 @@ function activeAnswer(p: PendingView, allies: ReadonlySet<string>): Record<strin
 /** Play one full passive season for a seed; return the player's final public seat + whether they won. */
 async function playPassive(resolver: Resolver, seed: number): Promise<{ status: Status; won: boolean }> {
   const mcp = resolver("player", `grad-passive-${seed}`);
-  await mcp.callTool("createCharacter", { playerName: "The Player", seed });
+  // Pin the player archetype to the historical default ("floater"): #529 stopped fabricating a
+  // default archetype (absence ⇒ neutral 0.5 stats), which would shift this seeded calibration band.
+  // The calibration player is a synthetic fixture, so it states its archetype explicitly.
+  await mcp.callTool("createCharacter", { playerName: "The Player", seed, archetype: "floater" });
   return runToEnd(mcp, (p) => passiveAnswer(p));
 }
 
 /** Play one full minimal-active season for a seed; the player bonds with two fixed allies and protects them. */
 async function playActive(resolver: Resolver, seed: number): Promise<{ status: Status; won: boolean }> {
   const mcp = resolver("player", `grad-active-${seed}`);
-  await mcp.callTool("createCharacter", { playerName: "The Player", seed });
+  // Pin the player archetype to the historical default ("floater"): #529 stopped fabricating a
+  // default archetype (absence ⇒ neutral 0.5 stats), which would shift this seeded calibration band.
+  // The calibration player is a synthetic fixture, so it states its archetype explicitly.
+  await mcp.callTool("createCharacter", { playerName: "The Player", seed, archetype: "floater" });
 
   const state0 = (await mcp.callTool("getGameState", {})) as StateView;
   const allyIds = (state0.house ?? [])

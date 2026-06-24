@@ -29,11 +29,22 @@ _LOCK = threading.Lock()
 # The only fields a window state may carry, with their coercers. Anything else is dropped (bounded
 # blob — no arbitrary client data is ever persisted). Geometry is clamped to a sane range so a
 # malformed client can never write a wild value that throws the window off-screen on another device.
-_BOOL_FIELDS = ("open", "minimized", "docked")
+#
+# #637/#638 extend the SAME store to a few synthetic ids — the gadget rail's ORDER (id
+# "gadget-rail"), the panel SIDE (id "panel"), game-POPUP shown/dismissed state (id
+# "popup:<name>"), and (#640, the OrwellGadget kit) per-gadget COLLAPSED state (id
+# "gadget:<id>"). They reuse the per-field last-write-wins merge + the `layout-changed`
+# fan-out; all are Vault-free (an order, a left/right enum, a shown/dismissed/collapsed
+# bool carry no game secret).
+_BOOL_FIELDS = ("open", "minimized", "docked", "dismissed", "shown", "collapsed")
 _NUM_FIELDS = ("x", "y", "w", "h")
 _NUM_MIN, _NUM_MAX = -20000.0, 20000.0
 _MAX_WINDOWS = 64          # a hard cap on tracked windows per user (the kit has a handful)
 _MAX_ID_LEN = 64
+# A bounded "side" enum (the panel edge) and a bounded id-list (the gadget rail order). Both are
+# clamped so a malformed/hostile client can never write an unbounded blob into the synced store.
+_SIDE_VALUES = ("left", "right")
+_MAX_ORDER_LEN = 64        # never more ids than the window cap; each id is _MAX_ID_LEN-bounded
 
 
 def _load() -> dict:
@@ -60,8 +71,24 @@ def _clean_window_id(window_id) -> str | None:
     return wid
 
 
+def _clean_order(value) -> list | None:
+    """Coerce a gadget-rail order to a bounded list of clean, de-duplicated string ids.
+    Anything unusable (not a list, no valid ids) ⇒ ``None`` (field dropped)."""
+    if not isinstance(value, (list, tuple)):
+        return None
+    out: list = []
+    for item in value:
+        wid = _clean_window_id(item)
+        if wid and wid not in out:
+            out.append(wid)
+        if len(out) >= _MAX_ORDER_LEN:
+            break
+    return out or None
+
+
 def _clean_state(partial) -> dict:
-    """Keep only the allowed, well-typed fields (bools + clamped numbers); drop everything else."""
+    """Keep only the allowed, well-typed fields (bools + clamped numbers + the #637/#638 synthetic
+    fields: a left/right `side` enum and a bounded `order` id-list); drop everything else."""
     out: dict = {}
     if not isinstance(partial, dict):
         return out
@@ -75,6 +102,14 @@ def _clean_state(partial) -> dict:
             except (TypeError, ValueError):
                 continue
             out[f] = max(_NUM_MIN, min(_NUM_MAX, v))
+    # #637: the panel side — a bounded enum, never free text.
+    if partial.get("side") in _SIDE_VALUES:
+        out["side"] = partial["side"]
+    # #637: the gadget-rail order — a bounded list of clean string ids.
+    if "order" in partial:
+        order = _clean_order(partial.get("order"))
+        if order is not None:
+            out["order"] = order
     return out
 
 
