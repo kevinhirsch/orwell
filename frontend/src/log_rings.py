@@ -55,6 +55,16 @@ IO = Ring()
 # recorder never receives auth headers / api keys.
 LLMIO = Ring()
 
+OVERSEER = Ring()
+# OVERSEER — feature 0079: the runtime loop overseer's diagnostic log. One entry per wake
+# or correction — the trigger symptom, a one-line diagnosis, the lever pulled, and the 0065
+# beatSeq before->after. It is the INTERPRETATION layer over the raw LIVE/IO/LLMIO rings
+# (those say WHAT happened; this says what it MEANT and whether it was a problem) and the
+# overseer's own audit trail. Surfaced as the "Overseer (live)" admin log source. Vault-free
+# by construction — the FE only ever holds Vault-free projections, and record_overseer
+# coerces/clips every field, so no narration body, casting answer, or engine secret can land.
+_OVERSEER_LEVELS = ("observation", "action", "anomaly", "escalation")
+
 
 class _RingHandler(logging.Handler):
     def emit(self, record):
@@ -106,6 +116,51 @@ def record_io(tool: str, args, ok: bool, duration_ms: int, payload) -> None:
         "args": _clip(args),
         "result": _clip(payload),
     })
+
+
+def record_overseer(level, kind, diagnosis, *, lever=None,
+                    beat_before=None, beat_after=None, ok=True, user=None) -> None:
+    """Feature 0079 — one runtime-overseer diagnostic entry: what woke it, what it concluded,
+    what it did. Vault-free BY CONSTRUCTION — callers pass only ids / kinds / counts / a short
+    diagnosis built from them (never a narration body, casting answer, or engine secret); the
+    free-text diagnosis is clipped. Swallows its own errors (logging must never hurt the app).
+
+      level     observation | action | anomaly | escalation  (anything else -> observation)
+      kind      the trigger symptom or correction class (a short token)
+      diagnosis one short human line (clipped)
+      lever     the action taken (hold | nudge | force-advance | propose-record |
+                reinject-delta | escalate | a guardrail name) or None
+      beat_*    the 0065 beatSeq around the action (coerced to int | None)
+      ok        did the lever apply cleanly (drives the display severity)
+    """
+    try:
+        import time as _t
+        lvl = level if level in _OVERSEER_LEVELS else "observation"
+        # Display severity for the viewer's colouring; the semantic class stays in overseerLevel.
+        severity = "ERROR" if (not ok or lvl == "escalation") else ("WARNING" if lvl == "anomaly" else "INFO")
+
+        def _beat(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        OVERSEER.push({
+            "ts": int(_t.time() * 1000),
+            "level": severity,
+            "logger": "overseer",
+            "msg": f"[{lvl}] {_clip(kind)}: {_clip(diagnosis)}",
+            "overseerLevel": lvl,
+            "kind": _clip(kind),
+            "diagnosis": _clip(diagnosis),
+            "lever": _clip(lever) if lever is not None else None,
+            "beatBefore": _beat(beat_before),
+            "beatAfter": _beat(beat_after),
+            "ok": bool(ok),
+            "user": _clip(user) if user is not None else None,
+        })
+    except Exception:
+        pass
 
 
 ensure_live_handler()

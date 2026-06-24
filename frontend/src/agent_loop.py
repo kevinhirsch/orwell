@@ -2121,6 +2121,15 @@ async def _auto_mark_premiere_intros(narration, owner) -> int:
                                f"{type(e).__name__}: {e}".rstrip(': '))
     if marked:
         logger.info(f"[orwell] auto-marked {marked} premiere intro(s) user={owner}")
+        try:  # 0079: the premiere belt is an overseer correction — log it
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "premiere-belt",
+                f"auto-marked {marked} premiere introduction(s) as met "
+                f"(the model narrated the meet but skipped markHouseguestMet)",
+                lever="mark-met", ok=True, user=owner)
+        except Exception:
+            pass
     return marked
 
 
@@ -2186,6 +2195,15 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         obj = _last_json_object_with_key(raw, "withIds")
         if obj is None:
             logger.info(f"[orwell] auto-record: no parseable JSON (len={len(raw)})")
+            try:  # 0079: a real gap the overseer log should surface (social play may fold no impact)
+                from src import log_rings as _lr
+                _lr.record_overseer(
+                    "anomaly", "gap-repair",
+                    f"a player↔house scene recorded nothing and the repair extraction returned "
+                    f"no parseable JSON (len={len(raw)}) — social play may have folded no impact",
+                    lever="propose-record", ok=False, user=owner)
+            except Exception:
+                pass
             return False
         valid = {h.get("id") for h in house}
         ids = [i for i in (obj.get("withIds") or []) if i in valid]
@@ -2205,6 +2223,16 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
             return False
         logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
                     f"edges={len(consequence['edges']) if consequence else 0}) user={owner}")
+        try:  # 0079: surface this gap-repair on the overseer diagnostic log
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "gap-repair",
+                f"recorded a missed player↔house scene (kind={kind}, "
+                f"with={len(ids)} houseguest(s), "
+                f"edges={len(consequence['edges']) if consequence else 0})",
+                lever="propose-record", ok=True, user=owner)
+        except Exception:
+            pass
         return True
     except Exception as _e:
         logger.warning(f"[orwell] auto-record failed: {_e}")

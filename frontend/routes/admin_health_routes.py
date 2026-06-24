@@ -650,6 +650,7 @@ def setup_admin_health_routes() -> APIRouter:
             {"id": "live", "label": "Front-end (live)"},
             {"id": "io", "label": "Engine I/O (live) — every tool call in/out"},
             {"id": "llmio", "label": "LLM I/O (live) — full prompt + response + reasoning"},
+            {"id": "overseer", "label": "Overseer (live) — diagnoses & corrections"},
         ]
         for name in _log_files():
             sources.append({"id": f"file:{name}", "label": f"{name} (file)"})
@@ -667,6 +668,9 @@ def setup_admin_health_routes() -> APIRouter:
             return {"source": source, "next": nxt, "lines": lines}
         if source == "llmio":
             nxt, lines = log_rings.LLMIO.since(since)
+            return {"source": source, "next": nxt, "lines": lines}
+        if source == "overseer":
+            nxt, lines = log_rings.OVERSEER.since(since)
             return {"source": source, "next": nxt, "lines": lines}
         if source.startswith("file:"):
             name = source[5:]
