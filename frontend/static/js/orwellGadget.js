@@ -56,7 +56,7 @@
       "  background: color-mix(in srgb, var(--panel, #111) 70%, transparent);" +
       "  color: var(--fg, #9cdef2);" +
       "  border: 1px solid var(--border, #355a66); border-radius: 10px;" +
-      "  font-family: 'Fira Code', ui-monospace, monospace;" +
+      "  font-family: var(--ow-ui-font, -apple-system, BlinkMacSystemFont, Inter, sans-serif);" +
       "  font-size: var(--fs-xs, .72rem); line-height: 1.5; }" +
       // The header: icon + Title-Case title + optional actions. Matches the old .xx-hd
       // (weight 600, the tracking, the title colour mixed toward the panel). The whole

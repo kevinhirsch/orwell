@@ -53,11 +53,16 @@ const LS_KEY = 'orwell-theme';
 const CUSTOM_THEMES_KEY = 'orwell-custom-themes';
 
 const FONT_MAP = {
-  mono: "'Fira Code', monospace",
-  sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+  // 'system' = the Apple SF system-font stack (typography audit #696). Real SF renders
+  // on Apple devices; Inter (bundled, OFL) is the cross-platform substitute; the rest
+  // are platform defaults. We do NOT bundle SF Pro (Apple license) — the system stack
+  // pulls the installed SF on Apple OSes.
+  system: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', Inter, 'Segoe UI', Roboto, sans-serif",
+  mono: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
+  sans: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
   serif: "Georgia, 'Times New Roman', serif",
 };
-const DEFAULT_FONT = 'mono';
+const DEFAULT_FONT = 'system';
 const DEFAULT_DENSITY = 'comfortable';
 const MAX_CUSTOM_THEMES = 8;
 

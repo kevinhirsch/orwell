@@ -111,7 +111,7 @@
       }
       // Apply font early
       if (t && t.font) {
-        var fm = {mono:"'Fira Code', monospace",sans:"system-ui, -apple-system, 'Segoe UI', sans-serif",serif:"Georgia, 'Times New Roman', serif"};
+        var fm = {system:"-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', Inter, 'Segoe UI', Roboto, sans-serif",mono:"ui-monospace, 'SF Mono', 'Fira Code', monospace",sans:"Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",serif:"Georgia, 'Times New Roman', serif"};
         if (fm[t.font]) { s.setProperty('--font-family', fm[t.font]); }
         else if (t.font.indexOf('gf:') === 0) {
           // A Google font (gf:Family). Inject the single CSS2 stylesheet link now
@@ -684,6 +684,7 @@
           <div class="theme-fd-group">
             <label class="theme-fd-label">Font</label>
             <select id="theme-font-select" class="theme-fd-select" aria-label="Font">
+              <option value="system">System (SF / Inter)</option>
               <option value="mono">Monospace</option>
               <option value="sans">Sans-serif</option>
               <option value="serif">Serif</option>

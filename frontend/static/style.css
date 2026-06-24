@@ -16,6 +16,15 @@
  */
 
 :root {
+  /* Typography (audit #696): the default UI font is the Apple SF SYSTEM-FONT STACK —
+     real SF on Apple devices, Inter (bundled, OFL) as the cross-platform substitute,
+     platform defaults elsewhere. We do NOT bundle SF Pro (Apple license). Monospace
+     is reserved for genuine code/technical/tabular contexts only. theme.js sets
+     --font-family per the user's font choice (default 'system' → this stack); these
+     tokens are the first-paint / fallback value before theme.js boots. */
+  --ow-ui-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', Inter, 'Segoe UI', Roboto, sans-serif;
+  --ow-mono-font: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+
   /* Core palette */
   --bg: #282c34;
   --fg: #9cdef2;
@@ -133,7 +142,7 @@ body {
      below so left + right docks can coexist without skewing the whole body. */
   transition: padding-left 160ms cubic-bezier(0.22, 0.61, 0.36, 1),
               padding-right 160ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  font-family: var(--font-family, 'Fira Code', monospace);
+  font-family: var(--font-family, var(--ow-ui-font));
   display: flex;
   height: 100%;
   height: 100dvh; /* dynamic viewport height — adapts when mobile keyboard opens */
@@ -1877,7 +1886,7 @@ body.bg-pattern-perlin-flow {
       background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
       color: var(--fg, #9cdef2);
       border: 1px solid var(--border, #355a66); border-radius: 10px;
-      font-family: 'Fira Code', ui-monospace, monospace;
+      font-family: var(--ow-ui-font, -apple-system, BlinkMacSystemFont, Inter, sans-serif);
       font-size: var(--fs-xs, .72rem); line-height: 1.5;
     }
     .og-card .og-head {
@@ -16151,7 +16160,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
      modal font, which is the app font (Fira Code) on mobile and Inter on
      desktop (.modal-content's Inter rule is inside @media min-width:769px).
      Mirror that here so all three footers match in both contexts. */
-  font-family: var(--font-family, 'Fira Code', monospace);
+  font-family: var(--font-family, var(--ow-ui-font));
   transition: border-color 0.15s, color 0.15s;
 }
 @media (min-width: 769px) {
