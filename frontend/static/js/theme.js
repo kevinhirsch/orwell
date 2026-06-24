@@ -918,8 +918,13 @@ export function initThemeUI() {
   // (Hick's law + brand coherence). So under the game build, show the house themes first and tuck
   // the rest behind a "Show all themes" reveal — power users keep them, and Customize is untouched.
   // The full inherited workspace (no game build) renders every theme as before.
+  // J1-24: the abstract 3-dot row undersold what a theme looks like. Paint the
+  // tile itself in the theme's OWN bg + fg so the swatch is a mini-preview (you
+  // see the real surface + text colour), with the accent dots as a secondary
+  // signal. The dual-ring dot CSS keeps each dot legible on any tile.
   const _swatch = ([name, c]) => `
-    <div class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}">
+    <div class="theme-swatch theme-swatch--preview${name === activeName ? ' active' : ''}" data-theme="${name}"
+         style="background:${c.bg};color:${c.fg};border-color:${c.panel};">
       <div class="theme-swatch-colors">
         <span style="background:${c.bg}"></span>
         <span style="background:${c.panel}"></span>

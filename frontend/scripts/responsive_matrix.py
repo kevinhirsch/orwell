@@ -432,15 +432,20 @@ def main():
 
                 # G6: the settings tab rail keeps its LEFT orientation in any
                 # modal wider than the 480 token (explicit user preference);
-                # top-bar stacking is the last resort below it. Force-open is
-                # scoped to this measurement and restored — the legacy click
-                # selector below predates the rail buttons and opens nothing.
+                # top-bar stacking is the last resort below it. #553: Settings is
+                # now a kit OrwellWindow built lazily on first open — so #settings-modal
+                # does NOT exist until opened. Open it for real (the gear fires
+                # settings.js open(); a programmatic .click() works regardless of the
+                # gear's own visibility), measure, then close via the kit ×.
+                page.evaluate(
+                    "(document.getElementById('user-bar-settings') ||"
+                    " document.getElementById('tool-settings-btn') ||"
+                    " document.getElementById('rail-settings') || {click(){}}).click()")
+                page.wait_for_timeout(350)  # let the kit window mount + the open fade settle
                 rail = page.evaluate("""
                   (() => {
                     const overlay = document.querySelector('#settings-modal');
                     if (!overlay) return null;
-                    const wasHidden = overlay.classList.contains('hidden');
-                    if (wasHidden) overlay.classList.remove('hidden');
                     const m = overlay.querySelector('.settings-modal-content');
                     const r = overlay.querySelector('.settings-sidebar');
                     const p = overlay.querySelector('.settings-panels');
@@ -450,10 +455,12 @@ def main():
                       out = { modalW: m.getBoundingClientRect().width,
                               left: rb.x < pb.x && rb.height > rb.width };
                     }
-                    if (wasHidden) overlay.classList.add('hidden');
                     return out;
                   })()
                 """)
+                page.evaluate(
+                    "(document.querySelector('#settings-modal .ow-close') || {click(){}}).click()")
+                page.wait_for_timeout(250)  # let the close fly-away finish + the node teardown
                 if rail is None:
                     report("fail", f"{vp_name} settings-rail: modal nodes missing")
                 elif rail["modalW"] > 480 and not rail["left"]:

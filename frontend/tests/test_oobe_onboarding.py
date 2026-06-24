@@ -473,3 +473,66 @@ def test_thing2_cast_photo_is_a_pill_not_an_auto_open():
     # the pill's click is what opens the box
     pill = hs[hs.index("function showPill"):hs.index("function removePill")]
     assert "mount()" in pill and "hs-choose-btn" in pill
+
+
+# ── 6. Welcome polish (#606 cluster: J1-31 focus ring, J1-10 desktop weight) + J1-30 producers copy ──
+
+def test_welcome_ctas_have_a_focus_visible_ring():
+    # J1-31: the onboarding overlay buttons are the journey's FIRST interactive elements and must
+    # carry a visible keyboard-focus ring (WCAG 2.4.7). The ring is keyed to --brand-color (theme
+    # token) — never a hardcoded color — and the primary CTA gets a double ring so its focus reads
+    # against its own fill.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    assert ".ob-btn:focus-visible" in onb
+    assert ".ob-btn-primary:focus-visible" in onb
+    # the ring uses the theme brand token, not a hardcoded white/bg
+    seg = onb[onb.index(".ob-btn:focus-visible"):onb.index(".ob-btn-primary:focus-visible")]
+    assert "var(--brand-color" in seg
+    assert "box-shadow" in seg
+
+
+def test_primary_cta_uses_on_accent_token_not_hardcoded_white():
+    # The accent CTA's text uses the --on-accent token (the project's contrast contract for accent
+    # fills), never a hardcoded white/--bg.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    seg = onb[onb.index(".ob-btn-primary {"):]
+    seg = seg[: seg.index("}")]
+    assert "var(--on-accent" in seg
+
+
+def test_welcome_card_scales_up_on_desktop():
+    # J1-10: the 420px card filled ~10% of a desktop viewport and read as under-confident. A wide
+    # (>=1024px) media query scales the card + title up for visual weight — pure type/space (no new
+    # imagery, which is a design call) and mobile/narrow keeps the compact card.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    assert "@media (min-width: 1024px)" in onb
+    seg = onb[onb.index("@media (min-width: 1024px)"):]
+    seg = seg[: seg.index("}\n      </style>") + 1] if "}\n      </style>" in seg else seg[:400]
+    assert ".ob-card" in seg and "width: 540px" in seg
+
+
+def test_pre_token_wait_copy_is_in_universe_in_the_game_build():
+    # J1-30: the pre-token wait (most visible right after "Start casting") read as OOC lag
+    # ("Processing request…"). In the game build the GENERIC waiting stages get a production voice;
+    # the literal strings remain as the non-game-build fallback.
+    chat = _read("static", "js", "chat.js")
+    assert "function _waitLabel" in chat
+    # the in-universe copy is producers-framed and gated on the game build
+    seg = chat[chat.index("function _waitLabel"):]
+    seg = seg[: seg.index("\n  }")]
+    assert "isGameBuild()" in seg
+    assert "producers" in seg.lower()
+    # the generic spinner stages route through the helper (with the literal fallback preserved)
+    assert "_waitLabel('init', 'Initializing')" in chat
+    assert "_waitLabel('waiting', 'Processing request')" in chat
+    assert "_waitLabel('still', 'Still waiting for model')" in chat
+
+
+def test_pre_token_copy_stays_consistent_with_producers_framing():
+    # CONVENTION: the FE's in-universe "producers" voice must stay consistent with the engine-side
+    # framing (apply_game_framing's PRE_GAME_PROMPT casts the show's voice as the PRODUCER). The
+    # pre-token wait copy uses the same "producers" framing — no competing fiction.
+    ch = _read("routes", "chat_helpers.py")
+    assert "PRODUCER" in ch  # the pre-game framing voice
+    chat = _read("static", "js", "chat.js")
+    assert "producers" in chat[chat.index("function _waitLabel"):chat.index("function _waitLabel") + 600].lower()

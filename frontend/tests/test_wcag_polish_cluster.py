@@ -53,14 +53,19 @@ def test_s8_1_dismiss_tap_target():
 # ── S7-1: the settings modal traps focus (WCAG 2.4.3 / 2.1.2) ────────────────
 
 def test_s7_1_settings_focus_trap():
+    # #553: Settings now composes the OrwellWindow kit as a MODAL window. The kit's modal chrome
+    # owns the focus-trap (Tab cycles inside), the inert background, and focus-return to the opener
+    # on close (orwellWindow.js _mountModalChrome/_trapFocus/_focusIntoModal) — replacing the
+    # bespoke _settingsTrapKeydown handler. Assert settings opts into that contract instead.
     js = _read("static/js/settings.js")
-    assert "_settingsTrapKeydown" in js, "settings must install a Tab focus-trap handler."
-    assert "_settingsPrevFocus" in js, "settings must restore focus to the trigger on close."
-    assert 'addEventListener(\'keydown\', _settingsTrapKeydown, true)' in js, (
-        "the trap must be armed (capture-phase keydown) on open."
+    assert "OrwellWindowKit.create(" in js, "Settings must compose the OrwellWindow kit (#553)."
+    assert "modal: true" in js, (
+        "the Settings kit window must be modal:true so the kit provides the focus-trap + "
+        "inert background + focus-return (S7-1 / WCAG 2.4.3+2.1.2)."
     )
-    assert 'removeEventListener(\'keydown\', _settingsTrapKeydown, true)' in js, (
-        "the trap must be torn down on close."
+    kit = _read("static/js/orwellWindow.js")
+    assert "_trapFocus" in kit and "_focusIntoModal" in kit, (
+        "the kit must implement the modal focus-trap + focus-into-modal the settings window relies on."
     )
 
 

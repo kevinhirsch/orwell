@@ -215,7 +215,10 @@ if python3 -c "import uvicorn, httpx, fastapi" >/dev/null 2>&1; then
       python3 -m uvicorn app:app --host 127.0.0.1 --port "$FE_PORT" >/tmp/orwell-smoke-fe.log 2>&1 & echo $! > /tmp/orwell-smoke-fe.pid )
   FE_PID="$(cat /tmp/orwell-smoke-fe.pid)"
   fe_up=0
-  for _ in $(seq 1 40); do
+  # The FastAPI app imports a lot; on a loaded / lower-core (parallel self-hosted) runner the cold
+  # boot can take well over 20s. Wait up to 120s (240 × 0.5s) — still bails immediately if the
+  # process dies. A slow boot must not flake the smoke (it did on the self-hosted pool, #669).
+  for _ in $(seq 1 240); do
     curl -fsS "http://127.0.0.1:${FE_PORT}/openapi.json" >/dev/null 2>&1 && { fe_up=1; break; }
     kill -0 "$FE_PID" 2>/dev/null || break
     sleep 0.5

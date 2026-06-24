@@ -157,6 +157,25 @@ def test_css_accent_ctas_use_on_accent_token():
     )
 
 
+def test_js_injected_accent_ctas_use_on_accent_token():
+    """JS-injected accent-backed CTAs must read the token too, not the theme --bg as ink.
+    The J2-17 remainder: the headshot 'Make AI studio portraits' CTA (.hs-btn) and the onboarding
+    primary button (.ob-btn-primary) both painted `color: var(--bg)` on an accent background — not
+    guaranteed AA (the bg<->accent contrast varies per theme; the audit measured ~3.29:1). They now
+    consume the luminance-aware token like every other accent CTA."""
+    hs = _read("static/js/orwellHeadshot.js")
+    assert "background: var(--brand-color, var(--accent, #4a9)); color: var(--on-accent, #fff)" in hs, (
+        ".hs-btn (the 'Make AI studio portraits' CTA, J2-17) must use var(--on-accent) on its accent bg."
+    )
+    ob = _read("static/js/orwellOnboarding.js")
+    assert "background: var(--brand-color, var(--red, #e06c75)); color: var(--on-accent, #fff)" in ob, (
+        ".ob-btn-primary must use var(--on-accent) on its accent background."
+    )
+    # the old dark-on-accent anti-pattern (color: var(--bg)) must be gone from BOTH primary CTAs.
+    assert "var(--accent, #4a9)); color: var(--bg" not in hs
+    assert "var(--red, #e06c75)); color: var(--bg" not in ob
+
+
 def test_non_accent_white_ctas_are_left_alone():
     """Guard against over-reach: white text on NON-accent backgrounds
     (semantic danger / recording / dark image overlays) must stay white."""

@@ -54,6 +54,20 @@ import { isNarrow } from './platform.js';
   function _senderLabel(modelLabel) {
     return isGameBuild() ? 'Big Brother' : (modelLabel || '');
   }
+  // J1-30 (immersion): the pre-token wait — most visible right after the player's first deliberate
+  // action ("Start casting"), where a generic "Processing request…" reads as lag/OOC. In the game
+  // build, dress the GENERIC waiting stages in a production voice so the gap feels like the show
+  // rolling, not the app stalling. Endpoint-DIAGNOSTIC states (online/offline/latency/countdown)
+  // stay literal — they are operator truth a player rarely sees and must not be fictionalised.
+  function _waitLabel(stage, fallback) {
+    if (!isGameBuild()) return fallback;
+    switch (stage) {
+      case 'init':    return 'The producers are rolling';
+      case 'waiting': return 'The producers are talking it over';
+      case 'still':   return 'The producers are still deliberating';
+      default:        return fallback;
+    }
+  }
   function _setRoleModelLabel(roleEl, requestedModel, actualModel, opts) {
     if (!roleEl) return;
     opts = opts || {};
@@ -997,7 +1011,7 @@ import { isNarrow } from './platform.js';
       holder.style.position = 'relative';
       
       // Create spinner
-      spinner = spinnerModule.create('Initializing', 'right', 'wave');
+      spinner = spinnerModule.create(_waitLabel('init', 'Initializing'), 'right', 'wave');
       currentSpinner = spinner;
       const bodyDiv = holder.querySelector('.body');
       bodyDiv.appendChild(spinner.createElement());
@@ -1011,7 +1025,7 @@ import { isNarrow } from './platform.js';
         spinner.updateMessage('Researching');
         setTimeout(() => spinner.updateMessage('Analyzing sources'), 1500);
       } else {
-        spinner.updateMessage('Processing request');
+        spinner.updateMessage(_waitLabel('waiting', 'Processing request'));
         const endpointUrlForProbe = sessionModule.getCurrentEndpointUrl ? sessionModule.getCurrentEndpointUrl() : null;
         if (endpointUrlForProbe && modelName) {
           processingProbeTimer = setTimeout(async () => {
@@ -1023,7 +1037,7 @@ import { isNarrow } from './platform.js';
               const status = await _probeCurrentEndpointStatus(endpointUrlForProbe, processingProbeAbort.signal);
               if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
               if (!status) {
-                spinner.updateMessage('Still waiting for model');
+                spinner.updateMessage(_waitLabel('still', 'Still waiting for model'));
               } else if (status.alive) {
                 const latency = status.latency_ms ? ` (${status.latency_ms}ms)` : '';
                 spinner.updateMessage(`Endpoint online${latency}; waiting for first token`);
@@ -1055,7 +1069,7 @@ import { isNarrow } from './platform.js';
               }
             } catch (e) {
               if (e && e.name !== 'AbortError' && spinner && spinner.element && !accumulated) {
-                spinner.updateMessage('Still waiting for model');
+                spinner.updateMessage(_waitLabel('still', 'Still waiting for model'));
               }
             } finally {
               processingProbeAbort = null;
