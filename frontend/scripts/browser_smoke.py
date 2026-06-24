@@ -2160,11 +2160,17 @@ def main() -> int:
                 .filter(vis).map(i => (i.id + ' ' + (i.textContent || '')).replace(/\\s+/g, ' ').trim());
               document.getElementById('export-dl-btn').click();
               const exp = items('export-dropdown-menu', '.export-dropdown-item');
-              document.getElementById('overflow-plus-btn').click();
+              const ovfTrigger = document.getElementById('overflow-plus-btn');
+              if (vis(ovfTrigger)) ovfTrigger.click();
               const ovf = items('overflow-menu', '.overflow-menu-item');
+              // #760: in the game build, attach is promoted to a first-class VISIBLE
+              // composer paperclip — there must be exactly one reachable attach affordance.
+              const attachPaperclip = document.getElementById('composer-attach-btn');
               return { export: exp, overflow: ovf,
                        exportTrigger: vis(document.getElementById('export-dl-btn')),
-                       overflowTrigger: vis(document.getElementById('overflow-plus-btn')) };
+                       overflowTrigger: vis(ovfTrigger),
+                       composerAttachVisible: vis(attachPaperclip),
+                       trayAttachPresent: !!document.getElementById('overflow-attach-btn') };
             }""")
             page.keyboard.press("Escape")  # fold the overflow menu back
             page.evaluate("document.body.click()")  # and dismiss the export dropdown
@@ -2173,12 +2179,27 @@ def main() -> int:
                   f"G13: the export menu presents its keep-set entries ({g13_menus['export']})")
             check(g13_zombies(g13_menus["export"]) == [],
                   f"G13: no export-menu entry names a dropped vertical ({g13_zombies(g13_menus['export'])})")
-            check(len(g13_menus["overflow"]) >= 1,
-                  f"G13: the overflow menu still holds keep-set actions ({g13_menus['overflow']})")
             check(g13_zombies(g13_menus["overflow"]) == [],
                   f"G13: no overflow item present whose handler is the refusal path ({g13_zombies(g13_menus['overflow'])})")
-            check(g13_menus["exportTrigger"] is True and g13_menus["overflowTrigger"] is True,
-                  "G13: menus with keep-set items keep their triggers (the cascade is hide-only, never over-hides)")
+            # The cascade is HIDE-ONLY and emptiness-driven (the G3 Tools-chevron rule):
+            # a menu WITH visible keep-set items keeps its trigger; a menu intentionally
+            # emptied (here, #760 promoting attach to a first-class visible paperclip) has
+            # its trigger correctly hidden — never over-hidden, never left as a zombie that
+            # opens nothing. So: trigger-visible IFF the menu has visible items.
+            check(g13_menus["exportTrigger"] is True,
+                  "G13: the export launcher (keep-set items) stays visible (cascade never over-hides)")
+            overflow_has_items = len(g13_menus["overflow"]) >= 1
+            check(g13_menus["overflowTrigger"] is overflow_has_items,
+                  "G13: the overflow chevron is visible IFF its menu has keep-set items "
+                  "(the cascade is hide-only, never over-hides — a non-empty menu keeps its "
+                  "trigger; an emptied one correctly hides it) "
+                  f"(items={g13_menus['overflow']}, trigger={g13_menus['overflowTrigger']})")
+            # #760: exactly one attach affordance in the composer. The game build shows the
+            # first-class paperclip; it must not ALSO keep the redundant overflow-tray entry.
+            check(g13_menus["composerAttachVisible"] is True,
+                  "G13/#760: the first-class composer attach paperclip is visible (one clear attach affordance)")
+            check(g13_menus["trayAttachPresent"] is False,
+                  "G13/#760: the redundant overflow-tray 'Attach files' duplicate is gone (no two attach entry points)")
 
             # (b) the shortcuts modal: rows render, none names a dropped
             # vertical, and no category header floats over zero rows.
