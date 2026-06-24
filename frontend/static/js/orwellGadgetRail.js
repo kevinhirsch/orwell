@@ -98,7 +98,7 @@
     var left = document.body.getAttribute("data-gadget-side") !== "left";  // fail-soft
     applySide(left ? "left" : "right"); lsSet(SIDE_KEY, left ? "left" : "right");
   }
-  function openDrawer() { rail.classList.add("grail-open"); if (opener) opener.setAttribute("hidden", ""); }
+  function openDrawer() { rail.classList.add("grail-open"); rail.style.removeProperty("bottom"); if (opener) opener.setAttribute("hidden", ""); }
   function closeDrawer() { rail.classList.remove("grail-open"); _refreshOpener(); }
 
   var _toggle = document.getElementById("gadget-rail-toggle");
@@ -196,11 +196,63 @@
     var show = !rail.hasAttribute("hidden") && _isNarrow() && !rail.classList.contains("grail-open");
     if (show) opener.removeAttribute("hidden"); else opener.setAttribute("hidden", "");
   }
+  // ── #740: the COMPOSER-OVERLAP GUARD ───────────────────────────────────────
+  // The composer (.chat-input-bar) is "the conversation is the game" — it must never be
+  // occluded by a rail/pin card. The desktop rail is an in-FLOW flex column (clears the
+  // composer by construction) and the mobile drawer is a deliberate full-height slide-over
+  // (you open it ON PURPOSE; tap-outside / × close it). The bug class this guards is a rail
+  // that has somehow gone FLOATING (computed position fixed/absolute) yet is NOT the open
+  // drawer — e.g. an orphaned/half-styled state — and so its card sits over the composer
+  // bottom-right. In that case lift it to clear the composer's top edge. A purely in-flow
+  // rail (the normal desktop case) and the intentionally-open drawer are both left alone, so
+  // this is a no-op in every healthy state. Done in JS (no style.css edit) and idempotent.
+  function _composerRect() {
+    var c = document.querySelector(".chat-input-bar");
+    if (!c) return null;
+    var cs = window.getComputedStyle(c);
+    if (cs.display === "none" || cs.visibility === "hidden") return null;
+    var r = c.getBoundingClientRect();
+    return (r.width > 0 && r.height > 0) ? r : null;
+  }
+  function _intersects(a, b) {
+    return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+  }
+  function _clearGuard() {
+    rail.style.removeProperty("bottom");
+    // Only release the `top` override if WE set it (auto) — never stomp a real inline top.
+    if (rail.style.top === "auto") rail.style.removeProperty("top");
+  }
+  function guardComposerOverlap() {
+    if (!rail || rail.hasAttribute("hidden")) return;
+    // The mobile drawer is a deliberate modal overlay — opening it over the composer is the
+    // intended behavior (it is dismissed by tap-outside / ×), so never fight it.
+    if (rail.classList.contains("grail-open")) { _clearGuard(); return; }
+    var cs;
+    try { cs = window.getComputedStyle(rail); } catch (_) { return; }
+    var floating = cs.position === "fixed" || cs.position === "absolute";
+    if (!floating) { _clearGuard(); return; } // in-flow column: can't overlap
+    var comp = _composerRect();
+    if (!comp) { _clearGuard(); return; }
+    var rr = rail.getBoundingClientRect();
+    if (rr.width <= 0 || rr.height <= 0) return;
+    if (_intersects(rr, comp)) {
+      // Lift the floating rail so its bottom clears the composer's top edge (+ a small gap).
+      // Anchor by `bottom` (and release any `top`, or top would win on a fixed element and the
+      // bottom we set would be ignored — the rail would stay painting over the composer).
+      var clear = Math.max(0, Math.round(window.innerHeight - comp.top) + 8);
+      rail.style.top = "auto";
+      rail.style.bottom = clear + "px";
+    } else {
+      _clearGuard();
+    }
+  }
+
   function syncVisibility() {
     if (_hasContent()) rail.removeAttribute("hidden");
     else { rail.setAttribute("hidden", ""); rail.classList.remove("grail-open"); }
     _refreshOpener();
     syncStrip();  // the strip must always track what's mounted-and-visible
+    guardComposerOverlap();  // #740: never let a floating rail card sit over the composer
   }
   if (body && window.MutationObserver) {
     var _obs = new MutationObserver(function () { syncVisibility(); });
@@ -208,7 +260,7 @@
       attributeFilter: ["style", "class", "hidden"] });
   }
   window.addEventListener("orwell:gamechanged", syncVisibility);
-  window.addEventListener("resize", _refreshOpener);
+  window.addEventListener("resize", function () { _refreshOpener(); guardComposerOverlap(); });
   setInterval(syncVisibility, 4000);  // belt-and-suspenders fallback
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", syncVisibility, { once: true });
@@ -689,5 +741,7 @@
         function (b) { return b.getAttribute("data-grail-gadget"); });
     },
     focusGadget: focusGadget,
+    // #740: re-run the composer-overlap guard on demand (the responsive-matrix gate calls this).
+    guardComposerOverlap: guardComposerOverlap,
   };
 })();

@@ -287,6 +287,55 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
                 report("fail", f"{vp_name} overlap:{names[i]} intersects {names[j]}")
     report("pass", f"{vp_name} overlap sweep ({len(boxes)} surfaces)")
 
+    # --- #740: the gadget RAIL / cast-PIN card never sits over the composer ----
+    # The conversation IS the game, so the composer (.chat-input-bar) must never be occluded by a
+    # rail or pinned cast card. The desktop rail is an in-flow flex column (clears by construction);
+    # the mobile drawer is a deliberate modal slide-over (opened on purpose, dismissed by ×/tap-out),
+    # so a CLOSED rail and the OPEN drawer are both legitimate non-findings — we only flag a rail/pin
+    # card that is actually painting over the composer while NOT the intentionally-open drawer.
+    if cbox:
+        rail_overlap = page.evaluate(
+            """
+            (() => {
+              const comp = document.querySelector('.chat-input-bar');
+              if (!comp) return [];
+              const cs0 = getComputedStyle(comp);
+              if (cs0.display === 'none' || cs0.visibility === 'hidden') return [];
+              const cb = comp.getBoundingClientRect();
+              if (cb.width <= 0 || cb.height <= 0) return [];
+              const pad = 2;  // border/shadow grace, matching the py _intersects
+              const hits = (b) => !(b.right - pad <= cb.left || cb.right - pad <= b.left ||
+                                    b.bottom - pad <= cb.top || cb.bottom - pad <= b.top);
+              const out = [];
+              const rail = document.getElementById('gadget-rail');
+              const drawerOpen = rail && rail.classList.contains('grail-open');
+              // The cast-pin card + the whole rail (only when it has gone floating, never the
+              // in-flow desktop column or the deliberate open drawer).
+              const cands = [];
+              if (rail && !rail.hasAttribute('hidden') && !drawerOpen) {
+                const rp = getComputedStyle(rail).position;
+                if (rp === 'fixed' || rp === 'absolute') cands.push(['gadget-rail(floating)', rail]);
+              }
+              const pin = document.getElementById('orwell-cast-pin');
+              if (pin && getComputedStyle(pin).display !== 'none' && !drawerOpen) {
+                // A cast-pin card that has escaped the rail body (orphaned onto <body>) and floats.
+                const inRail = !!pin.closest('#gadget-rail-body');
+                const pp = getComputedStyle(pin).position;
+                if (!inRail && (pp === 'fixed' || pp === 'absolute')) cands.push(['cast-pin(orphaned)', pin]);
+              }
+              for (const [name, el] of cands) {
+                const b = el.getBoundingClientRect();
+                if (b.width > 4 && b.height > 4 && hits(b)) out.push(name);
+              }
+              return out;
+            })()
+            """
+        )
+        for name in (rail_overlap or []):
+            report("fail", f"{vp_name} overlap:{name} intersects the composer")
+        if not rail_overlap:
+            report("pass", f"{vp_name} rail/cast-pin clears composer")
+
     # --- crowding: visible text at or above the floor; nowrap overflow -------
     crowd = page.evaluate(f"""
       (() => {{
