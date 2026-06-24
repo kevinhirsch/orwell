@@ -2918,6 +2918,14 @@ function initLoginBackground() {
       <span style="flex:1"></span>
       <span id="adm-loginbg-msg" class="admin-toggle-sub"></span>
       <button class="admin-btn-add" id="adm-loginbg-save" type="button" style="width:80px;text-align:center;">Save</button>
+    </div>
+
+    <!-- Element-kit demo link (#773) — a Developer/Design reference of the shared
+         OrwellElement primitives. Admin-gated chrome; opens in a new tab. Composes
+         the kit .ow-btn .ow-btn-secondary (the standard neutral-glass action). -->
+    <div class="admin-model-form-row" style="align-items:center;gap:8px;margin-top:6px;border-top:1px solid var(--border);padding-top:10px;">
+      <span class="admin-toggle-sub" style="flex:1">Design reference</span>
+      <a class="ow-btn ow-btn-secondary" id="adm-loginbg-kitdemo" href="/static/element_kit_demo.html" target="_blank" rel="noopener" style="text-decoration:none;font-size:0.85rem;padding:6px 14px;">Element kit demo</a>
     </div>`;
   panel.appendChild(card);
 

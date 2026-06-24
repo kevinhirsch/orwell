@@ -63,13 +63,28 @@ def test_login_bg_module_has_all_four_sources_and_reduced_motion():
     assert "/api/auth/login-background" in js
 
 
-def test_login_accent_only_on_the_cta():
+def test_login_cta_composes_the_element_kit_button():
     html = _read("static/login.html")
-    # The primary CTA carries the accent fill...
-    assert "button#submitBtn" in html
-    assert "var(--accent, var(--red))" in html
-    # ...and the threshold hero copy exists (the welcome/arrival moment).
+    # The CTA composes the shared element-kit button (.ow-btn .ow-btn-prominent),
+    # not a bespoke login button — one source of truth with the app's primary action.
+    assert 'class="ow-btn ow-btn-prominent"' in html, "the CTA must compose the kit button"
+    assert ".ow-btn-prominent" in html
+    # The threshold hero copy exists (the welcome/arrival moment).
     assert "greeting" in html
+
+
+def test_login_eye_blink_is_reduced_motion_safe():
+    html = _read("static/login.html")
+    assert "logo-eye-blink" in html, "the hero eye must have a blink animation"
+    assert "logo-eye-lid" in html, "blink is driven by an eyelid overlay"
+    # Under reduced-motion the eye must NOT blink (stays open/static).
+    assert ".logo-eye-lid { animation: none" in html
+
+
+def test_login_has_five_gradient_presets():
+    html = _read("static/login.html")
+    for preset in ("sunset", "aurora", "ocean", "gold", "lavender"):
+        assert f'data-lbg-preset="{preset}"' in html, f"the '{preset}' palette preset must exist"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,6 +111,11 @@ def test_admin_writes_through_admin_gated_endpoints():
     js = _read("static/js/admin.js")
     assert "/api/auth/settings" in js, "settings save goes through the admin-gated settings POST"
     assert "/api/auth/login-background/photo" in js, "photo upload goes through the admin-gated upload POST"
+
+
+def test_admin_links_to_element_kit_demo():
+    js = _read("static/js/admin.js")
+    assert "/static/element_kit_demo.html" in js, "admin must link to the element-kit demo page (#773)"
 
 
 def test_settings_defaults_to_gradient():
