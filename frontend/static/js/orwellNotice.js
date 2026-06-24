@@ -92,6 +92,14 @@
   // outage as an error). One mapping, so the engine-status states share the notice icon family.
   var SEVERITY_ICON = { info: "info", warn: "warn", error: "error" };
 
+  // #766 — ONLY ONE top banner may EVER be present. When a banner would overwrite another, severity
+  // precedence decides: a higher-severity outage must never be silently clobbered by a low-priority
+  // note. error/down (critical) > warn/degraded > info. Equal/higher ⇒ latest-wins (replace).
+  var SEVERITY_RANK = { info: 1, warn: 2, error: 3 };
+  function severityRank(sev) {
+    return SEVERITY_RANK[sev] || SEVERITY_RANK.info;
+  }
+
   // Resolve the icon HTML for a notice: an explicit named key wins; else a system-notice derives
   // it from severity; else nothing. Returns { html } for an SVG glyph, { text } for a raw glyph,
   // or null. (The raw-text branch keeps any bespoke caller glyph working unchanged.)
@@ -309,15 +317,13 @@
   // The top system-banner host (a fixed full-width bar at the top of the viewport). Created
   // lazily on body. A SEPARATE anchor from the above-composer zone — same base chrome.
   //
-  // #758b — the reserved inset must always equal the host's LIVE height, which is the union of
-  // EVERY top-banner card currently stacked in it (engine-status + a reconnecting notice + any
-  // other top-banner notice all mount HERE — there is ONE fixed host, never two systems). The
-  // height changes for reasons no show()/update()/hide() call catches: copy wraps differently when
-  // the viewport WIDTH changes, the web-font swaps in late (font-display:swap) and re-wraps, or a
-  // second card mounts via a path that doesn't re-measure. Any of those left the inset stale and
-  // the banner overlapped content. A ResizeObserver on the host re-runs setBannerInset on EVERY
-  // rendered-height change, so the inset tracks the true total of all banners at all times. (The
-  // explicit setBannerInset calls in show()/update() stay as the immediate, RO-independent path.)
+  // #766 — the host holds EXACTLY ≤1 banner card (show() replaces any existing one; never stacks),
+  // so the inset is simply that one card's height.
+  // #758b — the reserved inset must still track that card's LIVE height: it changes for reasons no
+  // show()/update()/hide() call catches — the copy wraps to more lines when the viewport WIDTH
+  // shrinks, or the web-font swaps in late (font-display:swap) and re-wraps — and a stale inset let
+  // the banner overlap content. A ResizeObserver on the host re-runs setBannerInset on EVERY
+  // rendered-height change, so the inset always matches the live banner (and clears when it's gone).
   function ensureBannerHost() {
     var host = document.getElementById(BANNER_ID);
     if (host) return host;
@@ -514,6 +520,25 @@
     var self = this;
     if (this._isBanner()) {
       var host = ensureBannerHost();
+      // #766 — ONLY ONE top banner may EVER be present. If another notice's banner card is already
+      // mounted in the host, the new one REPLACES it (never stack) — but a lower-severity note must
+      // not silently clobber a higher-severity outage. Compare the incoming severity to the existing
+      // card's: incoming rank ≥ existing ⇒ replace (latest-wins at equal rank); strictly lower ⇒
+      // refuse (keep the critical banner up). The host therefore holds exactly ≤1 card, always.
+      var existing = host.firstElementChild;
+      if (existing && existing !== el) {
+        var existingNotice = _byId[existing.id];
+        var existingRank = existingNotice ? severityRank(existingNotice.o.severity) : 0;
+        if (severityRank(this.o.severity) < existingRank) {
+          return null;  // a lower-priority banner never displaces a higher-severity outage
+        }
+        // Replace: tear the current banner down (its own hide() path clears _byId + the inset) so
+        // there is never a moment with two cards in the host.
+        if (existingNotice && typeof existingNotice.hide === "function") existingNotice.hide();
+        else existing.remove();
+        // hide() may animate-out asynchronously; force-remove any leftover so the host is empty now.
+        while (host.firstElementChild && host.firstElementChild !== el) host.firstElementChild.remove();
+      }
       host.appendChild(el);
       _byId[this.o.id] = this;
       if (!REDUCED()) {

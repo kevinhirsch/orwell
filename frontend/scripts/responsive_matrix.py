@@ -425,9 +425,10 @@ def audit_banner(page, vp_name, width, height):
                                    title: 'System: connection lost', placement: 'top-banner', persistDismiss: false });
               if (n.setBody) n.setBody('The house is offline — reconnecting…');
               n.show();
-              // #758b: a SECOND, long multi-line banner (engine-status style) so the host stacks two
-              // cards and its height wraps — exercising the union-inset / re-measure path.
-              const n2 = K.create({ id: 'matrix-banner-2', kind: 'system-notice', severity: 'warn',
+              // #766: a SECOND banner (equal severity ⇒ latest-wins) must REPLACE the first, never
+              // stack — leaving the single long multi-line card, which also exercises the #758b
+              // wrap/re-measure inset path on a narrow viewport.
+              const n2 = K.create({ id: 'matrix-banner-2', kind: 'system-notice', severity: 'error',
                                     title: 'Big Brother engine unavailable.', placement: 'top-banner', persistDismiss: false });
               if (n2.setBody) n2.setBody('The app could not reach the game service at http://127.0.0.1:8765 — '
                 + 'connection refused. The show cannot load until it is back. A long reason that wraps to '
@@ -478,13 +479,20 @@ def audit_banner(page, vp_name, width, height):
         report("pass", f"{vp_name} banner-inset (banner did not render)")
         page.evaluate("['matrix-banner','matrix-banner-2'].forEach(id=>{const e=document.getElementById(id);if(e)e.remove();})")
         return
-    # #758b: the reserved inset must equal the host's TOTAL live height (the union of ALL stacked
-    # top banners) — a stale/short inset is exactly how the engine-status banner covered content.
+    # #766: ONLY ONE top banner may EVER be present — after firing two banners the host must hold
+    # EXACTLY ≤1 .on-card (the 2nd replaced the 1st), never a stack.
+    if m["cardCount"] > 1:
+        report("fail", f"{vp_name} banner-inset: host holds {m['cardCount']} banner cards — only one "
+                       "may ever be present (#766: show() must replace, never stack)")
+    else:
+        report("pass", f"{vp_name} banner-inset single-card ({m['cardCount']} card — #766)")
+    # #758b: the reserved inset must equal the (single) banner host's LIVE height — a stale/short
+    # inset is exactly how the engine-status banner covered content (it can still wrap taller narrow).
     if abs(m["insetVar"] - m["bannerHeight"]) > 2:
         report("fail", f"{vp_name} banner-inset: --on-banner-inset {m['insetVar']:.0f} != banner host height "
-                       f"{m['bannerHeight']:.0f} ({m['cardCount']} stacked banners — the union must be reserved)")
+                       f"{m['bannerHeight']:.0f} (the single banner's full height must be reserved)")
     else:
-        report("pass", f"{vp_name} banner-inset union ({m['cardCount']} banners, inset {m['insetVar']:.0f}px == host)")
+        report("pass", f"{vp_name} banner-inset height (inset {m['insetVar']:.0f}px == host)")
     under = [r for r in m["rows"] if r["top"] < bb - 2]   # 2px grace
     for r in under:
         report("fail", f"{vp_name} banner-inset: {r['sel']} top {r['top']:.0f} is under the banner bottom {bb:.0f}")

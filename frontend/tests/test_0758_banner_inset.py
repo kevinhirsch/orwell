@@ -167,3 +167,28 @@ def test_engine_status_routes_icons_through_the_kit_not_baked_titles():
     assert 'kind === "down" ? "error" : "warn"' in js, (
         "engine-status must keep driving severity (error/warn) so the kit picks the matching icon (#764)."
     )
+
+
+# ── #766: ONLY ONE top banner may EVER be present — show() REPLACES, never stacks ────────────────
+def test_banner_host_holds_at_most_one_card_structurally():
+    """Owner ruling #766: the #orwell-notice-banner host must never hold more than one .on-card.
+    show() on a banner placement removes/replaces any existing banner card (severity precedence:
+    a lower-severity note never clobbers a higher-severity outage; equal/higher ⇒ latest-wins)."""
+    js = _read("static", "js", "orwellNotice.js")
+    # severity precedence is defined and consulted on replace
+    assert "SEVERITY_RANK" in js and "severityRank" in js, (
+        "the kit must rank severity (error > warn > info) so a low-priority banner can't clobber a "
+        "critical outage when only one may be present (#766)."
+    )
+    # the banner branch of show() actively REPLACES an existing card (removes it before mounting)
+    banner_branch = js[js.index("if (this._isBanner()) {"):js.index("var zone = ensureZone();")]
+    assert "firstElementChild" in banner_branch, (
+        "show()'s banner branch must inspect the host's existing card to enforce ≤1 (#766)."
+    )
+    assert ("existingNotice.hide()" in banner_branch or ".remove()" in banner_branch), (
+        "show()'s banner branch must remove/replace the existing banner card — never stack (#766)."
+    )
+    # the lower-severity refusal path exists (return null when incoming rank < existing)
+    assert "return null;  // a lower-priority banner never displaces" in banner_branch, (
+        "a strictly lower-severity banner must be refused so it can't clobber a higher one (#766)."
+    )
