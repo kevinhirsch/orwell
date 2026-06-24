@@ -37568,8 +37568,12 @@ body.theme-frosted #sidebar {
 body.theme-frosted .on-card {
   backdrop-filter: var(--ow-glass-backdrop) !important;
   -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;
-  border-color: color-mix(in srgb, var(--fg) 26%, transparent) !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent),
+  /* #725: the notice card now carries DARK ink (--fg redefined to #16191f on .on-card), so a
+     color-mix(--fg N%) border/rim resolves to a HARD DARK hairline + a dark inner rim on the light
+     glass. Apple glass is defined by a luminous EDGE, not a dark stroke — use the same soft white
+     luminous hairline + bright top rim the windows/cards carry (no dark line, no dark inner glow). */
+  border-color: rgba(255,255,255,0.14) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.42),
               0 6px 20px rgba(0,0,0,0.22) !important;
 }
 
@@ -38982,6 +38986,75 @@ body.theme-frosted .model-picker-menu input[type="text"] {
 body.theme-frosted .model-picker-menu input[type="text"]::placeholder {
   color: rgba(22,25,31,0.55) !important;
 }
+
+/* ── WINDOW-KIT TITLEBAR + WINDOW HEADERS dark-ink-on-glass (#742, #725 stragglers) ──
+   The titlebar (.ow-titlebar / .ow-title) and the legacy modal header (.modal-header h4)
+   sit OUTSIDE the .ow-body / .modal-content dark-ink redefine above, so they kept resolving
+   their text to the THEME --fg / --red — which for the glass theme (and every house theme)
+   is a LIGHT ink (e.g. glass fg #eef1f4, red #9aa3af). On the LIGHT glass titlebar that read
+   as LIGHT-on-LIGHT (measured ~1.09:1 — invisible). Apple's light sidebar/toolbar over light
+   glass renders DARK ink on the monochromatic glass ("symbols and text … becoming darker when
+   the underlying content is light" — HIG Color; lg_hig_legibility_primary_label shows the
+   dark glyph on the light glass tile). Flip the window/title chrome to the SAME dark ink the
+   body uses (#16191f), with a LIGHT halo (not the dark --ow-glass-text-shadow, which under
+   dark ink reads as a dirty smudge — #725). Kit-level so EVERY Lane-F window inherits it
+   (Probe Window, cast, finale, new-season, retrospective, theme, settings). Pinned by
+   browser_smoke.py's titlebar contrast probe (dark ink + NO dark text-shadow). */
+body.theme-frosted .ow-titlebar,
+body.theme-frosted .ow-title,
+body.theme-frosted .ow-title .ow-load-hint,
+body.theme-frosted .ow-titlebar-accessory {
+  color: #16191f !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.5) !important;
+}
+/* EXCEPTION: #orwell-headshot is the ONE deliberately-OPAQUE kit window (it floats over the
+   live casting narration, so it carries a SOLID dark --win-bg fill — see the id-scoped rule
+   above). Its titlebar is therefore LIGHT-on-DARK and must KEEP its light ink; the blanket
+   dark-ink rule above would flip it to dark-on-dark (a new light-on-light inverse). Restore
+   the light fg + the dark legibility halo for this window only. */
+body.theme-frosted #orwell-headshot .ow-titlebar,
+body.theme-frosted #orwell-headshot .ow-title,
+body.theme-frosted #orwell-headshot .ow-title .ow-load-hint {
+  color: var(--fg, #eef1f4) !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6) !important;
+}
+/* Its BODY is also light-on-DARK: the kit dark-ink redefine (.ow-window .ow-body { --fg:#16191f })
+   applies to every .ow-window, but this ONE window is opaque dark — so dark ink there is dark-on-dark
+   (illegible). Restore the LIGHT --fg inside the headshot body so its copy/studio text stays light on
+   the dark fill. (Every OTHER .ow-window is the light glass, where dark ink is correct.) */
+body.theme-frosted #orwell-headshot .ow-body,
+body.theme-frosted #orwell-headshot .ow-body * {
+  --fg: #eef1f4;
+}
+/* The first dark-ink block forces `.ow-window .ow-body { color:#16191f !important }` directly
+   (not only via --fg), and inner copy inherits it — so restore the LIGHT color on the opaque
+   headshot body + its text nodes too (id-scoped !important beats the class rule). Accent/CTA
+   buttons keep their own colored fills (they set color explicitly). */
+body.theme-frosted #orwell-headshot .ow-body,
+body.theme-frosted #orwell-headshot .ow-body .hs-lead,
+body.theme-frosted #orwell-headshot .ow-body .hs-msg,
+body.theme-frosted #orwell-headshot .ow-body .hs-btn-ghost,
+body.theme-frosted #orwell-headshot .ow-body p,
+body.theme-frosted #orwell-headshot .ow-body span,
+body.theme-frosted #orwell-headshot .ow-body label,
+body.theme-frosted #orwell-headshot .ow-body div {
+  color: #eef1f4 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;
+}
+/* The legacy modal-header title rode var(--red) (light gray on the glass theme) — same
+   light-on-light. The dark-ink redefine sets --fg on .modal-content, but the h4 uses --red,
+   so it survived light. Force it to the chrome dark ink (the plan window + the settings/theme
+   modal headers share this family). The send/CTA accents keep their own colored fills. */
+body.theme-frosted .modal-content .modal-header h4,
+body.theme-frosted .plan-window-content .modal-header h4,
+body.theme-frosted .plan-window-content #plan-window-title {
+  color: #16191f !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.5) !important;
+}
+
+/* (The #725 inner-stroke softening for the cast / finale / new-season / deals surfaces lives
+   in each window's OWN injected <style> — co-located with the hard var(--border) rules it
+   corrects — so the source stays self-consistent. See orwellCast/Finale/NewSeason/Deals.js.) */
 
 /* ── CHAT BUBBLES — Apple iMessage glass ──────────────────────────────────────
    The bubble glass material (received = neutral frost, sent = blue, white vibrant

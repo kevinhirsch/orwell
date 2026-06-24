@@ -95,7 +95,12 @@
           border-top: 1px solid var(--border, #355a66); }
         .ons-body .ons-portrait-h { font-size: 12px; opacity: .75; margin-bottom: 6px; font-weight: 600; }
         .ons-body .ons-msg { font-size: 12px; opacity: .8; margin-top: 8px; min-height: 1.2em; }
-        .ons-body .ons-msg.ons-err { color: var(--red, #e06c75); opacity: 1; }`;
+        .ons-body .ons-msg.ons-err { color: var(--red, #e06c75); opacity: 1; }
+        /* #725: soften the inner var(--border) strokes (the ghost button, the portrait divider)
+           to the low-opacity WHITE hairline on the light glass — Apple glass is lensing, not a
+           hard dark line. The primary/accent button keeps its filled tint. */
+        body.theme-frosted .ons-body .ons-btn-ghost { border-color: rgba(255,255,255,0.14); }
+        body.theme-frosted .ons-body .ons-portrait { border-top-color: rgba(255,255,255,0.14); }`;
       document.head.appendChild(s);
     }
 

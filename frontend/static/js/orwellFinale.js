@@ -105,6 +105,13 @@ import * as modalManager from "./modalManager.js";
             max-height: 42vh; overflow: auto;
           }
         }
+        /* #725: soften the inner var(--border) strokes (finalist cards, move buttons) to the
+           low-opacity WHITE hairline on the light glass — Apple defines glass by lensing, not a
+           hard dark line. The :hover accent rim on the move buttons stays (transient interaction). */
+        body.theme-frosted #orwell-finale .ofin-fin,
+        body.theme-frosted #orwell-finale .ofin-btn {
+          border-color: rgba(255,255,255,0.14);
+        }
       </style>
       <div class="ofin-stage" id="ofin-stage" aria-live="polite"></div>
       <div class="ofin-final" id="ofin-final"></div>

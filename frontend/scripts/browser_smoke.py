@@ -205,6 +205,23 @@ def main() -> int:
                       '<span class="gadget-rail-title">The House</span>'+
                       '<button class="gadget-rail-close">×</button>'+
                     '</div></div>');
+                  // #742 (window-kit titlebar): the OrwellWindow kit's titlebar (.ow-titlebar /
+                  // .ow-title) + the cast/finale/new-season window headers sit OUTSIDE the .ow-body
+                  // dark-ink scope, so they kept resolving to the THEME --fg / --red — LIGHT ink on
+                  // the LIGHT glass titlebar (measured ~1.09:1). Mount a kit window through the real
+                  // OrwellWindowKit seam and probe its title ink so the regression can't return.
+                  // (#orwell-headshot is the deliberate OPAQUE exception — light title there is
+                  // correct — and is NOT probed by this light-glass sweep.)
+                  let _kitProbe = null;
+                  try {
+                    if (window.OrwellWindowKit && window.OrwellWindowKit.create) {
+                      _kitProbe = window.OrwellWindowKit.create({
+                        id: 'ow-titlebar-lol-probe', title: 'Titlebar Probe', slot: 'top-left',
+                        content: '<div style="padding:6px">body</div>',
+                      });
+                      _kitProbe.open();
+                    }
+                  } catch (_) {}
                   const out = {
                     surfLum,
                     title: probe('.chat-meta-overlay #current-meta'),
@@ -223,6 +240,8 @@ def main() -> int:
                     // gadget RAIL HEADER (outside the card scope) — "The House" title + control:
                     railTitle: probe('.rail-probe-lol .gadget-rail-title'),
                     railClose: probe('.rail-probe-lol .gadget-rail-close'),
+                    // #742 window-kit titlebar — dark ink on the light-glass titlebar:
+                    kitTitle: probe('#ow-titlebar-lol-probe .ow-title'),
                   };
                   // DARK-INK CHROME must NOT carry the DARK glass legibility shadow (a dark
                   // shadow under dark text reads as a smudgy "drop shadow"). The dark
@@ -237,6 +256,9 @@ def main() -> int:
                   out.darkInkShadows = [
                     '.og-probe-lol .og-body', '.rail-probe-lol .gadget-rail-title',
                     '.adm-probe-lol', '#sidebar',
+                    // #742/#725: the dark-ink window-kit titlebar must carry the LIGHT halo, never
+                    // the dark --ow-glass-text-shadow (a dark shadow under dark ink = a smudge).
+                    '#ow-titlebar-lol-probe .ow-titlebar', '#ow-titlebar-lol-probe .ow-title',
                   ].map(tsProbe).filter(p => {
                     if (p.missing) return false;
                     const ts = (p.ts || 'none').toLowerCase();
@@ -277,6 +299,8 @@ def main() -> int:
                   });
                   out.sweepLight = sweep;
                   og.remove(); ad.remove(); rl.remove();
+                  try { if (_kitProbe) _kitProbe.destroy(); } catch (_) {}
+                  try { const k = document.getElementById('ow-titlebar-lol-probe'); if (k) k.remove(); } catch (_) {}
                   return out;
                 }"""
             )
@@ -288,7 +312,10 @@ def main() -> int:
                           "gadgetTitle", "gadgetFull", "gadgetMuted", "settingsRow",
                           # gadget RAIL HEADER (outside the card dark-ink scope): "The House"
                           # title + the rail control glyph — both must be dark on the light glass.
-                          "railTitle", "railClose"):
+                          "railTitle", "railClose",
+                          # #742 window-kit titlebar — the .ow-title over the light-glass titlebar
+                          # must be dark ink (it was ~1.09:1 light-on-light before the #742 fix).
+                          "kitTitle"):
                 _p = lol.get(_name) or {}
                 if _p.get("missing"):
                     continue  # element legitimately absent — nothing to mis-color

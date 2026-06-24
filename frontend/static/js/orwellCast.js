@@ -179,6 +179,14 @@
         @media (max-width: 768px) {
           #orwell-cast { width: auto !important; max-width: none !important; }
         }
+        /* #725: on the LIGHT glass var(--border) is a HARD dark stroke. Apple defines glass
+           by lensing, not a hard line — soften every inner stroke (portrait holders, the pin
+           + backfill controls) to the low-opacity WHITE hairline the windows/notices carry. */
+        body.theme-frosted #orwell-cast .oc-portrait,
+        body.theme-frosted #orwell-cast .oc-pin,
+        body.theme-frosted #orwell-cast .oc-backfill {
+          border-color: rgba(255,255,255,0.14);
+        }
       </style>
       <div class="oc-toolbar">
         <button type="button" class="oc-pin" id="oc-pin" title="Compact pin — two portraits in the control-room rail">📌 Compact pin</button>

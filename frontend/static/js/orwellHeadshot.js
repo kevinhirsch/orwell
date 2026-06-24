@@ -148,7 +148,20 @@
       .hs-choose-btn:hover { filter: brightness(1.06); box-shadow: 0 4px 14px rgba(0,0,0,.3); }
       .hs-choose-btn:focus-visible { outline: 2px solid var(--brand-color, var(--accent, #e06c75)); outline-offset: 3px; }
       .hs-choose-btn:active { transform: translateY(1px); }
-      @media (prefers-reduced-motion: reduce) { .hs-choose-btn { transition: none; } }`;
+      @media (prefers-reduced-motion: reduce) { .hs-choose-btn { transition: none; } }
+      /* #725: the studio also embeds in GLASS hosts (Settings modal, the New-Season window),
+         where its var(--border) strokes become HARD dark lines on the light glass. Apple glass is
+         lensing, not a hard stroke — soften them to the low-opacity WHITE hairline ONLY in a glass
+         context. The OPAQUE casting window (#orwell-headshot, solid dark fill) is EXCLUDED, where
+         the dark stroke is correctly visible on dark. */
+      body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-btn-ghost,
+      body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-preview,
+      body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-lib,
+      body.theme-frosted .modal-content .ow-headshot-studio .hs-btn-ghost,
+      body.theme-frosted .modal-content .ow-headshot-studio .hs-preview,
+      body.theme-frosted .modal-content .ow-headshot-studio .hs-lib {
+        border-color: rgba(255,255,255,0.14);
+      }`;
     document.head.appendChild(s);
   }
 

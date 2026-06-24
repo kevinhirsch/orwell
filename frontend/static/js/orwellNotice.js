@@ -195,7 +195,13 @@
       // dark veil. The severity/kind MEANING stays in the BORDER (set by the skins above).
       "  background-color: var(--ow-glass-light-color) !important;" +
       "  background-image: var(--ow-glass-light-fill) !important; }" +
-      "body.theme-frosted .on-card { text-shadow: var(--ow-glass-text-shadow); } }";
+      // #725 SMUDGE FIX: post-#725 the notice card carries DARK ink on the LIGHT glass (style.css
+      // dark-ink chrome list). The dark --ow-glass-text-shadow under dark ink reads as a dirty drop-
+      // shadow SMUDGE; the correct legibility halo on dark-on-light is a LIGHT halo (matches the
+      // style.css .on-card rule). This runtime rule is appended AFTER the stylesheet, so it must
+      // itself carry the light halo or it re-introduces the smudge. (The dark shadow stays only on
+      // genuinely light-on-dark text — chat bubbles, dock chips — which the notice card is NOT.)
+      "body.theme-frosted .on-card { text-shadow: 0 1px 1px rgba(255,255,255,0.5); } }";
     document.head.appendChild(st);
   }
 
