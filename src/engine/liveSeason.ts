@@ -288,6 +288,11 @@ export interface LiveSeasonState {
    */
   nightDepth?: number;
   lastSleepDepth?: number;
+  /** 0066 Phase-2: the COMPOUNDING multi-night fatigue meter (0..1) — an EMA of nightly deficits, so a
+   *  STRING of late nights wears a houseguest down beyond the single-night cost. Persisted (0007/0030 —
+   *  non-degradation); absent ⇒ 0 ⇒ byte-identical when the clock is off. `npcFatigue` is keyed by id. */
+  playerFatigue?: number;
+  npcFatigue?: Record<EntityId, number>;
 }
 
 /** What the live loop reads about the house — kept narrow so the core stays pure/testable. */

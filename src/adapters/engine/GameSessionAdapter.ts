@@ -117,7 +117,7 @@ import {
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -1879,9 +1879,32 @@ export class GameSessionAdapter implements GameSession {
    * deficit the competition fold consumes. No number crosses the wall.
    */
   socialFoldScale(id: EntityId): number {
-    if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 1;
-    const deficit = id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id));
-    return socialSwayScale(deficit);
+    return socialSwayScale(this.restDeficitOf(id));
+  }
+
+  /** The hidden rest deficit (0..1) a houseguest carries TODAY: tonight's immediate deficit (graded by how
+   *  late they were up — conflict-drained) COMBINED with the compounding multi-night fatigue meter. 0 when
+   *  the clock is off ⇒ byte-identical to the calibration spine. Feeds both the comp fold and social sway. */
+  private restDeficitOf(id: EntityId): number {
+    if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
+    const immediate = id === PLAYER
+      ? playerRestDeficit(this.live)
+      : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id));
+    const fatigue = id === PLAYER ? (this.live.playerFatigue ?? 0) : (this.live.npcFatigue?.[id] ?? 0);
+    return combinedRestDeficit(immediate, fatigue);
+  }
+
+  /** Roll every houseguest's multi-night fatigue meter at a genuine NIGHT-END (the player turned in, or the
+   *  house ran to the bitter end). EMA: decay the prior, add the night just ended. Fires once per night. */
+  private accrueNightFatigue(): void {
+    if (!this.live || !this.house) return;
+    const lastNight = (id: EntityId): number => id === PLAYER
+      ? playerRestDeficit(this.live!)
+      : npcRestDeficit(this.live!, this.statsOf(id), id, this.effectiveBedDepth(id));
+    this.live.playerFatigue = accrueFatigue(this.live.playerFatigue ?? 0, lastNight(PLAYER));
+    const next: Record<EntityId, number> = { ...(this.live.npcFatigue ?? {}) };
+    for (const n of this.house.npcs) next[n.id] = accrueFatigue(next[n.id] ?? 0, lastNight(n.id));
+    this.live.npcFatigue = next;
   }
 
   /** 0066 Phase-2: an NPC's effective turn-in DEPTH tonight = their chronotype bedtime pulled EARLIER by
@@ -3140,10 +3163,8 @@ export class GameSessionAdapter implements GameSession {
       // fold only; never crosses the wall. DORMANT unless the clock is actually running (opt-in) ⇒
       // returns 0, so the seeded calibration spine (juryReach / UAT) is BYTE-IDENTICAL to the pre-feature model.
       restOf: (id) => {
-        if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
-        // Conflict-drained bedtime feeds the comp deficit too (an NPC who stormed off to bed early was up
-        // LESS late ⇒ carries less, coherently with who `awakeNow` shows asleep).
-        return id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id));
+        // Tonight's immediate (conflict-drained) deficit + the compounding multi-night fatigue meter.
+        return this.restDeficitOf(id);
       },
       // Derived loyalty (0043): disposition (static CHARACTER) × current soul state — feeds the
       // emergent bloc term. Derived per read; never stored (decision 0002).
@@ -3423,7 +3444,14 @@ export class GameSessionAdapter implements GameSession {
         // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per advance, cycling toward
         // late-night and wrapping to a new morning (banking a late night the player never ended). The
         // diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
-        if (this.timeOfDayEnabled) { advanceClock(this.live!); this.rollNightConflicts(); }
+        if (this.timeOfDayEnabled) {
+          const wasRetired = this.live!.playerRetired ?? false;
+          advanceClock(this.live!);
+          // A genuine night-end is the WRAP (the house ran to the bitter end) — NOT the morning after a
+          // turnIn (that night already accrued). Detect: a fresh morning we did NOT reach via retirement.
+          if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? 0) === 0) this.accrueNightFatigue();
+          this.rollNightConflicts();
+        }
         this.commit(ev);
       }
       // Surface the just-resolved beat (it is player-witnessed) so the finale reveal/result beats
@@ -3486,6 +3514,7 @@ export class GameSessionAdapter implements GameSession {
     if (this.live.finished || playerHasLeft(this.live, PLAYER)) return this.advanceView(null);
     return this.inOneCommit(() => {
       playerTurnIn(this.live!, PLAYER);
+      this.accrueNightFatigue(); // the player chose bed — a genuine night-end; accrue before clearing conflicts
       this.rollNightConflicts();
       this.persist();
       return this.advanceView(null);

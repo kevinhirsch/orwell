@@ -221,3 +221,21 @@ export function socialSwayScale(deficit: number): number {
 // they never bed before the early-evening. Engine-only; the player never sees a number.
 export const CONFLICT_BEDTIME_DRAIN = 0.08;
 export const BEDTIME_DEPTH_FLOOR = 0.4;
+
+// 0066 Phase-2: a COMPOUNDING multi-night fatigue meter (0..1). One late night stings the next day
+// (the immediate deficit); a STRING of them wears you down further. `fatigueMeter` is an EMA of the
+// nightly deficits — each new night adds last night's deficit and decays the prior by RECOVERY (so a
+// rested night recovers, consecutive late nights stack toward 1). It ADDS to the immediate deficit
+// (weighted, bounded) for both the comp fold and social sway. Engine-only; 0 absent ⇒ byte-identical off.
+export const FATIGUE_RECOVERY = 0.5; // how much of yesterday's fatigue carries into today (a rested night halves it)
+export const FATIGUE_WEIGHT = 0.5;   // how much the accumulated meter adds on top of the immediate deficit
+
+/** Roll the fatigue meter forward one night: decay the prior, add last night's deficit. Bounded [0,1]. */
+export function accrueFatigue(prevMeter: number, lastNightDeficit: number): number {
+  return clamp(prevMeter * FATIGUE_RECOVERY + lastNightDeficit, 0, 1);
+}
+
+/** Combine tonight's immediate deficit with the accumulated multi-night fatigue (bounded). */
+export function combinedRestDeficit(immediate: number, fatigueMeter: number): number {
+  return clamp(immediate + FATIGUE_WEIGHT * fatigueMeter, 0, 1);
+}

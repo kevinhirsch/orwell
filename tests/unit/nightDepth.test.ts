@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  phaseForDepth, bedtimeDepthFor, restDeficitForDepth, socialSwayScale, SOCIAL_SWAY_FLOOR, TIME_OF_DAY_ORDER,
+  phaseForDepth, bedtimeDepthFor, restDeficitForDepth, socialSwayScale, SOCIAL_SWAY_FLOOR,
+  accrueFatigue, combinedRestDeficit, TIME_OF_DAY_ORDER,
 } from "../../src/engine/timeOfDay";
 import { advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit } from "../../src/engine/liveSeason";
 import type { LiveSeasonState } from "../../src/engine/liveSeason";
@@ -105,6 +106,30 @@ describe("socialSwayScale — a tired houseguest sways the house LESS (effective
       expect(v).toBeGreaterThanOrEqual(SOCIAL_SWAY_FLOOR);
       prev = v;
     }
+  });
+});
+
+describe("multi-night fatigue — a STRING of late nights compounds; a rested night recovers", () => {
+  it("accrueFatigue stacks consecutive late nights toward 1 and decays when rested (bounded)", () => {
+    // Moderate late nights (deficit 0.5 each) compound: a single one doesn't max you, but a string does.
+    const n1 = accrueFatigue(0, 0.5);
+    const n2 = accrueFatigue(n1, 0.5);
+    const n3 = accrueFatigue(n2, 0.5);
+    expect(n2).toBeGreaterThan(n1); // the second late night compounds beyond the first
+    expect(n3).toBeGreaterThan(n2);
+    expect(n3).toBeLessThanOrEqual(1); // bounded
+    expect(accrueFatigue(1, 1)).toBe(1); // saturates, never exceeds 1
+    const recovered = accrueFatigue(n3, 0); // a fully rested night
+    expect(recovered).toBeLessThan(n3); // recovers
+    expect(recovered).toBeGreaterThanOrEqual(0);
+  });
+
+  it("combinedRestDeficit adds the meter on top of the immediate deficit, bounded and monotonic", () => {
+    expect(combinedRestDeficit(0, 0)).toBe(0);          // rested + no history ⇒ nothing (byte-identical)
+    expect(combinedRestDeficit(0.3, 0)).toBe(0.3);      // no history ⇒ just the immediate
+    expect(combinedRestDeficit(0.3, 0.8)).toBeGreaterThan(0.3); // accumulated fatigue adds on top
+    expect(combinedRestDeficit(1, 1)).toBe(1);          // bounded
+    expect(combinedRestDeficit(0, 0.5)).toBeGreaterThan(combinedRestDeficit(0, 0.2)); // monotonic in the meter
   });
 });
 
