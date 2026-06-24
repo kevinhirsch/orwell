@@ -12,7 +12,25 @@
   <title>OrwellElement kit — demo</title>
   <link rel="stylesheet" href="/static/style.css">
   <style>
-    /* a light, bright wallpaper so glass legibility + dark-ink are stress-tested */
+    /* This is a tall DOC/demo page, not the app shell. The app's style.css clamps
+       `body` to a fixed-height flex shell (height:100dvh; display:flex; overflow) so a
+       long page can't scroll and shows the dark app --bg past one viewport. Override
+       it here so the demo is a normal scrollable block whose wallpaper covers the FULL
+       scrollable height — no dark slab past the fold. */
+    html, body {
+      height: auto !important;
+      min-height: 100%;
+      display: block !important;
+      overflow-x: hidden;
+      overflow-y: auto;
+      /* the wallpaper as a FIXED full-bleed background on html/body so it covers the
+         whole scrollable page end to end (the #__wp layer below mirrors the app hook). */
+      background:
+        radial-gradient(60% 60% at 20% 15%, #ffe9c7 0%, transparent 60%),
+        radial-gradient(70% 70% at 85% 25%, #cfe9ff 0%, transparent 60%),
+        radial-gradient(60% 60% at 70% 90%, #ffd6e7 0%, transparent 60%),
+        linear-gradient(135deg, #f3f6ff 0%, #eef7ee 100%) fixed !important;
+    }
     #__wp {
       position: fixed; inset: 0; z-index: -1;
       background:
@@ -42,13 +60,31 @@
     .ek-label { width: 100%; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; margin: 6px 0 2px; }
     .ek-stack { display: grid; gap: 10px; max-width: 360px; }
     .ek-inline { display: inline-flex; align-items: center; gap: 8px; }
+    .ek-section-h { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; opacity: .55;
+      margin: 30px 0 12px; padding-bottom: 6px; border-bottom: 1px solid color-mix(in srgb, var(--fg) 18%, transparent); }
+    .ek-note { font-size: 12px; opacity: .78; margin: 0 0 12px; line-height: 1.5; }
+    .ek-note code, .ek-page code { font-family: var(--ow-mono-font); font-size: .92em; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 1px 4px; border-radius: 4px; }
+    .ek-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; opacity: .55; }
+    .ek-traffic-wrap { display: grid; gap: 4px; justify-items: start; }
+    /* show the traffic-light cluster on a small frosted titlebar swatch */
+    .ek-traffic-wrap .ow-controls { background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border-radius: 999px; padding: 5px 8px; }
+    /* relocated kit windows/gadgets sit STATIC inline in the demo (override the kit's
+       fixed/absolute slot positioning so they render in the section flow for the still). */
+    .ek-wins { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+    .ek-wins .ow-window { position: static !important; inset: auto !important; transform: none !important;
+      margin: 0 !important; width: 300px !important; max-width: 100%; }
+    .ek-wins .og-card { position: static !important; width: 280px; }
+    #ek-notices .on-card, #ek-chathint .on-card, #ek-chathint .orwell-chat-hint {
+      position: static !important; inset: auto !important; transform: none !important; margin: 0 !important; max-width: 100%; }
   </style>
 </head>
 <body class="theme-frosted glass-full">
   <div id="__wp"></div>
   <div class="ek-page">
-    <h1 class="ek-h1">OrwellElement kit</h1>
-    <p class="ek-sub">Every primitive × every state · Full Glass + Frosted · over a light wallpaper (#773)</p>
+    <h1 class="ek-h1">Orwell kit reference</h1>
+    <p class="ek-sub">Every kit surface — atomic ELEMENTS + the COMPOSITE kits (windows / notices / gadget / decision) · Full Glass + Frosted · over a light wallpaper (#773)</p>
+    <h2 class="ek-section-h">Atomic elements — OrwellElement (.ow-* / .ow-btn)</h2>
 
     <!-- BUTTONS -->
     <section class="ek-card">
@@ -145,6 +181,71 @@
         <input type="range" class="ow-slider" min="0" max="100" value="50" style="--ow-slider-fill:50%" disabled>
       </div>
     </section>
+
+    <h2 class="ek-section-h">Composite kits — windows / notices / gadget / decision</h2>
+
+    <!-- WINDOWS (OrwellWindow kit) -->
+    <section class="ek-card">
+      <h2>Windows — OrwellWindowKit.create(…)</h2>
+      <p class="ek-note">Live instances via <code>OrwellWindowKit.create({id, title, content, modal?, dockable?})</code>, relocated inline for the still. One base class + <code>.ow-titlebar / .ow-controls / .ow-body</code>. Types/states: standard (HUD), <code>modal:true</code> (centered, scrim'd dialog), <code>dockable</code> (docked into the control room); minimizable / closable / resizable / draggable; persisted layout + cross-device sync.</p>
+      <div class="ek-label">macOS traffic-light controls — .ow-controls (rest · hover/focus shows glyphs)</div>
+      <div class="ek-row" id="ek-traffic-demo">
+        <div class="ek-traffic-wrap">
+          <span class="ek-tag">rest</span>
+          <div class="ow-controls ek-traffic-rest"><button class="ow-min" type="button" aria-label="Minimize">–</button><button class="ow-close" type="button" aria-label="Close">×</button></div>
+        </div>
+        <div class="ek-traffic-wrap">
+          <span class="ek-tag">hover / focus</span>
+          <div class="ow-controls ek-traffic-hot"><button class="ow-min" type="button" aria-label="Minimize">–</button><button class="ow-close" type="button" aria-label="Close">×</button></div>
+        </div>
+      </div>
+      <div class="ek-label">Standard · modal · docked windows (live)</div>
+      <div class="ek-wins" id="ek-windows"></div>
+    </section>
+
+    <!-- NOTIFICATIONS (OrwellNotice kit) -->
+    <section class="ek-card">
+      <h2>Notifications — OrwellNoticeKit.create(…)</h2>
+      <p class="ek-note">Live notice cards (<code>.on-card</code>) in each severity with the unified monochrome <code>.on-icon</code> set; the top system <strong>banner</strong> (<code>placement:"top-banner"</code>); and the <strong>chat-hint</strong> (<code>OrwellChatHint</code>, kind "guide").</p>
+      <div class="ek-label">Severities — info / warn / error (.on-card.on-sev-*)</div>
+      <div class="ek-stack" id="ek-notices"></div>
+      <div class="ek-label">Top system banner (placement: top-banner) — see the fixed bar at the very top</div>
+      <div class="ek-note" id="ek-banner-note">A live banner is mounted at the top of the viewport.</div>
+      <div class="ek-label">Chat-hint (OrwellChatHint) — the above-composer guide tip</div>
+      <div class="ek-stack" id="ek-chathint"></div>
+    </section>
+
+    <!-- GADGET (OrwellGadget kit) -->
+    <section class="ek-card">
+      <h2>Gadget — OrwellGadgetKit.create(…)</h2>
+      <p class="ek-note">A rail gadget (<code>.og-card</code>) with <code>.og-head</code> + <code>.og-body</code>, an action button, and the collapse chevron (its header carries the system-blue <code>:focus-visible</code> ring).</p>
+      <div class="ek-wins" id="ek-gadget"></div>
+    </section>
+
+    <!-- DECISION (OrwellDecision kit) -->
+    <section class="ek-card">
+      <h2>Decision — OrwellDecision (.odec-*)</h2>
+      <p class="ek-note">The decision card the kit renders above the composer: prompt + selectable option buttons + a confirm action + an instruction note. (Static composition of the kit's <code>.odec-*</code> classes — the live card is driven by game state.)</p>
+      <div id="orwell-decision-card" role="form" aria-label="Cast your eviction vote">
+        <div class="odec-head"><span class="odec-title">Cast your eviction vote</span></div>
+        <p class="odec-prompt">Two houseguests are on the block. Choose who you want to send home this week.</p>
+        <div class="odec-opts">
+          <button class="odec-opt" type="button" aria-pressed="false">Nominee A</button>
+          <button class="odec-opt" type="button" aria-pressed="true">Nominee B</button>
+        </div>
+        <div class="odec-row">
+          <button class="odec-confirm" type="button">Lock in vote</button>
+          <span class="odec-note" id="orwell-decision-card-note">Your vote is secret. You can change it until you lock it in.</span>
+        </div>
+      </div>
+      <div class="ek-label" style="margin-top:14px">Risk variant (.odec-risk — binding / irreversible)</div>
+      <div id="ek-decision-risk" class="odec-risk" role="form" aria-label="Self-evict">
+        <div class="odec-head"><span class="odec-title">Use your power</span><span class="odec-risk-badge" role="note">⚠ Irreversible — binding</span></div>
+        <p class="odec-prompt">This action is binding and cannot be undone.</p>
+        <div class="odec-opts"><button class="odec-opt" type="button" aria-pressed="true">Confirm choice</button></div>
+        <div class="odec-row"><button class="odec-confirm" type="button">Confirm</button><span class="odec-note">There is no taking this back.</span></div>
+      </div>
+    </section>
   </div>
 
   <style>
@@ -154,6 +255,17 @@
     input.ow-field.ek-force-focus { border-color: var(--ow-focus-ring,#0a84ff);
       box-shadow: inset 0 1px 2px rgba(0,0,0,.18), 0 0 0 var(--ow-focus-ring-w,3px) color-mix(in srgb, var(--ow-focus-ring,#0a84ff) 45%, transparent); outline: none; }
     .ow-switch input.ek-force-focus + .ow-switch-track { outline: var(--ow-focus-ring-w,3px) solid var(--ow-focus-ring,#0a84ff); outline-offset: 2px; }
+    /* show the traffic-light glyphs on the "hot" swatch even without a real hover (the
+       app reveals the −/× glyphs on hover/focus of the cluster). */
+    .ek-traffic-hot .ow-min, .ek-traffic-hot .ow-close { opacity: 1 !important; }
   </style>
+
+  <!-- The COMPOSITE kits + their deps (same files index.html loads), then the demo driver. -->
+  <script type="module" src="/static/js/orwellSlots.js"></script>
+  <script type="module" src="/static/js/orwellWindow.js"></script>
+  <script src="/static/js/orwellGadgetRail.js"></script>
+  <script src="/static/js/orwellGadget.js"></script>
+  <script src="/static/js/orwellNotice.js"></script>
+  <script type="module" src="/static/js/orwellElements.js"></script>
 </body>
 </html>

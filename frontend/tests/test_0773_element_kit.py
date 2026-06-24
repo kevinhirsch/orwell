@@ -168,3 +168,52 @@ def test_demo_and_docs_exist_and_reference_the_kit():
     with open(doc_path, encoding="utf-8") as f:
         doc = f.read()
     assert ".ow-field" in doc and ".ow-btn-destructive" in doc and ".ow-switch" in doc
+
+
+# ── the full kit reference: composite kits, not just atomic elements ──────────────
+
+DEMO = _read("static", "element_kit_demo.html")
+DRIVER = _read("static", "js", "orwellElements.js")
+
+
+def test_demo_is_a_full_kit_reference_with_composite_sections():
+    # the demo headlines BOTH tiers: atomic elements AND the composite kits.
+    assert "Atomic elements" in DEMO and "Composite kits" in DEMO
+    # a headed section per composite kit (window / notice / gadget / decision).
+    for heading in ("Windows — OrwellWindowKit", "Notifications — OrwellNoticeKit",
+                    "Gadget — OrwellGadgetKit", "Decision — OrwellDecision"):
+        assert heading in DEMO, f"demo missing composite section: {heading}"
+
+
+def test_demo_window_section_shows_types_traffic_lights_and_titlebar():
+    # window types/states noted + the macOS traffic-light controls swatch (rest + hover).
+    assert "modal" in DEMO and "dockable" in DEMO
+    assert "ow-controls" in DEMO and "ow-min" in DEMO and "ow-close" in DEMO
+    # live instantiation through the kit seam.
+    assert "OrwellWindowKit.create" in DRIVER
+
+
+def test_demo_notice_section_severities_banner_and_chat_hint():
+    # the driver instantiates every severity + the top banner + the chat-hint.
+    assert "OrwellNoticeKit.create" in DRIVER
+    for sev in ('"info"', '"warn"', '"error"'):
+        assert sev in DRIVER, f"driver missing severity {sev}"
+    assert '"top-banner"' in DRIVER          # the top system banner placement
+    assert "orwell-chat-hint" in DRIVER      # the OrwellChatHint composition
+
+
+def test_demo_gadget_and_decision_present():
+    assert "OrwellGadgetKit.create" in DRIVER
+    assert "og-card" in DEMO or "og-head" in DEMO or "OrwellGadgetKit" in DEMO
+    # the decision card composes the kit's .odec-* classes with a prompt + actions.
+    assert "orwell-decision-card" in DEMO
+    for cls in ("odec-prompt", "odec-opt", "odec-confirm"):
+        assert cls in DEMO, f"decision demo missing .{cls}"
+
+
+def test_demo_driver_is_demo_only_not_shipped():
+    # the driver must NOT be referenced by the real app shell (index.html) — it is a
+    # demo-page-only file. It is loaded ONLY by the demo page.
+    assert "orwellElements.js" in DEMO
+    index = _read("static", "index.html")
+    assert "orwellElements.js" not in index, "demo driver must not ship in the app shell"

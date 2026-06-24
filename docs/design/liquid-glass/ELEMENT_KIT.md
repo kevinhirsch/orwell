@@ -174,12 +174,31 @@ JS) to color the filled portion on WebKit. `:focus-visible` ring; `:disabled`.
 <input type="range" class="ow-slider" min="0" max="100" value="50" style="--ow-slider-fill:50%">
 ```
 
-## Demo / verification
+## Demo / verification — the full kit reference
 
-A self-contained demo that instantiates every primitive in every state lives at
-`frontend/static/element_kit_demo.html` (not in the app nav — for screenshot verification).
+`frontend/static/element_kit_demo.html` is a self-contained, sectioned **full kit reference**
+(not in the app nav — for screenshot verification). It shows "what everything accessible in a
+kit looks like" in two tiers:
+
+1. **Atomic elements** — every OrwellElement primitive in every state (above).
+2. **Composite kits** — LIVE instances, instantiated through each kit's own seam by the
+   demo-only driver `frontend/static/js/orwellElements.js` (loaded ONLY by the demo page —
+   never by the app shell):
+   - **Windows (OrwellWindowKit):** a standard HUD window, a `modal:true` centered dialog, and
+     a `dockable` (docked) window — via `OrwellWindowKit.create({id,title,content,modal?,dockable?})`,
+     relocated inline for the still. Shows the `.ow-titlebar` (dark-ink title), the macOS
+     **traffic-light** `.ow-controls` (rest + hover/focus glyphs), and the `.ow-body`. Window
+     states: minimizable / closable / resizable / draggable; persisted layout + cross-device sync.
+   - **Notifications (OrwellNoticeKit):** an `.on-card` in each severity (info/warn/error) with
+     the unified monochrome `.on-icon` set; the top system **banner** (`placement:"top-banner"`);
+     and the **chat-hint** (the `OrwellChatHint` composition — kind "guide").
+   - **Gadget (OrwellGadgetKit):** an `.og-card` with `.og-head` + `.og-body`, an action button,
+     and the collapse chevron (system-blue `:focus-visible` header ring).
+   - **Decision (OrwellDecision):** a `.odec-*` card with prompt + selectable option buttons +
+     a confirm action + an instruction note, plus the `.odec-risk` binding/irreversible variant.
+
 Open it over a light wallpaper at Full Glass + Frosted to confirm legibility, Apple-correct
-states, and no-accent-on-text.
+states, and no-accent-on-text across every kit surface.
 
 ## References (Apple-authentic — see `LIQUID_GLASS_REFERENCE.md`)
 
