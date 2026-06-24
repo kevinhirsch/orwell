@@ -38712,9 +38712,16 @@ body.theme-frosted #research-toggle-btn.research-running,
 body.theme-frosted .section-header-btn.active,
 body.theme-frosted .setup-trigger-link:hover,
 body.theme-frosted .setup-clickable-provider:hover,
-body.theme-frosted .setup-clickable-code:hover,
-body.theme-frosted .welcome-eye {
+body.theme-frosted .setup-clickable-code:hover {
   color: var(--fg) !important;
+}
+/* #763: the eye glyph is part of the wordmark LINE (an inline SVG inside .welcome-name)
+   and sits over the bare wallpaper like the wordmark — so it must NOT be routed to the
+   light var(--fg) (the old rule, light-on-light over a light wall). Kill its accent
+   (--brand-color) and let it INHERIT the adaptive ink of its parent .welcome-name
+   (currentColor): dark by default, flipped light over a dark wallpaper by adaptiveGlass. */
+body.theme-frosted .welcome-eye {
+  color: currentColor !important;
 }
 /* ── #759: two TRANSIENT chrome surfaces sit OUTSIDE the dark-ink chrome scope ──────
    The "Thinking" accordion header label (.thinking-header-left) and the ACTIVE tool
@@ -38759,15 +38766,60 @@ body.theme-frosted [style*="color: var(--red)"],
 body.theme-frosted [style*="color:var(--red)"] {
   color: var(--fg) !important;
 }
-/* the hero name is an accent gradient CLIPPED to text — repaint it neutral --fg so the
-   big "name" reads as colorless glass-vibrant text, not a branded accent gradient. */
+/* ── #763: the welcome HERO is ADAPTIVE, not a fixed light ink ─────────────────
+   The hero — the big "Orwell" wordmark (.welcome-name), the subtitle (.welcome-sub)
+   and the inline "type /setup" link — sits DIRECTLY over the wallpaper (#__wp), NOT
+   over the light glass chrome. The old rule repainted .welcome-name to the LIGHT
+   var(--fg) (mandate: no accent hue on text — correct), but over a LIGHT wallpaper
+   that is light-on-light (~1.13:1 — invisible). Unlike the chrome (a fixed light
+   glass that legitimately wants dark ink), the hero has NO glass plate, so a single
+   fixed ink cannot be legible over every wallpaper (light, dark, busy).
+
+   So the hero FLIPS polarity with the wallpaper, exactly like Apple's monochrome
+   labels over content ("becoming darker when the underlying content is light, and
+   lighter when it's dark" — HIG Color) and like the .msg-ai bubbles the #744
+   adaptiveGlass layer already flips. adaptiveGlass.js (the SAME #__wp sampler + APCA
+   floor machinery, #744) samples the wallpaper behind the hero and sets the ink +
+   halo inline ([data-adaptive-ink]) so it clears the APCA Lc≥60 floor over ANY
+   wallpaper. The accent gradient is still killed (neutral ink only — mandate).
+
+   This rule is the DEFAULT-BEFORE-JS floor: NEUTRAL DARK ink + a light halo, which
+   is legible over the common light/varied wallpaper (the reported failure) and over
+   most mid-tones; adaptiveGlass then flips it to light-ink+dark-halo over a dark
+   wallpaper within one debounced pass. Both polarities clear the floor; this default
+   only has to hold for the first frame and the (rare) no-JS path. */
 body.theme-frosted #welcome-screen .welcome-name {
   background: none !important;
-  -webkit-text-fill-color: var(--fg) !important;
+  -webkit-text-fill-color: #16191f;
   -webkit-background-clip: border-box !important;
   background-clip: border-box !important;
-  color: var(--fg) !important;
+  color: #16191f;
+  text-shadow: 0 1px 2px rgba(255,255,255,0.55), 0 0 3px rgba(255,255,255,0.45);
 }
+/* subtitle + the inline /setup link share the hero's adaptive default (neutral dark
+   ink + light halo). The /setup span sets its OWN accent color inline (style="color:
+   var(--accent)…") so it needs the same dark-ink override at this scope; the audit
+   flagged it at 2.55:1. The base #welcome-screen .welcome-sub rule muted the subtitle
+   to color-mix(--fg 60%) @ opacity .6 — over a light wallpaper that washed out, so we
+   restate it here at the dark ink with full presence on the glass theme. */
+body.theme-frosted #welcome-screen .welcome-sub {
+  color: #16191f !important;
+  -webkit-text-fill-color: #16191f !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 2px rgba(255,255,255,0.55), 0 0 3px rgba(255,255,255,0.45);
+}
+/* the inline /setup span sets its OWN accent color (style="color:var(--accent)…") — kill
+   it and let it INHERIT the subtitle's ink, which adaptiveGlass flips per wallpaper. So
+   the link tracks the subtitle: dark over a light wall, light over a dark wall (it shared
+   the subtitle's adaptive ink, never a fixed dark that fails over a dark/busy wallpaper —
+   the audit flagged it at 2.55:1). The halo + underline come from the subtitle/base rule. */
+body.theme-frosted #welcome-screen .welcome-sub .setup-trigger-link {
+  color: inherit !important;
+  -webkit-text-fill-color: inherit !important;
+}
+/* When adaptiveGlass flips the hero LIGHT (dark wallpaper), it sets these inline with
+   !important; the dark-halo backstop comes from the inline text-shadow it writes. The
+   data-adaptive-ink attribute is the source of truth at runtime. */
 
 /* ── The new background-image controls (theme.js builds these ids) ────────────
    #theme-glass-tier — a clean 3-way SEGMENTED control (Apple segmented_control_poster:

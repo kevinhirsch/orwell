@@ -42,6 +42,22 @@
   // is a FIXED light glass; the old per-surface dark veil is retired and must not return),
   // and the SENT (blue) bubble never adapts (always blue + white). So this is just .msg-ai.
   var BUBBLE_ADAPTIVE = ".msg-ai";
+  // ── #763 — the WELCOME HERO over the bare wallpaper ───────────────────────────
+  // The hero (the big "Orwell" wordmark, the subtitle, the inline "type /setup" link)
+  // sits DIRECTLY over the wallpaper (#__wp) — NOT over the light glass chrome. So a
+  // single fixed ink (the old light var(--fg)) is light-on-light over a LIGHT wallpaper
+  // (~1.13:1, invisible). Like Apple's monochrome labels over content and like the
+  // .msg-ai bubbles above, the hero must FLIP polarity with the wallpaper. Unlike a
+  // bubble there is NO frost plate, so the ink sits on the wallpaper DIRECTLY: we pick
+  // polarity at the linear-Y flip point, then verify APCA(ink ↔ wallpaper) clears the
+  // floor, and ESCALATE the ink toward pure black / pure white (not a scrim — a free
+  // wordmark over a photo wants a halo, not a plate) plus a contrasting halo backstop.
+  // Ink-only + halo; no veil/background is ever painted (it's not a glass surface).
+  var HERO_ADAPTIVE = "#welcome-screen .welcome-name, #welcome-screen .welcome-sub";
+  var HERO_INK_DARK = [22, 25, 31];        // #16191f — the dark ink (matches the CSS default + chrome)
+  var HERO_INK_LIGHT = [238, 241, 244];    // #eef1f4 — the light ink over a dark wallpaper
+  var HERO_HALO_LIGHT = "0 1px 2px rgba(255,255,255,0.60), 0 0 3px rgba(255,255,255,0.50)"; // under DARK ink
+  var HERO_HALO_DARK = "0 1px 2px rgba(0,0,0,0.62), 0 0 3px rgba(0,0,0,0.52)";              // under LIGHT ink
   // the LIGHT frost a received bubble takes over a BRIGHT backdrop (Apple's light received
   // bubble) — a near-white translucent material that reads with the dark INK_DARK label.
   // The DARK frost (over a dark/mid wall) is the CSS default (rgba(56,60,68,a)); its alpha
@@ -429,6 +445,29 @@
     return { ink: ink, frostRgb: frost, scrimAlpha: a, lc: lc, dark: dark };
   }
 
+  // #763 — for the welcome hero over a sampled wallpaper, pick ink polarity (the same
+  // linear-Y flip the small bars use), then verify APCA(ink ↔ wallpaper) clears the floor
+  // and ESCALATE the ink toward pure black / pure white until it does (or it's already
+  // maxed). The hero has no frost plate, so the ink sits on the wallpaper DIRECTLY — that
+  // is the pair we measure. Returns { ink, halo, dark, lc }. A contrasting halo is the
+  // backstop floor for a free wordmark over a busy/edge backdrop (mirrors the bubble halo).
+  function resolveHeroInk(L, bgRgb) {
+    var dark = L >= INK_THRESHOLD;          // bright wallpaper → DARK ink; dark wallpaper → LIGHT ink
+    var ink = dark ? HERO_INK_DARK.slice() : HERO_INK_LIGHT.slice();
+    var target = dark ? [0, 0, 0] : [255, 255, 255];  // escalate toward this if the floor isn't met
+    var lc = Math.abs(apcaContrast(ink, bgRgb));
+    // climb the ink toward pure black/white in a few steps if a mid-tone wallpaper starves it.
+    for (var step = 0; step < 6 && lc < APCA_FLOOR; step++) {
+      ink = [
+        Math.round(ink[0] + (target[0] - ink[0]) * 0.5),
+        Math.round(ink[1] + (target[1] - ink[1]) * 0.5),
+        Math.round(ink[2] + (target[2] - ink[2]) * 0.5),
+      ];
+      lc = Math.abs(apcaContrast(ink, bgRgb));
+    }
+    return { ink: ink, halo: dark ? HERO_HALO_LIGHT : HERO_HALO_DARK, dark: dark, lc: lc };
+  }
+
   // ── apply ───────────────────────────────────────────────────────────────────
   function isFrosted() { return !!(document.body && document.body.classList.contains("theme-frosted")); }
 
@@ -436,11 +475,18 @@
     try {
       if (el.id && EXCLUDE_IDS[el.id]) return;
       var r = el.getBoundingClientRect();
-      if (r.width < 24 || r.height < 24) return;
+      // The hero text (esp. the one-line subtitle) is a THIN strip — a flat 24px floor
+      // skipped .welcome-sub entirely (it stayed at the dark CSS default, unreadable over
+      // a dark/busy wallpaper). Hero elements are text, so a thin sample is fine; relax the
+      // height floor for them (keep the width floor so a collapsed/empty node is still skipped).
+      var heroEl = false; try { heroEl = el.matches(HERO_ADAPTIVE); } catch (_) {}
+      var minH = heroEl ? 10 : 24;
+      if (r.width < 24 || r.height < minH) return;
       var L = backdropLuminance({ left: r.left, top: r.top, width: r.width, height: r.height });
       if (L == null) {
         el.style.removeProperty("background-color");
         el.style.removeProperty("color"); el.style.removeProperty("text-shadow");
+        el.style.removeProperty("-webkit-text-fill-color");
         el.removeAttribute("data-adaptive-veil"); el.removeAttribute("data-adaptive-ink");
         return;
       }
@@ -481,6 +527,31 @@
         el.setAttribute("data-apca-lc", Math.round(s.lc));   // probe hook for the smoke test
         return;
       }
+      // #763 — the WELCOME HERO (wordmark + subtitle) over the bare wallpaper. Ink-only
+      // polarity flip with the APCA floor measured DIRECTLY against the wallpaper (no
+      // frost plate). We never paint a background here — only the ink + a contrasting
+      // halo. The CSS default is dark-ink+light-halo; we restate or flip it per backdrop.
+      var isHero = false; try { isHero = el.matches(HERO_ADAPTIVE); } catch (_) {}
+      if (isHero) {
+        var hbg = backdropAvgColor({ left: r.left, top: r.top, width: r.width, height: r.height });
+        if (!hbg) {  // no readable wallpaper colour → let the CSS default stand
+          el.style.removeProperty("color");
+          el.style.removeProperty("-webkit-text-fill-color");
+          el.style.removeProperty("text-shadow");
+          el.removeAttribute("data-adaptive-ink"); el.removeAttribute("data-apca-lc");
+          return;
+        }
+        var h = resolveHeroInk(L, hbg);
+        var hcss = "rgb(" + h.ink[0] + "," + h.ink[1] + "," + h.ink[2] + ")";
+        el.style.setProperty("color", hcss, "important");
+        // .welcome-name uses -webkit-text-fill-color (it was a clipped gradient) — drive it too.
+        el.style.setProperty("-webkit-text-fill-color", hcss, "important");
+        el.style.setProperty("text-shadow", h.halo, "important");
+        el.setAttribute("data-adaptive-ink", h.dark ? "dark" : "light");
+        el.setAttribute("data-apca-lc", Math.round(h.lc));
+        return;
+      }
+
       var small = false;
       try { small = el.matches(FLIP_SET); } catch (_) {}
       // SMALL bars stay CLEAR (low veil); LARGE surfaces don't flip, so their glass adapts
@@ -544,9 +615,13 @@
     // (isGlassFull is retained as a named helper for the source-pinned tests; the standdown is
     // keyed on theme-frosted, which covers BOTH tiers, so glass-full is a subset of it.)
     if (isFrosted() || isGlassFull()) {
-      _dropTagged(BUBBLE_ADAPTIVE);   // chrome (+ anything non-bubble) drops; bubbles kept
-      buildBackdrop();                // unified backdrop canvas; bubbles sample it
-      var nodes = document.querySelectorAll(BUBBLE_ADAPTIVE);
+      // The adaptive surfaces under the glass theme: the RECEIVED chat bubbles (#744) AND
+      // the welcome HERO over the bare wallpaper (#763). Both flip ink polarity with the
+      // backdrop; everything else (the fixed light glass chrome) stands down.
+      var ADAPTIVE_SEL = BUBBLE_ADAPTIVE + ", " + HERO_ADAPTIVE;
+      _dropTagged(ADAPTIVE_SEL);      // chrome (+ anything non-adaptive) drops; bubbles + hero kept
+      buildBackdrop();                // unified backdrop canvas; bubbles + hero sample it
+      var nodes = document.querySelectorAll(ADAPTIVE_SEL);
       for (var j = 0; j < nodes.length; j++) {
         var el = nodes[j];
         if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue;
@@ -568,6 +643,7 @@
       if (keepSel) { try { if (el.matches(keepSel)) continue; } catch (_) {} }
       el.style.removeProperty("background-color");
       el.style.removeProperty("color");
+      el.style.removeProperty("-webkit-text-fill-color");   // #763 — drop the hero ink override too
       el.style.removeProperty("text-shadow");
       el.style.removeProperty("--ai-scrim-alpha");   // #744 — drop the per-bubble scrim escalation too
       el.removeAttribute("data-adaptive-veil");
