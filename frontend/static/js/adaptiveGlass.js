@@ -462,6 +462,16 @@
       // re-sample when the theme or the backdrop changes (no new event — observe body).
       var mo = new MutationObserver(schedule);
       mo.observe(document.body, { attributes: true, attributeFilter: ["class", "style"], childList: true, subtree: false });
+      // re-sample when CHAT MESSAGES are added/stream in — the body observer is subtree:false,
+      // so a freshly-rendered received bubble (.msg-ai) would keep its default light-on-dark ink
+      // over a BRIGHT wallpaper until an unrelated scroll/resize fired. Observe #chat-history so
+      // the adaptive polarity flip lands as the bubble appears. Debounced (schedule), so streaming
+      // text doesn't thrash. (chat-history is static in index.html, so it exists at init.)
+      var _chat = document.getElementById("chat-history");
+      if (_chat) {
+        var cmo = new MutationObserver(schedule);
+        cmo.observe(_chat, { childList: true, subtree: true });
+      }
       ["(prefers-reduced-transparency: reduce)", "(prefers-contrast: more)"].forEach(function (q) {
         try { var mq = window.matchMedia(q); (mq.addEventListener ? mq.addEventListener : mq.addListener).call(mq, "change", schedule); } catch (_) {}
       });
