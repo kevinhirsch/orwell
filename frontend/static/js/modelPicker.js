@@ -185,6 +185,15 @@ function _initModelPickerDropdown() {
     const result = [];
     const seen = new Set();
     items.forEach(item => {
+      // Image-generation endpoints belong to the image flow (settings
+      // `image_model` / the image step), NOT the chat composer's "Select
+      // model" dropdown. Excluding image-ONLY endpoints here keeps them out of
+      // EVERY chat-picker path (browse, provider groups, AND search — they all
+      // read this one list), so no image model can leak via search. Chat (and
+      // chat+image dual-capable) endpoints are untouched. The image flow
+      // resolves its model independently (settings.js `_isImageModel`), so this
+      // never breaks image generation.
+      if ((item.model_type || 'llm') === 'image') return;
       // Previously: offline endpoints were skipped entirely, so a server
       // that briefly went down disappeared from the picker — confusing
       // when the user can still see it (offline-tagged) in Settings.
