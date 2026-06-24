@@ -4899,6 +4899,35 @@ async def stream_agent_loop(
                             + _turn_npc_move_nudges),
         )
 
+        # 0079 — the runtime loop overseer (SHADOW mode; opt-in, default OFF via ORWELL_OVERSEER).
+        # One holistic, Vault-free, post-turn diagnosis of the engine<->LLM loop: build structural
+        # Signals from this turn's telemetry, run the cheap symptom-gate, and if it trips, log the
+        # overseer's verdict to the OVERSEER ring. SHADOW = diagnose + log ONLY; it applies NO lever
+        # (the existing guardrails still do the acting), so behaviour is unchanged and the seeded
+        # lanes stay byte-identical. Fail-soft + off by default — the deterministic floor stands.
+        try:
+            from src.overseer import overseer_enabled, Signals, DeterministicOverseer
+            if overseer_enabled():
+                _ov_names = {ev.get("tool") for ev in (tool_events or []) if isinstance(ev, dict)}
+                _ov_sig = Signals(
+                    in_advance_phase=(_phase in _ADVANCE_PHASES),
+                    play_quiet=bool(_is_lull),
+                    engaged_scene=bool(_want_record),
+                    recorded_interaction=bool(_ov_names & _RECORD_TOOLS),
+                    progression_tool_called=bool(_ov_names & _PROGRESSION_TOOLS),
+                    io_error=any(isinstance(ev, dict) and ev.get("error") for ev in (tool_events or [])),
+                    beat_seq_before=_ledger_beat_seq_before,
+                )
+                _ov_verdict = DeterministicOverseer().assess(_ov_sig)
+                if _ov_verdict is not None:
+                    from src import log_rings as _lr
+                    _lr.record_overseer(
+                        _ov_verdict.level, _ov_verdict.kind, _ov_verdict.diagnosis,
+                        lever=_ov_verdict.lever, beat_before=_ledger_beat_seq_before,
+                        ok=True, user=owner)
+        except Exception as _ov_err:  # fail-soft: the overseer must never hurt a turn
+            logger.debug(f"[orwell] overseer shadow hook skipped: {_ov_err}")
+
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.
     full_response, _fallback_chunk = _empty_response_fallback(
