@@ -3513,6 +3513,73 @@ body.bg-pattern-perlin-flow {
         margin: -7px -8px -7px 8px;
       }
     }
+
+    /* ── Liquid Glass — model picker (#735) ──────────────────────────────────────
+       Under the glass tiers (body.theme-frosted = Full Glass AND Frosted) the picker
+       button + popover ride the shared kit LIGHT glass material (the material fill,
+       backdrop, luminous rim + soft float, and the menu/button radius come from the
+       grouped "CHROME surfaces" rules in THE ORWELL DESIGN SYSTEM block — these
+       selectors are in those lists). Here we close the legibility gaps that are local
+       to the picker's INNER controls: several set their OWN light `var(--fg)` mix and
+       so survived as light-on-light on the light glass (the "+" add-models button, the
+       favorite dot, the remove-from-recent dot, the provider-group chevron). Apple's
+       rule on the Regular material is dark ink over a light glass — never light-on-light
+       (LIQUID_GLASS_REFERENCE §"Regular"; ADAPTIVE_LEGIBILITY_REFERENCE §1 — small/large
+       elements adapt their symbols to the backdrop; menus are a "big" element so the
+       legible state is dark-ink, not a flip). Apple defines glass by LENSING, not a
+       stroke, so any definition edge is a soft luminous hairline, never a hard
+       var(--border). NO accent hue on TEXT; the favorite/remove dots are sanctioned
+       NON-text status accents and keep their hue. Scoped to body.theme-frosted so the
+       Normal tier keeps its flat look.
+
+       Ref menus/popovers: lg_hig_toolbar_after.png + lg_hig_ios_glass_over_light.png
+       (a floating glass element with dark monochrome symbols over light content). */
+    body.theme-frosted .model-picker-menu {
+      /* Redefine --fg to the chrome dark ink WITHIN the popover so every inner control
+         that paints `color: var(--fg)` / `color-mix(in srgb, var(--fg) N%, …)` resolves
+         to dark / muted-dark on the light glass — full ink stays dark, the muted
+         secondary gradation is preserved (it just keys off dark ink). Mirrors the kit
+         dark-ink-on-glass treatment the other chrome popovers (.dropdown/.cp-popover)
+         already get, applied to the model picker so its inner rows/dots/buttons can't
+         be light-on-light. */
+      --fg: #16191f;
+    }
+    /* The "+" add-models button: a quiet glass control on the light material — dark ink
+       glyph + a SOFT LUMINOUS hairline (not the hard dark var(--border) it carried). */
+    body.theme-frosted .model-picker-action-btn {
+      border-color: rgba(255,255,255,0.14) !important;
+      background: rgba(255,255,255,0.16);
+      color: #16191f !important;
+    }
+    body.theme-frosted .model-picker-action-btn:hover,
+    body.theme-frosted .model-picker-action-btn:focus-visible {
+      border-color: rgba(255,255,255,0.28) !important;
+      background: rgba(255,255,255,0.30);
+      color: #16191f !important;
+    }
+    /* The favorite + remove dots are sanctioned NON-text STATUS accents (a ● / ×),
+       not body text — but their RESTING (inactive) color was a light var(--fg) mix that
+       vanished on the light glass. Give the resting state a legible muted DARK ink; the
+       ACTIVE favorite keeps its accent hue (a status indicator, not text). */
+    body.theme-frosted .model-picker-list .mp-fav-dot:not(.active) {
+      color: rgba(22,25,31,0.40);
+    }
+    body.theme-frosted .model-picker-list .mp-fav-dot:not(.active):hover,
+    body.theme-frosted .model-picker-list .mp-fav-dot:not(.active):focus-visible {
+      color: rgba(22,25,31,0.72);
+    }
+    body.theme-frosted .model-picker-list .mp-remove-dot {
+      color: rgba(22,25,31,0.42);
+    }
+    /* Provider-group chevron is a dark monochrome symbol on the light glass. */
+    body.theme-frosted .model-picker-list .mp-provider-chevron {
+      color: #16191f;
+    }
+    /* The stale/offline badge rim was a hard var(--border) stroke — soften to a
+       luminous hairline so it reads as glass, not a dark box. */
+    body.theme-frosted .model-picker-list .model-switch-stale-badge {
+      border-color: rgba(0,0,0,0.16) !important;
+    }
     /* Overflow "+" menu */
     .overflow-wrapper {
       position: relative;
