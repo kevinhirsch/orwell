@@ -6,6 +6,14 @@
 // the player never has to PROMPT for it (ledger L31). It never replaces the chat (the interview /
 // premiere happens IN the chat); it just sets expectations beside it.
 //
+// #642: the guide is a charter member of the OrwellNotice kit (the above-composer affordance
+// zone). It composes window.OrwellNoticeKit (kind "guide") for the shared chrome/anchor/dismiss/
+// a11y/animation + the ONE stacked container, so it STACKS deterministically beside the decision
+// card instead of each minting its own insertBefore(bar). It keeps its OWN richer dismiss
+// persistence (the long-standing synced "popup:premiere-tutorial" id, #638) via the kit's
+// persistDismiss:false escape hatch + the onDismiss hook — so existing cross-device dismiss data
+// is untouched (mirrors the gadget kit's persistCollapsed:false consumer pattern).
+//
 // Shows ONLY when: the game build is on, a season has started, it is WEEK 1 (the premiere week), and
 // the player has not dismissed it before. Per-user dismiss persists (the E71 per-user-key pattern),
 // so it appears once per account, not once per session. Reads the same Vault-free /api/orwell/state +
@@ -56,7 +64,7 @@
     try {
       try { localStorage.setItem(dismissKey(), "1"); } catch (_) {}
       var card = document.getElementById("orwell-premiere-tutorial");
-      if (card) dismiss(card);   // mirror the close in this window (no re-emit — guarded)
+      if (card) dismiss();      // mirror the close in this window (no re-emit — guarded)
       else removeTutorial();
     } finally { _applyingSynced = false; }
   }
@@ -87,28 +95,15 @@
     if (document.getElementById("orwell-premiere-tutorial-css")) return;
     const st = document.createElement("style");
     st.id = "orwell-premiere-tutorial-css";
+    // #642: the card SHELL (margin/padding/dashed bg+border/radius/the rise+fade entrance) is now
+    // the OrwellNotice kit's `.on-card.on-guide`. Only the premiere-SPECIFIC inner rules remain.
     // Theme-token driven (works across every house theme + frost) — no hard-coded colors.
     st.textContent =
-      ".orwell-premiere-tutorial { margin: var(--space-2, .5rem) auto; max-width: 640px;" +
-      "  padding: var(--space-3, .7rem) var(--space-4, .9rem);" +
-      "  background: color-mix(in srgb, var(--fg) 5%, transparent);" +
-      "  border: 1px dashed color-mix(in srgb, var(--fg) 30%, transparent); border-radius: 12px;" +
-      "  color: color-mix(in srgb, var(--fg) 86%, transparent); font-size: var(--fs-sm, .82rem);" +
-      "  line-height: 1.5; }" +
-      // J2-10 / J1-20: the premiere's biggest beat was a hard single-frame pop-in. Stage the card's
-      // arrival with a gentle rise+fade so the apparatus lands with a little weight. Purely
-      // presentational — the card is byte-identical once settled; reduced-motion strips it (below).
-      ".orwell-premiere-tutorial.orwell-premiere-tutorial-in {" +
-      "  animation: orwellPremiereIn .42s cubic-bezier(0.22,0.61,0.36,1) both; }" +
-      "@keyframes orwellPremiereIn { from { opacity: 0; transform: translateY(8px); }" +
-      "  to { opacity: 1; transform: none; } }" +
-      ".orwell-premiere-tutorial .opt-hd { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .3rem; }" +
-      ".orwell-premiere-tutorial .opt-ttl { font-weight: 700; letter-spacing: .02em; }" +
-      ".orwell-premiere-tutorial .opt-rhythm { font-weight: 600;" +
+      ".orwell-premiere-tutorial .opt-rhythm { font-weight: 600; margin-top: .35rem;" +
       "  color: color-mix(in srgb, var(--fg) 72%, transparent); }" +
       // J2-13: a real affordance to DO the first move (the tutorial named the rhythm but offered no
       // way to act). The CTA seeds the composer with an opener and focuses it — it never sends, so
-      // the player stays the author (ADR 0003). Sits in its own action row beside Close guide.
+      // the player stays the author (ADR 0003). Sits in its own action row.
       ".orwell-premiere-tutorial .opt-actions { display: flex; align-items: center; gap: .5rem;" +
       "  flex-wrap: wrap; margin-top: .55rem; }" +
       ".orwell-premiere-tutorial .opt-go { flex-shrink: 0; cursor: pointer;" +
@@ -117,53 +112,50 @@
       "  border-radius: 8px; font: inherit; font-size: .74rem; font-weight: 600; min-height: 44px;" + // 2.5.5 tap floor
       "  padding: 0 .85rem; }" +
       ".orwell-premiere-tutorial .opt-go:hover, .orwell-premiere-tutorial .opt-go:focus-visible {" +
-      "  background: color-mix(in srgb, var(--accent, var(--fg)) 26%, transparent); }" +
-      ".orwell-premiere-tutorial .opt-dismiss { margin-left: auto; flex-shrink: 0; cursor: pointer;" +
-      "  background: color-mix(in srgb, var(--fg) 9%, transparent);" +
-      "  border: 1px solid color-mix(in srgb, var(--fg) 24%, transparent); color: inherit;" +
-      "  border-radius: 8px; font: inherit; font-size: .72rem; font-weight: 600; min-height: 44px;" + // J2-18 / 2.5.5: project tap floor (was 36px)
-      "  padding: 0 .75rem; }" +
-      ".orwell-premiere-tutorial .opt-dismiss:hover, .orwell-premiere-tutorial .opt-dismiss:focus-visible {" +
-      "  background: color-mix(in srgb, var(--fg) 16%, transparent); }" +
-      ".orwell-premiere-tutorial-out { opacity: 0; transition: opacity .2s ease; }" +
-      // J2-20 / J2-10: respect prefers-reduced-motion (consistent with orwellCast.js's portrait
-      // guard) — strip BOTH the dismiss fade AND the J2-10 entrance staging.
-      "@media (prefers-reduced-motion: reduce) {" +
-      "  .orwell-premiere-tutorial-out { transition: none; }" +
-      "  .orwell-premiere-tutorial.orwell-premiere-tutorial-in { animation: none; } }";
+      "  background: color-mix(in srgb, var(--accent, var(--fg)) 26%, transparent); }";
     document.head.appendChild(st);
   }
 
   let _mounted = false;
+  let _notice = null;   // #642: the OrwellNotice kit instance for this guide.
 
-  function dismiss(card) {
+  function dismiss() {
     markDismissed();
-    card.classList.add("orwell-premiere-tutorial-out");
-    setTimeout(function () { if (card.isConnected) card.remove(); }, 220);
+    if (_notice) _notice.hide();   // remove from the stacked zone (we own the dismiss persistence)
+    _mounted = false;
   }
 
   function mount() {
     if (_mounted) return;
     if (!isGameBuild() || hasDismissed()) return;
     if (document.getElementById("orwell-premiere-tutorial")) { _mounted = true; return; }
-    // Sit it just above the chat input, the same anchor the OOC hint uses (composer guidance).
+    // The above-composer affordance zone is owned by the OrwellNotice kit; with the kit absent,
+    // fail-soft (no guide rather than a hand-rolled fallback).
+    if (!window.OrwellNoticeKit) return;
+    // Need the composer anchor to exist (the kit anchors the zone above .chat-input-bar).
     const bar = document.querySelector(".chat-input-bar");
     if (!bar || !bar.parentNode) return;
     ensureCss();
 
-    const card = document.createElement("section");
-    card.id = "orwell-premiere-tutorial";
-    card.className = "orwell-premiere-tutorial";
-    card.setAttribute("role", "note");
-    // J2-12: the tutorial is injected after the premiere narration, so screen-reader users never
-    // hear about the journey's key expectation-setter. A polite live region announces it on insert
-    // WITHOUT stealing focus (the card stays a non-intrusive note per ADR 0003).
-    card.setAttribute("aria-live", "polite");
-    card.innerHTML =
-      '<div class="opt-hd">' +
-        '<span class="opt-ttl">Welcome to the house — premiere week</span>' +
-        '<button type="button" class="opt-dismiss" title="Won\'t show again" aria-label="Close guide — won\'t show again">Close guide</button>' +
-      '</div>' +
+    // Compose the kit (kind "guide"). persistDismiss:false — the premiere keeps its OWN richer
+    // synced "popup:premiere-tutorial" dismiss (#638, cross-device); the kit just supplies the
+    // chrome/anchor/animation/a11y. The legacy id + class are kept so existing selectors/tests
+    // and the per-premiere CSS above still apply.
+    _notice = window.OrwellNoticeKit.create({
+      id: "orwell-premiere-tutorial",
+      kind: "guide",
+      title: "Welcome to the house — premiere week",
+      dismissible: true,
+      persistDismiss: false,        // the premiere owns its own (synced) dismiss persistence
+      onDismiss: function () { dismiss(); },
+    });
+    const body = _notice.ensure();   // mounts into the stacked zone; returns the .on-body
+    const card = _notice.el;
+    if (!card) return;
+    card.classList.add("orwell-premiere-tutorial");   // keep the legacy hook class for inner CSS
+    // J2-12: announce on insert without stealing focus (the kit already sets aria-live=polite for
+    // the guide kind — non-intrusive note per ADR 0003).
+    body.innerHTML =
       '<div>Talk to anyone, wander any room — the house keeps playing around you. ' +
       'You\'ll need to cross paths with all fifteen houseguests before Production calls the first HOH competition.</div>' +
       '<div class="opt-rhythm">' +
@@ -176,16 +168,8 @@
       '<div class="opt-actions">' +
         '<button type="button" class="opt-go" aria-label="Start meeting the house — fills the message box with an opener">Meet the house \u{2192}</button>' +
       '</div>';
-    bar.parentNode.insertBefore(card, bar);
     _mounted = true;
-    // J2-10 / J1-20: stage the entrance (reduced-motion guarded in CSS); drop the class once it
-    // plays so a later re-render/re-flow can't replay it.
-    card.classList.add("orwell-premiere-tutorial-in");
-    card.addEventListener("animationend", function () {
-      card.classList.remove("orwell-premiere-tutorial-in");
-    }, { once: true });
-    card.querySelector(".opt-dismiss").addEventListener("click", function () { dismiss(card); });
-    var go = card.querySelector(".opt-go");
+    var go = body.querySelector(".opt-go");
     if (go) go.addEventListener("click", function () { firstMove(); });
   }
 
@@ -209,6 +193,7 @@
   // Once the season advanced it kept rendering its "premiere week" banner all the way to the finale.
   // Actively remove it whenever the game is no longer in the premiere window.
   function removeTutorial() {
+    if (_notice) _notice.hide();
     const card = document.getElementById("orwell-premiere-tutorial");
     if (card) card.remove();
     _mounted = false;

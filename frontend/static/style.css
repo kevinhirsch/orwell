@@ -1906,6 +1906,62 @@ body.bg-pattern-perlin-flow {
     .og-card .og-body { overflow-wrap: anywhere; }
     .og-card .og-empty { opacity: .6; font-style: italic; }
     @media (prefers-reduced-motion: reduce) { .og-card .og-chev { transition: none; } }
+    /* ── THE OrwellNotice KIT FAMILY (.on-*) — #642 ─────────────────────────────
+       The canonical ABOVE-COMPOSER affordance chrome — the third DWE kit, sibling to the
+       .ow-* (windows) and .og-* (rail gadgets) families. Every above-composer affordance
+       composes orwellNotice.js, which ALSO injects this family at runtime (ensureCss) so it
+       works before style.css loads; this copy is the source-of-truth declaration the house
+       themes (0052) + the frost layer paint and the convention gate (test_on_notice_kit.py)
+       pins (mirroring how .ow-* / .og-* live here). Keep this and the runtime ensureCss() in
+       orwellNotice.js in sync. */
+    #orwell-notice-zone {
+      display: flex; flex-direction: column; gap: var(--space-2, .45rem);
+      margin: 0 auto var(--space-2, .45rem); width: 100%; max-width: 760px;
+      pointer-events: none;
+    }
+    #orwell-notice-zone:empty { display: none; margin: 0; }
+    .on-card {
+      position: relative; pointer-events: auto;
+      border-radius: 12px; padding: .7rem .85rem;
+      background: var(--panel, #111); color: var(--fg, #9cdef2);
+      border: 1px solid var(--border, #355a66);
+      font-size: var(--fs-sm, .85rem); line-height: 1.5;
+      box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
+    }
+    .on-card .on-head { display: flex; align-items: baseline; gap: .5rem; padding-right: 1.6rem; }
+    .on-card .on-icon { flex: 0 0 auto; opacity: .9; }
+    .on-card .on-title { flex: 1 1 auto; min-width: 0; font-weight: 700; letter-spacing: .02em; }
+    .on-card .on-body { margin-top: .35rem; }
+    .on-card .on-body:empty { display: none; }
+    .on-card .on-dismiss {
+      position: absolute; top: .15rem; right: .2rem;
+      min-width: 44px; min-height: 44px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: none; background: none; color: inherit; cursor: pointer;
+      opacity: .65; border-radius: 8px; font: inherit; font-size: 1rem;
+    }
+    .on-card .on-dismiss:hover, .on-card .on-dismiss:focus-visible { opacity: 1; background: rgba(255,255,255,.08); }
+    .on-card.on-guide {
+      background: color-mix(in srgb, var(--fg, #9cdef2) 5%, transparent);
+      border-style: dashed; border-color: color-mix(in srgb, var(--fg, #9cdef2) 30%, transparent);
+      box-shadow: none;
+    }
+    .on-card.on-decision { border-color: var(--accent, var(--red, #e06c75)); }
+    .on-card.on-system-notice { border-color: color-mix(in srgb, var(--fg, #9cdef2) 28%, transparent); }
+    .on-card.on-sev-warn {
+      border-color: var(--color-warning, #f0ad4e);
+      background: linear-gradient(0deg, color-mix(in srgb, var(--color-warning, #f0ad4e) 8%, transparent), color-mix(in srgb, var(--color-warning, #f0ad4e) 8%, transparent)), var(--panel, #111);
+    }
+    .on-card.on-sev-error {
+      border-color: var(--color-error, var(--red, #e06c75));
+      background: linear-gradient(0deg, color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 10%, transparent), color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 10%, transparent)), var(--panel, #111);
+    }
+    .on-card.on-continue { border-color: color-mix(in srgb, var(--accent, #e06c75) 50%, var(--border, #355a66)); }
+    @keyframes on-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @keyframes on-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(4px); } }
+    .on-card.on-anim-in { animation: on-in .22s cubic-bezier(0.22,0.61,0.36,1) both; }
+    .on-card.on-anim-out { animation: on-out .2s ease both; }
+    @media (prefers-reduced-motion: reduce) { .on-card.on-anim-in, .on-card.on-anim-out { animation: none; } }
     /* game-build gate: no rail in the full inherited workspace */
     body:not([data-game-build]) #gadget-rail,
     body:not([data-game-build]) #gadget-rail-open { display: none !important; }
@@ -2344,19 +2400,16 @@ body.bg-pattern-perlin-flow {
        inset) and shares its visual language — fully theme-token driven (derives from
        --fg) so the frosted house themes stay readable. SHIPS WITH NO ACTIVE TIPS; the
        class is ready for any future composer hint via OrwellChatHint.register/show. */
-    .orwell-chat-hint {
+    /* (issue 642) the chat hint composes the OrwellNotice kit (kind "guide") for its SHELL now
+       (.on-card.on-guide owns the bg/border/radius/padding/animation). Only the hint-SPECIFIC
+       inner rules remain — the body lays its text + dismiss button out in a row. */
+    .orwell-chat-hint .on-body {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin: 0 8px 6px;
-      padding: 7px 12px;
-      border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
-      border-radius: 10px;
-      background: color-mix(in srgb, var(--fg) 5%, transparent);
-      color: color-mix(in srgb, var(--fg) 78%, transparent);
       font-size: 12.5px;
       line-height: 1.4;
-      animation: msg-enter 0.3s ease-out both;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
     }
     .orwell-chat-hint-text { flex: 1 1 auto; }
     .orwell-chat-hint code {

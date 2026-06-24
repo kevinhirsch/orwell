@@ -129,9 +129,13 @@ def test_sourcepin_wave3_shared_dismiss_affordance():
     # banner to docked sidebar chrome ("Where you are"), which has no dismiss affordance.
     # orwellRetrospective.js MIGRATED onto the kit (0054 Phase 2) — it carries the kit's own
     # close button now, not a bespoke ow-dismiss banner.
-    for f in ("orwellEngineStatus.js",):
-        js = _read("static", "js", f)
-        assert "ow-dismiss" in js, f                 # the dismissable banner surfaces adopt it
+    # #642: the engine-status banner MIGRATED off the window kit's .ow-dismiss onto the
+    # OrwellNotice kit (a top-banner system-notice) — its dismiss is the notice kit's shared
+    # .on-dismiss now (one shared dismiss affordance, the owner add-on). It no longer carries
+    # ow-dismiss; the notice ratchet (test_on_notice_kit.py) pins its kit membership.
+    eng = _read("static", "js", "orwellEngineStatus.js")
+    assert "OrwellNoticeKit.create(" in eng, "engine-status composes the OrwellNotice kit (#642)"
+    assert "ow-dismiss" not in eng, "engine-status no longer hand-borrows the window kit's dismiss"
 
 
 def test_sourcepin_wave3_modal_family_focus_return():

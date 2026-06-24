@@ -8,6 +8,16 @@
 // validates legality and stays idempotent. Dismissing the card (×) is always allowed — the
 // player may instead talk it out with the game master, which drives the same validated seam.
 //
+// #642: the decision card is the CHARTER member of the OrwellNotice kit (the above-composer
+// affordance zone). It composes window.OrwellNoticeKit (kind "decision") for the shared
+// anchor — it now mounts into the ONE stacked notice zone above the composer, so it STACKS
+// deterministically beside the game guide (the decision sits closest to the composer) instead
+// of scrolling inside #chat-history and fighting for the slot. It keeps its OWN rich internals
+// (legal options, pick-count, the binding Confirm, the J5-20 risk skin, the per-signature
+// dismiss + the boot/poll rearm) — the kit owns only the anchor; the decision is a HARD-STOP
+// affordance (dismissible, NEVER auto-dismissed). The kit's own corner × is suppressed
+// (dismissible:false) — the card renders its OWN .odec-x with the existing dismiss semantics.
+//
 // Input: chat.js dispatches `orwell:pending` with {pending} parsed from advanceGame /
 // submitDecision tool results (Vault-free PendingDecisionView: kind, prompt, options[],
 // appeals?, juror?, pick). Vault-free by construction; fail-open everywhere.
@@ -58,8 +68,10 @@
   // arming within the window cancels it — otherwise the stale timer fires removeCard() and yanks
   // the freshly-armed (live, unconfirmed) next decision card out from under the player (TRANS-4).
   let _doneTimer = null;
+  let _notice = null;   // #642: the OrwellNotice kit instance hosting the card (the zone anchor).
   function removeCard() {
     if (_doneTimer) { clearTimeout(_doneTimer); _doneTimer = null; }
+    if (_notice) { try { _notice.hide(); } catch (_) {} _notice = null; }
     const old = document.getElementById(CARD_ID);
     if (old) old.remove();
   }
@@ -86,6 +98,13 @@
       }
       @keyframes odec-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       @media (prefers-reduced-motion: reduce) { #${CARD_ID} { animation: none; transition: none; } }
+      /* #642: hosted in the OrwellNotice kit card (.on-card.on-decision owns the lift/border/
+         radius/anchor), the decision card goes FLAT — drop its own margin/max-width/shadow/
+         border/animation so it fills the kit body (no double chrome, no squeezed note column). */
+      .on-card.on-decision #${CARD_ID} {
+        margin: 0; max-width: none; box-shadow: none; border: none; padding: 0;
+        background: transparent; animation: none;
+      }
       #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
       #${CARD_ID} .odec-title { font-weight: 700; letter-spacing: .03em; flex: 1; }
       /* J5-21: the dismiss × stays visually in the top-right corner (absolute), but is moved to the
@@ -135,7 +154,10 @@
         background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
         border-radius: 8px; padding: .5rem; font: inherit;
       }
-      #${CARD_ID} .odec-row { display: flex; align-items: center; gap: .6rem; margin-top: .65rem; }
+      /* flex-wrap so the full-width .odec-hint (flex-basis:100%; order:99) drops to
+         its OWN line instead of competing for width and crushing .odec-note (the
+         description) into a one-word-per-line column. */
+      #${CARD_ID} .odec-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: .65rem; }
       #${CARD_ID} .odec-confirm {
         cursor: pointer; border: none; border-radius: 8px; padding: .42rem .95rem; font-weight: 700;
         min-height: 44px;
@@ -255,8 +277,13 @@
     removeCard();
     if (!pending || !pending.kind) return;
     ensureStyles();
+    // #642: the card mounts into the OrwellNotice kit's above-composer zone (the kit anchors it
+    // above .chat-input-bar). Require the kit + the composer anchor; fall back to the in-stream
+    // #chat-history host only if the kit is unavailable (fail-open — the card must always reach
+    // the player). The chat-history existence is still the boot-readiness signal the rearm uses.
     const chatBox = document.getElementById("chat-history");
-    if (!chatBox) return;
+    const hasKit = !!(window.OrwellNoticeKit && document.querySelector(".chat-input-bar"));
+    if (!chatBox && !hasKit) return;
 
     const kind = pending.kind;
     const pick = kind === "nominations" ? 2 : (typeof pending.pick === "number" ? Math.max(1, pending.pick) : 1);
@@ -566,7 +593,11 @@
         _doneTimer = setTimeout(() => {
           // J5-06: only remove if THIS card is still the lingering done-card — never a card that
           // re-armed into the same id within the 4s window (removeCard() also clears this timer).
-          if (card.isConnected && card.classList.contains("odec-done")) card.remove();
+          // #642: remove the kit notice host too (if any) so no empty wrapper lingers in the zone.
+          if (card.isConnected && card.classList.contains("odec-done")) {
+            if (_notice) { try { _notice.hide(); } catch (_) {} _notice = null; }
+            card.remove();
+          }
           _doneTimer = null;
         }, 4000);
       } catch (_) {
@@ -592,7 +623,31 @@
       }
     });
 
-    chatBox.appendChild(card);
+    // #642: mount the card into the OrwellNotice kit's stacked above-composer zone (kind
+    // "decision" — it sits closest to the composer, the most action-demanding affordance). The
+    // kit's own corner × is suppressed (dismissible:false) — the card carries its OWN .odec-x
+    // with the per-signature dismiss semantics; persistDismiss:false (a decision is a live
+    // hard-stop, never a "dismissed forever" bit). The existing #orwell-decision-card element is
+    // appended INTO the kit card so all its CSS/selectors/escape-scope are untouched. Fail-open:
+    // with no kit, fall back to the in-stream #chat-history host (the legacy mount).
+    if (hasKit) {
+      _notice = window.OrwellNoticeKit.create({
+        id: "orwell-decision-notice",
+        kind: "decision",
+        title: titleFor(kind, pending.binding),
+        role: "presentation",     // the inner card is the role="form" landmark; don't double it
+        dismissible: false,
+        persistDismiss: false,
+      });
+      const host = _notice.ensure();   // the .on-body of the stacked kit card
+      // The kit's empty head reserves no useful space for the decision card — hide it (the card
+      // brings its own .odec-head with the title + risk badge).
+      const kitHead = _notice.el && _notice.el.querySelector(".on-head");
+      if (kitHead) kitHead.style.display = "none";
+      host.appendChild(card);
+    } else {
+      chatBox.appendChild(card);
+    }
     card.scrollIntoView({ block: "nearest" });
     // J3-18: move focus to the card so keyboard/SR users know a binding decision appeared.
     // tabindex=-1 allows programmatic focus without adding the card to the Tab order.
