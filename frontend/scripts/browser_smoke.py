@@ -196,6 +196,15 @@ def main() -> int:
                   const ad = mk('<div class="admin-card adm-probe-lol" style="display:block">'+
                     '<div class="adm-row" style="color:color-mix(in srgb, var(--fg) 70%, var(--panel))">Setting label</div>'+
                     '</div>');
+                  // The gadget RAIL HEADER ("The House" title) sits OUTSIDE the cards in the
+                  // TRANSPARENT rail container, so it is NOT covered by the card dark-ink scope.
+                  // It regressed light-on-light (rgb(238,241,244) on the light glass). Mount a
+                  // representative rail head + title and prove its computed ink is dark.
+                  const rl = mk('<div class="gadget-rail rail-probe-lol" style="display:flex">'+
+                    '<div class="gadget-rail-head">'+
+                      '<span class="gadget-rail-title">The House</span>'+
+                      '<button class="gadget-rail-close">×</button>'+
+                    '</div></div>');
                   const out = {
                     surfLum,
                     title: probe('.chat-meta-overlay #current-meta'),
@@ -211,7 +220,30 @@ def main() -> int:
                     gadgetFull: probe('.og-probe-lol .ogp-full'),
                     gadgetMuted: probe('.og-probe-lol .ogp-muted'),
                     settingsRow: probe('.adm-probe-lol .adm-row'),
+                    // gadget RAIL HEADER (outside the card scope) — "The House" title + control:
+                    railTitle: probe('.rail-probe-lol .gadget-rail-title'),
+                    railClose: probe('.rail-probe-lol .gadget-rail-close'),
                   };
+                  // DARK-INK CHROME must NOT carry the DARK glass legibility shadow (a dark
+                  // shadow under dark text reads as a smudgy "drop shadow"). The dark
+                  // --ow-glass-text-shadow is reserved for LIGHT text on glass (chat bubbles,
+                  // the light-on-dark dock chips). Probe the textShadow of every dark-ink chrome
+                  // body-copy surface and assert NONE uses the dark (rgba(0,0,0,…)) halo.
+                  const tsProbe = (sel) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return { sel, missing: true };
+                    return { sel, ts: getComputedStyle(el).textShadow };
+                  };
+                  out.darkInkShadows = [
+                    '.og-probe-lol .og-body', '.rail-probe-lol .gadget-rail-title',
+                    '.adm-probe-lol', '#sidebar',
+                  ].map(tsProbe).filter(p => {
+                    if (p.missing) return false;
+                    const ts = (p.ts || 'none').toLowerCase();
+                    if (ts === 'none' || ts === '') return false;
+                    // flag any DARK (rgb(0,0,0,…) / rgba(0,0,0,…)) shadow on dark-ink chrome
+                    return /rgba?\\(\\s*0\\s*,\\s*0\\s*,\\s*0/.test(ts);
+                  });
                   // generic sweep: EVERY visible text node on a glass-chrome surface must be dark
                   // ink on the light glass (catch any future inner element that re-lights itself).
                   const sweep = [];
@@ -244,7 +276,7 @@ def main() -> int:
                     });
                   });
                   out.sweepLight = sweep;
-                  og.remove(); ad.remove();
+                  og.remove(); ad.remove(); rl.remove();
                   return out;
                 }"""
             )
@@ -253,7 +285,10 @@ def main() -> int:
             for _name in ("title", "metaCount", "costBadge", "textarea", "icon",
                           "picker", "pickerLabel", "menu",
                           # #725 kit-level: gadget card (title/full/muted) + settings row
-                          "gadgetTitle", "gadgetFull", "gadgetMuted", "settingsRow"):
+                          "gadgetTitle", "gadgetFull", "gadgetMuted", "settingsRow",
+                          # gadget RAIL HEADER (outside the card dark-ink scope): "The House"
+                          # title + the rail control glyph — both must be dark on the light glass.
+                          "railTitle", "railClose"):
                 _p = lol.get(_name) or {}
                 if _p.get("missing"):
                     continue  # element legitimately absent — nothing to mis-color
@@ -265,6 +300,13 @@ def main() -> int:
             _sweep = lol.get("sweepLight") or []
             check(not _sweep,
                   f"no light-on-light: glass-chrome text nodes are all dark ink ({_sweep[:6]})")
+            # NO smudgy "drop shadow": dark-ink chrome body copy must NOT carry the DARK glass
+            # legibility halo (that dark shadow is reserved for LIGHT text — chat bubbles + the
+            # light-on-dark dock chips). Any dark rgba(0,0,0,…) shadow on dark-ink chrome is the bug.
+            _darkShadows = lol.get("darkInkShadows") or []
+            check(not _darkShadows,
+                  f"no smudgy drop-shadow: dark-ink chrome text carries no DARK text-shadow "
+                  f"({_darkShadows[:4]})")
 
             page.evaluate("() => document.body.classList.remove('theme-frosted')")  # restore frosted-off
             try:

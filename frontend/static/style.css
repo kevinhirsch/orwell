@@ -36518,6 +36518,14 @@ body.theme-frosted .gadget-rail {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
+/* The rail HEADER divider is a hard dark line under the glass theme (its base
+   `border-bottom: 1px solid var(--border)` → a #3a3f47 dark hairline — owner: "the hard
+   black lines in the gadget dock don't embody Apple design"). Soften it to a faint
+   luminous hairline (a low-opacity dark wash that reads as a hairline, not a hard line),
+   consistent with the other glass dividers. */
+body.theme-frosted .gadget-rail-head {
+  border-bottom-color: rgba(0,0,0,0.06);
+}
 body.theme-frosted .og-card {
   background-color: color-mix(in srgb, var(--panel, var(--bg)) 28%, transparent) !important;
   background-image: linear-gradient(180deg,
@@ -37417,12 +37425,16 @@ body.theme-frosted .attach-image-skeleton {
   background-image: var(--ow-glass-light-fill) !important;
 }
 /* A subtle text-shadow on glass body copy guarantees legibility on the very      */
-/* brightest animated-bg frames (the SVG tint + this shadow = AA at both extremes).*/
+/* brightest animated-bg frames. Post-#725 these CHROME surfaces carry DARK ink on */
+/* the LIGHT glass, so the legibility halo must be the LIGHT halo (a dark shadow   */
+/* under dark text reads as a smudgy "drop shadow"). The dark --ow-glass-text-     */
+/* shadow is reserved for genuinely LIGHT text on glass (the chat bubbles + the    */
+/* light-on-dark Control-Center dock chips below) — never dark-ink chrome.         */
 body.theme-frosted .ow-window .ow-body,
 body.theme-frosted .og-card .og-body,
 body.theme-frosted .on-card,
 body.theme-frosted #sidebar {
-  text-shadow: var(--ow-glass-text-shadow);
+  text-shadow: 0 1px 1px rgba(255,255,255,0.45);
 }
 @media (prefers-reduced-motion: reduce) {
   /* Static bg under reduced-motion → the shadow is unnecessary; keep it light.    */
@@ -37820,6 +37832,23 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   transition: background-color .18s ease, box-shadow .18s ease,
               transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease;
   will-change: transform;
+}
+/* SOFT luminous hairline on the gadget-card controls + dock chips (owner: "the hard
+   black lines in the gadget dock don't embody Apple design"). On the LIGHT-glass cards
+   --fg is dark ink (#725), so the `color-mix(--fg 18%)` rim above resolves to a HARD
+   dark hairline. Apple's glass controls carry a low-opacity WHITE rim (matching the
+   windows/notices), not a dark line. Override to the soft white rim; the fill/morph above
+   is untouched, and the Normal (non-frosted) tier keeps its own borders. The gadget-card
+   controls also get the light inset top highlight; the DOCK chip keeps only the border
+   change (its own Control-Center box-shadow / tile depth below stays intact). */
+body.theme-frosted .og-card button,
+body.theme-frosted .og-card .og-act,
+body.theme-frosted #minimized-dock .minimized-dock-chip {
+  border-color: rgba(255,255,255,0.14);
+}
+body.theme-frosted .og-card button,
+body.theme-frosted .og-card .og-act {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
 }
 body.theme-frosted .ow-window .ow-body button:hover,
 body.theme-frosted .on-card button:hover,
@@ -38781,6 +38810,13 @@ body.theme-frosted .toast,
 body.theme-frosted .tool-indicator,
 body.theme-frosted .thinking-section,
 body.theme-frosted .thinking-section .thinking-header,
+/* The gadget rail is a TRANSPARENT container (its glass is the per-card tiles), so
+   its HEADER chrome ("The House" title + the rail controls) sits OUTSIDE the dark-ink
+   card scope and survived as LIGHT-on-light glass. Fold the rail head/title into the
+   dark-ink chrome here so the header reads dark-on-light like the cards below it. */
+body.theme-frosted .gadget-rail-head,
+body.theme-frosted .gadget-rail-head *,
+body.theme-frosted .gadget-rail-title,
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
 body.theme-frosted .cp-popover {
