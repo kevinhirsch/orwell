@@ -250,3 +250,43 @@ def test_mobile_hard_caps_refracted_count():
     m_desktop = int(re.search(r"MAX_LIVE_SURFACES\s*=\s*(\d+)", JS).group(1))
     m_mobile = int(re.search(r"MAX_LIVE_SURFACES_MOBILE\s*=\s*(\d+)", JS).group(1))
     assert m_mobile < m_desktop
+
+
+# ── 13. Apple-parity material: luminous (not darkening) + specular + float ──────
+
+def test_glass_material_is_luminous_not_a_dark_slab():
+    # Apple's regular glass is LIGHT/LUMINOUS: a luminous white-ish wash + a backdrop
+    # brightness LIFT, not a heavy dark tint. The dark tint floor must be modest.
+    assert "--ow-glass-lumin" in CSS
+    floor = int(re.search(r"--ow-glass-tint-floor:\s*(\d+)%", CSS).group(1))
+    assert floor <= 30, f"tint floor too heavy ({floor}%) — glass would read as a dark slab"
+    # the backdrop filter lifts luminosity (brightness > 1.2 = a real lift).
+    m = re.search(r"--ow-glass-backdrop:\s*[^;]*brightness\(([\d.]+)\)", CSS)
+    assert m and float(m.group(1)) >= 1.2, "backdrop brightness lift too weak for luminous glass"
+
+
+def test_specular_highlight_reads_as_a_light_source():
+    # a top-left specular sheen (radial-gradient) + a bright thin top rim, not a flat border.
+    assert "radial-gradient(120% 80% at 18% 0%" in CSS  # the top-left light source
+    # the rim/bloom inset shadows (the specular catch + the bloom).
+    assert re.search(r"inset 8px 10px 22px -12px", CSS)  # top-left bloom
+
+
+def test_soft_outer_float_shadow_is_genuine_elevation():
+    m = re.search(r"--ow-glass-float:\s*([^;]+);", CSS)
+    assert m
+    # a wide soft ambient shadow (>= ~40px blur) = real elevation off the content.
+    blurs = [int(x) for x in re.findall(r"\d+px\s+(\d+)px", m.group(1))]
+    assert blurs and max(blurs) >= 40, "float shadow too tight to read as elevation"
+
+
+# ── 14. Fluid morph on interaction (Apple: controls come to life) ──────────────
+
+def test_controls_morph_on_hover_and_press():
+    # glass controls lighten + lift on hover, depress on press — reduced-motion gated.
+    assert "Fluid morph on interaction" in CSS
+    assert "translateY(-1px) scale(1.015)" in CSS   # hover lift
+    assert "scale(0.97)" in CSS                       # press depress
+    # reduced-motion strips the transition/transform.
+    rm_blocks = re.findall(r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*?)\n\}", CSS, re.S)
+    assert any("transform: none" in b for b in rm_blocks)

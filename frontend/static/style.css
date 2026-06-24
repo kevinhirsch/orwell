@@ -37257,14 +37257,21 @@ body.theme-frosted .modal {
 /* as belt-and-suspenders on the brightest frames. This is the structural answer */
 /* to "always readable": the floor never lets the bg dominate the text's ground. */
 :root {
-  /* Minimum panel-tint opacity under text on glass (>= this keeps --fg AA over   */
-  /* the tint even when the bg behind is pure white). Tuned with the dark palette. */
-  --ow-glass-tint-floor: 46%;
-  --ow-glass-text-shadow: 0 1px 2px rgba(0,0,0,.55), 0 0 1px rgba(0,0,0,.5);
+  /* APPLE-PARITY MODEL (parity round): Apple's regular glass is LIGHT, LUMINOUS, and       */
+  /* RECEDES — it does NOT darken. The legibility for our LIGHT --fg text comes from the    */
+  /* backdrop LUMINOSITY LIFT (brightness/contrast normalize the ground) + a delicate       */
+  /* specular sheen + a text-shadow, NOT a heavy dark tint. So the fill is a very light,     */
+  /* low-opacity material (a touch of --fg white-ish) over a faint dark anchor — lit         */
+  /* frosted glass, not a smoked panel. The tint floor is kept ONLY as a thin readability    */
+  /* anchor (much lower than before), and the real "always-readable" work is done by the     */
+  /* luminosity lift + sheen + shadow below.                                                 */
+  --ow-glass-tint-floor: 22%;                 /* thin dark anchor (was 46% — too heavy)      */
+  --ow-glass-lumin: 14%;                       /* luminous white-ish material on top         */
+  --ow-glass-text-shadow: 0 1px 3px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.55);
 }
-/* Raise the baseline tints to the readability floor (the baseline used 26-32%,   */
-/* fine for a static bg; an ANIMATED bg needs the floor so a bright frame can't    */
-/* wash out the text). color-mix max() isn't a thing, so we set the floor value.   */
+/* The glass FILL: a faint dark anchor + a luminous white-ish wash = lit frosted glass.    */
+/* Two stacked layers (a translucent base-color anchor, then a luminous gradient image)     */
+/* read as a material that the bright backdrop infuses through, not a solid dark slab.       */
 body.theme-frosted .ow-window,
 body.theme-frosted .og-card,
 body.theme-frosted .chat-input-bar,
@@ -37272,6 +37279,16 @@ body.theme-frosted #sidebar,
 body.theme-frosted .modal-content,
 body.theme-frosted .on-card {
   background-color: color-mix(in srgb, var(--panel, var(--bg)) var(--ow-glass-tint-floor), transparent) !important;
+  background-image:
+    /* delicate top-left specular sheen (the light source) */
+    radial-gradient(120% 80% at 18% 0%,
+      color-mix(in srgb, var(--fg, #fff) 26%, transparent) 0%,
+      color-mix(in srgb, var(--fg, #fff) 8%, transparent) 30%,
+      transparent 62%),
+    /* the luminous white-ish material wash */
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--fg, #fff) var(--ow-glass-lumin), transparent) 0%,
+      color-mix(in srgb, var(--fg, #fff) 6%, transparent) 100%) !important;
 }
 /* A subtle text-shadow on glass body copy guarantees legibility on the very      */
 /* brightest animated-bg frames (the SVG tint + this shadow = AA at both extremes).*/
@@ -37436,15 +37453,18 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
 :root {
   /* Apple-language tokens. The luminous edge = a bright top-rim highlight; the      */
   /* float shadow = soft elevation; the radii are larger + concentric.              */
-  --ow-glass-radius: 22px;          /* window/surface radius (very rounded, Apple)  */
-  --ow-glass-radius-inner: 14px;    /* concentric inner-control radius (nested)     */
-  --ow-glass-edge: color-mix(in srgb, var(--fg, #fff) 40%, transparent);
-  --ow-glass-float: 0 12px 34px rgba(0,0,0,0.34), 0 2px 8px rgba(0,0,0,0.22);
-  /* Regular-variant luminosity lift composed into the backdrop filter (a gentle    */
-  /* brightness so a DARK backdrop reads lighter through the glass — Apple's         */
-  /* luminosity adjustment — without washing out the AA floor).                      */
-  --ow-glass-backdrop: blur(28px) saturate(180%) brightness(1.12);
-  --ow-glass-backdrop-strong: blur(40px) saturate(190%) brightness(1.14);
+  --ow-glass-radius: 26px;          /* window/surface radius (very rounded, Apple)  */
+  --ow-glass-radius-inner: 16px;    /* concentric inner-control radius (nested)     */
+  --ow-glass-edge: color-mix(in srgb, var(--fg, #fff) 55%, transparent);
+  /* Soft OUTER float-shadow — genuine elevation off the content (Apple). Two-stop:  */
+  /* a wide soft ambient + a tighter contact shadow, both low-opacity.               */
+  --ow-glass-float: 0 18px 50px rgba(0,0,0,0.30), 0 6px 16px rgba(0,0,0,0.20);
+  /* Regular-variant LUMINOSITY LIFT in the backdrop filter — pushed harder so a     */
+  /* dark backdrop reads as LIT frosted glass (recedes), not a smoked panel. High    */
+  /* saturate keeps the bg's color infusing the glass; contrast(1.06) keeps text     */
+  /* crisp through the lift.                                                          */
+  --ow-glass-backdrop: blur(26px) saturate(200%) brightness(1.28) contrast(1.04);
+  --ow-glass-backdrop-strong: blur(36px) saturate(210%) brightness(1.32) contrast(1.05);
 }
 
 /* The luminous edge + soft float + very-rounded corners on the primary text        */
@@ -37458,12 +37478,18 @@ body.theme-frosted .modal-content {
   border-radius: var(--ow-glass-radius) !important;
   backdrop-filter: var(--ow-glass-backdrop) !important;
   -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;
-  /* Luminous top rim (inset hairline) + a fainter base shade + the soft float.      */
+  /* SPECULAR light source (reads as a real light, not a flat border):               */
+  /*   • a bright THIN top rim (the hairline catch of light)                          */
+  /*   • a soft inner top-left bloom (inset, large-spread, low-opacity)               */
+  /*   • a faint dark bottom inset so the glass has a lower lip (depth)               */
+  /*   • the soft OUTER float-shadow (elevation off the content)                      */
   box-shadow:
     inset 0 1px 0 var(--ow-glass-edge),
-    inset 0 0 0 0.5px color-mix(in srgb, var(--fg, #fff) 12%, transparent),
+    inset 0 0 0 0.5px color-mix(in srgb, var(--fg, #fff) 14%, transparent),
+    inset 8px 10px 22px -12px color-mix(in srgb, var(--fg, #fff) 34%, transparent),
+    inset 0 -8px 16px -12px rgba(0,0,0,0.30),
     var(--ow-glass-float) !important;
-  border-color: color-mix(in srgb, var(--fg, #fff) 26%, transparent) !important;
+  border-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent) !important;
 }
 /* The big windows + the Control-Center dock carry the stronger blur (more glass).  */
 body.theme-frosted .ow-window,
@@ -37546,4 +37572,64 @@ body.theme-frosted .ow-window [style*="font-weight:200"],
 body.theme-frosted .ow-window [style*="font-weight:300"],
 body.theme-frosted .og-card [style*="font-weight:300"] {
   font-weight: 400 !important;   /* clamp stray thin inline weights up to Regular */
+}
+
+/* ── Fluid morph on interaction (Apple: "controls come to life") ──────────────*/
+/* Buttons/controls inside glass surfaces are themselves small glass chips that    */
+/* LIGHTEN + lift + glass-bloom on hover and depress on press. Reduced-motion       */
+/* strips the transition (the state still changes, just instantly).                 */
+body.theme-frosted .ow-window .ow-body button,
+body.theme-frosted .on-card button,
+body.theme-frosted .og-card button,
+body.theme-frosted .og-card .og-act,
+body.theme-frosted #minimized-dock .minimized-dock-chip {
+  background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg, #fff) 18%, transparent);
+  -webkit-backdrop-filter: blur(8px) saturate(160%) brightness(1.1);
+  backdrop-filter: blur(8px) saturate(160%) brightness(1.1);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 22%, transparent);
+  transition: background-color .18s ease, box-shadow .18s ease,
+              transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease;
+  will-change: transform;
+}
+body.theme-frosted .ow-window .ow-body button:hover,
+body.theme-frosted .on-card button:hover,
+body.theme-frosted .og-card button:hover,
+body.theme-frosted .og-card .og-act:hover,
+body.theme-frosted #minimized-dock .minimized-dock-chip:hover,
+body.theme-frosted .ow-window .ow-body button:focus-visible,
+body.theme-frosted .on-card button:focus-visible,
+body.theme-frosted .og-card button:focus-visible,
+body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
+  /* lighten + glass-bloom + a touch of lift (the control "comes to life") */
+  background-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 34%, transparent),
+              0 4px 14px rgba(0,0,0,0.22),
+              0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 30%, transparent);
+  transform: translateY(-1px) scale(1.015);
+  filter: brightness(1.08);
+}
+body.theme-frosted .ow-window .ow-body button:active,
+body.theme-frosted .on-card button:active,
+body.theme-frosted .og-card button:active,
+body.theme-frosted .og-card .og-act:active,
+body.theme-frosted #minimized-dock .minimized-dock-chip:active {
+  transform: translateY(0) scale(0.97);   /* depress on press */
+  filter: brightness(0.98);
+  transition-duration: .08s;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.theme-frosted .ow-window .ow-body button,
+  body.theme-frosted .on-card button,
+  body.theme-frosted .og-card button,
+  body.theme-frosted .og-card .og-act,
+  body.theme-frosted #minimized-dock .minimized-dock-chip {
+    transition: none;
+  }
+  body.theme-frosted .ow-window .ow-body button:hover,
+  body.theme-frosted .on-card button:hover,
+  body.theme-frosted .og-card button:hover,
+  body.theme-frosted #minimized-dock .minimized-dock-chip:hover {
+    transform: none;   /* no motion under reduced-motion; color/bloom still change */
+  }
 }
