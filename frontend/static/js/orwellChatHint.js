@@ -144,7 +144,11 @@ function show(key) {
   body.innerHTML =
     '<span class="orwell-chat-hint-text">' + (def.html || '') + '</span>' +
     (dismissText
-      ? '<button type="button" class="orwell-chat-hint-dismiss" aria-label="Dismiss tip">' +
+      // #775 element-kit migration: the "Got it" dismiss composes .ow-btn .ow-btn-plain (the kit
+      // owns the frosted chrome — ONE source of truth). The legacy .orwell-chat-hint-dismiss class
+      // is kept as the JS hook + Normal-tier fallback (its low-specificity style.css rule loses to
+      // the kit on the glass tiers); the dead-CSS retirement is the #774a sweep.
+      ? '<button type="button" class="ow-btn ow-btn-plain orwell-chat-hint-dismiss" aria-label="Dismiss tip">' +
           dismissText + '</button>'
       : '');
   _shownKey = key;

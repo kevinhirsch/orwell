@@ -38232,20 +38232,28 @@ body.theme-frosted .odec-confirm:hover:not(:disabled) {
 body.theme-frosted .odec-confirm:active:not(:disabled) { transform: translateY(0) scale(.98); }
 body.theme-frosted .odec-opt {
   border-radius: var(--ow-btn-radius) !important;
-  background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent) !important;
-  border: 1px solid color-mix(in srgb, var(--fg, #fff) 20%, transparent) !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 22%, transparent) !important;
 }
+/* #775 element-kit migration (owner request): the decision OPTION chips compose the kit's
+   .ow-btn .ow-btn-prominent (a liquid-glass PROMINENT CTA — the kit owns the unselected glass
+   chrome now). The old hand-rolled secondary-glass fill/border/shadow that lived here is retired
+   so the kit prominent can show through; only the option-specific bits remain: the capsule radius
+   above and the SELECTED-pill override below (a distinct bright fill the kit has no variant for). */
 body.theme-frosted .odec-opt:hover {
-  background-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent) !important;
   transform: translateY(-1px);
 }
-/* the SELECTED option pill reads bright (the selected-ref: bright fill, dark glyph) */
+/* #775: the SELECTED option pill must stay UNAMBIGUOUSLY distinct now the unselected chip is the
+   kit's neutral luminous .ow-btn-prominent (itself a bright glass capsule). The unselected chip is
+   TRANSLUCENT luminous glass; the selected pill is a near-SOLID bright plate with dark ink + an
+   accent ring (the selected-ref: "lit up, filled in"). The `background` shorthand clears the kit's
+   prominent radial-gradient so the selected fill is clean and reads opaque. It is deliberately NOT
+   the system-blue of the Confirm CTA (so "a selected option" never reads as "the Confirm button").*/
 body.theme-frosted .odec-opt[aria-pressed="true"],
 body.theme-frosted .odec-opt.selected {
-  background-color: color-mix(in srgb, var(--fg, #fff) 86%, transparent) !important;
+  background: color-mix(in srgb, var(--fg, #fff) 96%, transparent) !important;
   color: var(--bg, #15181f) !important;
-  border-color: transparent !important;
+  border-color: var(--ow-ios-blue, #0a84ff) !important;
+  box-shadow: 0 0 0 1px var(--ow-ios-blue, #0a84ff),
+              inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.2) !important;
 }
 
 /* ── DISABLED / unavailable: clearly inert (Apple: a distinct unavailable state) ─*/

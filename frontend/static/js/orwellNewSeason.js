@@ -96,10 +96,11 @@
         .ons-body .ons-portrait-h { font-size: 12px; opacity: .75; margin-bottom: 6px; font-weight: 600; }
         .ons-body .ons-msg { font-size: 12px; opacity: .8; margin-top: 8px; min-height: 1.2em; }
         .ons-body .ons-msg.ons-err { color: var(--red, #e06c75); opacity: 1; }
-        /* #725: soften the inner var(--border) strokes (the ghost button, the portrait divider)
-           to the low-opacity WHITE hairline on the light glass — Apple glass is lensing, not a
-           hard dark line. The primary/accent button keeps its filled tint. */
-        body.theme-frosted .ons-body .ons-btn-ghost { border-color: rgba(255,255,255,0.14); }
+        /* #775 element-kit migration: the ons-btns compose .ow-btn (+ -prominent / -secondary);
+           the kit owns frosted chrome (incl. the ghost button's hairline rim) — the retired
+           frosted ons-btn-ghost border override lived here. The .ons-btn* rules above remain
+           the Normal-tier (non-glass) fallback + the disabled state.
+           #725: soften the portrait divider to the low-opacity WHITE hairline on the light glass. */
         body.theme-frosted .ons-body .ons-portrait { border-top-color: rgba(255,255,255,0.14); }`;
       document.head.appendChild(s);
     }
@@ -108,8 +109,8 @@
       <div class="ons-lead">The season is over. When you're ready, walk back into a brand-new
         house — bring this houseguest back, or recast from scratch.</div>
       <div class="ons-choices">
-        <button type="button" class="ons-btn ons-btn-primary" data-keep="1">Keep this houseguest</button>
-        <button type="button" class="ons-btn ons-btn-ghost" data-keep="0">Recast from scratch</button>
+        <button type="button" class="ow-btn ow-btn-prominent ons-btn ons-btn-primary" data-keep="1">Keep this houseguest</button>
+        <button type="button" class="ow-btn ow-btn-secondary ons-btn ons-btn-ghost" data-keep="0">Recast from scratch</button>
       </div>
       <div class="ons-hint">Keep = the same person, a new cast. Recast = the casting interview runs again.</div>
       <div class="ons-portrait">
@@ -207,7 +208,7 @@
       <div class="ons-lead">You've been evicted — your season is over. The house keeps playing without
         you. See how it all ends, then walk into a brand-new season.</div>
       <div class="ons-choices">
-        <button type="button" class="ons-btn ons-btn-primary" id="ons-conclude">See how it ends</button>
+        <button type="button" class="ow-btn ow-btn-prominent ons-btn ons-btn-primary" id="ons-conclude">See how it ends</button>
       </div>
       <div class="ons-hint">Fast-forwards the rest of the season to the finale, then unlocks the recap
         and a fresh start.</div>

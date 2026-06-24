@@ -194,12 +194,13 @@
       }
       vaultWrap.appendChild(story);
     } else {
-      const open = el("button", [
-        // J5-08: contrast — #fff on the purple accent passes 4.5:1 (the computed --on-accent is dark
-        // ink tuned for the brand RED, which fails on this purple). And lift to the 44px tap floor.
-        "margin-top:4px", "padding:10px 14px", "border-radius:8px", "cursor:pointer", "min-height:44px",
-        "background:var(--accent, #6d4aff)", "color:#fff", "border:none", "font-size:13px", "font-family:inherit", "font-weight:600",
-      ].join(";"), "🔐 Open the Untold Story");
+      // #775 element-kit migration: the unseal CTA composes .ow-btn .ow-btn-prominent — the kit is
+      // the ONE source of truth for the button chrome (tap-floor, radius, weight, the frosted glass
+      // treatment; emphasis by luminosity, not hue). Only the panel-specific LAYOUT (top margin)
+      // stays inline — the chrome that used to live here (J5-08 tap-floor + #fff-on-accent contrast)
+      // is now the kit's. Inline chrome had to go so the kit rule can take effect (inline beats it).
+      const open = el("button", "margin-top:4px", "🔐 Open the Untold Story");
+      open.className = "ow-btn ow-btn-prominent";
       open.setAttribute("aria-label", "Open the Untold Story");  // UX-4: decorative lock emoji
       open.addEventListener("click", async () => {
         try {

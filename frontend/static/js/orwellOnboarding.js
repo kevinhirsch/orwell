@@ -95,26 +95,31 @@
         #orwell-onboarding .ob-steps .ob-step-n { display: inline-block; width: 1.4rem; font-weight: 700;
           color: var(--brand-color, var(--red, #e06c75)); }
         #orwell-onboarding .ob-hold-actions { display: flex; gap: .6rem; justify-content: center; margin-top: 1.1rem; flex-wrap: wrap; }
-        #orwell-onboarding .ob-btn {
+        /* #775 element-kit migration: the onboarding CTAs now compose .ow-btn (+ -secondary
+           / -prominent). The kit owns frosted chrome + the focus-visible ring (ONE source of
+           truth). These bespoke rules are UN-PREFIXED (no #orwell-onboarding id) so the kit's
+           body.theme-frosted .ow-btn rule wins on the glass tiers; on the Normal (non-glass)
+           tier they remain the fallback chrome. */
+        .ob-btn {
           font: inherit; font-size: .82rem; padding: .45rem .9rem; border-radius: 8px; cursor: pointer;
           background: transparent; color: var(--fg, #9cdef2);
           border: 1px solid var(--border, #355a66);
         }
-        #orwell-onboarding .ob-btn:hover { border-color: var(--fg, #9cdef2); }
+        .ob-btn:hover { border-color: var(--fg, #9cdef2); }
         /* J1-31: the welcome/setup/holding CTAs are the journey's FIRST interactive elements and
-           had no visible keyboard-focus ring (WCAG 2.4.7). Give every overlay button a clear
-           focus-visible ring keyed to --brand-color (matches the .list-item convention). */
-        #orwell-onboarding .ob-btn:focus-visible {
+           had no visible keyboard-focus ring (WCAG 2.4.7). Normal-tier focus ring keyed to
+           --brand-color (the glass tiers take the kit's system-blue ring). */
+        .ob-btn:focus-visible {
           outline: none;
           border-color: var(--brand-color, var(--red, #e06c75));
           box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-color, var(--red, #e06c75)) 70%, transparent);
         }
-        #orwell-onboarding .ob-btn-primary {
+        .ob-btn-primary {
           background: var(--brand-color, var(--red, #e06c75)); color: var(--on-accent, #fff);
           border-color: transparent; font-weight: 600;
         }
         /* A double ring (bg gap + brand) so the primary CTA's focus is visible against its own fill. */
-        #orwell-onboarding .ob-btn-primary:focus-visible {
+        .ob-btn-primary:focus-visible {
           box-shadow: 0 0 0 2px var(--bg, #282c34), 0 0 0 4px var(--brand-color, var(--red, #e06c75));
         }
         /* J1-10: on a desktop viewport the 420px card filled ~10% of the field and read as
@@ -196,7 +201,7 @@
     (actions || []).forEach((a) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "ob-btn" + (a.primary ? " ob-btn-primary" : "");
+      b.className = "ow-btn " + (a.primary ? "ow-btn-prominent ob-btn ob-btn-primary" : "ow-btn-secondary ob-btn");
       b.textContent = a.label;
       // Dismiss FIRST: the action's target (e.g. the Settings modal) must not open behind
       // the overlay's inert wall.
@@ -205,7 +210,7 @@
     });
     const d = document.createElement("button");
     d.type = "button";
-    d.className = "ob-btn";
+    d.className = "ow-btn ow-btn-secondary ob-btn";
     d.setAttribute("data-ob-dismiss", "");
     d.textContent = "Go in anyway"; // CONT-1: in-fiction dismiss (was the OOC "Continue anyway")
     d.addEventListener("click", dismiss);
@@ -362,7 +367,7 @@
     // needed — the wizard is re-rendered on models-changed and the Settings modal manages itself.)
     const choose = document.createElement("button");
     choose.type = "button";
-    choose.className = "ob-btn";
+    choose.className = "ow-btn ow-btn-secondary ob-btn";
     choose.setAttribute("data-ob-choose-models", "");
     choose.textContent = "Choose models";
     choose.addEventListener("click", () => {
@@ -376,7 +381,7 @@
 
     const go = document.createElement("button");
     go.type = "button";
-    go.className = "ob-btn ob-btn-primary";
+    go.className = "ow-btn ow-btn-prominent ob-btn ob-btn-primary";
     go.setAttribute("data-ob-setup-start", "");
     go.textContent = "Start casting";
     go.disabled = true; // enabled by refresh() once a narrator model resolves (avoids the async race)

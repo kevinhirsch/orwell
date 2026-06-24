@@ -138,15 +138,20 @@
          the producer's opener; clicking it opens the cast-photo box (which no longer auto-opens).
          Matches the decision-card accent pill (rounded, --accent, ≥44px tap target). */
       #orwell-choose-character { display: flex; justify-content: center; margin: 10px 0 6px; }
+      /* #775 element-kit migration (owner request): the "Choose Your Character" pill composes the
+         kit's .ow-btn .ow-btn-prominent — a liquid-glass PROMINENT CTA (the kit is the ONE source of
+         truth for the glass chrome). This bespoke rule keeps ONLY the pill-specific SHAPE (the wide
+         capsule radius + the slightly larger/heavier label that makes it read as a competition CTA)
+         + the Normal-tier (non-glass) fallback chrome. UN-PREFIXED, so the kit's
+         body.theme-frosted .ow-btn-prominent rule wins the chrome on the glass tiers. */
       .hs-choose-btn {
         font: inherit; font-size: 14px; font-weight: 700; letter-spacing: .02em;
         padding: 10px 22px; border-radius: 999px; cursor: pointer; min-height: 44px;
+        /* Normal-tier fallback (the kit, frosted-only, supplies the glass look): */
         background: var(--brand-color, var(--accent, #e06c75)); color: var(--on-accent, var(--bg, #111));
         border: 1px solid transparent; box-shadow: 0 2px 10px rgba(0,0,0,.25);
         transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
       }
-      .hs-choose-btn:hover { filter: brightness(1.06); box-shadow: 0 4px 14px rgba(0,0,0,.3); }
-      .hs-choose-btn:focus-visible { outline: 2px solid var(--brand-color, var(--accent, #e06c75)); outline-offset: 3px; }
       .hs-choose-btn:active { transform: translateY(1px); }
       @media (prefers-reduced-motion: reduce) { .hs-choose-btn { transition: none; } }
       /* #725: the studio also embeds in GLASS hosts (Settings modal, the New-Season window),
@@ -608,7 +613,7 @@
     wrap.id = PILL_ID;
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "hs-choose-btn";
+    btn.className = "ow-btn ow-btn-prominent hs-choose-btn";
     btn.textContent = "Choose Your Character";
     btn.setAttribute("aria-label", "Choose your character — open your cast photo");
     btn.addEventListener("click", () => { removePill(); mount(); });

@@ -166,7 +166,7 @@
       '</div>' +
       // J2-13: an affordance to DO the first move (close the gulf-of-execution).
       '<div class="opt-actions">' +
-        '<button type="button" class="opt-go" aria-label="Start meeting the house — fills the message box with an opener">Meet the house \u{2192}</button>' +
+        '<button type="button" class="ow-btn ow-btn-secondary opt-go" aria-label="Start meeting the house — fills the message box with an opener">Meet the house \u{2192}</button>' +
       '</div>';
     _mounted = true;
     var go = body.querySelector(".opt-go");
