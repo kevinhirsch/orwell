@@ -2538,6 +2538,7 @@
 <script src="/static/js/orwellGadgetRail.js"></script>  <!-- 0054: control-room gadget rail (hosts the HUD gadgets; collapse/side-swap/mobile drawer) -->
 <script src="/static/js/orwellGadget.js"></script>  <!-- #640: THE gadget kit — one card class + .og-* family every rail gadget composes (sibling to OrwellWindow) -->
 <script src="/static/js/liquidGlass.js"></script>  <!-- Liquid glass: real SVG-refraction (feImage→feDisplacementMap, squircle edge) layered OVER the CSS blur-glass baseline. Chromium-ONLY progressive enhancement; no-op elsewhere (the CSS frost stands). Loads AFTER the window + gadget kits so the .ow-*/.og-* surfaces exist. -->
+<script src="/static/js/adaptiveGlass.js"></script>  <!-- Adaptive legibility: samples backdrop luminance behind each glass surface and scales the --panel veil opacity (translucent over dark, muted over bright) so --fg text stays legible over ANY background. Runs on every engine; sets background-color (composes with the refraction's backdrop-filter). -->
 <script src="/static/js/orwellNotice.js"></script>  <!-- #642: THE notice kit — one card class + .on-* family every ABOVE-COMPOSER affordance composes (guide/decision/system-notice/continue); sibling to OrwellWindow/OrwellGadget -->
 <script type="module" src="/static/js/orwellStatusPanel.js"></script>  <!-- BB status HUD: week/phase/HOH/noms/veto (Vault-free) -->
 <!-- NPC "wants a word" approaches are NOT a player-facing panel (owner ruling 2026-06-18): an NPC
