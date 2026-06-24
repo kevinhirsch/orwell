@@ -76,6 +76,20 @@
   // intercept = gentle wash; set TINT_SLOPE=1/intercept=0 to disable.
   var TINT_SLOPE = 0.9;      // linear slope per channel (<1 softens) — thecubiq value
   var TINT_INTERCEPT = 0.05; // linear intercept per channel (small lift) — thecubiq value
+  // SPECULAR RIM HIGHLIGHT (the kube.io feBlend layer — the "lit edge" that makes the
+  // glass read as lit, the most "creative" part per the article). It's a rim light:
+  // a SECOND generated image (white, alpha = specular intensity) loaded as its own
+  // <feImage> and feBlend mode="screen"'d OVER the refracted+blurred+tinted backdrop,
+  // so a bright thin highlight rides the edge where the surface normal faces a fixed
+  // light. Intensity = max(0, outwardNormal · lightDir)^POWER, confined to the rim by
+  // the squircle edge band. Set SPEC_ENABLE=false to drop the whole layer (byte-identical
+  // to before). All artistic — tune ANGLE/POWER/GAIN against the Apple refs.
+  var SPEC_ENABLE = true;
+  var SPEC_ANGLE_DEG = -60;  // light direction (the article's diagram default; upper-leftish rim)
+  var SPEC_POWER = 3.0;      // exponent — higher = tighter/sharper highlight arc
+  var SPEC_GAIN = 1.35;      // multiply the raw specular before clamping (brightness of the rim)
+  var SPEC_ALPHA_MAX = 0.85; // cap the rim's peak opacity (1 = full white)
+  var SPEC_BAND = 0.55;      // fraction of EDGE band (from the edge inward) the rim occupies
 
   // Perf caps. Mobile gets a HARD-LOWER cap (small GPUs; the refraction is the most
   // expensive thing on the page). collectTargets() reads activeMaxSurfaces() so the
@@ -193,6 +207,17 @@
     var r = Math.min(radius, Math.min(cw, ch) / 2);
     var band = Math.min(EDGE, Math.min(cw, ch) / 2);
 
+    // Specular rim map (white, alpha = highlight intensity), built in the SAME loop.
+    var specCanvas = null, specData = null, lx = 0, ly = 0;
+    if (SPEC_ENABLE) {
+      specCanvas = document.createElement("canvas");
+      specCanvas.width = cw; specCanvas.height = ch;
+      var simg = specCanvas.getContext("2d").createImageData(cw, ch);
+      specData = simg.data;
+      var ang = (SPEC_ANGLE_DEG * Math.PI) / 180;
+      lx = Math.cos(ang); ly = Math.sin(ang); // fixed light direction (unit)
+    }
+
     for (var y = 0; y < ch; y++) {
       for (var x = 0; x < cw; x++) {
         // Signed distance to the rounded-rect boundary (negative inside). We use
@@ -231,6 +256,23 @@
           var len = Math.sqrt(nx * nx + ny * ny) || 1;
           dr = (nx / len) * mag;
           dg = (ny / len) * mag;
+
+          // Specular rim: the OUTWARD unit normal is -(inward). The highlight is
+          // strong where it faces the fixed light (dot>0), tightened by POWER, and
+          // confined to the OUTER fraction (SPEC_BAND) of the edge band so it reads
+          // as a thin lit line on the rim, not a wide wash.
+          if (specData) {
+            var ux = -(nx / len), uy = -(ny / len);
+            var ndotl = ux * lx + uy * ly;
+            if (ndotl > 0 && t < SPEC_BAND) {
+              var rim = 1 - t / SPEC_BAND;                 // 1 at edge → 0 at band inner
+              var s = Math.pow(ndotl, SPEC_POWER) * rim * SPEC_GAIN;
+              var a = Math.max(0, Math.min(SPEC_ALPHA_MAX, s));
+              var si = (y * cw + x) * 4;
+              specData[si] = 255; specData[si + 1] = 255; specData[si + 2] = 255;
+              specData[si + 3] = Math.round(a * 255);
+            }
+          }
         }
 
         var i = (y * cw + x) * 4;
@@ -242,7 +284,12 @@
       }
     }
     ctx.putImageData(img, 0, 0);
-    return { url: canvas.toDataURL("image/png"), w: cw, h: ch };
+    var out = { url: canvas.toDataURL("image/png"), w: cw, h: ch, specUrl: null };
+    if (specCanvas && specData) {
+      specCanvas.getContext("2d").putImageData(new ImageData(specData, cw, ch), 0, 0);
+      out.specUrl = specCanvas.toDataURL("image/png");
+    }
+    return out;
   }
 
   // ── SVG filter host (ONE shared inline <svg> with a <filter> per size bucket) ─
@@ -337,7 +384,34 @@
         f.setAttribute("intercept", String(TINT_INTERCEPT));
         feCT.appendChild(f);
       });
+      feCT.setAttribute("result", "tinted");
       filter.appendChild(feCT);
+      lastResult = "tinted";
+    }
+
+    // SPECULAR RIM (the kube.io feBlend layer): load the white rim map as a SECOND
+    // feImage and screen it over the lit backdrop so a bright highlight rides the
+    // edge. mode="screen" lightens only where the rim has alpha (transparent center =
+    // identity), giving the "lit glass" edge. Skipped when SPEC_ENABLE is off / no map.
+    if (SPEC_ENABLE && map.specUrl) {
+      var feSpec = document.createElementNS(SVG_NS, "feImage");
+      feSpec.setAttribute("x", "0");
+      feSpec.setAttribute("y", "0");
+      feSpec.setAttribute("width", String(map.w));
+      feSpec.setAttribute("height", String(map.h));
+      feSpec.setAttribute("preserveAspectRatio", "none");
+      feSpec.setAttribute("result", "specular_layer");
+      feSpec.setAttributeNS(XLINK_NS, "xlink:href", map.specUrl);
+      feSpec.setAttribute("href", map.specUrl);
+      filter.appendChild(feSpec);
+
+      var feBlend = document.createElementNS(SVG_NS, "feBlend");
+      feBlend.setAttribute("in", lastResult);
+      feBlend.setAttribute("in2", "specular_layer");
+      feBlend.setAttribute("mode", "screen");
+      feBlend.setAttribute("result", "lit");
+      filter.appendChild(feBlend);
+      lastResult = "lit";
     }
 
     svg.appendChild(filter);

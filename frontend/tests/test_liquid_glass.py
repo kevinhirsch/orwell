@@ -84,6 +84,19 @@ def test_uses_feimage_and_fedisplacementmap_with_rg_channels():
     assert '"in2", "displacement_map"' in JS
 
 
+def test_specular_rim_highlight_via_feblend():
+    # The kube.io feBlend specular layer: a SECOND generated rim-light image
+    # (white, alpha = highlight intensity) loaded as its own feImage and screened
+    # over the refracted backdrop so a bright lit edge rides the rim. Rim light =
+    # max(0, outwardNormal · fixed lightDir)^POWER, confined to the edge band.
+    assert "SPEC_ENABLE" in JS
+    assert "SPEC_ANGLE_DEG" in JS
+    assert "specUrl" in JS                 # the separate specular map is generated
+    assert '"result", "specular_layer"' in JS
+    assert "feBlend" in JS
+    assert '"mode", "screen"' in JS        # screen = lighten → the lit rim
+
+
 def test_displacement_map_uses_squircle_edge_and_neutral_128():
     assert "squircle" in JS.lower()
     assert "SQUIRCLE_N" in JS
