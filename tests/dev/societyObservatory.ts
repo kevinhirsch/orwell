@@ -6,8 +6,9 @@
  *   1. the per-NPC motivation DIALS — how character reshapes WHERE houseguests go (location) and WHO
  *      they talk to + HOW (friendly vs. game);
  *   2. a realistic TIME BUDGET + the nightly SLEEP ECONOMY — a believable 24h clock where bedtime is an
- *      EMERGENT, character-driven choice (chronotype + who's still up), the house force-wakes everyone at
- *      08:00, and short sleep is paid back the next day across THREE channels (comps, mood, social sway).
+ *      EMERGENT, character-driven choice (chronotype + who's still up + a conflict drains you to bed earlier),
+ *      the house force-wakes everyone at 08:00, and short sleep is paid back the next day as reduced
+ *      EFFECTIVENESS (worse comps + less social sway) — NEVER a personality change.
  *
  * It reuses the engine's PURE functions (`assignRooms`, `richOffscreenStretch`, the `RelationshipModel`,
  * and the `timeOfDay` labels) with DIAL-BIASED dependency functions, so we can watch all of this WITHOUT
@@ -27,6 +28,7 @@ import { richOffscreenStretch } from "../../src/engine/offscreen";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { generateHouse, dispositionOf } from "../../src/engine/characterFactory";
 import type { Houseguest } from "../../src/engine/characterFactory";
+import { RELATIONSHIP_CONSTANTS, scaleImpact } from "../../src/engine/relationshipConstants";
 import type { EdgeSignals, InteractionType } from "../../src/engine/relationshipConstants";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { InMemoryEventStore } from "../../src/adapters/inmemory/InMemoryEventStore";
@@ -136,21 +138,23 @@ const STAY = {
   bondW: 0.55, showmanceW: 0.7, threatW: 0.55, buzzW: 0.45, // the social-pull components
   chronoFloor: 0.25, chronoSpan: 1.55,                      // socialFactor = floor + span×chronotype01 (lark→0.25, owl→1.8)
   restlessW: 0.3, jitterW: 0.5,
+  drainW: 0.4, drainCap: 4, // a CHARACTER conflict drains you ⇒ you turn in EARLIER (owner ruling: never a personality change)
 };
 
-// ── Sleep debt → THREE next-day penalties (owner ruling 2026-06-24) ─────────────────────────────
+// ── Sleep debt → next-day penalties: EFFECTIVENESS, never PERSONALITY (owner ruling 2026-06-24) ──
 // `debt(h)` = the 8h need minus what you actually banked before the 08:00 wall. It costs you the NEXT day
-// across three channels — (1) comp sharpness, (2) emotional steadiness, (3) social SWAY, the last being a
-// NEGATIVE SKEW (charm less AND snap more), not a flat mute. Divisors set how fast each bites.
-const DEBT = { compDiv: 8, emoDiv: 8, socialDiv: 6 };
+// on TWO channels only — (1) comp sharpness, (2) social SWAY. The mechanic must NOT change who a character
+// is (no manufactured conflict, no scene-nature skew): the emotional dimension instead flows the OTHER way,
+// as a CONFLICT → EARLIER-BEDTIME drain (above, in `STAY.drainW`). Divisors set how fast each bites.
+const DEBT = { compDiv: 8, socialDiv: 6 };
 function debtHoursOf(turnIn: number): number {
   const slept = (Math.min(turnIn + SLEEP_NEED_MIN, DAY_END_MIN) - turnIn) / 60; // <8h once you bed past midnight
   return Math.max(0, 8 - slept);
 }
-// The tired social knock-on applied to scenes a tired houseguest INITIATES the next day:
-//   • the READ tilts toward friction (more game/conflict scenes selected) — they pick more fights;
-//   • a friendly fold lands flatter (charm damped); a game/conflict fold lands harder (snap amplified).
-const TIRED = { natureTilt: 0.35, warmDamp: 0.05, conflictAmp: 0.06 };
+// The tired SOCIAL penalty = reduced EFFECTIVENESS, applied to scenes a tired houseguest initiates the next
+// day: their fold on the other person is scaled DOWN in magnitude — symmetric, so they're worse at warming
+// AND at souring. They move the needle LESS (reduced sway); they do NOT move it in a different direction.
+const TIRED = { swayDamp: 0.9 }; // fraction of sway lost at full social penalty (fold scaled by 1 − damp×penalty)
 
 // ── Late-night cluster curve: the few who stay up should find EACH OTHER ───────────────────────
 // The deepest owls can end up awake ALONE, paying full sleep cost for no scheming. So add a SLIGHT,
@@ -167,6 +171,8 @@ function clusterBoost(clock: number, strength: number): number {
 // ── Scene-nature classes ──────────────────────────────────────────────────────────────────────
 const GAME: ReadonlySet<InteractionType> = new Set<InteractionType>(["alliance", "strategy", "conflict", "betrayal"]);
 const isGame = (t: InteractionType): boolean => GAME.has(t);
+// The friction subset that DRAINS the people in it (→ earlier bedtime). Alliance/strategy are game but not draining.
+const CONFLICT: ReadonlySet<InteractionType> = new Set<InteractionType>(["conflict", "betrayal"]);
 
 // ── Injection point 1: the dial-biased MOVEMENT pull (a's intent toward b) ─────────────────────
 function movePull(d: Dials, e: EdgeSignals, bIsHoh: boolean, moveIntent: number): number {
@@ -179,14 +185,14 @@ function movePull(d: Dials, e: EdgeSignals, bIsHoh: boolean, moveIntent: number)
 }
 
 // ── Injection point 2: a's dial-tinted READ of b (biases pairing + scene nature via natureWeights) ─
-// `frictionTilt` (≥0) is the tired knock-on: a sleep-deprived initiator reads more threat / less warmth,
-// so `natureWeights` selects more game/conflict scenes — they pick more fights the day after a late night.
-function tiltedEdge(d: Dials, e: EdgeSignals, frictionTilt: number): EdgeSignals {
+// Personality-only: who they are decides what kind of scene they run. Sleep does NOT enter here (the
+// debt mechanic must not change personality — no tired-friction tilt that would make a peacemaker fight).
+function tiltedEdge(d: Dials, e: EdgeSignals): EdgeSignals {
   return {
     ...e,
     // aggressive/paranoid read more threat & agenda (→ strategy/conflict); social read more warmth (→ bonding)
-    affinity: clamp01(e.affinity + 0.25 * (d.socialEnergy - 0.5) + 0.2 * (0.5 - d.strategicAggression) - 0.6 * frictionTilt),
-    threat: clamp01(e.threat + 0.3 * (d.strategicAggression - 0.5) + 0.25 * (d.paranoia - 0.5) + 0.15 * (d.confrontation - 0.5) + frictionTilt),
+    affinity: clamp01(e.affinity + 0.25 * (d.socialEnergy - 0.5) + 0.2 * (0.5 - d.strategicAggression)),
+    threat: clamp01(e.threat + 0.3 * (d.strategicAggression - 0.5) + 0.25 * (d.paranoia - 0.5) + 0.15 * (d.confrontation - 0.5)),
     alignment: clamp01(e.alignment + 0.25 * (d.strategicAggression - 0.5) + 0.2 * (d.foresight - 0.5)),
     trust: clamp01(e.trust + 0.2 * (d.loyalty - 0.5)),
   };
@@ -200,8 +206,9 @@ interface Obs {
   game: number;
   scenePartners: Map<EntityId, number>;
   lateScenes: number; // scenes this NPC initiated INSIDE the sleep block (the time bought with lost sleep)
+  fights: number;     // conflict/betrayal scenes this NPC was IN (either role) — the drain that beds them earlier
 }
-const freshObs = (): Obs => ({ room: new Map(), coPresent: new Map(), friendly: 0, game: 0, scenePartners: new Map(), lateScenes: 0 });
+const freshObs = (): Obs => ({ room: new Map(), coPresent: new Map(), friendly: 0, game: 0, scenePartners: new Map(), lateScenes: 0, fights: 0 });
 const bump = <K>(m: Map<K, number>, k: K, by = 1): void => { m.set(k, (m.get(k) ?? 0) + by); };
 const topN = <K>(m: Map<K, number>, n: number): [K, number][] =>
   [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
@@ -247,18 +254,19 @@ function run(opts: RunOpts) {
   const socRng = new SeededRandom(seed * 13 + 3);
   const sleepRng = new SeededRandom(seed * 17 + 5); // dedicated stream for the stay-up jitter (determinism)
 
-  // Yesterday's debt → today's tiredness, carried across days. Empty (=0) on day 0.
-  const tiredSocial = new Map<EntityId, number>(); // negative-sway penalty (charm less / snap more)
-  const tiredEmo = new Map<EntityId, number>();    // volatility/mood penalty (feeds the friction tilt)
-  const frictionTiltOf = (id: EntityId): number =>
-    TIRED.natureTilt * (0.6 * (tiredSocial.get(id) ?? 0) + 0.4 * (tiredEmo.get(id) ?? 0));
+  // Yesterday's short sleep → today's reduced social EFFECTIVENESS (sway), carried across days. =0 on day 0.
+  // (No emotional/personality carry — the emotional dimension flows the other way, as conflictDrain below.)
+  const tiredSocial = new Map<EntityId, number>();
+  // Within-TODAY conflict drain (reset each day): a character conflict wears the involved houseguest down so
+  // they turn in earlier THAT night. Personality produces the conflict; sleep never authors it.
+  const conflictDrain = new Map<EntityId, number>();
 
   // The pull `assignRooms` reads. `currentClock` is set each tick so the LATE-NIGHT cluster floor ramps in
-  // after midnight (0 by day ⇒ daytime movement unchanged). The dial READ is tired-tilted toward friction.
+  // after midnight (0 by day ⇒ daytime movement unchanged). The dial READ is PERSONALITY-only (sleep absent).
   let currentClock = DAY_START_MIN;
   const dialPull = (a: EntityId, b: EntityId): number =>
     movePull(dials.get(a)!, rel.edge(a, b), b === hoh, moveIntent) + clusterBoost(currentClock, lateCluster);
-  const dialEdge = (a: EntityId, b: EntityId): EdgeSignals => tiltedEdge(dials.get(a)!, rel.edge(a, b), frictionTiltOf(a));
+  const dialEdge = (a: EntityId, b: EntityId): EdgeSignals => tiltedEdge(dials.get(a)!, rel.edge(a, b));
 
   let occ: Map<EntityId, Room> | null = null;
   const obs = new Map<EntityId, Obs>(ids.map((id) => [id, freshObs()] as const));
@@ -298,18 +306,23 @@ function run(opts: RunOpts) {
     const social = STAY.bondW * bond + STAY.showmanceW * show + STAY.threatW * threat + STAY.buzzW * buzz;
     const socialFactor = STAY.chronoFloor + STAY.chronoSpan * c01;                  // larks discount it, owls chase it
     const restless = d.emotionalVolatility - 0.5;                                   // can't settle
+    const drain = Math.min(STAY.drainCap, conflictDrain.get(id) ?? 0);              // today's conflicts wear them out
     const jitter = sleepRng.next() - 0.5;                                           // seeded wobble
-    return Math.max(0, socialFactor * social + STAY.restlessW * restless + STAY.jitterW * jitter);
+    return Math.max(0, socialFactor * social + STAY.restlessW * restless - STAY.drainW * drain + STAY.jitterW * jitter);
   };
 
-  // The tired social knock-on (negative skew) on a scene a tired NPC initiated. Only draws rng when tired,
-  // so a fully-rested house is byte-identical to the no-debt model.
-  const applyTiredSkew = (initiator: EntityId, partner: EntityId, type: InteractionType, social: number): void => {
-    if (social <= 0) return;
-    const imp = isGame(type)
-      ? { affinity: -TIRED.conflictAmp * social, threat: TIRED.conflictAmp * social } // snap landed harder
-      : { affinity: -TIRED.warmDamp * social };                                       // charm landed flatter
-    rel.applyImpactDirected(partner, initiator, imp, socRng);
+  // Mirror the orchestrator fold (partner updates their belief about the initiator), but a SLEEP-DEPRIVED
+  // initiator moves the needle LESS — their fold is scaled down in magnitude (symmetric: worse at warming AND
+  // souring). It's reduced sway, NOT a redirected one, so it never changes the kind of scene or who they are.
+  // A fully-rested initiator (social=0) takes the plain `applyDirected` path ⇒ byte-identical to the no-debt model.
+  const foldScene = (initiator: EntityId, partner: EntityId, type: InteractionType): void => {
+    const social = tiredSocial.get(initiator) ?? 0;
+    if (social <= 0) {
+      rel.applyDirected(partner, initiator, type, socRng);
+      return;
+    }
+    const scaled = scaleImpact(RELATIONSHIP_CONSTANTS.IMPACT[type], Math.max(0, 1 - TIRED.swayDamp * social));
+    rel.applyImpactDirected(partner, initiator, scaled, socRng);
   };
 
   // One ~1h slice at a given clock minute. Decides emergent turn-ins, then runs the society among the AWAKE.
@@ -342,8 +355,11 @@ function run(opts: RunOpts) {
       events, rng: socRng, npcs: awake, interactions: 4, edgeOf: dialEdge, occupancy: occ,
     });
     for (const s of scenes) {
-      rel.applyDirected(s.partner, s.initiator, s.type, socRng); // mirror the orchestrator fold
-      applyTiredSkew(s.initiator, s.partner, s.type, tiredSocial.get(s.initiator) ?? 0); // tired negative skew
+      foldScene(s.initiator, s.partner, s.type); // fold, with the tired initiator's sway scaled down
+      if (CONFLICT.has(s.type)) { // a character conflict drains BOTH ⇒ both turn in earlier tonight
+        bump(conflictDrain, s.initiator); bump(conflictDrain, s.partner);
+        if (record) { obs.get(s.initiator)!.fights++; obs.get(s.partner)!.fights++; }
+      }
     }
     if (!record) return;
     phaseStats[phase].scenes += scenes.length;
@@ -371,17 +387,16 @@ function run(opts: RunOpts) {
   // Run whole DAYS on the 24h ring; bedtime emerges, the house empties after midnight, early birds re-wake
   // before the 08:00 wall, and the day ends by force-waking everyone — where the night's sleep debt is cashed.
   const runDay = (record: boolean): void => {
-    turnIn.clear(); wakeAt.clear();
+    turnIn.clear(); wakeAt.clear(); conflictDrain.clear();
     for (let clock = DAY_START_MIN; clock < DAY_END_MIN; clock += minutesPerTick) {
       tick(phaseAt(clock), clock, record);
     }
-    // Cash the night out: turn-in → hours slept → debt → tomorrow's tiredness (and the observed ledger).
+    // Cash the night out: turn-in → hours slept → debt → tomorrow's reduced social sway (and the observed ledger).
     for (const id of ids) {
       const ti = turnIn.get(id) ?? HARD_LIGHTS_OUT; // anyone still up at the wall is force-woken having bedded latest
       const wk = Math.min(ti + SLEEP_NEED_MIN, DAY_END_MIN);
       const debt = debtHoursOf(ti);
       tiredSocial.set(id, clamp01(debt / DEBT.socialDiv));
-      tiredEmo.set(id, clamp01(debt / DEBT.emoDiv));
       if (record) {
         const a = sleepAgg.get(id)!;
         a.tiSum += ti; a.wakeSum += wk; a.sleptSum += (wk - ti) / 60; a.debtSum += debt; a.days++;
@@ -444,27 +459,29 @@ function report(seed: number, moveIntent: number, minutesPerTick: number, lateCl
   const maxAwake = Math.max(1, ...hourAvg);
   console.log(`     ${hourAvg.map((a) => "█".repeat(Math.round((a / maxAwake) * 5)).padStart(6)).join("")}`);
 
-  // The sleep economy: who traded sleep for after-midnight scheming, and the THREE penalties they carry into
-  // the next day. `bed`/`wake`/`slept` are averaged over the observed days (emergent bedtime varies nightly).
-  console.log(`\n  ── sleep economy (stay up to scheme ⇒ bank <8h ⇒ pay it back next day: comp / mood / social sway) ──`);
-  console.log(`     houseguest                         chrono   bed    wake   slept   comp  emo  soc%   late`);
+  // The sleep economy: who traded sleep for after-midnight scheming, the penalties they carry into the next
+  // day (comp sharpness + reduced social SWAY), and `fights` — the conflicts that drained them earlier to bed.
+  // `bed`/`wake`/`slept`/`fights` are averaged over the observed days (emergent bedtime varies nightly).
+  console.log(`\n  ── sleep economy (stay up to scheme ⇒ bank <8h ⇒ pay it back next day: comp sharpness + social sway) ──`);
+  console.log(`     houseguest                         chrono   bed    wake   slept   comp  sway%  fights  late`);
   const sleepRows = ids.map((id) => {
     const a = sleepAgg.get(id)!;
     const days = Math.max(1, a.days);
     const debt = a.debtSum / days;
     return {
-      id, late: obs.get(id)!.lateScenes,
+      id, late: obs.get(id)!.lateScenes, fights: obs.get(id)!.fights / days,
       bed: a.tiSum / days, wake: a.wakeSum / days, slept: a.sleptSum / days,
-      comp: clamp01(debt / DEBT.compDiv), emo: clamp01(debt / DEBT.emoDiv), social: clamp01(debt / DEBT.socialDiv),
+      comp: clamp01(debt / DEBT.compDiv), social: clamp01(debt / DEBT.socialDiv),
     };
   }).sort((x, y) => y.social - x.social); // tired owls on top
   for (const r of sleepRows) {
     console.log(
       `     ${label(r.id).padEnd(34)} ${chronoTag(chrono.get(r.id)!)}   ${hhmm(r.bed).padStart(5)}  ${hhmm(r.wake).padStart(5)}  ${r.slept.toFixed(1).padStart(4)}h` +
-      `   ${r.comp.toFixed(2)} ${r.emo.toFixed(2)} ${String(Math.round(r.social * 100)).padStart(3)}%  ${String(r.late).padStart(4)}`,
+      `   ${r.comp.toFixed(2)}  ${String(Math.round(r.social * 100)).padStart(3)}%   ${r.fights.toFixed(1).padStart(4)}   ${String(r.late).padStart(4)}`,
     );
   }
-  console.log(`     (soc% = the negative-sway penalty: that fraction of charm is lost AND fights land harder the next day)`);
+  console.log(`     (sway% = reduced EFFECTIVENESS, not a personality change: a tired actor's social folds move others`);
+  console.log(`      that much LESS — symmetric, never a redirected one. fights = conflicts/day that drain them to bed EARLIER.)`);
 
   // archetype-level summary: does game-share track the dials?
   console.log(`\n  ── game-scene share by archetype (does aggression/paranoia scheme more?) ──`);
