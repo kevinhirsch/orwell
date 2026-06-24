@@ -177,7 +177,26 @@ def main() -> int:
                   // (the "Select Model" dropdown regressed light-on-light too).
                   const menu = document.querySelector('.model-picker-menu');
                   if (menu) menu.classList.remove('hidden');
-                  return {
+
+                  // #725 (kit-level): inner text on GLASS CHROME surfaces (gadget cards, settings
+                  // rows) used to go light-on-light because inner nodes set their OWN var(--fg) /
+                  // color-mix(--fg N%, …) at higher specificity than the blanket container dark-ink.
+                  // The fix redefines --fg to dark ink WITHIN those surfaces (full + muted resolve
+                  // dark). Mount a representative gadget card (with a FULL + a MUTED row + a value)
+                  // and a settings/admin row, then probe their inner text so the regression can't
+                  // silently return. (Removed at the end of the probe.)
+                  const mk = (html) => { const d = document.createElement('div'); d.innerHTML = html;
+                    const n = d.firstElementChild; document.body.appendChild(n); return n; };
+                  const og = mk('<section class="og-card og-probe-lol" style="display:block">'+
+                    '<div class="og-head"><span class="og-icon">🌙</span><span class="og-title">Night Status</span></div>'+
+                    '<div class="og-body">'+
+                      '<div class="ogp-full" style="color:var(--fg)">Awake: 6 houseguests</div>'+
+                      '<div class="ogp-muted" style="color:color-mix(in srgb, var(--fg) 60%, var(--panel))">winding down</div>'+
+                    '</div></section>');
+                  const ad = mk('<div class="admin-card adm-probe-lol" style="display:block">'+
+                    '<div class="adm-row" style="color:color-mix(in srgb, var(--fg) 70%, var(--panel))">Setting label</div>'+
+                    '</div>');
+                  const out = {
                     surfLum,
                     title: probe('.chat-meta-overlay #current-meta'),
                     metaCount: probe('.chat-meta-overlay .chat-meta-count'),
@@ -187,13 +206,54 @@ def main() -> int:
                     picker: probe('.model-picker-btn'),
                     pickerLabel: probe('.model-picker-btn #model-picker-label'),
                     menu: probe('.model-picker-menu'),
+                    // #725 gadget card + settings row (full + muted inner text on glass chrome):
+                    gadgetTitle: probe('.og-probe-lol .og-title'),
+                    gadgetFull: probe('.og-probe-lol .ogp-full'),
+                    gadgetMuted: probe('.og-probe-lol .ogp-muted'),
+                    settingsRow: probe('.adm-probe-lol .adm-row'),
                   };
+                  // generic sweep: EVERY visible text node on a glass-chrome surface must be dark
+                  // ink on the light glass (catch any future inner element that re-lights itself).
+                  const sweep = [];
+                  document.querySelectorAll('.og-card, .admin-card').forEach((card) => {
+                    if (getComputedStyle(card).display === 'none') return;
+                    card.querySelectorAll('*').forEach((el) => {
+                      if (!el.childNodes) return;
+                      // <option>/<optgroup> render in the native select popup (a separate surface,
+                      // not styleable cross-browser) — they are NOT on-glass chrome text.
+                      if (/^(OPTION|OPTGROUP)$/.test(el.tagName)) return;
+                      // Decorative COLOR samples (theme swatches / preview tiles / color dots/chips)
+                      // carry an INTENTIONAL color, not readable body text — exclude them so the
+                      // sweep flags only accidental light-on-light TEXT, the #725 failure mode.
+                      if (/\\b(swatch|preview|color-dot|colour-dot|color-chip|colorpick)\\b/.test(el.className || '')) return;
+                      const hasText = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+                      if (!hasText) return;
+                      const cs = getComputedStyle(el);
+                      const a = cs.color.match(/[\\d.]+/g);
+                      // skip fully-transparent text (alpha 0) — nothing painted
+                      if (a && a.length >= 4 && (+a[3]) === 0) return;
+                      // A node painting its OWN non-transparent background is a FILLED control (a
+                      // sanctioned CTA / selected pill / toggle) — light text on it is correct and
+                      // NOT the light-on-light bug. The bug is text riding the LIGHT GLASS directly,
+                      // i.e. an element whose own background is (near-)transparent. Skip filled ones.
+                      const bg = (getComputedStyle(el).backgroundColor || '').match(/[\\d.]+/g);
+                      const bgAlpha = bg && bg.length >= 4 ? (+bg[3]) : (bg ? 1 : 0);
+                      if (bgAlpha > 0.5) return;
+                      const L = lum(cs.color);
+                      if (L != null && L >= 0.4) sweep.push({ tag: el.tagName, cls: el.className, color: cs.color, lum: L });
+                    });
+                  });
+                  out.sweepLight = sweep;
+                  og.remove(); ad.remove();
+                  return out;
                 }"""
             )
             # The chrome text controls must be DARK ink (luminance < 0.4) on the light glass.
             # (A light surface measures high luminance; light text on it is the bug.)
             for _name in ("title", "metaCount", "costBadge", "textarea", "icon",
-                          "picker", "pickerLabel", "menu"):
+                          "picker", "pickerLabel", "menu",
+                          # #725 kit-level: gadget card (title/full/muted) + settings row
+                          "gadgetTitle", "gadgetFull", "gadgetMuted", "settingsRow"):
                 _p = lol.get(_name) or {}
                 if _p.get("missing"):
                     continue  # element legitimately absent — nothing to mis-color
@@ -201,6 +261,10 @@ def main() -> int:
                 check(_l is not None and _l < 0.4,
                       f"no light-on-light: {_name} text is dark ink on the light glass "
                       f"(lum={_l}, color={_p.get('color')})")
+            # generic sweep over every text node on glass chrome — nothing light-on-light.
+            _sweep = lol.get("sweepLight") or []
+            check(not _sweep,
+                  f"no light-on-light: glass-chrome text nodes are all dark ink ({_sweep[:6]})")
 
             page.evaluate("() => document.body.classList.remove('theme-frosted')")  # restore frosted-off
             try:
@@ -1834,10 +1898,18 @@ def main() -> int:
             # Collapse the sidebar for REAL (the hamburger), then compare
             # per-entry drawing signatures between the two states.
             page.evaluate("""() => {  // clear floaters that could sit over the hamburger
-              // #642: the engine-status banner is an OrwellNotice top-banner now — its dismiss is
-              // the kit's .on-dismiss (was .oes-x). Clear it so it can't sit over the hamburger.
-              const ban = document.querySelector('#orwell-engine-status .on-dismiss');
-              if (ban) ban.click();
+              // The engine-status top-banner is non-dismissable now (commit 377110a:
+              // dismissible:false — an honest outage signal, no × to wave it away), so there is
+              // NO .on-dismiss to click. The REAL fix is the layout: .hamburger-btn now yields to
+              // the banner via --on-banner-inset (style.css), dropping BELOW the banner's
+              // pointer-intercepting full-width card so the click always lands. We additionally
+              // hide the banner host here so this icon-parity assertion isn't height-sensitive on
+              // a short viewport — but the click no longer DEPENDS on it (see the local repro that
+              // proves #hamburger-btn is clickable with the banner up).
+              const dismiss = document.querySelector('#orwell-engine-status .on-dismiss');
+              if (dismiss) { dismiss.click(); return; }
+              const host = document.getElementById('orwell-notice-banner');
+              if (host) host.style.display = 'none';
             }""")
             page.wait_for_timeout(350)
             page.click("#hamburger-btn")

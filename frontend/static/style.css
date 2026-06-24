@@ -729,7 +729,14 @@ body.bg-pattern-perlin-flow {
     /* Fixed hamburger — always visible, toggles sidebar */
     .hamburger-btn {
       position: fixed;
-      top: 12px;
+      /* Yield to a top banner when one is shown. The engine-status banner is a full-width
+         position:fixed card (z-index 11000) whose painted area spans the whole top strip and
+         intercepts pointer events; the hamburger is position:fixed too, so without this it sits
+         UNDER the banner card and clicks are swallowed (the fe-browser smoke's #hamburger-btn
+         click timed out once the banner became non-dismissable). The notice kit publishes the
+         banner height as --on-banner-inset on <body>; drop the hamburger below it (no banner ⇒
+         the var is 0 ⇒ the 12px baseline wins). Mirrors the floating-sidebar inset pattern. */
+      top: max(12px, calc(var(--on-banner-inset, 0px) + 6px));
       left: 9px;
       right: auto;
       z-index: 210;
@@ -4764,7 +4771,9 @@ body.bg-pattern-perlin-flow {
       .hamburger-btn {
         width: 44px;
         height: 44px;
-        top: 6px;
+        /* Yield to the top banner here too (see the desktop rule) so the mobile hamburger
+           drops below a shown banner instead of sitting under its pointer-intercepting card. */
+        top: max(6px, calc(var(--on-banner-inset, 0px) + 4px));
         -webkit-tap-highlight-color: transparent;
       }
       body.hamburger-right .hamburger-btn { left: auto !important; right: 4px !important; }
@@ -37764,29 +37773,15 @@ body.theme-frosted .on-card .on-dismiss:focus-visible {
   }
 }
 
-/* ── Apple HIG: scroll-edge effect + typography legibility on glass ──────────── */
-/* Where scrollable content meets a floating glass surface, content should FADE    */
-/* under the glass (a soft blur/opacity transition), not hit a hard opaque cut.    */
-/* Apple uses this instead of an opaque bar bg. We add a gentle gradient-mask fade  */
-/* at the two seams that matter: the composer's top edge and the kit window body's  */
-/* top (under the floating titlebar). Purely visual; never changes hit-testing.     */
+/* ── Apple HIG: typography legibility on glass ────────────────────────────────── */
+/* The composer's top scroll-edge `::before` seam was REMOVED: it was a FULL-WIDTH  */
+/* rectangle (left:0;right:0;top:-18px) with a backdrop blur sitting above the       */
+/* FLOATING, ROUNDED composer, so it ignored the bar's border-radius and read as a   */
+/* rectangular haze/drop-shadow artifact at the top (owner report). The floating     */
+/* composer over the wallpaper doesn't need a scroll-edge fade — its own rounded     */
+/* glass + float shadow already separate it from the content. (The kit .ow-body top  */
+/* edge was deliberately never masked either.)                                       */
 body.theme-frosted .chat-input-bar { position: relative; }
-body.theme-frosted .chat-input-bar::before {
-  content: "";
-  position: absolute;
-  left: 0; right: 0; top: -18px; height: 18px;
-  pointer-events: none;
-  background: linear-gradient(to top,
-    color-mix(in srgb, var(--panel, var(--bg)) 22%, transparent), transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  -webkit-mask-image: linear-gradient(to top, #000, transparent);
-  mask-image: linear-gradient(to top, #000, transparent);
-}
-/* NB: we deliberately do NOT mask the kit .ow-body top edge — a body-wide mask    */
-/* would fade the first line of content on every window (and the kit warns against  */
-/* clipping the rounded-corner pointer region). The composer seam above is the one  */
-/* clear scroll-edge win; window headers already float as transparent glass.        */
 
 /* Apple HIG Typography: NEVER use light/thin font weights on glass — they smear    */
 /* over the translucent, variable-luminance ground. Floor text on glass at Regular  */
@@ -38476,10 +38471,38 @@ body.theme-frosted .msg-user :not(pre) > code {
   background-image: none !important;
   text-shadow: none !important;
 }
-/* inline code: a quieter solid chip (not the heavier block ground) */
+/* #734 / owner: code blocks inside chat bubbles rendered ALL-BLACK / unreadable —
+   the fill above is a near-black terminal ground, but the bubble's ADAPTIVE polarity
+   (adaptiveGlass sets `color: dark-ink` on the .msg-ai element over a BRIGHT wallpaper)
+   inherited DOWN into the code text → dark-on-dark. A code block is a SELF-CONTAINED
+   surface: it must NOT inherit the bubble's adaptive ink. Pin a stable DARK-TERMINAL
+   contract — LIGHT mono text + the readable --hl-* syntax tokens (all light, designed for
+   a dark ground) — and re-assert it for EVERY syntax token + the plain code text, so it's
+   consistent in Full + Frosted + Normal and never dark-on-dark. (Inline code gets a light
+   chip + dark text below, also stable.) */
+body.theme-frosted .msg-ai pre,
+body.theme-frosted .msg-user pre,
+body.theme-frosted .msg-ai pre code,
+body.theme-frosted .msg-user pre code {
+  color: var(--hl-fg, #d7e3ea) !important;
+  font-family: var(--ow-mono-font) !important;
+}
+body.theme-frosted .msg-ai pre .hljs-keyword,    body.theme-frosted .msg-user pre .hljs-keyword,
+body.theme-frosted .msg-ai pre .hljs-built_in,   body.theme-frosted .msg-user pre .hljs-built_in,
+body.theme-frosted .msg-ai pre .hljs-type        { color: var(--hl-keyword, #c678dd) !important; }
+body.theme-frosted .msg-ai pre .hljs-string,     body.theme-frosted .msg-user pre .hljs-string,
+body.theme-frosted .msg-ai pre .hljs-attr        { color: var(--hl-string, #e5c07b) !important; }
+body.theme-frosted .msg-ai pre .hljs-comment,    body.theme-frosted .msg-user pre .hljs-comment { color: var(--hl-comment, #828997) !important; }
+body.theme-frosted .msg-ai pre .hljs-function,   body.theme-frosted .msg-user pre .hljs-function,
+body.theme-frosted .msg-ai pre .hljs-title       { color: var(--hl-function, #61afef) !important; }
+body.theme-frosted .msg-ai pre .hljs-number,     body.theme-frosted .msg-user pre .hljs-number,
+body.theme-frosted .msg-ai pre .hljs-literal     { color: var(--hl-number, #d19a66) !important; }
+/* inline code: a quieter SOLID LIGHT chip with stable DARK text (never inherits the
+   bubble's adaptive ink — readable on either polarity). */
 body.theme-frosted .msg-ai :not(pre) > code,
 body.theme-frosted .msg-user :not(pre) > code {
-  background-color: color-mix(in srgb, var(--fg) 12%, var(--bg)) !important;
+  background-color: rgba(255,255,255,0.72) !important;
+  color: #16191f !important;
 }
 
 /* ── TRANSIENT typing / thinking / spinner → a small glass PILL (kit-consistent) ─
@@ -38772,6 +38795,37 @@ body.theme-frosted #sidebar button,
 body.theme-frosted .icon-rail a,
 body.theme-frosted .icon-rail button {
   text-shadow: 0 1px 1px rgba(255,255,255,0.4) !important;
+}
+
+/* ── KIT-LEVEL dark-ink-on-glass for chrome panels (#725, not whack-a-mole) ────
+   The blanket rule above colours the CONTAINER (#16191f), but inner elements that set
+   their OWN color (var(--fg) or color-mix(in srgb, var(--fg) N%, …)) at higher
+   specificity survive as LIGHT-on-LIGHT on the light glass (gadget rows + values,
+   settings rows, popover rows). Rather than chase each inner class, REDEFINE --fg to the
+   chrome dark ink WITHIN these glass CHROME surfaces under theme-frosted: every
+   `color: var(--fg)` and `color-mix(in srgb, var(--fg) N%, …)` then resolves to a
+   DARK-INK equivalent automatically — FULL stays dark, MUTED stays a muted dark
+   (the % mix is preserved, just keyed off dark ink) — so the muted secondary text on a
+   gadget card / settings row reads dark-on-light, never light-on-light. Borders/dots that
+   mix --fg likewise become a faint dark line on the light glass (correct for light glass).
+   Chat BUBBLES are deliberately OUT (they adapt via adaptiveGlass and own their own --fg
+   per polarity) — this set is CHROME only. adaptiveGlass stands down on chrome under
+   theme-frosted, so nothing fights this statically. Pinned by browser_smoke.py's
+   light-on-light contrast probe (gadget card + settings row). */
+body.theme-frosted .og-card,
+body.theme-frosted .admin-card,
+body.theme-frosted .ow-window .ow-body,
+body.theme-frosted .modal-content,
+body.theme-frosted .on-card,
+body.theme-frosted .dropdown,
+body.theme-frosted .overflow-menu,
+body.theme-frosted .cp-popover {
+  /* Redefine --fg to the chrome dark ink on these surfaces, so inner
+     `color: var(--fg)` AND `color-mix(in srgb, var(--fg) N%, …)` resolve to dark /
+     muted-dark. With --panel left dark, color-mix(--fg N%, --panel) mixes two darks ⇒ a
+     muted DARK that's legible on the light glass and keeps the muted gradation (full vs.
+     secondary), instead of the old light-on-light. */
+  --fg: #16191f;
 }
 
 /* LIGHT-ON-LIGHT GUARD — some text controls inside the light-glass chrome set their

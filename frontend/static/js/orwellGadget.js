@@ -66,7 +66,9 @@
       "  display: flex; align-items: center; gap: .4rem; margin: 0 0 .35rem;" +
       "  font-size: var(--ow-fs-heading, .8125rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; }" +
       ".og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }" +
-      ".og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }" +
+      // #729: the gadget-header focus ring is NEUTRAL (system-blue), never the theme red/accent —
+      // the glass chrome carries no accent HUE. system-blue is the one sanctioned focus tint.
+      ".og-card .og-head:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: 2px; border-radius: 4px; }" +
       ".og-card .og-icon { flex: 0 0 auto; }" +
       ".og-card .og-title {" +
       "  flex: 1 1 auto; min-width: 0;" +

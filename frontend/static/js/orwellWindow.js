@@ -118,7 +118,11 @@ function ensureCss() {
       flex: 1 1 auto; max-height: none;
     }
     .ow-window.ow-focused {
-      border-color: color-mix(in srgb, var(--accent, #e06c75) 65%, var(--win-border, var(--border, #355a66)));
+      /* #729: the focused-window ring is NEUTRAL, never the theme red/accent (the glass chrome
+         is colorless). A focused window reads via a brighter LUMINOUS rim + a deeper float
+         shadow, not a hued border. (style.css refines the rim per glass tier under
+         body.theme-frosted.) */
+      border-color: color-mix(in srgb, #ffffff 38%, var(--win-border, var(--border, #355a66)));
       box-shadow: 0 12px 36px rgba(0,0,0,.5);
     }
     /* ── J1-25 / J1-23: the opt-in modal backdrop ─────────────────────────────
@@ -140,7 +144,10 @@ function ensureCss() {
       cursor: move; user-select: none; -webkit-user-select: none;
       border-radius: var(--win-radius, 10px) var(--win-radius, 10px) 0 0;
     }
-    .ow-titlebar:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: -2px; }
+    /* #729: NEUTRAL focus ring (system-blue), never the theme red/accent — the glass chrome
+       carries no accent HUE. (Matches the gadget-header ring; system-blue is the one sanctioned
+       focus tint.) */
+    .ow-titlebar:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: -2px; }
     .ow-title {
       flex: 1; min-width: 0;
       font-size: var(--win-titlebar-fs, 1rem);

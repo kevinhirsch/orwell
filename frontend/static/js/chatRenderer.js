@@ -605,6 +605,13 @@ function _fmtCtx(n) {
  * Apply model color to a role element (sets color + dot color).
  */
 export function applyModelColor(roleEl, modelName) {
+  // C14/immersion + glass no-accent-on-text contract (#709): in the game build the assistant
+  // role label is "Big Brother", and it must read as NORMAL neutral foreground — never a model
+  // BRAND COLOR (which rendered the label yellow/gold). The provider logo + the click-to-info
+  // popup are model-identity leaks too, so the whole treatment is suppressed here. The label
+  // keeps the theme's default --fg ink (dark-on-light-glass under the frosted theme), exactly
+  // like the rest of the chat chrome. Owner: "yellow is not the color I want for 'Big Brother'."
+  if (typeof isGameBuild === 'function' && isGameBuild()) return;
   if (!modelName) return;
   const color = modelColor(modelName);
   if (color) {
