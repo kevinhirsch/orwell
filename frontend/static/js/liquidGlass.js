@@ -86,10 +86,14 @@
   // to before). All artistic — tune ANGLE/POWER/GAIN against the Apple refs.
   var SPEC_ENABLE = true;
   var SPEC_ANGLE_DEG = -60;  // light direction (the article's diagram default; upper-leftish rim)
-  var SPEC_POWER = 3.0;      // exponent — higher = tighter/sharper highlight arc
-  var SPEC_GAIN = 1.35;      // multiply the raw specular before clamping (brightness of the rim)
-  var SPEC_ALPHA_MAX = 0.85; // cap the rim's peak opacity (1 = full white)
-  var SPEC_BAND = 0.55;      // fraction of EDGE band (from the edge inward) the rim occupies
+  // Apple's specular RESPONDS TO GEOMETRY as a THIN bright edge on the lit side — NOT a
+  // wide glossy band. On a large flat surface (the composer bar) a wide/bright rim pools
+  // into a harsh horizontal streak; keep it a hairline that hugs the very edge and stays
+  // subtle, so it reads as a reflective edge, not a wash.
+  var SPEC_POWER = 4.0;      // exponent — higher = tighter/sharper highlight arc
+  var SPEC_GAIN = 1.0;       // multiply the raw specular before clamping (brightness of the rim)
+  var SPEC_ALPHA_MAX = 0.42; // cap the rim's peak opacity (subtle, not a glossy band)
+  var SPEC_BAND = 0.22;      // fraction of EDGE band the rim occupies (thin hairline near the edge)
 
   // Perf caps. Mobile gets a HARD-LOWER cap (small GPUs; the refraction is the most
   // expensive thing on the page). collectTargets() reads activeMaxSurfaces() so the
