@@ -54,87 +54,222 @@
     try { return !!(window.matchMedia && window.matchMedia("(prefers-contrast: more)").matches); } catch (_) { return false; }
   }
 
-  // ── backdrop image discovery + sampling ─────────────────────────────────────
-  // The "background" can be anything. We resolve the topmost viewport-covering source:
-  //   1) an explicit wallpaper/test element or any element with a background-image, or
-  //   2) an <img> that covers the viewport,
-  // sample its pixels (cover-mapped) for a surface's region, else fall back to the
-  // computed background-color luminance of the element behind the surface.
-  var _imgCache = {}; // url -> { canvas, ctx, w, h } | 'pending' | 'failed'
+  // ── unified backdrop canvas (image OR gradient OR solid — composited) ─────────
+  // The "background" can be ANYTHING: a solid theme colour, faint CSS pattern
+  // gradients, a full-viewport wallpaper image, or any combination. A url()-only
+  // path missed gradients entirely (they carry no url), so we paint ONE downscaled
+  // viewport canvas from the page's actual backdrop layers — base colour, then each
+  // background-image gradient, then any wallpaper image (back-to-front) — and sample
+  // regions of it per surface. That makes the adaptation correct over a photo, a
+  // light theme, a gradient theme, the dark chat, or a layered mix of them.
+  var BACKDROP_MAXW = 96;   // downscaled viewport-canvas width (cheap to getImageData)
+  var _bd = { cv: null, ctx: null, w: 0, h: 0, sig: "", base: null, tainted: false };
+  var _imgCache = {};       // url -> { img } | 'pending' | 'failed'
 
-  function bgImageUrl(el) {
-    try {
-      var bi = getComputedStyle(el).backgroundImage || "";
-      var m = bi.match(/url\((['"]?)(.*?)\1\)/);
-      return m ? m[2] : null;
-    } catch (_) { return null; }
-  }
+  function clamp255(x) { return Math.max(0, Math.min(255, Math.round(parseFloat(x)))); }
+  function parseAlpha(x) { x = String(x).trim(); return x.indexOf("%") >= 0 ? parseFloat(x) / 100 : parseFloat(x); }
+  function rgbaStr(c) { return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + (c[3] == null ? 1 : c[3]) + ")"; }
 
-  function findBackdropImageUrl() {
-    // Prefer a known full-viewport wallpaper, else scan likely containers.
-    var ids = ["__wp", "wallpaper", "app-bg", "background"];
-    for (var i = 0; i < ids.length; i++) {
-      var e = document.getElementById(ids[i]);
-      if (e) { var u = bgImageUrl(e); if (u) return u; }
+  // Parse a CSS colour (computed values resolve var()/color-mix() → rgb/rgba). Returns [r,g,b,a] or null.
+  function parseColor(s) {
+    if (!s) return null; s = String(s).trim();
+    if (s === "transparent") return [0, 0, 0, 0];
+    var m = s.match(/^rgba?\(([^)]+)\)/i);
+    if (m) {
+      var p = m[1].split(/[,\/\s]+/).filter(function (x) { return x !== ""; });
+      if (p.length >= 3) return [clamp255(p[0]), clamp255(p[1]), clamp255(p[2]), p[3] !== undefined ? parseAlpha(p[3]) : 1];
     }
-    var cands = [document.body, document.documentElement];
-    for (var c = 0; c < cands.length; c++) { var u2 = bgImageUrl(cands[c]); if (u2) return u2; }
+    var h = s.match(/^#([0-9a-fA-F]{3,8})$/);
+    if (h) {
+      var x = h[1];
+      if (x.length === 3) x = x[0] + x[0] + x[1] + x[1] + x[2] + x[2];
+      if (x.length >= 6) {
+        var a = x.length >= 8 ? parseInt(x.slice(6, 8), 16) / 255 : 1;
+        return [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16), a];
+      }
+    }
     return null;
   }
 
-  function ensureCanvas(url) {
+  // Split on a top-level separator only (commas inside rgb()/gradient() are kept).
+  function splitTopLevel(s, sep) {
+    var out = [], depth = 0, cur = "";
+    for (var i = 0; i < s.length; i++) {
+      var c = s[i];
+      if (c === "(") depth++; else if (c === ")") depth--;
+      if (c === sep && depth === 0) { out.push(cur); cur = ""; } else cur += c;
+    }
+    if (cur.trim() !== "") out.push(cur);
+    return out;
+  }
+
+  function parseAngle(h) {
+    h = h.trim().toLowerCase();
+    if (h.indexOf("deg") >= 0) return parseFloat(h);
+    if (h.indexOf("turn") >= 0) return parseFloat(h) * 360;
+    if (h.indexOf("grad") >= 0) return parseFloat(h) * 0.9;
+    if (h.indexOf("rad") >= 0) return parseFloat(h) * 180 / Math.PI;
+    var map = { "to top": 0, "to right": 90, "to bottom": 180, "to left": 270,
+      "to top right": 45, "to right top": 45, "to bottom right": 135, "to right bottom": 135,
+      "to bottom left": 225, "to left bottom": 225, "to top left": 315, "to left top": 315 };
+    return map[h] != null ? map[h] : 180;
+  }
+
+  // Colour stops from the gradient body parts; fill missing positions by interpolation.
+  function parseStops(parts) {
+    var stops = [];
+    for (var i = 0; i < parts.length; i++) {
+      var t = parts[i].trim();
+      // colour first, then an OPTIONAL position (% only — px positions are ignored).
+      var cm = t.match(/^(rgba?\([^)]*\)|#[0-9a-fA-F]+|[a-zA-Z]+)(?:\s+([-\d.]+)%)?/);
+      if (!cm) continue;
+      var col = parseColor(cm[1]); if (!col) continue;
+      var pos = cm[2] !== undefined ? parseFloat(cm[2]) / 100 : null;
+      stops.push({ col: col, pos: pos });
+    }
+    if (!stops.length) return stops;
+    if (stops[0].pos == null) stops[0].pos = 0;
+    if (stops[stops.length - 1].pos == null) stops[stops.length - 1].pos = 1;
+    for (var j = 1; j < stops.length - 1; j++) {
+      if (stops[j].pos != null) continue;
+      var prev = j - 1, next = j + 1;
+      while (next < stops.length && stops[next].pos == null) next++;
+      var p0 = stops[prev].pos, p1 = stops[next].pos != null ? stops[next].pos : 1;
+      stops[j].pos = p0 + (p1 - p0) * ((j - prev) / (next - prev));
+    }
+    return stops;
+  }
+
+  function avgColor(stops) {
+    var r = 0, g = 0, b = 0, a = 0;
+    for (var i = 0; i < stops.length; i++) { r += stops[i].col[0]; g += stops[i].col[1]; b += stops[i].col[2]; a += (stops[i].col[3] == null ? 1 : stops[i].col[3]); }
+    var n = stops.length || 1;
+    return [Math.round(r / n), Math.round(g / n), Math.round(b / n), a / n];
+  }
+
+  function paintGradient(ctx, w, h, css) {
+    var lp = css.indexOf("(");
+    var open = css.slice(0, lp).trim().toLowerCase();
+    var inner = css.slice(lp + 1, css.lastIndexOf(")"));
+    var parts = splitTopLevel(inner, ",");
+    if (!parts.length) return;
+    var radial = open.indexOf("radial") >= 0, conic = open.indexOf("conic") >= 0;
+    var head = parts[0].trim();
+    var headIsConfig = /^(to\s|[-\d.]+deg|[-\d.]+turn|[-\d.]+g?rad|circle|ellipse|at\s|closest|farthest|from\s)/i.test(head);
+    var stops = parseStops(headIsConfig ? parts.slice(1) : parts);
+    if (!stops.length) return;
+    if (conic) { ctx.fillStyle = rgbaStr(avgColor(stops)); ctx.fillRect(0, 0, w, h); return; }
+    var g;
+    if (radial) {
+      g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.75);
+    } else {
+      var a = (headIsConfig ? parseAngle(head) : 180) * Math.PI / 180;
+      var dx = Math.sin(a), dy = -Math.cos(a);
+      var len = Math.abs(w * dx) + Math.abs(h * dy);
+      g = ctx.createLinearGradient(w / 2 - dx * len / 2, h / 2 - dy * len / 2, w / 2 + dx * len / 2, h / 2 + dy * len / 2);
+    }
+    for (var i = 0; i < stops.length; i++) { try { g.addColorStop(clamp(stops[i].pos, 0, 1), rgbaStr(stops[i].col)); } catch (_) {} }
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  }
+
+  function drawCover(ctx, img, w, h) {
+    var iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return;
+    var s = Math.max(w / iw, h / ih), dw = iw * s, dh = ih * s;
+    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  }
+
+  function ensureImg(url) {
     var rec = _imgCache[url];
     if (rec && rec !== "pending" && rec !== "failed") return rec;
     if (rec === "pending" || rec === "failed") return null;
     _imgCache[url] = "pending";
     var img = new Image();
     img.crossOrigin = "anonymous";
-    img.onload = function () {
-      try {
-        var cv = document.createElement("canvas");
-        var scale = Math.min(1, 256 / Math.max(img.naturalWidth, img.naturalHeight)); // downscale: cheap
-        cv.width = Math.max(1, Math.round(img.naturalWidth * scale));
-        cv.height = Math.max(1, Math.round(img.naturalHeight * scale));
-        var ctx = cv.getContext("2d", { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0, cv.width, cv.height);
-        // touch one pixel to confirm it isn't tainted (cross-origin) → throws if so.
-        ctx.getImageData(0, 0, 1, 1);
-        _imgCache[url] = { canvas: cv, ctx: ctx, w: cv.width, h: cv.height };
-        schedule();
-      } catch (_) { _imgCache[url] = "failed"; }
-    };
+    img.onload = function () { _imgCache[url] = { img: img }; schedule(); };
     img.onerror = function () { _imgCache[url] = "failed"; };
     img.src = url;
     return null;
   }
 
-  // Average luminance of the backdrop behind `rect` (viewport px). Returns 0..1 or null.
-  function backdropLuminance(rect, imgUrl) {
+  // The backdrop element chain, back-to-front (html → body → known wallpaper containers).
+  function backdropChain() {
+    var chain = [];
+    if (document.documentElement) chain.push(document.documentElement);
+    if (document.body) chain.push(document.body);
+    var ids = ["__wp", "wallpaper", "app-bg", "background", "desktop"];
+    for (var i = 0; i < ids.length; i++) { var e = document.getElementById(ids[i]); if (e) chain.push(e); }
+    return chain;
+  }
+
+  // Build (or reuse) the unified downscaled backdrop canvas. Returns the cache record.
+  function buildBackdrop() {
     var vw = window.innerWidth || 1280, vh = window.innerHeight || 800;
-    if (imgUrl) {
-      var rec = ensureCanvas(imgUrl);
-      if (rec) {
-        // cover mapping: scale so the (downscaled) image covers the viewport.
-        var s = Math.max(vw / rec.w, vh / rec.h);
-        var dispW = rec.w * s, dispH = rec.h * s;
-        var ox = (vw - dispW) / 2, oy = (vh - dispH) / 2;
-        var total = 0, n = 0;
-        for (var gy = 0; gy < SAMPLE_GRID; gy++) {
-          for (var gx = 0; gx < SAMPLE_GRID; gx++) {
-            var vx = rect.left + (rect.width * (gx + 0.5)) / SAMPLE_GRID;
-            var vy = rect.top + (rect.height * (gy + 0.5)) / SAMPLE_GRID;
-            var ix = Math.round((vx - ox) / s), iy = Math.round((vy - oy) / s);
-            if (ix < 0 || iy < 0 || ix >= rec.w || iy >= rec.h) continue;
-            try {
-              var d = rec.ctx.getImageData(ix, iy, 1, 1).data;
-              total += relLum(d[0], d[1], d[2]); n++;
-            } catch (_) {}
-          }
+    var w = BACKDROP_MAXW, h = Math.max(1, Math.round(BACKDROP_MAXW * vh / vw));
+    var chain = backdropChain();
+    // First scan: a signature + the layer plan, so we don't repaint on every scroll.
+    var sig = w + "x" + h, plan = [], base = null;
+    for (var i = 0; i < chain.length; i++) {
+      var cs; try { cs = getComputedStyle(chain[i]); } catch (_) { continue; }
+      var col = parseColor(cs.backgroundColor);
+      if (col && col[3] > 0.05) { base = col; sig += "|c" + col.join(","); plan.push({ fill: col }); }
+      var bi = cs.backgroundImage || "";
+      if (bi && bi !== "none") {
+        var imgs = splitTopLevel(bi, ",");
+        for (var j = imgs.length - 1; j >= 0; j--) {   // CSS paints first-listed on top → reverse
+          var layer = imgs[j].trim();
+          var u = layer.match(/^url\((['"]?)(.*?)\1\)$/);
+          if (u) { plan.push({ url: u[2] }); sig += "|u" + u[2]; }
+          else if (/gradient\(/i.test(layer)) { plan.push({ grad: layer }); sig += "|g" + layer.length; }
         }
-        if (n) return total / n;
       }
     }
-    // Fallback: the computed background-color luminance of the element behind the centre.
+    if (_bd.sig === sig && _bd.cv) return _bd;
+    var cv = _bd.cv || document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    var ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = base ? rgbaStr(base) : "#282c34"; ctx.fillRect(0, 0, w, h);
+    var pending = false;
+    for (var p = 0; p < plan.length; p++) {
+      var it = plan[p];
+      if (it.fill) { ctx.fillStyle = rgbaStr(it.fill); ctx.fillRect(0, 0, w, h); }
+      else if (it.grad) { try { paintGradient(ctx, w, h, it.grad); } catch (_) {} }
+      else if (it.url) {
+        var rec = ensureImg(it.url);
+        if (!rec) { pending = true; continue; }
+        try { drawCover(ctx, rec.img, w, h); } catch (_) {}
+      }
+    }
+    var tainted = false;
+    try { ctx.getImageData(0, 0, 1, 1); } catch (_) { tainted = true; }
+    // sig keeps a |p marker while an image is still loading so the next pass rebuilds.
+    _bd = { cv: cv, ctx: ctx, w: w, h: h, sig: pending ? sig + "|p" : sig, base: base, tainted: tainted };
+    return _bd;
+  }
+
+  // Average luminance of the backdrop behind `rect` (viewport px). Returns 0..1 or null.
+  function backdropLuminance(rect) {
+    var vw = window.innerWidth || 1280, vh = window.innerHeight || 800;
+    var bd = buildBackdrop();
+    if (bd && bd.cv && !bd.tainted) {
+      var sx = bd.w / vw, sy = bd.h / vh, total = 0, n = 0;
+      for (var gy = 0; gy < SAMPLE_GRID; gy++) {
+        for (var gx = 0; gx < SAMPLE_GRID; gx++) {
+          var vx = rect.left + (rect.width * (gx + 0.5)) / SAMPLE_GRID;
+          var vy = rect.top + (rect.height * (gy + 0.5)) / SAMPLE_GRID;
+          var ix = clamp(Math.round(vx * sx), 0, bd.w - 1), iy = clamp(Math.round(vy * sy), 0, bd.h - 1);
+          try {
+            var d = bd.ctx.getImageData(ix, iy, 1, 1).data;
+            total += relLum(d[0], d[1], d[2]); n++;
+          } catch (_) {}
+        }
+      }
+      if (n) return total / n;
+    }
+    // Tainted (cross-origin wallpaper w/o CORS): use the resolved base colour if we have it.
+    if (bd && bd.base) return relLum(bd.base[0], bd.base[1], bd.base[2]);
+    // Deepest fallback: the computed background-color of the element behind the centre.
     try {
       var cx = clamp(rect.left + rect.width / 2, 0, vw - 1);
       var cy = clamp(rect.top + rect.height / 2, 0, vh - 1);
@@ -142,11 +277,8 @@
       for (var i = 0; i < els.length; i++) {
         var el = els[i];
         if (el.closest && el.closest(SURFACES)) continue; // skip the glass itself / glass chrome
-        var bg = getComputedStyle(el).backgroundColor || "";
-        var mm = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-        if (mm && (mm[4] === undefined || parseFloat(mm[4]) > 0.4)) {
-          return relLum(+mm[1], +mm[2], +mm[3]);
-        }
+        var c2 = parseColor(getComputedStyle(el).backgroundColor || "");
+        if (c2 && (c2[3] == null || c2[3] > 0.4)) return relLum(c2[0], c2[1], c2[2]);
       }
     } catch (_) {}
     return null;
@@ -155,12 +287,12 @@
   // ── apply ───────────────────────────────────────────────────────────────────
   function isFrosted() { return !!(document.body && document.body.classList.contains("theme-frosted")); }
 
-  function applyTo(el, imgUrl) {
+  function applyTo(el) {
     try {
       if (el.id && EXCLUDE_IDS[el.id]) return;
       var r = el.getBoundingClientRect();
       if (r.width < 24 || r.height < 24) return;
-      var L = backdropLuminance({ left: r.left, top: r.top, width: r.width, height: r.height }, imgUrl);
+      var L = backdropLuminance({ left: r.left, top: r.top, width: r.width, height: r.height });
       if (L == null) {
         el.style.removeProperty("background-color");
         el.style.removeProperty("color"); el.style.removeProperty("text-shadow");
@@ -211,12 +343,12 @@
       }
       return;
     }
-    var imgUrl = findBackdropImageUrl();
+    buildBackdrop(); // build the unified backdrop canvas once per pass; surfaces sample it
     var nodes = document.querySelectorAll(SURFACES);
     for (var j = 0; j < nodes.length; j++) {
       var el = nodes[j];
       if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue;
-      applyTo(el, imgUrl);
+      applyTo(el);
     }
   }
 
