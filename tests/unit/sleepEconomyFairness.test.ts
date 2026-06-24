@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { resolveCompetition, CompetitionIntents, type Competitor } from "../../src/domain/competitionOutcome";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
-import { restDeficitFor, bedtimeFor } from "../../src/engine/timeOfDay";
+import { restDeficitFor, bedtimeDepthFor } from "../../src/engine/timeOfDay";
 import { npcRestDeficit } from "../../src/engine/liveSeason";
 import type { LiveSeasonState } from "../../src/engine/liveSeason";
 import { ARCHETYPES } from "../../src/engine/characterFactory";
@@ -19,9 +19,11 @@ import { ARCHETYPES } from "../../src/engine/characterFactory";
  * This is the gate the deploy path (clock-ON) previously LACKED — the juryReach band runs clock-OFF.
  */
 
-// A minimal live state the rest read consumes: it only reads `lastSleepPhase` (how far last night ran).
-const nightOf = (lastSleepPhase: LiveSeasonState["lastSleepPhase"]): LiveSeasonState =>
-  ({ lastSleepPhase } as LiveSeasonState);
+// A minimal live state the rest read consumes: the continuous `lastSleepDepth` (how deep last night ran).
+// Mapped from a phase to a representative depth so the night-vs-late-night intent reads clearly.
+const DEPTH_OF: Record<string, number> = { morning: 0.1, afternoon: 0.3, evening: 0.5, night: 0.78, "late-night": 1.0 };
+const nightOf = (phase: NonNullable<LiveSeasonState["lastSleepPhase"]>): LiveSeasonState =>
+  ({ lastSleepDepth: DEPTH_OF[phase] } as LiveSeasonState);
 
 describe("ENG-NEW-1 — the rest deficit table matches its own design (the night⇒0 contradiction)", () => {
   it("a healthy night (bed by `night`) carries NO deficit; only `late-night` costs sharpness", () => {
@@ -51,22 +53,22 @@ describe("ENG-NEW-1 — no archetype tax: a NORMAL night costs every archetype n
 });
 
 describe("ENG-NEW-1 — the deficit is DYNAMIC on the actual night, only biting a real late night", () => {
-  it("only a night-owl who actually stayed up to `late-night` carries a deficit", () => {
+  it("only a night-owl who actually stayed up INTO `late-night` carries a deficit", () => {
     const lateNight = nightOf("late-night");
     for (const a of ARCHETYPES) {
-      const isOwl = bedtimeFor(a.bias) === "late-night"; // their character keeps them up to the bitter end
+      const isOwl = bedtimeDepthFor(a.bias) > 0.8; // their chronotype keeps them up into the small hours
       const deficit = npcRestDeficit(lateNight, a.bias);
       if (isOwl) expect(deficit).toBeGreaterThan(0); // they were genuinely up late — an EARNED cost
-      else expect(deficit).toBe(0);                  // they bedded earlier — the late night didn't touch them
+      else expect(deficit).toBe(0);                  // they bedded by `night` — the late night didn't touch them
     }
   });
 
-  it("a night-owl mental player pays ONLY on a late night they were actually awake through, never on a normal one", () => {
-    const owl = ARCHETYPES.find((a) => bedtimeFor(a.bias) === "late-night" && a.bias.mental >= 0.5)!;
-    expect(owl).toBeDefined();
-    expect(npcRestDeficit(nightOf("night"), owl.bias)).toBe(0);          // normal night ⇒ nothing
-    expect(npcRestDeficit(nightOf("evening"), owl.bias)).toBe(0);        // the house turned in early ⇒ nothing
-    expect(npcRestDeficit(nightOf("late-night"), owl.bias)).toBeGreaterThan(0); // they ran to the end ⇒ a cost
+  it("a night-owl pays ONLY on a late night they were actually awake through, never on a normal one", () => {
+    const owl = { physical: 0.2, social: 0.9 }; // a clear owl (social ≫ physical) — chronotype runs deep
+    expect(bedtimeDepthFor(owl)).toBeGreaterThan(0.8);
+    expect(npcRestDeficit(nightOf("night"), owl)).toBe(0);          // normal night ⇒ nothing
+    expect(npcRestDeficit(nightOf("evening"), owl)).toBe(0);        // the house turned in early ⇒ nothing
+    expect(npcRestDeficit(nightOf("late-night"), owl)).toBeGreaterThan(0); // they ran to the end ⇒ a cost
   });
 
   it("PROPERTY: for any stats, a normal night (bed by `night`) is always cost-free", () => {

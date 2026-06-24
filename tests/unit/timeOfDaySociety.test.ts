@@ -124,3 +124,31 @@ describe("ADR 0006 — the off-screen society pairs only the awake (the night ow
     expect(proved, "a late-night society ran among the awake, excluding the asleep").toBe(true);
   });
 });
+
+describe("0066 Phase-2 — a CHARACTER conflict drains a houseguest to bed earlier (conflict → earlier bedtime)", () => {
+  it("hammering an awake NPC with conflicts pulls THEM out of the night awake set; an un-conflicted one stays", () => {
+    process.env.ORWELL_TIME_OF_DAY = "1";
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const s = started(seed);
+      if (!advanceToPhase(s, "night")) continue;
+      const ids = npcsOf(s);
+      const awake = s.awakeAmong(ids);
+      if (awake.length < 3) continue; // need a victim + a conflict-partner + an un-conflicted control
+      const victim = awake[0]!, partner = awake[1]!, control = awake[2]!;
+      for (let i = 0; i < 6; i++) s.recordOffscreenScene(victim, partner, "conflict"); // a rough night
+      const after = s.awakeAmong(ids);
+      expect(after).not.toContain(victim);  // drained to bed early by the fights
+      expect(after).toContain(control);     // an uninvolved houseguest keeps their normal bedtime
+      return; // one good seed proves it
+    }
+    throw new Error("no seed reached `night` with ≥3 awake — test setup");
+  });
+
+  it("clock OFF: recording conflicts never changes the (identity) awake set", () => {
+    const s = started(7); // ORWELL_TIME_OF_DAY unset
+    for (let i = 0; i < 5; i++) { const a = s.advanceGame(); if (a.pending) resolveLegally(s, a.pending); }
+    const ids = npcsOf(s);
+    for (let i = 0; i < 6; i++) s.recordOffscreenScene(ids[0]!, ids[1]!, "conflict");
+    expect(s.awakeAmong(ids)).toEqual(ids); // identity — the drain is dormant off the clock
+  });
+});

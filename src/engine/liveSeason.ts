@@ -28,7 +28,7 @@ import { maybeFireTwist } from "./reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
 import { drawCompetition, competitionById } from "./competitionLibrary";
 import type { CompetitionDef, CompetitionPhase } from "./competitionLibrary";
-import { nextPhase, restDeficitFor, bedtimeFor, phaseIndex, DAY_START, type TimeOfDay } from "./timeOfDay";
+import { phaseForDepth, bedtimeDepthFor, restDeficitForDepth, DAY_START, type TimeOfDay } from "./timeOfDay";
 
 /**
  * The LIVE weekly loop (feature 0011, wired into the running game). Unlike
@@ -295,6 +295,19 @@ export interface LiveSeasonState {
    */
   playerRetired?: boolean;
   lastSleepPhase?: TimeOfDay;
+  /**
+   * Continuous "night depth" (0066 Phase-2, gated): the hidden 0..1 position the public `timeOfDay`
+   * is PROJECTED from (`phaseForDepth`). `nightDepth` advances by play; `lastSleepDepth` = how deep into
+   * last night the player was effectively up (drives the GRADED comp deficit + their rest cue). Absent ⇒
+   * the clock isn't running ⇒ 0 ⇒ byte-identical to the pre-feature model. Persist with the season (0030).
+   */
+  nightDepth?: number;
+  lastSleepDepth?: number;
+  /** 0066 Phase-2: the COMPOUNDING multi-night fatigue meter (0..1) — an EMA of nightly deficits, so a
+   *  STRING of late nights wears a houseguest down beyond the single-night cost. Persisted (0007/0030 —
+   *  non-degradation); absent ⇒ 0 ⇒ byte-identical when the clock is off. `npcFatigue` is keyed by id. */
+  playerFatigue?: number;
+  npcFatigue?: Record<EntityId, number>;
 }
 
 /** What the live loop reads about the house — kept narrow so the core stays pure/testable. */
@@ -860,18 +873,27 @@ export function firstCeremonyBeatResolved(s: LiveSeasonState): boolean {
  * awake again unless they choose to turn in. A no-op once the game is over. When the player has
  * already retired, time simply rolls them straight to the next morning (their night is done).
  */
+// One beat advances the hidden depth a fraction of a day (not a whole phase), so the public phase rolls
+// over several beats — a believable number of scenes fit each part of the day (a partial fix to the
+// "time races" lurch), and the depth grades the sleep trade. Tunable; ~14 beats fill a full day.
+const NIGHT_DEPTH_STEP = 0.07;
+
 export function advanceClock(s: LiveSeasonState): void {
   if (s.finished) return;
-  if (s.playerRetired) { s.timeOfDay = DAY_START; s.playerRetired = false; return; }
-  if (s.timeOfDay === undefined) { s.timeOfDay = DAY_START; return; }
-  if (s.timeOfDay === "late-night") {
+  if (s.playerRetired) { s.nightDepth = 0; s.timeOfDay = DAY_START; s.playerRetired = false; return; }
+  if (s.nightDepth === undefined) { s.nightDepth = 0; s.timeOfDay = DAY_START; return; }
+  const next = s.nightDepth + NIGHT_DEPTH_STEP;
+  if (next >= 1) {
     // A full night passed without the player turning in — they outlasted the whole house (Principle 6
-    // is theirs: nobody sent them to bed). They wake the next morning running on empty.
+    // is theirs: nobody sent them to bed). They wake the next morning running on empty (depth 1).
+    s.lastSleepDepth = 1;
     s.lastSleepPhase = "late-night";
+    s.nightDepth = 0;
     s.timeOfDay = DAY_START;
     return;
   }
-  s.timeOfDay = nextPhase(s.timeOfDay);
+  s.nightDepth = next;
+  s.timeOfDay = phaseForDepth(next);
 }
 
 /**
@@ -882,14 +904,17 @@ export function advanceClock(s: LiveSeasonState): void {
  */
 export function playerTurnIn(s: LiveSeasonState, player: EntityId): void {
   if (s.finished || playerHasLeft(s, player)) return;
-  s.lastSleepPhase = s.timeOfDay ?? DAY_START;
+  const depth = s.nightDepth ?? 0;
+  s.lastSleepDepth = depth;
+  s.lastSleepPhase = phaseForDepth(depth); // keep the phase cue coherent (restStatus reads it)
   s.playerRetired = true;
+  s.nightDepth = 0;
   s.timeOfDay = DAY_START;
 }
 
-/** The player's hidden rest deficit today (0..1) — from how late they were up last night. */
+/** The player's hidden rest deficit today (0..1) — graded by how deep into last night they were up. */
 export function playerRestDeficit(s: LiveSeasonState): number {
-  return restDeficitFor(s.lastSleepPhase ?? DAY_START);
+  return restDeficitForDepth(s.lastSleepDepth ?? 0);
 }
 
 /**
@@ -899,17 +924,21 @@ export function playerRestDeficit(s: LiveSeasonState): number {
  * mental/social-leaning houseguest (a night-owl bedtime) carried the MAX penalty in EVERY competition
  * — including the mental comps they should win — regardless of how the night actually went. That is a
  * structural aptitude tax (anti-sycophancy: the engine must not systematically disadvantage an
- * archetype). The deficit now reflects the LATEST PHASE THE NPC WAS ACTUALLY AWAKE last night — the
- * EARLIER of their character bedtime and how far the night actually ran (`lastSleepPhase`, which the
- * player's OWN bedtime drives). So a night-owl only pays when the night genuinely ran to `late-night`
- * (the player kept the house up late); on a normal night everyone — owls included — carries none, and
- * the mental favorite wins their mental comp cleanly. Dynamic on actual play, never a trait penalty.
+ * archetype). The deficit now reflects the LATEST DEPTH THE NPC WAS ACTUALLY AWAKE last night — the
+ * EARLIER of their CHRONOTYPE bedtime depth and how far the night actually ran (`lastSleepDepth`, which
+ * the player's OWN bedtime drives). So a night-owl only pays when the night genuinely ran late (the
+ * player kept the house up); on a normal night everyone — owls included — carries little/none, and the
+ * mental favorite wins their mental comp cleanly. Now GRADED + chronotype-aware, never a trait penalty.
  */
-export function npcRestDeficit(s: LiveSeasonState, stats: { physical: number; social: number }): number {
-  const bedtime = bedtimeFor(stats);
-  const nightPeak = s.lastSleepPhase ?? DAY_START;
-  const latestAwake = phaseIndex(bedtime) <= phaseIndex(nightPeak) ? bedtime : nightPeak;
-  return restDeficitFor(latestAwake);
+export function npcRestDeficit(
+  s: LiveSeasonState,
+  stats: { physical: number; social: number },
+  id?: EntityId,
+  bedDepthOverride?: number,
+): number {
+  const bedDepth = bedDepthOverride ?? bedtimeDepthFor(stats, id);
+  const nightPeak = s.lastSleepDepth ?? 0;
+  return restDeficitForDepth(Math.min(bedDepth, nightPeak));
 }
 
 /** Record the evictee as out (evictionOrder + remove from the live house). Does NOT roll the week. */
