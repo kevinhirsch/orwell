@@ -37369,13 +37369,18 @@ body.theme-frosted #sidebar {
   body.theme-frosted #sidebar,
   body.theme-frosted .icon-rail {
     position: fixed;
-    top: 50px;                 /* clear the fixed hamburger + the top bar */
+    /* Clear the fixed hamburger + top bar (50px baseline), AND yield to a top banner
+       when one is shown: the notice kit publishes its height as --on-banner-inset on
+       <body>, so the floating panel (position:fixed, immune to body padding) drops below
+       it instead of overlapping. No banner ⇒ the var is 0 ⇒ the 50px baseline wins. */
+    top: max(50px, calc(var(--on-banner-inset, 0px) + 8px));
     left: 10px;
     bottom: 12px;
     height: auto;
     border-right-width: 1px !important;   /* float = full border, not just a docked right edge */
     z-index: 120;
     overflow: hidden;
+    transition: top 0.2s cubic-bezier(0.22,0.61,0.36,1);
   }
   /* Right-side sidebar floats on the right edge instead. */
   body.theme-frosted.hamburger-right #sidebar,
