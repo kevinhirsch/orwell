@@ -296,11 +296,17 @@ class LlmOverseer:
                 return None
         return None
 
-    def assess(self, signals: "Signals") -> Optional["Verdict"]:
+    def build_prompt(self, signals: "Signals") -> str:
+        """Public alias of the Vault-free prompt builder, so the live async hook can drive the model
+        call itself (await) and still use the EXACT same telemetry-only prompt as assess()."""
+        return self._prompt(signals)
+
+    def verdict_from_reply(self, raw, signals: "Signals") -> Optional["Verdict"]:
+        """Turn a model reply into a Verdict, STRICTLY. An unparseable reply or any out-of-contract
+        field (a level outside LEVELS or a lever outside LEVERS — the model can NEVER widen the hand)
+        routes to the deterministic fallback. Exposed alongside build_prompt so the async live hook
+        reuses the identical validation as the sync assess() path."""
         try:
-            if not should_assess(signals):
-                return None
-            raw = self._llm_fn(self._prompt(signals))
             parsed = self._extract_json(raw)
             if not parsed:
                 return self._fallback.assess(signals)
@@ -324,6 +330,18 @@ class LlmOverseer:
                 diagnosis=diagnosis,
                 lever=lever,
             )
+        except Exception:
+            try:
+                return self._fallback.assess(signals)
+            except Exception:
+                return None
+
+    def assess(self, signals: "Signals") -> Optional["Verdict"]:
+        try:
+            if not should_assess(signals):
+                return None
+            raw = self._llm_fn(self._prompt(signals))
+            return self.verdict_from_reply(raw, signals)
         except Exception:
             # Any error in the model call / parse path -> the deterministic floor.
             try:

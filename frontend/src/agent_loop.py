@@ -4899,16 +4899,27 @@ async def stream_agent_loop(
                             + _turn_npc_move_nudges),
         )
 
-        # 0079 — the runtime loop overseer (SHADOW mode; opt-in, default OFF via ORWELL_OVERSEER).
-        # One holistic, Vault-free, post-turn diagnosis of the engine<->LLM loop: build structural
-        # Signals from this turn's telemetry, run the cheap symptom-gate, and if it trips, log the
-        # overseer's verdict to the OVERSEER ring. SHADOW = diagnose + log ONLY; it applies NO lever
-        # (the existing guardrails still do the acting), so behaviour is unchanged and the seeded
-        # lanes stay byte-identical. Fail-soft + off by default — the deterministic floor stands.
+        # 0079 — the runtime loop overseer (opt-in, default OFF via the admin toggle / ORWELL_OVERSEER).
+        # One holistic, Vault-free, post-turn diagnosis of the engine<->LLM loop. The symptom-gate is
+        # SPARSE (a healthy turn trips nothing). On a symptom it runs the REASONING tier (LlmOverseer
+        # over the user's utility model) for a wide-eyed root-cause read, FAIL-SOFT to the deterministic
+        # verdict when no model resolves or the call errors, and logs the verdict to the OVERSEER ring.
+        # It does NOT pull levers here: the inline guardrails above ARE the overseer's deterministic
+        # hands (they already nudged / advanced / backfilled this turn), so the post-turn tier is the
+        # intelligent DIAGNOSIS + audit layer over them — re-acting here would double-fire or override
+        # the tuned pacing grace. Fail-soft throughout; off by default ⇒ the loop runs exactly as before.
         try:
-            from src.overseer import overseer_enabled, Signals, DeterministicOverseer
+            from src.overseer import (overseer_enabled, should_assess, Signals,
+                                      DeterministicOverseer, LlmOverseer)
             if overseer_enabled():
                 _ov_names = {ev.get("tool") for ev in (tool_events or []) if isinstance(ev, dict)}
+                _ov_beat_after, _ov_desync = None, False
+                try:
+                    from routes import chat_helpers as _ov_ch
+                    _ov_beat_after = _ov_ch.last_beat_seq(owner)
+                    _ov_desync = owner in getattr(_ov_ch, "_DESYNC_REGROUND", set())
+                except Exception:
+                    pass
                 _ov_sig = Signals(
                     in_advance_phase=(_phase in _ADVANCE_PHASES),
                     play_quiet=bool(_is_lull),
@@ -4916,17 +4927,40 @@ async def stream_agent_loop(
                     recorded_interaction=bool(_ov_names & _RECORD_TOOLS),
                     progression_tool_called=bool(_ov_names & _PROGRESSION_TOOLS),
                     io_error=any(isinstance(ev, dict) and ev.get("error") for ev in (tool_events or [])),
+                    desync=bool(_ov_desync),
                     beat_seq_before=_ledger_beat_seq_before,
+                    beat_seq_after=_ov_beat_after,
                 )
-                _ov_verdict = DeterministicOverseer().assess(_ov_sig)
-                if _ov_verdict is not None:
-                    from src import log_rings as _lr
-                    _lr.record_overseer(
-                        _ov_verdict.level, _ov_verdict.kind, _ov_verdict.diagnosis,
-                        lever=_ov_verdict.lever, beat_before=_ledger_beat_seq_before,
-                        ok=True, user=owner)
+                if should_assess(_ov_sig):
+                    # Resolve the user's UTILITY model (the same resolver the cast-authoring path uses);
+                    # absent ⇒ the deterministic floor simply stands.
+                    _ov_llm = None
+                    try:
+                        from src.orwell_cast_authoring import _resolve_llm_fn
+                        _ov_llm = await _resolve_llm_fn(owner)
+                    except Exception:
+                        _ov_llm = None
+                    _ov_verdict = None
+                    if _ov_llm is not None:
+                        _ov = LlmOverseer(_ov_llm)  # reuse its Vault-free prompt + strict validation
+                        try:
+                            import inspect as _ov_inspect
+                            _ov_raw = _ov_llm(_ov.build_prompt(_ov_sig))
+                            if _ov_inspect.isawaitable(_ov_raw):
+                                _ov_raw = await asyncio.wait_for(_ov_raw, timeout=15)
+                            _ov_verdict = _ov.verdict_from_reply(_ov_raw, _ov_sig)
+                        except Exception:
+                            _ov_verdict = DeterministicOverseer().assess(_ov_sig)
+                    else:
+                        _ov_verdict = DeterministicOverseer().assess(_ov_sig)
+                    if _ov_verdict is not None:
+                        from src import log_rings as _lr
+                        _lr.record_overseer(
+                            _ov_verdict.level, _ov_verdict.kind, _ov_verdict.diagnosis,
+                            lever=_ov_verdict.lever, beat_before=_ledger_beat_seq_before,
+                            beat_after=_ov_beat_after, ok=True, user=owner)
         except Exception as _ov_err:  # fail-soft: the overseer must never hurt a turn
-            logger.debug(f"[orwell] overseer shadow hook skipped: {_ov_err}")
+            logger.debug(f"[orwell] overseer hook skipped: {_ov_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.
