@@ -194,11 +194,22 @@ def test_frosted_game_build_modal_header_drops_own_filter():
     )
 
 
-def test_l34_gadget_rail_frosts_too():
+def test_l34_gadget_rail_is_not_glass_under_the_cards():
+    # Apple layering rule (HIG Materials): Liquid Glass is ONE functional layer over
+    # content — "glass cannot properly sample other glass." The control-room rail must
+    # therefore NOT be its own glass panel UNDER the glass cards (that was glass-on-glass);
+    # the rail is a transparent structural container and the CARDS are the single glass
+    # tiles over the chat behind. (Was: the rail shared the .ow-window frost — double layer.)
     css = _read("static", "style.css")
     block = _frosted_bg_block(css)
-    assert "body.theme-frosted .gadget-rail" in block, \
-        "the control-room gadget rail must frost with the rest of the chrome (L34)"
+    assert "body.theme-frosted .gadget-rail," not in block, \
+        "the gadget rail must NOT share the frosted-glass panel rule (no glass-on-glass under the cards)"
+    m = re.search(r"body\.theme-frosted \.gadget-rail\s*\{([^}]*)\}", css, re.S)
+    assert m, "the gadget rail must have an explicit (transparent, non-glass) rule"
+    rule = m.group(1)
+    assert "background-color: transparent !important;" in rule
+    assert "backdrop-filter: none !important;" in rule
+    assert "-webkit-backdrop-filter: none !important;" in rule
 
 
 def test_liquid_glass_gadget_cards_frost():

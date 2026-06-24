@@ -36429,10 +36429,6 @@ body.theme-frosted .email-reader,
 body.theme-frosted .admin-card,
 body.theme-frosted .gallery-detail-menu,
 body.theme-frosted #theme-popup .modal-content,
-/* L34: the control-room gadget rail frosts with the rest of the chrome. Its
-   .gadget-rail-head is transparent (border-only), so frosting the rail body
-   carries the header into the same glass — no opaque band at the top. */
-body.theme-frosted .gadget-rail,
 /* L34: the OrwellWindow kit (.ow-window — cast, finale, retrospective, the
    gadget rail, every Lane-F window) frosts identically to the modal family.
    Without this the kit window kept its solid --win-bg, so its transparent
@@ -36459,10 +36455,22 @@ body.theme-frosted .ow-window {
               inset 0 0 24px color-mix(in srgb, var(--fg) 6%, transparent) !important;
 }
 /* Liquid glass on the gadget kit (#642): each .og-card becomes its own frosted
-   pane (matching the .ow-window treatment) so the control-room rail reads as
-   stacked glass, not opaque tiles. The rail container already frosts (it shares
-   the .ow-window glass rule above); the cards add their own blur + bright rim +
-   sheen so they lift off it as legible panes. */
+   pane over the CONTENT behind the rail — NOT over another glass panel.
+
+   Apple layering rule (HIG Materials): Liquid Glass is the functional layer that
+   floats over content; "glass cannot properly sample other glass" → one glass
+   sheet per view. So the gadget rail must NOT be its own glass panel under the
+   glass cards (that was glass-on-glass). The rail is a TRANSPARENT structural
+   container; the CARDS are the single glass tiles, refracting the chat behind.
+   The chat is dark, so no dimming layer is needed (the 35%-dim rule is for clear
+   glass over BRIGHT content). This is the iOS Control Center model: glass tiles
+   over the (dark) backdrop, not tiles on a glass slab. */
+body.theme-frosted .gadget-rail {
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 body.theme-frosted .og-card {
   background-color: color-mix(in srgb, var(--panel, var(--bg)) 28%, transparent) !important;
   background-image: linear-gradient(180deg,
@@ -37639,9 +37647,13 @@ body.theme-frosted .og-card [style*="font-weight:300"] {
 }
 
 /* ── Fluid morph on interaction (Apple: "controls come to life") ──────────────*/
-/* Buttons/controls inside glass surfaces are themselves small glass chips that    */
-/* LIGHTEN + lift + glass-bloom on hover and depress on press. Reduced-motion       */
-/* strips the transition (the state still changes, just instantly).                 */
+/* Controls inside a glass surface are VIBRANT FILLS on the parent's glass — NOT
+   their own glass. Apple HIG: Liquid Glass is one functional layer over content and
+   "glass cannot properly sample other glass," so a button must NOT carry its own
+   backdrop-filter on top of the window/card glass (that was glass-on-glass). They
+   keep a translucent fill + 1px rim + the lighten/lift/press morph; the blur is
+   removed. (Transient interactive controls — the composer SEND, decision CONFIRM —
+   are handled separately as prominent actions.) */
 body.theme-frosted .ow-window .ow-body button,
 body.theme-frosted .on-card button,
 body.theme-frosted .og-card button,
@@ -37649,8 +37661,6 @@ body.theme-frosted .og-card .og-act,
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--fg, #fff) 18%, transparent);
-  -webkit-backdrop-filter: blur(8px) saturate(118%) brightness(1.1);
-  backdrop-filter: blur(8px) saturate(118%) brightness(1.1);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 22%, transparent);
   transition: background-color .18s ease, box-shadow .18s ease,
               transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease;
