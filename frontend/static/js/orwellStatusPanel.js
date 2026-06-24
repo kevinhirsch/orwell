@@ -126,6 +126,12 @@ import { onNarrowChange } from './platform.js';
         #orwell-status .os-row .os-k { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
         #orwell-status .os-noms { color: var(--red, #e06c75); }
+        /* #759: NO accent hue on TEXT while glass is on. On the light glass material the
+           nominees line must read as the same neutral dark chrome ink the rest of the glass
+           HUD uses (#16191f) — not var(--red), which washes to an illegible light grey on
+           the light glass (~2.2:1). The flash highlight (.os-changed) is a NON-text effect
+           and is untouched. Normal (non-glass) tier keeps the accent. */
+        body.theme-frosted #orwell-status .os-noms { color: #16191f; }
         /* TRANS-3: a brief delta highlight when a power row CHANGES (HOH / noms / veto /
            phase) so a ceremony reveal is never a silent text swap. Theme-token driven. */
         #orwell-status .os-changed {
@@ -168,6 +174,9 @@ import { onNarrowChange } from './platform.js';
            season is over (finished). */
         #orwell-status .os-done { margin: .2rem 0 .15rem; font-weight: 600; }
         #orwell-status .os-done .os-winner { color: var(--accent, var(--red, #e06c75)); }
+        /* #759: same rule for the season WINNER name on the light glass — neutral dark ink,
+           never the accent (which is illegible on the light glass). Non-glass tier keeps it. */
+        body.theme-frosted #orwell-status .os-done .os-winner { color: #16191f; }
         /* J3-07/J3-08 (wayfinding): the PREMIERE objective + progress — the persistent answer to
            "why hasn't HOH started, and how far am I?". Shown only during the premiere (it is the
            current objective); the count is the player-mental-model NPC figure ("X of 15"). */
