@@ -425,7 +425,7 @@ body.bg-pattern-perlin-flow {
       }
     }
     .sidebar {
-      width: 240px;
+      width: 208px;
       background: var(--sidebar-bg, var(--panel));
       border-right: 1px solid var(--border);
       transition: width 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
@@ -36432,6 +36432,25 @@ body.theme-frosted .og-card {
   border-color: color-mix(in srgb, var(--fg) 28%, transparent) !important;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 34%, transparent),
               0 4px 14px rgba(0,0,0,0.18) !important;
+}
+/* Liquid glass on the composer (the chatbox) so the primary input surface matches
+   the window/gadget kits instead of reading as a solid dark bar. Translucent tint +
+   blur + a bright top rim; the inner textarea stays transparent so it rides the bar
+   glass (no opaque inset). */
+body.theme-frosted .chat-input-bar {
+  background-color: color-mix(in srgb, var(--panel, var(--bg)) 24%, transparent) !important;
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--fg, #fff) 16%, transparent) 0%,
+    color-mix(in srgb, var(--fg, #fff)  5%, transparent) 30%,
+    transparent 70%) !important;
+  backdrop-filter: blur(26px) saturate(185%) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(185%) !important;
+  border-color: color-mix(in srgb, var(--fg) 30%, transparent) !important;
+  box-shadow: var(--win-shadow),
+              inset 0 1px 0 color-mix(in srgb, var(--fg) 34%, transparent) !important;
+}
+body.theme-frosted .chat-input-bar textarea#message {
+  background: transparent !important;
 }
 /* F-S2-A (audit 2026-06-21): the pre-game cast-photo dialog (#orwell-headshot) is a GATING window
    that floats over the LIVE producer interview (the 2026-06-20 re-sequence made the photo optional
