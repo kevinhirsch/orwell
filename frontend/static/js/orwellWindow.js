@@ -31,10 +31,31 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { makeWindowResizable } from './windowResize.js';
 import { isNarrow } from './platform.js';
 
+// A2 (#573, DWE audit F9): the kit no longer owns a PRIVATE z counter. The kit's
+// non-modal band (the old `_zTop` 500–980) is now allocated by THE single window
+// authority `window.OrwellZ` (ui.js), the same monotonic tick the .modal family
+// and the kit's modal tier draw from — so "topmost / focused" has one source of
+// truth across kit windows AND legacy modals/overlays. The band offsets in OrwellZ
+// keep kit windows structurally below modals (no more agreement-by-numeric-gap).
+// Fallback (ui.js not yet loaded): a local band counter preserves the old behavior.
 const Z_BASE = 500;          // the window band: above the legacy panel stamps
 const Z_CEIL = 980;          //   (modalManager's 300s), below modals (1000+)
-let _zTop = Z_BASE;
+let _zFallback = Z_BASE;     // used ONLY when window._owNextWindowZ is absent
 const _stack = [];           // open, un-minimized kit windows, bottom → top
+
+// Allocate the next kit-window z through the single authority when present, else
+// the local fallback band. On a fallback renormalize the open stack is re-laid in
+// order (mirroring OrwellZ's restack hook) so stacking order survives the wrap.
+function nextWindowZ() {
+  if (typeof window._owNextWindowZ === 'function') {
+    return window._owNextWindowZ((apply) => apply(_stack.filter((w) => !w.o.modal).map((w) => w.el)));
+  }
+  if (_zFallback >= Z_CEIL) {
+    _zFallback = Z_BASE;
+    for (const w of _stack) { if (!w.o.modal && w.el) w.el.style.zIndex = String(++_zFallback); }
+  }
+  return ++_zFallback;
+}
 
 // ── opt-in modal tier (audit J1-25 / J1-23) ────────────────────────────────
 // A kit window created with `modal:true` becomes a PROPER modal dialog: a backdrop
@@ -758,11 +779,10 @@ export class OrwellWindow {
       this.el.style.zIndex = String(z);
       if (this._scrim) this._scrim.style.zIndex = String(z - 1);
     } else {
-      if (_zTop >= Z_CEIL) { // renormalize the band (modal windows stay pinned)
-        _zTop = Z_BASE;
-        for (const w of _stack) { if (!w.o.modal && w.el) w.el.style.zIndex = String(++_zTop); }
-      }
-      this.el.style.zIndex = String(++_zTop);
+      // A2: the non-modal band is allocated by the single authority (window.
+      // _owNextWindowZ in ui.js), which advances the SAME global tick the modal
+      // ladder uses and renormalizes the open kit stack at the band ceiling.
+      this.el.style.zIndex = String(nextWindowZ());
     }
     for (const w of _stack) w.el && w.el.classList.toggle('ow-focused', w === this);
   }
@@ -919,6 +939,11 @@ export class OrwellWindow {
     saveParked(this.o.id, false); // F2 (G16): a closed window forgets its parked state
     this.ac.abort();
     const opener = this.opener;
+    // A2: capture whether focus was inside this window BEFORE removing it, so the
+    // shared focus-return helper can apply the same "only if focus is still inside
+    // (or fell to body)" rule the .modal family uses. Removing this.el drops any
+    // inner focus to <body>, which the helper also treats as safe to return.
+    const focusWasInside = !!(this.el && document.activeElement && this.el.contains(document.activeElement));
     if (this.el) { this.el.remove(); this.el = null; }
     // A dock-toggle re-home keeps the same instance + the module's _win reference,
     // so skip the consumer's onClose reset and the focus-return (open() refocuses).
@@ -926,8 +951,13 @@ export class OrwellWindow {
     // 0064: a genuine close (not a dock re-home) syncs the closed state to other devices.
     this._emit({ open: false, minimized: false });
     try { this.o.onClose && this.o.onClose(); } catch (_) {}
-    // audit F8: focus returns to the opener
-    if (opener && opener.isConnected && typeof opener.focus === 'function') {
+    // audit F8 / A2 (#573): focus returns to the opener through THE single
+    // focus-return helper (window._owReturnFocus, ui.js) shared with the .modal
+    // family — one implementation of the restore rule, no drift. Fallback to a
+    // direct focus when ui.js hasn't loaded (keeps the old behavior).
+    if (typeof window._owReturnFocus === 'function') {
+      window._owReturnFocus(opener, focusWasInside ? document.body : null);
+    } else if (opener && opener.isConnected && typeof opener.focus === 'function') {
       try { opener.focus(); } catch (_) {}
     }
   }

@@ -138,7 +138,11 @@ def test_sourcepin_wave3_modal_family_focus_return():
     ui = _read("static", "js", "ui.js")
     assert "_owOpener" in ui                         # opener stashed on hidden->visible
     assert "_restoreFocus" in ui                     # restored on visible->hidden
-    assert "!m.contains(active)" in ui               # never yank focus the user moved
+    # A2 (#573): the "never yank focus the user moved" rule now lives in the ONE
+    # shared focus-return helper (window._owReturnFocus) both families call — the
+    # guard is `container.contains(active)` there, not an inlined `!m.contains`.
+    assert "window._owReturnFocus = _returnFocus" in ui
+    assert "container.contains(active)" in ui         # never yank focus the user moved
 
 
 def test_sourcepin_wave3_decision_card_escape_is_dismiss_only():
