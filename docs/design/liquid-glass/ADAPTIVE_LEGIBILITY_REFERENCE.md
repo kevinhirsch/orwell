@@ -340,6 +340,7 @@ deeper shadow + more lensing:
   `backdrop-filter: url(#filter)`. Map encodes displacement as `r = 128 + x*127`, `g = 128 + y*127`.
   **Chromium-only** (SVG-in-`backdrop-filter` is non-standard; Safari/Firefox can't do it on the
   *backdrop* — fall back to plain blur). Source: `[WEB‡]` kube.io, https://kube.io/blog/liquid-glass-css-svg/
+  (**cataloged verbatim**: `sources/lg_text_kube_liquid_glass_css_svg.md`).
 - **Blur/tint:** `backdrop-filter: blur(8–20px) saturate(160–180%) brightness(1.05)` for Regular
   (numbers are field practice, not Apple-published).
 - **Specular rim:** a separate `feImage` rim-light blended with `feBlend`, or in pure CSS an inset
@@ -528,7 +529,7 @@ function reflow(el, sampler){                 // sampler() -> {r,g,b} avg under 
 | Web‡ | MDN — mix-blend-mode | https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode |
 | Web‡ | WebKit blog — contrast-color() | https://webkit.org/blog/16929/contrast-color/ |
 | Web‡ | CSS-Tricks — Approximating contrast-color() | https://css-tricks.com/approximating-contrast-color-with-other-css-features/ |
-| Web‡ | kube.io — Liquid Glass refraction with CSS+SVG | https://kube.io/blog/liquid-glass-css-svg/ |
+| Web‡ | kube.io — Liquid Glass refraction with CSS+SVG (cataloged: `sources/lg_text_kube_liquid_glass_css_svg.md`) | https://kube.io/blog/liquid-glass-css-svg/ |
 | Web‡ | Frontend Masters — Liquid Glass on the Web | https://frontendmasters.com/blog/liquid-glass-on-the-web/ |
 | Web‡ | grafit.agency — Liquid Glass web reality check | https://www.grafit.agency/blog/why-you-shouldnt-use-the-liquid-glass-effect-on-your-website-yet |
 | Web‡ | naughtyduk/liquidGL | https://github.com/naughtyduk/liquidGL |

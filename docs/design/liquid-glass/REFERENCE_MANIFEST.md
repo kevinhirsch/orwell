@@ -53,3 +53,19 @@ third-party. "Authoritative" = published by Apple as canonical design/marketing 
   (non-authoritative)** in this table.
 
 **Total `lg_` images saved this session: 27** (22 HIG/dev-doc assets + 5 Newsroom).
+
+## Cataloged text/source extracts (`sources/`)
+
+This manifest is image-focused; the `sources/` directory holds the verbatim text/source-code extracts.
+Most are Apple HIG/WWDC material (see `README.md`). The web reimplementations are tracked here as
+**cataloged** (a full verbatim extract on disk) vs. merely **cited** (a URL referenced inline):
+
+| Source | URL | Status | File |
+|---|---|---|---|
+| kube.io — Liquid Glass refraction with CSS+SVG (non-authoritative web reimplementation) | https://kube.io/blog/liquid-glass-css-svg/ | **CATALOGED** | `sources/lg_text_kube_liquid_glass_css_svg.md` |
+
+> kube.io's published code (the `feImage`→`feDisplacementMap` refraction chain, the surface-function
+> normal/derivative, polar→Cartesian + R/G channel encoding, the squircle/convex/concave/lip equations,
+> the Chromium-only `backdrop-filter: url(#…)`) is captured verbatim. The author has **not**
+> open-sourced the full implementation (no CodePen/GitHub) and the specular-highlight filter is
+> described in prose only — both noted in the catalog file.
