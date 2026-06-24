@@ -63,6 +63,7 @@ Most are Apple HIG/WWDC material (see `README.md`). The web reimplementations ar
 | Source | URL | Status | File |
 |---|---|---|---|
 | kube.io — Liquid Glass refraction with CSS+SVG (non-authoritative web reimplementation) | https://kube.io/blog/liquid-glass-css-svg/ | **CATALOGED** | `sources/lg_text_kube_liquid_glass_css_svg.md` |
+| WWDC25 Session 310 — "Build an AppKit app with the new design" (AUTHORITATIVE, Apple) — full verbatim transcript + every code sample; exhaustive per-element extraction (buttons/control sizes+shapes, tint prominence, sliders/`neutralValue`, segmented & pop-up `borderShape`, glass bezel, `NSGlassEffectView`/`NSGlassEffectContainerView`, toolbars, sidebars/split, scroll edge effect, concentricity/`LayoutRegion`, menus) | https://developer.apple.com/videos/play/wwdc2025/310/ | **CATALOGED** | `sources/lg_wwdc_310_appkit_new_design.md` |
 
 > kube.io's published code (the `feImage`→`feDisplacementMap` refraction chain, the surface-function
 > normal/derivative, polar→Cartesian + R/G channel encoding, the squircle/convex/concave/lip equations,
