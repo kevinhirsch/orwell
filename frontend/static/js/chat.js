@@ -2921,12 +2921,22 @@ import { isNarrow } from './platform.js';
           var _finalReply = _liveReplyEl ? finalDisplay.trim() : '';
           if (_liveReplyEl && _finalReply) {
             // Render reply into the live-reply container (thinking bar already showing).
+            // #762: the live thinking accordion is ALREADY in the DOM (its own caret).
+            // If the reply buffer still carries a leftover inline <think> block,
+            // processWithThinking would emit a SECOND accordion here — two stacked
+            // thinking bars with two carets (different size/orientation). Drop any
+            // leftover think block from the reply BEFORE rendering so exactly one
+            // accordion (the live one above) remains; the caret is single + neutral.
+            var _replySrc = _finalReply;
+            if (/<think/i.test(_replySrc)) {
+              _replySrc = (markdownModule.extractThinkingBlocks(_replySrc).content || '').trim();
+            }
             // GAME BUILD: route through processWithThinking so the L6b reply-scrub runs —
             // the public bubble must never carry a reasoning preamble that bled into the
             // reply text (the thinking accordion already holds the reasoning separately).
             var _replyHtml = isGameBuild()
-              ? markdownModule.processWithThinking(markdownModule.squashOutsideCode(_finalReply))
-              : markdownModule.mdToHtml(markdownModule.squashOutsideCode(_finalReply));
+              ? markdownModule.processWithThinking(markdownModule.squashOutsideCode(_replySrc))
+              : markdownModule.mdToHtml(markdownModule.squashOutsideCode(_replySrc));
             _liveReplyEl.innerHTML = _replyHtml;
             _liveReplyEl.classList.remove('live-reply-content');
             if (_sourcesData) {

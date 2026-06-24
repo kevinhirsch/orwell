@@ -38733,6 +38733,22 @@ body.theme-frosted .tool-indicator.active {
   color: #16191f !important;
   text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
 }
+/* ── #761: the RIGHT side of the thinking-header row (the expand caret + the elapsed
+   timer) was still accent red — .thinking-toggle paints its OWN color: var(--red), and
+   the timer inherits whatever the header resolves to. On the glass theme the red caret
+   reads as a stray accent and the row no longer reads as one monochrome line. Flip the
+   caret + timer to the SAME neutral dark ink as the left label so the whole header row
+   is one monochrome line (Apple's light toolbar/sidebar = dark monochrome chrome). The
+   caret GLYPH and toggle function are unchanged — COLOR only. Covers both the finished
+   (markdown.js: .thinking-toggle / .thinking-timer) and live (chat.js:
+   .live-think-toggle / .live-think-timer) variants. The whirlpool loading spinner is a
+   sanctioned NON-text status indicator and keeps its own color — untouched. */
+body.theme-frosted .thinking-toggle,
+body.theme-frosted .live-think-toggle,
+body.theme-frosted .thinking-timer,
+body.theme-frosted .live-think-timer {
+  color: #16191f !important;
+}
 /* Catch-all for any element painting the accent onto its OWN text via the tokens.
    Scoped to body.theme-frosted; uses :where() to stay at zero specificity cost on the
    selector list head so it neutralizes hue without fighting structural color rules

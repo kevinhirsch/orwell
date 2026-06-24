@@ -26,6 +26,8 @@ from pathlib import Path
 
 FE = Path(__file__).resolve().parents[1]
 CSS = (FE / "static" / "style.css").read_text(encoding="utf-8")
+CHAT_JS = (FE / "static" / "js" / "chat.js").read_text(encoding="utf-8")
+MARKDOWN_JS = (FE / "static" / "js" / "markdown.js").read_text(encoding="utf-8")
 
 DARK_INK = "#16191f"
 
@@ -130,3 +132,79 @@ def test_fix_scoped_to_frosted_only():
         assert "body.theme-frosted" in s, (
             "the dark-ink fix must be scoped under body.theme-frosted (glass tiers only)"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════
+# #761 — the RIGHT side of the thinking-header (the expand caret + the elapsed timer)
+# must ALSO be neutral dark ink under the glass theme, so the whole header row reads as
+# one monochrome line (it was still accent red: .thinking-toggle paints var(--red)).
+# ══════════════════════════════════════════════════════════════════════════════════
+def test_thinking_caret_and_timer_neutral_under_frosted():
+    for target in (
+        "body.theme-frosted .thinking-toggle",
+        "body.theme-frosted .live-think-toggle",
+        "body.theme-frosted .thinking-timer",
+        "body.theme-frosted .live-think-timer",
+    ):
+        color = _frosted_color_for(target)
+        assert color is not None, f"{target} has no frosted text-color rule"
+        assert DARK_INK in color.lower(), (
+            f"{target} frosted color is {color!r}, expected {DARK_INK} (one monochrome row)"
+        )
+        assert "var(--red)" not in color, f"{target} must NOT keep var(--red) (stray accent)"
+        assert "var(--fg)" not in color, f"{target} must NOT route to light var(--fg)"
+
+
+def test_caret_glyph_unchanged_color_only():
+    """#761 is COLOR-ONLY — the caret GLYPH (▼ \\25BC via .thinking-toggle::after) and the
+    toggle function are untouched. Pin the glyph rule still exists."""
+    after = None
+    for m in re.finditer(r"\.thinking-toggle::after\s*\{([^{}]*)\}", CSS):
+        after = m.group(1)
+    assert after is not None, ".thinking-toggle::after rule (the caret glyph) was removed"
+    assert "25BC" in after.upper() or "▼" in after, (
+        "the caret glyph must remain ▼ (\\25BC) — #761 is color-only, no glyph change"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════
+# #762 — exactly ONE expand caret in the live thinking header. The duplicate was the
+# final-render path re-emitting a SECOND accordion (via processWithThinking) into the
+# .live-reply-content when the reply buffer still carried a leftover inline <think>.
+# The fix strips the leftover think block before that render.
+# ══════════════════════════════════════════════════════════════════════════════════
+def test_live_header_markup_has_single_toggle():
+    """The chat.js live-think header template (~1663) must declare exactly ONE
+    .thinking-toggle span (no second caret baked into the markup)."""
+    # the live header block: from .live-think-spinner-slot to the live toggle
+    m = re.search(r'live-think-spinner-slot.*?live-think-toggle', CHAT_JS, re.S)
+    assert m, "could not locate the live-think header template in chat.js"
+    block = m.group(0)
+    assert block.count("thinking-toggle") == 1, (
+        "the live header markup must contain exactly one .thinking-toggle caret"
+    )
+
+
+def test_final_render_strips_leftover_think_before_live_reply():
+    """#762 fix: before rendering the reply into the existing .live-reply-content, chat.js
+    must strip any leftover inline <think> so processWithThinking does not emit a SECOND
+    accordion (a duplicate caret) next to the live one."""
+    # the guarded render branch (live thinking bar already showing)
+    i = CHAT_JS.find("Render reply into the live-reply container")
+    assert i != -1, "the live-reply final-render branch was not found in chat.js"
+    branch = CHAT_JS[i:i + 1200]
+    assert "extractThinkingBlocks" in branch, (
+        "the live-reply final render must strip leftover <think> via extractThinkingBlocks "
+        "(else a second accordion/caret is emitted — #762)"
+    )
+    assert re.search(r"<think", branch, re.I), (
+        "the fix should guard on a leftover <think> in the reply buffer"
+    )
+
+
+def test_markdown_timer_has_pinnable_class():
+    """The finished-section timer (markdown.js timeHtml) carries the .thinking-timer class
+    so the neutral-color rule can target it (it previously had no class)."""
+    assert 'class="thinking-timer"' in MARKDOWN_JS, (
+        "markdown.js timeHtml must carry class=\"thinking-timer\" for the neutral color pin"
+    )
