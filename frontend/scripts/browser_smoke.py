@@ -173,17 +173,24 @@ def main() -> int:
                   };
                   const bar = document.querySelector('.chat-input-bar');
                   const surfLum = bar ? lum(getComputedStyle(bar).backgroundColor) : null;
+                  // open the model-picker menu so its rows are measurable on the light glass
+                  // (the "Select Model" dropdown regressed light-on-light too).
+                  const menu = document.querySelector('.model-picker-menu');
+                  if (menu) menu.classList.remove('hidden');
                   return {
                     surfLum,
                     title: probe('.chat-meta-overlay #current-meta'),
                     textarea: probe('.chat-input-bar textarea#message'),
                     icon: probe('.chat-input-bar .input-icon-btn'),
+                    picker: probe('.model-picker-btn'),
+                    pickerLabel: probe('.model-picker-btn #model-picker-label'),
+                    menu: probe('.model-picker-menu'),
                   };
                 }"""
             )
             # The chrome text controls must be DARK ink (luminance < 0.4) on the light glass.
             # (A light surface measures high luminance; light text on it is the bug.)
-            for _name in ("title", "textarea", "icon"):
+            for _name in ("title", "textarea", "icon", "picker", "pickerLabel", "menu"):
                 _p = lol.get(_name) or {}
                 if _p.get("missing"):
                     continue  # element legitimately absent — nothing to mis-color

@@ -246,16 +246,23 @@ def test_apple_language_tokens_present():
     assert "--ow-glass-float" in CSS           # soft outer float shadow
 
 
-def test_functional_layer_only_content_not_glassed():
-    # Apple: glass is the chrome layer; content/messages stay opaque. Guard that the
-    # chat message bubbles are NOT in the frosted glass selectors.
-    # (The only 'message' hit must be the composer textarea#message, which is chrome.)
-    frosted_lines = [ln for ln in CSS.splitlines()
-                     if "theme-frosted" in ln and ("message" in ln.lower() or "bubble" in ln.lower())]
-    for ln in frosted_lines:
-        assert "textarea#message" in ln, f"content surface glassed: {ln}"
-    # the JS refraction selectors never target message/bubble content.
+def test_chat_bubbles_are_imessage_glass_but_not_svg_refracted():
+    # Owner ruling + the iOS 26 Messages reference: Apple's own Messages makes the
+    # bubbles Liquid Glass — RECEIVED = neutral translucent frosted glass, SENT = the
+    # system-blue tint, white vibrant text. We match that under body.theme-frosted.
+    def _block(sel):
+        i = CSS.index(sel)
+        return CSS[i:CSS.index("}", i) + 1]
+    received = _block("body.theme-frosted .msg-ai {")
+    sent = _block("body.theme-frosted .msg-user {")
+    # received bubbles carry a translucent frosted-glass material (backdrop blur).
+    assert "backdrop-filter" in received and "blur(" in received
+    # sent bubbles carry the iMessage system blue (a BACKGROUND tint, not text).
+    assert "10,132,255" in sent or "rgba(10, 132, 255" in sent
+    # bubbles are NEVER in the JS SVG refraction set (perf — many bubbles on screen):
+    # the CSS glass blur is their material, but liquidGlass.js must not target them.
     assert ".message" not in JS and ".bubble" not in JS
+    assert "msg-ai" not in JS and "msg-user" not in JS
 
 
 # ── 11. typography legibility on glass (no thin weights) ───────────────────────
