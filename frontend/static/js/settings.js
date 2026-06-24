@@ -1739,6 +1739,13 @@ function initAppearance() {
     });
   });
 
+  // Issue #745: Beat haptics & audio — a JS-injected toggle (no index.html edit).
+  // Drops a row into the same Chat Area card as Sensitive Blur. Pairs with
+  // orwellHaptics.js (localStorage 'orwell-haptics', default ON — only an explicit
+  // 'off' disables; reduced-motion still silences it regardless). Idempotent: the
+  // row is injected once per modal build (guarded by data-haptics-key).
+  initBeatHapticsToggle();
+
   var resetBtn = el('set-uiVisResetBtn');
   if (resetBtn) {
     resetBtn.addEventListener('click', function() {
@@ -1804,6 +1811,42 @@ function initAppearance() {
       });
     });
   }
+}
+
+// Issue #745: inject + wire the "Beat Haptics & Audio" toggle. JS-driven (no
+// index.html edit) — it builds a .vis-row matching the surrounding ones and drops
+// it into the same .vis-toggles group as the Sensitive Blur control. Persists to
+// localStorage 'orwell-haptics' ('on'/'off'; absent ⇒ default ON). orwellHaptics.js
+// reads the same key and also self-gates on prefers-reduced-motion.
+function initBeatHapticsToggle() {
+  try {
+    if (!modalEl) return;
+    var anchor = modalEl.querySelector('[data-privacy-key="sensitive-blur"]');
+    var group = anchor && anchor.closest ? anchor.closest('.vis-toggles') : null;
+    if (!group) return;
+    var chk = modalEl.querySelector('[data-haptics-key="beat-haptics"]');
+    if (!chk) {
+      var row = document.createElement('label');
+      row.className = 'vis-row';
+      row.innerHTML =
+        '<span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>' +
+        '<span class="vis-label">Beat Haptics &amp; Audio <span class="vis-hint">Vibrate + chime on crown, noms, veto &amp; eviction</span></span>' +
+        '<input type="checkbox" data-haptics-key="beat-haptics"><span class="vis-switch"></span>';
+      group.appendChild(row);
+      chk = row.querySelector('[data-haptics-key="beat-haptics"]');
+    }
+    if (!chk) return;
+    // Sync from storage (default ON — only an explicit 'off' unchecks).
+    var stored = null;
+    try { stored = localStorage.getItem('orwell-haptics'); } catch (_) {}
+    chk.checked = stored !== 'off';
+    if (!chk.dataset.wired) {
+      chk.dataset.wired = '1';
+      chk.addEventListener('change', function() {
+        try { localStorage.setItem('orwell-haptics', chk.checked ? 'on' : 'off'); } catch (_) {}
+      });
+    }
+  } catch (_) { /* fail-soft — never break the settings panel over an accent toggle */ }
 }
 
 function syncAppearanceCheckboxes() {
