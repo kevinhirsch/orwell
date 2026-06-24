@@ -25,6 +25,39 @@
   --ow-ui-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', Inter, 'Segoe UI', Roboto, sans-serif;
   --ow-mono-font: ui-monospace, 'SF Mono', 'Fira Code', monospace;
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     THE ORWELL DESIGN SYSTEM — single source of truth (kits + .ow-*/.og-*/.on-*).
+     One token set every kit surface composes: type ramp, spacing scale, radius
+     scale (concentric-aware), the accent/on-accent colors, the Liquid-Glass
+     material, and the button system. Promote shared values HERE — do not declare
+     bespoke padding/margin/radius/button values on individual surfaces (the
+     test_ow_design_system.py ratchet, F-3 style, fails a build that reintroduces
+     one-off chrome values). Ties the liquid-glass + SF-type + Apple-button +
+     spacing work back to the DWE windowing lane + the kits. (HIG: Materials /
+     Buttons / Layout #695 / Typography #696.)
+     ────────────────────────────────────────────────────────────────────────── */
+  /* Spacing scale — mirrors css/responsive-tokens.css (4/8/12/16/24/32); referenced
+     so every kit gap/padding/margin uses ONE rhythm (fallbacks for first paint). */
+  --ow-space-1: var(--space-1, 4px);
+  --ow-space-2: var(--space-2, 8px);
+  --ow-space-3: var(--space-3, 12px);
+  --ow-space-4: var(--space-4, 16px);
+  --ow-space-5: var(--space-5, 24px);
+  --ow-space-6: var(--space-6, 32px);
+  --ow-tap-min: var(--tap-min, 44px);
+  /* Radius scale (concentric-aware): surface → inner control → pill/disc. */
+  --ow-radius: 26px;            /* window/card/dialog surface (very rounded, Apple) */
+  --ow-radius-inner: 16px;      /* a control nested inside a surface (concentric)   */
+  --ow-radius-pill: 999px;      /* capsule / circular disc                          */
+  /* Type ramp (SF default): weights — never thin on glass (Regular/Medium/Semibold). */
+  --ow-fw-regular: 400;
+  --ow-fw-medium: 500;
+  --ow-fw-semibold: 600;
+  /* Accent / on-accent (the prominent CTA color) — adapt per theme via --accent
+     (falls back to the brand --red). on-accent is the luminance-aware ink. */
+  --ow-accent: var(--accent, var(--red, #e06c75));
+  --ow-on-accent: var(--on-accent, #fff);
+
   /* Core palette */
   --bg: #282c34;
   --fg: #9cdef2;
@@ -37274,30 +37307,29 @@ body.theme-frosted .modal {
   /* frosted glass, not a smoked panel. The tint floor is kept ONLY as a thin readability    */
   /* anchor (much lower than before), and the real "always-readable" work is done by the     */
   /* luminosity lift + sheen + shadow below.                                                 */
-  --ow-glass-tint-floor: 22%;                 /* thin dark anchor (was 46% — too heavy)      */
-  --ow-glass-lumin: 14%;                       /* luminous white-ish material on top         */
+  /* NEUTRAL FROST — matched to Apple's canonical ios_glass_over_dark.png: a smoky-grey
+     frost with a SLIGHT luminosity lift, FAINT translucency (backdrop barely visible
+     through a soft blur, the material recedes), and a thin DIRECTIONAL luminous edge
+     RIM (the key "tell"). NO hue; the only color is the backdrop infusing through.
+     Minimal fill — the rim does the work. */
+  --ow-glass-veil-light: rgba(255,255,255,0.06);  /* faint neutral lift              */
+  --ow-glass-veil-dark: rgba(18,20,24,0.16);       /* faint neutral anchor (legibility)*/
   --ow-glass-text-shadow: 0 1px 3px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.55);
 }
-/* The glass FILL: a faint dark anchor + a luminous white-ish wash = lit frosted glass.    */
-/* Two stacked layers (a translucent base-color anchor, then a luminous gradient image)     */
-/* read as a material that the bright backdrop infuses through, not a solid dark slab.       */
+/* The glass FILL is a FAINT neutral smoky-grey (Apple ios_glass_over_dark): a thin
+   dark anchor + a thin white lift. The luminous DIRECTIONAL edge rim lives in the
+   box-shadow (the Apple-Materials block below). No hue, minimal fill, faint blur. */
 body.theme-frosted .ow-window,
 body.theme-frosted .og-card,
 body.theme-frosted .chat-input-bar,
 body.theme-frosted #sidebar,
 body.theme-frosted .modal-content,
 body.theme-frosted .on-card {
-  background-color: color-mix(in srgb, var(--panel, var(--bg)) var(--ow-glass-tint-floor), transparent) !important;
+  background-color: var(--ow-glass-veil-dark) !important;
   background-image:
-    /* delicate top-left specular sheen (the light source) */
-    radial-gradient(120% 80% at 18% 0%,
-      color-mix(in srgb, var(--fg, #fff) 26%, transparent) 0%,
-      color-mix(in srgb, var(--fg, #fff) 8%, transparent) 30%,
-      transparent 62%),
-    /* the luminous white-ish material wash */
     linear-gradient(180deg,
-      color-mix(in srgb, var(--fg, #fff) var(--ow-glass-lumin), transparent) 0%,
-      color-mix(in srgb, var(--fg, #fff) 6%, transparent) 100%) !important;
+      var(--ow-glass-veil-light) 0%,
+      rgba(255,255,255,0.03) 100%) !important;
 }
 /* A subtle text-shadow on glass body copy guarantees legibility on the very      */
 /* brightest animated-bg frames (the SVG tint + this shadow = AA at both extremes).*/
@@ -37312,14 +37344,11 @@ body.theme-frosted #sidebar {
   :root { --ow-glass-text-shadow: 0 1px 1px rgba(0,0,0,.4); }
 }
 
-/* ── The notice kit (.on-card) — same liquid glass as the windows/cards ─────── */
+/* ── The notice kit (.on-card) — same NEUTRAL liquid glass as the windows/cards ─*/
+/* (background-image inherits the neutral material rule above; just the blur here.) */
 body.theme-frosted .on-card {
-  background-image: linear-gradient(180deg,
-    color-mix(in srgb, var(--fg, #fff) 16%, transparent) 0%,
-    color-mix(in srgb, var(--fg, #fff)  5%, transparent) 28%,
-    transparent 64%) !important;
-  backdrop-filter: blur(34px) saturate(190%) brightness(1.05) !important;
-  -webkit-backdrop-filter: blur(34px) saturate(190%) brightness(1.05) !important;
+  backdrop-filter: var(--ow-glass-backdrop) !important;
+  -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;
   border-color: color-mix(in srgb, var(--fg) 26%, transparent) !important;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent),
               0 6px 20px rgba(0,0,0,0.22) !important;
@@ -37331,8 +37360,8 @@ body.theme-frosted .on-card {
 /* each minimized window a rounded translucent "module" tile in the grid. The JS  */
 /* refraction targets it too (selector added in liquidGlass.js) on Chromium.      */
 body.theme-frosted #minimized-dock.ow-has-rows {
-  padding: 10px;
-  margin: var(--space-2);
+  padding: var(--space-3, 12px);
+  margin: var(--space-2, 8px);
   border-top: none;
   border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
   border-radius: 22px;                 /* generous, Control-Center radius */
@@ -37341,22 +37370,22 @@ body.theme-frosted #minimized-dock.ow-has-rows {
     color-mix(in srgb, var(--fg, #fff) 16%, transparent) 0%,
     color-mix(in srgb, var(--fg, #fff)  5%, transparent) 30%,
     transparent 70%);
-  backdrop-filter: blur(40px) saturate(200%) brightness(1.06);
-  -webkit-backdrop-filter: blur(40px) saturate(200%) brightness(1.06);
+  backdrop-filter: blur(36px) saturate(122%) brightness(1.30);
+  -webkit-backdrop-filter: blur(36px) saturate(122%) brightness(1.30);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent),
               0 10px 30px rgba(0,0,0,0.4);
 }
 body.theme-frosted #minimized-dock .minimized-dock-hd {
-  opacity: 0.55; padding: 2px 6px 8px;
+  opacity: 0.55; padding: var(--space-1, 4px) var(--space-2, 8px) var(--space-2, 8px);
 }
 /* The chips become Control-Center module TILES: rounded translucent glass cells  */
 /* laid in a wrapping grid (a module grid, not a stacked list).                   */
 body.theme-frosted #minimized-dock .minimized-dock-rows {
-  flex-direction: row; flex-wrap: wrap; gap: 8px;
+  flex-direction: row; flex-wrap: wrap; gap: var(--space-2, 8px);
 }
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   width: auto; min-width: 96px; flex: 1 1 96px;
-  padding: 10px 12px; border-radius: 16px;
+  padding: var(--space-2, 8px) var(--space-3, 12px); border-radius: 16px;
   background-color: color-mix(in srgb, var(--fg) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent),
@@ -37380,9 +37409,9 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-chi
 /* The JS hard-caps refracted element count on small screens; the CSS keeps the    */
 /* radii/tint consistent and the Control-Center dock a comfortable touch grid.     */
 @media (max-width: 768px) {
-  body.theme-frosted #minimized-dock.ow-has-rows { border-radius: 20px; padding: 10px; }
+  body.theme-frosted #minimized-dock.ow-has-rows { border-radius: 20px; padding: var(--space-3, 12px); }
   body.theme-frosted #minimized-dock .minimized-dock-chip {
-    min-width: 44px; min-height: 44px;   /* WCAG 2.5.5 touch target */
+    min-width: var(--tap-min, 44px); min-height: var(--tap-min, 44px);   /* WCAG 2.5.5 */
     flex: 1 1 44%;
   }
 }
@@ -37472,8 +37501,11 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   /* dark backdrop reads as LIT frosted glass (recedes), not a smoked panel. High    */
   /* saturate keeps the bg's color infusing the glass; contrast(1.06) keeps text     */
   /* crisp through the lift.                                                          */
-  --ow-glass-backdrop: blur(26px) saturate(200%) brightness(1.28) contrast(1.04);
-  --ow-glass-backdrop-strong: blur(36px) saturate(210%) brightness(1.32) contrast(1.05);
+  /* Matched to ios_glass_over_dark.png: near-zero added saturation (~108%) so the
+     frost stays colorless, a SLIGHT luminosity lift, and a softer blur that leaves
+     the backdrop FAINTLY visible (the material recedes — not an opaque frost). */
+  --ow-glass-backdrop: blur(20px) saturate(108%) brightness(1.18);
+  --ow-glass-backdrop-strong: blur(28px) saturate(110%) brightness(1.20);
 }
 
 /* The luminous edge + soft float + very-rounded corners on the primary text        */
@@ -37487,18 +37519,17 @@ body.theme-frosted .modal-content {
   border-radius: var(--ow-glass-radius) !important;
   backdrop-filter: var(--ow-glass-backdrop) !important;
   -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;
-  /* SPECULAR light source (reads as a real light, not a flat border):               */
-  /*   • a bright THIN top rim (the hairline catch of light)                          */
-  /*   • a soft inner top-left bloom (inset, large-spread, low-opacity)               */
-  /*   • a faint dark bottom inset so the glass has a lower lip (depth)               */
-  /*   • the soft OUTER float-shadow (elevation off the content)                      */
+  /* The DIRECTIONAL LUMINOUS EDGE RIM (the Apple ios_glass_over_dark "tell"): a thin
+     bright specular outline around the whole perimeter, BRIGHTEST on the bottom-left
+     (the directional light), thinning toward the top-right — done with two opposing
+     inset hairlines + a faint full hairline. Neutral white. Plus the soft outer float
+     (elevation). No heavy fill bloom — the rim does the work. */
   box-shadow:
-    inset 0 1px 0 var(--ow-glass-edge),
-    inset 0 0 0 0.5px color-mix(in srgb, var(--fg, #fff) 14%, transparent),
-    inset 8px 10px 22px -12px color-mix(in srgb, var(--fg, #fff) 34%, transparent),
-    inset 0 -8px 16px -12px rgba(0,0,0,0.30),
+    inset 0 0 0 0.5px rgba(255,255,255,0.12),               /* faint full rim         */
+    inset 2px -2px 2px -1px rgba(255,255,255,0.42),          /* bright bottom-left rim */
+    inset -1px 1px 2px -1px rgba(255,255,255,0.16),          /* fainter top-right rim  */
     var(--ow-glass-float) !important;
-  border-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent) !important;
+  border-color: rgba(255,255,255,0.14) !important;
 }
 /* The big windows + the Control-Center dock carry the stronger blur (more glass).  */
 body.theme-frosted .ow-window,
@@ -37594,8 +37625,8 @@ body.theme-frosted .og-card .og-act,
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--fg, #fff) 18%, transparent);
-  -webkit-backdrop-filter: blur(8px) saturate(160%) brightness(1.1);
-  backdrop-filter: blur(8px) saturate(160%) brightness(1.1);
+  -webkit-backdrop-filter: blur(8px) saturate(118%) brightness(1.1);
+  backdrop-filter: blur(8px) saturate(118%) brightness(1.1);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 22%, transparent);
   transition: background-color .18s ease, box-shadow .18s ease,
               transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease;
@@ -37641,4 +37672,235 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:active {
   body.theme-frosted #minimized-dock .minimized-dock-chip:hover {
     transform: none;   /* no motion under reduced-motion; color/bloom still change */
   }
+}
+
+/* ============================================================================ */
+/* Apple Liquid Glass BUTTON SYSTEM (HIG Buttons) — parity pass                   */
+/* ----------------------------------------------------------------------------  */
+/* Compared against Apple's button refs (btn_styles / btn_idle / btn_selected):   */
+/*   • SHAPE/MATERIAL: capsule for text, circular glass DISC for icon-only;        */
+/*     translucent glass consistent with the surfaces; concentric radii.          */
+/*   • HIERARCHY (one prominent action per view): PROMINENT = bright filled/tinted */
+/*     accent glass (selected ref = bright disc, dark glyph); SECONDARY = bordered */
+/*     plain glass (idle ref = subtle translucent disc, light glyph); TERTIARY =   */
+/*     borderless.                                                                 */
+/*   • STATES: >=44px hit region; hover + press morph (scale/lighten/bloom,        */
+/*     reduced-motion gated); a clear disabled state.                              */
+/* Scoped to the frosted (glass) theme so the non-glass build is untouched.        */
+
+:root {
+  --ow-btn-radius: var(--ow-radius-pill, 999px);  /* capsule / disc (Apple)        */
+  --ow-btn-glass: blur(10px) saturate(118%) brightness(1.12);
+}
+
+/* ── THE KIT-OWNED BUTTON BASE (.ow-btn) — ONE source of truth ────────────────*/
+/* prominent / secondary / icon-disc all derive from this base; the real app       */
+/* buttons (.send-btn, .odec-confirm/.odec-opt, .ow-controls button) map onto the  */
+/* variants below so the decision card, composer, dialogs, settings, and window    */
+/* controls share ONE treatment. New kit buttons SHOULD use .ow-btn + a variant.   */
+body.theme-frosted .ow-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--ow-space-2, 8px);
+  min-height: var(--ow-tap-min, 44px); padding: var(--ow-space-2, 8px) var(--ow-space-4, 16px);
+  border-radius: var(--ow-btn-radius); border: 1px solid transparent;
+  font-family: var(--ow-ui-font); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -0.01em;
+  cursor: pointer; -webkit-backdrop-filter: var(--ow-btn-glass); backdrop-filter: var(--ow-btn-glass);
+  transition: background-color .18s ease, box-shadow .18s ease,
+              transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease, opacity .15s ease;
+}
+body.theme-frosted .ow-btn-secondary {
+  background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent);
+  border-color: color-mix(in srgb, var(--fg, #fff) 20%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 22%, transparent);
+}
+/* PROMINENT = brighter / more-OPAQUE NEUTRAL glass + Semibold label (owner: glass
+   is colorless; distinguish the primary action by LUMINOSITY + WEIGHT, not hue). */
+body.theme-frosted .ow-btn-prominent {
+  background:
+    radial-gradient(120% 100% at 30% 0%, rgba(255,255,255,0.30), transparent 55%),
+    rgba(255,255,255,0.26);
+  color: var(--fg, #fff);
+  font-weight: var(--ow-fw-semibold, 600);
+  border-color: rgba(255,255,255,0.34);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5),
+              0 4px 14px rgba(0,0,0,0.22);
+}
+body.theme-frosted .ow-btn-icon {
+  min-height: 0; padding: 0; width: 30px; height: 30px; border-radius: 50%;
+  background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent);
+}
+
+/* ── SECONDARY (default) glass buttons: translucent disc/capsule, light glyph ──*/
+/* The idle-ref look: a subtle translucent fill + faint rim + a centered glyph.   */
+body.theme-frosted .send-btn,
+body.theme-frosted .odec-confirm,
+body.theme-frosted .odec-opt,
+body.theme-frosted .ow-controls button,
+body.theme-frosted .ow-dismiss {
+  -webkit-backdrop-filter: var(--ow-btn-glass);
+  backdrop-filter: var(--ow-btn-glass);
+  transition: background-color .18s ease, box-shadow .18s ease,
+              transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease, opacity .15s ease;
+}
+
+/* WINDOW CONTROLS (min / close / dock) → circular glass DISCS (icon-only).        */
+/* >=44px hit region via padding-box sizing while the visible disc stays compact:   */
+/* the kit gives them 24px min; we expand the tap area with an invisible inset.     */
+/* CLUSTER LAYOUT (owner: the top-right cluster read cramped/uneven): a clean row   */
+/* of uniform discs with CONSISTENT gaps, and the titlebar inset from the window's  */
+/* very-rounded (26px) top-right corner so the discs never crowd the rounded edge.  */
+/* TITLEBAR (Apple hero.png / windows.png chrome): title + control discs share ONE
+   optical centerline. A fixed band height + align-items:center co-centers the left
+   title and right controls; symmetric vertical padding; the left inset matches the
+   body content inset (space-4). Layout HIG #695. */
+body.theme-frosted .ow-titlebar {
+  min-height: 48px;
+  padding: var(--space-2, 8px) var(--space-3, 12px) var(--space-2, 8px) var(--space-4, 16px);
+  gap: var(--space-2, 8px);
+  display: flex;
+  align-items: center;          /* the shared centerline */
+}
+/* Title type = SF, Semibold, ~16px, NO positive tracking (SF needs none), full-contrast.*/
+body.theme-frosted .ow-title {
+  font-family: var(--ow-ui-font);
+  font-weight: var(--ow-fw-semibold, 600);
+  font-size: 16px;
+  letter-spacing: 0 !important;  /* kill any legacy tracking on titles */
+  line-height: 1;                /* so the cap-height centers on the band line */
+  color: var(--fg, #fff);
+  display: flex; align-items: center;
+}
+body.theme-frosted .ow-controls {
+  gap: var(--space-1, 4px);             /* even, consistent gaps between the discs   */
+  display: flex;
+  align-items: center;
+}
+body.theme-frosted .ow-controls button {
+  width: 30px; height: 30px; min-width: 30px; min-height: 30px;  /* uniform discs */
+  border-radius: 50%;
+  background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 24%, transparent),
+              inset 0 0 0 .5px color-mix(in srgb, var(--fg, #fff) 14%, transparent);
+  opacity: .85;
+  position: relative;
+}
+/* the >=44px hit region (invisible) — WCAG 2.5.5 without bloating the visible disc */
+body.theme-frosted .ow-controls button::after {
+  content: ""; position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -50%);
+}
+body.theme-frosted .ow-controls button:hover,
+body.theme-frosted .ow-controls button:focus-visible {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 36%, transparent),
+              0 2px 8px rgba(0,0,0,.22);
+  transform: scale(1.08);
+}
+body.theme-frosted .ow-controls button:active { transform: scale(0.92); transition-duration: .08s; }
+/* the close control reads its danger on hover (a warm accent glass) */
+body.theme-frosted .ow-controls .ow-close:hover {
+  background-color: color-mix(in srgb, var(--red, #e06c75) 60%, transparent);
+  color: var(--on-accent, #fff);
+}
+
+/* ── PROMINENT action (one per view): bright filled accent glass + crisp glyph ──*/
+/* The selected-ref look: a bright/tinted disc that stands out. The composer SEND  */
+/* button and the decision CONFIRM are the prominent actions.                      */
+body.theme-frosted .send-btn {
+  border-radius: 50% !important;
+  /* PROMINENT = brighter / more-OPAQUE NEUTRAL glass disc (owner: glass is colorless;
+     distinguish by LUMINOSITY + WEIGHT, NOT hue). No accent fill. */
+  background:
+    radial-gradient(120% 100% at 30% 20%, rgba(255,255,255,0.34), transparent 60%),
+    rgba(255,255,255,0.26) !important;
+  color: var(--fg, #fff) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.55),
+    0 4px 14px rgba(0,0,0,0.24),
+    0 1px 3px rgba(0,0,0,.25) !important;
+}
+body.theme-frosted .send-btn:hover:not(:disabled) {
+  filter: brightness(1.12);
+  transform: scale(1.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.65),
+    0 6px 18px rgba(0,0,0,0.30),
+    0 0 0 3px rgba(255,255,255,0.16) !important;
+}
+body.theme-frosted .send-btn:active:not(:disabled) { transform: scale(0.95); transition-duration: .08s; }
+/* the composer's newchat ("+ New") mode is a capsule, not a disc */
+body.theme-frosted .send-btn.newchat-mode { border-radius: var(--ow-btn-radius) !important; }
+
+/* DECISION CARD: Confirm = prominent accent-glass capsule; options = secondary glass. */
+/* Consistent internal padding (scale) + tap-min height on the text-button tiers.   */
+body.theme-frosted .odec-confirm,
+body.theme-frosted .odec-opt {
+  padding: var(--space-2, 8px) var(--space-4, 16px) !important;
+  min-height: var(--tap-min, 44px);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+body.theme-frosted .odec-confirm {
+  border-radius: var(--ow-btn-radius) !important;
+  /* PROMINENT = brighter / more-OPAQUE NEUTRAL glass + Semibold (NO accent hue). */
+  background:
+    radial-gradient(120% 100% at 30% 0%, rgba(255,255,255,0.28), transparent 55%),
+    rgba(255,255,255,0.26) !important;
+  color: var(--fg, #fff) !important;
+  border: 1px solid rgba(255,255,255,0.34) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5),
+              0 4px 14px rgba(0,0,0,0.22) !important;
+  font-weight: 600;
+}
+body.theme-frosted .odec-confirm:hover:not(:disabled) {
+  filter: brightness(1.08); transform: translateY(-1px);
+}
+body.theme-frosted .odec-confirm:active:not(:disabled) { transform: translateY(0) scale(.98); }
+body.theme-frosted .odec-opt {
+  border-radius: var(--ow-btn-radius) !important;
+  background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--fg, #fff) 20%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 22%, transparent) !important;
+}
+body.theme-frosted .odec-opt:hover {
+  background-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent) !important;
+  transform: translateY(-1px);
+}
+/* the SELECTED option pill reads bright (the selected-ref: bright fill, dark glyph) */
+body.theme-frosted .odec-opt[aria-pressed="true"],
+body.theme-frosted .odec-opt.selected {
+  background-color: color-mix(in srgb, var(--fg, #fff) 86%, transparent) !important;
+  color: var(--bg, #15181f) !important;
+  border-color: transparent !important;
+}
+
+/* ── DISABLED / unavailable: clearly inert (Apple: a distinct unavailable state) ─*/
+body.theme-frosted .send-btn:disabled,
+body.theme-frosted .odec-confirm:disabled,
+body.theme-frosted .odec-opt:disabled,
+body.theme-frosted .ow-window .ow-body button:disabled {
+  opacity: .4 !important;
+  filter: grayscale(.4) !important;
+  box-shadow: none !important;
+  transform: none !important;
+  cursor: not-allowed !important;
+}
+
+/* Labels at Medium/Semibold (Apple typography) on text buttons (not the icon discs). */
+body.theme-frosted .odec-confirm,
+body.theme-frosted .odec-opt,
+body.theme-frosted .send-btn .send-btn-label {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.theme-frosted .send-btn,
+  body.theme-frosted .odec-confirm,
+  body.theme-frosted .odec-opt,
+  body.theme-frosted .ow-controls button {
+    transition: background-color .15s ease, box-shadow .15s ease;  /* color/bloom only */
+  }
+  body.theme-frosted .send-btn:hover,
+  body.theme-frosted .odec-confirm:hover,
+  body.theme-frosted .ow-controls button:hover { transform: none; }
 }

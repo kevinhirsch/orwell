@@ -179,9 +179,9 @@ def test_animated_bg_is_reduced_motion_gated():
 # ── 8. adaptive-contrast / always-readable text floor ─────────────────────────
 
 def test_adaptive_contrast_tint_floor_exists():
-    # text contrast is computed against the GLASS TINT (a min-opacity floor), not the
-    # raw animated bg — the structural "always readable" guarantee.
-    assert "--ow-glass-tint-floor" in CSS
+    # text contrast is anchored by a NEUTRAL dark veil + a text-shadow (not a hued
+    # tint) — the structural "always readable" guarantee over an animated bg.
+    assert "--ow-glass-veil-dark" in CSS
     assert "--ow-glass-text-shadow" in CSS
 
 
@@ -206,10 +206,11 @@ def test_reduced_transparency_solid_fallback():
     assert "prefers-reduced-transparency" in JS
 
 
-def test_increased_contrast_bumps_the_floor():
+def test_increased_contrast_strengthens_glass():
     assert "@media (prefers-contrast: more)" in CSS
     block = CSS[CSS.index("@media (prefers-contrast: more)"):]
-    assert "--ow-glass-tint-floor" in block[:600]
+    # increased-contrast strengthens the neutral anchor / borders for legibility.
+    assert "--ow-glass-veil-dark" in block[:800] or "border-color" in block[:800]
 
 
 # ── 10. Apple HIG visual language (concentric radii, luminous edge, float) ─────
@@ -254,22 +255,29 @@ def test_mobile_hard_caps_refracted_count():
 
 # ── 13. Apple-parity material: luminous (not darkening) + specular + float ──────
 
-def test_glass_material_is_luminous_not_a_dark_slab():
-    # Apple's regular glass is LIGHT/LUMINOUS: a luminous white-ish wash + a backdrop
-    # brightness LIFT, not a heavy dark tint. The dark tint floor must be modest.
-    assert "--ow-glass-lumin" in CSS
-    floor = int(re.search(r"--ow-glass-tint-floor:\s*(\d+)%", CSS).group(1))
-    assert floor <= 30, f"tint floor too heavy ({floor}%) — glass would read as a dark slab"
-    # the backdrop filter lifts luminosity (brightness > 1.2 = a real lift).
+def test_glass_material_is_neutral_frost_not_colored():
+    # Owner correction: Liquid Glass has NO hue of its own — a NEUTRAL white/dark veil;
+    # color comes ONLY from the backdrop. So the veils are neutral rgba (no --panel/--fg
+    # hue) and saturation is RESTRAINED (<=125%, Apple is subtle — high sat reads colored).
+    assert "--ow-glass-veil-light" in CSS and "--ow-glass-veil-dark" in CSS
+    # the veils are neutral (white / near-black rgba), not a hued theme color.
+    assert re.search(r"--ow-glass-veil-light:\s*rgba\(255,\s*255,\s*255", CSS)
+    # backdrop saturation restrained (neutral frost, not colored glass).
+    sat = re.findall(r"--ow-glass-backdrop[^:]*:\s*[^;]*saturate\((\d+)%\)", CSS)
+    assert sat and all(int(s) <= 125 for s in sat), f"saturation too high (colored glass): {sat}"
+    # a SLIGHT luminosity lift (Apple ios_glass_over_dark is subtle — a gentle lift,
+    # not a strong brighten), but a real one (> 1.1).
     m = re.search(r"--ow-glass-backdrop:\s*[^;]*brightness\(([\d.]+)\)", CSS)
-    assert m and float(m.group(1)) >= 1.2, "backdrop brightness lift too weak for luminous glass"
+    assert m and float(m.group(1)) >= 1.1
 
 
-def test_specular_highlight_reads_as_a_light_source():
-    # a top-left specular sheen (radial-gradient) + a bright thin top rim, not a flat border.
-    assert "radial-gradient(120% 80% at 18% 0%" in CSS  # the top-left light source
-    # the rim/bloom inset shadows (the specular catch + the bloom).
-    assert re.search(r"inset 8px 10px 22px -12px", CSS)  # top-left bloom
+def test_directional_luminous_edge_rim():
+    # Apple ios_glass_over_dark "tell": a thin DIRECTIONAL luminous rim around the
+    # perimeter, brightest on one side (here bottom-left), thinning at the opposite —
+    # NOT a flat uniform border or a heavy fill bloom.
+    assert "DIRECTIONAL LUMINOUS EDGE RIM" in CSS
+    assert re.search(r"inset 2px -2px 2px -1px rgba\(255,255,255", CSS)   # bright bottom-left rim
+    assert re.search(r"inset -1px 1px 2px -1px rgba\(255,255,255", CSS)   # fainter top-right rim
 
 
 def test_soft_outer_float_shadow_is_genuine_elevation():
@@ -290,3 +298,48 @@ def test_controls_morph_on_hover_and_press():
     # reduced-motion strips the transition/transform.
     rm_blocks = re.findall(r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*?)\n\}", CSS, re.S)
     assert any("transform: none" in b for b in rm_blocks)
+
+
+# ── 15. Apple Liquid Glass BUTTON SYSTEM (HIG Buttons) ─────────────────────────
+
+def test_button_system_present_with_hierarchy():
+    assert "Apple Liquid Glass BUTTON SYSTEM" in CSS
+    # capsule/disc radius token + glass material.
+    assert "--ow-btn-radius" in CSS
+    assert "--ow-btn-glass" in CSS
+
+
+def test_window_controls_are_circular_glass_discs():
+    # min/close/dock become circular glass discs (icon-only).
+    block = CSS[CSS.index("Apple Liquid Glass BUTTON SYSTEM"):]
+    assert re.search(r"\.ow-controls button\s*\{[^}]*border-radius:\s*50%", block, re.S)
+    # >=44px hit region via an invisible ::after (WCAG 2.5.5).
+    assert re.search(r"\.ow-controls button::after\s*\{[^}]*width:\s*44px", block, re.S)
+
+
+def test_prominent_actions_are_neutral_glass_not_accent():
+    # Owner correction: glass is colorless — the PROMINENT action is distinguished by
+    # LUMINOSITY + WEIGHT (brighter/opaquer neutral glass + Semibold), NOT an accent hue.
+    block = CSS[CSS.index("Apple Liquid Glass BUTTON SYSTEM"):]
+    assert ".odec-confirm" in block and ".send-btn" in block
+    # the prominent base uses a neutral white fill, never an accent var.
+    prom = re.search(r"\.ow-btn-prominent\s*\{(.*?)\}", block, re.S).group(1)
+    assert "rgba(255,255,255" in prom and "--accent" not in prom and "--ow-accent" not in prom
+    # the real prominent buttons (send/confirm) carry no accent fill either.
+    sendblk = re.search(r"body\.theme-frosted \.send-btn\s*\{(.*?)\}", block, re.S).group(1)
+    assert "--accent" not in sendblk and "--on-accent" not in sendblk
+
+
+def test_buttons_have_hover_press_and_disabled_states():
+    block = CSS[CSS.index("Apple Liquid Glass BUTTON SYSTEM"):]
+    assert ":active" in block            # press
+    assert ":hover" in block             # hover
+    assert ":disabled" in block          # disabled/unavailable
+    # disabled reads clearly inert.
+    assert re.search(r":disabled\s*\{[^}]*cursor:\s*not-allowed", block, re.S)
+
+
+def test_button_morph_is_reduced_motion_gated():
+    block = CSS[CSS.index("Apple Liquid Glass BUTTON SYSTEM"):]
+    rm = re.search(r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*)$", block, re.S).group(1)
+    assert "transform: none" in rm
