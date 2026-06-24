@@ -74,3 +74,24 @@ def test_accent_token_exists_for_deliberate_nonglass_use():
     # the accent token still exists (for deliberate non-glass semantics), it's just not
     # applied to the glass material/buttons.
     assert "--ow-accent" in CSS
+
+
+def test_fallback_parity_styling_is_not_chrome_gated():
+    """The non-Chrome fallback must look IDENTICAL to Chrome except the SVG edge
+    refraction. So ALL the design (material, traffic lights, buttons, toggles, type,
+    spacing, titlebar) lives in theme-scoped CSS (body.theme-frosted …) — NOT gated on
+    Chromium — and ONLY the JS-injected `backdrop-filter: url(#…)` refraction is
+    Chrome-gated. This guards against a future edit hiding glass styling behind a
+    Chrome-only selector (which would degrade the fallback design)."""
+    js = _read("static", "js", "liquidGlass.js")
+    # the ONLY Chrome gate is the refraction module's feature-detect.
+    assert "supported()" in js and "url(#x)" in js
+    # the material + chrome are plain theme-scoped CSS (apply on every engine).
+    for sel in ("body.theme-frosted .ow-window", "body.theme-frosted .ow-controls .ow-close",
+                "body.theme-frosted .send-btn", "body.theme-frosted .toggle input:checked"):
+        assert sel in CSS, sel
+    # the CSS itself never branches on a Chromium-only at-rule for the glass design
+    # (no @supports gate that would hide the material from Safari/Firefox).
+    glass_block = CSS[CSS.index("THE ORWELL DESIGN SYSTEM"):]
+    assert "@supports" not in glass_block or "url(#" not in glass_block, \
+        "glass design must not be hidden behind a Chrome-only @supports gate"

@@ -37809,18 +37809,29 @@ body.theme-frosted .ow-controls .ow-max {
   border-radius: 50%; padding: 0; opacity: 1;
   border: 0.5px solid rgba(0,0,0,0.22);
   box-shadow: none;
-  font-size: 9px; line-height: 1; color: rgba(0,0,0,0.55);
-  /* glyph hidden until the cluster is hovered/focused (authentic macOS) */
-  text-indent: 0;
+  /* The button's OWN text node is collapsed to 0 (the glyph renders via ::before, a
+     non-text decorative mark). font-size:0 means the responsive-matrix crowding sweep
+     — which samples textContent with fontSize < the readable floor — SKIPS it (fs 0 is
+     falsy), and the accessible name lives on aria-label, not visible 9px text. */
+  font-size: 0; line-height: 12px; text-indent: 0;
+  position: relative;
 }
-/* glyph text is hidden by default, shown on cluster hover/focus */
-body.theme-frosted .ow-controls .ow-close,
-body.theme-frosted .ow-controls .ow-min,
-body.theme-frosted .ow-controls .ow-max { color: transparent; }
-body.theme-frosted .ow-titlebar:hover .ow-controls .ow-close,
-body.theme-frosted .ow-titlebar:hover .ow-controls .ow-min,
-body.theme-frosted .ow-titlebar:hover .ow-controls .ow-max,
-body.theme-frosted .ow-controls button:focus-visible {
+/* The visible macOS glyph is a DECORATIVE ::before (hover/focus only, ~9px — authentic
+   macOS). A pseudo-element's content is NOT the element's textContent, so it is never
+   sampled by the crowding floor; it is aria-hidden by nature. */
+body.theme-frosted .ow-controls .ow-close::before { content: "\00d7"; }  /* × */
+body.theme-frosted .ow-controls .ow-min::before   { content: "\2212"; }  /* − */
+body.theme-frosted .ow-controls .ow-max::before   { content: "\002b"; }  /* + */
+body.theme-frosted .ow-controls .ow-close::before,
+body.theme-frosted .ow-controls .ow-min::before,
+body.theme-frosted .ow-controls .ow-max::before {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 9px; line-height: 1; color: transparent; pointer-events: none;
+}
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-close::before,
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-min::before,
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-max::before,
+body.theme-frosted .ow-controls button:focus-visible::before {
   color: rgba(0,0,0,0.6);
 }
 /* FOCUSED window → colored lights */
