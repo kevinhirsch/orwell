@@ -912,17 +912,22 @@ def main() -> int:
             check(f8.get("closed") is True, f"F8: Escape closes settings ({f8})")
             check(f8.get("focusBack") is True, f"F8: focus returns to the gear ({f8})")
 
-            # #553: Settings is now a MODAL dialog on the OrwellWindow kit — intentionally NOT
-            # minimizable (a scrim'd modal tucked to a dock chip is nonsense; Escape/× dismiss it).
-            # The launcher-agnostic minimize→restore contract is now exercised on the theme-modal
-            # (the legacy .modal family) below. Assert settings opens from the gear and carries no
-            # minimize affordance, then close it via its kit ×.
+            # #553: Settings is a MODAL dialog on the OrwellWindow kit — intentionally NOT
+            # minimizable-to-dock (a scrim'd modal tucked to a dock chip is nonsense; Escape/×
+            # dismiss it). Under the frosted macOS chrome the cluster renders the THREE-light
+            # cluster, so a yellow minimize LIGHT may be present — but it MUST be inert (disabled):
+            # it carries no click handler and never parks a dock chip, so the #553 intent (settings
+            # cannot minimize-to-dock) holds. Assert any minimize affordance is disabled, never
+            # functional. The legacy .modal-family minimize→restore contract is exercised below.
             page.click("#user-bar-settings")
             page.wait_for_timeout(300)
             check(page.evaluate("!!document.getElementById('settings-modal')") is True,
                   "G2: settings opens from the gear")
-            check(page.evaluate("!document.querySelector('#settings-modal .ow-min, #settings-modal .modal-minimize-btn, #settings-modal .minimize-btn')") is True,
-                  "G2/#553: the settings modal dialog has no minimize-to-dock button")
+            check(page.evaluate("""() => {
+                const m = document.querySelector('#settings-modal .ow-min, #settings-modal .modal-minimize-btn, #settings-modal .minimize-btn');
+                return !m || m.disabled === true;
+            }""") is True,
+                  "G2/#553: the settings modal has no FUNCTIONAL minimize-to-dock (any light is inert/disabled)")
             # Interactive: a trusted click INSIDE the window lands — the Account tab activates.
             page.click("#settings-modal [data-settings-tab='account']")
             page.wait_for_timeout(150)

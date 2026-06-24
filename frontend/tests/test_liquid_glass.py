@@ -369,6 +369,21 @@ def test_maximize_disabled_by_default():
     assert "ow-max" in win and "maximizable" in win and "ow-max-enabled" in win
 
 
+def test_three_light_cluster_always_renders():
+    # Authentic macOS reads as THREE lights. The kit always renders BOTH the yellow
+    # (min) and green (max) discs — greyed/inert when the window can't minimize/zoom —
+    # so a closable-only window (e.g. Settings) still shows red + greyed-yellow +
+    # greyed-green, not a lopsided two-light cluster. (Was: ow-min only built when
+    # minimizable, which dropped the yellow light entirely.)
+    win = _read("static", "js", "orwellWindow.js")
+    # the min button is built unconditionally; the capability only gates enabled-ness.
+    assert "const canMin = this.o.minimizable && !this._docked;" in win
+    assert "if (!canMin) { b.disabled = true; }" in win
+    # the disabled yellow light is greyed/inert the same way as the disabled green (a visible
+    # placeholder so the cluster reads as three lights — mirroring 'Zoom (unavailable)').
+    assert re.search(r"\.ow-controls \.ow-min\[disabled\]", CSS, re.S)
+
+
 def test_ios_toggle_blue_and_slider_green():
     assert "--ow-ios-blue" in CSS and "--ow-ios-green" in CSS
     # toggle ON = system blue (mirror iOS).

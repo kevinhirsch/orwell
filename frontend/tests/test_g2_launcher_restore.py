@@ -97,15 +97,16 @@ def test_sourcepin_gear_launcher_exists_in_markup():
 
 def test_smoke_exercises_the_launcher_restore_for_real():
     # The browser gate must drive the launcher-agnostic restore with TRUSTED
-    # clicks. #553: Settings is now a kit MODAL dialog — intentionally NOT
-    # minimizable (a scrim'd modal docked to a chip is nonsense) — so the gate
-    # asserts settings opens from the gear, carries NO minimize affordance, and
-    # is interactive, then exercises the launcher-agnostic minimize→restore
-    # contract on the legacy .modal family (theme-modal): minimize for real,
-    # heal from an arbitrary un-hide (the observer belt runs the real restore).
+    # clicks. #553: Settings is a kit MODAL dialog — intentionally NOT
+    # minimizable-to-dock (a scrim'd modal docked to a chip is nonsense). Under the
+    # frosted macOS chrome the cluster renders three traffic lights, so a yellow
+    # minimize LIGHT may be present but MUST be inert (disabled) — the gate asserts
+    # settings opens from the gear, has no FUNCTIONAL minimize, and is interactive,
+    # then exercises the launcher-agnostic minimize→restore contract on the legacy
+    # .modal family (theme-modal): minimize for real, heal from an arbitrary un-hide.
     smoke = _read("scripts", "browser_smoke.py")
     assert 'page.click("#user-bar-settings")' in smoke
-    assert "G2/#553: the settings modal dialog has no minimize-to-dock button" in smoke
+    assert "G2/#553: the settings modal has no FUNCTIONAL minimize-to-dock (any light is inert/disabled)" in smoke
     assert "trusted click inside lands" in smoke
     assert "G2: theme window minimizes to the dock" in smoke
     assert "heals the minimized theme window" in smoke

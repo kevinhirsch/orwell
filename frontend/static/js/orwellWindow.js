@@ -448,12 +448,21 @@ export class OrwellWindow {
     }
     // Minimize-to-dock is a FLOATING affordance; a docked window lives in the rail
     // and never minimizes to the chip dock (the rail owns its visibility/collapse).
-    if (this.o.minimizable && !this._docked) {
+    // macOS traffic-light cluster: the YELLOW light is ALWAYS rendered (mirroring the
+    // green/max light below) so every frosted window reads as the authentic THREE-light
+    // cluster — a non-minimizable window just gets a greyed/inert yellow disc, exactly
+    // like the greyed green. The kit's non-frosted glyph fallback hides the disabled
+    // placeholder via CSS (`body:not(.theme-frosted) .ow-controls button[disabled]`), so
+    // the legacy look still shows only functional controls.
+    const canMin = this.o.minimizable && !this._docked;
+    {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'ow-min';
-      b.setAttribute('aria-label', 'Minimize'); b.title = 'Minimize';
+      b.setAttribute('aria-label', canMin ? 'Minimize' : 'Minimize (unavailable)');
+      b.title = canMin ? 'Minimize' : '';
       b.textContent = '–';
-      b.addEventListener('click', (e) => { e.stopPropagation(); this.minimize(); }, { signal: this.ac.signal });
+      if (!canMin) { b.disabled = true; }
+      else { b.addEventListener('click', (e) => { e.stopPropagation(); this.minimize(); }, { signal: this.ac.signal }); }
       controls.appendChild(b);
     }
     if (this.o.closable) {
