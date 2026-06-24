@@ -95,8 +95,15 @@ def test_j5_done_timer_is_tracked_and_identity_checked():
     js = _read("static", "js", "orwellDecision.js")
     assert "_doneTimer" in js, "the 4s done-card removal must be tracked in a cancellable timer"
     assert "clearTimeout(_doneTimer)" in js, "removeCard() must clearTimeout the tracked done timer"
-    # The timeout must identity-check before removing (only remove a still-done card)
-    assert re.search(r"classList\.contains\(\"odec-done\"\)\)\s*card\.remove\(\)", js), \
+    # The timeout must identity-check before removing (only remove a still-done card).
+    # #642: the card now lives inside the OrwellNotice kit host, so the guarded removal also tears
+    # down the kit notice (_notice.hide()) before card.remove(); both sit inside the same
+    # contains("odec-done") guard. Assert the guard opens the block, and card.remove() appears
+    # within that guarded block (a short window after it) — not as an unguarded statement.
+    guard = re.search(r"classList\.contains\(\"odec-done\"\)\)\s*\{", js)
+    assert guard, "the done timer must guard on the still-done card before removal"
+    after = js[guard.end():guard.end() + 220]
+    assert "card.remove()" in after, \
         "the done timer must only remove the card if it is still the lingering done-card"
     # The bare unguarded setTimeout(removeCard, 4000) must be gone
     assert "setTimeout(removeCard, 4000)" not in js, \

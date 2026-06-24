@@ -1297,20 +1297,21 @@ def main() -> int:
                   f"0057: the new-season window is sized and inside the viewport (no overflow) ({sea_ns})")
             sea.close()
 
-            # F6 tail (wave 3): the engine-down banner's dismiss is the shared
-            # .ow-dismiss affordance (>=24px, kit CSS) — presence/retro are pinned in pytest.
+            # #642: the engine-down banner MIGRATED onto the OrwellNotice kit (a top-banner
+            # system-notice). Its dismiss is the kit's shared .on-dismiss affordance (>=44px touch
+            # floor, kit CSS) now — not the window kit's .ow-dismiss.
             page.evaluate("window.orwellRefreshEngineStatus && window.orwellRefreshEngineStatus()")
             page.wait_for_timeout(600)
             ban = page.evaluate("""() => {
-              const b = document.querySelector('#orwell-engine-status .oes-x');
+              const b = document.querySelector('#orwell-engine-status .on-dismiss');
               if (!b) return { present: false };
               const r = b.getBoundingClientRect();
-              return { present: true, owDismiss: b.classList.contains('ow-dismiss'),
+              return { present: true, onDismiss: b.classList.contains('on-dismiss'),
                        w: Math.round(r.width), h: Math.round(r.height) };
             }""")
             if ban.get("present"):
-                check(ban.get("owDismiss") is True and ban.get("w", 0) >= 24 and ban.get("h", 0) >= 24,
-                      f"F6: banner dismiss is the shared ow-dismiss affordance ({ban})")
+                check(ban.get("onDismiss") is True and ban.get("w", 0) >= 44 and ban.get("h", 0) >= 44,
+                      f"#642: banner dismiss is the shared OrwellNotice .on-dismiss affordance ({ban})")
 
             # F-3 (the ratchet, runtime half): every window-like surface on the page
             # is KIT-MANAGED — floating game panels carry [data-ow-window], and the
@@ -1722,7 +1723,9 @@ def main() -> int:
             # Collapse the sidebar for REAL (the hamburger), then compare
             # per-entry drawing signatures between the two states.
             page.evaluate("""() => {  // clear floaters that could sit over the hamburger
-              const ban = document.querySelector('#orwell-engine-status .oes-x');
+              // #642: the engine-status banner is an OrwellNotice top-banner now — its dismiss is
+              // the kit's .on-dismiss (was .oes-x). Clear it so it can't sit over the hamburger.
+              const ban = document.querySelector('#orwell-engine-status .on-dismiss');
               if (ban) ban.click();
             }""")
             page.wait_for_timeout(350)
