@@ -38488,6 +38488,406 @@ body.theme-frosted .ow-window .ow-body button.settings-nav-item.active {
   box-shadow: none;
 }
 
+/* ╔══════════════════════════════════════════════════════════════════════════╗ */
+/* ║  ── ELEMENT KIT ──  (issue #773)                                          ║ */
+/* ║  The OrwellElement kit: Apple-HIG atomic PRIMITIVES, ONE source of truth, ║ */
+/* ║  composable by EVERY surface (chat, settings, gadgets, login, admin).     ║ */
+/* ╚══════════════════════════════════════════════════════════════════════════╝ */
+/*
+ * ┌─ CLASS API ───────────────────────────────────────────────────────────────┐
+ * Every primitive is theme-agnostic, GLASS-DEFAULT (rides the one glass plane —
+ * HIG Materials: "controls sit on a system material, not on content"), uses
+ * DARK INK on glass for legibility, carries NO accent HUE on its text/label
+ * (HIG Color: "no inherent color … apply color sparingly … to the background
+ * rather than to symbols or text"), is a11y-trio safe (reduced-transparency →
+ * solid; prefers-contrast → contrasting border; reduced-motion → no transform),
+ * and has a real keyboard focus ring (HIG Buttons: "always include a press
+ * state"; Accessibility). Compose these — do NOT re-invent control chrome.
+ *
+ *   BUTTON  .ow-btn  + ONE variant:
+ *     .ow-btn-prominent   primary / default action (luminous neutral glass —
+ *                         #726 owns its color; emphasis = luminosity + weight)
+ *     .ow-btn-secondary   tinted-neutral glass (the standard action)
+ *     .ow-btn-plain       borderless / plain (low-emphasis, text-only)
+ *     .ow-btn-destructive system-RED fill + legible on-red label (HIG role:
+ *                         Destructive — the red is a SYSTEM semantic, not the
+ *                         theme accent, so it never violates no-accent-on-text)
+ *     .ow-btn-icon        circular icon-only disc
+ *   States (ALL variants): :hover (lift) · :active (iOS dim + slight scale) ·
+ *     :focus-visible (system-blue ring) · [disabled]/.is-disabled (inert).
+ *
+ *   FIELD   .ow-field      text input / textarea / the glass-appropriate field.
+ *                          :focus ring · [aria-invalid]/.is-invalid red ring ·
+ *                          legible placeholder.
+ *   CHECK   .ow-check      Apple checkbox (neutral box; accent check only when
+ *                          :checked).  Use on an <input type=checkbox>.
+ *   RADIO   .ow-radio      Apple radio (neutral ring; accent dot when :checked).
+ *   SWITCH  .ow-switch     the iOS toggle — wrap an <input type=checkbox>:
+ *                          <label class="ow-switch"><input type=checkbox>
+ *                            <span class="ow-switch-track"></span></label>
+ *                          ON track = system blue; knob = glass.
+ *   SELECT  .ow-select     kit-styled <select> (fixes dark-on-dark; chevron,
+ *                          legible options).
+ *   SLIDER  .ow-slider     kit-styled <input type=range> (system-green track,
+ *                          glass thumb).
+ * └─────────────────────────────────────────────────────────────────────────────┘
+ */
+:root {
+  /* The keyboard focus ring is Apple's SYSTEM BLUE — a fixed accessibility color,
+     deliberately NOT the theme accent (so it never reads as a hued text/label and
+     never trips the no-accent-on-glass contract). HIG: focus is system-driven. */
+  --ow-focus-ring: var(--ow-ios-blue, #0a84ff);
+  --ow-focus-ring-w: 3px;
+  /* THE GLASS TECHNIQUE for kit controls (owner directive). The in-browser Liquid
+     Glass method is kube.io "Liquid Glass with CSS + SVG"
+     (https://kube.io/blog/liquid-glass-css-svg/) + Frontend-Masters "Liquid Glass on
+     the Web" — the SAME technique the app already implements in liquidGlass.js
+     (feImage displacement map → feDisplacementMap in="SourceGraphic" xChannelSelector
+     ="R" yChannelSelector="G" via a backdrop-filter SVG-filter ref; the feImage+feBlend
+     specular rim "that responds to geometry"; the squircle height curve
+     y=⁴√(1−(1−x)⁴); the encoding r=128+x·127,g=128+y·127) and adaptiveGlass.js (the
+     APCA/contrast veil). Refs: ADAPTIVE_LEGIBILITY_REFERENCE.md §Refraction L337-351 +
+     §Accessibility L355-379; README.md L48.
+     A kit control RIDES the parent glass plane (the window/card/bar that liquidGlass.js
+     refracts & adaptiveGlass.js veils) — it is NOT a second glass slab (HIG no-glass-
+     on-glass: "use fills, transparency, and vibrancy for the top elements … part of
+     the material"; and refraction is perf-CAPPED to the chrome layer — never every
+     tiny control). So each control composes: a NEUTRAL translucent veil + the same
+     --ow-btn-glass backdrop blur the kit chrome uses + a SOFT LUMINOUS RIM (the pure-
+     CSS inset-highlight equivalent of the SVG specular rim, ADAPTIVE_LEGIBILITY L345-
+     347) + DARK monochrome ink. The TRANSIENT KNOBS (switch thumb / slider thumb) take
+     the REAL SVG refraction via #owlg-thumb at Full Glass — the sanctioned content-
+     layer transient glass ("the knob transforms into Liquid Glass during
+     interaction"; kube.io lip-bezel concave thumb). See the switch/slider blocks. */
+  --ow-control-fill: color-mix(in srgb, #16191f 10%, transparent);
+  --ow-control-fill-hover: color-mix(in srgb, #16191f 16%, transparent);
+  --ow-control-rim: color-mix(in srgb, #16191f 22%, transparent);
+  /* The control's own legible ink — the canonical neutral chrome dark ink (NOT --fg,
+     which on a naked glass surface is the theme's LIGHT fg → light-on-light; #726).
+     Matches adaptiveGlass.js HERO_INK_DARK / the .ow-btn ink #726 pinned. */
+  --ow-control-ink: #16191f;
+  /* System red for the Destructive role (HIG: "a destructive button uses the system
+     red color"). A semantic, not a theme hue — legible label rides on top of it. */
+  --ow-danger: var(--color-danger, #ff453a);
+  --ow-on-danger: #fff;   /* white clears AA on the iOS-dark system red (#ff453a) */
+}
+
+/* ── BUTTON: round out .ow-btn additively (#773) ─────────────────────────────── */
+/* The .ow-btn base + .ow-btn-prominent/.ow-btn-secondary/.ow-btn-icon COLORS are
+   defined above (and tuned by #726). Here we ADD the remaining Apple variants and
+   the full interactive-state set WITHOUT touching those colors. */
+
+/* PLAIN / borderless — low-emphasis text action (HIG "Normal" role, no fill). */
+body.theme-frosted .ow-btn-plain {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: var(--ow-control-ink, #16191f);
+}
+/* DESTRUCTIVE — system-red FILL, legible on-red LABEL (HIG Destructive role). The
+   red is a system semantic color, not the theme accent → no-accent-on-text holds. */
+body.theme-frosted .ow-btn-destructive {
+  background: var(--ow-danger, #ff453a);
+  color: var(--ow-on-danger, #fff);
+  border-color: color-mix(in srgb, #000 14%, var(--ow-danger, #ff453a));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 14px rgba(0,0,0,0.22);
+}
+
+/* STATES — apply to EVERY variant (Apple: hover lift, iOS press dim + scale,
+   system-blue focus ring, clear disabled). */
+body.theme-frosted .ow-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+body.theme-frosted .ow-btn-secondary:hover,
+body.theme-frosted .ow-btn-icon:hover { background-color: var(--ow-control-fill-hover); }
+body.theme-frosted .ow-btn-plain:hover {
+  background: color-mix(in srgb, #16191f 7%, transparent);
+  transform: none;          /* plain stays flat; only fills/buttons lift */
+}
+body.theme-frosted .ow-btn:active {
+  transform: translateY(0) scale(0.97);   /* iOS press: slight scale-down */
+  filter: brightness(0.96);
+  transition-duration: .08s;
+}
+body.theme-frosted .ow-btn:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+body.theme-frosted .ow-btn:disabled,
+body.theme-frosted .ow-btn[disabled],
+body.theme-frosted .ow-btn.is-disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.theme-frosted .ow-btn { transition: background-color .15s ease, box-shadow .15s ease, filter .15s ease; }
+  body.theme-frosted .ow-btn:hover,
+  body.theme-frosted .ow-btn:active { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .ow-btn-secondary,
+  body.theme-frosted .ow-btn-icon {
+    background-color: var(--panel, var(--bg)) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+@media (prefers-contrast: more) {
+  body.theme-frosted .ow-btn { border-color: color-mix(in srgb, var(--fg) 50%, transparent) !important; }
+}
+
+/* ── FIELD: .ow-field — the canonical glass-appropriate text field ────────────── */
+body.theme-frosted .ow-field {
+  display: block;
+  width: 100%;
+  min-height: var(--ow-tap-min, 44px);
+  padding: var(--ow-space-2, 8px) var(--ow-space-3, 12px);
+  border-radius: var(--ow-radius-inner, 12px);
+  border: 1px solid var(--ow-control-rim);
+  background-color: var(--ow-control-fill);
+  color: var(--ow-control-ink, var(--fg, #fff));
+  font-family: var(--ow-ui-font);
+  font-size: var(--ow-fs-body, 0.875rem);
+  font-weight: var(--ow-fw-regular, 400);
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  /* recessed text-well + a SOFT LUMINOUS RIM (the pure-CSS specular-edge equivalent of
+     the kube.io feBlend rim-light — --ow-glass-rim, the same edge the chrome uses). */
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,0.12));
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+body.theme-frosted textarea.ow-field { min-height: calc(var(--ow-tap-min, 44px) * 1.6); resize: vertical; line-height: 1.45; }
+body.theme-frosted .ow-field::placeholder {
+  /* legible placeholder — a muted neutral, never invisible (WCAG legibility floor). */
+  color: color-mix(in srgb, var(--ow-control-ink, #16191f) 56%, transparent);
+  opacity: 1;
+}
+body.theme-frosted .ow-field:hover { background-color: var(--ow-control-fill-hover); }
+body.theme-frosted .ow-field:focus,
+body.theme-frosted .ow-field:focus-visible {
+  outline: none;
+  border-color: var(--ow-focus-ring, #0a84ff);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.18),
+              0 0 0 var(--ow-focus-ring-w, 3px) color-mix(in srgb, var(--ow-focus-ring, #0a84ff) 45%, transparent);
+}
+body.theme-frosted .ow-field[aria-invalid="true"],
+body.theme-frosted .ow-field.is-invalid {
+  border-color: var(--ow-danger, #ff453a);
+}
+body.theme-frosted .ow-field[aria-invalid="true"]:focus,
+body.theme-frosted .ow-field.is-invalid:focus {
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.18),
+              0 0 0 var(--ow-focus-ring-w, 3px) color-mix(in srgb, var(--ow-danger, #ff453a) 45%, transparent);
+}
+body.theme-frosted .ow-field:disabled,
+body.theme-frosted .ow-field.is-disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── CHECKBOX: .ow-check — neutral box, accent check ONLY when checked ────────── */
+body.theme-frosted .ow-check,
+body.theme-frosted .ow-radio {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; flex: 0 0 auto;
+  margin: 0; display: inline-grid; place-content: center;
+  border: 1.5px solid var(--ow-control-rim);
+  background-color: var(--ow-control-fill);
+  cursor: pointer;
+  transition: background-color .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+body.theme-frosted .ow-check { border-radius: 6px; }
+body.theme-frosted .ow-radio { border-radius: 50%; }
+body.theme-frosted .ow-check:hover,
+body.theme-frosted .ow-radio:hover { border-color: color-mix(in srgb, var(--fg, #fff) 38%, transparent); }
+/* CHECKED → the sanctioned system blue FILL with a white glyph (the check/dot is the
+   only colored element, and it is the control's own state, not text). */
+body.theme-frosted .ow-check:checked,
+body.theme-frosted .ow-radio:checked {
+  background-color: var(--ow-ios-blue, #0a84ff);
+  border-color: var(--ow-ios-blue, #0a84ff);
+}
+body.theme-frosted .ow-check:checked::before {
+  content: "";
+  width: 11px; height: 11px;
+  background: #fff;
+  clip-path: polygon(41% 67%, 14% 42%, 4% 53%, 41% 88%, 96% 22%, 85% 12%);
+}
+body.theme-frosted .ow-radio:checked::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%; background: #fff;
+}
+body.theme-frosted .ow-check:focus-visible,
+body.theme-frosted .ow-radio:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+body.theme-frosted .ow-check:disabled,
+body.theme-frosted .ow-radio:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── SWITCH: .ow-switch — the iOS toggle ─────────────────────────────────────── */
+/* Markup: <label class="ow-switch"><input type="checkbox"><span class="ow-switch-track"></span></label> */
+body.theme-frosted .ow-switch {
+  position: relative; display: inline-flex; align-items: center;
+  width: 51px; height: 31px; flex: 0 0 auto; cursor: pointer;
+  vertical-align: middle;
+}
+body.theme-frosted .ow-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+body.theme-frosted .ow-switch .ow-switch-track {
+  position: absolute; inset: 0; border-radius: 999px;
+  background-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent);
+  border: 1px solid var(--ow-glass-rim-border, rgba(255,255,255,0.12));
+  transition: background-color .2s ease;
+}
+body.theme-frosted .ow-switch .ow-switch-track::before {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 27px; height: 27px; border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.86));
+  box-shadow: 0 2px 6px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.9);
+  transition: transform .2s cubic-bezier(.34,1.4,.64,1);
+}
+body.theme-frosted .ow-switch input:checked + .ow-switch-track {
+  background-color: var(--ow-ios-blue, #0a84ff);
+  border-color: var(--ow-ios-blue, #0a84ff);
+}
+body.theme-frosted .ow-switch input:checked + .ow-switch-track::before { transform: translateX(20px); }
+body.theme-frosted .ow-switch input:focus-visible + .ow-switch-track {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+body.theme-frosted .ow-switch input:disabled + .ow-switch-track { opacity: 0.45; }
+body.theme-frosted .ow-switch input:disabled { cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  body.theme-frosted .ow-switch .ow-switch-track,
+  body.theme-frosted .ow-switch .ow-switch-track::before { transition: none; }
+}
+
+/* ── SELECT: .ow-select — kit-styled dropdown (fixes dark-on-dark) ────────────── */
+body.theme-frosted select.ow-select {
+  -webkit-appearance: none; appearance: none;
+  min-height: var(--ow-tap-min, 44px);
+  padding: var(--ow-space-2, 8px) calc(var(--ow-space-5, 24px) + 10px) var(--ow-space-2, 8px) var(--ow-space-3, 12px);
+  border-radius: var(--ow-radius-inner, 12px);
+  border: 1px solid var(--ow-control-rim);
+  background-color: var(--ow-control-fill);
+  color: var(--ow-control-ink, #16191f);
+  font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, 0.875rem); font-weight: var(--ow-fw-medium, 500);
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  /* soft luminous rim — the pure-CSS specular-edge (kube.io feBlend rim equivalent). */
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,0.12)), 0 1px 3px rgba(0,0,0,0.14);
+  cursor: pointer;
+  /* a neutral chevron (monochrome --fg ink, no accent) */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 16px center, right 11px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+body.theme-frosted select.ow-select:hover { background-color: var(--ow-control-fill-hover); }
+body.theme-frosted select.ow-select:focus-visible {
+  outline: none; border-color: var(--ow-focus-ring, #0a84ff);
+  box-shadow: 0 0 0 var(--ow-focus-ring-w, 3px) color-mix(in srgb, var(--ow-focus-ring, #0a84ff) 45%, transparent);
+}
+/* the native option list is OS-painted: pin it to legible dark-on-light tokens so it
+   can never render dark-on-dark (the admin <select> bug this class fixes). */
+body.theme-frosted select.ow-select option {
+  background-color: var(--select-option-bg, #1c2127);
+  color: var(--select-option-fg, var(--fg, #fff));
+}
+body.theme-frosted select.ow-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── SLIDER: .ow-slider — kit-styled range (system-green track, glass thumb) ──── */
+body.theme-frosted input[type="range"].ow-slider {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 28px; background: transparent; cursor: pointer;
+  accent-color: var(--ow-ios-green, #30d158);   /* Firefox/native fallback */
+}
+body.theme-frosted input[type="range"].ow-slider::-webkit-slider-runnable-track {
+  height: 5px; border-radius: 999px;
+  background: linear-gradient(90deg,
+    var(--ow-ios-green, #30d158) 0 var(--ow-slider-fill, 50%),
+    color-mix(in srgb, var(--fg, #fff) 22%, transparent) var(--ow-slider-fill, 50%) 100%);
+}
+body.theme-frosted input[type="range"].ow-slider::-moz-range-track {
+  height: 5px; border-radius: 999px;
+  background: color-mix(in srgb, var(--fg, #fff) 22%, transparent);
+}
+body.theme-frosted input[type="range"].ow-slider::-moz-range-progress {
+  height: 5px; border-radius: 999px; background: var(--ow-ios-green, #30d158);
+}
+body.theme-frosted input[type="range"].ow-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 24px; height: 24px; margin-top: -10px; border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.86));
+  box-shadow: 0 2px 8px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.9);
+  border: none;
+}
+body.theme-frosted input[type="range"].ow-slider::-moz-range-thumb {
+  width: 24px; height: 24px; border-radius: 50%; border: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.86));
+  box-shadow: 0 2px 8px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.9);
+}
+body.theme-frosted input[type="range"].ow-slider:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 4px; border-radius: 999px;
+}
+body.theme-frosted input[type="range"].ow-slider:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* a11y trio for the element-kit controls (reduced-transparency → solid fills;
+   increased-contrast → contrasting border). Reduced-motion handled per-block. */
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .ow-field,
+  body.theme-frosted .ow-select,
+  body.theme-frosted .ow-check,
+  body.theme-frosted .ow-radio,
+  body.theme-frosted .ow-switch .ow-switch-track {
+    background-color: var(--panel, var(--bg)) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+@media (prefers-contrast: more) {
+  body.theme-frosted .ow-field,
+  body.theme-frosted .ow-select,
+  body.theme-frosted .ow-check,
+  body.theme-frosted .ow-radio,
+  body.theme-frosted .ow-switch .ow-switch-track {
+    border-color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+  }
+}
+
+/* ── TRANSIENT KNOB = real Liquid Glass at Full Glass (compose #owlg-thumb) ─────
+   The switch thumb + slider thumbs are the sanctioned CONTENT-LAYER transient-glass
+   elements (HIG: "for controls like sliders and toggles, the knob transforms into
+   Liquid Glass during interaction"). Rather than reinvent the optic, the kit knobs
+   take the SAME concave "lip-bezel" SVG refraction filter the app's bespoke toggles
+   use — #owlg-thumb, generated ONCE in liquidGlass.js (the kube.io #switch port:
+   convex outer rim + concave middle → "center zoomed out, edges refract the inside").
+   GATED on body.glass-full (the Chromium SVG-refraction tier) exactly like the
+   existing .toggle/.admin-slider knobs above; the plain Frosted tier + every non-
+   Chromium / reduced-transparency fallback keep the clean white knob. Refs: kube.io
+   "Liquid Glass with CSS + SVG" #switch; ADAPTIVE_LEGIBILITY_REFERENCE.md L348-351. */
+body.glass-full .ow-switch .ow-switch-track::before,
+body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
+  -webkit-backdrop-filter: url("#owlg-thumb");
+  backdrop-filter: url("#owlg-thumb");
+}
+@media (prefers-reduced-transparency: reduce) {
+  /* Reduce Transparency drops the refraction → a clean solid white knob (Apple). */
+  body.glass-full .ow-switch .ow-switch-track::before,
+  body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
+    background: #fff !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+/* ── END ELEMENT KIT ── (#773) ──────────────────────────────────────────────── */
+
 /* ============================================================================ */
 /* Liquid Glass — chrome (small bars/pills), chat bubbles, transient typing,     */
 /* the global no-accent-on-text rule, the bg-image controls & wallpaper layer.   */

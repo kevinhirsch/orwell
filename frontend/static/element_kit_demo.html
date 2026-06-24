@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<!--
+  OrwellElement kit — DEMO / verification render (issue #773).
+  Self-contained: instantiates EVERY kit primitive in EVERY state over a light
+  wallpaper at Full Glass + Frosted, for screenshot verification. NOT in app nav.
+  Open at /static/element_kit_demo.html.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OrwellElement kit — demo</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* a light, bright wallpaper so glass legibility + dark-ink are stress-tested */
+    #__wp {
+      position: fixed; inset: 0; z-index: -1;
+      background:
+        radial-gradient(60% 60% at 20% 15%, #ffe9c7 0%, transparent 60%),
+        radial-gradient(70% 70% at 85% 25%, #cfe9ff 0%, transparent 60%),
+        radial-gradient(60% 60% at 70% 90%, #ffd6e7 0%, transparent 60%),
+        linear-gradient(135deg, #f3f6ff 0%, #eef7ee 100%);
+    }
+    /* Simulate an in-app glass surface: real glass surfaces (.ow-window .ow-body,
+       .on-card, .modal-content) REDEFINE --fg to the canonical chrome dark ink so
+       every nested kit control inherits dark-on-glass legibility. The kit composes
+       --fg, so we set it here too — this is what the kit looks like in-app. */
+    .ek-page { --fg: #16191f; max-width: 920px; margin: 0 auto; padding: 28px 20px 80px; font-family: var(--ow-ui-font); color: var(--fg); }
+    .ek-h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+    .ek-sub { opacity: .8; font-size: 13px; margin: 0 0 24px; }
+    .ek-card {
+      background-color: color-mix(in srgb, var(--fg) 8%, transparent);
+      -webkit-backdrop-filter: var(--ow-glass-backdrop, blur(22px));
+      backdrop-filter: var(--ow-glass-backdrop, blur(22px));
+      border: 1px solid var(--ow-glass-rim-border, rgba(255,255,255,.12));
+      border-radius: var(--ow-radius, 26px);
+      box-shadow: var(--ow-glass-float, 0 18px 50px rgba(0,0,0,.3));
+      padding: 18px 20px; margin: 0 0 20px;
+    }
+    .ek-card h2 { font-size: 15px; font-weight: 600; margin: 0 0 14px; }
+    .ek-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 0 0 12px; }
+    .ek-label { width: 100%; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; margin: 6px 0 2px; }
+    .ek-stack { display: grid; gap: 10px; max-width: 360px; }
+    .ek-inline { display: inline-flex; align-items: center; gap: 8px; }
+  </style>
+</head>
+<body class="theme-frosted glass-full">
+  <div id="__wp"></div>
+  <div class="ek-page">
+    <h1 class="ek-h1">OrwellElement kit</h1>
+    <p class="ek-sub">Every primitive × every state · Full Glass + Frosted · over a light wallpaper (#773)</p>
+
+    <!-- BUTTONS -->
+    <section class="ek-card">
+      <h2>Button — .ow-btn + variant</h2>
+      <div class="ek-label">Variants (rest)</div>
+      <div class="ek-row">
+        <button class="ow-btn ow-btn-prominent">Prominent</button>
+        <button class="ow-btn ow-btn-secondary">Secondary</button>
+        <button class="ow-btn ow-btn-plain">Plain</button>
+        <button class="ow-btn ow-btn-destructive">Destructive</button>
+        <button class="ow-btn ow-btn-icon" aria-label="Close">✕</button>
+      </div>
+      <div class="ek-label">Disabled</div>
+      <div class="ek-row">
+        <button class="ow-btn ow-btn-prominent" disabled>Prominent</button>
+        <button class="ow-btn ow-btn-secondary" disabled>Secondary</button>
+        <button class="ow-btn ow-btn-plain" disabled>Plain</button>
+        <button class="ow-btn ow-btn-destructive" disabled>Destructive</button>
+        <button class="ow-btn ow-btn-icon" disabled aria-label="Close">✕</button>
+      </div>
+      <div class="ek-label">Hover &amp; focus (forced via class for the still)</div>
+      <div class="ek-row">
+        <button class="ow-btn ow-btn-prominent ek-force-hover">Hover</button>
+        <button class="ow-btn ow-btn-secondary ek-force-focus">Focus ring</button>
+        <button class="ow-btn ow-btn-destructive ek-force-focus">Focus ring</button>
+      </div>
+    </section>
+
+    <!-- FIELDS -->
+    <section class="ek-card">
+      <h2>Field — .ow-field</h2>
+      <div class="ek-stack">
+        <input class="ow-field" placeholder="Placeholder text (legible)">
+        <input class="ow-field" value="Filled value">
+        <input class="ow-field ek-force-focus" value="Focused (system-blue ring)">
+        <input class="ow-field is-invalid" value="Invalid (red ring)">
+        <input class="ow-field" value="Disabled" disabled>
+        <textarea class="ow-field" placeholder="Textarea…"></textarea>
+      </div>
+    </section>
+
+    <!-- CHECK / RADIO -->
+    <section class="ek-card">
+      <h2>Checkbox &amp; Radio — .ow-check / .ow-radio</h2>
+      <div class="ek-row">
+        <label class="ek-inline"><input type="checkbox" class="ow-check"> Unchecked</label>
+        <label class="ek-inline"><input type="checkbox" class="ow-check" checked> Checked</label>
+        <label class="ek-inline"><input type="checkbox" class="ow-check ek-force-focus" checked> Focused</label>
+        <label class="ek-inline"><input type="checkbox" class="ow-check" checked disabled> Disabled</label>
+      </div>
+      <div class="ek-row">
+        <label class="ek-inline"><input type="radio" name="r" class="ow-radio"> Unselected</label>
+        <label class="ek-inline"><input type="radio" name="r" class="ow-radio" checked> Selected</label>
+        <label class="ek-inline"><input type="radio" name="r2" class="ow-radio ek-force-focus" checked> Focused</label>
+        <label class="ek-inline"><input type="radio" name="r3" class="ow-radio" checked disabled> Disabled</label>
+      </div>
+    </section>
+
+    <!-- SWITCH -->
+    <section class="ek-card">
+      <h2>Switch — .ow-switch</h2>
+      <div class="ek-row">
+        <span class="ek-inline">Off
+          <label class="ow-switch"><input type="checkbox"><span class="ow-switch-track"></span></label>
+        </span>
+        <span class="ek-inline">On
+          <label class="ow-switch"><input type="checkbox" checked><span class="ow-switch-track"></span></label>
+        </span>
+        <span class="ek-inline">Focused
+          <label class="ow-switch"><input type="checkbox" checked class="ek-force-focus"><span class="ow-switch-track"></span></label>
+        </span>
+        <span class="ek-inline">Disabled
+          <label class="ow-switch"><input type="checkbox" checked disabled><span class="ow-switch-track"></span></label>
+        </span>
+      </div>
+    </section>
+
+    <!-- SELECT -->
+    <section class="ek-card">
+      <h2>Select — .ow-select</h2>
+      <div class="ek-row">
+        <select class="ow-select"><option>Choose an option</option><option>Two</option><option>Three</option></select>
+        <select class="ow-select ek-force-focus"><option>Focused</option></select>
+        <select class="ow-select" disabled><option>Disabled</option></select>
+      </div>
+    </section>
+
+    <!-- SLIDER -->
+    <section class="ek-card">
+      <h2>Slider — .ow-slider</h2>
+      <div class="ek-stack">
+        <input type="range" class="ow-slider" min="0" max="100" value="30" style="--ow-slider-fill:30%">
+        <input type="range" class="ow-slider" min="0" max="100" value="75" style="--ow-slider-fill:75%">
+        <input type="range" class="ow-slider" min="0" max="100" value="50" style="--ow-slider-fill:50%" disabled>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    /* helpers so a STILL screenshot shows pseudo-class states */
+    .ek-force-hover { filter: brightness(1.06); transform: translateY(-1px); }
+    .ek-force-focus { outline: var(--ow-focus-ring-w,3px) solid var(--ow-focus-ring,#0a84ff); outline-offset: 2px; }
+    input.ow-field.ek-force-focus { border-color: var(--ow-focus-ring,#0a84ff);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,.18), 0 0 0 var(--ow-focus-ring-w,3px) color-mix(in srgb, var(--ow-focus-ring,#0a84ff) 45%, transparent); outline: none; }
+    .ow-switch input.ek-force-focus + .ow-switch-track { outline: var(--ow-focus-ring-w,3px) solid var(--ow-focus-ring,#0a84ff); outline-offset: 2px; }
+  </style>
+</body>
+</html>
