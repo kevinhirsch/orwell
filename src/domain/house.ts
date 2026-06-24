@@ -8,26 +8,38 @@
 import type { EntityId } from "./ids";
 
 export type Room =
-  | "kitchen" | "living-room" | "backyard" | "bedroom-a" | "bedroom-b"
-  | "hoh-room" | "bathroom" | "storage-room" | "diary-room";
+  | "kitchen" | "living-room" | "dining-room" | "backyard"
+  | "hallway"
+  | "bedroom-a" | "bedroom-b" | "bedroom-c" | "bathroom" | "lounge"
+  | "hoh-room" | "storage-room" | "diary-room";
 
 export const HOUSE_ROOMS: readonly Room[] = [
-  "kitchen", "living-room", "backyard", "bedroom-a", "bedroom-b",
-  "hoh-room", "bathroom", "storage-room", "diary-room",
+  "kitchen", "living-room", "dining-room", "backyard",
+  "hallway",
+  "bedroom-a", "bedroom-b", "bedroom-c", "bathroom", "lounge",
+  "hoh-room", "storage-room", "diary-room",
 ];
 
 /**
- * The floor plan. Symmetric by construction (asserted by the unit tests): the living room is
- * the hub; the HOH room sits up its own stairs; the diary room opens off the living room and
- * adjoins nothing else (it is PRIVATE — overhearing the diary room is impossible by data).
+ * The floor plan (0077 — recent-BB layout). Symmetric by construction (asserted by the unit tests):
+ * an OPEN PUBLIC CORE where privacy is impossible (kitchen ⇄ living-room ⇄ dining-room ⇄ backyard),
+ * a `hallway` chokepoint off the living room, and a PRIVATE WING reached only through the hallway
+ * (the three bedrooms, the bathroom, the lounge). The HOH room sits up its own stairs off the living
+ * room; the storage room is the classic quick-meeting spot off the kitchen; the diary room opens off
+ * the living room and adjoins nothing else (PRIVATE — overhearing it is impossible by data). Owner
+ * note #1: the BATHROOM is NOT adjacent to any bedroom (it opens off the hallway).
  */
 export const HOUSE_ADJACENCY: ReadonlyMap<Room, readonly Room[]> = new Map<Room, readonly Room[]>([
-  ["living-room", ["kitchen", "backyard", "bedroom-a", "bedroom-b", "hoh-room", "bathroom", "diary-room"]],
-  ["kitchen", ["living-room", "backyard", "storage-room"]],
-  ["backyard", ["living-room", "kitchen"]],
-  ["bedroom-a", ["living-room", "bathroom"]],
-  ["bedroom-b", ["living-room", "bathroom"]],
-  ["bathroom", ["living-room", "bedroom-a", "bedroom-b"]],
+  ["kitchen", ["living-room", "dining-room", "backyard", "storage-room"]],
+  ["living-room", ["kitchen", "dining-room", "backyard", "hallway", "hoh-room", "diary-room"]],
+  ["dining-room", ["kitchen", "living-room"]],
+  ["backyard", ["kitchen", "living-room"]],
+  ["hallway", ["living-room", "bedroom-a", "bedroom-b", "bedroom-c", "bathroom", "lounge"]],
+  ["bedroom-a", ["hallway"]],
+  ["bedroom-b", ["hallway"]],
+  ["bedroom-c", ["hallway"]],
+  ["bathroom", ["hallway"]],
+  ["lounge", ["hallway"]],
   ["hoh-room", ["living-room"]],
   ["storage-room", ["kitchen"]],
   ["diary-room", ["living-room"]],
@@ -68,20 +80,37 @@ const ROOM_ALIASES: ReadonlyMap<string, Room> = new Map<string, Room>([
   ["living-room", "living-room"],
   ["livingroom", "living-room"],
   ["living", "living-room"],
-  ["lounge", "living-room"],
   ["common-room", "living-room"],
   ["common-area", "living-room"],
+  ["great-room", "living-room"],
+  ["dining-room", "dining-room"],
+  ["dining", "dining-room"],
+  ["dining-area", "dining-room"],
+  ["dinner", "dining-room"],
   ["backyard", "backyard"],
   ["yard", "backyard"],
   ["outside", "backyard"],
   ["garden", "backyard"],
   ["patio", "backyard"],
+  ["pool", "backyard"],
+  ["poolside", "backyard"],
+  ["hallway", "hallway"],
+  ["hall", "hallway"],
+  ["corridor", "hallway"],
   ["bedroom-a", "bedroom-a"],
   ["bedroom-1", "bedroom-a"],
   ["first-bedroom", "bedroom-a"],
   ["bedroom-b", "bedroom-b"],
   ["bedroom-2", "bedroom-b"],
   ["second-bedroom", "bedroom-b"],
+  ["bedroom-c", "bedroom-c"],
+  ["bedroom-3", "bedroom-c"],
+  ["third-bedroom", "bedroom-c"],
+  ["lounge", "lounge"],
+  ["games-room", "lounge"],
+  ["game-room", "lounge"],
+  ["have-not", "lounge"],
+  ["have-not-room", "lounge"],
   ["hoh-room", "hoh-room"],
   ["hoh", "hoh-room"],
   ["hoh-suite", "hoh-room"],
@@ -140,8 +169,8 @@ export function resolveRoom(name: string, currentRoom?: Room | null): RoomResolu
   const alias = ROOM_ALIASES.get(key);
   if (alias) return { kind: "ok", room: alias };
 
-  // 2. the ambiguous "bedroom" family — pick sensibly when we can, else report both.
-  const bedrooms: readonly Room[] = ["bedroom-a", "bedroom-b"];
+  // 2. the ambiguous "bedroom" family — pick sensibly when we can, else report the candidates.
+  const bedrooms: readonly Room[] = ["bedroom-a", "bedroom-b", "bedroom-c"];
   const isBedroomy = key === "bedroom" || key === "bedrooms" || key === "bed" || key === "room" || key === "beds";
   if (isBedroomy) {
     if (currentRoom && bedrooms.includes(currentRoom)) return { kind: "ok", room: currentRoom }; // already in one — stay
