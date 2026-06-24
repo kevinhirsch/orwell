@@ -98,7 +98,10 @@ def boot_fe():
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
         cwd=FE_DIR, stdout=open(f"/tmp/fe-matrix-{PORT}.log", "w"), stderr=subprocess.STDOUT, env=env)
-    for _ in range(60):
+    # 120s boot budget: on a loaded self-hosted runner (the whole CI fan-out
+    # hammering one host during a merge wave) uvicorn's first 200 can take well
+    # past 30s. Matches the deploy/smoke.sh FE-boot wait so neither flakes.
+    for _ in range(240):
         try:
             if httpx.get(FE, timeout=1).status_code == 200:
                 return proc

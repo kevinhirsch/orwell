@@ -74,7 +74,9 @@ def boot():
         cwd=ROOT, env=env, stdout=open(f"/tmp/fe-browser-{PORT}.log", "w"), stderr=subprocess.STDOUT,
     )
     base = f"http://127.0.0.1:{PORT}"
-    for _ in range(60):
+    # 120s boot budget — a loaded self-hosted runner during a merge wave can take
+    # well past 60s for uvicorn's first response (matches responsive_matrix.py / smoke.sh).
+    for _ in range(120):
         if proc.poll() is not None:
             sys.exit(f"FAIL — uvicorn exited early; see /tmp/fe-browser-{PORT}.log")
         try:
