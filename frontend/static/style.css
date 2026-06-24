@@ -38042,3 +38042,41 @@ body.theme-frosted .settings-nav-item.active {
   color: #fff !important;
 }
 body.theme-frosted .settings-nav-item.active svg { opacity: 1; color: #fff; }
+
+/* ── Settings sidebar tabs are macOS list ROWS, not glass action chips ──────────
+   The generic in-window button-glass treatment (`.ow-window .ow-body button`,
+   specificity 0,3,2) was pilling EVERY settings nav tab — a translucent fill, a
+   1px rim border, a backdrop-blur, and an accent hover-ring — so the sidebar read
+   as a stack of bubbly outlined buttons. In macOS System Settings the sidebar is
+   a plain list: unselected rows have NO fill/border, ONLY the selected row gets a
+   filled (system-blue) rounded rect. This higher-specificity reset (0,4,2 — it
+   includes the generic selector + the class) strips the chip styling so the
+   dedicated idle/active rules above govern: transparent idle, blue selected,
+   a gentle macOS row radius (not a full pill). */
+body.theme-frosted .ow-window .ow-body button.settings-nav-item {
+  background-color: transparent;
+  border: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  border-radius: 7px !important;   /* macOS sidebar row selection — a gentle round, not a full pill */
+  transform: none;
+}
+/* macOS sidebar focus: the blue fill already signals the selected row, and focus
+   AUTO-lands on the active tab when Settings opens — so the global 2px cyan
+   :focus-visible outline reads as a clashing bubble hugging the blue pill. Replace
+   it with a quiet on-palette inset ring (keyboard affordance preserved, no bubble). */
+body.theme-frosted .settings-nav-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--fg, #fff) 40%, transparent);
+}
+body.theme-frosted .ow-window .ow-body button.settings-nav-item:hover:not(.active) {
+  background-color: color-mix(in srgb, var(--fg, #fff) 8%, transparent);
+  box-shadow: none;
+  transform: none;
+  filter: none;
+}
+body.theme-frosted .ow-window .ow-body button.settings-nav-item.active {
+  background-color: var(--ow-ios-blue, #0a84ff);
+  box-shadow: none;
+}
