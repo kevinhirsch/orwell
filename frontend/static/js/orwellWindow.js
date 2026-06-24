@@ -94,7 +94,8 @@ function ensureCss() {
       border: 1px solid var(--win-border, var(--border, #355a66));
       border-radius: var(--win-radius, 10px);
       box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
-      font-size: var(--fs-sm, .8rem); line-height: 1.45;
+      /* Shared type system (#709): sans family + body PRESET for the window content. */
+      font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.45;
       /* NB (A6): do NOT clip the frost by hiding overflow on this root — combined with the
          10px border-radius it clips the rounded-corner pointer region and defeats the L11
          corner-resize grab (which arms 2px from the corner; CI browser-smoke caught it). The

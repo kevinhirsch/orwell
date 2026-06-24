@@ -98,12 +98,13 @@
       "  border-radius: 12px; padding: .7rem .85rem;" +
       "  background: var(--panel, #111); color: var(--fg, #9cdef2);" +
       "  border: 1px solid var(--border, #355a66);" +
-      "  font-size: var(--fs-sm, .85rem); line-height: 1.5;" +
+      // Shared type system (#709): sans family, body PRESET; the title row uses the title preset.
+      "  font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.5;" +
       "  box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45)); }" +
       // The header row: icon + title + the dismiss affordance.
       ".on-card .on-head { display: flex; align-items: baseline; gap: .5rem; }" +
       ".on-card .on-icon { flex: 0 0 auto; opacity: .9; }" +
-      ".on-card .on-title { flex: 1 1 auto; min-width: 0; font-weight: 700; letter-spacing: .02em; }" +
+      ".on-card .on-title { flex: 1 1 auto; min-width: 0; font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; }" +
       ".on-card .on-body { margin-top: .35rem; }" +
       ".on-card .on-body:empty { display: none; }" +
       // The ONE dismiss affordance — the 44px touch floor (WCAG 2.5.5), positioned in the

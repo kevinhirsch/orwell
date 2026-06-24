@@ -40,14 +40,12 @@
       severity: "error",
       role: "alert",                 // preserve the assertive announcement
       title: "",
-      dismissible: true,
-      // A connectivity problem is transient — NEVER a "dismissed forever" bit: the dismissed-key
-      // logic below re-shows it when the message changes / a new problem appears.
+      // NOT dismissible: this is an honest outage signal, never a "wave it away" affordance. It
+      // already auto-hides the moment the engine reports healthy (see hide()), so a manual × would
+      // only let a confused player bury a real problem. The dismissed-key plumbing below is now
+      // inert (nothing sets dismissedKey), kept only so show()/hide() read uniformly.
+      dismissible: false,
       persistDismiss: false,
-      onDismiss: function () {
-        // Remember the exact reason waved off (so the same problem stays dismissed, a new one shows).
-        dismissedKey = _lastReason;
-      },
     });
     return _notice;
   }

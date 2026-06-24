@@ -86,7 +86,8 @@
         margin: .6rem auto; max-width: 640px; border-radius: 12px; padding: .8rem .9rem;
         background: var(--panel, #111); color: var(--fg, #9cdef2);
         border: 1px solid var(--accent, var(--red, #e06c75));
-        font-size: .85rem; line-height: 1.5;
+        /* Shared type system (#709): sans family + body PRESET. */
+        font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.5;
         /* J5-03: figure/ground — the binding card must lift off the chat stream like every
            OrwellWindow does. Reuse the kit's shadow token (it is the only interactive surface
            that was missing it). */
@@ -106,7 +107,7 @@
         background: transparent; animation: none;
       }
       #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
-      #${CARD_ID} .odec-title { font-weight: 700; letter-spacing: .03em; flex: 1; }
+      #${CARD_ID} .odec-title { font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; flex: 1; }
       /* J5-21: the dismiss × stays visually in the top-right corner (absolute), but is moved to the
          END of the card's DOM so it is the LAST thing a keyboard user Tabs to — the decision options
          and Confirm come first (WCAG 2.4.3 focus order: a binding-decision surface must not put
@@ -164,10 +165,10 @@
         background: var(--accent, #e06c75); color: var(--on-accent, #fff); font: inherit;
       }
       #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
-      #${CARD_ID} .odec-note { opacity: .80; font-size: .85rem; flex: 1; }
+      #${CARD_ID} .odec-note { opacity: .80; font-size: var(--ow-fs-body, .875rem); flex: 1; }
       /* J4-20: the disabled-Confirm hint — quiet, italicized, sits beside the button; its hidden
          attribute is toggled in sync() so it shows only while Confirm can't be pressed. */
-      #${CARD_ID} .odec-hint { opacity: .7; font-size: .78rem; font-style: italic; flex-basis: 100%; order: 99; margin-top: -.2rem; }
+      #${CARD_ID} .odec-hint { opacity: .7; font-size: var(--ow-fs-caption, .75rem); font-style: italic; flex-basis: 100%; order: 99; margin-top: -.2rem; }
       #${CARD_ID} .odec-hint[hidden] { display: none; }
       #${CARD_ID} .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
       #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }

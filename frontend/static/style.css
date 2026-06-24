@@ -24,6 +24,14 @@
      tokens are the first-paint / fallback value before theme.js boots. */
   --ow-ui-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', Inter, 'Segoe UI', Roboto, sans-serif;
   --ow-mono-font: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+  /* Canonical aliases (#709): legacy sites reference --mono / --code-font / --font-family
+     WITHOUT ever defining them (they resolved to ad-hoc per-site fallbacks). Anchor them to
+     the two canonical tokens so ONE sans token + ONE mono token actually drive the whole UI.
+     (--font-family is ALSO set per-user by theme.js applyFontDensity; this is its base value
+     before theme.js boots, so it points at the same SF system stack — no first-paint shift.) */
+  --mono: var(--ow-mono-font);
+  --code-font: var(--ow-mono-font);
+  --font-family: var(--ow-ui-font);
 
   /* ══════════════════════════════════════════════════════════════════════════
      THE ORWELL DESIGN SYSTEM — single source of truth (kits + .ow-*/.og-*/.on-*).
@@ -49,10 +57,24 @@
   --ow-radius: 26px;            /* window/card/dialog surface (very rounded, Apple) */
   --ow-radius-inner: 16px;      /* a control nested inside a surface (concentric)   */
   --ow-radius-pill: 999px;      /* capsule / circular disc                          */
-  /* Type ramp (SF default): weights — never thin on glass (Regular/Medium/Semibold). */
+  /* Type ramp (SF default): weights — never thin on glass (Regular/Medium/Semibold/Bold).
+     HIG Typography (#696): floor at Regular (400); avoid Light/Thin entirely. */
   --ow-fw-regular: 400;
   --ow-fw-medium: 500;
   --ow-fw-semibold: 600;
+  --ow-fw-bold: 700;
+  /* ── Type SCALE — the ONE coherent preset ramp every kit composes (#709) ──
+     Five role-named sizes so a "title", "heading", "body", "label" or "caption"
+     reads identically in EVERY kit (window/notice/decision/gadget/chat-hint/
+     settings/toast/menu). Anchored on the existing rem scale in
+     css/responsive-tokens.css (--fs-*) so it rides the same fluid root + density
+     and stays above the --fs-2xs floor. rem (not px) → respects user zoom.
+     Family is ALWAYS --ow-ui-font for these presets; mono is reserved for code. */
+  --ow-fs-title: var(--fs-md, 0.875rem);     /* ~14px — window/modal/dialog + card titles    */
+  --ow-fs-heading: var(--fs-sm, 0.8125rem);  /* ~13px — section / settings-group headings     */
+  --ow-fs-body: var(--fs-md, 0.875rem);      /* ~14px — default body / content / option text  */
+  --ow-fs-label: var(--fs-sm, 0.8125rem);    /* ~13px — control labels, gadget rows           */
+  --ow-fs-caption: var(--fs-xs, 0.75rem);    /* ~12px — timestamps, metrics, secondary meta   */
   /* Accent / on-accent (the prominent CTA color) — adapt per theme via --accent
      (falls back to the brand --red). on-accent is the luminance-aware ink. */
   --ow-accent: var(--accent, var(--red, #e06c75));
@@ -133,9 +155,11 @@
   --win-border: var(--border);
   --win-radius: 10px;
   --win-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-  --win-titlebar-fs: 1rem;
-  --win-titlebar-weight: 600;
-  --win-titlebar-ls: -0.03em;
+  /* Window/modal titlebar type — composed from the shared title PRESET (#709) so a
+     kit window title, a modal header and a card title all read identically. */
+  --win-titlebar-fs: var(--ow-fs-title);
+  --win-titlebar-weight: var(--ow-fw-semibold);
+  --win-titlebar-ls: -0.02em;
 }
 
 :root.light {
@@ -2327,6 +2351,12 @@ body.bg-pattern-perlin-flow {
       word-break: break-word;
       overflow-wrap: anywhere;
       line-height: 1.5;
+      /* Chat font (#709): the conversation IS the game, so its prose rides the SAME sans system
+         as the glass chrome — explicitly the UI font, never the legacy "terminal" mono. (It
+         already inherited --ow-ui-font from body; pinned here so the bubble can never drift to
+         mono via an inherited context.) The user's own font/theme choice still applies through
+         --font-family; code/pre INSIDE a bubble stay --ow-mono-font (see .msg code / pre below). */
+      font-family: var(--font-family, var(--ow-ui-font));
       font-size: 0.95em;
       margin: 0;
       overflow: hidden;
@@ -2561,7 +2591,7 @@ body.bg-pattern-perlin-flow {
       position: relative;
       line-height: 1.4;
       font-size: 0.95em;
-      font-family: 'Fira Code', 'Courier New', monospace;
+      font-family: var(--ow-mono-font);
       min-height: 38px;
       max-width: 100%;
       margin: 8px 0;
@@ -4312,7 +4342,7 @@ body.bg-pattern-perlin-flow {
     }
     .code-runner-pre {
       margin:0; padding:0;
-      font-family:'Fira Code', 'Courier New', monospace;
+      font-family: var(--ow-mono-font);
       font-size:0.9em; line-height:1.5;
       white-space:pre-wrap; word-break:break-word;
       color:var(--fg);
@@ -4355,7 +4385,7 @@ body.bg-pattern-perlin-flow {
       background:var(--panel); color:var(--fg);
       border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);
       border-left: 3px solid var(--accent);
-      padding:8px 12px; border-radius:6px; font-size:12px; opacity:0;
+      padding:8px 12px; border-radius:6px; font-size:var(--ow-fs-caption); opacity:0;
       /* Off-screen to the right by default; .show slides to 0;
          removing .show transitions to -120% (off-screen left). */
       transform: translateX(120%);
@@ -5425,7 +5455,7 @@ body.bg-pattern-perlin-flow {
       border:1px solid var(--win-border);
       width:min(520px, 92vw); max-height:85vh; padding:10px;
       box-sizing:border-box; font-size:14px;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: var(--ow-ui-font);
       letter-spacing: -0.015em;
       display:flex; flex-direction:column;
       position:relative;
@@ -5917,7 +5947,7 @@ body.bg-pattern-perlin-flow {
       border-radius: 4px;
       background: var(--bg);
       color: var(--fg);
-      font-family: 'Fira Code', monospace;
+      font-family: var(--ow-mono-font);
       font-size: 10.2px; /* 15% smaller than 12px */
       cursor: pointer;
       transition: all 0.2s ease;
@@ -6667,7 +6697,7 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       outline: none;
       color: var(--fg);
       font-size: 16px;
-      font-family: 'Fira Code', monospace;
+      font-family: var(--ow-mono-font);
       padding: 14px 16px;
       box-sizing: border-box;
     }
@@ -7441,7 +7471,7 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       font-weight: 600;
     }
     .cmp-eval-expected-value {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-family: var(--ow-mono-font);
       font-size: 11px;
     }
     .cmp-eval-expected-close {
@@ -8227,6 +8257,9 @@ button.hamburger {
 
 /* Inline code */
 .msg code:not(pre code) {
+  /* Inline code IS genuine monospace data — keep it on the mono token even though the
+     bubble prose is sans (#709: mono reserved for code/pre). */
+  font-family: var(--ow-mono-font);
   color: var(--hl-string, #98c379);
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   padding: 1px 5px;
@@ -11078,7 +11111,7 @@ textarea.memory-add-input {
   cursor: pointer;
   border: 1px solid transparent;
   line-height: 16px;
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease, filter 0.12s ease;
   user-select: none;
 }
@@ -12618,7 +12651,7 @@ textarea.memory-add-input {
   justify-content: center;
   width: 22px;
   flex-shrink: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ow-mono-font);
   font-size: 11px;
   opacity: 0.7;
 }
@@ -13521,7 +13554,7 @@ mark.doc-find-mark.current {
   z-index: 5;
   overflow-y: auto;
   padding: 8px 12px;
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 0.85rem;
   line-height: 1.5;
   opacity: 0;
@@ -13582,7 +13615,7 @@ mark.doc-find-mark.current {
   box-shadow: 4px 0 16px rgba(0,0,0,0.35);
   animation: version-slide-in 0.2s ease-out;
   /* Match the app modal aesthetic so nothing inherits the large body font. */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ow-ui-font);
   font-size: 12px;
   letter-spacing: -0.01em;
 }
@@ -13709,7 +13742,7 @@ mark.doc-find-mark.current {
   line-height: 1.5;
   opacity: 0.8;
   margin-top: 2px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ow-mono-font);
   word-break: break-word;
 }
 .doc-version-diff .diff-del { color: var(--red); opacity: 0.75; }
@@ -14001,7 +14034,7 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   padding: 6px 12px 8px;
   max-height: 200px;
   overflow: auto;
-  font-family: 'Fira Code', 'Courier New', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 0.85em;
   line-height: 1.5;
   position: relative;
@@ -16128,7 +16161,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   display: none;
   position: relative;
   padding: 8px 12px;
-  font-family: 'Berkeley Mono', 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 9.5px;
   line-height: 1.5;
   color: var(--code-fg, var(--hl-fg, var(--fg)));
@@ -16202,7 +16235,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 }
 @media (min-width: 769px) {
   .doclib-card-action-btn {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ow-ui-font);
     letter-spacing: -0.015em;
   }
 }
@@ -16857,7 +16890,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 .skill-builtin-card { cursor: default; }
 .skill-builtin-card:hover { border-color: var(--border); }
 .skill-card-preview .skill-md-pre {
-  font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 11.5px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -16951,7 +16984,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 .skills-audit-summary { font-size: 11px; opacity: 0.7; margin-bottom: 4px; }
 .skills-audit-log {
   max-height: 22vh; overflow-y: auto;
-  font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 10.5px; line-height: 1.5; opacity: 0.8;
 }
 /* ── Skill test monitor + AI eval verdict ── */
@@ -16961,7 +16994,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   min-height: 120px;
   max-height: 48vh;
   overflow-y: auto;
-  font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 9.5px;
   line-height: 1.45;
   padding: 8px 10px;
@@ -17029,7 +17062,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   width: 100%;
   box-sizing: border-box;
   resize: none;
-  font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 11.5px;
   line-height: 1.5;
   padding: 8px;
@@ -18488,7 +18521,7 @@ body.gallery-selecting .gallery-dl-btn,
 }
 .cookbook-serve-preset-meta {
   font-size: 9px;
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   color: var(--fg-muted);
   opacity: 0.5;
 }
@@ -18636,7 +18669,7 @@ body.gallery-selecting .gallery-dl-btn,
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -18714,7 +18747,7 @@ body.gallery-selecting .gallery-dl-btn,
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -18946,7 +18979,7 @@ body.gallery-selecting .gallery-dl-btn,
 }
 .cookbook-serve-dir-pill {
   font-size: 10px;
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   padding: 2px 8px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--fg) 6%, transparent);
@@ -19034,7 +19067,7 @@ body.gallery-selecting .gallery-dl-btn,
 .cookbook-gpu-btn {
   width: 22px; height: 22px;
   font-size: 10px;
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   border: 1px solid var(--border);
   border-radius: 4px;
   background: none;
@@ -19102,7 +19135,7 @@ body.gallery-selecting .gallery-dl-btn,
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 11px;
   color: var(--fg);
 }
@@ -19308,7 +19341,7 @@ body.gallery-selecting .gallery-dl-btn,
 .cookbook-saved-host {
   font-size: 10px;
   color: var(--fg-muted);
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
 }
 .cookbook-saved-name {
   flex: 1;
@@ -19872,7 +19905,7 @@ body.gallery-selecting .gallery-dl-btn,
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   border: 1px solid var(--border);
   border-radius: 4px;
-  font-family: 'Berkeley Mono', 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 10px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -20083,7 +20116,7 @@ body.gallery-selecting .gallery-dl-btn,
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--fg);
-  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--ow-mono-font);
   font-size: 12px;
   padding: 8px;
   outline: none;
@@ -20313,20 +20346,20 @@ body.gallery-selecting .gallery-dl-btn,
 .cookbook-task-session {
   font-size: 9px;
   color: var(--fg-muted);
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   opacity: 0.35;
   letter-spacing: 0.3px;
 }
 .cookbook-task-server {
   font-size: 9px;
   color: var(--fg-muted);
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   opacity: 0.4;
 }
 .cookbook-task-uptime {
   font-size: 9px;
   color: var(--fg-muted);
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   opacity: 0.4;
 }
 .cookbook-task-status {
@@ -21004,7 +21037,7 @@ body.gallery-selecting .gallery-dl-btn,
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--fg);
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 12px;
   padding: 5px 8px;
 }
@@ -21833,7 +21866,7 @@ body.gallery-selecting .gallery-dl-btn,
 }
 .hwfit-panel-advanced summary:hover, .hwfit-panel-settings summary:hover { color: var(--fg); }
 .hwfit-panel-cmd {
-  font-family: 'Berkeley Mono', 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: var(--fs-xs); padding: 6px 8px; border-radius: 4px;
   background: var(--bg); border: 1px solid var(--border);
   white-space: pre-wrap; word-break: break-all; max-height: 60px; overflow-y: auto;
@@ -23088,8 +23121,9 @@ select.task-form-input { text-overflow: ellipsis; }
 }
 .settings-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
 .settings-section-title {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
+  /* settings-group eyebrow — caption PRESET (#709), uppercased + tracked. */
+  font-size: var(--ow-fs-caption);
+  font-weight: var(--ow-fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   opacity: 0.6;
@@ -23384,7 +23418,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   flex-shrink: 0;
   min-width: 35px;
   text-align: right;
-  font-family: 'Berkeley Mono', 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
 }
 
 /* Cookbook serve param hints */
@@ -23422,7 +23456,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   padding: 1px 5px;
   border-radius: 3px;
   margin-left: 4px;
-  font-family: 'Berkeley Mono', 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
 }
 
 /* Cookbook output copy — show only on hover */
@@ -23512,7 +23546,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-family: 'Berkeley Mono', 'SF Mono', monospace;
+  font-family: var(--ow-mono-font);
 }
 .cookbook-modeldir-default {
   opacity: 0.5;
@@ -23824,7 +23858,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
 .research-synapse .rs-label {
   fill: var(--fg);
   font-size: 10px;
-  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-family: var(--ow-mono-font);
   pointer-events: none;
   opacity: 0.85;
 }
@@ -23838,7 +23872,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   gap: 6px;
   flex-wrap: wrap;
   padding: 6px 10px 8px;
-  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-family: var(--ow-mono-font);
   font-size: 11px;
   color: var(--fg-dim, var(--fg));
   opacity: 0.85;
@@ -24855,7 +24889,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ow-mono-font);
   font-size: 10px;
   font-weight: 600;
   padding: 2px 6px;
@@ -26029,7 +26063,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
 .ge-dep-notice-text { flex: 1 1 auto; line-height: 1.4; }
 .ge-dep-notice-text strong { display: block; margin-bottom: 2px; }
 .ge-dep-notice-text code {
-  font-family: 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 10px;
   padding: 1px 4px;
   border-radius: 3px;
@@ -28471,7 +28505,7 @@ button .spinner-whirlpool {
 }
 .from-sender-addr {
   font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ow-mono-font);
   opacity: 0.55;
   margin-top: 2px;
   white-space: nowrap;
@@ -29375,7 +29409,7 @@ button .spinner-whirlpool {
 /* Prefer local/system emoji fonts; avoid remote font providers. */
 .doc-editor-textarea, .doc-editor-highlight, #doc-editor-code,
 .doc-md-preview, .doc-csv-preview {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', monospace;
+  font-family: var(--ow-mono-font);
   font-variant-emoji: text;
 }
 /* Preview panes claim the editor's space so the action footer stays pinned
@@ -30859,7 +30893,7 @@ body.notes-drag-mode .note-card-pin svg {
   height: min(80vh, 820px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
   box-sizing: border-box;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ow-ui-font);
   letter-spacing: -0.015em;
   /* Smooth open: scale up + fade in from the centre. */
   animation: notes-pane-enter 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
@@ -30992,7 +31026,7 @@ body.notes-drag-mode .note-card-pin svg {
 }
 .notes-pane-title {
   /* Match the other tool headers (.modal-header h4). */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ow-ui-font);
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.03em;
@@ -35209,7 +35243,7 @@ button.cal-event-more:hover { opacity:1 !important; }
 }
 .cal-hero-time {
   display: inline-flex; align-items: baseline; gap: 8px;
-  font-family: ui-monospace, SFMono-Regular, "Menlo", "Consolas", monospace;
+  font-family: var(--ow-mono-font);
   font-variant-numeric: tabular-nums;
   font-size: 56px;
   letter-spacing: 0.02em;
@@ -36211,7 +36245,7 @@ input.cp-swatch-input::selection { background: transparent; }
   background: var(--bg, #000); color: var(--fg, #eee);
   border: 1px solid var(--border, #333);
   border-radius: 4px;
-  font-family: ui-monospace, 'Fira Code', monospace;
+  font-family: var(--ow-mono-font);
   font-size: 12px; text-transform: lowercase;
 }
 .cp-hex:focus { outline: none; border-color: var(--red, #e06c75); }
@@ -36825,7 +36859,7 @@ body.theme-frosted .modal {
 .slash-ac-row:hover { background-color: color-mix(in srgb, var(--accent, var(--red)) 10%, transparent); }
 .slash-ac-row-sel  { background-color: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent); }
 .slash-ac-token {
-  font-family: 'Fira Code', ui-monospace, monospace;
+  font-family: var(--ow-mono-font);
   color: var(--accent, var(--red));
   font-weight: 600;
   flex-shrink: 0;
@@ -36840,7 +36874,7 @@ body.theme-frosted .modal {
 }
 .slash-ac-usage {
   color: var(--fg-muted, #888);
-  font-family: 'Fira Code', ui-monospace, monospace;
+  font-family: var(--ow-mono-font);
   font-size: 11px;
   opacity: 0.55;
   flex-shrink: 0;
@@ -36851,7 +36885,7 @@ body.theme-frosted .modal {
   font-style: italic;
 }
 .slash-ac-empty code {
-  font-family: 'Fira Code', ui-monospace, monospace;
+  font-family: var(--ow-mono-font);
   color: var(--accent, var(--red));
 }
 

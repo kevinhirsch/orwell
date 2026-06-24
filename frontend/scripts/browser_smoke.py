@@ -1410,20 +1410,19 @@ def main() -> int:
             sea.close()
 
             # #642: the engine-down banner MIGRATED onto the OrwellNotice kit (a top-banner
-            # system-notice). Its dismiss is the kit's shared .on-dismiss affordance (>=44px touch
-            # floor, kit CSS) now — not the window kit's .ow-dismiss.
+            # system-notice). It is NOW non-dismissable (dismissible:false): an honest outage signal
+            # auto-hides on health and must never carry a × the player could use to bury a real
+            # problem. So the kit renders NO .on-dismiss affordance for this banner.
             page.evaluate("window.orwellRefreshEngineStatus && window.orwellRefreshEngineStatus()")
             page.wait_for_timeout(600)
             ban = page.evaluate("""() => {
-              const b = document.querySelector('#orwell-engine-status .on-dismiss');
-              if (!b) return { present: false };
-              const r = b.getBoundingClientRect();
-              return { present: true, onDismiss: b.classList.contains('on-dismiss'),
-                       w: Math.round(r.width), h: Math.round(r.height) };
+              const card = document.querySelector('#orwell-engine-status');
+              if (!card) return { present: false };
+              return { present: true, hasDismiss: !!card.querySelector('.on-dismiss') };
             }""")
             if ban.get("present"):
-                check(ban.get("onDismiss") is True and ban.get("w", 0) >= 44 and ban.get("h", 0) >= 44,
-                      f"#642: banner dismiss is the shared OrwellNotice .on-dismiss affordance ({ban})")
+                check(ban.get("hasDismiss") is False,
+                      f"#642: engine-status banner is non-dismissable (no .on-dismiss ×) ({ban})")
 
             # F-3 (the ratchet, runtime half): every window-like surface on the page
             # is KIT-MANAGED — floating game panels carry [data-ow-window], and the

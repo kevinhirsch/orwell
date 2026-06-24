@@ -56,14 +56,15 @@
       "  background: color-mix(in srgb, var(--panel, #111) 70%, transparent);" +
       "  color: var(--fg, #9cdef2);" +
       "  border: 1px solid var(--border, #355a66); border-radius: 10px;" +
+      // Shared type system (#709): sans family + label PRESET for gadget rows.
       "  font-family: var(--ow-ui-font, -apple-system, BlinkMacSystemFont, Inter, sans-serif);" +
-      "  font-size: var(--fs-xs, .72rem); line-height: 1.5; }" +
-      // The header: icon + Title-Case title + optional actions. Matches the old .xx-hd
-      // (weight 600, the tracking, the title colour mixed toward the panel). The whole
+      "  font-size: var(--ow-fs-label, .8125rem); line-height: 1.5; }" +
+      // The header: icon + Title-Case title + optional actions. Uses the heading PRESET +
+      // the semibold weight token (the title colour mixed toward the panel). The whole
       // header is the collapse affordance when collapsible (role=button on it).
       ".og-card .og-head {" +
       "  display: flex; align-items: center; gap: .4rem; margin: 0 0 .35rem;" +
-      "  font-weight: 600; letter-spacing: .03em; }" +
+      "  font-size: var(--ow-fs-heading, .8125rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; }" +
       ".og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }" +
       ".og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }" +
       ".og-card .og-icon { flex: 0 0 auto; }" +
