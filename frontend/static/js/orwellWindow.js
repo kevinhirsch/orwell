@@ -412,7 +412,7 @@ export class OrwellWindow {
     const docked = this._docked;
     const el = document.createElement('div');
     el.id = this.o.id;
-    el.className = 'ow-window' + (docked ? ' ow-docked' : '');
+    el.className = 'ow-window' + (docked ? ' ow-docked' : '') + (this.o.maximizable ? ' ow-max-enabled' : '');
     el.setAttribute('data-ow-window', '');
     if (docked) el.setAttribute('data-ow-docked', '');
     // J1-25: a modal window is a dialog whose background it PROMISES is inert (the
@@ -462,6 +462,22 @@ export class OrwellWindow {
       b.setAttribute('aria-label', 'Close'); b.title = 'Close';
       b.textContent = '×';
       b.addEventListener('click', (e) => { e.stopPropagation(); this.close(); }, { signal: this.ac.signal });
+      controls.appendChild(b);
+    }
+    // macOS traffic-light cluster (frosted theme): the third light is MAXIMIZE/zoom.
+    // It is DISABLED by default everywhere (the greyed macOS look) — only a window that
+    // opts in (`maximizable:true`) gets an active green light + a working zoom toggle.
+    // CSS owns the colors/positions/greyed-state; the button just has to exist so the
+    // cluster reads as three lights. (Excluded exception: NOT glass-refracted.)
+    if (this.o.closable || this.o.minimizable) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'ow-max';
+      const on = !!this.o.maximizable;
+      b.setAttribute('aria-label', on ? 'Zoom' : 'Zoom (unavailable)');
+      b.title = on ? 'Zoom' : '';
+      b.textContent = '+';
+      if (!on) { b.disabled = true; }
+      else { b.addEventListener('click', (e) => { e.stopPropagation(); if (this.toggleMaximize) this.toggleMaximize(); }, { signal: this.ac.signal }); }
       controls.appendChild(b);
     }
     tb.appendChild(title); tb.appendChild(controls);

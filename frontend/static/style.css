@@ -37501,11 +37501,11 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   /* dark backdrop reads as LIT frosted glass (recedes), not a smoked panel. High    */
   /* saturate keeps the bg's color infusing the glass; contrast(1.06) keeps text     */
   /* crisp through the lift.                                                          */
-  /* Matched to ios_glass_over_dark.png: near-zero added saturation (~108%) so the
-     frost stays colorless, a SLIGHT luminosity lift, and a softer blur that leaves
-     the backdrop FAINTLY visible (the material recedes — not an opaque frost). */
-  --ow-glass-backdrop: blur(20px) saturate(108%) brightness(1.18);
-  --ow-glass-backdrop-strong: blur(28px) saturate(110%) brightness(1.20);
+  /* Matched to Apple's Icon Composer Liquid-Glass panel values + ios_glass_over_dark:
+     Blur ~22px, near-zero added saturation (~108%, colorless), a SLIGHT luminosity
+     lift, the backdrop FAINTLY visible (~50% translucency — the material recedes). */
+  --ow-glass-backdrop: blur(22px) saturate(108%) brightness(1.18);
+  --ow-glass-backdrop-strong: blur(30px) saturate(110%) brightness(1.20);
 }
 
 /* The luminous edge + soft float + very-rounded corners on the primary text        */
@@ -37748,31 +37748,99 @@ body.theme-frosted .ow-dismiss {
 /* CLUSTER LAYOUT (owner: the top-right cluster read cramped/uneven): a clean row   */
 /* of uniform discs with CONSISTENT gaps, and the titlebar inset from the window's  */
 /* very-rounded (26px) top-right corner so the discs never crowd the rounded edge.  */
-/* TITLEBAR (Apple hero.png / windows.png chrome): title + control discs share ONE
-   optical centerline. A fixed band height + align-items:center co-centers the left
-   title and right controls; symmetric vertical padding; the left inset matches the
-   body content inset (space-4). Layout HIG #695. */
+/* TITLEBAR — macOS chrome (owner-confirmed): traffic lights TOP-LEFT, title CENTERED.
+   One fixed band height + align-items:center puts the lights and the title on one
+   optical centerline. (Compare the Icon Composer ref / macOS.) Shared kit rule so
+   EVERY window inherits it. */
 body.theme-frosted .ow-titlebar {
-  min-height: 48px;
-  padding: var(--space-2, 8px) var(--space-3, 12px) var(--space-2, 8px) var(--space-4, 16px);
-  gap: var(--space-2, 8px);
+  min-height: 44px;
+  padding: var(--space-2, 8px) var(--space-4, 16px);
+  gap: var(--space-3, 12px);
   display: flex;
   align-items: center;          /* the shared centerline */
+  position: relative;
 }
-/* Title type = SF, Semibold, ~16px, NO positive tracking (SF needs none), full-contrast.*/
+/* Title CENTERED in the band (macOS), absolutely centered so the left traffic-light
+   cluster doesn't shove it. SF Semibold ~15px, zero tracking, full-contrast. */
 body.theme-frosted .ow-title {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  max-width: 60%; text-align: center;
   font-family: var(--ow-ui-font);
   font-weight: var(--ow-fw-semibold, 600);
-  font-size: 16px;
-  letter-spacing: 0 !important;  /* kill any legacy tracking on titles */
-  line-height: 1;                /* so the cap-height centers on the band line */
+  font-size: 15px;
+  letter-spacing: 0 !important;  /* SF needs no tracking */
+  line-height: 1;
   color: var(--fg, #fff);
-  display: flex; align-items: center;
+  pointer-events: none;          /* the title never eats a drag/click */
 }
+/* ── macOS TRAFFIC LIGHTS (the colored exception — NOT glass-refracted) ────────*/
+/* The control cluster moves to the TOP-LEFT and the existing close/min/(maximize)
+   buttons become the three standard lights: close=red, minimize=yellow,
+   maximize=green. ~12px discs, ~8px gaps, inset from the corner (concentric). Glyphs
+   appear on hover/focus of the cluster. Unfocused → neutral grey (authentic macOS). */
 body.theme-frosted .ow-controls {
-  gap: var(--space-1, 4px);             /* even, consistent gaps between the discs   */
-  display: flex;
-  align-items: center;
+  order: -1;                     /* cluster to the LEFT of the (centered) title */
+  gap: 8px;
+  display: flex; align-items: center;
+  margin-right: auto;            /* push the rest of the band away */
+}
+/* A right-side titlebar ACCESSORY (e.g. settings "Peek") — NOT a traffic light. A
+   small quiet control at the band's right end, clear of the left light cluster. */
+body.theme-frosted .ow-titlebar-accessory {
+  order: 5; margin-left: auto;
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 24px; padding: 2px 8px; border-radius: var(--ow-radius-inner, 14px);
+  background: color-mix(in srgb, var(--fg, #fff) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg, #fff) 16%, transparent);
+  font-size: 11px; color: var(--fg, #fff); opacity: .8; cursor: pointer;
+}
+body.theme-frosted .ow-titlebar-accessory:hover { opacity: 1; }
+/* a dockable window's dock toggle is NOT a traffic light — keep it a small quiet
+   control AFTER the lights (it still works; it just isn't one of the three). */
+body.theme-frosted .ow-controls .ow-dock { order: 3; }
+body.theme-frosted .ow-controls .ow-close { order: 0; }   /* red    (leftmost) */
+body.theme-frosted .ow-controls .ow-min   { order: 1; }   /* yellow            */
+body.theme-frosted .ow-controls .ow-max   { order: 2; }   /* green             */
+
+body.theme-frosted .ow-controls .ow-close,
+body.theme-frosted .ow-controls .ow-min,
+body.theme-frosted .ow-controls .ow-max {
+  width: 12px; height: 12px; min-width: 12px; min-height: 12px;
+  border-radius: 50%; padding: 0; opacity: 1;
+  border: 0.5px solid rgba(0,0,0,0.22);
+  box-shadow: none;
+  font-size: 9px; line-height: 1; color: rgba(0,0,0,0.55);
+  /* glyph hidden until the cluster is hovered/focused (authentic macOS) */
+  text-indent: 0;
+}
+/* glyph text is hidden by default, shown on cluster hover/focus */
+body.theme-frosted .ow-controls .ow-close,
+body.theme-frosted .ow-controls .ow-min,
+body.theme-frosted .ow-controls .ow-max { color: transparent; }
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-close,
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-min,
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-max,
+body.theme-frosted .ow-controls button:focus-visible {
+  color: rgba(0,0,0,0.6);
+}
+/* FOCUSED window → colored lights */
+body.theme-frosted .ow-window.ow-focused .ow-controls .ow-close { background: #ff5f57; }
+body.theme-frosted .ow-window.ow-focused .ow-controls .ow-min   { background: #febc2e; }
+body.theme-frosted .ow-window.ow-focused .ow-controls .ow-max   { background: #28c840; }
+/* UNFOCUSED window → neutral grey lights (authentic macOS) */
+body.theme-frosted .ow-window:not(.ow-focused) .ow-controls .ow-close,
+body.theme-frosted .ow-window:not(.ow-focused) .ow-controls .ow-min,
+body.theme-frosted .ow-window:not(.ow-focused) .ow-controls .ow-max {
+  background: color-mix(in srgb, var(--fg, #fff) 26%, transparent);
+}
+/* the 44px hit region stays (inherited ::after); hover lift is gone (lights don't grow) */
+body.theme-frosted .ow-controls button:hover { transform: none; box-shadow: none; }
+/* MAXIMIZE DISABLED by default (the macOS greyed/inactive look): dimmed, no glyph,
+   not clickable. A window opts the green back on with .ow-max-enabled on the window. */
+body.theme-frosted .ow-controls .ow-max[disabled],
+body.theme-frosted .ow-window:not(.ow-max-enabled) .ow-controls .ow-max {
+  background: color-mix(in srgb, var(--fg, #fff) 18%, transparent) !important;
+  opacity: 0.5; cursor: default; pointer-events: none; color: transparent !important;
 }
 body.theme-frosted .ow-controls button {
   width: 30px; height: 30px; min-width: 30px; min-height: 30px;  /* uniform discs */
@@ -37904,3 +37972,34 @@ body.theme-frosted .send-btn .send-btn-label {
   body.theme-frosted .odec-confirm:hover,
   body.theme-frosted .ow-controls button:hover { transform: none; }
 }
+
+/* ── iOS toggles (blue) + sliders (green) — the ONLY sanctioned accent colors ──*/
+/* Owner: glass is colorless; the lone accents are Apple's system BLUE on switches  */
+/* and GREEN on sliders, mirroring iOS, applied ONLY where Apple uses them.         */
+:root {
+  --ow-ios-blue: #0a84ff;    /* Apple system blue (dark) — iOS switch ON            */
+  --ow-ios-green: #30d158;   /* Apple system green (dark) — iOS slider track        */
+}
+/* SWITCHES / TOGGLES: blue ON state (mirror iOS). Replaces the app-accent fill.    */
+body.theme-frosted .toggle input:checked + .slider,
+body.theme-frosted .vis-row input:checked + .vis-switch {
+  background: var(--ow-ios-blue) !important;
+}
+/* SLIDERS: green track (mirror Apple). Range inputs under the glass theme.          */
+body.theme-frosted input[type="range"] {
+  accent-color: var(--ow-ios-green);
+}
+
+/* ── Sidebar selection (settings nav) — Apple filled-capsule treatment ─────────*/
+/* Apple's sidebar selected row (sidebars.png / nr_icon_composer) is a FILLED rounded
+   capsule with the system selection color + legible text — not a washed-out tint.
+   Use the sanctioned system blue (the macOS sidebar selection color), white text,
+   a pill radius. Frosted-theme scoped. */
+body.theme-frosted .settings-nav-item {
+  border-radius: var(--ow-radius-inner, 12px);
+}
+body.theme-frosted .settings-nav-item.active {
+  background: var(--ow-ios-blue, #0a84ff) !important;
+  color: #fff !important;
+}
+body.theme-frosted .settings-nav-item.active svg { opacity: 1; color: #fff; }

@@ -91,9 +91,16 @@ function initKitWindow() {
 // no-ops once promoted.
 function _ensurePeekInTitlebar() {
   if (!win || !win.el) return;
-  const controls = win.el.querySelector('.ow-controls');
+  // Peek is NOT a window control — it has no macOS traffic-light analog, so it must
+  // NOT sit in the .ow-controls cluster (authentic titlebar = traffic lights left +
+  // centered title only). Host it as a RIGHT-side titlebar accessory, marked so the
+  // glass CSS styles it as a small quiet control, never a traffic light.
+  const titlebar = win.el.querySelector('.ow-titlebar');
   const peek = win.el.querySelector('#settings-opacity-wrap');
-  if (controls && peek && peek.parentElement !== controls) controls.insertBefore(peek, controls.firstChild);
+  if (titlebar && peek && peek.parentElement !== titlebar) {
+    peek.classList.add('ow-titlebar-accessory');
+    titlebar.appendChild(peek);  // after the controls + title (flows to the right end)
+  }
   const legacyHeader = win.el.querySelector('.modal-header');
   if (legacyHeader) legacyHeader.remove();
 }

@@ -343,3 +343,42 @@ def test_button_morph_is_reduced_motion_gated():
     block = CSS[CSS.index("Apple Liquid Glass BUTTON SYSTEM"):]
     rm = re.search(r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*)$", block, re.S).group(1)
     assert "transform: none" in rm
+
+
+# ── 16. macOS traffic lights + iOS toggle/slider colors (parity) ───────────────
+
+def test_traffic_lights_top_left_colored_when_focused():
+    # window controls are macOS traffic lights: close=red, min=yellow, max=green when
+    # focused; neutral grey when unfocused; cluster ordered to the LEFT.
+    assert re.search(r"\.ow-window\.ow-focused .ow-controls \.ow-close\s*\{[^}]*#ff5f57", CSS, re.S)
+    assert re.search(r"\.ow-window\.ow-focused .ow-controls \.ow-min\s*\{[^}]*#febc2e", CSS, re.S)
+    assert re.search(r"\.ow-window\.ow-focused .ow-controls \.ow-max\s*\{[^}]*#28c840", CSS, re.S)
+    # unfocused → neutral grey.
+    assert re.search(r"\.ow-window:not\(\.ow-focused\) .ow-controls", CSS, re.S)
+    # cluster to the left (order:-1) and the title centered.
+    assert re.search(r"\.ow-controls\s*\{[^}]*order:\s*-1", CSS, re.S)
+    assert re.search(r"\.ow-title\s*\{[^}]*left:\s*50%", CSS, re.S)
+
+
+def test_maximize_disabled_by_default():
+    # the green/maximize light is greyed + inert unless the window opts in (.ow-max-enabled).
+    assert re.search(r"\.ow-window:not\(\.ow-max-enabled\) .ow-controls \.ow-max", CSS, re.S)
+    assert "pointer-events: none" in CSS
+    # the kit creates the max button + the opt-in class.
+    win = _read("static", "js", "orwellWindow.js")
+    assert "ow-max" in win and "maximizable" in win and "ow-max-enabled" in win
+
+
+def test_ios_toggle_blue_and_slider_green():
+    assert "--ow-ios-blue" in CSS and "--ow-ios-green" in CSS
+    # toggle ON = system blue (mirror iOS).
+    assert re.search(r"\.toggle input:checked \+ \.slider[^{]*\{[^}]*--ow-ios-blue", CSS, re.S)
+    # slider track = system green.
+    assert re.search(r'input\[type="range"\]\s*\{[^}]*--ow-ios-green', CSS, re.S)
+
+
+def test_titlebar_accessory_not_a_traffic_light():
+    # a right-side accessory (settings Peek) is hosted outside .ow-controls.
+    assert ".ow-titlebar-accessory" in CSS
+    s = _read("static", "js", "settings.js")
+    assert "ow-titlebar-accessory" in s

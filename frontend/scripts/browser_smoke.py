@@ -480,10 +480,13 @@ def main() -> int:
             page.wait_for_timeout(280)  # let the kit's open animation settle before measuring
             fin_cluster = page.evaluate("""[...document.querySelectorAll('#orwell-finale .ow-controls button')].map(b => {
               const r = b.getBoundingClientRect();
-              return { label: b.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) };
+              const a = getComputedStyle(b, '::after');
+              const aw = parseFloat(a.width) || 0, ah = parseFloat(a.height) || 0;
+              return { label: b.getAttribute('aria-label'),
+                       w: Math.round(Math.max(r.width, aw)), h: Math.round(Math.max(r.height, ah)) };
             })""")
             check(len(fin_cluster) >= 1 and all(c["label"] and c["w"] >= 24 and c["h"] >= 24 for c in fin_cluster),
-                  f"finale composes the kit cluster (named, >=24px) ({fin_cluster})")
+                  f"finale composes the kit cluster (named, >=24px tap) ({fin_cluster})")
             # F1 (DWE audit): these are TRUSTED clicks on purpose — the old evaluate()
             # clicks worked on an invisible dock and masked the stranded-window trap.
             page.click("#orwell-finale .ow-min")
@@ -561,13 +564,20 @@ def main() -> int:
                        focused: el.classList.contains('ow-focused') };
             }""")
             page.wait_for_timeout(280)  # let the open animation settle before measuring geometry
+            # Under the frosted theme the controls are macOS traffic lights (12px discs)
+            # with an INVISIBLE 44px ::after hit region (WCAG 2.5.5). Measure the EFFECTIVE
+            # tap area (max of the disc box and the ::after) so the check tracks the real
+            # target, not the visual disc size.
             kit["ctrls"] = page.evaluate("""[...document.querySelectorAll('#ow-smoke-window .ow-controls button')].map(b => {
               const r = b.getBoundingClientRect();
-              return { label: b.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) };
+              const a = getComputedStyle(b, '::after');
+              const aw = parseFloat(a.width) || 0, ah = parseFloat(a.height) || 0;
+              return { label: b.getAttribute('aria-label'),
+                       w: Math.round(Math.max(r.width, aw)), h: Math.round(Math.max(r.height, ah)) };
             })""")
             check(kit.get("mounted") is True and kit.get("titlebar") is True, f"kit: window mounts with titlebar ({kit})")
             check(all(c["w"] >= 24 and c["h"] >= 24 and c["label"] for c in kit.get("ctrls", [])),
-                  f"kit: control cluster named + >=24px targets ({kit.get('ctrls')})")
+                  f"kit: control cluster named + >=24px tap targets ({kit.get('ctrls')})")
             check(kit.get("focused") is True, "kit: opening focuses (ow-focused on top of the stack)")
             kb = page.query_selector("#ow-smoke-window .ow-titlebar").bounding_box()
             page.mouse.move(kb["x"] + 40, kb["y"] + kb["height"] / 2)
