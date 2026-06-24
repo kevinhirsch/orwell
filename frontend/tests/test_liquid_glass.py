@@ -180,10 +180,11 @@ def test_control_center_dock_is_glassed():
 def test_game_build_default_theme_has_animated_bg():
     theme = _read("static", "js", "theme.js")
     # The default theme ships an animated canvas background so the glass has dynamic
-    # content to refract (telescreen → perlin-flow). The fresh-session resolver must
+    # content to refract (glass → perlin-flow). The fresh-session resolver must
     # apply the default theme's pattern (not drop to 'none').
-    assert "DEFAULT_THEME = 'telescreen'" in theme
-    assert "'telescreen': 'perlin-flow'" in theme
+    assert "DEFAULT_THEME = 'glass'" in theme
+    assert re.search(r"\bglass\s*:\s*'perlin-flow'", theme), \
+        "the glass theme's default bg pattern must be perlin-flow"
     # fresh session resolves the active theme's pattern, not 'none'.
     assert "THEME_DEFAULT_PATTERN[activeName]" in theme
 
@@ -229,7 +230,9 @@ def test_increased_contrast_strengthens_glass():
     assert "@media (prefers-contrast: more)" in CSS
     block = CSS[CSS.index("@media (prefers-contrast: more)"):]
     # increased-contrast strengthens the neutral anchor / borders for legibility.
-    assert "--ow-glass-veil-dark" in block[:800] or "border-color" in block[:800]
+    # (window widened: the contrast block's selector list grew with the kit rollout,
+    # pushing the border-color property further down.)
+    assert "--ow-glass-veil-dark" in block[:1600] or "border-color" in block[:1600]
 
 
 # ── 10. Apple HIG visual language (concentric radii, luminous edge, float) ─────

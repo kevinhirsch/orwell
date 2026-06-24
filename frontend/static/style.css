@@ -261,10 +261,14 @@ body.bg-pattern-sparkles {
    before the animated canvas spawns at the end of theme init — and it doubles as the reduced-motion
    "static or off" fallback (where the canvas never spawns). The canvas overlays this seamlessly. */
 body.bg-pattern-perlin-flow {
+  /* UNIFORM, even, very-faint lift — no positional falloff. The old top-anchored
+     radial-gradient (… at 50% 0%, … transparent 60%) faded the lower half to black;
+     a flat linear-gradient of one constant tint lifts the whole field evenly so it
+     reads as a calm, uniform ground (Apple's content layer is even, not vignetted). */
   background-image:
-    radial-gradient(120% 80% at 50% 0%,
-      color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(3% * var(--bg-effect-intensity, 1)), transparent) 0%,
-      transparent 60%);
+    linear-gradient(
+      color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(2.4% * var(--bg-effect-intensity, 1)), transparent) 0%,
+      color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(2.4% * var(--bg-effect-intensity, 1)), transparent) 100%);
   background-attachment: fixed;
 }
 
@@ -37335,7 +37339,22 @@ body.theme-frosted .chat-input-bar,
 body.theme-frosted #sidebar,
 body.theme-frosted .icon-rail,
 body.theme-frosted .modal-content,
-body.theme-frosted .on-card {
+body.theme-frosted .on-card,
+/* CHROME surfaces folded onto the ONE neutral glass material (Apple HIG Materials —
+   "controls sit on top of a system material, not directly on content"; tab/tool bars,
+   menus, popovers, sheets all adopt Regular glass). Highest-traffic first: settings/
+   theme/memory/integrations panels (.admin-card), the chat top bar, the model picker
+   (button + menu/popover), the toast (a transient banner), the tool indicator, and the
+   attachment cards/skeletons. They share the windows' colorless veil — no per-surface
+   glass, no hue, color comes through from the backdrop. */
+body.theme-frosted .admin-card,
+body.theme-frosted .chat-top-bar,
+body.theme-frosted .model-picker-menu,
+body.theme-frosted .model-picker-btn,
+body.theme-frosted .toast,
+body.theme-frosted .tool-indicator,
+body.theme-frosted .attach-card,
+body.theme-frosted .attach-image-skeleton {
   background-color: var(--ow-glass-veil-dark) !important;
   background-image:
     linear-gradient(180deg,
@@ -37490,7 +37509,22 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-chi
   body.theme-frosted .modal-content,
   body.theme-frosted .dropdown,
   body.theme-frosted #minimized-dock.ow-has-rows,
-  body.theme-frosted #minimized-dock .minimized-dock-chip {
+  body.theme-frosted #minimized-dock .minimized-dock-chip,
+  /* the newly-glassed chrome surfaces fall back to SOLID too (Apple: Reduce
+     Transparency frosts toward opaque — legibility is never load-bearing on glass) */
+  body.theme-frosted .admin-card,
+  body.theme-frosted .chat-top-bar,
+  body.theme-frosted .model-picker-menu,
+  body.theme-frosted .model-picker-btn,
+  body.theme-frosted .toast,
+  body.theme-frosted .tool-indicator,
+  body.theme-frosted .attach-card,
+  body.theme-frosted .attach-image-skeleton,
+  /* and the glassed chat bubbles + transient pills (defined at EOF) */
+  body.theme-frosted .msg-ai,
+  body.theme-frosted .msg-user,
+  body.theme-frosted .thinking-section,
+  body.theme-frosted .thinking-header {
     background-color: var(--panel, var(--bg)) !important;
     background-image: none !important;
     backdrop-filter: none !important;
@@ -37510,7 +37544,20 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-chi
   body.theme-frosted .chat-input-bar,
   body.theme-frosted #sidebar,
   body.theme-frosted .modal-content,
-  body.theme-frosted #minimized-dock.ow-has-rows {
+  body.theme-frosted #minimized-dock.ow-has-rows,
+  /* Increased Contrast → contrasting border on the new chrome + bubble surfaces too
+     (Apple: elements go predominantly clear-edged with a contrasting border). */
+  body.theme-frosted .admin-card,
+  body.theme-frosted .chat-top-bar,
+  body.theme-frosted .model-picker-menu,
+  body.theme-frosted .model-picker-btn,
+  body.theme-frosted .toast,
+  body.theme-frosted .tool-indicator,
+  body.theme-frosted .attach-card,
+  body.theme-frosted .attach-image-skeleton,
+  body.theme-frosted .msg-ai,
+  body.theme-frosted .msg-user,
+  body.theme-frosted .thinking-section {
     border-color: color-mix(in srgb, var(--fg) 50%, transparent) !important;
   }
 }
@@ -37575,7 +37622,13 @@ body.theme-frosted .on-card,
 body.theme-frosted .chat-input-bar,
 body.theme-frosted #sidebar,
 body.theme-frosted .icon-rail,
-body.theme-frosted .modal-content {
+body.theme-frosted .modal-content,
+/* CHROME — same blur + DIRECTIONAL luminous rim + soft float + very-rounded concentric
+   corners as the windows (the Apple ios_glass_over_dark "tell"). One coherent material. */
+body.theme-frosted .admin-card,
+body.theme-frosted .model-picker-menu,
+body.theme-frosted .toast,
+body.theme-frosted .attach-image-skeleton {
   border-radius: var(--ow-glass-radius) !important;
   backdrop-filter: var(--ow-glass-backdrop) !important;
   -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;
@@ -37984,6 +38037,9 @@ body.theme-frosted .send-btn {
      shadow. Every OTHER control stays colorless (never tint multiple). */
   background: var(--ow-ios-blue, #0a84ff) !important;
   color: #fff !important;
+  /* No border: Apple's prominent filled button is a clean flat tint with NO stroke.
+     An inherited 1px var(--border) read as a dark/black ring around the blue disc. */
+  border: none !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.30),
     0 2px 8px rgba(0,0,0,0.26) !important;
@@ -38082,13 +38138,68 @@ body.theme-frosted .send-btn .send-btn-label {
   --ow-ios-green: #30d158;   /* Apple system green (dark) — iOS slider track        */
 }
 /* SWITCHES / TOGGLES: blue ON state (mirror iOS). Replaces the app-accent fill.    */
+/* Covers every toggle family in the player tier (settings = .admin-switch, plus    */
+/* .toggle/.vis-switch/.toggle-switch/.cookbook-checkbox) so the ON track is the     */
+/* sanctioned system blue everywhere; OFF stays the neutral translucent track.       */
 body.theme-frosted .toggle input:checked + .slider,
-body.theme-frosted .vis-row input:checked + .vis-switch {
+body.theme-frosted .vis-row input:checked + .vis-switch,
+body.theme-frosted .admin-switch input:checked + .admin-slider,
+body.theme-frosted .toggle-switch input:checked + .toggle-slider,
+body.theme-frosted .cookbook-checkbox:checked {
   background: var(--ow-ios-blue) !important;
 }
 /* SLIDERS: green track (mirror Apple). Range inputs under the glass theme.          */
 body.theme-frosted input[type="range"] {
   accent-color: var(--ow-ios-green);
+}
+
+/* ── SWITCH THUMB = Liquid Glass (kube.io #switch port) ────────────────────────
+   The KNOB becomes liquid glass while the TRACK keeps its sanctioned color (blue
+   ON / neutral OFF, above). Ripped from kube.io's Switch component
+   (https://kube.io/blog/liquid-glass-css-svg/ #switch): the thumb carries
+   `backdrop-filter:url(#thumb-filter)` (a CONCAVE "lip bezel" displacement — convex
+   outer rim, concave middle → "center zoomed out, edges refract the inside"),
+   `background-color:rgba(255,255,255,1)`, `box-shadow:0 4px 22px rgba(0,0,0,0.1)`.
+   Our concave filter is built once in liquidGlass.js as #owlg-thumb. Apple HIG:
+   the slider/segmented "knob becomes glass on interaction"
+   (lg_hig_slider_poster.png / lg_hig_segmented_control_poster.png) — here it reads
+   as glass at rest, the closest static analog of the transient-glass knob.
+
+   GATED on body.glass-full (Full-Glass tier = Chromium SVG refraction). The plain
+   .theme-frosted (Frosted) tier and every non-Chromium / reduced-transparency
+   fallback keep the clean white knob from the base rules — the refraction is a pure
+   progressive enhancement, never load-bearing for the control. */
+body.glass-full .admin-slider::before,
+body.glass-full .toggle .slider:before,
+body.glass-full .toggle-slider:before,
+body.glass-full .vis-switch::after,
+body.glass-full .cookbook-checkbox::after {
+  /* white-ish GLASS knob: a high-white translucent fill so the concave refraction
+     of the track/backdrop reads through it (kube uses opaque white; we drop the
+     alpha a touch so the glass is visible), plus the kube float shadow scaled to
+     the small knob and a thin top rim that catches light like Apple's knob. */
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.78)) !important;
+  -webkit-backdrop-filter: url("#owlg-thumb") !important;
+  backdrop-filter: url("#owlg-thumb") !important;
+  box-shadow:
+    0 2px 6px rgba(0,0,0,0.18),
+    0 4px 10px rgba(0,0,0,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.9) !important;
+}
+/* Accessibility / non-glass safety: if transparency is reduced the refraction is
+   dropped and the knob is a clean solid white disc (Apple drops glass under Reduce
+   Transparency); the track color is untouched. */
+@media (prefers-reduced-transparency: reduce) {
+  body.glass-full .admin-slider::before,
+  body.glass-full .toggle .slider:before,
+  body.glass-full .toggle-slider:before,
+  body.glass-full .vis-switch::after,
+  body.glass-full .cookbook-checkbox::after {
+    background: #fff !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
 }
 
 /* ── Sidebar selection (settings nav) — Apple filled-capsule treatment ─────────*/
@@ -38159,4 +38270,483 @@ body.theme-frosted .ow-window .ow-body button.settings-nav-item:hover:not(.activ
 body.theme-frosted .ow-window .ow-body button.settings-nav-item.active {
   background-color: var(--ow-ios-blue, #0a84ff);
   box-shadow: none;
+}
+
+/* ============================================================================ */
+/* Liquid Glass — chrome (small bars/pills), chat bubbles, transient typing,     */
+/* the global no-accent-on-text rule, the bg-image controls & wallpaper layer.   */
+/* ----------------------------------------------------------------------------  */
+/* Folds the SAME colorless kit onto every remaining player-tier surface. Apple   */
+/* refs: HIG Materials ("controls sit on a system material, not on content"),     */
+/* HIG Color ("no inherent color; takes color from content behind it"), HIG       */
+/* Tab/Tool bars + Menus + Popovers (small floating bars adopt Regular glass),    */
+/* segmented_control_poster (the 3-way tier control), ios_glass_over_dark (the    */
+/* directional luminous rim "tell"). Scoped to body.theme-frosted so the Normal   */
+/* tier is untouched. */
+
+/* ── SMALL chrome bars/pills — lighter blur + tighter (capsule-ish) radius ─────
+   The material veil + reduced-transparency/contrast fallbacks come from the
+   grouped rules above (these selectors are in those lists). Here we give the
+   SMALL elements (a tool/tab-bar-scale footprint) their own lighter blur + a
+   rounded (not 26px) radius + a thin rim, per Apple's smaller-element treatment.
+   They ride the ONE glass plane — no glass-on-glass nesting. */
+body.theme-frosted .model-picker-btn,
+body.theme-frosted .tool-indicator,
+body.theme-frosted .attach-card {
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    0 4px 14px rgba(0,0,0,0.20) !important;
+}
+/* The chat top bar (the "Orwell Chat · N msgs" title) is NOT its own bubble — just a
+   quiet Apple-sidebar-style frosted strip: a gentle blur so the title stays legible
+   over content, with NO border / rim / float / pill-radius. The faint veil comes from
+   the material group + the adaptive layer; here we strip the bubble chrome. */
+body.theme-frosted .chat-top-bar {
+  -webkit-backdrop-filter: blur(12px) saturate(110%);
+  backdrop-filter: blur(12px) saturate(110%);
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+/* the model picker button is a compact capsule control */
+body.theme-frosted .model-picker-btn { border-radius: var(--ow-radius-pill, 999px) !important; }
+/* the tool indicator + attachment cards are small rounded chips */
+body.theme-frosted .tool-indicator,
+body.theme-frosted .attach-card { border-radius: var(--ow-radius-inner, 14px) !important; }
+/* the model-picker POPOVER + toast banner carry the stronger surface radius already
+   (in the rim group above); keep their menu/row internals legible with the shadow. */
+body.theme-frosted .model-picker-menu,
+body.theme-frosted .toast {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    var(--ow-glass-float, 0 18px 50px rgba(0,0,0,0.30), 0 6px 16px rgba(0,0,0,0.20)) !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
+}
+/* the toast keeps its left status accent as a NON-text rule edge? No — per contract
+   accent is TEXT-only-neutralized; the toast's left bar is a structural status cue,
+   but to stay colorless on glass we neutralize it to a quiet luminous edge. */
+body.theme-frosted .toast {
+  border-left: 3px solid rgba(255,255,255,0.28) !important;
+}
+
+/* ── CHAT BUBBLES — translucent glass MATERIAL (neutral veil + blur + rim) ─────
+   Apple HIG: content-layer chat reads THROUGH a thin glass. We give .msg-ai /
+   .msg-user / the OOC variants the colorless veil + a soft blur + a thin rim +
+   the bubble radius they already own. NOT added to JS refraction (perf — many
+   bubbles on screen). Legible: --fg text + a hair of text-shadow floor. */
+body.theme-frosted .msg-ai,
+body.theme-frosted .msg-user,
+body.theme-frosted .msg-ooc,
+body.theme-frosted .msg-ooc-producer {
+  background-color: var(--ow-glass-veil-dark) !important;
+  background-image:
+    linear-gradient(180deg,
+      var(--ow-glass-veil-light) 0%,
+      rgba(255,255,255,0.03) 100%) !important;
+  -webkit-backdrop-filter: var(--ow-glass-backdrop, blur(22px) saturate(108%) brightness(1.18));
+  backdrop-filter: var(--ow-glass-backdrop, blur(22px) saturate(108%) brightness(1.18));
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    0 4px 16px rgba(0,0,0,0.18) !important;
+}
+body.theme-frosted .msg-ai .body,
+body.theme-frosted .msg-user .body {
+  text-shadow: var(--ow-glass-text-shadow);
+}
+/* the OOC asides keep their quieter dashed identity — a thinner translucent veil
+   so they still read as a backstage aside, not a full bubble. */
+body.theme-frosted .msg-user.msg-ooc,
+body.theme-frosted .msg-ooc.msg-ooc-producer {
+  background-color: color-mix(in srgb, var(--fg) 6%, transparent) !important;
+  border-style: dashed !important;
+  border-color: color-mix(in srgb, var(--fg) 26%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10) !important;
+}
+
+/* KEEP INNER CONTENT CRISP: code blocks / pre / inline code / blockquotes / tables
+   INSIDE a glassed bubble must stay a SOLID/contrast inner surface (Apple: content on
+   glass uses fills, not its own glass — and code/tables need a stable ground for
+   legibility). No backdrop-filter on these; a solid panel-ish fill instead. */
+body.theme-frosted .msg-ai pre,
+body.theme-frosted .msg-user pre,
+body.theme-frosted .msg-ai blockquote,
+body.theme-frosted .msg-user blockquote,
+body.theme-frosted .msg-ai table,
+body.theme-frosted .msg-user table,
+body.theme-frosted .msg-ai :not(pre) > code,
+body.theme-frosted .msg-user :not(pre) > code {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background-color: color-mix(in srgb, var(--bg, #15181f) 82%, #000) !important;
+  background-image: none !important;
+  text-shadow: none !important;
+}
+/* inline code: a quieter solid chip (not the heavier block ground) */
+body.theme-frosted .msg-ai :not(pre) > code,
+body.theme-frosted .msg-user :not(pre) > code {
+  background-color: color-mix(in srgb, var(--fg) 12%, var(--bg)) !important;
+}
+
+/* ── TRANSIENT typing / thinking / spinner → a small glass PILL (kit-consistent) ─
+   The thinking accordion + its header + the spinner container + the tool indicator
+   read as one small glass pill consistent with the chrome above. (The no-accent-on-
+   text rule below also neutralizes their old red label/border to --fg.) */
+body.theme-frosted .thinking-section {
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  border-radius: var(--ow-radius-inner, 14px) !important;
+  background-color: var(--ow-glass-veil-dark) !important;
+  background-image:
+    linear-gradient(180deg, var(--ow-glass-veil-light) 0%, rgba(255,255,255,0.03) 100%) !important;
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    0 4px 14px rgba(0,0,0,0.18) !important;
+}
+body.theme-frosted .thinking-header {
+  background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.10) !important;
+}
+body.theme-frosted .thinking-header:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent) !important;
+}
+/* the spinner container reads as a quiet glass chip inline with the stream */
+body.theme-frosted .agent-thinking-dots .ai-spinner,
+body.theme-frosted .tool-indicator {
+  border-radius: var(--ow-radius-pill, 999px) !important;
+}
+
+/* ── GLOBAL: NO accent HUE on TEXT under the glass theme (contract) ───────────
+   Whenever body.theme-frosted is active, text carries NO accent color regardless of
+   the house theme — the material is colorless and text rides it as neutral --fg
+   "vibrancy". This neutralizes links, the hero name/eye, section titles, the /setup
+   link, the thinking label, and anything painting --accent/--red onto TEXT. It does
+   NOT touch the sanctioned NON-text accents (toggle blue, slider green, the single
+   primary-action CTA background .send-btn/.odec-confirm) — those set background, not
+   text color, and are governed by their own rules above. */
+body.theme-frosted a,
+body.theme-frosted .red-text,
+body.theme-frosted .thinking-header-left,
+body.theme-frosted .tool-indicator.active,
+body.theme-frosted #research-toggle-btn.active,
+body.theme-frosted #research-toggle-btn.research-running,
+body.theme-frosted .section-header-btn.active,
+body.theme-frosted .setup-trigger-link:hover,
+body.theme-frosted .setup-clickable-provider:hover,
+body.theme-frosted .setup-clickable-code:hover,
+body.theme-frosted .welcome-eye {
+  color: var(--fg) !important;
+}
+/* Catch-all for any element painting the accent onto its OWN text via the tokens.
+   Scoped to body.theme-frosted; uses :where() to stay at zero specificity cost on the
+   selector list head so it neutralizes hue without fighting structural color rules
+   that legitimately set a non-accent --fg/neutral. We target the literal accent text. */
+body.theme-frosted [style*="color: var(--accent)"],
+body.theme-frosted [style*="color:var(--accent)"],
+body.theme-frosted [style*="color: var(--red)"],
+body.theme-frosted [style*="color:var(--red)"] {
+  color: var(--fg) !important;
+}
+/* the hero name is an accent gradient CLIPPED to text — repaint it neutral --fg so the
+   big "name" reads as colorless glass-vibrant text, not a branded accent gradient. */
+body.theme-frosted #welcome-screen .welcome-name {
+  background: none !important;
+  -webkit-text-fill-color: var(--fg) !important;
+  -webkit-background-clip: border-box !important;
+  background-clip: border-box !important;
+  color: var(--fg) !important;
+}
+
+/* ── The new background-image controls (theme.js builds these ids) ────────────
+   #theme-glass-tier — a clean 3-way SEGMENTED control (Apple segmented_control_poster:
+   a translucent capsule TRACK with a bright glass SELECTED pill; active uses the
+   sanctioned system-blue). #theme-bg-source / -url / -file — standard glass form
+   controls consistent with the kit. Scoped to body.theme-frosted. */
+body.theme-frosted #theme-glass-tier {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--ow-radius-pill, 999px);
+  background-color: color-mix(in srgb, var(--fg) 10%, transparent);
+  border: 1px solid rgba(255,255,255,0.14);
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
+}
+body.theme-frosted #theme-glass-tier > button,
+body.theme-frosted #theme-glass-tier > .seg,
+body.theme-frosted #theme-glass-tier > label {
+  flex: 1 1 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 30px; padding: 4px 14px;
+  border: none; background: transparent;
+  border-radius: var(--ow-radius-pill, 999px);
+  color: var(--fg); font-family: var(--ow-ui-font, inherit);
+  font-weight: var(--ow-fw-semibold, 600); font-size: 12px; letter-spacing: -0.01em;
+  cursor: pointer; white-space: nowrap;
+  transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+body.theme-frosted #theme-glass-tier > button:hover,
+body.theme-frosted #theme-glass-tier > .seg:hover {
+  background-color: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+/* the SELECTED segment = the bright glass pill, sanctioned system-blue (active state). */
+body.theme-frosted #theme-glass-tier > button[aria-pressed="true"],
+body.theme-frosted #theme-glass-tier > button.active,
+body.theme-frosted #theme-glass-tier > .seg.active,
+body.theme-frosted #theme-glass-tier > input:checked + label {
+  background: var(--ow-ios-blue, #0a84ff);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.30), 0 2px 8px rgba(0,0,0,0.22);
+}
+
+/* the bg-source SELECT + the image URL INPUT — glass form controls (vibrant fills,
+   NO own backdrop-filter where they sit inside a glass panel; here they're standalone
+   form rows, so a light glass material is correct + keeps the kit coherent). */
+body.theme-frosted #theme-bg-source,
+body.theme-frosted #theme-bg-image-url {
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: var(--ow-radius-inner, 12px);
+  background-color: color-mix(in srgb, var(--fg) 10%, transparent);
+  border: 1px solid rgba(255,255,255,0.16);
+  color: var(--fg);
+  font-family: var(--ow-ui-font, inherit); font-size: 13px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12);
+}
+body.theme-frosted #theme-bg-source:focus,
+body.theme-frosted #theme-bg-image-url:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--ow-ios-blue, #0a84ff) 70%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18),
+              0 0 0 3px color-mix(in srgb, var(--ow-ios-blue, #0a84ff) 22%, transparent);
+}
+/* the FILE input — a compact glass "choose file" affordance (its button part too). */
+body.theme-frosted #theme-bg-image-file {
+  font-family: var(--ow-ui-font, inherit); font-size: 12px; color: var(--fg);
+}
+body.theme-frosted #theme-bg-image-file::file-selector-button {
+  min-height: 30px; padding: 4px 14px; margin-right: 10px;
+  border-radius: var(--ow-radius-pill, 999px);
+  border: 1px solid rgba(255,255,255,0.18);
+  background-color: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg); font-weight: var(--ow-fw-semibold, 600); font-size: 12px;
+  cursor: pointer;
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px));
+  backdrop-filter: var(--ow-btn-glass, blur(10px));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22);
+  transition: background-color .18s ease, filter .18s ease;
+}
+body.theme-frosted #theme-bg-image-file::file-selector-button:hover {
+  background-color: color-mix(in srgb, var(--fg) 20%, transparent);
+  filter: brightness(1.08);
+}
+
+/* ── #__wp — the fixed full-bleed wallpaper layer (theme.js sets background-image) ──
+   The CONTENT layer the glass floats above: a fixed, behind-everything, cover-fit
+   wallpaper. theme.js owns its background-image; we give it sensible base geometry. */
+#__wp {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-position: center center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+/* While a wallpaper is active, html+body must be TRANSPARENT or their opaque --bg
+   would cover the z-index:-1 #__wp layer. Author !important beats the FOUC inline
+   background-color set on <html> by the head-script. theme.js toggles has-wallpaper. */
+html:has(body.has-wallpaper),
+body.has-wallpaper {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* a11y: the new bg-image controls + segmented tier honor reduced-transparency (solid)
+   and the segmented control keeps its blue selected state (a sanctioned non-text
+   accent, not glass) — so it stays legible when glass is stripped. */
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted #theme-glass-tier,
+  body.theme-frosted #theme-bg-source,
+  body.theme-frosted #theme-bg-image-url,
+  body.theme-frosted #theme-bg-image-file::file-selector-button {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background-color: var(--panel, var(--bg)) !important;
+  }
+}
+
+/* ============================================================================ */
+/* FULL GLASS tier (body.glass-full) — the kube.io "Liquid Glass" music-player    */
+/* CLEAR look, retuned from the foggy baseline.                                   */
+/* ----------------------------------------------------------------------------  */
+/* Owner direction + Apple HIG (docs/design/liquid-glass/LIQUID_GLASS_REFERENCE.md): */
+/*   "Liquid Glass forms a distinct FUNCTIONAL layer for controls and navigation   */
+/*    elements — like tab bars and sidebars — that floats above the content layer"  */
+/*   "Don't use Liquid Glass in the CONTENT layer."                                 */
+/* So Full Glass splits the world in two:                                          */
+/*   • FUNCTIONAL CHROME  → the clear music-player glass: a LIGHT translucent fill   */
+/*     (~0.60, the "Glass Background Opacity" preset), LOW blur (Blur 1.0), and the  */
+/*     strong SVG refraction from liquidGlass.js riding on top (Chromium) — so the   */
+/*     wallpaper shows THROUGH, lensed at the rim. Reads like the Apple light        */
+/*     sidebar (lg_hig_sidebar_extend_correct): light, see-through, text-legible.    */
+/*   • CHAT BUBBLES (CONTENT)  → NOT glass. Refraction + the frosted blur material   */
+/*     are stripped; a restrained, legible content fill stands instead, so the       */
+/*     wallpaper shows in the GAPS between bubbles and the chrome floats above.      */
+/* These rules sit AFTER the theme-frosted baseline so they win at equal specificity */
+/* under glass-full only; the Frosted tier (theme-frosted WITHOUT glass-full) keeps  */
+/* its blurred frost unchanged. The adaptive layer (adaptiveGlass.js) still sets an  */
+/* inline background-COLOR veil for legibility; our LIGHT fill is a background-IMAGE  */
+/* layer that composites OVER it (so they don't fight — the light wash dominates the */
+/* faint adaptive veil and the chrome reads light).                                  */
+
+/* ── FUNCTIONAL CHROME: the LIGHT, clear music-player glass ─────────────────── */
+body.glass-full #sidebar,
+body.glass-full .icon-rail,
+body.glass-full .chat-input-bar,
+body.glass-full .chat-top-bar,
+body.glass-full .ow-window,
+body.glass-full .modal-content,
+body.glass-full .admin-card,
+body.glass-full .model-picker-menu,
+body.glass-full .og-card,
+body.glass-full .on-card,
+body.glass-full .toast,
+body.glass-full .dropdown,
+body.glass-full .overflow-menu,
+body.glass-full .cp-popover {
+  /* GLASS BACKGROUND OPACITY ≈ 0.60 — a LIGHT, white-ish translucent fill (NOT the
+     dark veil). Painted as a background-IMAGE flat wash so it layers OVER the adaptive
+     inline background-color (which the JS sets !important and CSS can't beat); the light
+     wash dominates that faint dark veil, so the panel reads LIGHT and see-through.
+     A gentle top-down lift keeps a hint of the lit-glass sheen. */
+  background-image: linear-gradient(180deg,
+    rgba(255,255,255,0.62) 0%,
+    rgba(255,255,255,0.52) 100%) !important;
+  /* BLUR LEVEL 1.0 — low. The refraction (JS, on Chromium) is the effect; on the CSS
+     fallback this stays a CLEAR low-blur light glass, never a milky fog. The JS sets its
+     own inline SVG-filter backdrop with !important and outranks this; this value is the
+     graceful fallback for the surfaces past the cap / non-Chromium. */
+  -webkit-backdrop-filter: blur(3px) saturate(180%) !important;
+  backdrop-filter: blur(3px) saturate(180%) !important;
+  /* A bright, light-glass rim (the panel is light now, so a white inner hairline + a soft
+     light outer edge read as the Apple light sidebar's crisp edge). */
+  border-color: rgba(255,255,255,0.55) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.65),
+    inset 0 0 0 0.5px rgba(255,255,255,0.30),
+    0 12px 36px rgba(0,0,0,0.22) !important;
+}
+/* Text on the LIGHT chrome must be DARK to stay legible (Apple light sidebar reads dark
+   ink on light glass). adaptiveGlass.js flips ink only for SMALL bars; the sidebar/window
+   are "large" and keep light --fg by its model — which would vanish on our light fill. So
+   force a dark ink + a faint light halo on the functional chrome under glass-full. (The
+   adaptive ink override is inline; we use a higher-specificity selector + !important and,
+   for the sidebar, target it directly so it wins.) */
+body.glass-full #sidebar,
+body.glass-full #sidebar *,
+body.glass-full .icon-rail,
+body.glass-full .icon-rail *,
+body.glass-full .chat-input-bar,
+body.glass-full .chat-top-bar,
+body.glass-full .ow-window .ow-body,
+body.glass-full .modal-content,
+body.glass-full .admin-card,
+body.glass-full .dropdown,
+body.glass-full .overflow-menu,
+body.glass-full .cp-popover {
+  color: #16191f !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
+}
+/* Keep accent/branded buttons + icon glyphs from being forced to body ink where they
+   carry their own color (links, the send button, status accents). Restrict the blanket
+   dark-ink to text-bearing structural nodes; let explicitly-coloured controls keep theirs. */
+body.glass-full #sidebar a,
+body.glass-full #sidebar button,
+body.glass-full .icon-rail a,
+body.glass-full .icon-rail button {
+  text-shadow: 0 1px 1px rgba(255,255,255,0.4) !important;
+}
+
+/* ── CHAT BUBBLES = CONTENT layer (Apple HIG: NOT Liquid Glass) ──────────────── */
+/* Strip the glass material + any refraction from the bubbles. They are content, so the
+   wallpaper shows in the GAPS between them and the functional glass floats above. A
+   restrained, legible fill stands instead of a glass pane — quiet, never foggy. The JS
+   no longer refracts them (removed from SELECTORS); this also neutralizes any stray
+   inline backdrop-filter the baseline set. The adaptive layer still floors legibility
+   with its inline background-color scrim (low over the wallpaper), which is the correct
+   CONTENT treatment (a quiet ground for the text), so we DON'T re-add glass on top. */
+body.glass-full .msg-ai,
+body.glass-full .msg-user,
+body.glass-full .msg-ooc,
+body.glass-full .msg-ooc-producer {
+  /* NO blur, NO glass material — content, not a functional glass pane. */
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  /* A restrained, near-transparent content fill (a faint dark scrim) layered over the
+     adaptive inline veil for a stable text ground without reading as a panel. The
+     wallpaper still shows clearly in the gaps between bubbles. */
+  background-image: linear-gradient(180deg,
+    rgba(12,14,18,0.36) 0%,
+    rgba(12,14,18,0.28) 100%) !important;
+  border: 1px solid rgba(255,255,255,0.10) !important;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18) !important;
+}
+/* Bubble text stays the theme's LIGHT --fg with a legibility shadow (content over a
+   photo) — they are content, so light ink on the faint dark scrim, not the dark-ink
+   light-glass chrome treatment above. */
+body.glass-full .msg-ai .body,
+body.glass-full .msg-user .body,
+body.glass-full .msg-ai,
+body.glass-full .msg-user {
+  color: var(--fg, #fff) !important;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.75), 0 0 2px rgba(0,0,0,0.55) !important;
+}
+/* The OOC asides stay quieter (their dashed backstage identity), even fainter scrim. */
+body.glass-full .msg-user.msg-ooc,
+body.glass-full .msg-ooc.msg-ooc-producer {
+  background-image: linear-gradient(180deg,
+    rgba(12,14,18,0.20) 0%,
+    rgba(12,14,18,0.14) 100%) !important;
+  border-style: dashed !important;
+  border-color: rgba(255,255,255,0.22) !important;
+}
+
+/* a11y: prefers-reduced-transparency already forces the theme-frosted set SOLID (the
+   block earlier in this file). glass-full layers on top of theme-frosted, so those
+   solid overrides still apply; but our background-IMAGE light wash would re-introduce
+   translucency over the solid fill. Drop it (and the bubble scrim) under reduced
+   transparency so the solid panels stand. */
+@media (prefers-reduced-transparency: reduce) {
+  body.glass-full #sidebar,
+  body.glass-full .icon-rail,
+  body.glass-full .chat-input-bar,
+  body.glass-full .chat-top-bar,
+  body.glass-full .ow-window,
+  body.glass-full .modal-content,
+  body.glass-full .admin-card,
+  body.glass-full .model-picker-menu,
+  body.glass-full .og-card,
+  body.glass-full .on-card,
+  body.glass-full .toast,
+  body.glass-full .dropdown,
+  body.glass-full .overflow-menu,
+  body.glass-full .cp-popover,
+  body.glass-full .msg-ai,
+  body.glass-full .msg-user,
+  body.glass-full .msg-ooc,
+  body.glass-full .msg-ooc-producer {
+    background-image: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    color: var(--fg, #fff) !important;
+    text-shadow: none !important;
+  }
 }

@@ -245,8 +245,11 @@ def _themes_in_order():
 
 
 def test_0052_house_themes_are_first_in_the_picker():
+    # The color-agnostic 'glass' theme now LEADS the picker (owner directive: Glass is
+    # the default + first); the house set follows immediately after it.
     order, _ = _themes_in_order()
-    assert order[:5] == HOUSE, f"the picker must open with the house set, got {order[:5]}"
+    assert order[0] == "glass", f"the picker must open with glass, got {order[:1]}"
+    assert order[1:6] == HOUSE, f"the house set must follow glass, got {order[1:6]}"
 
 
 def test_0052_house_palettes_meet_aa_contrast():

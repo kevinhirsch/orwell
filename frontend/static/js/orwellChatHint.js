@@ -66,6 +66,39 @@ const ELEM_ID = 'orwell-chat-hint';
 let _shownKey = null;
 let _notice = null;   // #642: the OrwellNotice kit instance for the (single) live hint.
 
+// ── LIQUID GLASS (body.theme-frosted) ────────────────────────────────────────
+// The hint card composes the OrwellNotice kit (kind "guide"); orwellNotice.js + style.css
+// already frost .on-card / .on-guide, so the hint shell gets the kit glass for free. We
+// inject this tiny module-local rule as a belt-and-suspenders: it re-asserts the kit glass
+// material on the hint's OWN .orwell-chat-hint hook class (added in show()) so the hint reads
+// as the SAME liquid-glass material as the rest of the kit even if a future .orwell-chat-hint
+// rule ever set a solid bg, or the cascade ordered against the kit rule. It mirrors the static
+// .on-card frosted rim+float box-shadow (~style.css 37587) for consistency and puts the kit
+// text-shadow on the body copy. No accent-hued text. Wrapped in prefers-reduced-transparency:
+// no-preference so this runtime-injected !important rule (appended AFTER the linked stylesheet,
+// so it'd win on source order at equal specificity) NEVER overrides style.css's a11y OPAQUE
+// fallback (body.theme-frosted .on-card) under prefers-reduced-transparency:reduce. Idempotent.
+function _ensureGlassCss() {
+  if (typeof document === 'undefined' || document.getElementById('orwell-chat-hint-glass-css')) return;
+  const st = document.createElement('style');
+  st.id = 'orwell-chat-hint-glass-css';
+  st.textContent =
+    '@media (prefers-reduced-transparency: no-preference) {' +
+    'body.theme-frosted .on-card.orwell-chat-hint {' +
+    '  background-color: var(--ow-glass-veil-dark) !important;' +
+    '  background-image: linear-gradient(180deg, var(--ow-glass-veil-light) 0%, rgba(255,255,255,0.03) 100%) !important;' +
+    '  backdrop-filter: var(--ow-glass-backdrop) !important;' +
+    '  -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;' +
+    '  border-radius: var(--ow-glass-radius) !important;' +
+    '  box-shadow:' +
+    '    inset 0 0 0 0.5px rgba(255,255,255,0.12),' +
+    '    inset 2px -2px 2px -1px rgba(255,255,255,0.42),' +
+    '    inset -1px 1px 2px -1px rgba(255,255,255,0.16),' +
+    '    var(--ow-glass-float) !important; }' +
+    'body.theme-frosted .on-card.orwell-chat-hint .on-body { text-shadow: var(--ow-glass-text-shadow); } }';
+  document.head.appendChild(st);
+}
+
 function _remove() {
   if (_notice) { _notice.hide(); _notice = null; }
   const el = document.getElementById(ELEM_ID);
@@ -85,6 +118,7 @@ function show(key) {
   if (_shownKey === key && document.getElementById(ELEM_ID)) return true; // already up
 
   _remove();                                      // only one hint at a time
+  _ensureGlassCss();                              // glass material under body.theme-frosted
 
   const dismissText = def.dismissText === undefined ? 'Got it' : def.dismissText;
   // Compose the kit (kind "guide"). persistDismiss:false — the hint owns its own per-KEY dismiss

@@ -18,22 +18,22 @@
   (function(){
     try {
       var t = JSON.parse(localStorage.getItem('orwell-theme'));
-      // L32/L33: with no stored theme (brand-new player / factory reset), the
-      // default is `telescreen` — the on-brand 1984 surveillance look — frosted
-      // ON. Synthesize the saved-theme shape so the existing apply path below
-      // paints it from the very first frame (no flash to the CSS :root before
-      // theme.js boots). An explicit saved choice always wins (t stays as-is).
-      // Keep in sync with theme.js DEFAULT_THEME + the telescreen palette.
+      // With no stored theme (brand-new player / factory reset), the default is
+      // the neutral Apple "Liquid Glass" theme — glassTier 'full' (the Chromium
+      // refraction over the CSS material). Synthesize the saved-theme shape so the
+      // existing apply path below paints it from the very first frame (no flash to
+      // the CSS :root before theme.js boots). An explicit saved choice always wins
+      // (t stays as-is). Keep in sync with theme.js DEFAULT_THEME + the glass
+      // palette + THEME_DEFAULT_PATTERN['glass'].
       if (!t || !t.colors) {
-        // R3 (audit anim-F1): include telescreen's default bgPattern so the head-script arms the
-        // bg-pattern-perlin-flow CLASS at first paint (below) — otherwise the signature background
-        // only appears once theme.js's applyBgPattern runs at the END of _initWithSync (after an
-        // awaited /api/prefs/theme read), which under a slow read pops in ~1.8s AFTER the app loader
-        // clears, leaving a bare bg. The class brings the static phosphor base (style.css) up front;
-        // the animated canvas overlays it when it spawns. Keep in sync with THEME_DEFAULT_PATTERN.
-        t = { name: 'telescreen', frosted: true, bgPattern: 'perlin-flow',
-              colors: { bg:'#101418', fg:'#d7e9ee', panel:'#151c22', border:'#2a3e4a', red:'#56c8e8' },
-              house: true };
+        // Arm the signature bgPattern class at first paint so the wallpaper the
+        // refraction lenses is up front (otherwise it only appears once theme.js's
+        // applyBgPattern runs at the END of _initWithSync, after an awaited
+        // /api/prefs/theme read). The class brings the static base (style.css) up
+        // front; the animated canvas overlays it when it spawns.
+        t = { name: 'glass', glassTier: 'full', bgPattern: 'perlin-flow',
+              colors: { bg:'#15171c', fg:'#eef1f4', panel:'#1d2026', border:'#3a3f47', red:'#9aa3af' },
+              glass: true };
       }
       if (t && t.colors) {
         var s = document.documentElement.style;
@@ -146,27 +146,55 @@
           document.body.classList.add('bg-pattern-' + t.bgPattern);
         }, {once:true});
       }
-      // L33/L34 + 0052: paint the frosted-glass + house treatment from the
-      // first frame so a fresh session opens already frosted (no flash to a
-      // solid chrome before theme.js boots). Frosted defaults ON; an explicit
-      // saved `frosted:false` opts out. House presets also tint --panel-frost.
+      // Paint the glass TIER + house treatment from the first frame so a fresh
+      // session opens already glassy (no flash to solid chrome before theme.js
+      // boots). The tier ladder: 'full' → body.theme-frosted + body.glass-full
+      // (CSS material + Chromium SVG refraction); 'frosted' → theme-frosted only
+      // (the blur baseline); 'normal' → neither. Resolve order (keep in sync with
+      // theme.js resolveGlassTier / defaultGlassTierFor): saved `glassTier` wins;
+      // else the legacy `frosted` bool (true→'frosted', false→'normal'); else the
+      // per-theme default ('glass'→full; house/others→frosted). A saved wallpaper
+      // image is painted into #__wp early to avoid a flash. House presets also
+      // tint --panel-frost.
       if (t) {
-        var _frosted = (t.frosted !== undefined) ? !!t.frosted : true;
-        // House presets (0052) — recognized by name since the saved object
-        // doesn't persist the `house` flag (applyColors re-derives it shortly).
         var _HOUSE = { 'the-feed':1, 'telescreen':1, 'room-101':1, 'memory-wall':1, 'sequester':1 };
-        var _house = !!t.house || !!(t.name && _HOUSE[t.name]);
+        var _name = t.name || '';
+        var _tier;
+        if (t.glassTier === 'full' || t.glassTier === 'frosted' || t.glassTier === 'normal') {
+          _tier = t.glassTier;
+        } else if (t.frosted !== undefined) {
+          _tier = t.frosted ? 'frosted' : 'normal';
+        } else {
+          // Per-theme default: the neutral 'glass' theme ships full refraction;
+          // everything else defaults to the frosted (material-only) baseline.
+          _tier = (_name === 'glass' || t.glass) ? 'full' : 'frosted';
+        }
+        var _house = !!t.house || !!(_name && _HOUSE[_name]);
         var _panel = (t.colors && t.colors.panel) || '';
+        var _bgImage = t.bgImage || '';
         document.addEventListener('DOMContentLoaded', function() {
-          if (_frosted) document.body.classList.add('theme-frosted');
+          if (_tier === 'full' || _tier === 'frosted') document.body.classList.add('theme-frosted');
+          if (_tier === 'full') document.body.classList.add('glass-full');
           if (_house) {
             document.body.classList.add('house-theme');
-            if (t.name) document.body.classList.add('house-theme--' + t.name);
+            if (_name) document.body.classList.add('house-theme--' + _name);
             var m = /^#?([0-9a-f]{6})$/i.exec(_panel);
             if (m) {
               var r = parseInt(m[1].slice(0,2),16), g = parseInt(m[1].slice(2,4),16), b = parseInt(m[1].slice(4,6),16);
               document.documentElement.style.setProperty('--panel-frost', 'rgba('+r+', '+g+', '+b+', 0.62)');
             }
+          }
+          // Early wallpaper paint (the fixed full-bleed #__wp layer theme.js owns).
+          if (_bgImage) {
+            var wp = document.getElementById('__wp');
+            if (!wp) {
+              wp = document.createElement('div');
+              wp.id = '__wp';
+              wp.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;'
+                + 'background-size:cover;background-position:center;background-repeat:no-repeat;';
+              document.body.appendChild(wp);
+            }
+            wp.style.backgroundImage = 'url("' + String(_bgImage).replace(/"/g, '\\"') + '")';
           }
         }, {once:true});
       }
@@ -698,12 +726,16 @@
               <option value="spacious">Spacious</option>
             </select>
           </div>
-          <div class="theme-fd-group" id="theme-frosted-group">
-            <label class="theme-fd-label" for="theme-frosted-toggle">Frosted</label>
-            <label class="admin-switch" style="margin-top:4px;">
-              <input type="checkbox" id="theme-frosted-toggle">
-              <span class="admin-slider"></span>
-            </label>
+          <div class="theme-fd-group" id="theme-glass-tier-group">
+            <label class="theme-fd-label">Glass</label>
+            <!-- 3-way Liquid Glass tier (shared contract id). Full = CSS material
+                 + Chromium SVG refraction; Frosted = the blur baseline; Off = flat.
+                 style.css styles #theme-glass-tier / its [data-tier] buttons. -->
+            <div id="theme-glass-tier" class="theme-seg" role="group" aria-label="Glass tier" data-value="full">
+              <button type="button" class="theme-seg-btn" data-tier="full" aria-pressed="true" title="Liquid Glass — material + refraction">Full</button>
+              <button type="button" class="theme-seg-btn" data-tier="frosted" aria-pressed="false" title="Frosted — blur material only">Frosted</button>
+              <button type="button" class="theme-seg-btn" data-tier="normal" aria-pressed="false" title="No glass — flat chrome">Off</button>
+            </div>
           </div>
         </div>
         <div class="theme-fd-row" id="theme-google-font-row">
@@ -722,26 +754,55 @@
         </div>
         <div class="theme-fd-row">
           <div class="theme-fd-group" style="flex:1 1 0;">
-            <label class="theme-fd-label">Background / Effect</label>
-            <select id="theme-bg-pattern-select" class="theme-fd-select">
-              <option value="none">Solid</option>
-              <option value="dots">Dots</option>
-              <option value="synapse">Synapse</option>
-              <option value="rain">Rain</option>
-              <option value="constellations">Constellations</option>
-              <option value="perlin-flow">Perlin Flow</option>
-              <option value="petals">Petals</option>
-              <option value="sparkles">Sparkles</option>
-              <option value="embers">Embers</option>
+            <label class="theme-fd-label" for="theme-bg-source">Background</label>
+            <!-- Source: an animated pattern (the canvas particle fields) OR a
+                 wallpaper image (URL or upload). An image becomes #__wp, the
+                 fixed full-bleed layer the glass material lenses. -->
+            <select id="theme-bg-source" class="theme-fd-select" aria-label="Background source">
+              <option value="animation">Animation</option>
+              <option value="image">Image</option>
             </select>
           </div>
-          <div class="theme-fd-group" style="flex:0 0 auto;align-items:center;">
-            <label class="theme-fd-label">&nbsp;</label>
-            <div class="color-row" style="margin:0;padding:0;">
-              <input type="color" id="theme-bg-effect-color" value="#9cdef2" title="Effect color">
-              <button class="color-reset-btn" data-reset-effect title="Reset to text color">&#x21BA;</button>
+        </div>
+        <!-- Animation controls (pattern + effect colour). Hidden under Image. -->
+        <div id="theme-bg-anim-group">
+          <div class="theme-fd-row">
+            <div class="theme-fd-group" style="flex:1 1 0;">
+              <label class="theme-fd-label">Pattern / Effect</label>
+              <select id="theme-bg-pattern-select" class="theme-fd-select">
+                <option value="none">Solid</option>
+                <option value="dots">Dots</option>
+                <option value="synapse">Synapse</option>
+                <option value="rain">Rain</option>
+                <option value="constellations">Constellations</option>
+                <option value="perlin-flow">Perlin Flow</option>
+                <option value="petals">Petals</option>
+                <option value="sparkles">Sparkles</option>
+                <option value="embers">Embers</option>
+              </select>
+            </div>
+            <div class="theme-fd-group" style="flex:0 0 auto;align-items:center;">
+              <label class="theme-fd-label">&nbsp;</label>
+              <div class="color-row" style="margin:0;padding:0;">
+                <input type="color" id="theme-bg-effect-color" value="#9cdef2" title="Effect color">
+                <button class="color-reset-btn" data-reset-effect title="Reset to text color">&#x21BA;</button>
+              </div>
             </div>
           </div>
+        </div>
+        <!-- Image controls (URL + upload). Hidden under Animation. -->
+        <div id="theme-bg-image-group" style="display:none;">
+          <div class="theme-fd-row">
+            <div class="theme-fd-group" style="flex:1 1 0;min-width:0;">
+              <label class="theme-fd-label" for="theme-bg-image-url">Image URL</label>
+              <input id="theme-bg-image-url" class="theme-fd-select" type="url" autocomplete="off" spellcheck="false" placeholder="https://&hellip; or paste a link" aria-label="Background image URL" />
+            </div>
+            <div class="theme-fd-group" style="flex:0 0 auto;">
+              <label class="theme-fd-label" for="theme-bg-image-file">Upload</label>
+              <input id="theme-bg-image-file" type="file" accept="image/*" aria-label="Upload a background image" />
+            </div>
+          </div>
+          <div class="theme-fd-label" style="opacity:0.4;font-weight:normal;">Uploads are downscaled to 1600px and stored locally (max ~1.5MB). The glass material refracts whatever sits behind it.</div>
         </div>
         <div class="theme-fd-row">
           <div class="theme-fd-group" id="theme-bg-intensity-group" style="flex:1 1 0;">

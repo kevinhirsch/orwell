@@ -9,6 +9,16 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
 export const THEMES = {
+  // ── Apple "Liquid Glass" (iOS 26 / macOS 26 "Tahoe", WWDC25). The DEFAULT and
+  //    FIRST entry in the picker. The material is COLORLESS/neutral by Apple's
+  //    own rule — "Liquid Glass has no inherent color, and instead takes on colors
+  //    from the content directly behind it" (HIG Color) — so the palette here is
+  //    a neutral grey set with a desaturated (hueless) `red` accent: no accent hue
+  //    on text under the glass material (the global frosted text rule keys off the
+  //    body tier class, enforced in style.css). `glassTier:'full'` opts this theme
+  //    into the Chromium SVG refraction (the `glass-full` body class) over the CSS
+  //    blur baseline; `glass:true` flags it for any glass-aware consumer.
+  glass:        { bg:'#15171c', fg:'#eef1f4', panel:'#1d2026', border:'#3a3f47', red:'#9aa3af', glassTier:'full', glass: true },
   // ── 0052 (ruling #13): the HOUSE themes lead the picker — the game's identity,
   //    first in insertion order. Each is a full token set in the preset shape; the
   //    `house: true` flag drives the frosted-chrome + micro-motion treatment
@@ -44,11 +54,11 @@ export const THEMES = {
 // 0052: each preset knows its own key (drives the per-theme house treatment class).
 for (const [k, v] of Object.entries(THEMES)) v._key = k;
 
-// L32: telescreen — the on-brand 1984 surveillance look — is the DEFAULT theme
-// out of the box. A brand-new player, an unset preference, or a factory-reset /
-// no-stored-theme session all resolve here; an explicit SAVED choice still wins
-// (getSaved() short-circuits every fallback below).
-const DEFAULT_THEME = 'telescreen';
+// The Apple "Liquid Glass" theme — neutral, colorless, refraction-on — is the
+// DEFAULT theme out of the box. A brand-new player, an unset preference, or a
+// factory-reset / no-stored-theme session all resolve here; an explicit SAVED
+// choice still wins (getSaved() short-circuits every fallback below).
+const DEFAULT_THEME = 'glass';
 const LS_KEY = 'orwell-theme';
 const CUSTOM_THEMES_KEY = 'orwell-custom-themes';
 
@@ -68,6 +78,9 @@ const MAX_CUSTOM_THEMES = 8;
 
 // Default background patterns for built-in themes
 const THEME_DEFAULT_PATTERN = {
+  // The glass theme's signature animated wallpaper — a slow, flowing field the
+  // refraction has something to lens. (An image, if chosen, supersedes it.)
+  glass:      'perlin-flow',
   // A5 (ruling #18) — every HOUSE theme ships a creative particles background that fits its
   // identity, reusing the existing canvas-particle machinery (behind the chat, perf-budgeted,
   // prefers-reduced-motion / document.hidden aware). Tinted to the theme's --fg by default.
@@ -100,6 +113,9 @@ const THEME_DEFAULT_EFFECT_COLOR = {
 
 // Default effect intensity (0..1) per theme. Any theme not listed defaults to 1.
 const THEME_DEFAULT_INTENSITY = {
+  // Subtle — the glass material sits ABOVE the wallpaper; the texture is a hint
+  // for the lensing to grab, not noise that competes with content.
+  glass:      0.5,
   midnight:   0.5,
   terminal:   0.8,
   organs:     0.65,
@@ -111,13 +127,33 @@ const THEME_DEFAULT_INTENSITY = {
   'sequester':   0.5,
 };
 
-// L33: the frosted-glass treatment is ON by default on EVERY theme. An unset
-// frosted preference resolves to ENABLED; an explicit toggle-off still persists
-// and wins (the saved `frosted` flag short-circuits this fallback). Any theme
-// that should ship frosted-OFF can opt out here; none currently do.
-const THEME_DEFAULT_FROSTED_OFF = {};
-function defaultFrostedFor(_name) {
-  return THEME_DEFAULT_FROSTED_OFF[_name] !== true;
+// The glass tier ladder (Apple parity):
+//   • 'full'    → body.theme-frosted + body.glass-full — the CSS glass MATERIAL
+//                 PLUS the Chromium SVG refraction/lensing (the defining optic).
+//   • 'frosted' → body.theme-frosted only — the CSS blur-glass baseline (the
+//                 documented graceful fallback; identical except the lensing).
+//   • 'normal'  → neither class — flat, solid chrome.
+// Every theme defaults to 'frosted' (glass material ON, refraction OFF) EXCEPT
+// the dedicated 'glass' theme, which ships with the full Apple refraction. An
+// unset preference resolves to this default; a saved tier (or the legacy
+// `frosted` bool, back-compat) short-circuits it. A theme is `glass:true` ⇒ full.
+function defaultGlassTierFor(name) {
+  const t = THEMES[name];
+  if (name === 'glass' || (t && (t.glass || t.glassTier === 'full'))) return 'full';
+  if (t && t.glassTier === 'normal') return 'normal';
+  return 'frosted';
+}
+
+// Resolve the glass tier for a saved/opts blob (a saved theme record OR a custom
+// theme entry). Back-compat order: an explicit `glassTier` wins; else the legacy
+// `frosted` bool (`true`→'frosted', `false`→'normal'); else the theme default.
+// `name` is the theme name the tier defaults against when nothing is stored.
+function resolveGlassTier(rec, name) {
+  if (rec && (rec.glassTier === 'full' || rec.glassTier === 'frosted' || rec.glassTier === 'normal')) {
+    return rec.glassTier;
+  }
+  if (rec && rec.frosted !== undefined) return rec.frosted ? 'frosted' : 'normal';
+  return defaultGlassTierFor(name);
 }
 
 // ── Custom theme persistence ──
@@ -173,7 +209,8 @@ export function saveCustomTheme(name, colors, opts) {
     if (opts.bgEffectColor) entry.bgEffectColor = opts.bgEffectColor;
     if (opts.bgEffectIntensity !== undefined) entry.bgEffectIntensity = opts.bgEffectIntensity;
     if (opts.bgEffectSize !== undefined) entry.bgEffectSize = opts.bgEffectSize;
-    if (opts.frosted !== undefined) entry.frosted = !!opts.frosted;
+    if (opts.glassTier !== undefined) entry.glassTier = opts.glassTier;
+    if (opts.bgImage !== undefined) entry.bgImage = opts.bgImage;
   }
   entry._updatedAt = Date.now();      // LWW stamp
   ct[name] = entry;
@@ -660,11 +697,108 @@ export function applyBgEffectSize(v) {
   document.documentElement.style.setProperty('--bg-effect-size', String(n));
 }
 
-/** Toggle the global "frosted glass" look — applies a translucent + blurred
- *  treatment to every panel, sidebar, modal, dropdown, and popover via CSS
- *  rules scoped to `body.theme-frosted`. */
+/** Apply the global glass TIER — the Apple "Liquid Glass" material ladder.
+ *  Drives two body classes (the shared contract; style.css + the glass JS
+ *  modules key off them):
+ *    • 'full'    → body.theme-frosted + body.glass-full
+ *                  (CSS glass material PLUS the Chromium SVG refraction/lensing).
+ *    • 'frosted' → body.theme-frosted only
+ *                  (CSS blur-glass baseline — the documented graceful fallback).
+ *    • 'normal'  → neither class (flat, solid chrome).
+ *  `theme-frosted` is the material (both glass tiers); `glass-full` gates the
+ *  refraction (Full only). Any unrecognized value falls back to 'frosted'. */
+export function applyGlassTier(tier) {
+  const t = (tier === 'full' || tier === 'frosted' || tier === 'normal') ? tier : 'frosted';
+  const frosted = (t === 'full' || t === 'frosted');
+  const full = (t === 'full');
+  document.body.classList.toggle('theme-frosted', frosted);
+  document.body.classList.toggle('glass-full', full);
+}
+
+/** Back-compat shim for any stray caller (e.g. the cross-device sync seam in
+ *  chatStream.js): a truthy "frosted" maps to the 'frosted' tier, falsy to
+ *  'normal'. New code should call applyGlassTier directly. */
 export function applyFrostedGlass(on) {
-  document.body.classList.toggle('theme-frosted', !!on);
+  applyGlassTier(on ? 'frosted' : 'normal');
+}
+
+// The fixed full-bleed wallpaper layer id. adaptiveGlass.js samples `#__wp`
+// first (see its `ids` list) so the glass legibility flip reads the chosen
+// image as its backdrop — keep this id in sync with that consumer.
+const WALLPAPER_ID = '__wp';
+
+/** Set (or clear) the fixed full-bleed wallpaper image behind all app content.
+ *  An empty / null url REMOVES the layer. The layer is created lazily and lives
+ *  at the very back (z-index:-1, pointer-events:none) so it sits behind content
+ *  but in front of the document background; the glass material then lenses it. */
+export function applyBgImage(url) {
+  let wp = document.getElementById(WALLPAPER_ID);
+  if (!url) {
+    if (wp) wp.remove();
+    // restore the opaque theme background (the #__wp layer is gone).
+    document.body.classList.remove('has-wallpaper');
+    return;
+  }
+  if (!wp) {
+    wp = document.createElement('div');
+    wp.id = WALLPAPER_ID;
+    wp.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;'
+      + 'background-size:cover;background-position:center;background-repeat:no-repeat;';
+    document.body.appendChild(wp);
+  }
+  wp.style.backgroundImage = `url("${String(url).replace(/"/g, '\\"')}")`;
+  // The page (html+body) carries an OPAQUE --bg that would cover the z-index:-1
+  // wallpaper. `has-wallpaper` makes them transparent (CSS, author !important — it
+  // beats the FOUC inline bg) so #__wp shows and the glass lenses it.
+  document.body.classList.add('has-wallpaper');
+}
+
+// Downscale an uploaded image to <= MAX_WP_DIM on the long edge and return a
+// data URL, capped at MAX_WP_BYTES. Resolves null (with a warning) if the
+// encoded result is over the cap — the caller then skips it.
+const MAX_WP_DIM = 1600;
+const MAX_WP_BYTES = 1.5 * 1024 * 1024; // ~1.5MB cap on the stored data URL
+function _downscaleImageFile(file) {
+  return new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onerror = () => resolve(null);
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => resolve(null);
+        img.onload = () => {
+          try {
+            let { width: w, height: h } = img;
+            const longEdge = Math.max(w, h);
+            if (longEdge > MAX_WP_DIM) {
+              const scale = MAX_WP_DIM / longEdge;
+              w = Math.round(w * scale);
+              h = Math.round(h * scale);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            // Prefer the source mime for PNGs (alpha); JPEG for everything else.
+            const isPng = /image\/png/i.test(file.type || '');
+            let dataUrl = canvas.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.85);
+            // If a PNG blew the cap, retry as JPEG; then re-check.
+            if (dataUrl.length > MAX_WP_BYTES && isPng) {
+              dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+            }
+            if (dataUrl.length > MAX_WP_BYTES) {
+              console.warn('Background image too large after downscale (> ~1.5MB) — skipped.');
+              resolve(null);
+              return;
+            }
+            resolve(dataUrl);
+          } catch (e) { console.warn('Background image downscale failed:', e); resolve(null); }
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    } catch (e) { console.warn('Background image read failed:', e); resolve(null); }
+  });
 }
 
 // Read current size multiplier for JS effects (canvas-based).
@@ -740,10 +874,14 @@ export function save(name, colors, opts) {
     if (opts.bgEffectColor) obj.bgEffectColor = opts.bgEffectColor;
     if (opts.bgEffectIntensity !== undefined && opts.bgEffectIntensity !== 1) obj.bgEffectIntensity = opts.bgEffectIntensity;
     if (opts.bgEffectSize !== undefined && opts.bgEffectSize !== 1) obj.bgEffectSize = opts.bgEffectSize;
-    // L33: frosted defaults ON, so an explicit toggle-OFF must be PERSISTED as
-    // `frosted: false` — otherwise the default-on fallback would re-enable it on
-    // the next boot. Record the explicit boolean whenever the caller passed one.
-    if (opts.frosted !== undefined) obj.frosted = !!opts.frosted;
+    // Persist the glass TIER as a string ('full'|'frosted'|'normal'). The default
+    // varies per theme (defaultGlassTierFor), so we record whatever the caller
+    // resolved — otherwise the per-theme default would override the user's pick on
+    // the next boot. The legacy `frosted` bool is read on load (back-compat) but
+    // no longer WRITTEN; glassTier supersedes it.
+    if (opts.glassTier !== undefined) obj.glassTier = opts.glassTier;
+    // A chosen wallpaper image (URL or downscaled data URL). Empty ⇒ omit.
+    if (opts.bgImage) obj.bgImage = opts.bgImage;
   }
   Storage.setJSON(LS_KEY, obj);
   _syncToServer(obj);
@@ -941,8 +1079,11 @@ export function initThemeUI() {
   const _gameBuild = !!(document.body && document.body.hasAttribute('data-game-build'));
   const _entries = Object.entries(THEMES);
   if (_gameBuild) {
-    const houseEntries = _entries.filter(([, c]) => c.house);
-    const otherEntries = _entries.filter(([, c]) => !c.house);
+    // The glass theme (the neutral Apple default) leads alongside the house
+    // themes — it's the out-of-box look, not an "extra" tucked behind the reveal.
+    const _isLead = (n, c) => n === 'glass' || c.glass || c.house;
+    const houseEntries = _entries.filter(([n, c]) => _isLead(n, c));
+    const otherEntries = _entries.filter(([n, c]) => !_isLead(n, c));
     // Keep the active (non-house) theme visible up-front so a power user's current pick isn't hidden.
     const activeIsOther = otherEntries.some(([n]) => n === activeName);
     grid.innerHTML = houseEntries.map(_swatch).join('')
@@ -1002,8 +1143,14 @@ export function initThemeUI() {
     if (ec) opts.bgEffectColor = ec.value;
     if (es) opts.bgEffectIntensity = parseFloat(es.value) / 100;
     if (sz) opts.bgEffectSize = parseFloat(sz.value) / 100;
-    const fr = document.getElementById('theme-frosted-toggle');
-    if (fr) opts.frosted = !!fr.checked;
+    // Glass tier — the 3-way control (id=theme-glass-tier). Its current value is
+    // mirrored onto the control's dataset by the change handler; read that.
+    const gt = document.getElementById('theme-glass-tier');
+    if (gt && gt.dataset.value) opts.glassTier = gt.dataset.value;
+    // The wallpaper image is tracked on the bg-source control's dataset (a URL or
+    // a downscaled data URL), set whenever an image is applied. Empty ⇒ omit.
+    const bs = document.getElementById('theme-bg-source');
+    if (bs && bs.dataset.image) opts.bgImage = bs.dataset.image;
     return opts;
   }
   function _saveFull(name, colors) { save(name, colors, _getOpts()); }
@@ -1029,22 +1176,24 @@ export function initThemeUI() {
         const ec = ct && ct.bgEffectColor ? ct.bgEffectColor : (THEME_DEFAULT_EFFECT_COLOR[name] || '');
         const ei = (ct && ct.bgEffectIntensity !== undefined) ? ct.bgEffectIntensity : (THEME_DEFAULT_INTENSITY[name] !== undefined ? THEME_DEFAULT_INTENSITY[name] : 1);
         const sz = (ct && ct.bgEffectSize !== undefined) ? ct.bgEffectSize : 1;
-        const fr = (ct && ct.frosted !== undefined)
-          ? !!ct.frosted
-          : defaultFrostedFor(name);
+        const tier = resolveGlassTier(ct, name);
+        // A custom theme may carry its own wallpaper; a built-in preset has none
+        // (selecting a built-in clears any active image so its pattern shows).
+        const img = (ct && ct.bgImage) ? ct.bgImage : '';
         applyFontDensity(f, d);
         applyBgEffectColor(ec);
         applyBgEffectIntensity(ei);
         applyBgEffectSize(sz);
-        applyFrostedGlass(fr);
-        applyBgPattern(p);
+        applyGlassTier(tier);
+        applyBgImage(img);
+        // An image supersedes the animation; otherwise paint the pattern.
+        applyBgPattern(img ? 'none' : p);
         const fs = document.getElementById('theme-font-select');
         const ds = document.getElementById('theme-density-select');
         const ps = document.getElementById('theme-bg-pattern-select');
         const ecs = document.getElementById('theme-bg-effect-color');
         const eis = document.getElementById('theme-bg-intensity');
         const szs = document.getElementById('theme-bg-size');
-        const frs = document.getElementById('theme-frosted-toggle');
         if (fs) { _reflectGoogleFontOption(fs, f); fs.value = f; }
         _syncGoogleFontInput(f);
         if (ds) ds.value = d;
@@ -1052,8 +1201,9 @@ export function initThemeUI() {
         if (ecs) ecs.value = ec || colors.fg || '#9cdef2';
         if (eis) eis.value = String(Math.round(ei * 100));
         if (szs) szs.value = String(Math.round(sz * 100));
-        if (frs) frs.checked = fr;
-        save(name, colors, { font: f, density: d, bgPattern: p, bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, frosted: fr });
+        _syncGlassTierControl(tier);
+        _syncBgSourceControls(img);
+        save(name, colors, { font: f, density: d, bgPattern: (img ? 'none' : p), bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, glassTier: tier, bgImage: img });
       });
     });
     g.querySelectorAll('.theme-delete-btn').forEach(btn => {
@@ -1186,6 +1336,7 @@ export function initThemeUI() {
           bgPattern: _activeSaved.bgPattern, bgEffectColor: _activeSaved.bgEffectColor,
           bgEffectIntensity: _activeSaved.bgEffectIntensity,
           bgEffectSize: _activeSaved.bgEffectSize,
+          glassTier: _activeSaved.glassTier, bgImage: _activeSaved.bgImage,
         });
         _saveFull(_activeName, colors);
       } else {
@@ -1254,7 +1405,12 @@ export function initThemeUI() {
       applyColors(colors);
       syncPickers(colors);
       applyFontDensity(DEFAULT_FONT, DEFAULT_DENSITY);
-      applyBgPattern('none');
+      // Reset to the DEFAULT theme's own glass tier + signature pattern, image off.
+      const _defTier = defaultGlassTierFor(DEFAULT_THEME);
+      const _defPattern = THEME_DEFAULT_PATTERN[DEFAULT_THEME] || 'none';
+      applyGlassTier(_defTier);
+      applyBgImage('');
+      applyBgPattern(_defPattern);
       // Drop any active Google font (synthetic option + the dynamic <link>).
       const _gl = document.getElementById(GOOGLE_FONT_LINK_ID);
       if (_gl) _gl.remove();
@@ -1264,10 +1420,12 @@ export function initThemeUI() {
       const ps = document.getElementById('theme-bg-pattern-select');
       if (fs) { fs.querySelectorAll('option[data-google-font]').forEach(o => o.remove()); fs.value = DEFAULT_FONT; }
       if (ds) ds.value = DEFAULT_DENSITY;
-      if (ps) ps.value = 'none';
+      if (ps) ps.value = _defPattern;
+      _syncGlassTierControl(_defTier);
+      _syncBgSourceControls('');
       grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
-      const darkSwatch = grid.querySelector('[data-theme="dark"]');
-      if (darkSwatch) darkSwatch.classList.add('active');
+      const defSwatch = grid.querySelector('[data-theme="' + DEFAULT_THEME + '"]');
+      if (defSwatch) defSwatch.classList.add('active');
     });
   }
 
@@ -1424,15 +1582,16 @@ export function initThemeUI() {
     ? saved.bgEffectIntensity
     : (saved && THEME_DEFAULT_INTENSITY[saved.name] !== undefined ? THEME_DEFAULT_INTENSITY[saved.name] : 1);
   const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : 1;
-  const _initFrosted = (saved && saved.frosted !== undefined)
-    ? !!saved.frosted
-    : defaultFrostedFor(saved ? saved.name : DEFAULT_THEME);
+  const _initTier = resolveGlassTier(saved, saved ? saved.name : DEFAULT_THEME);
+  const _initBgImage = (saved && saved.bgImage) ? saved.bgImage : '';
   applyFontDensity(_initFont, _initDensity);
   applyBgEffectColor(_initEffectColor);
   applyBgEffectIntensity(_initEffectIntensity);
   applyBgEffectSize(_initEffectSize);
-  applyFrostedGlass(_initFrosted);
-  applyBgPattern(_initPattern);
+  applyGlassTier(_initTier);
+  applyBgImage(_initBgImage);
+  // A saved wallpaper supersedes the animated pattern.
+  applyBgPattern(_initBgImage ? 'none' : _initPattern);
 
   const fontSelect = document.getElementById('theme-font-select');
   const densitySelect = document.getElementById('theme-density-select');
@@ -1514,6 +1673,12 @@ export function initThemeUI() {
     const np = patternSelect.cloneNode(true); patternSelect.parentNode.replaceChild(np, patternSelect);
     np.value = _initPattern;
     np.addEventListener('change', () => {
+      // Choosing an animation supersedes any wallpaper image — clear #__wp and
+      // flip the bg-source control back to 'animation'.
+      applyBgImage('');
+      _syncBgSourceControls('');
+      const bs = document.getElementById('theme-bg-source');
+      if (bs) bs.value = 'animation';
       applyBgPattern(np.value);
       const s = getSaved(); if (s) _saveFull(s.name, s.colors);
     });
@@ -1546,14 +1711,117 @@ export function initThemeUI() {
     });
   }
 
-  const frostedToggle = document.getElementById('theme-frosted-toggle');
-  if (frostedToggle) {
-    frostedToggle.checked = _initFrosted;
-    frostedToggle.addEventListener('change', () => {
-      applyFrostedGlass(frostedToggle.checked);
+  // ── Glass tier — the 3-way control (id=theme-glass-tier): full | frosted | normal.
+  // The container holds one [data-tier] button per value; the active one carries
+  // .active + aria-pressed, and the chosen value is mirrored to the container's
+  // dataset.value so _getOpts can read it. (Function declarations below are
+  // hoisted, so the swatch handler can call these helpers.)
+  function _syncGlassTierControl(tier) {
+    const ctrl = document.getElementById('theme-glass-tier');
+    if (!ctrl) return;
+    const t = (tier === 'full' || tier === 'frosted' || tier === 'normal') ? tier : 'frosted';
+    ctrl.dataset.value = t;
+    ctrl.querySelectorAll('[data-tier]').forEach((b) => {
+      const on = b.dataset.tier === t;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  // Reflect the active wallpaper into the bg-source select + URL input. An image
+  // ⇒ source='image' and the URL field shows it (unless it's a data: upload);
+  // none ⇒ source='animation' and the field clears. The chosen image string is
+  // stashed on the source control's dataset so _getOpts can persist it.
+  function _syncBgSourceControls(img) {
+    const bs = document.getElementById('theme-bg-source');
+    const urlInput = document.getElementById('theme-bg-image-url');
+    if (bs) {
+      bs.dataset.image = img || '';
+      bs.value = img ? 'image' : 'animation';
+    }
+    if (urlInput) urlInput.value = (img && !/^data:/i.test(img)) ? img : '';
+    _syncBgSourceVisibility(img ? 'image' : 'animation');
+  }
+  // Show the pattern controls under 'animation' and the URL/file controls under
+  // 'image' (style.css owns the look; this just toggles display).
+  function _syncBgSourceVisibility(source) {
+    const animWrap = document.getElementById('theme-bg-anim-group');
+    const imgWrap = document.getElementById('theme-bg-image-group');
+    const isImg = source === 'image';
+    if (animWrap) animWrap.style.display = isImg ? 'none' : '';
+    if (imgWrap) imgWrap.style.display = isImg ? '' : 'none';
+  }
+
+  const glassTierCtrl = document.getElementById('theme-glass-tier');
+  if (glassTierCtrl && glassTierCtrl.dataset.bound !== '1') {
+    glassTierCtrl.dataset.bound = '1';
+    glassTierCtrl.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-tier]');
+      if (!btn) return;
+      const tier = btn.dataset.tier;
+      applyGlassTier(tier);
+      _syncGlassTierControl(tier);
       const s = getSaved(); if (s) _saveFull(s.name, s.colors);
     });
   }
+  _syncGlassTierControl(_initTier);
+
+  // ── Background source (animation vs image) + the URL / file inputs.
+  const bgSourceSelect = document.getElementById('theme-bg-source');
+  if (bgSourceSelect && bgSourceSelect.dataset.bound !== '1') {
+    bgSourceSelect.dataset.bound = '1';
+    bgSourceSelect.addEventListener('change', () => {
+      const src = bgSourceSelect.value;
+      _syncBgSourceVisibility(src);
+      if (src === 'animation') {
+        // Drop the wallpaper, restore the current pattern.
+        applyBgImage('');
+        bgSourceSelect.dataset.image = '';
+        const ps = document.getElementById('theme-bg-pattern-select');
+        applyBgPattern(ps ? ps.value : 'none');
+      } else {
+        // Switching to image: if one is already stashed, paint it; pattern off.
+        const img = bgSourceSelect.dataset.image || '';
+        if (img) { applyBgImage(img); applyBgPattern('none'); }
+      }
+      const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+    });
+  }
+  const bgImageUrl = document.getElementById('theme-bg-image-url');
+  if (bgImageUrl && bgImageUrl.dataset.bound !== '1') {
+    bgImageUrl.dataset.bound = '1';
+    const applyUrl = () => {
+      const url = bgImageUrl.value.trim();
+      if (!url) return;
+      applyBgImage(url);
+      applyBgPattern('none');
+      if (bgSourceSelect) { bgSourceSelect.dataset.image = url; bgSourceSelect.value = 'image'; }
+      _syncBgSourceVisibility('image');
+      const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+    };
+    bgImageUrl.addEventListener('change', applyUrl);
+    bgImageUrl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyUrl(); } });
+  }
+  const bgImageFile = document.getElementById('theme-bg-image-file');
+  if (bgImageFile && bgImageFile.dataset.bound !== '1') {
+    bgImageFile.dataset.bound = '1';
+    bgImageFile.addEventListener('change', async () => {
+      const file = bgImageFile.files && bgImageFile.files[0];
+      if (!file) return;
+      const dataUrl = await _downscaleImageFile(file);
+      bgImageFile.value = ''; // allow re-picking the same file
+      if (!dataUrl) {
+        uiModule.showToast?.('Image too large — pick one under ~1.5MB.');
+        return;
+      }
+      applyBgImage(dataUrl);
+      applyBgPattern('none');
+      if (bgSourceSelect) { bgSourceSelect.dataset.image = dataUrl; bgSourceSelect.value = 'image'; }
+      _syncBgSourceVisibility('image');
+      const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+    });
+  }
+  // Reflect the saved wallpaper into the bg-source controls on init.
+  _syncBgSourceControls(_initBgImage);
 
   // --- Color Harmony Generator (inside Advanced section) ---
   const harmonyGenBtnEl = document.getElementById('harmony-generate-btn');
@@ -2424,7 +2692,7 @@ function _initEmbers() {
 const themeModule = { initThemeUI, togglePopup, closePopup, makeDraggable,
                        THEMES, applyColors, applyFontDensity, applyBgPattern,
                        applyBgEffectColor, applyBgEffectIntensity, applyBgEffectSize,
-                       applyFrostedGlass,
+                       applyGlassTier, applyFrostedGlass, applyBgImage,
                        save, getSaved, saveCustomTheme, deleteCustomTheme,
                        getCustomThemes };
 

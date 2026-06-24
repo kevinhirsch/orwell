@@ -178,6 +178,52 @@
         #${CARD_ID} .odec-note { flex: none; order: -1; }
         #${CARD_ID} .odec-confirm { width: 100%; padding: .6rem .95rem; }
       }
+      /* ── LIQUID GLASS (body.theme-frosted) ──────────────────────────────────────
+         The decision card surface must read as the SAME kit glass as the rest of the
+         family. The common path hosts #${CARD_ID} INSIDE the OrwellNotice kit card
+         (.on-card.on-decision), where it already goes FLAT (transparent/no chrome) so the
+         glass comes from the kit (.on-card, frosted by style.css + orwellNotice.js). In the
+         FALLBACK path (no kit → mounted bare into #chat-history) the card carries its OWN
+         solid var(--panel) bg, so glass IT directly here. We also neutralize the .odec-risk
+         skin's SOLID var(--panel) wash (the eviction-red MEANING stays in the BORDER), and
+         we DELIBERATELY DO NOT touch .odec-confirm — the primary CONFIRM button keeps its
+         sanctioned system-blue CTA fill (the one tinted action per view). The whole block is
+         scoped to prefers-reduced-transparency:no-preference so the fallback card honors the
+         a11y opaque preference (its base solid var(--panel) bg stands under reduce; the kit-
+         hosted path is opaqued by style.css's .on-card a11y rule). */
+      @media (prefers-reduced-transparency: no-preference) {
+      body.theme-frosted #${CARD_ID},
+      body.theme-frosted #${CARD_ID}.odec-risk {
+        background-color: var(--ow-glass-veil-dark);
+        background-image: linear-gradient(180deg, var(--ow-glass-veil-light) 0%, rgba(255,255,255,0.03) 100%);
+        -webkit-backdrop-filter: var(--ow-glass-backdrop);
+        backdrop-filter: var(--ow-glass-backdrop);
+        border-radius: var(--ow-glass-radius);
+        /* mirror the static .on-card frosted rim+float box-shadow (~style.css 37587). */
+        box-shadow:
+          inset 0 0 0 0.5px rgba(255,255,255,0.12),
+          inset 2px -2px 2px -1px rgba(255,255,255,0.42),
+          inset -1px 1px 2px -1px rgba(255,255,255,0.16),
+          var(--ow-glass-float);
+        text-shadow: var(--ow-glass-text-shadow);
+      }
+      /* When hosted inside the kit card the inner decision card stays flat (the kit IS the
+         glass) — keep it transparent under theme-frosted so it never double-glasses. */
+      body.theme-frosted .on-card.on-decision #${CARD_ID},
+      body.theme-frosted .on-card.on-decision #${CARD_ID}.odec-risk {
+        background-color: transparent;
+        background-image: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+      }
+      }
+      /* SANCTIONED ACCENT — NOTE: the primary Confirm CTA's system-blue fill is owned by
+         style.css (body.theme-frosted .odec-confirm → background: var(--ow-ios-blue,#0a84ff)
+         !important, the ONE tinted CTA per view). The glass block above scopes to the CARD
+         surface only and never names .odec-confirm, so it cannot wash out that CTA — the
+         blue stands. We deliberately add NO .odec-confirm rule here (it would only weaken /
+         duplicate the static !important system-blue rule). */
     `;
     document.head.appendChild(st);
   }

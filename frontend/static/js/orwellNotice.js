@@ -166,7 +166,40 @@
       "@keyframes on-banner-in { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: none; } }" +
       ".on-card.on-anim-banner-in { animation: on-banner-in .22s ease-out both; }" +
       "@media (prefers-reduced-motion: reduce) {" +
-      "  .on-card.on-anim-in, .on-card.on-anim-out, .on-card.on-anim-banner-in { animation: none; } }";
+      "  .on-card.on-anim-in, .on-card.on-anim-out, .on-card.on-anim-banner-in { animation: none; } }" +
+      // ── LIQUID GLASS (body.theme-frosted) ──────────────────────────────────────
+      // Under the glass theme the notice card must read as the SAME kit material as the
+      // windows/gadgets, not a solid --panel slab. style.css ALREADY frosts .on-card
+      // (background/backdrop/radius/rim+float box-shadow/text-shadow, all with !important).
+      // The ONLY thing the static !important rule does NOT beat are the kit's OWN, more-
+      // specific solid-bg skins below (.on-guide sets box-shadow:none; .on-sev-warn /
+      // .on-sev-error layer a solid var(--panel) bg; .on-decision/.on-continue/.on-system-
+      // notice retint the border). So we neutralize those skins' SOLID backgrounds under
+      // theme-frosted (here, inline, where they were authored) and let the static kit glass
+      // win — re-asserting the kit material with !important so the result is the kit glass
+      // regardless of cascade order. The accent/severity meaning stays in the BORDER only
+      // (no accent-hued TEXT, no solid fill). Wrapped in prefers-reduced-transparency:
+      // no-preference so these runtime-injected !important rules (appended AFTER the linked
+      // stylesheet, so they'd win on source order at equal specificity) NEVER override
+      // style.css's a11y OPAQUE fallback under prefers-reduced-transparency:reduce.
+      "@media (prefers-reduced-transparency: no-preference) {" +
+      "body.theme-frosted .on-card," +
+      "body.theme-frosted .on-card.on-guide," +
+      "body.theme-frosted .on-card.on-sev-warn," +
+      "body.theme-frosted .on-card.on-sev-error {" +
+      "  background-color: var(--ow-glass-veil-dark) !important;" +
+      "  background-image: linear-gradient(180deg, var(--ow-glass-veil-light) 0%, rgba(255,255,255,0.03) 100%) !important;" +
+      "  backdrop-filter: var(--ow-glass-backdrop) !important;" +
+      "  -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;" +
+      "  border-radius: var(--ow-glass-radius) !important;" +
+      // mirror the static .on-card frosted rim+float box-shadow (~style.css 37587) so the
+      // .on-guide skin's box-shadow:none can't flatten the glass off the card.
+      "  box-shadow:" +
+      "    inset 0 0 0 0.5px rgba(255,255,255,0.12)," +
+      "    inset 2px -2px 2px -1px rgba(255,255,255,0.42)," +
+      "    inset -1px 1px 2px -1px rgba(255,255,255,0.16)," +
+      "    var(--ow-glass-float) !important; }" +
+      "body.theme-frosted .on-card { text-shadow: var(--ow-glass-text-shadow); } }";
     document.head.appendChild(st);
   }
 

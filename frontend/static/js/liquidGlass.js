@@ -36,7 +36,10 @@
 //     refraction, no motion), and on reduced-motion we additionally DROP the
 //     scale to a calmer value so the lensing is gentle. Fully fail-soft: any
 //     error anywhere leaves the CSS blur-glass in place.
-//   • Active ONLY under body.theme-frosted (the glass theme). A theme change is
+//   • Active ONLY under body.glass-full (the Full Glass tier: theme-frosted +
+//     glass-full). The Frosted tier (theme-frosted alone) gets the CSS glass
+//     material but NOT the Chromium SVG refraction, which gates on glass-full.
+//     A tier/theme change is
 //     observed via a MutationObserver on <body class> (no new event needed — this
 //     respects the g15 "one orwell:gamechanged dispatcher" rule; we add no
 //     CustomEvent of our own).
@@ -58,26 +61,54 @@
   //              softer flat→curve transition (avoids a hard interior seam).
   // SATURATE/BLUR — paired with the displacement in the backdrop-filter so the
   //              glass keeps the baseline's frosted character under the refraction.
-  var SCALE = 16;            // px max displacement at the rim
-  var SCALE_REDUCED = 8;     // calmer lensing under prefers-reduced-motion
+  // ── RETUNED to the kube.io "Liquid Glass" MUSIC-PLAYER preset ────────────────
+  // The owner's instruction: rip the music-player technique and match its
+  // PARAMETERS panel exactly so Full Glass reads as CLEAR, strongly-REFRACTIVE
+  // glass (the lensing does the work) — NOT fog. The literal music-player SVG
+  // filter chain in the saved article (filter id="parallax-image-hero-filter"):
+  //   feGaussianBlur stdDeviation="0.2"  → blurred_source        (BLUR LEVEL 1.0 — near-zero)
+  //   feImage displacement-map (150×150) → displacement_map
+  //   feDisplacementMap scale="133.97"   → displaced              (REFRACTION 1.00 — strong)
+  //   feColorMatrix saturate values="6"  → displaced_saturated    (SATURATION 6)
+  //   feImage specular-map               → specular_layer
+  //   feComposite operator="in" + feComponentTransfer feFuncA slope="0.2"
+  //   feBlend normal ×2                  → lit                    (SPECULAR OPACITY 0.40)
+  // Our map is generated at the element's OWN pixel resolution (1:1, userSpaceOnUse),
+  // not stretched from a 150px reference, so the kube `scale=133.97` does NOT port
+  // verbatim — it is calibrated against a 150px map. The value below is tuned BY
+  // RENDER to give the music player's strong-but-not-smeared lensing in OUR px units:
+  // the rim clearly bends the backdrop, the center stays crisp.
+  var SCALE = 58;            // px max displacement at the rim — REFRACTION 1.00 (strong lensing)
+  var SCALE_REDUCED = 30;    // calmer lensing under prefers-reduced-motion
   var RADIUS = 18;           // corner radius the lens hugs (≥ kit --win-radius)
-  var EDGE = 22;             // refraction band width inward from each edge (px)
+  var EDGE = 26;             // refraction band width inward from each edge (px) — a touch wider
+                             // so the stronger displacement has room to ramp (no hard interior seam)
   var SQUIRCLE_N = 4;        // squircle exponent (4 ⇒ the article's convex profile)
-  // IN-FILTER blur (folded in from the thecubiq CodePen refinement): the gaussian
-  // blur composes INSIDE the one backdrop-filter url(#id) so blur + displacement
-  // are a single pass. A tiny CSS blur fallback rides alongside in case the SVG
-  // chain is partially honored. Kept modest so the lens reads SHARPER than the
-  // 24px CSS baseline (the refraction is the point — not more frost).
-  var FILTER_BLUR = 16;      // px — stdDeviation of the in-filter <feGaussianBlur> (8 let sharp
-                             // text behind a menu over the dark chat bleed through; Apple's
-                             // Regular material dissolves the backdrop into soft washes)
-  var CSS_BLUR_FALLBACK = 2; // px — thin CSS blur layered with the SVG url()
-  var BACKDROP_SAT = 180;    // % saturate, matching the baseline's lively glass
-  // In-filter tint/lift (feComponentTransfer linear slope+intercept): a subtle
-  // brighten so the glass reads lit, composed in the same pass. slope<1 + a small
-  // intercept = gentle wash; set TINT_SLOPE=1/intercept=0 to disable.
-  var TINT_SLOPE = 0.9;      // linear slope per channel (<1 softens) — thecubiq value
-  var TINT_INTERCEPT = 0.05; // linear intercept per channel (small lift) — thecubiq value
+  // IN-FILTER blur — BLUR LEVEL 1.0 (the music player's stdDeviation="0.2"). This is
+  // the FOG FIX: the prior 16px gaussian smeared the backdrop into milk. Near-zero
+  // gaussian keeps the glass CLEAR so the wallpaper reads THROUGH it, lensed at the
+  // rim. We use ~2px (not 0.2) because our map is at full element resolution and a
+  // hair of blur hides the per-pixel displacement-map stairstepping; the look is
+  // still crisp/transparent, not frosted.
+  var FILTER_BLUR = 2;       // px — stdDeviation of the in-filter <feGaussianBlur> (music-player low)
+  var CSS_BLUR_FALLBACK = 0; // px — NO extra CSS blur; the clear glass must not re-fog
+  // SATURATION — kube's chain runs `feColorMatrix saturate="6"` on the displaced layer
+  // (their "glass dispersion" pop). At 6× it OVER-saturates whatever shows through and
+  // throws a HUE CAST (warm sky → yellow on the sidebar, warm foreground → red on the
+  // composer), which violates the colorless-material mandate ("glass has no hue of its
+  // own; it takes color from content"). A gentle lift (~1.4×) keeps the Apple vibrancy
+  // without casting a colour — the glass stays neutral and merely carries the content's
+  // own colour through. (Owner: "odd yellow hue over the sidebar / red on the chatbar".)
+  var FILTER_SATURATE = 1.4;  // feColorMatrix saturate on the displaced layer (neutralized from kube's 6)
+  var BACKDROP_SAT = 100;    // % CSS backdrop saturate — neutral (the saturate now lives IN-filter,
+                             // exactly like the music player; CSS adds none on top)
+  // The music player has NO tint/lift wash — its character is refraction + saturation +
+  // a faded specular rim, over a CLEAR backdrop. A slope<1 tint wash would darken/fog the
+  // glass (the opposite of the goal), so the tint pass is DISABLED (slope=1, intercept=0 ⇒
+  // the feComponentTransfer pass is skipped entirely). The light glass FILL is supplied by
+  // CSS (body.glass-full light translucent fill), not by an in-filter darkening transfer.
+  var TINT_SLOPE = 1;        // 1 ⇒ no per-channel softening (clear, music-player)
+  var TINT_INTERCEPT = 0;    // 0 ⇒ no lift; the pass is skipped (byte-clear backdrop)
   // SPECULAR RIM HIGHLIGHT (the kube.io feBlend layer — the "lit edge" that makes the
   // glass read as lit, the most "creative" part per the article). It's a rim light:
   // a SECOND generated image (white, alpha = specular intensity) loaded as its own
@@ -95,16 +126,46 @@
   var SPEC_POWER = 6.0;      // exponent — higher = tighter/sharper highlight arc (collapse the
                              // bright part to the lit corner/edge instead of smearing the top)
   var SPEC_GAIN = 1.0;       // multiply the raw specular before clamping (brightness of the rim)
-  var SPEC_ALPHA_MAX = 0.50; // peak rim opacity — brighter is fine once the band is a true hairline
-                             // (a crisp bright line reads "lit"; a dim wide one reads "glossy")
+  var SPEC_ALPHA_MAX = 0.40; // SPECULAR OPACITY = 0.40 (the music-player PARAMETERS value). A crisp
+                             // bright hairline reads "lit"; a dim wide one reads "glossy".
   var SPEC_BAND = 0.10;      // fraction of EDGE band the rim occupies — ~2px hairline, not a 6-10px
                              // band (Apple's lit edge in the refs is 1-2px)
+  // The music-player chain ALSO lays a SECOND, faded copy of the whole specular map back
+  // over the result (feComponentTransfer feFuncA type="linear" slope="0.2" → feBlend),
+  // a soft full-surface specular sheen UNDER the crisp rim. Ported as an extra screen
+  // pass of the specular at this alpha slope. 0 ⇒ skip (just the crisp rim).
+  var SPEC_FADE = 0.2;       // feFuncA slope on the soft specular sheen pass (kube slope="0.2")
+
+  // ── SWITCH-THUMB glass (ripped from the kube.io #switch section) ─────────────
+  // kube.io (https://kube.io/blog/liquid-glass-css-svg/) "Switch": the thumb uses
+  //   backdrop-filter:url(#thumb-filter); background-color:rgba(255,255,255,1);
+  //   box-shadow:0 4px 22px rgba(0,0,0,0.1)
+  // and the article notes Apple's Switch is the ONE component that is NOT convex:
+  //   "This uses a LIP BEZEL, which makes the surface convex on the outside and
+  //    CONCAVE in the middle. This makes the center slider zoomed out, while the
+  //    edges refract the inside." (kube #switch; cf. Apple HIG slider/segmented
+  //    "knob becomes glass on interaction" — lg_hig_slider_poster.png).
+  // We port a CONCAVE radial profile for a round knob: the displacement points
+  // OUTWARD from the center (vs our convex builder's INWARD push), so the backdrop
+  // appears pushed away from the middle — the "zoomed-out center, refracted edge"
+  // lip-bezel read. It is a SEPARATE, STATIC filter (id THUMB_FILTER_ID) generated
+  // once at THUMB_MAP_RES and applied to the knob pseudo-elements by CSS (the knob
+  // is a ::before/::after, not a JS-selectable node). Gated on body.glass-full by
+  // the CSS; the non-glass / non-Chromium fallback keeps the clean white knob.
+  var THUMB_FILTER_ID = "owlg-thumb";
+  var THUMB_MAP_RES = 64;    // px resolution the round concave map is generated at (stretched to the knob)
+  var THUMB_SCALE = 14;      // px max radial displacement at the knob rim (the knob is tiny; keep modest)
+  var THUMB_LIP = 0.34;      // fraction of the radius that is the convex OUTER lip (rim); inside it is concave
+  var THUMB_BLUR = 0.6;      // px in-filter gaussian (a hair, to hide map stairstep on the small knob)
 
   // Perf caps. Mobile gets a HARD-LOWER cap (small GPUs; the refraction is the most
   // expensive thing on the page). collectTargets() reads activeMaxSurfaces() so the
   // cap follows the viewport live (a rotate/resize re-evaluates on the next pass).
-  var MAX_LIVE_SURFACES = 16;        // desktop hard cap on simultaneously-refracted elements
-  var MAX_LIVE_SURFACES_MOBILE = 8;  // small-screen hard cap (GPU-cheap)
+  // Prioritize big/visible-first; the rest fall back to the CSS frosted approximation.
+  // Bubbles are NOT refracted (content layer, HIG), so the live set is just chrome +
+  // open menus — comfortably under this cap on a normal desktop view.
+  var MAX_LIVE_SURFACES = 20;        // desktop hard cap on simultaneously-refracted elements
+  var MAX_LIVE_SURFACES_MOBILE = 8;  // small-screen hard cap (GPU-cheap; CSS glass for the rest)
   var MOBILE_W = 768;                // ≤ this viewport width ⇒ the mobile cap applies
   var SIZE_BUCKET = 8;               // round W/H to this grid so near-equal sizes share a map
   var RESIZE_DEBOUNCE_MS = 140;      // coalesce a resize-drag burst into one re-map
@@ -117,21 +178,35 @@
   // composer, sidebar, modals and the Control-Center dock take priority; the smaller
   // notice + gadget cards come last (they share size buckets, so a rail of identical
   // cards is cheap) and are dropped first when the cap bites on a small screen.
+  // Apple HIG (docs/design/liquid-glass/LIQUID_GLASS_REFERENCE.md): "Liquid Glass forms a
+  // distinct FUNCTIONAL layer for controls and navigation elements — like tab bars and
+  // sidebars — that floats ABOVE the content layer" and "Don't use Liquid Glass in the
+  // CONTENT layer." So the refraction belongs ONLY on the functional/chrome layer:
+  // sidebar/rail, composer, top bar, model picker, window chrome, the dock, menus/popovers,
+  // gadget chrome, and the functional notice cards — NAVIGATION + CONTROLS. The CHAT MESSAGE
+  // BUBBLES are the CONTENT layer and are deliberately EXCLUDED (a refractive pane on the
+  // content is what made them read as fog — and it's the HIG anti-pattern). Bubbles get the
+  // restrained content treatment in CSS instead (the wallpaper shows in the gaps between
+  // bubbles; the glass chrome floats above). Ordered big/visible-first; the CSS frosted blur
+  // is the graceful perf fallback for the overflow past the cap, mobile, and non-Chromium.
   var SELECTORS = [
     ".ow-window",
     "#minimized-dock.ow-has-rows", // the iOS Control-Center dock module
-    ".chat-input-bar",
     "#sidebar",
     ".icon-rail",                  // the collapsed floating sidebar rail (frosted theme)
+    ".chat-input-bar",
     ".modal-content",
-    ".og-card",                    // the control-room gadget cards (prioritized — "gadgets first")
+    ".admin-card",                 // settings / theme / memory / integrations panels
+    ".chat-top-bar",
+    ".model-picker-menu",
+    ".toast",
+    ".og-card",                    // the control-room gadget cards
     // Transient menus & popovers: small + short-lived, so they refract when open and
-    // share size buckets (one map per size). Usually only 1–2 are open at once, so they
-    // sit comfortably under the cap. watchMounts() also schedules a pass when they mount.
+    // share size buckets (one map per size). watchMounts() schedules a pass when they mount.
     ".dropdown",
     ".overflow-menu",
     ".cp-popover",
-    ".on-card",                    // the notice kit
+    ".on-card",                    // the notice kit (functional affordance)
   ];
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
@@ -338,6 +413,105 @@
     return bw + "x" + bh + "x" + RADIUS + "x" + scale;
   }
 
+  // ── Concave round-knob displacement map (the kube.io switch "lip bezel") ──────
+  // A CIRCULAR map for the toggle thumb. Unlike the convex rounded-rect builder
+  // (displacement points INWARD), this is the switch's LIP BEZEL: a thin convex
+  // OUTER lip (rim, fraction THUMB_LIP of the radius) that refracts the inside,
+  // wrapping a CONCAVE interior whose displacement points OUTWARD from the center
+  // (so the middle reads "zoomed out"). R/G encode x/y displacement (128 neutral),
+  // direction = radial. Returns a PNG dataURL stretched to the knob via 100%×100%.
+  function buildThumbMapDataUrl() {
+    var n = THUMB_MAP_RES;
+    var canvas = document.createElement("canvas");
+    canvas.width = n; canvas.height = n;
+    var ctx = canvas.getContext("2d");
+    var img = ctx.createImageData(n, n);
+    var data = img.data;
+    var cx = (n - 1) / 2, cy = (n - 1) / 2;
+    var R = n / 2; // knob radius in map px
+    for (var y = 0; y < n; y++) {
+      for (var x = 0; x < n; x++) {
+        var vx = x - cx, vy = y - cy;
+        var dist = Math.sqrt(vx * vx + vy * vy);
+        var t = Math.min(1, dist / R); // 0 center → 1 rim
+        var dr = 0, dg = 0;
+        if (t > 0.001 && t <= 1) {
+          var ux = vx / (dist || 1), uy = vy / (dist || 1); // outward radial unit
+          var mag; // signed radial magnitude in [-1,1]: + = outward (concave), - = inward (convex lip)
+          if (t >= 1 - THUMB_LIP) {
+            // OUTER LIP — convex: pull the backdrop INWARD (negative radial), peaking
+            // at the very rim and easing to 0 at the lip's inner boundary.
+            var lt = (t - (1 - THUMB_LIP)) / THUMB_LIP; // 0 at lip inner → 1 at rim
+            mag = -Math.pow(lt, 1.6);
+          } else {
+            // INNER FIELD — concave: push OUTWARD (positive radial), gentle ramp from
+            // 0 at the center to its max at the lip boundary (the "zoomed-out" middle).
+            var ct = t / (1 - THUMB_LIP); // 0 center → 1 at lip boundary
+            mag = Math.pow(ct, 1.4);
+          }
+          dr = ux * mag;
+          dg = uy * mag;
+        }
+        var i = (y * n + x) * 4;
+        data[i] = Math.max(0, Math.min(255, Math.round(128 + dr * 127)));     // R = x-displacement
+        data[i + 1] = Math.max(0, Math.min(255, Math.round(128 + dg * 127))); // G = y-displacement
+        data[i + 2] = 128;
+        data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return canvas.toDataURL("image/png");
+  }
+
+  var thumbBuilt = false;
+  function ensureThumbFilter() {
+    if (thumbBuilt && document.getElementById(THUMB_FILTER_ID)) return;
+    var svg = ensureHost();
+    // Drop any stale copy (e.g. host was re-created) before rebuilding.
+    var prev = document.getElementById(THUMB_FILTER_ID);
+    if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+    var url = buildThumbMapDataUrl();
+    var filter = document.createElementNS(SVG_NS, "filter");
+    filter.setAttribute("id", THUMB_FILTER_ID);
+    // objectBoundingBox so the round map stretches to the knob's exact box (any size).
+    filter.setAttribute("filterUnits", "objectBoundingBox");
+    filter.setAttribute("x", "0");
+    filter.setAttribute("y", "0");
+    filter.setAttribute("width", "1");
+    filter.setAttribute("height", "1");
+    filter.setAttribute("color-interpolation-filters", "sRGB");
+
+    var feImage = document.createElementNS(SVG_NS, "feImage");
+    feImage.setAttribute("x", "0");
+    feImage.setAttribute("y", "0");
+    feImage.setAttribute("width", "100%");
+    feImage.setAttribute("height", "100%");
+    feImage.setAttribute("preserveAspectRatio", "none");
+    feImage.setAttribute("result", "thumb_map");
+    feImage.setAttributeNS(XLINK_NS, "xlink:href", url);
+    feImage.setAttribute("href", url);
+    filter.appendChild(feImage);
+
+    var feDisp = document.createElementNS(SVG_NS, "feDisplacementMap");
+    feDisp.setAttribute("in", "SourceGraphic");
+    feDisp.setAttribute("in2", "thumb_map");
+    feDisp.setAttribute("scale", String(reducedMotion() ? Math.round(THUMB_SCALE * 0.6) : THUMB_SCALE));
+    feDisp.setAttribute("xChannelSelector", "R");
+    feDisp.setAttribute("yChannelSelector", "G");
+    feDisp.setAttribute("result", "thumb_refracted");
+    filter.appendChild(feDisp);
+
+    if (THUMB_BLUR > 0) {
+      var feBlur = document.createElementNS(SVG_NS, "feGaussianBlur");
+      feBlur.setAttribute("in", "thumb_refracted");
+      feBlur.setAttribute("stdDeviation", String(THUMB_BLUR));
+      filter.appendChild(feBlur);
+    }
+
+    svg.appendChild(filter);
+    thumbBuilt = true;
+  }
+
   // Get (or build) a filter for a given content-box size; returns its DOM id.
   function filterFor(w, h, scale) {
     var key = bucketKey(w, h, scale);
@@ -347,19 +521,32 @@
     var id = "owlg-" + (filterCount++);
     var filter = document.createElementNS(SVG_NS, "filter");
     filter.setAttribute("id", id);
-    // userSpaceOnUse over the map's own box so the displacement aligns 1:1 with px.
-    filter.setAttribute("filterUnits", "userSpaceOnUse");
+    // ── EDGE-ALIGNMENT FIX (owner: "refraction looks slightly off to the left of
+    // the blue button") ────────────────────────────────────────────────────────
+    // Previously the filter region + feImage were sized in userSpaceOnUse to the
+    // BUCKETED map dimensions (map.w × map.h, W/H rounded to the 8px SIZE_BUCKET
+    // grid) and pinned at x=0,y=0. When the element's true rendered size differed
+    // from its bucket (rounding, or fractional flex/DPR sizes), the rim band landed
+    // at `map.w`/`map.h` instead of the real edge — pulled INWARD by up to a bucket,
+    // so the lensing/specular seam sat left of the actual right edge. Switching the
+    // filter region to objectBoundingBox (0,0,1,1) and the feImage to 100%×100%
+    // (preserveAspectRatio="none") makes the ONE shared bucketed map stretch to fill
+    // each element's EXACT box, so the rim band hugs the true edge on every surface
+    // regardless of size — and the same cached filter now fits every box (the bucket
+    // still shares the dataURL for perf). primitiveUnits stays the default
+    // (userSpaceOnUse), so feDisplacementMap `scale` remains in px (unchanged).
+    filter.setAttribute("filterUnits", "objectBoundingBox");
     filter.setAttribute("x", "0");
     filter.setAttribute("y", "0");
-    filter.setAttribute("width", String(map.w));
-    filter.setAttribute("height", String(map.h));
+    filter.setAttribute("width", "1");
+    filter.setAttribute("height", "1");
     filter.setAttribute("color-interpolation-filters", "sRGB");
 
     var feImage = document.createElementNS(SVG_NS, "feImage");
     feImage.setAttribute("x", "0");
     feImage.setAttribute("y", "0");
-    feImage.setAttribute("width", String(map.w));
-    feImage.setAttribute("height", String(map.h));
+    feImage.setAttribute("width", "100%");
+    feImage.setAttribute("height", "100%");
     feImage.setAttribute("result", "displacement_map");
     feImage.setAttribute("preserveAspectRatio", "none");
     feImage.setAttributeNS(XLINK_NS, "xlink:href", map.url);
@@ -388,8 +575,23 @@
       lastResult = "blurred";
     }
 
-    // IN-FILTER tint/lift (CodePen refinement #1): a gentle per-channel linear
-    // transfer for the lit-glass wash, composed in the same pass.
+    // IN-FILTER SATURATE (ported LITERALLY from the music-player chain:
+    // `feColorMatrix type="saturate" values="6"` on the displaced layer). This is the
+    // glass-dispersion "pop" — the lensed backdrop gets saturated so the refraction
+    // reads as real glass, not a smudge. Runs IN the chain (like kube), not as a CSS
+    // backdrop-filter saturate. Skipped when FILTER_SATURATE === 1.
+    if (FILTER_SATURATE !== 1) {
+      var feSat = document.createElementNS(SVG_NS, "feColorMatrix");
+      feSat.setAttribute("in", lastResult);
+      feSat.setAttribute("type", "saturate");
+      feSat.setAttribute("values", String(FILTER_SATURATE));
+      feSat.setAttribute("result", "saturated");
+      filter.appendChild(feSat);
+      lastResult = "saturated";
+    }
+
+    // Optional per-channel linear transfer (kept for compatibility; DISABLED in the
+    // music-player preset — slope=1/intercept=0 ⇒ skipped, the glass stays clear).
     if (TINT_SLOPE !== 1 || TINT_INTERCEPT !== 0) {
       var feCT = document.createElementNS(SVG_NS, "feComponentTransfer");
       feCT.setAttribute("in", lastResult);
@@ -405,22 +607,29 @@
       lastResult = "tinted";
     }
 
-    // SPECULAR RIM (the kube.io feBlend layer): load the white rim map as a SECOND
-    // feImage and screen it over the lit backdrop so a bright highlight rides the
-    // edge. mode="screen" lightens only where the rim has alpha (transparent center =
-    // identity), giving the "lit glass" edge. Skipped when SPEC_ENABLE is off / no map.
+    // SPECULAR (the kube.io specular-map + feBlend layers). kube generates a dedicated
+    // specular-map and lays it over the saturated/displaced result in TWO passes:
+    //   1) the crisp specular (composited `in` with the saturated layer) — our white
+    //      rim map screened over the result is the equivalent "lit edge".
+    //   2) a SECOND, alpha-FADED copy of the whole specular (feFuncA slope="0.2"),
+    //      blended back as a soft full-surface sheen UNDER the crisp rim.
+    // We reproduce both from our single generated rim/spec map. mode="screen" lightens
+    // only where the spec has alpha (transparent center = identity = clear glass).
     if (SPEC_ENABLE && map.specUrl) {
       var feSpec = document.createElementNS(SVG_NS, "feImage");
       feSpec.setAttribute("x", "0");
       feSpec.setAttribute("y", "0");
-      feSpec.setAttribute("width", String(map.w));
-      feSpec.setAttribute("height", String(map.h));
+      // 100%×100% over the element box (matches the displacement feImage) so the
+      // specular rim aligns with the true edge too — see the EDGE-ALIGNMENT FIX note.
+      feSpec.setAttribute("width", "100%");
+      feSpec.setAttribute("height", "100%");
       feSpec.setAttribute("preserveAspectRatio", "none");
       feSpec.setAttribute("result", "specular_layer");
       feSpec.setAttributeNS(XLINK_NS, "xlink:href", map.specUrl);
       feSpec.setAttribute("href", map.specUrl);
       filter.appendChild(feSpec);
 
+      // Pass 1: the crisp specular rim screened over the result (the "lit edge").
       var feBlend = document.createElementNS(SVG_NS, "feBlend");
       feBlend.setAttribute("in", lastResult);
       feBlend.setAttribute("in2", "specular_layer");
@@ -428,6 +637,27 @@
       feBlend.setAttribute("result", "lit");
       filter.appendChild(feBlend);
       lastResult = "lit";
+
+      // Pass 2: the kube feFuncA-faded soft sheen — fade the specular's alpha by the
+      // slope, then screen it back for a gentle full-surface glass sheen under the rim.
+      if (SPEC_FADE > 0) {
+        var feFade = document.createElementNS(SVG_NS, "feComponentTransfer");
+        feFade.setAttribute("in", "specular_layer");
+        var fa = document.createElementNS(SVG_NS, "feFuncA");
+        fa.setAttribute("type", "linear");
+        fa.setAttribute("slope", String(SPEC_FADE));
+        feFade.appendChild(fa);
+        feFade.setAttribute("result", "specular_faded");
+        filter.appendChild(feFade);
+
+        var feBlend2 = document.createElementNS(SVG_NS, "feBlend");
+        feBlend2.setAttribute("in", lastResult);
+        feBlend2.setAttribute("in2", "specular_faded");
+        feBlend2.setAttribute("mode", "screen");
+        feBlend2.setAttribute("result", "lit2");
+        filter.appendChild(feBlend2);
+        lastResult = "lit2";
+      }
     }
 
     svg.appendChild(filter);
@@ -526,8 +756,12 @@
     return out;
   }
 
+  // Refraction is the FULL GLASS tier only. The body carries `theme-frosted` for
+  // BOTH glass tiers (CSS material) and `glass-full` ONLY for Full Glass — which is
+  // what gates the Chromium SVG refraction. So this checks `glass-full`, not
+  // `theme-frosted`: the Frosted tier keeps the CSS blur-glass with no refraction.
   function isFrosted() {
-    return !!(document.body && document.body.classList.contains("theme-frosted"));
+    return !!(document.body && document.body.classList.contains("glass-full"));
   }
 
   // The public re-apply pass: only under the frosted theme + Chromium support.
@@ -619,6 +853,9 @@
     }
     try {
       ensureHost();
+      // Build the static switch-thumb filter once (the toggle knobs reference it by
+      // id from CSS, gated on body.glass-full). Chromium-only path (supported() above).
+      try { ensureThumbFilter(); } catch (_) {}
       if (window.ResizeObserver) ro = new ResizeObserver(onResizeEntries);
       watchTheme();
       watchMounts();

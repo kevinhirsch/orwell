@@ -20,7 +20,20 @@
   "use strict";
 
   // Surfaces that carry the glass material (mirror style.css's frosted set + liquidGlass).
-  var SURFACES = ".ow-window, .chat-input-bar, #sidebar, .icon-rail, .modal-content, .og-card, .on-card, #minimized-dock.ow-has-rows, .dropdown, .overflow-menu, .cp-popover";
+  // Adaptive legibility runs under BOTH glass tiers (keyed on theme-frosted), so this
+  // list must cover EVERY newly-glassed surface — chrome, chat bubbles, transient
+  // indicators — or those surfaces lose adaptive ink/veil. #orwell-headshot is excluded
+  // (gating dialog, kept opaque in CSS).
+  var SURFACES = [
+    // — Chrome / large panels (no flip → mute) —
+    ".ow-window", "#sidebar", ".icon-rail", ".modal-content", ".admin-card",
+    ".chat-top-bar", ".model-picker-menu", ".og-card", ".on-card", ".toast",
+    ".orwell-chat-hint", ".attach-card", ".dropdown", ".overflow-menu", ".cp-popover",
+    // — Chat bubbles (large → mute, no flip) —
+    ".msg-ai", ".msg-user", ".msg-ooc",
+    // — Small bars / transient pills (flip ink) —
+    ".chat-input-bar", "#minimized-dock.ow-has-rows", ".thinking-section", ".tool-indicator",
+  ].join(", ");
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
   // Apple's adaptation is SIZE-DEPENDENT (WWDC25 219 + HIG Color):
@@ -44,7 +57,11 @@
   var VEIL_FULL_AT_SMALL = 0.35;
   var VEIL_FULL_AT_LARGE = 0.62;
   // Small bars/tiles that FLIP (everything else in SURFACES is treated as large / no-flip).
-  var FLIP_SET = ".chat-input-bar, .og-card, #minimized-dock.ow-has-rows";
+  // The composer bar, gadget tiles, the dock, and the small transient pills (the
+  // typing/thinking indicator, the tool-indicator chip) are small bars → flip the ink.
+  // Large surfaces (windows, sidebar, modals, admin-card, toasts, chat bubbles, menus)
+  // are NOT here → they mute via the adaptive veil and keep light --fg.
+  var FLIP_SET = ".chat-input-bar, .og-card, #minimized-dock.ow-has-rows, .thinking-section, .tool-indicator";
   // LINEAR-Y flip point: backdrop above this ⇒ DARK ink. The WCAG black-vs-white crossover is
   // L≈0.18; the small bar's own veil darkens the effective background a touch, so the flip
   // sits just above it at 0.22 (≈ perceptual mid-grey sRGB≈0.5). 0.36 fired far too late —
