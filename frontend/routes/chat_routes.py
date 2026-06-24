@@ -180,8 +180,15 @@ def _recover_empty_session_model(sess, session_id: str, owner: str | None = None
     401/503 instead of using the model the user already picked.
 
     Returns True iff sess.model was repaired.
+
+    Also repairs a session whose saved model is a text→image model: an endpoint that serves
+    both chat and image can have an image model persisted onto a chat session (the old
+    visible[0] recovery, or a corrupted default), and it can't hold a conversation — so we
+    re-derive the first real CHAT model in that case too.
     """
-    if getattr(sess, "model", None):
+    from src.llm_core import is_image_model
+    existing = getattr(sess, "model", None)
+    if existing and not is_image_model(existing):
         return False
     db = SessionLocal()
     try:
