@@ -162,25 +162,46 @@ const TIRED = { swayDamp: 0.9 }; // fraction of sway lost at full social penalty
 // midnight to an additive `strength` floor folded into the movement pull, so awake owls gravitate to
 // whatever room already has people. Tunable — the lever for WHEN staying up buys company.
 const LATE_CLUSTER_DEFAULT = 0.6;
+const FRIENDLY_LEAN_DEFAULT = 0.0; // default: the engine's natural friendly:game ratio (the sweep explores leaning friendlier)
 function clusterBoost(clock: number, strength: number): number {
   if (clock < SLEEP_BLOCK_START) return 0;                          // daytime: no co-location nudge
   const frac = Math.min(1, (clock - SLEEP_BLOCK_START) / (3 * 60)); // 0 at 00:00 → 1 by 03:00
   return strength * (0.6 + 0.4 * frac);                             // live from midnight, fuller by 03:00
 }
 
-// ── Scene-nature classes ──────────────────────────────────────────────────────────────────────
+// ── Scene-nature classes (0078 §3: motivation sets the nature; FRIENDLY builds the bond, never vote math) ─
 const GAME: ReadonlySet<InteractionType> = new Set<InteractionType>(["alliance", "strategy", "conflict", "betrayal"]);
 const isGame = (t: InteractionType): boolean => GAME.has(t);
+// FRIENDLY = ordinary downtime (the default texture of a house that isn't always plotting). Owner ruling:
+// a friendly scene nudges AFFINITY ONLY — the relationship warms, but NO strategic weight moves (no
+// trust/threat/alignment ⇒ it can never feed the vote math). `friendlyImpact` strips the engine IMPACT to
+// its affinity (gossip has none in IMPACT, so it gets a small warm floor — "hanging out warms you").
+const FRIENDLY: ReadonlySet<InteractionType> = new Set<InteractionType>(["bonding", "showmance", "gossip"]);
+const FRIENDLY_AFFINITY_FLOOR = 0.08;
+const friendlyImpact = (type: InteractionType): Partial<EdgeSignals> =>
+  ({ affinity: RELATIONSHIP_CONSTANTS.IMPACT[type].affinity ?? FRIENDLY_AFFINITY_FLOOR });
+// |strategic| weight in an impact — the proof metric: friendly folds must sum to 0 (affinity only).
+const strategicMass = (imp: Partial<EdgeSignals>): number =>
+  Math.abs(imp.trust ?? 0) + Math.abs(imp.threat ?? 0) + Math.abs(imp.alignment ?? 0);
 // The friction subset that DRAINS the people in it (→ earlier bedtime). Alliance/strategy are game but not draining.
 const CONFLICT: ReadonlySet<InteractionType> = new Set<InteractionType>(["conflict", "betrayal"]);
 
 // ── Injection point 1: the dial-biased MOVEMENT pull (a's intent toward b) ─────────────────────
+// You SEEK OUT people you actively like, not neutral acquaintances — so the pull reads warmth/threat
+// ABOVE the neutral edge baseline (affinity 0.25, threat 0.1). Without this every pair pulls weakly and
+// `assignRooms`' rich-get-richer room weighting collapses the whole house into one room (observed: 12/15
+// in the living-room) → co-presence stops being selective. Subtracting the baseline makes movement pick
+// out the few who matter, so the house spreads into MOTIVATED clusters and co-presence becomes earned.
+const PULL_AFFINITY_BASE = 0.3; // seek only above-neutral warmth
+const PULL_THREAT_BASE = 0.15;  // work/avoid only an above-neutral threat
 function movePull(d: Dials, e: EdgeSignals, bIsHoh: boolean, moveIntent: number): number {
-  const bond = e.affinity * (0.4 + 0.6 * d.socialEnergy + 0.4 * d.loyalty);      // seek allies/company
-  const work = e.threat * d.strategicAggression * d.confrontation;               // approach a rival to work them (bold)
-  const avoid = e.threat * (1 - d.confrontation) * (0.5 + d.grudge);             // avoidant/grudgeful keep distance
+  const warmth = Math.max(0, e.affinity - PULL_AFFINITY_BASE);
+  const menace = Math.max(0, e.threat - PULL_THREAT_BASE);
+  const bond = warmth * (0.4 + 0.6 * d.socialEnergy + 0.4 * d.loyalty);          // seek allies/company
+  const work = menace * d.strategicAggression * d.confrontation;                 // approach a rival to work them (bold)
+  const avoid = menace * (1 - d.confrontation) * (0.5 + d.grudge);               // avoidant/grudgeful keep distance
   const power = bIsHoh ? d.powerProximity : 0;                                   // court the HOH
-  const romance = e.affinity * d.showmancePull * 0.6;                            // orbit a romance
+  const romance = warmth * d.showmancePull * 0.6;                                // orbit a romance
   return Math.max(0, moveIntent * (bond + work + power + romance - avoid));
 }
 
@@ -230,10 +251,11 @@ interface RunOpts {
   observeDays: number;
   minutesPerTick: number;
   lateCluster: number; // strength of the late-night co-location pull (the cluster curve)
+  friendlyLean: number; // optional affinity nudge on the read → more FRIENDLY (downtime) scenes (the friendly:game knob)
 }
 
 function run(opts: RunOpts) {
-  const { seed, moveIntent, warmupDays, observeDays, minutesPerTick, lateCluster } = opts;
+  const { seed, moveIntent, warmupDays, observeDays, minutesPerTick, lateCluster, friendlyLean } = opts;
   const house: Houseguest[] = generateHouse(new SeededRandom(seed)).npcs;
   const ids = house.map((h) => h.id);
   const name = new Map(house.map((h) => [h.id, h.name] as const));
@@ -266,7 +288,13 @@ function run(opts: RunOpts) {
   let currentClock = DAY_START_MIN;
   const dialPull = (a: EntityId, b: EntityId): number =>
     movePull(dials.get(a)!, rel.edge(a, b), b === hoh, moveIntent) + clusterBoost(currentClock, lateCluster);
-  const dialEdge = (a: EntityId, b: EntityId): EdgeSignals => tiltedEdge(dials.get(a)!, rel.edge(a, b));
+  // The scene-selection read. `friendlyLean` nudges affinity up so `natureWeights` favors bonding/showmance
+  // (downtime) — the friendly:game knob. (It rides on the read, so it lightly warms pairing too; acceptable
+  // for a play knob, and the only no-engine-change way to lean the ratio.)
+  const dialEdge = (a: EntityId, b: EntityId): EdgeSignals => {
+    const e = tiltedEdge(dials.get(a)!, rel.edge(a, b));
+    return friendlyLean ? { ...e, affinity: clamp01(e.affinity + friendlyLean) } : e;
+  };
 
   let occ: Map<EntityId, Room> | null = null;
   const obs = new Map<EntityId, Obs>(ids.map((id) => [id, freshObs()] as const));
@@ -279,6 +307,12 @@ function run(opts: RunOpts) {
   // midnight, early birds trickle back before the 08:00 wall). 8 buckets: 00:00..07:00.
   const lateHourSum = new Array(8).fill(0) as number[];
   const lateHourTicks = new Array(8).fill(0) as number[];
+  // Scene-nature instrumentation (0078 §3). The PROOF: strategic weight moved by friendly folds must be 0.
+  let friendlyAffinityMoved = 0, friendlyStrategicMoved = 0, gameStrategicMoved = 0;
+  // Nature follows motivation: bucket each recorded scene by the initiator's TRUE read of the partner
+  // (warm / neutral / threatened) → friendly:game mix per bucket (warm⇒friendly, threat⇒game expected).
+  const natureBucket = { warm: { f: 0, g: 0 }, neutral: { f: 0, g: 0 }, threat: { f: 0, g: 0 } };
+  const BUCKET_MARGIN = 0.1;
 
   // Per-night emergent sleep state (reset each day).
   const turnIn = new Map<EntityId, number>();   // the clock minute this NPC went to bed (undefined ⇒ still up)
@@ -311,18 +345,18 @@ function run(opts: RunOpts) {
     return Math.max(0, socialFactor * social + STAY.restlessW * restless - STAY.drainW * drain + STAY.jitterW * jitter);
   };
 
-  // Mirror the orchestrator fold (partner updates their belief about the initiator), but a SLEEP-DEPRIVED
-  // initiator moves the needle LESS — their fold is scaled down in magnitude (symmetric: worse at warming AND
-  // souring). It's reduced sway, NOT a redirected one, so it never changes the kind of scene or who they are.
-  // A fully-rested initiator (social=0) takes the plain `applyDirected` path ⇒ byte-identical to the no-debt model.
-  const foldScene = (initiator: EntityId, partner: EntityId, type: InteractionType): void => {
-    const social = tiredSocial.get(initiator) ?? 0;
-    if (social <= 0) {
-      rel.applyDirected(partner, initiator, type, socRng);
-      return;
-    }
-    const scaled = scaleImpact(RELATIONSHIP_CONSTANTS.IMPACT[type], Math.max(0, 1 - TIRED.swayDamp * social));
-    rel.applyImpactDirected(partner, initiator, scaled, socRng);
+  // Fold one scene (partner updates their belief about the initiator). Two model rules ride here:
+  //   • FRIENDLY scenes fold AFFINITY ONLY (0078 §3) — no strategic weight, so downtime never feeds votes;
+  //   • a SLEEP-DEPRIVED initiator moves the needle LESS — the fold is scaled down in magnitude (symmetric).
+  // `applyOneDirection` always draws its 4 jitters regardless of impact contents, so stripping friendly to
+  // affinity-only does NOT shift the seeded rng stream (only the magnitudes differ). Returns the impact it
+  // actually folded, so the caller can accumulate the strategic-weight proof.
+  const foldScene = (initiator: EntityId, partner: EntityId, type: InteractionType): Partial<EdgeSignals> => {
+    const base = FRIENDLY.has(type) ? friendlyImpact(type) : RELATIONSHIP_CONSTANTS.IMPACT[type];
+    const damp = Math.max(0, 1 - TIRED.swayDamp * (tiredSocial.get(initiator) ?? 0));
+    const impact = damp === 1 ? base : scaleImpact(base, damp);
+    rel.applyImpactDirected(partner, initiator, impact, socRng);
+    return impact;
   };
 
   // One ~1h slice at a given clock minute. Decides emergent turn-ins, then runs the society among the AWAKE.
@@ -355,10 +389,20 @@ function run(opts: RunOpts) {
       events, rng: socRng, npcs: awake, interactions: 4, edgeOf: dialEdge, occupancy: occ,
     });
     for (const s of scenes) {
-      foldScene(s.initiator, s.partner, s.type); // fold, with the tired initiator's sway scaled down
+      const friendly = FRIENDLY.has(s.type);
+      // Bucket by the initiator's TRUE read of the partner BEFORE the fold mutates it (nature-follows-motivation).
+      const e = rel.edge(s.initiator, s.partner);
+      const bond = (e.trust + e.affinity) / 2, thr = e.threat;
+      const impact = foldScene(s.initiator, s.partner, s.type); // fold (affinity-only if friendly; sway-damped if tired)
       if (CONFLICT.has(s.type)) { // a character conflict drains BOTH ⇒ both turn in earlier tonight
         bump(conflictDrain, s.initiator); bump(conflictDrain, s.partner);
         if (record) { obs.get(s.initiator)!.fights++; obs.get(s.partner)!.fights++; }
+      }
+      if (record) {
+        if (friendly) { friendlyAffinityMoved += Math.abs(impact.affinity ?? 0); friendlyStrategicMoved += strategicMass(impact); }
+        else { gameStrategicMoved += strategicMass(impact); }
+        const b = thr > bond + BUCKET_MARGIN ? natureBucket.threat : bond > thr + BUCKET_MARGIN ? natureBucket.warm : natureBucket.neutral;
+        if (friendly) b.f++; else b.g++;
       }
     }
     if (!record) return;
@@ -406,13 +450,17 @@ function run(opts: RunOpts) {
   for (let day = 0; day < warmupDays; day++) runDay(false); // let relationships + positions form
   for (let day = 0; day < observeDays; day++) runDay(true);  // measure
 
-  return { ids, name, arche, dials, chrono, naturalBed, rel, obs, phaseStats, sleepAgg, lateCompany, lateAlone, lateHourSum, lateHourTicks, minutesPerTick };
+  return {
+    ids, name, arche, dials, chrono, naturalBed, rel, obs, phaseStats, sleepAgg, lateCompany, lateAlone,
+    lateHourSum, lateHourTicks, minutesPerTick, moveIntent,
+    friendlyAffinityMoved, friendlyStrategicMoved, gameStrategicMoved, natureBucket,
+  };
 }
 
 // ── Readout ──────────────────────────────────────────────────────────────────────────────────
-function report(seed: number, moveIntent: number, minutesPerTick: number, lateCluster: number): void {
-  const { ids, name, arche, chrono, rel, obs, phaseStats, sleepAgg, lateHourSum, lateHourTicks } =
-    run({ seed, moveIntent, warmupDays: 3, observeDays: 4, minutesPerTick, lateCluster });
+function report(seed: number, moveIntent: number, minutesPerTick: number, lateCluster: number, friendlyLean: number): void {
+  const r = run({ seed, moveIntent, warmupDays: 3, observeDays: 4, minutesPerTick, lateCluster, friendlyLean });
+  const { ids, name, arche, dials, chrono, rel, obs, phaseStats, sleepAgg, lateHourSum, lateHourTicks } = r;
   const label = (id: EntityId): string => `${name.get(id)} (${arche.get(id)})`;
   const ticksPerDay = Math.ceil((DAY_END_MIN - DAY_START_MIN) / minutesPerTick);
 
@@ -474,10 +522,10 @@ function report(seed: number, moveIntent: number, minutesPerTick: number, lateCl
       comp: clamp01(debt / DEBT.compDiv), social: clamp01(debt / DEBT.socialDiv),
     };
   }).sort((x, y) => y.social - x.social); // tired owls on top
-  for (const r of sleepRows) {
+  for (const row of sleepRows) {
     console.log(
-      `     ${label(r.id).padEnd(34)} ${chronoTag(chrono.get(r.id)!)}   ${hhmm(r.bed).padStart(5)}  ${hhmm(r.wake).padStart(5)}  ${r.slept.toFixed(1).padStart(4)}h` +
-      `   ${r.comp.toFixed(2)}  ${String(Math.round(r.social * 100)).padStart(3)}%   ${r.fights.toFixed(1).padStart(4)}   ${String(r.late).padStart(4)}`,
+      `     ${label(row.id).padEnd(34)} ${chronoTag(chrono.get(row.id)!)}   ${hhmm(row.bed).padStart(5)}  ${hhmm(row.wake).padStart(5)}  ${row.slept.toFixed(1).padStart(4)}h` +
+      `   ${row.comp.toFixed(2)}  ${String(Math.round(row.social * 100)).padStart(3)}%   ${row.fights.toFixed(1).padStart(4)}   ${String(row.late).padStart(4)}`,
     );
   }
   console.log(`     (sway% = reduced EFFECTIVENESS, not a personality change: a tired actor's social folds move others`);
@@ -496,6 +544,59 @@ function report(seed: number, moveIntent: number, minutesPerTick: number, lateCl
     const pct = f + g ? Math.round((100 * g) / (f + g)) : 0;
     console.log(`     ${a.padEnd(18)} ${String(pct).padStart(3)}% game   (${f}f / ${g}g)`);
   }
+
+  // Q2 — scene nature (0078 §3): friendly = AFFINITY-ONLY (the proof), and nature follows motivation.
+  console.log(`\n  ── scene nature (Q2: friendly builds the bond but NEVER the vote math; nature follows the read) ──`);
+  console.log(`     PROOF — strategic weight (|Δtrust|+|Δthreat|+|Δalign|) moved by FRIENDLY scenes: ${r.friendlyStrategicMoved.toFixed(2)}` +
+    `  (affinity moved: ${r.friendlyAffinityMoved.toFixed(1)})`);
+  console.log(`             …by GAME scenes: ${r.gameStrategicMoved.toFixed(1)}  ⇒ only game talk feeds votes. ${r.friendlyStrategicMoved === 0 ? "✓" : "✗ LEAK"}`);
+  const bktLine = (k: "warm" | "neutral" | "threat"): string => {
+    const b = r.natureBucket[k]; const t = b.f + b.g;
+    return `${k.padEnd(9)} ${String(b.f).padStart(3)}f/${String(b.g).padStart(3)}g (${t ? Math.round((100 * b.g) / t) : 0}% game)`;
+  };
+  console.log(`     by the initiator's read of the partner:  ${bktLine("warm")}   ${bktLine("neutral")}   ${bktLine("threat")}`);
+  console.log(`     (expected: WARM pairs skew friendly, THREATENED pairs skew game — motivation choosing the nature.)`);
+
+  // Q3 — intent realized: is bonding EARNED by motivation, or "just from a shared room"? The room itself
+  // COLLAPSES into one hangout (assignRooms has attraction but no anti-crowding — see the room-spread note),
+  // so room co-presence is near-universal and a poor instrument. But WHO you actually have SCENES with is
+  // tie-weighted (motivated) even inside the mega-room — so we measure intent at the SCENE-PARTNER level.
+  const K_SOUGHT = 3;
+  const hohId = ids[0]!;
+  let intentSum = 0, baseSum = 0, bondMatch = 0, counted = 0;
+  const roomCounts = new Map<Room, number>();
+  for (const id of ids) {
+    const o = obs.get(id)!;
+    for (const [room, n] of o.room) bump(roomCounts, room, n);
+    const sceneTotal = [...o.scenePartners.values()].reduce((s, c) => s + c, 0);
+    const others = ids.filter((x) => x !== id);
+    const pulls = others
+      .map((x) => [x, movePull(dials.get(id)!, rel.edge(id, x), x === hohId, r.moveIntent)] as const)
+      .filter(([, p]) => p > 0).sort((a, b) => b[1] - a[1]);
+    const sought = new Set(pulls.slice(0, K_SOUGHT).map(([x]) => x));
+    if (sceneTotal === 0 || sought.size === 0) continue;
+    let withSought = 0;
+    for (const [x, c] of o.scenePartners) if (sought.has(x)) withSought += c;
+    intentSum += withSought / sceneTotal;            // share of SCENES spent with sought targets
+    baseSum += sought.size / others.length;          // luck: the share if scenes were uniform
+    const topBond = others.map((x) => [x, rel.bondStrength(id, x)] as const).sort((a, b) => b[1] - a[1])[0];
+    if (topBond && sought.has(topBond[0])) bondMatch++;
+    counted++;
+  }
+  const intentPct = counted ? (100 * intentSum) / counted : 0;
+  const basePct = counted ? (100 * baseSum) / counted : 0;
+  console.log(`\n  ── intent realized (Q3: is bonding EARNED by motivation, or "just from a shared room"?) ──`);
+  console.log(`     scenes spent with SOUGHT targets: ${intentPct.toFixed(0)}%   vs motiveless baseline ${basePct.toFixed(0)}%` +
+    `   (lift ${basePct ? (intentPct / basePct).toFixed(2) : "—"}×)`);
+  console.log(`     NPCs whose STRONGEST bond is someone they sought: ${counted ? Math.round((100 * bondMatch) / counted) : 0}%` +
+    `  ⇒ ${intentPct > basePct * 1.3 ? "scene-pairing is intentional (bonding is earned, not arbitrary)" : "interactions still look like luck"}.`);
+  const topRoom = topN(roomCounts, 1)[0];
+  const roomTotal = [...roomCounts.values()].reduce((s, c) => s + c, 0);
+  console.log(`     FINDING — the house collapses into one hangout (${topRoom ? `${topRoom[0]} holds ${Math.round((100 * topRoom[1]) / roomTotal)}% of presence` : "—"}):`);
+  console.log(`     assignRooms has attraction but NO anti-crowding/capacity, so even selective pull snowballs into one`);
+  console.log(`     room. Selectivity lives in SCENE-PAIRING, not room occupancy ⇒ 0078 Phase-1 needs privacy-seeking /`);
+  console.log(`     0077 room capacity to make WHO-IS-IN-A-ROOM-TOGETHER readable. (The original bug — arbitrary bonding`);
+  console.log(`     — is NOT present: scene-pairing + the resulting bonds track motivation; co-LOCATION is just unselective.)`);
 }
 
 // ── Time-knob sweep ────────────────────────────────────────────────────────────────────────────
@@ -508,7 +609,7 @@ function timeSweep(seed: number, moveIntent: number, lateCluster: number): void 
   console.log(`  minutes/    slices    scenes/day    ── scenes per phase ──`);
   console.log(`  convo       /day      (observed)    morn  aft  eve  night  late`);
   for (const minutesPerTick of [30, 60, 120, 240]) {
-    const { phaseStats } = run({ seed, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick, lateCluster });
+    const { phaseStats } = run({ seed, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick, lateCluster, friendlyLean: 0 });
     const ticksPerDay = Math.ceil((DAY_END_MIN - DAY_START_MIN) / minutesPerTick);
     const per = (p: TimeOfDay): string => String(Math.round(phaseStats[p].scenes / 4)).padStart(4);
     const totalScenes = TIME_OF_DAY_ORDER.reduce((a, p) => a + phaseStats[p].scenes, 0);
@@ -537,7 +638,7 @@ function clusterSweep(seed: number, moveIntent: number, minutesPerTick: number):
   for (const lateCluster of [0, 0.3, 0.6, 1.0, 1.6]) {
     let company = 0, alone = 0, scenes = 0;
     for (const s of seeds) {
-      const r = run({ seed: s, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick, lateCluster });
+      const r = run({ seed: s, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick, lateCluster, friendlyLean: 0 });
       company += r.lateCompany; alone += r.lateAlone; scenes += r.phaseStats["late-night"].scenes;
     }
     const rate = company + alone ? Math.round((100 * company) / (company + alone)) : 0;
@@ -550,12 +651,37 @@ function clusterSweep(seed: number, moveIntent: number, minutesPerTick: number):
   console.log(`  not a co-location one. Scenes/day is capped per tick, so it moves less than co-presence.)`);
 }
 
+// ── Friendly-lean sweep ────────────────────────────────────────────────────────────────────────
+// Vary the friendly:game knob (an affinity nudge on the read) and watch the house-life ratio shift —
+// the owner wants "most house life is downtime," so we look for the lean where game talk stands OUT.
+function natureSweep(seed: number, moveIntent: number, minutesPerTick: number, lateCluster: number): void {
+  const seeds = [seed, 11, 13, 19];
+  console.log(`\n${"═".repeat(96)}`);
+  console.log(`  FRIENDLY-LEAN SWEEP — move-intent ×${moveIntent.toFixed(2)}, mean over ${seeds.length} seeds  (settle "most house life is downtime")`);
+  console.log(`${"═".repeat(96)}`);
+  console.log(`  friendlyLean    % game scenes    friendly:game`);
+  for (const friendlyLean of [0, 0.1, 0.2, 0.3]) {
+    let f = 0, g = 0;
+    for (const s of seeds) {
+      const r = run({ seed: s, moveIntent, warmupDays: 2, observeDays: 4, minutesPerTick, lateCluster, friendlyLean });
+      for (const id of r.ids) { f += r.obs.get(id)!.friendly; g += r.obs.get(id)!.game; }
+    }
+    const pct = f + g ? Math.round((100 * g) / (f + g)) : 0;
+    console.log(`  ${friendlyLean.toFixed(2).padEnd(12)}    ${String(pct).padStart(3)}%            ${f}f / ${g}g`);
+  }
+  console.log(`\n  Read: a higher lean warms the read so bonding/downtime wins more nature draws ⇒ fewer game scenes ⇒`);
+  console.log(`  strategic beats stand out against ordinary house life. (friendly folds AFFINITY ONLY, so the ratio`);
+  console.log(`  changes the texture, never the vote math.)`);
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────────────────────
 const moveIntent = Number(process.argv[2] ?? "1.0");
 const minutesPerTick = Number(process.argv[3] ?? "60");
 const lateCluster = Number(process.argv[4] ?? String(LATE_CLUSTER_DEFAULT));
-report(7, moveIntent, minutesPerTick, lateCluster);       // realistic clock — dials + presence + sleep readout
+const friendlyLean = Number(process.argv[5] ?? String(FRIENDLY_LEAN_DEFAULT));
+report(7, moveIntent, minutesPerTick, lateCluster, friendlyLean); // realistic clock — dials + presence + sleep + nature + intent
 timeSweep(7, moveIntent, lateCluster);                    // how the clock cadence reshapes a day
 clusterSweep(7, moveIntent, minutesPerTick);              // when does late-night clustering make staying up pay?
-report(7, moveIntent * 2.2, minutesPerTick, lateCluster); // higher move-intent pass — watch co-presence tighten
+natureSweep(7, moveIntent, minutesPerTick, lateCluster);  // settle the friendly:game lean
+report(7, moveIntent * 2.2, minutesPerTick, lateCluster, friendlyLean); // higher move-intent pass — watch co-presence tighten
 console.log("");
