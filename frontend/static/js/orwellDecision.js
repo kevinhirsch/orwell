@@ -154,7 +154,10 @@
         background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
         border-radius: 8px; padding: .5rem; font: inherit;
       }
-      #${CARD_ID} .odec-row { display: flex; align-items: center; gap: .6rem; margin-top: .65rem; }
+      /* flex-wrap so the full-width .odec-hint (flex-basis:100%; order:99) drops to
+         its OWN line instead of competing for width and crushing .odec-note (the
+         description) into a one-word-per-line column. */
+      #${CARD_ID} .odec-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: .65rem; }
       #${CARD_ID} .odec-confirm {
         cursor: pointer; border: none; border-radius: 8px; padding: .42rem .95rem; font-weight: 700;
         min-height: 44px;
