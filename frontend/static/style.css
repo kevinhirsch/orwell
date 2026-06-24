@@ -37619,8 +37619,8 @@ body.theme-frosted .on-card {
      color-mix(--fg N%) border/rim resolves to a HARD DARK hairline + a dark inner rim on the light
      glass. Apple glass is defined by a luminous EDGE, not a dark stroke — use the same soft white
      luminous hairline + bright top rim the windows/cards carry (no dark line, no dark inner glow). */
-  border-color: rgba(255,255,255,0.14) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.42),
+  border-color: var(--ow-glass-rim-border) !important;
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim),
               0 6px 20px rgba(0,0,0,0.22) !important;
 }
 
@@ -37793,6 +37793,15 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   --ow-glass-radius: 26px;          /* window/surface radius (very rounded, Apple)  */
   --ow-glass-radius-inner: 16px;    /* concentric inner-control radius (nested)     */
   --ow-glass-edge: color-mix(in srgb, var(--fg, #fff) 55%, transparent);
+  /* #770: ONE canonical luminous EDGE for glass chrome — a SUBTLE fixed faint white,
+     NOT an --fg-dependent or over-bright value. The Apple "tell" is a soft luminous
+     highlight that reads as a lit edge, NEVER a hard RULED line (LIQUID_GLASS_REFERENCE
+     §6: "a thin highlight that responds to geometry" + README "soft luminous edges").
+     The old 0.65 top rim + 0.55 border resolved to a hard white hairline on every
+     window/sidebar/card on a light wallpaper; this is the single soft value every glass
+     chrome surface now shares (windows, sidebar, cards, composer, dock). */
+  --ow-glass-rim: rgba(255,255,255,0.12);          /* the soft luminous top/perimeter edge */
+  --ow-glass-rim-border: rgba(255,255,255,0.12);   /* the matching hairline border          */
   /* Soft OUTER float-shadow — genuine elevation off the content (Apple). Two-stop:  */
   /* a wide soft ambient + a tighter contact shadow, both low-opacity.               */
   --ow-glass-float: 0 18px 50px rgba(0,0,0,0.30), 0 6px 16px rgba(0,0,0,0.20);
@@ -37827,16 +37836,18 @@ body.theme-frosted .attach-image-skeleton {
   backdrop-filter: var(--ow-glass-backdrop) !important;
   -webkit-backdrop-filter: var(--ow-glass-backdrop) !important;
   /* The DIRECTIONAL LUMINOUS EDGE RIM (the Apple ios_glass_over_dark "tell"): a thin
-     bright specular outline around the whole perimeter, BRIGHTEST on the bottom-left
-     (the directional light), thinning toward the top-right — done with two opposing
-     inset hairlines + a faint full hairline. Neutral white. Plus the soft outer float
-     (elevation). No heavy fill bloom — the rim does the work. */
+     SOFT specular outline around the perimeter, gently brighter on the bottom-left (the
+     directional light), thinning toward the top-right — done with two opposing inset
+     hairlines + a faint full hairline. Neutral white. Plus the soft outer float (elevation).
+     #770: the bottom-left rim was 0.42 — over-bright, reading as a hard ruled edge on a light
+     wallpaper; softened to a faint luminous bloom (matches --ow-glass-rim) so NO hard line
+     crosses any glass chrome. Apple's lit edge is a soft highlight, not a ruled stroke. */
   box-shadow:
-    inset 0 0 0 0.5px rgba(255,255,255,0.12),               /* faint full rim         */
-    inset 2px -2px 2px -1px rgba(255,255,255,0.42),          /* bright bottom-left rim */
-    inset -1px 1px 2px -1px rgba(255,255,255,0.16),          /* fainter top-right rim  */
+    inset 0 0 0 0.5px var(--ow-glass-rim),                  /* faint full rim         */
+    inset 2px -2px 2px -1px rgba(255,255,255,0.16),          /* soft bottom-left rim   */
+    inset -1px 1px 2px -1px rgba(255,255,255,0.10),          /* fainter top-right rim  */
     var(--ow-glass-float) !important;
-  border-color: rgba(255,255,255,0.14) !important;
+  border-color: var(--ow-glass-rim-border) !important;
 }
 /* The big windows + the Control-Center dock carry the stronger blur (more glass).  */
 body.theme-frosted .ow-window,
@@ -37847,7 +37858,7 @@ body.theme-frosted #minimized-dock.ow-has-rows {
 body.theme-frosted #minimized-dock.ow-has-rows {
   border-radius: var(--ow-glass-radius) !important;
   box-shadow:
-    inset 0 1px 0 var(--ow-glass-edge),
+    inset 0 1px 0 var(--ow-glass-rim),   /* #770: soft luminous edge, not the 0.55 --fg hard line */
     var(--ow-glass-float) !important;
 }
 
@@ -38664,7 +38675,9 @@ body.theme-frosted .msg-user :not(pre) > code {
    read as one small glass pill consistent with the chrome above. (The no-accent-on-
    text rule below also neutralizes their old red label/border to --fg.) */
 body.theme-frosted .thinking-section {
-  border: 1px solid rgba(255,255,255,0.55) !important;
+  /* #770: same soft luminous edge as the rest of the glass chrome — the old 0.55 border +
+     0.65 rim read as a hard white ruled outline on the light glass. */
+  border: 1px solid var(--ow-glass-rim-border) !important;
   border-radius: var(--ow-radius-inner, 14px) !important;
   /* The ONE LIGHT GLASS — same kube fill as every other glass surface (no old dark veil). */
   background-color: var(--ow-glass-light-color) !important;
@@ -38672,8 +38685,7 @@ body.theme-frosted .thinking-section {
   -webkit-backdrop-filter: blur(3px) saturate(180%) !important;
   backdrop-filter: blur(3px) saturate(180%) !important;
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.65),
-    inset 0 0 0 0.5px rgba(255,255,255,0.30),
+    inset 0 1px 0 var(--ow-glass-rim),
     0 4px 14px rgba(0,0,0,0.10) !important;
 }
 body.theme-frosted .thinking-header {
@@ -38714,6 +38726,25 @@ body.theme-frosted .setup-clickable-code:hover {
    (currentColor): dark by default, flipped light over a dark wallpaper by adaptiveGlass. */
 body.theme-frosted .welcome-eye {
   color: currentColor !important;
+}
+/* ── #770: NO accent HUE on glass-chrome STROKES (borders / focus outlines) ──────────
+   Sibling to the no-accent-on-TEXT contract above: under the glass theme the material is
+   colorless, so any --red/--accent BORDER or focus OUTLINE on a glass surface reads as a
+   stray red stroke (issue #770). Two sanctioned outcomes (ruling #729): a focus ring becomes
+   the ONE system-blue (the same --ow-ios-blue the kit titlebar + gadget header already use —
+   the only sanctioned focus tint); a decorative red border/border-left becomes a soft NEUTRAL
+   hairline (the same --ow-glass-rim the chrome edges use). NO accent hue on glass chrome. */
+body.theme-frosted .og-card .og-head:focus-visible,
+body.theme-frosted .on-card:focus-visible,
+body.theme-frosted .on-card *:focus-visible {
+  outline-color: var(--ow-ios-blue, #0a84ff) !important;
+}
+body.theme-frosted .on-card.on-continue,
+body.theme-frosted .rag-source-item,
+body.theme-frosted .search-status {
+  /* the red-tinted continue border + the rag/search red border-left → neutral hairline */
+  border-color: var(--ow-glass-rim-border) !important;
+  border-left-color: var(--ow-glass-rim-border) !important;
 }
 /* ── #759: two TRANSIENT chrome surfaces sit OUTSIDE the dark-ink chrome scope ──────
    The "Thinking" accordion header label (.thinking-header-left) and the ACTIVE tool
@@ -38990,13 +39021,15 @@ body.theme-frosted .cp-popover {
      differs by tier. */
   -webkit-backdrop-filter: blur(3px) saturate(180%) !important;
   backdrop-filter: blur(3px) saturate(180%) !important;
-  /* The light-glass rim + soft light box-shadow (kube `0 4px 20px rgba(0,0,0,0.08)`,
-     deepened a touch for the larger app panels): a white inner hairline + a soft light
-     outer edge = the Apple light sidebar's crisp edge. NO dark slab. */
-  border-color: rgba(255,255,255,0.55) !important;
+  /* #770: the light-glass rim + soft light box-shadow. The old 0.65 top rim + 0.55 border
+     resolved to a HARD WHITE RULED LINE on every window/sidebar/card over a light wallpaper
+     (issue #770: hairlines below titlebars, under "Orwell", around decision cards). Apple's
+     lit glass edge is a SOFT luminous highlight, never a visible ruled line (LIQUID_GLASS_
+     REFERENCE §6 + README "soft luminous edges"). Drop to the ONE canonical subtle white edge
+     (--ow-glass-rim ≈ 0.12) shared by every glass chrome surface; keep the soft outer float. */
+  border-color: var(--ow-glass-rim-border) !important;
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.65),
-    inset 0 0 0 0.5px rgba(255,255,255,0.30),
+    inset 0 1px 0 var(--ow-glass-rim),
     0 12px 36px rgba(0,0,0,0.10) !important;
 }
 }
@@ -39260,4 +39293,19 @@ body.glass-full .chat-input-bar {
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.14),
     0 12px 36px rgba(0,0,0,0.12) !important;
+}
+/* ── #770 composer-MIDDLE line: the inline icon buttons must ride the bar glass ──────
+   The composer's inline icon buttons carry class `input-icon-btn tool-indicator`, so the
+   shared chrome-glass rule (which lists `.tool-indicator` for the standalone in-stream tool
+   chip) ALSO matched them — giving each composer button the PANEL rim (`inset 0 1px 0` +
+   `border-color`). Lined up in the toolbar row, those top rims read as ONE faint horizontal
+   line cutting the MIDDLE of the bar (render-diff confirmed, issue #770 — NOT the outer rim
+   #760 already softened). Per Apple HIG (controls "sit on top of a system material" and ride
+   the bar — they don't get their own glass slab inside it), strip the panel rim/border from
+   the composer's inline icon buttons so nothing draws a divider across the bar. Their own
+   :hover/.active wash + the textarea row stay intact. */
+body.theme-frosted .chat-input-bar .input-icon-btn,
+body.theme-frosted .chat-input-bar .input-icon-btn.tool-indicator {
+  border-color: transparent !important;
+  box-shadow: none !important;
 }
