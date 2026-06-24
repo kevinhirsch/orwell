@@ -470,13 +470,15 @@ export class OrwellWindow {
     }
     // Minimize-to-dock is a FLOATING affordance; a docked window lives in the rail
     // and never minimizes to the chip dock (the rail owns its visibility/collapse).
-    // macOS traffic-light cluster (frosted theme): close=red + minimize=yellow. The
-    // YELLOW light is ALWAYS rendered so the cluster keeps its shape — a non-minimizable
-    // window just gets a greyed/inert yellow disc. The kit's non-frosted glyph fallback
-    // hides the disabled placeholder via CSS (`body:not(.theme-frosted) .ow-controls
-    // button[disabled]`), so the legacy look still shows only functional controls. (The
-    // third green/zoom light was removed — owner ruling: it crowded the title at thin
-    // widths and was inert everywhere.)
+    // macOS traffic-light cluster (frosted theme): close=red + minimize=yellow, plus
+    // the GREEN light — which is the DOCK toggle (built above) and exists ONLY on dockable
+    // windows (the green disc visually occupies the slot the inert maximize/zoom light used
+    // to). The YELLOW light is ALWAYS rendered so the cluster keeps its shape — a
+    // non-minimizable window just gets a greyed/inert yellow disc. The kit's non-frosted
+    // glyph fallback hides the disabled placeholder via CSS (`body:not(.theme-frosted)
+    // .ow-controls button[disabled]`), so the legacy look still shows only functional
+    // controls. A NON-dockable window has NO green disc (red + yellow only) — the dock
+    // dot's dockable-only gating IS the `if (this.o.dockable)` guard above.
     const canMin = this.o.minimizable && !this._docked;
     {
       const b = document.createElement('button');
@@ -499,8 +501,10 @@ export class OrwellWindow {
     // NB: the maximize/zoom ("green light") control is DELIBERATELY GONE from every window
     // (owner ruling): it only crowded the (centered) titlebar title when a window was resized
     // thin, and it was inert everywhere anyway (no window ever opted it on). The macOS
-    // cluster reads as close (red) + minimize (yellow) — close/minimize/dock/resize are
-    // untouched. Do NOT re-add a third light here.
+    // cluster reads as close (red) + minimize (yellow), plus — on DOCKABLE windows only —
+    // the dock toggle styled as the GREEN light in the maximize slot (built above; it is a
+    // real, functional control, not the removed inert zoom). Do NOT re-add an inert third
+    // light here.
     tb.appendChild(title); tb.appendChild(controls);
     const body = document.createElement('div');
     body.className = 'ow-body';

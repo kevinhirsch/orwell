@@ -38064,14 +38064,19 @@ body.theme-frosted .ow-titlebar-accessory {
   font-size: 11px; color: var(--fg, #fff); opacity: .8; cursor: pointer;
 }
 body.theme-frosted .ow-titlebar-accessory:hover { opacity: 1; }
-/* a dockable window's dock toggle is NOT a traffic light — keep it a small quiet
-   control AFTER the lights (it still works; it just isn't one of the three). */
-body.theme-frosted .ow-controls .ow-dock { order: 3; }
+/* macOS traffic-light ORDER: red (close) → yellow (minimize) → GREEN (dock). The green
+   disc is the DOCK toggle and exists ONLY on dockable windows (the kit builds .ow-dock
+   solely under `if (this.o.dockable)`), so a non-dockable window shows red + yellow only
+   and never an empty green slot. It visually occupies the slot the inert maximize/zoom
+   light used to — but it is a REAL, functional control (dock → control-room gadget, and
+   back), NOT a maximize button. */
 body.theme-frosted .ow-controls .ow-close { order: 0; }   /* red    (leftmost) */
 body.theme-frosted .ow-controls .ow-min   { order: 1; }   /* yellow            */
+body.theme-frosted .ow-controls .ow-dock  { order: 2; }   /* green  (rightmost) */
 
 body.theme-frosted .ow-controls .ow-close,
-body.theme-frosted .ow-controls .ow-min {
+body.theme-frosted .ow-controls .ow-min,
+body.theme-frosted .ow-controls .ow-dock {
   width: 12px; height: 12px; min-width: 12px; min-height: 12px;
   border-radius: 50%; padding: 0; opacity: 1;
   border: 0.5px solid rgba(0,0,0,0.22);
@@ -38079,7 +38084,9 @@ body.theme-frosted .ow-controls .ow-min {
   /* The button's OWN text node is collapsed to 0 (the glyph renders via ::before, a
      non-text decorative mark). font-size:0 means the responsive-matrix crowding sweep
      — which samples textContent with fontSize < the readable floor — SKIPS it (fs 0 is
-     falsy), and the accessible name lives on aria-label, not visible 9px text. */
+     falsy), and the accessible name lives on aria-label, not visible 9px text. The kit's
+     own `.ow-controls .ow-dock { font-size: .9rem }` rule (the legacy non-frosted glyph)
+     is overridden here for the frosted traffic-light treatment. */
   font-size: 0; line-height: 12px; text-indent: 0;
   position: relative;
 }
@@ -38088,23 +38095,45 @@ body.theme-frosted .ow-controls .ow-min {
    sampled by the crowding floor; it is aria-hidden by nature. */
 body.theme-frosted .ow-controls .ow-close::before { content: "\00d7"; }  /* × */
 body.theme-frosted .ow-controls .ow-min::before   { content: "\2212"; }  /* − */
+/* GREEN dock glyph: a downward-into-tray arrow (\2913 ⤓) = "dock / tuck into the rail".
+   When the window is ALREADY docked, the toggle floats it back out, so the glyph flips to
+   an upward-out-of-tray arrow (\2912 ⤒) = "float / pop out". Both read as a dock action,
+   never a maximize. */
+body.theme-frosted .ow-controls .ow-dock::before        { content: "\2913"; }  /* ⤓ dock */
+body.theme-frosted .ow-window.ow-docked
+  .ow-controls .ow-dock::before                          { content: "\2912"; }  /* ⤒ float */
 body.theme-frosted .ow-controls .ow-close::before,
-body.theme-frosted .ow-controls .ow-min::before {
+body.theme-frosted .ow-controls .ow-min::before,
+body.theme-frosted .ow-controls .ow-dock::before {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-size: 9px; line-height: 1; color: transparent; pointer-events: none;
 }
+/* the dock arrow reads a touch larger so the tray bar is legible at 12px */
+body.theme-frosted .ow-controls .ow-dock::before { font-size: 10px; }
 body.theme-frosted .ow-titlebar:hover .ow-controls .ow-close::before,
 body.theme-frosted .ow-titlebar:hover .ow-controls .ow-min::before,
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-dock::before,
 body.theme-frosted .ow-controls button:focus-visible::before {
   color: rgba(0,0,0,0.6);
 }
-/* FOCUSED window → colored lights */
+/* FOCUSED window → colored lights (green dock dot only ever exists on dockable windows) */
 body.theme-frosted .ow-window.ow-focused .ow-controls .ow-close { background: #ff5f57; }
 body.theme-frosted .ow-window.ow-focused .ow-controls .ow-min   { background: #febc2e; }
+body.theme-frosted .ow-window.ow-focused .ow-controls .ow-dock  { background: #28c840; }
 /* UNFOCUSED window → neutral grey lights (authentic macOS) */
 body.theme-frosted .ow-window:not(.ow-focused) .ow-controls .ow-close,
-body.theme-frosted .ow-window:not(.ow-focused) .ow-controls .ow-min {
+body.theme-frosted .ow-window:not(.ow-focused) .ow-controls .ow-min,
+body.theme-frosted .ow-window:not(.ow-focused) .ow-controls .ow-dock {
   background: color-mix(in srgb, var(--fg, #fff) 26%, transparent);
+}
+/* a11y: a crisp focus-visible RING on the traffic lights (keyboard focus must read even
+   when the cluster is colored at rest). offset clears the 12px disc so the ring is legible;
+   the disc's own glyph also reveals on :focus-visible (above). */
+body.theme-frosted .ow-controls .ow-close:focus-visible,
+body.theme-frosted .ow-controls .ow-min:focus-visible,
+body.theme-frosted .ow-controls .ow-dock:focus-visible {
+  outline: 2px solid var(--ow-ios-blue, #0a84ff);
+  outline-offset: 2px;
 }
 /* the 44px hit region stays (inherited ::after); hover lift is gone (lights don't grow) */
 body.theme-frosted .ow-controls button:hover { transform: none; box-shadow: none; }
