@@ -37429,6 +37429,37 @@ body.theme-frosted .modal {
 .ask-user-other-send { flex-shrink: 0; white-space: nowrap; min-height: 39px; }
 .ask-user-other-send:disabled { opacity: 0.5; cursor: default; }
 
+/* ── #760 sidebar brand-band edge softening (owned: sidebar brand/header) ────
+   The shared chrome-glass rule gives #sidebar an `inset 0 1px 0 rgba(255,255,255,0.65)`
+   top rim. Render-diff (scan of the sidebar top edge, frosted) confirms that 0.65
+   white inset paints a HARD bright hairline across the very top of the sidebar
+   glass — the band the "Orwell" brand sits in — reading as a faint white ruled
+   line by/under the brand. Apple glass edges are a SOFT luminous bloom, not a
+   visible rule (docs/design/liquid-glass/README.md "soft luminous edges";
+   LIQUID_GLASS_REFERENCE: "a thin highlight that responds to geometry, NOT a
+   wide glossy band"). Soften JUST the inset rim opacity on the sidebar (keep the
+   border + soft outer float so the panel still reads as glass); placed last so
+   it wins by source order. Scoped to #sidebar only — windows/cards keep the
+   shared rim (other agent's domain untouched). Belt-and-braces: also pin the
+   brand/header to carry no divider of their own. */
+body.theme-frosted #sidebar {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 0 0 0.5px rgba(255,255,255,0.14),
+    0 12px 36px rgba(0,0,0,0.10) !important;
+}
+body.glass-full #sidebar {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    0 12px 36px rgba(0,0,0,0.12) !important;
+}
+body.theme-frosted .sidebar-header,
+body.theme-frosted .sidebar-brand,
+body.theme-frosted .sidebar-brand-title {
+  border: none !important;
+  box-shadow: none !important;
+}
+
 /* ============================================================================ */
 /* Liquid glass — iOS-26 / Control-Center coherence layer (PR: SVG refraction)  */
 /* ----------------------------------------------------------------------------  */
@@ -39139,4 +39170,34 @@ body.theme-frosted .plan-window-content #plan-window-title {
     color: var(--fg, #fff) !important;
     text-shadow: none !important;
   }
+}
+
+/* ── #760 composer edge softening (owned: .chat-input-* region) ──────────────
+   The shared chrome-glass rule (the multi-selector block earlier in this file)
+   gives every glass surface an `inset 0 1px 0 rgba(255,255,255,0.65)` top rim +
+   `border-color: rgba(255,255,255,0.55)`. On the COMPOSER that bright white
+   inset reads as a hard RULED line cutting across the bar — right under the
+   "Say or do something…" placeholder — which is NOT how Apple glass edges look
+   (Apple's lit edge is a SOFT luminous bloom, not a visible hairline; see
+   docs/design/liquid-glass/README.md "soft luminous edges" + LIQUID_GLASS_REFERENCE
+   "a thin highlight that responds to geometry, NOT a wide glossy band").
+   Scoped to .chat-input-bar ONLY (windows/cards keep the shared rule); placed
+   last so it wins by source order without raising specificity into another
+   agent's selectors. Drop the inset rim opacity right down to a faint bloom and
+   soften the border so no hairline crosses the composer at EITHER tier. The
+   textarea row (.chat-input-top) → toolbar row (.chat-input-bottom) carry no
+   own divider, so this is the only edge that could ruled-line the bar. */
+body.theme-frosted .chat-input-bar {
+  border-color: color-mix(in srgb, var(--fg) 14%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    0 12px 36px rgba(0,0,0,0.10) !important;
+}
+body.glass-full .chat-input-bar {
+  /* Full Glass: liquidGlass.js owns the backdrop refraction inline; we only
+     re-soften the same rim so the hairline is gone at this tier too. */
+  border-color: color-mix(in srgb, var(--fg) 12%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.14),
+    0 12px 36px rgba(0,0,0,0.12) !important;
 }

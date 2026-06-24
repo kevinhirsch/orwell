@@ -151,6 +151,16 @@ function applyGameBuildMenuGating() {
     const tts = el('overflow-tts-btn');
     if (tts) tts.remove();
   }
+  // #760: the game build promotes attach to a first-class composer paperclip
+  // (#composer-attach-btn, E94 above). Keeping "Attach files" in the overflow
+  // tray too = TWO attach entry points (a duplicate behind the chevron). Drop
+  // the tray duplicate; the cascade below then hides the now-empty chevron, so
+  // the composer shows exactly ONE attach control. (Full build keeps both: its
+  // first-class paperclip stays hidden, the tray entry is the only attach.)
+  if (document.body.hasAttribute('data-game-build')) {
+    const trayAttach = el('overflow-attach-btn');
+    if (trayAttach) trayAttach.remove();
+  }
   _g13CascadeMenuTriggers();
 }
 
