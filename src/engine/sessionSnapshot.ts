@@ -147,6 +147,15 @@ export interface SessionCore {
   nominationWeeks?: Record<EntityId, number[]>;
   surfacedThreadCount?: number;
   /**
+   * Feature 0075 — the trust-gated confidence ledger: per-houseguest, the highest TIER they have
+   * confided to the player (monotonic for a true secret) + whether that disclosure was truthful (a
+   * lie is engine-side only). `confideLieCount` is the per-season lie count (the hard cap). Persisted
+   * so a restored game remembers exactly what the player was told, never re-tells a secret at a lower
+   * tier, and never re-opens the lie cap. Absent on pre-0075 saves ⇒ empty/zero (non-degradation).
+   */
+  confideState?: Record<EntityId, { tier: "none" | "tease" | "partial" | "full"; truthful: boolean }>;
+  confideLieCount?: number;
+  /**
    * The engine-only HIDDEN seeded relationship layer (feature 0059): the sparse pre-game ties +
    * showmances seeded at cast time, Vault-sealed from the player AND the admin. Persisted so a
    * showmance stage never silently resets and the layer survives a restart (0030). ENGINE-ONLY (same

@@ -1,8 +1,19 @@
 # 0075 — Trust-gated confidences (a houseguest opens up to you)
 
-> **Status:** 📝 **SPEC / sketch** (drafted 2026-06-22). **Gate (planned):** engine (Vitest +
-> dependency-cruiser + BDD `0075-trust-gated-confidences.feature`) and front-end (pytest, for the
-> draw-it-out lever + the no-cold-open guardrail). **Depends on:** 0001 (Vault Wall), 0002
+> **Status:** 🟢 **BUILT (engine), 2026-06-24** — the player-driven `confide` lever ships end-to-end:
+> the pure decision core (`src/engine/confidence.ts` + `confidenceConstants.ts`), the live
+> `GameSession.confide` authority + the Vault-safe `mayConfide` hint on `npcVoice`
+> (`GameSessionAdapter`), the four-place MCP wiring + the `confide` moment-prompt lever, the
+> persisted disclosure-tier + lie-count ledger (non-degradation), and the confidence-recording
+> pathway (`registry.setOnConfide` → `surfaceInformationTo`). **Gate:** `tests/unit/confidence.test.ts`
+> (pure) + `tests/unit/confideBoundary.test.ts` (the MCP-boundary + the load-bearing Vault-wall test).
+> Gated/opt-in by construction — `confide` fires only on the player lever and `mayConfide` takes no
+> rng, so the seeded calibration spine is byte-identical. **Fast-follows (not in the first PR):** (a)
+> wiring the full `.feature` into `cucumber.cjs` (its lie-catch + full-season scenarios cover the
+> deferred enrichment below); (b) the **passive lie-catch** — a later true pathway flips the belief +
+> the betrayal-grade blow when the player acts on it (spec open-Q #4, deferred); (c) the **FE
+> agent-loop guardrail** that error-corrects a `confide` under-call (0055 sibling, pytest-gated).
+> **Depends on:** 0001 (Vault Wall), 0002
 > (event visibility & pathway propagation / `surfaceInformationTo`), 0017/0026 (relationship math),
 > 0023 (consequence & memory fold), 0039 (deals — the favor/goodwill ledger), 0041 (soul / emotional
 > state — vulnerability), 0058 (deep profiles — the sealed secrets), 0060 (story-thread scheduler +

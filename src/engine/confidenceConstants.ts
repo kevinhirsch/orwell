@@ -21,6 +21,14 @@ export const CONFIDENCE = {
   /** Weight on banked GOODWILL / owed favor (kept deals, saves, votes, comfort — the reliability ledger). */
   goodwillWeight: 0.45,
 
+  // ── the banked-goodwill ledger: how the player's reliability reads ∈ [0,1] (read off 0039 deals) ──
+  // Concrete in-game debt the adapter derives from the deal ledger (kept word, an open pact) — NOT a
+  // new authored signal. Bounded so a wall of deals can't trivialize the bond gate; a BROKEN deal
+  // subtracts (a houseguest the player burned does not then bare their soul to them).
+  keptDealGoodwill: 0.4,
+  openDealGoodwill: 0.2,
+  brokenDealPenalty: 0.5,
+
   // ── the disclosure ladder: motive bands (owner steer #1) ────────────────────────────────────────
   // Start at the confidant band (`THREAD.confidantBondThreshold` ≈ 0.7) and step up; tuned vs the UAT.
   bands: {
@@ -38,6 +46,22 @@ export const CONFIDENCE = {
   lieProb: 0.6,
   /** HARD per-season cap on lies told TO the player — rare, like 0059's "≤2 ties" (a house of liars is noise). */
   maxLiesPerSeason: 2,
+
+  // ── the vulnerability fold (0023): a confidence DEEPENS the bond (the houseguest opened up) ──────
+  // A confidence is folded as a `bonding` interaction toward the player — the engine owns the
+  // magnitude (anti-sycophancy); this only NAMES the nature. A lie folds the SAME warm bump (the
+  // player feels closer — that is the trap); a later contradicting pathway is what reverses it (v1
+  // surfaces that passively — spec open-Q #4).
+  bondNature: "bonding",
+
+  // ── the Vault-SAFE `mayConfide` reason words (the emergent hint) — NEVER the secret, NEVER a number ──
+  // The adapter picks ONE by the dominant motive source, so the model leans into a confidence the
+  // scene EARNED. Pure texture; carries no premise.
+  reasons: {
+    keptWord: "you've kept your word to them when it counted",
+    openPact: "you've got something working between you",
+    closeness: "they've come to trust you more than most of this house",
+  },
 
   // ── the tease gloss (class-keyed, Vault-safe: never the premise, never a number) ────────────────
   teaseGloss: {

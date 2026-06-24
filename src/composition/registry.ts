@@ -240,6 +240,17 @@ function buildUserSandbox(user = "default"): UserSandbox {
     const fact = engine.knowledge.surfaceInformationTo(PLAYER, { content: rumor, subject, confidence: 0.5 }, `told-by:${confidant}`);
     return fact !== null;
   });
+  // 0075 — a houseguest CONFIDES in the player (the engine already decided whether/how much/true). The
+  // teller IS the subject (`told-by:<npc>`): the NPC holds the content (their own secret, or the lie
+  // they're asserting), then it surfaces to the player as a content-anchored belief — correctly the
+  // player's KNOWLEDGE (Journal-visible), never Vault content. A lie records the same way (the player
+  // believes it); only the engine knows it is false.
+  session.setOnConfide((npcId, content, confidence) => {
+    const factId = `confide:${npcId}:${engine.events.count()}`;
+    engine.knowledge.seedBelief(npcId, { content, originalContent: content, factId, confidence: 0.9, hops: 0, distortion: 0, source: npcId }, "origin");
+    const fact = engine.knowledge.surfaceInformationTo(PLAYER, { content, subject: npcId, confidence }, `told-by:${npcId}`);
+    return fact !== null;
+  });
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({
