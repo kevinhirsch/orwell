@@ -36399,7 +36399,7 @@ body.theme-frosted .ow-window {
   /* Tinted base color (set separately so the shorthand can't swallow it);
      much more transparent than before so what's behind actually shows
      through. The blur catches whatever pixels are below. */
-  background-color: color-mix(in srgb, var(--panel, var(--bg)) 20%, transparent) !important;
+  background-color: color-mix(in srgb, var(--panel, var(--bg)) 26%, transparent) !important;
   /* Liquid-glass sheen: a brighter specular wash down the top so the glass reads
      as a lit, refractive pane (not a flat tinted panel). Kept dark-tinted overall
      so light --fg text stays legible over busy content behind the blur. */
@@ -36407,8 +36407,8 @@ body.theme-frosted .ow-window {
     color-mix(in srgb, var(--fg, #fff) 24%, transparent) 0%,
     color-mix(in srgb, var(--fg, #fff)  9%, transparent) 20%,
     transparent 58%) !important;
-  backdrop-filter: blur(32px) saturate(190%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(190%) !important;
+  backdrop-filter: blur(44px) saturate(200%) brightness(1.06) !important;
+  -webkit-backdrop-filter: blur(44px) saturate(200%) brightness(1.06) !important;
   border-color: color-mix(in srgb, var(--fg) 34%, transparent) !important;
   /* The signature liquid-glass edge: keep the drop shadow, add a bright 1px top
      rim (light catching the glass) + a faint inner glow for depth. */
@@ -36422,13 +36422,13 @@ body.theme-frosted .ow-window {
    the .ow-window glass rule above); the cards add their own blur + bright rim +
    sheen so they lift off it as legible panes. */
 body.theme-frosted .og-card {
-  background-color: color-mix(in srgb, var(--panel, var(--bg)) 24%, transparent) !important;
+  background-color: color-mix(in srgb, var(--panel, var(--bg)) 28%, transparent) !important;
   background-image: linear-gradient(180deg,
     color-mix(in srgb, var(--fg, #fff) 18%, transparent) 0%,
     color-mix(in srgb, var(--fg, #fff)  6%, transparent) 24%,
     transparent 60%) !important;
-  backdrop-filter: blur(20px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  backdrop-filter: blur(32px) saturate(200%) brightness(1.05) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(200%) brightness(1.05) !important;
   border-color: color-mix(in srgb, var(--fg) 28%, transparent) !important;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 34%, transparent),
               0 4px 14px rgba(0,0,0,0.18) !important;
@@ -36438,13 +36438,13 @@ body.theme-frosted .og-card {
    blur + a bright top rim; the inner textarea stays transparent so it rides the bar
    glass (no opaque inset). */
 body.theme-frosted .chat-input-bar {
-  background-color: color-mix(in srgb, var(--panel, var(--bg)) 24%, transparent) !important;
+  background-color: color-mix(in srgb, var(--panel, var(--bg)) 28%, transparent) !important;
   background-image: linear-gradient(180deg,
     color-mix(in srgb, var(--fg, #fff) 16%, transparent) 0%,
     color-mix(in srgb, var(--fg, #fff)  5%, transparent) 30%,
     transparent 70%) !important;
-  backdrop-filter: blur(26px) saturate(185%) !important;
-  -webkit-backdrop-filter: blur(26px) saturate(185%) !important;
+  backdrop-filter: blur(38px) saturate(200%) brightness(1.05) !important;
+  -webkit-backdrop-filter: blur(38px) saturate(200%) brightness(1.05) !important;
   border-color: color-mix(in srgb, var(--fg) 30%, transparent) !important;
   box-shadow: var(--win-shadow),
               inset 0 1px 0 color-mix(in srgb, var(--fg) 34%, transparent) !important;

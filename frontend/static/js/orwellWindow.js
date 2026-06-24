@@ -383,7 +383,12 @@ export class OrwellWindow {
    * sheet host owns the geometry there. Opt a window out with resizable:false.
    */
   constructor(opts) {
-    this.o = Object.assign({ slot: 'top-right', role: 'complementary',
+    // A modal:true dialog (settings, etc.) must CENTER, not pin to the top-right HUD
+    // slot — opening a scrim'd dialog flush against the right edge reads as a "snap
+    // to the right" bug. Non-modal HUD windows keep the top-right default. An explicit
+    // `slot` in opts still wins (e.g. the headshot dialog passes top-center itself).
+    const _defaultSlot = (opts && opts.modal) ? 'top-center' : 'top-right';
+    this.o = Object.assign({ slot: _defaultSlot, role: 'complementary',
       draggable: true, minimizable: true, closable: true, resizable: true,
       minWidth: 240, minHeight: 160, focus: false,
       // persistLayout (default true): a window's geometry rides the 0064 cross-device layout sync

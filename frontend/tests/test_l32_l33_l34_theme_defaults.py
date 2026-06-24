@@ -143,8 +143,8 @@ def test_l34_kit_window_frosts_under_theme_frosted():
     assert "body.theme-frosted .ow-window" in block
     # It uses the translucent + blur treatment, not a solid fill.
     assert "color-mix(in srgb, var(--panel" in block
-    # Liquid-glass pass (2026-06-24): blur deepened 24px → 32px for the refractive look.
-    assert "backdrop-filter: blur(32px)" in block
+    # Liquid-glass pass (2026-06-24): blur deepened for the refractive, content-obfuscating look.
+    assert "backdrop-filter: blur(44px)" in block
 
 
 def test_l34_a6_kit_titlebar_rides_the_root_frost_no_own_filter():
