@@ -3681,6 +3681,9 @@ body.bg-pattern-perlin-flow {
       color:var(--color-muted-alt); font-size:0.75rem;
       position: relative;
     }
+    /* Game build: sent (player) messages get an EMPTY footer (no action buttons — owner
+       ruling). Hide it entirely so it reserves no height under the bubble. */
+    .msg-footer-empty { display: none !important; }
     .msg-footer .timestamp {
       font-size:0.75rem; color:var(--color-muted-alt);
       margin:0; opacity:1;

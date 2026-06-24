@@ -1325,15 +1325,16 @@ export function createMsgFooter(msgElement) {
     }},
   ];
 
-  // E93: the chat transcript of a LIVE game is the played record of events the
-  // engine has already recorded and folded — editing, deleting, or re-rolling it
-  // desyncs the visible story from the EventStore (and edit-then-regenerate is an
-  // anti-sycophancy hole). Under the game build with a game active, only
-  // non-record-altering actions survive (copy, fork). Pre-game OOC is unaffected.
-  const _gameRecord = document.body.hasAttribute('data-game-build')
-    && document.body.dataset.gameActive === '1';
-  const _RECORD_SAFE = new Set(['copy', 'fork']);
-  const actionPool = _gameRecord ? allActions.filter(a => _RECORD_SAFE.has(a.id)) : allActions;
+  // E93 + owner ruling: the chat transcript of a game is the PLAYED RECORD of events the
+  // engine has already recorded and folded — editing, deleting, or re-rolling it desyncs the
+  // visible story from the EventStore (and edit-then-regenerate is an anti-sycophancy hole).
+  // The record-altering + general-assistant utility actions (edit, regenerate, rewrite-shorter,
+  // explain-simpler, fork, delete) are all chatbot cruft here, NOT in-character play. So in the
+  // GAME BUILD, GM/narration messages keep ONLY Copy (the Speak/TTS button is added separately
+  // by chat.js). Outside the game build (full workspace) the complete set stands.
+  const _gameBuild = document.body.hasAttribute('data-game-build');
+  const _GAME_KEEP = new Set(['copy']);
+  const actionPool = _gameBuild ? allActions.filter(a => _GAME_KEEP.has(a.id)) : allActions;
 
   // Filter out unavailable actions (e.g. TTS when not enabled)
   const availableActions = actionPool.filter(a => !a.available || a.available());
@@ -1508,6 +1509,14 @@ function _trackUserAction(id) {
 export function createUserMsgFooter(msgElement) {
   const footer = document.createElement('div');
   footer.className = 'msg-footer';
+
+  // GAME BUILD (owner ruling): SENT (player) messages carry NO action buttons. Your lines are
+  // consequential dialogue you can't un-say (edit/delete/resend break the recorded-record model,
+  // E93), and copy on your own line is cruft. Return an empty, hidden footer so nothing renders.
+  if (document.body.hasAttribute('data-game-build')) {
+    footer.classList.add('msg-footer-empty');
+    return footer;
+  }
 
   const actions = document.createElement('span');
   actions.className = 'msg-actions';

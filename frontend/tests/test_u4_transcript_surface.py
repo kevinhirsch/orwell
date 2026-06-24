@@ -36,9 +36,14 @@ def test_e65_restart_opens_a_fresh_session():
 # ── E93: the played record ────────────────────────────────────────────────────
 
 def test_e93_game_transcript_keeps_only_record_safe_actions():
-    assert "_RECORD_SAFE = new Set(['copy', 'fork'])" in RENDERER
-    assert "dataset.gameActive === '1'" in RENDERER
+    # Owner ruling: in the game build the transcript is the PLAYED RECORD, not a chat
+    # scratchpad. GM/narration messages keep ONLY Copy (the Speak/TTS button is added
+    # separately by chat.js); the record-altering + chatbot-utility actions (edit, regenerate,
+    # rewrite-shorter, explain-simpler, fork, delete) are all dropped.
+    assert "_GAME_KEEP = new Set(['copy'])" in RENDERER
     assert "data-game-build" in RENDERER
+    # SENT (player) messages carry NO action buttons at all in the game build.
+    assert "msg-footer-empty" in RENDERER
 
 
 def test_e93_game_active_flag_is_maintained_by_the_status_poll():
