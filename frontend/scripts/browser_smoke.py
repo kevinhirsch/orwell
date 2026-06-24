@@ -180,6 +180,8 @@ def main() -> int:
                   return {
                     surfLum,
                     title: probe('.chat-meta-overlay #current-meta'),
+                    metaCount: probe('.chat-meta-overlay .chat-meta-count'),
+                    costBadge: probe('.chat-meta-overlay .session-cost-display'),
                     textarea: probe('.chat-input-bar textarea#message'),
                     icon: probe('.chat-input-bar .input-icon-btn'),
                     picker: probe('.model-picker-btn'),
@@ -190,7 +192,8 @@ def main() -> int:
             )
             # The chrome text controls must be DARK ink (luminance < 0.4) on the light glass.
             # (A light surface measures high luminance; light text on it is the bug.)
-            for _name in ("title", "textarea", "icon", "picker", "pickerLabel", "menu"):
+            for _name in ("title", "metaCount", "costBadge", "textarea", "icon",
+                          "picker", "pickerLabel", "menu"):
                 _p = lol.get(_name) or {}
                 if _p.get("missing"):
                     continue  # element legitimately absent — nothing to mis-color

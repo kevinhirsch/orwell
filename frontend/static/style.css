@@ -38773,6 +38773,13 @@ body.theme-frosted .chat-input-bar textarea#message::placeholder {
   /* a clearly-secondary but legible dark placeholder on the light glass (~4.6:1) */
   color: rgba(22,25,31,0.58) !important;
 }
+/* the muted siblings of the chat title — the "N msgs" count + the session-cost badge —
+   set their OWN light color-mix(--fg 35%), which was light-on-light on the gray glass and
+   slipped past the gate. Give them a MUTED DARK ink: still quiet/secondary, but legible. */
+body.theme-frosted .chat-meta-overlay .chat-meta-count,
+body.theme-frosted .chat-meta-overlay .session-cost-display {
+  color: rgba(22,25,31,0.60) !important;
+}
 /* the picker's search input keeps a legible fill on the light glass: a light field
    with dark ink (rather than the dark var(--bg) field that reads as a dark slab in
    the light menu). */
