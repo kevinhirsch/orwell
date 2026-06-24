@@ -117,6 +117,44 @@ def main() -> int:
             check(page.query_selector("#chat-container") is not None, "keep-set DOM: chat container mounted")
             check(page.query_selector("textarea") is not None, "keep-set DOM: composer mounted")
 
+            # Liquid-glass refraction (kube.io SVG technique) must actually WIN the cascade.
+            # The frosted CSS sets `backdrop-filter: blur(..) !important` on the same glass
+            # surfaces, so liquidGlass.js must set its inline url(#filter) with `important`
+            # priority — a plain inline style LOSES to a stylesheet !important and the whole
+            # effect silently dies (computed backdrop shows blur(), never url(#owlg-*)). This
+            # guards that regression on a real Chromium engine (where the module is active).
+            # new_page() seeds frosted-OFF for stable window mechanics, and the refraction only
+            # runs under body.theme-frosted — so TEMPORARILY enable frosted, verify, then restore
+            # frosted-off (don't disturb the window-mechanics suites that follow).
+            page.evaluate("() => document.body.classList.add('theme-frosted')")
+            lg = {"supported": True, "tagged": 0, "withUrl": 0}
+            for _ in range(12):  # poll ~2.6s: the apply pass runs on rAF after the class flips
+                try:
+                    page.evaluate("() => window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh()")
+                except Exception:
+                    pass
+                page.wait_for_timeout(220)
+                lg = page.evaluate("""() => {
+                  const g = window.OrwellLiquidGlass || {};
+                  if (!g.supported) return { supported: false };
+                  const tagged = [...document.querySelectorAll('[data-liquid-glass]')];
+                  const withUrl = tagged.filter(e => (getComputedStyle(e).backdropFilter || '').includes('url('));
+                  return { supported: true, tagged: tagged.length, withUrl: withUrl.length };
+                }""")
+                if not lg.get("supported") or lg.get("tagged", 0) > 0:
+                    break
+            page.evaluate("() => document.body.classList.remove('theme-frosted')")  # restore frosted-off
+            try:
+                page.evaluate("() => window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh()")
+            except Exception:
+                pass
+            # Only assert when the module is active (Chromium) AND it found a surface to refract.
+            # When tagged>0, EVERY one must show url() in its computed backdrop: that proves the
+            # inline SVG refraction beat the CSS `!important` blur (the exact regression this guards).
+            if lg.get("supported") and lg.get("tagged", 0) > 0:
+                check(lg.get("withUrl", 0) == lg.get("tagged", 0),
+                      f"liquid-glass refraction wins the cascade (computed backdrop = url(#filter), not clobbered by the !important blur) ({lg})")
+
             # Final FE batch: V3 phase labels + A3 delta announcer live in the status HUD.
             hud_a11y = page.evaluate("""() => {
               if (window._orwellStatusEnsure) window._orwellStatusEnsure();

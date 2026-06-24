@@ -366,11 +366,17 @@
       // belt-and-suspenders softener, and saturate keeps the baseline's lively glass.
       var val =
         "url(#" + id + ") blur(" + CSS_BLUR_FALLBACK + "px) saturate(" + BACKDROP_SAT + "%)";
-      // Layer OVER the CSS baseline: setting an inline backdrop-filter wins the
-      // cascade for Chromium. Non-Chromium never reaches here (supported() gate),
-      // so its CSS blur-glass is untouched.
-      el.style.backdropFilter = val;
-      el.style.webkitBackdropFilter = val;
+      // Layer OVER the CSS baseline. CRITICAL: the frosted CSS sets
+      // `backdrop-filter: blur(..) !important` on these same surfaces (style.css
+      // body.theme-frosted .ow-window etc.), and a plain inline style LOSES to a
+      // CSS !important — so the SVG refraction must be set with `important`
+      // priority to actually win the cascade (an inline !important outranks a
+      // stylesheet !important). Without this the url(#filter) is silently
+      // overridden by the blur and the whole liquid-glass layer never renders.
+      // Non-Chromium never reaches here (supported() gate), so its CSS blur-glass
+      // fallback is untouched.
+      el.style.setProperty("backdrop-filter", val, "important");
+      el.style.setProperty("-webkit-backdrop-filter", val, "important");
       el.setAttribute("data-liquid-glass", "1");
       liveEls.add(el);
       if (ro) {

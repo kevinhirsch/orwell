@@ -94,8 +94,14 @@ def test_displacement_map_uses_squircle_edge_and_neutral_128():
 
 def test_applied_via_backdrop_filter_url():
     assert "url(#" in JS
-    assert "backdropFilter" in JS
-    assert "webkitBackdropFilter" in JS
+    # Applied via setProperty with `important` priority — NOT a plain `el.style.backdropFilter =`.
+    # The frosted CSS sets `backdrop-filter: blur(..) !important` on the same surfaces, and a
+    # plain inline style LOSES to a stylesheet !important — so the SVG refraction must be set
+    # with `important` priority to win the cascade (an inline !important outranks it). Without
+    # this the url(#filter) is silently clobbered by the blur and the effect never renders.
+    assert 'setProperty("backdrop-filter"' in JS
+    assert 'setProperty("-webkit-backdrop-filter"' in JS
+    assert '"important"' in JS
 
 
 def test_tunable_constants_exist_at_top():
