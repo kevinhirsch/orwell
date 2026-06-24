@@ -1963,14 +1963,17 @@ body.bg-pattern-perlin-flow {
       color: var(--fg, #9cdef2);
       border: 1px solid var(--border, #355a66); border-radius: 10px;
       font-family: var(--ow-ui-font, sans-serif);
-      font-size: var(--fs-xs, .72rem); line-height: 1.5;
+      font-size: var(--ow-fs-label, .8125rem); line-height: 1.5;
     }
     .og-card .og-head {
       display: flex; align-items: center; gap: .4rem; margin: 0 0 .35rem;
-      font-weight: 600; letter-spacing: .03em;
+      font-size: var(--ow-fs-heading, .8125rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em;
     }
     .og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }
-    .og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }
+    /* #729/#730: the gadget-header focus ring is NEUTRAL system-blue, never the theme red/accent —
+       the glass chrome carries no accent HUE. Kept value-identical to orwellGadget.js ensureCss()
+       (the canonical copy) so there is no red→blue flash on stylesheet load. */
+    .og-card .og-head:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: 2px; border-radius: 4px; }
     .og-card .og-icon { flex: 0 0 auto; }
     .og-card .og-title {
       flex: 1 1 auto; min-width: 0;
@@ -2010,12 +2013,12 @@ body.bg-pattern-perlin-flow {
       border-radius: 12px; padding: .7rem .85rem;
       background: var(--panel, #111); color: var(--fg, #9cdef2);
       border: 1px solid var(--border, #355a66);
-      font-size: var(--fs-sm, .85rem); line-height: 1.5;
+      font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.5;
       box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
     }
     .on-card .on-head { display: flex; align-items: baseline; gap: .5rem; padding-right: 1.6rem; }
     .on-card .on-icon { flex: 0 0 auto; opacity: .9; }
-    .on-card .on-title { flex: 1 1 auto; min-width: 0; font-weight: 700; letter-spacing: .02em; }
+    .on-card .on-title { flex: 1 1 auto; min-width: 0; font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; }
     .on-card .on-body { margin-top: .35rem; }
     .on-card .on-body:empty { display: none; }
     .on-card .on-dismiss {
