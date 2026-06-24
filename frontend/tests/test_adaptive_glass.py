@@ -49,24 +49,35 @@ def test_samples_backdrop_luminance():
     assert "elementsFromPoint" in JS                 # fallback: element-behind bg color
 
 
-def test_keeps_glass_clear_with_a_gentle_veil():
-    # The glass stays CLEAR (Apple's bright-media legibility is NOT "darken the glass").
-    # The veil is a GENTLE --panel mix, scaled by luminance but capped low (not a slab).
-    assert "VEIL_MIN" in JS and "VEIL_MAX" in JS
-    assert "VEIL_MIN + (VEIL_MAX - VEIL_MIN)" in JS
-    assert 'setProperty("background-color"' in JS and "var(--panel" in JS
-    vmax = int(re.search(r"VEIL_MAX\s*=\s*(\d+)", JS).group(1))
-    assert vmax <= 40, f"veil too strong ({vmax}%) — glass must stay clear, not muted"
+def test_size_aware_flip_small_clear_large_muted():
+    # Apple (WWDC25 219): SMALL bars/tiles flip symbols + stay clear; LARGE surfaces
+    # (sidebars/windows/menus) DON'T flip ("surface area too big") — the glass adapts
+    # (mutes) instead. So small surfaces get a low veil cap, large a higher one, and only
+    # small surfaces flip ink.
+    assert "FLIP_SET" in JS
+    assert "VEIL_MAX_SMALL" in JS and "VEIL_MAX_LARGE" in JS
+    small = int(re.search(r"VEIL_MAX_SMALL\s*=\s*(\d+)", JS).group(1))
+    large = int(re.search(r"VEIL_MAX_LARGE\s*=\s*(\d+)", JS).group(1))
+    assert small <= 34, f"small bars must stay CLEAR ({small}%) — the flip does the work"
+    assert large > small, "large surfaces mute more (they don't flip)"
+    assert "el.matches(FLIP_SET)" in JS
+    # only SMALL + bright flips to dark ink.
+    assert re.search(r"small\s*&&\s*L\s*>=?\s*INK_THRESHOLD", JS)
 
 
-def test_adaptive_ink_flips_symbols_dark_over_bright():
-    # The REAL Apple lever (HIG Color): "symbols and text become darker when the underlying
-    # content is light, and lighter when it's dark." So over a BRIGHT backdrop the surface's
-    # ink flips DARK (like the share-button-over-Fuji reference) while the glass stays clear.
-    assert "INK_THRESHOLD" in JS and "INK_DARK" in JS
-    assert re.search(r"L\s*>=?\s*INK_THRESHOLD", JS)
-    assert 'setProperty("color", INK_DARK' in JS
+def test_linear_luminance_and_threshold():
+    # proper sRGB→linear luminance (not gamma-encoded), flip at the researched Y > 0.36.
+    assert "0.2126" in JS and "Math.pow" in JS and "12.92" in JS  # sRGB→linear
+    assert re.search(r"INK_THRESHOLD\s*=\s*0\.36", JS)
+    assert "INK_DARK" in JS and 'setProperty("color", INK_DARK' in JS
     assert "data-adaptive-ink" in JS
+
+
+def test_accessibility_increase_contrast_drops_the_flip():
+    # Increase Contrast supersedes the subtle flip (black/white + border via CSS) — the
+    # module drops its overrides under prefers-contrast: more.
+    assert "prefersContrast" in JS
+    assert "(prefers-contrast: more)" in JS
 
 
 def test_fail_soft_and_frosted_gated():

@@ -23,20 +23,36 @@
   var SURFACES = ".ow-window, .chat-input-bar, #sidebar, .modal-content, .og-card, .on-card, #minimized-dock.ow-has-rows, .dropdown, .overflow-menu, .cp-popover";
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
-  // Apple's mechanism over bright media is NOT "darken the glass" — the glass stays
-  // CLEAR/translucent and the SYMBOLS go dark ("symbols and text become darker when the
-  // underlying content is light, and lighter when it's dark"). So we keep the veil GENTLE
-  // (the glass stays clear) and do the legibility work with an adaptive INK colour on the
-  // surface's text/symbols. The small veil only provides a touch of separation.
-  var VEIL_MIN = 14;   // % --panel at a dark backdrop (translucent/lit)
-  var VEIL_MAX = 34;   // % --panel at a bright backdrop (still clearly translucent — NOT a slab)
-  var INK_THRESHOLD = 0.58; // backdrop luminance above which symbols flip to DARK ink
+  // Apple's adaptation is SIZE-DEPENDENT (WWDC25 219 + HIG Color):
+  //   • SMALL bars/tiles (toolbars, tab bars — our composer bar, gadget tiles, the dock):
+  //     the glass stays CLEAR and the SYMBOLS FLIP light↔dark to mirror the backdrop
+  //     ("symbols and glyphs … flip from light to dark and vice versa … to maximize
+  //     contrast"). No darkening of the glass.
+  //   • LARGE surfaces (sidebars, windows, modals, menus): they "don't flip from light to
+  //     dark — their surface area is too big and transitions would be distracting." Instead
+  //     the Regular glass continuously "blurs AND adjusts the luminosity of background
+  //     content to maintain legibility" — so we keep LIGHT --fg symbols and let a stronger
+  //     adaptive veil mute a bright backdrop just enough to keep them legible.
+  // The only darkening Apple sanctions is the Clear variant's literal 35% dimmer over bright
+  // media (not used here — our surfaces carry text, so Regular is correct).
+  var VEIL_MIN = 14;          // % --panel at a dark backdrop (translucent/lit) — both sizes
+  var VEIL_MAX_SMALL = 30;    // small bars stay CLEAR (the symbol flip does the legibility work)
+  var VEIL_MAX_LARGE = 58;    // large surfaces don't flip → glass adapts (mutes) to keep light text legible
+  var VEIL_FULL_AT = 0.5;     // linear-Y at which the veil reaches its cap (steeper ramp; bright haze mutes enough)
+  // Small bars/tiles that FLIP (everything else in SURFACES is treated as large / no-flip).
+  var FLIP_SET = ".chat-input-bar, .og-card, #minimized-dock.ow-has-rows";
+  var INK_THRESHOLD = 0.36;   // LINEAR-Y flip point (research): backdrop above this ⇒ DARK ink
   var INK_DARK = "#11151c";   // dark symbol/label colour over bright backdrops
   var DEBOUNCE_MS = 120;
-  var SAMPLE_GRID = 5; // NxN samples across the surface's backdrop region
+  var SAMPLE_GRID = 5;        // NxN samples across the surface's backdrop region
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-  function relLum(r, g, b) { return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; }
+  // Proper relative luminance: sRGB → linear, then Rec.709 weights (matches Apple/WCAG).
+  function _lin(c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  function relLum(r, g, b) { return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b); }
+  function prefersContrast() {
+    try { return !!(window.matchMedia && window.matchMedia("(prefers-contrast: more)").matches); } catch (_) { return false; }
+  }
 
   // ── backdrop image discovery + sampling ─────────────────────────────────────
   // The "background" can be anything. We resolve the topmost viewport-covering source:
@@ -151,20 +167,27 @@
         el.removeAttribute("data-adaptive-veil"); el.removeAttribute("data-adaptive-ink");
         return;
       }
-      // GENTLE veil only (glass stays clear). Brighter backdrop → a touch more separation.
-      var pct = Math.round(clamp(VEIL_MIN + (VEIL_MAX - VEIL_MIN) * L, VEIL_MIN, VEIL_MAX));
+      var small = false;
+      try { small = el.matches(FLIP_SET); } catch (_) {}
+      // SMALL bars stay CLEAR (low veil); LARGE surfaces don't flip, so their glass adapts
+      // (a stronger veil over bright) to keep the light --fg symbols legible.
+      var vmax = small ? VEIL_MAX_SMALL : VEIL_MAX_LARGE;
+      // Steeper ramp: reach the cap by VEIL_FULL_AT (bright haze has only moderate LINEAR
+      // luminance, so a 1:1 ramp under-mutes). Large surfaces must mute enough that the
+      // light --fg symbols stay legible over a bright backdrop (they don't flip).
+      var f = clamp(L / VEIL_FULL_AT, 0, 1);
+      var pct = Math.round(clamp(VEIL_MIN + (vmax - VEIL_MIN) * f, VEIL_MIN, vmax));
       el.style.setProperty("background-color",
         "color-mix(in srgb, var(--panel, var(--bg)) " + pct + "%, transparent)", "important");
       el.setAttribute("data-adaptive-veil", String(pct));
-      // ADAPTIVE INK (the real Apple lever): over a BRIGHT backdrop the symbols/labels go
-      // DARK; over a DARK backdrop they stay light (--fg). A faint opposite-tone halo gives
-      // the final legibility margin without darkening the glass. Set on the surface so its
-      // text/symbols inherit; the tinted CTA / coloured controls keep their own !important.
-      if (L >= INK_THRESHOLD) {
+
+      if (small && L >= INK_THRESHOLD) {
+        // SMALL + BRIGHT: flip symbols DARK (the glass stays clear). Faint light halo = margin.
         el.style.setProperty("color", INK_DARK, "important");
         el.style.setProperty("text-shadow", "0 0 2px rgba(255,255,255,0.55)", "important");
         el.setAttribute("data-adaptive-ink", "dark");
       } else {
+        // SMALL+dark, or any LARGE surface: keep light --fg (large elements never flip).
         el.style.removeProperty("color");
         el.style.setProperty("text-shadow", "0 1px 2px rgba(0,0,0,0.32)", "important");
         el.setAttribute("data-adaptive-ink", "light");
@@ -173,7 +196,10 @@
   }
 
   function pass() {
-    if (!isFrosted()) {
+    // Accessibility wins over the optics (WWDC25): under Increase Contrast the system goes
+    // predominantly black/white + a contrasting border — the subtle adaptive flip is dropped.
+    // Drop our overrides and let the CSS high-contrast treatment stand.
+    if (!isFrosted() || prefersContrast()) {
       // drop our overrides so the static CSS veil stands
       var tagged = document.querySelectorAll("[data-adaptive-veil]");
       for (var i = 0; i < tagged.length; i++) {
