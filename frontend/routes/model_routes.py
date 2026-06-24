@@ -1891,6 +1891,7 @@ def setup_model_routes(model_discovery):
                 _is_admin = bool(auth_mgr.is_admin(_user))
         except Exception:
             _is_admin = False
+        _global_branch = not (_user and not _is_admin)
         if _user and not _is_admin:
             from routes.prefs_routes import _load_for_user
             _user_prefs = _load_for_user(_user) or {}
@@ -1901,6 +1902,7 @@ def setup_model_routes(model_discovery):
             ep_id = settings.get("default_endpoint_id", "")
             model = settings.get("default_model", "")
             _fallbacks = settings.get("default_model_fallbacks") or []
+        _original_model = model
         db = SessionLocal()
         try:
             ep = None
@@ -1977,6 +1979,22 @@ def setup_model_routes(model_discovery):
             # endpoint has no chat model to offer (better an empty pick than dispatching to it).
             if model and is_image_model(model):
                 model = ""
+            # Harden: when the STORED global default was a text→image model, persist the derived
+            # chat model so the corruption is cleaned at the SOURCE — Settings and the research/
+            # utility lanes that fall back to `default_model` stop reading the image model. Global/
+            # admin scope only (per-user prefs self-heal on read); writes at most once, since the
+            # next read sees a chat model and skips this.
+            if (
+                _global_branch and _original_model and is_image_model(_original_model)
+                and model and not is_image_model(model) and model != _original_model
+            ):
+                try:
+                    settings["default_model"] = model
+                    if not settings.get("default_endpoint_id"):
+                        settings["default_endpoint_id"] = ep.id
+                    _save_settings(settings)
+                except Exception:
+                    pass
             return {"endpoint_id": ep.id, "endpoint_url": chat_url, "model": model}
         finally:
             db.close()
