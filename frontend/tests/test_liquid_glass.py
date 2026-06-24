@@ -379,11 +379,11 @@ def test_button_morph_is_reduced_motion_gated():
 # ── 16. macOS traffic lights + iOS toggle/slider colors (parity) ───────────────
 
 def test_traffic_lights_top_left_colored_when_focused():
-    # window controls are macOS traffic lights: close=red, min=yellow, max=green when
-    # focused; neutral grey when unfocused; cluster ordered to the LEFT.
+    # window controls are macOS traffic lights: close=red, min=yellow when focused;
+    # neutral grey when unfocused; cluster ordered to the LEFT. (The third green/max
+    # light was dropped — owner ruling; see test_maximize_control_removed_from_all_windows.)
     assert re.search(r"\.ow-window\.ow-focused .ow-controls \.ow-close\s*\{[^}]*#ff5f57", CSS, re.S)
     assert re.search(r"\.ow-window\.ow-focused .ow-controls \.ow-min\s*\{[^}]*#febc2e", CSS, re.S)
-    assert re.search(r"\.ow-window\.ow-focused .ow-controls \.ow-max\s*\{[^}]*#28c840", CSS, re.S)
     # unfocused → neutral grey.
     assert re.search(r"\.ow-window:not\(\.ow-focused\) .ow-controls", CSS, re.S)
     # cluster to the left (order:-1) and the title centered.
@@ -391,28 +391,49 @@ def test_traffic_lights_top_left_colored_when_focused():
     assert re.search(r"\.ow-title\s*\{[^}]*left:\s*50%", CSS, re.S)
 
 
-def test_maximize_disabled_by_default():
-    # the green/maximize light is greyed + inert unless the window opts in (.ow-max-enabled).
-    assert re.search(r"\.ow-window:not\(\.ow-max-enabled\) .ow-controls \.ow-max", CSS, re.S)
-    assert "pointer-events: none" in CSS
-    # the kit creates the max button + the opt-in class.
+def test_maximize_control_removed_from_all_windows():
+    # Owner ruling (#768): the maximize/zoom ("green light") control is GONE from every
+    # kit window — it only crowded the centered titlebar title at thin widths and was inert
+    # everywhere. The kit must NOT create an .ow-max button, the maximizable opt, or the
+    # .ow-max-enabled class; the CSS must carry no .ow-max rule (no green #28c840 light).
     win = _read("static", "js", "orwellWindow.js")
-    assert "ow-max" in win and "maximizable" in win and "ow-max-enabled" in win
+    assert "ow-max" not in win
+    assert "maximizable" not in win
+    assert "ow-max-enabled" not in win
+    assert ".ow-max" not in CSS
+    assert "#28c840" not in CSS  # the green light color is gone with it
 
 
-def test_three_light_cluster_always_renders():
-    # Authentic macOS reads as THREE lights. The kit always renders BOTH the yellow
-    # (min) and green (max) discs — greyed/inert when the window can't minimize/zoom —
-    # so a closable-only window (e.g. Settings) still shows red + greyed-yellow +
-    # greyed-green, not a lopsided two-light cluster. (Was: ow-min only built when
-    # minimizable, which dropped the yellow light entirely.)
+def test_two_light_cluster_close_and_min():
+    # The cluster is now close (red) + minimize (yellow). The min button is built
+    # unconditionally so a closable-only window (e.g. Settings) still shows red +
+    # greyed-yellow, not a lone red — the capability only gates enabled-ness.
     win = _read("static", "js", "orwellWindow.js")
-    # the min button is built unconditionally; the capability only gates enabled-ness.
     assert "const canMin = this.o.minimizable && !this._docked;" in win
     assert "if (!canMin) { b.disabled = true; }" in win
-    # the disabled yellow light is greyed/inert the same way as the disabled green (a visible
-    # placeholder so the cluster reads as three lights — mirroring 'Zoom (unavailable)').
+    # the disabled yellow light is greyed/inert (a visible placeholder).
     assert re.search(r"\.ow-controls \.ow-min\[disabled\]", CSS, re.S)
+    # close + min keep their traffic-light order; no third (green) order slot remains.
+    assert re.search(r"\.ow-controls \.ow-close \{ order: 0", CSS)
+    assert re.search(r"\.ow-controls \.ow-min   \{ order: 1", CSS)
+
+
+def test_compact_pin_is_monochrome_kit_control():
+    # Owner ruling (#769): the Cast "Compact pin" control is a kit-consistent button —
+    # a MONOCHROME inline SVG (currentColor), NOT a full-color emoji pushpin, and styled
+    # on glass with a soft white hairline + no accent on the text.
+    cast = _read("static", "js", "orwellCast.js")
+    # the oc-pin button carries an inline SVG glyph (currentColor, kit language)…
+    assert re.search(r'class="oc-pin"[^>]*>\s*<svg[^>]*stroke="currentColor"', cast)
+    # …and NO full-color emoji pushpin glyph.
+    assert "📌" not in cast
+    # the .oc-pin button text never picks up an accent color (dark legible ink on glass).
+    pinblk = re.search(r"#orwell-cast \.oc-pin \{(.*?)\}", cast, re.S).group(1)
+    assert "--accent" not in pinblk and "color: inherit" in pinblk
+    # on the frosted glass it carries the kit's soft white hairline (rgba(255,255,255,0.14)).
+    assert re.search(
+        r"body\.theme-frosted #orwell-cast[^{]*\.oc-pin[^{]*\{[^}]*rgba\(255,255,255,0\.14\)",
+        cast, re.S)
 
 
 def test_ios_toggle_blue_and_slider_green():

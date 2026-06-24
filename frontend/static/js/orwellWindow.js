@@ -434,7 +434,7 @@ export class OrwellWindow {
     const docked = this._docked;
     const el = document.createElement('div');
     el.id = this.o.id;
-    el.className = 'ow-window' + (docked ? ' ow-docked' : '') + (this.o.maximizable ? ' ow-max-enabled' : '');
+    el.className = 'ow-window' + (docked ? ' ow-docked' : '');
     el.setAttribute('data-ow-window', '');
     if (docked) el.setAttribute('data-ow-docked', '');
     // J1-25: a modal window is a dialog whose background it PROMISES is inert (the
@@ -470,12 +470,13 @@ export class OrwellWindow {
     }
     // Minimize-to-dock is a FLOATING affordance; a docked window lives in the rail
     // and never minimizes to the chip dock (the rail owns its visibility/collapse).
-    // macOS traffic-light cluster: the YELLOW light is ALWAYS rendered (mirroring the
-    // green/max light below) so every frosted window reads as the authentic THREE-light
-    // cluster — a non-minimizable window just gets a greyed/inert yellow disc, exactly
-    // like the greyed green. The kit's non-frosted glyph fallback hides the disabled
-    // placeholder via CSS (`body:not(.theme-frosted) .ow-controls button[disabled]`), so
-    // the legacy look still shows only functional controls.
+    // macOS traffic-light cluster (frosted theme): close=red + minimize=yellow. The
+    // YELLOW light is ALWAYS rendered so the cluster keeps its shape — a non-minimizable
+    // window just gets a greyed/inert yellow disc. The kit's non-frosted glyph fallback
+    // hides the disabled placeholder via CSS (`body:not(.theme-frosted) .ow-controls
+    // button[disabled]`), so the legacy look still shows only functional controls. (The
+    // third green/zoom light was removed — owner ruling: it crowded the title at thin
+    // widths and was inert everywhere.)
     const canMin = this.o.minimizable && !this._docked;
     {
       const b = document.createElement('button');
@@ -495,22 +496,11 @@ export class OrwellWindow {
       b.addEventListener('click', (e) => { e.stopPropagation(); this.close(); }, { signal: this.ac.signal });
       controls.appendChild(b);
     }
-    // macOS traffic-light cluster (frosted theme): the third light is MAXIMIZE/zoom.
-    // It is DISABLED by default everywhere (the greyed macOS look) — only a window that
-    // opts in (`maximizable:true`) gets an active green light + a working zoom toggle.
-    // CSS owns the colors/positions/greyed-state; the button just has to exist so the
-    // cluster reads as three lights. (Excluded exception: NOT glass-refracted.)
-    if (this.o.closable || this.o.minimizable) {
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'ow-max';
-      const on = !!this.o.maximizable;
-      b.setAttribute('aria-label', on ? 'Zoom' : 'Zoom (unavailable)');
-      b.title = on ? 'Zoom' : '';
-      b.textContent = '+';
-      if (!on) { b.disabled = true; }
-      else { b.addEventListener('click', (e) => { e.stopPropagation(); if (this.toggleMaximize) this.toggleMaximize(); }, { signal: this.ac.signal }); }
-      controls.appendChild(b);
-    }
+    // NB: the maximize/zoom ("green light") control is DELIBERATELY GONE from every window
+    // (owner ruling): it only crowded the (centered) titlebar title when a window was resized
+    // thin, and it was inert everywhere anyway (no window ever opted it on). The macOS
+    // cluster reads as close (red) + minimize (yellow) — close/minimize/dock/resize are
+    // untouched. Do NOT re-add a third light here.
     tb.appendChild(title); tb.appendChild(controls);
     const body = document.createElement('div');
     body.className = 'ow-body';

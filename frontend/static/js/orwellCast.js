@@ -165,6 +165,10 @@
           padding: .3rem .55rem; min-height: 28px; display: inline-flex; align-items: center; gap: .35rem;
         }
         #orwell-cast .oc-pin:hover { background: rgba(255,255,255,.12); }
+        /* #769: the pin icon is a MONOCHROME inline SVG (currentColor) — kit glyph language,
+           no full-color emoji. flex-shrink:0 keeps it crisp beside the label. */
+        #orwell-cast .oc-pin .oc-pin-ic { flex-shrink: 0; opacity: .85; }
+        #orwell-cast .oc-pin:hover .oc-pin-ic { opacity: 1; }
         #orwell-cast .oc-actions { margin-top: .8rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
         #orwell-cast .oc-backfill {
           cursor: pointer; font: inherit; font-size: .74rem; letter-spacing: .03em;
@@ -189,7 +193,7 @@
         }
       </style>
       <div class="oc-toolbar">
-        <button type="button" class="oc-pin" id="oc-pin" title="Compact pin — two portraits in the control-room rail">📌 Compact pin</button>
+        <button type="button" class="oc-pin" id="oc-pin" title="Compact pin — two portraits in the control-room rail"><svg class="oc-pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 8 3 3H7l3-3-1-8z"/></svg><span>Compact pin</span></button>
       </div>
       <div class="oc-grid" id="oc-grid"></div>
       <div class="oc-empty" id="oc-empty" style="display:none"></div>
