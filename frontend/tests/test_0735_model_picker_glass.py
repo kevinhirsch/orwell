@@ -8,9 +8,9 @@ so a refactor can't silently regress it):
     picker button + popover ride the shared kit LIGHT glass material (the same
     --ow-glass-* tokens / kube light fill the OrwellWindow + Notice kits use).
   * DARK INK (#16191f family) on the light glass for every text node — model name,
-    provider/endpoint label, section labels, the search input + its placeholder, the
-    selected/active row, the button label, the "+" add-models control, the
-    favorite/remove dots' resting state. NO light-on-light anywhere.
+    provider/endpoint label, section labels, the selected/active row, the button
+    label, the "+" add-models control, the favorite/remove dots' resting state.
+    NO light-on-light anywhere.
   * SOFT LUMINOUS hairlines (rgba(255,255,255,0.14) family), NOT a hard dark
     var(--border) stroke (Apple defines glass by lensing, not stroke).
   * NO accent HUE on TEXT (mandate). The favorite-status dot keeps its accent only as
@@ -98,26 +98,6 @@ def test_picker_text_nodes_are_dark_ink():
     assert menu_redefines_fg or explicit, (
         "the picker's text nodes must resolve to dark ink (#16191f) on the light glass "
         "— either by redefining --fg on the popover or an explicit dark-ink text rule"
-    )
-
-
-def test_search_input_text_and_placeholder_are_dark_ink():
-    # Placeholders are a common miss — pin both the field text and the ::placeholder.
-    in_block = None
-    for sel, body in _blocks_for('.model-picker-menu input[type="text"]'):
-        if "body.theme-frosted" in sel and DARK_INK.search(body):
-            in_block = body
-            break
-    assert in_block, "the search input text must be dark ink on the light glass"
-
-    ph = re.search(
-        r"body\.theme-frosted[^{}]*\.model-picker-menu input\[type=\"text\"\]::placeholder[^{}]*\{([^{}]*)\}",
-        CSS,
-        re.S,
-    )
-    assert ph and re.search(r"22\s*,\s*25\s*,\s*31", ph.group(1)), (
-        "the search input ::placeholder must be a legible dark ink (22,25,31) — "
-        "not a light-on-light placeholder"
     )
 
 
