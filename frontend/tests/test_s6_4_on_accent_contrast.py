@@ -167,13 +167,17 @@ def test_js_injected_accent_ctas_use_on_accent_token():
     assert "background: var(--brand-color, var(--accent, #4a9)); color: var(--on-accent, #fff)" in hs, (
         ".hs-btn (the 'Make AI studio portraits' CTA, J2-17) must use var(--on-accent) on its accent bg."
     )
+    # #709: the onboarding primary CTA no longer hand-rolls an accent fill — it composes the element
+    # kit's .ow-btn-prominent (kit-owned, legible glass styling), and the modal is RECREATED on the
+    # OrwellWindow kit. So there is no bespoke accent-backed onboarding CTA to contrast-check here, and
+    # NO red anywhere in the overlay (the kit chrome is colorless).
     ob = _read("static/js/orwellOnboarding.js")
-    assert "background: var(--brand-color, var(--red, #e06c75)); color: var(--on-accent, #fff)" in ob, (
-        ".ob-btn-primary must use var(--on-accent) on its accent background."
+    assert "ow-btn-prominent" in ob, (
+        "the onboarding primary CTA must compose the element kit's .ow-btn-prominent."
     )
-    # the old dark-on-accent anti-pattern (color: var(--bg)) must be gone from BOTH primary CTAs.
+    assert "var(--red, #e06c75)" not in ob, "no red accent may survive in the kit-rebuilt overlay."
+    # the old dark-on-accent anti-pattern (color: var(--bg)) must be gone from the headshot CTA too.
     assert "var(--accent, #4a9)); color: var(--bg" not in hs
-    assert "var(--red, #e06c75)); color: var(--bg" not in ob
 
 
 def test_non_accent_white_ctas_are_left_alone():

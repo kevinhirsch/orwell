@@ -231,8 +231,10 @@ def _setup_seg(onb):
 def test_setup_wizard_is_its_own_modal_not_in_chat():
     onb = _read("static", "js", "orwellOnboarding.js")
     assert "function mountSetup" in onb
-    # it is a real dialog overlay (aria-modal), the same overlay machinery as the holding cards
-    assert 'aria-modal", "true"' in onb
+    # #709: it is a real dialog modal — RECREATED on the OrwellWindow kit (modal:true owns the
+    # scrim + inert + focus-trap + aria-modal), the same overlay machinery as the holding cards.
+    assert "OrwellWindowKit.create" in onb
+    assert "modal: true" in onb
     # the ONLY welcome copy is the framing line; the rest is feed/model setup
     seg = _setup_seg(onb)
     assert "Production needs the feeds" in seg
@@ -478,37 +480,39 @@ def test_thing2_cast_photo_is_a_pill_not_an_auto_open():
 # ── 6. Welcome polish (#606 cluster: J1-31 focus ring, J1-10 desktop weight) + J1-30 producers copy ──
 
 def test_welcome_ctas_have_a_focus_visible_ring():
-    # J1-31: the onboarding overlay buttons are the journey's FIRST interactive elements and must
-    # carry a visible keyboard-focus ring (WCAG 2.4.7). The ring is keyed to --brand-color (theme
-    # token) — never a hardcoded color — and the primary CTA gets a double ring so its focus reads
-    # against its own fill.
+    # J1-31 → #709: the onboarding CTAs are the journey's FIRST interactive elements and must carry a
+    # visible keyboard-focus ring (WCAG 2.4.7). The bespoke .ob-btn focus CSS (keyed to --brand-color)
+    # is GONE — the CTAs compose the element kit (.ow-btn / -secondary / -prominent), which OWNS the
+    # focus-visible ring as one source of truth (neutral system-blue, never the theme red). The ring
+    # lives in style.css's .ow-btn rules, not in this module.
     onb = _read("static", "js", "orwellOnboarding.js")
-    assert ".ob-btn:focus-visible" in onb
-    assert ".ob-btn-primary:focus-visible" in onb
-    # the ring uses the theme brand token, not a hardcoded white/bg
-    seg = onb[onb.index(".ob-btn:focus-visible"):onb.index(".ob-btn-primary:focus-visible")]
-    assert "var(--brand-color" in seg
-    assert "box-shadow" in seg
+    assert "ow-btn" in onb
+    assert "ow-btn-prominent" in onb     # the primary CTA
+    assert "ow-btn-secondary" in onb     # the dismiss / secondary CTAs
+    # the bespoke brand-keyed focus ring is retired
+    assert ".ob-btn:focus-visible" not in onb
 
 
 def test_primary_cta_uses_on_accent_token_not_hardcoded_white():
-    # The accent CTA's text uses the --on-accent token (the project's contrast contract for accent
-    # fills), never a hardcoded white/--bg.
+    # #709: the primary CTA is now the kit's .ow-btn-prominent — the kit owns its (legible, glass)
+    # styling. The bespoke .ob-btn-primary { background: var(--red) } block (the dark-on-accent
+    # anti-pattern this test once guarded) is DELETED, so there is no longer a hardcoded accent fill
+    # in this module to contrast-check; the kit guarantees legibility.
     onb = _read("static", "js", "orwellOnboarding.js")
-    seg = onb[onb.index(".ob-btn-primary {"):]
-    seg = seg[: seg.index("}")]
-    assert "var(--on-accent" in seg
+    assert "ow-btn-prominent" in onb
+    assert ".ob-btn-primary {" not in onb           # the bespoke accent-fill block is gone
+    assert "var(--red, #e06c75)" not in onb         # no red anywhere in the overlay
 
 
 def test_welcome_card_scales_up_on_desktop():
-    # J1-10: the 420px card filled ~10% of a desktop viewport and read as under-confident. A wide
-    # (>=1024px) media query scales the card + title up for visual weight — pure type/space (no new
-    # imagery, which is a design call) and mobile/narrow keeps the compact card.
+    # J1-10 → #709: the card filled too little of a desktop viewport and read as under-confident. The
+    # card is now the kit window (auto-sized to content); this module gives it a confident min-width on
+    # wide screens (>=1024px). Mobile/narrow keeps the kit's max-width:64vw clamp.
     onb = _read("static", "js", "orwellOnboarding.js")
     assert "@media (min-width: 1024px)" in onb
     seg = onb[onb.index("@media (min-width: 1024px)"):]
-    seg = seg[: seg.index("}\n      </style>") + 1] if "}\n      </style>" in seg else seg[:400]
-    assert ".ob-card" in seg and "width: 540px" in seg
+    seg = seg[: seg.index("`") if "`" in seg else 400]
+    assert ".ob-card" in seg and "min-width: 480px" in seg
 
 
 def test_pre_token_wait_copy_is_in_universe_in_the_game_build():

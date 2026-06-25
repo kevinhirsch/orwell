@@ -701,8 +701,15 @@ def main() -> int:
                                           "|| document.querySelector('#sidebar') === null "
                                           "|| !!document.querySelector('#sidebar').closest('[inert]')")
             check(sidebar_inert is True, "onboarding: background is inert while mounted")
-            page.evaluate("document.getElementById('orwell-onboarding').remove();"
-                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+            # #709: the onboarding modal is now a KIT window — it owns a separate .ow-scrim sibling +
+            # the inert background. Dismiss it the real way (its own dismiss button → kit destroy),
+            # which removes the window AND its scrim AND un-inerts — never a force `.remove()` (that
+            # orphaned the scrim, which then intercepted every click below).
+            page.click("#orwell-onboarding [data-ob-dismiss]")
+            page.wait_for_function("() => !document.getElementById('orwell-onboarding') "
+                                   "&& !document.querySelector('.ow-scrim') "
+                                   "&& document.querySelectorAll('[inert]').length === 0",
+                                   timeout=3000)
 
             # C25/E88: the Diary Room is a composer mode in the chat (no dialog) — ruling #4.
             page.evaluate("window._orwellOpenDiaryRoom && window._orwellOpenDiaryRoom()")
