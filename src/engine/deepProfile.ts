@@ -406,18 +406,39 @@ type VocationSector =
   | "trades" | "healthcare" | "service" | "business" | "tech"
   | "arts" | "education" | "publicService" | "outdoors" | "fitness" | "curio" | "generic";
 
+// #848: the keyword set is matched FIRST-WIN over this ordered list, so a too-coarse / mis-ordered
+// keyword mis-keys a vocation into a sector whose stakes don't fit it (the live repro: "cheese monger"
+// matched the gimmick bucket's "cheese" and inherited novelty-act stakes like "a stunt that went viral").
+// Two disciplines keep the mapping honest: (1) ORDER specific-before-generic and keep the precise
+// COMPOUND keyword ahead of a single-word one that would otherwise steal the vocation ("aerospace
+// technician" must reach `tech`, not be eaten by healthcare's old bare "technician"; "nail technician"
+// reaches `service`, "special-education aide" reaches `education`, "city planner"/"court reporter" reach
+// `publicService`, "data analyst" reaches `tech`); and (2) food & trade vocations are SPLIT OUT of the
+// gimmick bucket — `curio` is now genuine reality-show novelty/performance acts only, so its stakes fit
+// every member. Every corpus vocation resolves to a sector whose stake pool plausibly fits it (a coherence
+// regression test pins this); an unmatched vocation still falls to the grounded `generic` stakes.
 const SECTOR_KEYWORDS: ReadonlyArray<{ sector: VocationSector; words: readonly string[] }> = [
+  // healthcare — precise clinical roles ONLY (so "nail technician" / "aerospace technician" /
+  // "special-education aide" are NOT pulled in by a bare "technician"/"aide" before their real sector).
+  { sector: "healthcare", words: ["nurse", "paramedic", "hygienist", "physical therapist", "occupational therapist", "pharmacist", "radiologic", "veterinary technician", "phlebotomist", "home health aide", "optometrist", "emt"] },
   { sector: "trades", words: ["electrician", "plumber", "welder", "carpenter", "mechanic", "hvac", "foreman", "landscaper", "painter", "machinist", "roofer", "locksmith"] },
-  { sector: "healthcare", words: ["nurse", "paramedic", "hygienist", "therapist", "pharmacist", "technologist", "technician", "phlebotomist", "aide", "optometrist", "emt"] },
-  { sector: "service", words: ["bartender", "barista", "cook", "chef", "sommelier", "concierge", "attendant", "entertainer", "planner", "food-truck", "tattoo", "barber", "hairstylist", "nail", "massage"] },
-  { sector: "business", words: ["agent", "salesperson", "adjuster", "broker", "advisor", "analyst", "executive", "owner", "rep", "teller", "recruiter"] },
-  { sector: "tech", words: ["software", "it support", "data", "qa", "engineer", "aerospace", "robotics", "drone", "streamer", "ux", "administrator"] },
-  { sector: "arts", words: ["designer", "photographer", "podcast", "musician", "filmmaker", "comedian", "dancer", "novelist", "muralist", "voice-over", "buyer", "gallery", "dj"] },
-  { sector: "education", words: ["teacher", "counselor", "student", "tutor", "docent", "librarian"] },
-  { sector: "publicService", words: ["firefighter", "dispatcher", "paralegal", "social worker", "carrier", "planner", "reporter", "ranger", "officer"] },
-  { sector: "outdoors", words: ["fisherman", "rancher", "vineyard", "beekeeper", "florist", "trucker", "wildland", "guide", "biologist", "farmer", "zookeeper"] },
+  // service, hospitality, FOOD & personal-care — food vendors (cheese monger) and beauty/personal-care
+  // (nail tech, massage) live here, AHEAD of the gimmick bucket, so their stakes read job-shaped.
+  { sector: "service", words: ["bartender", "barista", "cook", "chef", "sommelier", "concierge", "flight attendant", "cruise-ship", "wedding planner", "food-truck", "cheese", "tattoo", "barber", "hairstylist", "nail", "massage"] },
+  // tech & engineering — "data analyst" / "aerospace" resolve here (ahead of business "analyst" /
+  // healthcare "technician"); the keywords are compound/anchored so they don't over-capture.
+  { sector: "tech", words: ["software", "it support", "data analyst", "qa ", "civil engineer", "aerospace", "robotics", "drone", "video-game streamer", "ux ", "network administrator"] },
+  { sector: "business", words: ["real-estate agent", "salesperson", "adjuster", "broker", "financial advisor", "supply-chain", "account executive", "small-business owner", "pharmaceutical rep", "bank teller", "recruiter", "boutique owner"] },
+  { sector: "arts", words: ["graphic designer", "photographer", "podcast", "musician", "filmmaker", "comedian", "dancer", "novelist", "muralist", "voice-over", "fashion buyer", "gallery", "dj"] },
+  { sector: "education", words: ["teacher", "counselor", "student", "tutor", "docent", "librarian", "special-education aide"] },
+  // public service & law — "city planner" / "court reporter" resolve here (not service's "planner" /
+  // business's "rep" substring).
+  { sector: "publicService", words: ["firefighter", "dispatcher", "paralegal", "social worker", "postal carrier", "city planner", "court reporter", "park ranger", "customs officer"] },
+  { sector: "outdoors", words: ["fisherman", "rancher", "vineyard", "beekeeper", "florist", "trucker", "wildland", "ski-resort", "marine biologist", "farmer", "zookeeper"] },
   { sector: "fitness", words: ["trainer", "yoga", "crossfit", "athlete", "climbing", "swim coach", "boxing", "surf", "spin", "physical-education"] },
-  { sector: "curio", words: ["eating", "cuddler", "escape-room", "renaissance", "mascot", "cheese", "axe-throwing", "ghost-tour", "balloon", "poker"] },
+  // the only-on-a-reality-show curios — GIMMICK / performance acts ONLY (food & trades split out above),
+  // so the novelty-act stakes below fit every member.
+  { sector: "curio", words: ["competitive-eating", "cuddler", "escape-room", "renaissance", "mascot", "axe-throwing", "ghost-tour", "balloon", "poker"] },
 ];
 
 function sectorOf(vocation: string): VocationSector {
