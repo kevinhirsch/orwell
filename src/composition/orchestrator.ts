@@ -6,7 +6,7 @@ import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
 import { scaleImpact, natureFoldImpact } from "../engine/relationshipConstants";
 import { rollOverhears } from "../engine/presence";
-import { diffuseGossip, makeSocialGraph, rumorFrom, GOSSIP } from "../engine/gossip";
+import { diffuseGossip, makeSocialGraph, rumorFrom, gossipEdgeAffinity, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
 import { nextHouseEvent } from "../engine/houseEvents";
 import { SeededRandom } from "../adapters/random/SeededRandom";
@@ -587,11 +587,19 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // scene and never a number. Every retelling is a recorded, traceable event (0002).
   if (core.house && scenes.length > 0 && rng.next() < GOSSIP.riseProb) {
     const scene = scenes[rng.int(scenes.length)]!;
-    const everyone: EntityId[] = [core.house.player.id, ...ids];
+    // The graph is the AWAKE house (ADR 0006), exactly like the off-screen society above: a
+    // houseguest who has gone to bed neither retells nor receives a rumor at night (a pre-existing
+    // gap — the graph used to be all living NPCs, so a telling could reach a sleeper). When the
+    // clock is off (the default + the seeded calibration spine) `awakeAmong` is the whole roster, so
+    // this is byte-identical there. The PLAYER is a node like anyone — but only while THEY are up.
+    const everyone: EntityId[] = sandbox.session.awakeAmong([core.house.player.id, ...ids]);
     const edges: Array<readonly [EntityId, EntityId]> = [];
     for (let i = 0; i < everyone.length; i++) {
       for (let j = i + 1; j < everyone.length; j++) {
-        if (sandbox.engine.relationships.edge(everyone[i]!, everyone[j]!).affinity > GOSSIP.affinityEdge) {
+        // #565: symmetric edge selection (max of both directed reads) — a rumor travels along a bond
+        // whenever EITHER party is warm enough to carry it. The directed-only test structurally
+        // excluded the player (always `everyone[0]`, so only player→NPC was ever read) from the graph.
+        if (gossipEdgeAffinity(sandbox.engine.relationships, everyone[i]!, everyone[j]!) > GOSSIP.affinityEdge) {
           edges.push([everyone[i]!, everyone[j]!] as const);
         }
       }
