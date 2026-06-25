@@ -889,6 +889,9 @@
       if (!targetSet.has(el) || !el.isConnected) clearFrom(el);
     });
     targets.forEach(applyTo);
+    // Keep the single pointer-reactive rim in sync with tier/focus changes (a theme
+    // flip to non-glass / reduced-transparency clears it; a flip back re-picks it).
+    try { refreshSpecTarget(); } catch (_) {}
   }
 
   // ── ResizeObserver (debounced) — re-map a surface whose size changed ─────────
@@ -941,6 +944,146 @@
     } catch (_) {}
   }
 
+  // ── POINTER-REACTIVE SPECULAR (Genius #21) ──────────────────────────────────
+  // A thin pointer-tracking rim-light on the ONE currently-focused surface. As the
+  // pointer moves over that surface, a subtle moving specular highlight shifts to
+  // track it — "a hint of life", Apple-restrained, NEVER multiple at once.
+  //
+  // Mechanics (kept dead-simple + cheap):
+  //   • We track exactly ONE active surface (the FOCUSED one): the composer when it
+  //     holds focus (focus-within on .chat-input-bar), else the focused window
+  //     (.ow-window.ow-focused). Focus changes swap the active surface; the previous
+  //     one is cleared so there is provably never more than one live at a time.
+  //   • pointermove over the active surface writes two CSS custom properties on it —
+  //     --ow-spec-x / --ow-spec-y, the 0..1 pointer position within the surface — and
+  //     sets data-ow-spec="1". The CSS (the dedicated pointer-specular region in
+  //     style.css, body.glass-full only) consumes them in a radial-gradient ::after
+  //     specular sheen whose CENTER tracks the pointer. The hue is OKLCH-normalized to
+  //     neutral so no accent creeps onto the colorless glass.
+  //   • rAF-throttled: pointermove only stashes the latest coords; one rAF flushes them
+  //     to the CSS vars. No layout thrash, no per-event style write storm.
+  //   • prefers-reduced-motion ⇒ NO pointer tracking. We set data-ow-spec="static" so
+  //     the CSS renders a fixed (top-edge) rim-light instead of a moving one — the
+  //     surface still reads as lit glass, it just doesn't chase the pointer.
+  //   • Full-Glass tier only (isFrosted() == body.glass-full) and Chromium only
+  //     (this whole module no-ops otherwise) and never under reduced-transparency.
+  var specActive = null;         // the single surface currently carrying the pointer rim
+  var specRaf = 0;               // pending rAF id (0 = none)
+  var specPending = null;        // latest {el,x,y} awaiting flush
+  var specBound = false;         // listeners attached once
+
+  function specEligible() {
+    // The pointer-reactive rim is Full-Glass + Chromium + transparency-on only. (Caller
+    // already guards Chromium via supported(); these are the live-toggleable gates.)
+    return isFrosted() && !reducedTransparency() && !_forceDisabled;
+  }
+
+  // The single FOCUSED surface that should carry the rim, or null. Composer focus wins
+  // over a focused window (it's the active input); STRICTLY one is returned.
+  function focusedSurface() {
+    try {
+      var bar = document.querySelector(".chat-input-bar");
+      if (bar && bar.isConnected && bar.matches(":focus-within")) return bar;
+      var win = document.querySelector(".ow-window.ow-focused");
+      if (win && win.isConnected) return win;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function clearSpec(el) {
+    if (!el) return;
+    try {
+      el.removeAttribute("data-ow-spec");
+      el.style.removeProperty("--ow-spec-x");
+      el.style.removeProperty("--ow-spec-y");
+    } catch (_) {}
+  }
+
+  // Promote `el` (or null) to the SOLE pointer-rim surface, clearing any previous one.
+  function setSpecActive(el) {
+    if (el === specActive) return;
+    if (specActive) clearSpec(specActive);
+    specActive = el || null;
+    if (!specActive) return;
+    // Reduced-motion ⇒ a STATIC rim (no pointer chase). Otherwise mark it live and seed
+    // the highlight at the top-center until the pointer moves over it.
+    if (reducedMotion()) {
+      specActive.setAttribute("data-ow-spec", "static");
+    } else {
+      specActive.setAttribute("data-ow-spec", "1");
+      try {
+        specActive.style.setProperty("--ow-spec-x", "0.5");
+        specActive.style.setProperty("--ow-spec-y", "0");
+      } catch (_) {}
+    }
+  }
+
+  // Re-evaluate which single surface is focused and own the rim accordingly.
+  function refreshSpecTarget() {
+    if (!specEligible()) { setSpecActive(null); return; }
+    setSpecActive(focusedSurface());
+  }
+
+  function flushSpec() {
+    specRaf = 0;
+    var p = specPending;
+    specPending = null;
+    if (!p || p.el !== specActive || !specActive) return;
+    if (reducedMotion()) return; // static rim ignores the pointer
+    try {
+      specActive.style.setProperty("--ow-spec-x", p.x.toFixed(4));
+      specActive.style.setProperty("--ow-spec-y", p.y.toFixed(4));
+    } catch (_) {}
+  }
+
+  function onSpecPointerMove(e) {
+    if (!specActive || reducedMotion() || !specEligible()) return;
+    // Only track when the pointer is actually over the active surface (one at a time).
+    var el = specActive;
+    var r;
+    try { r = el.getBoundingClientRect(); } catch (_) { return; }
+    if (r.width <= 0 || r.height <= 0) return;
+    var x = (e.clientX - r.left) / r.width;
+    var y = (e.clientY - r.top) / r.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return; // pointer left the surface
+    specPending = { el: el, x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+    if (!specRaf) {
+      specRaf = (window.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); })(flushSpec);
+    }
+  }
+
+  function bindSpec() {
+    if (specBound) return;
+    specBound = true;
+    try {
+      // Focus changes re-pick the single active surface (focusin/out bubble).
+      document.addEventListener("focusin", refreshSpecTarget, true);
+      document.addEventListener("focusout", function () {
+        // defer so focus has settled on the new target before we re-pick
+        (window.requestAnimationFrame || function (fn) { return setTimeout(fn, 0); })(refreshSpecTarget);
+      }, true);
+      // A window raise (.ow-focused swap) happens on pointerdown, so a deferred re-pick
+      // on pointerdown keeps the focused-window rim in sync without a new observer.
+      document.addEventListener("pointerdown", function () {
+        (window.requestAnimationFrame || function (fn) { return setTimeout(fn, 0); })(refreshSpecTarget);
+      }, true);
+      document.addEventListener("pointermove", onSpecPointerMove, { passive: true });
+      // a11y prefs flip live → re-evaluate static vs. tracking (drop + re-pick so the
+      // new data-ow-spec mode is applied to whatever is focused now).
+      try {
+        ["(prefers-reduced-motion: reduce)", "(prefers-reduced-transparency: reduce)"].forEach(function (q) {
+          var mq = window.matchMedia(q);
+          var on = function () { setSpecActive(null); refreshSpecTarget(); };
+          if (mq.addEventListener) mq.addEventListener("change", on);
+          else if (mq.addListener) mq.addListener(on);
+        });
+      } catch (_) {}
+    } catch (_) {}
+    refreshSpecTarget();
+  }
+
   // ── Boot ────────────────────────────────────────────────────────────────────
   function init() {
     if (!supported()) {
@@ -971,15 +1114,19 @@
         );
       } catch (_) {}
       applyPass();
+      // Pointer-reactive specular (Genius #21): bind the single-surface pointer rim.
+      try { bindSpec(); } catch (_) {}
       window.OrwellLiquidGlass = {
         supported: true,
         refresh: scheduleApply,
         clear: clearAll,
         // exposed for the visual-verification harness: force the fallback look
         // (drop our overrides) so the CSS blur-glass can be screenshotted alone.
-        _disable: function () { _forceDisabled = true; clearAll(); },
+        _disable: function () { _forceDisabled = true; clearAll(); setSpecActive(null); },
         _enable: function () { _forceDisabled = false; scheduleApply(); },
         _scale: function () { return activeScale(); },
+        // the single surface currently carrying the pointer rim (verification harness).
+        _specSurface: function () { return specActive; },
       };
     } catch (_) {
       // Any boot failure → leave the CSS glass entirely intact.
