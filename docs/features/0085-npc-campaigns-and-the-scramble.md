@@ -1,0 +1,173 @@
+# 0085 — NPC campaigns & the scramble (strategy executed over time)
+
+> **Status:** 📝 **SPEC / draft** (authored 2026-06-25). **Gate (planned):** engine (Vitest +
+> property/calibration + dependency-cruiser + BDD `0085-npc-campaigns-and-the-scramble.feature`) and
+> front-end (the player experiences campaigns only through existing surfaces — approaches, gossip, the
+> decision card). **Depends on:** 0038 (the off-screen society tick that runs each campaign move), 0039
+> (deals — a campaign's currency), 0043 (blocs — a campaign can be a bloc's shared agenda), 0044 +
+> `decisions`/`decisionConstants` (the seeded nomination/vote weights a campaign tilts), 0002/0038
+> (the pathways + gossip the player learns a campaign through), 0077 (conspicuousness — a campaign's
+> meetings are observable even when its content is sealed), 0048 (the retrospective unseal of who was
+> working whom). **Sibling of** 0084 (voice) — voice makes the texture real, campaigns make the
+> strategy real. **Vault Wall (mandate #2):** a campaign's existence, its true target, and its plan are
+> **hidden NPC strategy** — the player learns of one only through a modeled pathway; the engine, not
+> narration, tallies whether it works.
+
+> **Owner direction (2026-06-25, this session):**
+> *"NPC and character campaigning — strategy executed over a period of time: a day, a week, or multiple
+> weeks. It's strategy, just executed over a period."*
+
+## The problem this fixes
+
+The off-screen society already schemes — but mostly in **one-tick reactions**: a scene happens, edges
+move, gossip spreads. What it lacks is **temporal structure**: a houseguest deciding *"I want the comp
+beast out this week"* and then **pursuing that goal across many beats** — lobbying one ally Monday,
+planting a doubt Tuesday, cutting a deal Wednesday, adapting when the target wins veto — until it
+resolves at the vote. Real _BB_ strategy is a **campaign**, not an impulse. Mandate #1 calls out
+exactly this: *"off-screen NPC-to-NPC scheming the player never witnesses"* — this feature gives that
+scheming a **spine that persists and adapts over time**, and makes it *matter* by tilting the seeded
+outcome (never the narration's call — anti-sycophancy #3).
+
+## The model — a `Campaign` (hidden, persistent, adaptive)
+
+A **`Campaign`** is engine-only, Vault-sealed strategic state, owned by one NPC or shared by a bloc:
+
+```
+Campaign {
+  owners:    EntityId[]          // one schemer, or a bloc acting together (0043)
+  goal:      "evict" | "protect" | "build-alliance" | "win-power" | "discredit"
+  target:    EntityId            // who it's aimed at (the evict/protect/discredit subject)
+  plan:      Move[]              // the ordered, adaptable steps (lobby, plant, deal, position, throw)
+  progress:  number              // how close to its goal (0..1) — Vault-only, never shown
+  horizon:   "day" | "week" | "season"   // a flip vote vs. a season-long "get the threat out" crusade
+  status:    "active" | "won" | "lost" | "abandoned"
+  startedBeat / deadlineBeat     // the ceremony it resolves against
+  confidence: number             // the owner's read of its odds (drifts with the board)
+}
+```
+
+It lives beside the other hidden engine state (souls, relationships, deals) and **never crosses the
+wall** — no player or admin surface returns a campaign.
+
+### Generation — from goals + threat-reads
+
+NPCs form campaigns from their **deep-profile goals (0058)** crossed with the **live board**: who
+threatens them (a high-threat edge, an impending nomination), who they're bonded to (an alliance to
+build), a grudge to act on. A `comp-beast` left in the game spawns "evict the bigger threat";
+a `mastermind` spawns "build-alliance" early and "discredit-rival" late. Seeded, archetype-weighted,
+bounded in number (a house isn't all campaigns at once — scarcity keeps it legible).
+
+### Execution — one motivated move per off-screen tick
+
+Each off-screen tick (`simulateOffscreenStretch` / `richOffscreenStretch`, 0038), every active
+campaign advances **one concrete move**, folding into the systems that already exist — *no new parallel
+mechanics*:
+
+- **lobby** — an NPC↔NPC scene pushing the target's name (fold via relationships + gossip 0038).
+- **plant** — seed a doubt/rumor about the target (gossip diffusion 0038, drifting with each retelling).
+- **deal** — offer/strengthen a promise toward the goal (0039).
+- **position** — distance from the target, cluster with allies (presence/blocs 0049/0043).
+- **throw / win** — bend a competition *intent* toward the goal (the existing intent system, 0006).
+
+The move is **motivated, not scripted**: which move fires is chosen by the owner's character + the
+board, through the seeded `RandomnessSource`.
+
+### Adaptation — the board changes, the plan re-plans
+
+A campaign is not a fixed script. When the board shifts it **re-plans rather than evaporating**: the
+target wins veto ⇒ re-aim at the replacement (or escalate); a recruited ally flips ⇒ shore up or
+abandon; the owner lands on the block ⇒ the campaign pivots to self-`protect`. (Mirrors ADR 0005's
+principle: a move that fits no enum still folds — strategy must never silently vanish.)
+
+### Resolution — it tilts the *seeded* outcome (the anti-sycophancy spine)
+
+This is the crux. A campaign's accumulated `progress` feeds the **existing seeded nomination/vote
+decision weights (0044, `decisions`/`decisionConstants`)** — a well-run "evict X" campaign measurably
+raises X's eviction odds; a "protect" campaign lowers them. **The engine tallies it; narration only
+voices it.** No campaign "wins" because the story wanted it to — it wins because the seeded math, fed
+by real accumulated moves, landed there. The campaign resolves `won`/`lost` at its deadline ceremony.
+
+### The scramble — campaigns colliding at the vote
+
+The pre-eviction **scramble** is the week's campaigns crashing together: many owners working the same
+small electorate, a **hidden true vote count** that can diverge from what each houseguest says to the
+player's face (secret ballots, E12). A **blindside** is precisely that divergence — the player (or the
+target) believes one count; the sealed tally says another. The reveal is the staged, anonymized
+eviction (E12); the per-owner attribution unseals only in the 0048 retrospective.
+
+## The player's side
+
+- **Experienced, never read directly.** The player never sees a campaign object. They feel it: the
+  same name pushed at them by several houseguests (diffusion), an NPC who keeps **approaching** them to
+  lobby (a campaign move surfaced as a 0036 social initiative), a pair conspicuously **holed up** (0077),
+  a story that **contradicts** what someone else told them (a plant catching the light). They may be a
+  campaign's **target** (the house quietly working them out) or an **asset** (recruited into someone's
+  plan). Knowledge of a campaign arrives **only through a 0002 pathway** — what they witness, are told,
+  or overhear.
+- **The player runs their own.** The player can pursue their **own** campaign — declare a goal
+  (out-of-character, a Diary-Room-level intent) and execute it through their real social play across
+  days. It is **player-knowledge** (no in-game pathway to any NPC — like the Diary Room, mandate text),
+  it **never auto-controls NPCs** (they respond through their own reads), and the house's response is
+  earned through the moves the player actually makes. The engine tracks the player's campaign so the
+  later board and the retrospective reflect what they tried.
+
+## Engine seams
+
+- New `src/engine/campaigns.ts` — the `Campaign` type, generation (`formCampaigns`), the per-tick
+  `advanceCampaign` (selects + applies one move via the existing fold paths), and `replan`. Pure +
+  seeded; engine-only.
+- `src/engine/offscreen.ts` — the society tick advances each active campaign one move (the single
+  driver; no second loop).
+- `src/engine/decisions.ts` / `decisionConstants.ts` — nomination/vote weighting reads campaign
+  `progress` (a new bounded term beside `juryManagementWeight` et al.), so a sustained campaign tilts
+  the **seeded** outcome. **Calibration-critical:** the term must ride the existing decision stream
+  with a controlled draw structure (the juryReach/gradient lesson) — gated by a property test that a
+  campaign *shifts* the eviction distribution without de-seeding it.
+- `src/adapters/engine/GameSessionAdapter.ts` / `EngineCommandsAdapter.ts` — campaign moves that touch
+  the player surface route through the **existing** seams (social initiatives 0036, gossip surfacing
+  0002) — the player learns a campaign only as those pathways already allow. A player-campaign intent
+  is recorded as player-level OOC state (never an NPC pathway).
+- Persistence: campaigns + their move history persist in `SessionCore` (0007/0030) and **accumulate**
+  (non-degradation #4 — a season-long campaign's history deepens, never thins); pruned only on
+  resolution/eviction.
+- Vault: the `Campaign` store is engine-only; dependency-cruiser proves no outward import, exactly like
+  the souls/relationships.
+
+## Testability (role-only; HARD rules)
+
+- **Persistent, not one-shot:** a campaign advances across **multiple** off-screen ticks and survives a
+  snapshot/restore mid-run (a multi-week `season` campaign carries across a week boundary).
+- **Adaptive:** when the target escapes (veto), the campaign **re-targets or pivots** rather than
+  vanishing; when the owner is endangered it flips to self-protect.
+- **It actually tilts the outcome (anti-sycophancy):** a property test over seeds shows a sustained
+  "evict X" campaign **raises X's eviction rate vs. a no-campaign baseline** — *and* that the run stays
+  seeded (same seed ⇒ same result; the calibration gates stay green; the campaign term doesn't re-phase
+  the juryReach spine).
+- **Vault-sealed:** no player or admin surface returns a campaign's existence, target, plan, or
+  progress — a sentinel sweep over every player/admin projection is clean; the player's only knowledge
+  of a campaign arrives through a recorded pathway (lobby scene / gossip / overhear / conspicuousness).
+- **The blindside:** the hidden true vote count can diverge from houseguests' stated intentions; the
+  staged reveal is anonymized (E12); attribution unseals only in the 0048 retrospective.
+- **Content stays sealed:** the player can learn *that* a campaign exists and *who/what* it targets
+  (through a pathway) without ever receiving the sealed scene content (ties 0077 conspicuousness).
+- **Player campaign isolation:** a player-declared campaign is player-knowledge with **no** NPC
+  pathway (it never appears in any NPC's `knows`), and it **never** auto-moves an NPC — NPCs respond
+  only to the player's actual recorded moves.
+- **Determinism:** seeded generation + execution ⇒ reproducible campaigns.
+
+## Open questions / defaults (resolve at build)
+
+1. **How many concurrent campaigns** keep the house legible without sprawl? (Start: a small per-week
+   cap, archetype-prioritized; scarcity is a feature — tune from a UAT walk.)
+2. **The decision-weight magnitude** — how hard `progress` tilts the seeded vote. Must be *felt* but
+   never deterministic (the underdog can still survive a campaign). Calibrate against the existing
+   eviction distribution; do **not** ship a value that flattens variance.
+3. **Bloc campaigns vs. solo** — when does a bloc (0043) adopt a *shared* campaign vs. members running
+   their own? (Start: a cohesive bloc shares one; loose ties stay solo.)
+4. **Player-campaign surface** — is the player's declared goal an explicit OOC "set a target" affordance
+   or inferred from their Diary-Room strategy? (Start: lightweight, inferred from play + DR; resist a
+   strategy dashboard — ADR 0003.)
+5. **Move vocabulary** — the starting `Move` set (lobby/plant/deal/position/throw); extend only as the
+   fold paths support them.
+6. **Horizon mix** — how often a campaign is a single-week flip vs. a season-long crusade (affects
+   pacing + how much the player can perceive over time).
