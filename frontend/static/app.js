@@ -293,6 +293,11 @@ function initializeEventListeners() {
     }
   });
 
+  // #795: the top-center caret "More" dropdown (export-dl-btn / export-dropdown-menu)
+  // is gone — the conversation chrome is now a single pencil that renames the CURRENT
+  // conversation inline (no dropdown switcher). The export menu (if still present in a
+  // non-game build) keeps its open/close wiring; the export actions below stay wired and
+  // self-guard, so Copy/PDF/Save survive wherever the menu is rendered.
   const exportMenu = el('export-dropdown-menu');
   if (exportDlBtn && exportMenu) {
     exportDlBtn.addEventListener('click', (e) => {
@@ -315,27 +320,93 @@ function initializeEventListeners() {
         exportMenu.classList.remove('open');
       }
     });
-    // Opening the sidebar should dismiss any open popup. Many code paths open
-    // the sidebar (toggle button, swipe, keyboard, rail), so watch its class
-    // for a hidden→visible transition rather than hooking each one.
-    const _sidebarEl = el('sidebar');
-    if (_sidebarEl) {
-      let _wasHidden = _sidebarEl.classList.contains('hidden');
-      new MutationObserver(() => {
-        const nowHidden = _sidebarEl.classList.contains('hidden');
-        if (_wasHidden && !nowHidden) window.closeAllPopups();
-        _wasHidden = nowHidden;
-      }).observe(_sidebarEl, { attributes: true, attributeFilter: ['class'] });
-    }
-    // Clicking session name also opens dropdown
-    const currentMeta = el('current-meta');
-    if (currentMeta) {
-      currentMeta.style.cursor = 'pointer';
-      currentMeta.addEventListener('click', (e) => {
-        e.stopPropagation();
-        exportDlBtn.click();
-      });
-    }
+  }
+  // Opening the sidebar should dismiss any open popup. Many code paths open
+  // the sidebar (toggle button, swipe, keyboard, rail), so watch its class
+  // for a hidden→visible transition rather than hooking each one. (Independent
+  // of the export menu — kept outside that guard so it runs in the game build too.)
+  const _sidebarEl = el('sidebar');
+  if (_sidebarEl) {
+    let _wasHidden = _sidebarEl.classList.contains('hidden');
+    new MutationObserver(() => {
+      const nowHidden = _sidebarEl.classList.contains('hidden');
+      if (_wasHidden && !nowHidden && window.closeAllPopups) window.closeAllPopups();
+      _wasHidden = nowHidden;
+    }).observe(_sidebarEl, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  // #795: rename the CURRENT conversation inline. One implementation, shared by the
+  // top-bar pencil (#topbar-rename-btn), a click on the title text (#current-meta),
+  // and the legacy export-menu "Rename" entry (#export-rename-btn) where it still ships.
+  function _renameCurrentConversation() {
+    if (exportMenu) exportMenu.classList.remove('open');
+    let sid = sessionModule.getCurrentSessionId();
+    // A brand-new chat has no session id yet — still allow renaming if there's
+    // a pending chat (we materialize it on commit so the name sticks).
+    const hasPending = sessionModule.hasPendingChat && sessionModule.hasPendingChat();
+    if (!sid && !hasPending) return;
+    const meta = sid ? sessionModule.getSessions().find(s => s.id === sid) : null;
+    const currentName = meta?.name || '';
+    const metaEl = el('current-meta');
+    if (!metaEl) return;
+    if (metaEl.querySelector('.session-rename-input')) return; // already editing
+
+    // Replace title with an input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentName;
+    input.className = 'session-rename-input';
+    input.style.cssText = 'font-size:inherit;background:transparent;border:none;border-bottom:1px solid var(--accent, var(--red));color:var(--fg);outline:none;width:100%;padding:0;';
+    const origText = metaEl.textContent;
+    metaEl.textContent = '';
+    metaEl.appendChild(input);
+    input.focus();
+    input.select();
+
+    const commit = async () => {
+      const newName = input.value.trim();
+      if (newName && newName !== currentName) {
+        // Materialize a pending (new) chat first so it has an id to rename.
+        if (!sid && sessionModule.materializePendingSession) {
+          try { await sessionModule.materializePendingSession(); sid = sessionModule.getCurrentSessionId(); } catch (_) {}
+        }
+        if (!sid) { metaEl.textContent = newName; return; }
+        const fd = new FormData();
+        fd.append('name', newName);
+        await fetch(`${API_BASE}/api/session/${sid}`, { method: 'PATCH', body: fd });
+        const _m = sessionModule.getSessions().find(s => s.id === sid);
+        if (_m) _m.name = newName;
+        metaEl.textContent = newName;
+        uiModule.showToast('Renamed');
+        sessionModule.loadSessions();
+      } else {
+        metaEl.textContent = origText;
+      }
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.removeEventListener('blur', commit); metaEl.textContent = origText; }
+    });
+  }
+  window._renameCurrentConversation = _renameCurrentConversation; // test/debug seam
+
+  // #795: the top-center pencil — the only conversation affordance now.
+  const topbarRenameBtn = el('topbar-rename-btn');
+  if (topbarRenameBtn) {
+    topbarRenameBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _renameCurrentConversation();
+    });
+  }
+  // Clicking the title text also starts the rename.
+  const currentMeta = el('current-meta');
+  if (currentMeta) {
+    currentMeta.style.cursor = 'pointer';
+    currentMeta.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _renameCurrentConversation();
+    });
   }
 
   // Serialize the current chat history into a plain-text transcript.
@@ -449,59 +520,13 @@ function initializeEventListeners() {
     });
   }
 
-  // Rename session from top bar
+  // Rename session from the legacy export menu (non-game builds that still ship it) —
+  // delegates to the shared #795 inline-rename so there is one implementation.
   const exportRenameBtn = el('export-rename-btn');
   if (exportRenameBtn) {
     exportRenameBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      exportMenu.classList.remove('open');
-      let sid = sessionModule.getCurrentSessionId();
-      // A brand-new chat has no session id yet — still allow renaming if there's
-      // a pending chat (we materialize it on commit so the name sticks).
-      const hasPending = sessionModule.hasPendingChat && sessionModule.hasPendingChat();
-      if (!sid && !hasPending) return;
-      const meta = sid ? sessionModule.getSessions().find(s => s.id === sid) : null;
-      const currentName = meta?.name || '';
-      const metaEl = el('current-meta');
-      if (!metaEl) return;
-
-      // Replace title with an input
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = currentName;
-      input.className = 'session-rename-input';
-      input.style.cssText = 'font-size:inherit;background:transparent;border:none;border-bottom:1px solid var(--accent, var(--red));color:var(--fg);outline:none;width:100%;padding:0;';
-      const origText = metaEl.textContent;
-      metaEl.textContent = '';
-      metaEl.appendChild(input);
-      input.focus();
-      input.select();
-
-      const commit = async () => {
-        const newName = input.value.trim();
-        if (newName && newName !== currentName) {
-          // Materialize a pending (new) chat first so it has an id to rename.
-          if (!sid && sessionModule.materializePendingSession) {
-            try { await sessionModule.materializePendingSession(); sid = sessionModule.getCurrentSessionId(); } catch (_) {}
-          }
-          if (!sid) { metaEl.textContent = newName; return; }
-          const fd = new FormData();
-          fd.append('name', newName);
-          await fetch(`${API_BASE}/api/session/${sid}`, { method: 'PATCH', body: fd });
-          const _m = sessionModule.getSessions().find(s => s.id === sid);
-          if (_m) _m.name = newName;
-          metaEl.textContent = newName;
-          uiModule.showToast('Renamed');
-          sessionModule.loadSessions();
-        } else {
-          metaEl.textContent = origText;
-        }
-      };
-      input.addEventListener('blur', commit);
-      input.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-        if (ev.key === 'Escape') { input.removeEventListener('blur', commit); metaEl.textContent = origText; }
-      });
+      _renameCurrentConversation();
     });
   }
 
@@ -573,12 +598,9 @@ function initializeEventListeners() {
         return;
       }
 
-      // Theme popup
-      const themeModal = document.getElementById('theme-modal');
-      if (themeModal && !themeModal.classList.contains('hidden')) {
-        themeModule.closePopup();
-        return;
-      }
+      // Theme popup — now an OrwellWindow kit modal; the ui.js global Escape
+      // arbiter (OrwellWindowKit.dismissTop) owns its dismissal, exactly like
+      // Settings. No bespoke branch here (it would double-close).
 
       // Calendar owns a few inner Escape layers (settings panel, event form,
       // then the calendar modal itself). Let calendar.js handle those instead
@@ -828,6 +850,8 @@ function initializeEventListeners() {
       if (welcomeName && welcomeName.dataset.researchOrigHtml) {
         welcomeName.innerHTML = welcomeName.dataset.researchOrigHtml;
         delete welcomeName.dataset.researchOrigHtml;
+        // #801: the restored wordmark carries the eye lid again — rebind the blink.
+        window.dispatchEvent(new CustomEvent('orwell:welcome-rerendered'));
       }
       if (welcomeSub && welcomeSub.dataset.researchOrigText) {
         welcomeSub.textContent = welcomeSub.dataset.researchOrigText;
@@ -1150,8 +1174,11 @@ function initializeEventListeners() {
   const toolThemeBtn = el('tool-theme-btn');
   if (toolThemeBtn) {
     toolThemeBtn.addEventListener('click', () => {
-      const tm = document.getElementById('theme-modal');
-      if (tm) tm.classList.remove('hidden');
+      // The Theme window is now an OrwellWindow kit window — open via the module
+      // (the kit owns build / geometry / scrim / focus-trap), not a bespoke
+      // .hidden strip on a static modal.
+      if (themeModule && themeModule.openPopup) themeModule.openPopup();
+      else if (themeModule && themeModule.togglePopup) themeModule.togglePopup();
     });
   }
 
@@ -1409,6 +1436,12 @@ function initializeEventListeners() {
       // off then on to trigger applyUIVis a second time, which is the
       // bug they report as "deep research only shows after I toggle".
       try { if (window.applyUIVis && window.loadUIVis) window.applyUIVis(window.loadUIVis()); } catch (_) {}
+      // #796: the feature pass hid some rail buttons directly, then applyUIVis may have
+      // re-shown their expanded rows — leaving the collapsed rail OUT OF STEP with the
+      // expanded sidebar. Re-sync the rail so it mirrors the final row visibility (the
+      // rail follows the row; one source of truth). syncRailIcons un-hides a rail button
+      // whose row is shown and hides one whose row is hidden.
+      try { if (window._railIconsSync) window._railIconsSync(); } catch (_) {}
       // G13: this pass may have hidden menu entries — a menu left with zero
       // visible items must take its trigger down with it (gating cascades).
       try { _g13CascadeMenuTriggers(); } catch (_) {}
@@ -2469,6 +2502,8 @@ function initializeEventListeners() {
           welcomeName.style.animation = 'none';
           welcomeName.offsetHeight;
           welcomeName.style.animation = '';
+          // #801: the restored wordmark carries the eye lid again — rebind the blink.
+          window.dispatchEvent(new CustomEvent('orwell:welcome-rerendered'));
         }
         if (ws) { ws.style.animation = 'none'; ws.offsetHeight; ws.style.animation = 'welcome-enter 0.3s ease-out both'; }
         const welcomeSub2 = el('welcome-sub');

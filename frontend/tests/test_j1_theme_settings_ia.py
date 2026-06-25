@@ -125,5 +125,12 @@ def test_j1_15_theme_picker_has_one_home_no_appearance_card():
         "the theme picker's single home is the standing sidebar entry (#tool-theme-btn); "
         "the Settings->Appearance Theme card must stay removed (J1-15)."
     )
-    # The picker itself lives in its own modal.
-    assert 'id="themeGrid"' in html and 'id="theme-modal"' in html
+    # The picker itself lives in its own window. Its content (#themeGrid +
+    # #theme-popup) is hosted, hidden, in #theme-host until the OrwellWindow kit's
+    # first open() lifts it into the kit window (id "theme-modal", built in
+    # theme.js initThemeKitWindow — so the id is created at runtime, not in static
+    # HTML). Mirror the Settings kit migration (#settings-host / id 'settings-modal').
+    assert 'id="themeGrid"' in html and 'id="theme-host"' in html and 'id="theme-popup"' in html
+    js = _read("static/js/theme.js")
+    assert "initThemeKitWindow" in js and "id: 'theme-modal'" in js, \
+        "the theme window must be created via the OrwellWindow kit (id 'theme-modal')"

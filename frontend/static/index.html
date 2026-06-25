@@ -31,7 +31,7 @@
         // applyBgPattern runs at the END of _initWithSync, after an awaited
         // /api/prefs/theme read). The class brings the static base (style.css) up
         // front; the animated canvas overlays it when it spawns.
-        t = { name: 'glass', glassTier: 'full', bgPattern: 'perlin-flow',
+        t = { name: 'glass', glassTier: 'full', bgPattern: 'glass-mesh',
               colors: { bg:'#15171c', fg:'#eef1f4', panel:'#1d2026', border:'#3a3f47', red:'#9aa3af' },
               glass: true };
       }
@@ -324,7 +324,9 @@
   <link rel="stylesheet" href="/static/css/responsive-tokens.css">  <!-- Stream S: the responsive mechanism — MUST precede style.css -->
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/css/orwellHouseThemes.css">  <!-- 0052: the house themes' frost + micro-motion -->
+  <link rel="stylesheet" href="/static/css/meshGradient.css">  <!-- the shared login/glass-theme aurora mesh (reused into #__wp by theme.js) -->
   <link rel="stylesheet" href="/static/css/game-trim.css?v=20260608">  <!-- Orwell: hide non-game tool surfaces -->
+  <link rel="stylesheet" href="/static/css/eyeBlink.css">  <!-- #801: the shared hero-eye blink (look only; rhythm is eyeBlink.js) -->
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -583,7 +585,15 @@
   </div>
 
   <!-- Theme Popup (floating panel) -->
-  <div id="theme-modal" class="modal hidden">
+  <!-- Theme window — hosted HIDDEN here until the OrwellWindow kit's first open()
+       lifts #theme-popup into the kit's .ow-body (mirrors #settings-host). The kit
+       (id "theme-modal", created in theme.js initThemeKitWindow) supplies the glass
+       chrome, macOS traffic lights, sans UI font, centered modal placement, and the
+       scrim/inert/focus-trap. The legacy .modal-header below is dropped on first
+       open (the kit chrome replaces it); the Peek toggle is re-hosted into the kit
+       titlebar. The id stays "theme-host" so the static content keeps a home; every
+       el('theme-…') wiring finds it in this display:none host before promotion. -->
+  <div id="theme-host" style="display:none">
   <div id="theme-popup" class="modal-content admin-modal-content" role="dialog" aria-label="Theme" style="background:var(--bg)">
     <div class="modal-header theme-popup-header" id="theme-popup-header">
       <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><circle cx="15" cy="14" r="1.5" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor"/></svg>Theme</h4>
@@ -1127,9 +1137,9 @@
          mobile) so the page always exposes a single level-1 heading. -->
     <h1 class="a11y-visually-hidden">Orwell</h1>
     <div class="chat-top-bar">
-      <div class="chat-meta-overlay"><span id="current-meta">Orwell Chat</span><span id="current-meta-count" class="chat-meta-count" aria-hidden="true"></span><span id="session-cost-display" class="session-cost-display" style="display:none;"></span><span class="export-dropdown-wrap" id="export-dropdown-wrap"><button type="button" class="export-dl-btn" id="export-dl-btn" title="More"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button><div class="export-dropdown-menu" id="export-dropdown-menu"><div class="export-dropdown-item" id="export-rename-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span><span>Rename</span></div><div class="export-dropdown-item" id="export-copy-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span><span>Copy Chat</span></div><div class="export-dropdown-item" id="export-pdf-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15v-2h2a1.5 1.5 0 0 1 0 3H9z"/></svg></span><span>PDF</span></div><div class="export-dropdown-item" id="export-doc-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span><span>Save to Documents</span></div></div></span></div>    </div>
+      <div class="chat-meta-overlay"><span id="current-meta">Orwell Chat</span><span id="current-meta-count" class="chat-meta-count" aria-hidden="true"></span><span id="session-cost-display" class="session-cost-display" style="display:none;"></span><button type="button" class="topbar-rename-btn" id="topbar-rename-btn" title="Rename conversation" aria-label="Rename conversation"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button></div>    </div>
     <div id="welcome-screen">
-      <div class="welcome-name"><svg class="welcome-eye" viewBox="0 0 32 32"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><circle cx="16" cy="16" r="4.5" fill="currentColor"/></svg>Orwell</div>
+      <div class="welcome-name"><span class="eye-blink-wrap welcome-eye-wrap" aria-hidden="true"><svg class="welcome-eye" viewBox="0 0 32 32"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><circle cx="16" cy="16" r="4.5" fill="currentColor"/></svg><svg class="welcome-eye welcome-eye-lid" data-eye-lid viewBox="0 0 32 32"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg></span>Orwell</div>
       <div class="welcome-sub" id="welcome-sub">Welcome, <span class="setup-trigger-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Click to launch setup">type /setup</span> to get started.</div>
       <div class="welcome-tip" id="welcome-tip"></div>
       <div id="welcome-setup" style="display:none"></div>
@@ -1409,9 +1419,12 @@
         <span class="grail-chevron" aria-hidden="true">›</span>
       </button>
       <span class="gadget-rail-title">The House</span>
-      <button class="gadget-rail-rearrange" id="gadget-rail-rearrange" type="button" title="Rearrange gadgets" aria-label="Rearrange gadgets" aria-pressed="false">⠿</button>
-      <button class="gadget-rail-swap" id="gadget-rail-swap" type="button" title="Swap sides" aria-label="Swap the control room to the other side">⇄</button>
-      <button class="gadget-rail-close" id="gadget-rail-close" type="button" title="Close" aria-label="Close the control room">×</button>
+      <!-- #8/#9: SVG LINE-ICON controls (were black-on-black text glyphs ⠿ ⇄ × — illegible under
+           the glass theme). currentColor stroke icons matching the kit's icon language; the
+           legible ink + halo come from the .gadget-rail-head light-ink rule in style.css. -->
+      <button class="gadget-rail-rearrange" id="gadget-rail-rearrange" type="button" title="Rearrange gadgets" aria-label="Rearrange gadgets" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="6" r="1.3"/><circle cx="16" cy="6" r="1.3"/><circle cx="8" cy="12" r="1.3"/><circle cx="16" cy="12" r="1.3"/><circle cx="8" cy="18" r="1.3"/><circle cx="16" cy="18" r="1.3"/></svg></button>
+      <button class="gadget-rail-swap" id="gadget-rail-swap" type="button" title="Swap sides" aria-label="Swap the control room to the other side"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button>
+      <button class="gadget-rail-close" id="gadget-rail-close" type="button" title="Close" aria-label="Close the control room"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="gadget-rail-body" id="gadget-rail-body"></div>
     <!-- The collapsed icon strip is DERIVED from the gadget registry in orwellGadgetRail.js —
@@ -2622,6 +2635,7 @@
 <script type="module" src="/static/app.js"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
+<script type="module" src="/static/js/eyeBlink.js"></script>  <!-- #801: randomized ~7-10s hero-eye blink (shared w/ login) -->
 <script defer src="/static/js/sessionSync.js?v=20260608"></script>  <!-- cross-device live sync -->
 <script defer src="/static/js/orwellLayoutSync.js?v=20260620"></script>  <!-- 0064 Part F: cross-device window/HUD layout sync -->
 <script src="/static/js/orwellReport.js"></script>  <!-- BB failure ring (G11): fail-open catches report here — absence becomes observable. Plain script, BEFORE the panels -->
@@ -2634,6 +2648,7 @@
 <script src="/static/js/orwellGadget.js"></script>  <!-- #640: THE gadget kit — one card class + .og-* family every rail gadget composes (sibling to OrwellWindow) -->
 <script src="/static/js/liquidGlass.js"></script>  <!-- Liquid glass: real SVG-refraction (feImage→feDisplacementMap, squircle edge) layered OVER the CSS blur-glass baseline. Chromium-ONLY progressive enhancement; no-op elsewhere (the CSS frost stands). Loads AFTER the window + gadget kits so the .ow-*/.og-* surfaces exist. -->
 <script src="/static/js/adaptiveGlass.js"></script>  <!-- Adaptive legibility: samples backdrop luminance behind each glass surface and scales the --panel veil opacity (translucent over dark, muted over bright) so --fg text stays legible over ANY background. Runs on every engine; sets background-color (composes with the refraction's backdrop-filter). -->
+<script src="/static/js/orwellScrollbars.js"></script>  <!-- Apple macOS OVERLAY scrollbars for the window kit (.ow-window .ow-body): the CSS gives the thin/rounded/translucent/overlay bar; this wires the auto-hide-on-idle + reveal-on-scroll/hover + hover-expand (toggles .ow-scrolling / .ow-scroll-hover). Loads AFTER the window kit so the .ow-body bodies exist; decorates new ones via MutationObserver. -->
 <script src="/static/js/orwellNotice.js"></script>  <!-- #642: THE notice kit — one card class + .on-* family every ABOVE-COMPOSER affordance composes (guide/decision/system-notice/continue); sibling to OrwellWindow/OrwellGadget -->
 <script type="module" src="/static/js/orwellStatusPanel.js"></script>  <!-- BB status HUD: week/phase/HOH/noms/veto (Vault-free) -->
 <!-- NPC "wants a word" approaches are NOT a player-facing panel (owner ruling 2026-06-18): an NPC

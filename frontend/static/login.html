@@ -49,6 +49,7 @@
 // secret. Until it resolves, the module paints the gradient default, so the glass
 // panel never sits over a blank void.
 </script>
+<link rel="stylesheet" href="/static/css/eyeBlink.css">  <!-- #801: the shared hero-eye blink (same mechanism as the in-app hero) -->
 <style>
   /* Mirror the main app's :root defaults (static/style.css ~line 18) so an
      uncustomized theme — or a fresh browser with no `orwell-theme` in
@@ -100,95 +101,12 @@
   }
   #login-bg-host .login-bg { position: absolute; inset: 0; }
 
-  /* gradient (DEFAULT) — a soft-focus MESH gradient in the Apple Sequoia / iOS
-     "aurora" wallpaper idiom: several smoothly-blended, heavily-blurred color
-     blobs over a deep base, dreamy/out-of-focus, NO hard edges. Rich and
-     luminous but not neon. The moving color refracts/blurs through the colorless
-     glass panel — which is exactly what sells the liquid-glass look.
-
-     PALETTE PRESETS (Sunset / Aurora / Ocean / Gold / Lavender) are admin-chosen:
-     login_bg.js sets data-lbg-preset on this element + the per-preset color vars,
-     plus --lbg-speed / --lbg-intensity. The five var sets live in the preset
-     blocks below; the defaults here are the Aurora preset (magenta/indigo reads
-     beautifully through glass). The mesh is theme-agnostic (its own rich palette).
-
-     The heavy gaussian blur is what makes it read as a soft mesh rather than
-     distinct blobs — the panel's own backdrop-blur compounds it. */
-  .login-bg-gradient {
-    --lbg-c1: #8b6bff;  /* indigo  */
-    --lbg-c2: #ff5fb0;  /* magenta */
-    --lbg-c3: #ffae66;  /* warm    */
-    --lbg-c4: #5fd8ff;  /* cyan    */
-    --lbg-base: #2a1c5e; /* lifted violet base — bright, not muddy */
-    --lbg-ray: #ffffff;  /* the diagonal aurora light-ray tint */
-    --lbg-speed: 26s;
-    --lbg-intensity: 1;
-  }
-  /* The blobs live on a ::before so we can heavily blur ONLY the mesh (a wide
-     blur radius on a real layer) without blurring the diagonal ray, and scale it
-     up past the viewport so the blur edges never show. The blobs are LARGE and
-     reach near-full opacity so they fill the frame and overlap into a rich mesh
-     (rather than small dots floating on a dark base). */
-  .login-bg-gradient { background: var(--lbg-base); }
-  .login-bg-gradient::before {
-    content: ""; position: absolute; inset: -25%;
-    background:
-      radial-gradient(60vmax 60vmax at 16% 12%, color-mix(in srgb, var(--lbg-c1) calc(95% * var(--lbg-intensity)), transparent), transparent 78%),
-      radial-gradient(66vmax 66vmax at 86% 10%, color-mix(in srgb, var(--lbg-c2) calc(92% * var(--lbg-intensity)), transparent), transparent 80%),
-      radial-gradient(72vmax 72vmax at 74% 92%, color-mix(in srgb, var(--lbg-c3) calc(90% * var(--lbg-intensity)), transparent), transparent 82%),
-      radial-gradient(64vmax 64vmax at 20% 86%, color-mix(in srgb, var(--lbg-c4) calc(90% * var(--lbg-intensity)), transparent), transparent 80%);
-    background-size: 150% 150%;
-    filter: blur(54px) saturate(1.55) brightness(1.14);
-    will-change: background-position;
-  }
-  /* A drifting diagonal "aurora ray" of brighter light streaking across. */
-  .login-bg-gradient::after {
-    content: ""; position: absolute; inset: -30%;
-    background: linear-gradient(118deg,
-      transparent 36%,
-      color-mix(in srgb, var(--lbg-ray) calc(24% * var(--lbg-intensity)), transparent) 50%,
-      transparent 64%);
-    filter: blur(30px); mix-blend-mode: screen;
-    will-change: transform, opacity;
-  }
-  .login-bg-gradient.is-animated::before {
-    animation: login-mesh-drift var(--lbg-speed, 26s) ease-in-out infinite alternate;
-  }
-  .login-bg-gradient.is-animated::after {
-    animation: login-ray-sweep calc(var(--lbg-speed, 26s) * 1.6) ease-in-out infinite alternate;
-  }
-  @keyframes login-mesh-drift {
-    0%   { background-position: 0% 50%,   100% 40%,  80% 100%, 20% 0%;   }
-    50%  { background-position: 70% 10%,  20% 90%,   30% 40%,  90% 70%;  }
-    100% { background-position: 100% 60%, 0% 50%,    60% 0%,   0% 100%;  }
-  }
-  @keyframes login-ray-sweep {
-    0%   { transform: translateX(-12%) translateY(6%);  opacity: 0.7; }
-    100% { transform: translateX(12%)  translateY(-6%); opacity: 1;   }
-  }
-  /* ── Palette presets (admin-selectable) — rich, luminous Apple-wallpaper sets ── */
-  .login-bg-gradient[data-lbg-preset="sunset"] {
-    --lbg-c1: #6a3c9e; --lbg-c2: #ff6a4a; --lbg-c3: #ffc24a; --lbg-c4: #34c2d6;
-    --lbg-base: #3a1a4d; --lbg-ray: #ffe6b8;
-  }
-  .login-bg-gradient[data-lbg-preset="aurora"] {
-    --lbg-c1: #8b6bff; --lbg-c2: #ff5fb0; --lbg-c3: #ffae66; --lbg-c4: #5fd8ff;
-    --lbg-base: #2a1c5e; --lbg-ray: #ffffff;
-  }
-  .login-bg-gradient[data-lbg-preset="ocean"] {
-    --lbg-c1: #4fe6ff; --lbg-c2: #3f8bff; --lbg-c3: #6a5cff; --lbg-c4: #9af0ff;
-    --lbg-base: #11244f; --lbg-ray: #e2f6ff;
-  }
-  .login-bg-gradient[data-lbg-preset="gold"] {
-    /* Soft, warm, luminous gold/amber glow blending into teal (Apple-wallpaper
-       warmth) — not a punchy yellow. Muted teal top, warm amber/peach glow low. */
-    --lbg-c1: #3aa89a; --lbg-c2: #6fc7a8; --lbg-c3: #f0b878; --lbg-c4: #e8945c;
-    --lbg-base: #1a3a36; --lbg-ray: #ffe8c8;
-  }
-  .login-bg-gradient[data-lbg-preset="lavender"] {
-    --lbg-c1: #ffb0d6; --lbg-c2: #cfa8ff; --lbg-c3: #aac0ff; --lbg-c4: #ffd2ec;
-    --lbg-base: #3a2c52; --lbg-ray: #ffffff;
-  }
+  /* gradient (DEFAULT) — the soft-focus Apple Sequoia / iOS "aurora" MESH
+     gradient. Its CSS (the .login-bg-gradient blobs/ray + the five palette
+     presets + the drift/sweep keyframes) now lives in the SHARED stylesheet
+     css/meshGradient.css (linked below) so the in-app glass theme reuses the
+     exact same mesh via theme.js → #__wp. login_bg.js sets data-lbg-preset +
+     --lbg-speed / --lbg-intensity on the .login-bg-gradient element. */
 
   /* photo — a static bundled image OR an admin-provided URL (set inline by JS). */
   .login-bg-photo { background-size: cover; background-position: center; }
@@ -204,12 +122,11 @@
   #login-bg-host #petals-canvas, #login-bg-host #sparkles-canvas,
   #login-bg-host #embers-canvas { opacity: var(--bg-effect-intensity, 1); }
 
-  /* Reduced motion — freeze to the STATIC gradient (Apple: no peripheral /
-     repetitive animation). The .is-animated class is never added when reduced
-     motion is on (login_bg.js), and canvas sources render a single still frame;
-     this belt-and-braces rule kills any residual animation too. */
+  /* Reduced motion — freeze EVERYTHING in the bg host to a static frame (Apple:
+     no peripheral / repetitive animation). The .is-animated class is never added
+     under reduced motion (login_bg.js) and the shared meshGradient.css freezes
+     the gradient; this belt-and-braces rule also kills any canvas-source motion. */
   @media (prefers-reduced-motion: reduce) {
-    .login-bg-gradient { animation: none !important; }
     #login-bg-host * { animation: none !important; }
   }
 
@@ -422,33 +339,20 @@
      sitting above the wordmark as the threshold mark. */
   .logo-eye { width: 2.4rem; height: 2.4rem; color: var(--ink); opacity: 0.92;
     filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35)); }
-  /* The eye BLINKS — a quick double-blink (blink-blink) once every ~10s, fitting
-     the surveillance / "it's watching you" theme. The eyelid is an eye-shaped
-     overlay (.logo-eye-lid) sweeping shut: it scales from 0 height to full twice
-     in the first ~0.9s, then stays open for the rest of the 10s cycle. The eye
-     itself stays still. */
-  .logo-eye-wrap { position: relative; width: 2.4rem; height: 2.4rem; line-height: 0; }
+  /* The eye BLINKS on a randomized ~7-10s cadence (occasional double-blink),
+     fitting the surveillance / "it's watching you" theme. The eyelid is an
+     eye-shaped overlay (.logo-eye-lid, marked [data-eye-lid]) that sweeps shut;
+     the eye itself stays still. The blink LOOK + reduced-motion freeze live in
+     the shared /static/css/eyeBlink.css, and the RHYTHM in eyeBlink.js — one
+     mechanism shared with the in-app welcome hero (#801). Here we only own the
+     wrap sizing + the lid's cosmetic color (so a closed lid reads as a filled
+     almond in the eye color). */
+  .logo-eye-wrap { width: 2.4rem; height: 2.4rem; }
   .logo-eye-wrap .logo-eye { position: absolute; inset: 0; }
   .logo-eye-lid {
-    position: absolute; inset: 0;
-    transform-origin: center;
-    transform: scaleY(0);
     /* The lid mirrors the eye color so a closed lid reads as a filled almond. */
     color: var(--ink); opacity: 0.92;
     filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
-    animation: logo-eye-blink 10s ease-in-out infinite;
-  }
-  @keyframes logo-eye-blink {
-    /* two quick blinks up front, then held open (scaleY 0) for the rest. */
-    0%   { transform: scaleY(0); }
-    2%   { transform: scaleY(1); }
-    4%   { transform: scaleY(0); }
-    6%   { transform: scaleY(1); }
-    8%   { transform: scaleY(0); }
-    100% { transform: scaleY(0); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .logo-eye-lid { animation: none; transform: scaleY(0); }
   }
   .version-label {
     position: fixed; bottom: 12px; right: 16px;
@@ -470,13 +374,17 @@
   }
   @keyframes login-spin { to { transform: rotate(360deg); } }
 </style>
+<!-- The aurora mesh-gradient palette + keyframes are shared with the in-app
+     glass theme (theme.js reuses login_bg.js's renderer into #__wp). Single
+     source of truth: css/meshGradient.css. -->
+<link rel="stylesheet" href="/static/css/meshGradient.css">
 </head>
 <body>
 <main class="card">
   <h1 class="logo">
-    <span class="logo-eye-wrap" aria-hidden="true">
+    <span class="logo-eye-wrap eye-blink-wrap" aria-hidden="true">
       <svg class="logo-eye" viewBox="0 0 32 32" focusable="false"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><circle cx="16" cy="16" r="4.5" fill="currentColor"/></svg>
-      <svg class="logo-eye-lid" viewBox="0 0 32 32" focusable="false"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
+      <svg class="logo-eye-lid" data-eye-lid viewBox="0 0 32 32" focusable="false"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
     </span>
     <span>Orwell</span>
     <span class="greeting" id="greeting">Welcome back</span>
@@ -795,5 +703,6 @@ if (window.visualViewport) {
 }
 </script>
 <script type="module" nonce="{{CSP_NONCE}}" src="/static/js/login_bg.js"></script>
+<script type="module" nonce="{{CSP_NONCE}}" src="/static/js/eyeBlink.js"></script>  <!-- #801: randomized ~7-10s hero-eye blink (shared w/ in-app hero) -->
 </body>
 </html>

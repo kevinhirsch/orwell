@@ -82,6 +82,24 @@ def _session_url_matches_endpoint(session_url: str, endpoint_base: str) -> bool:
     return sess in variants or sess.startswith(base + "/")
 
 
+def _sse_error_response(message: str, status: int = 400) -> StreamingResponse:
+    """A one-shot SSE stream carrying a single ``event: error`` then ``[DONE]``.
+
+    The streaming chat endpoint must NEVER reject a send with a bare HTTP 4xx: the
+    client opens an SSE reader and renders ``event: error`` chunks (the dead-endpoint
+    path already relies on this), but a non-200 with a plain body is the fragile
+    branch that can leave a sent message looking like it "went into nothing" — no
+    visible reason, and the optimistic user bubble has nothing on the server to
+    reconcile to. Routing the pre-stream model/endpoint guards through this helper
+    guarantees the failure ALWAYS surfaces in the transcript (HTTP 200 + a streamed
+    error), exactly like an upstream model failure mid-stream.
+    """
+    async def _gen() -> AsyncGenerator[str, None]:
+        yield f'event: error\ndata: {json.dumps({"error": message, "status": status})}\n\n'
+        yield "data: [DONE]\n\n"
+    return StreamingResponse(_gen(), media_type="text/event-stream")
+
+
 def _clear_orphaned_session_endpoint(sess, owner: str | None = None) -> bool:
     """Clear a session model if its endpoint was deleted from ModelEndpoint."""
     if not getattr(sess, "endpoint_url", ""):
@@ -522,8 +540,17 @@ def setup_chat_routes(
             _verify_session_owner(request, session)
             sess = session_manager.get_session(session)
             owner = get_current_user(request)
+            # The model/endpoint guards below decide whether this turn can reach an
+            # LLM at all. They MUST surface to the player as a streamed error, never a
+            # bare HTTP 4xx: a streaming client renders `event: error` chunks but a
+            # plain non-200 is the brittle branch that can read as "the message went
+            # into nothing" (no reason shown, and the optimistic user bubble has no
+            # server record to reconcile against). So they return through the SSE-error
+            # path — HTTP 200 + a single streamed error — exactly like an upstream
+            # model failure mid-stream. (The dead-endpoint case already works this way.)
             if _clear_orphaned_session_endpoint(sess, owner=owner):
-                raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
+                return _sse_error_response(
+                    "Selected model endpoint was removed. Pick another model in Settings.")
             # Issue #587: picker shows a model from the endpoint cache but
             # s.model never made it onto the DB row (first-send race after
             # endpoint setup, or a previous endpoint delete/recreate). Pull
@@ -532,14 +559,13 @@ def setup_chat_routes(
             # generic 401/503).
             _recover_empty_session_model(sess, session, owner=owner)
             if not getattr(sess, "model", "").strip():
-                raise HTTPException(
-                    400,
-                    "No model selected for this chat. Open the model picker and choose one before sending.",
-                )
+                return _sse_error_response(
+                    "No model selected for this chat. Open the model picker and "
+                    "choose one before sending.")
         except SessionNotFoundError as e:
-            raise HTTPException(404, str(e))
+            return _sse_error_response(str(e), status=404)
         except (ValueError, ValidationError):
-            raise HTTPException(400, "Invalid request parameters")
+            return _sse_error_response("Invalid request parameters")
 
         # ------------------------------------------------------------------ #
         # Privilege gates that must fire BEFORE any LLM work / token spend.

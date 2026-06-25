@@ -459,6 +459,28 @@ body.bg-pattern-perlin-flow {
       color: var(--accent);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
     }
+    /* #795: the top-center pencil — the lone conversation affordance (no dropdown
+       switcher). Styled to match the old "More" caret so the header reads the same. */
+    .topbar-rename-btn {
+      background: none; border: none;
+      color: inherit;
+      cursor: pointer;
+      flex-shrink: 0;
+      margin-left: 2px;
+      padding: 4px 5px; border-radius: 4px;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: color 0.08s, background 0.08s, opacity 0.08s;
+      opacity: 0.65;
+    }
+    .topbar-rename-btn:hover {
+      color: var(--accent);
+      opacity: 1;
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+    }
+    .topbar-rename-btn svg { display: block; }
+    /* While renaming, the input fills the title slot — drop the pencil so it
+       doesn't crowd the inline editor. */
+    .chat-meta-overlay:has(.session-rename-input) .topbar-rename-btn { display: none; }
     .export-dropdown-menu {
       display: none;
       position: fixed;
@@ -1851,10 +1873,16 @@ body.bg-pattern-perlin-flow {
       content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
       background: transparent; transition: background .12s ease;
     }
+    /* #8/#9: the resize affordance was a RED glow (var(--accent)/--red) — colorless glass chrome
+       carries NO accent hue. Hover + active-drag show a NEUTRAL luminous white bar (the glass
+       rim language); keyboard focus shows the ONE sanctioned system-blue (matching the kit's
+       focus-ring contract). NO red on the gadget-sidebar resize/hover state. */
     .gadget-rail-resize-handle:hover::before,
-    .gadget-rail-resize-handle:focus-visible::before,
     .gadget-rail.grail-resizing .gadget-rail-resize-handle::before {
-      background: color-mix(in srgb, var(--accent, #e06c75) 70%, transparent);
+      background: rgba(255,255,255,0.55);
+    }
+    .gadget-rail-resize-handle:focus-visible::before {
+      background: var(--ow-ios-blue, #0a84ff);
     }
     .gadget-rail-resize-handle:focus-visible { outline: none; }
     body[data-gadget-side="left"] .gadget-rail-resize-handle {
@@ -1883,6 +1911,9 @@ body.bg-pattern-perlin-flow {
     .gadget-rail-toggle:hover, .gadget-rail-swap:hover, .gadget-rail-close:hover, .gadget-rail-rearrange:hover {
       opacity: 1; background: color-mix(in srgb, var(--fg) 10%, transparent); }
     .gadget-rail-rearrange[aria-pressed="true"] { opacity: 1; color: var(--accent, #e06c75); }
+    /* #8/#9: the rail-head controls are now SVG line icons (were text glyphs). Size + inherit
+       the button's currentColor so the legible-ink rule (light --fg under glass) drives them. */
+    .gadget-rail-rearrange svg, .gadget-rail-swap svg, .gadget-rail-close svg { display: block; width: 18px; height: 18px; }
     .grail-chevron { display: inline-block; transition: transform .22s ease; }
     .gadget-rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: .35rem; min-height: 0;
       min-width: 0; display: flex; flex-direction: column; }
@@ -1922,7 +1953,10 @@ body.bg-pattern-perlin-flow {
     .grail-ico { flex-shrink: 0; background: transparent; border: none; cursor: pointer;
       font-size: 1.1rem; width: 38px; height: 38px; min-width: 38px; padding: 0;
       display: inline-flex; align-items: center; justify-content: center;
-      border-radius: 8px; line-height: 1; }
+      border-radius: 8px; line-height: 1; color: var(--fg); }
+    /* #8/#9: condensed-strip icons are SVG line icons (were emoji). Size + inherit currentColor
+       so they match the kit iconography and pick up the legible ink under glass. */
+    .grail-ico svg { display: block; width: 20px; height: 20px; }
     .grail-ico:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
     /* collapsed: a thin icon strip; the body + most chrome hide, the chevron flips */
     .gadget-rail[data-collapsed="true"] { width: 50px; }
@@ -1955,10 +1989,15 @@ body.bg-pattern-perlin-flow {
        MATCHES the visual language every hand-rolled gadget used (margin/padding/the
        70%-panel mix/border/10px radius/Fira mono/fs-xs/line-height) so a migrated gadget
        renders identically. Keep this and the runtime ensureCss() in orwellGadget.js in sync. */
+    /* #797: gadget INSETS are tuned to the --ow-space-* scale for clean, even, Apple-grade
+       alignment across EVERY gadget kind — no ad-hoc rem values. The card breathes on a single
+       rhythm: --ow-space-3 (12px) horizontal padding, --ow-space-2 (8px) vertical padding +
+       margin + the inner header/row gaps, --ow-space-1 (4px) for the tightest gaps. Keep this
+       and the runtime ensureCss() in orwellGadget.js in lock-step. */
     .og-card {
       display: none;
-      margin: var(--space-2, .4rem) var(--space-2, .4rem) 0;
-      padding: var(--space-2, .4rem) var(--space-3, .55rem);
+      margin: var(--ow-space-2, 8px) var(--ow-space-2, 8px) 0;
+      padding: var(--ow-space-2, 8px) var(--ow-space-3, 12px);
       background: color-mix(in srgb, var(--panel, #111) 70%, transparent);
       color: var(--fg, #9cdef2);
       border: 1px solid var(--border, #355a66); border-radius: 10px;
@@ -1966,26 +2005,26 @@ body.bg-pattern-perlin-flow {
       font-size: var(--fs-xs, .72rem); line-height: 1.5;
     }
     .og-card .og-head {
-      display: flex; align-items: center; gap: .4rem; margin: 0 0 .35rem;
+      display: flex; align-items: center; gap: var(--ow-space-2, 8px); margin: 0 0 var(--ow-space-2, 8px);
       font-weight: 600; letter-spacing: .03em;
     }
     .og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }
     .og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }
-    .og-card .og-icon { flex: 0 0 auto; }
+    .og-card .og-icon { flex: 0 0 auto; display: inline-flex; }
     .og-card .og-title {
       flex: 1 1 auto; min-width: 0;
       color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .og-card .og-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: .25rem; }
+    .og-card .og-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--ow-space-1, 4px); }
     .og-card .og-act {
       flex: 0 0 auto; background: rgba(255,255,255,.06);
       border: 1px solid var(--border, #355a66); color: inherit; cursor: pointer;
       border-radius: 6px; font: inherit; font-size: .68rem;
-      min-height: 24px; padding: 0 .45rem; opacity: .8;
+      min-height: 24px; padding: 0 var(--ow-space-2, 8px); opacity: .8;
     }
     .og-card .og-act:hover, .og-card .og-act:focus-visible { opacity: 1; background: rgba(255,255,255,.12); }
-    .og-card .og-chev { flex: 0 0 auto; opacity: .55; margin-left: .1rem; transition: transform .15s; }
+    .og-card .og-chev { flex: 0 0 auto; opacity: .55; margin-left: var(--ow-space-1, 4px); transition: transform .15s; }
     .og-card.og-collapsed .og-chev { transform: rotate(-90deg); }
     .og-card.og-collapsed .og-body { display: none; }
     .og-card .og-body { overflow-wrap: anywhere; }
@@ -2213,6 +2252,25 @@ body.bg-pattern-perlin-flow {
       vertical-align: -0.15em;
       color: var(--brand-color, var(--red));
     }
+    /* The eye blinks (#801): a lid SVG overlays the still eye and sweeps shut on
+       a randomized ~7-10s cadence (shared mechanism — eyeBlink.css/.js). The
+       wrap pins the lid exactly over the eye; the lid carries no right margin so
+       it lines up with the eye glyph (the wrap owns the gap to the wordmark). */
+    .welcome-eye-wrap {
+      position: relative;
+      display: inline-flex;
+      vertical-align: -0.15em;
+      margin-right: 0.4rem;
+      line-height: 0;
+    }
+    .welcome-eye-wrap .welcome-eye {
+      margin-right: 0;
+      vertical-align: 0;
+    }
+    .welcome-eye-wrap .welcome-eye-lid {
+      position: absolute;
+      inset: 0;
+    }
     #welcome-screen .welcome-sub {
       font-size:0.85rem;
       color:color-mix(in srgb, var(--fg) 60%, transparent);
@@ -2276,11 +2334,34 @@ body.bg-pattern-perlin-flow {
       transition: margin 0.3s ease, max-width 0.3s ease;
     }
     .chat-container.welcome-active .chat-input-bar {
-      margin-bottom:30vh;
+      /* #802: ALWAYS keep comfortable breathing room between the hero and the
+         composer. The hero floats centered (#welcome-screen, top:40%); this
+         margin pushes the composer up toward it. A flat 30vh crowds the hero on
+         short laptop screens, so make it FLUID — it shrinks on short viewports
+         (dropping the composer toward the bottom to free space for the hero) and
+         is capped so the gap stays comfy. Paired with the short-height overrides
+         below + the welcome-active min gap on #welcome-screen. */
+      margin-bottom: clamp(48px, 30vh, 30vh);
       margin-left:auto;
       margin-right:auto;
       max-width: 800px;
       width: 100%;
+    }
+    /* #802: guarantee a comfortable gap below the hero so the composer can never
+       crowd or touch it, at any viewport height. The hero is absolutely centered
+       and the composer is pushed up by the margin above; on short screens we
+       shrink that push AND reserve a fluid min gap under the hero block. */
+    .chat-container.welcome-active #welcome-screen {
+      padding-bottom: clamp(16px, 4vh, 40px);
+    }
+    @media (max-height: 760px) {
+      .chat-container.welcome-active .chat-input-bar { margin-bottom: clamp(36px, 22vh, 22vh); }
+    }
+    @media (max-height: 650px) {
+      .chat-container.welcome-active .chat-input-bar { margin-bottom: clamp(24px, 14vh, 14vh); }
+    }
+    @media (max-height: 500px) {
+      .chat-container.welcome-active .chat-input-bar { margin-bottom: clamp(8px, 6vh, 6vh); }
     }
     @media (max-width:768px) {
       #welcome-screen .welcome-name { font-size:1.8rem; }
@@ -3830,6 +3911,12 @@ body.bg-pattern-perlin-flow {
     .msg-actions {
       display:inline-flex; align-items:center; gap:4px;
     }
+    /* OWNER RULING (liquid-glass follow-up): NO per-message action icons on SENT (player)
+       bubbles in the game build — they rendered gray/illegible on the blue fill, and the
+       played-record model already strips the record-altering ones. The JS gate
+       (createUserMsgFooter) renders an empty action set; this is the CSS belt covering any
+       other render path. RECEIVED / GM message actions are untouched. */
+    body[data-game-build] .msg-user .msg-actions { display: none !important; }
     .footer-copy-btn {
       background:none; border:none;
       color:var(--color-muted-alt); cursor:pointer;
@@ -4639,16 +4726,58 @@ body.bg-pattern-perlin-flow {
       .section-header-flex h4::before {
         height: 18px;
       }
-      /* Compact top bar on mobile — align with sidebar header */
+      /* #800: on mobile the conversation title bar is a real title bar — the two
+         sidebar EXPAND ICONS fold INTO it (the hamburger at the left edge, the gadget /
+         control-room opener at the right edge), both as consistent kit line icons
+         vertically centered on the title row. The bar gives itself a defined height so
+         those corner controls read as part of it rather than free-floating FABs. The
+         buttons stay position:fixed (so they sit above the scroll + clear the banner),
+         but they are anchored to the SAME row center as the title via --ow-titlebar-top. */
+      :root { --ow-titlebar-h: 44px; }
       .chat-top-bar {
-        padding: 1px 8px;
-        min-height: 14px;
+        padding: 1px 44px;          /* reserve the corner-control gutters */
+        min-height: var(--ow-titlebar-h);
         margin-top: -31px;
         padding-top: 31px;
       }
       .chat-top-bar .chat-new-btn { display: none; }
       .chat-meta-overlay { font-size: 0.65em; max-width: 55%; overflow: visible; left: 50%; top: 50%; transform: translate(-50%, -50%); position: absolute; }
-      .chat-meta-overlay .export-dl-btn { display: inline-flex; }
+      .chat-meta-overlay .export-dl-btn,
+      .chat-meta-overlay .topbar-rename-btn { display: inline-flex; }
+
+      /* #800: shared anchor — the vertical center of the title-bar row, below any banner +
+         the safe-area inset. Both expand icons sit here so they line up with each other
+         AND with the centered title. */
+      /* center a 44px (touch-floor) corner control on the 44px title-bar row that starts
+         ~11px below the banner/safe-area: row top + (rowH - btnH)/2 ≈ +11px. */
+      :root { --ow-titlebar-top: calc(var(--on-banner-inset, 0px) + env(safe-area-inset-top, 0px) + 11px); }
+      .hamburger-btn,
+      body[data-game-build] .gadget-rail-open {
+        top: var(--ow-titlebar-top) !important;
+        width: 30px;
+        height: 30px;
+        z-index: 210;
+        opacity: 0.55;
+        color: var(--hamburger-color, var(--fg));
+        background: none;
+        border: none;
+        box-shadow: none;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.15s, background 0.15s;
+      }
+      .hamburger-btn { left: 7px !important; right: auto !important; }
+      body[data-game-build] .gadget-rail-open { right: 7px !important; left: auto !important; bottom: auto !important; }
+      /* the two icons share one visual language: line icons, currentColor, same hit-feel */
+      .hamburger-btn svg,
+      .gadget-rail-open svg { width: 20px; height: 20px; display: block; stroke: currentColor; }
+      .hamburger-btn:hover, .hamburger-btn:active,
+      .gadget-rail-open:hover, .gadget-rail-open:active {
+        opacity: 1;
+        background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
+      }
       /* Incognito — smaller on mobile */
       .incognito-btn {
         padding: 4px 10px;
@@ -5409,6 +5538,8 @@ body.bg-pattern-perlin-flow {
       #doclib-modal,
       #compare-model-overlay,
       #research-overlay,
+      /* #theme-modal + #settings-modal are OrwellWindow kit windows (.ow-window) —
+         they glide with the sidebar collapse exactly like the .modal family. */
       #theme-modal,
       #settings-modal,
       #email-lib-modal {
@@ -6751,26 +6882,17 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       font-size: 13px;
     }
 
-    /* ---------- Theme popup (uses .modal > .modal-content frame) ---------- */
-    #theme-modal { z-index: 260; }
+    /* ---------- Theme window CONTENT ----------
+       The window FRAME is now the OrwellWindow kit (.ow-window, modal:true) —
+       it owns geometry/z/scrim/titlebar (theme.js initThemeKitWindow), so the
+       old bespoke modal-frame rules here (#theme-modal z-index, #theme-popup
+       overflow/max-height, the legacy #theme-popup .modal-header chrome) are
+       retired. #theme-popup is now the kit's .ow-body CONTENT; only its inner
+       layout (tabs / grid / swatches / color rows / etc.) is styled below. */
     #theme-popup .theme-popup-sub { color: color-mix(in srgb, var(--fg) 50%, transparent); font-size: 11px; margin-bottom: 10px; }
-    /* `max-height` instead of a fixed height so the popup shrinks to fit its
-       content (avoids the leftover whitespace after the time-based switching
-       card was removed). The inner .theme-tab-panel keeps overflow:auto, so
-       any taller content still scrolls inside. */
-    #theme-popup { overflow-y: hidden; max-height: min(85vh, 600px); }
-    /* The popup ROOT is var(--bg) (inline) so its inner .admin-cards
-       (themselves var(--panel)) keep a visible contrast in the body. But
-       the base .modal-header is `background-color: inherit`, so the title
-       strip behind the Peek bar inherited that page-background var(--bg)
-       and read as a flat, mismatched gray — unlike every other window's
-       chrome, whose titlebar shows var(--win-bg) (= var(--panel)). Pin the
-       header to the shared window-chrome token so it matches the kit
-       (.ow-titlebar over var(--win-bg)) and the other modals, and tracks
-       theme changes (the house presets + the custom colors set right here
-       move --panel/--win-bg). Scoped to the header only — the body keeps
-       var(--bg) for its card contrast. */
-    #theme-popup .modal-header { flex-shrink: 0; background-color: var(--win-bg); }
+    /* #theme-popup is the content node inside .ow-body now (no own frame). Let it
+       fill the kit body; the kit window itself scrolls/sizes. */
+    #theme-popup { display: flex; flex-direction: column; min-height: 0; height: 100%; background: transparent; }
     #theme-popup .admin-tabs { margin: 0 -10px 8px; padding: 0 10px; flex-shrink: 0; }
     .theme-tab-panel { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 10px; }
 
@@ -13887,6 +14009,13 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
 }
 .theme-opacity-wrap.hidden { display: none; }
 .theme-opacity-wrap:hover { opacity: 1; }
+/* RESP (WCAG 2.5.5): the compact Peek toggle keeps its 22px desktop look, but on a
+   coarse-pointer / phone viewport it must meet the 44px touch floor. The responsive
+   matrix measures the element's OWN bounding rect, so grow the box (not just a hit halo).
+   Covers both the settings + theme kit-titlebar Peek toggles. */
+@media (max-width: 480px), (pointer: coarse) {
+  .theme-opacity-wrap.theme-opacity-toggle { min-height: 44px; min-width: 44px; height: auto; }
+}
 /* The title h4 already carries margin-right:auto to group header controls
    on the right. BOTH the Peek button AND the injected minimize button also
    have margin-left:auto — and multiple competing auto-margins split the
@@ -36996,6 +37125,7 @@ body.theme-frosted .modal {
   .send-btn,                  /* composer send / new-chat button (37w in newchat mode) */
   .input-icon-btn,            /* composer toolbar: attach / more-tools (36w) */
   .export-dl-btn,             /* chat-meta export ▾ (36w) */
+  .topbar-rename-btn,         /* #795 chat-meta rename pencil (24w) — replaces export ▾ */
   .scroll-nav-btn,            /* scroll-to-latest ▼ (38w) */
   #orwell-scroll-bottom,      /* game scroll-to-latest (38×38, JS-injected) */
   .gadget-rail-open,          /* mobile gadget-drawer opener (42w) */
@@ -37541,17 +37671,13 @@ body.theme-frosted #minimized-dock.ow-has-rows {
   padding: var(--space-3, 12px);
   margin: var(--space-2, 8px);
   border-top: none;
-  border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+  /* #8/#9 COHERENCE: NO bespoke dark material or --fg-tinted (cyan) border here — the dock
+     shares the ONE light-glass material/backdrop/rim with the windows + cards (set in the
+     "THE LIGHT GLASS surface" block below, which this rule is now a member of). This rule
+     keeps ONLY the Control-Center LAYOUT identity: the generous radius + padding. A 1px
+     neutral border carries the shared rim color; the float shadow rides the shared rule. */
+  border: 1px solid var(--ow-glass-rim-border);
   border-radius: 22px;                 /* generous, Control-Center radius */
-  background-color: color-mix(in srgb, var(--panel, var(--bg)) 40%, transparent);
-  background-image: linear-gradient(180deg,
-    color-mix(in srgb, var(--fg, #fff) 16%, transparent) 0%,
-    color-mix(in srgb, var(--fg, #fff)  5%, transparent) 30%,
-    transparent 70%);
-  backdrop-filter: blur(36px) saturate(122%) brightness(1.30);
-  -webkit-backdrop-filter: blur(36px) saturate(122%) brightness(1.30);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 30%, transparent),
-              0 10px 30px rgba(0,0,0,0.4);
 }
 body.theme-frosted #minimized-dock .minimized-dock-hd {
   opacity: 0.55; padding: var(--space-1, 4px) var(--space-2, 8px) var(--space-2, 8px);
@@ -37564,22 +37690,29 @@ body.theme-frosted #minimized-dock .minimized-dock-rows {
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   width: auto; min-width: 96px; flex: 1 1 96px;
   padding: var(--space-2, 8px) var(--space-3, 12px); border-radius: 16px;
-  background-color: color-mix(in srgb, var(--fg) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent),
+  /* #8/#9 COHERENCE: the dock TILE rides the parent dock glass as a vibrant translucent
+     fill (Apple: controls don't carry their own glass) with the SAME neutral WHITE rim the
+     window/card controls use — NOT an --fg-tinted (cyan) border/shadow. Colorless chrome. */
+  background-color: rgba(255,255,255,0.10);
+  border: 1px solid var(--ow-glass-rim-border);
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim),
               0 2px 8px rgba(0,0,0,0.18);
   text-shadow: var(--ow-glass-text-shadow);
 }
 body.theme-frosted #minimized-dock .minimized-dock-chip:hover,
 body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
-  background-color: color-mix(in srgb, var(--accent, var(--red)) 22%, color-mix(in srgb, var(--fg) 10%, transparent));
-  border-color: color-mix(in srgb, var(--accent, var(--red)) 45%, transparent);
+  /* #8/#9: lighten on interaction (the control "comes to life") — NO accent/red HUE on the
+     glass chrome. The keyboard focus RING is the ONE sanctioned system-blue (set below). */
+  background-color: rgba(255,255,255,0.18);
+  border-color: var(--ow-glass-rim-border);
 }
 /* The first/last-child whole-dock-drag cue from the base sheet would fight the    */
 /* tile look; neutralize it under the Control-Center treatment (drag still works). */
 body.theme-frosted #minimized-dock .minimized-dock-chip:first-child:not(:only-child),
 body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-child) {
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent),
+  /* #8/#9: neutral WHITE inset rim (not the --fg cyan tint) so the edge chips read as the
+     same colorless glass as every other chip. */
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim),
               0 2px 8px rgba(0,0,0,0.18);
 }
 
@@ -37887,6 +38020,16 @@ body.theme-frosted .og-card button,
 body.theme-frosted .og-card .og-act {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
 }
+/* #8/#9 COHERENCE: the dock TILE fill + inset highlight were resolving to the --fg-tinted
+   (cyan, #9cdef2) values from the shared morph rule above — reading as a cyan-tinted chip
+   against the now-coherent neutral light-glass dock. Force the SAME colorless WHITE fill +
+   soft white inset rim every other glass control carries, so the chip reads as one family
+   with the windows/cards. (Its hover lighten + the neutral focus ring are set elsewhere.) */
+body.theme-frosted #minimized-dock .minimized-dock-chip {
+  background-color: rgba(255,255,255,0.10);
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim),
+              0 2px 8px rgba(0,0,0,0.18);
+}
 body.theme-frosted .ow-window .ow-body button:hover,
 body.theme-frosted .on-card button:hover,
 body.theme-frosted .og-card button:hover,
@@ -37898,9 +38041,12 @@ body.theme-frosted .og-card button:focus-visible,
 body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
   /* lighten + glass-bloom + a touch of lift (the control "comes to life") */
   background-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent);
+  /* #8/#9: the hover/focus bloom ring is a NEUTRAL white hairline, never the theme red/accent
+     (issue #770: glass chrome carries no accent HUE). The keyboard FOCUS ring is the one
+     sanctioned system-blue, applied via :focus-visible outline in the #770 block below. */
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg, #fff) 34%, transparent),
               0 4px 14px rgba(0,0,0,0.22),
-              0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 30%, transparent);
+              0 0 0 1px rgba(255,255,255,0.22);
   transform: translateY(-1px) scale(1.015);
   filter: brightness(1.08);
 }
@@ -39482,6 +39628,30 @@ body.theme-frosted .msg-user .body {
   color: #fff !important;
   text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.40) !important;
 }
+/* ── Sent-bubble TIMESTAMP ("You · time") legibility on the blue fill ─────────────────
+   The timestamp next to "You" (.role-timestamp in the role line; .timestamp/.msg-time on
+   other render paths) kept its base muted colour — .role-timestamp = var(--color-muted-alt)
+   and .msg-user .timestamp = color-mix(var(--fg) 72%): on the glass theme that resolves to a
+   GRAY light-cyan, and it also inherited the bubble's DARK drop-shadow — gray text + dark
+   shadow on the system-blue fill = illegible (the owner's report). The bubble fill is a FIXED
+   blue (rgba(10,132,255,0.80)) that NEVER adapts, so the timestamp must be high-opacity WHITE
+   (white-on-blue clears WCAG AA — #fff on #0a84ff ≈ 3.1:1 large / boosted by a soft DARK-blue
+   halo for the translucent fill) with the dark drop-shadow DROPPED (it's the illegibility on a
+   blue+gray pairing). Scoped to .msg-user — the received frost bubble's timestamp is untouched. */
+body.theme-frosted .msg-user .role-timestamp,
+body.theme-frosted .msg-user .timestamp,
+body.theme-frosted .msg-user .msg-time,
+body.theme-frosted .msg-user .msg-footer .timestamp {
+  /* SOLID white (not 0.92) — the system-blue fill is translucent, so any opacity drop
+     erodes the white-on-blue ratio below Apple's own ~3:1 timestamp floor. Pure #fff on the
+     blue fill measures 3.0:1 over a light wallpaper and 5.1:1 over a dark one. */
+  color: #fff !important;
+  /* soft same-hue DARKER-blue rim (NOT a black drop-shadow) so the white reads on the
+     translucent blue without the dirty dark smudge the bubble shadow caused — and a touch
+     of it floors legibility where a bright wallpaper blooms through the fill. */
+  text-shadow: 0 1px 2px rgba(0,40,90,0.55) !important;
+  opacity: 1 !important;
+}
 /* RECEIVED bubbles DEFAULT to white over the dark frost (over a dark wallpaper / the dark
    animation). adaptiveGlass.js FLIPS them to dark ink + a light frost over a BRIGHT
    wallpaper (Apple Messages received-bubble polarity) by setting an inline color on .msg-ai;
@@ -39648,7 +39818,20 @@ body.theme-frosted .welcome-eye {
    hairline (the same --ow-glass-rim the chrome edges use). NO accent hue on glass chrome. */
 body.theme-frosted .og-card .og-head:focus-visible,
 body.theme-frosted .on-card:focus-visible,
-body.theme-frosted .on-card *:focus-visible {
+body.theme-frosted .on-card *:focus-visible,
+/* #8/#9: the global focus-visible outline (2px solid var --red) painted a RED ring on EVERY
+   focused control inside a glass window / gadget card / dock (the owner-flagged "red border" —
+   a modal auto-focuses its first button, so it showed at once). Route every window/dock/gadget
+   control's keyboard-focus ring to the ONE sanctioned system-blue (the same --ow-ios-blue the
+   kit titlebar + gadget header already use). Colorless glass chrome. */
+body.theme-frosted .ow-window:focus-visible,
+body.theme-frosted .ow-window *:focus-visible,
+body.theme-frosted .modal-content *:focus-visible,
+body.theme-frosted .og-card button:focus-visible,
+body.theme-frosted .og-card .og-act:focus-visible,
+body.theme-frosted .og-card *:focus-visible,
+body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible,
+body.theme-frosted #minimized-dock *:focus-visible {
   outline-color: var(--ow-ios-blue, #0a84ff) !important;
 }
 body.theme-frosted .on-card.on-continue,
@@ -39690,6 +39873,39 @@ body.theme-frosted .live-think-toggle,
 body.theme-frosted .thinking-timer,
 body.theme-frosted .live-think-timer {
   color: #16191f !important;
+}
+/* ── #759 follow-on: the accordion BODY (.thinking-content / .thinking-content-inner) ───
+   The HEADER row was flipped to dark ink above (#759/#761), but the reasoning BODY text
+   below it kept the CSS default `color: var(--fg)` — on the glass theme that --fg is the
+   LIGHT cyan ink (designed for the dark animated bg), so the reasoning rode the LIGHT GLASS
+   panel as light-on-light (~1.1:1 — illegible white-on-white, the owner's report). The
+   thinking-section is a FIXED light glass under the glass theme (adaptiveGlass STANDS DOWN
+   for it under theme-frosted — it is NOT in the runtime adaptive set; only .msg-ai + the
+   welcome hero flip polarity), so the body never flips: pin the SAME neutral dark ink the
+   header chrome uses (#16191f) + a LIGHT legibility halo (NOT the dark --ow-glass-text-shadow,
+   which under dark ink reads as a dirty smudge — the #725 pattern). Cover BOTH variants
+   (markdown.js finished + chat.js live `.live-think-inner`) and any nested markdown / inline
+   text / links that would otherwise inherit the accent-neutralized light --fg. Code blocks
+   keep their own stable dark-terminal contract (the bubble code rules above), so plain text
+   only — inline code gets the light-chip treatment just below. */
+body.theme-frosted .thinking-content,
+body.theme-frosted .thinking-content-inner,
+body.theme-frosted .thinking-content-inner p,
+body.theme-frosted .thinking-content-inner li,
+body.theme-frosted .thinking-content-inner span,
+body.theme-frosted .thinking-content-inner strong,
+body.theme-frosted .thinking-content-inner em,
+body.theme-frosted .thinking-content-inner blockquote,
+body.theme-frosted .thinking-content-inner a {
+  color: #16191f !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
+}
+/* inline code inside the reasoning body: a quiet SOLID LIGHT chip with stable dark text
+   (matches the bubble inline-code contract; no smudge halo on the chip). */
+body.theme-frosted .thinking-content-inner :not(pre) > code {
+  background-color: rgba(255,255,255,0.72) !important;
+  color: #16191f !important;
+  text-shadow: none !important;
 }
 /* Catch-all for any element painting the accent onto its OWN text via the tokens.
    Scoped to body.theme-frosted; uses :where() to stay at zero specificity cost on the
@@ -39920,6 +40136,13 @@ body.theme-frosted .attach-card,
 body.theme-frosted .attach-image-skeleton,
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
+/* COHERENCE (#8/#9): the Control-Center dock is ONE glass family with the windows +
+   cards — it consumes the SAME light-glass material/backdrop/rim here (it used to carry a
+   bespoke dark blur(36px) over rgba(0,0,0,.4) + an --fg-tinted cyan border, reading as a
+   foggier/darker odd-one-out vs every other surface). The dock-specific layout — the
+   generous Control-Center radius + padding — stays in its own rule above; only the
+   MATERIAL is unified here. */
+body.theme-frosted #minimized-dock.ow-has-rows,
 body.theme-frosted .cp-popover {
   /* GLASS BACKGROUND OPACITY ≈ 0.60 (the kube preset) — a LIGHT, white-ish translucent
      fill. Set BOTH the background-color AND a top-down background-image lift so no dark
@@ -39944,6 +40167,19 @@ body.theme-frosted .cp-popover {
     inset 0 1px 0 var(--ow-glass-rim),
     0 12px 36px rgba(0,0,0,0.10) !important;
 }
+/* EDGE-BLEED CLAMP (the refraction "ring" fix) — clip the SVG-refraction backdrop to the
+   surface's OWN rounded-rect for the transient menus/popovers. liquidGlass.js neutralizes the
+   displacement map's outer edge so it no longer samples beyond the surface, but a rounded
+   corner still renders the rectangular filter region in the corner gap; clipping the backdrop
+   to the element's border-radius removes any residual halo past the corners. Scoped to the
+   four transient popovers (leaf menus — no submenu/shadow to clip); the chrome panels +
+   gadget cards (owned elsewhere) are untouched. */
+body.theme-frosted .dropdown,
+body.theme-frosted .overflow-menu,
+body.theme-frosted .cp-popover,
+body.theme-frosted .model-picker-menu {
+  overflow: hidden;
+}
 }
 /* Text on the LIGHT glass must be DARK to stay legible (Apple light sidebar reads dark
    ink on light glass). adaptiveGlass.js stands down under the glass theme now, so the
@@ -39963,18 +40199,29 @@ body.theme-frosted .toast,
 body.theme-frosted .tool-indicator,
 body.theme-frosted .thinking-section,
 body.theme-frosted .thinking-section .thinking-header,
-/* The gadget rail is a TRANSPARENT container (its glass is the per-card tiles), so
-   its HEADER chrome ("The House" title + the rail controls) sits OUTSIDE the dark-ink
-   card scope and survived as LIGHT-on-light glass. Fold the rail head/title into the
-   dark-ink chrome here so the header reads dark-on-light like the cards below it. */
-body.theme-frosted .gadget-rail-head,
-body.theme-frosted .gadget-rail-head *,
-body.theme-frosted .gadget-rail-title,
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
 body.theme-frosted .cp-popover {
   color: #16191f !important;
   text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
+}
+/* #8/#9 — "The House" (gadget rail / control-room) HEADER legibility. The rail is a
+   TRANSPARENT container (its glass is the per-card tiles), so its header band ("The House"
+   title + the ⠿ rearrange / ⇄ swap / × close controls) sits over the DARK app, NOT over
+   light glass — so the earlier dark-ink fold rendered the whole header BLACK-on-black /
+   illegible (owner report). The header takes the app's LIGHT --fg ink with a dark halo
+   (legible over the dark/transparent container), matching the rest of the dark chrome. */
+body.theme-frosted .gadget-rail-head,
+body.theme-frosted .gadget-rail-head *,
+body.theme-frosted .gadget-rail-title {
+  color: var(--fg, #e8eef2) !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.55) !important;
+}
+/* the active "Rearrange" toggle was the theme ACCENT (red) — colorless glass chrome carries
+   no accent hue; signal the pressed state with full-opacity light ink instead. */
+body.theme-frosted .gadget-rail-rearrange[aria-pressed="true"] {
+  color: var(--fg, #e8eef2) !important;
+  opacity: 1;
 }
 /* Keep accent/branded buttons + icon glyphs from being forced to body ink where they
    carry their own color (links, the send button, status accents). Restrict the blanket
@@ -40208,4 +40455,124 @@ body.theme-frosted .chat-input-bar .input-icon-btn,
 body.theme-frosted .chat-input-bar .input-icon-btn.tool-indicator {
   border-color: transparent !important;
   box-shadow: none !important;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────────────
+   APPLE OVERLAY SCROLLBARS (window kit)                                          #709
+   ───────────────────────────────────────────────────────────────────────────────────
+   Authentic macOS "Tahoe" overlay scrollbars for the OrwellWindow kit's scroll body
+   (`.ow-window .ow-body` — Settings, Control-Room, Theme, Status, the onboarding/welcome
+   modals; every kit window content that scrolls). Matches macOS exactly:
+
+     • THIN pill thumb (~8px box, ~5px painted, fully rounded), inset a hair from the edge.
+     • TRANSLUCENT NEUTRAL thumb sourced from --fg (NO accent hue — the glass is colorless;
+       reads on both light and dark glass). NO solid track (transparent).
+     • OVERLAY — the bar floats over content and does NOT consume layout width (no reflow
+       when it appears/disappears). `overlay` where supported; `auto` otherwise (the painted
+       thumb is the same thin pill either way, so a sliver of gutter at worst — never the old
+       chunky red bar).
+     • AUTO-HIDE + REVEAL — hidden at rest (thumb opacity 0); fades in on scroll/hover and
+       fades out ~1.1s after activity stops (the .ow-scrolling class is driven by
+       orwellScrollbars.js). Widens/darkens on hover over the thumb (.ow-scroll-hover).
+     • prefers-reduced-motion → no fade transition (instant). prefers-reduced-transparency
+       → a more opaque thumb. Firefox via scrollbar-width/scrollbar-color; Chromium via
+       ::-webkit-scrollbar*.
+
+   Scoped to the window kit so it overrides the global chunky --red scrollbar (style.css
+   top) WITHOUT a global * reset. This region is intentionally the LAST scrollbar block in
+   the file so it wins for `.ow-body`.
+   ─────────────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* The macOS overlay thumb is a NEUTRAL MID-GREY with alpha — colorless (no accent) and,
+     crucially, mid-luminance so the SAME translucent pill reads on BOTH light and dark
+     glass (a light --fg-derived thumb would vanish on the light frosted body). This is the
+     authentic macOS behaviour: the overlay bar is a fixed neutral, not theme-ink. The grey
+     base lives in one token so it's the single source, no scattered hexes. */
+  --ow-sb-grey: 110, 110, 110;                                   /* neutral mid-grey channels */
+  --ow-sb-size: 9px;                                             /* overlay box width        */
+  --ow-sb-radius: 4.5px;                                         /* pill = half the box       */
+  --ow-sb-inset: 1.5px;                                          /* hair off the edge         */
+  --ow-sb-thumb: rgba(var(--ow-sb-grey), 0.55);                 /* at rest (translucent)     */
+  --ow-sb-thumb-hover: rgba(var(--ow-sb-grey), 0.8);            /* expanded (darker)         */
+  --ow-sb-size-hover: 12px;                                      /* the macOS widen           */
+}
+
+/* OVERLAY: float the bar over content; do not reserve gutter (no reflow on appear). */
+.ow-window .ow-body {
+  overflow: auto;                 /* (the kit already sets this; restated for the @supports) */
+  scrollbar-gutter: auto;         /* explicitly DO NOT reserve track width                   */
+}
+@supports (overflow: overlay) {
+  /* Chromium honours `overlay` → the bar truly floats and consumes zero layout width.
+     (Modern Chromium aliases overlay→auto; the thin pill below makes the gutter a sliver.) */
+  .ow-window .ow-body { overflow: overlay; }
+}
+
+/* Firefox (and any engine WITHOUT ::-webkit-scrollbar): thin + neutral translucent thumb
+   on a transparent track. CRITICAL: this MUST be gated to non-webkit engines — Chromium
+   PREFERS the standard `scrollbar-width` and IGNORES the ::-webkit-scrollbar pseudo-elements
+   the moment `scrollbar-width` is set on the same element, which would discard the whole
+   macOS treatment below. Hidden-at-rest isn't expressible in FF, so FF shows a permanently
+   thin neutral bar (already macOS-like). */
+@supports not selector(::-webkit-scrollbar) {
+  .ow-window .ow-body {
+    scrollbar-width: thin;
+    scrollbar-color: var(--ow-sb-thumb) transparent;
+  }
+}
+
+/* ── Chromium (::-webkit-scrollbar) — the full macOS overlay treatment ── */
+.ow-window .ow-body::-webkit-scrollbar {
+  width: var(--ow-sb-size);
+  height: var(--ow-sb-size);
+  background: transparent;        /* NO solid track */
+}
+.ow-window .ow-body::-webkit-scrollbar-track,
+.ow-window .ow-body::-webkit-scrollbar-track-piece,
+.ow-window .ow-body::-webkit-scrollbar-corner {
+  background: transparent;        /* track + corner stay invisible */
+  border: 0;
+}
+.ow-window .ow-body::-webkit-scrollbar-thumb {
+  /* AUTO-HIDE: the thumb is driven by background-color, NOT opacity — Chromium does not
+     honour `opacity` on the scrollbar pseudo-element (it computes but never hides), so the
+     reveal/idle-fade is a transparent→grey background transition. (opacity is kept too as a
+     belt for engines that DO honour it.) Hidden at rest = transparent fill. */
+  background-color: transparent;
+  border-radius: var(--ow-sb-radius);
+  /* The transparent border + background-clip insets the painted pill a hair from the edge,
+     so the thin thumb floats (the macOS look) instead of touching the window frame. */
+  border: var(--ow-sb-inset) solid transparent;
+  background-clip: padding-box;
+  opacity: 0;
+  transition: background-color 260ms ease, opacity 260ms ease;
+}
+/* Reveal on scroll/hover (class driven by orwellScrollbars.js) — grey fill fades in. */
+.ow-window .ow-body.ow-scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--ow-sb-thumb);
+  opacity: 1;
+}
+/* Hover-expand: widen + darken the thumb when the pointer is over the bar edge. */
+.ow-window .ow-body.ow-scroll-hover::-webkit-scrollbar {
+  width: var(--ow-sb-size-hover);
+  height: var(--ow-sb-size-hover);
+}
+.ow-window .ow-body.ow-scroll-hover::-webkit-scrollbar-thumb,
+.ow-window .ow-body::-webkit-scrollbar-thumb:hover,
+.ow-window .ow-body::-webkit-scrollbar-thumb:active {
+  background-color: var(--ow-sb-thumb-hover);
+  opacity: 1;
+}
+
+/* Accessibility: no fade animation under reduced motion (instant reveal). */
+@media (prefers-reduced-motion: reduce) {
+  .ow-window .ow-body::-webkit-scrollbar-thumb { transition: none; }
+}
+/* More opaque thumb under reduced transparency (the translucent grey would be too faint). */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --ow-sb-thumb: rgba(var(--ow-sb-grey), 0.72);
+    --ow-sb-thumb-hover: rgba(var(--ow-sb-grey), 0.92);
+  }
 }

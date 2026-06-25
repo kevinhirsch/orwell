@@ -692,16 +692,59 @@ function _setRailIcon(btn, srcSvg) {
   else btn.insertBefore(next, btn.firstChild);
 }
 
+// #796: is an expanded sidebar source ROW effectively visible? An entry can be hidden
+// three ways: inline display:none on itself (Customize-UI per-tool toggles / admin
+// feature flags), a hidden SECTION ancestor via CSS (the game build hides whole
+// sections — #email-section / #tools-section), or a hidden user-bar. We must measure
+// this INDEPENDENTLY of the sidebar's own collapse: the rail is shown precisely WHEN the
+// sidebar is collapsed (.sidebar.hidden), and that collapse cascades display:none onto
+// inner containers (e.g. `.sidebar.hidden .sidebar-user-bar`) — a layout artifact, not a
+// genuine hide. So we lift the `.hidden` class off the sidebar for the duration of the
+// measurement (synchronous, no paint between toggle + restore ⇒ no flicker), then walk
+// computed display/visibility up to the .sidebar root.
+function _rowVisible(src) {
+  if (!src) return false;
+  const sidebar = document.getElementById('sidebar');
+  const wasHidden = sidebar && sidebar.classList.contains('hidden');
+  if (wasHidden) sidebar.classList.remove('hidden');
+  let visible = true;
+  try {
+    let node = src;
+    while (node && node !== document.body) {
+      if (node.classList && node.classList.contains('sidebar')) break; // the nav root
+      const cs = getComputedStyle(node);
+      if (cs.display === 'none' || cs.visibility === 'hidden') { visible = false; break; }
+      node = node.parentElement;
+    }
+  } finally {
+    if (wasHidden) sidebar.classList.add('hidden');
+  }
+  return visible;
+}
+
 export function syncRailIcons() {
   const rail = document.getElementById('icon-rail');
   if (!rail) return;
 
-  // 1. Declared static buttons — clone the source row's icon svg.
+  // 1. Declared static buttons — clone the source row's icon svg AND mirror the
+  // row's visibility. (#796: the rail must show the SAME SET the expanded sidebar
+  // shows, not just the same glyphs. The game build / Customize-UI hides tool rows
+  // via inline display:none; without this, the collapsed rail kept showing icons —
+  // e.g. Calendar / Compare / Email — for entries the expanded sidebar had hidden.)
+  // Buttons whose source row sets display:none follow it; a present, shown row un-hides
+  // the rail button. The dynamic indicators (rail-chats / rail-documents) own their own
+  // show/hide and so are skipped here — they carry no source-row gating contract.
+  const DYNAMIC_OWN_VIS = new Set(['rail-chats', 'rail-documents']);
   rail.querySelectorAll('.icon-rail-btn[data-rail-source]').forEach((btn) => {
     const src = document.getElementById(btn.dataset.railSource);
     const spec = RAIL_MIRRORS.find((m) => m.rail === btn.id);
     const svg = src && src.querySelector((spec && spec.iconSel) || 'svg');
     if (svg) _setRailIcon(btn, svg);
+    // RAIL_MIRRORS-managed injected entries set their own visibility in pass 2;
+    // the dynamic indicators manage theirs. Everything else mirrors its row.
+    if (!spec && !DYNAMIC_OWN_VIS.has(btn.id)) {
+      btn.style.display = _rowVisible(src) ? '' : 'none';
+    }
   });
 
   // 2. Injected game chrome — create the mirror, keep icon + gating in step.
@@ -746,8 +789,10 @@ export function syncRailIcons() {
     // do it now too so a fresh button never renders empty.)
     const svg = src.querySelector(spec.iconSel || 'svg');
     if (svg) _setRailIcon(btn, svg);
-    // The row's game gating is the rail's too (hidden until a game exists).
-    btn.style.display = getComputedStyle(src).display === 'none' ? 'none' : '';
+    // The row's game gating is the rail's too (hidden until a game exists). Use the
+    // collapse-aware check (#796) so the sidebar's own collapse — present whenever the
+    // rail is shown — doesn't read as the row being hidden.
+    btn.style.display = _rowVisible(src) ? '' : 'none';
   }
 
   // 3. a11y (WCAG 4.1.2): the rail buttons are icon-only — `title` alone is not a

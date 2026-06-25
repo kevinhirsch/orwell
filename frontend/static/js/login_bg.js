@@ -66,17 +66,63 @@ function _normalize(cfg) {
 }
 
 // ── The animated mesh gradient (default + the reduced-motion fallback) ──
+// SHARED RENDERER (DRY): the in-app glass-theme wallpaper (theme.js → #__wp)
+// mounts the SAME mesh via mountMeshGradient() below, so the login screen and
+// the glass theme paint byte-identically. The visual lives in the CSS
+// (.login-bg-gradient + its presets) — extracted to css/meshGradient.css so both
+// the login page and the app load it. This function only sets the preset
+// data-attr + the speed/intensity vars + the is-animated class.
 function _mountGradient(host, { animate, gradient }) {
+  return mountMeshGradient(host, {
+    animate,
+    preset: gradient && gradient.preset,
+    speed: gradient && gradient.speed,
+    intensity: gradient && gradient.intensity,
+  });
+}
+
+/** Mount the shared mesh-gradient layer into `host`. Reusable from anywhere
+ *  (login + the in-app glass wallpaper). Returns the created element.
+ *  opts: { animate (bool — adds .is-animated; respect prefers-reduced-motion at
+ *  the call site), preset (one of GRADIENT_PRESETS; falls back to 'aurora'),
+ *  speed (seconds, default 26), intensity (0.4–1.4, default 1), extraClass }. */
+export function mountMeshGradient(host, opts) {
+  opts = opts || {};
+  let preset = String(opts.preset || 'aurora').toLowerCase();
+  if (!GRADIENT_PRESETS.has(preset)) preset = 'aurora';
   const el = document.createElement('div');
-  el.className = 'login-bg login-bg-gradient' + (animate ? ' is-animated' : '');
+  el.className = 'login-bg login-bg-gradient'
+    + (opts.animate ? ' is-animated' : '')
+    + (opts.extraClass ? ' ' + opts.extraClass : '');
   el.setAttribute('aria-hidden', 'true');
-  if (gradient) {
-    el.setAttribute('data-lbg-preset', gradient.preset);
-    el.style.setProperty('--lbg-speed', gradient.speed + 's');
-    el.style.setProperty('--lbg-intensity', String(gradient.intensity));
-  }
-  host.appendChild(el);
+  el.setAttribute('data-lbg-preset', preset);
+  el.style.setProperty('--lbg-speed', _clamp(opts.speed, 8, 60, 26) + 's');
+  el.style.setProperty('--lbg-intensity', String(_clamp(opts.intensity, 0.4, 1.4, 1)));
+  if (host) host.appendChild(el);
   return el;
+}
+
+/** Resolve the public cosmetic login-background config — the SAME source the
+ *  login page reads — so the in-app glass wallpaper tracks the admin's chosen
+ *  palette. Prefers a server-inlined window.__loginBg, else the public GET; any
+ *  failure falls through to the normalized default (aurora). Returns the
+ *  normalized { source, gradient:{preset,speed,intensity}, ... } shape. */
+export async function resolveLoginBackgroundConfig() {
+  let cfg = (typeof window !== 'undefined' && window.__loginBg) || null;
+  if (!cfg) {
+    try {
+      const r = await fetch('/api/auth/login-background', { credentials: 'same-origin' });
+      if (r.ok) cfg = await r.json();
+    } catch (_) { /* fall through to the default */ }
+  }
+  return _normalize(cfg);
+}
+
+// True when the user/OS asks for reduced motion (re-read live so a setting flip
+// + re-apply picks it up). Exposed so the in-app reuse matches the login policy.
+export function prefersReducedMotion() {
+  try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  catch (_) { return false; }
 }
 
 // ── Photo ──
@@ -207,15 +253,19 @@ export async function initLoginBackground(rawCfg) {
   return cfg.source;
 }
 
-// Auto-init: prefer the server-inlined config; fall back to the public GET.
+// Auto-init: ONLY on the login page (the host div + #login-card live there).
+// Importing this module elsewhere (theme.js reuses mountMeshGradient /
+// resolveLoginBackgroundConfig) must NOT spawn the full login background.
 (async () => {
-  let cfg = (typeof window !== 'undefined' && window.__loginBg) || null;
-  if (!cfg) {
-    try {
-      const r = await fetch('/api/auth/login-background', { credentials: 'same-origin' });
-      if (r.ok) cfg = await r.json();
-    } catch (_) { /* fall through to the gradient default */ }
+  if (typeof document === 'undefined') return;
+  // Guard: the login page is the only place with the auth form (#authForm) — the
+  // app imports mountMeshGradient/resolveLoginBackgroundConfig from this module
+  // and must NOT trigger the full login background.
+  if (!document.getElementById('authForm') && !document.body?.classList.contains('login-page')) {
+    return;
   }
-  try { await initLoginBackground(cfg); }
-  catch (e) { console.error('[login-bg] init failed:', e); }
+  try {
+    const cfg = await resolveLoginBackgroundConfig();
+    await initLoginBackground(cfg);
+  } catch (e) { console.error('[login-bg] init failed:', e); }
 })();

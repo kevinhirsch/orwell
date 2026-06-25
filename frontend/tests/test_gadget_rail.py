@@ -164,3 +164,85 @@ def test_j5_control_room_chrome_meets_touch_tap_target_floor():
     for sel in (".gadget-rail-head button", ".ow-controls button", "#gadget-rail-strip"):
         assert sel in block, sel
     assert "min-width: 44px" in block and "min-height: 44px" in block
+
+
+# ── #798 — drag-to-reorder actually reorders (and persists) ───────────────────
+
+def test_drag_drop_hit_test_sees_through_the_lifted_gadget():
+    """#798 regression: dragging a gadget did NOT reorder. The grabbed gadget is translated
+    UNDER the finger (transform + z-index:5), so the drop-target probe's `elementFromPoint`
+    returned the DRAGGED gadget itself — `over === _drag.el` every time, so the drop never
+    fired moveRelative → reorder. The fix makes the lifted gadget transparent to hit-testing
+    (`pointer-events:none`) during the probe AND skips it in the nearest-by-center fallback,
+    so the probe resolves to the gadget BENEATH it. (Live drag+reorder+persist is exercised
+    in browser_smoke.py.)"""
+    js = _read("static", "js", "orwellGadgetRail.js")
+    probe = re.search(r"function _gadgetFromPoint\(x, y\)\s*\{(.*?)\n  \}", js, re.S)
+    assert probe, "_gadgetFromPoint must exist"
+    body = probe.group(1)
+    # the lifted gadget is taken out of hit-testing around the elementFromPoint call …
+    assert 'pointerEvents = "none"' in body, "must drop the lifted gadget out of hit-testing"
+    assert "elementFromPoint" in body
+    # … and restored afterwards (no permanently-dead pointer events on the card)
+    assert "removeProperty" in body or "pointerEvents = prevPE" in body
+    # the nearest-by-center fallback must SKIP the dragged gadget (else it resolves to itself)
+    assert "_drag.el" in js and "c === lifted" in body
+    # the drop path still ends at the real reorder seam
+    end = re.search(r"function _endPointer\(e\)\s*\{(.*?)\n  \}", js, re.S)
+    assert end and "moveRelative" in end.group(1)
+
+
+def test_reorder_persists_to_localstorage_and_syncs():
+    """The reorder seam saves the new order (per-user localStorage key + the 0064 layout-sync
+    fan-out) so it survives a reload and crosses devices/windows."""
+    js = _read("static", "js", "orwellGadgetRail.js")
+    save = re.search(r"function saveOrder\(ids\)\s*\{(.*?)\n  \}", js, re.S)
+    assert save, "saveOrder must exist"
+    body = save.group(1)
+    assert "lsSet(_orderKey()" in body                 # per-user localStorage fallback
+    assert "orwell:window-layout" in body              # the synced source of truth (#637)
+    # the order key is per-user (so two users on one device don't collide)
+    assert 'return "orwell-gadget-order:"' in js
+
+
+# ── #797 — gadget content insets ride the --ow-space-* scale (clean, even) ────
+
+def _og_card_block(css: str) -> str:
+    i = css.find(".og-card {")
+    assert i != -1, ".og-card must be declared in style.css"
+    # span to the end of the .og-card family (the @media reduced-motion chev rule closes it)
+    end = css.find(".og-card .og-chev { transition: none; }", i)
+    assert end != -1, ".og-card family must close with the reduced-motion chev rule"
+    return css[i:end + 80]
+
+
+def test_gadget_insets_use_the_spacing_tokens_not_adhoc_rems():
+    """#797: the gadget content insets were ad-hoc rems (.4rem/.55rem/.35rem/.45rem/.1rem) that
+    rendered slightly uneven across kinds. They now ride the --ow-space-* scale: --ow-space-3
+    (12px) horizontal padding, --ow-space-2 (8px) vertical padding + margin + inner gaps,
+    --ow-space-1 (4px) for the tightest gaps — clean, consistent across every gadget kind."""
+    css = _read("static", "style.css")
+    block = _og_card_block(css)
+    # card padding + margin on the token scale
+    assert "padding: var(--ow-space-2, 8px) var(--ow-space-3, 12px)" in block
+    assert "margin: var(--ow-space-2, 8px) var(--ow-space-2, 8px) 0" in block
+    # the header rhythm matches the card (gap == bottom margin == --ow-space-2)
+    assert "gap: var(--ow-space-2, 8px); margin: 0 0 var(--ow-space-2, 8px)" in block
+    # tightest gaps (actions, chevron) on --ow-space-1
+    assert "gap: var(--ow-space-1, 4px)" in block          # .og-actions
+    assert "margin-left: var(--ow-space-1, 4px)" in block  # .og-chev
+    # the old ad-hoc inset rems are GONE from the card block
+    for bad in (".4rem", ".55rem", ".35rem", ".45rem", ".1rem"):
+        assert bad not in block, f"ad-hoc inset {bad} must not remain in the .og-card chrome"
+
+
+def test_gadget_kit_js_and_css_insets_stay_in_lockstep():
+    """The runtime ensureCss() in orwellGadget.js (which paints the kit BEFORE style.css loads)
+    must carry the SAME token-based insets as the style.css source-of-truth copy — otherwise the
+    card flashes a different spacing on first paint."""
+    js = _read("static", "js", "orwellGadget.js")
+    assert "margin: var(--ow-space-2, 8px) var(--ow-space-2, 8px) 0" in js
+    assert "padding: var(--ow-space-2, 8px) var(--ow-space-3, 12px)" in js
+    assert "gap: var(--ow-space-2, 8px); margin: 0 0 var(--ow-space-2, 8px)" in js
+    assert "gap: var(--ow-space-1, 4px)" in js
+    assert "margin-left: var(--ow-space-1, 4px)" in js

@@ -232,15 +232,21 @@ function _unsnap(content) {
   delete content.dataset._tileZone;
 }
 
-function _findDragTarget(e) {
-  const header = e.target.closest('.modal-header');
-  if (!header) return null;
-  // Skip clicks on header buttons (close, minimize, etc.)
-  if (e.target.closest('button')) return null;
-  const modal = header.closest('.modal, .research-overlay');
-  if (!modal) return null;
-  const content = modal.querySelector('.modal-content, .research-pane');
-  return content || null;
+function _findDragTarget(_e) {
+  // #794 follow-up (owner-approved): desktop window TILING (the 9-zone snap that
+  // filled a window to a half/quarter/maximize on drag-release) is RETIRED. It was
+  // the SAME interference the left/right edge-snap dock had — a window dragged so
+  // the cursor ended near an edge/corner did NOT stay where it was dropped; a beat
+  // after release it re-anchored to fill a tile zone (e.g. right-half), fighting
+  // "pull a window in any direction and drop it where you let go." Owner ruling:
+  // "I don't actually need the snapping if it's a problem — we could probably drop
+  // the whole thing." Returning null means tracking never starts: no ghost, no
+  // release-time tile snap. Windows drag freely and stay exactly where released.
+  //
+  // The pointer listeners + _unsnap / _reclampAll stay wired so a window that is
+  // ALREADY tile-snapped from a persisted state can still be released/reclamped —
+  // but no NEW snap is ever created from a drag.
+  return null;
 }
 
 document.addEventListener('pointerdown', (e) => {

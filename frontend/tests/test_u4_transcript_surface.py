@@ -43,8 +43,14 @@ def test_e93_game_transcript_keeps_only_record_safe_actions():
     assert "_GAME_KEEP = new Set(['copy', 'regen'])" in RENDERER
     assert "'Re-narrate'" in RENDERER
     assert "data-game-build" in RENDERER
-    # SENT (player) messages keep ONLY Copy in the game build (no edit/delete/resend).
-    assert "_gameUserKeep = new Set(['copy'])" in RENDERER
+    # Owner ruling (liquid-glass follow-up): SENT (player) messages carry NO per-message
+    # action icons in the game build — under the glass theme the lone gray "Copy" glyph was
+    # illegible on the blue fill, and the played-record model already strips the
+    # record-altering actions, so the sent footer uses an EMPTY action pool.
+    assert re.search(
+        r"const userPool\s*=\s*document\.body\.hasAttribute\(['\"]data-game-build['\"]\)\s*\?\s*\[\s*\]",
+        RENDERER,
+    ), "sent-bubble footer must use an EMPTY action pool in the game build (no icons)"
 
 
 def test_e93_game_active_flag_is_maintained_by_the_status_poll():

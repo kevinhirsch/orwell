@@ -1,0 +1,184 @@
+"""The assumed/OOB default models resolve correctly.
+
+Two bugs/specs covered:
+
+  Bug 2 (chat default): the chat picker used to auto-pick `items[0].models[0]`
+  — an arbitrary first-sorted model ("fugu") — IGNORING the configured default.
+  The owner ALWAYS wants the OOB default chat model to be deepseek-v4-pro on the
+  OpenRouter endpoint. The picker now resolves the auto-pick via
+  `_resolveDefaultPick(items)`, which PREFERS the server-resolved configured
+  default (cached on `window.__orwellDefaultChat`, out-of-box deepseek-v4-pro)
+  over the first-listed model, and NEVER picks an image model. An explicit user
+  selection clears the auto-pick marker, so the configured default never
+  overrides a real choice (only the unset/auto case resolves to the default).
+
+  Image default: the OOB image model is gemini-2.5-flash-image. That lives in
+  DEFAULT_SETTINGS["image_model"]; when blank ("Auto-detect") it resolves via
+  IMAGE_AUTODETECT_CANDIDATES, which leads with gemini-2.5-flash-image. An
+  explicit image_model is honored as-is.
+
+Mechanism for "explicit choice still wins": the configured-default preference
+only fires when the picker has NO model selected (auto-pick path), and an
+explicit pick sets `_autoPickedMid = null` so the late-default correction is
+skipped. The backend `/api/default-chat` reads the user's saved
+default_model/default_endpoint_id first and only falls through to the OOB
+default when unset.
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+
+import pytest
+
+FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read(rel):
+    with open(os.path.join(FRONTEND, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+# ── OOB defaults live in DEFAULT_SETTINGS (the assumed defaults) ────────────────
+
+
+def test_oob_default_chat_model_is_deepseek_v4_pro():
+    from src.settings import DEFAULT_SETTINGS
+    assert DEFAULT_SETTINGS["default_model"] == "deepseek/deepseek-v4-pro", (
+        "the assumed default chat model must be deepseek-v4-pro (OpenRouter)"
+    )
+
+
+def test_oob_default_image_model_is_gemini_flash_image():
+    from src.settings import DEFAULT_SETTINGS
+    assert DEFAULT_SETTINGS["image_model"] == "google/gemini-2.5-flash-image", (
+        "the assumed default image model must be gemini-2.5-flash-image"
+    )
+
+
+def test_image_autodetect_leads_with_gemini_flash_image():
+    """When image_model is blank (Auto-detect), the first candidate tried is
+    gemini-2.5-flash-image — so the assumed default holds even unset."""
+    from src.ai_interaction import IMAGE_AUTODETECT_CANDIDATES
+    assert IMAGE_AUTODETECT_CANDIDATES[0] == "google/gemini-2.5-flash-image", (
+        "the image auto-detect default must lead with gemini-2.5-flash-image"
+    )
+
+
+# ── source pins: the picker honors the configured default, not first-listed ─────
+
+
+def test_picker_resolves_configured_default_not_arbitrary_first():
+    js = _read("static/js/modelPicker.js")
+    # The auto-pick no longer reaches for items[0].models[0]; it goes through the
+    # configured-default resolver.
+    assert "_resolveDefaultPick(" in js, (
+        "the picker auto-pick must resolve via _resolveDefaultPick (the configured-"
+        "default-preferring resolver), not an arbitrary first-listed model"
+    )
+    assert "__orwellDefaultChat" in js, (
+        "_resolveDefaultPick must consult the server-resolved configured default "
+        "(window.__orwellDefaultChat)"
+    )
+    # The arbitrary `models[0]` / `first.models[0]` auto-pick is gone.
+    assert "modelId = models[0]" not in js and "modelId = first.models[0]" not in js, (
+        "the picker must not auto-pick the first-listed model ('fugu' bug)"
+    )
+
+
+def test_picker_default_pick_never_an_image_model():
+    js = _read("static/js/modelPicker.js")
+    # Both the configured-default branch and the floor exclude image models.
+    assert "_firstChatPick" in js, "the auto-pick floor must skip image models (_firstChatPick)"
+    fn_start = js.index("function _firstChatPick(")
+    fn = js[fn_start:fn_start + 600]
+    assert "_isImageModelId(mid)" in fn, "the auto-pick floor must filter image models"
+
+
+def test_explicit_pick_clears_auto_marker():
+    """An explicit user pick clears `_autoPickedMid`, so the late-arriving
+    configured default cannot override the user's choice."""
+    js = _read("static/js/modelPicker.js")
+    pick_start = js.index("async function _pick(")
+    pick = js[pick_start:pick_start + 400]
+    assert "_autoPickedMid = null" in pick, (
+        "an explicit _pick must clear the auto-pick marker so a configured default "
+        "never overrides an explicit selection"
+    )
+
+
+# ── behavioral: _resolveDefaultPick prefers deepseek-v4-pro over first-listed ───
+
+
+def _slice_fns(js):
+    """Pull the module-level helpers the resolver harness needs."""
+    out = []
+    for name in ("_isImageModelId", "_firstChatPick", "_resolveDefaultPick"):
+        start = js.index(f"function {name}(")
+        end = js.index("\n}\n", start) + len("\n}\n")
+        out.append(js[start:end])
+    return "\n".join(out)
+
+
+def _run_resolver(items, default_chat):
+    js = _read("static/js/modelPicker.js")
+    harness = (
+        "const ITEMS = " + json.dumps(items) + ";\n"
+        "const window = { __orwellDefaultChat: " + json.dumps(default_chat) + " };\n"
+        + _slice_fns(js) +
+        "\nconst pick = _resolveDefaultPick(ITEMS);\n"
+        "console.log(JSON.stringify(pick));\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(harness)
+        path = f.name
+    try:
+        res = subprocess.run(["node", path], capture_output=True, text=True, timeout=20)
+    finally:
+        os.unlink(path)
+    assert res.returncode == 0, res.stderr
+    return json.loads(res.stdout.strip().splitlines()[-1])
+
+
+# A catalog where "fugu" sorts/lists FIRST but deepseek-v4-pro is the configured
+# default served by the OpenRouter endpoint.
+_ITEMS = [
+    {"endpoint_id": "misc", "endpoint_name": "Misc", "url": "http://m/v1",
+     "models": ["fugu/fugu-1", "google/gemini-2.5-flash-image"]},
+    {"endpoint_id": "or", "endpoint_name": "OpenRouter", "url": "http://or/v1",
+     "models": ["deepseek/deepseek-v4-pro", "openai/gpt-4o"]},
+]
+
+
+def test_resolver_prefers_configured_deepseek_over_first_listed():
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    pick = _run_resolver(_ITEMS, {"model": "deepseek/deepseek-v4-pro", "endpoint_id": "or"})
+    assert pick and pick["mid"] == "deepseek/deepseek-v4-pro", (
+        f"expected the configured default deepseek-v4-pro, got {pick}"
+    )
+    assert pick["endpointId"] == "or", "must bind to the OpenRouter endpoint that serves it"
+
+
+def test_resolver_falls_back_to_first_chat_when_no_default_configured():
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    # No configured default → first NON-IMAGE model (never the image model).
+    pick = _run_resolver(_ITEMS, None)
+    assert pick and pick["mid"] == "fugu/fugu-1", (
+        f"with no configured default, fall back to the first CHAT model, got {pick}"
+    )
+
+
+def test_resolver_never_returns_image_model_even_when_default_is_image():
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    # A corrupted default pointing at an image model must not be honored; the
+    # floor returns the first chat model instead.
+    pick = _run_resolver(_ITEMS, {"model": "google/gemini-2.5-flash-image", "endpoint_id": "misc"})
+    assert pick and pick["mid"] != "google/gemini-2.5-flash-image", (
+        f"the resolver must never hand back an image model as the chat default, got {pick}"
+    )
