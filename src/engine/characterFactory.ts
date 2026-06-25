@@ -226,22 +226,57 @@ export function isCorpusName(fullName: string): boolean {
 }
 
 /**
- * Seeded sampling WITHOUT replacement per season: unique full names AND unique given names
- * within a house (the show never casts two same-named houseguests in a season). The corpora
+ * Seeded sampling WITHOUT replacement per season: unique full names, unique given names AND
+ * unique SURNAMES within a house (the show never casts two same-named houseguests in a season,
+ * and two unrelated houseguests sharing a surname reads as a casting slip — #853). The corpora
  * are raw material — which name lands on which archetype is entirely the seed's draw. The
  * pre-seeded `used`/`usedGiven` sets carry CROSS-SEASON memory (NAME-1 / #547) so a new season's
  * cast avoids names used by prior seasons in the same game.
+ *
+ * RNG-SAFETY (E38 / #338): the loop's RNG consumption is byte-identical to before #853 — it re-loops
+ * (drawing a fresh given + surname) ONLY on the original given / full-name collision conditions, never
+ * on a surname collision. A surname collision is resolved WITHOUT any draw: since a unique `given`
+ * already makes the full name unique, we deterministically advance through the corpus to the next free
+ * surname. So the main stream — and every downstream stat / volatility / age draw seeded off it — is
+ * unchanged for ALL seeds; only the surname STRING differs on the (rare) colliding seed, which is the
+ * fix. (An earlier approach re-looped on surname collisions, shifting the stream and breaking
+ * seed-pinned tests like portraitVariety's age band.)
  */
-function uniqueName(rng: RandomnessSource, used: Set<string>, usedGiven: Set<string>): string {
+function uniqueName(
+  rng: RandomnessSource,
+  used: Set<string>,
+  usedGiven: Set<string>,
+  usedSurnames: Set<string>,
+): string {
   for (let guard = 0; guard < 1000; guard++) {
     const given = rng.pick(GIVEN_NAMES);
-    const name = `${given} ${rng.pick(SURNAMES)}`;
-    if (!used.has(name) && !usedGiven.has(given)) {
-      used.add(name);
-      usedGiven.add(given);
-      return name;
+    let surname = rng.pick(SURNAMES);
+    // Re-loop ONLY on the original given / full-name collisions — NOT on a surname collision — so RNG
+    // consumption per iteration is byte-identical to before #853 (one given + one surname pick, same
+    // re-loop triggers). Re-looping on a surname collision shifted the main stream and perturbed
+    // downstream age / stat draws, breaking seed-pinned tests (portraitVariety's age band).
+    if (used.has(`${given} ${surname}`) || usedGiven.has(given)) continue;
+    // Surname de-dup WITHOUT consuming RNG: a unique `given` already makes the full name unique, so on
+    // a surname collision we deterministically advance through the corpus to the next free surname (no
+    // extra draw → main stream unchanged; both #853 and the #338 golden-RNG isolation hold).
+    if (usedSurnames.has(surname)) {
+      const start = SURNAMES.indexOf(surname);
+      for (let step = 1; step < SURNAMES.length; step++) {
+        const cand = SURNAMES[(start + step) % SURNAMES.length]!;
+        if (!usedSurnames.has(cand)) {
+          surname = cand;
+          break;
+        }
+      }
     }
+    const name = `${given} ${surname}`;
+    used.add(name);
+    usedGiven.add(given);
+    usedSurnames.add(surname);
+    return name;
   }
+  // Same fail-stop contract as before (the guard is far beyond reachable: 805 surnames / 501 given
+  // names vs a 15-cast leave ample headroom — seedPriorNames is the piece that keeps it that way).
   throw new Error("could not sample a unique name");
 }
 
@@ -609,6 +644,11 @@ export function generateHouse(
   const specs = curatedArchetypes(rng, NPC_COUNT);
   const used = new Set<string>();
   const usedGiven = new Set<string>();
+  // #853: also enforce UNIQUE SURNAMES within a house (two unrelated houseguests sharing a surname
+  // reads as a casting slip). Scoped to THIS house only (not pre-seeded from prior seasons): a
+  // surname recurring in a later season is realistic and surnames are plentiful, so we don't carry
+  // it cross-season the way `used`/`usedGiven` do.
+  const usedSurnames = new Set<string>();
   // NAME-1 (#547): avoid names used by prior seasons in the same game (bounded, fail-soft).
   seedPriorNames(priorNames, used, usedGiven);
   // Draw order on the MAIN stream (name, style, stats, background, volatility) is preserved exactly;
@@ -617,7 +657,7 @@ export function generateHouse(
   // (E38 re-baselined the seeded streams once — the name draw now consumes 2 picks, not phonemes —
   // and the side streams hash off the new names and re-derive, exactly as the audit specified.)
   const npcs: Houseguest[] = specs.map((spec, i) => {
-    const name = uniqueName(rng, used, usedGiven);
+    const name = uniqueName(rng, used, usedGiven, usedSurnames);
     const strategyStyle = rng.pick(spec.styles);
     const stats = jittered(spec.bias, rng);
     // The legacy archetype-flavored background line is RETAINED (byte-stable: it still consumes the

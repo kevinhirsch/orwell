@@ -55,6 +55,39 @@ describe("E55 — structured confessional content (pure)", () => {
     expect(a.content).toBe(b.content);
     expect(a.trigger).toBeUndefined();
   });
+
+  it("never names the same houseguest as both biggest threat and most trusted (issue #839)", () => {
+    // A house where the SAME peer is simultaneously the confessor's top threat AND top bond:
+    // without the distinctness constraint target === ally (the "Tiana Ortega" double-naming bug).
+    const r = new RelationshipModel(0.5);
+    const self = npc(1);
+    const peers = [npc(2), npc(3)];
+    // The first peer is both the strongest threat and the strongest bond...
+    r.edge(self, peers[0]!).threat = 0.95;
+    r.edge(self, peers[0]!).trust = 0.95;
+    r.edge(self, peers[0]!).affinity = 0.95;
+    // ...the second peer is the runner-up bond (and a lesser threat).
+    r.edge(self, peers[1]!).threat = 0.1;
+    r.edge(self, peers[1]!).trust = 0.6;
+    r.edge(self, peers[1]!).affinity = 0.6;
+
+    const conf = confessionalFor(self, [self, ...peers], r);
+    expect(conf.target).toBe(peers[0]!); // still the true biggest threat (anti-sycophancy)
+    expect(conf.ally).toBe(peers[1]!); // ally falls to the runner-up bond, not the target
+    expect(conf.ally).not.toBe(conf.target); // ≥2 others ⇒ distinct (issue #839)
+  });
+
+  it("with only one other houseguest, target wins and ally stays null (no double-naming)", () => {
+    const r = new RelationshipModel(0.5);
+    const self = npc(1);
+    const only = npc(2);
+    r.edge(self, only).threat = 0.9; // the sole peer is the biggest threat
+    r.edge(self, only).trust = 0.9;
+    r.edge(self, only).affinity = 0.9; // ...and would be the top bond too
+    const conf = confessionalFor(self, [self, only], r);
+    expect(conf.target).toBe(only);
+    expect(conf.ally).toBeNull(); // can't reuse the target as ally; legitimately null
+  });
 });
 
 describe("E55/C12 — live ceremony confessionals reach the record AND the soul", () => {

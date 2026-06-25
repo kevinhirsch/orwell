@@ -115,6 +115,34 @@ def test_status_page_ships_the_button_next_to_portraits(client):
     assert "reads no Vault" in html
 
 
+def test_producer_vault_dump_is_not_html_escaped_into_textContent(client):
+    """Issue #851 — the Producer's Vault unseal dump renders raw, not HTML-escaped.
+
+    renderVault() builds the dump lines and they are written into #pv-body via .textContent
+    (a non-markup sink). .textContent does NOT decode HTML entities, so escaping there makes an
+    apostrophe show verbatim as "&#39;" (and "&" as "&amp;"). The fix: the dump fields must be
+    written RAW — no esc() wrapping content destined for the textContent sink. (It's XSS-safe:
+    textContent never interprets markup; esc() stays correct for the page's innerHTML sinks.)
+    """
+    html = client.get("/admin/status").text
+    # The render path is present and writes into the textContent sink.
+    assert "function renderVault(v)" in html
+    assert 'document.getElementById("pv-body")' in html
+    assert "body.textContent = d.ok ? renderVault(d.vault)" in html
+    # The dump fields are emitted RAW (the regression was esc(story[i].content)/esc(story[i].type)).
+    assert "(story[i].content || \"\")" in html
+    assert "(story[i].type || \"\")" in html
+    assert "esc(story[i].content" not in html
+    assert "esc(story[i].type" not in html
+    # No esc() CALL anywhere in the renderVault → textContent dump block (twists / votes / winner /
+    # reason). Strip JS line-comments first so an explanatory "don't esc()" note can't false-match.
+    vault_block = html[html.index("function renderVault(v)"):html.index('document.getElementById("producer-vault")')]
+    vault_code = "\n".join(ln.split("//", 1)[0] for ln in vault_block.splitlines())
+    assert "esc(" not in vault_code, "the #pv-body textContent dump path must not HTML-escape (issue #851)"
+    # The page still uses esc() for its innerHTML sinks (the security boundary stays intact elsewhere).
+    assert "esc(" in html
+
+
 def test_engine_client_calls_the_admin_channel(monkeypatch):
     # orwell_engine.advance_to_finale crosses the ADMIN channel (Vault-free by construction), not
     # the player channel — the tool name is advanceToFinale.

@@ -1317,25 +1317,29 @@ document.getElementById("ff-finale").addEventListener("click", fastForwardFinale
 // ── DEBUG · owner override of mandate #2: the Producer's Vault unseal ─────────────────────────────
 // HIDDEN by default. An explicit click + spoiler confirm UNSEALS the LIVE hidden layer into #pv-panel
 // — the one place the admin surface deliberately shows Vault content. Re-seal hides it again.
+// The dump is written into #pv-body via .textContent (a non-markup sink) below, so the lines
+// MUST be the RAW strings — DON'T esc() them. textContent does not decode HTML entities, so an
+// escaped apostrophe would render verbatim as "&#39;" (issue #851). It's also XSS-safe: textContent
+// never interprets markup. (The one place this admin surface deliberately shows Vault content.)
 function renderVault(v) {
   if (!v) return "No active game to unseal.";
   var out = [];
-  if (v.winner) out.push("WINNER (so far): " + esc(v.winner.name || ""));
+  if (v.winner) out.push("WINNER (so far): " + (v.winner.name || ""));
   var story = Array.isArray(v.hiddenStory) ? v.hiddenStory : [];
   out.push("\\nHIDDEN LAYER (" + story.length + " entr" + (story.length === 1 ? "y" : "ies") + "):");
-  for (var i = 0; i < story.length; i++) out.push("  • [" + esc(story[i].type || "") + "] " + esc(story[i].content || ""));
+  for (var i = 0; i < story.length; i++) out.push("  • [" + (story[i].type || "") + "] " + (story[i].content || ""));
   var tw = Array.isArray(v.twists) ? v.twists : [];
   if (tw.length) {
     out.push("\\nSEALED TWISTS:");
-    for (var j = 0; j < tw.length; j++) out.push("  • " + esc(tw[j].kind || "") + (tw[j].firedWeek != null ? " — fired week " + esc(tw[j].firedWeek) : " — not fired"));
+    for (var j = 0; j < tw.length; j++) out.push("  • " + (tw[j].kind || "") + (tw[j].firedWeek != null ? " — fired week " + tw[j].firedWeek : " — not fired"));
   }
   var ev = Array.isArray(v.evictionVotes) ? v.evictionVotes : [];
   if (ev.length) {
     out.push("\\nTRUE EVICTION VOTES:");
     for (var k = 0; k < ev.length; k++) {
       var w = ev[k];
-      var lines = (w.votes || []).map(function (x) { return esc((x.voter && x.voter.name) || "") + "→" + esc((x.votedFor && x.votedFor.name) || ""); });
-      out.push("  • Week " + esc(w.week) + " (out: " + esc((w.evictee && w.evictee.name) || "") + "): " + lines.join(", "));
+      var lines = (w.votes || []).map(function (x) { return ((x.voter && x.voter.name) || "") + "→" + ((x.votedFor && x.votedFor.name) || ""); });
+      out.push("  • Week " + w.week + " (out: " + ((w.evictee && w.evictee.name) || "") + "): " + lines.join(", "));
     }
   }
   return out.join("\\n");
@@ -1349,7 +1353,8 @@ async function unsealProducerVault() {
   try {
     const r = await fetch("/api/admin/ops/producer-vault", { method: "POST", credentials: "same-origin" });
     const d = await r.json();
-    body.textContent = d.ok ? renderVault(d.vault) : ("Could not unseal: " + esc((d && d.reason) || "unknown") + ".");
+    // textContent sink — write the RAW reason (don't esc(); the entity would render verbatim, #851).
+    body.textContent = d.ok ? renderVault(d.vault) : ("Could not unseal: " + ((d && d.reason) || "unknown") + ".");
   } catch (e) { body.textContent = "Request failed: " + e.message; }
 }
 document.getElementById("producer-vault").addEventListener("click", unsealProducerVault);
