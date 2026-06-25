@@ -9,7 +9,7 @@ import { PLAYER } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { KnowledgeService } from "../ports/KnowledgeService";
-import { PRESENCE, MOVEMENT_PERSONALITY } from "./presenceConstants";
+import { PRESENCE, MOVEMENT_PERSONALITY, MOVEMENT_INTENT } from "./presenceConstants";
 
 /** A tiny deterministic string hash (FNV-1a) — pure, draws no rng. Used only to seat zones reproducibly. */
 function zoneHash(s: string): number {
@@ -44,6 +44,30 @@ export interface MovementProfile {
   volatility: number;
 }
 
+/**
+ * A houseguest's MOTIVATED draw toward another (feature 0078) — read off the relationship model by the
+ * caller, so the pure presence module never reaches into the engine's relationship state directly.
+ *  • `weight` ≥ 0 — how much this houseguest's motivation points at the OTHER right now: high for a
+ *    strong ally to seek out, a deal/bloc partner to honor, OR a rival/target to corner and WORK (any
+ *    CHARGED tie is a reason to go find them). `0` ⇒ no agenda toward them (the neutral default).
+ *  • `avoid` — `true` when the motivation is to keep DISTANCE (a dangerous threat with no bond to work),
+ *    so their room is softly de-weighted instead of sought. A pull can be either drawn-toward or
+ *    avoided, never both; a houseguest the NPC has no charged read on yields no entry at all.
+ * The caller returns one entry per OTHER the NPC has an agenda about; absent ⇒ no intent ⇒ the base
+ * 0049/0076 behavior, byte-identical.
+ */
+export interface MovementPull {
+  /** The houseguest this NPC's motivation is about. */
+  target: EntityId;
+  /** Strength of the agenda toward `target` (≥ 0). Larger ⇒ a stronger reason to be where they are. */
+  weight: number;
+  /** `true` ⇒ keep DISTANCE (de-weight their room) rather than seek it. Default `false` ⇒ drawn toward. */
+  avoid?: boolean;
+}
+
+/** A houseguest's full motivation this tick (feature 0078): the set of others they have an agenda about. */
+export type MovementIntent = readonly MovementPull[];
+
 export interface PresenceDeps {
   rng: RandomnessSource;
   /** Directed affinity read (0017/0026) — how much `a` wants to be around `b`. */
@@ -58,6 +82,22 @@ export interface PresenceDeps {
    * stream — and from the off-screen society pairing on a calibration-neutral, un-weighted base occupancy.
    */
   movement?: (id: EntityId) => MovementProfile | null;
+  /**
+   * Per-NPC MOTIVATED movement (feature 0078) — who this houseguest's agenda wants them near right now
+   * (an ally to bond with, a rival/target to work, a deal/bloc partner to honor) and who they want
+   * distance from (a pure threat). When present, the destination weighting pulls toward (or pushes off)
+   * the rooms those targets occupy, so co-presence is EARNED by intent rather than arbitrary drift.
+   *
+   * Optional and back-compatible: absent (or `null`/`[]` for an id) ⇒ NO intent ⇒ the base 0049/0076
+   * behavior, byte-identical. Unlike `movement` (L21/L24, calibration-NEUTRAL on a dedicated stream),
+   * intent is DELIBERATELY calibration-load-bearing (owner ruling 0078: location must affect play) and
+   * is supplied on BOTH the base and weighted passes. It DRAWS NO rng of its own — it only re-weights
+   * the per-candidate destination weights and the move-gate threshold (one stay-gate draw + at most one
+   * destination draw, exactly as before) — so the per-NPC shared-stream draw COUNT is unchanged; the
+   * spine moves only by WHICH room intent steers toward, which the 0078 calibration pass re-tunes for.
+   * The pull magnitudes/cap live in `MOVEMENT_INTENT` (the sibling-constants pattern). Vault-free.
+   */
+  intent?: (id: EntityId) => MovementIntent | null;
   /**
    * The player's CURRENT room (feature 0076) — the live scene. When set (the player-facing WEIGHTED
    * pass only), an NPC who is already in this room uses `sceneMoveProb` for the stay-gate instead of
@@ -105,6 +145,55 @@ function seekPullFor(p: MovementProfile | null | undefined): number {
 }
 
 /**
+ * The NET motivated pull a houseguest feels toward a single ROOM this tick (feature 0078): sum the
+ * agenda toward every target currently in that room (reading the occupancy being built, exactly as the
+ * affinity cluster does), `avoid` subtracting. Positive ⇒ drawn toward; negative ⇒ wants distance; `0`
+ * ⇒ no agenda there. Draws NO rng — a pure read of the supplied motivation. `null`/`[]` intent ⇒ `0`.
+ */
+function roomIntentScore(intent: MovementIntent | null | undefined, room: Room, placed: ReadonlyMap<EntityId, Room>): number {
+  if (!intent || intent.length === 0) return 0;
+  let s = 0;
+  for (const pull of intent) {
+    if (placed.get(pull.target) !== room) continue; // the target isn't here ⇒ this room earns no pull
+    const w = Math.max(0, pull.weight);
+    s += pull.avoid ? -w : w;
+  }
+  return s;
+}
+
+/**
+ * The STRONGEST unsatisfied pursuit a houseguest has this tick (feature 0078): the largest drawn-toward
+ * (non-`avoid`) agenda whose target is NOT already in the houseguest's current room — a reason to get up
+ * and go looking. Returns `0` when every pursuit is satisfied (target already here), there is no
+ * drawn-toward agenda at all, or on first placement (no `here`). Draws NO rng. Feeds the move-gate nudge.
+ */
+function unsatisfiedPursuit(intent: MovementIntent | null | undefined, here: Room | undefined, placed: ReadonlyMap<EntityId, Room>): number {
+  if (!intent || intent.length === 0 || here === undefined) return 0;
+  let best = 0;
+  for (const pull of intent) {
+    if (pull.avoid) continue; // avoidance is a destination de-weight, not a reason to chase
+    if (placed.get(pull.target) === here) continue; // already with them ⇒ no unmet pursuit toward them
+    best = Math.max(best, Math.max(0, pull.weight));
+  }
+  return best;
+}
+
+/**
+ * The intentional move-gate probability (feature 0078): an unsatisfied pursuit raises the base move
+ * rate so the houseguest goes looking for their target, scaled by `moveIntentStrength × pursuitMoveBias`
+ * and clamped into the SAME [moveProbFloor, moveProbCeil] the personality rate uses (nobody teleports
+ * every tick). `pursuit === 0` ⇒ returns `base` unchanged ⇒ byte-identical. NEVER applied to a held
+ * scene-room companion (0076 stickiness wins — that gate is chosen by the caller before this is called).
+ */
+function intentMoveProb(base: number, pursuit: number): number {
+  if (pursuit <= 0) return base;
+  const M = MOVEMENT_PERSONALITY;
+  const I = MOVEMENT_INTENT;
+  const raised = base + Math.min(1, pursuit) * I.pursuitMoveBias * I.moveIntentStrength;
+  return Math.max(M.moveProbFloor, Math.min(M.moveProbCeil, raised));
+}
+
+/**
  * Assign every ACTIVE houseguest exactly one room. With a previous occupancy, each houseguest
  * either stays put or moves to an ADJACENT room (no teleporting — ADR 0003 §8); the very first
  * assignment may place anyone anywhere. Deterministic for a given rng stream: iteration order
@@ -125,6 +214,9 @@ export function assignRooms(
     // L21/L24: who this houseguest IS bends HOW they move — read once per houseguest (no rng draw),
     // so the per-NPC `rng` draw count is identical with or without a profile (the isolation guarantee).
     const profile = deps.movement?.(id) ?? null;
+    // 0078: WHERE their motivation points — read once per houseguest (no rng draw), same isolation
+    // guarantee. Absent ⇒ null ⇒ every intent term below is a no-op (byte-identical to pre-0078).
+    const intent = deps.intent?.(id) ?? null;
     // Candidate rooms: anywhere on first assignment; stay-or-adjacent afterwards. The diary
     // room is never a hangout (it is a booth, not a lounge).
     const candidates: readonly Room[] = (here
@@ -141,16 +233,20 @@ export function assignRooms(
     // on the weighted pass), the gate uses the low `sceneMoveProb` instead of their ordinary rate — they
     // stay by default but keep full agency to leave (the low roll still fires, and the affinity-weighted
     // destination below reads as a motivated exit). Still ONE draw, so the per-NPC draw count is unchanged.
-    const moveThreshold =
-      here !== undefined && here === deps.sceneRoom && deps.sceneMoveProb !== undefined
-        ? deps.sceneMoveProb
-        : moveProbFor(profile);
+    //
+    // 0078: OTHERWISE, an UNSATISFIED pursuit (a motive target not in this room) raises the move rate —
+    // they get up and go looking. Still ONE draw (only the threshold shifts); the scene-hold case wins
+    // (a companion mid-scene with the player isn't yanked away by an off-screen agenda).
+    const heldByScene = here !== undefined && here === deps.sceneRoom && deps.sceneMoveProb !== undefined;
+    const moveThreshold = heldByScene
+      ? deps.sceneMoveProb!
+      : intentMoveProb(moveProbFor(profile), unsatisfiedPursuit(intent, here, next));
     if (here && deps.rng.next() >= moveThreshold) {
       next.set(id, here); // most ticks, most people stay where they are
       continue;
     }
     // Weight each candidate by who is already there (affinity pull, bent by how much THIS houseguest
-    // seeks company — L21/L24) + the HOH-room pull.
+    // seeks company — L21/L24) + the HOH-room pull + the MOTIVATED pull toward/away (0078).
     const seekPull = seekPullFor(profile);
     const weights = candidates.map((room) => {
       let w = 1;
@@ -158,6 +254,15 @@ export function assignRooms(
         if (theirRoom === room) w += seekPull * deps.affinity(id, other);
       }
       if (room === "hoh-room") w = id === deps.hoh ? w + PRESENCE.hohRoomPull * 4 : w * PRESENCE.hohRoomPull;
+      // 0078: intent STEERS the roll — a room holding a target the NPC's agenda points at gains weight
+      // (seek them out); a room holding a threat they avoid loses weight. Bounded by `maxRoomBonus` (as a
+      // multiple of the room's pre-intent weight) so a clear motive strongly favors a room without ever
+      // zeroing the seeded variance the calibration spine rests on (steer, never force). `w` stays ≥ 0.
+      const score = roomIntentScore(intent, room, next);
+      if (score !== 0) {
+        const bonus = w * MOVEMENT_INTENT.maxRoomBonus * Math.tanh(score * MOVEMENT_INTENT.moveIntentStrength);
+        w = Math.max(0, w + bonus);
+      }
       return w;
     });
     const total = weights.reduce((a, b) => a + b, 0);
