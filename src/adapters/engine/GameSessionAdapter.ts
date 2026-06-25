@@ -17,6 +17,8 @@ import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor } from "../../engine/presence";
+import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
+import type { KnowledgeService } from "../../ports/KnowledgeService";
 import { PRESENCE, PRIVACY } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
 import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
@@ -2205,6 +2207,41 @@ export class GameSessionAdapter implements GameSession {
       reads.push(`(You saw ${names.join(" and ")} slip into the ${roomDisplayName(room)} a while ago and haven't seen them come out.)`);
     }
     return reads;
+  }
+
+  /**
+   * 0077 NPC-side increment — the HOUSE whispers about closed-door pairings. When two NPCs are
+   * conspicuously holed up in a private room, a plausibly-positioned third houseguest notices and a
+   * Vault-free POSITION suspicion (who/where, never the content) diffuses NPC-to-NPC and can reach the
+   * player. Called once per off-screen tick by the orchestrator, AFTER all society/gossip work.
+   *
+   * CALIBRATION: runs on a DEDICATED rng (off the game seed + presence-tick counter — NEVER the shared
+   * society/competition/vote stream the orchestrator passes), and the diffusion takes NO relationship
+   * fold (`whisperConspicuousPairings` → `diffuseGossip` without `rel`/`subjects`). So it moves no edge
+   * and consumes no shared draw ⇒ the seeded `juryReach` + gradient outcomes are byte-identical with
+   * this on or off. Reads the WEIGHTED player-facing occupancy (what the house observably looks like).
+   */
+  whisperPairings(knowledge: KnowledgeService): void {
+    if (!this.house || !this.presence) return;
+    const player = this.house.player.id;
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const awake = this.awakeNow();
+    const npcs = this.house.npcs
+      .map((n) => n.id)
+      .filter((id) => !evicted.has(id) && (!awake || awake.has(id)));
+    if (npcs.length < 2) return;
+    // DEDICATED stream — zero touch to the orchestrator's shared per-user rng (the calibration spine).
+    const rng = new SeededRandom(hashSeed(`house-suspicion:${this.gameSeed ?? ""}:${this.presenceTickCount}`));
+    whisperConspicuousPairings({
+      occupancy: this.presence,
+      tenureOf: (id) => this.presenceTenure?.get(id) ?? 0,
+      npcs,
+      player,
+      affinity: (a, b) => this.rel.edge(a, b).affinity,
+      nameOf: (id) => this.nameOf(id),
+      knowledge,
+      rng,
+    });
   }
 
   socialInitiatives(): SocialInitiative[] {

@@ -627,6 +627,13 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // fires, on a seeded SIDE rng so the main beat stream stays byte-stable (0007). Engine-only: nothing
   // crosses but a class-keyed paraphrase belief (never the premise, never a number — §7).
   sandbox.session.scheduleStoryThreads(rng);
+  // 0077 NPC-side increment — the house WHISPERS about closed-door pairings: a conspicuous NPC pair
+  // holed up in a private room is noticed by a plausibly-positioned third houseguest, and a Vault-free
+  // POSITION suspicion (who/where, never the sealed content) diffuses NPC-to-NPC and can reach the
+  // player. Runs LAST and on a DEDICATED rng inside the session (never the shared stream above) with NO
+  // relationship fold ⇒ calibration byte-identical (the seeded society/vote spine is untouched; the
+  // gossip/surfacing events it records are a type `nextHouseEvent`/confessionals never scan).
+  sandbox.session.whisperPairings(sandbox.engine.knowledge);
   // Every recorded scene (+ the player-turn day) counts toward the advance.
   return sandbox.engine.events.count() - before;
 }
