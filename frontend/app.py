@@ -199,6 +199,11 @@ if AUTH_ENABLED:
         "/api/auth/features",
         "/api/auth/settings",
         "/api/auth/integrations/presets",
+        # #764: the login page is PRE-AUTH and reads its (cosmetic-only) animated
+        # background source from this GET. It returns ONLY {source, photo_url} —
+        # a validated enum + optional URL — never anything sensitive, so it is
+        # safe to expose without a session (like /api/auth/status / /login).
+        "/api/auth/login-background",
         "/api/health",
         # Engine-reachability probe (doctor script, monitoring, the engine-status banner pre-login).
         # Vault-free and user-free: engine up/down + a connection-error string — no game state.

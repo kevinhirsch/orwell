@@ -3,7 +3,6 @@
 
 import { providerLogo } from './providers.js';
 import uiModule from './ui.js';
-import settingsModule from './settings.js';
 import { sortModelObjects } from './modelSort.js';
 import { isNarrow } from './platform.js';
 
@@ -35,11 +34,6 @@ function _pushRecent(mid) {
   const next = _loadRecent().filter(x => x !== mid);
   next.unshift(mid);
   _saveList(RECENT_KEY, next.slice(0, RECENT_MAX));
-}
-function _removeRecent(mid) {
-  if (!mid) return;
-  const next = _loadRecent().filter(x => x !== mid);
-  _saveList(RECENT_KEY, next);
 }
 function _loadFavorites() { return _loadList(FAVORITES_KEY); }
 function _toggleFavorite(mid) {
@@ -115,10 +109,8 @@ function _initModelPickerDropdown() {
   const wrap = document.getElementById('model-picker-wrap');
   const btn = document.getElementById('model-picker-btn');
   const menu = document.getElementById('model-picker-menu');
-  const search = document.getElementById('model-picker-search');
   const listEl = document.getElementById('model-picker-list');
-  const searchRow = menu ? menu.querySelector('.model-picker-search-row') : null;
-  if (!wrap || !btn || !menu || !search || !listEl) return;
+  if (!wrap || !btn || !menu || !listEl) return;
 
   function _close() {
     if (menu.classList.contains('hidden')) return;
@@ -130,37 +122,14 @@ function _initModelPickerDropdown() {
       menu.removeEventListener('animationend', _onDone);
       menu.classList.remove('closing');
       menu.classList.add('hidden');
-      search.value = '';
     }, { once: true });
     // Fallback if animationend doesn't fire
     setTimeout(() => {
       if (!menu.classList.contains('hidden')) {
         menu.classList.remove('closing');
         menu.classList.add('hidden');
-        search.value = '';
       }
     }, 200);
-  }
-
-  function _openPickerShortcut(kind) {
-    _close();
-    try {
-      if (kind === 'cookbook') {
-        if (window.cookbookModule && typeof window.cookbookModule.open === 'function') {
-          window.cookbookModule.open();
-        } else {
-          const btn = document.getElementById('tool-cookbook-btn') || document.getElementById('rail-cookbook');
-          if (btn) btn.click();
-          else location.hash = '#cookbook';
-        }
-      } else if (kind === 'settings') {
-        if (settingsModule && typeof settingsModule.open === 'function') settingsModule.open();
-      } else if (window.adminModule && typeof window.adminModule.open === 'function') {
-        window.adminModule.open('services');
-      } else if (settingsModule && typeof settingsModule.open === 'function') {
-        settingsModule.open('services');
-      }
-    } catch (_) {}
   }
 
   // Local endpoint health — only probed for LOCAL endpoints, since
@@ -185,6 +154,15 @@ function _initModelPickerDropdown() {
     const result = [];
     const seen = new Set();
     items.forEach(item => {
+      // Image-generation endpoints belong to the image flow (settings
+      // `image_model` / the image step), NOT the chat composer's "Select
+      // model" dropdown. Excluding image-ONLY endpoints here keeps them out of
+      // EVERY chat-picker path (browse, provider groups, AND search — they all
+      // read this one list), so no image model can leak via search. Chat (and
+      // chat+image dual-capable) endpoints are untouched. The image flow
+      // resolves its model independently (settings.js `_isImageModel`), so this
+      // never breaks image generation.
+      if ((item.model_type || 'llm') === 'image') return;
       // Previously: offline endpoints were skipped entirely, so a server
       // that briefly went down disappeared from the picker — confusing
       // when the user can still see it (offline-tagged) in Settings.
@@ -275,19 +253,15 @@ function _initModelPickerDropdown() {
   const _collapsedProviders = new Set(_loadList('orwell-model-collapsed'));
   let _justExpandedProvider = null;
 
-  function _populate(filter) {
+  // The picker has no search field — it always renders the full (chat-only,
+  // already image-filtered) browse list. The `filter` arg is retained as a
+  // no-op so existing _populate() call sites stay valid.
+  function _populate(_filter) {
     listEl.innerHTML = '';
     const all = _getAllModels();
-    const q = (filter || '').trim().toLowerCase();
     const hasAnyModel = all.length > 0;
     listEl.classList.toggle('is-empty', !hasAnyModel);
     menu.classList.toggle('no-models', !hasAnyModel);
-    if (search) {
-      search.placeholder = hasAnyModel ? 'Search models…' : 'No models connected';
-    }
-    if (searchRow) {
-      searchRow.classList.toggle('searching', !!q);
-    }
 
     if (!hasAnyModel) return; // collapsed empty list — nothing to render
 
@@ -304,13 +278,7 @@ function _initModelPickerDropdown() {
       el.textContent = label;
       listEl.appendChild(el);
     }
-    function _addEmpty(text) {
-      const empty = document.createElement('div');
-      empty.className = 'model-switch-empty';
-      empty.textContent = text;
-      listEl.appendChild(empty);
-    }
-    function _addRow(m, onRemove) {
+    function _addRow(m) {
       const row = document.createElement('div');
       row.className = 'model-switch-item';
       if (m.stale) {
@@ -371,48 +339,19 @@ function _initModelPickerDropdown() {
         if (nowFav && idx < 0) favs.push(m.mid);
         else if (!nowFav && idx >= 0) favs.splice(idx, 1);
         if (uiModule && uiModule.showToast) uiModule.showToast(nowFav ? 'Favorited' : 'Unfavorited');
-        // In browse mode the Favorites section membership changed — rebuild
-        // (cheap: Recent + Favorites). In search mode the row stays put, so
-        // the in-place favorite update above is enough.
-        if (!q) {
-          const st = listEl.scrollTop;
-          _populate('');
-          listEl.scrollTop = st;
-        }
+        // The Favorites section membership changed — rebuild the browse list
+        // (cheap: Recent + Favorites), preserving scroll position.
+        const st = listEl.scrollTop;
+        _populate('');
+        listEl.scrollTop = st;
       });
       row.appendChild(favDot);
-
-      // Remove-from-recent button (shown only for Recent section items).
-      if (onRemove) {
-        const rmBtn = document.createElement('button');
-        rmBtn.type = 'button';
-        rmBtn.className = 'mp-remove-dot';
-        rmBtn.textContent = '×';
-        rmBtn.title = 'Remove from recent';
-        rmBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          onRemove();
-        });
-        row.appendChild(rmBtn);
-      }
 
       row.addEventListener('click', () => _pick(m));
       listEl.appendChild(row);
     }
 
-    // ── Search mode: flat, filtered results across the whole catalog ──
-    if (q) {
-      const matches = all.filter(m => {
-        const provName = _providerDisplayName(_providerSlug(m.mid)).toLowerCase();
-        return [m.mid, m.display, m.epName, m.providerText, provName]
-          .filter(Boolean).join(' ').toLowerCase().includes(q);
-      });
-      if (matches.length === 0) _addEmpty('No matching models');
-      else matches.forEach(_addRow);
-      return;
-    }
-
-    // ── Browse mode: sections in order: Favorites → Recent (big catalogs only) → All / Providers ──
+    // ── Browse: sections in order: Favorites → Recent (big catalogs only) → All / Providers ──
     //   1. Never list the same model twice in the dropdown. Favorites
     //      win over Recent (if you favorited it, that's where it
     //      belongs — Recent shouldn't show it again as duplicate).
@@ -439,10 +378,7 @@ function _initModelPickerDropdown() {
         _addSection('Recent');
         recentModels.forEach(m => {
           shown.add(m.mid);
-          _addRow(m, () => {
-            _removeRecent(m.mid);
-            _populate('');
-          });
+          _addRow(m);
         });
       }
     }
@@ -517,7 +453,7 @@ function _initModelPickerDropdown() {
     // waiting for the async session-create/PATCH that follows.
     try { document.dispatchEvent(new CustomEvent('orwell:model-picked', { detail: m })); } catch {}
 
-    // Blur search input before closing to dismiss keyboard on mobile
+    // Blur the active element before closing to dismiss the keyboard on mobile
     if (document.activeElement) document.activeElement.blur();
     _close();
     // Refocus main textarea — skip on mobile to avoid keyboard bounce
@@ -615,7 +551,7 @@ function _initModelPickerDropdown() {
       _populate('');
       if (window.modelsModule && window.modelsModule.refreshModels) {
         window.modelsModule.refreshModels().then(() => {
-          if (!menu.classList.contains('hidden')) _populate(search.value || '');
+          if (!menu.classList.contains('hidden')) _populate('');
           updateModelPicker();
         }).catch(() => {});
       }
@@ -623,9 +559,11 @@ function _initModelPickerDropdown() {
       // the list so stale local servers get dimmed. Cloud entries
       // aren't probed; they stay visible.
       _refreshLocalProbe().then(() => {
-        if (!menu.classList.contains('hidden')) _populate(search.value || '');
+        if (!menu.classList.contains('hidden')) _populate('');
       });
-      if (!isNarrow()) search.focus();
+      // Focus the menu so its keydown handler (↑/↓/Enter/Esc) receives keys —
+      // skip on mobile to avoid a keyboard/scroll bounce.
+      if (!isNarrow()) menu.focus();
       // Hide scroll button so it doesn't overlap
       const _scrollBtn = document.getElementById('scroll-bottom-btn');
       if (_scrollBtn) _scrollBtn.style.display = 'none';
@@ -634,18 +572,11 @@ function _initModelPickerDropdown() {
     }
   });
 
-  search.addEventListener('input', () => _populate(search.value));
-  search.addEventListener('click', (e) => e.stopPropagation());
-  search.addEventListener('keydown', (e) => {
+  // Keyboard nav (↑/↓ to move, Enter to pick, Esc to close) lives on the menu
+  // now that the search input — its former host — is gone.
+  menu.addEventListener('keydown', (e) => {
     _handlePickerKeydown(e, listEl, '.model-switch-item', _close);
   });
-  const addModelsBtn = document.getElementById('model-picker-add-models-btn');
-  if (addModelsBtn) {
-    addModelsBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      _openPickerShortcut('models');
-    });
-  }
   document.addEventListener('click', (e) => {
     if (!menu.classList.contains('hidden') && !menu.contains(e.target) && e.target !== btn) {
       _close();

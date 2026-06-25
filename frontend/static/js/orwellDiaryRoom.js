@@ -75,8 +75,8 @@
       "background:color-mix(in srgb, var(--accent, #e06c75) 18%, transparent);" +
       "border:1px solid var(--accent, #e06c75);font-size:var(--fs-xs);";
     pill.innerHTML = `<span>📔 Diary Room — private &amp; out-of-character; the house never hears this.</span>
-      <button type="button" id="orwell-dr-exit" aria-label="Leave the Diary Room" title="Leave the Diary Room"
-        style="border:none;background:none;color:inherit;cursor:pointer;font-size:1em;min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;padding:0 2px;">×</button>`;
+      <button type="button" id="orwell-dr-exit" class="ow-btn ow-btn-plain" aria-label="Leave the Diary Room" title="Leave the Diary Room"
+        style="color:inherit;font-size:1em;min-width:44px;min-height:44px;padding:0 2px;">×</button>`;
     form.parentElement.insertBefore(pill, form);
     pill.querySelector("#orwell-dr-exit").addEventListener("click", exitDRMode);
     return pill;

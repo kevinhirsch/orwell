@@ -91,7 +91,14 @@
           flex: 0 0 auto; font-size: .62rem; text-transform: uppercase; letter-spacing: .05em;
           opacity: .65; padding-top: .1rem;
         }
-        #orwell-deals .odl-broken .odl-terms { text-decoration: line-through; }`;
+        #orwell-deals .odl-broken .odl-terms { text-decoration: line-through; }
+        /* #725: on the LIGHT glass the var(--border) stroke resolves to a HARD dark line.
+           Apple defines glass by lensing, not a hard stroke — soften the row outline + its
+           neutral left rail to a low-opacity WHITE hairline (the status accents keep their hue). */
+        body.theme-frosted #orwell-deals .odl-row {
+          border-color: rgba(255,255,255,0.14);
+          border-left-color: rgba(255,255,255,0.14);
+        }`;
       document.head.appendChild(st);
     }
     // Mount into the control-room gadget rail (0054), under the status panel (anchor).

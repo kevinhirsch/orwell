@@ -94,7 +94,8 @@ function ensureCss() {
       border: 1px solid var(--win-border, var(--border, #355a66));
       border-radius: var(--win-radius, 10px);
       box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45));
-      font-size: var(--fs-sm, .8rem); line-height: 1.45;
+      /* Shared type system (#709): sans family + body PRESET for the window content. */
+      font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.45;
       /* NB (A6): do NOT clip the frost by hiding overflow on this root — combined with the
          10px border-radius it clips the rounded-corner pointer region and defeats the L11
          corner-resize grab (which arms 2px from the corner; CI browser-smoke caught it). The
@@ -117,7 +118,11 @@ function ensureCss() {
       flex: 1 1 auto; max-height: none;
     }
     .ow-window.ow-focused {
-      border-color: color-mix(in srgb, var(--accent, #e06c75) 65%, var(--win-border, var(--border, #355a66)));
+      /* #729: the focused-window ring is NEUTRAL, never the theme red/accent (the glass chrome
+         is colorless). A focused window reads via a brighter LUMINOUS rim + a deeper float
+         shadow, not a hued border. (style.css refines the rim per glass tier under
+         body.theme-frosted.) */
+      border-color: color-mix(in srgb, #ffffff 38%, var(--win-border, var(--border, #355a66)));
       box-shadow: 0 12px 36px rgba(0,0,0,.5);
     }
     /* ── J1-25 / J1-23: the opt-in modal backdrop ─────────────────────────────
@@ -139,7 +144,10 @@ function ensureCss() {
       cursor: move; user-select: none; -webkit-user-select: none;
       border-radius: var(--win-radius, 10px) var(--win-radius, 10px) 0 0;
     }
-    .ow-titlebar:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: -2px; }
+    /* #729: NEUTRAL focus ring (system-blue), never the theme red/accent — the glass chrome
+       carries no accent HUE. (Matches the gadget-header ring; system-blue is the one sanctioned
+       focus tint.) */
+    .ow-titlebar:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: -2px; }
     .ow-title {
       flex: 1; min-width: 0;
       font-size: var(--win-titlebar-fs, 1rem);
@@ -252,12 +260,26 @@ function ensureCss() {
   document.head.appendChild(st);
 }
 
+// #758: a top system-banner (orwellNotice.js, position:fixed) reserves its height on <body> as
+// --on-banner-inset. Kit windows are position:fixed, so the body padding-top can't move them — the
+// kit consumes the inset directly: the clamp top floor starts BELOW the banner and the window's
+// max-height shrinks by it, so a top-slotted window sits under the banner AND the stack COMPRESSES
+// into the remaining viewport (it never runs off the bottom). Read live (default 0); the banner
+// broadcasts orwell:banner-inset, which re-runs the global re-clamp below.
+function bannerInset() {
+  try {
+    const v = parseFloat(getComputedStyle(document.body).getPropertyValue('--on-banner-inset'));
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  } catch (_) { return 0; }
+}
+
 // Explicit viewport clamp (audit note on norm c: never rely on cursor physics).
 function clampPos(left, top, w, h) {
   const margin = 4;
+  const topFloor = margin + bannerInset();  // #758: never clamp a window UP under a top banner
   return {
     left: Math.max(margin, Math.min(window.innerWidth - Math.max(w, 60) - margin, left)),
-    top: Math.max(margin, Math.min(window.innerHeight - Math.min(h, 200) - margin, top)),
+    top: Math.max(topFloor, Math.min(window.innerHeight - Math.min(h, 200) - margin, top)),
   };
 }
 
@@ -383,7 +405,12 @@ export class OrwellWindow {
    * sheet host owns the geometry there. Opt a window out with resizable:false.
    */
   constructor(opts) {
-    this.o = Object.assign({ slot: 'top-right', role: 'complementary',
+    // A modal:true dialog (settings, etc.) must CENTER, not pin to the top-right HUD
+    // slot — opening a scrim'd dialog flush against the right edge reads as a "snap
+    // to the right" bug. Non-modal HUD windows keep the top-right default. An explicit
+    // `slot` in opts still wins (e.g. the headshot dialog passes top-center itself).
+    const _defaultSlot = (opts && opts.modal) ? 'top-center' : 'top-right';
+    this.o = Object.assign({ slot: _defaultSlot, role: 'complementary',
       draggable: true, minimizable: true, closable: true, resizable: true,
       minWidth: 240, minHeight: 160, focus: false,
       // persistLayout (default true): a window's geometry rides the 0064 cross-device layout sync
@@ -443,12 +470,24 @@ export class OrwellWindow {
     }
     // Minimize-to-dock is a FLOATING affordance; a docked window lives in the rail
     // and never minimizes to the chip dock (the rail owns its visibility/collapse).
-    if (this.o.minimizable && !this._docked) {
+    // macOS traffic-light cluster (frosted theme): close=red + minimize=yellow, plus
+    // the GREEN light — which is the DOCK toggle (built above) and exists ONLY on dockable
+    // windows (the green disc visually occupies the slot the inert maximize/zoom light used
+    // to). The YELLOW light is ALWAYS rendered so the cluster keeps its shape — a
+    // non-minimizable window just gets a greyed/inert yellow disc. The kit's non-frosted
+    // glyph fallback hides the disabled placeholder via CSS (`body:not(.theme-frosted)
+    // .ow-controls button[disabled]`), so the legacy look still shows only functional
+    // controls. A NON-dockable window has NO green disc (red + yellow only) — the dock
+    // dot's dockable-only gating IS the `if (this.o.dockable)` guard above.
+    const canMin = this.o.minimizable && !this._docked;
+    {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'ow-min';
-      b.setAttribute('aria-label', 'Minimize'); b.title = 'Minimize';
+      b.setAttribute('aria-label', canMin ? 'Minimize' : 'Minimize (unavailable)');
+      b.title = canMin ? 'Minimize' : '';
       b.textContent = '–';
-      b.addEventListener('click', (e) => { e.stopPropagation(); this.minimize(); }, { signal: this.ac.signal });
+      if (!canMin) { b.disabled = true; }
+      else { b.addEventListener('click', (e) => { e.stopPropagation(); this.minimize(); }, { signal: this.ac.signal }); }
       controls.appendChild(b);
     }
     if (this.o.closable) {
@@ -459,6 +498,13 @@ export class OrwellWindow {
       b.addEventListener('click', (e) => { e.stopPropagation(); this.close(); }, { signal: this.ac.signal });
       controls.appendChild(b);
     }
+    // NB: the maximize/zoom ("green light") control is DELIBERATELY GONE from every window
+    // (owner ruling): it only crowded the (centered) titlebar title when a window was resized
+    // thin, and it was inert everywhere anyway (no window ever opted it on). The macOS
+    // cluster reads as close (red) + minimize (yellow), plus — on DOCKABLE windows only —
+    // the dock toggle styled as the GREEN light in the maximize slot (built above; it is a
+    // real, functional control, not the removed inert zoom). Do NOT re-add an inert third
+    // light here.
     tb.appendChild(title); tb.appendChild(controls);
     const body = document.createElement('div');
     body.className = 'ow-body';
@@ -579,8 +625,9 @@ export class OrwellWindow {
     if (this.el.style.display === 'none') return;
     // 3. Shrink-to-fit FIRST so the post-shrink size drives the position clamp.
     const r0 = this.el.getBoundingClientRect();
+    const inset = bannerInset();  // #758: subtract a top banner so a tall window COMPRESSES to fit
     const maxW = window.innerWidth - 8;
-    const maxH = window.innerHeight - 8;
+    const maxH = window.innerHeight - inset - 8;
     if (r0.width > maxW) {
       this.el.style.width = Math.max(this.o.minWidth, maxW) + 'px';
       this.el.style.maxWidth = 'none';
@@ -596,11 +643,12 @@ export class OrwellWindow {
     //    we want the WHOLE window in view whenever it now fits, so pull left/top back so
     //    the right/bottom edges land inside too (never past the 4px margin on either side).
     const m = 4;
+    const topFloor = m + inset;  // #758: the top floor clears the banner
     const r = this.el.getBoundingClientRect();
     let left = Math.max(m, Math.min(window.innerWidth - r.width - m, r.left));
-    let top = Math.max(m, Math.min(window.innerHeight - r.height - m, r.top));
-    if (left < m) left = m;   // wider than the viewport (already min-clamped above) — pin left
-    if (top < m) top = m;     // taller than the viewport — pin top
+    let top = Math.max(topFloor, Math.min(window.innerHeight - r.height - m, r.top));
+    if (left < m) left = m;            // wider than the viewport (already min-clamped above) — pin left
+    if (top < topFloor) top = topFloor; // taller than the viewport — pin just below the banner
     if (Math.abs(left - r.left) > 0.5 || Math.abs(top - r.top) > 0.5) {
       this.el.style.left = left + 'px'; this.el.style.top = top + 'px';
       this.el.style.right = 'auto'; this.el.style.bottom = 'auto'; this.el.style.transform = 'none';
@@ -1004,6 +1052,11 @@ function onViewportResize() {
   _reclampRaf = (window.requestAnimationFrame || ((fn) => setTimeout(fn, 120)))(reclampOpenWindows);
 }
 window.addEventListener('resize', onViewportResize);
+// #758: a top system-banner show/hide/copy-change shifts the available top band — re-clamp every
+// open window through the SAME rAF-debounced pass (so a banner appearing pushes a top-slotted
+// window below it and compresses the stack; disappearing lets it climb back). The banner
+// (orwellNotice.js) broadcasts orwell:banner-inset on set/clear.
+window.addEventListener('orwell:banner-inset', onViewportResize);
 
 // The .ow-* family is page-global chrome (the .ow-dismiss affordance is used by
 // non-window surfaces that may render before any window exists) — inject at load.

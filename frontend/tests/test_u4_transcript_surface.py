@@ -36,9 +36,15 @@ def test_e65_restart_opens_a_fresh_session():
 # ── E93: the played record ────────────────────────────────────────────────────
 
 def test_e93_game_transcript_keeps_only_record_safe_actions():
-    assert "_RECORD_SAFE = new Set(['copy', 'fork'])" in RENDERER
-    assert "dataset.gameActive === '1'" in RENDERER
+    # Owner ruling: in the game build the transcript is the PLAYED RECORD, not a chat
+    # scratchpad. GM/narration messages keep Copy + Re-narrate (regen, relabeled) + the
+    # separate Speak/TTS button; the record-altering + chatbot-utility actions (edit,
+    # rewrite-shorter, explain-simpler, fork, delete) are dropped.
+    assert "_GAME_KEEP = new Set(['copy', 'regen'])" in RENDERER
+    assert "'Re-narrate'" in RENDERER
     assert "data-game-build" in RENDERER
+    # SENT (player) messages keep ONLY Copy in the game build (no edit/delete/resend).
+    assert "_gameUserKeep = new Set(['copy'])" in RENDERER
 
 
 def test_e93_game_active_flag_is_maintained_by_the_status_poll():
@@ -245,8 +251,11 @@ def _themes_in_order():
 
 
 def test_0052_house_themes_are_first_in_the_picker():
+    # The color-agnostic 'glass' theme now LEADS the picker (owner directive: Glass is
+    # the default + first); the house set follows immediately after it.
     order, _ = _themes_in_order()
-    assert order[:5] == HOUSE, f"the picker must open with the house set, got {order[:5]}"
+    assert order[0] == "glass", f"the picker must open with glass, got {order[:1]}"
+    assert order[1:6] == HOUSE, f"the house set must follow glass, got {order[1:6]}"
 
 
 def test_0052_house_palettes_meet_aa_contrast():

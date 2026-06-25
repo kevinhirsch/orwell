@@ -605,6 +605,13 @@ function _fmtCtx(n) {
  * Apply model color to a role element (sets color + dot color).
  */
 export function applyModelColor(roleEl, modelName) {
+  // C14/immersion + glass no-accent-on-text contract (#709): in the game build the assistant
+  // role label is "Big Brother", and it must read as NORMAL neutral foreground — never a model
+  // BRAND COLOR (which rendered the label yellow/gold). The provider logo + the click-to-info
+  // popup are model-identity leaks too, so the whole treatment is suppressed here. The label
+  // keeps the theme's default --fg ink (dark-on-light-glass under the frosted theme), exactly
+  // like the rest of the chat chrome. Owner: "yellow is not the color I want for 'Big Brother'."
+  if (typeof isGameBuild === 'function' && isGameBuild()) return;
   if (!modelName) return;
   const color = modelColor(modelName);
   if (color) {
@@ -1303,7 +1310,7 @@ export function createMsgFooter(msgElement) {
       e.stopPropagation();
       if (window.chatModule?.editAIMessage) window.chatModule.editAIMessage(msgElement);
     }},
-    { id: 'regen', icon: '\u21BB', title: 'Regenerate from here', cls: 'msg-action-btn', handler(e) {
+    { id: 'regen', icon: '\u21BB', title: document.body.hasAttribute('data-game-build') ? 'Re-narrate' : 'Regenerate from here', cls: 'msg-action-btn', handler(e) {
       e.stopPropagation();
       if (window.chatModule?.regenerateFrom) window.chatModule.regenerateFrom(msgElement);
     }},
@@ -1325,15 +1332,17 @@ export function createMsgFooter(msgElement) {
     }},
   ];
 
-  // E93: the chat transcript of a LIVE game is the played record of events the
-  // engine has already recorded and folded — editing, deleting, or re-rolling it
-  // desyncs the visible story from the EventStore (and edit-then-regenerate is an
-  // anti-sycophancy hole). Under the game build with a game active, only
-  // non-record-altering actions survive (copy, fork). Pre-game OOC is unaffected.
-  const _gameRecord = document.body.hasAttribute('data-game-build')
-    && document.body.dataset.gameActive === '1';
-  const _RECORD_SAFE = new Set(['copy', 'fork']);
-  const actionPool = _gameRecord ? allActions.filter(a => _RECORD_SAFE.has(a.id)) : allActions;
+  // E93 + owner ruling: the chat transcript of a game is the PLAYED RECORD of events the
+  // engine has already recorded and folded — editing, deleting, or re-rolling it desyncs the
+  // visible story from the EventStore (and edit-then-regenerate is an anti-sycophancy hole).
+  // The record-altering + general-assistant utility actions (edit, regenerate, rewrite-shorter,
+  // explain-simpler, fork, delete) are chatbot cruft here, NOT in-character play. So in the GAME
+  // BUILD, GM/narration messages keep Copy + Re-narrate (the regen action, relabeled — re-rolls
+  // the narration prose for the SAME engine beat) plus the Speak/TTS button (added separately by
+  // chat.js). Outside the game build (full workspace) the complete set stands.
+  const _gameBuild = document.body.hasAttribute('data-game-build');
+  const _GAME_KEEP = new Set(['copy', 'regen']);
+  const actionPool = _gameBuild ? allActions.filter(a => _GAME_KEEP.has(a.id)) : allActions;
 
   // Filter out unavailable actions (e.g. TTS when not enabled)
   const availableActions = actionPool.filter(a => !a.available || a.available());
@@ -1534,10 +1543,17 @@ export function createUserMsgFooter(msgElement) {
     }},
   ];
 
+  // GAME BUILD (owner ruling): SENT (player) messages keep ONLY Copy — the record-altering
+  // actions (edit/delete/resend) break the played-record model (E93). Outside the game build
+  // the full set stands.
+  const _gameUserKeep = new Set(['copy']);
+  const userPool = document.body.hasAttribute('data-game-build')
+    ? allActions.filter(a => _gameUserKeep.has(a.id)) : allActions;
+
   const recent = _getUserRecentActions();
   const defaults = ['edit', 'delete', 'copy'];
   const order = recent.length > 0 ? recent : defaults;
-  const sorted = [...allActions].sort((a, b) => {
+  const sorted = [...userPool].sort((a, b) => {
     const ai = order.indexOf(a.id), bi = order.indexOf(b.id);
     if (ai >= 0 && bi >= 0) return ai - bi;
     if (ai >= 0) return -1;

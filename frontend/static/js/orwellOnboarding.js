@@ -58,103 +58,92 @@
     return r.json();
   }
 
-  function buildOverlay() {
-    const el = document.createElement("div");
-    el.id = "orwell-onboarding";
-    el.setAttribute("role", "dialog");
-    el.setAttribute("aria-modal", "true");
-    el.setAttribute("aria-label", "Big Brother production notice");
-    el.innerHTML = `
-      <style>
-        #orwell-onboarding {
-          position: fixed; inset: 0; z-index: 99999;
-          display: flex; align-items: center; justify-content: center;
-          background: color-mix(in srgb, var(--bg, #282c34) 88%, black);
-          font-family: 'Fira Code', ui-monospace, monospace;
-        }
-        #orwell-onboarding .ob-card {
-          width: 420px; max-width: 92vw; max-height: 90vh; overflow: auto;
-          background: var(--panel, #111); color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66); border-radius: 12px;
-          padding: 1.6rem 1.6rem 1.4rem; box-shadow: 0 20px 60px rgba(0,0,0,.45);
-        }
-        #orwell-onboarding h1 {
-          font-size: 1.5rem; font-weight: 600; letter-spacing: .04em; margin: 0 0 .25rem;
-          background: linear-gradient(135deg, var(--brand-color, var(--red, #e06c75)),
-            color-mix(in srgb, var(--brand-color, var(--red, #e06c75)) 60%, var(--fg, #fff)));
-          -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        #orwell-onboarding .ob-hold { text-align: center; padding: .4rem 0 .2rem; }
-        /* J2-11: opacity:.7 over the inherited dim color rendered the tagline/tip at ~1.5:1 (WCAG
-           1.4.3 FAIL). Use an explicit ~82% of --fg so it clears 4.5:1 on every house theme. */
-        #orwell-onboarding .ob-hold .ob-hold-sub { color: color-mix(in srgb, var(--fg, #fff) 82%, transparent);
-          font-size: .82rem; margin: .5rem 0 0; line-height: 1.5; }
-        #orwell-onboarding .ob-steps { text-align: left; margin: 1rem 0 .2rem; padding: 0; list-style: none;
-          font-size: .8rem; line-height: 1.6; color: color-mix(in srgb, var(--fg, #fff) 88%, transparent); }
-        #orwell-onboarding .ob-steps li { margin: .15rem 0; }
-        #orwell-onboarding .ob-steps .ob-step-n { display: inline-block; width: 1.4rem; font-weight: 700;
-          color: var(--brand-color, var(--red, #e06c75)); }
-        #orwell-onboarding .ob-hold-actions { display: flex; gap: .6rem; justify-content: center; margin-top: 1.1rem; flex-wrap: wrap; }
-        #orwell-onboarding .ob-btn {
-          font: inherit; font-size: .82rem; padding: .45rem .9rem; border-radius: 8px; cursor: pointer;
-          background: transparent; color: var(--fg, #9cdef2);
-          border: 1px solid var(--border, #355a66);
-        }
-        #orwell-onboarding .ob-btn:hover { border-color: var(--fg, #9cdef2); }
-        /* J1-31: the welcome/setup/holding CTAs are the journey's FIRST interactive elements and
-           had no visible keyboard-focus ring (WCAG 2.4.7). Give every overlay button a clear
-           focus-visible ring keyed to --brand-color (matches the .list-item convention). */
-        #orwell-onboarding .ob-btn:focus-visible {
-          outline: none;
-          border-color: var(--brand-color, var(--red, #e06c75));
-          box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-color, var(--red, #e06c75)) 70%, transparent);
-        }
-        #orwell-onboarding .ob-btn-primary {
-          background: var(--brand-color, var(--red, #e06c75)); color: var(--on-accent, #fff);
-          border-color: transparent; font-weight: 600;
-        }
-        /* A double ring (bg gap + brand) so the primary CTA's focus is visible against its own fill. */
-        #orwell-onboarding .ob-btn-primary:focus-visible {
-          box-shadow: 0 0 0 2px var(--bg, #282c34), 0 0 0 4px var(--brand-color, var(--red, #e06c75));
-        }
-        /* J1-10: on a desktop viewport the 420px card filled ~10% of the field and read as
-           under-confident. Scale the card + title up a notch on wide screens so the first
-           impression carries more weight (no new imagery — that's a design call; this is pure
-           type/space). Mobile/narrow keeps the compact card unchanged. */
-        @media (min-width: 1024px) {
-          #orwell-onboarding .ob-card { width: 540px; padding: 2.2rem 2.2rem 1.9rem; }
-          #orwell-onboarding h1 { font-size: 1.85rem; }
-          #orwell-onboarding .ob-hold .ob-hold-sub { font-size: .9rem; }
-        }
-      </style>
-      <div class="ob-card"></div>`;
-    return el;
+  // #709 (owner directive): the onboarding modals are RECREATED on the OrwellWindow KIT — the same
+  // kit settings.js uses (window.OrwellWindowKit.create({ modal:true })). The kit OWNS the glass
+  // chrome (the frosted `body.theme-frosted .ow-window` material + neutral rim), the kit SANS font
+  // (--ow-ui-font — retiring the orphaned hard-pinned mono font-family a font audit should
+  // have caught), the centered modal placement, the backdrop scrim, the inert background, the
+  // focus-trap + aria-modal, the focus-into-dialog, and Escape participation (via ui.js's single
+  // arbiter → dismissTop → close). So the bespoke dark `--panel` card, the red h1 gradient, the red
+  // step-numbers, the mono pin, and the hand-rolled inert/trap are all GONE — replaced by the kit.
+  //
+  // The CONTENT styles below (the centered hold layout, the legible sub copy, the step list) are the
+  // only CSS this module still owns; they carry NO accent hue (neutral --fg) so nothing reintroduces
+  // red on any tier — the kit chrome is colorless by design (#729). The CTAs compose the element kit
+  // (.ow-btn / .ow-btn-secondary / .ow-btn-prominent) which brings its own legible glass styling +
+  // focus ring. We keep the legacy `.ob-card` / `ob-btn` class HOOKS (additive) so existing JS/tests
+  // that select them keep working.
+  function ensureContentCss() {
+    if (document.getElementById("ob-content-css")) return;
+    const st = document.createElement("style");
+    st.id = "ob-content-css";
+    st.textContent = `
+      #orwell-onboarding .ob-hold { text-align: center; padding: .2rem 0; }
+      /* J2-11: an explicit ~82% of --fg so the sub copy clears 4.5:1 on every house theme. */
+      #orwell-onboarding .ob-hold .ob-hold-sub { color: color-mix(in srgb, var(--fg, #fff) 82%, transparent);
+        font-size: var(--ow-fs-body, .875rem); margin: .5rem 0 0; line-height: 1.5; }
+      #orwell-onboarding h1 { font-size: var(--ow-fs-title, 1.5rem); font-weight: 600; letter-spacing: -0.02em;
+        margin: 0 0 .25rem; color: var(--fg, #fff); }
+      #orwell-onboarding .ob-steps { text-align: left; margin: 1rem 0 .2rem; padding: 0; list-style: none;
+        font-size: .85rem; line-height: 1.6; color: color-mix(in srgb, var(--fg, #fff) 88%, transparent); }
+      #orwell-onboarding .ob-steps li { margin: .15rem 0; }
+      /* Neutral step-numbers (no --red/--brand-color anywhere — the kit chrome is colorless). */
+      #orwell-onboarding .ob-steps .ob-step-n { display: inline-block; width: 1.4rem; font-weight: 700;
+        color: var(--fg, #fff); }
+      #orwell-onboarding .ob-hold-actions { display: flex; gap: .6rem; justify-content: center;
+        margin-top: 1.1rem; flex-wrap: wrap; }
+      /* Desktop weight: the kit window is auto-sized to content; give it a confident min-width on wide
+         screens (mobile/narrow keeps the kit's max-width:64vw clamp). */
+      @media (min-width: 1024px) {
+        #orwell-onboarding .ob-card { min-width: 480px; }
+        #orwell-onboarding h1 { font-size: var(--ow-fs-title-lg, 1.85rem); }
+      }
+    `;
+    document.head.appendChild(st);
   }
 
-  // A11Y-1: aria-modal is a PROMISE to assistive tech that the rest of the page is
-  // inert — enforce it. Tab stays inside the card; everything behind the scrim is
-  // inert (unfocusable, unclickable) until the overlay resolves.
-  let _inerted = [];
-  function inertBackground(except) {
-    _inerted = [];
-    Array.from(document.body.children).forEach((n) => {
-      if (n === except || n.tagName === "SCRIPT" || n.tagName === "STYLE") return;
-      if (!n.inert) { n.inert = true; _inerted.push(n); }
+  // Build an onboarding modal ON THE WINDOW KIT and open it. Returns { el, card, win }:
+  //   • el   — the kit window element; carries id="orwell-onboarding" (the dedupe guard + every
+  //            `getElementById("orwell-onboarding")` / `data-ob-*` selector keep working).
+  //   • card — the kit .ow-body, ALSO tagged `.ob-card` (legacy hook) — the content host.
+  //   • win  — the OrwellWindow instance (so the caller can win.close()).
+  // The kit's modal:true gives scrim + inert + focus-trap + aria-modal + center + Escape; we pass an
+  // onClose so the caller's dismiss runs whether the user hits Escape or our own buttons. The card is
+  // a BLOCKING dialog: not minimizable (a scrim'd modal in a dock chip is nonsense), not draggable/
+  // resizable (it's centered + transient), and persistLayout:false so it always re-centers.
+  function buildOverlay(opts) {
+    ensureContentCss();
+    const o = opts || {};
+    const card = document.createElement("div");
+    card.className = "ob-card";          // legacy hook; the kit hosts it as the .ow-body content
+    card.setAttribute("tabindex", "-1");
+    const win = window.OrwellWindowKit.create({
+      id: "orwell-onboarding",
+      title: o.title || "Big Brother production notice",
+      modal: true,                       // scrim + inert background + focus-trap + aria-modal + Escape (kit-owned)
+      minimizable: false,                // a blocking dialog never tucks to a dock chip
+      closable: !!o.closable,            // no kit × by default — the way out is our own dismiss button + Escape
+      draggable: false,
+      resizable: false,
+      persistLayout: false,              // always re-center; never carry a dragged offset
+      content: card,
+      onClose: () => { try { o.onClose && o.onClose(); } catch (_) {} },
     });
+    win.open(document.activeElement);
+    const el = win.el;                   // the kit sets el.id = "orwell-onboarding"
+    return { el, card, win };
   }
+
+  // A11Y belt: the kit's modal:true already inerts the background + traps focus + sets aria-modal
+  // (it generalized THIS module's old welcome-modal pattern onto the kit). These thin helpers stay as
+  // a defensive supplement (and to keep the no-trap source-pins literal): uninertBackground() is
+  // idempotent and harmless when the kit already cleaned up. We no longer hand-roll the trap.
+  let _inerted = [];
   function uninertBackground() {
+    // Clear our own (belt) inert set AND sweep any lingering inert on the page's top-level children
+    // (defensive: if the kit's teardown raced, no node is left unfocusable).
     _inerted.forEach((n) => { try { n.inert = false; } catch (_) {} });
     _inerted = [];
-  }
-  function trapFocus(el) {
-    el.addEventListener("keydown", (e) => {
-      if (e.key !== "Tab") return;
-      const f = el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-      if (!f.length) { e.preventDefault(); return; } // nothing focusable → focus stays on the card
-      const first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    });
   }
 
   // F5/J4: a blocking production notice — the holding modal (it carries no data entry; it blocks
@@ -170,33 +159,44 @@
   // operator mid-configuration is never re-blocked by the poller.
   function mountHolding(title, sub, readyAgain, actions) {
     if (document.getElementById("orwell-onboarding")) return;
-    const el = buildOverlay();
+    let timer = null;
+    let _down = false;
+    // Single dismiss path: stop the poller, belt-clean inert, and close the kit window. Routed
+    // through the kit's onClose so Escape (ui.js arbiter → dismissTop → close) and our own buttons
+    // all converge here. Guarded so the close→onClose→close re-entry is a no-op.
+    const dismiss = () => {
+      if (_down) return; _down = true;
+      if (timer) clearInterval(timer);
+      uninertBackground();           // kit already un-inerts on teardown; belt-and-suspenders
+      // destroy() is the SYNCHRONOUS teardown: it removes the scrim + un-inerts + drops the window
+      // node immediately (no 190ms close animation), so the way-out is instant and leaves zero
+      // residue — the no-trap contract (and the smoke's "dismiss like a person, then proceed").
+      try { win.destroy(); } catch (_) {}
+    };
+    const { el, card, win } = buildOverlay({
+      title,
+      // Escape routes through the kit (ui.js arbiter → dismissTop → close → onClose). Converge it on
+      // our dismiss so the poller stops + cleanup runs once (the _down guard makes re-entry a no-op).
+      onClose: () => { if (!_down) { _down = true; if (timer) clearInterval(timer); uninertBackground(); } },
+    });
     // Tag a blocking HOLDING card (vs. the welcome modal) so the model-config
     // auto-advance (orwell:models-changed) can clear it immediately instead of
     // waiting on the 5s re-probe. The welcome modal carries no such tag, so the
     // auto-advance never yanks a welcome the player is reading.
     el.setAttribute("data-ob-holding", "");
-    const card = el.querySelector(".ob-card");
-    card.setAttribute("tabindex", "-1");
     card.innerHTML = `
       <div class="ob-hold">
         <h1>${title}</h1>
         <p class="ob-hold-sub">${sub}</p>
         <div class="ob-hold-actions"></div>
       </div>`;
-    let timer = null;
-    const dismiss = () => {
-      if (timer) clearInterval(timer);
-      uninertBackground();
-      el.remove();
-    };
     // Expose the dismiss so the auto-advance can tear this card down cleanly.
     el._obDismiss = dismiss;
     const row = card.querySelector(".ob-hold-actions");
     (actions || []).forEach((a) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "ob-btn" + (a.primary ? " ob-btn-primary" : "");
+      b.className = "ow-btn " + (a.primary ? "ow-btn-prominent ob-btn ob-btn-primary" : "ow-btn-secondary ob-btn");
       b.textContent = a.label;
       // Dismiss FIRST: the action's target (e.g. the Settings modal) must not open behind
       // the overlay's inert wall.
@@ -205,15 +205,14 @@
     });
     const d = document.createElement("button");
     d.type = "button";
-    d.className = "ob-btn";
+    d.className = "ow-btn ow-btn-secondary ob-btn";
     d.setAttribute("data-ob-dismiss", "");
     d.textContent = "Go in anyway"; // CONT-1: in-fiction dismiss (was the OOC "Continue anyway")
     d.addEventListener("click", dismiss);
     row.appendChild(d);
+    // Escape is owned by the kit (ui.js single arbiter → dismissTop → close → onClose), but keep an
+    // explicit "Escape" listener on the card as a belt so a focused-card keypress always dismisses.
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
-    document.body.appendChild(el);
-    inertBackground(el);
-    trapFocus(el);
     try { card.focus(); } catch (_) {}
     timer = setInterval(async () => {
       try {
@@ -287,11 +286,14 @@
 
   function mountSetup(onProceed) {
     if (document.getElementById("orwell-onboarding")) return;
-    const el = buildOverlay();
-    el.setAttribute("aria-label", "Big Brother production setup");
+    let _down = false;
+    const { el, card, win } = buildOverlay({
+      title: "Big Brother production setup",
+      // Escape / kit teardown routes here too — run the same dismiss (markWelcomeSeen + bridge +
+      // onProceed). _down guards the close→onClose→close re-entry so it fires once.
+      onClose: () => { if (!_down) dismiss(); },
+    });
     el.setAttribute("data-ob-setup", ""); // tag so the model-change re-render can find + refresh it
-    const card = el.querySelector(".ob-card");
-    card.setAttribute("tabindex", "-1");
     // The framing line + a compact model summary borrowed from Settings. "Auto-detect" is shown for
     // an empty image_model (which resolves to the gemini default at generation time).
     card.innerHTML = `
@@ -331,6 +333,7 @@
     window.addEventListener("orwell:models-changed", onModels);
 
     const dismiss = () => {
+      if (_down) return; _down = true;
       try { window.removeEventListener("orwell:models-changed", onModels); } catch (_) {}
       markWelcomeSeen();
       uninertBackground();
@@ -346,7 +349,9 @@
           try { document.body.classList.remove("ow-onboarding-bridge"); } catch (_) {}
         }, 4000);
       } catch (_) {}
-      el.remove();
+      // destroy() = synchronous teardown: removes the scrim + un-inerts + drops the node immediately
+      // (no 190ms close animation), so the handoff to onProceed never races a lingering scrim.
+      try { win.destroy(); } catch (_) {}
       // Dismissing the setup wizard via "Start casting" IS the proceed — onProceed opens the fresh
       // interview session and fires the producers' kickoff. The photo box appears MID-interview
       // (after the producers ask), not before, so there is no separate "image step" to hand off to.
@@ -362,21 +367,24 @@
     // needed — the wizard is re-rendered on models-changed and the Settings modal manages itself.)
     const choose = document.createElement("button");
     choose.type = "button";
-    choose.className = "ob-btn";
+    choose.className = "ow-btn ow-btn-secondary ob-btn";
     choose.setAttribute("data-ob-choose-models", "");
     choose.textContent = "Choose models";
     choose.addEventListener("click", () => {
+      // Lift the kit's inert wall so the Settings modal isn't opened behind it (the kit inerted the
+      // whole page, Settings host included). The kit owns the inert set on the window instance.
+      try { win._uninertBackground && win._uninertBackground(); } catch (_) {}
       try { uninertBackground(); } catch (_) {}
       try { openSettings(); } catch (_) {}
       // Re-inert behind the (now-open) Settings modal so the wizard stays modal underneath; the
       // Settings modal sits above. A short delay lets Settings mount first.
-      setTimeout(() => { try { inertBackground(el); } catch (_) {} }, 50);
+      setTimeout(() => { try { win._inertBackground && win._inertBackground(); } catch (_) {} }, 50);
     });
     row.appendChild(choose);
 
     const go = document.createElement("button");
     go.type = "button";
-    go.className = "ob-btn ob-btn-primary";
+    go.className = "ow-btn ow-btn-prominent ob-btn ob-btn-primary";
     go.setAttribute("data-ob-setup-start", "");
     go.textContent = "Start casting";
     go.disabled = true; // enabled by refresh() once a narrator model resolves (avoids the async race)
@@ -384,11 +392,12 @@
     row.appendChild(go);
     _startBtn = go;
 
+    // Escape is owned by the kit (ui.js arbiter → dismissTop → close → onClose → dismiss); keep an
+    // explicit card listener as a belt so a focused-card keypress always dismisses.
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
-    document.body.appendChild(el);
     setOnboardingActive(true); // suppress the splash tip/tagline while the wizard is up
-    inertBackground(el);
-    trapFocus(el);
+    // The kit already appended the window, inerted the background, trapped focus, and focused the
+    // first body control on open(). Move focus to the primary CTA (Start) once it's in the DOM.
     try { go.focus(); } catch (_) {}
     refresh(); // populate the model summary + Start enabled-state
   }

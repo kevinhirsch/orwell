@@ -116,3 +116,14 @@ if (typeof document !== 'undefined' && document.addEventListener) {
     }
   });
 }
+
+// ============================================
+// Haptics + audio beat channel (issue #745)
+// ============================================
+// Side-effect import: orwellHaptics self-registers its window listeners and rides
+// the `orwell:gamechanged` reason this module dispatches above (crown / noms /
+// veto / eviction / decision-confirm) to fire a sub-second vibrate + audio cue.
+// Imported HERE — at the dispatcher hub, which is always loaded — so no
+// index.html script tag is needed. Vault-free (reads only the public beat
+// reason), gated behind a user setting + prefers-reduced-motion, fail-soft.
+import './orwellHaptics.js';

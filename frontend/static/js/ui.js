@@ -368,7 +368,7 @@ export function showToast(msg, durationOrOpts) {
     if (actionHint && !isNarrow()) {
       const hint = document.createElement('span');
       hint.textContent = actionHint;
-      hint.style.cssText = 'font-size:9px;opacity:0.55;letter-spacing:0.4px;text-transform:uppercase;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin-top:1px;pointer-events:none;';
+      hint.style.cssText = 'font-size:9px;opacity:0.55;letter-spacing:0.4px;text-transform:uppercase;font-family:var(--mono, monospace);margin-top:1px;pointer-events:none;';
       stack.appendChild(hint);
     }
 

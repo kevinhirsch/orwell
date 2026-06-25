@@ -135,7 +135,9 @@ def test_banner_defines_the_in_fiction_holding_state():
     js = _status_js()
     assert 'd.busy === "creating"' in js, "the banner must read the health poll's busy marker"
     # The holding line is AMBER (degraded) and in-fiction — never the red outage chrome.
-    assert 'show("degraded", "🎬 Production is building the house…"' in js
+    # #764: titles carry NO baked-in glyph — the icon is the OrwellNotice kit's severity-derived
+    # monochrome glyph (.on-icon), so the holding title is plain text driven by severity "degraded".
+    assert 'show("degraded", "Production is building the house…"' in js
     assert "Casting is being finalized" in js
 
 
@@ -148,7 +150,7 @@ def test_banner_never_shows_red_for_failures_while_busy():
     )
     unreachable_branch = js.index("if (!d || !d.engine)")
     busy_guard = js.index("if (busy) { showHolding(); return; }")
-    red = js.index('show("down", "⚠ Big Brother engine unavailable.", reason')
+    red = js.index('show("down", "Big Brother engine unavailable.", reason')  # #764: de-glyphed title
     assert unreachable_branch < busy_guard < red, (
         "the busy guard must run before the red banner inside the unreachable branch"
     )

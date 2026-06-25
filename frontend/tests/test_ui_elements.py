@@ -111,9 +111,13 @@ class TestOnboardingOverlay:
         assert "The house is dark" in JS_ONBOARDING               # F5 engine down
 
     def test_holding_card_is_a_real_modal(self):
+        # #709: the onboarding modals are RECREATED on the OrwellWindow kit (the same kit settings.js
+        # uses). The kit's `modal: true` OWNS the scrim + inert background + focus-trap + aria-modal
+        # (it generalized this module's old hand-rolled welcome-modal pattern), so the bespoke
+        # inertBackground/trapFocus are gone — the "real modal" contract is now the kit modal.
         assert "orwell-onboarding" in JS_ONBOARDING
-        assert "inertBackground" in JS_ONBOARDING
-        assert "trapFocus" in JS_ONBOARDING
+        assert "OrwellWindowKit.create" in JS_ONBOARDING
+        assert "modal: true" in JS_ONBOARDING
 
     # -- Route contracts (C-level) -------------------------------------------
 

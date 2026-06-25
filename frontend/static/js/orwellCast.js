@@ -115,7 +115,7 @@
            chosen size persists under winsize-orwell-cast. */
         #orwell-cast {
           width: min(360px, 92vw);
-          font-family: 'Fira Code', ui-monospace, monospace;
+          font-family: var(--mono, monospace);
         }
         #orwell-cast .oc-grid {
           display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
@@ -165,6 +165,10 @@
           padding: .3rem .55rem; min-height: 28px; display: inline-flex; align-items: center; gap: .35rem;
         }
         #orwell-cast .oc-pin:hover { background: rgba(255,255,255,.12); }
+        /* #769: the pin icon is a MONOCHROME inline SVG (currentColor) — kit glyph language,
+           no full-color emoji. flex-shrink:0 keeps it crisp beside the label. */
+        #orwell-cast .oc-pin .oc-pin-ic { flex-shrink: 0; opacity: .85; }
+        #orwell-cast .oc-pin:hover .oc-pin-ic { opacity: 1; }
         #orwell-cast .oc-actions { margin-top: .8rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
         #orwell-cast .oc-backfill {
           cursor: pointer; font: inherit; font-size: .74rem; letter-spacing: .03em;
@@ -179,9 +183,17 @@
         @media (max-width: 768px) {
           #orwell-cast { width: auto !important; max-width: none !important; }
         }
+        /* #725: on the LIGHT glass var(--border) is a HARD dark stroke. Apple defines glass
+           by lensing, not a hard line — soften every inner stroke (portrait holders, the pin
+           + backfill controls) to the low-opacity WHITE hairline the windows/notices carry. */
+        body.theme-frosted #orwell-cast .oc-portrait,
+        body.theme-frosted #orwell-cast .oc-pin,
+        body.theme-frosted #orwell-cast .oc-backfill {
+          border-color: rgba(255,255,255,0.14);
+        }
       </style>
       <div class="oc-toolbar">
-        <button type="button" class="oc-pin" id="oc-pin" title="Compact pin — two portraits in the control-room rail">📌 Compact pin</button>
+        <button type="button" class="oc-pin" id="oc-pin" title="Compact pin — two portraits in the control-room rail"><svg class="oc-pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 8 3 3H7l3-3-1-8z"/></svg><span>Compact pin</span></button>
       </div>
       <div class="oc-grid" id="oc-grid"></div>
       <div class="oc-empty" id="oc-empty" style="display:none"></div>

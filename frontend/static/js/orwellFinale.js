@@ -71,7 +71,7 @@ import * as modalManager from "./modalManager.js";
       <style>
         #orwell-finale {
           width: 240px; display: none;
-          font-family: 'Fira Code', ui-monospace, monospace; font-size: .74rem;
+          font-family: var(--mono, monospace); font-size: .74rem;
         }
         #orwell-finale .ofin-stage { opacity: .6; margin: 0 0 .4rem; letter-spacing: .03em; }
         #orwell-finale .ofin-final {
@@ -87,12 +87,21 @@ import * as modalManager from "./modalManager.js";
         #orwell-finale .ofin-reveal { margin: .2rem 0; opacity: .9; }
         #orwell-finale .ofin-reveal b { color: var(--fg, #9cdef2); }
         #orwell-finale .ofin-move { margin-top: .5rem; }
-        #orwell-finale .ofin-btn {
+        /* #775 element-kit migration: the finale move buttons now compose .ow-btn
+           .ow-btn-secondary (the kit owns frosted chrome — ONE source of truth). This
+           bespoke rule keeps ONLY the finale-specific LAYOUT (full-width, left-aligned
+           list look, vertical rhythm) + the Normal-tier (non-glass) fallback chrome.
+           The selector is intentionally un-prefixed (no #orwell-finale id) so the kit's
+           body.theme-frosted .ow-btn rule wins on the glass tiers; the frosted-only
+           chrome override below is retired (the kit supplies it). */
+        .ofin-btn {
           /* J5-13: lift to the project tap floor (was ~27px) and bump the label off .74rem so the
              time-pressured finale move buttons are tappable + legible on coarse pointers. */
           width: 100%; cursor: pointer; border-radius: 8px; padding: .45rem .6rem; margin: .2rem 0; min-height: 44px;
           background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
           font-family: inherit; font-size: .82rem; text-align: left;
+          /* the kit centers content; the finale list look is left-aligned full-width */
+          justify-content: flex-start;
         }
         #orwell-finale .ofin-btn:hover { border-color: var(--accent, #e06c75); }
         /* E67/C26 + F3: phones — a full-width top sheet whose POSITION the slot
@@ -104,6 +113,12 @@ import * as modalManager from "./modalManager.js";
             border-radius: 0 0 12px 12px; border-left: none; border-right: none;
             max-height: 42vh; overflow: auto;
           }
+        }
+        /* #725: soften the inner var(--border) strokes (finalist cards, move buttons) to the
+           low-opacity WHITE hairline on the light glass — Apple defines glass by lensing, not a
+           hard dark line. The :hover accent rim on the move buttons stays (transient interaction). */
+        body.theme-frosted #orwell-finale .ofin-fin {
+          border-color: rgba(255,255,255,0.14);
         }
       </style>
       <div class="ofin-stage" id="ofin-stage" aria-live="polite"></div>
@@ -200,7 +215,7 @@ import * as modalManager from "./modalManager.js";
     move.innerHTML = "";
     const addBtn = (label, text) => {
       const btn = document.createElement("button");
-      btn.type = "button"; btn.className = "ofin-btn"; btn.textContent = label;
+      btn.type = "button"; btn.className = "ow-btn ow-btn-secondary ofin-btn"; btn.textContent = label;
       // A11Y-10: visible label keeps the emoji/arrow; the accessible name strips leading glyphs so
       // a screen reader reads "Vote for X", not "ballot box with ballot Vote for X".
       btn.setAttribute("aria-label", label.replace(/^[^\p{L}\p{N}]+/u, "").trim() || label);

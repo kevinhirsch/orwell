@@ -86,7 +86,8 @@
         margin: .6rem auto; max-width: 640px; border-radius: 12px; padding: .8rem .9rem;
         background: var(--panel, #111); color: var(--fg, #9cdef2);
         border: 1px solid var(--accent, var(--red, #e06c75));
-        font-size: .85rem; line-height: 1.5;
+        /* Shared type system (#709): sans family + body PRESET. */
+        font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.5;
         /* J5-03: figure/ground — the binding card must lift off the chat stream like every
            OrwellWindow does. Reuse the kit's shadow token (it is the only interactive surface
            that was missing it). */
@@ -106,7 +107,7 @@
         background: transparent; animation: none;
       }
       #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
-      #${CARD_ID} .odec-title { font-weight: 700; letter-spacing: .03em; flex: 1; }
+      #${CARD_ID} .odec-title { font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; flex: 1; }
       /* J5-21: the dismiss × stays visually in the top-right corner (absolute), but is moved to the
          END of the card's DOM so it is the LAST thing a keyboard user Tabs to — the decision options
          and Confirm come first (WCAG 2.4.3 focus order: a binding-decision surface must not put
@@ -125,7 +126,10 @@
           linear-gradient(0deg, color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 9%, transparent), color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 9%, transparent)),
           var(--panel, #111);
       }
-      #${CARD_ID}.odec-risk .odec-opt[aria-pressed="true"] { border-color: var(--color-error, var(--red, #e06c75)); background: var(--color-error, var(--red, #e06c75)); }
+      /* #775: a SELECTED option on a risk (irreversible) card keeps the eviction-RED fill — the
+         stakes signal. !important so it wins over the style.css frosted selected-pill override
+         (the kit-migration's neutral selected state) on the glass tiers too. */
+      #${CARD_ID}.odec-risk .odec-opt[aria-pressed="true"] { border-color: var(--color-error, var(--red, #e06c75)) !important; background: var(--color-error, var(--red, #e06c75)) !important; color: var(--on-accent, #fff) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25) !important; }
       #${CARD_ID}.odec-risk .odec-confirm { background: var(--color-error, var(--red, #e06c75)); }
       #${CARD_ID} .odec-risk-badge {
         display: inline-flex; align-items: center; gap: .3rem; margin-left: .4rem;
@@ -140,15 +144,23 @@
       #${CARD_ID} .odec-stillin { margin: 0 0 .55rem; font-size: .82em; opacity: .92; line-height: 1.45; }
       #${CARD_ID} .odec-stillin strong { letter-spacing: .02em; }
       #${CARD_ID} .odec-opts { display: flex; flex-wrap: wrap; gap: .4rem; }
+      /* #775 element-kit migration (owner request): the decision OPTION chips compose the kit's
+         .ow-btn .ow-btn-prominent (a liquid-glass PROMINENT CTA). On the GLASS tiers the kit owns
+         the chip chrome (background/border/ink) — so the bespoke chip fill is scoped to the NORMAL
+         (non-glass) tier here, and a frosted-tier SELECTED override lives in style.css. The
+         layout-only bits (capsule radius, padding, tap floor) stay on both tiers. */
       #${CARD_ID} .odec-opt {
         cursor: pointer; border-radius: 999px; padding: .5rem .8rem; min-height: 44px;
-        /* J5-04: the plain --border (#355a66) on the chip's translucent fill is ~2.25:1 on the
-           dark panel — below WCAG 1.4.11's 3:1 for a UI-component boundary. Mix toward --fg so
-           the chip edge is visible in both themes (the chip is the ONLY way to make the pick). */
-        border: 1px solid color-mix(in srgb, var(--border, #355a66) 55%, var(--fg, #9cdef2)); background: rgba(255,255,255,.05); color: inherit;
         font: inherit;
       }
-      #${CARD_ID} .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: var(--on-accent, #fff); }
+      /* Normal-tier (non-glass) chip chrome — the glass tiers take the kit prominent instead. */
+      body:not(.theme-frosted) #${CARD_ID} .odec-opt {
+        /* J5-04: the plain --border (#355a66) on the chip's translucent fill is ~2.25:1 on the
+           dark panel — below WCAG 1.4.11's 3:1 for a UI-component boundary. Mix toward --fg so
+           the chip edge is visible (the chip is the ONLY way to make the pick). */
+        border: 1px solid color-mix(in srgb, var(--border, #355a66) 55%, var(--fg, #9cdef2)); background: rgba(255,255,255,.05); color: inherit;
+      }
+      body:not(.theme-frosted) #${CARD_ID} .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: var(--on-accent, #fff); }
       #${CARD_ID} textarea {
         width: 100%; min-height: 72px; box-sizing: border-box; margin-top: .2rem;
         background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
@@ -164,10 +176,10 @@
         background: var(--accent, #e06c75); color: var(--on-accent, #fff); font: inherit;
       }
       #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
-      #${CARD_ID} .odec-note { opacity: .80; font-size: .85rem; flex: 1; }
+      #${CARD_ID} .odec-note { opacity: .80; font-size: var(--ow-fs-body, .875rem); flex: 1; }
       /* J4-20: the disabled-Confirm hint — quiet, italicized, sits beside the button; its hidden
          attribute is toggled in sync() so it shows only while Confirm can't be pressed. */
-      #${CARD_ID} .odec-hint { opacity: .7; font-size: .78rem; font-style: italic; flex-basis: 100%; order: 99; margin-top: -.2rem; }
+      #${CARD_ID} .odec-hint { opacity: .7; font-size: var(--ow-fs-caption, .75rem); font-style: italic; flex-basis: 100%; order: 99; margin-top: -.2rem; }
       #${CARD_ID} .odec-hint[hidden] { display: none; }
       #${CARD_ID} .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
       #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }
@@ -178,6 +190,56 @@
         #${CARD_ID} .odec-note { flex: none; order: -1; }
         #${CARD_ID} .odec-confirm { width: 100%; padding: .6rem .95rem; }
       }
+      /* ── LIQUID GLASS (body.theme-frosted) ──────────────────────────────────────
+         The decision card surface must read as the SAME ONE LIGHT GLASS as the rest of the
+         family. The common path hosts #${CARD_ID} INSIDE the OrwellNotice kit card
+         (.on-card.on-decision), where it goes FLAT (transparent/no chrome) so the glass comes
+         from the kit (.on-card, painted the kube LIGHT glass by style.css). In the FALLBACK
+         path (no kit → mounted bare into #chat-history) the card carries its OWN solid
+         var(--panel) bg, so we glass IT directly here — with the ONE LIGHT GLASS, not a dark
+         veil. Owner ruling: "there should be no old dark glass at all"; "the old dark glass
+         shouldn't be the frosted fallback". The inline DARK-veil glass that used to live here
+         (and made the FROSTED fallback dark) is RETIRED. We also neutralize the .odec-risk
+         skin's SOLID var(--panel) wash (the eviction-red MEANING stays in the BORDER), and we
+         DELIBERATELY DO NOT touch .odec-confirm — the primary CONFIRM button keeps its
+         sanctioned system-blue CTA fill (the one tinted action per view). Applies to BOTH tiers
+         (no :not(.glass-full) — the light fill is uniform; Full adds SVG refraction on top via
+         liquidGlass.js). Scoped to prefers-reduced-transparency:no-preference so the fallback
+         card honors the a11y opaque preference under reduce. */
+      @media (prefers-reduced-transparency: no-preference) {
+      /* The ONE LIGHT GLASS for BOTH tiers (Full adds SVG refraction on top). */
+      body.theme-frosted #${CARD_ID},
+      body.theme-frosted #${CARD_ID}.odec-risk {
+        background-color: var(--ow-glass-light-color);
+        background-image: var(--ow-glass-light-fill);
+        -webkit-backdrop-filter: blur(3px) saturate(180%);
+        backdrop-filter: blur(3px) saturate(180%);
+        border-radius: var(--ow-glass-radius);
+        /* The light-glass rim + soft light shadow (matches style.css's ONE LIGHT GLASS). */
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.65),
+          inset 0 0 0 0.5px rgba(255,255,255,0.30),
+          0 12px 36px rgba(0,0,0,0.10);
+        color: #16191f;
+        text-shadow: 0 1px 1px rgba(255,255,255,0.45);
+      }
+      /* When hosted inside the kit card the inner decision card stays flat (the kit IS the
+         glass) — keep it transparent under theme-frosted so it never double-glasses. */
+      body.theme-frosted .on-card.on-decision #${CARD_ID},
+      body.theme-frosted .on-card.on-decision #${CARD_ID}.odec-risk {
+        background-color: transparent;
+        background-image: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+      }
+      }
+      /* SANCTIONED ACCENT — NOTE: the primary Confirm CTA's system-blue fill is owned by
+         style.css (body.theme-frosted .odec-confirm → background: var(--ow-ios-blue,#0a84ff)
+         !important, the ONE tinted CTA per view). The glass block above scopes to the CARD
+         surface only and never names .odec-confirm, so it cannot wash out that CTA — the
+         blue stands. We deliberately add NO .odec-confirm rule here (it would only weaken /
+         duplicate the static !important system-blue rule). */
     `;
     document.head.appendChild(st);
   }
@@ -370,7 +432,11 @@
 
     let textarea = null;
     const confirm = document.createElement("button");
-    confirm.className = "odec-confirm"; confirm.type = "button";
+    // #775 (owner request): the Confirm / "Evict" CTA composes the kit's .ow-btn .ow-btn-prominent
+    // for the kit's state machinery (focus ring, press, disabled). Its legible FILL stays the
+    // sanctioned system-blue (style.css body.theme-frosted .odec-confirm, !important color:#fff) —
+    // or eviction-RED on a risk card — so the label is ALWAYS white-on-accent, never dark-on-dark.
+    confirm.className = "ow-btn ow-btn-prominent odec-confirm"; confirm.type = "button";
     // 0006 staged-rounds: only the FIRST comp-round BINDS (the approach the single outcome roll honors);
     // later rounds are non-binding FLAVOR over an already-decided result (audit 2026-06-20) — phrase the
     // confirm so a flavor round reads as "push through", never a fresh stakes commitment. Single source
@@ -395,7 +461,7 @@
 
     const addChip = (label, value) => {
       const b = document.createElement("button");
-      b.className = "odec-opt"; b.type = "button";
+      b.className = "ow-btn ow-btn-prominent odec-opt"; b.type = "button";
       b.setAttribute("aria-pressed", "false");
       b.textContent = label;
       b.addEventListener("click", () => {
@@ -525,7 +591,10 @@
     // confirmation so the player simply plays on (never a fabricated, half-committed exit).
     if (kind === "self-evict") {
       const cancel = document.createElement("button");
-      cancel.className = "odec-opt"; cancel.type = "button";
+      // #775: the self-evict Cancel is a standard secondary action, NOT a selectable option chip —
+      // give it the kit's secondary variant (the .odec-opt layout class stays for the row sizing),
+      // never the prominent option-chip treatment + aria-pressed toggle semantics.
+      cancel.className = "ow-btn ow-btn-secondary odec-opt"; cancel.type = "button";
       cancel.textContent = "Cancel — stay in the house";
       cancel.addEventListener("click", async () => {
         _userDismissed = true;

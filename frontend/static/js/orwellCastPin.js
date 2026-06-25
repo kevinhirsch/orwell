@@ -72,11 +72,26 @@
       "#orwell-cast-pin .ocp-face { min-width: 0; aspect-ratio: 1 / 1; border-radius: 8px;" +
       "  overflow: hidden; background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);" +
       "  display: flex; align-items: center; justify-content: center; }" +
+      // #725 — under the glass theme the hard dark var(--border) hairline reads as a heavy
+      // ink rim that fights the frosted, luminous look of the windows/notices. Soften it to
+      // the same soft white hairline (rgba(255,255,255,0.14)) the glass kits use, so the
+      // portrait tiles lift off the frosted card instead of being boxed in dark ink. The
+      // Normal tier keeps its solid var(--border) (the rule above) untouched.
+      "body.theme-frosted #orwell-cast-pin .ocp-face { border-color: rgba(255,255,255,0.14); }" +
       "#orwell-cast-pin .ocp-face img { width: 100%; height: 100%; object-fit: cover; }" +
       // L16: evicted houseguests render grayscale; active/jury stay full color.
       "#orwell-cast-pin .ocp-face.ocp-evicted img { filter: grayscale(1); }" +
       "#orwell-cast-pin .ocp-face .ocp-ph { font-size: 1.1rem; opacity: .45; }" +
-      "#orwell-cast-pin .ocp-foot { margin-top: .3rem; opacity: .6; }";
+      "#orwell-cast-pin .ocp-foot { margin-top: .3rem; opacity: .6; }" +
+      // #740 — anti-overlap belt: the cast-pin gadget is a RAIL gadget (it mounts into
+      // #gadget-rail-body and flows in the rail column, which clears the composer by
+      // construction). But the OrwellGadget kit mount has a body-level fallback
+      // (#gadget-rail-body -> #sidebar -> document.body), so a degraded DOM could orphan it
+      // onto <body>. An orphaned card must NEVER become a floating tile sitting over the
+      // composer: keep it in normal flow (a docked card, not a fixed/floating one) whenever
+      // it is NOT inside the rail body. In the normal case the gadget IS in the rail and
+      // this selector simply never matches.
+      "#orwell-cast-pin:not(#gadget-rail-body > #orwell-cast-pin) { position: static !important; }";
     document.head.appendChild(st);
   }
 

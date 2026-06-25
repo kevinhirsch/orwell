@@ -69,12 +69,18 @@ def test_j5_decision_card_has_box_shadow():
 
 def test_j5_chip_border_mixes_toward_fg():
     js = _read("static", "js", "orwellDecision.js")
-    opt_rule = re.search(r"\.odec-opt\s*\{([^}]+)\}", js)
-    assert opt_rule, ".odec-opt rule not found"
+    # #775 element-kit migration: on the GLASS tiers the option chips compose .ow-btn-prominent
+    # (the kit supplies a legible on-glass boundary). The bespoke chip fill + the J5-04 boundary
+    # fix now live on the NORMAL (non-glass) tier rule — find THAT rule and assert the contrast fix.
+    opt_rule = re.search(r"body:not\(\.theme-frosted\).*?\.odec-opt\s*\{([^}]+)\}", js)
+    assert opt_rule, "Normal-tier .odec-opt rule not found"
     body = opt_rule.group(1)
-    # The bare var(--border) border failed 3:1 on the dark chip fill; it must now mix toward --fg
+    # The bare var(--border) border failed 3:1 on the dark chip fill; it must still mix toward --fg
     assert "color-mix" in body and "--fg" in body, \
-        ".odec-opt border must color-mix toward --fg for >=3:1 boundary contrast in the dark theme"
+        ".odec-opt (Normal-tier) border must color-mix toward --fg for >=3:1 boundary contrast in the dark theme"
+    # And the chips must compose the kit prominent (the glass-tier source of truth).
+    assert "ow-btn-prominent" in js and "odec-opt" in js, \
+        "decision option chips must compose .ow-btn .ow-btn-prominent (the element kit)"
 
 
 # ── J5-05: card entrance + done-state transition, reduced-motion guarded ──
@@ -129,14 +135,16 @@ def test_j5_retrospective_uses_heading_elements():
 
 def test_j5_unseal_button_contrast_and_tap_target():
     js = _read("static", "js", "orwellRetrospective.js")
-    # find the open-vault button style list
+    # #775 element-kit migration: the unseal CTA now composes the kit's .ow-btn .ow-btn-prominent
+    # instead of hand-inlined chrome. The kit is the ONE source of truth for the button contrast
+    # (a legible on-glass label by construction) AND the 44px tap floor (.ow-btn min-height). So
+    # the J5-08 guarantees are now inherited from the kit — assert the migration, not the old
+    # inline color:#fff / min-height:44px contract.
     open_btn = re.search(r'"🔐 Open the Untold Story"', js)
     assert open_btn, "unseal button not found"
-    region = js[max(0, open_btn.start() - 400):open_btn.end()]
-    assert "color:#fff" in region, \
-        "unseal button must use color:#fff (the computed --on-accent dark ink fails on the purple accent)"
-    assert "min-height:44px" in region, \
-        "unseal button must meet the 44px tap floor"
+    region = js[max(0, open_btn.start() - 400):open_btn.end() + 200]
+    assert "ow-btn-prominent" in region, \
+        "unseal button must compose the element kit's .ow-btn .ow-btn-prominent (it owns contrast + the tap floor)"
 
 
 # ── J5-09: the per-voter reveal must render before the hidden-story dump ──

@@ -2827,11 +2827,217 @@ function initLocalTls() {
 }
 
 /* ═══════════════════════════════════════════
+   LOGIN BACKGROUND (#764) — admin config for the pre-auth login glass page's
+   animated background. Source picker + per-source rich controls (gradient
+   palette/speed/intensity, particle density/speed/color, photo upload + URL).
+   The card is BUILT here and injected into the (admin) services panel so we
+   don't touch index.html; it persists via the admin-gated POST /api/auth/settings
+   and a photo POST /api/auth/login-background/photo. The login page READS the
+   cosmetic-only public GET. (The deferred #765 admin glass pass will reskin it.)
+   ═══════════════════════════════════════════ */
+function initLoginBackground() {
+  // Inject once, into the admin "services" panel (the default admin tab).
+  if (el('adm-loginbg-card')) return;
+  const panel = document.querySelector('[data-settings-panel="services"]');
+  if (!panel) return;  // non-admin DOM — nothing to wire
+
+  const PRESETS = ['aurora', 'sunset', 'ocean', 'gold', 'lavender'];
+  const card = document.createElement('div');
+  card.className = 'admin-card';
+  card.id = 'adm-loginbg-card';
+  card.innerHTML = `
+    <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>Login background</h2>
+    <div class="admin-toggle-sub" style="margin-bottom:10px">The animated background behind the sign-in glass panel (shown to everyone before they log in). Cosmetic only.</div>
+
+    <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+      <label for="adm-loginbg-source" class="admin-toggle-label" style="flex:0 0 70px;">Source</label>
+      <select id="adm-loginbg-source" class="ow-select" style="flex:1;">
+        <option value="gradient">Animated gradient</option>
+        <option value="particles">Particles</option>
+        <option value="photo">Photo</option>
+        <option value="bundled">Bundled pattern</option>
+      </select>
+    </div>
+
+    <!-- Gradient settings -->
+    <div id="adm-loginbg-grp-gradient" class="adm-loginbg-group" style="margin-top:8px;">
+      <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+        <label for="adm-loginbg-preset" class="admin-toggle-label" style="flex:0 0 70px;">Palette</label>
+        <select id="adm-loginbg-preset" class="ow-select" style="flex:1;">
+          <option value="aurora">Aurora</option>
+          <option value="sunset">Sunset</option>
+          <option value="ocean">Ocean</option>
+          <option value="gold">Gold / Teal</option>
+          <option value="lavender">Lavender</option>
+        </select>
+      </div>
+      <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+        <label for="adm-loginbg-gspeed" class="admin-toggle-label" style="flex:0 0 70px;">Speed</label>
+        <input id="adm-loginbg-gspeed" type="range" class="ow-slider" min="8" max="60" step="1" style="flex:1;">
+        <span id="adm-loginbg-gspeed-val" class="admin-toggle-sub" style="flex:0 0 46px;text-align:right;"></span>
+      </div>
+      <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+        <label for="adm-loginbg-gint" class="admin-toggle-label" style="flex:0 0 70px;">Intensity</label>
+        <input id="adm-loginbg-gint" type="range" class="ow-slider" min="0.4" max="1.4" step="0.05" style="flex:1;">
+        <span id="adm-loginbg-gint-val" class="admin-toggle-sub" style="flex:0 0 46px;text-align:right;"></span>
+      </div>
+    </div>
+
+    <!-- Particle settings -->
+    <div id="adm-loginbg-grp-particles" class="adm-loginbg-group" style="margin-top:8px;">
+      <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+        <label for="adm-loginbg-pdensity" class="admin-toggle-label" style="flex:0 0 70px;">Density</label>
+        <input id="adm-loginbg-pdensity" type="range" class="ow-slider" min="12" max="160" step="1" style="flex:1;">
+        <span id="adm-loginbg-pdensity-val" class="admin-toggle-sub" style="flex:0 0 46px;text-align:right;"></span>
+      </div>
+      <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+        <label for="adm-loginbg-pspeed" class="admin-toggle-label" style="flex:0 0 70px;">Speed</label>
+        <input id="adm-loginbg-pspeed" type="range" class="ow-slider" min="0.05" max="1.2" step="0.05" style="flex:1;">
+        <span id="adm-loginbg-pspeed-val" class="admin-toggle-sub" style="flex:0 0 46px;text-align:right;"></span>
+      </div>
+      <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+        <label for="adm-loginbg-pcolor" class="admin-toggle-label" style="flex:0 0 70px;">Dot color</label>
+        <input id="adm-loginbg-pcolor" type="text" class="ow-field" placeholder="default (white) — e.g. #9cdef2" style="flex:1;">
+      </div>
+    </div>
+
+    <!-- Photo settings -->
+    <div id="adm-loginbg-grp-photo" class="adm-loginbg-group" style="margin-top:8px;">
+      <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+        <button class="ow-btn ow-btn-secondary" id="adm-loginbg-upload-btn" type="button">Upload image…</button>
+        <input id="adm-loginbg-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">
+        <span id="adm-loginbg-upload-status" class="admin-toggle-sub" style="flex:1;"></span>
+      </div>
+      <div class="admin-model-form-row" style="align-items:center;gap:8px;">
+        <label for="adm-loginbg-photourl" class="admin-toggle-label" style="flex:0 0 70px;">or URL</label>
+        <input id="adm-loginbg-photourl" type="text" class="ow-field" placeholder="https://… or /static/…" style="flex:1;">
+      </div>
+    </div>
+
+    <div class="admin-model-form-row" style="align-items:center;gap:8px;margin-top:10px;">
+      <span style="flex:1"></span>
+      <span id="adm-loginbg-msg" class="admin-toggle-sub"></span>
+      <button class="ow-btn ow-btn-prominent" id="adm-loginbg-save" type="button" style="min-width:80px;text-align:center;">Save</button>
+    </div>
+
+    <!-- Element-kit demo link (#773) — a Developer/Design reference of the shared
+         OrwellElement primitives. Admin-gated chrome; opens in a new tab. Composes
+         the kit .ow-btn .ow-btn-secondary (the standard neutral-glass action). -->
+    <div class="admin-model-form-row" style="align-items:center;gap:8px;margin-top:6px;border-top:1px solid var(--border);padding-top:10px;">
+      <span class="admin-toggle-sub" style="flex:1">Design reference</span>
+      <a class="ow-btn ow-btn-secondary" id="adm-loginbg-kitdemo" href="/static/element_kit_demo.html" target="_blank" rel="noopener" style="text-decoration:none;font-size:0.85rem;padding:6px 14px;">Element kit demo</a>
+    </div>`;
+  panel.appendChild(card);
+
+  const $ = (id) => el(id);
+  const sourceSel = $('adm-loginbg-source');
+  const presetSel = $('adm-loginbg-preset');
+  const gspeed = $('adm-loginbg-gspeed'), gspeedVal = $('adm-loginbg-gspeed-val');
+  const gint = $('adm-loginbg-gint'), gintVal = $('adm-loginbg-gint-val');
+  const pdensity = $('adm-loginbg-pdensity'), pdensityVal = $('adm-loginbg-pdensity-val');
+  const pspeed = $('adm-loginbg-pspeed'), pspeedVal = $('adm-loginbg-pspeed-val');
+  const pcolor = $('adm-loginbg-pcolor');
+  const photoUrl = $('adm-loginbg-photourl');
+  const fileInput = $('adm-loginbg-file');
+  const uploadBtn = $('adm-loginbg-upload-btn');
+  const uploadStatus = $('adm-loginbg-upload-status');
+  const msg = $('adm-loginbg-msg');
+  const saveBtn = $('adm-loginbg-save');
+
+  function syncGroups() {
+    const src = sourceSel.value;
+    $('adm-loginbg-grp-gradient').style.display = (src === 'photo' || src === 'bundled') ? 'none' : '';
+    $('adm-loginbg-grp-particles').style.display = (src === 'particles') ? '' : 'none';
+    $('adm-loginbg-grp-photo').style.display = (src === 'photo') ? '' : 'none';
+  }
+  function syncLabels() {
+    if (gspeedVal) gspeedVal.textContent = gspeed.value + 's';
+    if (gintVal) gintVal.textContent = Number(gint.value).toFixed(2);
+    if (pdensityVal) pdensityVal.textContent = pdensity.value;
+    if (pspeedVal) pspeedVal.textContent = Number(pspeed.value).toFixed(2);
+  }
+  sourceSel.addEventListener('change', syncGroups);
+  [gspeed, gint, pdensity, pspeed].forEach(r => r.addEventListener('input', syncLabels));
+
+  // Load current config from the public cosmetic GET (admin reads the same shape).
+  fetch('/api/auth/login-background', { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      sourceSel.value = PRESETS && d.source ? d.source : 'gradient';
+      const g = d.gradient || {};
+      presetSel.value = g.preset || 'aurora';
+      gspeed.value = g.speed != null ? g.speed : 26;
+      gint.value = g.intensity != null ? g.intensity : 1;
+      const p = d.particles || {};
+      pdensity.value = p.density != null ? p.density : 64;
+      pspeed.value = p.speed != null ? p.speed : 0.25;
+      pcolor.value = p.color || '';
+      photoUrl.value = d.photo_url || '';
+      syncGroups(); syncLabels();
+    })
+    .catch(() => { syncGroups(); syncLabels(); });
+
+  // Photo upload (admin-gated POST; stores file + flips source to photo).
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    uploadStatus.textContent = 'Uploading…';
+    uploadStatus.style.color = '';
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      const res = await fetch('/api/auth/login-background/photo', {
+        method: 'POST', credentials: 'same-origin', body: fd,
+      });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.detail || 'Upload failed');
+      photoUrl.value = d.photo_url || '';
+      sourceSel.value = 'photo';
+      syncGroups();
+      uploadStatus.textContent = 'Uploaded';
+      uploadStatus.style.color = 'var(--green)';
+    } catch (e) {
+      uploadStatus.textContent = e.message || 'Upload failed';
+      uploadStatus.style.color = 'var(--red)';
+    }
+    setTimeout(() => { uploadStatus.textContent = ''; uploadStatus.style.color = ''; }, 4000);
+  });
+
+  // Save all cosmetic settings through the admin-gated settings POST.
+  saveBtn.addEventListener('click', async () => {
+    msg.textContent = 'Saving…'; msg.style.color = '';
+    const body = {
+      login_background: sourceSel.value,
+      login_gradient_preset: presetSel.value,
+      login_gradient_speed: Number(gspeed.value),
+      login_gradient_intensity: Number(gint.value),
+      login_particles_density: Number(pdensity.value),
+      login_particles_speed: Number(pspeed.value),
+      login_particles_color: pcolor.value.trim(),
+      login_background_photo_url: photoUrl.value.trim(),
+    };
+    try {
+      const res = await fetch('/api/auth/settings', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || 'Save failed'); }
+      msg.textContent = 'Saved'; msg.style.color = 'var(--green)';
+    } catch (e) {
+      msg.textContent = e.message || 'Save failed'; msg.style.color = 'var(--red)';
+    }
+    setTimeout(() => { msg.textContent = ''; msg.style.color = ''; }, 3000);
+  });
+}
+
+/* ═══════════════════════════════════════════
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, initHealthLogs, initPublicDeployment, initLocalTls, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTranscripts, initHealthLogs, initPublicDeployment, initLocalTls, initLoginBackground, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }

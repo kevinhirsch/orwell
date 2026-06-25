@@ -1,8 +1,10 @@
 """Google Fonts in the theme font picker.
 
-The theme engine's font setting ships four offline-safe built-ins (Monospace,
-Sans-serif, Serif, and the GohuFont custom-folder font) and now ADDS a searchable
-Google Fonts picker so the player can pick (almost) any Google font for the UI.
+The theme engine's font setting ships offline-safe built-ins (the default System /
+SF stack, Monospace, Sans-serif, Serif) and ADDS a searchable Google Fonts picker
+so the player can pick (almost) any Google font for the UI. (The unused GohuFont
+custom-folder file was removed in the typography-#696 pass; the custom-folder scan
+machinery stays for player-dropped fonts.)
 
 These are source-pinned tests in the same JS/HTML/JSON-as-text style as the other
 FE chrome tests (the FE has no DOM runtime in the pytest lane). They pin the
@@ -70,17 +72,18 @@ def test_builtins_intact_and_offline():
     js = _read("static", "js", "theme.js")
     # The three CSS built-ins are unchanged and need no network.
     fontmap = re.search(r"const FONT_MAP = \{(.*?)\};", js, re.S).group(1)
-    assert "mono:" in fontmap and "sans:" in fontmap and "serif:" in fontmap
-    # The default font is a built-in (offline) one.
-    assert re.search(r"const DEFAULT_FONT = '(mono|sans|serif)';", js)
-    # GohuFont (the 4th built-in) is still discovered from the local folder.
-    assert os.path.exists(os.path.join(FRONTEND, "static", "fonts", "custom", "GohuFont.ttf"))
+    assert "system:" in fontmap and "mono:" in fontmap and "sans:" in fontmap and "serif:" in fontmap
+    # The default font is the Apple SF SYSTEM stack (audit #696) — a built-in (offline)
+    # one (the stack degrades to Inter / platform defaults with no network).
+    assert re.search(r"const DEFAULT_FONT = '(system|mono|sans|serif)';", js)
+    # The default 'system' entry IS the SF system-font stack (no bundled SF Pro — license).
+    assert "-apple-system" in fontmap and "Inter" in fontmap
 
 
 def test_html_still_lists_the_builtin_font_options():
     html = _read("static", "index.html")
     sel = re.search(r'<select id="theme-font-select".*?</select>', html, re.S).group(0)
-    assert 'value="mono"' in sel and 'value="sans"' in sel and 'value="serif"' in sel
+    assert 'value="system"' in sel and 'value="mono"' in sel and 'value="sans"' in sel and 'value="serif"' in sel
 
 
 def test_google_font_path_is_additive_not_a_replacement():

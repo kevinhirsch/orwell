@@ -117,6 +117,328 @@ def main() -> int:
             check(page.query_selector("#chat-container") is not None, "keep-set DOM: chat container mounted")
             check(page.query_selector("textarea") is not None, "keep-set DOM: composer mounted")
 
+            # Liquid-glass refraction (kube.io SVG technique) must actually WIN the cascade.
+            # The frosted CSS sets `backdrop-filter: blur(..) !important` on the same glass
+            # surfaces, so liquidGlass.js must set its inline url(#filter) with `important`
+            # priority — a plain inline style LOSES to a stylesheet !important and the whole
+            # effect silently dies (computed backdrop shows blur(), never url(#owlg-*)). This
+            # guards that regression on a real Chromium engine (where the module is active).
+            # new_page() seeds frosted-OFF for stable window mechanics, and the refraction only
+            # runs under body.theme-frosted — so TEMPORARILY enable frosted, verify, then restore
+            # frosted-off (don't disturb the window-mechanics suites that follow).
+            page.evaluate("() => document.body.classList.add('theme-frosted')")
+            lg = {"supported": True, "tagged": 0, "withUrl": 0}
+            for _ in range(12):  # poll ~2.6s: the apply pass runs on rAF after the class flips
+                try:
+                    page.evaluate("() => window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh()")
+                except Exception:
+                    pass
+                page.wait_for_timeout(220)
+                lg = page.evaluate("""() => {
+                  const g = window.OrwellLiquidGlass || {};
+                  if (!g.supported) return { supported: false };
+                  const tagged = [...document.querySelectorAll('[data-liquid-glass]')];
+                  const withUrl = tagged.filter(e => (getComputedStyle(e).backdropFilter || '').includes('url('));
+                  return { supported: true, tagged: tagged.length, withUrl: withUrl.length };
+                }""")
+                if not lg.get("supported") or lg.get("tagged", 0) > 0:
+                    break
+
+            # LIGHT-ON-LIGHT GUARD (owner: "'Orwell Chat' is light-on-light... can we check for
+            # that"). On the LIGHT glass chrome (the kube music-player fill, rgba(255,255,255,0.6)),
+            # text MUST be dark ink or it's unreadable. Several controls (the chat title, the
+            # composer textarea/placeholder, the input icons) set their OWN light --fg with higher
+            # specificity than the blanket chrome dark-ink rule, which is exactly how the title +
+            # chat bar regressed. Probe the computed text color of each on light-glass chrome and
+            # assert it is DARK (relative luminance well below the light surface), so light-on-light
+            # can't silently come back. theme-frosted is still applied here (added for the
+            # refraction check above); we measure before restoring frosted-off.
+            lol = page.evaluate(
+                """() => {
+                  // WCAG relative luminance from a computed `rgb(...)`/`rgba(...)` string.
+                  const lum = (c) => {
+                    const m = (c || '').match(/[\\d.]+/g);
+                    if (!m || m.length < 3) return null;
+                    const f = [m[0], m[1], m[2]].map(v => {
+                      const s = (+v) / 255;
+                      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+                    });
+                    return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2];
+                  };
+                  const probe = (sel) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return { sel, missing: true };
+                    const cs = getComputedStyle(el);
+                    return { sel, color: cs.color, lum: lum(cs.color) };
+                  };
+                  const bar = document.querySelector('.chat-input-bar');
+                  const surfLum = bar ? lum(getComputedStyle(bar).backgroundColor) : null;
+                  // open the model-picker menu so its rows are measurable on the light glass
+                  // (the "Select Model" dropdown regressed light-on-light too).
+                  const menu = document.querySelector('.model-picker-menu');
+                  if (menu) menu.classList.remove('hidden');
+
+                  // #725 (kit-level): inner text on GLASS CHROME surfaces (gadget cards, settings
+                  // rows) used to go light-on-light because inner nodes set their OWN var(--fg) /
+                  // color-mix(--fg N%, …) at higher specificity than the blanket container dark-ink.
+                  // The fix redefines --fg to dark ink WITHIN those surfaces (full + muted resolve
+                  // dark). Mount a representative gadget card (with a FULL + a MUTED row + a value)
+                  // and a settings/admin row, then probe their inner text so the regression can't
+                  // silently return. (Removed at the end of the probe.)
+                  const mk = (html) => { const d = document.createElement('div'); d.innerHTML = html;
+                    const n = d.firstElementChild; document.body.appendChild(n); return n; };
+                  const og = mk('<section class="og-card og-probe-lol" style="display:block">'+
+                    '<div class="og-head"><span class="og-icon">🌙</span><span class="og-title">Night Status</span></div>'+
+                    '<div class="og-body">'+
+                      '<div class="ogp-full" style="color:var(--fg)">Awake: 6 houseguests</div>'+
+                      '<div class="ogp-muted" style="color:color-mix(in srgb, var(--fg) 60%, var(--panel))">winding down</div>'+
+                    '</div></section>');
+                  const ad = mk('<div class="admin-card adm-probe-lol" style="display:block">'+
+                    '<div class="adm-row" style="color:color-mix(in srgb, var(--fg) 70%, var(--panel))">Setting label</div>'+
+                    '</div>');
+                  // The gadget RAIL HEADER ("The House" title) sits OUTSIDE the cards in the
+                  // TRANSPARENT rail container, so it is NOT covered by the card dark-ink scope.
+                  // It regressed light-on-light (rgb(238,241,244) on the light glass). Mount a
+                  // representative rail head + title and prove its computed ink is dark.
+                  const rl = mk('<div class="gadget-rail rail-probe-lol" style="display:flex">'+
+                    '<div class="gadget-rail-head">'+
+                      '<span class="gadget-rail-title">The House</span>'+
+                      '<button class="gadget-rail-close">×</button>'+
+                    '</div></div>');
+                  // #742 (window-kit titlebar): the OrwellWindow kit's titlebar (.ow-titlebar /
+                  // .ow-title) + the cast/finale/new-season window headers sit OUTSIDE the .ow-body
+                  // dark-ink scope, so they kept resolving to the THEME --fg / --red — LIGHT ink on
+                  // the LIGHT glass titlebar (measured ~1.09:1). Mount a kit window through the real
+                  // OrwellWindowKit seam and probe its title ink so the regression can't return.
+                  // (#orwell-headshot is the deliberate OPAQUE exception — light title there is
+                  // correct — and is NOT probed by this light-glass sweep.)
+                  let _kitProbe = null;
+                  try {
+                    if (window.OrwellWindowKit && window.OrwellWindowKit.create) {
+                      _kitProbe = window.OrwellWindowKit.create({
+                        id: 'ow-titlebar-lol-probe', title: 'Titlebar Probe', slot: 'top-left',
+                        content: '<div style="padding:6px">body</div>',
+                      });
+                      _kitProbe.open();
+                    }
+                  } catch (_) {}
+                  const out = {
+                    surfLum,
+                    title: probe('.chat-meta-overlay #current-meta'),
+                    metaCount: probe('.chat-meta-overlay .chat-meta-count'),
+                    costBadge: probe('.chat-meta-overlay .session-cost-display'),
+                    textarea: probe('.chat-input-bar textarea#message'),
+                    icon: probe('.chat-input-bar .input-icon-btn'),
+                    picker: probe('.model-picker-btn'),
+                    pickerLabel: probe('.model-picker-btn #model-picker-label'),
+                    menu: probe('.model-picker-menu'),
+                    // #725 gadget card + settings row (full + muted inner text on glass chrome):
+                    gadgetTitle: probe('.og-probe-lol .og-title'),
+                    gadgetFull: probe('.og-probe-lol .ogp-full'),
+                    gadgetMuted: probe('.og-probe-lol .ogp-muted'),
+                    settingsRow: probe('.adm-probe-lol .adm-row'),
+                    // gadget RAIL HEADER (outside the card scope) — "The House" title + control:
+                    railTitle: probe('.rail-probe-lol .gadget-rail-title'),
+                    railClose: probe('.rail-probe-lol .gadget-rail-close'),
+                    // #742 window-kit titlebar — dark ink on the light-glass titlebar:
+                    kitTitle: probe('#ow-titlebar-lol-probe .ow-title'),
+                  };
+                  // DARK-INK CHROME must NOT carry the DARK glass legibility shadow (a dark
+                  // shadow under dark text reads as a smudgy "drop shadow"). The dark
+                  // --ow-glass-text-shadow is reserved for LIGHT text on glass (chat bubbles,
+                  // the light-on-dark dock chips). Probe the textShadow of every dark-ink chrome
+                  // body-copy surface and assert NONE uses the dark (rgba(0,0,0,…)) halo.
+                  const tsProbe = (sel) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return { sel, missing: true };
+                    return { sel, ts: getComputedStyle(el).textShadow };
+                  };
+                  out.darkInkShadows = [
+                    '.og-probe-lol .og-body', '.rail-probe-lol .gadget-rail-title',
+                    '.adm-probe-lol', '#sidebar',
+                    // #742/#725: the dark-ink window-kit titlebar must carry the LIGHT halo, never
+                    // the dark --ow-glass-text-shadow (a dark shadow under dark ink = a smudge).
+                    '#ow-titlebar-lol-probe .ow-titlebar', '#ow-titlebar-lol-probe .ow-title',
+                  ].map(tsProbe).filter(p => {
+                    if (p.missing) return false;
+                    const ts = (p.ts || 'none').toLowerCase();
+                    if (ts === 'none' || ts === '') return false;
+                    // flag any DARK (rgb(0,0,0,…) / rgba(0,0,0,…)) shadow on dark-ink chrome
+                    return /rgba?\\(\\s*0\\s*,\\s*0\\s*,\\s*0/.test(ts);
+                  });
+                  // generic sweep: EVERY visible text node on a glass-chrome surface must be dark
+                  // ink on the light glass (catch any future inner element that re-lights itself).
+                  const sweep = [];
+                  document.querySelectorAll('.og-card, .admin-card').forEach((card) => {
+                    if (getComputedStyle(card).display === 'none') return;
+                    card.querySelectorAll('*').forEach((el) => {
+                      if (!el.childNodes) return;
+                      // <option>/<optgroup> render in the native select popup (a separate surface,
+                      // not styleable cross-browser) — they are NOT on-glass chrome text.
+                      if (/^(OPTION|OPTGROUP)$/.test(el.tagName)) return;
+                      // Decorative COLOR samples (theme swatches / preview tiles / color dots/chips)
+                      // carry an INTENTIONAL color, not readable body text — exclude them so the
+                      // sweep flags only accidental light-on-light TEXT, the #725 failure mode.
+                      if (/\\b(swatch|preview|color-dot|colour-dot|color-chip|colorpick)\\b/.test(el.className || '')) return;
+                      const hasText = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+                      if (!hasText) return;
+                      const cs = getComputedStyle(el);
+                      const a = cs.color.match(/[\\d.]+/g);
+                      // skip fully-transparent text (alpha 0) — nothing painted
+                      if (a && a.length >= 4 && (+a[3]) === 0) return;
+                      // A node painting its OWN non-transparent background is a FILLED control (a
+                      // sanctioned CTA / selected pill / toggle) — light text on it is correct and
+                      // NOT the light-on-light bug. The bug is text riding the LIGHT GLASS directly,
+                      // i.e. an element whose own background is (near-)transparent. Skip filled ones.
+                      const bg = (getComputedStyle(el).backgroundColor || '').match(/[\\d.]+/g);
+                      const bgAlpha = bg && bg.length >= 4 ? (+bg[3]) : (bg ? 1 : 0);
+                      if (bgAlpha > 0.5) return;
+                      const L = lum(cs.color);
+                      if (L != null && L >= 0.4) sweep.push({ tag: el.tagName, cls: el.className, color: cs.color, lum: L });
+                    });
+                  });
+                  out.sweepLight = sweep;
+                  og.remove(); ad.remove(); rl.remove();
+                  try { if (_kitProbe) _kitProbe.destroy(); } catch (_) {}
+                  try { const k = document.getElementById('ow-titlebar-lol-probe'); if (k) k.remove(); } catch (_) {}
+                  return out;
+                }"""
+            )
+            # The chrome text controls must be DARK ink (luminance < 0.4) on the light glass.
+            # (A light surface measures high luminance; light text on it is the bug.)
+            for _name in ("title", "metaCount", "costBadge", "textarea", "icon",
+                          "picker", "pickerLabel", "menu",
+                          # #725 kit-level: gadget card (title/full/muted) + settings row
+                          "gadgetTitle", "gadgetFull", "gadgetMuted", "settingsRow",
+                          # gadget RAIL HEADER (outside the card dark-ink scope): "The House"
+                          # title + the rail control glyph — both must be dark on the light glass.
+                          "railTitle", "railClose",
+                          # #742 window-kit titlebar — the .ow-title over the light-glass titlebar
+                          # must be dark ink (it was ~1.09:1 light-on-light before the #742 fix).
+                          "kitTitle"):
+                _p = lol.get(_name) or {}
+                if _p.get("missing"):
+                    continue  # element legitimately absent — nothing to mis-color
+                _l = _p.get("lum")
+                check(_l is not None and _l < 0.4,
+                      f"no light-on-light: {_name} text is dark ink on the light glass "
+                      f"(lum={_l}, color={_p.get('color')})")
+            # generic sweep over every text node on glass chrome — nothing light-on-light.
+            _sweep = lol.get("sweepLight") or []
+            check(not _sweep,
+                  f"no light-on-light: glass-chrome text nodes are all dark ink ({_sweep[:6]})")
+            # NO smudgy "drop shadow": dark-ink chrome body copy must NOT carry the DARK glass
+            # legibility halo (that dark shadow is reserved for LIGHT text — chat bubbles + the
+            # light-on-dark dock chips). Any dark rgba(0,0,0,…) shadow on dark-ink chrome is the bug.
+            _darkShadows = lol.get("darkInkShadows") or []
+            check(not _darkShadows,
+                  f"no smudgy drop-shadow: dark-ink chrome text carries no DARK text-shadow "
+                  f"({_darkShadows[:4]})")
+
+            # ── #744 — RECEIVED-TRANSCRIPT APCA LEGIBILITY FLOOR (ship-first) ───────────
+            # The transcript IS the game (read for hours): EVERY received bubble (.msg-ai) must
+            # clear a real perceptual contrast floor over ANY wallpaper, INCLUDING a busy/saturated
+            # mid-tone (the worst case where a bare polarity flip alone can wash out). We seed
+            # received bubbles, drop a BUSY MID-TONE wallpaper behind them, run the adaptive pass,
+            # then MEASURE APCA(resolved-ink ↔ scrim-composited-surface) per bubble and assert it
+            # clears the floor. theme-frosted is still applied here (added above); we measure before
+            # restoring frosted-off.
+            apca744 = page.evaluate(
+                """() => {
+                  const AG = window.OrwellAdaptiveGlass;
+                  if (!AG || !AG.apcaContrast) return { missing: true };
+                  // a busy/saturated mid-tone wallpaper — the documented worst case.
+                  let wp = document.getElementById('__wp');
+                  if (!wp) { wp = document.createElement('div'); wp.id = '__wp';
+                    wp.style.cssText = 'position:fixed;inset:0;z-index:-1'; document.body.prepend(wp); }
+                  wp.style.background =
+                    'linear-gradient(115deg,#4a7a8c 0%,#caa45a 22%,#6b5b8a 44%,#8c5a4a 62%,'
+                    + '#3a6b5b 80%,#9a8c5a 100%)';
+                  // ensure the wallpaper actually composites behind the chat for the sampler
+                  document.body.style.background = 'transparent';
+                  document.documentElement.style.background = 'transparent';
+                  // seed two received bubbles + a sent bubble + a code block in a received bubble.
+                  let ch = document.getElementById('chat-history');
+                  if (!ch) { ch = document.createElement('div'); ch.id = 'chat-history';
+                    ch.style.cssText = 'position:absolute;top:60px;left:60px;right:60px;'; document.body.appendChild(ch); }
+                  const made = [];
+                  const mk = (cls, html) => { const m = document.createElement('div'); m.className = 'msg ' + cls;
+                    m.dataset.s744 = '1'; m.innerHTML = '<div class="role">R</div><div class="body">' + html + '</div>';
+                    ch.appendChild(m); made.push(m); return m; };
+                  mk('msg-ai', 'The house is quiet but for the hum of the cameras tonight.');
+                  mk('msg-user', 'I want an ally before the comp.');
+                  mk('msg-ai', 'Here is the play:<pre><code>if (trust > threat) ok();</code></pre>then waits.');
+                  return { seeded: made.length };
+                }"""
+            )
+            if not apca744.get("missing"):
+                # let the adaptive pass + debounce settle, force a refresh, re-measure.
+                for _ in range(8):
+                    try:
+                        page.evaluate("() => window.OrwellAdaptiveGlass && window.OrwellAdaptiveGlass.refresh && window.OrwellAdaptiveGlass.refresh()")
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(180)
+                    measured = page.evaluate(
+                        """() => {
+                          const AG = window.OrwellAdaptiveGlass;
+                          const FLOOR = AG.APCA_FLOOR || 60;
+                          const parse = s => { const m = String(s).match(/rgba?\\(([^)]+)\\)/); if (!m) return null;
+                            const p = m[1].split(/[,\\/\\s]+/).filter(Boolean); return [parseInt(p[0]),parseInt(p[1]),parseInt(p[2])]; };
+                          const bd = el => {
+                            const wp = document.getElementById('__wp'); const cs = getComputedStyle(wp);
+                            // approximate the sampled wallpaper colour by the mid stop (smoke heuristic);
+                            // the live module samples per-pixel — here we just need an opaque mid backdrop.
+                            return parse(cs.backgroundColor) || [123,113,124];
+                          };
+                          const out = [];
+                          document.querySelectorAll('.msg-ai[data-s744]').forEach((el, i) => {
+                            const cs = getComputedStyle(el);
+                            const ink = parse(cs.color);
+                            // the resolved scrim surface = the bubble's own (opaque-composited) fill colour:
+                            // computed background-color already has --ai-scrim-alpha applied; composite it
+                            // over the wallpaper to get the surface the ink truly sits on.
+                            const fill = parse(cs.backgroundColor); const a = parseFloat(el.style.getPropertyValue('--ai-scrim-alpha')) || 0.46;
+                            const wallp = bd(el);
+                            const surface = AG.compositeOver(fill || [56,60,68], a, wallp);
+                            const lc = Math.abs(AG.apcaContrast(ink || [255,255,255], surface));
+                            const attrLc = parseInt(el.getAttribute('data-apca-lc') || '0', 10);
+                            out.push({ i, ink, lc: Math.round(lc), attrLc, floor: FLOOR });
+                          });
+                          return out;
+                        }"""
+                    )
+                    if measured and all(b.get("attrLc", 0) > 0 for b in measured):
+                        break
+                check(bool(measured) and len(measured) >= 2,
+                      f"#744: received transcript bubbles are present to measure ({apca744})")
+                # the module's own per-bubble APCA verdict (data-apca-lc, set during the resolve)
+                # must clear the floor for EVERY received bubble over the busy mid-tone wallpaper.
+                _below = [b for b in measured if b.get("attrLc", 0) < b.get("floor", 60)]
+                check(not _below,
+                      f"#744: EVERY received bubble clears the APCA floor (Lc>=60) over a busy "
+                      f"mid-tone wallpaper — frost+scrim escalation guarantees it ({measured})")
+                # teardown the seeded bubbles + restore the page background so later suites are clean.
+                page.evaluate(
+                    """() => {
+                      document.querySelectorAll('[data-s744]').forEach(e => e.remove());
+                      const wp = document.getElementById('__wp'); if (wp) wp.style.background = '';
+                      document.body.style.background = ''; document.documentElement.style.background = '';
+                    }"""
+                )
+
+            page.evaluate("() => document.body.classList.remove('theme-frosted')")  # restore frosted-off
+            try:
+                page.evaluate("() => window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh()")
+            except Exception:
+                pass
+            # Only assert when the module is active (Chromium) AND it found a surface to refract.
+            # When tagged>0, EVERY one must show url() in its computed backdrop: that proves the
+            # inline SVG refraction beat the CSS `!important` blur (the exact regression this guards).
+            if lg.get("supported") and lg.get("tagged", 0) > 0:
+                check(lg.get("withUrl", 0) == lg.get("tagged", 0),
+                      f"liquid-glass refraction wins the cascade (computed backdrop = url(#filter), not clobbered by the !important blur) ({lg})")
+
             # Final FE batch: V3 phase labels + A3 delta announcer live in the status HUD.
             hud_a11y = page.evaluate("""() => {
               if (window._orwellStatusEnsure) window._orwellStatusEnsure();
@@ -379,8 +701,15 @@ def main() -> int:
                                           "|| document.querySelector('#sidebar') === null "
                                           "|| !!document.querySelector('#sidebar').closest('[inert]')")
             check(sidebar_inert is True, "onboarding: background is inert while mounted")
-            page.evaluate("document.getElementById('orwell-onboarding').remove();"
-                          "document.querySelectorAll('[inert]').forEach(n => n.inert = false)")
+            # #709: the onboarding modal is now a KIT window — it owns a separate .ow-scrim sibling +
+            # the inert background. Dismiss it the real way (its own dismiss button → kit destroy),
+            # which removes the window AND its scrim AND un-inerts — never a force `.remove()` (that
+            # orphaned the scrim, which then intercepted every click below).
+            page.click("#orwell-onboarding [data-ob-dismiss]")
+            page.wait_for_function("() => !document.getElementById('orwell-onboarding') "
+                                   "&& !document.querySelector('.ow-scrim') "
+                                   "&& document.querySelectorAll('[inert]').length === 0",
+                                   timeout=3000)
 
             # C25/E88: the Diary Room is a composer mode in the chat (no dialog) — ruling #4.
             page.evaluate("window._orwellOpenDiaryRoom && window._orwellOpenDiaryRoom()")
@@ -480,10 +809,13 @@ def main() -> int:
             page.wait_for_timeout(280)  # let the kit's open animation settle before measuring
             fin_cluster = page.evaluate("""[...document.querySelectorAll('#orwell-finale .ow-controls button')].map(b => {
               const r = b.getBoundingClientRect();
-              return { label: b.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) };
+              const a = getComputedStyle(b, '::after');
+              const aw = parseFloat(a.width) || 0, ah = parseFloat(a.height) || 0;
+              return { label: b.getAttribute('aria-label'),
+                       w: Math.round(Math.max(r.width, aw)), h: Math.round(Math.max(r.height, ah)) };
             })""")
             check(len(fin_cluster) >= 1 and all(c["label"] and c["w"] >= 24 and c["h"] >= 24 for c in fin_cluster),
-                  f"finale composes the kit cluster (named, >=24px) ({fin_cluster})")
+                  f"finale composes the kit cluster (named, >=24px tap) ({fin_cluster})")
             # F1 (DWE audit): these are TRUSTED clicks on purpose — the old evaluate()
             # clicks worked on an invisible dock and masked the stranded-window trap.
             page.click("#orwell-finale .ow-min")
@@ -561,13 +893,20 @@ def main() -> int:
                        focused: el.classList.contains('ow-focused') };
             }""")
             page.wait_for_timeout(280)  # let the open animation settle before measuring geometry
+            # Under the frosted theme the controls are macOS traffic lights (12px discs)
+            # with an INVISIBLE 44px ::after hit region (WCAG 2.5.5). Measure the EFFECTIVE
+            # tap area (max of the disc box and the ::after) so the check tracks the real
+            # target, not the visual disc size.
             kit["ctrls"] = page.evaluate("""[...document.querySelectorAll('#ow-smoke-window .ow-controls button')].map(b => {
               const r = b.getBoundingClientRect();
-              return { label: b.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) };
+              const a = getComputedStyle(b, '::after');
+              const aw = parseFloat(a.width) || 0, ah = parseFloat(a.height) || 0;
+              return { label: b.getAttribute('aria-label'),
+                       w: Math.round(Math.max(r.width, aw)), h: Math.round(Math.max(r.height, ah)) };
             })""")
             check(kit.get("mounted") is True and kit.get("titlebar") is True, f"kit: window mounts with titlebar ({kit})")
             check(all(c["w"] >= 24 and c["h"] >= 24 and c["label"] for c in kit.get("ctrls", [])),
-                  f"kit: control cluster named + >=24px targets ({kit.get('ctrls')})")
+                  f"kit: control cluster named + >=24px tap targets ({kit.get('ctrls')})")
             check(kit.get("focused") is True, "kit: opening focuses (ow-focused on top of the stack)")
             kb = page.query_selector("#ow-smoke-window .ow-titlebar").bounding_box()
             page.mouse.move(kb["x"] + 40, kb["y"] + kb["height"] / 2)
@@ -902,17 +1241,22 @@ def main() -> int:
             check(f8.get("closed") is True, f"F8: Escape closes settings ({f8})")
             check(f8.get("focusBack") is True, f"F8: focus returns to the gear ({f8})")
 
-            # #553: Settings is now a MODAL dialog on the OrwellWindow kit — intentionally NOT
-            # minimizable (a scrim'd modal tucked to a dock chip is nonsense; Escape/× dismiss it).
-            # The launcher-agnostic minimize→restore contract is now exercised on the theme-modal
-            # (the legacy .modal family) below. Assert settings opens from the gear and carries no
-            # minimize affordance, then close it via its kit ×.
+            # #553: Settings is a MODAL dialog on the OrwellWindow kit — intentionally NOT
+            # minimizable-to-dock (a scrim'd modal tucked to a dock chip is nonsense; Escape/×
+            # dismiss it). Under the frosted macOS chrome the cluster renders the THREE-light
+            # cluster, so a yellow minimize LIGHT may be present — but it MUST be inert (disabled):
+            # it carries no click handler and never parks a dock chip, so the #553 intent (settings
+            # cannot minimize-to-dock) holds. Assert any minimize affordance is disabled, never
+            # functional. The legacy .modal-family minimize→restore contract is exercised below.
             page.click("#user-bar-settings")
             page.wait_for_timeout(300)
             check(page.evaluate("!!document.getElementById('settings-modal')") is True,
                   "G2: settings opens from the gear")
-            check(page.evaluate("!document.querySelector('#settings-modal .ow-min, #settings-modal .modal-minimize-btn, #settings-modal .minimize-btn')") is True,
-                  "G2/#553: the settings modal dialog has no minimize-to-dock button")
+            check(page.evaluate("""() => {
+                const m = document.querySelector('#settings-modal .ow-min, #settings-modal .modal-minimize-btn, #settings-modal .minimize-btn');
+                return !m || m.disabled === true;
+            }""") is True,
+                  "G2/#553: the settings modal has no FUNCTIONAL minimize-to-dock (any light is inert/disabled)")
             # Interactive: a trusted click INSIDE the window lands — the Account tab activates.
             page.click("#settings-modal [data-settings-tab='account']")
             page.wait_for_timeout(150)
@@ -1298,20 +1642,19 @@ def main() -> int:
             sea.close()
 
             # #642: the engine-down banner MIGRATED onto the OrwellNotice kit (a top-banner
-            # system-notice). Its dismiss is the kit's shared .on-dismiss affordance (>=44px touch
-            # floor, kit CSS) now — not the window kit's .ow-dismiss.
+            # system-notice). It is NOW non-dismissable (dismissible:false): an honest outage signal
+            # auto-hides on health and must never carry a × the player could use to bury a real
+            # problem. So the kit renders NO .on-dismiss affordance for this banner.
             page.evaluate("window.orwellRefreshEngineStatus && window.orwellRefreshEngineStatus()")
             page.wait_for_timeout(600)
             ban = page.evaluate("""() => {
-              const b = document.querySelector('#orwell-engine-status .on-dismiss');
-              if (!b) return { present: false };
-              const r = b.getBoundingClientRect();
-              return { present: true, onDismiss: b.classList.contains('on-dismiss'),
-                       w: Math.round(r.width), h: Math.round(r.height) };
+              const card = document.querySelector('#orwell-engine-status');
+              if (!card) return { present: false };
+              return { present: true, hasDismiss: !!card.querySelector('.on-dismiss') };
             }""")
             if ban.get("present"):
-                check(ban.get("onDismiss") is True and ban.get("w", 0) >= 44 and ban.get("h", 0) >= 44,
-                      f"#642: banner dismiss is the shared OrwellNotice .on-dismiss affordance ({ban})")
+                check(ban.get("hasDismiss") is False,
+                      f"#642: engine-status banner is non-dismissable (no .on-dismiss ×) ({ban})")
 
             # F-3 (the ratchet, runtime half): every window-like surface on the page
             # is KIT-MANAGED — floating game panels carry [data-ow-window], and the
@@ -1723,10 +2066,18 @@ def main() -> int:
             # Collapse the sidebar for REAL (the hamburger), then compare
             # per-entry drawing signatures between the two states.
             page.evaluate("""() => {  // clear floaters that could sit over the hamburger
-              // #642: the engine-status banner is an OrwellNotice top-banner now — its dismiss is
-              // the kit's .on-dismiss (was .oes-x). Clear it so it can't sit over the hamburger.
-              const ban = document.querySelector('#orwell-engine-status .on-dismiss');
-              if (ban) ban.click();
+              // The engine-status top-banner is non-dismissable now (commit 377110a:
+              // dismissible:false — an honest outage signal, no × to wave it away), so there is
+              // NO .on-dismiss to click. The REAL fix is the layout: .hamburger-btn now yields to
+              // the banner via --on-banner-inset (style.css), dropping BELOW the banner's
+              // pointer-intercepting full-width card so the click always lands. We additionally
+              // hide the banner host here so this icon-parity assertion isn't height-sensitive on
+              // a short viewport — but the click no longer DEPENDS on it (see the local repro that
+              // proves #hamburger-btn is clickable with the banner up).
+              const dismiss = document.querySelector('#orwell-engine-status .on-dismiss');
+              if (dismiss) { dismiss.click(); return; }
+              const host = document.getElementById('orwell-notice-banner');
+              if (host) host.style.display = 'none';
             }""")
             page.wait_for_timeout(350)
             page.click("#hamburger-btn")
@@ -1816,11 +2167,17 @@ def main() -> int:
                 .filter(vis).map(i => (i.id + ' ' + (i.textContent || '')).replace(/\\s+/g, ' ').trim());
               document.getElementById('export-dl-btn').click();
               const exp = items('export-dropdown-menu', '.export-dropdown-item');
-              document.getElementById('overflow-plus-btn').click();
+              const ovfTrigger = document.getElementById('overflow-plus-btn');
+              if (vis(ovfTrigger)) ovfTrigger.click();
               const ovf = items('overflow-menu', '.overflow-menu-item');
+              // #760: in the game build, attach is promoted to a first-class VISIBLE
+              // composer paperclip — there must be exactly one reachable attach affordance.
+              const attachPaperclip = document.getElementById('composer-attach-btn');
               return { export: exp, overflow: ovf,
                        exportTrigger: vis(document.getElementById('export-dl-btn')),
-                       overflowTrigger: vis(document.getElementById('overflow-plus-btn')) };
+                       overflowTrigger: vis(ovfTrigger),
+                       composerAttachVisible: vis(attachPaperclip),
+                       trayAttachPresent: !!document.getElementById('overflow-attach-btn') };
             }""")
             page.keyboard.press("Escape")  # fold the overflow menu back
             page.evaluate("document.body.click()")  # and dismiss the export dropdown
@@ -1829,12 +2186,27 @@ def main() -> int:
                   f"G13: the export menu presents its keep-set entries ({g13_menus['export']})")
             check(g13_zombies(g13_menus["export"]) == [],
                   f"G13: no export-menu entry names a dropped vertical ({g13_zombies(g13_menus['export'])})")
-            check(len(g13_menus["overflow"]) >= 1,
-                  f"G13: the overflow menu still holds keep-set actions ({g13_menus['overflow']})")
             check(g13_zombies(g13_menus["overflow"]) == [],
                   f"G13: no overflow item present whose handler is the refusal path ({g13_zombies(g13_menus['overflow'])})")
-            check(g13_menus["exportTrigger"] is True and g13_menus["overflowTrigger"] is True,
-                  "G13: menus with keep-set items keep their triggers (the cascade is hide-only, never over-hides)")
+            # The cascade is HIDE-ONLY and emptiness-driven (the G3 Tools-chevron rule):
+            # a menu WITH visible keep-set items keeps its trigger; a menu intentionally
+            # emptied (here, #760 promoting attach to a first-class visible paperclip) has
+            # its trigger correctly hidden — never over-hidden, never left as a zombie that
+            # opens nothing. So: trigger-visible IFF the menu has visible items.
+            check(g13_menus["exportTrigger"] is True,
+                  "G13: the export launcher (keep-set items) stays visible (cascade never over-hides)")
+            overflow_has_items = len(g13_menus["overflow"]) >= 1
+            check(g13_menus["overflowTrigger"] is overflow_has_items,
+                  "G13: the overflow chevron is visible IFF its menu has keep-set items "
+                  "(the cascade is hide-only, never over-hides — a non-empty menu keeps its "
+                  "trigger; an emptied one correctly hides it) "
+                  f"(items={g13_menus['overflow']}, trigger={g13_menus['overflowTrigger']})")
+            # #760: exactly one attach affordance in the composer. The game build shows the
+            # first-class paperclip; it must not ALSO keep the redundant overflow-tray entry.
+            check(g13_menus["composerAttachVisible"] is True,
+                  "G13/#760: the first-class composer attach paperclip is visible (one clear attach affordance)")
+            check(g13_menus["trayAttachPresent"] is False,
+                  "G13/#760: the redundant overflow-tray 'Attach files' duplicate is gone (no two attach entry points)")
 
             # (b) the shortcuts modal: rows render, none names a dropped
             # vertical, and no category header floats over zero rows.

@@ -66,6 +66,40 @@ const ELEM_ID = 'orwell-chat-hint';
 let _shownKey = null;
 let _notice = null;   // #642: the OrwellNotice kit instance for the (single) live hint.
 
+// ── LIQUID GLASS (body.theme-frosted) ────────────────────────────────────────
+// The hint card composes the OrwellNotice kit (kind "guide"); orwellNotice.js + style.css
+// already paint .on-card / .on-guide as the ONE LIGHT GLASS (the kube music-player light fill),
+// so the hint shell gets that light glass for free on BOTH tiers (Full adds SVG refraction;
+// Frosted a CSS blur). We inject this tiny module-local rule as a belt-and-suspenders: it
+// re-asserts the SAME LIGHT GLASS on the hint's OWN .orwell-chat-hint hook class (added in
+// show()) so the hint reads identically even if a future .orwell-chat-hint rule ever set a
+// solid bg, or the cascade ordered against the kit rule. Owner ruling: "there should be no old
+// dark glass at all"; "the old dark glass shouldn't be the frosted fallback" — so the inline
+// DARK-veil glass that used to live here (and made the FROSTED fallback dark) is RETIRED; this
+// is now the light glass for BOTH tiers (no :not(.glass-full) scope). Wrapped in prefers-
+// reduced-transparency:no-preference so this runtime-injected !important rule NEVER overrides
+// style.css's a11y OPAQUE fallback under prefers-reduced-transparency:reduce. Idempotent.
+function _ensureGlassCss() {
+  if (typeof document === 'undefined' || document.getElementById('orwell-chat-hint-glass-css')) return;
+  const st = document.createElement('style');
+  st.id = 'orwell-chat-hint-glass-css';
+  st.textContent =
+    '@media (prefers-reduced-transparency: no-preference) {' +
+    /* The ONE LIGHT GLASS for BOTH tiers (Full adds SVG refraction on top via liquidGlass.js). */
+    'body.theme-frosted .on-card.orwell-chat-hint {' +
+    '  background-color: var(--ow-glass-light-color) !important;' +
+    '  background-image: var(--ow-glass-light-fill) !important;' +
+    '  -webkit-backdrop-filter: blur(3px) saturate(180%) !important;' +
+    '  backdrop-filter: blur(3px) saturate(180%) !important;' +
+    '  border-radius: var(--ow-glass-radius) !important;' +
+    '  box-shadow:' +
+    '    inset 0 1px 0 rgba(255,255,255,0.65),' +
+    '    inset 0 0 0 0.5px rgba(255,255,255,0.30),' +
+    '    0 12px 36px rgba(0,0,0,0.10) !important; }' +
+    'body.theme-frosted .on-card.orwell-chat-hint .on-body { text-shadow: 0 1px 1px rgba(255,255,255,0.45); } }';
+  document.head.appendChild(st);
+}
+
 function _remove() {
   if (_notice) { _notice.hide(); _notice = null; }
   const el = document.getElementById(ELEM_ID);
@@ -85,6 +119,7 @@ function show(key) {
   if (_shownKey === key && document.getElementById(ELEM_ID)) return true; // already up
 
   _remove();                                      // only one hint at a time
+  _ensureGlassCss();                              // glass material under body.theme-frosted
 
   const dismissText = def.dismissText === undefined ? 'Got it' : def.dismissText;
   // Compose the kit (kind "guide"). persistDismiss:false — the hint owns its own per-KEY dismiss
@@ -109,7 +144,11 @@ function show(key) {
   body.innerHTML =
     '<span class="orwell-chat-hint-text">' + (def.html || '') + '</span>' +
     (dismissText
-      ? '<button type="button" class="orwell-chat-hint-dismiss" aria-label="Dismiss tip">' +
+      // #775 element-kit migration: the "Got it" dismiss composes .ow-btn .ow-btn-plain (the kit
+      // owns the frosted chrome — ONE source of truth). The legacy .orwell-chat-hint-dismiss class
+      // is kept as the JS hook + Normal-tier fallback (its low-specificity style.css rule loses to
+      // the kit on the glass tiers); the dead-CSS retirement is the #774a sweep.
+      ? '<button type="button" class="ow-btn ow-btn-plain orwell-chat-hint-dismiss" aria-label="Dismiss tip">' +
           dismissText + '</button>'
       : '');
   _shownKey = key;

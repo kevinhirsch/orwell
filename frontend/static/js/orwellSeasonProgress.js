@@ -169,7 +169,7 @@
         position: fixed; top: 8px; right: 10px; z-index: 58;
         display: none; pointer-events: none;
         padding: 2px 9px; border-radius: 999px;
-        font-family: 'Fira Code', ui-monospace, monospace;
+        font-family: var(--mono, monospace);
         font-size: 11px; font-weight: 600; letter-spacing: .04em;
         color: color-mix(in srgb, var(--accent, var(--accent-primary, #9cdef2)) 88%, var(--fg, #cfd8e3));
         background: color-mix(in srgb, var(--panel, #161616) 78%, transparent);
