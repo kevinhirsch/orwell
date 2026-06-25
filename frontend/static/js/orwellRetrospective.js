@@ -21,7 +21,10 @@
 
   const POLL_MS = 30000;
   const ID = "orwell-retro";
-  const ICON = "📼";
+  // #780: monochrome icon language — a mono inline SVG (currentColor), not a full-color
+  // emoji. A film-clapper / playback glyph for "the season, watched back". Drives the
+  // dock chip (the kit renders the titlebar from `title`, kept emoji-free above).
+  const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='6' width='20' height='14' rx='2'/><path d='M2 10h20'/><circle cx='8' cy='15' r='2'/><circle cx='16' cy='15' r='2'/><path d='M2 6l3-3M8 6l3-3M14 6l3-3'/></svg>";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -65,7 +68,9 @@
       </style>
       <div class="oretro-body" data-role="body"></div>`;
     _win = window.OrwellWindowKit.create({
-      id: ID, title: "📼 The Season, Watched Back", icon: ICON,
+      // #780: monochrome icon language — no full-color emoji in the titlebar (the kit
+      // renders `title` verbatim). The glyph is the mono SVG `icon` slot.
+      id: ID, title: "The Season, Watched Back", icon: ICON,
       // top-right slot: the retrospective must NOT share a slot with the post-season
       // "New season" window (bottom-right) — post-season both are open, and stacking
       // two windows in one corner shoved the second off-screen. Distinct slots ⇒ no

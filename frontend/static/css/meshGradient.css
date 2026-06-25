@@ -82,24 +82,31 @@
   0%   { transform: translateX(-12%) translateY(6%);  opacity: 0.7; }
   100% { transform: translateX(12%)  translateY(-6%); opacity: 1;   }
 }
-/* ── Palette presets (admin-selectable) — rich, luminous Apple-wallpaper sets ── */
+/* ── Palette presets (admin-selectable) — rich, luminous Apple-wallpaper sets ──
+   #780: each preset is now visually DISTINCT and TRUE to its label (the old set had
+   'sunset' leading purple ≈ 'aurora', and 'gold' reading green/teal). Soft, luminous,
+   never harsh — the glass material lenses these, so the family stays Apple-restrained. */
 .login-bg-gradient[data-lbg-preset="sunset"] {
-  --lbg-c1: #6a3c9e; --lbg-c2: #ff6a4a; --lbg-c3: #ffc24a; --lbg-c4: #34c2d6;
-  --lbg-base: #3a1a4d; --lbg-ray: #ffe6b8;
+  /* Warm orange → pink dusk: amber high, coral/rose low, one cool violet horizon
+     band for depth (no purple LEAD — that was the aurora collision). */
+  --lbg-c1: #ff9d5c; --lbg-c2: #ff6a8b; --lbg-c3: #ffb86c; --lbg-c4: #c86fd9;
+  --lbg-base: #4a1f33; --lbg-ray: #ffe1c2;
 }
 .login-bg-gradient[data-lbg-preset="aurora"] {
-  --lbg-c1: #8b6bff; --lbg-c2: #ff5fb0; --lbg-c3: #ffae66; --lbg-c4: #5fd8ff;
-  --lbg-base: #2a1c5e; --lbg-ray: #ffffff;
+  /* The aurora-borealis idiom: green/teal curtains with a violet upper sky —
+     green-led so it never reads as the warm/pink 'sunset'. */
+  --lbg-c1: #4ff0b0; --lbg-c2: #46d6e0; --lbg-c3: #7a8cff; --lbg-c4: #b06cff;
+  --lbg-base: #102a3a; --lbg-ray: #d8fff0;
 }
 .login-bg-gradient[data-lbg-preset="ocean"] {
   --lbg-c1: #4fe6ff; --lbg-c2: #3f8bff; --lbg-c3: #6a5cff; --lbg-c4: #9af0ff;
   --lbg-base: #11244f; --lbg-ray: #e2f6ff;
 }
 .login-bg-gradient[data-lbg-preset="gold"] {
-  /* Soft, warm, luminous gold/amber glow blending into teal (Apple-wallpaper
-     warmth) — not a punchy yellow. Muted teal top, warm amber/peach glow low. */
-  --lbg-c1: #3aa89a; --lbg-c2: #6fc7a8; --lbg-c3: #f0b878; --lbg-c4: #e8945c;
-  --lbg-base: #1a3a36; --lbg-ray: #ffe8c8;
+  /* Soft, warm, luminous gold/amber — true to its name (the old set was teal-led).
+     Honey high, warm amber/peach low, one muted bronze base — never a punchy yellow. */
+  --lbg-c1: #ffd27a; --lbg-c2: #f5b15a; --lbg-c3: #ffe3a6; --lbg-c4: #e89a55;
+  --lbg-base: #3a2a12; --lbg-ray: #fff0cf;
 }
 .login-bg-gradient[data-lbg-preset="lavender"] {
   --lbg-c1: #ffb0d6; --lbg-c2: #cfa8ff; --lbg-c3: #aac0ff; --lbg-c4: #ffd2ec;

@@ -131,7 +131,9 @@ import * as modalManager from "./modalManager.js";
     // system (the clamped slot offset "finale" — the F5 dual-persistence era is
     // over; wave 1 shipped the stale-key cleanup, retired here).
     _win = window.OrwellWindowKit.create({
-      id: ID, title: "🏆 The Finale", icon: ICON,
+      // #780: monochrome icon language — no full-color emoji in the titlebar (the kit
+      // renders `title` verbatim). The glyph is the mono SVG `icon` slot.
+      id: ID, title: "The Finale", icon: ICON,
       slot: "top-left", slotKey: "finale", role: "complementary",
       // An ambient HUD parks (minimize); the finale exists while one is staging,
       // so it carries no close — a capability of the one kit cluster.
@@ -167,8 +169,17 @@ import * as modalManager from "./modalManager.js";
     // 0054 Phase 2: docked, clear the inline display so the .ow-docked flex-column
     // rule applies (an inline `block` would break the kit's docked layout — the rail
     // shows it via content-driven visibility). Floating, show as a block as before.
+    const _wasHidden = !el.style.display || el.style.display === "none";
     if (_win && _win.isDocked && _win.isDocked()) el.style.display = "";
     else if (!isMinimized()) el.style.display = "block";
+    // #780 (finale opens flush top-left, clipped): the finale's content CSS defaults to
+    // `display:none`, so the slot restack at open() SKIPS it (an invisible entry is not
+    // stacked) and it sits at the CSS-default 0,0 — its red traffic-light clipped under
+    // the viewport edge. The moment it becomes visible, re-run the slot stack so it
+    // anchors to its `top-left` base (below the banner, past the sidebar). Idempotent.
+    if (_wasHidden && el.style.display && el.style.display !== "none") {
+      try { window.OrwellSlots && window.OrwellSlots.restackAll && window.OrwellSlots.restackAll(); } catch (_) {}
+    }
 
     const finalists = Array.isArray(finale.finalists) ? finale.finalists : [];
     const reveals = Array.isArray(finale.reveals) ? finale.reveals : [];
@@ -296,6 +307,11 @@ import * as modalManager from "./modalManager.js";
     const el = ensureUI();
     if (_win && _win.isDocked && _win.isDocked()) el.style.display = "";
     else if (!isMinimized()) el.style.display = "block";
+    // #780: re-anchor once visible (see render()) so the headless/explicit show lands on
+    // the slot base rather than the clipped CSS-default 0,0.
+    if (el.style.display && el.style.display !== "none") {
+      try { window.OrwellSlots && window.OrwellSlots.restackAll && window.OrwellSlots.restackAll(); } catch (_) {}
+    }
     return true;
   };
   window.orwellRefreshFinale = refresh;

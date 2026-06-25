@@ -230,7 +230,9 @@
         <span class="oc-backfill-note" id="oc-backfill-note"></span>
       </div>`;
     _win = window.OrwellWindowKit.create({
-      id: PANEL_ID, title: "🎬 The Cast",
+      // #780: monochrome icon language — no full-color emoji in the titlebar (the kit
+      // renders `title` verbatim). The glyph is the mono SVG `icon` slot below.
+      id: PANEL_ID, title: "The Cast",
       icon: "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><circle cx='9' cy='7' r='4'/><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/></svg>",
       slot: "top-left", slotKey: "cast", role: "complementary",
       minimizable: true, closable: true, draggable: true,

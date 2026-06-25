@@ -114,8 +114,10 @@ def test_l33_boot_and_swatch_paths_use_the_tier_resolver():
     js = _read("static", "js", "theme.js")
     # Boot/restore resolves the tier from the saved record (back-compat aware).
     assert "resolveGlassTier(saved, saved ? saved.name : DEFAULT_THEME)" in js
-    # Swatch-click resolves the tier per selected theme.
-    assert "resolveGlassTier(ct, name)" in js
+    # Swatch-click resolves the tier per selected theme. #780: it now passes the saved
+    # record (not a bare null) for a built-in re-select, so a saved explicit tier wins
+    # over the per-theme default instead of being clobbered back to it.
+    assert "resolveGlassTier(_tierRec, name)" in js
 
 
 def test_l33_glass_tier_is_persisted_with_backcompat():
