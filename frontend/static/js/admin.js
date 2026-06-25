@@ -2477,6 +2477,17 @@ function initHealthLogs() {
   }
 
   if (refreshBtn) refreshBtn.addEventListener('click', load);
+
+  // DEBUG · owner override of mandate #2: the SPOILER bundle download. The plain
+  // "Download debug bundle" <a> above stays Vault-free; this button navigates to ?vault=1 (the
+  // route's explicit opt-in) so the downloaded JSON ALSO carries the live Producer's Vault — behind
+  // the same spoiler confirm as the status-page unseal. The default download is untouched.
+  const bundleVaultBtn = el('adm-health-bundle-vault');
+  if (bundleVaultBtn) bundleVaultBtn.addEventListener('click', () => {
+    if (!confirm("DOWNLOAD THE DEBUG BUNDLE WITH THE PRODUCER'S VAULT?\n\nThe downloaded file will deliberately INCLUDE your LIVE game's SECRETS — off-screen scheming, NPC confessionals, hidden ties, the sealed twists, and the real eviction votes. It overrides the God-Mode Vault wall (mandate #2) for debugging.\n\nThis file WILL spoil your in-progress game — do not share it. Continue?")) return;
+    window.location.href = '/api/admin/debug-bundle?vault=1';
+  });
+
   load();  // live rows on open — the card is a health surface, not a form
 }
 

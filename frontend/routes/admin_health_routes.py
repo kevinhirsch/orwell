@@ -549,6 +549,28 @@ async def _bundle_extras(user: str | None) -> dict:
     return extras
 
 
+async def _producer_vault_section(user: str | None) -> dict:
+    """DEBUG — the owner-ruled OVERRIDE of mandate #2, OPT-IN ONLY (the ``?vault=1`` debug bundle).
+
+    UNLIKE every other helper in this module — which are Vault-free BY CONSTRUCTION — this one
+    DELIBERATELY returns live Vault content. It is the same single sanctioned LIVE reveal the
+    status-page "Producer's Vault — Unseal" button uses: it crosses the engine's out-of-band
+    ``producerVault`` admin capability via ``orwell_engine.producer_vault()`` (NOT an advertised
+    tool; admin/God-Mode channel only). It is reached ONLY when the route's explicit opt-in flag
+    is set AND ``require_admin`` has already cleared — never on a player path, never always-on.
+
+    Fail-soft like the rest of the bundle: an engine error / no active game reads as an
+    ``{"error": ...}`` section, never a 500. Do NOT call this from the default bundle path."""
+    try:
+        dump = await orwell_engine.producer_vault(user=user)
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    if not isinstance(dump, dict) or not dump:
+        return {"error": "no active game to unseal"}
+    logger.info("[ops] admin UNSEALED the producer's vault into the debug bundle (opt-in override of mandate #2)")
+    return dump
+
+
 async def _health_snapshot(user: str | None) -> dict:
     """The aggregated health view both routes share."""
     detail = await orwell_engine.engine_health_detail()  # FE's view: ok + error + lastError
@@ -941,7 +963,7 @@ def setup_admin_health_routes() -> APIRouter:
         return {"ok": True, "vault": dump}
 
     @router.get("/debug-bundle")
-    async def debug_bundle(request: Request):
+    async def debug_bundle(request: Request, vault: int = 0, include_vault: int = 0):
         require_admin(request)
         user = None
         try:
@@ -979,6 +1001,20 @@ def setup_admin_health_routes() -> APIRouter:
             "gameState": extras.get("gameState"),
             "sessions": extras.get("sessions"),
         }
+        # ── OPT-IN ONLY: the Producer's Vault (owner-ruled DEBUG override of mandate #2) ──
+        # The DEFAULT bundle (no flag) is byte-identically Vault-free as today — the block
+        # below is reached ONLY behind an EXPLICIT ?vault=1 (alias ?include_vault=1) AND the
+        # require_admin gate already cleared above. It crosses the SAME sanctioned, out-of-band
+        # producerVault unseal that the status-page "Unseal" button uses (admin-only, never a
+        # player path, never always-on) via orwell_engine.producer_vault(). Fail-soft: a broken/
+        # absent unseal degrades to an {"error": ...} section, never a 500. This is an addition
+        # to the OPT-IN path ONLY; it never touches the default assembly above. DO NOT widen it.
+        if vault or include_vault:
+            bundle["_SPOILERS"] = (
+                "Producer's Vault — live secret state (off-screen scheming, NPC confessionals, "
+                "hidden ties, sealed twists, true eviction votes). Owner-ruled DEBUG override of "
+                "mandate #2; do not share.")
+            bundle["producerVault"] = await _producer_vault_section(user)
         import json as _json
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         return Response(
@@ -1041,6 +1077,10 @@ _STATUS_PAGE = """<!doctype html>
 <div class="grid" id="grid">Loading…</div>
 <div class="actions">
   <a class="btn" href="/api/admin/debug-bundle" download>Download debug bundle</a>
+  <!-- DEBUG · owner override of mandate #2: the SPOILER bundle. Same download as above PLUS the
+       live Producer's Vault section (?vault=1), behind an explicit confirm. The plain link above
+       stays Vault-free; this one deliberately includes secret state. -->
+  <button type="button" class="btn" id="bundle-vault" style="border-color:#7a3b3b;color:#f0a6a6" title="DEBUG — download the debug bundle WITH the live Producer's Vault (off-screen scheming, NPC confessionals, hidden ties, sealed twists, the real eviction votes). SPOILERS — this deliberately includes your in-progress game's secrets (owner override of mandate #2).">Download debug bundle + Producer's Vault (SPOILERS)</button>
   <button type="button" class="btn" id="refresh-now">Refresh now</button>
   <button type="button" class="btn" id="update-orwell" title="Pull latest, rebuild the engine, refresh front-end deps, and restart both services. The app briefly goes down (~30–60s) and reconnects automatically.">Update Orwell (pull + rebuild + restart)</button>
   <button type="button" class="btn" id="regen-portraits" title="Discard every stored cast portrait for your game and regenerate the full set (debug)">Regenerate cast portraits (debug)</button>
@@ -1361,6 +1401,14 @@ document.getElementById("producer-vault").addEventListener("click", unsealProduc
 document.getElementById("pv-reseal").addEventListener("click", function () {
   document.getElementById("pv-body").textContent = "";
   document.getElementById("pv-panel").style.display = "none";
+});
+// ── DEBUG · owner override of mandate #2: the SPOILER bundle download ──────────────────────────────
+// The plain "Download debug bundle" <a> above is Vault-free. This one navigates to ?vault=1 (the
+// route's explicit opt-in) so the downloaded JSON ALSO carries the live Producer's Vault section —
+// behind the same spoiler confirm as the unseal. The default download is untouched.
+document.getElementById("bundle-vault").addEventListener("click", function () {
+  if (!confirm("DOWNLOAD THE DEBUG BUNDLE WITH THE PRODUCER'S VAULT?\\n\\nThe downloaded file will deliberately INCLUDE your LIVE game's SECRETS — off-screen scheming, NPC confessionals, hidden ties, the sealed twists, and the real eviction votes. It overrides the God-Mode Vault wall (mandate #2) for debugging.\\n\\nThis file WILL spoil your in-progress game — do not share it. Continue?")) return;
+  window.location.href = "/api/admin/debug-bundle?vault=1";
 });
 // ── BEGIN update-reset-combo lane: destructive Update + Reset (pull+rebuild THEN OOBE; type RESET) ──
 // Pulls latest + rebuilds, THEN wipes everything to first-run OOBE — keeping the API-key/LLM config.
