@@ -17,8 +17,13 @@ map). This module stays **pure**: it imports nothing (in particular nothing from
 
 Contract (ADR 0010 §5):
     resolve_token_policy(call_class, settings) ->
-        {"reasoning": <dict|None>, "max_tokens": int,
+        {"reasoning": <dict|None>, "max_tokens": int|None,
          "caching": bool, "context_budget": int|None}
+
+``max_tokens`` is ``None`` for a class whose default is "use the model-aware cap" (narration,
+casting) when there is NO in-band admin override — the call site substitutes a model-sized
+default (full reasoning+answer headroom). An explicit, in-band ``max_tokens_budget`` override
+yields a positive int and always wins.
 
 ``reasoning`` is the OpenRouter form ``{"effort": "low"|"medium"|"high"}`` or
 ``None`` when the effort is ``"off"`` (the field is omitted from the payload).
@@ -38,10 +43,20 @@ _DEFAULT_EFFORT = {
     "casting": "medium",
     "background-authoring": "low",
 }
+# The per-class default output cap. ``None`` means "use the caller's model-aware default" — the
+# resolver leaves ``max_tokens`` as ``None`` so the call site (which knows the concrete model)
+# substitutes ``llm_core._model_max_output_tokens(model)`` (a generous, model-sized cap). A flat
+# constant here re-introduced the #835 truncation vector for reasoning models (deepseek-v4-pro
+# counts reasoning+visible against ``max_tokens``, so a flat 4096 truncated narration mid-reply —
+# the #620 NARR-5 warning). ``narration``/``casting`` therefore default to ``None`` (full model
+# headroom for reasoning + answer); the short, non-reasoning utility/background classes keep their
+# tight literal caps. An EXPLICIT, in-band admin override (``max_tokens_budget[class]``) still wins
+# for ANY class — that is the point of ADR 0010 #1 — and the resolved value is recorded in the
+# ledger's ``appliedMaxTokens``.
 _DEFAULT_MAX_TOKENS = {
-    "narration": 4096,
+    "narration": None,  # ⇒ model-aware default at the call site (full reasoning+answer headroom)
     "utility-extraction": 1500,
-    "casting": 2048,
+    "casting": None,    # ⇒ model-aware default (same reasoning-truncation applies; turns are short)
     "background-authoring": 1200,
 }
 # "off" -> reasoning omitted (None). The full set of admin-acceptable values.
@@ -91,7 +106,11 @@ def resolve_token_policy(call_class: str, settings: dict | None = None) -> dict:
     - ``reasoning``: ``{"effort": "low"|"medium"|"high"}`` per the effort, or
       ``None`` when the effort is ``"off"`` (the field is omitted from the payload).
       No class is ever default-by-omission — every class names an explicit posture.
-    - ``max_tokens``: the per-class output cap — admin-editable at runtime (see below).
+    - ``max_tokens``: the per-class output cap — admin-editable at runtime (see below). It is
+      ``None`` when the class default is "use the caller's model-aware cap" (narration, casting)
+      and there is no in-band override — the call site fills in a model-sized default so a
+      reasoning model has room to think AND answer (the alternative, a flat literal, truncated
+      reasoning-model narration mid-reply — #835/#620 NARR-5). An in-band override is a positive int.
     - ``caching``: ``True`` for all classes (provider-automatic; the live model caches).
     - ``context_budget``: ``None`` — computed elsewhere by ``context_budget.py``;
       a reserved hook so the contract is stable.
@@ -99,7 +118,8 @@ def resolve_token_policy(call_class: str, settings: dict | None = None) -> dict:
     Admin overrides (both per-class, both defensively read, both wins-over-default):
     - ``settings["reasoning_budget"][call_class]`` — one of ``valid_efforts()``.
     - ``settings["max_tokens_budget"][call_class]`` — an in-band positive int
-      (``max_tokens_bounds()``); out-of-band / non-int / non-positive ⇒ class default.
+      (``max_tokens_bounds()``); out-of-band / non-int / non-positive ⇒ class default
+      (which, for narration/casting, is ``None`` ⇒ the call site's model-aware cap).
 
     An unknown/garbage override falls back to the class default; an unknown
     ``call_class`` falls back to the ``"narration"`` defaults. Defensive: ``settings``

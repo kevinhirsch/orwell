@@ -31,7 +31,10 @@ CALL_CLASSES = token_policy.CALL_CLASSES
 def test_narration_defaults_medium_effort():
     pol = resolve_token_policy("narration")
     assert pol["reasoning"] == {"effort": "medium"}
-    assert pol["max_tokens"] == 4096
+    # max_tokens is None (NOT a flat 4096) by default ⇒ "use the model-aware cap" at the call site.
+    # A flat 4096 truncated reasoning-model narration mid-reply (#835/#620 NARR-5); the call site
+    # (test below) substitutes _model_max_output_tokens(model). An in-band override still wins.
+    assert pol["max_tokens"] is None
 
 
 def test_utility_extraction_defaults():
@@ -43,7 +46,9 @@ def test_utility_extraction_defaults():
 def test_casting_defaults_medium_effort():
     pol = resolve_token_policy("casting")
     assert pol["reasoning"] == {"effort": "medium"}
-    assert pol["max_tokens"] == 2048
+    # Casting also defaults to None ⇒ model-aware cap: the SAME reasoning-truncation applies
+    # (casting turns are short, so 4096 rarely bit, but a reasoning model can still overrun).
+    assert pol["max_tokens"] is None
 
 
 def test_background_authoring_defaults_low_effort():
@@ -65,8 +70,8 @@ def test_off_override_omits_reasoning():
     settings = {"reasoning_budget": {"narration": "off"}}
     pol = resolve_token_policy("narration", settings)
     assert pol["reasoning"] is None
-    # The output cap is unaffected by the reasoning override.
-    assert pol["max_tokens"] == 4096
+    # The output cap is unaffected by the reasoning override (still the model-aware default ⇒ None).
+    assert pol["max_tokens"] is None
 
 
 def test_high_override_beats_default():
@@ -88,15 +93,15 @@ def test_garbage_effort_override_falls_back_to_class_default():
     for bad in ("ultra", "", "MEDIUM", 7, None, {"effort": "high"}):
         settings = {"reasoning_budget": {"casting": bad}}
         pol = resolve_token_policy("casting", settings)
-        # casting default effort is "medium"
+        # casting default effort is "medium"; default max_tokens is None (model-aware cap)
         assert pol["reasoning"] == {"effort": "medium"}, bad
-        assert pol["max_tokens"] == 2048, bad
+        assert pol["max_tokens"] is None, bad
 
 
 def test_unknown_call_class_falls_back_to_narration_without_raising():
     pol = resolve_token_policy("totally-unknown-class")
     assert pol["reasoning"] == {"effort": "medium"}
-    assert pol["max_tokens"] == 4096
+    assert pol["max_tokens"] is None  # narration default ⇒ model-aware cap at the call site
     assert pol["caching"] is True
     assert pol["context_budget"] is None
 
@@ -107,7 +112,7 @@ def test_unknown_call_class_still_honors_a_matching_override_if_present():
     settings = {"reasoning_budget": {"totally-unknown-class": "off"}}
     pol = resolve_token_policy("totally-unknown-class", settings)
     assert pol["reasoning"] is None
-    assert pol["max_tokens"] == 4096
+    assert pol["max_tokens"] is None  # narration default ⇒ model-aware cap
 
 
 # --- 4. Defensive settings: None / missing key / non-dict -> defaults ---------
@@ -125,7 +130,7 @@ def test_settings_not_a_dict_never_raises():
     for bad in ("a string", 42, ["list"], object()):
         pol = resolve_token_policy("narration", bad)  # must not raise
         assert pol["reasoning"] == {"effort": "medium"}
-        assert pol["max_tokens"] == 4096
+        assert pol["max_tokens"] is None
 
 
 def test_reasoning_budget_not_a_dict_never_raises():
@@ -136,7 +141,7 @@ def test_reasoning_budget_not_a_dict_never_raises():
 
 # --- 5. No class is reasoning-by-omission: explicit key + int max_tokens -------
 
-def test_every_class_has_explicit_reasoning_decision_and_int_max_tokens():
+def test_every_class_has_explicit_reasoning_decision_and_max_tokens():
     for call_class in CALL_CLASSES:
         pol = resolve_token_policy(call_class)
         assert "reasoning" in pol
@@ -144,8 +149,11 @@ def test_every_class_has_explicit_reasoning_decision_and_int_max_tokens():
         assert pol["reasoning"] is None or isinstance(pol["reasoning"], dict)
         if isinstance(pol["reasoning"], dict):
             assert pol["reasoning"]["effort"] in ("low", "medium", "high")
-        assert isinstance(pol["max_tokens"], int)
-        assert pol["max_tokens"] > 0
+        # max_tokens is EITHER a positive int (a literal class cap) OR None (use the model-aware
+        # cap at the call site). It is never <= 0, and the key is always present.
+        assert "max_tokens" in pol
+        mt = pol["max_tokens"]
+        assert mt is None or (isinstance(mt, int) and not isinstance(mt, bool) and mt > 0)
 
 
 def test_every_class_explicit_under_off_override_too():
@@ -156,7 +164,8 @@ def test_every_class_explicit_under_off_override_too():
         pol = resolve_token_policy(call_class, settings)
         assert "reasoning" in pol
         assert pol["reasoning"] is None
-        assert isinstance(pol["max_tokens"], int)
+        mt = pol["max_tokens"]
+        assert mt is None or (isinstance(mt, int) and not isinstance(mt, bool) and mt > 0)
 
 
 # --- helper surface -----------------------------------------------------------
@@ -180,7 +189,8 @@ def test_max_tokens_override_beats_default():
 def test_max_tokens_override_is_per_class_only():
     settings = {"max_tokens_budget": {"casting": 9000}}
     assert resolve_token_policy("casting", settings)["max_tokens"] == 9000
-    assert resolve_token_policy("narration", settings)["max_tokens"] == 4096  # untouched default
+    # narration untouched ⇒ its default (None ⇒ model-aware cap), not the casting override
+    assert resolve_token_policy("narration", settings)["max_tokens"] is None
 
 
 def test_both_overrides_compose():
@@ -198,7 +208,12 @@ def test_out_of_band_or_garbage_max_tokens_falls_back_to_class_default():
     for bad in (0, -1, lo - 1, hi + 1, "4096", 4096.0, True, None, [4096]):
         settings = {"max_tokens_budget": {"narration": bad}}
         pol = resolve_token_policy("narration", settings)
-        assert pol["max_tokens"] == 4096, bad  # class default stands; never the bad value
+        # class default stands (None ⇒ model-aware cap); the bad value is never the cap
+        assert pol["max_tokens"] is None, bad
+    # a non-reasoning class with a LITERAL default still falls back to that literal
+    for bad in (0, -1, "1500"):
+        pol = resolve_token_policy("utility-extraction", {"max_tokens_budget": {"utility-extraction": bad}})
+        assert pol["max_tokens"] == 1500, bad
 
 
 def test_in_band_bounds_inclusive():
@@ -210,7 +225,7 @@ def test_in_band_bounds_inclusive():
 def test_max_tokens_budget_not_a_dict_never_raises():
     for bad in ("nope", 5, ["x"], object()):
         pol = resolve_token_policy("narration", {"max_tokens_budget": bad})
-        assert pol["max_tokens"] == 4096
+        assert pol["max_tokens"] is None  # narration default ⇒ model-aware cap
 
 
 def test_max_tokens_bounds_shape():
