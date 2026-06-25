@@ -348,6 +348,17 @@ export interface SeasonCtx {
    * ledger reconciles downstream. Optional: omitted ⇒ no deal term.
    */
   dealsOf?: (id: EntityId) => readonly Deal[];
+  /**
+   * 0085 — the per-listener CAMPAIGN tilt: the summed, CHARACTER-mediated push (`campaignTilt` =
+   * persuasiveness(owner) × susceptibility(voter) × trust × progress) from campaigns to EVICT `target`
+   * that `voter` is AWARE of (on a pathway — the symmetric-perspective spine). A sustained, well-pitched
+   * campaign raises its target's eviction odds; the engine TALLIES it, narration only voices it
+   * (anti-sycophancy). Optional: omitted ⇒ 0, so the seeded vote — and the whole `juryReach` calibration
+   * spine — is BYTE-IDENTICAL to the pre-feature model. ENGINE-ONLY (a bounded number; never crosses the
+   * wall). Wired only by the LIVE adapter (Phase B2); the calibration/UAT harness leaves it unset, so
+   * campaigns never shift the baseline gates.
+   */
+  campaignTiltFor?: (target: EntityId, voter: EntityId) => number;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -764,7 +775,10 @@ export function voteChoice(voter: EntityId, fn: [EntityId, EntityId], ctx: Seaso
     deals.some((d) => d.status === "open" && d.condition.promisors.includes(voter) && d.parties.includes(n) && n !== voter);
   const score = (n: EntityId): number =>
     ctx.rel.edge(voter, n).threat * (1 + paranoia * V.moodSelfProtectWeight) +
-    blocTerm(blocs, voter, n) -
+    blocTerm(blocs, voter, n) +
+    // 0085: a campaign to evict `n` that this voter is aware of pushes the vote toward `n` — bounded,
+    // character-mediated, engine-tallied. Absent provider ⇒ 0 ⇒ byte-identical (the juryReach spine).
+    (ctx.campaignTiltFor?.(n, voter) ?? 0) -
     (dealBound(n) ? V.dealHonorWeight : 0) -
     V.juryManagementWeight * ctx.rel.edge(n, voter).trust -
     V.bondKeepWeight * ctx.rel.bondStrength(voter, n);
