@@ -39242,6 +39242,28 @@ body.theme-frosted .msg-ooc.msg-ooc-producer {
   border-color: rgba(255,255,255,0.26) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.12) !important;
 }
+/* ── #709 casting "on file" producer aside: follow the bubble's ADAPTIVE ink ─────────
+   The LIVE-stream producer/casting aside (.ooc-producer-aside — the inner div emitted by
+   markdown.js for a fully `((…))`-wrapped reply, e.g. the casting "your cast photo is on
+   file" note) PINS its own text colour `color-mix(var(--fg) 78%)` — which on the glass theme
+   is the LIGHT cyan --fg. That hard colour OVERRIDES the #744 adaptive ink the parent .msg-ai
+   bubble flips to over a BRIGHT wallpaper (the bubble goes dark-ink, the aside stays light-cyan
+   → light-on-light, measured ~1:1, invisible — the owner's "cast photo is on file" report).
+   The aside is INNER content of an adaptive bubble, so it must FOLLOW that polarity, not pin a
+   fixed hue. Inherit the bubble's ink (the .msg-ai/.body chain already carries the adaptive
+   colour) + a LIGHT legibility halo (matching the dark-ink-on-glass contract; the dark
+   --ow-glass-text-shadow would smudge under dark ink). The dashed frame + "production" badge
+   keep their quiet identity — the badge derives from currentColor so it tracks the ink too.
+   Scoped to body.theme-frosted; the Normal tier keeps its light-cyan backstage look. */
+body.theme-frosted .ooc-producer-aside {
+  color: inherit !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
+}
+body.theme-frosted .ooc-producer-aside::before {
+  color: inherit !important;
+  background: color-mix(in srgb, currentColor 10%, transparent) !important;
+  border-color: color-mix(in srgb, currentColor 22%, transparent) !important;
+}
 
 /* KEEP INNER CONTENT CRISP: code blocks / pre / inline code / blockquotes / tables
    INSIDE a glassed bubble must stay a SOLID/contrast inner surface (Apple: content on
