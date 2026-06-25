@@ -485,17 +485,22 @@ def test_two_light_cluster_close_and_min():
 
 
 def test_compact_pin_is_monochrome_kit_control():
-    # Owner ruling (#769): the Cast "Compact pin" control is a kit-consistent button —
-    # a MONOCHROME inline SVG (currentColor), NOT a full-color emoji pushpin, and styled
-    # on glass with a soft white hairline + no accent on the text.
+    # Owner ruling (#769 first-pass → #771 proper reskin): the Cast "Compact pin" control is
+    # a FIRST-CLASS kit button — a MONOCHROME inline SVG (currentColor), NOT a full-color
+    # emoji pushpin; it rides .ow-btn (the shared glass material) and styles on glass with the
+    # kit's dark legible ink + a soft white hairline, no accent on the text. The exhaustive
+    # state/markup gate lives in test_0771_compact_pin_kit.py; this keeps the headline contract
+    # pinned alongside the rest of the glass kit.
     cast = _read("static", "js", "orwellCast.js")
     # the oc-pin button carries an inline SVG glyph (currentColor, kit language)…
-    assert re.search(r'class="oc-pin"[^>]*>\s*<svg[^>]*stroke="currentColor"', cast)
+    assert re.search(r'id="oc-pin"[^>]*>\s*<svg[^>]*stroke="currentColor"', cast)
+    # …it is a first-class kit button (rides .ow-btn)…
+    assert re.search(r'class="oc-pin ow-btn[^"]*"', cast)
     # …and NO full-color emoji pushpin glyph.
     assert "📌" not in cast
-    # the .oc-pin button text never picks up an accent color (dark legible ink on glass).
+    # the .oc-pin button text is the kit's dark chrome ink (legible on glass), never an accent.
     pinblk = re.search(r"#orwell-cast \.oc-pin \{(.*?)\}", cast, re.S).group(1)
-    assert "--accent" not in pinblk and "color: inherit" in pinblk
+    assert "--accent" not in pinblk and "#16191f" in pinblk
     # on the frosted glass it carries the kit's soft white hairline (rgba(255,255,255,0.14)).
     assert re.search(
         r"body\.theme-frosted #orwell-cast[^{]*\.oc-pin[^{]*\{[^}]*rgba\(255,255,255,0\.14\)",

@@ -1339,7 +1339,15 @@ export function initThemeUI() {
         const ec = ct && ct.bgEffectColor ? ct.bgEffectColor : (THEME_DEFAULT_EFFECT_COLOR[name] || '');
         const ei = (ct && ct.bgEffectIntensity !== undefined) ? ct.bgEffectIntensity : (THEME_DEFAULT_INTENSITY[name] !== undefined ? THEME_DEFAULT_INTENSITY[name] : 1);
         const sz = (ct && ct.bgEffectSize !== undefined) ? ct.bgEffectSize : 1;
-        const tier = resolveGlassTier(ct, name);
+        // #780 (glass-tier override gap): a BUILT-IN theme has no `ct`, so
+        // resolveGlassTier(null, name) always returned the per-theme DEFAULT — which
+        // CLOBBERED a tier the player had explicitly chosen for that same theme (e.g.
+        // 'glass' forced back to 'full' on every re-select, so a saved 'frosted'/'normal'
+        // never survived). When re-selecting the SAME theme that is already saved with an
+        // explicit tier, preserve it; only fall to the theme default on a genuine theme change.
+        const _savedRec = getSaved();
+        const _tierRec = ct || ((_savedRec && _savedRec.name === name) ? _savedRec : null);
+        const tier = resolveGlassTier(_tierRec, name);
         // A custom theme may carry its own wallpaper; a built-in preset has none
         // (selecting a built-in clears any active image so its pattern shows).
         const img = (ct && ct.bgImage) ? ct.bgImage : '';

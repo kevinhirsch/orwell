@@ -57,6 +57,22 @@
   --ow-radius: 26px;            /* window/card/dialog surface (very rounded, Apple) */
   --ow-radius-inner: 16px;      /* a control nested inside a surface (concentric)   */
   --ow-radius-pill: 999px;      /* capsule / circular disc                          */
+  /* COMPUTED concentric radius (SwiftUI 2026 `.containerConcentric` / WWDC25 356).
+     A nested surface's corner should equal its PARENT radius minus the inset between
+     them — so the child's corner runs PARALLEL to the parent's, never a mismatched
+     corner. This is the .ow-btn-concentric precedent (inner = parent − padding)
+     GENERALIZED from controls to nested SURFACES (cards/panels inside windows).
+     A nested surface sets --ow-parent-radius + --ow-parent-inset ON ITSELF and reads
+     --ow-radius-concentric for its border-radius; the corner then adapts to the parent.
+     With neither set the fallback (--ow-radius-inner) stands, so a non-nested surface
+     is unchanged. max(0,…) guards a negative radius when the inset exceeds the parent.
+     NOTE: like .ow-btn-concentric, the calc is re-stated in each consuming rule (the
+     nested var()s must resolve in the CHILD's scope, not :root's), and this :root copy
+     keeps the canonical formula in one documented place + powers the contract fallback. */
+  --ow-radius-concentric: max(
+    0px,
+    calc(var(--ow-parent-radius, var(--ow-radius)) - var(--ow-parent-inset, 0px))
+  );
   /* Type ramp (SF default): weights — never thin on glass (Regular/Medium/Semibold/Bold).
      HIG Typography (#696): floor at Regular (400); avoid Light/Thin entirely. */
   --ow-fw-regular: 400;
@@ -14015,6 +14031,17 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
    Covers both the settings + theme kit-titlebar Peek toggles. */
 @media (max-width: 480px), (pointer: coarse) {
   .theme-opacity-wrap.theme-opacity-toggle { min-height: 44px; min-width: 44px; height: auto; }
+  /* When Peek is re-homed into the kit titlebar it ALSO carries .ow-titlebar-accessory,
+     whose `body.theme-frosted .ow-titlebar-accessory { min-height:24px }` rule (higher
+     specificity) was clamping the box back to 24px — the matrix measured 59x24 at
+     phone-390. Re-assert the 44px touch floor at higher specificity + !important so it
+     beats the accessory sizing in BOTH glass tiers. Desktop (no media match) is untouched,
+     so the compact 22px look stands there. Covers the settings + theme Peek toggles. */
+  .theme-opacity-wrap.theme-opacity-toggle.ow-titlebar-accessory,
+  body.theme-frosted .theme-opacity-wrap.theme-opacity-toggle.ow-titlebar-accessory {
+    min-height: 44px !important; min-width: 44px !important;
+    height: auto !important; max-height: none !important;
+  }
 }
 /* The title h4 already carries margin-right:auto to group header controls
    on the right. BOTH the Peek button AND the injected minimize button also
@@ -22330,6 +22357,28 @@ body.gallery-selecting .gallery-dl-btn,
   }
   .settings-panels {
     padding: 12px 14px;
+  }
+}
+
+/* TABLET TIER (769–920px viewport — above the mobile full-screen sheet at ≤768,
+   below the laptop tier at ≥1024): the kit window is capped at 64vw, so the
+   settings content lands in a 480–500px DEAD ZONE right at ~820px — the exact
+   knife-edge of the G6 rail stack/left decision. getBoundingClientRect (the
+   matrix's basis) and the @container resolution can fall on OPPOSITE sides of
+   the 480 token there depending on the runner (scrollbar gutter, vw rounding),
+   so the rail flickered between left and stacked across environments. Cap the
+   SETTINGS kit window narrow enough at this tier that its content is reliably
+   ≤480 — which lets the EXISTING `@container settings-modal (max-width:480px)`
+   rule do the stacking (container-driven, per the brief), with no boundary
+   ambiguity. A ~500px settings window at an ~820px viewport is cramped anyway,
+   so the stacked rail is the better layout here (the G6 intent). Laptop/desktop
+   (≥1024, ≥1366) are untouched — their wide modal keeps the LEFT rail. */
+@media (min-width: 769px) and (max-width: 920px) {
+  #settings-modal.ow-window {
+    /* window border (2px) + .ow-body horizontal padding (~23px) ≈ 25px of
+       chrome; cap at 500px ⇒ content ≤ ~475px ⇒ under the 480 token. !important
+       beats the kit's `max-width: 64vw` base rule. */
+    max-width: 500px !important;
   }
 }
 
@@ -37913,6 +37962,40 @@ body.theme-frosted .on-card button,
 body.theme-frosted .og-card button {
   border-radius: var(--ow-glass-radius-inner) !important;
 }
+
+/* COMPUTED concentric SURFACE nesting (--ow-radius-concentric / SwiftUI
+   .containerConcentric). The fixed --ow-glass-radius-inner above is a hand-tuned
+   approximation; a genuinely-nested surface should instead DERIVE its corner from
+   its parent so the two corners stay parallel. A nested card/panel sets the parent
+   radius + the inset between it and its parent ON ITSELF, then reads the computed
+   --ow-radius-concentric. With 26px parent − ~10px inset this lands on ~16px (the
+   old fixed inner value), but now it TRACKS the window if the window radius changes
+   — no second hand-tuned constant. Non-nested instances of these cards keep the
+   --ow-glass-radius surface treatment from the rule above (they aren't matched here).
+   (The vars + calc are re-stated here, not inherited from :root — nested var()s must
+   resolve in the CHILD's own scope; same pattern as .ow-btn-concentric.) */
+body.theme-frosted .ow-window > .ow-body .admin-card,
+body.theme-frosted .ow-window > .ow-body .og-card,
+body.theme-frosted .ow-window > .ow-body .on-card {
+  --ow-parent-radius: var(--ow-glass-radius);
+  --ow-parent-inset: 10px;   /* the .ow-body padding (≈.7rem) — the gap to the child  */
+  /* --ow-radius-concentric formula, re-stated so its var()s resolve in THIS scope. */
+  --ow-radius-concentric: max(
+    0px, calc(var(--ow-parent-radius) - var(--ow-parent-inset)));
+  border-radius: var(--ow-radius-concentric) !important;
+}
+
+/* The decision card in CHAT is a glass surface nested inside the chat scroll column
+   (the conversation is its container). It derives its corner concentrically from the
+   chat surface radius rather than carrying a bespoke fixed radius. */
+body.theme-frosted #orwell-decision-card {
+  --ow-parent-radius: var(--ow-glass-radius);
+  --ow-parent-inset: 8px;    /* the card's gutter inside the chat column */
+  --ow-radius-concentric: max(
+    0px, calc(var(--ow-parent-radius) - var(--ow-parent-inset)));
+  border-radius: var(--ow-radius-concentric) !important;
+}
+
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   border-radius: var(--ow-glass-radius-inner) !important;
 }
@@ -39855,6 +39938,28 @@ body.theme-frosted .search-status {
    spinner/dot, the chip background tint) are untouched — only TEXT goes neutral dark. */
 body.theme-frosted .thinking-header-left,
 body.theme-frosted .tool-indicator.active {
+  color: #16191f !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
+}
+/* ── #759 sweep: the DOC-FENCE indicator family is the SAME defect class ──────────
+   The active document indicator in the chat toolbar (.doc-indicator-active /
+   #doc-indicator-btn.active) and its overflow-menu twin (#overflow-doc-btn.has-docs /
+   .active) paint their OWN text at var(--accent, var(--red)) (base, ~line 3014/3023) to
+   signal the "docs attached / panel open" state. On the glass theme --accent is unset and
+   --red resolves to the house accent HUE (#c6613f orange on the default glass theme), so
+   these chips read as an ACCENT-ON-GLASS glyph on the LIGHT glass chrome (measured ~4.05:1
+   vs. a white-composited surface — sub-floor, and an accent hue the no-accent-on-text
+   contract forbids; worse over a darker wallpaper showing through the glass). #overflow-doc-btn
+   sits inside .overflow-menu, which only redefines --fg (NOT --accent/--red), so the kit
+   dark-ink redefine does NOT reach its accent text either. Flip the TEXT to the SAME neutral
+   dark ink the active tool chip above uses (#16191f) + a LIGHT halo (not the dark
+   --ow-glass-text-shadow, which under dark ink reads as a smudge — #725 pattern). The state
+   still reads (opacity:1 + the chip's own background tint persist) — only the accent HUE on
+   the glyph goes neutral, exactly like .tool-indicator.active. */
+body.theme-frosted .doc-indicator-active,
+body.theme-frosted #doc-indicator-btn.active,
+body.theme-frosted #overflow-doc-btn.has-docs,
+body.theme-frosted #overflow-doc-btn.active {
   color: #16191f !important;
   text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
 }

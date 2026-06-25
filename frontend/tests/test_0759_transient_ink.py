@@ -208,3 +208,79 @@ def test_markdown_timer_has_pinnable_class():
     assert 'class="thinking-timer"' in MARKDOWN_JS, (
         "markdown.js timeHtml must carry class=\"thinking-timer\" for the neutral color pin"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════
+# #759 sweep — the DOC-FENCE indicator family is the SAME defect class.
+#
+# The active document indicator in the chat toolbar (.doc-indicator-active /
+# #doc-indicator-btn.active) and its overflow-menu twin (#overflow-doc-btn.has-docs /
+# .active) paint their OWN text at var(--accent, var(--red)) (base ~line 3014/3023) for
+# the "docs attached / panel open" state. On the glass theme --accent is unset and --red
+# resolves to the house accent HUE (#c6613f on the default glass theme) — an ACCENT-ON-GLASS
+# glyph on the LIGHT glass chrome (measured ~4.05:1 vs. a white-composited surface, vs.
+# ~17.6:1 after the fix). #overflow-doc-btn sits inside .overflow-menu, whose dark-ink
+# redefine only touches --fg (NOT --accent/--red), so it is NOT covered by that scope.
+# Fix: flip the TEXT to the SAME neutral dark ink (#16191f) + a LIGHT halo, scoped to
+# body.theme-frosted (Normal tier untouched). NON-text state cues (opacity, the chip
+# background tint) persist — only the accent HUE on the glyph goes neutral.
+# ══════════════════════════════════════════════════════════════════════════════════
+_DOC_TARGETS = (
+    "body.theme-frosted .doc-indicator-active",
+    "body.theme-frosted #doc-indicator-btn.active",
+    "body.theme-frosted #overflow-doc-btn.has-docs",
+    "body.theme-frosted #overflow-doc-btn.active",
+)
+
+
+def test_doc_indicator_family_is_dark_ink_under_frosted():
+    for target in _DOC_TARGETS:
+        color = _frosted_color_for(target)
+        assert color is not None, f"{target} has no frosted text-color rule (#759 sweep)"
+        assert DARK_INK in color.lower(), (
+            f"{target} frosted color is {color!r}, expected {DARK_INK} "
+            "(neutral dark ink on light glass — no accent hue)"
+        )
+        assert "var(--accent)" not in color, (
+            f"{target} text must NOT keep var(--accent) (accent hue on glass — the bug)"
+        )
+        assert "var(--red)" not in color, (
+            f"{target} text must NOT keep var(--red) (accent hue on glass — the bug)"
+        )
+        assert "var(--fg)" not in color, (
+            f"{target} must NOT route to light var(--fg) (light on light glass)"
+        )
+
+
+def test_doc_indicator_family_carries_light_halo():
+    """The dark-ink doc-indicator fix uses a LIGHT (white) halo, never the dark
+    --ow-glass-text-shadow (a dark shadow under dark ink = a smudge, #725)."""
+    blocks = [
+        (s, b) for (s, b) in _blocks_for("body.theme-frosted .doc-indicator-active")
+        if "body.theme-frosted #overflow-doc-btn.active" in s and DARK_INK in b.lower()
+    ]
+    assert blocks, "the shared #759-sweep doc-indicator dark-ink fix block was not found"
+    _, body = blocks[0]
+    ts = re.search(r"text-shadow\s*:\s*([^;]+);", body)
+    assert ts, "the doc-indicator fix block sets no text-shadow"
+    val = ts.group(1)
+    assert "255,255,255" in val.replace(" ", "") or "255, 255, 255" in val, (
+        f"text-shadow should be a LIGHT halo (white), got {val!r}"
+    )
+    assert "var(--ow-glass-text-shadow)" not in val, (
+        "must not use the dark --ow-glass-text-shadow (smudge under dark ink)"
+    )
+
+
+def test_doc_indicator_fix_scoped_to_frosted_only():
+    """The doc-indicator dark-ink fix must be scoped under body.theme-frosted so the
+    Normal tier keeps its accent-state glyph."""
+    blocks = [
+        s for (s, b) in _blocks_for(".doc-indicator-active")
+        if DARK_INK in b.lower() and "#overflow-doc-btn.active" in s
+    ]
+    assert blocks, "no shared dark-ink fix block for the doc-indicator family"
+    for s in blocks:
+        assert "body.theme-frosted" in s, (
+            "the doc-indicator dark-ink fix must be scoped under body.theme-frosted"
+        )

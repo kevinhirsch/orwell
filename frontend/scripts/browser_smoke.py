@@ -866,18 +866,55 @@ def main() -> int:
 
             # F2 (DWE audit): drag must MOVE the panel — the slot restack used to revert
             # every windowDrag style write, leaving drag dead and offsets at (0,0).
+            # #783: the finale panel opens at its bottom-right HUD slot, parked flush against
+            # the 720px viewport bottom (y~635) — so the original DOWN-and-RIGHT drag was
+            # fully clamped by clampPos() (observed y 635->635, x moved only ~5px) and the
+            # check failed every run. Pin the panel to a top-left geometry with room below
+            # and to the right FIRST, then drag down-right into that room. Harness-only,
+            # Vault-free; drag direction is unchanged so the offset/restack checks below
+            # still see a real positive delta.
+            #
+            # DRAG_TOL: the shared px tolerance for every tolerance-based drag/resize band
+            # below (this F2 check + the kit/L11 checks). Headless trusted-pointer simulation
+            # drifts a few px run-to-run (sub-pixel rounding + frame timing); +/-30px absorbs
+            # that while still failing a dead/clamped drag (which lands tens of px off, ~0).
+            DRAG_TOL = 30
+            # NB: the slot system positions these windows with !important transform/inset,
+            # so the reset must use setProperty(..., 'important') to win (a plain style write
+            # is silently overridden — that left the panel parked at the edge).
+            page.evaluate("""() => {
+              Object.keys(localStorage)
+                .filter(k => /^orwell-slot-offset:finale/.test(k))
+                .forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+              const el = document.getElementById('orwell-finale');
+              if (el) {
+                el.style.setProperty('transform', 'none', 'important');
+                el.style.setProperty('right', 'auto', 'important');
+                el.style.setProperty('bottom', 'auto', 'important');
+                el.style.setProperty('left', '80px', 'important');
+                el.style.setProperty('top', '80px', 'important');
+              }
+            }""")
+            page.wait_for_timeout(300)
             hdr = page.query_selector("#orwell-finale .ow-titlebar")
             hb = hdr.bounding_box()
             r0 = page.evaluate("document.getElementById('orwell-finale').getBoundingClientRect().toJSON()")
+            # Tolerance-based (#783): assert the panel moved BY ~the intended drag delta in
+            # the correct direction, not to an exact coordinate — absorbs sub-pixel/timing
+            # drift while still failing a dead/clamped drag (which lands tens of px off, at
+            # a ~0 delta). DRAG_TOL is shared with the kit checks above (rationale there).
+            FIN_DX, FIN_DY = 150, 120  # intended drag delta (see loop below)
             page.mouse.move(hb["x"] + hb["width"] / 2, hb["y"] + hb["height"] / 2)
             page.mouse.down()
             for i in range(1, 9):
-                page.mouse.move(hb["x"] + hb["width"] / 2 + 150 * i / 8, hb["y"] + hb["height"] / 2 + 120 * i / 8)
+                page.mouse.move(hb["x"] + hb["width"] / 2 + FIN_DX * i / 8, hb["y"] + hb["height"] / 2 + FIN_DY * i / 8)
             page.mouse.up()
             page.wait_for_timeout(200)
             r1 = page.evaluate("document.getElementById('orwell-finale').getBoundingClientRect().toJSON()")
-            moved = abs(r1["x"] - r0["x"]) > 100 or abs(r1["y"] - r0["y"]) > 80
-            check(moved is True, f"F2: dragging the title bar MOVES the panel (x {r0['x']:.0f}->{r1['x']:.0f}, y {r0['y']:.0f}->{r1['y']:.0f})")
+            f_dx, f_dy = r1["x"] - r0["x"], r1["y"] - r0["y"]
+            check(abs(f_dx - FIN_DX) <= DRAG_TOL and abs(f_dy - FIN_DY) <= DRAG_TOL,
+                  f"F2: dragging the title bar MOVES the panel by ~the drag delta "
+                  f"(dx {f_dx:.0f}~{FIN_DX}, dy {f_dy:.0f}~{FIN_DY}, tol +/-{DRAG_TOL})")
             off = page.evaluate("""() => {
               const k = Object.keys(localStorage).find(k => k.startsWith('orwell-slot-offset:finale'));
               if (!k) return null;
@@ -934,49 +971,103 @@ def main() -> int:
             check(all(c["w"] >= 24 and c["h"] >= 24 and c["label"] for c in kit.get("ctrls", [])),
                   f"kit: control cluster named + >=24px tap targets ({kit.get('ctrls')})")
             check(kit.get("focused") is True, "kit: opening focuses (ow-focused on top of the stack)")
+            # Deterministic geometry before the drag/resize block (#783). Two real flake
+            # drivers, BOTH harness-side (no product bug — the window drags/resizes fine):
+            #   1. The kit restores a persisted winsize-<id>/slot-offset; a leftover LARGE
+            #      size or low position from a prior run parks the window flush against the
+            #      viewport bottom/right edge, where clampPos() pins a +120px drag/resize to
+            #      ~0 (observed dy/dh deltas of ~0 instead of ~90). Even fresh, the default
+            #      top-slot can sit only ~4px above the 720px viewport bottom — no room down.
+            #   2. The ow-open scale animation must fully settle (transform: none) before we
+            #      grab the titlebar, or the pointer lands on a transformed/stale rect.
+            # Fix: clear every persisted geometry key for this window, then pin it to a small
+            # top-left geometry with generous room BELOW and to the RIGHT so a +120/+90 drag
+            # and resize always fit, then wait out the animation. Vault-free, harness-only.
+            # The slot system positions via !important transform/inset, so use
+            # setProperty(..., 'important') or the reset is silently overridden.
+            page.evaluate("""() => {
+              Object.keys(localStorage)
+                .filter(k => /^(winsize-ow-smoke-window|winpos-ow-smoke-window|orwell-slot-offset:owsmoke)/.test(k))
+                .forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+              const el = document.getElementById('ow-smoke-window');
+              if (el) {
+                el.style.setProperty('transform', 'none', 'important');
+                el.style.setProperty('right', 'auto', 'important');
+                el.style.setProperty('bottom', 'auto', 'important');
+                el.style.setProperty('left', '60px', 'important');
+                el.style.setProperty('top', '60px', 'important');
+                el.style.setProperty('width', '320px', 'important');
+                el.style.setProperty('height', '240px', 'important');
+              }
+            }""")
+            page.wait_for_timeout(320)  # let the ow-open transform fully clear before measuring
+            # Tolerance-based drag/resize assertions (#783): headless trusted-pointer
+            # simulation drifts a few px run-to-run (sub-pixel rounding + frame timing —
+            # e.g. a +120px drag lands as +118 or +122, observed flips like x603->602 vs
+            # x595->594). So assert the window moved/resized BY APPROXIMATELY the intended
+            # drag delta in the correct direction, within a px tolerance, instead of pinning
+            # a near-exact final coordinate. The band [delta - DRAG_TOL, delta + DRAG_TOL]
+            # absorbs the drift while keeping teeth: a window that doesn't move, moves the
+            # wrong way, or doesn't resize lands far outside it (its measured delta is ~0 or
+            # opposite-signed, dozens of px from the expected delta). (DRAG_TOL is defined
+            # once, above the F2 finale-drag check, and shared by every drag/resize band.)
+            DRAG_DX, DRAG_DY = 120, 90  # intended titlebar-drag delta (see loop below)
             kb = page.query_selector("#ow-smoke-window .ow-titlebar").bounding_box()
             page.mouse.move(kb["x"] + 40, kb["y"] + kb["height"] / 2)
             page.mouse.down()
             for i in range(1, 7):
-                page.mouse.move(kb["x"] + 40 + 120 * i / 6, kb["y"] + kb["height"] / 2 + 90 * i / 6)
+                page.mouse.move(kb["x"] + 40 + DRAG_DX * i / 6, kb["y"] + kb["height"] / 2 + DRAG_DY * i / 6)
             page.mouse.up()
             page.wait_for_timeout(150)
             kmoved = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
-            check(abs(kmoved["x"] - kb["x"]) > 60, f"kit: trusted drag moves the window (x {kb['x']:.0f}->{kmoved['x']:.0f})")
+            k_dx, k_dy = kmoved["x"] - kb["x"], kmoved["y"] - kb["y"]
+            check(abs(k_dx - DRAG_DX) <= DRAG_TOL and abs(k_dy - DRAG_DY) <= DRAG_TOL,
+                  f"kit: trusted drag moves the window by ~the drag delta "
+                  f"(dx {k_dx:.0f}~{DRAG_DX}, dy {k_dy:.0f}~{DRAG_DY}, tol +/-{DRAG_TOL})")
 
             # L11: every kit window resizes from the SIDE and the CORNER on
             # desktop (edge-proximity grips), and the size persists under the
             # kit's one winsize-<id> key. Grab the bottom-right corner and drag
             # it out — width AND height must grow, and the chosen size sticks.
+            # Same tolerance rationale as the drag check above (#783): assert the
+            # corner drag GREW width and height by ~the intended +120/+90 delta within
+            # DRAG_TOL, in the right direction. A window that fails to resize lands at a
+            # ~0 delta, dozens of px below the band's lower edge, so the check still bites.
+            CORNER_DW, CORNER_DH = 120, 90  # intended corner-drag delta (see loop below)
             rbefore = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
             cx = rbefore["x"] + rbefore["width"] - 2
             cy = rbefore["y"] + rbefore["height"] - 2
             page.mouse.move(cx, cy)
             page.mouse.down()
             for i in range(1, 7):
-                page.mouse.move(cx + 120 * i / 6, cy + 90 * i / 6)
+                page.mouse.move(cx + CORNER_DW * i / 6, cy + CORNER_DH * i / 6)
             page.mouse.up()
             page.wait_for_timeout(150)
             rcorner = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
-            check(rcorner["width"] - rbefore["width"] > 60 and rcorner["height"] - rbefore["height"] > 40,
-                  f"L11: corner-drag resizes the window (w {rbefore['width']:.0f}->{rcorner['width']:.0f}, "
-                  f"h {rbefore['height']:.0f}->{rcorner['height']:.0f})")
-            # the right EDGE alone resizes width only (a true side grip)
+            c_dw, c_dh = rcorner["width"] - rbefore["width"], rcorner["height"] - rbefore["height"]
+            check(abs(c_dw - CORNER_DW) <= DRAG_TOL and abs(c_dh - CORNER_DH) <= DRAG_TOL,
+                  f"L11: corner-drag resizes the window by ~the drag delta "
+                  f"(dw {c_dw:.0f}~{CORNER_DW}, dh {c_dh:.0f}~{CORNER_DH}, tol +/-{DRAG_TOL})")
+            # the right EDGE alone resizes width only (a true side grip) — same #783
+            # tolerance: width grows by ~the +80 edge-drag delta within DRAG_TOL.
+            EDGE_DW = 80  # intended right-edge-drag delta (see loop below)
             rmid = page.evaluate("document.getElementById('ow-smoke-window').getBoundingClientRect().toJSON()")
             ex = rmid["x"] + rmid["width"] - 2
             ey = rmid["y"] + rmid["height"] / 2
             page.mouse.move(ex, ey)
             page.mouse.down()
             for i in range(1, 5):
-                page.mouse.move(ex + 80 * i / 4, ey)
+                page.mouse.move(ex + EDGE_DW * i / 4, ey)
             page.mouse.up()
             page.wait_for_timeout(120)
             redge = page.evaluate("""() => ({
               w: Math.round(document.getElementById('ow-smoke-window').getBoundingClientRect().width),
               saved: localStorage.getItem('winsize-ow-smoke-window'),
             })""")
-            check(redge["w"] - round(rmid["width"]) > 40,
-                  f"L11: right-edge drag widens the window (w {rmid['width']:.0f}->{redge['w']})")
+            e_dw = redge["w"] - round(rmid["width"])
+            check(abs(e_dw - EDGE_DW) <= DRAG_TOL,
+                  f"L11: right-edge drag widens the window by ~the drag delta "
+                  f"(dw {e_dw:.0f}~{EDGE_DW}, tol +/-{DRAG_TOL}, w {rmid['width']:.0f}->{redge['w']})")
             check(bool(redge["saved"]) and '"w"' in (redge["saved"] or ""),
                   f"L11: the resized geometry persists under winsize-ow-smoke-window ({redge['saved']!r})")
 

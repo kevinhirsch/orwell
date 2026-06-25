@@ -58,20 +58,30 @@
     if (!n) return;
     _lastReason = reason;
     const severity = kind === "down" ? "error" : "warn";
+    // #763: pass the icon EXPLICITLY through the kit's `icon` channel (a semantic key from the
+    // kit's ONE monochrome set — never a glyph baked into the title). "down" reads as a hard
+    // error, a "degraded"/reconnecting state as a warning — the same mono SVG family every other
+    // notice/banner uses, so BOTH engine-status banners share ONE icon language (no colour-emoji
+    // beside a mono symbol). The title strings stay glyph-free text. (Passing it explicitly rather
+    // than leaning on the system-notice severity auto-derive makes the kit's `icon` slot the single,
+    // legible source of the banner icon — consistent with the dock / #764 notice icons.)
+    const icon = kind === "down" ? "error" : "warn";
     // Mount (idempotent) then re-skin in place — a state transition (down → reconnecting) reuses
     // the same element (no flicker) and re-measures the body inset for the new copy.
     n.show();
-    n.update({ severity: severity, title: title, body: reason });
+    n.update({ severity: severity, icon: icon, title: title, body: reason });
   }
   function hide() {
     dismissedKey = null; // healthy again — a future problem should always reshow
     if (_notice) _notice.hide();
   }
 
-  // #764: titles carry NO baked-in glyph anymore — the icon is the OrwellNotice kit's severity-
-  // derived monochrome glyph (.on-icon), so engine-status shares ONE icon language with every other
-  // notice/banner (the old satellite/warning/clapperboard emoji baked into the title string mixed
-  // colour emoji with the kit's mono symbols). show()'s severity (error=down, warn=degraded) drives it.
+  // #764/#763: titles carry NO baked-in glyph anymore — the icon flows through the OrwellNotice
+  // kit's dedicated `icon` channel (a monochrome SVG glyph rendered into .on-icon), so engine-status
+  // shares ONE icon language with every other notice/banner (the old satellite/warning/clapperboard
+  // emoji baked into the title string mixed colour emoji with the kit's mono symbols). #763 makes
+  // that icon EXPLICIT (a semantic key per kind: error=down, warn=degraded) rather than implicit via
+  // the system-notice severity auto-derive — the kit's `icon` slot is the single legible source.
 
   // G8: while createCharacter is in flight (health reports busy:"creating"), a slow or even
   // timed-out engine probe is casting being finalized — NOT an outage. Hold in-fiction (amber),

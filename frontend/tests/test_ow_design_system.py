@@ -55,6 +55,40 @@ def test_kit_owned_button_base_and_variants():
         assert sel in CSS, sel
 
 
+def test_computed_concentric_radius_token_exists():
+    """#751: the nested-surface radius is a COMPUTED token (child = parent − inset),
+    SwiftUI 2026 .containerConcentric — not a second fixed scale. It generalizes the
+    .ow-btn-concentric precedent (parent radius − inset) from controls to surfaces, so
+    it reuses the SAME --ow-parent-radius / --ow-parent-inset contract."""
+    assert "--ow-radius-concentric" in CSS, "the computed concentric token is missing"
+    decl = re.search(r"--ow-radius-concentric\s*:\s*(.*?);", CSS, re.S)
+    assert decl, "no --ow-radius-concentric declaration"
+    body = decl.group(1)
+    # it is genuinely COMPUTED: a calc of parent radius minus the parent inset.
+    assert "calc(" in body and "--ow-parent-radius" in body and "--ow-parent-inset" in body, body
+    # it shares the .ow-btn-concentric contract (same custom-prop names), not a parallel system.
+    assert "--ow-parent-radius" in CSS and "--ow-parent-inset" in CSS
+
+
+def test_nested_kit_surfaces_use_concentric_token_not_fixed_inner():
+    """#751 DoD: genuinely-nested kit SURFACES derive radius from the parent via the
+    computed token, NOT a hand-tuned inner radius. Pin the nested cards-in-window rule
+    and the decision-card-in-chat rule to --ow-radius-concentric."""
+    # cards/panels nested in a glass window body compute their corner from the window.
+    nested = re.search(
+        r"body\.theme-frosted\s+\.ow-window\s*>\s*\.ow-body\s+\.admin-card[^{]*\{([^}]*)\}",
+        CSS, re.S)
+    assert nested, "no nested cards-in-window concentric rule"
+    assert "var(--ow-radius-concentric)" in nested.group(1), nested.group(1)
+    # the decision card in chat composes the same computed token (no bespoke fixed radius).
+    dec = re.search(r"body\.theme-frosted\s+#orwell-decision-card\s*\{([^}]*)\}", CSS, re.S)
+    assert dec, "no glass decision-card concentric rule"
+    block = dec.group(1)
+    assert "var(--ow-radius-concentric)" in block, block
+    # and the parent surface publishes the contract the child reads.
+    assert "--ow-parent-radius" in block and "--ow-parent-inset" in block, block
+
+
 def test_glass_material_is_neutral_no_hue():
     # the material tokens are neutral veils (white/near-black rgba), never a hued
     # theme color, and saturation stays restrained (colorless frost).

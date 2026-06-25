@@ -24,6 +24,11 @@
 
   const WIN_ID = "orwell-new-season";
   const POLL_MS = 15000;
+  // #780: monochrome icon language — the titlebar glyph is a mono inline SVG (currentColor),
+  // never a full-color emoji. NEW = a "sparkle/fresh start"; EVICTED = a door (the terminal
+  // hand-off). The kit renders these in the titlebar `icon` slot + the dock chip.
+  const ICON_NEW = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8'/></svg>";
+  const ICON_EVICTED = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/><polyline points='16 17 21 12 16 7'/><line x1='21' y1='12' x2='9' y2='12'/></svg>";
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -255,13 +260,14 @@
     if (_win || document.getElementById(WIN_ID)) destroy(); // a state change: tear down the old surface
     if (!(window.OrwellWindowKit && window.OrwellWindowKit.create)) return; // kit not loaded
     _mode = mode;
-    // Cohesive window-title contract: emoji + a single space + a Title-Case name (matches Cast 🎬 /
-    // Finale 🏆 / Retrospective 📼). ✨ = a fresh start; 🚪 = the evicted-player terminal hand-off.
+    // #780: cohesive window-title contract — a Title-Case name + a MONOCHROME mono-SVG `icon`
+    // (the kit renders `title` verbatim, so an emoji prefix lands as a full-color glyph that
+    // clashes with the icon language). The door icon marks the evicted-player terminal hand-off.
     const evicted = mode === "evicted";
     _win = window.OrwellWindowKit.create({
       id: WIN_ID,
-      title: evicted ? "🚪 Evicted" : "✨ A New Season",
-      icon: evicted ? "🚪" : "🎬",
+      title: evicted ? "Evicted" : "A New Season",
+      icon: evicted ? ICON_EVICTED : ICON_NEW,
       slot: "bottom-right",
       slotKey: "new-season",
       // Persistent: stays until the state moves on. Not closable; minimizable so the player can tuck
