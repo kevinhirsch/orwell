@@ -1851,6 +1851,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
     # completion — these make it conclusive. Vault-free: lengths/counts/finish_reason only.
     _diag = {
         "content_chars": 0,   # total content/reasoning chars streamed
+        "reply_chars": 0,     # BUG 2: REPLY (visible content) chars only — disambiguates content_chars
+        "reasoning_chars": 0, # BUG 2: REASONING (thinking) chars only (never in the player bubble)
         "tool_call_seen": False,
         "usage_seen": False,
         "output_tokens": None,
@@ -1862,7 +1864,9 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         'succeeded' log). Loud WARNINGs for the live symptoms: 200-but-empty, no usage chunk."""
         logger.info(
             f"LLM stream to {target_url} ended; model={model} status={_diag['status']} "
-            f"content_chars={_diag['content_chars']} tool_call_seen={_diag['tool_call_seen']} "
+            f"content_chars={_diag['content_chars']} "
+            f"reply_chars={_diag['reply_chars']} reasoning_chars={_diag['reasoning_chars']} "
+            f"tool_call_seen={_diag['tool_call_seen']} "
             f"finish_reason={_finish_reason} usage_seen={_diag['usage_seen']} "
             f"output_tokens={_diag['output_tokens']}"
         )
@@ -2046,10 +2050,12 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                         reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking") or ""
                                         if reasoning:
                                             _diag["content_chars"] += len(reasoning)
+                                            _diag["reasoning_chars"] += len(reasoning)
                                             yield _stream_delta_event(reasoning, thinking=True)
                                         content = delta.get("content") or ""
                                         if content:
                                             _diag["content_chars"] += len(content)
+                                            _diag["reply_chars"] += len(content)
                                             stripped = content.lstrip()
                                             # gpt-oss harmony format (<|channel|>analysis/final): route via the harmony
                                             # stream router. Sticky once the first marker appears — distinct from the

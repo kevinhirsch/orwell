@@ -560,10 +560,68 @@ import { isNarrow } from './platform.js';
       }
     }
 
+    // --- BUG 1 (never eat a message): render the optimistic user bubble SYNCHRONOUSLY here,
+    // BEFORE anything that might clear the composer or early-return. The first send of a session
+    // has to await session/model materialization below (`materializePendingSession`,
+    // `/api/default-chat`); previously those branches cleared the composer and returned with NO
+    // bubble, so the user's text simply vanished ("Hello?" eaten; the 2nd message worked because by
+    // then a session existed). The bubble is painted up front (in a PENDING state) so the message
+    // is always visible; if materialization fails the bubble is marked unsent and the composer text
+    // is RESTORED (never wiped into nothing). The later render block (post-attachment-upload) adopts
+    // this element instead of painting a second bubble. Headless / skip-bubble sends never get one.
+    const _wantOptimisticBubble = !_headless && !_hideUserBubble;
+    // ADR 0008: a client-temp id for the optimistic user bubble. The server stamps it on the
+    // persisted user message, so on reconcile the sender ADOPTS this bubble to the canonical
+    // {id, seq} (temp -> canonical) instead of fetching history and rendering a duplicate.
+    const _clientMsgId = 'c-' + ((window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : (Date.now() + '-' + Math.random().toString(36).slice(2)));
+    // The visible text for the optimistic bubble. Doc-edit context is folded into the display
+    // string later (it only applies when a session already exists, never on the first-send path
+    // these early returns guard), so the plain message is the correct pre-materialize display.
+    const _earlyAttachInfo = (!_headless && fileHandlerModule.getPendingCount())
+      ? fileHandlerModule.getPendingInfo() : null;
+    let _userMsgEl = null;
+    if (_wantOptimisticBubble) {
+      _userMsgEl = addMessage('user', _displayOverride || msg, null,
+        _earlyAttachInfo ? { attachments: _earlyAttachInfo } : null);
+      if (_userMsgEl) {
+        _userMsgEl.dataset.clientMsgId = _clientMsgId;
+        _userMsgEl.classList.add('msg-pending');
+      }
+    }
+    // The composer text was just captured (`msg`) and is now mirrored in the bubble, so it is safe
+    // to clear the composer immediately — BUT only once a send is actually going to proceed. On a
+    // hard early-return (no model configured / materialize failed) we KEEP the bubble (marked
+    // unsent) and RESTORE the composer so the user never loses their words. This helper centralizes
+    // the "send is dead, don't eat the message" cleanup.
+    const _abortSendKeepMessage = (assistantNote) => {
+      if (_userMsgEl) {
+        _userMsgEl.classList.remove('msg-pending');
+        _userMsgEl.classList.add('msg-unsent');
+        _userMsgEl.dataset.unsent = '1';
+      }
+      // Restore the composer text (it was never cleared on this path, but be explicit/idempotent so
+      // a future reordering can't strand the words) — the message is preserved, never eaten.
+      if (!_headless) {
+        try {
+          const _mi = el('message');
+          if (_mi && !_mi.value) { _mi.value = msg; if (uiModule.autoResize) uiModule.autoResize(_mi); }
+        } catch (_) {}
+      }
+      if (assistantNote) addMessage('assistant', assistantNote);
+      _releaseSendFlag();
+    };
+    const _NO_SESSION_NOTE =
+      'No chat session active. You can:\n\n' +
+      '- Open the model picker in the chat box and pick a model\n' +
+      '- Use the `+` button in the model picker to add a model endpoint\n' +
+      '- Use `/help` to see all available commands';
+
     // Materialize pending session (deferred from model click) on first message
     if (sessionModule.hasPendingChat && sessionModule.hasPendingChat()) {
       const ok = await sessionModule.materializePendingSession();
-      if (!ok || !sessionModule.getCurrentSessionId()) { _releaseSendFlag(); return; }
+      if (!ok || !sessionModule.getCurrentSessionId()) { _abortSendKeepMessage(); return; }
     }
 
     if (!sessionModule.getCurrentSessionId()) {
@@ -580,30 +638,16 @@ import { isNarrow } from './platform.js';
         } catch (_) {
           dc = (typeof window !== 'undefined' && window.__orwellDefaultChat) || null;
         }
-        if (dc.endpoint_url && dc.model) {
+        if (dc && dc.endpoint_url && dc.model) {
           await sessionModule.createDirectChat(dc.endpoint_url, dc.model, dc.endpoint_id);
           const ok = await sessionModule.materializePendingSession();
-          if (!ok || !sessionModule.getCurrentSessionId()) { _releaseSendFlag(); return; }
+          if (!ok || !sessionModule.getCurrentSessionId()) { _abortSendKeepMessage(); return; }
         } else {
-          el('message').value = '';
-          if (uiModule.autoResize) uiModule.autoResize(el('message'));
-          addMessage('assistant',
-            'No chat session active. You can:\n\n' +
-            '- Open the model picker in the chat box and pick a model\n' +
-            '- Use the `+` button in the model picker to add a model endpoint\n' +
-            '- Use `/help` to see all available commands');
-          _releaseSendFlag();
+          _abortSendKeepMessage(_NO_SESSION_NOTE);
           return;
         }
       } catch (e) {
-        el('message').value = '';
-        if (uiModule.autoResize) uiModule.autoResize(el('message'));
-        addMessage('assistant',
-          'No chat session active. You can:\n\n' +
-          '- Open the model picker in the chat box and pick a model\n' +
-          '- Use the `+` button in the model picker to add a model endpoint\n' +
-          '- Use `/help` to see all available commands');
-        _releaseSendFlag();
+        _abortSendKeepMessage(_NO_SESSION_NOTE);
         return;
       }
     }
@@ -730,14 +774,24 @@ import { isNarrow } from './platform.js';
           }
         }
       }
-      // ADR 0008: a client-temp id for the optimistic user bubble. The server stamps it on the
-      // persisted user message, so on reconcile the sender ADOPTS this bubble to the canonical
-      // {id, seq} (temp -> canonical) instead of fetching history and rendering a duplicate.
-      const _clientMsgId = 'c-' + ((window.crypto && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : (Date.now() + '-' + Math.random().toString(36).slice(2)));
-      let _userMsgEl = null;
-      if (!skipBubble) {
+      // ADOPT the optimistic bubble painted up front (BUG 1). The early render already created the
+      // user bubble + stamped `_clientMsgId` before any session/model materialization could clear the
+      // composer, so we DON'T paint a second one here — we just settle its state and reconcile its
+      // visible text with the (possibly doc-edit-augmented) `userDisplay`. The `_userMsgEl` /
+      // `_clientMsgId` are function-scoped from the early block.
+      if (_userMsgEl) {
+        _userMsgEl.classList.remove('msg-pending');
+        // Doc-edit context augments the display string after the early bubble was painted with the
+        // plain message — re-render the body so the user sees the same text the AI receives.
+        if (userDisplay !== msg) {
+          try {
+            const _body = _userMsgEl.querySelector('.body');
+            if (_body) _body.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(userDisplay));
+          } catch (_) {}
+        }
+      } else if (!skipBubble) {
+        // Defensive fallback: if the early render didn't happen (e.g. an unexpected state where the
+        // bubble was suppressed early but is wanted now), paint it here so a message is NEVER eaten.
         _userMsgEl = addMessage('user', userDisplay, null, _pendingAttachInfo ? { attachments: _pendingAttachInfo } : null);
         if (_userMsgEl) _userMsgEl.dataset.clientMsgId = _clientMsgId;
       }
