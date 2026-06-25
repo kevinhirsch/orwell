@@ -251,14 +251,69 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
             page = browser.new_page()
             page.goto(base + "/", wait_until="load", timeout=30000)
             page.wait_for_timeout(4000)  # module graph + async init
-            # Dismiss the engine-down holding card if it mounted (it inerts the
-            # page behind it, which would swallow the gear click).
-            for _ in range(3):
-                if not page.evaluate("!!document.getElementById('orwell-onboarding')"):
+            # Open Settings past the pre-game onboarding overlay. The overlay (the setup
+            # wizard) inerts the page behind it AND lays a backdrop scrim ([data-ow-scrim])
+            # that intercepts pointer events, so the gear click is swallowed while either
+            # is present.
+            #
+            # This converges on purpose (the prior fixed 4000ms + 3×Escape loop was flaky
+            # on a slow CI runner): the pre-game route() that mounts the wizard is ASYNC and
+            # is fired twice — once on DOMContentLoaded, once on the in-browser model scan's
+            # `orwell:models-changed` (none→some) — so the wizard can mount LATE (after a
+            # fixed dismiss loop already ran and missed it) and can RE-mount in the gap
+            # between a dismiss and the click, racing it. A dismiss-then-click sequence can
+            # therefore never be race-free against an app that re-mounts asynchronously.
+            #
+            # So: dismiss + click in ONE converging loop. Each pass dismisses whatever
+            # overlay is up (Escape → the kit's single arbiter → synchronous teardown that
+            # removes BOTH the window and its scrim — NOT a force-click that would mask a
+            # real scrim), then attempts the gear click once the overlay is clear; we win
+            # the moment the Settings kit modal is actually open on screen. A
+            # genuinely orphaned scrim (window gone, scrim lingering for good) would keep
+            # this from ever clearing and the loop would time out loudly — the app-bug
+            # signal we want, never masked.
+            def _overlay_present() -> bool:
+                return page.evaluate(
+                    """() => !!document.getElementById('orwell-onboarding')
+                              || !!document.querySelector('[data-ow-scrim]')"""
+                )
+
+            # "Settings is open" = the kit window #settings-modal is built, connected, and
+            # visible. NOT "#set-defaultEpSelect exists" — that select lives in the hidden
+            # #settings-host template at all times, so it would read true before the gear is
+            # ever clicked and the loop would break without opening Settings (then initAll()
+            # never runs and the selects never populate).
+            def _settings_open() -> bool:
+                return page.evaluate(
+                    """() => {
+                      const m = document.getElementById('settings-modal');
+                      if (!m || !m.isConnected) return false;
+                      const s = getComputedStyle(m);
+                      return s.display !== 'none' && s.visibility !== 'hidden'
+                             && m.getClientRects().length > 0;
+                    }"""
+                )
+
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if _settings_open():
                     break
-                page.keyboard.press("Escape")
-                page.wait_for_timeout(400)
-            page.click("#user-bar-settings", timeout=10000)  # open settings → initAll()
+                if _overlay_present():
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(250)  # cover the kit's ~190ms close fade + teardown
+                    continue
+                # No overlay in the way — try to open Settings. Use a short per-attempt
+                # timeout so a wizard re-mounting onto the gear mid-click just loops back to
+                # dismiss it rather than failing the whole test.
+                try:
+                    page.click("#user-bar-settings", timeout=2000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(150)
+            assert _settings_open(), (
+                "Settings never opened past the onboarding overlay — if a scrim outlived "
+                "its window it would block this forever (a kit teardown bug, not a race)"
+            )
             page.wait_for_function(
                 """() => {
                   const ep = document.getElementById('set-defaultEpSelect');
