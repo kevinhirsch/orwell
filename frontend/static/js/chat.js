@@ -48,11 +48,11 @@ import { isNarrow } from './platform.js';
   var _sameModelName = chatRenderer.sameModelName;
   var _applyModelColor = chatRenderer.applyModelColor;
   // C14/immersion: the single source for an AI message's SENDER label. In the game build the
-  // narrator is the show ("Big Brother"), never the raw LLM model name — used at every
+  // narrator is the show ("Orwell"), never the raw LLM model name — used at every
   // placeholder / resume / continuation site so the model machinery stays invisible to the
   // player (mirrors _setRoleModelLabel for the resolved-model path).
   function _senderLabel(modelLabel) {
-    return isGameBuild() ? 'Big Brother' : (modelLabel || '');
+    return isGameBuild() ? 'Orwell' : (modelLabel || '');
   }
   // J1-30 (immersion): the pre-token wait — most visible right after the player's first deliberate
   // action ("Start casting"), where a generic "Processing request…" reads as lag/OOC. In the game
@@ -80,7 +80,7 @@ import { isNarrow } from './platform.js';
     // C14/immersion: the player must never see the raw LLM model name as the sender —
     // in the game build the narrator IS the show. Use a diegetic label unless a specific
     // speaker name was supplied.
-    else if (document.body.hasAttribute('data-game-build')) label = 'Big Brother';
+    else if (document.body.hasAttribute('data-game-build')) label = 'Orwell';
     roleEl.textContent = label + ' ';
     _applyModelColor(roleEl, actual || req);
     // C14/immersion: the raw "alias -> dated-version" model string must never reach the
@@ -2801,7 +2801,7 @@ import { isNarrow } from './platform.js';
                 const _roundActual = holder?._actualModel || _roundRequested;
                 // C14/immersion: a continuation round in the game build is still the show —
                 // never the raw model name as the sender.
-                newRole.textContent = isGameBuild() ? 'Big Brother' : (_modelRouteLabel(_roundRequested, _roundActual) || '');
+                newRole.textContent = isGameBuild() ? 'Orwell' : (_modelRouteLabel(_roundRequested, _roundActual) || '');
                 _applyModelColor(newRole, _roundActual);
                 newWrap.appendChild(newRole);
                 const newBody = document.createElement('div');

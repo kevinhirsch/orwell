@@ -1088,7 +1088,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
   const role = document.createElement('div');
   role.className = 'role';
   // Immersion: image bubbles (in-character portraits) never show the raw image-model name.
-  role.textContent = isGameBuild() ? "Big Brother" : (model || 'image').split('/').pop();
+  role.textContent = isGameBuild() ? "Orwell" : (model || 'image').split('/').pop();
   wrap.appendChild(role);
 
   const body = document.createElement('div');
@@ -1971,7 +1971,7 @@ export function addMessage(role, content, modelName, metadata) {
           const contModel = pair.actualModel || pair.requestedModel;
           // C14/immersion: never render the raw LLM model name as the sender in the game
           // build — the narrator is the show (matches the live path's _setRoleModelLabel).
-          roleEl.textContent = isGameBuild() ? "Big Brother" : modelRouteLabel(pair.requestedModel, contModel);
+          roleEl.textContent = isGameBuild() ? "Orwell" : modelRouteLabel(pair.requestedModel, contModel);
           // C14/immersion: the "alias -> dated-version" tooltip is a model-name leak too —
           // suppressed in the game build (mirrors the live path's _setRoleModelLabel).
           if (!isGameBuild() && pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
@@ -2141,9 +2141,9 @@ export function addMessage(role, content, modelName, metadata) {
     const isCompacted = metadata?.compacted;
     const replyModels = replyModelPair(modelName, metadata);
     const resolvedModel = replyModels.actualModel || replyModels.requestedModel;
-    // C14/immersion: in the game build the assistant is the show ("Big Brother"), never the model name.
+    // C14/immersion: in the game build the assistant is the show ("Orwell"), never the model name.
     var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Orwell'
-      : (isGameBuild() && role === 'assistant') ? 'Big Brother'
+      : (isGameBuild() && role === 'assistant') ? 'Orwell'
       : modelRouteLabel(replyModels.requestedModel, resolvedModel);
     if (role === 'assistant' && (metadata?.research || metadata?.research_clarification)) {
       _roleText += ' (Research)';
