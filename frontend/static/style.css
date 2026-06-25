@@ -39858,6 +39858,28 @@ body.theme-frosted .tool-indicator.active {
   color: #16191f !important;
   text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
 }
+/* ── #759 sweep: the DOC-FENCE indicator family is the SAME defect class ──────────
+   The active document indicator in the chat toolbar (.doc-indicator-active /
+   #doc-indicator-btn.active) and its overflow-menu twin (#overflow-doc-btn.has-docs /
+   .active) paint their OWN text at var(--accent, var(--red)) (base, ~line 3014/3023) to
+   signal the "docs attached / panel open" state. On the glass theme --accent is unset and
+   --red resolves to the house accent HUE (#c6613f orange on the default glass theme), so
+   these chips read as an ACCENT-ON-GLASS glyph on the LIGHT glass chrome (measured ~4.05:1
+   vs. a white-composited surface — sub-floor, and an accent hue the no-accent-on-text
+   contract forbids; worse over a darker wallpaper showing through the glass). #overflow-doc-btn
+   sits inside .overflow-menu, which only redefines --fg (NOT --accent/--red), so the kit
+   dark-ink redefine does NOT reach its accent text either. Flip the TEXT to the SAME neutral
+   dark ink the active tool chip above uses (#16191f) + a LIGHT halo (not the dark
+   --ow-glass-text-shadow, which under dark ink reads as a smudge — #725 pattern). The state
+   still reads (opacity:1 + the chip's own background tint persist) — only the accent HUE on
+   the glyph goes neutral, exactly like .tool-indicator.active. */
+body.theme-frosted .doc-indicator-active,
+body.theme-frosted #doc-indicator-btn.active,
+body.theme-frosted #overflow-doc-btn.has-docs,
+body.theme-frosted #overflow-doc-btn.active {
+  color: #16191f !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
+}
 /* ── #761: the RIGHT side of the thinking-header row (the expand caret + the elapsed
    timer) was still accent red — .thinking-toggle paints its OWN color: var(--red), and
    the timer inherits whatever the header resolves to. On the glass theme the red caret
