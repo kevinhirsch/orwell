@@ -5,7 +5,7 @@ import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
 import type { LiveSeasonState } from "./liveSeason";
 import type { Deal } from "../domain/deal";
-import type { Campaign } from "./campaigns";
+import type { Campaign, Drive } from "./campaigns";
 import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
 import type { Room, Zone } from "../domain/house";
@@ -87,6 +87,10 @@ export interface SessionCore {
   /** The DEDICATED campaign-rng tick counter (0085 B2) — persisted so the campaign trajectory stays
    * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream). */
   campaignTickCount?: number;
+  /** Every active houseguest's current DRIVE (0086) — sticky motivation+intensity, so an agenda survives a
+   * restart instead of re-rolling. ENGINE-ONLY (hidden strategy). Absent on pre-0086 saves / when the
+   * campaign layer is off. */
+  drives?: Record<EntityId, Drive>;
   /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
   presence?: Record<EntityId, Room>;
   /**
