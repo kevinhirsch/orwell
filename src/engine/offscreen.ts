@@ -142,9 +142,31 @@ export function richOffscreenStretch(deps: {
   edgeOf?: (from: EntityId, to: EntityId) => EdgeSignals;
   /** Who is in which room (0049/E45) — when present, scenes require co-presence. */
   occupancy?: ReadonlyMap<EntityId, string>;
+  /**
+   * Orientation-plausibility gate for a SHOWMANCE scene (#840 — mirrors the seeded layer's 0063
+   * `showmanceEligible`, `src/engine/diversity.ts#showmancePlausible`). When supplied, a drawn
+   * `showmance` between an orientation-implausible pair is DEMOTED to ordinary `bonding` (warm
+   * downtime, not romance) — a QUEER showmance is first-class, only a pairing that makes no sense
+   * for BOTH parties is ruled out. Omitted ⇒ no gating (back-compat: pre-0063 casts, pure tests).
+   */
+  showmancePlausible?: (a: EntityId, b: EntityId) => boolean;
+  /**
+   * Active-showmance EXCLUSIVITY source (#840 — mirrors the seeded layer's one-partner discipline,
+   * `src/engine/seededRelationships.ts`). When supplied, returns whether a houseguest ALREADY holds
+   * an active showmance partner coming into this stretch (the seeded showmance layer). A drawn
+   * `showmance` is demoted to `bonding` if either party is already partnered (pre-existing OR newly
+   * paired earlier in THIS stretch), so no houseguest ever holds more than one active showmance.
+   */
+  hasActiveShowmance?: (id: EntityId) => boolean;
 }): OffscreenScene[] {
-  const { events, rng, npcs, interactions, hiddenElementsOf, edgeOf, occupancy } = deps;
+  const {
+    events, rng, npcs, interactions, hiddenElementsOf, edgeOf, occupancy,
+    showmancePlausible, hasActiveShowmance,
+  } = deps;
   const scenes: OffscreenScene[] = [];
+  // #840 — houseguests who pick up a NEW showmance partner during this stretch, so a later scene in
+  // the same stretch cannot give one person a second partner (the one-partner cap, within-tick half).
+  const newlyPartnered = new Set<EntityId>();
 
   for (let i = 0; i < interactions; i++) {
     let a: EntityId;
@@ -177,6 +199,27 @@ export function richOffscreenStretch(deps: {
       let guard = 0;
       while (b === a && guard++ < 16) b = rng.pick(npcs);
       type = rng.pick(RICH_TYPES);
+    }
+
+    // #840 — gate a SHOWMANCE scene the same way the SEEDED layer gates a showmance: it may only form
+    // between an orientation-PLAUSIBLE pair, and no houseguest may hold more than ONE active showmance
+    // partner. An ineligible draw is DEMOTED to ordinary `bonding` (a warm, non-romantic downtime
+    // scene) rather than re-drawn — so this consumes ZERO extra rng and the seeded competition/vote
+    // spine stays in phase (only the gated scene's nature/fold changes). Gates only when the relevant
+    // dep is supplied (omitted ⇒ no gating: pre-0063 casts and the pure byte-identity paths are intact).
+    // `bonding` and `showmance` are both FRIENDLY natures (affinity-only fold), so the demotion stays a
+    // friendly scene — it never injects strategic (vote-affecting) weight.
+    if (type === "showmance") {
+      const orientationOk = !showmancePlausible || showmancePlausible(a, b);
+      const exclusivityOk = !hasActiveShowmance
+        || (!hasActiveShowmance(a) && !hasActiveShowmance(b) && !newlyPartnered.has(a) && !newlyPartnered.has(b));
+      if (!orientationOk || !exclusivityOk) {
+        type = "bonding"; // demote: they grew close, but it is not a romance
+      } else if (hasActiveShowmance) {
+        // A genuine new showmance forms — claim BOTH so a later scene this stretch can't re-pair either.
+        newlyPartnered.add(a);
+        newlyPartnered.add(b);
+      }
     }
 
     const event: GameEvent = {

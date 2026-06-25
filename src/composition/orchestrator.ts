@@ -517,12 +517,20 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // and leave the off-screen society (the night owls scheme on without them; a turned-in player misses
   // it). IDENTITY when the clock is off ⇒ the hidden society + the seeded calibration spine are byte-identical.
   const awakeIds = sandbox.session.awakeAmong(ids);
+  // #840 — the live off-screen society must gate a SHOWMANCE the SAME way the seeded layer (0059/0063)
+  // does: only between an orientation-plausible pair, and ≤1 active showmance partner per houseguest.
+  // The session assembles both predicates from its Vault-sealed identities + seeded showmances (engine-
+  // only — neither is projected); an ineligible draw is demoted to `bonding` inside the stretch.
+  const showmanceGate = sandbox.session.offscreenShowmanceGate();
   const scenes = awakeIds.length >= 2
     ? richOffscreenStretch({
         events: sandbox.engine.events, rng, npcs: awakeIds, interactions,
         hiddenElementsOf: (id) => hiddenOf.get(id) ?? [],
         // E45 — motivated, co-present society: partners by tie strength, scenes need co-presence.
         edgeOf: (a, b) => sandbox.engine.relationships.edge(a, b),
+        // #840 — orientation + one-partner showmance discipline (mirrors the seeded layer).
+        showmancePlausible: showmanceGate.plausible,
+        hasActiveShowmance: showmanceGate.hasActiveShowmance,
         ...(occupancy ? { occupancy } : {}),
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
