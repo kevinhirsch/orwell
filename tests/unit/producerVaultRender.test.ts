@@ -100,3 +100,49 @@ describe("#846/#847 — the deep-profile dump row is structured and not duplicat
     expect(probed, "no secret-thread fragment was substantial enough to probe").toBeGreaterThan(0);
   });
 });
+
+describe("#841/#842 — the dump dedupes byte-identical rows and coalesces symmetric pairs", () => {
+  /** Plant a hidden, player-excluded off-screen scene (kept verbatim so the render is predictable). */
+  function plantHidden(sb: ReturnType<GameSessionRegistry["sandboxFor"]>, id: string, ts: number, a: string, b: string, content: string): void {
+    sb.engine.events.record({ id, ts, type: "conversation", initiator: a, witnessSet: [a, b], hidden: true, content });
+  }
+
+  it("#841 — two byte-identical hidden rows collapse to one", () => {
+    const sb = liveSandbox("pvr-841", 7);
+    plantHidden(sb, "dup-a", 9_600_001, npc(1), npc(2), `${npc(1)} bonded with ${npc(2)}`);
+    plantHidden(sb, "dup-b", 9_600_002, npc(1), npc(2), `${npc(1)} bonded with ${npc(2)}`); // identical content
+    const dump = sb.session.producerVaultDump()!;
+    // No `{type, content}` appears more than once anywhere in the dump.
+    const seen = new Map<string, number>();
+    for (const r of dump.hiddenStory) { const k = `${r.type}|${r.content}`; seen.set(k, (seen.get(k) ?? 0) + 1); }
+    expect([...seen.values()].filter((n) => n > 1)).toHaveLength(0);
+  });
+
+  it("#842 — a symmetric `A clashed with B` + `B clashed with A` coalesces to one entry", () => {
+    const sb = liveSandbox("pvr-842", 7);
+    plantHidden(sb, "sym-a", 9_700_001, npc(1), npc(2), `${npc(1)} clashed with ${npc(2)}`);
+    plantHidden(sb, "sym-b", 9_700_002, npc(2), npc(1), `${npc(2)} clashed with ${npc(1)}`); // the mirror
+    const dump = sb.session.producerVaultDump()!;
+    const clashes = dump.hiddenStory.filter((r) => /clashed with/.test(r.content));
+    expect(clashes).toHaveLength(1); // the two directions are ONE mutual scene
+    expect(clashes[0]!.content).not.toMatch(/\bnpc:\d+\b/); // names resolved
+  });
+
+  it("#842 — a symmetric pair coalesces even with different flavor tails", () => {
+    const sb = liveSandbox("pvr-842b", 7);
+    plantHidden(sb, "tail-a", 9_800_001, npc(1), npc(2), `${npc(1)} clashed with ${npc(2)} — over the nominations`);
+    plantHidden(sb, "tail-b", 9_800_002, npc(2), npc(1), `${npc(2)} clashed with ${npc(1)} — about a broken promise`);
+    const dump = sb.session.producerVaultDump()!;
+    expect(dump.hiddenStory.filter((r) => /clashed with/.test(r.content))).toHaveLength(1);
+  });
+
+  it("does NOT coalesce a DIFFERENT pair or a different interaction (no over-collapse)", () => {
+    const sb = liveSandbox("pvr-842c", 7);
+    plantHidden(sb, "p1", 9_900_001, npc(1), npc(2), `${npc(1)} clashed with ${npc(2)}`);
+    plantHidden(sb, "p2", 9_900_002, npc(3), npc(4), `${npc(3)} clashed with ${npc(4)}`); // a DIFFERENT pair
+    plantHidden(sb, "p3", 9_900_003, npc(1), npc(2), `${npc(1)} bonded with ${npc(2)}`);   // same pair, different verb
+    const dump = sb.session.producerVaultDump()!;
+    expect(dump.hiddenStory.filter((r) => /clashed with/.test(r.content))).toHaveLength(2); // two distinct conflicts
+    expect(dump.hiddenStory.filter((r) => /bonded with/.test(r.content)).length).toBeGreaterThanOrEqual(1);
+  });
+});

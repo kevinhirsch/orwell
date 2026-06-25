@@ -187,6 +187,65 @@ function retrospectiveLabel(kind: string): string {
 }
 
 /**
+ * The MUTUAL off-screen interaction verbs (mirroring the public `RICH_VERBS` phrasing in
+ * `src/engine/offscreen.ts`). A scene recorded as `A <verb> B` and its counterpart `B <verb> A` are the
+ * SAME mutual happening seen from each side — the dump should show it ONCE (#842). Render-time
+ * recognition of PUBLIC content only (no engine coupling, no Vault data); kept local + ordered
+ * longest-first so a contained phrase can't shadow a longer one.
+ */
+const MUTUAL_OFFSCREEN_VERBS: readonly string[] = [
+  "formed an alliance with",
+  "gossiped about the house with",
+  "talked strategy with",
+  "quietly turned on",
+  "grew close to",
+  "clashed with",
+  "bonded with",
+];
+
+/**
+ * Coalesce the unsealed dump rows for readability (#841/#842) — a PURE render-time pass that NEVER
+ * changes what the engine recorded (no event/RNG touch), only what the operator is shown:
+ *   - #841: drop a byte-identical `{type, content}` row (keep the first occurrence);
+ *   - #842: collapse a SYMMETRIC off-screen pair (`A <mutual-verb> B` + `B <mutual-verb> A`, ignoring any
+ *           ` — detail` tail) into ONE row — the same mutual scene from each side.
+ * Order-stable: the first row of any duplicate/mirror set is kept in place.
+ */
+function coalesceDumpRows(
+  rows: ReadonlyArray<{ type: string; content: string }>,
+): Array<{ type: string; content: string }> {
+  const out: Array<{ type: string; content: string }> = [];
+  const seenExact = new Set<string>();
+  const seenMutual = new Set<string>();
+  for (const r of rows) {
+    // #841 — exact duplicate.
+    const exactKey = `${r.type} ${r.content}`;
+    if (seenExact.has(exactKey)) continue;
+    seenExact.add(exactKey);
+    // #842 — symmetric mutual off-screen scene. Strip a trailing " — detail" before matching the pair so
+    // two mirrored scenes with different flavor tails still coalesce on the parties + verb.
+    const core = r.content.replace(/\s+—\s.*$/, "").trim();
+    let mutualKey: string | null = null;
+    for (const verb of MUTUAL_OFFSCREEN_VERBS) {
+      const at = core.indexOf(` ${verb} `);
+      if (at <= 0) continue;
+      const a = core.slice(0, at).trim();
+      const b = core.slice(at + verb.length + 2).trim();
+      if (!a || !b) continue;
+      const pair = [a, b].sort();
+      mutualKey = `${r.type} ${verb} ${pair[0]} ${pair[1]}`;
+      break;
+    }
+    if (mutualKey) {
+      if (seenMutual.has(mutualKey)) continue;
+      seenMutual.add(mutualKey);
+    }
+    out.push({ type: r.type, content: r.content });
+  }
+  return out;
+}
+
+/**
  * A fresh entropy seed for a game created WITHOUT an explicit seed (E39/C7): a uint32 from
  * `crypto` randomness, persisted in the snapshot (`gameSeed`) so the season stays reproducible
  * AFTER creation. This is an adapter (not the pure core) — the one sanctioned place real
@@ -1319,7 +1378,14 @@ export class GameSessionAdapter implements GameSession {
         votedFor: { id: votedFor, name: this.nameOf(votedFor) },
       })),
     }));
-    return { winner: this.live.winner ? this.named(this.live.winner) : null, hiddenStory, twists, evictionVotes };
+    // #841/#842 — a pure render-time coalesce: drop byte-identical rows and collapse a symmetric
+    // off-screen pair (A↔B) into one. Never changes what was recorded — only what the operator sees.
+    return {
+      winner: this.live.winner ? this.named(this.live.winner) : null,
+      hiddenStory: coalesceDumpRows(hiddenStory),
+      twists,
+      evictionVotes,
+    };
   }
 
   /**
