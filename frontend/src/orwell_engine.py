@@ -656,6 +656,17 @@ async def make_deal(with_id: str, kind: str, terms: str, expected_beat_seq: int 
     return await _call("makeDeal", args, user=user)
 
 
+async def confide(npc_id: str, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """Feature 0075 — the player presses an ally to confide. The engine is the single authority: it
+    decides whether/how much they disclose and whether it's true or a lie, and records the disclosure
+    as the player's knowledge via an in-game pathway. 0065 Part A — the optional `expected_beat_seq`
+    CAS token threads in only when provided (absent ⇒ identical to today)."""
+    args: dict = {"npcId": npc_id}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("confide", args, user=user)
+
+
 async def season_recap(user: str | None = None) -> dict:
     """The season's public arc from the event record (0048) — Vault-free, any time."""
     return await _call("seasonRecap", {}, user=user)
