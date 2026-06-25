@@ -287,7 +287,7 @@ PYTHON_BIN="${ORWELL_PYTHON:-python3}"
 OOBE_HELPER="${ORWELL_OOBE_HELPER:-${FE_DIR}/scripts/oobe_reset.py}"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  msg "would preserve LLM/provider config via ${OOBE_HELPER} (model_endpoints + LLM settings)"
+  msg "would preserve API keys/endpoints via ${OOBE_HELPER} (model_endpoints); model SELECTIONS reset to OOB defaults (#860)"
   msg "would keep FE files: ${FE_KEEP_FILES[*]} (+ rebuilt app.db / settings.json)"
   if [[ -d "$FE_DATA_DIR" ]]; then
     while IFS= read -r -d '' entry; do

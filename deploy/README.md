@@ -114,7 +114,9 @@ standalone file.
 Returns the box to a fresh first-run state — every game sandbox (saves, souls, the hidden Vault
 layer) **and** the whole front-end store (accounts, chats/sessions, memory, MCP configs, uploads,
 **every cast portrait / avatar / headshot**, presets, and every other user setting) — while
-**keeping your LLM setup**: the **API keys**, the **selected models**, and the **model defaults**.
+**keeping your LLM credentials**: the **API keys** + the **provider endpoint**. The **selected
+models reset to the OOB defaults** (narrator `deepseek/deepseek-v4-pro` on OpenRouter, portrait
+`gemini-2.5-flash-image`) — a stale/placeholder pick never rides across a reset (issue #860).
 Run it either **on the Proxmox host** (it bridges into the LXC, like `orwell-update.sh`) or
 **inside the container as root**:
 

@@ -3,16 +3,18 @@
 # orwell — factory reset.
 #
 # "Factory reset" returns the app to first-run onboarding (OOBE) while PRESERVING the operator's
-# LLM setup — the API keys, the selected models, and the model defaults — so you never have to
-# re-enter your provider config. EVERYTHING ELSE is wiped: every per-user game sandbox (saves,
+# LLM credentials — the API keys + the provider endpoint(s) — so you never have to re-enter your
+# provider config. The SELECTED MODELS are RESET to the OOB defaults (issue #860): narrator
+# deepseek/deepseek-v4-pro on OpenRouter, portrait gemini-2.5-flash-image — a stale/placeholder
+# pick can never ride across a reset. EVERYTHING ELSE is wiped: every per-user game sandbox (saves,
 # souls, the hidden Vault layer) and the ENTIRE front-end store — all accounts, chats/sessions,
 # memory, MCP configs, uploads, EVERY cast portrait / avatar / headshot, presets, and every other
 # user setting. (The engine config data/.env is preserved, as in every reset.)
 #
 # This is intentionally IDENTICAL to the in-app admin "Factory Reset (OOBE)" button and to
 # `orwell reset-oobe`: a reset must never throw away the operator's LLM credentials. The real
-# work — preserve the model_endpoints + the LLM-selection settings, wipe the rest, rebuild — lives
-# in orwell-oobe-reset.sh + frontend/scripts/oobe_reset.py. This script delegates to it so the two
+# work — preserve the model_endpoints (API keys), RESET the model selections to defaults, wipe the
+# rest, rebuild — lives in orwell-oobe-reset.sh + frontend/scripts/oobe_reset.py. This script delegates to it so the two
 # can NEVER drift. (Historically this script wiped the API keys too; that behavior was removed per
 # the product decision that a factory reset keeps your LLM config — to also drop the keys, remove
 # frontend/data/.app_key, .key, api_keys.json and app.db by hand.)
@@ -46,7 +48,7 @@ for cand in "${__here:+${__here}/orwell-oobe-reset.sh}" \
 done
 [[ -n "$OOBE" ]] || die "cannot find orwell-oobe-reset.sh (the factory-reset implementation) next to this script or under /opt/orwell/deploy."
 
-msg "factory reset → ${OOBE} (keeps API keys + selected models + model defaults; wipes everything else)"
+msg "factory reset → ${OOBE} (keeps API keys + endpoint; RESETS selected models to defaults; wipes everything else)"
 # Hand off entirely (forwarding every flag), so the host→container bridge, confirmation, keys-safe
 # preservation, scrub, ownership restore, ops-progress and restart all run from the one source.
 exec bash "$OOBE" "$@"

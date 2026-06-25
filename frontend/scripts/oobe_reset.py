@@ -12,9 +12,12 @@ What "API-key / LLM-provider config" means here (and where it lives):
   * ``app.db`` → table ``model_endpoints`` — the admin-configured providers: each row's
     ``base_url``, the (Fernet-encrypted) ``api_key``, model pools, image vs llm type, etc.
     This is the PRIMARY provider config in the modern build (src/endpoint_resolver.py).
-  * ``data/settings.json`` → the small allowlist of LLM-SELECTION keys (which configured
-    endpoint/model is the default for chat / utility / research / vision / image). Wiping
-    these without the endpoints would leave the providers present but unselected.
+  * ``data/settings.json`` → the model/endpoint SELECTION keys are RESET to the OOB defaults
+    (issue #860): a reset does NOT carry the previously-selected models — only operational flags
+    (image_gen_enabled, image_quality, vision_enabled) survive. After the reset the defaults stand
+    (narrator deepseek/deepseek-v4-pro on OpenRouter, portrait gemini-2.5-flash-image), and the
+    preserved endpoint(s) + key(s) keep the provider usable (resolution binds the empty default
+    endpoint to the first enabled endpoint — the preserved OpenRouter one).
   * ``data/.app_key`` → the Fernet key that decrypts ``model_endpoints.api_key`` (and the
     other EncryptedText columns). Preserving the endpoints WITHOUT this key would leave the
     stored keys permanently undecryptable, so it is preserved as a FILE (see the shell
@@ -45,16 +48,29 @@ import os
 import sqlite3
 import sys
 
-# The LLM-selection settings keys to carry across the reset. These name WHICH configured
-# endpoint/model is the default for each lane — useless without the model_endpoints rows,
-# and the rows are awkward to use without them, so the two travel together. Anything NOT in
-# this allowlist (theme, keybinds, game prefs, feature flags, …) is dropped to OOBE defaults.
+# Reset semantics (issue #860, owner ruling 2026-06-25): a factory/OOBE reset preserves ONLY the
+# API key(s) + the provider endpoint record(s) (the model_endpoints rows, carried separately) — it
+# does NOT preserve the SELECTED MODELS. After a reset the model selections revert to the OOB
+# defaults (narrator deepseek/deepseek-v4-pro on OpenRouter, portrait gemini-2.5-flash-image), so a
+# stale/placeholder pick (e.g. the "sakana/fugu-ultra" the owner was stuck on) can never ride across
+# a reset. The provider's API key stays usable because the endpoint record + its encrypted key are
+# preserved, and `default_endpoint_id`/`image_endpoint_id` reverting to "" binds resolution to the
+# first enabled endpoint (the preserved OpenRouter one) — see DEFAULT_SETTINGS in src/settings.py.
+#
+# We therefore preserve ONLY operational (non-model-selection) flags. Every model/endpoint SELECTION
+# key is deliberately DROPPED so it falls back to its DEFAULT_SETTINGS value on the next load.
 PRESERVED_SETTINGS_KEYS = (
+    "image_gen_enabled", "image_quality", "vision_enabled",
+)
+
+# The model/endpoint SELECTION keys that a reset RESETS to defaults (by NOT preserving them). Listed
+# explicitly so the source-pinned test can assert none of them survives a reset.
+RESET_TO_DEFAULT_SELECTION_KEYS = (
     "default_endpoint_id", "default_model", "default_model_fallbacks",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
-    "vision_endpoint_id", "vision_model", "vision_model_fallbacks", "vision_enabled",
-    "image_endpoint_id", "image_model", "image_gen_enabled", "image_quality",
+    "vision_endpoint_id", "vision_model", "vision_model_fallbacks",
+    "image_endpoint_id", "image_model",
 )
 
 
@@ -110,11 +126,15 @@ def export_model_endpoints(path: str) -> list[dict]:
 
 
 def export_preserved_settings(path: str) -> dict:
-    """Read ONLY the allowlisted LLM-selection keys from settings.json (global level).
+    """Read ONLY the allowlisted OPERATIONAL settings keys from settings.json (global level).
+
+    Per issue #860, the model/endpoint SELECTION keys are deliberately NOT preserved — a reset
+    resets the selected models to the OOB defaults (so a stale/placeholder pick can never ride
+    across). Only operational flags (image_gen_enabled, image_quality, vision_enabled) survive;
+    everything else, including default_model / image_model, reverts to DEFAULT_SETTINGS on load.
 
     Per-user prefs (data/user_prefs.json) are deliberately NOT preserved — they belong to
-    accounts, which the reset removes. The global default selection is what an operator
-    set up at install time and should survive."""
+    accounts, which the reset removes."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             saved = json.load(f)

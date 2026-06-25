@@ -54,14 +54,17 @@ def _seed_store(db_path, settings_path):
     conn.commit()
     conn.close()
 
-    # settings.json: a mix of LLM-selection keys (KEEP) + unrelated user settings (WIPE).
+    # settings.json: model SELECTION keys (now RESET to default — #860) + operational flags
+    # (KEEP) + unrelated user settings (WIPE). The model picks here include a STALE placeholder
+    # (sakana/fugu-ultra) to prove it never rides across the reset.
     with open(settings_path, "w", encoding="utf-8") as f:
         json.dump({
             "default_endpoint_id": "ep1",
-            "default_model": "the-model",
+            "default_model": "sakana/fugu-ultra",
             "image_endpoint_id": "ep2",
             "image_model": "the-image-model",
             "image_gen_enabled": True,
+            "image_quality": "high",
             # Non-LLM settings that must be dropped to OOBE defaults:
             "theme": "midnight",
             "keybinds": {"send": "ctrl+enter"},
@@ -93,16 +96,21 @@ def test_preserves_providers_and_wipes_everything_else(monkeypatch, tmp_path):
     ]
     assert tables == {"model_endpoints"}, f"only the provider table may survive, got {tables}"
 
-    # settings.json carries ONLY the allowlisted LLM-selection keys; user settings are gone.
+    # settings.json carries ONLY the operational flags; model SELECTIONS and user settings are
+    # gone (#860 — the selections revert to DEFAULT_SETTINGS on load: deepseek-v4-pro narrator,
+    # gemini-2.5-flash-image portraits). The stale sakana/fugu-ultra pick does NOT survive.
     with open(settings, encoding="utf-8") as f:
         kept = json.load(f)
     assert kept == {
-        "default_endpoint_id": "ep1",
-        "default_model": "the-model",
-        "image_endpoint_id": "ep2",
-        "image_model": "the-image-model",
         "image_gen_enabled": True,
+        "image_quality": "high",
     }
+    # Every model/endpoint SELECTION key is RESET (not preserved) — incl. the stale placeholder.
+    for reset_key in (
+        "default_endpoint_id", "default_model", "image_endpoint_id", "image_model",
+    ):
+        assert reset_key not in kept, f"{reset_key} must reset to default, not ride across the reset"
+    assert "sakana/fugu-ultra" not in json.dumps(kept), "the stale placeholder must never survive"
     for wiped in ("theme", "keybinds", "some_game_pref"):
         assert wiped not in kept
 
