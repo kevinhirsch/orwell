@@ -1142,6 +1142,11 @@ def setup_chat_routes(
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
                 _actual_model = None
+                # ADR 0010 #4: the stream's terminal finish_reason. "length" ⇒ the reply was cut off by
+                # the output token cap — emit a `truncated` event at [DONE] so the chat-mode UI offers a
+                # Continue affordance (the agent-mode path already does this; chat mode bypasses the agent
+                # loop, so it must surface the same signal itself). The chat.js handler is mode-agnostic.
+                _chat_finish_reason = None
                 # ── Chat mode: call stream_llm directly, NO tools, NO document access ──
                 try:
                     _chat_candidates = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
@@ -1202,6 +1207,11 @@ def setup_chat_routes(
                                     # Wall-clock response time for the stats popup ("Time").
                                     last_metrics.setdefault("response_time", round(time.time() - _chat_start, 2))
                                     yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
+                                elif data.get("type") == "finish":
+                                    # ADR 0010 #4: remember the terminal finish_reason (from stream_llm),
+                                    # consumed at [DONE] below. Not forwarded — the UI signal is the
+                                    # `truncated` event, mirroring the agent-loop path.
+                                    _chat_finish_reason = data.get("reason")
                             except json.JSONDecodeError:
                                 yield chunk
                         elif chunk.startswith("event: error"):
@@ -1258,6 +1268,12 @@ def setup_chat_routes(
                                     owner=_user,
                                     allow_background_extraction=not tool_policy.block_all_tool_calls,
                                 )
+                            # ADR 0010 #4: the reply was cut off by the output token cap — surface a
+                            # `truncated` event so chat mode shows the same Continue affordance agent mode
+                            # already does. Suppressed in Compare (the grid has no single bubble to merge
+                            # into) and when there's nothing to continue.
+                            if _chat_finish_reason == "length" and full_response and not compare_mode:
+                                yield f'data: {json.dumps({"type": "truncated"})}\n\n'
                             _stream_set(session, status="done")
                             yield chunk
                 except (asyncio.CancelledError, GeneratorExit):

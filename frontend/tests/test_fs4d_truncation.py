@@ -101,13 +101,27 @@ def test_llm_core_captures_finish_reason_and_emits_finish_event():
         "it must emit a `finish` event carrying the terminal reason at [DONE]"
 
 
-def test_anthropic_max_tokens_fallback_bumped_off_the_truncating_4096():
+def test_anthropic_max_tokens_fallback_is_model_aware_off_the_truncating_4096():
+    # ADR 0010 #2: the Anthropic adapter REQUIRES a cap; the old 4096 fallback truncated reasoning models.
+    # The fallback is now MODEL-AWARE (`_model_max_output_tokens`) rather than a single hardcoded 8192 —
+    # a configured preset/per-class cap still wins; the helper is the floor when none is set.
+    import importlib
+    lc = importlib.import_module("src.llm_core")
     src = _read("src", "llm_core.py")
-    # The Anthropic adapter REQUIRES a cap; the old 4096 fallback truncated reasoning models. A configured
-    # preset still wins; the fallback is just the floor when none is set.
-    assert "else 8192" in src, "the Anthropic max_tokens fallback must be raised off the truncating 4096"
+    assert "else _model_max_output_tokens(model)" in src, \
+        "the Anthropic max_tokens fallback must size per model, not a hardcoded literal"
     assert '"max_tokens": max_tokens if max_tokens and max_tokens > 0 else 4096' not in src, \
         "the old 4096 reasoning-truncating fallback must be gone"
+    # The hardcoded 8192 stopgap constant must be folded into the model-aware helper, not left as a
+    # bare literal in the builder's fallback expression.
+    assert "else 8192" not in src, "the hardcoded 8192 stopgap literal must be removed from the builder"
+    # The helper sizes a known reasoning model generously (>= the old 8192 floor) and never below it,
+    # and falls back to the conservative 8192 floor for an unknown model (no 400 risk).
+    assert lc._model_max_output_tokens("claude-opus-4-8") >= 8192
+    assert lc._model_max_output_tokens("claude-sonnet-4-6") >= 8192
+    assert lc._model_max_output_tokens("some-unknown-model") == 8192
+    # A Haiku-3.5-class model stays at its hard 8192 cap (the larger "claude-…-4" floors must not match it).
+    assert lc._model_max_output_tokens("claude-3-5-haiku-20241022") == 8192
 
 
 # ── chat.js: render `truncated` as a quiet Continue note, not the GM body ─────────
@@ -123,3 +137,19 @@ def test_chat_js_handles_truncated_with_a_continue_affordance():
     assert "continue-btn" in block and "Continue ▸" in block, "it must offer a Continue button"
     assert "getElementById('chat-history')" in block, \
         "the note appends to the history container, never the GM body bubble (re-rendered at finalize)"
+
+
+# ── ADR 0010 #4: chat mode (no agent loop) surfaces the same `truncated` Continue affordance ──
+
+def test_chat_mode_emits_truncated_on_a_length_finish():
+    # The chat-mode path streams via stream_llm_with_fallback directly (no agent loop), so it must
+    # inspect the `finish` event itself and emit `{"type":"truncated"}` at [DONE] when the reply was cut
+    # off by the output cap — the chat.js handler is mode-agnostic and already renders it.
+    src = _read("routes", "chat_routes.py")
+    # The chat-mode branch captures the terminal finish_reason from the stream's `finish` event...
+    assert 'data.get("type") == "finish"' in src, \
+        "chat mode must read the stream's `finish` event to learn the terminal reason"
+    assert "_chat_finish_reason" in src, "chat mode must track the terminal finish_reason"
+    # ...and emits a `truncated` event when it was a token-cap cutoff (suppressed in Compare).
+    assert '_chat_finish_reason == "length"' in src and '"type": "truncated"' in src, \
+        "chat mode must emit a `truncated` event on a length-finish so the Continue affordance shows"

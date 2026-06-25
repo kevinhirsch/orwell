@@ -594,6 +594,36 @@ def _uses_max_completion_tokens(model: str) -> bool:
     m = model.lower()
     return any(m.startswith(p) or f"/{p}" in m for p in _MAX_COMPLETION_TOKENS_MODELS)
 
+
+# ADR 0010 follow-on #2: model-aware default OUTPUT ceiling for the Anthropic builder, which (unlike
+# the OpenAI-compatible path) REQUIRES an explicit max_tokens and 400s if it's too high for the model.
+# This replaces the single hardcoded `8192` stopgap: a reasoning model burns budget thinking before it
+# answers, so the floor must be generous — but it must stay under each family's hard cap. We size by
+# model family from published Anthropic output limits, defaulting to the safe 8192 floor for anything
+# unrecognized (so an unknown model is never sent a value that 400s). Order matters: match the LARGEST
+# qualifier first (Haiku-3.5 caps at 8192 even though "claude-…-4-…" patterns are 64K+).
+_DEFAULT_OUTPUT_TOKENS = 8192  # the conservative floor — supported by every modern Claude model
+# (substring, cap) — checked in order; first hit wins. Generous-but-safe per-family defaults.
+_ANTHROPIC_OUTPUT_CAPS = (
+    ("haiku-3", 8192),       # Haiku 3 / 3.5 — 8192 hard cap
+    ("claude-3-5", 8192),    # other Claude-3.5 snapshots — 8192
+    ("opus-4", 32768),       # Opus 4.x — supports up to 128K; 32K is a safe, generous reasoning floor
+    ("sonnet-4", 32768),     # Sonnet 4.x — up to 64K; 32K floor
+    ("haiku-4", 16384),      # Haiku 4.x — up to 64K; 16K floor (Haiku answers are shorter)
+)
+
+
+def _model_max_output_tokens(model: str) -> int:
+    """The model-aware DEFAULT output cap used when the caller set no explicit ``max_tokens`` —
+    sized per Anthropic model family so a reasoning model has room to think AND answer, while never
+    exceeding the family's hard limit. Unknown models fall back to the conservative ``8192`` floor
+    (previously the single hardcoded constant)."""
+    m = (model or "").lower()
+    for needle, cap in _ANTHROPIC_OUTPUT_CAPS:
+        if needle in m:
+            return cap
+    return _DEFAULT_OUTPUT_TOKENS
+
 # OpenAI reasoning models (o1, o3, o4, gpt-5 families) only accept the default
 # temperature. Sending any explicit value — even 0.0 — returns HTTP 400
 # ("Only the default (1) value is supported"). That otherwise breaks chat when a
@@ -751,10 +781,12 @@ def _build_anthropic_payload(model, messages, temperature, max_tokens, stream=Fa
         temperature = max(0.0, min(temperature, 1.0))
     # F-S4-D: Anthropic REQUIRES an explicit max_tokens, so an unset cap (0) must fall back to a literal.
     # The old 4096 floor truncated reasoning/long narration mid-reply (a reasoning model burns the budget
-    # thinking, then has little left for the answer). 8192 is supported by every modern Claude model (no
-    # 400 risk) and doubles the headroom; a configured preset cap still wins, and the `finish:length` →
-    # Continue affordance covers whatever still overflows.
-    _anthropic_default_max_tokens = max_tokens if max_tokens and max_tokens > 0 else 8192
+    # thinking, then has little left for the answer). ADR 0010 #2: the fallback is now MODEL-AWARE
+    # (`_model_max_output_tokens`) instead of a single hardcoded 8192 — a reasoning model gets a generous
+    # per-family floor (Opus/Sonnet 4.x ≫ Haiku 3.5) that still stays under each model's hard cap (no 400
+    # risk). A configured preset/per-class cap still wins; the `finish:length` → Continue affordance covers
+    # whatever still overflows.
+    _anthropic_default_max_tokens = max_tokens if max_tokens and max_tokens > 0 else _model_max_output_tokens(model)
     payload = {
         "model": model,
         "messages": chat_messages,
@@ -1332,6 +1364,9 @@ async def llm_call_async(
     # Only allocate a usage sink when we will actually meter (call_class + user) — otherwise the impl
     # stays byte-identical (no usage-accounting request, no capture).
     _usage: Optional[Dict] = {} if (call_class and user) else None
+    # The meta sink carries the terminal finish_reason (ADR 0010 #3 ledger field). Defined here so the
+    # meter can read it regardless of whether the I/O trace is enabled; populated by both impl calls.
+    _meta: Dict = {}
 
     def _meter():
         # ADR 0010: one Vault-free token/cost entry for a metered utility call, keyed by the canonical
@@ -1351,6 +1386,8 @@ async def llm_call_async(
                 user, session=_sess or user, turn_id=None, call_class=call_class,
                 input_tokens=_usage.get("input_tokens", 0), cached_tokens=_usage.get("cached_tokens", 0),
                 reasoning_tokens=_usage.get("reasoning_tokens", 0), output_tokens=_usage.get("output_tokens", 0),
+                # ADR 0010 #3: the cap sent on the wire for this utility call + its terminal stop reason.
+                applied_max_tokens=max_tokens, finish_reason=_meta.get("finish_reason"),
                 cost=float(_usage.get("cost") or 0), provider=_usage.get("provider"),
             )
         except Exception:
@@ -1360,11 +1397,10 @@ async def llm_call_async(
         text = await _llm_call_async_impl(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
             headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
-            policy=policy, usage_sink=_usage)
+            policy=policy, usage_sink=_usage, meta_sink=_meta)
         _meter()
         return text
     started = time.time()
-    _meta: Dict = {}
     try:
         text = await _llm_call_async_impl(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,

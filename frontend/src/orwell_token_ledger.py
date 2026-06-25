@@ -10,7 +10,12 @@ single, structured, body-free source of truth.
 Each turn produces one entry::
 
     { ts, turnId, session, callClass, inputTokens, cachedTokens, reasoningTokens,
-      outputTokens, cost, contextPercent, provider }
+      outputTokens, appliedMaxTokens, finishReason, cost, contextPercent, provider }
+
+``appliedMaxTokens`` is the OUTPUT cap that was actually sent on the wire for the turn (ADR 0010
+follow-on #1 — the admin-editable per-class value), and ``finishReason`` is the provider's terminal
+stop reason (``"length"`` ⇒ the reply was truncated by that cap). Both are admin/internal observability
+only; like every other field they are coerced to a scalar / clipped id, so they can never carry a body.
 
 Vault-free / body-free by construction (hard invariant)
 -------------------------------------------------------
@@ -121,6 +126,8 @@ def _entry(
     cached_tokens: Any,
     reasoning_tokens: Any,
     output_tokens: Any,
+    applied_max_tokens: Any,
+    finish_reason: Any,
     cost: Any,
     context_percent: Any,
     provider: Any,
@@ -136,6 +143,10 @@ def _entry(
         "cachedTokens": _clean_int(cached_tokens),
         "reasoningTokens": _clean_int(reasoning_tokens),
         "outputTokens": _clean_int(output_tokens),
+        # ADR 0010 follow-on #3: the output cap actually applied (count), and the terminal stop reason
+        # (a short known token — "length" means the cap truncated the reply). Both Vault-free scalars.
+        "appliedMaxTokens": _clean_int(applied_max_tokens),
+        "finishReason": _clean_id(finish_reason),
         "cost": _clean_float(cost),
         "contextPercent": _clean_float(context_percent),
         "provider": _clean_id(provider),
@@ -155,6 +166,8 @@ def record_turn(
     cached_tokens: Any = 0,
     reasoning_tokens: Any = 0,
     output_tokens: Any = 0,
+    applied_max_tokens: Any = 0,
+    finish_reason: Any = None,
     cost: Any = 0.0,
     context_percent: Any = None,
     provider: Any = None,
@@ -175,6 +188,8 @@ def record_turn(
             cached_tokens=cached_tokens,
             reasoning_tokens=reasoning_tokens,
             output_tokens=output_tokens,
+            applied_max_tokens=applied_max_tokens,
+            finish_reason=finish_reason,
             cost=cost,
             context_percent=context_percent,
             provider=provider,
@@ -254,12 +269,12 @@ def clear(user: str | None) -> None:
 
 def _log_line(user_key: str, entry: dict) -> None:
     """One structured ``[orwell]`` line per turn — picked up by the LIVE root-logger ring
-    for the admin viewer. Counts + cost + class + ctx% only (no body)."""
+    for the admin viewer. Counts + caps + finish + cost + class + ctx% only (no body)."""
     try:
         ctx = entry.get("contextPercent")
         logger.info(
             "[orwell] token-ledger turn user=%s session=%s turn=%s class=%s "
-            "in=%s cached=%s reasoning=%s out=%s cost=%.6f ctx=%s%% provider=%s",
+            "in=%s cached=%s reasoning=%s out=%s cap=%s finish=%s cost=%.6f ctx=%s%% provider=%s",
             user_key,
             entry.get("session") or "-",
             entry.get("turnId") or "-",
@@ -268,6 +283,8 @@ def _log_line(user_key: str, entry: dict) -> None:
             entry.get("cachedTokens"),
             entry.get("reasoningTokens"),
             entry.get("outputTokens"),
+            entry.get("appliedMaxTokens"),
+            entry.get("finishReason") or "-",
             entry.get("cost") or 0.0,
             ("%.1f" % ctx) if isinstance(ctx, (int, float)) else "-",
             entry.get("provider") or "-",

@@ -3487,8 +3487,9 @@ async def stream_agent_loop(
     # stay maximally forceful instead of resetting to gentle each turn.
     _is_live_game = game_mode in (True, "game")
     # ADR 0010 slice B: resolve the per-call-class token policy ONCE for game turns (live-game
-    # narration or the casting interview). It carries the reasoning budget — admin-overridable via the
-    # `reasoning_budget` setting — that each narration LLM call then sends. Non-game platform chat
+    # narration or the casting interview). It carries the reasoning budget AND the per-class
+    # `max_tokens` output cap — BOTH admin-overridable at runtime (the `reasoning_budget` /
+    # `max_tokens_budget` settings) — that each narration LLM call then sends. Non-game platform chat
     # resolves no policy ⇒ byte-identical (no reasoning override on the general assistant).
     _call_class = "casting" if game_mode == "casting" else ("narration" if _is_live_game else None)
     _token_policy = None
@@ -3496,10 +3497,27 @@ async def stream_agent_loop(
         try:
             from src.token_policy import resolve_token_policy
             _token_policy = resolve_token_policy(
-                _call_class, {"reasoning_budget": get_setting("reasoning_budget", {})}
+                _call_class,
+                {
+                    "reasoning_budget": get_setting("reasoning_budget", {}),
+                    "max_tokens_budget": get_setting("max_tokens_budget", {}),
+                },
             )
         except Exception:
             _token_policy = None
+    # ADR 0010 follow-on #1: the per-class `max_tokens` is the EFFECTIVE output cap for a game/casting
+    # turn (admin-editable at runtime via `max_tokens_budget`). It supersedes the inherited preset
+    # default for these turns only; non-game chat keeps the caller's `max_tokens` (byte-identical). The
+    # resolved value is always a sane positive int, so this never widens to "uncapped". `appliedMaxTokens`
+    # (the ledger field) records exactly this number.
+    _effective_max_tokens = max_tokens
+    if _token_policy:
+        try:
+            _pol_mt = _token_policy.get("max_tokens")
+            if isinstance(_pol_mt, int) and not isinstance(_pol_mt, bool) and _pol_mt > 0:
+                _effective_max_tokens = _pol_mt
+        except Exception:
+            _effective_max_tokens = max_tokens
     # ADR 0010 slice C: the canonical game session (0064) is the cache-stickiness key (every device's
     # turns converge on it), and the high-token provider-pin threshold (0 = off) decides when a large
     # prompt pins the cache-warm provider. Resolved once for game/casting turns; absent for chat.
@@ -3675,7 +3693,7 @@ async def stream_agent_loop(
             _candidates,
             messages,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=_effective_max_tokens,  # ADR 0010 #1: admin-editable per-class output cap
             prompt_type=prompt_type if round_num == 1 else None,
             tools=all_tool_schemas if all_tool_schemas else None,
             timeout=agent_stream_timeout,
@@ -3966,7 +3984,7 @@ async def stream_agent_loop(
                     }]
                     _raw = await llm_call_async(
                         url=endpoint_url, model=model, messages=_synth_messages,
-                        headers=headers, temperature=0.3, max_tokens=max_tokens, timeout=60,
+                        headers=headers, temperature=0.3, max_tokens=_effective_max_tokens, timeout=60,
                     )
                     _synth = _THINK_RE.sub("", strip_tool_blocks(_raw or "")).strip()
                 except Exception as _e:
@@ -5590,6 +5608,10 @@ async def stream_agent_loop(
                 cached_tokens=real_cached_tokens,
                 reasoning_tokens=real_reasoning_tokens,
                 output_tokens=real_output_tokens,
+                # ADR 0010 #3: the cap actually applied this turn (admin-editable per-class), and the
+                # terminal stop reason ("length" ⇒ the cap truncated the final round).
+                applied_max_tokens=_effective_max_tokens,
+                finish_reason=_round_finish_reason,
                 cost=real_cost,
                 context_percent=metrics.get("context_percent", 0),
                 provider=_usage_provider,
