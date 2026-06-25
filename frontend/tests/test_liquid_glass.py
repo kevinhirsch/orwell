@@ -449,7 +449,9 @@ def test_green_dock_light_only_on_dockable_windows():
     # so a non-dockable window renders red + yellow only (no green disc, no empty slot).
     win = _read("static", "js", "orwellWindow.js")
     # dockable-only gating: the .ow-dock button is created inside the dockable guard.
-    assert re.search(r"if \(this\.o\.dockable\)\s*\{[^}]*className = 'ow-dock'", win, re.S)
+    # (the .ow-dock class may carry a trailing `tap-exempt` so the kit's coarse-pointer
+    # sizing escapes the global 44px tap floor — mobile titlebar-control proportion fix.)
+    assert re.search(r"if \(this\.o\.dockable\)\s*\{[^}]*className = 'ow-dock\b", win, re.S)
     # green disc, focused, in the maximize slot (order 2, rightmost of the three lights).
     assert re.search(r"\.ow-window\.ow-focused .ow-controls \.ow-dock\s*\{[^}]*#28c840", CSS, re.S)
     assert re.search(r"\.ow-controls \.ow-dock\s*\{ order: 2", CSS)
@@ -464,7 +466,7 @@ def test_green_dock_light_only_on_dockable_windows():
     assert re.search(r"\.ow-window\.ow-docked\b[^{]*\.ow-controls \.ow-dock::before", CSS, re.S)
     assert re.search(r"\.ow-titlebar:hover .ow-controls \.ow-dock::before", CSS, re.S)
     # a11y: the dock toggle carries an aria-label, and the lights get a focus-visible ring.
-    assert "aria-label" in re.search(r"className = 'ow-dock';(.*?)controls\.appendChild", win, re.S).group(1)
+    assert "aria-label" in re.search(r"className = 'ow-dock[^']*';(.*?)controls\.appendChild", win, re.S).group(1)
     assert re.search(r"\.ow-controls \.ow-dock:focus-visible \{[^}]*outline:", CSS, re.S)
 
 

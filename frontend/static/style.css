@@ -37280,21 +37280,21 @@ body.theme-frosted .modal {
   .doc-email-richbody.doc-font-m { font-size: 16px !important; }
 }
 
-/* J5-01 (Control-Room audit): the kit-window + gadget-rail chrome controls sit BELOW the
-   44px coarse-pointer tap-target floor — rail header buttons render 30×32, kit-window
-   controls (dock/min/close) 24×32, collapsed-strip icons 38×38. Bump them to the floor on
-   TOUCH only so desktop chrome stays compact (the same pattern as J4-11 / J2-06 / the
-   tour-hint dismiss). Width can grow past the icon — flex centering keeps the glyph centered. */
+/* J5-01 (Control-Room audit): the gadget-rail chrome controls sit BELOW the 44px
+   coarse-pointer tap-target floor — rail header buttons render 30×32, collapsed-strip
+   icons 38×38. Bump them to the floor on TOUCH only so desktop chrome stays compact (the
+   same pattern as J4-11 / J2-06 / the tour-hint dismiss). Width can grow past the icon —
+   flex centering keeps the glyph centered.
+   NB (#893 interim — mobile titlebar-control proportion fix): the kit titlebar controls
+   (.ow-controls button / .ow-dismiss) were ORIGINALLY in this floor too, but a 44px box
+   DOMINATES the kit's ~44px titlebar — the owner-reported "giant buttons" on Settings/Theme.
+   They now carry `.tap-exempt` and take an Apple-proportionate ~32px coarse size from the
+   kit's OWN CSS (orwellWindow.js); the gadget-rail chrome below keeps the full 44px floor. */
 @media (hover: none) and (pointer: coarse) {
   .gadget-rail-head button,
-  .ow-controls button,
-  .ow-dismiss,
   .og-card .og-act,
   #gadget-rail-strip [data-grail-gadget],
   #gadget-rail-strip button {
-    /* !important beats the kit's runtime-injected `.ow-controls button { min-width:24px }`
-       (appended to <head> after style.css, so it'd win on source order otherwise) — the same
-       reason the touch font-size catch-all above pins !important. */
     min-width: 44px !important;
     min-height: 44px !important;
   }

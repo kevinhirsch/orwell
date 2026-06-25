@@ -151,18 +151,21 @@ def test_public_seam_exposes_registry_and_live_derivations():
 
 
 def test_j5_control_room_chrome_meets_touch_tap_target_floor():
-    """J5-01 (Control-Room audit): the kit-window + gadget-rail chrome controls render BELOW
-    the 44px coarse-pointer tap-target floor — rail header buttons 30×32, kit-window dock/min/
-    close 24×32, collapsed-strip icons 38×38. A touch-only (`pointer: coarse`) rule bumps them
-    to 44px; desktop stays compact. (Behaviour verified headless: 44×44 on touch, ~30×32 on a
-    fine pointer. The responsive matrix's touch-floor check doesn't reach these — the rail
-    drawer is closed and the kit windows are unmounted during its run.)"""
+    """J5-01 (Control-Room audit): the gadget-rail chrome controls render BELOW the 44px
+    coarse-pointer tap-target floor — rail header buttons 30×32, collapsed-strip icons 38×38.
+    A touch-only (`pointer: coarse`) rule bumps them to 44px; desktop stays compact.
+    (#893 interim — mobile titlebar-control proportion fix: the kit titlebar controls
+    .ow-controls button / .ow-dismiss were REMOVED from this floor — a 44px box dominates the
+    kit's ~44px titlebar. They are `.tap-exempt` and take an Apple-proportionate ~32px coarse
+    size from the kit's own CSS instead; this floor stays for the gadget-rail chrome only.)"""
     css = _read("static", "style.css")
     assert "J5-01" in css                       # the Control-Room tap-target fix marker
-    block = css[css.find("J5-01"):css.find("J5-01") + 1200]
+    block = css[css.find("J5-01"):css.find("J5-01") + 1300]
     assert "@media (hover: none) and (pointer: coarse)" in block
-    for sel in (".gadget-rail-head button", ".ow-controls button", "#gadget-rail-strip"):
+    for sel in (".gadget-rail-head button", "#gadget-rail-strip"):
         assert sel in block, sel
+    # the kit titlebar controls no longer ride this 44px floor (proportion fix)
+    assert ".ow-controls button {" not in block and ".ow-dismiss," not in block
     assert "min-width: 44px" in block and "min-height: 44px" in block
 
 

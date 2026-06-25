@@ -239,6 +239,18 @@ function ensureCss() {
     }
     .ow-controls button:hover, .ow-controls button:focus-visible,
     .ow-dismiss:hover, .ow-dismiss:focus-visible { opacity: 1; background: rgba(255,255,255,.08); }
+    /* Coarse-pointer (touch) sizing — Apple-proportionate titlebar chrome. The kit
+       controls carry the tap-exempt class (set where they're built) so they ESCAPE the
+       global responsive-tokens.css coarse floor (button:not(.tap-exempt) -> 44px), which
+       otherwise inflates these dense titlebar glyph controls into 44px boxes that DOMINATE
+       a ~44px titlebar (the owner-reported "giant buttons" on Settings/Theme). The titlebar
+       row owns the spacing slop, so a 32px control is comfortably tappable WITHOUT
+       ballooning — the proportionate middle between the 24px base (too small for touch) and
+       the blanket 44px floor (titlebar-dominating). The frosted theme keeps its own
+       12px-disc + invisible 44px ::after hit region (style.css, higher specificity). */
+    @media (pointer: coarse) {
+      .ow-controls button, .ow-dismiss { min-width: 32px; min-height: 32px; }
+    }
     /* R4 (audit resp-F2): dvh tracks the dynamic (keyboard/URL-bar-shrunk) mobile viewport so a
        window's lowest controls don't fall below the fold when the soft keyboard opens; vh first
        as the fallback for engines without dvh. */
@@ -537,7 +549,7 @@ export class OrwellWindow {
     // mode change is a teardown + rebuild, never a live geometry mutation.
     if (this.o.dockable) {
       const b = document.createElement('button');
-      b.type = 'button'; b.className = 'ow-dock';
+      b.type = 'button'; b.className = 'ow-dock tap-exempt';
       const docked = this._docked;
       b.setAttribute('aria-label', docked ? 'Float this window' : 'Dock to the control room');
       b.title = docked ? 'Float (undock from the control room)' : 'Dock to the control room';
@@ -559,7 +571,7 @@ export class OrwellWindow {
     const canMin = this.o.minimizable && !this._docked;
     {
       const b = document.createElement('button');
-      b.type = 'button'; b.className = 'ow-min';
+      b.type = 'button'; b.className = 'ow-min tap-exempt';
       b.setAttribute('aria-label', canMin ? 'Minimize' : 'Minimize (unavailable)');
       b.title = canMin ? 'Minimize' : '';
       b.textContent = '–';
@@ -569,7 +581,7 @@ export class OrwellWindow {
     }
     if (this.o.closable) {
       const b = document.createElement('button');
-      b.type = 'button'; b.className = 'ow-close';
+      b.type = 'button'; b.className = 'ow-close tap-exempt';
       b.setAttribute('aria-label', 'Close'); b.title = 'Close';
       b.textContent = '×';
       b.addEventListener('click', (e) => { e.stopPropagation(); this.close(); }, { signal: this.ac.signal });
