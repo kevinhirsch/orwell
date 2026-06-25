@@ -201,6 +201,78 @@ def test_engine_status_banner_composes_the_kit():
     )
 
 
+# ── #763: ONE icon language — the icon flows through the kit `icon` slot, never a title glyph ──
+
+
+def _emoji_chars(s):
+    # Any non-ASCII codepoint that reads as a pictograph/emoji (the colour-emoji family the bug
+    # baked into the title — 📡 satellite, ⚠ warning, 🎬 clapperboard). Deliberately permissive:
+    # punctuation the source legitimately uses (em dash —, arrows →, bullets •, curly quotes) is
+    # whitelisted so the gate flags ONLY emoji/symbol glyphs, not typographic punctuation.
+    OK = set("—–‘’“”…•→←↔×·")
+    out = []
+    for ch in s:
+        if ord(ch) < 0x2190:  # below the Arrows block — plain ASCII + Latin-1 + general punct
+            if ord(ch) < 0x2000:
+                continue
+        if ch in OK:
+            continue
+        if ord(ch) >= 0x2000:  # general-punctuation and above: a symbol/emoji we don't whitelist
+            out.append(ch)
+    return out
+
+
+def test_engine_status_titles_carry_no_raw_glyph():
+    # #763: the banner titles are GLYPH-FREE text. The old bug prepended a colour emoji (📡/⚠/🎬)
+    # to the title string, so a full-colour emoji sat next to the kit's monochrome symbols on the
+    # sibling banner. The icon now lives in the kit's `icon` slot only; titles are plain text.
+    import re
+
+    js = _read("static", "js", "orwellEngineStatus.js")
+    # Pull every show(...)/showHolding/showReconnecting title literal — the 2nd arg to show(), and
+    # the inline title literals in the two helper wrappers — and assert none carry an emoji glyph.
+    titles = re.findall(r'show\(\s*"[^"]*"\s*,\s*"([^"]*)"', js)
+    # the helper wrappers call show("degraded", "<title>", ...) — captured by the same regex
+    assert titles, "expected to find engine-status banner title literals to check"
+    for t in titles:
+        bad = _emoji_chars(t)
+        assert not bad, (
+            f"engine-status banner title {t!r} still carries a raw glyph/emoji {bad} — "
+            "#763: pass the icon through the kit `icon` slot, keep the title glyph-free text."
+        )
+
+
+def test_engine_status_passes_icon_through_the_kit_slot():
+    # #763: the icon flows through the OrwellNotice kit's dedicated `icon` channel (a semantic key
+    # from the kit's ONE monochrome set), not a title glyph. show() resolves a per-kind key and
+    # hands it to the kit via update({ icon: ... }).
+    js = _read("static", "js", "orwellEngineStatus.js")
+    assert "icon:" in js, (
+        "orwellEngineStatus.js must pass an `icon` through the kit (update({ icon: ... })) — "
+        "#763: the icon flows through the kit's icon slot, never a baked-in title glyph."
+    )
+    # consistent monochrome icon language: it uses the kit's named severity-family keys (the same
+    # keys NOTICE_ICONS defines: info/warn/error), so both banners render the SAME mono SVG glyphs.
+    assert '"error"' in js and '"warn"' in js, (
+        "orwellEngineStatus.js must use the kit's monochrome icon keys (error=down, warn=degraded) "
+        "so both engine-status banners share ONE icon language (#763)."
+    )
+
+
+def test_kit_icon_slot_renders_the_monochrome_set_into_on_icon():
+    # The kit's `icon` channel is the single source: a named key resolves to a MONOCHROME inline SVG
+    # (currentColor, no colour emoji), rendered into .on-icon. This is what the banner icons compose.
+    kit = _read("static", "js", KIT)
+    assert "NOTICE_ICONS" in kit                       # the kit's one monochrome glyph set
+    assert "on-icon" in kit                            # the decorative icon node before the title
+    assert "resolveIcon" in kit                        # the key→glyph resolver
+    # currentColor inline SVG (tints with severity, never a fixed-colour emoji)
+    assert "currentColor" in kit
+    # update() carries the icon through (a state transition re-renders the slot), and the option is
+    # documented as a first-class field.
+    assert "patch.icon" in kit
+
+
 def test_kit_supports_the_top_banner_placement():
     kit = _read("static", "js", KIT)
     assert "top-banner" in kit
