@@ -20,7 +20,8 @@ import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "..
 import { moodWord } from "../../engine/voice";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN,
-  type Campaign, type CampaignActor, type Influence,
+  deriveDrive, ownBallotLean, ARCHETYPE_AGGRESSION,
+  type Campaign, type CampaignActor, type Influence, type Drive,
 } from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
@@ -332,6 +333,13 @@ export class GameSessionAdapter implements GameSession {
   /** The DEDICATED campaign rng tick counter — campaign draws fork off the game seed + this, never the
    * shared society/vote stream (the L21/L24 isolation), so even live campaigns don't re-phase calibration. */
   private campaignTickCount = 0;
+  /**
+   * 0086 — every active houseguest's current DRIVE (motivation + intensity), keyed by id. Computed each
+   * campaignTick (sticky — carried from the prior tick), engine-only + Vault-sealed, never projected. The
+   * loudest promote to campaigns; the quiet `target` ones add only a small own-ballot lean to their owner's
+   * vote. Empty unless the campaign layer is enabled ⇒ no drives ⇒ no lean ⇒ calibration byte-identical.
+   */
+  private drives: Map<EntityId, Drive> = new Map();
   /** Records a one-off witnessed event (deal made/broken) and returns its id. Wired by the registry. */
   private onPlayerEvent?: (content: string, witnessSet: EntityId[], type?: string) => string | undefined;
   /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
@@ -1401,6 +1409,7 @@ export class GameSessionAdapter implements GameSession {
       // 0085: persist live campaigns so a multi-week agenda + its history survive a restart (accumulate,
       // never thin). Engine-only hidden strategy — already inside the never-outward snapshot.
       ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
+      ...(this.drives.size ? { drives: Object.fromEntries([...this.drives].map(([k, v]) => [k, { ...v }])) as Record<EntityId, Drive> } : {}),
       ...(this.campaignTickCount > 0 ? { campaignTickCount: this.campaignTickCount } : {}),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
       // L21/L24: the calibration-neutral base occupancy the off-screen society pairs on — persisted so the
@@ -1547,6 +1556,8 @@ export class GameSessionAdapter implements GameSession {
     // 0085: restore live campaigns (absent on pre-0085 saves ⇒ none).
     this.campaigns = (core.campaigns ?? []).map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] }));
     this.campaignTickCount = core.campaignTickCount ?? 0;
+    // 0086: restore live drives (absent on pre-0086 saves ⇒ none ⇒ re-derived on the next campaign tick).
+    this.drives = core.drives ? new Map(Object.entries(core.drives) as [EntityId, Drive][]) : new Map();
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
     // L21/L24: restore the calibration-neutral base occupancy (absent on pre-L21/L24 saves — the next tick
@@ -3612,6 +3623,13 @@ export class GameSessionAdapter implements GameSession {
       const owner = c.owners[0]!;
       sum += campaignTilt(c.progress, this.influenceOf(owner).persuasiveness, this.influenceOf(voter).susceptibility, this.rel.edge(owner, voter).trust);
     }
+    // 0086 ruling #5: the OWN-BALLOT lean — a voter's own LOW (non-promoted) target drive against this
+    // nominee nudges THEIR vote only. Skipped if they've already promoted it to a campaign (counted above),
+    // so a drive's vote effect is exactly one tier, never additive.
+    const drv = this.drives.get(voter);
+    if (drv && !this.campaigns.some((c) => c.status === "active" && c.owners[0] === voter && c.target === target)) {
+      sum += ownBallotLean(drv, target);
+    }
     return sum;
   }
 
@@ -3672,6 +3690,21 @@ export class GameSessionAdapter implements GameSession {
     this.campaigns = this.campaigns
       .map((c) => c.status === "active" ? advanceCampaign(c, { rng, beat, alliesOf: (id) => this.allyReadsOf(id).map((a) => a.toward) }) : c)
       .filter((c) => c.status === "active");
+    // 0086: derive EVERY active houseguest's drive this tick (sticky from the prior tick) — the whole house
+    // is motivated; only the loudest are campaigns above, the quiet `target` ones add the own-ballot lean.
+    const nextDrives = new Map<EntityId, Drive>();
+    for (const a of this.campaignActors()) {
+      nextDrives.set(a.id, deriveDrive(a, {
+        nominated: nominees.has(a.id),
+        aggression: ARCHETYPE_AGGRESSION[this.archetypeOf(a.id)] ?? 0.5,
+        emotional: this.soulObj(a.id)?.emotionalState ?? 0.5,
+      }, this.drives.get(a.id)));
+    }
+    this.drives = nextDrives;
+  }
+
+  private archetypeOf(id: EntityId): string {
+    return this.house?.npcs.find((n) => n.id === id)?.character.archetype ?? "floater";
   }
 
   private statsOf(id: EntityId): Stats {

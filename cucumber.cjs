@@ -67,6 +67,7 @@ module.exports = {
       "docs/features/0078-motivated-society-and-intentional-movement.feature",
       "docs/features/0084-character-voice-and-mood.feature",
       "docs/features/0085-npc-campaigns-and-the-scramble.feature",
+      "docs/features/0086-houseguest-drives.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

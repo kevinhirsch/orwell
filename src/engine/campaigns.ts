@@ -283,3 +283,103 @@ export function replan(campaign: Campaign, board: CampaignBoard, c: CampaignCons
   }
   return campaign;
 }
+
+// --- 0086: HOUSEGUEST DRIVES (everyone always plays; intensity varies) -------------------------------
+//
+// A Drive is the substrate the Campaign is the top gear of. Every active houseguest always carries one;
+// `formCampaigns` (above) promotes the loudest into campaigns, while the quiet ones add only a small
+// OWN-BALLOT lean (ruling #5). Pure + perspective-bound + STICKY (ruling #6). Vault-only.
+
+export type DriveMotivation = "self-preserve" | "target" | "build" | "lay-low" | "win-power";
+
+export interface Drive {
+  owner: EntityId;
+  motivation: DriveMotivation;
+  /** The subject — present for `target` (who to evict) / `build` (with whom). */
+  target?: EntityId;
+  /** How hard they pursue it THIS week (0..1) — VAULT-ONLY, never shown. */
+  intensity: number;
+}
+
+export interface DriveConstants {
+  /** The small own-ballot vote term a low TARGET drive adds = lowLeanWeight × intensity (≪ campaign base). */
+  lowLeanWeight: number;
+  /** A sticky target is HELD while its threat read stays at/above (threatThreshold − hysteresis). */
+  hysteresis: number;
+  /** How much archetype aggression adds to intensity. */
+  aggressionWeight: number;
+  /** How much a rattled soul (low emotionalState) adds to intensity. */
+  emotionalWeight: number;
+  /** The self-preserve intensity FLOOR when on the block. */
+  nominatedIntensity: number;
+  /** The lay-low simmer intensity — the quiet baseline everyone carries. */
+  layLowIntensity: number;
+}
+
+export const DRIVE: DriveConstants = {
+  lowLeanWeight: 0.08, // bounded well under CAMPAIGN.base (0.25) — a quiet grudge, not a campaign
+  hysteresis: 0.12,
+  aggressionWeight: 0.25,
+  emotionalWeight: 0.2,
+  nominatedIntensity: 0.85,
+  layLowIntensity: 0.3,
+};
+
+/** Archetype aggression (0..1) — how hard this archetype pursues at a given board state (ruling: villain ≫ floater). */
+export const ARCHETYPE_AGGRESSION: Record<string, number> = {
+  "comp-beast": 0.65, "mastermind": 0.8, "social-butterfly": 0.5, "floater": 0.25,
+  "villain": 0.85, "underdog": 0.45, "flirt": 0.5, "loyalist": 0.45,
+  "wildcard": 0.7, "analyst": 0.6, "hothead": 0.8, "peacemaker": 0.3,
+};
+
+export interface DriveContext {
+  /** The owner is on the block this week ⇒ self-preserve dominates (a real board change). */
+  nominated: boolean;
+  /** Archetype aggression 0..1 (from `ARCHETYPE_AGGRESSION`). */
+  aggression: number;
+  /** The owner's soul emotionalState (0..1, 0.5 = calm) — a rattled soul pushes harder. */
+  emotional: number;
+}
+
+function driveIntensity(anchor: number, ctx: DriveContext, c: DriveConstants): number {
+  const rattled = ctx.emotional < 0.5 ? (0.5 - ctx.emotional) * 2 : 0;
+  return clamp01(anchor * 0.6 + ctx.aggression * c.aggressionWeight + rattled * c.emotionalWeight);
+}
+
+/**
+ * Derive a houseguest's DRIVE for this tick (PURE, perspective-bound, STICKY). Reads ONLY the owner's
+ * own threat/ally reads + their board danger — never an omniscient ledger. Sticky (ruling #6): a
+ * `target` commitment is HELD across ticks while the target stays a live threat (hysteresis), re-aiming
+ * only on a real board change (nominated ⇒ self-preserve; the target drops below the read). Everyone
+ * always gets a drive — `lay-low` is the quiet floor. Intensity is bounded; the caller supplies the
+ * seeded board reads, so two same-board ticks derive the same drive.
+ */
+export function deriveDrive(actor: CampaignActor, ctx: DriveContext, prior: Drive | undefined, c: DriveConstants = DRIVE): Drive {
+  const make = (motivation: DriveMotivation, target: EntityId | undefined, anchor: number): Drive => {
+    let intensity = driveIntensity(anchor, ctx, c);
+    if (ctx.nominated && motivation === "self-preserve") intensity = Math.max(intensity, c.nominatedIntensity);
+    return { owner: actor.id, motivation, ...(target !== undefined ? { target } : {}), intensity };
+  };
+  const topThreat = [...actor.threats].sort((a, b) => b.threat - a.threat)[0];
+  const topAlly = [...actor.allies].sort((a, b) => b.affinity - a.affinity)[0];
+  // A real board change: on the block ⇒ self-preserve.
+  if (ctx.nominated) return make("self-preserve", topThreat?.toward, topThreat?.threat ?? 0.6);
+  // Sticky: keep a prior target while they remain a live threat (don't re-roll the agenda each tick).
+  if (prior && prior.motivation === "target" && prior.target !== undefined) {
+    const still = actor.threats.find((t) => t.toward === prior.target);
+    if (still && still.threat >= CAMPAIGN.threatThreshold - c.hysteresis) return make("target", prior.target, still.threat);
+  }
+  if (topThreat && topThreat.threat >= CAMPAIGN.threatThreshold) return make("target", topThreat.toward, topThreat.threat);
+  if (topAlly && topAlly.affinity >= CAMPAIGN.allyThreshold) return make("build", topAlly.toward, topAlly.affinity);
+  return make("lay-low", undefined, c.layLowIntensity);
+}
+
+/**
+ * The small OWN-BALLOT lean a low (non-promoted) TARGET drive applies to its OWNER's OWN vote against
+ * their target (ruling #5: a quiet grudge moves one vote, never the electorate). Only `target` drives
+ * lean — `self-preserve`/`lay-low`/`build`/`win-power` add nothing (ruling #7). Bounded ≪ a campaign tilt.
+ */
+export function ownBallotLean(drive: Drive, nominee: EntityId, c: DriveConstants = DRIVE): number {
+  if (drive.motivation !== "target" || drive.target !== nominee) return 0;
+  return c.lowLeanWeight * clamp01(drive.intensity);
+}
