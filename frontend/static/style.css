@@ -3842,6 +3842,12 @@ body.bg-pattern-perlin-flow {
     .msg-actions {
       display:inline-flex; align-items:center; gap:4px;
     }
+    /* OWNER RULING (liquid-glass follow-up): NO per-message action icons on SENT (player)
+       bubbles in the game build — they rendered gray/illegible on the blue fill, and the
+       played-record model already strips the record-altering ones. The JS gate
+       (createUserMsgFooter) renders an empty action set; this is the CSS belt covering any
+       other render path. RECEIVED / GM message actions are untouched. */
+    body[data-game-build] .msg-user .msg-actions { display: none !important; }
     .footer-copy-btn {
       background:none; border:none;
       color:var(--color-muted-alt); cursor:pointer;
@@ -39510,6 +39516,30 @@ body.theme-frosted .msg-user .body {
   color: #fff !important;
   text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.40) !important;
 }
+/* ── Sent-bubble TIMESTAMP ("You · time") legibility on the blue fill ─────────────────
+   The timestamp next to "You" (.role-timestamp in the role line; .timestamp/.msg-time on
+   other render paths) kept its base muted colour — .role-timestamp = var(--color-muted-alt)
+   and .msg-user .timestamp = color-mix(var(--fg) 72%): on the glass theme that resolves to a
+   GRAY light-cyan, and it also inherited the bubble's DARK drop-shadow — gray text + dark
+   shadow on the system-blue fill = illegible (the owner's report). The bubble fill is a FIXED
+   blue (rgba(10,132,255,0.80)) that NEVER adapts, so the timestamp must be high-opacity WHITE
+   (white-on-blue clears WCAG AA — #fff on #0a84ff ≈ 3.1:1 large / boosted by a soft DARK-blue
+   halo for the translucent fill) with the dark drop-shadow DROPPED (it's the illegibility on a
+   blue+gray pairing). Scoped to .msg-user — the received frost bubble's timestamp is untouched. */
+body.theme-frosted .msg-user .role-timestamp,
+body.theme-frosted .msg-user .timestamp,
+body.theme-frosted .msg-user .msg-time,
+body.theme-frosted .msg-user .msg-footer .timestamp {
+  /* SOLID white (not 0.92) — the system-blue fill is translucent, so any opacity drop
+     erodes the white-on-blue ratio below Apple's own ~3:1 timestamp floor. Pure #fff on the
+     blue fill measures 3.0:1 over a light wallpaper and 5.1:1 over a dark one. */
+  color: #fff !important;
+  /* soft same-hue DARKER-blue rim (NOT a black drop-shadow) so the white reads on the
+     translucent blue without the dirty dark smudge the bubble shadow caused — and a touch
+     of it floors legibility where a bright wallpaper blooms through the fill. */
+  text-shadow: 0 1px 2px rgba(0,40,90,0.55) !important;
+  opacity: 1 !important;
+}
 /* RECEIVED bubbles DEFAULT to white over the dark frost (over a dark wallpaper / the dark
    animation). adaptiveGlass.js FLIPS them to dark ink + a light frost over a BRIGHT
    wallpaper (Apple Messages received-bubble polarity) by setting an inline color on .msg-ai;
@@ -39731,6 +39761,39 @@ body.theme-frosted .live-think-toggle,
 body.theme-frosted .thinking-timer,
 body.theme-frosted .live-think-timer {
   color: #16191f !important;
+}
+/* ── #759 follow-on: the accordion BODY (.thinking-content / .thinking-content-inner) ───
+   The HEADER row was flipped to dark ink above (#759/#761), but the reasoning BODY text
+   below it kept the CSS default `color: var(--fg)` — on the glass theme that --fg is the
+   LIGHT cyan ink (designed for the dark animated bg), so the reasoning rode the LIGHT GLASS
+   panel as light-on-light (~1.1:1 — illegible white-on-white, the owner's report). The
+   thinking-section is a FIXED light glass under the glass theme (adaptiveGlass STANDS DOWN
+   for it under theme-frosted — it is NOT in the runtime adaptive set; only .msg-ai + the
+   welcome hero flip polarity), so the body never flips: pin the SAME neutral dark ink the
+   header chrome uses (#16191f) + a LIGHT legibility halo (NOT the dark --ow-glass-text-shadow,
+   which under dark ink reads as a dirty smudge — the #725 pattern). Cover BOTH variants
+   (markdown.js finished + chat.js live `.live-think-inner`) and any nested markdown / inline
+   text / links that would otherwise inherit the accent-neutralized light --fg. Code blocks
+   keep their own stable dark-terminal contract (the bubble code rules above), so plain text
+   only — inline code gets the light-chip treatment just below. */
+body.theme-frosted .thinking-content,
+body.theme-frosted .thinking-content-inner,
+body.theme-frosted .thinking-content-inner p,
+body.theme-frosted .thinking-content-inner li,
+body.theme-frosted .thinking-content-inner span,
+body.theme-frosted .thinking-content-inner strong,
+body.theme-frosted .thinking-content-inner em,
+body.theme-frosted .thinking-content-inner blockquote,
+body.theme-frosted .thinking-content-inner a {
+  color: #16191f !important;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
+}
+/* inline code inside the reasoning body: a quiet SOLID LIGHT chip with stable dark text
+   (matches the bubble inline-code contract; no smudge halo on the chip). */
+body.theme-frosted .thinking-content-inner :not(pre) > code {
+  background-color: rgba(255,255,255,0.72) !important;
+  color: #16191f !important;
+  text-shadow: none !important;
 }
 /* Catch-all for any element painting the accent onto its OWN text via the tokens.
    Scoped to body.theme-frosted; uses :where() to stay at zero specificity cost on the

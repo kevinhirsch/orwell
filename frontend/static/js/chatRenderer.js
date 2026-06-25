@@ -1543,12 +1543,13 @@ export function createUserMsgFooter(msgElement) {
     }},
   ];
 
-  // GAME BUILD (owner ruling): SENT (player) messages keep ONLY Copy — the record-altering
-  // actions (edit/delete/resend) break the played-record model (E93). Outside the game build
-  // the full set stands.
-  const _gameUserKeep = new Set(['copy']);
-  const userPool = document.body.hasAttribute('data-game-build')
-    ? allActions.filter(a => _gameUserKeep.has(a.id)) : allActions;
+  // OWNER RULING (liquid-glass follow-up): NIX the per-message action icons on SENT (player)
+  // bubbles entirely. Under the glass theme the lone "Copy" glyph rendered gray/illegible on the
+  // blue fill, and the played-record model (E93) already strips the record-altering actions
+  // (edit/delete/resend) — so the sent side carries NO action buttons in the game build. RECEIVED
+  // / GM messages keep their actions (createMsgFooter, unchanged). Outside the game build (full
+  // workspace) the complete set still stands.
+  const userPool = document.body.hasAttribute('data-game-build') ? [] : allActions;
 
   const recent = _getUserRecentActions();
   const defaults = ['edit', 'delete', 'copy'];
