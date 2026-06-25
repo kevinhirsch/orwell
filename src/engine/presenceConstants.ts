@@ -85,6 +85,14 @@ export interface PrivacyConstants {
   conspicuousMinTenureTicks: number;
   /** Confidence carried by a tracked sighting (a watched movement — solid, but not a witnessed scene). */
   trackedConfidence: number;
+  /**
+   * The per-tick chance the HOUSE whispers about a conspicuous closed-door pairing (the 0077 NPC-side
+   * increment): when two NPCs are holed up together, an onlooker occasionally starts a Vault-free
+   * position rumor that diffuses NPC-to-NPC. Rare — a rumor rises only sometimes, and only when a pairing
+   * already exists. Runs on a DEDICATED rng (never the society/vote spine), so this number is texture,
+   * never calibration.
+   */
+  whisperProb: number;
 }
 
 export const PRIVACY: PrivacyConstants = {
@@ -93,6 +101,7 @@ export const PRIVACY: PrivacyConstants = {
   conspicuousPairSize: 2,
   conspicuousMinTenureTicks: 2,
   trackedConfidence: 0.7,
+  whisperProb: 0.35,
 };
 
 /**

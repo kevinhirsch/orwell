@@ -149,6 +149,22 @@ surfaced to the player and **diffused NPC-to-NPC as suspicion** (0038). The **co
 (earshot is rare/partial/muffled); only the **meeting** is observable. Paranoia is the human's to
 form (0017) — the engine never says "they're scheming," it says who was seen, where, how long.
 
+> **NPC-side increment — the house whispers (BUILT 2026-06-25).** The diffusion above is now a live
+> engine path, not just the player's own read: each off-screen tick, when two NPCs are conspicuously
+> holed up in a private room, a plausibly-positioned third houseguest (out in the observable house,
+> most motivated by affinity to notice) starts a Vault-free **position** rumor — *"word in the house:
+> A and B keep slipping off to the lounge together"* — that **diffuses NPC-to-NPC along the affinity
+> graph** (reusing the 0038 gossip machinery) and **can reach the player** when a chain terminates at
+> them. So the player can learn about a pairing they never witnessed, by hearing the house talk. It is
+> **texture, never the spine**: `src/engine/houseSuspicion.ts` runs on a **dedicated rng** (off the game
+> seed + presence-tick counter, never the shared society/vote stream) and diffuses **without a
+> relationship fold** (`diffuseGossip` sans `rel`/`subjects`) — so it moves no edge and consumes no
+> shared draw, and the seeded `juryReach` + gradient outcomes are **byte-identical** with it on or off.
+> Wired one line into the orchestrator's off-screen tick (`session.whisperPairings`, run last). Gate:
+> `tests/unit/houseSuspicion.test.ts` (diffusion + reach-the-player + Vault-safety + the no-fold
+> neutrality guard) + the green calibration sims. The sealed scene's **content never crosses** — only
+> the meeting.
+
 ## Engine seams
 
 - `src/domain/house.ts` — the new `Room` set + the three relations (`HOUSE_ADJACENCY` for movement;
