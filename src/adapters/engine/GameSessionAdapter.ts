@@ -3,7 +3,7 @@ import type {
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView, HouseguestMoveResult,
-  SeasonRecapView, RetrospectiveView, NpcVoiceView,
+  SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
   PreSeedNextSeasonReq, PreSeedNextSeasonView,
@@ -19,7 +19,7 @@ import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { PRESENCE } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_ADJACENCY, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
+import { HOUSE_SIGHTLINE, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
@@ -90,7 +90,7 @@ function isUsableTagline(s: string): boolean {
 import { buildPortraitPrompt, buildCastPortraitPrompts, physicalFacetToAppearance } from "../../engine/portraitPrompts";
 import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
 import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
-import type { GameHouse, StrategyStyle, Soul } from "../../engine/characterFactory";
+import type { GameHouse, StrategyStyle, Soul, HiddenElement } from "../../engine/characterFactory";
 import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
@@ -117,7 +117,7 @@ import {
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, bedtimeFor } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -141,6 +141,11 @@ import {
 import type { Orientation, GenderPresentation } from "../../engine/diversityConstants";
 import { ALL_ETHNICITIES } from "../../engine/diversityConstants";
 import { foldHiddenImpact } from "../../engine/consequence";
+import {
+  decideConfidence, disclosureMotive, disclosureTier, discloseTrue, fabricate,
+  type ConfidenceSignals,
+} from "../../engine/confidence";
+import { CONFIDENCE, type DisclosureTier } from "../../engine/confidenceConstants";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
@@ -726,6 +731,11 @@ export class GameSessionAdapter implements GameSession {
     this.onThreadSurfaceToPlayer = fn;
   }
 
+  /** 0075 — wire the confidence-recording pathway (the composition root owns the KnowledgeService). */
+  setOnConfide(fn: (npcId: EntityId, content: string, confidence: number) => boolean): void {
+    this.onConfide = fn;
+  }
+
   /**
    * 0060 §3 (`nominated-twice`) — engine-only, hidden bookkeeping: the DISTINCT weeks each houseguest
    * has been on the block, accrued each schedule tick from the live ceremony nominees. Persisted in the
@@ -735,6 +745,26 @@ export class GameSessionAdapter implements GameSession {
   private nominationWeeks: Record<EntityId, number[]> = {};
   /** 0060 — the count of threads that have ever SURFACED this season (the hard restraint cap, §5). */
   private surfacedThreadCount = 0;
+  /**
+   * 0075 — what each houseguest has CONFIDED to the player, by id. The tier is MONOTONIC for a true
+   * confidence (never re-told at a lower tier than already reached); `truthful: false` marks a lie
+   * (engine-side only — never a player-facing tell). Persisted in the snapshot so a restored game
+   * remembers exactly what the player has been told (non-degradation, 0007/0030).
+   */
+  private confideState: Record<EntityId, { tier: DisclosureTier; truthful: boolean }> = {};
+  /** 0075 — the per-season count of lies told TO the player (the hard `CONFIDENCE.maxLiesPerSeason` cap). */
+  private lieCount = 0;
+  /**
+   * 0075 — the in-game pathway that records a confidence as the player's knowledge (set by the
+   * composition root, like `onThreadSurfaceToPlayer`). The houseguest is the teller (`told-by:<id>`):
+   * the engine writes the belief through `surfaceInformationTo` (0002) so it is correctly the
+   * player's knowledge, not Vault content. Returns whether the player came to hold the belief.
+   */
+  private onConfide?: (npcId: EntityId, content: string, confidence: number) => boolean;
+  /** 0066 Phase-2: per-NIGHT conflict tally per houseguest (cleared at each new day). A character conflict
+   *  drains the people in it ⇒ they turn in earlier tonight. In-memory + ephemeral (a mid-day reload simply
+   *  resets it); only ever populated on the clock-ON path, so the calibration spine is unaffected. */
+  private nightConflicts = new Map<EntityId, number>();
 
   /**
    * The season record providers (0048/B56): the full event record + the Vault's hidden records,
@@ -914,6 +944,9 @@ export class GameSessionAdapter implements GameSession {
         toward: { id: other, name: this.nameOf(other) },
         stance: relationshipLabel(this.rel.edge(id, other), dispositionOf(npc.character.archetype)),
       })),
+      // 0075: the Vault-safe emergent confidence hint (reason + warmth word only) — present ONLY for an
+      // ACTIVE houseguest the player has earned a confidence from, and only when the scene precipitates it.
+      ...(isActive ? (() => { const m = this.mayConfideFor(npc); return m ? { mayConfide: m } : {}; })() : {}),
     };
   }
 
@@ -1352,6 +1385,11 @@ export class GameSessionAdapter implements GameSession {
       // persisted so a driven thread stays driven and the cap is never re-opened by a reload.
       ...(Object.keys(this.nominationWeeks).length ? { nominationWeeks: cloneSession(this.nominationWeeks) } : {}),
       ...(this.surfacedThreadCount > 0 ? { surfacedThreadCount: this.surfacedThreadCount } : {}),
+      // 0075 — the confidence ledger (what each houseguest has confided + the season lie count),
+      // persisted so a restored game remembers exactly what the player was told and never re-opens the
+      // lie cap or re-tells a secret at a lower tier (non-degradation, 0007/0030).
+      ...(Object.keys(this.confideState).length ? { confideState: cloneSession(this.confideState) } : {}),
+      ...(this.lieCount > 0 ? { confideLieCount: this.lieCount } : {}),
       ...(this.seededRels.ties.length || this.seededRels.showmances.length
         ? { seededRelationships: cloneSession(this.seededRels) } : {}),
       // 0063: the engine-only HIDDEN private-orientation map — persisted so a closeted houseguest's
@@ -1520,6 +1558,10 @@ export class GameSessionAdapter implements GameSession {
     // relaxation on a legacy resume, since pre-0060 saves carried no surfaced threads to over-count).
     this.nominationWeeks = core.nominationWeeks ? cloneSession(core.nominationWeeks) : {};
     this.surfacedThreadCount = core.surfacedThreadCount ?? 0;
+    // 0075 — restore the confidence ledger (absent on pre-0075 saves ⇒ empty/zero, never re-confides
+    // a secret the player already heard, the cap intact).
+    this.confideState = core.confideState ? cloneSession(core.confideState) : {};
+    this.lieCount = core.confideLieCount ?? 0;
     // 0063 — restore the engine-only HIDDEN private orientations (a closeted orientation must never
     // silently reset) FIRST, so the 0059 showmance re-derive below can read them for its eligibility gate.
     // Persisted on 0063+ saves; on a pre-0063 (or legacy) save with a seed, re-derive deterministically —
@@ -1892,7 +1934,7 @@ export class GameSessionAdapter implements GameSession {
         phase: this.live.timeOfDay,
         player: this.house.player.id,
         playerRetired: this.live.playerRetired ?? false,
-        bedtimeOf: (id) => bedtimeFor(this.statsOf(id)),
+        bedtimeOf: (id) => phaseForDepth(this.effectiveBedDepth(id)), // chronotype-aware + conflict-drained (0066 Phase-2)
       }),
     );
   }
@@ -1906,6 +1948,58 @@ export class GameSessionAdapter implements GameSession {
   awakeAmong(ids: readonly EntityId[]): EntityId[] {
     const awake = this.awakeNow();
     return awake ? ids.filter((id) => awake.has(id)) : [...ids];
+  }
+
+  /**
+   * 0066 Phase-2: the off-screen fold-magnitude scale (≤1) for a scene's INITIATOR — a tired houseguest
+   * sways the house LESS (reduced EFFECTIVENESS, never a personality change; the scene's nature is
+   * unchanged). Returns 1 (no scaling) when the clock is off ⇒ the hidden society + its seeded calibration
+   * spine are BYTE-IDENTICAL; reduced sway only on the live clock-ON path, keyed off the same hidden rest
+   * deficit the competition fold consumes. No number crosses the wall.
+   */
+  socialFoldScale(id: EntityId): number {
+    return socialSwayScale(this.restDeficitOf(id));
+  }
+
+  /** The hidden rest deficit (0..1) a houseguest carries TODAY: tonight's immediate deficit (graded by how
+   *  late they were up — conflict-drained) COMBINED with the compounding multi-night fatigue meter. 0 when
+   *  the clock is off ⇒ byte-identical to the calibration spine. Feeds both the comp fold and social sway. */
+  private restDeficitOf(id: EntityId): number {
+    if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
+    const immediate = id === PLAYER
+      ? playerRestDeficit(this.live)
+      : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id));
+    const fatigue = id === PLAYER ? (this.live.playerFatigue ?? 0) : (this.live.npcFatigue?.[id] ?? 0);
+    return combinedRestDeficit(immediate, fatigue);
+  }
+
+  /** Roll every houseguest's multi-night fatigue meter at a genuine NIGHT-END (the player turned in, or the
+   *  house ran to the bitter end). EMA: decay the prior, add the night just ended. Fires once per night. */
+  private accrueNightFatigue(): void {
+    if (!this.live || !this.house) return;
+    const lastNight = (id: EntityId): number => id === PLAYER
+      ? playerRestDeficit(this.live!)
+      : npcRestDeficit(this.live!, this.statsOf(id), id, this.effectiveBedDepth(id));
+    this.live.playerFatigue = accrueFatigue(this.live.playerFatigue ?? 0, lastNight(PLAYER));
+    const next: Record<EntityId, number> = { ...(this.live.npcFatigue ?? {}) };
+    for (const n of this.house.npcs) next[n.id] = accrueFatigue(next[n.id] ?? 0, lastNight(n.id));
+    this.live.npcFatigue = next;
+  }
+
+  /** 0066 Phase-2: an NPC's effective turn-in DEPTH tonight = their chronotype bedtime pulled EARLIER by
+   *  any conflicts they were in this night (a fight drains you to bed). Floored. Drives both who is awake
+   *  late (`awakeNow`) and their next-day comp deficit, coherently. */
+  private effectiveBedDepth(id: EntityId): number {
+    const base = bedtimeDepthFor(this.statsOf(id), id);
+    const conflicts = this.nightConflicts.get(id) ?? 0;
+    return Math.max(BEDTIME_DEPTH_FLOOR, base - CONFLICT_BEDTIME_DRAIN * conflicts);
+  }
+
+  /** Clear the per-night conflict tally at the moment the day rolls over (a fresh morning at depth 0) —
+   *  tonight's fights don't follow anyone into tomorrow. Called right after the clock advances / the player
+   *  turns in; a no-op mid-day (still the same night) and harmless at game start (empty). */
+  private rollNightConflicts(): void {
+    if (this.live?.timeOfDay === DAY_START && (this.live?.nightDepth ?? 0) === 0) this.nightConflicts.clear();
   }
 
   /**
@@ -1967,12 +2061,15 @@ export class GameSessionAdapter implements GameSession {
       }
       return out;
     };
-    // The player's room + each ADJACENT room only — what they could see or hear themselves.
+    // The player's room + each room they have SIGHTLINE into (0077 Phase 2 — eyeshot, NOT raw
+    // adjacency): the open public core sees across itself + into the hallway mouth, but a CLOSED door
+    // (a bedroom, the bathroom/lounge, the HOH/storage/diary) is opaque — standing one room over no
+    // longer leaks who is behind it. Who is behind a closed door is earned by watching, never ambient.
     const present = inRoom(room);
     return {
       room,
       present,
-      nearby: (HOUSE_ADJACENCY.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) })),
+      nearby: (HOUSE_SIGHTLINE.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) })),
       // L21/L24: duration — the player's tenure in this room + each companion's, so the narrator
       // voices continuity (who has lingered with you vs. who just walked in) instead of resetting.
       turnsHere: this.presenceTenure?.get(me) ?? 0,
@@ -2284,6 +2381,8 @@ export class GameSessionAdapter implements GameSession {
       this.groundedSkinTones = adopt.groundedSkinTones;
       this.nominationWeeks = {};
       this.surfacedThreadCount = 0;
+      this.confideState = {};
+      this.lieCount = 0;
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -2512,6 +2611,8 @@ export class GameSessionAdapter implements GameSession {
     this.groundedSkinTones = {};
     this.nominationWeeks = {};
     this.surfacedThreadCount = 0;
+    this.confideState = {};
+    this.lieCount = 0;
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -2784,6 +2885,9 @@ export class GameSessionAdapter implements GameSession {
     // 0060 — a fresh season starts with no nomination history and an unspent surfacing cap.
     this.nominationWeeks = {};
     this.surfacedThreadCount = 0;
+    // 0075 — a fresh season has heard no confidences and spent no lies.
+    this.confideState = {};
+    this.lieCount = 0;
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
     // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
@@ -3189,8 +3293,8 @@ export class GameSessionAdapter implements GameSession {
       // fold only; never crosses the wall. DORMANT unless the clock is actually running (opt-in) ⇒
       // returns 0, so the seeded calibration spine (juryReach / UAT) is BYTE-IDENTICAL to the pre-feature model.
       restOf: (id) => {
-        if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
-        return id === PLAYER ? playerRestDeficit(this.live) : npcRestDeficit(this.live, this.statsOf(id));
+        // Tonight's immediate (conflict-drained) deficit + the compounding multi-night fatigue meter.
+        return this.restDeficitOf(id);
       },
       // Derived loyalty (0043): disposition (static CHARACTER) × current soul state — feeds the
       // emergent bloc term. Derived per read; never stored (decision 0002).
@@ -3350,6 +3454,12 @@ export class GameSessionAdapter implements GameSession {
   recordOffscreenScene(initiator: EntityId, partner: EntityId, type: InteractionType): void {
     this.inflect(initiator, offscreenEmotion(type, "initiator"));
     this.inflect(partner, offscreenEmotion(type, "partner"));
+    // 0066 Phase-2: a conflict drains BOTH ⇒ they turn in earlier tonight (clock-ON only — the tally is
+    // read by `effectiveBedDepth`; off ⇒ never populated ⇒ no effect, byte-identical).
+    if (this.timeOfDayEnabled && this.live?.timeOfDay && (type === "conflict" || type === "betrayal")) {
+      this.nightConflicts.set(initiator, (this.nightConflicts.get(initiator) ?? 0) + 1);
+      this.nightConflicts.set(partner, (this.nightConflicts.get(partner) ?? 0) + 1);
+    }
   }
 
   /** The manner-scale of an eviction fold (audit E48): full shock only for a genuine grievance. */
@@ -3472,8 +3582,19 @@ export class GameSessionAdapter implements GameSession {
         // cycled most of a day inside ONE competition (the HOH crowned at late-night the morning it
         // began). The clock still INITIALIZES on the first advance (so the HUD/rest cue are live from
         // turn one) even before the first substantive beat lands.
+        //
+        // 0066 Phase-2 (PR #715): the graded sleep economy — chronotype bedtimes + continuous night
+        // depth + the night-end fatigue/conflict bookkeeping — rides this SAME substantive-play gate, so
+        // it never over-advances on inert staged-comp beats either. On the bare init advance `advanceClock`
+        // only initializes (returns early), so the bookkeeping below is a harmless no-op there: rest
+        // deficit is 0 (no night ran) and the conflict tally is still empty.
         if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
+          const wasRetired = this.live!.playerRetired ?? false;
           advanceClock(this.live!);
+          // A genuine night-end is the WRAP (the house ran to the bitter end) — NOT the morning after a
+          // turnIn (that night already accrued). Detect: a fresh morning we did NOT reach via retirement.
+          if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? 0) === 0) this.accrueNightFatigue();
+          this.rollNightConflicts();
         }
         this.commit(ev);
       }
@@ -3537,6 +3658,8 @@ export class GameSessionAdapter implements GameSession {
     if (this.live.finished || playerHasLeft(this.live, PLAYER)) return this.advanceView(null);
     return this.inOneCommit(() => {
       playerTurnIn(this.live!, PLAYER);
+      this.accrueNightFatigue(); // the player chose bed — a genuine night-end; accrue before clearing conflicts
+      this.rollNightConflicts();
       this.persist();
       return this.advanceView(null);
     });
@@ -3613,6 +3736,126 @@ export class GameSessionAdapter implements GameSession {
     const deal = this.deals.make([PLAYER, target], req.kind, terms, evId, this.live.week);
     this.persist();
     return this.dealView(deal);
+  }
+
+  /**
+   * 0075 — the trust-gated confidence (the single authority). The model presses the ally and calls this;
+   * the ENGINE decides everything (whether they open up, how much, true or a lie) and RECORDS the
+   * disclosure as the player's knowledge. Vault-safe by construction: an undisclosed secret is never
+   * handed to the model; a sub-`full` tier never returns the whole premise; a lie is engine-authored
+   * from the public archetype (no real secret of anyone). Monotonic for a true confidence.
+   */
+  confide(npcId: EntityId, expectedBeatSeq?: number): ConfideResult | null {
+    // 0065 Part A — refuse a confidence computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(expectedBeatSeq);
+    if (!this.house || !this.live) return null;
+    const npc = this.house.npcs.find((n) => n.id === npcId);
+    const evicted = new Set(this.live.evictionOrder);
+    if (!npc || evicted.has(npcId)) return null; // unknown / departed ⇒ no confidence path
+    const secret = this.headlineSecretOf(npc);
+    const none: ConfideResult = { disclosed: false, tier: "none", truthful: true };
+    if (!secret) return none; // nothing sealed to share
+
+    const signals = this.confidenceSignalsFor(npc);
+    // Deterministic, seeded per (npc, beat): repeated presses inside one beat reach the same decision;
+    // a later press (bond grown, a new week) re-rolls. No raw rng leaks the outcome (anti-sycophancy).
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:confide:${npcId}:${this.week}:${this.phase}`));
+    const decision = decideConfidence(signals, rng, { liesRemaining: CONFIDENCE.maxLiesPerSeason - this.lieCount });
+    if (!decision.disclosed) return none;
+
+    // Monotonic: never re-tell a TRUE secret at a LOWER tier than already reached — idempotent, no new
+    // fold (the house's memory only deepens; it never thins, 0007/0030). A lie is its own track.
+    const prior = this.confideState[npcId];
+    if (decision.truthful && prior?.truthful
+      && this.tierRank(decision.tier) <= this.tierRank(prior.tier)) {
+      return { disclosed: true, tier: prior.tier, truthful: true, content: discloseTrue(secret, prior.tier) };
+    }
+
+    const content = decision.truthful ? discloseTrue(secret, decision.tier) : fabricate(rng, secret.kind);
+    // Record it as the player's knowledge through the in-game `told-by` pathway (0002, E9) — so it is
+    // correctly Journal-visible knowledge, never Vault content. A lie is recorded the same way (the
+    // player believes it); the engine knows it is false (`confideState.truthful`).
+    this.onConfide?.(npcId, content, decision.truthful ? 0.85 : 0.6);
+    // Fold the vulnerability bond bump (0023): opening up DEEPENS the bond toward the player.
+    foldHiddenImpact(this.rel, rng, npcId, [npcId, PLAYER], CONFIDENCE.bondNature, [PLAYER]);
+    if (!decision.truthful) this.lieCount++;
+    this.confideState[npcId] = { tier: decision.tier, truthful: decision.truthful };
+    this.persist();
+    return { disclosed: true, tier: decision.tier, truthful: decision.truthful, content };
+  }
+
+  /** 0075 — the headline sealed secret a houseguest would confide (their first hidden element). */
+  private headlineSecretOf(npc: { character: { hiddenElements?: HiddenElement[] } }): HiddenElement | undefined {
+    return npc.character.hiddenElements?.[0];
+  }
+
+  /** 0075 — assemble the Vault-hidden confidence signals from the existing relationship + deal ledger. */
+  private confidenceSignalsFor(npc: { id: EntityId; character: { archetype: string } }): ConfidenceSignals {
+    const npcToPlayer = this.rel.edge(npc.id, PLAYER);
+    const playerToNpc = this.rel.edge(PLAYER, npc.id);
+    return {
+      npcTrust: npcToPlayer.trust,
+      npcAffinity: npcToPlayer.affinity,
+      npcThreat: npcToPlayer.threat,
+      playerTrust: playerToNpc.trust,
+      playerAffinity: playerToNpc.affinity,
+      goodwill: this.goodwillFromDeals(npc.id),
+      archetype: npc.character.archetype,
+    };
+  }
+
+  /**
+   * 0075 — the banked-goodwill scalar ∈ [0,1] derived from the 0039 deal ledger (NOT a new authored
+   * signal): kept word + an open pact build it, a broken deal subtracts. Bounded by `CONFIDENCE`.
+   */
+  private goodwillFromDeals(npcId: EntityId): number {
+    const between = this.deals.forParty(PLAYER).filter((d) => d.parties.includes(npcId));
+    let g = 0;
+    for (const d of between) {
+      if (d.status === "kept") g += CONFIDENCE.keptDealGoodwill;
+      else if (d.status === "open") g += CONFIDENCE.openDealGoodwill;
+      else if (d.status === "broken") g -= CONFIDENCE.brokenDealPenalty;
+    }
+    return Math.max(0, Math.min(1, g));
+  }
+
+  /** 0075 — order the disclosure tiers for the monotonic guard (none < tease < partial < full). */
+  private tierRank(tier: DisclosureTier): number {
+    return { none: 0, tease: 1, partial: 2, full: 3 }[tier];
+  }
+
+  /**
+   * 0075 — the Vault-SAFE `mayConfide` hint for `npcVoice` (the emergent "no cold open" path). Present
+   * ONLY when the genuine disclosure motive clears the floor AND a fresh precipitating event makes the
+   * moment plausible (a recent player-witnessed scene with this houseguest). Carries a `reason` word +
+   * a `warmth` word — NEVER the secret, NEVER a number. Returns `undefined` otherwise (the common case).
+   */
+  private mayConfideFor(npc: { id: EntityId; character: { archetype: string } }): NpcVoiceView["mayConfide"] {
+    if (!this.onConfide) return undefined; // no pathway wired ⇒ no emergent hint (e.g. bare unit harness)
+    const signals = this.confidenceSignalsFor(npc);
+    const motive = disclosureMotive(signals);
+    if (disclosureTier(motive) === "none") return undefined; // below the floor ⇒ not ready
+    // The motive must be carried by GENUINE closeness, not the strategic-lie pull — the hint invites a
+    // real opening (a lie still routes through `confide`, but it is never advertised as readiness).
+    if (!this.recentPlayerSceneWith(npc.id)) return undefined; // not earned by the scene ⇒ no cold open
+    const between = this.deals.forParty(PLAYER).filter((d) => d.parties.includes(npc.id));
+    const reason = between.some((d) => d.status === "kept") ? CONFIDENCE.reasons.keptWord
+      : between.some((d) => d.status === "open") ? CONFIDENCE.reasons.openPact
+        : CONFIDENCE.reasons.closeness;
+    return { ready: true, reason, warmth: motive >= CONFIDENCE.bands.full ? "high" : "growing" };
+  }
+
+  /**
+   * 0075 — was there a FRESH precipitating scene between the player and this houseguest (a favor, a
+   * rattled moment, a deal just struck)? The "no cold open" anchor: a confidence reads as prompted by
+   * what just happened, never a non-sequitur. Vault-free — reads only the recent player-witnessed
+   * relationship history the adapter already tracks (an open/kept deal between them is the concrete
+   * proxy a precipitating favor leaves behind).
+   */
+  private recentPlayerSceneWith(npcId: EntityId): boolean {
+    return this.deals.forParty(PLAYER).some(
+      (d) => d.parties.includes(npcId) && (d.status === "open" || d.status === "kept"),
+    );
   }
 
   /** Reconcile a binding action against open player-party deals: kept/broken + the fallout (0039). */

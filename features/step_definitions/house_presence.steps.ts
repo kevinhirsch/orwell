@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { BbWorld } from "../support/world";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import { Orchestrator } from "../../src/composition/orchestrator";
-import { HOUSE_ADJACENCY, areAdjacent, occupancyViolations } from "../../src/domain/house";
+import { HOUSE_SIGHTLINE, areVisible, occupancyViolations } from "../../src/domain/house";
 import type { Room, Occupancy } from "../../src/domain/house";
 import { rollOverhears } from "../../src/engine/presence";
 import { PRESENCE } from "../../src/engine/presenceConstants";
@@ -138,7 +138,8 @@ Then("it lists who is present in the player's room", function (this: BbWorld) {
 
 Then("it lists who is in adjacent rooms", function (this: BbWorld) {
   const w = this.hpWhereabouts!;
-  assert.deepEqual(w.nearby.map((n) => n.room), [...(HOUSE_ADJACENCY.get(w.room as Room) ?? [])]);
+  // 0077 Phase 2: `nearby` lists the rooms the player can SEE INTO (sightline), not every adjacent room.
+  assert.deepEqual(w.nearby.map((n) => n.room), [...(HOUSE_SIGHTLINE.get(w.room as Room) ?? [])]);
   const occ = this.hpSandbox!.session.occupancy()!;
   for (const n of w.nearby) {
     const expected = [...occ.entries()].filter(([, r]) => r === n.room).map(([id]) => id).sort();
@@ -148,7 +149,9 @@ Then("it lists who is in adjacent rooms", function (this: BbWorld) {
 
 Then("it reveals nothing about non-adjacent rooms", function (this: BbWorld) {
   const w = this.hpWhereabouts!;
-  for (const n of w.nearby) assert.ok(areAdjacent(w.room as Room, n.room as Room), `${n.room} is adjacent`);
+  // 0077 Phase 2: `nearby` is SIGHTLINE-scoped (eyeshot) — every reported room is one the player can
+  // actually SEE into; a closed door one room over is never revealed (the stronger privacy claim).
+  for (const n of w.nearby) assert.ok(areVisible(w.room as Room, n.room as Room), `${n.room} is in sightline`);
   // L21/L24: duration rides the view (turnsHere + per-companion tenure) — still no non-adjacent room.
   assert.deepEqual(Object.keys(w).sort(), ["companions", "nearby", "present", "room", "turnsHere"]);
 });

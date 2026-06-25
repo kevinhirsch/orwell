@@ -84,7 +84,7 @@ def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Di
     import httpx
     from src.database import SessionLocal, ModelEndpoint
     from src.llm_core import _detect_provider, ANTHROPIC_MODELS
-    from src.auth_helpers import owner_filter
+    from src.auth_helpers import owner_filter, is_admin_user
 
     spec = spec.strip()
     target_endpoint_name = None
@@ -101,8 +101,14 @@ def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Di
         query = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
         if target_endpoint_name:
             query = query.filter(ModelEndpoint.name.ilike(f"%{target_endpoint_name}%"))
-        if owner:
-            query = owner_filter(query, ModelEndpoint, owner)
+        # Admins manage the global pool (don't scope them); everyone else sees their own
+        # endpoints PLUS shared/null-owner rows. Without this, a configured endpoint whose
+        # owner stamp doesn't match the caller (e.g. an admin-/null-owned provider, or one
+        # whose owner went stale when an OOBE reset rebuilt accounts but preserved endpoints)
+        # resolves to "not found" — which is what makes image generation report NO USABLE
+        # MODEL even though portraits already generated from that very endpoint.
+        if owner and not is_admin_user(owner):
+            query = owner_filter(query, ModelEndpoint, owner, include_shared=True)
         endpoints = query.all()
 
         if not endpoints:
@@ -174,13 +180,17 @@ def has_image_capable_endpoint(owner: Optional[str] = None) -> bool:
     GENUINELY no usable endpoint."""
     from src.database import SessionLocal, ModelEndpoint
     from src.llm_core import _detect_provider
-    from src.auth_helpers import owner_filter
+    from src.auth_helpers import owner_filter, is_admin_user
 
     db = SessionLocal()
     try:
         query = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
-        if owner:
-            query = owner_filter(query, ModelEndpoint, owner)
+        # Same scoping as _resolve_model: admins see the whole pool; others see own + shared.
+        # A pure capability check ("can this box generate images?") must not answer False just
+        # because the only image-capable endpoint isn't owned by the caller (stale/foreign/null
+        # owner after an OOBE reset) — that's the NO USABLE MODEL false-negative.
+        if owner and not is_admin_user(owner):
+            query = owner_filter(query, ModelEndpoint, owner, include_shared=True)
         for ep in query.all():
             try:
                 provider = _detect_provider(_normalize_base(ep.base_url))

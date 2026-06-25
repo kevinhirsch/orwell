@@ -63,6 +63,7 @@ def _block(text, start, end):
 MODEL_SELECT_IDS = {
     "set-defaultModelSelect",   # the chat picker itself — the pool's source
     "set-utilityModelSelect",   # endpoint-scoped (chat-picker mechanism)
+    "set-faithModelSelect",     # endpoint-scoped, like utility (feature 0081 — the faithfulness judge model)
     "set-vlModelSelect",        # union pool, vision-capability filter (H2)
     "set-researchModel",        # endpoint-scoped, like utility (H2b)
     "set-imgModelSelect",       # union pool (H2)

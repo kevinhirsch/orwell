@@ -1636,6 +1636,46 @@
             </div>
           </div>
           <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Runtime overseer</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Supervises the engine&#8596;LLM loop. <b>Pacing</b> catches stalls and missed engine calls; <b>Faithfulness</b> checks the narration against engine truth. <b>Off</b> = the deterministic floor stands &middot; <b>Shadow</b> = diagnose &amp; log only &middot; <b>Active</b> = correct live (live-LLM only). The <code>ORWELL_OVERSEER_MODE</code> / <code>ORWELL_FAITHFULNESS_MODE</code> env vars are the headless fallback when these are left unset.</div>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label">Pacing overseer</label>
+                <select id="set-overseerMode" class="settings-select">
+                  <option value="off">Off</option>
+                  <option value="shadow">Shadow</option>
+                  <option value="active">Active</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Faithfulness gate</label>
+                <select id="set-faithMode" class="settings-select">
+                  <option value="off">Off</option>
+                  <option value="shadow">Shadow</option>
+                  <option value="active">Active</option>
+                </select>
+              </div>
+              <div id="set-overseerMsg" style="font-size:var(--fs-xs);color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
+            </div>
+          </div>
+          <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Faithfulness judge model</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">The model that judges narration faithfulness (used only when the gate above is on). Leave blank to use the Utility model (then the chat model).</div>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label">Endpoint</label>
+                <select id="set-faithEpSelect" class="settings-select"><option value="">—</option></select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Model</label>
+                <select id="set-faithModelSelect" class="settings-select"><option value="">—</option></select>
+              </div>
+              <div id="set-faithFallbacks" class="settings-fallbacks"></div>
+              <button type="button" class="settings-fallback-add" id="set-faithAddFallback" title="Add a model to try if the faithfulness model fails">+ Add fallback</button>
+              <div id="set-faithChatMsg" style="font-size:var(--fs-xs);color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
+            </div>
+          </div>
+          <div class="admin-card">
             <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Vision<span style="flex:1"></span><label class="admin-switch" title="Analyze images with a vision-capable model"><input type="checkbox" id="set-visionEnabledToggle" checked><span class="admin-slider"></span></label></h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Analyze images with a vision-capable model.</div>
             <div style="display:flex;flex-direction:column;gap:0.5rem;">

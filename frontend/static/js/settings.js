@@ -598,6 +598,95 @@ async function initUtilityModel() {
   });
 }
 
+/* Feature 0081 — the DEDICATED faithfulness-judge model picker. Mirrors initUtilityModel exactly,
+ * onto the faithfulness_* settings keys; blank ⇒ resolve_endpoint("faithfulness") falls back to the
+ * Utility model then the chat model. Same shared endpoint/model pool + fallback widget. */
+async function initFaithfulnessModel() {
+  var epSel = el('set-faithEpSelect');
+  var modelSel = el('set-faithModelSelect');
+  var msg = el('set-faithChatMsg');
+  if (!epSel || !modelSel) return;
+  var _endpoints = [];
+  var fallbackWidget = null;
+  if (epSel.options[0]) epSel.options[0].textContent = 'Same as utility';
+  if (modelSel.options[0]) modelSel.options[0].textContent = 'Same as utility';
+
+  try {
+    _endpoints = await _fetchModelEndpoints();
+    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
+  } catch (e) { console.warn('Failed to load endpoints for faithfulness model', e); }
+
+  function refreshModels(selectedModel) {
+    var epId = epSel.value;
+    var ep = _endpoints.find(function(e) { return e.id === epId; });
+    _fillModelSelect(modelSel, ep ? ep.models : [], selectedModel, true);
+  }
+
+  try {
+    var res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await res.json();
+    if (settings.faithfulness_endpoint_id) epSel.value = settings.faithfulness_endpoint_id;
+    refreshModels(settings.faithfulness_model || '');
+    fallbackWidget = _bindFallbackWidget({
+      containerId: 'set-faithFallbacks',
+      addBtnId: 'set-faithAddFallback',
+      endpoints: function() { return _endpoints; },
+      settingKey: 'faithfulness_model_fallbacks',
+      initial: Array.isArray(settings.faithfulness_model_fallbacks)
+        ? settings.faithfulness_model_fallbacks.map(function(f) { return { endpoint_id: (f && f.endpoint_id) || '', model: (f && f.model) || '' }; })
+        : [],
+    });
+  } catch (e) { console.warn('Failed to load faithfulness model settings', e); }
+
+  async function saveFaith() {
+    try {
+      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          faithfulness_endpoint_id: epSel.value || '',
+          faithfulness_model: modelSel.value || ''
+        })
+      });
+      if (msg) { msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
+        setTimeout(function() { msg.textContent = ''; }, 1500); }
+    } catch (e) { if (msg) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; } }
+  }
+
+  epSel.addEventListener('change', function() { refreshModels(''); saveFaith(); });
+  modelSel.addEventListener('change', saveFaith);
+
+  _registerAiEndpointRefresh(function(endpoints) {
+    _endpoints = endpoints;
+    _fillEndpointSelect(epSel, _endpoints, epSel.value, true);
+    refreshModels(modelSel.value);
+    if (fallbackWidget && fallbackWidget.refresh) fallbackWidget.refresh();
+  });
+}
+
+/* Feature 0079/0080 + 0081 — the runtime-overseer operator dials (pacing + faithfulness), moved here
+ * from /admin/status. Each is off/shadow/active, persisted to overseer_mode / faithfulness_mode via
+ * /api/auth/settings (admin-only). */
+async function initOverseerModes() {
+  var ovSel = el('set-overseerMode'), faithSel = el('set-faithMode'), msg = el('set-overseerMsg');
+  if (!ovSel || !faithSel) return;
+  try {
+    var res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await res.json();
+    if (settings.overseer_mode) ovSel.value = settings.overseer_mode;
+    if (settings.faithfulness_mode) faithSel.value = settings.faithfulness_mode;
+  } catch (e) { console.warn('Failed to load overseer modes', e); }
+  function save(body) {
+    if (msg) { msg.textContent = 'Saving…'; msg.style.color = ''; }
+    fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function() { if (msg) { msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
+        setTimeout(function() { msg.textContent = ''; }, 1500); } })
+      .catch(function() { if (msg) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; } });
+  }
+  ovSel.addEventListener('change', function() { save({ overseer_mode: ovSel.value }); });
+  faithSel.addEventListener('change', function() { save({ faithfulness_mode: faithSel.value }); });
+}
+
 /* G21 — only image-generation models belong in the Image select.
  * H2 unified every flat model dropdown onto the chat pool but, unlike Vision
  * and TTS, left the Image select UNFILTERED — so a chat model (DeepSeek,
@@ -2449,6 +2538,8 @@ function initAll() {
   initialized = true;
   initDefaultChat();
   initUtilityModel();
+  initFaithfulnessModel();
+  initOverseerModes();
   initImageSettings();
   initTimeOfDaySettings();
   initTokenEconomySettings();

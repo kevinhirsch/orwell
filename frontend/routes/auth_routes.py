@@ -486,7 +486,18 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         a scrubbed copy with secret keys blanked. The frontend uses this
         for keybinds + TTS prefs, so it stays callable without admin."""
         user = _get_current_user(request)
-        settings = _load_settings()
+        # Copy before any override — load_settings() may return the cached dict, which must NOT be
+        # mutated (it would poison the TTL cache for every other reader).
+        settings = dict(_load_settings())
+        # Feature 0079/0080/0081 — surface the RESOLVED (env-aware) overseer/faithfulness modes, so the
+        # Settings dials reflect what is actually IN EFFECT, not just the saved value. The ORWELL_*
+        # env vars are a headless fallback when a dial is unsaved; the dial must show that.
+        try:
+            from src import overseer as _ov, faithfulness as _fa
+            settings["overseer_mode"] = _ov.overseer_mode()
+            settings["faithfulness_mode"] = _fa.faithfulness_mode()
+        except Exception:
+            pass
         if user and auth_manager.is_admin(user):
             return settings
         return scrub_settings(settings)

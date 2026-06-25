@@ -5036,6 +5036,25 @@ async def do_make_deal(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_confide(content: str, owner: Optional[str] = None) -> Dict:
+    """Feature 0075 — the player presses an ALLY to open up. The ENGINE is the single authority: it
+    decides whether they disclose, how much, and whether it's the truth or a lie, and records it as
+    the player's knowledge. We only forward {npcId} and return what the engine discloses."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    npc_id = (args.get("npcId") or args.get("npc_id") or args.get("with") or "").strip()
+    if not npc_id:
+        return {"error": "npcId (the houseguest the player is pressing to open up) is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.confide(npc_id, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_manage_sandbox(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

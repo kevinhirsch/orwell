@@ -8,26 +8,38 @@
 import type { EntityId } from "./ids";
 
 export type Room =
-  | "kitchen" | "living-room" | "backyard" | "bedroom-a" | "bedroom-b"
-  | "hoh-room" | "bathroom" | "storage-room" | "diary-room";
+  | "kitchen" | "living-room" | "dining-room" | "backyard"
+  | "hallway"
+  | "bedroom-a" | "bedroom-b" | "bedroom-c" | "bathroom" | "lounge"
+  | "hoh-room" | "storage-room" | "diary-room";
 
 export const HOUSE_ROOMS: readonly Room[] = [
-  "kitchen", "living-room", "backyard", "bedroom-a", "bedroom-b",
-  "hoh-room", "bathroom", "storage-room", "diary-room",
+  "kitchen", "living-room", "dining-room", "backyard",
+  "hallway",
+  "bedroom-a", "bedroom-b", "bedroom-c", "bathroom", "lounge",
+  "hoh-room", "storage-room", "diary-room",
 ];
 
 /**
- * The floor plan. Symmetric by construction (asserted by the unit tests): the living room is
- * the hub; the HOH room sits up its own stairs; the diary room opens off the living room and
- * adjoins nothing else (it is PRIVATE — overhearing the diary room is impossible by data).
+ * The floor plan (0077 — recent-BB layout). Symmetric by construction (asserted by the unit tests):
+ * an OPEN PUBLIC CORE where privacy is impossible (kitchen ⇄ living-room ⇄ dining-room ⇄ backyard),
+ * a `hallway` chokepoint off the living room, and a PRIVATE WING reached only through the hallway
+ * (the three bedrooms, the bathroom, the lounge). The HOH room sits up its own stairs off the living
+ * room; the storage room is the classic quick-meeting spot off the kitchen; the diary room opens off
+ * the living room and adjoins nothing else (PRIVATE — overhearing it is impossible by data). Owner
+ * note #1: the BATHROOM is NOT adjacent to any bedroom (it opens off the hallway).
  */
 export const HOUSE_ADJACENCY: ReadonlyMap<Room, readonly Room[]> = new Map<Room, readonly Room[]>([
-  ["living-room", ["kitchen", "backyard", "bedroom-a", "bedroom-b", "hoh-room", "bathroom", "diary-room"]],
-  ["kitchen", ["living-room", "backyard", "storage-room"]],
-  ["backyard", ["living-room", "kitchen"]],
-  ["bedroom-a", ["living-room", "bathroom"]],
-  ["bedroom-b", ["living-room", "bathroom"]],
-  ["bathroom", ["living-room", "bedroom-a", "bedroom-b"]],
+  ["kitchen", ["living-room", "dining-room", "backyard", "storage-room"]],
+  ["living-room", ["kitchen", "dining-room", "backyard", "hallway", "hoh-room", "diary-room"]],
+  ["dining-room", ["kitchen", "living-room"]],
+  ["backyard", ["kitchen", "living-room"]],
+  ["hallway", ["living-room", "bedroom-a", "bedroom-b", "bedroom-c", "bathroom", "lounge"]],
+  ["bedroom-a", ["hallway"]],
+  ["bedroom-b", ["hallway"]],
+  ["bedroom-c", ["hallway"]],
+  ["bathroom", ["hallway"]],
+  ["lounge", ["hallway"]],
   ["hoh-room", ["living-room"]],
   ["storage-room", ["kitchen"]],
   ["diary-room", ["living-room"]],
@@ -35,6 +47,52 @@ export const HOUSE_ADJACENCY: ReadonlyMap<Room, readonly Room[]> = new Map<Room,
 
 export function areAdjacent(a: Room, b: Room): boolean {
   return a !== b && (HOUSE_ADJACENCY.get(a) ?? []).includes(b);
+}
+
+/**
+ * The SIGHTLINE graph (0077 Phase 2 — eyeshot, NARROWER than adjacency where it matters). Adjacency
+ * is who you can WALK to; sightline is whose occupants you can SEE from where you stand. The OPEN-PLAN
+ * PUBLIC CORE (kitchen / living-room / dining-room / backyard) is one mutual-visibility CLIQUE —
+ * open plan + glass to the yard, so standing in any one you see everyone in all four (this is the one
+ * place sightline reaches PAST a direct door: you can see across the great room to the yard without a
+ * dining→backyard doorway). The living room also sees into the `hallway` mouth (who is loitering /
+ * moving through it). EVERY OTHER room is a CLOSED door — opaque from outside: standing next to a
+ * bedroom, the bathroom, the lounge, the HOH room (up its own stairs), the storage room (the quiet
+ * meeting spot), or the sealed diary room reveals NOTHING about who is inside — crucially, from the
+ * hallway you do NOT see into the bedrooms it adjoins. That opacity is the privacy payoff (owner note
+ * #3): who is behind a closed door is KNOWLEDGE you earn by watching a doorway, never a free read.
+ * Symmetric + irreflexive (asserted by the unit tests).
+ */
+export const HOUSE_SIGHTLINE: ReadonlyMap<Room, readonly Room[]> = new Map<Room, readonly Room[]>([
+  ["kitchen", ["living-room", "dining-room", "backyard"]],
+  ["living-room", ["kitchen", "dining-room", "backyard", "hallway"]],
+  ["dining-room", ["kitchen", "living-room", "backyard"]],
+  ["backyard", ["kitchen", "living-room", "dining-room"]],
+  ["hallway", ["living-room"]],
+  ["bedroom-a", []],
+  ["bedroom-b", []],
+  ["bedroom-c", []],
+  ["bathroom", []],
+  ["lounge", []],
+  ["hoh-room", []],
+  ["storage-room", []],
+  ["diary-room", []],
+]);
+
+/** Whether an observer standing in room `a` can SEE the occupants of room `b` (0077 Phase 2 eyeshot). */
+export function areVisible(a: Room, b: Room): boolean {
+  return a !== b && (HOUSE_SIGHTLINE.get(a) ?? []).includes(b);
+}
+
+/**
+ * A PRIVATE room is one NO other room has sightline INTO — a closed door, opaque from outside (0077
+ * Phase 2). Its occupants are never an ambient proximity read; they are learned only by watching a
+ * doorway (the tracked-occupancy layer). Derived from the sightline graph (data, not a separate flag)
+ * so the two can never drift. The public core + the hallway are public; everything else is private.
+ */
+export function isPrivateRoom(room: Room): boolean {
+  for (const sees of HOUSE_SIGHTLINE.values()) if (sees.includes(room)) return false;
+  return true;
 }
 
 /**
@@ -68,20 +126,37 @@ const ROOM_ALIASES: ReadonlyMap<string, Room> = new Map<string, Room>([
   ["living-room", "living-room"],
   ["livingroom", "living-room"],
   ["living", "living-room"],
-  ["lounge", "living-room"],
   ["common-room", "living-room"],
   ["common-area", "living-room"],
+  ["great-room", "living-room"],
+  ["dining-room", "dining-room"],
+  ["dining", "dining-room"],
+  ["dining-area", "dining-room"],
+  ["dinner", "dining-room"],
   ["backyard", "backyard"],
   ["yard", "backyard"],
   ["outside", "backyard"],
   ["garden", "backyard"],
   ["patio", "backyard"],
+  ["pool", "backyard"],
+  ["poolside", "backyard"],
+  ["hallway", "hallway"],
+  ["hall", "hallway"],
+  ["corridor", "hallway"],
   ["bedroom-a", "bedroom-a"],
   ["bedroom-1", "bedroom-a"],
   ["first-bedroom", "bedroom-a"],
   ["bedroom-b", "bedroom-b"],
   ["bedroom-2", "bedroom-b"],
   ["second-bedroom", "bedroom-b"],
+  ["bedroom-c", "bedroom-c"],
+  ["bedroom-3", "bedroom-c"],
+  ["third-bedroom", "bedroom-c"],
+  ["lounge", "lounge"],
+  ["games-room", "lounge"],
+  ["game-room", "lounge"],
+  ["have-not", "lounge"],
+  ["have-not-room", "lounge"],
   ["hoh-room", "hoh-room"],
   ["hoh", "hoh-room"],
   ["hoh-suite", "hoh-room"],
@@ -140,8 +215,8 @@ export function resolveRoom(name: string, currentRoom?: Room | null): RoomResolu
   const alias = ROOM_ALIASES.get(key);
   if (alias) return { kind: "ok", room: alias };
 
-  // 2. the ambiguous "bedroom" family — pick sensibly when we can, else report both.
-  const bedrooms: readonly Room[] = ["bedroom-a", "bedroom-b"];
+  // 2. the ambiguous "bedroom" family — pick sensibly when we can, else report the candidates.
+  const bedrooms: readonly Room[] = ["bedroom-a", "bedroom-b", "bedroom-c"];
   const isBedroomy = key === "bedroom" || key === "bedrooms" || key === "bed" || key === "room" || key === "beds";
   if (isBedroomy) {
     if (currentRoom && bedrooms.includes(currentRoom)) return { kind: "ok", room: currentRoom }; // already in one — stay

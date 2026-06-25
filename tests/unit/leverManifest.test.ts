@@ -83,7 +83,10 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     // invented a third into a room they were not in. The lever must bind the JSON shape, not just
     // forbid "guessing".
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/`present` are the people IN/);
-    expect(BASE_GAME_MASTER_PROMPT).toMatch(/is a NAMED adjacent room/);
+    // 0077 Phase 2 — `nearby` is now SIGHTLINE-scoped (a room the player can SEE INTO), and closed
+    // rooms are opaque (their occupants never appear), the stronger privacy contract.
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/is a NAMED room the player can SEE INTO/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/are OPAQUE: their occupants do NOT appear/);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/NEITHER list is elsewhere/i);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/Never move a `present` person|pull a `nearby` person/);
   });

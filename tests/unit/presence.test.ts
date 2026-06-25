@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { HOUSE_ROOMS, HOUSE_ADJACENCY, areAdjacent, occupancyViolations } from "../../src/domain/house";
+import { HOUSE_ROOMS, HOUSE_ADJACENCY, HOUSE_SIGHTLINE, areAdjacent, areVisible, occupancyViolations } from "../../src/domain/house";
 import type { Room } from "../../src/domain/house";
 import { assignRooms, rollOverhears } from "../../src/engine/presence";
 import { PRESENCE, MOVEMENT_PERSONALITY } from "../../src/engine/presenceConstants";
@@ -427,12 +427,14 @@ describe("whereabouts (0049) — the Vault-free presence read", () => {
     expect(HOUSE_ROOMS).toContain(w!.room as Room);
   });
 
-  it("shows only the player's room + adjacent rooms, names only — no numbers, motives, or hidden keys", () => {
+  it("shows only the player's room + SIGHTLINE rooms (0077 Phase 2 — eyeshot, not adjacency), names only — no numbers, motives, or hidden keys", () => {
     const { sb } = liveGame(8);
     const w = sb.session.whereabouts()!;
-    const adjacent = HOUSE_ADJACENCY.get(w.room as Room) ?? [];
-    expect(w.nearby.map((n) => n.room)).toEqual([...adjacent]);
-    for (const n of w.nearby) expect(areAdjacent(w.room as Room, n.room as Room)).toBe(true);
+    // 0077 Phase 2: `nearby` is the rooms the player can SEE INTO (sightline), not every adjacent room —
+    // a closed door one room over no longer leaks its occupants.
+    const visible = HOUSE_SIGHTLINE.get(w.room as Room) ?? [];
+    expect(w.nearby.map((n) => n.room)).toEqual([...visible]);
+    for (const n of w.nearby) expect(areVisible(w.room as Room, n.room as Room)).toBe(true);
     // Strict shape: NamedRefs only in present/nearby (no numbers, motives, or hidden keys).
     for (const ref of [...w.present, ...w.nearby.flatMap((n) => n.present)]) {
       expect(Object.keys(ref).sort()).toEqual(["id", "name"]);
@@ -446,10 +448,10 @@ describe("whereabouts (0049) — the Vault-free presence read", () => {
       expect(Object.keys(c).sort()).toEqual(["id", "name", "turnsHere"]);
       expect(c.turnsHere).toBeGreaterThanOrEqual(0);
     }
-    // Non-adjacent rooms never appear (fog of war): rooms shown = own + adjacent.
+    // Rooms the player can't SEE never appear (0077 Phase 2 fog of war): rooms shown = own + sightline.
     const shown = new Set([w.room, ...w.nearby.map((n) => n.room)]);
     for (const room of shown) expect(HOUSE_ROOMS).toContain(room as Room);
-    expect(shown.size).toBe(adjacent.length + 1);
+    expect(shown.size).toBe(visible.length + 1);
   });
 
   it("L21/L24 — the player is a person: held across engine ticks, relocated only by movePlayer; tenure accrues", () => {

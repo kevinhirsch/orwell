@@ -650,6 +650,7 @@ def setup_admin_health_routes() -> APIRouter:
             {"id": "live", "label": "Front-end (live)"},
             {"id": "io", "label": "Engine I/O (live) — every tool call in/out"},
             {"id": "llmio", "label": "LLM I/O (live) — full prompt + response + reasoning"},
+            {"id": "overseer", "label": "Overseer (live) — diagnoses & corrections"},
         ]
         for name in _log_files():
             sources.append({"id": f"file:{name}", "label": f"{name} (file)"})
@@ -667,6 +668,9 @@ def setup_admin_health_routes() -> APIRouter:
             return {"source": source, "next": nxt, "lines": lines}
         if source == "llmio":
             nxt, lines = log_rings.LLMIO.since(since)
+            return {"source": source, "next": nxt, "lines": lines}
+        if source == "overseer":
+            nxt, lines = log_rings.OVERSEER.since(since)
             return {"source": source, "next": nxt, "lines": lines}
         if source.startswith("file:"):
             name = source[5:]
@@ -693,11 +697,18 @@ def setup_admin_health_routes() -> APIRouter:
         """The LLM I/O trace toggle + log-retention horizon + the live total-size
         readout (the universal logging setting on the status page). Best-effort."""
         require_admin(request)
-        from src import llm_trace
+        from src import llm_trace, overseer, faithfulness
         from src.settings import get_setting
         total = llm_trace.total_log_bytes()
+        mode = overseer.overseer_mode()  # 0080: 'off' | 'shadow' | 'active'
         return {
             "traceEnabled": bool(get_setting("llm_trace_enabled", True)),
+            # 0080: the 3-state mode is authoritative; overseerEnabled stays for back-compat
+            # (true iff the mode is not 'off').
+            "overseerMode": mode,
+            "overseerEnabled": mode != "off",
+            # 0081: the narration-faithfulness gate rides its OWN independent dial.
+            "faithfulnessMode": faithfulness.faithfulness_mode(),
             "retentionDays": llm_trace.retention_days(),
             "choices": llm_trace.RETENTION_CHOICES,
             "totalBytes": total,
@@ -710,7 +721,7 @@ def setup_admin_health_routes() -> APIRouter:
         """Persist the trace toggle and/or retention horizon. Lowering the horizon
         trims immediately so the freed space shows up at once."""
         require_admin(request)
-        from src import llm_trace
+        from src import llm_trace, overseer, faithfulness
         from src.settings import load_settings, save_settings
         try:
             body = await request.json()
@@ -723,6 +734,26 @@ def setup_admin_health_routes() -> APIRouter:
         if "traceEnabled" in body:
             settings["llm_trace_enabled"] = bool(body["traceEnabled"])
             changed = True
+        # 0080: the 3-state mode is the primary control. When set, it is authoritative — clear the
+        # legacy binary key so it can never shadow the chosen mode in overseer_mode()'s resolution.
+        if "overseerMode" in body:
+            mode = body["overseerMode"]
+            if isinstance(mode, str) and mode in overseer.OVERSEER_MODES:
+                settings["overseer_mode"] = mode
+                settings.pop("overseer_enabled", None)
+                changed = True
+        elif "overseerEnabled" in body:
+            # Legacy binary toggle (back-compat): True -> shadow, False -> off, written through the
+            # 3-state key so the new control reflects it.
+            settings["overseer_mode"] = "shadow" if bool(body["overseerEnabled"]) else "off"
+            settings.pop("overseer_enabled", None)
+            changed = True
+        # 0081: the faithfulness gate's OWN dial, independent of the overseer mode above.
+        if "faithfulnessMode" in body:
+            fmode = body["faithfulnessMode"]
+            if isinstance(fmode, str) and fmode in faithfulness.FAITHFULNESS_MODES:
+                settings["faithfulness_mode"] = fmode
+                changed = True
         if "retentionDays" in body:
             try:
                 d = int(body["retentionDays"])
@@ -735,8 +766,12 @@ def setup_admin_health_routes() -> APIRouter:
             save_settings(settings)
         # Apply the (possibly new) horizon now so the size readout reflects it.
         result = llm_trace.trim_logs(None)
+        mode = overseer.overseer_mode()  # 0080: resolved post-save (the source of truth)
         return {
             "traceEnabled": bool(settings.get("llm_trace_enabled", True)),
+            "overseerMode": mode,
+            "overseerEnabled": mode != "off",
+            "faithfulnessMode": faithfulness.faithfulness_mode(),  # 0081: independent dial
             "retentionDays": llm_trace.retention_days(),
             "totalBytes": result["totalBytes"],
             "totalHuman": result["totalHuman"],
@@ -1071,6 +1106,8 @@ _STATUS_PAGE = """<!doctype html>
   <button type="button" class="btn" id="trim-now" title="Trim every managed logfile to the selected horizon right now">Trim now</button>
   <span id="retmsg" class="sub"></span>
 </div>
+<h1 style="margin-top:26px">RUNTIME OVERSEER</h1>
+<div class="sub">The pacing-overseer and narration-faithfulness dials — and the dedicated faithfulness judge model — now live in <strong>Settings &rarr; AI &rarr; Runtime overseer</strong>. The live diagnostics still stream to the <strong>Overseer (live)</strong> panel above. The <code>ORWELL_OVERSEER_MODE</code> / <code>ORWELL_FAITHFULNESS_MODE</code> env vars remain the headless fallback.</div>
 <div id="err"></div>
 <script nonce="{{CSP_NONCE}}">
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));

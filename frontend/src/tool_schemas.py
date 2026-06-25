@@ -1488,6 +1488,20 @@ FUNCTION_TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "confide",
+            "description": "Feature 0075 — when the player presses an ALLY they're already in a 1:1 scene with to open up ('what's really going on with you?', 'you can tell me'), call confide({npcId}). The ENGINE decides whether they actually open up, how much of their secret they share, and whether it's the truth or a lie — never invent a confession. Returns {disclosed, tier, content}: voice the returned content as that houseguest confiding; if disclosed is false, play the deflection (they're not ready / change the subject). Never state a tier or whether it's true — judging that is the player's alone.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "npcId": {"type": "string", "description": "The houseguest id the player is pressing to open up (from the roster)."},
+                },
+                "required": ["npcId"],
+            },
+        },
+    },
     # --- God Mode / admin (0016) — ADMIN-ONLY; still Vault-free (walled even for admin) ---
     {
         "type": "function",
@@ -1746,6 +1760,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "requestSelfEviction",
     # C13: the prompt-advertised levers that were missing from the FE surface.
     "socialInitiatives", "diaryRoom", "makeDeal",
+    # 0075: the trust-gated confide lever (the engine decides the disclosure; the model voices it).
+    "confide",
     # B64/0049: the Vault-free presence read (who's here, who's one room over).
     "whereabouts",
     # L21/L24: the player directs their own movement (the engine never auto-relocates a person).

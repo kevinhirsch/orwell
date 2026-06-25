@@ -493,6 +493,11 @@ _NON_CHAT_EXACT_PREFIXES = (
 def _is_chat_model(model_id: str) -> bool:
     """Return True if the model ID looks like a chat/completions-capable model."""
     mid = model_id.lower()
+    # Text→image models (gpt-image, dall-e, flux, "*-flash-image", …) resolve fine but
+    # can't serve chat — keep them out of the chat partition / default selection.
+    from src.llm_core import is_image_model
+    if is_image_model(model_id):
+        return False
     for prefix in _NON_CHAT_PREFIXES:
         if mid.startswith(prefix):
             return False
@@ -1647,7 +1652,12 @@ def setup_model_routes(model_discovery):
             # global default to an embedding/tts/etc. entry a provider happens
             # to list first.
             settings = _load_settings()
-            if not settings.get("default_endpoint_id"):
+            # Only an LLM/chat endpoint may auto-become the default CHAT endpoint. An image
+            # endpoint (model_type="image") serves text→image models that can't complete
+            # chat, so binding the chat default to it produces the "chat goes to the image
+            # model" failure. Image endpoints are selected via the separate image_* settings.
+            _ep_is_image = (ep.model_type or "llm") == "image"
+            if not settings.get("default_endpoint_id") and not _ep_is_image:
                 from src.endpoint_resolver import _first_chat_model
                 settings["default_endpoint_id"] = ep.id
                 # Honor the configured/OOB default chat model (e.g. deepseek-v4-pro) when THIS
@@ -1881,6 +1891,7 @@ def setup_model_routes(model_discovery):
                 _is_admin = bool(auth_mgr.is_admin(_user))
         except Exception:
             _is_admin = False
+        _global_branch = not (_user and not _is_admin)
         if _user and not _is_admin:
             from routes.prefs_routes import _load_for_user
             _user_prefs = _load_for_user(_user) or {}
@@ -1891,6 +1902,7 @@ def setup_model_routes(model_discovery):
             ep_id = settings.get("default_endpoint_id", "")
             model = settings.get("default_model", "")
             _fallbacks = settings.get("default_model_fallbacks") or []
+        _original_model = model
         db = SessionLocal()
         try:
             ep = None
@@ -1946,11 +1958,41 @@ def setup_model_routes(model_discovery):
                 return {"endpoint_id": "", "endpoint_url": "", "model": ""}
             base = _normalize_base(ep.base_url)
             chat_url = build_chat_url(base)
-            if not model and (getattr(ep, "cached_models", None) or getattr(ep, "pinned_models", None)):
+            # A chat/narrator default must never be a text→image model — it can't complete
+            # chat (it 400s or returns an empty/garbage reply). If the stored default points
+            # at one (a corrupted default, the symptom of "chat insists on gemini-flash-image")
+            # OR no model is set, derive the first real CHAT model off the endpoint. This makes
+            # an already-corrupted persisted default SELF-HEAL on the next resolve.
+            from src.llm_core import is_image_model
+            from src.endpoint_resolver import _first_chat_model
+            if (not model or is_image_model(model)) and (
+                getattr(ep, "cached_models", None) or getattr(ep, "pinned_models", None)
+            ):
                 try:
                     visible = _visible_models(ep.cached_models, getattr(ep, "hidden_models", None), getattr(ep, "pinned_models", None))
-                    if visible:
-                        model = visible[0]
+                    picked = _first_chat_model(visible)
+                    if picked:
+                        model = picked
+                except Exception:
+                    pass
+            # Final guard: never hand an image model back as the chat default, even when the
+            # endpoint has no chat model to offer (better an empty pick than dispatching to it).
+            if model and is_image_model(model):
+                model = ""
+            # Harden: when the STORED global default was a text→image model, persist the derived
+            # chat model so the corruption is cleaned at the SOURCE — Settings and the research/
+            # utility lanes that fall back to `default_model` stop reading the image model. Global/
+            # admin scope only (per-user prefs self-heal on read); writes at most once, since the
+            # next read sees a chat model and skips this.
+            if (
+                _global_branch and _original_model and is_image_model(_original_model)
+                and model and not is_image_model(model) and model != _original_model
+            ):
+                try:
+                    settings["default_model"] = model
+                    if not settings.get("default_endpoint_id"):
+                        settings["default_endpoint_id"] = ep.id
+                    _save_settings(settings)
                 except Exception:
                     pass
             return {"endpoint_id": ep.id, "endpoint_url": chat_url, "model": model}

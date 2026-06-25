@@ -150,3 +150,22 @@ def owner_filter(query, model_cls, user: str, *, include_shared: bool = False):
     if include_shared:
         return query.filter((model_cls.owner == user) | (model_cls.owner == None))  # noqa: E711
     return query.filter(model_cls.owner == user)
+
+
+def is_admin_user(user: Optional[str]) -> bool:
+    """Request-free admin check for background/system code paths that resolve
+    endpoints WITHOUT a Request (e.g. the portrait pipeline, `_resolve_model`,
+    `has_image_capable_endpoint`). Reads the same ``data/auth.json`` the app's
+    AuthManager uses, so it agrees with the request-scoped checks.
+
+    Admins manage the global endpoint pool, so — like the request-scoped read
+    paths — they must not be owner-scoped to endpoints they happen to personally
+    own. Empty/unknown user, or any failure to load auth, returns False (the
+    caller then falls back to owner+shared scoping, which is the safe default)."""
+    if not user:
+        return False
+    try:
+        from core.auth import AuthManager
+        return bool(AuthManager().is_admin(user))
+    except Exception:
+        return False

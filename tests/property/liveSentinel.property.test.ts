@@ -52,6 +52,10 @@ const args = (name: string, seed: number): Record<string, unknown> => {
     case "surfaceInformationTo": return { entity: PLAYER, fact: { content: "x" }, pathway: "told-by:npc:1" };
     case "diaryRoom": return { entry: "my private read" };
     case "makeDeal": return { with: npc(1), kind: "safety", terms: "we ride together" };
+    // 0075: press a houseguest to confide — the returned content (whatever tier, even a fabricated
+    // lie) must NEVER carry a planted sealed sentinel; the engine only ever discloses the secret it
+    // chose + recorded, blurred/glossed to the tier, and a lie is engine-authored, not a real secret.
+    case "confide": return { npcId: npc(1) };
     // B65: voice the NPC who HOLDS adjacent secrets — their soul/hidden-element/Vault sentinels and
     // every OTHER houseguest's knowledge sentinel must still never cross (the per-NPC bound).
     case "npcVoice": return { id: npc(1) };

@@ -163,7 +163,7 @@ def test_has_image_capable_endpoint_provider_logic(monkeypatch, provider, base_u
     # ModelEndpoint is referenced only for the .filter column — a stub attribute is enough.
     monkeypatch.setattr(database, "ModelEndpoint",
                         type("ME", (), {"is_enabled": True, "owner": None}))
-    monkeypatch.setattr("src.auth_helpers.owner_filter", lambda q, m, o: q)
+    monkeypatch.setattr("src.auth_helpers.owner_filter", lambda q, m, o, **k: q)
     assert ai_interaction.has_image_capable_endpoint("u") is expected
 
 
@@ -182,7 +182,7 @@ def test_has_image_capable_endpoint_false_when_none(monkeypatch):
     monkeypatch.setattr(database, "SessionLocal", lambda: _Session())
     monkeypatch.setattr(database, "ModelEndpoint",
                         type("ME", (), {"is_enabled": True, "owner": None}))
-    monkeypatch.setattr("src.auth_helpers.owner_filter", lambda q, m, o: q)
+    monkeypatch.setattr("src.auth_helpers.owner_filter", lambda q, m, o, **k: q)
     assert ai_interaction.has_image_capable_endpoint("u") is False
 
 

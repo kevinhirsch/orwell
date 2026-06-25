@@ -14,6 +14,45 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+
+# ── Canonical text→image model classification (single source of truth) ──────────
+# A text→image model resolves fine through the normal endpoint plumbing but CANNOT
+# serve chat completions — POSTing it to a chat endpoint returns an empty/garbage
+# reply or 400s. Several chat-model selection points (the default-chat resolver, the
+# empty-session recovery, _first_chat_model) used to carry their own incomplete
+# non-chat lists that only knew the legacy families ("dall-e", "stable-diffusion"),
+# so a modern image model like "google/gemini-3.1-flash-image" or "gpt-image-1" slipped
+# through and got bound as the chat/narrator model. This is the ONE place that knows
+# the image families; every chat selector consults it (and src.orwell_portraits
+# re-exports it as `_is_image_model`, the prior home, so its tests stay pinned here).
+_IMAGE_MODEL_FAMILIES = (
+    "gpt-image", "dall-e", "dalle",
+    "flux", "stable-diffusion", "sdxl", "sd3", "sd-", "playground-v",
+    "imagen", "ideogram", "recraft", "kolors", "kandinsky", "pixart",
+    "firefly", "titan-image", "aura-flow", "hidream", "seedream",
+    "qwen-image", "wan2", "janus", "omnigen", "cogview", "chroma",
+    "lumina", "nano-banana", "photon", "phoenix", "luma-photon",
+)
+# Markers of a VISION (image-understanding) model — these ARE chat-capable and must
+# NOT be misclassified as image generators just because "image" appears in the id.
+_VISION_MARKERS = ("vision", "-vl", "understand", "caption", "ocr", "embed", "rerank")
+
+
+def is_image_model(model_id: Optional[str]) -> bool:
+    """True for a text→image (generation) model; False for chat/vision/embedding models.
+
+    Recognizes the known image families plus any id carrying "image"/"text-to-image"/"t2i"
+    (e.g. "google/gemini-3.1-flash-image"), while excluding vision/understanding models
+    that legitimately do chat. Keep in sync with the front-end `_isImageModel` in settings.js.
+    """
+    lower = str(model_id or "").lower()
+    if any(kw in lower for kw in _IMAGE_MODEL_FAMILIES):
+        return True
+    if "image" in lower or "text-to-image" in lower or "t2i" in lower:
+        return not any(m in lower for m in _VISION_MARKERS)
+    return False
+
+
 class LLMConfig:
     """Configuration constants for LLM operations."""
     DEFAULT_TIMEOUT = 30

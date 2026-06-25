@@ -27,6 +27,8 @@ export const ORWELL_TOOL_BEATS = {
   'socialInitiatives': '🏠 Reading the house',
   'diaryRoom': '📔 Diary Room',
   'makeDeal': '🤝 Handshake',
+  // 0075: the player presses an ally to open up; the engine decides the disclosure.
+  'confide': '🤫 Confiding',
   'askProducers': '🎙 Producers',
   'renderScene': '📺 Production',
   'endOfSessionSummary': '📼 Tape check',

@@ -306,7 +306,16 @@ export const BASE_GAME_MASTER_PROMPT = [
   "  • npcVoice — BEFORE voicing a houseguest in a scene, fetch their bounded person: their persona,",
   "    where they are and who is with them, what THEY actually know and suspect, and their stances.",
   "    Speak them ONLY from this — they cannot reference what they never witnessed or were told,",
-  "    and what they do know they may share, shade, or lie about, in character.",
+  "    and what they do know they may share, shade, or lie about, in character. If it carries a",
+  "    `mayConfide` hint, this houseguest is READY to open up to the player — lean the scene toward it,",
+  "    in their manner (never state the reason word or any read aloud); when the player presses, confide.",
+  "  • confide — when the player presses an ALLY they're already with to open up ('what's really going",
+  "    on?', 'you can tell me'), call confide({ npcId }). The GAME decides whether they actually open up,",
+  "    how much, and whether it is the truth or a LIE — you never invent a confession. VOICE the returned",
+  "    `content` as that houseguest confiding; if `disclosed` is false, play the deflection (they change",
+  "    the subject / 'not yet') — itself a real beat. NEVER say which tier it was or whether it was true:",
+  "    judging a confidence — and catching a lie — is the player's alone. This is the most human beat in",
+  "    the house; an earned confidence you only narrate (without confide) is unrecorded and never real.",
   "  • socialInitiatives — which houseguests want to approach the player right now, each with a",
   "    coarse motive (bond: their tie drives it; probe: their wariness does), so scenes start from",
   "    EITHER side — not only when the player reaches out. Voice the approach in that houseguest's",
@@ -315,8 +324,12 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    narrate ANY room, crowd, or who-is-present scene (every phase, not just the premiere) — presence",
   "    is the game's ground truth, never invented. Read its shape EXACTLY: `present` are the people IN",
   "    the player's room — the only ones the player can see and address directly; each entry of `nearby`",
-  "    is a NAMED adjacent room with its own people — the player may glimpse or overhear them through a",
-  "    doorway, but they are NOT in the room and cannot be spoken to until someone moves. Anyone in",
+  "    is a NAMED room the player can SEE INTO (eyeshot — the open great room/yard, or the hallway mouth)",
+  "    with its own people — the player may glimpse or overhear them across the gap, but they are NOT in",
+  "    the room and cannot be spoken to until someone moves. CLOSED rooms (a bedroom, the storage/diary",
+  "    room) are OPAQUE: their occupants do NOT appear in `nearby` even one door away — who is behind a",
+  "    closed door is something the player learns by watching, never a free read, so never narrate who is",
+  "    in a closed side room unless the player witnessed them go in. Anyone in",
   "    NEITHER list is elsewhere in the house and is NOT visible — do not place them in the scene at all.",
   "    Never move a `present` person into a side room or pull a `nearby` person into the player's room,",
   "    never place a houseguest from memory or a guess, never call a room empty without checking, and",
@@ -783,12 +796,13 @@ export function renderGameContext(view: GameStateView): string {
           return t >= 2 ? `${p.name} (lingering, ${tenureWord(t)})` : `${p.name} (${tenureWord(t)})`;
         }).join(", ")
       : "no one — you have this room to yourself";
-    // L-LOC: EVERY adjacent room, occupied AND empty — the engine's occupancy for each room the player
-    // can see into is a FACT to voice, so the narrator never invents "empty" for a room the engine
-    // populated (the live-playtest bug: the panel showed houseguests in a room the narrator called empty,
-    // and bent it to match the player's wish for "a room to themselves"). This reads the SAME Vault-free
-    // `whereabouts` projection the FE "The House" panel renders — by construction it carries only the
-    // player's room + adjacent rooms, so nothing the player can't legitimately observe ever appears.
+    // L-LOC: EVERY room the player can SEE INTO (0077 Phase 2 sightline), occupied AND empty — the
+    // engine's occupancy for each visible room is a FACT to voice, so the narrator never invents
+    // "empty" for a room the engine populated (the live-playtest bug: the panel showed houseguests in a
+    // room the narrator called empty, and bent it to match the player's wish for "a room to themselves").
+    // This reads the SAME Vault-free `whereabouts` projection the FE "The House" panel renders — by
+    // construction it carries only the player's room + the SIGHTLINE rooms (a closed door is opaque and
+    // never appears), so nothing the player can't legitimately observe ever appears.
     const nearby = wa.nearby.map((n) =>
       n.present.length
         ? `    · ${roomLabel(n.room)}: ${n.present.map((p) => p.name).join(", ")}.`
@@ -800,8 +814,8 @@ export function renderGameContext(view: GameStateView): string {
       `    Your room: the ${roomLabel(wa.room)} (you've been here ${tenureWord(wa.turnsHere)}).`,
       `    With you: ${here}.`,
       ...(nearby.length
-        ? ["    One room over (each adjacent room and EXACTLY who is in it — voice this occupancy, never invent it):", ...nearby]
-        : ["    No adjacent rooms are in view."]),
+        ? ["    In view (each room you can SEE INTO and EXACTLY who is in it — voice this occupancy, never invent it; closed rooms are opaque and not listed):", ...nearby]
+        : ["    No other rooms are in view (you can see into none from here)."]),
       // The model used to GUESS a room id for moveTo ("bedroom"?) and loop through "isn't mapping"
       // retries. Hand it the EXACT walkable rooms so it always names a real one (moveTo is forgiving,
       // but this removes the guessing entirely). These are the WHOLE house — only the player's room +
