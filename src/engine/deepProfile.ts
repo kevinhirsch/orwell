@@ -322,9 +322,9 @@ const SECRET_POOL = [
 
 // True strategic goals — distinct from a stated public game. No stat vocabulary.
 const TRUE_GOAL_POOL = [
-  "reach the end as a beloved player whose strategy stays invisible",
+  "reach the end as a beloved houseguest whose strategy stays invisible",
   "build one secret two-person final deal nobody sees coming",
-  "let the loud players take the heat while quietly steering evictions",
+  "let the loud personalities take the heat while quietly steering evictions",
   "neutralize the sharpest hidden threat before the jury phase",
   "win in a way the people back home can be proud of",
   "control the house through suggestion, never visible power",
@@ -344,7 +344,7 @@ const TRUE_GOAL_POOL = [
 
 // Named weaknesses / blind spots — behavioral seeds the game exploits on a delay.
 const WEAKNESS_POOL = [
-  "underestimates quiet players and reads them as non-threats too long",
+  "underestimates quiet houseguests and reads them as non-threats too long",
   "cannot resist being the most relevant person in the room",
   "is too loyal once committed and finds it hard to cut anyone",
   "plays several moves ahead of where the house actually is",
@@ -490,9 +490,9 @@ const ARCHETYPE_GOAL: Record<Archetype, readonly string[]> = {
   "comp-beast": ["win enough comps to never depend on anyone's loyalty", "be feared into a final two no one dares to evict"],
   "mastermind": ["steer every eviction from the shadows and reach the end uncredited", "build one secret two-person deal the house never sees coming"],
   "social-butterfly": ["be so universally liked the jury can't vote against them", "sit beside someone the jury clearly resents and coast to the win"],
-  "floater": ["survive to the end by never being anyone's primary target", "let the loud players burn each other and inherit the house"],
+  "floater": ["survive to the end by never being anyone's primary target", "let the loud rivals burn each other and inherit the house"],
   "villain": ["engineer a blindside big enough to make the house fear them", "control the game through pressure and dare anyone to take the shot"],
-  "underdog": ["outlast every player who counted them out and win it earned", "carry one ally as far as it goes, then make the cold cut clean"],
+  "underdog": ["outlast everyone who counted them out and win it earned", "carry one ally as far as it goes, then make the cold cut clean"],
   "flirt": ["ride a showmance shield to the final stretch, then cut it loose", "use charm to get every secret in the house and trade them"],
   "loyalist": ["reach the end beside the person they trust most and let the jury decide", "play a clean, loyalty-first game the jury can respect"],
   "wildcard": ["blow the house up at the perfect moment and win in the wreckage", "be impossible to read until the numbers force the move"],
@@ -505,7 +505,7 @@ const ARCHETYPE_GOAL: Record<Archetype, readonly string[]> = {
 // the archetype's failure mode. Composed WITH a vocation-flavored tell so a comp-beast nurse and a
 // comp-beast trucker fail a little differently.
 const ARCHETYPE_WEAKNESS: Record<Archetype, readonly string[]> = {
-  "comp-beast": ["leans on comp wins for safety long after laying low was the smarter play", "reads quiet social players as non-threats until it is far too late"],
+  "comp-beast": ["leans on comp wins for safety long after laying low was the smarter play", "reads quiet social houseguests as non-threats until it is far too late"],
   "mastermind": ["plays several moves ahead of where the house actually is and gets caught alone", "trusts their own cleverness over a warm conversation that has earned nothing"],
   "social-butterfly": ["needs to be liked and folds the instant an alliance turns cold", "talks too much when nervous and leaks their own plans"],
   "floater": ["is so conflict-averse they let others make their decisions for them", "waits one beat too long to commit and lands on the wrong side"],
@@ -656,6 +656,29 @@ const PERCEPTION_POOL: ReadonlyArray<DayOnePerception> = [
   { read: "an unknown quantity worth a careful early read", trustLean: 0.0, affinityLean: 0.0, threatLean: 0.0 },
   { read: "cordial but kept at a polite distance — not close", trustLean: 0.0, affinityLean: -0.4, threatLean: -0.4 },
   { read: "easy to overlook — barely on the radar yet", trustLean: 0.0, affinityLean: 0.0, threatLean: -0.4 },
+];
+
+/**
+ * #854 — every TEMPLATE/POOL STRING the deep-profile composer can interpolate, flattened for the
+ * regression sweep. The hazard: a pool string carrying a bare GAME-ROLE id-token word ("player",
+ * "hoh", "nominee", …) is mangled when this hidden text is unsealed for the 0048 retrospective and run
+ * through `humanizeForRetrospective` → `humanizeIds`, whose whole-token pass replaces a standalone
+ * `player` token with the PLAYER'S NAME (the live repro shape: "outlast every <PlayerName> who counted
+ * them out"). The A8 boundary protects "players" (a word char follows) but NOT a bare "player". This
+ * aggregator lets the test assert NO pool string contains such a bare token, exhaustively — the
+ * generated-text sweep alone could miss a rarely-drawn string. Test-facing; not a runtime input.
+ */
+export const ALL_DEEP_PROFILE_POOL_STRINGS: readonly string[] = [
+  ...SECRET_POOL,
+  ...TRUE_GOAL_POOL,
+  ...WEAKNESS_POOL,
+  ...Object.values(ARCHETYPE_SECRET_FRAME).flat(),
+  ...Object.values(ARCHETYPE_GOAL).flat(),
+  ...Object.values(ARCHETYPE_WEAKNESS).flat(),
+  ...Object.values(SECTOR_STAKE).flat(),
+  ...Object.values(AGE_TELL).flat(),
+  ...Object.values(GOAL_STAKE).flat(),
+  ...PERCEPTION_POOL.map((p) => p.read),
 ];
 
 /** How many secrets each NPC carries (the §3 "2–3 secrets"). */
