@@ -107,6 +107,21 @@ function ensureCss() {
          mismatched shade — the "frost breaks at the top" band. Never re-add a child filter or
          a blind overflow clip here.) */
     }
+    /* #794 [THE fly-in fix]: kit windows own their GEOMETRY via the slot system, which
+       writes inline left/top/width/height that must take effect INSTANTLY — on open it
+       clamps + re-centres, on drag/resize it tracks the pointer, on a viewport change it
+       re-anchors. A legacy .modal-family rule in style.css adds the kit ids settings-modal
+       and theme-modal to a group carrying "transition: left .25s, width .25s" (meant to
+       glide those modals with the sidebar collapse). That leaks onto these kit windows and
+       turns the open-time re-anchor into a visible 0.25s SLIDE — the reported "fly in, then
+       move to centre" two-step (the slot sets the centred left, the transition animates the
+       element sliding to it). Kit geometry is never a transition: neutralise the
+       left/top/width/height transitions on every .ow-window. The !important is required to
+       beat the offending rule's ID specificity; it pins ONLY the geometry longhands — hover
+       / focus / colour / scale transitions keep their own (non-geometry) timing. */
+    .ow-window {
+      transition-property: opacity, transform, background-color, border-color, box-shadow, backdrop-filter, -webkit-backdrop-filter !important;
+    }
     /* L11: once a window carries an explicit height (the player resized it, or a
        persisted size was restored), let it become a flex column so the body
        grows to fill it instead of staying pinned to its content height. The
@@ -774,6 +789,19 @@ export class OrwellWindow {
     if (window.OrwellSlots) {
       this._slot = window.OrwellSlots.register(el, this.o.slot,
         { key: this.o.slotKey || null, draggable: this.o.draggable });
+      // FLY-IN FIX (#794) belt-and-braces: register() runs ONE synchronous restackSlot that
+      // measures the element BEFORE the just-mounted .ow-body content has fully laid out, so the
+      // first centred left can be computed against a stale width. Force a synchronous reflow
+      // (read offsetWidth) and re-restack so the centred left is correct against the real,
+      // now-stable width BEFORE the open-animation class is added below — the window is at its
+      // final spot from the first frame. (THE root fix for the visible "fly right, then move to
+      // centre" slide is the geometry-transition suppression in ensureCss — see the .ow-window
+      // transition-property rule above; this just removes the one-frame measurement wobble.)
+      // Cheap: one layout read + idempotent setStyle writes that no-op when nothing moved.
+      if (this._slot && typeof this._slot.restack === 'function') {
+        void el.offsetWidth;     // force synchronous layout of the freshly-mounted content
+        this._slot.restack();    // re-anchor with the now-correct measured width, pre-animation
+      }
     }
     Modals.register(this.o.id, {
       label: this.o.title, icon: this.o.icon || '',

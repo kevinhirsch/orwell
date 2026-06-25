@@ -9,7 +9,10 @@ import { makeWindowDraggable } from './windowDrag.js';
 // importing the module here, which would instantiate a SECOND copy with its own window stack.
 // Game build (feature 0032): workspace verticals removed.
 const searchModule = null;
-import { clearDockSide } from './modalSnap.js';
+// #794: the legacy modalSnap dock seam is retired for Settings — the OrwellWindow kit OWNS the
+// window geometry (slotKey:'settings', centered on open), so the stale modalSnap import is removed.
+// Nothing here re-anchors/recenters the window after it opens; the kit centers it BEFORE the open
+// animation (see orwellWindow.js open()), which is what kills the "fly right then jump to center".
 import { sortModelIds } from './modelSort.js';
 import { isAltGrEvent } from './platform.js';
 import { DEFAULT_KEYBINDS } from './keyboard-shortcuts.js';
