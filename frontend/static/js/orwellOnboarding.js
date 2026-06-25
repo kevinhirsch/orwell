@@ -361,24 +361,22 @@
 
     // "Choose models" opens the REAL Settings model controls (the elements this wizard borrows
     // from) so the player can pick their OpenRouter narrator/portrait models. It does NOT dismiss
-    // the wizard or start the game — Settings opens over it; on return the orwell:models-changed
-    // re-render reflects the new pick and Start enables. (Settings must not open behind the inert
-    // wall, so lift the inert + onboarding suppression while it's up, then restore on close isn't
-    // needed — the wizard is re-rendered on models-changed and the Settings modal manages itself.)
+    // the wizard or start the game — Settings opens OVER it; on return the orwell:models-changed
+    // re-render reflects the new pick and Start enables.
+    //
+    // #870: Settings (modal:true) and this wizard (modal:true) are now coordinated by the kit's
+    // modal STACK. Opening Settings PUSHES it onto the stack and inerts the wizard beneath while
+    // Settings is the live top; closing Settings POPS it and restores the wizard as the live,
+    // interactive top. No manual inert dance — the old "uninert, open, re-inert on a 50ms timer"
+    // hack was the symptom of the missing stack coordinator (it deadlocked when the two modals'
+    // inert sets and scrims collided). Just open Settings; the stack does the rest.
     const choose = document.createElement("button");
     choose.type = "button";
     choose.className = "ow-btn ow-btn-secondary ob-btn";
     choose.setAttribute("data-ob-choose-models", "");
     choose.textContent = "Choose models";
     choose.addEventListener("click", () => {
-      // Lift the kit's inert wall so the Settings modal isn't opened behind it (the kit inerted the
-      // whole page, Settings host included). The kit owns the inert set on the window instance.
-      try { win._uninertBackground && win._uninertBackground(); } catch (_) {}
-      try { uninertBackground(); } catch (_) {}
       try { openSettings(); } catch (_) {}
-      // Re-inert behind the (now-open) Settings modal so the wizard stays modal underneath; the
-      // Settings modal sits above. A short delay lets Settings mount first.
-      setTimeout(() => { try { win._inertBackground && win._inertBackground(); } catch (_) {} }, 50);
     });
     row.appendChild(choose);
 

@@ -357,3 +357,41 @@ def test_sourcepin_a1_cast_photo_opts_in_roster_does_not():
     # …while the cast ROSTER stays a free-floating, non-modal reference panel
     cast = _read("static", "js", "orwellCast.js")
     assert "modal: true" not in cast
+
+
+# ── #870 — modal-over-modal (the stack manager) ─────────────────────────────
+# A single modal was correct, but two LIVE modals at once deadlocked: opening
+# Settings (modal:true) from the onboarding "Production needs the feeds" window
+# (also modal:true) locked up the Settings screen — each modal independently
+# inerted the other and their scrims shared one fixed z. The kit now owns ONE
+# ordered modal stack (push on open, pop on close): only the TOP modal is
+# interactive; the page AND every lower modal go inert; each modal's window +
+# scrim draw a fresh monotonic z so a later modal is strictly above an earlier
+# one; Escape closes the TOP modal only; focus returns to the previous top.
+# (Behavior is exercised live in browser_smoke.py; this source-pins the wiring.)
+
+
+def test_sourcepin_870_modal_stack_manager():
+    js = _read("static", "js", "orwellWindow.js")
+    assert "_modalStack" in js                          # the one ordered modal stack
+    assert "_recomputeModalStack" in js                 # recompute inert/z from the live top
+    assert "_stampModalZ" in js                         # per-depth modal z (no shared fixed z)
+    # push on mount, pop on unmount — the stack lifecycle
+    assert "_modalStack.push(this)" in js
+    assert "_modalStack.splice(i, 1)" in js
+    # the inert set is tracked at the STACK level and recomputed from the live top,
+    # so a pop never un-inerts a node a lower modal still needs inert (stack-aware).
+    assert "_modalInerted" in js
+    # Escape closes the TOP modal first (the modal stack outranks non-modal windows).
+    assert "_modalStack.length - 1" in js
+
+
+def test_sourcepin_870_onboarding_drops_manual_inert_dance():
+    # The old "Choose models" hack lifted inert, opened Settings, then re-inerted on
+    # a 50ms timer — the symptom of the missing stack coordinator. With the stack it
+    # just opens Settings; the manual re-inert timer is gone from the handler.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    assert "data-ob-choose-models" in onb               # the door is still there…
+    assert "openSettings" in onb                         # …and still opens real Settings
+    # the brittle re-inert-on-a-timer dance is gone (the stack owns coordination now)
+    assert "win._inertBackground && win._inertBackground()" not in onb

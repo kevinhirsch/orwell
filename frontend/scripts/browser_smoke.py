@@ -717,6 +717,65 @@ def main() -> int:
                                           "|| document.querySelector('#sidebar') === null "
                                           "|| !!document.querySelector('#sidebar').closest('[inert]')")
             check(sidebar_inert is True, "onboarding: background is inert while mounted")
+
+            # #870: modal-OVER-modal — opening a 2nd modal while onboarding is up must make the
+            # 2nd the interactive TOP with the 1st inert beneath (it was a P1 lockup: the two
+            # scrims shared a z and each inerted the other). Open a 2nd kit modal directly over
+            # onboarding and assert the stack invariants, then close it and assert the 1st restores.
+            stack2 = page.evaluate("""() => {
+              const onb = document.getElementById('orwell-onboarding');
+              const body = document.createElement('div');
+              const inp = document.createElement('input'); inp.id = 'ob870-input';
+              body.appendChild(inp);
+              const w = window.OrwellWindowKit.create({
+                id: 'ob870-second', title: 'Second modal', modal: true,
+                minimizable: false, closable: true, draggable: false, resizable: false,
+                persistLayout: false, content: body });
+              w.open(document.querySelector('#orwell-onboarding [data-ob-choose-models]') || onb);
+              window.__ob870 = w;
+              const second = document.getElementById('ob870-second');
+              const zEl = (el) => parseInt(getComputedStyle(el).zIndex, 10) || 0;
+              const onbScrim = document.querySelector('.ow-scrim[data-ow-scrim="orwell-onboarding"]');
+              const secScrim = document.querySelector('.ow-scrim[data-ow-scrim="ob870-second"]');
+              return {
+                bothMounted: !!(onb && second),
+                // the 2nd modal is strictly above the 1st: its window tops the 1st window, its
+                // scrim tops the 1st scrim (so its dim covers the lower modal), and its window
+                // sits above its own scrim — no shared/colliding z (the #870 lockup).
+                secondAboveFirst: !!(secScrim && onbScrim)
+                  && zEl(second) > zEl(onb)
+                  && zEl(secScrim) > zEl(onbScrim)
+                  && zEl(second) > zEl(secScrim),
+                // only the TOP modal is interactive: the 1st (lower) is inert, the 2nd is not
+                firstInert: onb.inert === true || !!onb.closest('[inert]'),
+                secondLive: second.inert !== true && !second.closest('[inert]'),
+              };
+            }""")
+            check(stack2.get("bothMounted") is True, f"modal-stack: both modals mounted ({stack2})")
+            check(stack2.get("secondAboveFirst") is True, "modal-stack: 2nd modal + scrim strictly above the 1st")
+            check(stack2.get("firstInert") is True, "modal-stack: the 1st (lower) modal is inert beneath")
+            check(stack2.get("secondLive") is True, "modal-stack: the 2nd (top) modal is interactive")
+            # the top modal's own input is reachable/focusable (not blocked by the lower modal's scrim)
+            page.evaluate("document.getElementById('ob870-input').focus()")
+            top_focusable = page.evaluate("document.activeElement && document.activeElement.id === 'ob870-input'")
+            check(top_focusable is True, "modal-stack: the top modal's controls are interactive")
+            # close the 2nd → the 1st restores as the live, interactive top (un-inerted), no orphan scrim
+            page.evaluate("window.__ob870.close()")
+            page.wait_for_function("() => !document.getElementById('ob870-second') "
+                                   "&& !document.querySelector('.ow-scrim[data-ow-scrim=\\\"ob870-second\\\"]')",
+                                   timeout=3000)
+            restored = page.evaluate("""() => {
+              const onb = document.getElementById('orwell-onboarding');
+              return {
+                firstStillUp: !!onb,
+                firstNowLive: !!onb && onb.inert !== true && !onb.closest('[inert]'),
+                firstScrimUp: !!document.querySelector('.ow-scrim[data-ow-scrim="orwell-onboarding"]'),
+              };
+            }""")
+            check(restored.get("firstStillUp") is True, "modal-stack: closing the 2nd leaves the 1st up")
+            check(restored.get("firstNowLive") is True, "modal-stack: the 1st modal is interactive again after the 2nd closes")
+            check(restored.get("firstScrimUp") is True, "modal-stack: the 1st modal keeps its own scrim")
+
             # #709: the onboarding modal is now a KIT window — it owns a separate .ow-scrim sibling +
             # the inert background. Dismiss it the real way (its own dismiss button → kit destroy),
             # which removes the window AND its scrim AND un-inerts — never a force `.remove()` (that

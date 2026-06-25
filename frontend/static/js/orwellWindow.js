@@ -69,6 +69,63 @@ function nextWindowZ() {
 const Z_MODAL_SCRIM = 1000;
 const Z_MODAL = 1001;
 
+// ── #870: the modal STACK manager (modal-over-modal coordination) ───────────
+// A single modal was correct (J1-25/J1-23: scrim + inert + focus-trap + aria-modal).
+// The gap (#870, a P1 lockup): two LIVE modals at once. The onboarding "Production
+// needs the feeds" window is modal:true; its "Choose models" opens Settings, ALSO
+// modal:true — so two modals were mounted together. Each one independently (1) inerted
+// EVERY body child except its own el + scrim (so modal A inerted modal B → B is dead),
+// and (2) drew a scrim at a shared fixed z — A's scrim could sit at/over B. Result:
+// the second modal renders stacked/dimmed and is non-interactive (the lockup).
+//
+// The fix is ONE ordered modal stack the kit owns (bottom → top). On open a modal
+// PUSHES; on close it POPS. From the stack we recompute, top-down:
+//   • z: each modal's window draws a fresh monotonic modal z (via the single OrwellZ
+//     authority), and its scrim sits one below — so a later modal is STRICTLY above an
+//     earlier one (window + scrim both). No shared fixed z.
+//   • inert: only the TOP modal is interactive. The page AND every lower modal go inert;
+//     the top modal + its own scrim stay live. Inert is recomputed from the CURRENT top
+//     on every push/pop, and each modal remembers ONLY the nodes IT set inert, so a pop
+//     never un-inerts a node the new top still needs inert.
+//   • focus: only the top modal traps focus; closing returns focus to the previous top.
+// Single-modal behavior is byte-equivalent: with one modal the stack has one entry, the
+// recompute inerts exactly "every body child except el + scrim" (the old all-or-nothing),
+// the scrim/z land where they used to, and teardown un-inerts that same set.
+const _modalStack = [];   // live modal OrwellWindow instances, bottom → top
+// The exact set of nodes the kit has currently forced inert for the modal stack. Tracked
+// HERE (not per-modal) so the inert state is always recomputed from the live TOP — a pop
+// can never un-inert a node a lower modal still needs inert, because we recompute the whole
+// set from scratch against the new top each time. Only nodes the kit itself set inert are
+// ever released (a node that was already inert for another reason is left untouched).
+const _modalInerted = new Set();
+
+// Recompute the inert + scrim/z layering for the WHOLE modal stack from its current order.
+// The TOP modal (its window + its own scrim) is the ONLY interactive surface; the rest of
+// the page AND every LOWER modal (window + scrim) go inert. Called on every push (open) and
+// pop (close) so the live set always reflects the current top.
+//
+// Single-modal equivalence: with one modal in the stack, `keep` = {el, scrim}, so this
+// inerts exactly "every top-level body child except the window + its scrim" — byte-identical
+// to the old all-or-nothing `_inertBackground`.
+function _recomputeModalStack() {
+  const top = _modalStack[_modalStack.length - 1] || null;
+  // 1. z/scrim layering: re-stamp every modal bottom → top so a later modal's window AND
+  //    scrim sit strictly above an earlier one. raise() draws a fresh monotonic modal z and
+  //    pins the scrim one below; iterating in stack order keeps the relative ordering.
+  for (const w of _modalStack) { try { w._stampModalZ(); } catch (_) {} }
+  // 2. inert: release the kit's previous inert set, then inert everything except the top
+  //    modal's window + its own scrim. Recomputing from scratch is what makes this
+  //    stack-aware — the new top's surface is the single thing left live.
+  _modalInerted.forEach((n) => { try { n.inert = false; } catch (_) {} });
+  _modalInerted.clear();
+  if (!top) return;
+  const keep = new Set([top.el, top._scrim].filter(Boolean));
+  Array.from(document.body.children).forEach((n) => {
+    if (keep.has(n) || n.tagName === 'SCRIPT' || n.tagName === 'STYLE') return;
+    if (!n.inert) { try { n.inert = true; _modalInerted.add(n); } catch (_) {} }
+  });
+}
+
 const REDUCED = () =>
   !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -701,10 +758,12 @@ export class OrwellWindow {
   }
 
   // ── J1-25 modal chrome (the per-window `modal` option) ─────────────────────
-  // Mounts the backdrop scrim, makes the rest of the page inert (the aria-modal
-  // promise), and traps Tab inside the window. Mirrors the welcome modal's
-  // exemplary pattern (orwellOnboarding.js), which the audit calls out as the one
-  // to reuse. Single-modal by design (the cast-photo flow opens one at a time).
+  // Mounts the backdrop scrim, traps Tab inside the window, PUSHES onto the kit's
+  // modal stack, and recomputes the stack so the rest of the page AND every lower
+  // modal go inert with this one as the live top (the aria-modal promise). Mirrors
+  // the welcome modal's exemplary pattern (orwellOnboarding.js). #870: modal-over-
+  // modal is coordinated by the stack — opening a 2nd modal makes it the interactive
+  // top with the 1st inert beneath; closing restores the 1st.
   _mountModalChrome() {
     if (this._scrim) return;
     const scrim = document.createElement('div');
@@ -714,30 +773,38 @@ export class OrwellWindow {
     // Insert behind the (already-mounted) window so DOM order matches the z order.
     document.body.insertBefore(scrim, this.el);
     this._scrim = scrim;
-    this._inertBackground();
+    if (_modalStack.indexOf(this) === -1) _modalStack.push(this);   // #870: become the top
     this._trapFocus();
+    _recomputeModalStack();   // #870: inert page + lower modals; this one is the live top
   }
 
   _unmountModalChrome() {
+    const i = _modalStack.indexOf(this);
+    if (i !== -1) _modalStack.splice(i, 1);                          // #870: pop
     if (this._scrim) { try { this._scrim.remove(); } catch (_) {} this._scrim = null; }
-    this._uninertBackground();
+    // #870: recompute against the NEW top — releases this modal's contribution to the inert
+    // set and re-inerts everything except whatever modal is now on top (or fully un-inerts the
+    // page when the stack is empty). Stack-aware: a node a lower modal still needs inert stays inert.
+    _recomputeModalStack();
   }
 
-  // aria-modal is a PROMISE to assistive tech that the rest of the page is inert —
-  // enforce it (audit J1-25). Everything except the window + its scrim goes inert;
-  // the exact set is remembered so teardown restores only what we changed.
-  _inertBackground() {
-    this._inerted = [];
-    Array.from(document.body.children).forEach((n) => {
-      if (n === this.el || n === this._scrim || n.tagName === 'SCRIPT' || n.tagName === 'STYLE') return;
-      if (!n.inert) { try { n.inert = true; this._inerted.push(n); } catch (_) {} }
-    });
+  // #870: re-stamp THIS modal's z + scrim z from the single OrwellZ ladder. Called per-modal
+  // by _recomputeModalStack in stack order so a later modal lands strictly above an earlier one
+  // (window + scrim both). Fallback to the fixed tier when ui.js's ladder isn't loaded.
+  _stampModalZ() {
+    if (!this.o.modal || !this.el) return;
+    const z = (typeof window._owNextModalZ === 'function') ? window._owNextModalZ() : Z_MODAL;
+    this.el.style.zIndex = String(z);
+    if (this._scrim) this._scrim.style.zIndex = String(z - 1);
   }
 
-  _uninertBackground() {
-    (this._inerted || []).forEach((n) => { try { n.inert = false; } catch (_) {} });
-    this._inerted = [];
-  }
+  // Back-compat shims (audit J1-25; #870). The kit no longer hand-inerts per-modal — the modal
+  // stack owns the inert set and recomputes it from the live top. These remain because
+  // orwellOnboarding.js calls win._inertBackground()/_uninertBackground() directly (its old
+  // "lift inert to open Settings, then re-inert" dance). They now simply re-run the stack
+  // recompute, so the live top is always honored regardless of which one a consumer pokes.
+  _inertBackground() { _recomputeModalStack(); }
+  _uninertBackground() { _recomputeModalStack(); }
 
   // Keep Tab inside the window so focus can't escape into the (inert) page — the
   // J1-25 defect was "focus escapes into chat; Escape landed on body". Listener is
@@ -856,9 +923,18 @@ export class OrwellWindow {
     // a legacy modal once _zCounter passed it). Fallback to the fixed tier if ui.js
     // hasn't loaded. The scrim follows just under whatever the window lands on.
     if (this.o.modal) {
-      const z = (typeof window._owNextModalZ === 'function') ? window._owNextModalZ() : Z_MODAL;
-      this.el.style.zIndex = String(z);
-      if (this._scrim) this._scrim.style.zIndex = String(z - 1);
+      // #870: a raise() on a modal makes it the live top of the modal stack — move it to
+      // the top of the stack and recompute (z + scrim layering + inert). _recomputeModalStack
+      // re-stamps every modal in order via _stampModalZ, so this one lands strictly highest.
+      const mi = _modalStack.indexOf(this);
+      if (mi !== -1) {
+        if (mi !== _modalStack.length - 1) { _modalStack.splice(mi, 1); _modalStack.push(this); }
+        _recomputeModalStack();
+      } else {
+        // Not yet on the stack (raised before _mountModalChrome in open()) — stamp z directly;
+        // _mountModalChrome will push + recompute right after.
+        this._stampModalZ();
+      }
     } else {
       // A2: the non-modal band is allocated by the single authority (window.
       // _owNextWindowZ in ui.js), which advances the SAME global tick the modal
@@ -1049,7 +1125,18 @@ export class OrwellWindow {
 // Escape participation (audit F7): ui.js's single arbiter calls this between
 // the menu stack and the modal pass. Top kit window parks (minimizable) or
 // closes; returns true when it consumed the key.
+//
+// #870: when ANY modal is open, Escape closes EXACTLY the TOP modal (the modal stack's
+// last entry) — never a lower modal, never a non-modal window behind it. A modal owns the
+// foreground (it inerts the page + every lower modal), so it always outranks the non-modal
+// pass. This keeps the "one thing per press, top-down" contract for modal-over-modal.
 export function dismissTop() {
+  for (let i = _modalStack.length - 1; i >= 0; i--) {
+    const w = _modalStack[i];
+    if (!w.el || !w.el.isConnected || w.el.style.display === 'none') { _modalStack.splice(i, 1); continue; }
+    if (w.o.minimizable) w.minimize(); else w.close();
+    return true;
+  }
   for (let i = _stack.length - 1; i >= 0; i--) {
     const w = _stack[i];
     if (!w.el || !w.el.isConnected || w.el.style.display === 'none') { _stack.splice(i, 1); continue; }
