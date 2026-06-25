@@ -111,6 +111,17 @@ step — never re-ask what is recorded, never invent or assume answers.
 - No season is running yet: do not improvise houseguests, scenes, or game events.
 """
 
+# Orwell #872 (item C): the MINIMAL tool surface a casting turn needs. The interview is a tight
+# loop — read the engine casting status, file answers, finalize — so we send only these (ADR-0003
+# prompt minimalism; the audit saw 29 tools sent on casting turns, a likely deepseek-v4-pro 400
+# contributor). Restricting the schema array also keeps the model from reaching for live-season /
+# God-Mode levers that have no meaning before the season starts. `ask_user` lets it pause for the
+# player; `generate_image` covers the headshot studio; `web_search` covers in-fiction flavor.
+CASTING_TOOLS = frozenset({
+    "updateCasting", "createCharacter", "getGameState", "gameStatus",
+    "ask_user", "generate_image", "web_search",
+})
+
 _AGENT_PREAMBLE = """\
 You are an AI assistant with tool access. You can run shell commands, execute Python, search the web, \
 read/write files, create and edit documents, generate images, manage memories, and more. \
@@ -3228,6 +3239,17 @@ async def stream_agent_loop(
         except Exception as e:
             logger.debug(f"[tool-rag] game opt-in union skipped: {e}")
 
+    # Orwell #872 (item C — prompt minimalism, ADR-0003): the casting interview is a tiny
+    # contract — read the engine's casting status, file answers, finalize. The audit saw 29
+    # tools sent on casting turns (a likely 400 contributor on deepseek-v4-pro). Collapse the
+    # casting candidate set to exactly the tools the interview needs, OVERRIDING the broad RAG/
+    # keyword/pinned selection above (this is the final word for casting). `disabled_tools`
+    # still filters it, and a None set (send-all) is forced into the small set too — a casting
+    # turn never needs the full game/God-Mode/utility surface.
+    if game_mode == "casting":
+        _relevant_tools = set(CASTING_TOOLS)
+        logger.info(f"[tool-rag] casting turn — restricted tool set: {sorted(_relevant_tools)}")
+
     prep_timings["tool_selection"] = time.time() - _t1
 
     _t2 = time.time()
@@ -3515,6 +3537,14 @@ async def stream_agent_loop(
     _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
     _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
+    # Orwell #872 (item B): a per-turn flag set when an upstream provider error (e.g. deepseek-v4-pro
+    # intermittently 400ing on a continuation/tool round) was surfaced this turn. A pure-error turn
+    # produces NO visible narration (_emitted_visible stays False), which would otherwise look like a
+    # player cancellation and DISABLE the casting finalize fallback below — exactly when the safety net
+    # is most needed (the model's own turn keeps erroring, so it can never call createCharacter itself).
+    # When this is set the casting block treats the turn as a STALL (run the FE-driven finalize), not a
+    # cancellation. Reset implicitly per turn (this is a fresh local each stream_agent_loop call).
+    _turn_had_error = False
     _turn_reapproach_nudges = 0  # 0057: post-season re-approach, at most one per finishing turn
 
     # 0065 Part D — the per-turn sync-ledger baselines. Captured at turn START so the end-of-turn
@@ -3659,6 +3689,7 @@ async def stream_agent_loop(
                 break
             # Forward error events from stream_llm to the frontend
             if chunk.startswith("event: error"):
+                _turn_had_error = True  # #872: mark the turn so the casting safety-net treats it as a stall
                 yield chunk
                 continue
             if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
@@ -3871,6 +3902,7 @@ async def stream_agent_loop(
                                     _doc_last_len = 0
                     elif data.get("error"):
                         err_msg = data.get("error", "unknown")
+                        _turn_had_error = True  # #872: mark the turn so the casting safety-net treats it as a stall
                         logger.error(f"Agent round {round_num}: stream error: {err_msg}")
                         # FEPY-1 (#621): a mid-stream upstream error must NOT land in the GM body bubble
                         # (a casting 502/503/504 reads as in-fiction producer narration). Emit a typed
@@ -4789,7 +4821,14 @@ async def stream_agent_loop(
                 # new state THIS turn. Model-driven recording wins (skipped when updateCasting fired).
                 _cast_recorded_this_turn = "updateCasting" in {
                     (ev.get("tool") if isinstance(ev, dict) else None) for ev in tool_events}
-                if not _cast_recorded_this_turn and _emitted_visible and owner is not None:
+                # #872: also run the record belt when the model's turn ERRORED (e.g. deepseek-v4-pro
+                # 400ing on a continuation/tool round). On a pure-error turn nothing visible was emitted
+                # AND updateCasting never fired, so the player's just-given answer would otherwise be
+                # lost — casting never reaches `ready`/`finalizable` and the season can't premiere. The
+                # belt is itself fail-closed (its own extraction call may 400 too → it just returns
+                # False), so attempting it on an error turn can only help, never block.
+                if (not _cast_recorded_this_turn and owner is not None
+                        and (_emitted_visible or _turn_had_error)):
                     await _auto_record_casting(
                         _extract_last_user_message(messages), cleaned_round,
                         endpoint_url, model, headers, owner)
@@ -4803,7 +4842,12 @@ async def stream_agent_loop(
                 # A cancelled / empty turn (the player hit Stop, or nothing was produced) must NOT march
                 # the stall counter — a string of mobile cancellations would otherwise reach the forced
                 # finalize on a name-only intake. `_emitted_visible` is False on such a turn.
-                _turn_was_cancelled = not _emitted_visible
+                # #872: an ERRORED turn (the model 400'd) is NOT a cancellation — it is exactly the case
+                # the safety-net exists for (the model can never call createCharacter itself when its own
+                # turn keeps failing). Treat it as a real turn so the FE-driven finalize can fire. Still
+                # gated downstream on engine `ready` + `finalizable` + a player-readiness signal, so an
+                # error storm can never start a game the player never set up.
+                _turn_was_cancelled = (not _emitted_visible) and not _turn_had_error
                 # #549: run the finalize check on a lull OR an explicit readiness signal — a player
                 # who is plainly ready in a substantive sentence ("let's start the game, I'll target
                 # the comp beasts") would otherwise skip this block entirely (not a short lull) and
