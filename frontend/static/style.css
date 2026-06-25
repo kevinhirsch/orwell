@@ -37998,6 +37998,16 @@ body.theme-frosted .ow-btn {
   color: #16191f;   /* dark monochrome ink on the light glass material (no accent hue) */
   font-family: var(--ow-ui-font); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -0.01em;
   cursor: pointer;
+  /* NOTE (#709 glass-button refraction): this backdrop-filter is intentionally NOT
+     !important. At Full Glass, liquidGlass.js sets an inline backdrop-filter (an SVG
+     filter reference) with `important` priority to layer the vector-displacement
+     REFRACTION (the kube.io technique, same as the chrome surfaces) onto the glass
+     buttons. An inline !important wins over a stylesheet rule WITHOUT !important, so
+     keeping this declaration plain lets the Full-Glass refraction apply on .ow-btn-
+     prominent/.ow-btn-secondary/.ow-btn-icon/.ow-btn-group. The CSS blur material here
+     is the Frosted-tier (and non-Chromium) fallback. DO NOT add !important here or the
+     refraction is silently clobbered. (.ow-btn-plain / .ow-btn-destructive-solid /
+     grouped members are excluded in liquidGlass.js — they never refract.) */
   -webkit-backdrop-filter: var(--ow-btn-glass-kit, var(--ow-btn-glass));
   backdrop-filter: var(--ow-btn-glass-kit, var(--ow-btn-glass));
   /* FLOAT: soft cast shadow + the full-perimeter specular rim (the depth/parity fix). */

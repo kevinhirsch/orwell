@@ -479,3 +479,78 @@ def test_titlebar_accessory_not_a_traffic_light():
     assert ".ow-titlebar-accessory" in CSS
     s = _read("static", "js", "settings.js")
     assert "ow-titlebar-accessory" in s
+
+
+# ── 17. GLASS BUTTONS get the SVG refraction (#709 — kube.io demos it on pills) ──
+
+def test_glass_button_variants_in_refraction_selector_set():
+    # The high-emphasis glass button variants are refraction targets — the SAME
+    # feImage→feDisplacementMap technique as the chrome surfaces. They live in the JS
+    # SELECTORS list (kube.io demos the effect on pill buttons → the authentic look).
+    sel_block = re.search(r"var SELECTORS = \[(.*?)\];", JS, re.S).group(1)
+    for sel in (".ow-btn-prominent", ".ow-btn-secondary", ".ow-btn-icon",
+                ".ow-btn-group", ".ow-btn"):
+        assert '"' + sel + '"' in sel_block, sel
+
+
+def test_plain_and_solid_and_grouped_buttons_are_excluded_from_refraction():
+    # Non-glass / opaque / glass-on-glass variants must NEVER refract:
+    #   .ow-btn-plain            → borderless, no glass material
+    #   .ow-btn-destructive-solid → opaque red plate (not translucent glass)
+    #   .ow-btn-group > .ow-btn   → members ride the group's ONE backdrop sample
+    assert "BTN_NO_REFRACT" in JS
+    assert "isRefractableButton" in JS
+    no_refract = re.search(r"var BTN_NO_REFRACT\s*=\s*\"([^\"]+)\"", JS).group(1)
+    assert ".ow-btn-plain" in no_refract
+    assert ".ow-btn-destructive-solid" in no_refract
+    assert ".ow-btn-group > .ow-btn" in no_refract
+    # the exclusion guard is enforced on BOTH the collect and the apply paths.
+    assert "if (!isRefractableButton(el)) continue;" in JS
+    assert "if (!isRefractableButton(el)) { clearFrom(el); return; }" in JS
+
+
+def test_button_refraction_applied_via_backdrop_filter_not_filter():
+    # CRITICAL: the refraction must ride backdrop-filter (refracts the backdrop BEHIND
+    # the button) — NEVER `filter:` (which would displace the button's own label/glyph).
+    # The single apply path (applyTo) sets ONLY backdrop-filter; the module never sets a
+    # plain `filter` on a live surface (the SVG `feImage`/`feColorMatrix` etc. are filter
+    # PRIMITIVES inside the <filter>, not a CSS `filter:` on the element).
+    assert 'setProperty("backdrop-filter"' in JS
+    assert 'setProperty("-webkit-backdrop-filter"' in JS
+    # no CSS `filter:` is ever assigned to a refracted element (only backdrop-filter is).
+    assert "setProperty(\"filter\"" not in JS
+    assert ".style.filter" not in JS
+
+
+def test_glass_buttons_are_lowest_refraction_priority_after_chrome():
+    # The cap fills from the top of SELECTORS; the big chrome panels must outrank the
+    # buttons so a button-heavy view never starves the windows/sidebar/composer. The
+    # button selectors are appended LAST (lowest priority → dropped first under the cap).
+    sel_block = re.search(r"var SELECTORS = \[(.*?)\];", JS, re.S).group(1)
+    chrome_first = sel_block.index('".ow-window"')
+    btn_first = sel_block.index('".ow-btn-prominent"')
+    assert chrome_first < btn_first, "buttons must rank below chrome in the cap order"
+    # and the cap itself is unchanged (buttons share size buckets, so cost is per-size).
+    assert "MAX_LIVE_SURFACES" in JS
+
+
+def test_button_glass_css_backdrop_filter_is_overridable_no_important():
+    # The Full-Glass inline `backdrop-filter: url(#…) !important` must win over the CSS
+    # button-glass material — so the CSS .ow-btn backdrop-filter must NOT carry
+    # !important (an inline !important only outranks a stylesheet rule WITHOUT one). Guard
+    # the cascade: the .ow-btn base material declaration stays plain.
+    blk = re.search(r"body\.theme-frosted \.ow-btn \{(.*?)\n\}", CSS, re.S).group(1)
+    # only actual DECLARATION lines (the property starts the line), not comment prose.
+    bf = [ln for ln in blk.splitlines()
+          if re.match(r"\s*-?(webkit-)?backdrop-filter\s*:", ln)]
+    assert bf, "the .ow-btn base must declare a CSS glass material (the fallback)"
+    assert all("!important" not in ln for ln in bf), \
+        "an !important on .ow-btn backdrop-filter would clobber the Full-Glass refraction"
+
+
+def test_button_refraction_remount_watched():
+    # buttons mount/unmount constantly (decision cards, menus); the mount observer must
+    # schedule a refraction pass when a glass button appears.
+    assert ".ow-btn" in JS  # covered above, but the mount-watch selector must include it
+    mo = re.search(r"var sel = \"([^\"]*\.ow-btn[^\"]*)\";", JS)
+    assert mo, "the watchMounts selector must include .ow-btn / .ow-btn-group"

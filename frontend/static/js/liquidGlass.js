@@ -212,7 +212,35 @@
     ".overflow-menu",
     ".cp-popover",
     ".on-card",                    // the notice kit (functional affordance)
+    // ── GLASS BUTTONS (kube.io demos the refraction on PILL BUTTONS — the authentic
+    // look). The high-emphasis glass variants get the SAME feImage→feDisplacementMap
+    // refraction + specular rim as the chrome, applied via backdrop-filter (refracts the
+    // backdrop BEHIND the button, NEVER the label/glyph — see applyTo). They are LAST in
+    // priority so the big chrome panels always win the cap, and they SHARE the per-size
+    // filter cache (identical buttons → ONE filter, so a row of same-size buttons is
+    // cheap). The .ow-btn-group is the ONE glass-sampling surface for its members
+    // (NSGlassEffectContainerView analogue, style.css) — its members carry no backdrop
+    // of their own and are EXCLUDED below. EXCLUSIONS (isRefractableButton): .ow-btn-plain
+    // (borderless, no glass material), the opaque .ow-btn-destructive-solid plate, and
+    // grouped members (they ride the group's single sample) never refract.
+    ".ow-btn-prominent",
+    ".ow-btn-secondary",
+    ".ow-btn-icon",
+    ".ow-btn-group",               // the segmented group = ONE shared backdrop sample
+    ".ow-btn",                     // any remaining glass .ow-btn (plain/solid/grouped excluded)
   ];
+  // Glass-button variants that must NEVER refract: borderless plain (no glass material),
+  // the opaque solid-destructive plate, and grouped members (they ride the group's single
+  // backdrop sample — refracting a member would be glass-on-glass + a wrong-size filter).
+  var BTN_NO_REFRACT = ".ow-btn-plain, .ow-btn-destructive-solid, .ow-btn-group > .ow-btn";
+  function isRefractableButton(el) {
+    try {
+      if (!el.matches || !el.matches(".ow-btn, .ow-btn-group")) return true; // not a button → no extra gate
+      return !el.matches(BTN_NO_REFRACT);
+    } catch (_) {
+      return true;
+    }
+  }
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
   function activeMaxSurfaces() {
@@ -716,6 +744,7 @@
     try {
       if (!el || !el.isConnected) return;
       if (el.id && EXCLUDE_IDS[el.id]) return;
+      if (!isRefractableButton(el)) { clearFrom(el); return; } // never refract plain/solid/grouped-member buttons
       var r = el.getBoundingClientRect();
       if (r.width < 24 || r.height < 24) return; // too small to bother
       var id = filterFor(r.width, r.height, activeScale());
@@ -784,6 +813,7 @@
         var el = nodes[i];
         if (seen.has(el)) continue;
         if (el.id && EXCLUDE_IDS[el.id]) continue;
+        if (!isRefractableButton(el)) continue; // plain/solid/grouped-member buttons never refract
         if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue; // hidden
         seen.add(el);
         out.push(el);
@@ -865,7 +895,7 @@
           for (var j = 0; j < m.addedNodes.length; j++) {
             var n = m.addedNodes[j];
             if (n.nodeType !== 1) continue;
-            var sel = ".ow-window, .chat-input-bar, .og-card, .on-card, .modal-content, #minimized-dock, .minimized-dock-chip, .dropdown, .overflow-menu, .cp-popover";
+            var sel = ".ow-window, .chat-input-bar, .og-card, .on-card, .modal-content, #minimized-dock, .minimized-dock-chip, .dropdown, .overflow-menu, .cp-popover, .ow-btn, .ow-btn-group";
             if (
               n.matches &&
               (n.matches(sel) || (n.querySelector && n.querySelector(sel)))
