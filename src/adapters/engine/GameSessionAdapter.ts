@@ -3582,6 +3582,17 @@ export class GameSessionAdapter implements GameSession {
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }
 
+  /**
+   * The player's OWN declared campaign target (0085 C) — a player-level, OOC intent, exactly like a
+   * Diary-Room strategy: it is the PLAYER'S knowledge with NO in-game pathway to any NPC. It NEVER seeds
+   * or moves an NPC campaign (NPC formation reads only NPC threat/ally reads — `campaignActors` excludes
+   * the player), so the house responds only to the player's ACTUAL recorded moves, never to their intent.
+   */
+  private playerCampaignTarget: EntityId | null = null;
+  declarePlayerCampaign(target: EntityId): void { this.playerCampaignTarget = target; }
+  /** Read back the player's declared campaign target (player-knowledge only; never an NPC pathway). */
+  playerCampaignRead(): EntityId | null { return this.playerCampaignTarget; }
+
   private influenceOf(id: EntityId): Influence {
     const hg = this.house ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id)) : undefined;
     return hg?.character.influence ?? { persuasiveness: 0.5, susceptibility: 0.5 };
@@ -3636,7 +3647,13 @@ export class GameSessionAdapter implements GameSession {
     this.campaigns = this.campaigns
       .filter((c) => living.has(c.owners[0]!))
       .map((c) => c.status === "active"
-        ? replan(c, { active: living, ownerEndangered: nominees.has(c.owners[0]!), threats: this.threatReadsOf(c.owners[0]!) })
+        ? replan(c, {
+            active: living,
+            ownerEndangered: nominees.has(c.owners[0]!),
+            threats: this.threatReadsOf(c.owners[0]!),
+            // The target WON the veto ⇒ safe this week ⇒ an evict campaign re-aims (0085 C).
+            targetSafe: this.ceremony.vetoHolder === c.target,
+          })
         : c);
     const activeCount = (): number => this.campaigns.filter((c) => c.status === "active").length;
     // Form up to the cap (one active campaign per owner).

@@ -16,7 +16,7 @@ Feature: 0085 — NPC campaigns & the scramble
 
     Scenario: A campaign persists and advances across many ticks
       Given a schemer forms a campaign to evict the target this week
-      When the off-screen society runs several ticks
+      When the society runs several more campaign ticks
       Then the campaign advances by a concrete move on each tick
       And the campaign is still active and closer to its goal until the week resolves
 
