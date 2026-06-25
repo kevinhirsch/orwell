@@ -187,6 +187,65 @@ function retrospectiveLabel(kind: string): string {
 }
 
 /**
+ * The MUTUAL off-screen interaction verbs (mirroring the public `RICH_VERBS` phrasing in
+ * `src/engine/offscreen.ts`). A scene recorded as `A <verb> B` and its counterpart `B <verb> A` are the
+ * SAME mutual happening seen from each side — the dump should show it ONCE (#842). Render-time
+ * recognition of PUBLIC content only (no engine coupling, no Vault data); kept local + ordered
+ * longest-first so a contained phrase can't shadow a longer one.
+ */
+const MUTUAL_OFFSCREEN_VERBS: readonly string[] = [
+  "formed an alliance with",
+  "gossiped about the house with",
+  "talked strategy with",
+  "quietly turned on",
+  "grew close to",
+  "clashed with",
+  "bonded with",
+];
+
+/**
+ * Coalesce the unsealed dump rows for readability (#841/#842) — a PURE render-time pass that NEVER
+ * changes what the engine recorded (no event/RNG touch), only what the operator is shown:
+ *   - #841: drop a byte-identical `{type, content}` row (keep the first occurrence);
+ *   - #842: collapse a SYMMETRIC off-screen pair (`A <mutual-verb> B` + `B <mutual-verb> A`, ignoring any
+ *           ` — detail` tail) into ONE row — the same mutual scene from each side.
+ * Order-stable: the first row of any duplicate/mirror set is kept in place.
+ */
+function coalesceDumpRows(
+  rows: ReadonlyArray<{ type: string; content: string; ts?: number }>,
+): Array<{ type: string; content: string; ts?: number }> {
+  const out: Array<{ type: string; content: string; ts?: number }> = [];
+  const seenExact = new Set<string>();
+  const seenMutual = new Set<string>();
+  for (const r of rows) {
+    // #841 — exact duplicate.
+    const exactKey = `${r.type} ${r.content}`;
+    if (seenExact.has(exactKey)) continue;
+    seenExact.add(exactKey);
+    // #842 — symmetric mutual off-screen scene. Strip a trailing " — detail" before matching the pair so
+    // two mirrored scenes with different flavor tails still coalesce on the parties + verb.
+    const core = r.content.replace(/\s+—\s.*$/, "").trim();
+    let mutualKey: string | null = null;
+    for (const verb of MUTUAL_OFFSCREEN_VERBS) {
+      const at = core.indexOf(` ${verb} `);
+      if (at <= 0) continue;
+      const a = core.slice(0, at).trim();
+      const b = core.slice(at + verb.length + 2).trim();
+      if (!a || !b) continue;
+      const pair = [a, b].sort();
+      mutualKey = `${r.type} ${verb} ${pair[0]} ${pair[1]}`;
+      break;
+    }
+    if (mutualKey) {
+      if (seenMutual.has(mutualKey)) continue;
+      seenMutual.add(mutualKey);
+    }
+    out.push(r.ts !== undefined ? { type: r.type, content: r.content, ts: r.ts } : { type: r.type, content: r.content });
+  }
+  return out;
+}
+
+/**
  * A fresh entropy seed for a game created WITHOUT an explicit seed (E39/C7): a uint32 from
  * `crypto` randomness, persisted in the snapshot (`gameSeed`) so the season stays reproducible
  * AFTER creation. This is an adapter (not the pure core) — the one sanctioned place real
@@ -884,14 +943,16 @@ export class GameSessionAdapter implements GameSession {
     this.deltaScanProbe = fn;
   }
 
-  /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. */
+  /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. `known` carries
+   *  the originating `sourceEventId` (#843) so the Vault dump can join a gossip/surfacing breadcrumb
+   *  event back to the real belief it lodged — voicing only ever reads `content`, so this is additive. */
   private npcKnowledge?: {
-    known: (id: EntityId) => ReadonlyArray<{ content: string }>;
+    known: (id: EntityId) => ReadonlyArray<{ content: string; sourceEventId?: string }>;
     suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
   };
 
   setNpcKnowledgeProviders(p: {
-    known: (id: EntityId) => ReadonlyArray<{ content: string }>;
+    known: (id: EntityId) => ReadonlyArray<{ content: string; sourceEventId?: string }>;
     suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
   }): void {
     this.npcKnowledge = p;
@@ -1247,17 +1308,45 @@ export class GameSessionAdapter implements GameSession {
     if (!this.live) throw new Error("buildVaultUnseal called without a live season");
     const nameOf = (id: EntityId): string => this.nameOf(id);
     const events = this.record?.events() ?? [];
+    // #843 — a gossip/surfacing event's CONTENT is an internal breadcrumb (`gossip <pathway> reaches
+    // <to>` / `surfaced to <entity> via <pathway>`), not the belief itself. Join each back to the
+    // KnowledgeFact it lodged (by `sourceEventId`) so the dump shows the real, name-resolvable
+    // paraphrase. Build the index ONCE from every houseguest's known facts (the recipient holds it).
+    const beliefByEvent = new Map<string, string>();
+    if (this.npcKnowledge && this.house) {
+      for (const hg of [this.house.player, ...this.house.npcs]) {
+        for (const f of this.npcKnowledge.known(hg.id)) {
+          if (f.sourceEventId && !beliefByEvent.has(f.sourceEventId)) beliefByEvent.set(f.sourceEventId, f.content);
+        }
+      }
+    }
     // The FE renders each row as "[type] content", so `type` must be a READABLE label (not a raw kind
     // slug) and `content` clean, name-resolved prose — this is the Wall's ONE sanctioned reveal, shown
     // readably (audit: the live dump leaked "[hidden-thread] story-thread thread:npc:8:0 …").
-    const hiddenStory = events
+    const hiddenStory: Array<{ type: string; content: string; ts?: number }> = events
       .filter((e) => e.hidden)
-      .map((e) => ({ type: retrospectiveLabel(e.type), content: this.retroScrub(e.content) }));
+      .map((e) => {
+        // For a gossip/surfacing breadcrumb, prefer the joined belief (the concrete paraphrase) over the
+        // internal "reaches <to>" plumbing; fall back to the scrubbed breadcrumb if no fact joined (#843).
+        const belief = (e.type === "gossip" || e.type === "surfacing") ? beliefByEvent.get(e.id) : undefined;
+        // #852 — carry the event's monotonic time marker so the dump can order chronologically.
+        return { type: retrospectiveLabel(e.type), content: this.retroScrub(belief ?? e.content), ts: e.ts };
+      });
     // The structured hidden layers (threads + seeded relationships) render from the IN-MEMORY objects,
     // not their engine-only Vault audit strings — so every id is a NAME and no machine slug crosses. They
     // are therefore SKIPPED below when iterating the Vault records (rendered here once, readably, instead).
     for (const t of this.storyThreads) {
       hiddenStory.push({ type: "Secret thread", content: storyThreadToRetrospectiveProse(t, nameOf) });
+    }
+    // #847 — the deep profile's secrets / true-goals / weakness are ALSO the source of the secret
+    // threads above (each thread is derived from one of them), so re-rendering the deep-profile blob would
+    // print the same secret TWICE. The threads are the canonical, live (status-bearing) representation of
+    // those three; the deep profile uniquely carries the houseguest's DAY-ONE READ OF THE PLAYER, which no
+    // thread carries. So render the deep profile here as exactly that one non-duplicated, labeled line
+    // (from the IN-MEMORY structured object, never the raw Vault string) — and skip its Vault record below.
+    for (const [id, profile] of Object.entries(this.deepProfiles)) {
+      const read = profile.dayOnePerception?.read?.trim();
+      if (read) hiddenStory.push({ type: "Hidden side", content: `${nameOf(id)} — day-one read of you: ${read}` });
     }
     for (const tie of this.seededRels.ties) {
       hiddenStory.push({ type: "Hidden tie", content: preGameTieToRetrospectiveProse(tie, nameOf) });
@@ -1269,6 +1358,11 @@ export class GameSessionAdapter implements GameSession {
       // Rendered structurally elsewhere: twists via `twists` below; threads + seeded relationships from
       // the structured objects above (their raw Vault strings carry ids/slugs we must not echo).
       if (r.kind === "reserved-twist" || r.kind === "hidden-thread" || r.kind === "seeded-relationship") continue;
+      // #846/#847 — the deep-profile `hidden-attribute` blob is rendered structurally above (its day-one
+      // read) and its secrets/goals/weakness live in the threads, so SKIP the raw blob to avoid the
+      // semicolon run-on AND the double-printed secret. Other `hidden-attribute` records (e.g. a private
+      // orientation) are NOT deep profiles — they keep rendering normally.
+      if (r.kind === "hidden-attribute" && /^deep-profile\b/.test(r.content)) continue;
       hiddenStory.push({ type: retrospectiveLabel(r.kind), content: this.retroScrub(r.content) });
     }
     const fired = new Map((this.live.firedTwists ?? []).map((t) => [t.kind as string, t.beat]));
@@ -1285,7 +1379,25 @@ export class GameSessionAdapter implements GameSession {
         votedFor: { id: votedFor, name: this.nameOf(votedFor) },
       })),
     }));
-    return { winner: this.live.winner ? this.named(this.live.winner) : null, hiddenStory, twists, evictionVotes };
+    // #852 — order the dump CHRONOLOGICALLY. Pre-season setup (threads, seeded ties, the day-one reads,
+    // sealed orientations) carries no event time marker, so it sorts FIRST (as setup); the live hidden
+    // layer then follows by its monotonic `ts`. A stable sort keeps same-`ts` rows in assembly order.
+    // (Week GROUPING is intentionally not attempted: events carry a monotonic tick, not a week number, so
+    // reconstructing week boundaries here would be fragile — chronological order is the robust win.)
+    const TS_FLOOR = Number.NEGATIVE_INFINITY;
+    const ordered = hiddenStory
+      .map((row, i) => ({ row, i }))
+      .sort((a, b) => (a.row.ts ?? TS_FLOOR) - (b.row.ts ?? TS_FLOOR) || a.i - b.i)
+      .map((x) => x.row);
+    // #841/#842 — a pure render-time coalesce: drop byte-identical rows and collapse a symmetric
+    // off-screen pair (A↔B) into one. After the chronological sort, the kept row is the EARLIEST.
+    // Never changes what was recorded — only what the operator sees.
+    return {
+      winner: this.live.winner ? this.named(this.live.winner) : null,
+      hiddenStory: coalesceDumpRows(ordered),
+      twists,
+      evictionVotes,
+    };
   }
 
   /**

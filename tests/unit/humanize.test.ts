@@ -37,6 +37,29 @@ describe("A8 — id humanization is whole-token, never a blind substring replace
     expect(humanizeIds("a house meeting shifts the week", entities)).toBe("a house meeting shifts the week");
     expect(humanizeIds("player wins", [])).toBe("player wins"); // no entities ⇒ nothing to humanize
   });
+
+  // #845 — the bare-word player id collides with the SINGULAR English word "player". The whole-token
+  // boundary already protects the plural; the singular common noun after a DETERMINER is left alone.
+  it("never substitutes the SINGULAR dictionary word 'player' after a determiner (#845)", () => {
+    // The live repro: a deep-profile goal "outlast every player" became "outlast every <name>".
+    expect(humanizeIds("outlast every player in the house", entities)).toBe("outlast every player in the house");
+    expect(humanizeIds("a player who throws comps", entities)).toBe("a player who throws comps");
+    expect(humanizeIds("their day-one read of this player", entities)).toBe("their day-one read of this player");
+    for (const sentence of [
+      "outlast every player in the house",
+      "a player who throws comps",
+      "this player is dangerous",
+    ]) {
+      expect(humanizeIds(sentence, entities)).not.toContain("Hero");
+    }
+  });
+
+  it("STILL substitutes a genuine bare `player` id token not preceded by a determiner (#845)", () => {
+    // The id never follows a determiner in beat prose — it leads the content, or follows punctuation/a verb.
+    expect(humanizeIds("player wins Head of Household", entities)).toBe("Hero wins Head of Household");
+    expect(humanizeIds("the vote is read: player", entities)).toBe("the vote is read: Hero");
+    expect(humanizeIds("npc:1 evicts player", entities)).toBe("Ada evicts Hero"); // final-eviction beat shape
+  });
 });
 
 /**
@@ -80,5 +103,61 @@ describe("0048 — humanizeForRetrospective resolves embedded ids + de-slugs, ke
     const once = humanizeForRetrospective("story-thread thread:npc:8:0 [resolved]", entities);
     expect(humanizeForRetrospective(once, entities)).toBe(once);
     expect(humanizeForRetrospective("thread:npc:8:0 [dormant]", [])).not.toMatch(/thread:|\[dormant\]/);
+  });
+
+  // #844 — a knowledge/gossip BREADCRUMB pathway slug must collapse to a calm gloss with NO orphan
+  // surname stranded and NO stray `via :` colon, regardless of where id resolution lands.
+  it("collapses a gossip/surfacing pathway slug with no orphan name and no stray colon (#844)", () => {
+    const teller = [{ id: "player", name: "Hero" }, { id: "npc:8", name: "Pat Garner" }, { id: "npc:3", name: "Lee Vance" }];
+    // The `gossip ${pathway} reaches ${to}` breadcrumb: a `told-by:<id>` slug — the teller's id is INSIDE
+    // the slug, so resolving it first would strand the surname. It must not.
+    const gossip = humanizeForRetrospective("gossip told-by:npc:8 reaches npc:3", teller);
+    expect(gossip).not.toMatch(/\bnpc:\d+\b/);
+    expect(gossip).not.toContain("Garner");       // no orphan surname stranded after the gloss
+    expect(gossip).not.toMatch(/\btold-by\b/);
+    expect(gossip).toContain("Lee Vance");        // the recipient (a clean trailing id) still resolves
+    // The `surfaced to ${entity} via ${pathway}` breadcrumb: a colon-pathway whose keyword could be
+    // stripped upstream, leaving `via :…`. It must not.
+    const surf = humanizeForRetrospective("surfaced to npc:3 via overheard:offscreen:alliance:1:594987875", teller);
+    expect(surf).not.toMatch(/via\s+:/);          // no stray `via :`
+    expect(surf).not.toMatch(/(?:^|\s):[\w-]+:/); // no orphan colon-led machine fragment
+    expect(surf).toContain("Lee Vance");
+  });
+
+  // #845 — the retrospective unseals AUTHORED deep-profile prose where "player" is a COMMON NOUN. The
+  // bare-word player id is never a hidden-scene subject (hidden scenes exclude the player) and the
+  // day-1-read label is pre-translated to "you", so a literal "player" must NEVER become the player name.
+  it("never turns the COMMON NOUN 'player' into the player's name in deep-profile prose (#845)", () => {
+    // The live repro shape: a true-goal that contains the singular word "player" (any modifier, not just
+    // a determiner) — npc:3 still resolves, but "player" stays a word.
+    const raw = "deep-profile npc:3 | true-goals: be the strongest player and outlast every player here";
+    const out = humanizeForRetrospective(raw, entities);
+    expect(out).toContain("Veteran");        // npc:3 → name
+    expect(out).toContain("strongest player"); // the common noun is intact
+    expect(out).toContain("every player");
+    expect(out).not.toContain("Hero");       // the player name never leaked into authored prose
+    expect(out).not.toMatch(/\bnpc:\d+\b/);
+  });
+
+  // #845 (cross-lane) — the SAME hazard lives in a corpus VOCATION noun, not just template pool strings:
+  // a real `src/engine/data/vocations.ts` entry like "professional poker player" is interpolated into
+  // conditioned deep-profile prose, where the trailing word "player" must NOT mangle to the player name.
+  // Resolving only colon-bearing ids in the retrospective covers it (a bare "player" is never substituted).
+  it("surfaces a vocation noun like 'professional poker player' CLEAN — no name substitution (#845)", () => {
+    // A name whose surname token would make a leak unmistakable if the bare "player" id were resolved.
+    const roster = [{ id: "player", name: "Ryne ODonnell" }, { id: "npc:3", name: "Tess Vane" }];
+    // The vocation embedded in a secret, plus a bare mid-sentence "player", plus a clean npc id to resolve.
+    const raw = "deep-profile npc:3 | secrets: a former professional poker player coasting on a casual front | true-goals: read as a harmless social player";
+    const out = humanizeForRetrospective(raw, roster);
+    expect(out).toContain("Tess Vane");                 // the real id still resolves
+    expect(out).toContain("professional poker player"); // the vocation noun is intact (NOT "poker Ryne …")
+    expect(out).toContain("social player");             // a bare mid-sentence "player" stays a word
+    expect(out).not.toContain("Ryne");                  // the player name never leaks into the vocation/prose
+    expect(out).not.toContain("ODonnell");
+    expect(out).not.toMatch(/\bnpc:\d+\b/);
+
+    // And the bare vocation string on its own (as it sits in the corpus) is a no-op, with or without a roster.
+    expect(humanizeForRetrospective("professional poker player", roster)).toBe("professional poker player");
+    expect(humanizeForRetrospective("professional poker player", [])).toBe("professional poker player");
   });
 });

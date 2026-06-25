@@ -19,6 +19,13 @@ export interface HiddenRecord {
   kind: HiddenKind;
   subject?: string;
   content: string;
+  /**
+   * Optional monotonic time marker for the record (#852) — additive/back-compat: a record written
+   * without it round-trips byte-identically, and every existing reader ignores it. Lets the producer's
+   * Vault dump carry a chronological marker for records that have one (the live, time-stamped hidden
+   * layer); pre-game seals simply omit it and sort as setup.
+   */
+  ts?: number;
 }
 
 export interface VaultStore {
