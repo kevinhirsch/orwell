@@ -16,11 +16,11 @@ import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
-import { assignRooms } from "../../engine/presence";
-import { PRESENCE } from "../../engine/presenceConstants";
+import { assignRooms, zoneFor } from "../../engine/presence";
+import { PRESENCE, PRIVACY } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_SIGHTLINE, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
-import type { Room, Occupancy } from "../../domain/house";
+import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
+import type { Room, Zone, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
@@ -148,7 +148,7 @@ import {
 import { CONFIDENCE, type DisclosureTier } from "../../engine/confidenceConstants";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
-import type { CeremonyState, SessionCore } from "../../engine/sessionSnapshot";
+import type { CeremonyState, SessionCore, TrackedSighting } from "../../engine/sessionSnapshot";
 import { cloneSession, fastClone } from "../../engine/sessionSnapshot";
 
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
@@ -346,6 +346,16 @@ export class GameSessionAdapter implements GameSession {
    * the movement trajectory stays reproducible across a restart. Advances ONCE per `presenceTick`.
    */
   private presenceTickCount = 0;
+  /**
+   * TRACKED OCCUPANCY (0077 Phase 2 — the privacy payoff): the PLAYER's beliefs about who is behind a
+   * CLOSED door. NOT the live map — acquired knowledge: a sighting lands only when the player WITNESSES
+   * a houseguest head into a private room (their origin was in the player's eyeshot), keyed by the
+   * subject. It carries a pathway + confidence (the 0002 model applied to position), goes STALE with age
+   * (NEVER read off the secret live position — that would leak that they left), decays out past the
+   * horizon, and is CORRECTED early when the player next sees the subject somewhere visible. Persisted
+   * (0007 — acquired knowledge accumulates), Vault-free (position, never the scene's content).
+   */
+  private trackedSightings: Map<EntityId, TrackedSighting> | null = null;
   /** The game's seed (B60/E12): per-moment rng keys off it — two same-named games never share streams. */
   private gameSeed: number | null = null;
   /** The per-season style anchor for portrait prompts (0051): seeded at cast time, stable through the season. */
@@ -1356,6 +1366,11 @@ export class GameSessionAdapter implements GameSession {
       // L21/L24: the dedicated movement stream's tick counter — persisted so the personality-weighted
       // movement trajectory stays reproducible across a restart (absent ⇒ 0).
       ...(this.presenceTickCount > 0 ? { presenceTickCount: this.presenceTickCount } : {}),
+      // 0077: the player's tracked closed-door beliefs — persisted so the privacy payoff accumulates
+      // across a restart (0007). Absent/empty ⇒ omitted (byte-identical to a pre-0077 save).
+      ...(this.trackedSightings && this.trackedSightings.size > 0
+        ? { trackedSightings: Object.fromEntries(this.trackedSightings) as Record<EntityId, TrackedSighting> }
+        : {}),
       ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       // The producer persona's seed (producer-persona feature) — persisted so the SAME off-camera casting
       // producer is voiced across turns and a restart (it is established pre-game, before any season seed).
@@ -1493,6 +1508,10 @@ export class GameSessionAdapter implements GameSession {
     this.presenceTenure = core.presenceTenure ? new Map(Object.entries(core.presenceTenure) as [EntityId, number][]) : null;
     // L21/L24: restore the dedicated movement stream's tick counter (absent on older saves ⇒ 0).
     this.presenceTickCount = core.presenceTickCount ?? 0;
+    // 0077: restore the player's tracked closed-door beliefs (acquired knowledge survives a restart).
+    this.trackedSightings = core.trackedSightings
+      ? new Map(Object.entries(core.trackedSightings) as [EntityId, TrackedSighting][])
+      : null;
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     // The producer persona's seed (producer-persona feature): restore so the SAME off-camera casting
     // producer is voiced after a restart. Persisted on feature+ saves; on a started game that predates
@@ -1827,6 +1846,15 @@ export class GameSessionAdapter implements GameSession {
       const stayed = prev?.get(id) === room;
       tenure.set(id, stayed ? (this.presenceTenure?.get(id) ?? 0) + 1 : 0);
     }
+    // 0077: the player TRACKS any houseguest they watched head into a closed room this tick — their
+    // origin was in the player's eyeshot. Pure read-side (no rng), so the calibration spine is untouched.
+    const meRoom = next.get(me);
+    if (prev && meRoom) {
+      for (const [id, room] of next) {
+        const from = prev.get(id);
+        if (from && from !== room) this.observeMoveIntoPrivate(id, from, room, meRoom);
+      }
+    }
     this.presence = next;
     this.presenceBase = nextBase;
     this.presenceTenure = tenure;
@@ -1903,6 +1931,9 @@ export class GameSessionAdapter implements GameSession {
     // OPEN set only — `presenceBase` is deliberately NOT touched (calibration neutrality, see above).
     this.presence.set(id, dest);
     (this.presenceTenure ??= new Map()).set(id, 0); // a fresh arrival
+    // 0077: a NARRATED relocation the player can see into a closed room is tracked, same as a drift.
+    const myRoom = this.presence.get(this.house.player.id);
+    if (myRoom) this.observeMoveIntoPrivate(id, here, dest, myRoom);
     this.persist();
     return { status: "moved", whereabouts: this.whereabouts() };
   }
@@ -2043,6 +2074,8 @@ export class GameSessionAdapter implements GameSession {
     // L21/L24: prune the calibration-neutral base in lockstep so the society never pairs an evictee.
     if (this.presenceBase) for (const id of [...this.presenceBase.keys()]) if (!active.has(id)) this.presenceBase.delete(id);
     if (this.presenceTenure) for (const id of [...this.presenceTenure.keys()]) if (!active.has(id)) this.presenceTenure.delete(id);
+    // 0077: forget a tracked sighting once its subject leaves the house (an evictee is nowhere).
+    if (this.trackedSightings) for (const id of [...this.trackedSightings.keys()]) if (!active.has(id)) this.trackedSightings.delete(id);
   }
 
   whereabouts(): WhereaboutsView | null {
@@ -2066,15 +2099,112 @@ export class GameSessionAdapter implements GameSession {
     // (a bedroom, the bathroom/lounge, the HOH/storage/diary) is opaque — standing one room over no
     // longer leaks who is behind it. Who is behind a closed door is earned by watching, never ambient.
     const present = inRoom(room);
+    // 0077: the TRACKED layer — who the player BELIEVES is behind a closed door (acquired by watching a
+    // doorway), with age + a Vault-safe `stale` flag. NEVER the live map — the bedrooms stay blanks in
+    // `nearby` (sightline). The player's own sub-zone rides along as flavor ("over by the pool").
+    const now = this.trackedNow();
+    const tracked = now.map((t) => ({
+      id: t.id,
+      name: this.nameOf(t.id),
+      room: t.sighting.room,
+      ...(t.sighting.zone ? { zone: t.sighting.zone } : {}),
+      sinceTurns: t.age,
+      stale: t.stale,
+      pathway: t.sighting.pathway,
+      confidence: t.sighting.confidence,
+    }));
+    // CONSPICUOUSNESS (two alone too long) is DERIVED from the same beliefs — Vault-free who/where/how-long.
+    const conspicuous = this.conspicuousFrom(now);
+    const myZone = zoneFor(me, room, this.gameSeed ?? "");
     return {
       room,
+      ...(myZone ? { zone: myZone } : {}),
       present,
       nearby: (HOUSE_SIGHTLINE.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) })),
       // L21/L24: duration — the player's tenure in this room + each companion's, so the narrator
       // voices continuity (who has lingered with you vs. who just walked in) instead of resetting.
       turnsHere: this.presenceTenure?.get(me) ?? 0,
       companions: present.map((p) => ({ ...p, turnsHere: this.presenceTenure?.get(p.id) ?? 0 })),
+      tracked,
+      ...(conspicuous.length ? { conspicuous } : {}),
     };
+  }
+
+  /** 0077: a houseguest's live sub-zone in a zoned big room (Vault-free flavor); undefined elsewhere. */
+  currentZone(id: EntityId): Zone | undefined {
+    const r = this.presence?.get(id);
+    return r ? zoneFor(id, r, this.gameSeed ?? "") : undefined;
+  }
+
+  /**
+   * 0077: record a TRACKED sighting when the player WITNESSED `subject` head from `origin` into a closed
+   * `dest`. "Witnessed" = the origin was in the player's eyeshot (or was the player's own room) — so a
+   * houseguest who slips off down a hallway you can see becomes acquired knowledge, while one who was
+   * already out of view does not. Pure, Vault-free, draws NO rng (calibration untouched).
+   */
+  private observeMoveIntoPrivate(subject: EntityId, origin: Room, dest: Room, playerRoom: Room): void {
+    if (subject === this.house?.player.id || !isPrivateRoom(dest)) return;
+    if (origin !== playerRoom && !areVisible(playerRoom, origin)) return; // the player didn't see them go
+    (this.trackedSightings ??= new Map()).set(subject, {
+      room: dest,
+      zone: zoneFor(subject, dest, this.gameSeed ?? ""),
+      tick: this.presenceTickCount,
+      pathway: `tracked:${subject}:${this.presenceTickCount}`,
+      confidence: PRIVACY.trackedConfidence,
+    });
+  }
+
+  /**
+   * 0077: the player's CURRENT tracked beliefs — pruned of decayed (past-horizon) sightings, of subjects
+   * no longer in the house, and of any the player has since DISPROVEN by seeing the subject somewhere
+   * visible (a correcting pathway). Each carries its age + a `stale` flag derived from AGE ALONE — never
+   * the secret live position (reading that would leak that they left). Mutates the persisted map lazily
+   * (drops dead beliefs) so it never grows without bound. Vault-free.
+   */
+  private trackedNow(): Array<{ id: EntityId; sighting: TrackedSighting; age: number; stale: boolean }> {
+    if (!this.trackedSightings || !this.presence) return [];
+    const me = this.house?.player.id;
+    const myRoom = me ? this.presence.get(me) : undefined;
+    const out: Array<{ id: EntityId; sighting: TrackedSighting; age: number; stale: boolean }> = [];
+    for (const [id, s] of [...this.trackedSightings]) {
+      const age = this.presenceTickCount - s.tick;
+      if (age > PRIVACY.trackedHorizonTicks || !this.presence.has(id)) { this.trackedSightings.delete(id); continue; }
+      // A correcting pathway: the player can now SEE the subject (their room or a sightline-connected
+      // room) ⇒ the closed-door belief is resolved by direct observation; drop it.
+      const live = this.presence.get(id);
+      if (myRoom && live && (live === myRoom || areVisible(myRoom, live))) { this.trackedSightings.delete(id); continue; }
+      out.push({ id, sighting: s, age, stale: age >= PRIVACY.staleAfterTicks });
+    }
+    return out;
+  }
+
+  /**
+   * 0077 CONSPICUOUSNESS — "two alone too long is a tell." A Vault-free read, DERIVED per call (never
+   * stored — ADR 0002, like blocs 0043): a private room the player has tracked EXACTLY `conspicuousPairSize`
+   * houseguests into, both sightings aged at least `conspicuousMinTenureTicks`, surfaces as "you saw A and
+   * B slip into the lounge a while ago and haven't seen them come out." Names + room + "a while" — NEVER
+   * the content of whatever they are doing in there (the scene stays sealed; earshot is rare/partial/muffled).
+   */
+  conspicuousReads(): string[] {
+    return this.conspicuousFrom(this.trackedNow());
+  }
+
+  /** Pure conspicuousness derivation over an already-computed tracked-belief list (shared by `whereabouts`). */
+  private conspicuousFrom(now: ReturnType<GameSessionAdapter["trackedNow"]>): string[] {
+    const byRoom = new Map<Room, EntityId[]>();
+    for (const t of now) {
+      if (t.age < PRIVACY.conspicuousMinTenureTicks) continue;
+      const list = byRoom.get(t.sighting.room) ?? [];
+      list.push(t.id);
+      byRoom.set(t.sighting.room, list);
+    }
+    const reads: string[] = [];
+    for (const [room, who] of byRoom) {
+      if (who.length !== PRIVACY.conspicuousPairSize) continue;
+      const names = who.map((id) => this.nameOf(id));
+      reads.push(`(You saw ${names.join(" and ")} slip into the ${roomDisplayName(room)} a while ago and haven't seen them come out.)`);
+    }
+    return reads;
   }
 
   socialInitiatives(): SocialInitiative[] {

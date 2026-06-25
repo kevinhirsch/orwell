@@ -7,7 +7,7 @@ import type { LiveSeasonState } from "./liveSeason";
 import type { Deal } from "../domain/deal";
 import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
-import type { Room } from "../domain/house";
+import type { Room, Zone } from "../domain/house";
 import type { HiddenRecord } from "../ports/VaultStore";
 
 /**
@@ -37,6 +37,19 @@ export interface CeremonyState {
   nominees: EntityId[];
   vetoHolder?: EntityId;
   vetoUsed: boolean;
+}
+
+/**
+ * A single persisted TRACKED-OCCUPANCY belief (0077 Phase 2): the player saw the subject (the map key)
+ * head into `room` (+ `zone` flavor) at presence-tick `tick`; `pathway` + `confidence` make it a real
+ * 0002 acquired-knowledge fact. Vault-free — position only, never the off-screen scene's content.
+ */
+export interface TrackedSighting {
+  room: Room;
+  zone?: Zone;
+  tick: number;
+  pathway: string;
+  confidence: number;
 }
 
 /** The live-session core the `GameSessionAdapter` snapshots/restores. */
@@ -80,6 +93,13 @@ export interface SessionCore {
    * the deterministic sequence). The counter advances ONCE per `presenceTick`.
    */
   presenceTickCount?: number;
+  /**
+   * TRACKED OCCUPANCY (0077 Phase 2): the PLAYER's persisted beliefs about who is behind a closed door —
+   * acquired knowledge (a witnessed movement), keyed by subject, carrying a pathway + confidence + the
+   * sighting tick. Persisted so the privacy payoff accumulates across a restart (0007); absent on older
+   * saves. Vault-free (position, never the scene's content).
+   */
+  trackedSightings?: Record<EntityId, TrackedSighting>;
   /** The game's seed (B60/audit E12): the per-moment rng keys off it, so two same-named games diverge. */
   seed?: number;
   /**
