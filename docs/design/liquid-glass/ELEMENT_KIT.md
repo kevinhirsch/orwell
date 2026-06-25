@@ -127,19 +127,38 @@ solidifies the glass fills; increased-contrast strengthens the border.
 #### Depth & material (WWDC25 310/356 parity)
 
 A Liquid Glass button **floats**: it casts a soft, diffuse drop shadow (a real cast
-shadow — `--ow-btn-shadow`, contact + ambient at low alpha) and carries a **full-perimeter
-specular rim** (`--ow-btn-rim` — a bright lit glass edge, brightest at the top, light
-source ≈ -60° per kube.io). The fill is a **translucent glass veil** (`--ow-btn-veil`) +
-the kit material filter (`--ow-btn-glass-kit`: blur + saturate, only a hair of brightness
-so the **backdrop samples through** — *tint, not fill*). The rim + shadow, not opacity,
-give it form. Tuned against the authentic Apple refs (`images/lg_hig_segmented_control_poster.png`,
-`lg_hig_ios_glass_over_light.png`, `lg_hig_toolbar_grouping_correct.png`, `lg_color_160…tinted`).
+shadow — `--ow-btn-shadow`, a tight near-black contact line + two broad low-alpha ambient
+layers) and carries a **full-perimeter specular rim** (`--ow-btn-rim` — a bright lit glass
+edge, brightest at the top, light source ≈ -60° per kube.io). The fill is a **translucent
+glass veil** (`--ow-btn-veil`) + the kit material filter (`--ow-btn-glass-kit`: blur +
+saturate, only a hair of brightness so the **backdrop samples through** — *tint, not fill*).
+The rim + shadow, not opacity, give it form. Tuned against the authentic Apple refs
+(`images/lg_hig_segmented_control_poster.png`, `lg_hig_ios_glass_over_light.png`,
+`lg_hig_toolbar_grouping_correct.png`, `lg_color_160…tinted`).
+
+**#709 — refraction + rim + shadow read coherently.** At Full Glass `liquidGlass.js` lays
+the kube.io `feDisplacementMap` refraction onto the glass buttons via
+`backdrop-filter: url(#…)`. That displacement is a **soft wide halo at the pill edge** that
+can *fight* the rim, so the CSS depth was retuned to win the cascade: a **CRISP 0.5px lit
+top hairline** (re-asserts the glass outline the refraction blurs), a **more present
+contact-shadow** (a faint shadow vanished over a vivid/colourful wallpaper), and a
+**luminous-but-translucent fill with a top-down luminosity gradient** so the refracted
+wallpaper still reads through while the dark label clears contrast over light/colourful
+backdrops. `.ow-btn-secondary`/`-icon` ride a **light luminous veil** (not the old dark
+wash) — Apple's "secondary" lowers visual *weight*, it doesn't darken the material, and a
+dark wash made the dark ink illegible over a colourful/dark backdrop.
 
 #### Size ladder — shape follows size (WWDC25 310)
 
 WWDC25 310 establishes a **five-size hierarchy** and ties **shape to size**. The size
-modifiers size via **padding + line-height**, never a hard-coded height (310: "avoid
-hard-coding the heights of controls"); the ≥44px tap floor stays on the base `.ow-btn`.
+modifiers size via **padding + line-height** + a stepped **min-height floor** + an explicit
+**font ladder** (#709 — the prior build collapsed: the base `min-height:44px` dominated and
+the shared `--ow-fs-*` tokens are all ~14px, so every size rendered ~44px with near-identical
+type). 310 forbids a hard `height`, but a stepped `min-height` floor (the control's tap
+metric) is exactly how AppKit's control sizes work: **sm/md hold the ≥44px tap floor**
+(WCAG 2.5.5; 310: mini/sm/md are "slightly taller" anyway) with the **type** stepped for
+density (13/14px), and **lg (52px/16px) / xl (62px/18px)** step UP for the spacious capsule
+read. The result is a real, visible hierarchy.
 
 | Modifier | Size | Shape |
 |---|---|---|

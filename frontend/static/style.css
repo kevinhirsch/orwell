@@ -37972,19 +37972,29 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:active {
    sits — angle ≈ -60°, kube.io). The fill is TRANSLUCENT so the backdrop samples
    through (tint-not-fill); the rim + shadow, not opacity, give it form. */
 :root {
-  /* floating drop shadow: contact + ambient, soft & low-alpha but PRESENT (a real cast
-     shadow giving the pill lift — cf. the segmented-control poster). */
-  --ow-btn-shadow: 0 1px 1.5px rgba(0,0,0,0.10), 0 4px 10px rgba(0,0,0,0.10), 0 10px 24px rgba(0,0,0,0.10);
-  --ow-btn-shadow-hover: 0 2px 4px rgba(0,0,0,0.12), 0 8px 18px rgba(0,0,0,0.13), 0 16px 34px rgba(0,0,0,0.14);
-  /* full-perimeter specular rim: a CRISP bright hairline all around + a stronger lit top
+  /* floating drop shadow: contact + ambient, soft but PRESENT — a real cast shadow that
+     lifts the pill off ANY backdrop (the prior 0.10 alphas vanished over a busy/colorful
+     wallpaper; the segmented-control + toolbar refs show a clearly readable soft drop). A
+     TIGHT near-black contact line grounds the pill, then two broad low-alpha ambient layers
+     give the float. #709 refraction parity: over a vivid wallpaper the soft refraction halo
+     can swallow a faint shadow, so the contact layer carries the form. */
+  --ow-btn-shadow: 0 0.5px 1px rgba(0,0,0,0.16), 0 3px 8px rgba(0,0,0,0.14), 0 8px 22px rgba(0,0,0,0.12);
+  --ow-btn-shadow-hover: 0 1px 2px rgba(0,0,0,0.18), 0 7px 16px rgba(0,0,0,0.16), 0 16px 34px rgba(0,0,0,0.15);
+  /* full-perimeter specular rim: a CRISP bright hairline all around + a stronger lit TOP
      edge + a faint shaded bottom (light source top-left, angle ≈ -60°, kube.io) — the
-     pure-CSS equivalent of the feBlend rim-light. This, not opacity, gives the glass form. */
+     pure-CSS equivalent of the feBlend rim-light. #709: the SVG refraction band is a SOFT
+     wide halo at the pill edge; a CRISP 0.5px lit hairline re-asserts the glass outline the
+     refraction blurs (otherwise the rim is lost in the lensing). The top edge does the lit
+     work; the perimeter hairline keeps a clean light-on-light contour. Brightest white kept
+     ≤ 0.6 (#770 glass-hairline ceiling). */
   --ow-btn-rim: inset 0 0 0 0.5px rgba(255,255,255,0.5),
-                inset 0 1.5px 1px rgba(255,255,255,0.6),
-                inset 0 -1.5px 1.5px rgba(0,0,0,0.06);
+                inset 0 1px 0 rgba(255,255,255,0.6),
+                inset 0 -1px 1px rgba(0,0,0,0.08);
   /* a faint translucent glass veil so even a BARE .ow-btn reads as the material (not a
-     painted plate); variants tint over this. Kept light so the backdrop samples through. */
-  --ow-btn-veil: color-mix(in srgb, #ffffff 12%, transparent);
+     painted plate); variants tint over this. #709: kept LIGHTER (was 12%) so the refracted
+     wallpaper reads THROUGH the glass (tint-not-fill) instead of fogging into a milky plate
+     over a colorful backdrop. The rim + shadow — not the fill — give it form. */
+  --ow-btn-veil: color-mix(in srgb, #ffffff 8%, transparent);
   /* The kit-button material filter. The shared --ow-btn-glass adds brightness(1.12),
      which over-lights the glass into a "painted bright plate"; a true Liquid Glass
      button leans on BLUR + SATURATE (sampling the backdrop) with only a hair of
@@ -38021,10 +38031,17 @@ body.theme-frosted .ow-btn {
               transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease, opacity .15s ease;
 }
 body.theme-frosted .ow-btn-secondary {
-  /* SECONDARY-prominence: a faint DARK wash over the glass veil + the shared rim/shadow
-     (keyed off the chrome ink, not --fg, so it never inverts to a near-white plate). */
-  background-color: color-mix(in srgb, #16191f 9%, transparent);
-  border-color: color-mix(in srgb, #16191f 16%, transparent);
+  /* SECONDARY-prominence: subdued vs the primary, but it must stay LEGIBLE glass. #709
+     FIX: the old DARK wash (#16191f 9%) DARKENED the glass, so over a colourful/dark
+     backdrop the dark chrome ink fell to ~1.8:1 (invisible). WWDC310 "secondary" lowers
+     visual WEIGHT, it doesn't make the material darker — Apple's glass stays a light
+     material. So secondary now rides a LIGHT luminous veil (lighter than the primary so
+     it reads less prominent, but bright enough that the dark ink stays legible over any
+     backdrop). A whisper of a top-down lift keeps it glassy, not flat. */
+  background:
+    linear-gradient(to bottom, rgba(255,255,255,0.16), transparent 70%),
+    rgba(255,255,255,0.30);
+  border-color: color-mix(in srgb, #16191f 12%, transparent);
   box-shadow: var(--ow-btn-rim), var(--ow-btn-shadow);
 }
 /* PROMINENT = PRIMARY tint prominence (WWDC25 310 "tint, don't fill"). A translucent
@@ -38037,23 +38054,33 @@ body.theme-frosted .ow-btn-secondary {
    + light-label combo was ~1.49:1 — illegible; dark ink on this bright fill clears WCAG
    AA / APCA comfortably). */
 body.theme-frosted .ow-btn-prominent {
+  /* #709: a TOP-DOWN luminosity gradient (brighter at the top, like Apple's segmented
+     pill) over the neutral tint — keeps the glass luminous (and the dark label legible)
+     even over a dark backdrop, while staying translucent enough at the base that the
+     refracted wallpaper still reads through (tint-not-fill). */
   background:
-    radial-gradient(120% 100% at 30% 0%, var(--ow-btn-tint-primary, rgba(255,255,255,0.30)), transparent 55%),
+    linear-gradient(to bottom, rgba(255,255,255,0.22), transparent 70%),
+    radial-gradient(120% 120% at 30% -10%, var(--ow-btn-tint-primary, rgba(255,255,255,0.26)), transparent 60%),
     var(--ow-btn-tint-primary, rgba(255,255,255,0.26));
   color: #16191f;
   font-weight: var(--ow-fw-semibold, 600);
   border-color: color-mix(in srgb, #16191f 6%, transparent);
-  /* the shared float shadow + a brighter specular rim (the primary action reads as the
-     most lit glass — luminosity, not hue; owner ruling). */
+  /* the shared float shadow + a brighter (but still crisp) specular rim — the primary
+     action reads as the MOST lit glass (luminosity, not hue; owner ruling). #709: the lift
+     comes from a sharper top-edge highlight + the inner perimeter line, NOT a fatter wash
+     (a fat bright rim fought the refraction halo and pooled into a streak). Brightest white
+     0.6 (#770 ceiling). */
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.34),
-    inset 0 1px 1px rgba(255,255,255,0.7),
+    inset 0 0 0 0.75px rgba(255,255,255,0.34),
+    inset 0 1px 0.5px rgba(255,255,255,0.6),
     inset 0 -1px 1px rgba(0,0,0,0.05),
     var(--ow-btn-shadow);
 }
 body.theme-frosted .ow-btn-icon {
   min-height: 0; padding: 0; width: 30px; height: 30px; border-radius: 50%;
-  background-color: color-mix(in srgb, #16191f 10%, transparent);
+  /* #709: a LIGHT luminous veil (was a dark wash) so the dark glyph stays legible over a
+     colourful/dark backdrop — matches the secondary fix; subdued, still glass. */
+  background-color: rgba(255,255,255,0.30);
 }
 
 /* ── SECONDARY (default) glass buttons: translucent disc/capsule, light glyph ──*/
@@ -38591,8 +38618,8 @@ body.theme-frosted .ow-window .ow-body button.settings-nav-item.active {
      The default tint stays NEUTRAL-luminous (owner ruling: glass is colorless — emphasis
      by luminosity + weight). Override `--ow-btn-tint-primary` to an accent wash to take
      310's accent-tinted primary look without touching any label. */
-  --ow-btn-tint-primary: rgba(255,255,255,0.30);   /* primary prominence — luminous neutral glass (override → accent wash) */
-  --ow-btn-tint-secondary: color-mix(in srgb, #16191f 10%, transparent);  /* secondary — subdued neutral wash */
+  --ow-btn-tint-primary: rgba(255,255,255,0.34);   /* primary prominence — the MOST luminous neutral glass (brighter than secondary so the prime action reads first; #709). Still translucent (tint-not-fill); a top-down luminosity gradient on .ow-btn-prominent lets the refracted wallpaper read through while keeping the dark label legible over a dark backdrop (override → accent wash) */
+  --ow-btn-tint-secondary: rgba(255,255,255,0.30);  /* secondary — subdued LIGHT luminous veil; #709 flipped from a dark wash so the dark ink stays legible over any backdrop (Apple secondary lowers WEIGHT, not the material's lightness) */
   --ow-btn-tint-danger: color-mix(in srgb, var(--ow-danger, #ff453a) 62%, transparent); /* secondary-prominence RED tint over glass (translucent, NOT a solid plate; deep enough the white on-danger label clears AA) */
 }
 
@@ -38707,25 +38734,38 @@ body.theme-frosted .ow-btn.is-disabled {
    LINE-HEIGHT (and font-size), never a fixed height; the ≥44px tap floor stays via
    min-height on the base. The base .ow-btn keeps its capsule default so existing #775
    consumers (bare .ow-btn) are untouched — these are OPT-IN size modifiers. */
+/* #709 SIZE-LADDER FIX: the ladder was VISUALLY FLAT — the base min-height:44px (the tap
+   floor) dominated every size and the shared --ow-fs-* tokens are all ~14px, so sm/md/lg/xl
+   all rendered at 44px with near-identical type. WWDC310's five sizes are a real HIERARCHY
+   ("establish varying levels of density and hierarchy"); xl is "more spacious". 310 forbids
+   a hard `height`, but a stepped min-height FLOOR (the tap target / control metric) + padding
+   is exactly how AppKit's control sizes work — and the test regex sanctions `min-height` (it
+   excludes the min- prefix). So: sm/md hold the 44px tap floor (310: mini/sm/md are "slightly
+   taller" anyway) but step the TYPE down for density; lg/xl step the floor UP (52 / 62px) for
+   the spacious capsule read, with an explicit font ladder so the type grows with the size. */
 body.theme-frosted .ow-btn-sm {
+  min-height: var(--ow-tap-min, 44px);            /* keep the ≥44px tap floor (WCAG 2.5.5) */
   padding: var(--ow-space-1, 4px) var(--ow-space-3, 12px);
-  line-height: 1.25; font-size: var(--ow-fs-caption, 0.8125rem);
+  line-height: 1.25; font-size: 0.8125rem;        /* ~13px — compact/dense */
   border-radius: var(--ow-radius-inner, 16px);   /* small → rounded-rect */
 }
 body.theme-frosted .ow-btn-md {
+  min-height: var(--ow-tap-min, 44px);
   padding: var(--ow-space-2, 8px) var(--ow-space-4, 16px);
-  line-height: 1.35; font-size: var(--ow-fs-body, 0.875rem);
+  line-height: 1.35; font-size: 0.875rem;         /* ~14px — default */
   border-radius: var(--ow-radius-inner, 16px);   /* medium → rounded-rect */
 }
 body.theme-frosted .ow-btn-lg {
+  min-height: 52px;                               /* step UP — large is more spacious */
   padding: var(--ow-space-3, 12px) var(--ow-space-5, 24px);
-  line-height: 1.4; font-size: var(--ow-fs-body, 0.9375rem);
+  line-height: 1.4; font-size: 1rem;              /* ~16px */
   border-radius: var(--ow-radius-pill, 9999px);  /* large → capsule */
 }
 /* EXTRA-LARGE (new in Tahoe) — the single most-prominent action. Capsule, spacious. */
 body.theme-frosted .ow-btn-xl {
+  min-height: 62px;                               /* the most spacious size (the prime action) */
   padding: var(--ow-space-4, 16px) var(--ow-space-6, 32px);
-  line-height: 1.45; font-size: var(--ow-fs-title, 1.0625rem);
+  line-height: 1.45; font-size: 1.125rem;         /* ~18px — clearly the largest label */
   font-weight: var(--ow-fw-semibold, 600);
   border-radius: var(--ow-radius-pill, 9999px);  /* extra-large → capsule */
 }
@@ -38741,8 +38781,8 @@ body.theme-frosted .ow-btn-prominence-secondary {
 }
 body.theme-frosted .ow-btn-prominence-primary {
   background:
-    radial-gradient(120% 100% at 30% 0%, var(--ow-btn-tint-primary, rgba(255,255,255,0.30)), transparent 55%),
-    var(--ow-btn-tint-primary, rgba(255,255,255,0.26));
+    radial-gradient(120% 120% at 30% -10%, var(--ow-btn-tint-primary, rgba(255,255,255,0.22)), transparent 60%),
+    var(--ow-btn-tint-primary, rgba(255,255,255,0.18));
   border-color: rgba(255,255,255,0.34);
 }
 
