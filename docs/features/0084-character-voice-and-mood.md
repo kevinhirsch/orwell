@@ -1,6 +1,10 @@
 # 0084 — Character voice & grounded mood (sixteen mouths, not one)
 
-> **Status:** 📝 **SPEC / draft** (authored 2026-06-25). **Gate (planned):** engine (Vitest +
+> **Status:** ✅ **BUILT 2026-06-25** (BDD `0084-character-voice-and-mood.feature` wired into
+> `cucumber.cjs` + `tests/unit/voice0084.test.ts`; `src/engine/voice.ts` + `src/domain/voiceProfile.ts`,
+> `CHARACTER.voice` minted in `characterFactory`, `NpcVoiceView.persona.voice` + `mood` from
+> `GameSessionAdapter.npcVoice`, momentPrompts lever; calibration byte-identical — voice rides a
+> names-keyed side rng off the main stream, mood is a read). **Gate:** engine (Vitest +
 > dependency-cruiser + BDD `0084-character-voice-and-mood.feature`) and front-end (the voicing path
 > consumes the new persona facet + mood through `getMomentPrompt`/`npcVoice`). **Depends on:** 0058
 > (deep profiles / `CharacterFactory` is where the static voice is minted), 0041 + `emotionalArc`

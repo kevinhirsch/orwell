@@ -1,5 +1,6 @@
 import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
+import type { VoiceProfile } from "../domain/voiceProfile";
 
 /**
  * Vault-free game-session port (onboarding + per-moment prompt injection).
@@ -887,7 +888,20 @@ export interface NpcVoiceView {
      * One true facet of a full character, never a reductive label.
      */
     ethnicity?: string; genderPresentation?: "man" | "woman" | "nonbinary"; outOrientation?: string;
+    /**
+     * Feature 0084 — the VOICE fingerprint: HOW this houseguest talks (register/rhythm/energy/
+     * directness/humor/stress-tell + a prose signature + a light lexicon). PUBLIC, byte-stable, voiced
+     * EVERY turn so the cast sounds like sixteen people, not one narrator. Absent on a pre-0084 save.
+     */
+    voice?: VoiceProfile;
   };
+  /**
+   * Feature 0084 — the houseguest's CURRENT mood as a Vault-safe AFFECT WORD, derived live from their
+   * soul on two timescales (the acute spike + the marinated season-long baseline). Observable carriage
+   * only — NEVER a number, NEVER the hidden cause (only a houseguest on a pathway to the precipitating
+   * event knows WHY). Voiced so a rattled houseguest sounds rattled. Absent before presence/soul is live.
+   */
+  mood?: string;
   /** Where they are + who is in the room with them (0049). Null when presence is unseeded. */
   whereabouts: { room: string; present: NamedRef[] } | null;
   /** What THIS houseguest legitimately knows — content only, most recent first-capped. */

@@ -17,6 +17,7 @@ import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
+import { moodWord } from "../../engine/voice";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
 import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
@@ -944,7 +945,17 @@ export class GameSessionAdapter implements GameSession {
         ...(npc.character.ethnicity !== undefined ? { ethnicity: npc.character.ethnicity } : {}),
         ...(npc.character.genderPresentation !== undefined ? { genderPresentation: npc.character.genderPresentation } : {}),
         ...(npc.character.outOrientation !== undefined ? { outOrientation: npc.character.outOrientation } : {}),
+        // 0084: voice them in their STORED voice fingerprint — how THIS houseguest talks, all season. A
+        // PUBLIC, byte-stable facet (no Vault, no number); absent only on a pre-0084 save.
+        ...(npc.character.voice !== undefined ? { voice: npc.character.voice } : {}),
       },
+      // 0084: the current MOOD as a Vault-safe affect word, derived live from the soul on two timescales
+      // (acute + marinated baseline). ACTIVE houseguests only (a juror is out of the house); observable
+      // carriage only — never a number, never the hidden cause.
+      ...(isActive ? (() => {
+        const s = this.soulObj(id);
+        return s ? { mood: moodWord(s.emotionalState, s.volatility, s.emotionalHistory) } : {};
+      })() : {}),
       whereabouts: room ? { room, present } : null,
       knows: (this.npcKnowledge?.known(id) ?? [])
         .slice(-GameSessionAdapter.VOICE_KNOWS_CAP)

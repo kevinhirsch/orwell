@@ -4,6 +4,7 @@ import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics"
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { physicalFacetToAppearance } from "./portraitPrompts";
+import { generateVoice, type VoiceProfile } from "./voice";
 import { GIVEN_NAMES } from "./data/givenNames";
 import { SURNAMES } from "./data/surnames";
 import { VOCATIONS } from "./data/vocations";
@@ -111,6 +112,17 @@ export interface Character {
    * Optional only for back-compat with pre-demeanor saves (which load without it and re-derive nothing).
    */
   demeanor?: string;
+  /**
+   * The houseguest's VOICE fingerprint (feature 0084) — HOW they talk, a richer structured sibling of
+   * `demeanor`: register / rhythm / energy / directness / humor / stress-tell + a prose signature + a
+   * light habitual lexicon. PUBLIC and Vault-free (how a person talks is observable), and BYTE-STABLE
+   * for the whole season — voice is IDENTITY and never drifts (owner ruling 2026-06-25; all the
+   * turn-to-turn dynamism lives in the soul-derived `mood`). Generated cast-wide off a names-keyed side
+   * rng (player-INDEPENDENT, no main-stream draw), so it joins the byte-stable static baseline the
+   * 0007/0031 superset check guards against regeneration/drift. Optional only for back-compat with
+   * pre-0084 saves (which load without it and re-derive nothing — the field stays as persisted).
+   */
+  voice?: VoiceProfile;
   /**
    * Deep character profile — PUBLIC facets (feature 0058). A real multi-sentence `biography` (not a
    * one-liner) and a STRUCTURED `physicalCharacteristics` facet (the single source of truth shared by
@@ -642,11 +654,16 @@ export function generateHouse(
   const demeanors = generateDemeanors(demeanorRng, npcs.length);
   const buildRng = new SeededRandom(hashSeed(`build:${npcs.map((n) => n.name).join("|")}`));
   const builds = spreadFacet(buildRng, BUILDS, npcs.length, MAX_PER_BUILD);
+  // 0084: deal each houseguest a distinct VOICE fingerprint cast-wide off a names-keyed side rng — one
+  // advancing stream, archetype-biased per NPC, so the cast sounds like sixteen people. Player-INDEPENDENT
+  // and off the main stream (no calibration impact), byte-stable for the season (voice is identity).
+  const voiceRng = new SeededRandom(hashSeed(`voice:${npcs.map((n) => n.name).join("|")}`));
   npcs.forEach((n, i) => {
     n.character.vocation = facets[i]!.vocation;
     n.character.hometown = facets[i]!.hometown;
     n.character.demeanor = demeanors[i]!;
     n.character.appearance = withBuild(n.character.appearance, builds[i]!);
+    n.character.voice = generateVoice(voiceRng, n.character.archetype);
   });
   return { npcs };
 }
