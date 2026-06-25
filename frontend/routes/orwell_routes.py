@@ -1292,7 +1292,14 @@ def setup_orwell_routes() -> APIRouter:
         who = _current_user(request) or (request.client.host if request.client else "anon")
         if not _fe_report_limiter.check(f"fe-report:{who}"):
             return Response(status_code=204)  # over the window: drop silently
-        logger.info("[fe-fail] %s: %s — %s", fields["surface"], fields["errorClass"], fields["detail"])
+        # A `startup`-tagged report is a benign boot race: a HUD poll fired before the
+        # engine connection was ready (a network "Failed to fetch" before the first
+        # confirmed engine contact, inside the boot grace window — see orwellReport.js).
+        # Downgrade those to DEBUG so they don't spam the live ring at INFO; every genuine
+        # (post-connect) failure is untagged and still logs at INFO, staying observable.
+        level = logging.DEBUG if data.get("startup") is True else logging.INFO
+        logger.log(level, "[fe-fail] %s: %s — %s",
+                   fields["surface"], fields["errorClass"], fields["detail"])
         return Response(status_code=204)
 
     return router

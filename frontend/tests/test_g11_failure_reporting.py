@@ -141,7 +141,62 @@ def test_fe_report_stores_nothing_beyond_the_ring():
     block = src.split("fe-report", 1)[1]
     for verb in ("open(", "write_text", "sqlite", "Path(", "save_", "json.dump("):
         assert verb not in block, f"fe-report must not persist ({verb})"
-    assert 'logger.info("[fe-fail] %s: %s — %s"' in src
+    # The [fe-fail] line still logs through the standard format; the level is chosen per
+    # report (INFO for genuine failures, DEBUG for a benign startup race — see below).
+    assert '"[fe-fail] %s: %s — %s"' in src
+    assert "logger.log(level" in src
+
+
+# ── startup-race suppression: a benign boot race logs at DEBUG, not INFO ────────
+
+def test_startup_tagged_report_is_downgraded_below_the_live_ring(client):
+    # A `startup`-tagged report (a network "Failed to fetch" before the first engine
+    # contact, inside the boot grace window) is a benign race — it logs at DEBUG and so
+    # does NOT land in the LIVE ring (the ring handler is INFO-level). No noise at boot.
+    cur = _cursor()
+    r = client.post("/api/orwell/fe-report", json={
+        "surface": "status-panel", "errorClass": "status-poll",
+        "detail": "TypeError: Failed to fetch", "startup": True,
+    })
+    assert r.status_code == 204
+    assert _ring_lines(cur) == [], "a startup race must not reach the INFO live ring"
+
+
+def test_untagged_failure_still_logs_at_info(client):
+    # The SAME shape WITHOUT the startup tag is a genuine (post-connect) failure — it
+    # stays at INFO and lands in the ring. Real outages are never quieted.
+    cur = _cursor()
+    r = client.post("/api/orwell/fe-report", json={
+        "surface": "status-panel", "errorClass": "status-poll",
+        "detail": "TypeError: Failed to fetch",
+    })
+    assert r.status_code == 204
+    assert any("status-panel: status-poll" in m for m in _ring_lines(cur))
+
+
+def test_startup_flag_must_be_strictly_true_to_downgrade(client):
+    # A truthy-but-not-True startup value does NOT downgrade (defensive: only the exact
+    # client contract { startup: true } quiets the line).
+    cur = _cursor()
+    r = client.post("/api/orwell/fe-report", json={
+        "surface": "g11-startupish", "errorClass": "poll", "detail": "x", "startup": "yes",
+    })
+    assert r.status_code == 204
+    assert any("g11-startupish" in m for m in _ring_lines(cur)), "only startup:true quiets the line"
+
+
+def test_reporter_tags_startup_only_for_network_errors_pre_connect():
+    # Source pins on orwellReport.js: a markConnected latch, a boot grace window, the
+    # network-error matcher, and the startup tag gated on all three.
+    js = _read("static", "js", "orwellReport.js")
+    assert "markConnected" in js
+    assert "BOOT_GRACE_MS" in js
+    assert "isNetworkFetchError" in js
+    assert "failed to fetch" in js.lower()
+    assert "startup" in js
+    # the status panel latches a confirmed contact on a successful poll
+    sp = _read("static", "js", "orwellStatusPanel.js")
+    assert "markConnected" in sp
 
 
 # ── source pins: the reporter module ───────────────────────────────────────────

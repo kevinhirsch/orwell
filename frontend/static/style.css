@@ -242,27 +242,50 @@ pre, code, .hljs {
   line-height: 1.5;
 }
 
-/* Scrollbar styling */
+/* ── Scrollbar styling — GLOBAL Apple-style baseline ──
+   Thin, translucent, NEUTRAL (colorless — the glass mandate: chrome carries no accent
+   hue), transparent track, subtle at rest + a touch more visible on hover. This is the
+   single shared baseline for EVERY scrollable surface (chat stream, sidebars, gadget
+   dock, settings/admin panels, modals, sheets, decision cards). It reuses the same
+   --ow-sb-* tokens the window-kit OVERLAY region (end of file) defines on :root, so the
+   thumb colour is one source of truth across the whole app. The .ow-window .ow-body kit
+   bodies additionally get JS-driven overlay auto-hide layered on top of this baseline;
+   this rule governs all the non-kit surfaces (and is a graceful, no-JS fallback for the
+   kit too). CSS custom-property resolution is order-independent, so referencing the
+   --ow-sb-* tokens here (declared later in the file) is fine.
+   The --ow-sb-* fallbacks below keep this rule self-sufficient even if the token block
+   were ever removed. */
 @supports selector(::-webkit-scrollbar) {
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: var(--ow-sb-size, 9px);
+    height: var(--ow-sb-size, 9px);
+    background: transparent;        /* NO solid track */
   }
-  ::-webkit-scrollbar-track {
-    background: var(--panel);
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-track-piece,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+    border: 0;
   }
   ::-webkit-scrollbar-thumb {
-    background-color: var(--red);
-    border-radius: 4px;
-    border: 2px solid var(--panel);
+    background-color: var(--ow-sb-thumb, rgba(110, 110, 110, 0.55));
+    border-radius: var(--ow-sb-radius, 4.5px);
+    /* transparent border + clip insets the pill a hair from the edge (the floating look) */
+    border: var(--ow-sb-inset, 1.5px) solid transparent;
+    background-clip: padding-box;
+    transition: background-color 200ms ease;
   }
-  ::-webkit-scrollbar-thumb:hover {
-    background-color: color-mix(in srgb, var(--red) 80%, white);
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    background-color: var(--ow-sb-thumb-hover, rgba(110, 110, 110, 0.8));
   }
 }
 
 html {
-  scrollbar-color: var(--red) var(--panel);
+  /* Firefox / engines without ::-webkit-scrollbar: thin + neutral translucent thumb on a
+     transparent track (already macOS-like; FF can't auto-hide, so it shows a permanently
+     thin neutral bar). */
+  scrollbar-color: var(--ow-sb-thumb, rgba(110, 110, 110, 0.55)) transparent;
   scrollbar-width: thin;
 }
 
