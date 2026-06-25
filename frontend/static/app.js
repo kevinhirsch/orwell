@@ -825,6 +825,8 @@ function initializeEventListeners() {
       if (welcomeName && welcomeName.dataset.researchOrigHtml) {
         welcomeName.innerHTML = welcomeName.dataset.researchOrigHtml;
         delete welcomeName.dataset.researchOrigHtml;
+        // #801: the restored wordmark carries the eye lid again — rebind the blink.
+        window.dispatchEvent(new CustomEvent('orwell:welcome-rerendered'));
       }
       if (welcomeSub && welcomeSub.dataset.researchOrigText) {
         welcomeSub.textContent = welcomeSub.dataset.researchOrigText;
@@ -2469,6 +2471,8 @@ function initializeEventListeners() {
           welcomeName.style.animation = 'none';
           welcomeName.offsetHeight;
           welcomeName.style.animation = '';
+          // #801: the restored wordmark carries the eye lid again — rebind the blink.
+          window.dispatchEvent(new CustomEvent('orwell:welcome-rerendered'));
         }
         if (ws) { ws.style.animation = 'none'; ws.offsetHeight; ws.style.animation = 'welcome-enter 0.3s ease-out both'; }
         const welcomeSub2 = el('welcome-sub');

@@ -49,6 +49,7 @@
 // secret. Until it resolves, the module paints the gradient default, so the glass
 // panel never sits over a blank void.
 </script>
+<link rel="stylesheet" href="/static/css/eyeBlink.css">  <!-- #801: the shared hero-eye blink (same mechanism as the in-app hero) -->
 <style>
   /* Mirror the main app's :root defaults (static/style.css ~line 18) so an
      uncustomized theme — or a fresh browser with no `orwell-theme` in
@@ -338,33 +339,20 @@
      sitting above the wordmark as the threshold mark. */
   .logo-eye { width: 2.4rem; height: 2.4rem; color: var(--ink); opacity: 0.92;
     filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35)); }
-  /* The eye BLINKS — a quick double-blink (blink-blink) once every ~10s, fitting
-     the surveillance / "it's watching you" theme. The eyelid is an eye-shaped
-     overlay (.logo-eye-lid) sweeping shut: it scales from 0 height to full twice
-     in the first ~0.9s, then stays open for the rest of the 10s cycle. The eye
-     itself stays still. */
-  .logo-eye-wrap { position: relative; width: 2.4rem; height: 2.4rem; line-height: 0; }
+  /* The eye BLINKS on a randomized ~7-10s cadence (occasional double-blink),
+     fitting the surveillance / "it's watching you" theme. The eyelid is an
+     eye-shaped overlay (.logo-eye-lid, marked [data-eye-lid]) that sweeps shut;
+     the eye itself stays still. The blink LOOK + reduced-motion freeze live in
+     the shared /static/css/eyeBlink.css, and the RHYTHM in eyeBlink.js — one
+     mechanism shared with the in-app welcome hero (#801). Here we only own the
+     wrap sizing + the lid's cosmetic color (so a closed lid reads as a filled
+     almond in the eye color). */
+  .logo-eye-wrap { width: 2.4rem; height: 2.4rem; }
   .logo-eye-wrap .logo-eye { position: absolute; inset: 0; }
   .logo-eye-lid {
-    position: absolute; inset: 0;
-    transform-origin: center;
-    transform: scaleY(0);
     /* The lid mirrors the eye color so a closed lid reads as a filled almond. */
     color: var(--ink); opacity: 0.92;
     filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
-    animation: logo-eye-blink 10s ease-in-out infinite;
-  }
-  @keyframes logo-eye-blink {
-    /* two quick blinks up front, then held open (scaleY 0) for the rest. */
-    0%   { transform: scaleY(0); }
-    2%   { transform: scaleY(1); }
-    4%   { transform: scaleY(0); }
-    6%   { transform: scaleY(1); }
-    8%   { transform: scaleY(0); }
-    100% { transform: scaleY(0); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .logo-eye-lid { animation: none; transform: scaleY(0); }
   }
   .version-label {
     position: fixed; bottom: 12px; right: 16px;
@@ -394,9 +382,9 @@
 <body>
 <main class="card">
   <h1 class="logo">
-    <span class="logo-eye-wrap" aria-hidden="true">
+    <span class="logo-eye-wrap eye-blink-wrap" aria-hidden="true">
       <svg class="logo-eye" viewBox="0 0 32 32" focusable="false"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><circle cx="16" cy="16" r="4.5" fill="currentColor"/></svg>
-      <svg class="logo-eye-lid" viewBox="0 0 32 32" focusable="false"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
+      <svg class="logo-eye-lid" data-eye-lid viewBox="0 0 32 32" focusable="false"><path d="M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
     </span>
     <span>Orwell</span>
     <span class="greeting" id="greeting">Welcome back</span>
@@ -715,5 +703,6 @@ if (window.visualViewport) {
 }
 </script>
 <script type="module" nonce="{{CSP_NONCE}}" src="/static/js/login_bg.js"></script>
+<script type="module" nonce="{{CSP_NONCE}}" src="/static/js/eyeBlink.js"></script>  <!-- #801: randomized ~7-10s hero-eye blink (shared w/ in-app hero) -->
 </body>
 </html>

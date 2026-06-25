@@ -2230,6 +2230,25 @@ body.bg-pattern-perlin-flow {
       vertical-align: -0.15em;
       color: var(--brand-color, var(--red));
     }
+    /* The eye blinks (#801): a lid SVG overlays the still eye and sweeps shut on
+       a randomized ~7-10s cadence (shared mechanism — eyeBlink.css/.js). The
+       wrap pins the lid exactly over the eye; the lid carries no right margin so
+       it lines up with the eye glyph (the wrap owns the gap to the wordmark). */
+    .welcome-eye-wrap {
+      position: relative;
+      display: inline-flex;
+      vertical-align: -0.15em;
+      margin-right: 0.4rem;
+      line-height: 0;
+    }
+    .welcome-eye-wrap .welcome-eye {
+      margin-right: 0;
+      vertical-align: 0;
+    }
+    .welcome-eye-wrap .welcome-eye-lid {
+      position: absolute;
+      inset: 0;
+    }
     #welcome-screen .welcome-sub {
       font-size:0.85rem;
       color:color-mix(in srgb, var(--fg) 60%, transparent);
@@ -2293,11 +2312,34 @@ body.bg-pattern-perlin-flow {
       transition: margin 0.3s ease, max-width 0.3s ease;
     }
     .chat-container.welcome-active .chat-input-bar {
-      margin-bottom:30vh;
+      /* #802: ALWAYS keep comfortable breathing room between the hero and the
+         composer. The hero floats centered (#welcome-screen, top:40%); this
+         margin pushes the composer up toward it. A flat 30vh crowds the hero on
+         short laptop screens, so make it FLUID — it shrinks on short viewports
+         (dropping the composer toward the bottom to free space for the hero) and
+         is capped so the gap stays comfy. Paired with the short-height overrides
+         below + the welcome-active min gap on #welcome-screen. */
+      margin-bottom: clamp(48px, 30vh, 30vh);
       margin-left:auto;
       margin-right:auto;
       max-width: 800px;
       width: 100%;
+    }
+    /* #802: guarantee a comfortable gap below the hero so the composer can never
+       crowd or touch it, at any viewport height. The hero is absolutely centered
+       and the composer is pushed up by the margin above; on short screens we
+       shrink that push AND reserve a fluid min gap under the hero block. */
+    .chat-container.welcome-active #welcome-screen {
+      padding-bottom: clamp(16px, 4vh, 40px);
+    }
+    @media (max-height: 760px) {
+      .chat-container.welcome-active .chat-input-bar { margin-bottom: clamp(36px, 22vh, 22vh); }
+    }
+    @media (max-height: 650px) {
+      .chat-container.welcome-active .chat-input-bar { margin-bottom: clamp(24px, 14vh, 14vh); }
+    }
+    @media (max-height: 500px) {
+      .chat-container.welcome-active .chat-input-bar { margin-bottom: clamp(8px, 6vh, 6vh); }
     }
     @media (max-width:768px) {
       #welcome-screen .welcome-name { font-size:1.8rem; }

@@ -1,0 +1,69 @@
+/* eyeBlink.css — the ONE shared eyelid-blink mechanism for the Orwell hero eye.
+ *
+ * Used by BOTH heroes that show the watching eye (issue #801):
+ *   - the in-app welcome / threshold hero  (#welcome-screen .welcome-eye)
+ *   - the login page threshold hero        (.logo-eye-lid)
+ *
+ * The eye itself stays perfectly still (the unblinking surveillance stare); a
+ * lid overlay — an eye-shaped, FILLED almond sitting exactly over the eye —
+ * sweeps shut and snaps open. The CADENCE (randomized ~7-10s, occasional
+ * double-blink) is owned by the shared JS module (eyeBlink.js): it adds the
+ * one-shot animation class, the keyframe runs once, JS removes it. The CSS here
+ * only owns the LOOK of a single blink — never the rhythm.
+ *
+ * prefers-reduced-motion: the JS never schedules a blink, AND this stylesheet
+ * hard-freezes the lid open as a belt-and-suspenders guard (no seizure risk).
+ */
+
+/* The wrap pins the lid exactly over the eye. The eye SVG and the lid SVG share
+ * the same box. Authors give the eye glyph the wrap, the still eye, and the lid
+ * (carrying [data-eye-lid] so the JS can find it). */
+.eye-blink-wrap {
+  position: relative;
+  display: inline-flex;
+  line-height: 0;
+}
+.eye-blink-wrap > [data-eye-lid] {
+  position: absolute;
+  inset: 0;
+  transform-origin: center;
+  transform: scaleY(0);            /* default: lid retracted, eye fully open */
+  pointer-events: none;
+}
+
+/* A single quick, natural blink: fast close, brief hold shut, fast open. ~180ms.
+ * The eased close/open reads as an eyelid, not a wipe. */
+@keyframes eye-blink-single {
+  0%   { transform: scaleY(0); }
+  35%  { transform: scaleY(1); }
+  55%  { transform: scaleY(1); }
+  100% { transform: scaleY(0); }
+}
+
+/* A double-blink (blink-blink) — two quick closes in succession, for realism /
+ * extra creep. ~360ms. */
+@keyframes eye-blink-double {
+  0%   { transform: scaleY(0); }
+  14%  { transform: scaleY(1); }
+  24%  { transform: scaleY(0); }
+  40%  { transform: scaleY(1); }
+  52%  { transform: scaleY(0); }
+  100% { transform: scaleY(0); }
+}
+
+[data-eye-lid].eye-blinking {
+  animation: eye-blink-single 0.18s ease-in-out 1;
+}
+[data-eye-lid].eye-blinking-double {
+  animation: eye-blink-double 0.36s ease-in-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No blink at all — the eye holds its steady stare. */
+  [data-eye-lid],
+  [data-eye-lid].eye-blinking,
+  [data-eye-lid].eye-blinking-double {
+    animation: none !important;
+    transform: scaleY(0) !important;
+  }
+}

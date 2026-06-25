@@ -74,11 +74,19 @@ def test_login_cta_composes_the_element_kit_button():
 
 
 def test_login_eye_blink_is_reduced_motion_safe():
+    # #801: the login hero now uses the ONE shared blink mechanism (eyeBlink.js +
+    # eyeBlink.css) — a randomized ~7-10s cadence shared with the in-app hero —
+    # instead of its old fixed 10s pure-CSS loop. Reduced-motion safety now lives
+    # in the shared stylesheet/module.
     html = _read("static/login.html")
-    assert "logo-eye-blink" in html, "the hero eye must have a blink animation"
     assert "logo-eye-lid" in html, "blink is driven by an eyelid overlay"
-    # Under reduced-motion the eye must NOT blink (stays open/static).
-    assert ".logo-eye-lid { animation: none" in html
+    assert "data-eye-lid" in html, "the lid carries the shared [data-eye-lid] marker"
+    assert "/static/css/eyeBlink.css" in html
+    assert "/static/js/eyeBlink.js" in html
+    # The shared CSS hard-freezes the lid open under reduced motion.
+    css = _read("static/css/eyeBlink.css")
+    assert "prefers-reduced-motion: reduce" in css
+    assert "animation: none !important" in css
 
 
 def test_login_has_five_gradient_presets():
