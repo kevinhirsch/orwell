@@ -8,6 +8,7 @@ import type {
   PreSeedCastReq, PreSeedCastView,
   PreSeedNextSeasonReq, PreSeedNextSeasonView,
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
+  RecordCastIdentityReq, RecordCastIdentityResult, ProposedCastIdentityFacets,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView,
   StateDeltaView, DeltaEventView,
@@ -144,8 +145,9 @@ import {
 import type { SeededRelationships } from "../../engine/seededRelationships";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
 import {
-  generateDiversityLayer, privateOrientationToVaultContent, showmancePlausible,
+  generateDiversityLayer, repairDiversityLayer, privateOrientationToVaultContent, showmancePlausible,
 } from "../../engine/diversity";
+import type { ProposedIdentityFacets } from "../../engine/diversity";
 import type { Orientation, GenderPresentation } from "../../engine/diversityConstants";
 import { ALL_ETHNICITIES } from "../../engine/diversityConstants";
 import { foldHiddenImpact } from "../../engine/consequence";
@@ -1258,6 +1260,122 @@ export class GameSessionAdapter implements GameSession {
     if (ctx.prewarm) this.persist();
 
     return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
+  }
+
+  /**
+   * The AI-driven cast-identity write-back (issue #544 — the deferred AI half of the 0063 diversity floor).
+   * The FE producer-LLM PROPOSES the whole cast's DESCRIPTIVE identity facets (heritage / gender
+   * presentation / orientation / disclosure / age) targeting U.S.-population rates; this RUNS them through
+   * the engine's `repairDiversityLayer` (the SAME floors/caps/weighted-expectation as the seeded floor), so
+   * even a lazy/biased/monochrome proposal is REPAIRED to a realistic cast before anything folds. The PUBLIC
+   * facets fold onto the byte-stable Characters; `skinTone` is RE-GROUNDED from the FINAL heritage (the PR
+   * #527 hinge, so text + portrait agree); each PRIVATE orientation is rebuilt + re-sealed into the Vault.
+   *
+   * Lands on the PRE-WARMED cast pre-game (the common case — replaces the seeded identity floor BEFORE deep
+   * authoring shoots portraits) or the live house once a season runs (same fold either way). Idempotent. The
+   * HARD BOUNDARY: only descriptive identity facets are touched — NEVER a hidden game weight (the seeded
+   * Day-1 read / competition leans stay engine-owned; anti-sycophancy #3 + the juryReach calibration depend
+   * on the net-zero-balanced seed). Calibration-neutral: the layer rides the SAME isolated descriptive
+   * sub-streams as the floor, never a competition/vote input (the #338 golden test stays the proof). With NO
+   * proposal the engine never receives this call and the deterministic floor stands.
+   */
+  recordCastIdentity(req: RecordCastIdentityReq): RecordCastIdentityResult {
+    // Resolve the target cast + its seed: the live house (a season is running) or the pre-warmed holding
+    // store (the common pre-game case). Same fold logic either way; only the npcs/seed/maps differ. (Mirrors
+    // the recordCastProfile ctx split.)
+    const ctx = this.house && this.gameSeed !== null
+      ? {
+        npcs: this.house.npcs, seed: this.gameSeed, prewarm: false,
+        setPrivate: (m: Record<EntityId, Orientation>): void => { this.privateOrientations = m; },
+        setGrounded: (id: EntityId, tone: string): void => { this.groundedSkinTones[id] = tone; },
+      }
+      : this.prewarm
+      ? {
+        npcs: this.prewarm.npcs, seed: this.prewarm.seed, prewarm: true,
+        setPrivate: (m: Record<EntityId, Orientation>): void => { this.prewarm!.privateOrientations = m; },
+        setGrounded: (id: EntityId, tone: string): void => { this.prewarm!.groundedSkinTones[id] = tone; },
+      }
+      : null;
+    if (!ctx) return { accepted: false, applied: 0, reason: "no cast to fold identity onto" };
+
+    // Map the LOOSE port facets → the engine's STRICT proposal shape. Unrecognized values are dropped HERE
+    // (and again, defensively, inside repairDiversityLayer) so the engine never trusts a bad value — the
+    // floors/caps then guarantee realism regardless. The proposal is DESCRIPTIVE-ONLY by type: there is no
+    // field on it for a hidden weight, so a model can never author the Day-1 read / competition leans.
+    const known = new Set(ctx.npcs.map((n) => n.id));
+    const proposed: Record<EntityId, ProposedIdentityFacets> = {};
+    for (const [rawId, raw] of Object.entries(req.facets ?? {})) {
+      const id = rawId as EntityId;
+      if (!known.has(id) || typeof raw !== "object" || raw === null) continue;
+      const f = raw as ProposedCastIdentityFacets;
+      const one: ProposedIdentityFacets = {};
+      if (typeof f.ethnicity === "string" && f.ethnicity.trim()) one.ethnicity = f.ethnicity.trim();
+      if (f.genderPresentation === "man" || f.genderPresentation === "woman" || f.genderPresentation === "nonbinary") {
+        one.genderPresentation = f.genderPresentation;
+      }
+      if (typeof f.orientation === "string" && f.orientation.trim()) one.orientation = f.orientation.trim() as Orientation;
+      if (typeof f.out === "boolean") one.out = f.out;
+      if (typeof f.age === "number" && Number.isFinite(f.age)) one.age = f.age;
+      if (Object.keys(one).length > 0) proposed[id] = one;
+    }
+
+    // Validate + REPAIR the whole-cast proposal against the proportional targets (diversityConstants.ts).
+    // Off the SAME dedicated, isolated sub-stream the floor uses (forked off the cast seed via hashSeed
+    // inside repairDiversityLayer) — never the shared house/competition/vote stream. An EMPTY proposal makes
+    // this byte-identical to the seeded floor (the deterministic no-model path).
+    const layer = repairDiversityLayer(ctx.seed, ctx.npcs, proposed);
+
+    // PUBLIC fold — onto the byte-stable Character (mirrors seedDiversity's fold). `skinTone` comes from the
+    // FINAL (possibly repaired) heritage, so text + portrait agree (the PR #527 / 0063 §3.2 hinge). The
+    // engine — not the model — owns skinTone here too.
+    let applied = 0;
+    for (const n of ctx.npcs) {
+      const pub = layer.public[n.id];
+      if (!pub) continue;
+      n.character.ethnicity = pub.ethnicity;
+      n.character.genderPresentation = pub.genderPresentation;
+      // A houseguest may have FLIPPED out↔private on a re-fold: set the public out facet when present, and
+      // CLEAR it otherwise (a now-private orientation must never linger on the public Character).
+      if (pub.outOrientation !== undefined) n.character.outOrientation = pub.outOrientation;
+      else delete n.character.outOrientation;
+      n.character.age = pub.age;
+      ctx.setGrounded(n.id, pub.skinTone);
+      if (n.character.physicalCharacteristics) n.character.physicalCharacteristics.skinTone = pub.skinTone;
+      if (proposed[n.id]) applied++;
+    }
+
+    // HIDDEN — rebuild the AUTHORITATIVE private-orientation map (engine-only; the in-memory map drives
+    // 0059 showmance eligibility + persists in the snapshot, never the Vault audit copy). The private-
+    // orientation soul note is PER-HOUSEGUEST idempotent: for every NPC, drop any STALE prior note (a re-fold
+    // may CHANGE the orientation, or flip private→public), then add the current note iff the NPC is now
+    // private. This keeps recall lossless without piling up duplicate/stale notes (non-degradation: the note
+    // is replaced in spirit, never silently dropped — the current truth is always present).
+    const nextPrivate: Record<EntityId, Orientation> = { ...layer.privateOrientations };
+    ctx.setPrivate(nextPrivate);
+    const PRIVATE_NOTE_PREFIX = "private-orientation ";
+    for (const n of ctx.npcs) {
+      const orientation = nextPrivate[n.id];
+      const note = orientation ? privateOrientationToVaultContent(n.id, orientation) : null;
+      const stale = n.soul.memory.some((m) => m.startsWith(`${PRIVATE_NOTE_PREFIX}${n.id}:`) && m !== note);
+      if (!stale && (note === null || n.soul.memory.includes(note))) continue; // already correct — no change
+      // Swap the array REFERENCE (R3 clone-cache invalidation) and rewrite this NPC's private-orientation
+      // note: keep all OTHER memory, drop this NPC's stale private note, append the current one (if private).
+      n.soul.memory = n.soul.memory.filter((m) => !m.startsWith(`${PRIVATE_NOTE_PREFIX}${n.id}:`));
+      if (note) {
+        n.soul.memory.push(note);
+        this.soul?.recordToSoul(n.id, note);
+      }
+    }
+    // Re-seal the current private orientations into the Vault (engine-only audit copy; idempotent replace by
+    // the private-orientation Vault id, so a re-fold overwrites rather than duplicates).
+    const entries = Object.entries(nextPrivate).map(([id, orientation]) => ({ id: id as EntityId, orientation }));
+    if (entries.length) this.onSealPrivateOrientations?.(entries);
+
+    // A pre-game fold lands on `prewarm`, which is durable state — persist it. The live path commits through
+    // the orchestrator hook around the tool call. `persist()` is re-entrancy-guarded.
+    if (ctx.prewarm) this.persist();
+
+    return { accepted: true, applied };
   }
 
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */

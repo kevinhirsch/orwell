@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, RecordOffscreenSceneTextureReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, RecordOffscreenSceneTextureReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -144,6 +144,18 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       // name if it doesn't pass, so a malformed name never fails the whole call.
       if (args["name"] !== undefined && typeof args["name"] !== "string") refuse("name", "a string when present");
       return;
+    case "recordCastIdentity":
+      // #544: the FE cast-identity write-back. `facets` is the per-houseguest map of PROPOSED descriptive
+      // facets — OPTIONAL (like recordWorldSnapshot's `slices`): refuse ONLY if present and not an object
+      // (a string/array where an object is expected is the R6 class that dies deep in the fold). An absent
+      // `facets` is a clean no-op (the deterministic floor stands), so a leak/sentinel sweep that calls the
+      // tool with `{}` never 400s. Each houseguest's own facet shape (which values are recognized) is
+      // validated + REPAIRED inside the adapter against the diversity targets, not here.
+      if (args["facets"] !== undefined
+        && (typeof args["facets"] !== "object" || args["facets"] === null || Array.isArray(args["facets"]))) {
+        refuse("facets", "an object mapping houseguest id → proposed facets when present");
+      }
+      return;
     case "preSeedCast":
       // 0065: optional explicit seed (tests/replays); default is real entropy minted in the adapter.
       if (args["seed"] !== undefined && typeof args["seed"] !== "number") refuse("seed", "a number when present");
@@ -224,6 +236,10 @@ export class McpServer {
       case "recordCastProfile":
         // 0058/0065: seal one houseguest's authored §3 profile (PUBLIC/HIDDEN split; never echoes a hidden value).
         return this.deps.session.recordCastProfile(args as unknown as RecordCastProfileReq);
+      case "recordCastIdentity":
+        // #544: validate + REPAIR the FE-proposed cast identity facets against the diversity targets, fold the
+        // PUBLIC facets onto the byte-stable cast, re-ground skin tone, re-seal each private orientation. Vault-free out.
+        return this.deps.session.recordCastIdentity(args as unknown as RecordCastIdentityReq);
       case "recordWorldSnapshot":
         // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
         return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);

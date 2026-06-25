@@ -58,6 +58,32 @@ export interface PublicDiversityFacets {
   outOrientation?: Orientation;
 }
 
+/**
+ * The AI-driven half of the 0063 diversity floor (the 2026-06-23 ruling, issue #544) — the LLM-PROPOSED
+ * descriptive identity facets for ONE houseguest, written BACK to the engine via `recordCastIdentity`.
+ * Every field is OPTIONAL and DESCRIPTIVE-ONLY (heritage / gender presentation / orientation / disclosure /
+ * age) — NEVER a hidden game weight (those stay engine-seeded; anti-sycophancy + the juryReach calibration
+ * depend on the seeded, net-zero-balanced Day-1 read).
+ *
+ * The engine does NOT trust this blindly: each proposed value is matched against the known pools and folded
+ * in as the INITIAL deal (replacing the seeded random pick), then the SAME validate/repair pipeline runs to
+ * GUARANTEE the four floors hold regardless of what the model returns (a lazy/biased model can never skew
+ * the cast). An unrecognized/absent field falls back to the engine's seeded deal for that houseguest — so
+ * with NO proposal the layer is byte-identical to `generateDiversityLayer` (graceful degradation).
+ */
+export interface ProposedIdentityFacets {
+  /** The proposed heritage label — matched (case-insensitively) against `ALL_ETHNICITIES`; unknown ⇒ seeded deal. */
+  ethnicity?: string;
+  /** The proposed gender presentation — accepted only if it is one of the known presentations. */
+  genderPresentation?: GenderPresentation;
+  /** The proposed orientation — accepted only if it is one of the known orientations. */
+  orientation?: Orientation;
+  /** Whether the (queer) orientation is publicly out; absent ⇒ the engine's seeded disclosure roll decides. */
+  out?: boolean;
+  /** The proposed age — accepted only at/above the eligibility floor (descriptive; never a game input). */
+  age?: number;
+}
+
 /** The per-houseguest layer: public facets + (when private) the Vault-sealed orientation. */
 export interface DiversityLayer {
   /** Public facets per NPC id — fold onto the byte-stable Character. */
@@ -121,13 +147,32 @@ function pickWeightedCapped<T>(
   return pick;
 }
 
+/** Case-insensitive lookup of a proposed heritage label against the known pool (unknown ⇒ undefined). */
+function ethnicityByHeritage(label: string | undefined): EthnicityIdentity | undefined {
+  if (!label) return undefined;
+  const want = label.trim().toLowerCase();
+  return want ? ALL_ETHNICITIES.find((e) => e.heritage.toLowerCase() === want) : undefined;
+}
+
+const isKnownGenderPresentation = (v: unknown): v is GenderPresentation =>
+  v === "man" || v === "woman" || v === "nonbinary";
+const isKnownOrientation = (v: unknown): v is Orientation =>
+  typeof v === "string" && ORIENTATIONS.some((o) => o.orientation === v);
+
 /**
  * Generate + validate/repair the diversity layer for the whole cast off a DEDICATED isolated sub-stream.
  * `seed` is the cast seed; the sub-streams fork off it via `hashSeed` (never the shared house stream).
  * The houseguests supply their seed-stable NAME (for gender coherence) and AGE (for the age-band floor);
  * NO competition-relevant draw happens here, so the season's outcome sequence is unchanged.
+ *
+ * `proposed` (issue #544 — the AI-driven half) optionally supplies the LLM's PROPOSED descriptive facets
+ * per NPC id; each recognized field SEEDS the initial deal in place of the seeded random pick (an
+ * unrecognized/absent field falls back to the seeded pick), then the SAME repair pipeline below runs.
+ * Absent `proposed` (the live-game path / no model) is byte-identical to the pre-#544 deal.
  */
-export function generateDiversityLayer(seed: number, npcs: readonly Houseguest[]): DiversityLayer {
+export function generateDiversityLayer(
+  seed: number, npcs: readonly Houseguest[], proposed?: Record<EntityId, ProposedIdentityFacets>,
+): DiversityLayer {
   // Dedicated, isolated sub-streams — each forked off the cast seed, NEVER the shared house stream.
   const ethRng = new SeededRandom(hashSeed(`${seed}:diversity:ethnicity`));
   const genRng = new SeededRandom(hashSeed(`${seed}:diversity:gender`));
@@ -135,22 +180,54 @@ export function generateDiversityLayer(seed: number, npcs: readonly Houseguest[]
   const discRng = new SeededRandom(hashSeed(`${seed}:diversity:disclosure`));
 
   // ── 1. Initial deal (capped spreads, off the sub-streams) ────────────────────────────────────────
+  // The seeded RANDOM picks are ALWAYS DRAWN (every NPC consumes one ethnicity + one gender pick off the
+  // sub-streams), so the sub-stream consumption — and therefore the layer when no proposal is present —
+  // is byte-identical to the pre-#544 deal. An accepted PROPOSED facet then OVERRIDES the drawn value for
+  // that NPC. Drawing-then-overriding (never skipping the draw) keeps the deal player-/proposal-position-
+  // independent and preserves the #338 RNG isolation: these are descriptive sub-streams, never the outcome
+  // stream, so the public competition/vote sequence is unchanged regardless of any proposal.
   const ethUses = new Map<string, number>();
   const drafts: Draft[] = npcs.map((n) => {
+    const want = proposed?.[n.id];
     const nameGender = nameGenderOf(n.name);
     // Gender presentation defaults to the name's typical gender; unisex names get a seeded pick (man/
     // woman here — nonbinary is assigned later, only among unisex names, capped). Keeps name+presentation
-    // coherent: a clearly-gendered name always presents that way at the deal.
-    const genderPresentation: GenderPresentation =
+    // coherent: a clearly-gendered name always presents that way at the deal. A PROPOSED presentation (when
+    // recognized) overrides the deal; the seeded pick is still consumed off the sub-stream above it.
+    const dealtGender: GenderPresentation =
       nameGender === "man" ? "man"
       : nameGender === "woman" ? "woman"
       : genRng.next() < 0.5 ? "man" : "woman";
+    const genderPresentation: GenderPresentation =
+      want && isKnownGenderPresentation(want.genderPresentation) ? want.genderPresentation : dealtGender;
     // Ethnicity dealt off the whole pool, U.S.-population-WEIGHTED + capped (owner 2026-06-23) — so the
     // cast centers near the real ~40% BIPOC mix rather than the old uniform ~70% skew. BIPOC is still
-    // repaired UP below in the rare tail where a weighted deal falls under the small-cast floor.
-    const ethnicity = pickWeightedCapped(ethRng, ALL_ETHNICITIES, (e) => e.heritage, ethUses, MAX_PER_ETHNICITY, (e) => e.weight);
-    const orientation = ORIENTATIONS[orRng.int(ORIENTATIONS.length)]!.orientation;
-    return { id: n.id, name: n.name, nameGender, age: n.character.age, ethnicity, genderPresentation, orientation, out: true };
+    // repaired UP below in the rare tail where a weighted deal falls under the small-cast floor. A PROPOSED
+    // heritage (when it matches a known pool entry AND is still UNDER the per-heritage cap) overrides the
+    // dealt one; the dealt pick is still drawn (sub-stream isolation). A proposal that piles ALL 15 onto one
+    // heritage is REPAIRED at the source: the first MAX_PER_ETHNICITY proposers get it, the OVERFLOW falls
+    // back to the seeded capped deal — so even a monochrome proposal can never violate the spread cap.
+    const dealtEthnicity = pickWeightedCapped(ethRng, ALL_ETHNICITIES, (e) => e.heritage, ethUses, MAX_PER_ETHNICITY, (e) => e.weight);
+    const proposedEthnicity = ethnicityByHeritage(want?.ethnicity);
+    const proposedUnderCap = proposedEthnicity !== undefined
+      && (ethUses.get(proposedEthnicity.heritage) ?? 0) < MAX_PER_ETHNICITY;
+    const ethnicity = proposedUnderCap ? proposedEthnicity! : dealtEthnicity;
+    if (proposedUnderCap && proposedEthnicity!.heritage !== dealtEthnicity.heritage) {
+      // Keep `ethUses` counting the FINAL heritages so the per-heritage cap stays honest for later NPCs:
+      // un-count the dealt pick that was overridden, count the proposed one instead. (No-op when no
+      // proposal — that branch never runs, so the pre-#544 deal is byte-identical.)
+      ethUses.set(dealtEthnicity.heritage, Math.max(0, (ethUses.get(dealtEthnicity.heritage) ?? 1) - 1));
+      ethUses.set(ethnicity.heritage, (ethUses.get(ethnicity.heritage) ?? 0) + 1);
+    }
+    // Orientation: a recognized proposed orientation overrides the seeded pick (still drawn for isolation).
+    const dealtOrientation = ORIENTATIONS[orRng.int(ORIENTATIONS.length)]!.orientation;
+    const orientation = want && isKnownOrientation(want.orientation) ? want.orientation : dealtOrientation;
+    // Age: a proposed age at/above the eligibility floor overrides the seeded age (descriptive only — age
+    // is NOT a competition/vote input, so this never perturbs the outcome stream; the age-band repair below
+    // still guarantees the spread). Below the floor / absent ⇒ the seed-stable Character age stands.
+    const age = want && typeof want.age === "number" && want.age >= AGE_ELIGIBILITY_FLOOR
+      ? Math.floor(want.age) : n.character.age;
+    return { id: n.id, name: n.name, nameGender, age, ethnicity, genderPresentation, orientation, out: true };
   });
 
   // ── 2. Repair — BIPOC floor (swap non-BIPOC drafts up to BIPOC heritages, respecting the cap) ────
@@ -162,6 +239,24 @@ export function generateDiversityLayer(seed: number, npcs: readonly Houseguest[]
       if (bipocCount() >= MIN_BIPOC) break;
       if (d.ethnicity.bipoc) continue;
       d.ethnicity = pickWeightedCapped(ethRng, BIPOC_ETHNICITIES, (e) => e.heritage, bipocUses, MAX_PER_ETHNICITY, (e) => e.weight);
+    }
+  }
+
+  // ── 2.5. Repair — nonbinary CAP DOWN (issue #544): a proposal can over-supply nonbinary, which the deal
+  //     never does on its own (nonbinary is assigned ONLY by step 4 below, capped). Convert the surplus
+  //     beyond MAX_NONBINARY back to a coherent binary BEFORE the gender-balance repair, so the cap holds
+  //     and the converted drafts can satisfy the binary floors. Deterministic + RNG-free (resolve to the
+  //     name-gender when clear, else to the currently under-represented binary) — so the no-proposal path,
+  //     where no draft is nonbinary yet, runs this as a pure no-op and stays byte-identical.
+  const nbCountNow = (): number => drafts.filter((d) => d.genderPresentation === "nonbinary").length;
+  if (nbCountNow() > MAX_NONBINARY) {
+    const countBinary = (g: GenderPresentation): number => drafts.filter((d) => d.genderPresentation === g).length;
+    for (const d of drafts) {
+      if (nbCountNow() <= MAX_NONBINARY) break;
+      if (d.genderPresentation !== "nonbinary") continue;
+      d.genderPresentation = d.nameGender === "man" ? "man"
+        : d.nameGender === "woman" ? "woman"
+        : countBinary("man") <= countBinary("woman") ? "man" : "woman";
     }
   }
 
@@ -239,10 +334,14 @@ export function generateDiversityLayer(seed: number, npcs: readonly Houseguest[]
   // ── 7. Disclosure — character-driven: some queer houseguests are OUT (public), some PRIVATE ───────
   // A seeded per-houseguest roll (NOT a uniform rule). Only NON-straight orientations can be "private";
   // a straight orientation is simply public/unremarkable. A nonbinary-but-straight houseguest's gender
-  // is public (presentation is observable) but carries no private-orientation secret.
+  // is public (presentation is observable) but carries no private-orientation secret. The seeded roll is
+  // ALWAYS consumed (sub-stream isolation), and a PROPOSED `out` (issue #544, when present) then overrides
+  // it for a queer houseguest — the model may author whether this person is out or holds it privately.
   for (const d of drafts) {
     if (!isQueer(d.orientation)) { d.out = true; continue; }
-    d.out = discRng.next() < PUBLICLY_OUT_PROB;
+    const rolledOut = discRng.next() < PUBLICLY_OUT_PROB;
+    const want = proposed?.[d.id];
+    d.out = want && typeof want.out === "boolean" ? want.out : rolledOut;
   }
   // §4/§5 guarantee: a season should reliably carry BOTH an out queer houseguest AND a private one when
   // it has ≥2 queer houseguests — so the scenarios always have a subject. If the roll made them ALL out
@@ -278,6 +377,22 @@ export function generateDiversityLayer(seed: number, npcs: readonly Houseguest[]
     if (isQueer(d.orientation) && !d.out) privateOrientations[d.id] = d.orientation;
   }
   return { public: pub, privateOrientations };
+}
+
+/**
+ * The AI-driven repair entry (issue #544): take the LLM's PROPOSED descriptive identity facets per NPC id
+ * and produce the engine-GUARANTEED diversity layer. Recognized proposed facets seed the initial deal; the
+ * SAME validate/repair pipeline then enforces the four floors (BIPOC / gender balance / age spread / LGBTQ+)
+ * and the per-heritage cap — so a lazy/biased/monochrome proposal can NEVER skew the cast, and `skinTone`
+ * is always re-grounded from the FINAL (possibly repaired) heritage. Deterministic per seed + proposal, and
+ * still player-INDEPENDENT (the sub-streams key off the seeded NAMES, never the player). Calibration-neutral:
+ * these are descriptive facets on isolated sub-streams, never a competition/vote input. An EMPTY proposal is
+ * byte-identical to `generateDiversityLayer` (the deterministic floor — what stands when no model is wired).
+ */
+export function repairDiversityLayer(
+  seed: number, npcs: readonly Houseguest[], proposed: Record<EntityId, ProposedIdentityFacets>,
+): DiversityLayer {
+  return generateDiversityLayer(seed, npcs, proposed);
 }
 
 // ── Vault sealing helper for a private orientation (engine-only — never projected) ──────────────────

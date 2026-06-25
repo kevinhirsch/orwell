@@ -4730,6 +4730,7 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                     orwell_portraits.kickoff_generation(prompts, owner)
                 if cast:
                     from src import orwell_cast_authoring
+                    from src import orwell_cast_identity
                     from src import orwell_portraits
 
                     def _refresh_authored_portraits():
@@ -4748,8 +4749,16 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                         except Exception:
                             pass
 
-                    orwell_cast_authoring.kickoff_authoring(
-                        cast, owner, then=_refresh_authored_portraits)
+                    def _author_then_refresh():
+                        # Deep authoring runs AFTER the AI identity seed has folded (so the authored look +
+                        # secrets read the engine-validated heritage), then tops up any missing portrait.
+                        orwell_cast_authoring.kickoff_authoring(
+                            cast, owner, then=_refresh_authored_portraits)
+
+                    # #544 — AI-seed the cast's descriptive identity FIRST (engine validates/repairs/folds),
+                    # THEN deep-author. Best-effort/fail-soft: no model ⇒ the engine's deterministic floor
+                    # stands and `then` still chains authoring (which also degrades gracefully).
+                    orwell_cast_identity.kickoff_identity(cast, owner, then=_author_then_refresh)
         except Exception:
             pass  # authoring + portraits are augmentation — never let them affect game start
         # 0062 — capture the REAL move-in zeitgeist (web_search) in the background, replacing the engine's

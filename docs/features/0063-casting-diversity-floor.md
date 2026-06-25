@@ -15,6 +15,21 @@
 > develop entirely organically through gameplay… The AI must never push this connection
 > artificially"*). **Executable spec:** `0063-casting-diversity-floor.feature` (skeleton; NOT yet in
 > `cucumber.cjs` — added when built to green, exactly as 0058 Phase 1's feature was).
+>
+> **AI-driven half — BUILT (issue #544, the deferred second half of the 2026-06-23 ruling).** The cast's
+> **descriptive** identity facets (heritage/ethnicity, gender presentation, orientation, disclosure, age)
+> are now **LLM-seeded to U.S.-population rates** and written back via the `recordCastIdentity` write-back;
+> the engine **validates + repairs** the whole-cast proposal through `repairDiversityLayer`
+> (`src/engine/diversity.ts`) against the proportional targets already in `diversityConstants.ts` (the SAME
+> floors/caps/weighted expectation — even a monochrome/biased proposal is repaired to a realistic cast),
+> **re-grounds `skinTone` from the FINAL heritage** (the PR #527 hinge), and re-seals each PRIVATE
+> orientation into the Vault. The **hard boundary**: only descriptive identity is accepted — **never a
+> hidden game weight** (the seeded Day-1 read / competition leans stay engine-owned: anti-sycophancy #3 +
+> the juryReach calibration). **Calibration-neutral** — the layer rides the SAME isolated descriptive
+> sub-streams (the #338 golden test stays the proof; an empty/no-model proposal is byte-identical to the
+> deterministic weighted floor, which simply stands). FE driver: `frontend/src/orwell_cast_identity.py`
+> (best-effort, fail-soft, runs BEFORE deep authoring — pipeline order: identity → author → shoot). Gates:
+> `tests/unit/castIdentity.test.ts`, `frontend/tests/test_544_cast_identity.py`.
 
 ## 1. Summary — the gap this closes
 
