@@ -16,10 +16,10 @@ import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
-import { assignRooms, zoneFor } from "../../engine/presence";
+import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
-import { PRESENCE, PRIVACY } from "../../engine/presenceConstants";
+import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
 import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
 import type { Room, Zone, Occupancy } from "../../domain/house";
@@ -1741,6 +1741,13 @@ export class GameSessionAdapter implements GameSession {
       rng,
       affinity: (a, b) => this.rel.edge(a, b).affinity,
       hoh: this.ceremony.hoh ?? null,
+      // 0078: INTENTIONAL movement — supplied on BOTH passes (the base AND the weighted view). Unlike the
+      // L21/L24 personality `movement` (calibration-NEUTRAL, weighted-only), intent is DELIBERATELY
+      // calibration-load-bearing (owner ruling: location must affect play), so the off-screen society
+      // (which pairs on the BASE occupancy) sees the same motivated clustering the player observes. The
+      // PLAYER returns null (a person, never engine-driven by an agenda; `movePlayer` owns their moves),
+      // which keeps the player's room identical in both views (the base pass pins them either way).
+      intent: (id: EntityId) => (id === playerId ? null : this.movementIntentFor(id)),
       ...(weighted
         ? {
             movement: (id: EntityId) => (id === playerId ? null : {
@@ -1756,6 +1763,43 @@ export class GameSessionAdapter implements GameSession {
           }
         : {}),
     };
+  }
+
+  /**
+   * A houseguest's MOTIVATED movement targets this tick (feature 0078) — WHERE their agenda points,
+   * read off the directed relationship model (the same Vault-free edges presence already uses; no
+   * number crosses the wall, and this draws NO rng). An NPC is drawn toward whoever they have a strong
+   * CHARGED tie with — a bond to deepen OR a threat to WORK (any reason to seek them out) — and softly
+   * AWAY from a pure danger they have no bond to leverage. Co-presence thus reflects agenda, not luck.
+   *
+   * The signal is a BOUNDED read of the existing edge signals (no new state): toward-pull rises with
+   * `max(bondStrength, threat)` above the neutral baseline; a pull becomes `avoid` only when threat
+   * clearly dominates the bond (a houseguest you fear and have nothing to gain from — you keep distance).
+   * Returns only the meaningfully-charged others (a small set), so a typical tick steers an NPC toward
+   * the one or two houseguests their game actually centers on, leaving the rest to seeded drift.
+   */
+  private movementIntentFor(id: EntityId): MovementIntent | null {
+    if (!this.house) return null;
+    const C = RELATIONSHIP_CONSTANTS;
+    const neutralBond = (C.baseline.trust + C.baseline.affinity) / 2;
+    const pulls: MovementPull[] = [];
+    for (const other of this.presenceActive()) {
+      if (other === id) continue;
+      const e = this.rel.edge(id, other);
+      const bond = this.rel.bondStrength(id, other); // trust+affinity, shaded by demonstrated loyalty
+      const threat = e.threat;
+      // Charge = how far the strongest signal sits above neutral. Bond and threat BOTH pull you toward
+      // them (an ally to keep close, a rival to corner). Below-neutral on both ⇒ no agenda (skip).
+      const bondCharge = Math.max(0, bond - neutralBond);
+      const threatCharge = Math.max(0, threat - C.baseline.threat);
+      const charge = Math.max(bondCharge, threatCharge);
+      if (charge < MOVEMENT_INTENT.minCharge) continue; // not charged enough to bend movement — let drift rule
+      // AVOID only when a real danger clearly outweighs any bond to work — you keep distance from a pure
+      // threat, but you still CLOSE on a rival you can scheme against (a charged threat WITH some bond).
+      const avoid = threatCharge >= bondCharge * MOVEMENT_INTENT.avoidThreatDominance && bondCharge < MOVEMENT_INTENT.workableBondFloor;
+      pulls.push({ target: other, weight: charge, avoid });
+    }
+    return pulls.length ? pulls : null;
   }
 
   /**

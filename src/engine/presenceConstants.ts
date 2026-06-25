@@ -166,3 +166,85 @@ export const MOVEMENT_PERSONALITY: MovementPersonality = {
   moveProbCeil: 0.95,
   seekPullFloor: 0,
 };
+
+/**
+ * INTENTIONAL MOVEMENT (feature 0078) — NPCs move toward what their MOTIVATION wants, exactly as the
+ * player does, so co-presence is EARNED, not arbitrary drift. The owner's headline ask: "NPCs should
+ * act just as intentional as the player would be in terms of location selection."
+ *
+ * Where MOVEMENT_PERSONALITY bends HOW MUCH a houseguest roams (a trait), INTENT bends WHERE they go
+ * (a goal): toward the room of whoever their relationship read points at — an ally to bond with, a
+ * rival/target to work, a deal/bloc partner to honor — and (softly) AWAY from a pure threat they want
+ * distance from. The pull is read off the relationship model (the caller supplies the per-candidate
+ * "how much does THIS houseguest want to be in a room with THAT one, and with what valence" signal),
+ * so when two end up together it is usually because ONE of them went looking for the other.
+ *
+ * CRITICAL — the calibration story is DIFFERENT from MOVEMENT_PERSONALITY's. Personality weighting had
+ * to be calibration-NEUTRAL (cosmetic), so it rode a dedicated stream off the base. INTENT is
+ * DELIBERATELY calibration-LOAD-BEARING: it changes who clusters → who the off-screen society pairs →
+ * the relationship folds that feed votes. By owner ruling (0078) location is MEANT to affect play, so
+ * intent ships WITH a calibration pass (juryReach + the gradient re-verified). It therefore applies to
+ * the calibration-bearing BASE occupancy (drawn from the shared stream), and — like the personality
+ * weighting — it only RE-WEIGHTS the existing stay-gate threshold and the per-candidate destination
+ * weights; it DRAWS NO rng of its own (one stay-gate draw + at most one destination draw, exactly as
+ * before), so the per-NPC shared-stream draw COUNT is unchanged (the spine re-phases only by which
+ * ROOM intent steers toward, which is precisely the change the calibration pass re-tunes for). All
+ * numbers here are God-Mode-knobbable later (the 0026/0028 sibling-constants pattern); no number ever
+ * crosses the Vault Wall — intent reads the same Vault-free relationship edges presence already uses.
+ *
+ * `moveIntentStrength` is the headline tuning lever the 0078 calibration pass turns: start MODEST so
+ * the house doesn't collapse into one room, raise it for more agenda-driven clustering. The whole
+ * intent contribution scales by it, so `0` ⇒ intent is inert ⇒ byte-identical to the pre-0078 base.
+ */
+export interface MovementIntentConstants {
+  /**
+   * The master gain on the WHOLE intent contribution (open question #1 — "move-intent strength"). It
+   * multiplies every per-candidate intent bonus AND the pursuit move-gate nudge, so it is the single
+   * knob the calibration pass turns. `0` ⇒ intent fully inert (the base is byte-identical to pre-0078).
+   * Modest by default so motivation BENDS room choice without the house all collapsing into one room.
+   */
+  moveIntentStrength: number;
+  /**
+   * How much an UNSATISFIED pursuit (the houseguest's motive target is NOT in their current room)
+   * raises their per-tick MOVE probability — they get up and go looking. Scaled by `moveIntentStrength`
+   * and clamped into the SAME [moveProbFloor, moveProbCeil] the personality move-rate uses, so nobody
+   * teleports every tick. A SATISFIED pursuit (target already here) leaves the rate untouched (they
+   * have no reason to leave on intent's account — stickiness is 0076's job, not intent's).
+   */
+  pursuitMoveBias: number;
+  /**
+   * The hard cap on the per-candidate intent BONUS weight added to a destination room, as a multiple of
+   * the room's base affinity-cluster weight — so intent can strongly favor a room without ever zeroing
+   * the seeded variance the calibration spine rests on (a clear motive STEERS the roll; it never
+   * forces it). The away-from-threat penalty is symmetric (a multiplicative discount toward this cap).
+   */
+  maxRoomBonus: number;
+  /**
+   * The minimum CHARGE (how far the strongest relationship signal — bond or threat — sits above its
+   * neutral baseline) before a houseguest's read of another bends their movement at all. Below it the
+   * tie is too lukewarm to be an agenda, and seeded drift rules (the house isn't ALL pursuit). Keeps
+   * the motive set small — a typical NPC chases the one or two houseguests their game centers on.
+   */
+  minCharge: number;
+  /**
+   * AVOIDANCE gate (the read side): a pull flips from drawn-toward to "keep distance" only when the
+   * THREAT charge is at least this multiple of the BOND charge — a danger that clearly dominates any
+   * warmth. Below it, a charged threat still pulls you TOWARD them (you corner a rival you can work).
+   */
+  avoidThreatDominance: number;
+  /**
+   * AVOIDANCE gate (the read side, second condition): even a threat-dominant read stays drawn-toward
+   * (you go WORK them) while there is at least this much bond charge to leverage. Avoidance is reserved
+   * for a pure danger you have nothing to gain from — only then do you keep your distance.
+   */
+  workableBondFloor: number;
+}
+
+export const MOVEMENT_INTENT: MovementIntentConstants = {
+  moveIntentStrength: 0.2,
+  pursuitMoveBias: 0.18,
+  maxRoomBonus: 2.0,
+  minCharge: 0.08,
+  avoidThreatDominance: 1.5,
+  workableBondFloor: 0.1,
+};
