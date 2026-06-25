@@ -102,11 +102,13 @@
     return { format };
   }
 
-  // Flatten every visible person (present + all nearby) into one list — the dedup scope.
+  // Flatten every visible person (present + all nearby + tracked beliefs) into one list — the dedup
+  // scope, so a tracked houseguest reads with the same first-name disambiguation as everyone on screen.
   function _allPeople(w) {
     const out = [];
     ((w && w.present) || []).forEach((p) => out.push(p));
     ((w && w.nearby) || []).forEach((n) => ((n && n.present) || []).forEach((p) => out.push(p)));
+    ((w && w.tracked) || []).forEach((t) => out.push(t)); // 0077: tracked beliefs share the dedup scope
     return out;
   }
 
@@ -132,7 +134,12 @@
         #orwell-presence .opres-room .opres-r {
           color: color-mix(in srgb, var(--fg, #9cdef2) 70%, var(--panel, #111));
         }
-        #orwell-presence .opres-quiet { opacity: .6; font-style: italic; }`;
+        #orwell-presence .opres-quiet { opacity: .6; font-style: italic; }
+        #orwell-presence .opres-tracked { display: block; margin-top: .3rem; opacity: .82; overflow-wrap: anywhere; }
+        #orwell-presence .opres-conspicuous {
+          display: block; margin-top: .3rem; font-style: italic; overflow-wrap: anywhere;
+          color: color-mix(in srgb, var(--accent, #e0b341) 80%, var(--fg, #9cdef2));
+        }`;
       document.head.appendChild(st);
     }
     // 0054: prefer the control-room gadget rail (under the status HUD when present).
@@ -161,10 +168,11 @@
     const names = _displayNames(_allPeople(w));
     const join = (list) => (list || []).map((p) => names.format(p)).filter(Boolean).join(", ");
 
-    // HEADER: the room you're in + who's with you (first names) — or "alone".
+    // HEADER: the room you're in (+ your corner of a big room, 0077) + who's with you — or "alone".
     const present = Array.isArray(w.present) ? w.present : [];
     const here = present.length ? join(present) : "alone";
-    const headLine = roomLabel(w.room) + " — " + here;
+    const roomName = roomLabel(w.room) + (w.zone ? " · " + String(w.zone).replace(/-/g, " ") : "");
+    const headLine = roomName + " — " + here;
     el.querySelector("[data-role='head']").textContent = headLine;
     // A11Y-1: announce ONLY when the line actually changed (not on every poll).
     if (headLine !== _lastAnnounced) {
@@ -173,19 +181,37 @@
       _lastAnnounced = headLine;
     }
 
-    // BODY: the VISIBLE nearby rooms that HAVE people, each with first names.
+    // BODY: the VISIBLE nearby rooms that HAVE people, each with first names; then the 0077 layers.
     const rooms = (Array.isArray(w.nearby) ? w.nearby : [])
       .filter((n) => n && n.present && n.present.length);
     const body = el.querySelector("[data-role='body']");
+    const parts = [];
     if (!rooms.length) {
-      body.innerHTML = '<span class="opres-quiet">No one nearby.</span>';
+      parts.push('<span class="opres-quiet">No one nearby.</span>');
     } else {
-      body.innerHTML = rooms
+      parts.push(rooms
         .map((n) =>
           '<span class="opres-room"><span class="opres-r">' + esc(roomLabel(n.room)) +
           ':</span> ' + esc(join(n.present)) + "</span>")
-        .join("");
+        .join(""));
     }
+    // 0077 TRACKED: who you watched slip behind a closed door — a BELIEF, flagged when it's gone stale.
+    // Fog-of-war by construction: the engine only sends houseguests the player actually witnessed go in.
+    const tracked = (Array.isArray(w.tracked) ? w.tracked : []).filter((t) => t && t.name && t.room);
+    if (tracked.length) {
+      parts.push('<span class="opres-tracked"><span class="opres-r">Seen heading off:</span> ' +
+        tracked.map((t) =>
+          esc(names.format(t)) + " → " + esc(roomLabel(t.room)) + (t.stale ? " (a while ago)" : ""))
+          .join(", ") + "</span>");
+    }
+    // 0077 CONSPICUOUSNESS: "two alone too long" — already Vault-free player-facing prose from the engine.
+    const conspic = (Array.isArray(w.conspicuous) ? w.conspicuous : []).filter(Boolean);
+    if (conspic.length) {
+      parts.push(conspic
+        .map((c) => '<span class="opres-conspicuous">' + esc(c) + "</span>")
+        .join(""));
+    }
+    body.innerHTML = parts.join("");
     _gadget.show();
   }
 

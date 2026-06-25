@@ -87,7 +87,10 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     // rooms are opaque (their occupants never appear), the stronger privacy contract.
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/is a NAMED room the player can SEE INTO/);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/are OPAQUE: their occupants do NOT appear/);
-    expect(BASE_GAME_MASTER_PROMPT).toMatch(/NEITHER list is elsewhere/i);
+    // 0077 Phase 2 — the `tracked` layer (earned closed-door knowledge, voiced as a stale-able belief)
+    // and the conspicuousness read are part of the contract; anyone in NONE of the lists is off-scene.
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/`tracked` list is exactly that/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/is elsewhere and NOT visible/i);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/Never move a `present` person|pull a `nearby` person/);
   });
 

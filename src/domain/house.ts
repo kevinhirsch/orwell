@@ -96,6 +96,87 @@ export function isPrivateRoom(room: Room): boolean {
 }
 
 /**
+ * A named SUB-ZONE within a big room (0077 Phase 2 — owner note #2: "the backyard is big enough for
+ * multiple groups to chat outside of earshot"). A zone is a presentation/earshot subdivision, NOT a
+ * separate room: EYESHOT stays room-wide (everyone in the backyard SEES everyone, including that
+ * another group is huddled across the yard — a conspicuousness signal in itself), but EARSHOT is
+ * zone-scoped (a scene by the pool is not overheard at the workout corner). Plain strings, scoped to
+ * the floor plan below.
+ */
+export type Zone = string;
+
+/**
+ * The 1–2 genuinely BIG rooms carry zones; every other room is a single space (no entry here ⇒ no
+ * zoning — `zonesFor` returns `[]`, and earshot/eyeshot behave exactly as the pre-zone build). The
+ * backyard runs poolside → patio → workout (a line); the lounge has two separated corners. Owner
+ * note #2 + "resist zoning small rooms" (open question #4). Order is the canonical zone order.
+ */
+export const ROOM_ZONES: ReadonlyMap<Room, readonly Zone[]> = new Map<Room, readonly Zone[]>([
+  ["backyard", ["poolside", "patio", "workout"]],
+  ["lounge", ["couches", "window-nook"]],
+]);
+
+/**
+ * Which zones of a room are close enough to carry a small RESIDUAL overhear (adjacent zones), vs. far
+ * enough to be fully out of earshot. The backyard is a LINE — poolside↔patio↔workout — so the two
+ * ends (poolside/workout) are out of earshot of each other (the BDD "pool vs. workout corner" case);
+ * the lounge's two corners are deliberately NON-adjacent (two private corners, the whole point). A
+ * room with no entry has no intra-room adjacency (every zone pair is "far", trivially — there is one
+ * zone). Symmetric by construction (asserted by the unit tests).
+ */
+const ZONE_ADJACENCY: ReadonlyMap<Room, ReadonlyMap<Zone, readonly Zone[]>> = new Map([
+  ["backyard", new Map<Zone, readonly Zone[]>([
+    ["poolside", ["patio"]],
+    ["patio", ["poolside", "workout"]],
+    ["workout", ["patio"]],
+  ])],
+  ["lounge", new Map<Zone, readonly Zone[]>([
+    ["couches", []],
+    ["window-nook", []],
+  ])],
+]);
+
+/** Whether a room is subdivided into earshot zones (0077 — only the big rooms). */
+export function isZonedRoom(room: Room): boolean {
+  return ROOM_ZONES.has(room);
+}
+
+/** The canonical, ordered zones of a room — `[]` for an un-zoned room (every other room). */
+export function zonesFor(room: Room): readonly Zone[] {
+  return ROOM_ZONES.get(room) ?? [];
+}
+
+/**
+ * Whether two zones of the SAME room are within earshot of each other (0077): the same zone always
+ * is; adjacent zones carry a residual overhear; far zones (and the two lounge corners) do not. An
+ * un-zoned room has at most one zone, so any two co-present occupants there are trivially in earshot
+ * (`a === b`), preserving the pre-zone "same room ⇒ in earshot" behavior. `undefined` zones (no zone
+ * info supplied) are treated as the same single space — back-compatible.
+ */
+export function zonesInEarshot(room: Room, a: Zone | undefined, b: Zone | undefined): boolean {
+  if (a === undefined || b === undefined || a === b) return true;
+  if (!isZonedRoom(room)) return true;
+  return (ZONE_ADJACENCY.get(room)?.get(a) ?? []).includes(b);
+}
+
+/**
+ * Deterministically seat an entity into one of a room's zones from an already-computed numeric KEY
+ * (the caller hashes a stable identity — e.g. id+room — so the choice is reproducible and draws NO
+ * rng; zones are a read-side projection, never a new shared-stream draw — the L21/L24 isolation).
+ * Returns `undefined` for an un-zoned room (nothing to seat into).
+ */
+export function pickZone(room: Room, key: number): Zone | undefined {
+  const zones = zonesFor(room);
+  if (zones.length === 0) return undefined;
+  return zones[((key % zones.length) + zones.length) % zones.length];
+}
+
+/** The PUBLIC display name for a zone ("poolside" → "poolside", "window-nook" → "window nook"). */
+export function zoneDisplayName(zone: Zone): string {
+  return zone.replace(/-/g, " ");
+}
+
+/**
  * The PUBLIC, natural display name for a room (the same `kitchen`/`living room`/`bedroom A`
  * the player and narrator say aloud). Pure presentation of a public room id — never a Vault
  * fact. Drives the model-facing room list so the narrator always knows the exact names it can

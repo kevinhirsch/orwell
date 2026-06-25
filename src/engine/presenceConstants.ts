@@ -36,6 +36,13 @@ export interface PresenceConstants {
   overhearConfidence: number;
   /** Fraction of a scene's content an overhearer catches (NEVER 1 — through a wall, not a transcript). */
   overhearFraction: number;
+  /**
+   * Closed-door MUFFLE (0077 Phase 2): the multiplier on the per-scene overhear gate when the scene
+   * happens behind a PRIVATE (closed) door — harder to hear into than an open-core room. Strictly
+   * OPT-IN: only the player channel passes it (its own isolated `commands:` rng stream); the
+   * off-screen society/orchestrator spine passes nothing, so the calibration draws are byte-identical.
+   */
+  doorMuffle: number;
 }
 
 export const PRESENCE: PresenceConstants = {
@@ -46,6 +53,46 @@ export const PRESENCE: PresenceConstants = {
   hohRoomPull: 0.5,
   overhearConfidence: 0.4,
   overhearFraction: 0.6,
+  doorMuffle: 0.4,
+};
+
+/**
+ * The PRIVACY / tracked-occupancy tunables (0077 Phase 2 — "who is behind a closed door" as
+ * KNOWLEDGE, not a free ambient read). Pure read-side numbers — they never touch any rng stream, so
+ * they cannot perturb calibration. All are God-Mode-knobbable later (the 0026/0028 constants pattern).
+ */
+export interface PrivacyConstants {
+  /**
+   * STALE-belief horizon (open question #2): how many presence ticks a tracked sighting stays on the
+   * board before it decays out entirely. A belief older than this is dropped (you've lost the thread).
+   * A still-fresh belief whose subject has since moved is reported as STALE, not dropped — the player
+   * believes it until a new pathway corrects it.
+   */
+  trackedHorizonTicks: number;
+  /**
+   * STALE flag age: ticks before a still-live belief reads as `stale` ("you saw them go in a while
+   * ago"). Derived from AGE alone — NEVER from the secret live position (that would leak that they
+   * left). Below the horizon, so a belief flags stale before it finally decays out.
+   */
+  staleAfterTicks: number;
+  /**
+   * CONSPICUOUSNESS threshold (open question #3): a private room held by EXACTLY this many tracked
+   * high-tenure houseguests trips the "holed up together" read. Exactly two, per the owner's framing
+   * ("two alone too long implies gameplay").
+   */
+  conspicuousPairSize: number;
+  /** Minimum ticks a sighting must have aged before it reads as conspicuous (both subjects "a while" in). */
+  conspicuousMinTenureTicks: number;
+  /** Confidence carried by a tracked sighting (a watched movement — solid, but not a witnessed scene). */
+  trackedConfidence: number;
+}
+
+export const PRIVACY: PrivacyConstants = {
+  trackedHorizonTicks: 6,
+  staleAfterTicks: 3,
+  conspicuousPairSize: 2,
+  conspicuousMinTenureTicks: 2,
+  trackedConfidence: 0.7,
 };
 
 /**

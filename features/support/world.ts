@@ -364,6 +364,19 @@ export class BbWorld extends World {
   hpBefore?: { week: number; phase: string; kind: string };
   hpEventsBefore?: number;
 
+  // House map, privacy & eyeshot (0077) scratch state.
+  pmRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  pmUser?: string;
+  pmSandbox?: import("../../src/composition/registry").UserSandbox;
+  pmWhereabouts?: import("../../src/ports/GameSession").WhereaboutsView;
+  pmSubjects?: import("../../src/domain/ids").EntityId[];
+  pmBedroom?: import("../../src/domain/house").Room;
+  pmEventId?: string;
+  pmWitnessSet?: import("../../src/domain/ids").EntityId[];
+  pmHiddenContent?: string;
+  pmSuspectId?: import("../../src/domain/ids").EntityId;
+  pmSuspicionPathway?: string;
+
   // Live reserve twists (0025/B53) scratch state.
   twistRegistry?: import("../../src/composition/registry").GameSessionRegistry;
   twistUser?: string;

@@ -784,9 +784,19 @@ export interface PremiereIntrosView {
 export interface WhereaboutsView {
   /** The room the player is in. */
   room: string;
+  /**
+   * The player's SUB-ZONE within a big, zoned room (0077 — "over by the pool" / "the workout corner").
+   * Present ONLY in a zoned room (backyard, lounge); absent everywhere else. Pure flavor — eyeshot stays
+   * room-wide; the zone only scopes earshot.
+   */
+  zone?: string;
   /** Who else is in the player's room (names only). */
   present: NamedRef[];
-  /** Each ADJACENT room and who is in it (names only). Non-adjacent rooms never appear. */
+  /**
+   * Each room the player has SIGHTLINE into (eyeshot — 0077 Phase 2) and who is in it (names only). The
+   * open public core sees across itself + into the hallway mouth; a CLOSED door is opaque and never
+   * appears here. (Historically "adjacent rooms"; now sightline-scoped, which is strictly narrower.)
+   */
   nearby: Array<{ room: string; present: NamedRef[] }>;
   /**
    * DURATION — how many consecutive player-turns the player has been in this room (0 = just
@@ -797,6 +807,24 @@ export interface WhereaboutsView {
    */
   turnsHere: number;
   companions: Array<{ id: EntityId; name: string; turnsHere: number }>;
+  /**
+   * TRACKED OCCUPANCY (0077 Phase 2 — the privacy payoff): who the player BELIEVES is behind a closed
+   * door, learned by WATCHING them head in (never the live map). Each carries the believed room (+ zone),
+   * how long ago the sighting was (`sinceTurns`), a Vault-safe `stale` flag (derived from AGE, never the
+   * secret live position), and its 0002 pathway + confidence. The bedrooms stay blanks in `nearby`; this
+   * is the only way a closed room's occupants ever surface — and only because the player earned it.
+   */
+  tracked: Array<{
+    id: EntityId; name: string; room: string; zone?: string;
+    sinceTurns: number; stale: boolean; pathway: string; confidence: number;
+  }>;
+  /**
+   * CONSPICUOUSNESS reads (0077 — "two alone too long is a tell"), DERIVED per call: a private room the
+   * player tracked exactly two high-tenure houseguests into surfaces as a Vault-free line naming WHO,
+   * WHERE, and HOW LONG — never what was said. Present only when at least one such read fires. Paranoia
+   * is the human's to form (0017); the engine reports the meeting, never the motive.
+   */
+  conspicuous?: string[];
 }
 
 /**
