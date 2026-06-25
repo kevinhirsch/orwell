@@ -1030,6 +1030,18 @@ body.bg-pattern-perlin-flow {
       background: none; border: none; border-radius: 6px;
       color: var(--fg); font-family: inherit; font-size: var(--fs-sm);
       cursor: pointer; user-select: none; text-align: left;
+    }
+    /* #752 [PERSISTENT-SURFACE STABILITY] — the Windows dock is a PERSISTENT surface, so its
+       entrance animation is OPT-IN per chip, NEVER replayed on every re-render. _renderDock
+       rebuilds ALL its chip rows (rows.innerHTML='') whenever the minimized SET changes; gating
+       the entrance behind .chip-entering — which _renderDock adds ONLY to a chip whose id was
+       NOT docked on the previous pass — means an already-docked chip stays exactly where it was
+       while one brand-new chip flies in. A NEW chip is a TRANSIENT arrival (it animates); the
+       chips already docked are persistent (they hold position; the FLIP transform in _renderDock
+       smoothly reflows them when the newcomer changes the layout). Without this gate, minimizing
+       window B replayed dock-chip-in on the already-present window A — the "nothing stays where
+       you left it" defect. */
+    .minimized-dock-chip.chip-entering {
       animation: dock-chip-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
     }
     .minimized-dock-chip:hover {

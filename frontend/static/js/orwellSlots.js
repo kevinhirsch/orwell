@@ -11,6 +11,32 @@
 //
 // E97 rides here too: one animation contract for every registered panel —
 // fade+scale on open, the reverse on close — honoring prefers-reduced-motion.
+//
+// ── #752 [THE PERSISTENT-SURFACE STABILITY POLICY] ──────────────────────────
+// NN/g's deepest critique of the glass UI was learnability: "nothing stayed where
+// you left it." The rule this kit enforces, and that every persistent surface must
+// honor:
+//
+//   PERSISTENT surfaces — the nav sidebar (#sidebar), the gadget rail
+//   (#gadget-rail), and the Windows dock (#minimized-dock) — keep STABLE POSITIONS
+//   across game-phase changes, the 20–30s poll / `orwell:gamechanged` refresh, and
+//   page reloads. They do NOT relocate and do NOT replay an entrance/slide/fly
+//   animation on those events — an entrance plays only on FIRST mount. Their
+//   position/side/collapse/order is read from persisted state on load and re-applied
+//   IDEMPOTENTLY (a re-run that finds the surface already in place is a no-op), so a
+//   refresh or a reload lands them exactly where the player left them.
+//
+//   TRANSIENT surfaces — toasts, decision cards, sheets, and the floating game
+//   windows registered HERE — animate in/out freely; that is their whole job. When
+//   they animate, they do so FROM A STABLE ANCHOR (a slot, the dock chip), never by
+//   shoving a persistent surface aside.
+//
+// This module is the geometry-persistence half of the policy for FLOATING windows
+// (slot anchor + a clamped, persisted drag offset; `animateIn` fires only on a
+// hidden→shown reveal, never on a restack). The persistent surfaces own their own
+// CSS-flow positioning (sidebar-layout.js / orwellGadgetRail.js / modalManager.js)
+// and their gamechanged/poll handlers are deliberately idempotent. The guard
+// `frontend/tests/test_0752_persistent_surface_stability.py` source-pins the policy.
 (function () {
   "use strict";
 
