@@ -2567,6 +2567,30 @@ body.bg-pattern-perlin-flow {
       border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
     }
 
+    /* BUG 1 (never eat a message): the optimistic user bubble is painted BEFORE session/model
+       materialization. While that's in flight the bubble is `.msg-pending` (slightly dimmed so the
+       send-in-progress reads). If the send hard-fails (no model configured / materialize failed) the
+       bubble settles to `.msg-unsent` with a quiet "not sent" tag — the message is preserved on
+       screen and restored to the composer, never silently dropped. */
+    .msg-user.msg-pending { opacity: 0.7; }
+    .msg-user.msg-unsent {
+      opacity: 0.85;
+      border-color: color-mix(in srgb, var(--accent-error, var(--red)) 45%, transparent);
+    }
+    .msg-user.msg-unsent .role::after {
+      content: 'not sent';
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--accent-error, var(--red)) 80%, var(--fg));
+      background: color-mix(in srgb, var(--accent-error, var(--red)) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent-error, var(--red)) 30%, transparent);
+    }
+
     /* L36 follow-on — the MODEL's OOC answer (a producer/HUD aside): the GM wrapped its whole
        reply in ((...)), so render it as a quiet aside outside the fiction, not a spoken-in-room
        line. Mirrors the player-side aside treatment; theme-token driven. */

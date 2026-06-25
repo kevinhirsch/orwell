@@ -3553,6 +3553,9 @@ async def stream_agent_loop(
         _round_finish_reason = None
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
+        # BUG 2 disambiguator snapshots (see the [BUG2-len] log at round end): full_response /
+        # round_reasoning are deltas this round measured against these baselines.
+        _full_response_len_at_round_start = len(full_response)
         _game_buf = ""  # live-game operator-aside scrub buffer (holds the unjudged sentence tail)
         # Once a tool-call OPENER appears in the visible text (e.g. deepseek's DSML pipe markup
         # `<｜DSML｜tool_calls>` emitted as text), stop streaming visible deltas for the rest of
@@ -3965,6 +3968,28 @@ async def stream_agent_loop(
         # Keep <think> blocks so they render in the thinking section on reload
         cleaned_round = strip_tool_blocks(round_response).strip()
         round_texts.append(cleaned_round)
+
+        # BUG 2 (truncation) disambiguator: log the REPLY vs REASONING vs EMITTED lengths for this
+        # round so a live bundle can localize a tail-drop. `content_chars` in llm_core counts
+        # reply+reasoning combined, so it can't tell us whether the player-visible reply was cut.
+        # These four numbers do:
+        #   raw_reply        = round_response (the RAW reply text the loop accumulated this round)
+        #   reasoning        = round_reasoning (the thinking channel — never in the bubble)
+        #   emitted_visible  = full_response delta for THIS round (what actually streamed to the player)
+        #   cleaned_round    = the persisted/reload text (dataset.raw on the FE)
+        # If raw_reply >> emitted_visible the drop is SERVER-side (scrub/guard/buffer ate the tail);
+        # if raw_reply == emitted_visible but the bubble is shorter, the drop is CLIENT/CSS-side.
+        try:
+            _emitted_this_round = len(full_response) - _full_response_len_at_round_start
+            logger.info(
+                f"[BUG2-len] round {round_num}: raw_reply={len(round_response)} "
+                f"reasoning={len(round_reasoning)} "
+                f"emitted_visible={_emitted_this_round} cleaned={len(cleaned_round)} "
+                f"scrub_active={_scrub_active} visible_halted={_visible_halted} "
+                f"game_buf_tail={len(_game_buf)}"
+            )
+        except Exception:
+            pass
 
         if not tool_blocks:
             # ── Completion verifier (mechanism 3a) ────────────────────
