@@ -3787,6 +3787,27 @@ import { isNarrow } from './platform.js';
   function _serverMsgId(msg) { return msg.id || (msg.metadata && msg.metadata._db_id) || null; }
 
   /**
+   * F5 (dedup hardening): count the message bubbles that SHOULD map 1:1 to a persisted server message
+   * — i.e. exclude rows that are intentionally hidden (display:none): a tool-only continuation round
+   * (chat.js ~2780) and a skippable production-cue user bubble. Those have no server counterpart, so
+   * they must not inflate the count. Everything else visible (a real user bubble, a real AI bubble, and
+   * crucially an ORPHANED continuation/finalize bubble) counts. softReloadHistory compares this to the
+   * server's visible-message count to detect an orphan a pure id-order check is blind to. Pure (DOM in,
+   * number out) and exported so the reconcile contract is unit-testable without a live stream.
+   */
+  export function _visibleMsgCount(box) {
+    if (!box) return 0;
+    let n = 0;
+    box.querySelectorAll('.msg').forEach((el) => {
+      // A bubble explicitly hidden via inline style is an intermediate/skipped row with no
+      // server message — don't count it. (Hidden via class is rare; the live hide uses style.display.)
+      const hidden = (el.style && el.style.display === 'none');
+      if (!hidden) n += 1;
+    });
+    return n;
+  }
+
+  /**
    * ADR 0008 — render-and-reconcile to the authoritative seq-ordered log.
    *
    * The chat conversation is a FE-replicated log; the audit (S3-RACE) proved two tabs diverge
@@ -3850,7 +3871,18 @@ import { isNarrow } from './platform.js';
     if (_forced && visible.length < renderedCount) _forced = false;
     const renderedIds = Array.from(box.querySelectorAll('.msg[data-db-id]')).map((el) => el.dataset.dbId);
     const serverIds = visible.map(_serverMsgId).filter(Boolean);
-    const converged = renderedIds.length === serverIds.length &&
+    // F5 (dedup hardening): the id-order check alone is BLIND to a db-id-LESS ORPHAN bubble — a
+    // continuation/round bubble (multi-round agent turn) or a resume finalize-in-place bubble that
+    // never received its data-db-id. Such an orphan is invisible to `renderedIds` (which selects only
+    // `.msg[data-db-id]`), so the rendered id-order could equal the server seq-order ("converged")
+    // WHILE an extra duplicate bubble sits on screen → the dup survived every reload (issue #873 / F5).
+    // Count VISIBLE message bubbles (excluding the hidden tool-only / production-cue rows, which are
+    // display:none and have no server counterpart) and require it to equal the server's visible-message
+    // count. A mismatch means an orphan (or a missing bubble) is present → NOT converged → rebuild to
+    // the authoritative log, which collapses the orphan with ZERO net churn on the already-correct case.
+    const orphanFree = _visibleMsgCount(box) === visible.length;
+    const converged = orphanFree &&
+      renderedIds.length === serverIds.length &&
       renderedIds.every((v, i) => v === serverIds[i]);
     if (converged && !_forced) { _pendingReconcile.delete(sessionId); return; }
 
@@ -3985,6 +4017,13 @@ import { isNarrow } from './platform.js';
     // event so the finalize renders the identical time string the sender/history do (not a local
     // attach-time `new Date()`).
     let serverTs = null;
+    // F5 (dedup hardening): the SERVER-minted DB id, captured off the replayed message_saved event.
+    // Stamped onto the finalized-in-place bubble below so the resumed reply carries its {db id} —
+    // otherwise the finalize creates a db-id-LESS orphan that softReloadHistory's adopt pass cannot
+    // match and its divergence check ignored, so a later reload left a DUPLICATE bubble (the audit's
+    // "resume finalize-in-place can leave a db-id-less duplicate bubble"). With the id stamped, the
+    // adopt pass matches it with ZERO churn — the streamed bubble keeps its single entrance.
+    let savedDbId = null;
     // "Rich" responses (tool calls, sources, doc streaming, multi-round) need the
     // full canonical render, which is rebuilt from the saved DB record on reload.
     // Plain text replies can be finalized in place without a reload.
@@ -4059,6 +4098,9 @@ import { isNarrow } from './platform.js';
             // server timestamp and re-stamp the live bubble so this observer reads the same time as
             // every other window. (json.id is the DB id; the finalize/reload carries it forward.)
             if (json.ts) { serverTs = json.ts; _applyServerTimestamp(holder, serverTs); }
+            // F5 (dedup hardening): also capture the DB id so the finalize-in-place below stamps
+            // data-db-id onto the canonical bubble (zero-churn adopt on a later reload, no duplicate).
+            if (json.id) { savedDbId = json.id; holder.dataset.dbId = json.id; }
           } else if (json.type === 'tool_start' || json.type === 'tool_output' ||
                      json.type === 'tool_progress' || json.type === 'agent_step' ||
                      json.type === 'web_sources' || json.type === 'rag_sources' ||
@@ -4091,6 +4133,10 @@ import { isNarrow } from './platform.js';
       // the identical time string as the sender's bubble and the history reload (chatRenderer.addMessage
       // → roleTimestamp(metadata.timestamp)). Absent ⇒ roleTimestamp falls back to "now" (prior behavior).
       if (serverTs) meta_.timestamp = serverTs;
+      // F5 (dedup hardening): carry the DB id so the finalized bubble is data-db-id-stamped (addMessage
+      // reads metadata._db_id). A later softReloadHistory then ADOPTS this bubble (id match) with ZERO
+      // churn instead of leaving it an unmatchable orphan beside the canonical reload render (duplicate).
+      if (savedDbId) meta_._db_id = savedDbId;
       chatRenderer.addMessage('assistant', _combined(), model, meta_);
       uiModule.scrollHistory();
       return true;
@@ -5630,6 +5676,7 @@ import { isNarrow } from './platform.js';
     flushPendingReconcile,
     deferPeerResume,
     flushPendingPeerResume,
+    _visibleMsgCount,   // F5 (dedup hardening): exposed for the reconcile-orphan browser gate
   };
 
   // Single delegated handler for tool-call fold/expand. One listener on
