@@ -32,6 +32,11 @@ CONTAINER_EXCEPTIONS = {
     # The chatbar micro-tier: a second collapse stage below the 360 tier for the
     # composer when the sidebar squeezes it. Documented sub-tier, page chrome.
     260: ("chatbar micro-tier (composer icon collapse)", 1),
+    # #894 — the cast gallery's narrow-rail tier: when the cast window is docked into
+    # the (narrow) gadget rail, the horizontal 2-row gallery drops to ONE column per
+    # page so the squares stay legible. A sub-tier below the 360 token, scoped to the
+    # #orwell-cast container only. The 3-/4-column up-tiers use the 480/620 tokens.
+    240: ("cast gallery narrow-rail one-column page (#orwell-cast docked)", 1),
 }
 
 MEDIA_RX = re.compile(r"@media[^{]*?\((?:max|min)-width:\s*(\d+)px")
