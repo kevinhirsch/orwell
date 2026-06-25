@@ -884,14 +884,16 @@ export class GameSessionAdapter implements GameSession {
     this.deltaScanProbe = fn;
   }
 
-  /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. */
+  /** Per-NPC knowledge readers (B65), wired by the registry from the KnowledgeService. `known` carries
+   *  the originating `sourceEventId` (#843) so the Vault dump can join a gossip/surfacing breadcrumb
+   *  event back to the real belief it lodged — voicing only ever reads `content`, so this is additive. */
   private npcKnowledge?: {
-    known: (id: EntityId) => ReadonlyArray<{ content: string }>;
+    known: (id: EntityId) => ReadonlyArray<{ content: string; sourceEventId?: string }>;
     suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
   };
 
   setNpcKnowledgeProviders(p: {
-    known: (id: EntityId) => ReadonlyArray<{ content: string }>;
+    known: (id: EntityId) => ReadonlyArray<{ content: string; sourceEventId?: string }>;
     suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
   }): void {
     this.npcKnowledge = p;
@@ -1247,12 +1249,29 @@ export class GameSessionAdapter implements GameSession {
     if (!this.live) throw new Error("buildVaultUnseal called without a live season");
     const nameOf = (id: EntityId): string => this.nameOf(id);
     const events = this.record?.events() ?? [];
+    // #843 — a gossip/surfacing event's CONTENT is an internal breadcrumb (`gossip <pathway> reaches
+    // <to>` / `surfaced to <entity> via <pathway>`), not the belief itself. Join each back to the
+    // KnowledgeFact it lodged (by `sourceEventId`) so the dump shows the real, name-resolvable
+    // paraphrase. Build the index ONCE from every houseguest's known facts (the recipient holds it).
+    const beliefByEvent = new Map<string, string>();
+    if (this.npcKnowledge && this.house) {
+      for (const hg of [this.house.player, ...this.house.npcs]) {
+        for (const f of this.npcKnowledge.known(hg.id)) {
+          if (f.sourceEventId && !beliefByEvent.has(f.sourceEventId)) beliefByEvent.set(f.sourceEventId, f.content);
+        }
+      }
+    }
     // The FE renders each row as "[type] content", so `type` must be a READABLE label (not a raw kind
     // slug) and `content` clean, name-resolved prose — this is the Wall's ONE sanctioned reveal, shown
     // readably (audit: the live dump leaked "[hidden-thread] story-thread thread:npc:8:0 …").
     const hiddenStory = events
       .filter((e) => e.hidden)
-      .map((e) => ({ type: retrospectiveLabel(e.type), content: this.retroScrub(e.content) }));
+      .map((e) => {
+        // For a gossip/surfacing breadcrumb, prefer the joined belief (the concrete paraphrase) over the
+        // internal "reaches <to>" plumbing; fall back to the scrubbed breadcrumb if no fact joined (#843).
+        const belief = (e.type === "gossip" || e.type === "surfacing") ? beliefByEvent.get(e.id) : undefined;
+        return { type: retrospectiveLabel(e.type), content: this.retroScrub(belief ?? e.content) };
+      });
     // The structured hidden layers (threads + seeded relationships) render from the IN-MEMORY objects,
     // not their engine-only Vault audit strings — so every id is a NAME and no machine slug crosses. They
     // are therefore SKIPPED below when iterating the Vault records (rendered here once, readably, instead).
