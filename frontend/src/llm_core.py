@@ -1009,6 +1009,30 @@ def _normalize_anthropic_url(url: str) -> str:
     return url + "/v1/messages"
 
 
+def _ensure_openai_chat_path(url: str) -> str:
+    """Ensure an OpenAI-compatible chat POST targets /chat/completions, not a bare API base.
+
+    A session/endpoint URL is sometimes stored as the raw provider base (e.g.
+    ``https://openrouter.ai/api/v1``) rather than the resolved chat URL. POSTing the base
+    returns the provider's HTML landing page with HTTP 200 — an unparseable ~150KB body that
+    surfaces as an empty completion (no content, no usage), i.e. a vanished turn. The
+    ``resolve_endpoint`` path already appends the path via ``build_chat_url``; this is the
+    defensive counterpart for callers that pass a bare base (the live agent loop uses the
+    session's stored ``endpoint_url``).
+
+    Idempotent and conservative: a URL already ending in a known completion path is returned
+    unchanged, and only a bare ``…/v1`` / ``…/api/v1`` / ``…/api`` base gets ``/chat/completions``
+    appended — a non-standard custom path (copilot/opencode/etc.) is left untouched."""
+    u = (url or "").rstrip("/")
+    if not u:
+        return url
+    if u.endswith(("/chat/completions", "/completions", "/responses", "/v1/messages")):
+        return u
+    if u.endswith("/v1") or u.endswith("/api/v1") or u.endswith("/api"):
+        return u + "/chat/completions"
+    return url
+
+
 def _model_list_base(url: str) -> str:
     """Normalize model/chat URLs to the configured endpoint base."""
     base = (url or "").strip().rstrip("/")
@@ -1172,7 +1196,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
             stream=False, num_ctx=get_context_length(url, model),
         )
     else:
-        target_url = url
+        target_url = _ensure_openai_chat_path(url)
         if provider == "copilot":
             from src.copilot import apply_request_headers
             apply_request_headers(h, messages_copy)
@@ -1416,7 +1440,7 @@ async def _llm_call_async_impl(
             stream=False, num_ctx=get_context_length(url, model),
         )
     else:
-        target_url = url
+        target_url = _ensure_openai_chat_path(url)
         h = _provider_headers(provider, headers)
         if provider == "copilot":
             from src.copilot import apply_request_headers
@@ -1581,7 +1605,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             stream=True, tools=tools, num_ctx=get_context_length(url, model),
         )
     else:
-        target_url = url
+        target_url = _ensure_openai_chat_path(url)
         payload = {
             "model": model,
             "messages": messages_copy,
