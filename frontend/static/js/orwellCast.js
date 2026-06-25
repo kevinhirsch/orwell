@@ -158,16 +158,44 @@
         #orwell-cast .oc-empty { opacity: .65; font-size: .8rem; line-height: 1.5; padding: .4rem 0; }
         /* L12: pin/un-pin the cast window into the right-side gadget rail. */
         #orwell-cast .oc-toolbar { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
+        /* #769 / #771 — the Compact-pin control is a FIRST-CLASS kit button. The markup
+           carries .ow-btn .ow-btn-secondary, so on the glass tier it inherits the kit's
+           shared material (translucent veil, specular rim, soft float shadow, dark legible
+           chrome ink, NO accent on the label) by construction. This .oc-pin block carries
+           only the pin-SPECIFIC overrides: the small Normal-tier control (no .ow-btn base
+           exists off-glass), a sensible compact size, the monochrome glyph, and the
+           toggled/active states. Apple-restrained: a small neutral capsule, not a tinted CTA. */
         #orwell-cast .oc-pin {
-          cursor: pointer; font: inherit; font-size: .72rem; letter-spacing: .02em;
-          color: inherit; background: rgba(255,255,255,.06);
-          border: 1px solid var(--border, #355a66); border-radius: 8px;
-          padding: .3rem .55rem; min-height: 28px; display: inline-flex; align-items: center; gap: .35rem;
+          cursor: pointer; font: inherit; font-size: .72rem; font-weight: 600; letter-spacing: -0.01em;
+          color: #16191f; background: rgba(255,255,255,.30);
+          border: 1px solid color-mix(in srgb, #16191f 10%, transparent); border-radius: 999px;
+          padding: .32rem .68rem; min-height: 30px;
+          display: inline-flex; align-items: center; gap: .4rem;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 1px 2px rgba(0,0,0,.10);
+          transition: background-color .18s ease, box-shadow .18s ease,
+                      transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease;
         }
-        #orwell-cast .oc-pin:hover { background: rgba(255,255,255,.12); }
+        #orwell-cast .oc-pin:hover { background: rgba(255,255,255,.42); transform: translateY(-1px); }
+        #orwell-cast .oc-pin:active { transform: translateY(0) scale(.97); filter: brightness(.97); }
+        #orwell-cast .oc-pin:focus-visible {
+          outline: none;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 0 0 2px var(--ow-ios-blue, #0a84ff);
+        }
+        /* toggled: when the roster is currently pinned (aria-pressed), the control reads as
+           an engaged neutral plate — a brighter fill + an accent ring, the same "lit up,
+           filled in" toggled language the decision options use, never an accent label. */
+        #orwell-cast .oc-pin[aria-pressed="true"] {
+          background: color-mix(in srgb, #16191f 92%, transparent); color: #fff;
+          border-color: var(--ow-ios-blue, #0a84ff);
+          box-shadow: 0 0 0 1px var(--ow-ios-blue, #0a84ff), 0 1px 3px rgba(0,0,0,.22);
+        }
+        #orwell-cast .oc-pin[aria-pressed="true"] .oc-pin-ic { opacity: 1; }
+        /* The 44px coarse-pointer tap floor (WCAG 2.5.5) is owned in style.css (the RESP-1/2
+           @media (hover:none) and (pointer:coarse) block already lifts .oc-pin to 44px) — one
+           source of truth, so it isn't duplicated here. */
         /* #769: the pin icon is a MONOCHROME inline SVG (currentColor) — kit glyph language,
            no full-color emoji. flex-shrink:0 keeps it crisp beside the label. */
-        #orwell-cast .oc-pin .oc-pin-ic { flex-shrink: 0; opacity: .85; }
+        #orwell-cast .oc-pin .oc-pin-ic { flex-shrink: 0; opacity: .8; }
         #orwell-cast .oc-pin:hover .oc-pin-ic { opacity: 1; }
         #orwell-cast .oc-actions { margin-top: .8rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
         #orwell-cast .oc-backfill {
@@ -193,7 +221,7 @@
         }
       </style>
       <div class="oc-toolbar">
-        <button type="button" class="oc-pin" id="oc-pin" title="Compact pin — two portraits in the control-room rail"><svg class="oc-pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 8 3 3H7l3-3-1-8z"/></svg><span>Compact pin</span></button>
+        <button type="button" class="oc-pin ow-btn ow-btn-secondary" id="oc-pin" aria-pressed="false" title="Compact pin — dock the cast roster into the control-room rail"><svg class="oc-pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 8 3 3H7l3-3-1-8z"/></svg><span>Compact pin</span></button>
       </div>
       <div class="oc-grid" id="oc-grid"></div>
       <div class="oc-empty" id="oc-empty" style="display:none"></div>
@@ -232,8 +260,17 @@
     // pinned state + render; this just toggles it and the window dismisses itself).
     const pinBtn = el2.querySelector("#oc-pin");
     if (pinBtn) {
+      // #771 — reflect the live pinned state on the toggle (aria-pressed drives the
+      // toggled visual + tells AT this is a two-state control). The full window is only
+      // ever open while UN-pinned (pinning dismisses it), so this normally reads "false";
+      // we still source it from the gadget so the semantics are correct, not assumed.
+      try {
+        const pinned = !!(window.OrwellCastPin && window.OrwellCastPin.isPinned());
+        pinBtn.setAttribute("aria-pressed", pinned ? "true" : "false");
+      } catch (_) {}
       pinBtn.addEventListener("click", () => {
         if (window.OrwellCastPin) window.OrwellCastPin.setPinned(true);
+        pinBtn.setAttribute("aria-pressed", "true");
       });
     }
     return el2;

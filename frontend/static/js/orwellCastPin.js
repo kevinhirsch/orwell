@@ -81,7 +81,10 @@
       "#orwell-cast-pin .ocp-face img { width: 100%; height: 100%; object-fit: cover; }" +
       // L16: evicted houseguests render grayscale; active/jury stay full color.
       "#orwell-cast-pin .ocp-face.ocp-evicted img { filter: grayscale(1); }" +
-      "#orwell-cast-pin .ocp-face .ocp-ph { font-size: 1.1rem; opacity: .45; }" +
+      // #771 — the placeholder is a MONOCHROME inline SVG silhouette (currentColor), kit
+      // glyph language, not an off-brand color emoji. Sized to the tiny rail face.
+      "#orwell-cast-pin .ocp-face .ocp-ph { display: flex; align-items: center; justify-content: center; opacity: .42; }" +
+      "#orwell-cast-pin .ocp-face .ocp-ph svg { width: 56%; height: 56%; }" +
       "#orwell-cast-pin .ocp-foot { margin-top: .3rem; opacity: .6; }" +
       // #740 — anti-overlap belt: the cast-pin gadget is a RAIL gadget (it mounts into
       // #gadget-rail-body and flows in the rail column, which clears the composer by
@@ -115,11 +118,18 @@
     if (typeof window._orwellCastEnsure === "function") window._orwellCastEnsure();
   }
 
+  // #771 — monochrome silhouette glyph (currentColor) shared by every placeholder face,
+  // matching the kit's inline-SVG icon language (no color emoji).
+  var OCP_SILHOUETTE =
+    '<span class="ocp-ph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/>' +
+    '<path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></span>';
+
   function faceHtml(hg) {
     var evicted = hg && hg.status === "evicted"; // L16
     var inner = (hg && hg.portrait)
       ? '<img loading="lazy" alt="' + esc(hg.name) + '" src="' + esc(hg.portrait) + '">'
-      : '<span class="ocp-ph">👤</span>';
+      : OCP_SILHOUETTE;
     return '<div class="ocp-face' + (evicted ? " ocp-evicted" : "") + '">' + inner + "</div>";
   }
 
@@ -147,7 +157,7 @@
     var ordered = roster.slice().sort(function (a, b) { return rank(a) - rank(b); });
 
     var faces = el.querySelector('[data-role="portraits"]');
-    faces.innerHTML = ordered.map(faceHtml).join("") || '<div class="ocp-face"><span class="ocp-ph">👤</span></div>';
+    faces.innerHTML = ordered.map(faceHtml).join("") || '<div class="ocp-face">' + OCP_SILHOUETTE + "</div>";
 
     var present = roster.filter(function (h) { return !h.status || h.status === "active"; }).length;
     var foot = el.querySelector('[data-role="foot"]');
