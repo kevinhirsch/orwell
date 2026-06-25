@@ -115,6 +115,10 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["kind"])) refuse("kind", "a deal kind (string)");
       if (!isStr(args["terms"])) refuse("terms", "a non-empty string");
       return;
+    case "confide":
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      if (!isStr(args["npcId"])) refuse("npcId", "a houseguest id (string)");
+      return;
     case "runCompetition":
       if (args["type"] !== undefined && typeof args["type"] !== "string") refuse("type", "a string when present");
       if (args["participantIds"] !== undefined && !isStrArray(args["participantIds"])) {
@@ -263,6 +267,9 @@ export class McpServer {
         return this.deps.session.turnIn();
       case "makeDeal":
         return this.deps.session.makeDeal(args as unknown as MakeDealReq);
+      case "confide":
+        // 0075 — the trust-gated confidence: the engine decides + records; the model voices the result.
+        return this.deps.session.confide(args["npcId"] as EntityId, args["expectedBeatSeq"] as number | undefined);
       case "getVisibleStateFor":
         return this.deps.player.getVisibleState();
       case "renderScene":

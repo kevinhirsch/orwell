@@ -367,6 +367,23 @@ export interface MakeDealReq {
   expectedBeatSeq?: number;
 }
 
+/**
+ * The result of a `confide` (feature 0075). The engine decided WHETHER the houseguest opened up,
+ * WHICH tier (how much), and whether it was a real confidence or a fabricated one (a lie). The
+ * `content` is the text the model is handed to VOICE — already redacted/fabricated to the tier, so
+ * no undisclosed secret ever crosses. `truthful` is the ENGINE's record (so a later pathway can
+ * contradict a lie); it is NOT a player-facing tell — the model voices the confidence plainly and
+ * judging it is the human's job (anti-sycophancy). A motive below the floor ⇒ `disclosed: false`
+ * and no `content` (the model plays the deflection — itself a small, real beat).
+ */
+export interface ConfideResult {
+  disclosed: boolean;
+  tier: "none" | "tease" | "partial" | "full";
+  truthful: boolean;
+  /** The text to voice — present only when `disclosed`. Redacted/fabricated to the tier. */
+  content?: string;
+}
+
 export interface CreateCharacterReq {
   /**
    * The player's authored display name (the only human-authored profile). Optional since 0050:
@@ -851,6 +868,16 @@ export interface NpcVoiceView {
   suspects: string[];
   /** Organic stances toward the other ACTIVE houseguests — labels, never numbers (ADR 0002). */
   stances: Array<{ toward: NamedRef; stance: string }>;
+  /**
+   * Feature 0075 — the read-only, Vault-SAFE hint that this houseguest is READY to confide in the
+   * player (the "no cold open" emergent path). Present ONLY when the disclosure motive clears the
+   * floor AND a fresh precipitating event makes the moment plausible — so the model leans into a
+   * confidence the scene has EARNED, never a non-sequitur. It carries only a `reason` word and a
+   * `warmth` word — NEVER the secret, NEVER a number. The model then drives it through the `confide`
+   * lever so the disclosure stays engine-decided and recorded (never narrated free-hand). Absent ⇒
+   * no readiness this scene (the common case).
+   */
+  mayConfide?: { ready: true; reason: string; warmth: "high" | "growing" };
 }
 
 /**
@@ -1215,6 +1242,22 @@ export interface GameSession {
    * actions and makes a broken promise hurt. Returns the new deal's Vault-free projection.
    */
   makeDeal(req: MakeDealReq): DealView | null;
+
+  /**
+   * Feature 0075 — press an ally to open up (a trust-gated confidence). The SINGLE authority, like
+   * `runCompetition`: the model voices/previews, the ENGINE decides + commits. Evaluates the
+   * Vault-hidden `disclosureMotive` (mutual bond + banked goodwill) — and, for a manipulative
+   * houseguest reading the player as useful-but-threatening, a STRATEGIC motive that may produce a
+   * LIE — picks the tier, selects/redacts the real secret (or fabricates a false one), RECORDS the
+   * resulting belief as the player's knowledge via an in-game `told-by` pathway (0002), folds the
+   * vulnerability bond bump (0023), and returns `{ disclosed, tier, content, truthful }`. The Wall
+   * holds structurally: the engine never hands the model an UNdisclosed secret, a sub-`full` tier
+   * never returns the whole premise, and a lie is engine-authored from the PUBLIC archetype (never a
+   * real secret of anyone). Monotonic: a true secret is never re-confided at a LOWER tier than
+   * already reached. `null` pre-game / for an unknown or non-active houseguest.
+   * 0065 Part A: optional `expectedBeatSeq` compare-and-swap (stale ⇒ 409, no disclosure).
+   */
+  confide(npcId: EntityId, expectedBeatSeq?: number): ConfideResult | null;
   /**
    * Which houseguests want to approach the player right now (0012/0036) — relationship-driven
    * (allies scheme, rivals probe), so scenes start from EITHER side, not only player→NPC. Returns
