@@ -3507,15 +3507,28 @@ async def stream_agent_loop(
             _token_policy = None
     # ADR 0010 follow-on #1: the per-class `max_tokens` is the EFFECTIVE output cap for a game/casting
     # turn (admin-editable at runtime via `max_tokens_budget`). It supersedes the inherited preset
-    # default for these turns only; non-game chat keeps the caller's `max_tokens` (byte-identical). The
-    # resolved value is always a sane positive int, so this never widens to "uncapped". `appliedMaxTokens`
+    # default for these turns only; non-game chat keeps the caller's `max_tokens` (byte-identical).
+    #
+    # The policy returns a positive int ONLY for an explicit, in-band admin override; for the default
+    # case (narration/casting) it returns `max_tokens: None`, meaning "use the model-aware cap". We
+    # resolve that here — at the call site that knows the concrete model — to a generous, model-sized
+    # output cap (`_model_max_output_tokens`), NOT a flat 4096: a reasoning model (deepseek-v4-pro
+    # counts reasoning+visible against `max_tokens`) burns the budget thinking and would truncate the
+    # answer mid-reply (the #835 truncation vector / #620 NARR-5 warning that #572's flat cap
+    # resurfaced). The value always ends a positive int (Anthropic requires an explicit cap;
+    # OpenAI/OpenRouter apply it only when >0), so it never widens to "uncapped". `appliedMaxTokens`
     # (the ledger field) records exactly this number.
     _effective_max_tokens = max_tokens
     if _token_policy:
         try:
             _pol_mt = _token_policy.get("max_tokens")
             if isinstance(_pol_mt, int) and not isinstance(_pol_mt, bool) and _pol_mt > 0:
-                _effective_max_tokens = _pol_mt
+                _effective_max_tokens = _pol_mt  # explicit, in-band admin override wins
+            else:
+                # No override (default case): use the model-aware output cap, not the inherited
+                # preset default — full reasoning+answer headroom for the concrete model.
+                from src.llm_core import _model_max_output_tokens
+                _effective_max_tokens = _model_max_output_tokens(model)
         except Exception:
             _effective_max_tokens = max_tokens
     # ADR 0010 slice C: the canonical game session (0064) is the cache-stickiness key (every device's
