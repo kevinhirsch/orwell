@@ -55,6 +55,24 @@ def test_approach_nudge_is_wired_into_the_lingering_window():
     assert "_approach_nudge(_name, _top.get(\"motive\"))" in js
 
 
+def test_approach_nudge_honors_one_narration_per_turn():
+    """The approach nudge must NOT re-prompt a SECOND scene once the player has already been shown
+    one this turn (the duplicate/overlapping bedroom-scene bug). It must carry the SAME
+    `_emitted_visible` suppression the advance ladder honors — a second re-prompt appends a second
+    narration to the same message, so the player sees two scenes concatenated."""
+    import os
+    js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "src", "agent_loop.py"), encoding="utf-8").read()
+    # The gate excludes a turn that already showed a scene (mirrors the advance nudge's guard).
+    assert "and (not _emitted_visible)" in js, \
+        "_want_approach must suppress when a scene was already shown this turn"
+    # It is folded into the SAME _want_approach gate (not a separate, bypassable check).
+    gate_start = js.index("_want_approach = (_is_lull")
+    gate_block = js[gate_start:gate_start + 300]
+    assert "(not _emitted_visible)" in gate_block, \
+        "the _emitted_visible guard must live inside the _want_approach gate"
+
+
 def test_no_player_facing_initiatives_route_or_panel_remains():
     """The intent must not reach the player through any route/panel — only chat."""
     import os
