@@ -3206,6 +3206,32 @@ export class GameSessionAdapter implements GameSession {
     };
   }
 
+  /**
+   * #840 — the gate the off-screen society (the orchestrator's `defaultApply` tick) uses so a LIVE
+   * off-screen `showmance` scene obeys the SAME discipline the SEEDED layer (0059/0063) does:
+   *
+   *   • `plausible(a, b)` — orientation-aware eligibility (reuses `showmanceEligiblePredicate`): a live
+   *     showmance only forms between an orientation-plausible pair (a queer showmance is first-class).
+   *   • `hasActiveShowmance(id)` — whether the houseguest ALREADY holds an active (non-`resolved`,
+   *     non-evicted) seeded showmance partner, so the off-screen tick never gives anyone a SECOND
+   *     active showmance (the within-tick half of the one-partner cap lives in `richOffscreenStretch`).
+   *
+   * Engine-only by construction (it reads the Vault-sealed private orientations + seeded showmances but
+   * surfaces neither — only the demotion's later BEHAVIOR is observable). The off-screen layer doesn't
+   * mint a persistent showmance record, so "active partner" is sourced from the seeded showmance layer.
+   */
+  offscreenShowmanceGate(): { plausible: (a: EntityId, b: EntityId) => boolean; hasActiveShowmance: (id: EntityId) => boolean } {
+    const plausible = this.showmanceEligiblePredicate();
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const partnered = new Set<EntityId>();
+    for (const s of this.seededRels.showmances) {
+      if (s.stage === "resolved" || evicted.has(s.a) || evicted.has(s.b)) continue;
+      partnered.add(s.a);
+      partnered.add(s.b);
+    }
+    return { plausible, hasActiveShowmance: (id) => partnered.has(id) };
+  }
+
   private seedSeededRelationships(seed: number): void {
     if (!this.house) return;
     const rng = new SeededRandom(hashSeed(`${seed}:seeded-relationships`));
