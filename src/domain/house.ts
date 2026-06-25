@@ -50,6 +50,52 @@ export function areAdjacent(a: Room, b: Room): boolean {
 }
 
 /**
+ * The SIGHTLINE graph (0077 Phase 2 — eyeshot, NARROWER than adjacency where it matters). Adjacency
+ * is who you can WALK to; sightline is whose occupants you can SEE from where you stand. The OPEN-PLAN
+ * PUBLIC CORE (kitchen / living-room / dining-room / backyard) is one mutual-visibility CLIQUE —
+ * open plan + glass to the yard, so standing in any one you see everyone in all four (this is the one
+ * place sightline reaches PAST a direct door: you can see across the great room to the yard without a
+ * dining→backyard doorway). The living room also sees into the `hallway` mouth (who is loitering /
+ * moving through it). EVERY OTHER room is a CLOSED door — opaque from outside: standing next to a
+ * bedroom, the bathroom, the lounge, the HOH room (up its own stairs), the storage room (the quiet
+ * meeting spot), or the sealed diary room reveals NOTHING about who is inside — crucially, from the
+ * hallway you do NOT see into the bedrooms it adjoins. That opacity is the privacy payoff (owner note
+ * #3): who is behind a closed door is KNOWLEDGE you earn by watching a doorway, never a free read.
+ * Symmetric + irreflexive (asserted by the unit tests).
+ */
+export const HOUSE_SIGHTLINE: ReadonlyMap<Room, readonly Room[]> = new Map<Room, readonly Room[]>([
+  ["kitchen", ["living-room", "dining-room", "backyard"]],
+  ["living-room", ["kitchen", "dining-room", "backyard", "hallway"]],
+  ["dining-room", ["kitchen", "living-room", "backyard"]],
+  ["backyard", ["kitchen", "living-room", "dining-room"]],
+  ["hallway", ["living-room"]],
+  ["bedroom-a", []],
+  ["bedroom-b", []],
+  ["bedroom-c", []],
+  ["bathroom", []],
+  ["lounge", []],
+  ["hoh-room", []],
+  ["storage-room", []],
+  ["diary-room", []],
+]);
+
+/** Whether an observer standing in room `a` can SEE the occupants of room `b` (0077 Phase 2 eyeshot). */
+export function areVisible(a: Room, b: Room): boolean {
+  return a !== b && (HOUSE_SIGHTLINE.get(a) ?? []).includes(b);
+}
+
+/**
+ * A PRIVATE room is one NO other room has sightline INTO — a closed door, opaque from outside (0077
+ * Phase 2). Its occupants are never an ambient proximity read; they are learned only by watching a
+ * doorway (the tracked-occupancy layer). Derived from the sightline graph (data, not a separate flag)
+ * so the two can never drift. The public core + the hallway are public; everything else is private.
+ */
+export function isPrivateRoom(room: Room): boolean {
+  for (const sees of HOUSE_SIGHTLINE.values()) if (sees.includes(room)) return false;
+  return true;
+}
+
+/**
  * The PUBLIC, natural display name for a room (the same `kitchen`/`living room`/`bedroom A`
  * the player and narrator say aloud). Pure presentation of a public room id — never a Vault
  * fact. Drives the model-facing room list so the narrator always knows the exact names it can

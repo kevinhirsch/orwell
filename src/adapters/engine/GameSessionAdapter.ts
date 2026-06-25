@@ -19,7 +19,7 @@ import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
 import { PRESENCE } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_ADJACENCY, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
+import { HOUSE_SIGHTLINE, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
@@ -2023,12 +2023,15 @@ export class GameSessionAdapter implements GameSession {
       }
       return out;
     };
-    // The player's room + each ADJACENT room only — what they could see or hear themselves.
+    // The player's room + each room they have SIGHTLINE into (0077 Phase 2 — eyeshot, NOT raw
+    // adjacency): the open public core sees across itself + into the hallway mouth, but a CLOSED door
+    // (a bedroom, the bathroom/lounge, the HOH/storage/diary) is opaque — standing one room over no
+    // longer leaks who is behind it. Who is behind a closed door is earned by watching, never ambient.
     const present = inRoom(room);
     return {
       room,
       present,
-      nearby: (HOUSE_ADJACENCY.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) })),
+      nearby: (HOUSE_SIGHTLINE.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) })),
       // L21/L24: duration — the player's tenure in this room + each companion's, so the narrator
       // voices continuity (who has lingered with you vs. who just walked in) instead of resetting.
       turnsHere: this.presenceTenure?.get(me) ?? 0,
