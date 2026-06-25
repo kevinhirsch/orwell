@@ -143,6 +143,10 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       // domain-validates it (reasonable two-token name, non-colliding) and falls back to the corpus
       // name if it doesn't pass, so a malformed name never fails the whole call.
       if (args["name"] !== undefined && typeof args["name"] !== "string") refuse("name", "a string when present");
+      // The optional LLM-authored PUBLIC occupation (#849) — a string when present; the adapter ignores
+      // a blank value (the seeded `vocation` stands) and keeps it in lockstep with the biography, so a
+      // malformed value never fails the whole call.
+      if (args["vocation"] !== undefined && typeof args["vocation"] !== "string") refuse("vocation", "a string when present");
       return;
     case "recordCastIdentity":
       // #544: the FE cast-identity write-back. `facets` is the per-houseguest map of PROPOSED descriptive

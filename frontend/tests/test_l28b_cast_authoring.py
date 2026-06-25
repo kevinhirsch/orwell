@@ -299,3 +299,35 @@ def test_quality_floor_drops_a_one_word_weakness_and_trivial_secrets():
     assert "secrets" not in prof, "all-trivial secrets would overwrite the seeded list"
     # a rich biography still survives alongside the dropped hidden fields
     assert prof["biography"] == _FULL["biography"]
+
+
+# ── #849 — the PUBLIC occupation (vocation) is authored in lockstep with the biography ─────────────
+
+def test_849_prompt_instructs_vocation_lockstep_with_the_biography():
+    """#849: the producer prompt must (a) request a `vocation` key, and (b) instruct the model to keep
+    the public occupation and the biography naming the SAME job (so the engine's hidden stakes, keyed
+    off vocation, cohere with the job the player reads)."""
+    msgs = A.build_authoring_messages({"id": "npc:1", "name": "Dana Reyes", "vocation": "welder"})
+    system = msgs[0]["content"]
+    assert '"vocation"' in system
+    low = system.lower()
+    assert "occupation" in low and "same job" in low
+    # vocation is a PUBLIC field the parser forwards (it crosses to the player, in lockstep with the bio)
+    assert "vocation" in A._PUBLIC_KEYS
+
+
+def test_849_parser_forwards_an_authored_vocation():
+    prof = A.parse_authored_profile(json.dumps(dict(_FULL, vocation="court reporter")), "npc:7")
+    assert prof["vocation"] == "court reporter"
+
+
+def test_849_parser_collapses_whitespace_and_drops_a_runaway_vocation():
+    # a clean noun phrase has its internal whitespace/newlines collapsed
+    prof = A.parse_authored_profile(json.dumps(dict(_FULL, vocation="  court\n reporter ")), "npc:7")
+    assert prof["vocation"] == "court reporter"
+    # a runaway paragraph masquerading as an occupation is dropped (the seeded vocation then stands)
+    runaway = "a court reporter who also " + ("moonlights " * 20)
+    prof2 = A.parse_authored_profile(json.dumps(dict(_FULL, vocation=runaway)), "npc:7")
+    assert "vocation" not in prof2
+    # an empty / blank vocation is simply not forwarded
+    assert "vocation" not in A.parse_authored_profile(json.dumps(dict(_FULL, vocation="   ")), "npc:7")

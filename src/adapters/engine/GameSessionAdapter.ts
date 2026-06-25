@@ -1184,6 +1184,22 @@ export class GameSessionAdapter implements GameSession {
     }
 
     // (1) PUBLIC fold onto the byte-stable Character — these cross to the player.
+    // OCCUPATION/VOCATION LOCKSTEP (#849): the public `vocation` is the job the player reads — and the
+    // hidden secret STAKE is keyed off it (deepProfile's `sectorOf(vocation)`). The authoring LLM can
+    // re-write the public cover (biography → a NEW occupation) without re-grounding `vocation`, leaving
+    // the seeded hidden stakes keyed to the OLD job (the Producer's-Vault audit: a "court reporter" bio
+    // over business-owner stakes). So when the author supplies a new `vocation`, fold it onto the public
+    // Character FIRST — in lockstep with the biography — so both public facets agree AND the seeded-floor
+    // re-derive below (step 2) reads the corrected occupation. A blank/non-string value is ignored (the
+    // seeded `vocation` stands). Trim to a clean noun phrase; the cast-mirror guard already ran above on
+    // the biography (the occupation noun is too short to meaningfully mirror a player name).
+    const priorVocation = target.character.vocation;
+    if (typeof req.vocation === "string" && req.vocation.trim().length > 0) {
+      target.character.vocation = req.vocation.trim();
+      if (target.character.vocation !== priorVocation) publicFields.push("vocation");
+    }
+    // Did the occupation the player infers actually change? Drives the hidden-stake re-ground in step 2.
+    const occupationChanged = target.character.vocation !== priorVocation;
     if (req.biography !== undefined) target.character.biography = req.biography;
     if (req.physicalCharacteristics !== undefined) {
       target.character.physicalCharacteristics = req.physicalCharacteristics;
@@ -1206,17 +1222,26 @@ export class GameSessionAdapter implements GameSession {
     // The author supplies the Day-1 read as PROSE only — the engine KEEPS the calibrated seeded leans
     // (anti-sycophancy: the LLM authors flavor, never the hidden weights; this also preserves the
     // net-zero perception balance the juryReach gate depends on). Only the read TEXT is authored.
-    const prev: DeepProfile = ctx.profiles[target.id]
-      // Coherence floor (P1): when no prior profile exists, the seeded fallback is now CHARACTER-
-      // CONDITIONED off the target's own archetype/vocation/age (never the player) — a coherent
-      // individual hidden life, not a flat shared-pool draw. The narrative text rides a DEDICATED
-      // sub-stream (#392 RNG-isolation), matching the cast-layer key so the fallback agrees with it.
-      ?? generateDeepProfile(
-        new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)),
-        undefined,
-        target.character,
-        hashSeed(`${this.gameSeed ?? 0}:deep-narrative:${target.name}`),
-      );
+    // The CHARACTER-CONDITIONED seeded floor (P1): coherent off the target's own archetype/vocation/age
+    // (never the player). The narrative text rides a DEDICATED sub-stream (#392 RNG-isolation), matching
+    // the cast-layer key so the fallback agrees with it.
+    const seededFloor = (): DeepProfile => generateDeepProfile(
+      new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:deep-hidden:${target.name}`)),
+      undefined,
+      target.character,
+      hashSeed(`${this.gameSeed ?? 0}:deep-narrative:${target.name}`),
+    );
+    // #849 RE-GROUND: when the occupation changed, the EXISTING seeded floor (in `ctx.profiles`) was
+    // composed off the OLD vocation, so its secrets/goals/weakness cohere with the WRONG job. Re-derive
+    // the floor off the now-corrected `target.character` so any hidden field the author leaves to the
+    // engine reads like the occupation the player will infer. The re-derive is TEXT-ONLY by construction:
+    // vocation feeds only deepProfile's isolated narrative stream (#392), so the calibrated Day-1 leans
+    // are byte-identical — and we carry the PRIOR `dayOnePerception` across regardless, so the move-in
+    // NPC→player edge (the juryReach calibration) is provably untouched.
+    const prior: DeepProfile | undefined = ctx.profiles[target.id];
+    const prev: DeepProfile = occupationChanged
+      ? { ...seededFloor(), dayOnePerception: (prior ?? seededFloor()).dayOnePerception }
+      : (prior ?? seededFloor());
     const next: DeepProfile = {
       secrets: req.secrets ?? prev.secrets,
       trueGoals: req.trueGoals ?? prev.trueGoals,
@@ -1236,7 +1261,12 @@ export class GameSessionAdapter implements GameSession {
     // (4) Full-fidelity recall (L27b): replace the prior deep-profile note in the authoritative soul
     // memory (engine-only; never crosses) so the authored detail is recall-able in full and persists +
     // re-indexes on restore. Also index it NOW for same-session recall.
-    const oldNote = deepProfileToVaultContent(target.id, prev);
+    // The note to REPLACE is the one ACTUALLY stored — the genuine prior profile (`prior`), NOT the
+    // possibly re-grounded floor in `prev`: when the occupation changed, `prev` is the re-derived floor
+    // and would not match the stored note, so we'd leak a stale old-vocation note (a non-degradation
+    // regression). Anchoring on `prior` keeps the swap idempotent. (`prior` undefined ⇒ nothing to
+    // replace, so the new note is appended below — same as a first-time seal.)
+    const oldNote = deepProfileToVaultContent(target.id, prior ?? prev);
     const newNote = deepProfileToVaultContent(target.id, next);
     const idx = target.soul.memory.lastIndexOf(oldNote);
     if (idx >= 0) {

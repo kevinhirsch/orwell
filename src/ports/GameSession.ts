@@ -1072,6 +1072,16 @@ export interface RecordCastProfileReq {
   // --- PUBLIC (crosses to the player; folded onto the byte-stable Character) ---
   /** An LLM-generated, real-sounding replacement display name (public). Absent ⇒ the engine's seeded corpus name stands (the deterministic floor). Rejected if not a reasonable two-token human name. */
   name?: string;
+  /**
+   * The houseguest's PUBLIC occupation — a short noun phrase, e.g. "court reporter" — the `vocation`
+   * facet the player reads the job from. Author this WHENEVER the authored `biography` describes a
+   * different occupation than the seeded skeleton's: the engine keeps `vocation` and the biography in
+   * LOCKSTEP (both public) and RE-GROUNDS the seeded hidden secret stakes off the new occupation (#849),
+   * so the hidden life can never cohere with a job the player would never infer. Absent ⇒ the seeded
+   * `vocation` stands unchanged (and the hidden stakes keyed off it are left untouched). A blank /
+   * non-string value is ignored (the seeded floor stands).
+   */
+  vocation?: string;
   /** A real multi-sentence backstory (the presentable parts). */
   biography?: string;
   /** The structured physical-characteristics facet (text↔image single source of truth). */
