@@ -60,7 +60,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # Big Brother game engine (Vault-free): the model drives the game by
              # calling these, then narrates the engine-decided results.
              "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
-             "socialInitiatives", "diaryRoom", "makeDeal", "whereabouts", "moveTo",
+             "socialInitiatives", "diaryRoom", "makeDeal", "confide", "whereabouts", "moveTo",
              "premiereIntros", "markHouseguestMet",
              "seasonRecap", "seasonRetrospective", "npcVoice",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
@@ -96,6 +96,8 @@ GAME_TOOL_KEEP = frozenset({
     # C13: the three prompt-advertised levers that were missing from the FE surface —
     # NPC approaches, the player's recorded confessional, and first-class deals (0039).
     "socialInitiatives", "diaryRoom", "makeDeal",
+    # 0075: the trust-gated confide lever (the engine decides the disclosure; the model voices it).
+    "confide",
     # B64/0049: the Vault-free presence read (lingering play has engine ground truth).
     "whereabouts",
     # L21/L24: the player walks where they choose; the engine never auto-relocates a person.
