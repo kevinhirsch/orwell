@@ -1106,8 +1106,6 @@ _STATUS_PAGE = """<!doctype html>
   <button type="button" class="btn" id="trim-now" title="Trim every managed logfile to the selected horizon right now">Trim now</button>
   <span id="retmsg" class="sub"></span>
 </div>
-<h1 style="margin-top:26px">RUNTIME OVERSEER</h1>
-<div class="sub">The pacing-overseer and narration-faithfulness dials — and the dedicated faithfulness judge model — now live in <strong>Settings &rarr; AI &rarr; Runtime overseer</strong>. The live diagnostics still stream to the <strong>Overseer (live)</strong> panel above. The <code>ORWELL_OVERSEER_MODE</code> / <code>ORWELL_FAITHFULNESS_MODE</code> env vars remain the headless fallback.</div>
 <div id="err"></div>
 <script nonce="{{CSP_NONCE}}">
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
