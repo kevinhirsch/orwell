@@ -130,6 +130,22 @@
     #login-bg-host * { animation: none !important; }
   }
 
+  /* macOS sign-in transition (phase a): on a successful login the whole login
+     screen quickly fades opacity → 0 just before we navigate to the app, so the
+     hand-off reads as one continuous animation (the app then slides its surfaces
+     in — phase b). A gentle scale-down adds the macOS "dissolve into the desktop"
+     feel. Honoured only when motion is allowed (the JS skips adding the class
+     under prefers-reduced-motion, and this rule no-ops there too). */
+  body.login-leaving {
+    opacity: 0;
+    transform: scale(0.985);
+    transition: opacity 0.28s ease, transform 0.28s ease;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body.login-leaving { transition: none; transform: none; }
+  }
+
   /* THE GLASS PANEL — the single floating functional layer. */
   .card {
     /* Tinted, very-translucent base so the moving background actually shows
@@ -604,6 +620,24 @@
       sessionStorage.removeItem('ody-session-active');
       submitBtn.innerHTML = '<span class="login-spinner" aria-hidden="true"></span>';
       submitBtn.disabled = true;
+      // macOS sign-in transition (phase a): arm the dedicated flag so the APP
+      // page (index.html) plays the staggered surface slide-in on its first
+      // reveal — and ONLY then (it's consumed once; never replays on poll/
+      // gamechanged/reload). Then quickly fade the login screen to 0 before we
+      // navigate, so the eye reads it as one continuous sign-in animation rather
+      // than a hard page swap. prefers-reduced-motion ⇒ no fade (instant nav).
+      try { sessionStorage.setItem('ody-signin-transition', '1'); } catch (_) {}
+      const _reduced = (function(){ try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(_) { return false; } })();
+      function _go() { window.location.replace('/'); }
+      function _fadeThenGo() {
+        if (_reduced) { _go(); return; }
+        document.body.classList.add('login-leaving');
+        // Navigate after the fade (or a safety timeout if transitionend never fires).
+        let done = false;
+        const fin = () => { if (done) return; done = true; _go(); };
+        document.addEventListener('transitionend', fin, { once: true });
+        setTimeout(fin, 360);
+      }
       Promise.all([
         fetch('/api/sessions', { credentials: 'same-origin' }).then(r => r.json()),
         fetch('/api/auth/features', { credentials: 'same-origin' }).then(r => r.json()),
@@ -612,7 +646,7 @@
         sessionStorage.setItem('ody-prefetch-sessions', JSON.stringify(sess));
         sessionStorage.setItem('ody-prefetch-features', JSON.stringify(feat));
         sessionStorage.setItem('ody-prefetch-settings', JSON.stringify(sett));
-      }).catch(() => {}).finally(() => { window.location.replace('/'); });
+      }).catch(() => {}).finally(_fadeThenGo);
     }
     async function doLogin(totpCode) {
       const loginBody = { username, password, remember };

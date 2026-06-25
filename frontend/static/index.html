@@ -15,6 +15,21 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
   <script nonce="{{CSP_NONCE}}">
   window._orwellLoadTime = Date.now();
+  // macOS sign-in transition (phase b) — capture the "just arrived from login"
+  // flag EARLY and CONSUME it immediately (removeItem), so it is read at most
+  // once. login.html sets `ody-signin-transition` on a successful sign-in right
+  // before it navigates here. Capturing + clearing it here (before any module
+  // can see it) guarantees the entrance is a FIRST-MOUNT-ONLY reveal: a reload
+  // while authed never re-sets the flag, and the 20-30s poll / orwell:gamechanged
+  // refresh never touch sessionStorage — so the slide-in fires exactly once on
+  // the login→app hand-off and NEVER replays. signinTransition.js reads the
+  // global; if it's false the module is an inert no-op.
+  (function(){
+    try {
+      window.__orwellSigninEntrance = sessionStorage.getItem('ody-signin-transition') === '1';
+      if (window.__orwellSigninEntrance) sessionStorage.removeItem('ody-signin-transition');
+    } catch (_) { window.__orwellSigninEntrance = false; }
+  })();
   (function(){
     try {
       var t = JSON.parse(localStorage.getItem('orwell-theme'));

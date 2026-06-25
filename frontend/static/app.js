@@ -29,6 +29,7 @@ import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
+import { playSigninEntrance } from './js/signinTransition.js';
 // Game build (feature 0032): workspace verticals removed — null stubs for guarded usage sites.
 const ragModule = null, searchModule = null, compareModule = null, documentModule = null;
 const memoryModule = null, galleryModule = null, tasksModule = null, calendarModule = null;
@@ -4088,6 +4089,12 @@ function startOrwellApp() {
       .finally(() => {
         const loader = document.getElementById('app-loader');
         if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 300); }
+        // macOS sign-in transition (phase b): the app shell is now revealed (the
+        // loader is fading out), so play the staggered surface slide-in — ONCE,
+        // and only when we arrived from a fresh login (the flag was captured +
+        // consumed in index.html's head). It's a no-op on a reload-while-authed
+        // and never replays on poll / orwell:gamechanged (see signinTransition.js).
+        try { playSigninEntrance(); } catch (_) {}
         // Fire any URL route opener now that sessions + module wiring are
         // ready. Deferred from up top of init for exactly this reason.
         if (window._orwellRouteOpener) {
