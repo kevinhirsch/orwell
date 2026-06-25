@@ -72,7 +72,11 @@ export function politicalTemperature(active: readonly EntityId[], rel: Relations
   };
   const reads = active.map(menace).sort((a, b) => a - b);
   if (reads.length === 0) return { spread: 0, runaway: false };
-  const median = reads[Math.floor(reads.length / 2)]!;
+  // True median over the sorted reads: for an EVEN-length house, average the two central elements
+  // (an upper-central pick — `reads[mid]` — biased `spread` DOWN, so `runaway` tripped slightly
+  // less often than a real median would). Odd length keeps the single central element.
+  const mid = Math.floor(reads.length / 2);
+  const median = reads.length % 2 === 0 ? (reads[mid - 1]! + reads[mid]!) / 2 : reads[mid]!;
   const spread = reads[reads.length - 1]! - median;
   return { spread, runaway: spread > DECISION.nomination.runawaySpread };
 }
