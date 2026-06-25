@@ -562,6 +562,11 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // the CURRENT batch (transient; refreshed every tick; the event store is the durable source).
   sandbox.session.notifyOffscreenTick(scenes.map((s) => s.event.id));
 
+  // 0085 B2 — advance the live campaign layer one tick (form/advance/re-plan + diffuse knownTo). SELF-
+  // GATED: a no-op (and zero draws) unless campaigns are enabled (ORWELL_CAMPAIGNS=1), so the calibration
+  // harness — which never enables them — is byte-identical. Uses its own dedicated rng, never this tick's.
+  sandbox.session.campaignTick();
+
   // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
   // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
   // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at

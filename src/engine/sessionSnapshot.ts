@@ -84,6 +84,9 @@ export interface SessionCore {
    * Phase B populates it from the live off-screen tick.)
    */
   campaigns?: Campaign[];
+  /** The DEDICATED campaign-rng tick counter (0085 B2) — persisted so the campaign trajectory stays
+   * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream). */
+  campaignTickCount?: number;
   /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
   presence?: Record<EntityId, Room>;
   /**
