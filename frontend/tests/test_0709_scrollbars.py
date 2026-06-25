@@ -33,6 +33,14 @@ INDEX = _read("static", "index.html")
 # live here so the test reasons about the right block, not some other surface's bar.
 REGION_MARKER = "APPLE OVERLAY SCROLLBARS (window kit)"
 REGION = CSS.split(REGION_MARKER, 1)[1] if REGION_MARKER in CSS else ""
+# Bound the region at the start of the NEXT appended end-region (the liquid-glass craft
+# region #757, and after it the OrwellSheet kit #753 — which legitimately uses
+# var(--accent)/var(--red) for the anchored sheet rim). Without this bound the scrollbar
+# "no accent" pins would over-reach into a sibling surface's CSS appended later.
+for _next_region in ("LIQUID-GLASS CRAFT REGION", "OrwellSheet — THE iOS bottom-sheet kit"):
+    if _next_region in REGION:
+        REGION = REGION.split(_next_region, 1)[0]
+        break
 # REGION_CODE = the rules only (comments stripped) for "no accent in the actual rules"
 # checks. The marker sits INSIDE the banner comment, so REGION opens mid-comment; drop
 # everything through the banner's closing */ first, then strip any remaining comments.

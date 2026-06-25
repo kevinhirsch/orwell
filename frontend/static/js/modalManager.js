@@ -337,6 +337,15 @@ function _renderDock() {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'minimized-dock-chip';
+    // #752 [PERSISTENT-SURFACE STABILITY]: the dock is a PERSISTENT surface — only a
+    // genuinely NEW chip plays the entrance animation. _renderDock rebuilds ALL chip rows
+    // (rows.innerHTML='') on any change to the minimized set, so an unconditional
+    // dock-chip-in (now gated to .chip-entering in style.css) would re-fly every already-
+    // docked chip on every minimize/restore/close. _renderedChipIds still holds the PREVIOUS
+    // pass's ids here (it's repopulated at the end), so a chip absent from it is the
+    // transient newcomer that should animate; the survivors hold position (the FLIP transform
+    // below reflows them smoothly).
+    if (!_renderedChipIds.has(id)) chip.classList.add('chip-entering');
     chip.dataset.modalId = id;
     chip.title = `Restore ${meta.label}`;
     // Restore any external data-* attributes the previous chip carried

@@ -1046,6 +1046,18 @@ body.bg-pattern-perlin-flow {
       background: none; border: none; border-radius: 6px;
       color: var(--fg); font-family: inherit; font-size: var(--fs-sm);
       cursor: pointer; user-select: none; text-align: left;
+    }
+    /* #752 [PERSISTENT-SURFACE STABILITY] — the Windows dock is a PERSISTENT surface, so its
+       entrance animation is OPT-IN per chip, NEVER replayed on every re-render. _renderDock
+       rebuilds ALL its chip rows (rows.innerHTML='') whenever the minimized SET changes; gating
+       the entrance behind .chip-entering — which _renderDock adds ONLY to a chip whose id was
+       NOT docked on the previous pass — means an already-docked chip stays exactly where it was
+       while one brand-new chip flies in. A NEW chip is a TRANSIENT arrival (it animates); the
+       chips already docked are persistent (they hold position; the FLIP transform in _renderDock
+       smoothly reflows them when the newcomer changes the layout). Without this gate, minimizing
+       window B replayed dock-chip-in on the already-present window A — the "nothing stays where
+       you left it" defect. */
+    .minimized-dock-chip.chip-entering {
       animation: dock-chip-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
     }
     .minimized-dock-chip:hover {
@@ -40680,4 +40692,270 @@ body.theme-frosted .chat-input-bar .input-icon-btn.tool-indicator {
     --ow-sb-thumb: rgba(var(--ow-sb-grey), 0.72);
     --ow-sb-thumb-hover: rgba(var(--ow-sb-grey), 0.92);
   }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   LIQUID-GLASS CRAFT REGION (Genius #21 + #26) — owned by the liquid-glass lane.
+   Two restrained, Apple-restrained material touches, BOTH gated on body.glass-full
+   (the Full-Glass / Chromium SVG-refraction tier — Frosted/Normal are untouched):
+
+     #21  POINTER-REACTIVE SPECULAR — a thin pointer-tracking rim-light on the ONE
+          currently-focused surface (the composer when focused, else the focused
+          window). liquidGlass.js sets data-ow-spec="1" + --ow-spec-x/--ow-spec-y
+          (0..1 pointer position) on EXACTLY ONE surface at a time; this renders a
+          subtle moving specular sheen that tracks the pointer. Under
+          prefers-reduced-motion the JS sets data-ow-spec="static" → a fixed top rim
+          (no pointer chase). The hue is OKLCH-normalized to NEUTRAL (≈0 chroma) so no
+          accent creeps onto the colorless glass, and the peak alpha stays under the
+          #770 soft-hairline ceiling (0.16) so it reads as a hint of life, not a glare.
+
+     #26  CHROMATIC-FRINGE EDGE — a 1px high-chroma gradient border on ≤2 KEY surfaces
+          (the focused window + the composer) for perceived glass "weight" at the very
+          edge. Used SPARINGLY (material quality, never decoration): a thin OKLCH
+          gradient from a faint cool to a faint warm high-chroma stop, both at LOW
+          lightness-contrast so the eye reads "glass dispersion at the edge", not a
+          rainbow. Suppressed (neutralized to 1px) under prefers-reduced-transparency.
+
+   SKIPPED (intentionally deferred, Genius #30): the WebGPU/WebGL flowing-glass spike —
+   research-only / post-launch; SVG refraction (liquidGlass.js) is sufficient. Not built.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Neutral near-white (negligible chroma) — the colorless-glass mandate. The two
+     alpha stops stay well under the #770 0.16 soft-hairline ceiling. */
+  --ow-spec-alpha-core: 0.14;                       /* brightest point of the moving highlight */
+  --ow-spec-alpha-soft: 0.05;                       /* the soft falloff toward the surface */
+  /* Chromatic-fringe stops — high CHROMA, near-equal LIGHTNESS so the edge shimmers
+     like glass dispersion rather than reading as a colored stroke. Kept faint (low
+     alpha) so it's perceived weight, not decoration. OKLCH so the two hues stay
+     perceptually balanced (neither dominates). */
+  --ow-fringe-cool: oklch(0.86 0.16 250 / 0.34);   /* faint cool dispersion */
+  --ow-fringe-warm: oklch(0.86 0.16 30 / 0.30);    /* faint warm dispersion */
+  --ow-fringe-mid:  oklch(0.92 0.05 250 / 0.16);   /* near-neutral midpoint (keeps it from rainbowing) */
+}
+
+/* ── #21 pointer-reactive specular — the single focused surface only ───────────
+   The sheen is a non-interactive ::after radial gradient whose CENTER tracks the
+   pointer via the JS-set custom properties. Default center (0.5, 0) until the first
+   pointermove. The composer needs a positioning context for the absolute pseudo
+   (windows are position:fixed already); scope it here so the base rule is untouched. */
+body.glass-full .chat-input-bar { position: relative; }
+body.glass-full [data-ow-spec]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 3;                       /* above the glass backdrop, below interactive content */
+  opacity: 1;
+  /* The moving specular: a soft radial bloom centered on the pointer. NEUTRAL OKLCH
+     near-white at a low core alpha (--ow-spec-alpha-core, well under the #770 0.16
+     hairline ceiling) → a subtle highlight that hugs wherever the pointer is. The
+     hue carries ~0 chroma so no accent creeps onto the colorless glass. */
+  background: radial-gradient(
+    120px 120px at
+      calc(var(--ow-spec-x, 0.5) * 100%) calc(var(--ow-spec-y, 0) * 100%),
+    oklch(0.99 0.004 250 / var(--ow-spec-alpha-core)) 0%,
+    oklch(0.99 0.004 250 / var(--ow-spec-alpha-soft)) 40%,
+    transparent 72%
+  );
+  /* Confine the bloom toward the RIM so it reads as a rim-light, not a center wash:
+     mask out the interior, keeping a thin band near the edge. */
+  -webkit-mask:
+    linear-gradient(#000, #000) content-box,
+    linear-gradient(#000, #000);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000, #000) content-box,
+    linear-gradient(#000, #000);
+  mask-composite: exclude;
+  padding: 1.5px;                   /* the rim band width the mask carves out */
+}
+/* prefers-reduced-motion → STATIC rim (JS sets data-ow-spec="static"): a fixed soft
+   highlight along the TOP edge, no pointer tracking. */
+body.glass-full [data-ow-spec="static"]::after {
+  background: radial-gradient(
+    140px 90px at 50% 0%,
+    oklch(0.99 0.004 250 / var(--ow-spec-alpha-core)) 0%,
+    oklch(0.99 0.004 250 / var(--ow-spec-alpha-soft)) 45%,
+    transparent 75%
+  );
+}
+@media (prefers-reduced-motion: reduce) {
+  body.glass-full [data-ow-spec]::after { transition: none; }
+}
+/* Reduced transparency → SOLID surfaces (Apple drops glass): no specular sheen. */
+@media (prefers-reduced-transparency: reduce) {
+  body.glass-full [data-ow-spec]::after { display: none; }
+}
+
+/* ── #26 chromatic-fringe edge — ≤2 KEY surfaces (focused window + composer) ───
+   A 1px high-chroma OKLCH gradient border drawn as a masked ::before so it sits at
+   the VERY edge over the glass. Used sparingly: ONLY the focused window and the
+   composer (the two key surfaces) carry it. */
+body.glass-full .ow-window.ow-focused::before,
+body.glass-full .chat-input-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 4;                       /* hairline rides above the specular sheen */
+  padding: 1px;                     /* the 1px fringe thickness */
+  background: linear-gradient(
+    135deg,
+    var(--ow-fringe-cool) 0%,
+    var(--ow-fringe-mid) 50%,
+    var(--ow-fringe-warm) 100%
+  );
+  /* carve out the interior so only the 1px perimeter shows (border-as-gradient). */
+  -webkit-mask:
+    linear-gradient(#000, #000) content-box,
+    linear-gradient(#000, #000);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000, #000) content-box,
+    linear-gradient(#000, #000);
+  mask-composite: exclude;
+}
+/* Reduced transparency → neutralize the fringe to a plain 1px soft neutral hairline
+   (don't fight the solid-surface fallback with a chromatic edge). */
+@media (prefers-reduced-transparency: reduce) {
+  body.glass-full .ow-window.ow-focused::before,
+  body.glass-full .chat-input-bar::before {
+    background: var(--ow-glass-rim-border, rgba(255,255,255,0.12));
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   OrwellSheet — THE iOS bottom-sheet kit (#753, Genius #15/16/17)
+
+   The linked-stylesheet copy of the .ow-sheet family. Every sheet composes
+   orwellSheet.js, which ALSO injects this family at runtime (its ensureCss) so a
+   sheet that mounts before this stylesheet has parsed still renders correctly.
+   Keep this region and the runtime ensureCss() in orwellSheet.js in lock-step
+   (the convention the gadget/notice kits follow). The kit owns: medium+large
+   DETENTS, the OPAQUE-UP cross-fade (--ow-sheet-prog 0→1), the grabber +
+   swipe/scrim/Escape dismiss, and the a11y trio (reduced-transparency opaque,
+   reduced-motion no-slide, prefers-contrast hard rim). Vault-free chrome only.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* the LIGHT scrim (modal sheets only) — the chat peeks through behind it. */
+.ow-sheet-scrim {
+  position: fixed; inset: 0; z-index: 1200;
+  background: var(--ow-sheet-scrim-bg, rgba(0, 0, 0, .32));
+  animation: ow-sheet-scrim-in .2s ease-out;
+}
+@keyframes ow-sheet-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* the sheet panel — bottom-anchored, rising to its detent height. */
+.ow-sheet {
+  position: fixed; left: 50%; bottom: 0; transform: translateX(-50%);
+  z-index: 1201; width: 100%; max-width: 720px;
+  display: flex; flex-direction: column;
+  border-top-left-radius: var(--ow-glass-radius, 20px);
+  border-top-right-radius: var(--ow-glass-radius, 20px);
+  border: 1px solid var(--win-border, var(--border, #355a66)); border-bottom: none;
+  background: var(--win-bg, var(--panel, #111)); color: var(--fg, #9cdef2);
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, .45);
+  font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.5;
+  --ow-sheet-prog: 0;
+  overflow: hidden;
+  transition: height .32s cubic-bezier(.32, .72, 0, 1), background-color .2s ease;
+}
+.ow-sheet.ow-sheet-dragging { transition: none; }   /* 1:1 with the finger while dragging */
+@keyframes ow-sheet-in { from { transform: translate(-50%, 100%); } to { transform: translate(-50%, 0); } }
+@keyframes ow-sheet-out { from { transform: translate(-50%, 0); } to { transform: translate(-50%, 100%); } }
+.ow-sheet.ow-sheet-anim-in { animation: ow-sheet-in .34s cubic-bezier(.32, .72, 0, 1) both; }
+.ow-sheet.ow-sheet-anim-out { animation: ow-sheet-out .26s cubic-bezier(.4, 0, 1, 1) both; }
+
+/* OPAQUE-UP: translucent glass at medium → solid at large (--ow-sheet-prog 0→1). */
+@media (prefers-reduced-transparency: no-preference) {
+  body.theme-frosted .ow-sheet {
+    background-color: var(--ow-glass-light-color, rgba(255, 255, 255, .6));
+    background-image: var(--ow-glass-light-fill, none);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    backdrop-filter: blur(18px) saturate(180%);
+    color: #16191f;
+  }
+  body.theme-frosted .ow-sheet::before {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background: var(--win-bg, var(--panel, #111));
+    opacity: var(--ow-sheet-prog, 0); transition: opacity .2s ease;
+    border-top-left-radius: inherit; border-top-right-radius: inherit;
+  }
+  body.theme-frosted .ow-sheet {
+    color: color-mix(in srgb, #16191f calc((1 - var(--ow-sheet-prog, 0)) * 100%), var(--fg, #9cdef2));
+  }
+}
+/* a11y: reduced-transparency → ALWAYS opaque (no glass, no progress cross-fade). */
+@media (prefers-reduced-transparency: reduce) {
+  .ow-sheet {
+    background: var(--win-bg, var(--panel, #111)) !important;
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
+  .ow-sheet::before { display: none !important; }
+}
+/* a11y: prefers-contrast → a hard, high-contrast rim. */
+@media (prefers-contrast: more), (forced-colors: active) {
+  .ow-sheet { border-color: var(--fg, CanvasText) !important; border-width: 2px !important; }
+  .ow-sheet-grabber span { background: var(--fg, CanvasText) !important; }
+}
+
+/* the grabber handle — the iOS pill, with a 44px hit region. */
+.ow-sheet-grabber {
+  position: relative; flex: 0 0 auto; min-height: 28px; padding-top: 8px;
+  display: flex; align-items: flex-start; justify-content: center;
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.ow-sheet-grabber:active { cursor: grabbing; }
+.ow-sheet-grabber span {
+  display: block; width: 38px; height: 5px; border-radius: 3px;
+  background: color-mix(in srgb, var(--fg, #9cdef2) 38%, transparent);
+}
+.ow-sheet-grabber::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 44px; }
+
+/* the header (title + close). */
+.ow-sheet-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: .5rem;
+  padding: .15rem .9rem .5rem; touch-action: none;
+}
+.ow-sheet-title {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--ow-fs-title, 1rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em;
+}
+.ow-sheet-close {
+  flex: 0 0 auto; min-width: 44px; min-height: 44px; padding: 0; margin: -.5rem -.4rem -.5rem 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none; color: inherit; cursor: pointer;
+  opacity: .65; border-radius: 8px; font: inherit; font-size: 1.1rem;
+}
+.ow-sheet-close:hover, .ow-sheet-close:focus-visible { opacity: 1; background: rgba(255, 255, 255, .1); }
+
+/* the scrolling body. */
+.ow-sheet-body {
+  flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch;
+  padding: 0 .9rem calc(.9rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* ANCHORED (non-modal action-sheet) — the decision card lives here. */
+.ow-sheet.ow-sheet-anchored {
+  position: relative; left: auto; bottom: auto; transform: none;
+  width: 100%; max-width: 760px; margin: 0 auto var(--space-2, .45rem);
+  height: auto !important; z-index: auto; pointer-events: auto;
+  border-radius: var(--ow-glass-radius-inner, 14px);
+  border: 1px solid var(--accent, var(--red, #e06c75));
+  border-bottom: 1px solid var(--accent, var(--red, #e06c75));
+  box-shadow: var(--win-shadow, 0 8px 32px rgba(0, 0, 0, .45));
+}
+.ow-sheet.ow-sheet-anchored .ow-sheet-grabber { min-height: 18px; padding-top: 6px; cursor: default; }
+.ow-sheet.ow-sheet-anchored .ow-sheet-grabber::after { display: none; }  /* not draggable */
+.ow-sheet.ow-sheet-anchored .ow-sheet-body { max-height: 60vh; }
+@keyframes ow-sheet-anchored-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.ow-sheet.ow-sheet-anchored.ow-sheet-anim-in { animation: ow-sheet-anchored-in .22s cubic-bezier(.22, .61, .36, 1) both; }
+
+/* reduced motion strips every sheet animation/transition. */
+@media (prefers-reduced-motion: reduce) {
+  .ow-sheet, .ow-sheet.ow-sheet-anim-in, .ow-sheet.ow-sheet-anim-out,
+  .ow-sheet-scrim, .ow-sheet::before { animation: none !important; transition: none !important; }
 }

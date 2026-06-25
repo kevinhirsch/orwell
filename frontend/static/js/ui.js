@@ -1344,6 +1344,15 @@ if (!window._odyEscExpandGuard) {
       e.stopImmediatePropagation(); e.preventDefault();
       return;
     }
+    // OrwellSheet (#753): a modal bottom-sheet (the casting sheet) is a dialog at the sheet z-band
+    // — Escape dismisses the top open one, after menus + kit windows but before the settings modal.
+    // Anchored (non-modal) sheets — the decision action-sheet — deliberately skip Escape here (the
+    // decision card owns its OWN card-scoped Escape-to-dismiss). The kit returns false when no modal
+    // sheet is open, so this never swallows Escape from the rest of the chain.
+    if (window.OrwellSheetKit && window.OrwellSheetKit.dismissTop()) {
+      e.stopImmediatePropagation(); e.preventDefault();
+      return;
+    }
     // #553: a visible Settings kit modal (.ow-window) dismisses on Escape with DIALOG semantics —
     // from any focused field, like the old bespoke handler. This runs BEFORE the input guard below
     // (which would otherwise swallow ESC whenever a settings input/select has focus). Inner

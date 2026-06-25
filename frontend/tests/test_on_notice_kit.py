@@ -293,7 +293,11 @@ def test_no_new_above_composer_affordance_hand_rolls_its_anchor():
 
     # files allowed to reference the composer bar for NON-affordance reasons (layout, the kit,
     # the composer's own modules). The affordances themselves are kit consumers (asserted above).
-    ALLOWED = set(ABOVE_COMPOSER_AFFORDANCES) | {KIT}
+    # #753: orwellSheet.js is a SIBLING KIT (the iOS bottom-sheet kit), not a hand-rolled
+    # affordance — its anchored placement PREFERS the OrwellNotice zone (OrwellNoticeKit.ensureZone)
+    # and only falls back to a composer-bar anchor when the notice kit is unavailable (fail-open,
+    # the same chain the notice kit itself uses). It is a kit, so it joins the allowed set.
+    ALLOWED = set(ABOVE_COMPOSER_AFFORDANCES) | {KIT, "orwellSheet.js"}
     rx = re.compile(r"insertBefore\([^)]*\b(bar|chatBar)\b\)")
     rogue = {}
     for path in glob.glob(os.path.join(JS_DIR, "*.js")):
