@@ -31,12 +31,15 @@
 //                        true on desktop, irrelevant on mobile (mobileSkip).
 //     mobileSkip:      drag is disabled below this viewport width.
 //                        Default 768. Set to 0 to never skip.
-//     enableDock:      bool — enable left + right edge docks.
-//                        Default true.
+//     enableDock:      DEPRECATED / no-op (#794 follow-up). The left/right
+//                        edge-snap dock that this once toggled is RETIRED — a
+//                        drag never docks a window to a side edge anymore. The
+//                        option is still accepted (callers may pass it) but has
+//                        no effect; windows always drag freely.
 //     enableFullscreen: bool — enable top-edge fullscreen snap.
 //                        Default true when onEnterFullscreen is supplied.
 
-import { makeEdgeDockController } from './modalSnap.js';
+import { clearRightDock } from './modalSnap.js';
 import { makeWindowResizable } from './windowResize.js';
 
 // Registry of content elements that have been manually positioned (dragged).
@@ -79,18 +82,9 @@ window.addEventListener('resize', () => {
 
 const SNAP_PX = 6;        // cursor distance from top edge for fullscreen snap
 const UNSNAP_PX = 24;     // cursor distance from top before fullscreen exits
-const DOCK_EDGE_PX = 60;  // cursor distance from L/R edge to trigger dock
-                          // exit while still in fullscreen state
-
-// CSS-var lookup for the rail+sidebar width — used to decide where the
-// "left edge" effectively is during a fullscreen drag-out (the cursor
-// has to pass the rail to count as "near left").
-function _leftNavWidth() {
-  const rs = getComputedStyle(document.documentElement);
-  const rail = parseInt(rs.getPropertyValue('--icon-rail-w') || '48', 10) || 0;
-  const sb = parseInt(rs.getPropertyValue('--sidebar-w') || '0', 10) || 0;
-  return rail + sb;
-}
+// #794 follow-up: DOCK_EDGE_PX + _leftNavWidth() (the left/right edge-snap
+// geometry) were removed along with the retired edge-snap dock. The only snap
+// gesture left is the top-edge fullscreen one (SNAP_PX / UNSNAP_PX above).
 
 export function makeWindowDraggable(modal, options = {}) {
   const content = options.content;
@@ -105,7 +99,8 @@ export function makeWindowDraggable(modal, options = {}) {
   const skipSelector = options.skipSelector || 'button, input, select';
   const mobileSkip = (typeof options.mobileSkip === 'number') ? options.mobileSkip : 768;
   const enableTouch = options.enableTouch !== false;
-  const enableDock = options.enableDock !== false && !!modal;
+  // options.enableDock is accepted for back-compat but is a no-op now (#794
+  // follow-up) — the left/right edge-snap dock is retired, so we never read it.
 
   // R2 (audit resp-F4): below the mobileSkip tier the drag is disabled (the mousedown/touchstart
   // handlers early-return), so don't paint an INLINE cursor:move — it would beat the responsive CSS
@@ -134,12 +129,26 @@ export function makeWindowDraggable(modal, options = {}) {
     });
   }
 
-  const rightDock = enableDock ? makeEdgeDockController(modal, 'right') : null;
-  // Left dock is enabled by default too. modalSnap collapses the wide sidebar
-  // and anchors the panel beside the icon rail, so it no longer collides with
-  // the navigation. Callers can still pass enableLeftDock:false for a special
-  // modal that should only dock right.
-  const leftDock = (enableDock && options.enableLeftDock !== false) ? makeEdgeDockController(modal, 'left') : null;
+  // #794 follow-up (owner-approved): the left/right EDGE-SNAP dock is RETIRED for
+  // free dragging. It hijacked a drag at release — dropping a window with the
+  // cursor within 60px of a side edge force-re-anchored it into a full-height
+  // docked side panel (pos:fixed, pinned to the edge, body pushed), so the window
+  // did NOT stay where the user dropped it, and the dock was sticky (un-dock
+  // needed an 80px pull-away). That fought the basic expectation: "pull a window
+  // in any direction and drop it where you let go." Owner ruling (verbatim
+  // intent): "I don't actually need the snapping if it's a problem — we could
+  // probably drop the whole thing." So a drag NEVER arms an edge-dock controller
+  // now (makeEdgeDockController is no longer called from this drag path): every
+  // window drags freely and stays exactly where released (still viewport-clamped
+  // on resize, never re-anchored). The top-edge FULLSCREEN snap (a separate
+  // gesture, opt-in via onEnterFullscreen) is untouched.
+  //
+  // modalSnap.js stays imported only for the NON-drag dock flows other modules
+  // drive directly (modalManager minimize/restore: suspendDock/resumeDock;
+  // remembered-dock-on-open: applyEdgeDock) plus clearRightDock, which _startDrag
+  // uses to gracefully peel a remembered-docked window back to free-floating when
+  // it is grabbed. None of those CREATE a dock from a drag, so the interference
+  // is gone while minimize/restore keep working.
 
   // Per-drag state, reset on mousedown.
   let dragging = false;
@@ -192,6 +201,16 @@ export function makeWindowDraggable(modal, options = {}) {
     dragging = true;
     _draggedElements.add(content);
     if (modal) modal.classList.add('modal-dragging');
+    // #794 follow-up: with drag-time edge-snap retired, the ONLY way a window can
+    // still carry a dock class is a NON-drag path (modalManager's remembered-dock
+    // on open / restore). If the user grabs such a docked window, peel it back to
+    // a free-floating window centred on the cursor BEFORE the drag pins geometry —
+    // otherwise it would drag with a stale full-height width + a body push. This
+    // makes "grab a docked window and drag it" behave like grabbing any window.
+    if (modal && (modal.classList.contains('modal-right-docked')
+                  || modal.classList.contains('modal-left-docked'))) {
+      try { clearRightDock(modal, cx, cy); } catch (_) {}
+    }
     // Cancel any in-flight open animation so we don't pin a mid-animation
     // rect and then jump once the animation settles.
     try {
@@ -217,76 +236,25 @@ export function makeWindowDraggable(modal, options = {}) {
 
   const _onMove = (cx, cy) => {
     if (!dragging) return;
-    // Fullscreen state: unsnap on drag-down or drag toward either horizontal
-    // edge. Update dock hover immediately after exit so a fast release
-    // commits the dock instead of dropping the modal mid-air.
+    // #794 follow-up: the left/right edge-snap dock is retired (rightDock/leftDock
+    // are always null), so the only snap left here is the TOP-edge fullscreen one.
+    // Fullscreen state: unsnap only on a downward drag (cy > UNSNAP_PX). There is
+    // no side-dock to flip into anymore, so dragging a fullscreen window sideways
+    // simply keeps it fullscreen until the cursor drops below the unsnap band.
     if (_isFullscreen()) {
-      // Corner guard: ignore the side edges while the cursor is still in the
-      // top fullscreen band, so dragging across the top corners keeps
-      // fullscreen instead of flipping into a corner dock.
-      const inTopBand = cy <= SNAP_PX;
-      const nearRight = !inTopBand && (window.innerWidth - cx) <= DOCK_EDGE_PX;
-      const nearLeft = !inTopBand && (cx - _leftNavWidth()) <= DOCK_EDGE_PX;
-      // Dragging a fullscreen window to a SIDE edge → keep it fullscreen and
-      // just arm the side-dock hint; releasing there docks it (handled in
-      // _onEnd, which drops the fullscreen class). Previously this exited
-      // fullscreen first, which re-CENTERED the window — so it looked like
-      // it "centered instead of docking". Only a downward drag unsnaps to a
-      // windowed (centered) modal.
-      if (nearRight && rightDock) {
-        if (leftDock) leftDock.release();
-        rightDock.onMove(cx, cy);
-        return;
-      }
-      if (nearLeft && leftDock) {
-        if (rightDock) rightDock.release();
-        leftDock.onMove(cx, cy);
-        return;
-      }
-      if (cy > UNSNAP_PX) {
-        _exitFs(cx, cy);
-        if (rightDock) rightDock.onMove(cx, cy);
-        if (leftDock) leftDock.onMove(cx, cy);
-      } else {
-        if (rightDock) rightDock.release();
-        if (leftDock) leftDock.release();
-      }
+      if (cy > UNSNAP_PX) _exitFs(cx, cy);
       return;
     }
-    // Right-docked: pulling away from the right edge un-docks. Same for left.
-    if (rightDock && modal && modal.classList.contains('modal-right-docked')) {
-      if (rightDock.onMove(cx, cy)) {
-        const r = content.getBoundingClientRect();
-        startX = cx; startY = cy;
-        startLeft = r.left; startTop = r.top;
-      }
-      return;
-    }
-    if (leftDock && modal && modal.classList.contains('modal-left-docked')) {
-      if (leftDock.onMove(cx, cy)) {
-        const r = content.getBoundingClientRect();
-        startX = cx; startY = cy;
-        startLeft = r.left; startTop = r.top;
-      }
-      return;
-    }
-    // Windowed: just follow the cursor.
+    // Windowed: just follow the cursor — drops exactly where released. No edge
+    // re-anchoring in any direction.
     if (Math.abs(cx - startX) > MOVE_THRESHOLD || Math.abs(cy - startY) > MOVE_THRESHOLD) {
       movedDuringDrag = true;
     }
     content.style.left = (startLeft + cx - startX) + 'px';
     content.style.top = (startTop + cy - startY) + 'px';
-    // Corner guard: in the top fullscreen band the side docks stay OFF, so a
-    // top corner only ever snaps to fullscreen — never the corner hybrid.
+    // Top-edge fullscreen hint only (the lone surviving snap gesture).
     const inTopBand = cy <= SNAP_PX;
     _showSnapHint(enableFullscreen && inTopBand);
-    if (inTopBand) {
-      if (rightDock) rightDock.release();
-      if (leftDock) leftDock.release();
-    } else {
-      if (rightDock) rightDock.onMove(cx, cy);
-      if (leftDock) leftDock.onMove(cx, cy);
-    }
   };
 
   const _onEnd = (cx, cy) => {
@@ -294,27 +262,13 @@ export function makeWindowDraggable(modal, options = {}) {
     dragging = false;
     if (modal) modal.classList.remove('modal-dragging');
     _showSnapHint(false);
-    // Top edge wins over side edges — fullscreen is the more common gesture.
+    // The only release-time snap left is the TOP-edge fullscreen (opt-in via
+    // onEnterFullscreen). Side edges no longer dock — the window stays where
+    // it was dropped.
     if (enableFullscreen && typeof cy === 'number' && cy <= SNAP_PX) {
-      if (rightDock) rightDock.release();
-      if (leftDock) leftDock.release();
       _enterFs();
       return;
     }
-    if (rightDock && rightDock.hovering()) {
-      if (leftDock) leftDock.release();
-      if (fsClass && modal) modal.classList.remove(fsClass);  // dock takes over from fullscreen
-      rightDock.commit();
-      return;
-    }
-    if (leftDock && leftDock.hovering()) {
-      if (rightDock) rightDock.release();
-      if (fsClass && modal) modal.classList.remove(fsClass);
-      leftDock.commit();
-      return;
-    }
-    if (rightDock) rightDock.release();
-    if (leftDock) leftDock.release();
     if (onDragEnd) {
       const r = content.getBoundingClientRect();
       try { onDragEnd({ rect: r }); } catch (_) {}
