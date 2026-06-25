@@ -1543,9 +1543,19 @@ import { isNarrow } from './platform.js';
               // Handle SSE error events (e.g. HTTP 404 from provider)
               if (_nextIsError || json.status >= 400) {
                 _nextIsError = false;
-                const errMsg = json.text || json.error?.message || `Error ${json.status || 'unknown'}`;
-                console.error('Stream error:', errMsg);
+                const rawErrMsg = json.text || json.error?.message || `Error ${json.status || 'unknown'}`;
+                console.error('Stream error:', rawErrMsg);
                 if (spinner && spinner.element) spinner.destroy();
+                // Orwell #872 (item A): NEVER render a raw HTTP status / provider error into the GM
+                // body bubble in the game build — an "Error 400" reads to the player as a literal
+                // Big Brother / producer message. The provider (notably deepseek-v4-pro) intermittently
+                // 400s on continuation/tool rounds; the player must never see the machinery. Surface a
+                // diegetic line instead; the finally still FORCE-reconciles this bubble to the persisted
+                // fallback (the agent loop saves a friendly message). Outside the game build (the general
+                // assistant) keep the informative error so misconfig stays debuggable.
+                const errMsg = isGameBuild()
+                  ? "Big Brother cuts to a brief technical interlude… hang tight, we'll be right back."
+                  : rawErrMsg;
                 typewriterInto(roundHolder.querySelector('.body'), errMsg);
                 // ADR 0012 (GAP 2): keep the immediate live feedback, but mark the turn so the finally
                 // FORCE-reconciles this bubble to the persisted fallback — the agent loop saves a

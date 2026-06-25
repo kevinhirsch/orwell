@@ -120,9 +120,12 @@ def test_belt_is_wired_into_the_casting_branch():
     # keyed off a guaranteed "fields" wrapper via the shared balanced-brace parser
     assert '_last_json_object_with_key(raw, "fields")' in src
     assert "_oe.update_casting(clean, user=owner)" in src
-    # wired in the casting branch, gated on the model NOT having called updateCasting + an engaged turn
+    # wired in the casting branch, gated on the model NOT having called updateCasting + an engaged
+    # turn OR an errored turn (#872: a pure-error turn emits no visible narration but the player's
+    # answer must still land so casting can reach ready/finalizable).
     assert '_cast_recorded_this_turn = "updateCasting" in {' in src
-    assert "if not _cast_recorded_this_turn and _emitted_visible and owner is not None:" in src
+    assert "if (not _cast_recorded_this_turn and owner is not None" in src
+    assert "and (_emitted_visible or _turn_had_error)):" in src
     assert "await _auto_record_casting(" in src
     # it runs BEFORE the finalize fallback so that path sees the freshly-recorded state this turn
     assert src.index("await _auto_record_casting(") < src.index("Casting finalize fallback (the game won't START)")
