@@ -527,20 +527,68 @@ const AGE_TELL: Record<AgeBand, readonly string[]> = {
   seasoned: ["treating this as the last shot to be seen the way they always wanted", "carrying years of being overlooked into every move they make"],
 };
 
+// #850 — how many DETERMINISTIC variants each rotatable component yields when resolving a cross-cast
+// collision (the count of distinct values to walk through with NO rng). Each equals its pool's length so
+// the rotation (offset 0..len-1, taken `% len` in build*) covers EVERY distinct value with no gaps:
+// SECTOR_STAKE lists are 3 long; ARCHETYPE_* / AGE_TELL / GOAL_STAKE lists are 2. A secret thus has up to
+// 3×2×2 = 12 no-rng variants and a goal/weakness 2×2 — far more than the cast-wide cap of 1 ever needs.
+const STAKE_VARIANTS = 3;       // SECTOR_STAKE[sector].length
+const FRAME_VARIANTS = 2;       // ARCHETYPE_SECRET_FRAME[archetype].length
+const AGE_TELL_VARIANTS = 2;    // AGE_TELL[band].length
+const GOAL_VARIANTS = 2;        // ARCHETYPE_GOAL[archetype].length
+const GOAL_STAKE_VARIANTS = 2;  // GOAL_STAKE[band].length
+const WEAK_CORE_VARIANTS = 2;   // ARCHETYPE_WEAKNESS[archetype].length
+
 /**
- * Compose ONE character-grounded secret: the archetype's hidden frame, the houseguest's CONCRETE
- * vocation interpolated, the vocation-sector stake, and (sometimes) an age tell. Reads like THIS
- * person's secret. Deterministic off `rng`.
+ * Draw an INDEX into `pool` consuming the rng BYTE-IDENTICALLY to `rng.pick(pool)` (which is
+ * `pool[rng.int(pool.length)]`). The `*Picks` phases use this so the split into index-pick + pure-build
+ * leaves the rng stream exactly as the original inline `rng.pick(...)` composers did (#850 byte-identity).
  */
-function composeSecret(rng: RandomnessSource, f: ConditioningFacets): string {
-  const frame = rng.pick(ARCHETYPE_SECRET_FRAME[f.archetype]);
-  const stake = rng.pick(SECTOR_STAKE[sectorOf(f.vocation)]);
-  // Two grounded shapes, chosen by the rng, both naming the actual vocation:
-  if (rng.next() < 0.5) {
-    return `behind the ${f.vocation} story, ${stake} — and ${frame}`;
-  }
-  const tell = rng.pick(AGE_TELL[f.ageBand]);
+function pickIndex(rng: RandomnessSource, pool: readonly unknown[]): number {
+  return rng.int(pool.length);
+}
+
+// #850 — the conditioned composers are split into a `*Picks` phase (consumes the rng in the EXACT
+// same order/count as before, so byte-identity holds when nothing collides) and a pure `build*` phase
+// (assembles the string from the chosen indices). The split exists so a cross-cast COLLISION can be
+// resolved DETERMINISTICALLY — by rotating the component indices with NO further rng draw (the #853
+// surname-dedup discipline) — instead of re-rolling. A non-colliding cast draws zero variants, so its
+// composed text is byte-identical to before #850; only a (vanishingly rare) colliding cast diverges,
+// which is the fix. All of this is on the ISOLATED narrative stream, so it cannot perturb any outcome.
+
+type SecretPicks = { frameIx: number; stakeIx: number; firstShape: boolean; tellIx: number };
+
+/** Consume the rng EXACTLY as the pre-#850 inline secret composer did (same picks, order, conditional tell). */
+function secretPicks(rng: RandomnessSource, f: ConditioningFacets): SecretPicks {
+  const frameIx = pickIndex(rng, ARCHETYPE_SECRET_FRAME[f.archetype]);
+  const stakeIx = pickIndex(rng, SECTOR_STAKE[sectorOf(f.vocation)]);
+  const firstShape = rng.next() < 0.5;
+  // The age tell is drawn ONLY in the second shape — preserve that conditional draw exactly.
+  const tellIx = firstShape ? 0 : pickIndex(rng, AGE_TELL[f.ageBand]);
+  return { frameIx, stakeIx, firstShape, tellIx };
+}
+
+/** Pure: build the secret string from chosen indices (no rng). Indices are taken modulo each pool length. */
+function buildSecret(p: SecretPicks, f: ConditioningFacets): string {
+  const frames = ARCHETYPE_SECRET_FRAME[f.archetype];
+  const stakes = SECTOR_STAKE[sectorOf(f.vocation)];
+  const frame = frames[p.frameIx % frames.length]!;
+  const stake = stakes[p.stakeIx % stakes.length]!;
+  if (p.firstShape) return `behind the ${f.vocation} story, ${stake} — and ${frame}`;
+  const tells = AGE_TELL[f.ageBand];
+  const tell = tells[p.tellIx % tells.length]!;
   return `is a ${f.vocation} ${tell} who ${frame}, carrying ${stake}`;
+}
+
+/** The ordered, NO-RNG deterministic variants of one secret pick — rotate stake, then frame, then tell. */
+function* secretVariants(base: SecretPicks): Generator<SecretPicks> {
+  for (let tell = 0; tell < AGE_TELL_VARIANTS; tell++) {
+    for (let frame = 0; frame < FRAME_VARIANTS; frame++) {
+      for (let stake = 0; stake < STAKE_VARIANTS; stake++) {
+        yield { ...base, stakeIx: base.stakeIx + stake, frameIx: base.frameIx + frame, tellIx: base.tellIx + tell };
+      }
+    }
+  }
 }
 
 // A goal's personal STAKE — why THIS person wants the strategic outcome, grounded in their life-stage so
@@ -551,30 +599,62 @@ const GOAL_STAKE: Record<AgeBand, readonly string[]> = {
   seasoned: ["to be remembered as more than they were ever credited for", "to get the recognition a lifetime never quite handed them"],
 };
 
-/**
- * Compose ONE character-grounded true goal — the archetype's strategic drive ALWAYS carrying BOTH the
- * concrete vocation AND a life-stage stake, so the goal is individual (two same-archetype, same-vocation
- * houseguests still diverge on the stake) and effectively never collides verbatim across the cast.
- */
-function composeGoal(rng: RandomnessSource, f: ConditioningFacets): string {
-  const goal = rng.pick(ARCHETYPE_GOAL[f.archetype]);
-  const stake = rng.pick(GOAL_STAKE[f.ageBand]);
-  // Two grounded shapes — both name the vocation AND the life-stage stake, ordered differently:
-  if (rng.next() < 0.5) return `${goal} — and walk back into the ${f.vocation} life ${stake}`;
+type GoalPicks = { goalIx: number; stakeIx: number; firstShape: boolean };
+
+/** Consume the rng EXACTLY as the pre-#850 inline goal composer did (both picks always drawn, then the branch). */
+function goalPicks(rng: RandomnessSource, f: ConditioningFacets): GoalPicks {
+  const goalIx = pickIndex(rng, ARCHETYPE_GOAL[f.archetype]);
+  const stakeIx = pickIndex(rng, GOAL_STAKE[f.ageBand]);
+  const firstShape = rng.next() < 0.5;
+  return { goalIx, stakeIx, firstShape };
+}
+
+/** Pure: build the goal string from chosen indices (no rng). */
+function buildGoal(p: GoalPicks, f: ConditioningFacets): string {
+  const goals = ARCHETYPE_GOAL[f.archetype];
+  const stakes = GOAL_STAKE[f.ageBand];
+  const goal = goals[p.goalIx % goals.length]!;
+  const stake = stakes[p.stakeIx % stakes.length]!;
+  if (p.firstShape) return `${goal} — and walk back into the ${f.vocation} life ${stake}`;
   return `as a ${f.vocation}, ${stake}: ${goal}`;
 }
 
-/**
- * Compose THE character-grounded weakness — the archetype failure mode ALWAYS grounded in this
- * houseguest's concrete vocation (+ an age tell), so two same-archetype houseguests with different jobs
- * read differently and never collide verbatim across the cast.
- */
-function composeWeakness(rng: RandomnessSource, f: ConditioningFacets): string {
-  const core = rng.pick(ARCHETYPE_WEAKNESS[f.archetype]);
-  const tell = rng.pick(AGE_TELL[f.ageBand]);
-  // Two grounded shapes, both naming the actual vocation so the weakness is individual:
-  if (rng.next() < 0.5) return `${core} — a tell the ${f.vocation} in them never fully shook`;
+/** The ordered, NO-RNG deterministic variants of one goal pick — rotate stake, then goal. */
+function* goalVariants(base: GoalPicks): Generator<GoalPicks> {
+  for (let goal = 0; goal < GOAL_VARIANTS; goal++) {
+    for (let stake = 0; stake < GOAL_STAKE_VARIANTS; stake++) {
+      yield { ...base, stakeIx: base.stakeIx + stake, goalIx: base.goalIx + goal };
+    }
+  }
+}
+
+type WeaknessPicks = { coreIx: number; tellIx: number; firstShape: boolean };
+
+/** Consume the rng EXACTLY as the pre-#850 inline weakness composer did (both picks always drawn, then branch). */
+function weaknessPicks(rng: RandomnessSource, f: ConditioningFacets): WeaknessPicks {
+  const coreIx = pickIndex(rng, ARCHETYPE_WEAKNESS[f.archetype]);
+  const tellIx = pickIndex(rng, AGE_TELL[f.ageBand]);
+  const firstShape = rng.next() < 0.5;
+  return { coreIx, tellIx, firstShape };
+}
+
+/** Pure: build the weakness string from chosen indices (no rng). */
+function buildWeakness(p: WeaknessPicks, f: ConditioningFacets): string {
+  const cores = ARCHETYPE_WEAKNESS[f.archetype];
+  const tells = AGE_TELL[f.ageBand];
+  const core = cores[p.coreIx % cores.length]!;
+  const tell = tells[p.tellIx % tells.length]!;
+  if (p.firstShape) return `${core} — a tell the ${f.vocation} in them never fully shook`;
   return `${core} — the ${f.vocation} ${tell}`;
+}
+
+/** The ordered, NO-RNG deterministic variants of one weakness pick — rotate core, then tell. */
+function* weaknessVariants(base: WeaknessPicks): Generator<WeaknessPicks> {
+  for (let tell = 0; tell < AGE_TELL_VARIANTS; tell++) {
+    for (let core = 0; core < WEAK_CORE_VARIANTS; core++) {
+      yield { ...base, coreIx: base.coreIx + core, tellIx: base.tellIx + tell };
+    }
+  }
 }
 
 /**
@@ -623,22 +703,89 @@ function generateConditionedDeepProfile(
     dayOnePerception = { ...PERCEPTION_POOL[rng.int(PERCEPTION_POOL.length)]! };
   }
   // NARRATIVE stream (`narrativeRng`): the conditioned, coherent hidden text — fully isolated from the
-  // outcome stream, so its (variable) draw count never shifts a single game outcome.
-  const secrets = composeDistinct(narrativeRng, count, () => composeSecret(narrativeRng, facets));
-  const trueGoals = composeDistinct(narrativeRng, 2, () => composeGoal(narrativeRng, facets));
-  const weakness = composeWeakness(narrativeRng, facets);
+  // outcome stream, so its (variable) draw count never shifts a single game outcome. #850: the cast-wide
+  // `caps.cond*Uses` tallies de-collide the composed text across the cast — resolved by the no-rng
+  // deterministic variant walk, so a non-colliding cast is byte-identical to the pre-#850 floor.
+  const secrets = composeDistinctCrossCast(
+    narrativeRng, count,
+    () => secretPicks(narrativeRng, facets), (p) => buildSecret(p, facets), secretVariants,
+    caps?.condSecretUses,
+  );
+  const trueGoals = composeDistinctCrossCast(
+    narrativeRng, 2,
+    () => goalPicks(narrativeRng, facets), (p) => buildGoal(p, facets), goalVariants,
+    caps?.condGoalUses,
+  );
+  const weakness = composeCappedCrossCast(
+    narrativeRng,
+    () => weaknessPicks(narrativeRng, facets), (p) => buildWeakness(p, facets), weaknessVariants,
+    caps?.condWeaknessUses,
+  );
   return { secrets, trueGoals, weakness, dayOnePerception };
 }
 
-/** Compose `n` values distinct within this profile, re-rolling on a collision (bounded guard). */
-function composeDistinct(rng: RandomnessSource, n: number, make: () => string): string[] {
+// #850 — across the cast, a conditioned secret/goal/weakness string may be shared by at most this many
+// houseguests (1 ⇒ verbatim-unique). The conditioning already makes a collision vanishingly rare; this
+// is the belt that GUARANTEES it, resolved deterministically.
+const MAX_PER_COND = 1;
+
+/**
+ * #850 — compose `n` values that are distinct WITHIN this profile AND cast-wide UNIQUE, the #853
+ * discipline applied to the isolated narrative stream:
+ *   • The base pick consumes the narrative rng EXACTLY as the inline composer did, so a slot with NO
+ *     collision yields the base string with ZERO extra draws — byte-identical to the pre-#850 floor.
+ *   • On a collision (within-profile OR cast-wide over its cap), we walk the DETERMINISTIC, NO-RNG
+ *     component variants (`variants(base)`, which yields the base first) to the first free string. The
+ *     narrative rng is therefore never advanced to resolve a collision — only the rare colliding cast's
+ *     TEXT changes, and even then its rng stream is untouched (so sibling slots/NPCs stay byte-identical).
+ *   • Relaxation (never spin): if every variant is taken, accept the base string anyway.
+ * `used` is the cast-wide tally (e.g. `caps.condSecretUses`); pass `undefined` for within-profile-only
+ * de-collision (a standalone profile with no cast context).
+ */
+function composeDistinctCrossCast<P>(
+  narrativeRng: RandomnessSource,
+  n: number,
+  pick: () => P,
+  build: (p: P) => string,
+  variants: (base: P) => Generator<P>,
+  used: Map<string, number> | undefined,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (let guard = 0; out.length < n && guard < 200; guard++) {
-    const v = make();
-    if (!seen.has(v)) { seen.add(v); out.push(v); }
+  const free = (s: string): boolean => !seen.has(s) && (used ? (used.get(s) ?? 0) < MAX_PER_COND : true);
+  for (let i = 0; i < n; i++) {
+    const base = pick(); // consumes narrativeRng once — identical to the inline composer's draw
+    let chosen: string | null = null;
+    for (const cand of variants(base)) {       // first yield IS `base` ⇒ no-collision is byte-identical
+      const s = build(cand);
+      if (free(s)) { chosen = s; break; }
+    }
+    if (chosen === null) chosen = build(base);  // relaxation — never spin
+    seen.add(chosen);
+    if (used) used.set(chosen, (used.get(chosen) ?? 0) + 1);
+    out.push(chosen);
   }
   return out;
+}
+
+/** #850 — compose ONE cast-wide-unique value (the single weakness), same deterministic discipline. */
+function composeCappedCrossCast<P>(
+  narrativeRng: RandomnessSource,
+  pick: () => P,
+  build: (p: P) => string,
+  variants: (base: P) => Generator<P>,
+  used: Map<string, number> | undefined,
+): string {
+  const base = pick();
+  if (used) {
+    for (const cand of variants(base)) {
+      const s = build(cand);
+      if ((used.get(s) ?? 0) < MAX_PER_COND) { used.set(s, (used.get(s) ?? 0) + 1); return s; }
+    }
+  }
+  const s = build(base); // no caps (standalone) ⇒ byte-identical; or relaxation when every variant is taken
+  if (used) used.set(s, (used.get(s) ?? 0) + 1);
+  return s;
 }
 
 // Day-1 reads of the player + their signed leans for the NPC→player edge (never shown).
@@ -696,16 +843,28 @@ export const MAX_PER_PERCEPTION = 3;
  * The mutable usage tallies that enforce the L41 cast-wide spread caps as `generateCastDeepLayer` deals
  * one NPC at a time. Keyed by the drawn string (the perception by its `read`). Pass the SAME object to
  * every NPC's `generateDeepProfile` so a trope used to its cap is no longer offered to later NPCs.
+ *
+ * The `secret/goal/weakness/perceptionUses` maps tally the LEGACY shared-pool draws (the outcome stream).
+ * #850: the `cond*Uses` maps tally the CONDITIONED narrative TEXT cast-wide so two houseguests never share
+ * a verbatim composed secret/goal/weakness — resolved DETERMINISTICALLY (no rng) when a collision occurs,
+ * on the isolated narrative stream. Keyed by the composed string.
  */
 export interface CastSpreadCaps {
   secretUses: Map<string, number>;
   goalUses: Map<string, number>;
   weaknessUses: Map<string, number>;
   perceptionUses: Map<string, number>;
+  /** #850 — cast-wide tally of the CONDITIONED composed secret/goal/weakness strings (cross-cast de-collision). */
+  condSecretUses: Map<string, number>;
+  condGoalUses: Map<string, number>;
+  condWeaknessUses: Map<string, number>;
 }
 
 export function newCastSpreadCaps(): CastSpreadCaps {
-  return { secretUses: new Map(), goalUses: new Map(), weaknessUses: new Map(), perceptionUses: new Map() };
+  return {
+    secretUses: new Map(), goalUses: new Map(), weaknessUses: new Map(), perceptionUses: new Map(),
+    condSecretUses: new Map(), condGoalUses: new Map(), condWeaknessUses: new Map(),
+  };
 }
 
 /** The character facets the conditioned generator reads (a slice of the byte-stable static Character). */
