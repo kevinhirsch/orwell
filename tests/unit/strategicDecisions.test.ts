@@ -100,6 +100,46 @@ describe("strategic nominations (0044 §4 — beyond raw threat)", () => {
   });
 });
 
+describe("political temperature — true median (issue #587: even-length house)", () => {
+  /** Pin each houseguest's MENACE (the mean threat the rest of the house reads in them) to an
+   *  exact value by giving every other reader an identical incoming threat edge toward them. */
+  function houseWithMenaces(menaces: readonly number[]): { active: EntityId[]; rel: RelationshipModel } {
+    const active = menaces.map((_, i) => npc(i + 1));
+    const rel = new RelationshipModel(0.5);
+    active.forEach((target, i) => {
+      for (const reader of active) if (reader !== target) rel.edge(reader, target).threat = menaces[i]!;
+    });
+    return { active, rel };
+  }
+
+  it("averages the two central reads for an even-length house (falsifier [0,0,0.4,0.4] ⇒ median 0.2)", () => {
+    // runawaySpread is 0.3; true median 0.2 ⇒ spread 0.4-0.2 = 0.2 (calm). The old upper-central
+    // pick took reads[2]=0.4 ⇒ spread 0, biasing the read calmer still (the runaway under-trip).
+    const { active, rel } = houseWithMenaces([0, 0, 0.4, 0.4]);
+    const temp = politicalTemperature(active, rel);
+    expect(temp.spread).toBeCloseTo(0.2, 10);
+    expect(temp.runaway).toBe(false);
+  });
+
+  it("the corrected median can flip runaway ON where the upper-central pick masked it", () => {
+    // Even-length house. True median of [0,0,0.1,0.9] is 0.05 ⇒ spread 0.85 > 0.3 ⇒ runaway.
+    // The old pick took reads[2]=0.1 ⇒ spread 0.8 (still runaway here) — but the general bias was
+    // DOWNWARD; this pins that the proper median strictly raises the spread for an even house.
+    const { active, rel } = houseWithMenaces([0, 0, 0.1, 0.9]);
+    const temp = politicalTemperature(active, rel);
+    expect(temp.spread).toBeCloseTo(0.85, 10);
+    expect(temp.runaway).toBe(true);
+  });
+
+  it("odd-length houses keep the single central read (unchanged path)", () => {
+    // Median of [0,0,0.4] is the central 0 ⇒ spread 0.4-0 = 0.4 > 0.3 ⇒ runaway.
+    const { active, rel } = houseWithMenaces([0, 0, 0.4]);
+    const temp = politicalTemperature(active, rel);
+    expect(temp.spread).toBeCloseTo(0.4, 10);
+    expect(temp.runaway).toBe(true);
+  });
+});
+
 describe("the enriched vote (0044 §4 — bloc + mood + deal + jury management)", () => {
   it("a rattled voter breaks a deal out of self-protection a calm voter honors", () => {
     const rel = new RelationshipModel(0.5);
