@@ -85,9 +85,16 @@ describe("0084 mood — grounded in the soul, two timescales, Vault-safe", () =>
     expect(moodWord(0.5, 0.4, baseline)).toBe(calm); // settles back as the soul mean-reverts
   });
 
-  it("high volatility adds an on-edge qualifier", () => {
-    expect(moodWord(0.5, 0.85, [0.5])).toMatch(/on edge/);
+  it("only genuinely turbulent volatility adds an on-edge qualifier (post-diag: the bar is high)", () => {
+    expect(moodWord(0.5, 0.95, [0.5])).toMatch(/on edge/);
+    expect(moodWord(0.5, 0.85, [0.5])).not.toMatch(/on edge/); // chronically-high is no longer "on edge"
     expect(moodWord(0.5, 0.3, [0.5])).not.toMatch(/on edge/);
+  });
+
+  it("the mid-range produces varied moods, not one flat 'even' (the diagnostic fix)", () => {
+    // A real season keeps souls ~0.3–0.74; the recalibrated bands must span several distinct words there.
+    const words = new Set([0.32, 0.40, 0.47, 0.52, 0.58, 0.64, 0.71].map((e) => moodWord(e, 0.5, [0.5])));
+    expect(words.size).toBeGreaterThanOrEqual(4);
   });
 
   it("never emits a number (Vault-safe affect word only)", () => {

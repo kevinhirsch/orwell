@@ -108,39 +108,53 @@ export function generateVoice(rng: RandomnessSource, archetype: string): VoicePr
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 const mean = (xs: readonly number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0.5);
 
-/** The lasting carriage from a soul set-point (0..1) — the marinated baseline's word. */
+/**
+ * The carriage word for a blended soul level (0..1). RECALIBRATED (post-0085 diagnostic): a real
+ * season keeps souls in ~0.3–0.74, so the old wide bands collapsed the whole house onto "even"/
+ * "settled". These finer bands give the mid-range its own gradations (muted → even → steady → settled)
+ * while keeping the extremes reachable, so sixteen houseguests read as sixteen moods, not one.
+ */
 function carriageWord(v: number): string {
-  if (v < 0.18) return "hollowed out";
+  if (v < 0.22) return "hollowed out";
   if (v < 0.33) return "worn down";
-  if (v < 0.45) return "subdued";
+  if (v < 0.42) return "subdued";
+  if (v < 0.49) return "muted";
   if (v < 0.55) return "even";
-  if (v < 0.68) return "settled";
-  if (v < 0.83) return "at ease";
+  if (v < 0.62) return "steady";
+  if (v < 0.70) return "settled";
+  if (v < 0.80) return "at ease";
   return "riding high";
 }
 
-/** Strong-deviation thresholds: only a real spike/crash overrides the marinated carriage. */
-const ACUTE_OVERRIDE = 0.35;
-const ACUTE_DISTRESS = 0.25; // an acute crisis always shows, regardless of the baseline
-const VOLATILE = 0.7;
+/** The ACUTE state carries the real per-moment spread, so it leads the blend; the baseline pulls it. */
+const ACUTE_WEIGHT = 0.62;
+const DISTRESS = 0.22; // an acute crisis always shows, over everything
+const LOW_BASELINE = 0.34; // a season-long set-point below this reads as chronically "worn"
+const HIGH_BASELINE = 0.7; // …above this, as lasting "at ease"
+// Volatility runs chronically high in a live season (diag: avg ~0.89), so "on edge" only means
+// something near the top of the range — otherwise it's universal noise. (The deeper fix — souls that
+// actually settle — lives in emotionalArc and is calibration-gated; this is the read-side bar.)
+const VOLATILE = 0.92;
 
 /**
- * The Vault-safe MOOD word for the voicer. Combines the MARINATED baseline (the trend of
- * `emotionalHistory` — what the season has done to them) with the ACUTE state (`emotionalState`),
- * plus a volatility qualifier. The marinated carriage is the default; the acute state only overrides
- * it on a strong spike or crash — so a worn-down houseguest still reads worn on a calm day, while a
- * fresh crisis still surfaces. Never a number, never the cause. `emotionalHistory` defaults to the
- * acute value (a fresh soul has no arc yet).
+ * The Vault-safe MOOD word for the voicer. BLENDS the ACUTE state (`emotionalState`, which carries the
+ * real per-moment spread) with the MARINATED baseline (the trend of `emotionalHistory` — what the
+ * season has done to them), so the moment drives the word while the long arc flavors it: a houseguest
+ * worn down over weeks reads "worn but …" even on a lift; a long safe run reads "at ease but …" on a
+ * dip; a fresh crash always shows as "shaken". Never a number, never the cause. `emotionalHistory`
+ * defaults to the acute value (a fresh soul has no arc yet).
  */
 export function moodWord(emotionalState: number, volatility: number, emotionalHistory: readonly number[] = []): string {
   const acute = clamp01(emotionalState);
   const marinated = emotionalHistory.length ? clamp01(mean(emotionalHistory)) : acute;
-  const dev = acute - marinated;
+  const effective = clamp01(ACUTE_WEIGHT * acute + (1 - ACUTE_WEIGHT) * marinated);
 
-  let word = carriageWord(marinated);
-  if (acute < ACUTE_DISTRESS) word = `shaken, ${word}`;
-  else if (dev <= -ACUTE_OVERRIDE) word = `rattled, ${word}`;
-  else if (dev >= ACUTE_OVERRIDE) word = `buoyed, ${word}`;
+  let word = carriageWord(effective);
+  // The marinade as a lasting FLAVOR layered on the moment (the season's set-point):
+  if (marinated < LOW_BASELINE && acute > marinated + 0.1) word = `worn but ${word}`;
+  else if (marinated > HIGH_BASELINE && acute < marinated - 0.08) word = `at ease but ${word}`;
+  // An acute crisis overrides the flavor entirely.
+  if (acute < DISTRESS) word = `shaken, ${carriageWord(effective)}`;
 
   if (clamp01(volatility) > VOLATILE) word = `${word}, on edge`;
   return word;
