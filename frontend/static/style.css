@@ -39944,6 +39944,19 @@ body.theme-frosted .cp-popover {
     inset 0 1px 0 var(--ow-glass-rim),
     0 12px 36px rgba(0,0,0,0.10) !important;
 }
+/* EDGE-BLEED CLAMP (the refraction "ring" fix) — clip the SVG-refraction backdrop to the
+   surface's OWN rounded-rect for the transient menus/popovers. liquidGlass.js neutralizes the
+   displacement map's outer edge so it no longer samples beyond the surface, but a rounded
+   corner still renders the rectangular filter region in the corner gap; clipping the backdrop
+   to the element's border-radius removes any residual halo past the corners. Scoped to the
+   four transient popovers (leaf menus — no submenu/shadow to clip); the chrome panels +
+   gadget cards (owned elsewhere) are untouched. */
+body.theme-frosted .dropdown,
+body.theme-frosted .overflow-menu,
+body.theme-frosted .cp-popover,
+body.theme-frosted .model-picker-menu {
+  overflow: hidden;
+}
 }
 /* Text on the LIGHT glass must be DARK to stay legible (Apple light sidebar reads dark
    ink on light glass). adaptiveGlass.js stands down under the glass theme now, so the

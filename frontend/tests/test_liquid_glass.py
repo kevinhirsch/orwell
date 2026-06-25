@@ -105,6 +105,40 @@ def test_displacement_map_uses_squircle_edge_and_neutral_128():
     assert "128 + dg * 127" in JS
 
 
+def test_edge_bleed_clamp_map_outer_edge_is_neutral():
+    # THE "RING" FIX. The squircle profile is maximal at the very perimeter (t=0 ⇒ push=1.0),
+    # so feDisplacementMap at the outermost row/col samples the backdrop up to `scale` px BEYOND
+    # the surface — at the rounded corners that pulls outside content into the rim, a refraction
+    # halo. The kube article's own constraint: displacement must fall to NEUTRAL at the outer
+    # edge. So squircleProfile WINDOWS the magnitude to 0 at the very edge (a smoothstep lead-in
+    # over EDGE_NEUTRAL of the bezel band), and the specular hairline fades the same way — the
+    # perimeter pixels are byte-neutral, so no out-of-bounds sample → no bleed ring. This is a
+    # source-pin so the clamp can't silently regress.
+    assert "EDGE_NEUTRAL" in JS
+    assert re.search(r"var EDGE_NEUTRAL\s*=\s*0?\.\d+", JS), "EDGE_NEUTRAL must be a small >0 fraction"
+    # the clamp is applied inside squircleProfile (the displacement magnitude window).
+    sp = re.search(r"function squircleProfile\(t\) \{(.*?)\n  \}", JS, re.S).group(1)
+    assert "EDGE_NEUTRAL" in sp, "the edge-neutral window must live inside squircleProfile"
+    assert "3 - 2 * u" in sp, "smoothstep lead-in (0 at the very edge → peak inward)"
+    # and the specular rim fades to 0 at the very edge too (no bright pixel on the corner).
+    assert "SPEC_BAND * EDGE_NEUTRAL" in JS
+
+
+def test_edge_bleed_clamp_menus_clip_backdrop_to_rounded_rect():
+    # Belt-and-suspenders for the refraction ring: the transient menus/popovers clip the
+    # SVG-refraction backdrop to their OWN rounded-rect (overflow:hidden under the frosted
+    # theme) so any residual corner halo past the border-radius is clipped away. Scoped to the
+    # four leaf popovers only (no submenu/shadow to clip); chrome panels are untouched.
+    block = re.search(
+        r"body\.theme-frosted \.dropdown,\s*"
+        r"body\.theme-frosted \.overflow-menu,\s*"
+        r"body\.theme-frosted \.cp-popover,\s*"
+        r"body\.theme-frosted \.model-picker-menu \{([^}]*)\}",
+        CSS, re.S)
+    assert block, "the four transient popovers must share a frosted clip rule"
+    assert "overflow: hidden" in block.group(1)
+
+
 def test_applied_via_backdrop_filter_url():
     assert "url(#" in JS
     # Applied via setProperty with `important` priority — NOT a plain `el.style.backdropFilter =`.
@@ -118,7 +152,7 @@ def test_applied_via_backdrop_filter_url():
 
 
 def test_tunable_constants_exist_at_top():
-    for c in ("SCALE", "RADIUS", "EDGE", "SQUIRCLE_N"):
+    for c in ("SCALE", "RADIUS", "EDGE", "SQUIRCLE_N", "EDGE_NEUTRAL"):
         assert re.search(r"var " + c + r"\s*=", JS), c
 
 

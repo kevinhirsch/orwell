@@ -84,6 +84,18 @@
   var EDGE = 26;             // refraction band width inward from each edge (px) — a touch wider
                              // so the stronger displacement has room to ramp (no hard interior seam)
   var SQUIRCLE_N = 4;        // squircle exponent (4 ⇒ the article's convex profile)
+  // EDGE-BLEED CLAMP (the "ring" fix). The squircle profile is MAXIMAL right at the very
+  // perimeter (t=0 ⇒ push=1.0), so feDisplacementMap at the outermost row/col samples the
+  // backdrop up to `scale` px BEYOND the surface — at the rounded corners that pulls content
+  // from OUTSIDE the visible shape into the rim, rendering a faint refraction halo/ring past
+  // the corners. The kube article's own constraint: displacement is symmetric around the
+  // bezel and must fall to NEUTRAL (128,128) AT the outer edge so it never samples beyond the
+  // surface. So we WINDOW the magnitude to ZERO at the very edge and ramp it up over the
+  // outermost EDGE_NEUTRAL fraction of the band — the peak just moves a few px inward, the
+  // in-bounds lensing strength is preserved, and the perimeter pixels are byte-neutral (no
+  // out-of-bounds sample → no bleed ring). EDGE_NEUTRAL is a small fraction (the ramp is a
+  // thin ~3-4px lead-in at EDGE=26), so it removes the halo without softening the lens band.
+  var EDGE_NEUTRAL = 0.16;   // fraction of the bezel band that ramps 0→peak from the very edge inward
   // IN-FILTER blur — BLUR LEVEL 1.0 (the music player's stdDeviation="0.2"). This is
   // the FOG FIX: the prior 16px gaussian smeared the backdrop into milk. Near-zero
   // gaussian keeps the glass CLEAR so the wallpaper reads THROUGH it, lensed at the
@@ -311,11 +323,22 @@
   function squircleProfile(t) {
     // t in [0,1]: 0 at the very edge, 1 at the inner band boundary.
     // Convex squircle falloff: strong near the edge, easing to 0 inward.
-    var c = 1 - Math.min(1, Math.max(0, t)); // closeness to the edge
+    var tc = Math.min(1, Math.max(0, t));
+    var c = 1 - tc; // closeness to the edge
     // (1 - (1-c)^N)^(1/N) is the article's convex squircle; we want the
     // MAGNITUDE to be high at the edge (c→1) and 0 inward (c→0).
     var n = SQUIRCLE_N;
     var prof = Math.pow(1 - Math.pow(1 - c, n), 1 / n); // 0→1 as c 0→1
+    // EDGE-BLEED CLAMP: window the magnitude to 0 at the VERY edge (t=0) and ramp it up
+    // over the outermost EDGE_NEUTRAL fraction of the band, so the perimeter pixels are
+    // neutral (128,128) and feDisplacementMap never samples beyond the surface (no halo
+    // ring past the rounded corners). Smoothstep the lead-in so the rim has no hard seam;
+    // beyond the lead-in (t >= EDGE_NEUTRAL) the squircle profile is untouched, preserving
+    // the in-bounds lensing strength. EDGE_NEUTRAL=0 ⇒ byte-identical to the old behavior.
+    if (EDGE_NEUTRAL > 0 && tc < EDGE_NEUTRAL) {
+      var u = tc / EDGE_NEUTRAL;          // 0 at edge → 1 at lead-in inner
+      prof *= u * u * (3 - 2 * u);        // smoothstep ramp 0→1 (neutral at the very edge)
+    }
     return prof; // magnitude weight at this depth
   }
 
@@ -412,6 +435,14 @@
               var ndotl = ux * lx + uy * ly;
               if (ndotl > 0) {
                 var rim = 1 - tEdge / SPEC_BAND;            // 1 at edge → 0 at band inner
+                // Match the displacement EDGE-BLEED CLAMP: fade the lit hairline to 0 at the
+                // very perimeter so it rides JUST inside the edge (clip-safe, and consistent
+                // with the now-neutral outer displacement rim — no bright pixel on the
+                // un-clipped corner). Same smoothstep lead-in as squircleProfile.
+                if (EDGE_NEUTRAL > 0 && tEdge < SPEC_BAND * EDGE_NEUTRAL) {
+                  var ue = tEdge / (SPEC_BAND * EDGE_NEUTRAL);
+                  rim *= ue * ue * (3 - 2 * ue);
+                }
                 var s = Math.pow(ndotl, SPEC_POWER) * rim * SPEC_GAIN;
                 var a = Math.max(0, Math.min(SPEC_ALPHA_MAX, s));
                 var si = (y * cw + x) * 4;
