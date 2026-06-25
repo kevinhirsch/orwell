@@ -148,48 +148,36 @@ def test_decision_card_keeps_the_notice_kit_fallback():
     assert "OrwellNoticeKit.create(" in js
 
 
-# ── casting/headshot migration: a bottom sheet (chat peeks through) ────────────
+# ── casting/headshot is NOT a sheet — it stays a MODAL OrwellWindow ─────────────
+# CONTRACT (corrected): OrwellSheet applies to DECISIONS only. The cast-photo / casting
+# surface keeps its HARD modal-a11y contract — a kit OrwellWindow with a title, an
+# aria-modal BACKDROP SCRIM covering the viewport, and a FOCUS-TRAP (P1 / J1-23 / J1-25,
+# pinned in scripts/browser_smoke.py). A peek-through bottom-sheet (no full scrim, no focus
+# trap) would break that contract, so casting must NOT migrate onto OrwellSheet.
 
-def test_casting_runs_on_the_bottom_sheet():
+def test_casting_stays_a_modal_window_not_a_sheet():
     js = _read("static", "js", "orwellHeadshot.js")
-    # the casting box composes the sheet kit, opening at medium (chat peeks through), with a large
-    # detent for the studio.
-    assert "OrwellSheetKit.create(" in js
-    assert 'detents: ["medium", "large"]' in js
-    assert 'detent: "medium"' in js
-    # it expands to LARGE when the studio surfaces options (ensureOpen → snap('large')).
-    assert 'snap("large")' in js
-
-
-def test_casting_does_not_destroy_the_chat():
-    # the sheet is modal but uses the LIGHT scrim so the chat stays MOUNTED + visible behind it —
-    # the migration must not replace/destroy the chat. The casting box never touches #chat-history.
-    js = _read("static", "js", "orwellHeadshot.js")
-    assert 'getElementById("chat-history")' not in js or "remove" not in js.split("chat-history")[1][:80]
-    # the sheet's scrim is the LIGHT one (the kit) — a peek-through, not a blackout.
-    sheet = _read("static", "js", "orwellSheet.js")
-    assert "ow-sheet-scrim" in sheet
+    # the cast-photo box composes the WINDOW kit as a real modal (J1-25): aria-modal + scrim +
+    # focus-trap come from modal:true on the OrwellWindow kit.
+    assert "OrwellWindowKit.create(" in js
+    assert "modal: true" in js
+    # it carries a (title-cased) title and is a dialog (P1 / browser_smoke title + role checks).
+    assert 'title: "Your Cast Photo"' in js
+    assert 'role: "dialog"' in js
+    # it must NOT mount the cast-photo on the peek-through OrwellSheet (that has no full scrim /
+    # focus-trap and broke P1/J1-23/J1-25).
+    assert "OrwellSheetKit.create(" not in js, "casting must not migrate onto OrwellSheet (modal a11y)"
 
 
 def test_casting_preserves_its_oobe_seams():
     js = _read("static", "js", "orwellHeadshot.js")
-    # every load-bearing OOBE seam survives the migration.
+    # every load-bearing OOBE seam survives.
     for needle in (
         "onCastingHeadshotChosen",     # finalize → record {uploaded} + resume
         "onCastingPhotoSkipped",       # skip → record {skipped} + resume
         "recordPhotoStep",             # the engine POST
         "_orwellResumeAfterPhoto",     # the interview-resume cue
-        "teardownWindow",              # clean teardown (handles sheet OR window)
+        "teardownWindow",              # clean teardown (destroys the kit window)
         "OrwellHeadshotStudio",        # the reusable studio (Settings → Account shares it)
     ):
         assert needle in js, needle
-    # teardown handles BOTH the sheet (dismiss) and the window fallback (destroy).
-    assert "destroy" in js and "dismiss" in js
-
-
-def test_casting_keeps_a_window_kit_fallback():
-    # if the sheet kit isn't ready, casting falls back to the prior OrwellWindow modal so OOBE
-    # still works (fail-open).
-    js = _read("static", "js", "orwellHeadshot.js")
-    assert "OrwellWindowKit.create(" in js
-    assert "modal: true" in js

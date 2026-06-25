@@ -39,24 +39,19 @@
          made the titlebar a dead grip — a movable-looking but static window). Width/z-index here
          carry NO position props (left/top/transform), so the slot's inline geometry and the drag
          both apply unobstructed. */
-      /* #753: the casting box is now an OrwellSheet (.ow-sheet) by default — these window-era
-         geometry rules are scoped to the .ow-window FALLBACK so they never fight the bottom-sheet's
-         own fixed/full-width/detent geometry (an unscoped #orwell-headshot id would beat .ow-sheet
-         on specificity and break the sheet layout). */
-      #${ID}.ow-window {
+      #${ID} {
         width: 480px; max-width: min(92vw, 480px);
         z-index: 1000;  /* above the slotted HUD, below true modals */
       }
       /* R1 (audit resp-F1): on the narrow sheet tier the slot host pins left:0/right:0 to make a
          full-width sheet; the desktop fixed width + max-width fought that and left a one-sided ~26-31px
-         right gutter. Drop them <=768px so the sheet goes flush edge-to-edge. (Window fallback only.) */
+         right gutter. Drop them <=768px so the sheet goes flush edge-to-edge. */
       @media (max-width: 768px) {
-        #${ID}.ow-window { width: auto; max-width: none; }
+        #${ID} { width: auto; max-width: none; }
       }
       /* R4 (audit resp-F2): dvh tracks the keyboard-shrunk mobile viewport so the lowest exit
-         ("Skip for now") stays above the fold; vh first as the fallback for engines without dvh.
-         (Window-fallback body only; the sheet manages its own body height via flex + detents.) */
-      #${ID}.ow-window > .ow-body { max-height: min(62vh, calc(100vh - var(--ow-headshot-top-clear, 120px)));
+         ("Skip for now") stays above the fold; vh first as the fallback for engines without dvh. */
+      #${ID} > .ow-body { max-height: min(62vh, calc(100vh - var(--ow-headshot-top-clear, 120px)));
         max-height: min(62dvh, calc(100dvh - var(--ow-headshot-top-clear, 120px))); }
       /* the ONE instruction lives in the window body — no duplicate banner/placeholder copy */
       #${ID} .hs-lead { margin: 0 0 10px; font-size: 12.5px; line-height: 1.5;
@@ -167,9 +162,6 @@
       body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-btn-ghost,
       body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-preview,
       body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-lib,
-      body.theme-frosted .ow-sheet .ow-headshot-studio .hs-btn-ghost,
-      body.theme-frosted .ow-sheet .ow-headshot-studio .hs-preview,
-      body.theme-frosted .ow-sheet .ow-headshot-studio .hs-lib,
       body.theme-frosted .modal-content .ow-headshot-studio .hs-btn-ghost,
       body.theme-frosted .modal-content .ow-headshot-studio .hs-preview,
       body.theme-frosted .modal-content .ow-headshot-studio .hs-lib {
@@ -465,9 +457,10 @@
 
   function mount() {
     if (_win || document.getElementById(ID)) return;
+    if (!window.OrwellWindowKit || !window.OrwellWindowKit.create) return; // kit not ready → fail open
     ensureCss();
     const { body, studioHost } = buildBody();
-    // L1: while the casting box is mounted, drop the welcome-screen's 30vh composer
+    // L1: while the casting window is mounted, drop the welcome-screen's 30vh composer
     // lift so the composer docks normally (never hangs mid-screen) and the splash tips
     // are suppressed underneath. The flag is scoped to the game build in game-trim.css.
     try { document.body.classList.add("ow-casting-headshot-open"); } catch (_) {}
@@ -475,58 +468,34 @@
     // bridge class (set by orwellOnboarding on welcome-dismiss to keep the splash hidden through the
     // gap). Continuity holds: ow-onboarding-bridge out, ow-casting-headshot-open in, no flash.
     try { document.body.classList.remove("ow-onboarding-bridge"); } catch (_) {}
-
-    // #753 (Genius #15/16/17): the casting / headshot studio runs in an iOS BOTTOM SHEET, NOT a
-    // centered modal window. It opens at the MEDIUM detent (the chat PEEKS THROUGH behind the
-    // light scrim — the chat is never replaced/destroyed), expands to LARGE for the studio (the
-    // 3-option grid + library), and swipe-down-past-medium returns the player to the chat. The
-    // sheet IS modal (focus-trap + inert background + aria-modal) so focus can't escape mid-OOBE,
-    // but the LIGHT scrim keeps the live narration visible behind it (the brief's "chat peeks
-    // through"). No close × in the chrome — the two EXITS stay in the body (finalize a photo or
-    // "Skip for now"), so there is no half-open dead state. Fail-open: if the sheet kit isn't
-    // ready, fall back to the pre-#753 OrwellWindow modal so OOBE still works.
-    let usingSheet = false;
-    if (window.OrwellSheetKit && window.OrwellSheetKit.create) {
-      usingSheet = true;
-      _win = window.OrwellSheetKit.create({
-        id: ID, title: "Your Cast Photo",
-        detents: ["medium", "large"],   // medium = chat peeks through; large = the studio
-        detent: "medium",
-        role: "dialog",
-        // A live hard-step of OOBE: no kit ×, no swipe-away-to-dismiss — the player exits ONLY via
-        // the in-body finalize / "Skip for now" (which record the step + resume the interview).
-        // Tapping the scrim or swiping down therefore must NOT silently abandon casting.
-        dismissible: false, scrimDismiss: false, swipeDismiss: false,
-        content: body,
-      });
-      _win.open();
-    } else if (window.OrwellWindowKit && window.OrwellWindowKit.create) {
-      // Pre-#753 fallback: the centered, draggable, non-resizeable modal window (the prior shape).
-      _win = window.OrwellWindowKit.create({
-        id: ID, title: "Your Cast Photo", icon: CAST_ICON,
-        slot: "top-center", role: "dialog", persistLayout: false, modal: true,
-        minimizable: false, closable: false, draggable: true, resizable: false,
-        minWidth: 320, minHeight: 240,
-        content: body, focus: true,
-      });
-      _win.open();
-    } else {
-      return; // neither kit ready → fail open (the chat composer is still the way in)
-    }
-
-    // Mount the reusable studio into the box body.
+    // Compose the kit. No close/minimize chrome — the two EXITS are in the body (finalize a photo
+    // or "Skip for now"), so there is no half-open dead state. It rides the "top-center" slot so it
+    // is a horizontally-centered dialog the player can DRAG out of the way (the grip is live), but
+    // it is NOT resizeable (a fixed-size onboarding box). The kit owns the chrome, titlebar, focus,
+    // and the .ow-* family; the slot owns centering (the box re-centers — no persisted offset, D1).
+    _win = window.OrwellWindowKit.create({
+      id: ID, title: "Your Cast Photo", icon: CAST_ICON,
+      // Two audit lanes converge on this dialog:
+      //  • A1/J1-25 (Lane A): modal:true — aria-modal + focus-trap + inert background + a backdrop
+      //    scrim, so focus can't escape into the chat and the live narration recedes behind a dim
+      //    instead of competing for figure.
+      //  • D1 + State-5/6 (Lane B): the player's explicit ask — it must be MOVEABLE (draggable) but
+      //    NOT resizeable, centered (top-center slot), and ALWAYS re-center (no slotKey + persistLayout
+      //    false ⇒ a drag persists no offset and never syncs geometry across reloads/devices).
+      // The result is a centered, draggable MODAL that re-centers. The two in-body exits (finalize /
+      // "Skip for now") are the only ways out.
+      slot: "top-center", role: "dialog", persistLayout: false, modal: true,
+      minimizable: false, closable: false, draggable: true, resizable: false,
+      minWidth: 320, minHeight: 240,
+      content: body, focus: true,
+    });
+    _win.open();
+    // Mount the reusable studio into the window body.
     buildStudio(studioHost, {
-      // No persistent "set ✓" chip in the casting box — the box hands off on finalize/skip, so
-      // nothing lingers above the composer.
+      // No persistent "set ✓" chip in the casting window — the titlebar carries the title and the
+      // window hands off on finalize/skip, so nothing lingers above the composer.
       onSummary: function () {},
-      // L3: when the studio surfaces generated options / a restored photoset, EXPAND the sheet to
-      // the LARGE detent so the 3-option grid never collapses out of view (a window was always
-      // "open"; a sheet must climb to show the studio). No-op on the fallback window.
-      ensureOpen: function () {
-        if (usingSheet && _win && typeof _win.snap === "function") {
-          try { _win.snap("large"); } catch (_) {}
-        }
-      },
+      ensureOpen: function () {},        // a window is always "open" — nothing to expand
       onFinalized: onCastingHeadshotChosen, // record {uploaded} + resume the interview
       onSkip: onCastingPhotoSkipped,        // OOBE re-sequence: record {skipped} + resume (pre-game box only)
     });
@@ -587,15 +556,7 @@
   }
 
   function teardownWindow() {
-    // #753: the box may be an OrwellSheet (dismiss) or the fallback OrwellWindow (destroy) — tear
-    // down whichever handle we hold. Both leave no listeners/scrim/inert page behind.
-    if (_win) {
-      try {
-        if (typeof _win.destroy === "function") _win.destroy();
-        else if (typeof _win.dismiss === "function") _win.dismiss("api");
-      } catch (_) {}
-      _win = null;
-    }
+    if (_win) { try { _win.destroy(); } catch (_) {} _win = null; }
     const el = document.getElementById(ID);
     if (el) el.remove();
     // R6 (audit anim-F3): clear the splash-suppression class HERE, not only in unmount(). The
