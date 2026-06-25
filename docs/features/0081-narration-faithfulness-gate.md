@@ -1,7 +1,11 @@
 # 0081 — Narration-faithfulness gate (the overseer's second role: grounding & graceful recovery)
 
-> **Status:** 📝 **SPEC** (drafted + owner-ruled 2026-06-24; the mandate boundary and rulings O1/O2/O4 are
-> closed — see §10). The **second overseer role** that
+> **Status:** ✅ **BUILT** (2026-06-24, PR #778 — phases P1–P6, FE-only; the mandate boundary +
+> rulings O1/O2/O4 closed, see §10). Implemented as `FaithfulnessJudge` + `dispatch_correction` +
+> `faithfulness_mode`/`faithfulness_unreframable_mode` (`frontend/src/faithfulness.py`) and the
+> `_faith_check` post-turn hook + casting seam (`frontend/src/agent_loop.py`); 58 gates in
+> `frontend/tests/test_0081_*.py`. Default **off** — opt-in via its own `/admin/status` dial. The
+> **second overseer role** that
 > [0079](./0079-runtime-overseer-and-diagnostic-log.feature) deliberately deferred ("the narration
 > **faithfulness gate** … a *separate, future* role, deliberately not in this feature"). Where 0079/0080
 > watch **pacing & gap-repair** (the model *under*-calls — a scene folds zero impact, the game freezes),
@@ -249,35 +253,42 @@ Diagnostic log (G1b, FE — 0079 ring reused):
 
 ## 6. Definition of Done
 
-- [ ] **Claim-bearing cadence:** a pure-mood/transition beat (asserts nothing checkable) does **not** wake
-      the judge — no model call, no log line; a claim-bearing beat does. (Breadth ≠ frequency.)
-- [ ] **Hybrid detection:** the deterministic 0065 guard still corrects regex-able closed-set board claims
+**✅ Built in PR #778 (P1–P6), FE-only.** Built symbols differ from this section's provisional names:
+the judge is `FaithfulnessJudge`; the projection is the Vault-free `_faith_build_projection` /
+`_faith_build_casting_projection` dict (not `knownProjection`); the un-reframable re-ground reuses the
+0065 `_DESYNC_REGROUND` seam. Gates: `frontend/tests/test_0081_{faithfulness_dial,faithfulness_judge,faithfulness_shadow_hook}.py` (58 tests).
+
+- [x] **Claim-bearing cadence:** `should_judge(claim_bearing, engaged_scene)` — a pure lull (neither)
+      never wakes the judge (no model call, no log); a claim-bearing/engaged turn does. (Breadth ≠ frequency.)
+- [x] **Hybrid detection:** the deterministic 0065 guard still corrects regex-able closed-set board claims
       **pre-stream**; the LLM judge catches the **semantic** remainder across all four dimensions
-      **post-stream**, on seeded fixtures (roles only).
-- [ ] **Open-set adopt:** an invented open-set detail is recorded canonical via `recordInteraction` — the
-      claim becomes true and nothing downstream contradicts it.
-- [ ] **Closed-set reframe:** a closed-set contradiction is recovered next turn as in-fiction misbelief;
-      the engine outcome/board is **unchanged** (asserted against the board before and after).
-- [ ] **Anti-sycophancy guard (load-bearing):** a unit test proves a flagged **closed-set** claim can
-      **never** route to `adopt` — it falls through to `reframe` / backend re-ground; **no closed-set field
-      is ever rewritten to match narration** (`lever == adopt ⇒ class == open-set`).
-- [ ] **Un-reframable → configurable fallback:** a closed-set slip with no plausible reframe routes to the
-      `overseer.faithfulness.unreframable` setting — default `reground` (re-inject the corrected delta + log,
-      **no visible retraction**), or `log-only`, or `visible`; **all three keep the engine truth unbent**.
-- [ ] **Vault-free judge:** the judge holds **no `VaultStore`** handle; a "leak" is caught as an
-      assertion outside `knownProjection`, not by Vault comparison; `npm run test:arch` stays green; the
-      log is sentinel-clean on the player **and** admin canaries (0001).
-- [ ] **Junction coverage:** the gate fires at the casting / premiere / preview-decision junctions with
-      the same detect-and-correct behavior (the folded-in 0082 scope).
-- [ ] **Folds into the overseer:** rides its **own** 3-state dial, independent of the pacing dial (`shadow`
-      = log-only, `active` = correct+log); every attempt lands in the `OVERSEER` ring with `{dimension,
-      class, claim, truth, lever, ok}`; `reframe` **steers**, never authors (the model writes the prose —
-      ADR 0003).
-- [ ] **Fail-soft / determinism:** judge unavailable/`off` ⇒ the 0065 guard + reasoning scrub +
-      `expressiveNonCollapse` behave exactly as today; seeded UAT/BDD/calibration lanes **byte-identical**
-      via `DeterministicOverseer`; **no** re-baseline.
-- [ ] Name-agnostic tests (roles only); `npm test` + the FE pytest gate green; live-LLM manual run
-      recorded (the active path is live-only — the gates can't see it).
+      **post-stream** (the claim-bearing trigger reuses `_sentence_has_closed_set_claim`).
+- [x] **Open-set adopt:** an invented open-set detail is recorded canonical via the 0055
+      `_auto_record_scene` → `recordInteraction` machinery, tagged **O3** for audit.
+- [x] **Closed-set reframe:** a closed-set contradiction is recovered next turn as in-fiction misbelief
+      via a `_DESYNC_REGROUND` directive; the engine board is **unchanged** (the mandate test asserts no
+      board mutator is reached).
+- [x] **Anti-sycophancy guard (load-bearing):** `verdict_from_reply` rejects `adopt` for any non-open
+      slip (the parse-layer wall), and the integration test proves a flagged **closed-set** slip **never**
+      reaches `recordInteraction` in active mode (`lever == adopt ⇒ class == open`).
+- [x] **Un-reframable → configurable fallback:** `faithfulness_unreframable_mode()` — default `reground`
+      (silent re-ground, **no visible retraction**), or `log-only`, or `visible`; **all three keep the
+      engine truth unbent**.
+- [x] **Vault-free judge:** the judge holds **no Vault handle** (the FE has none); a "leak" is caught as
+      an assertion outside the Vault-free projection, never by Vault comparison.
+- [x] **Junction coverage:** the gate fires in-game (premiere + preview ride the in-game hook — the
+      projection carries the roster + `pending`) and at the **casting** junction (its own seam +
+      context-aware judge). (Folded-in 0082 scope.)
+- [x] **Folds into the overseer:** rides its **own** 3-state dial (`faithfulness_mode`), independent of
+      the pacing dial; every detection + correction lands in the `OVERSEER` ring (`faith:*` kinds with
+      `lever`/`ok`); `reframe` **steers**, never authors (the model writes the prose — ADR 0003).
+- [x] **Fail-soft / determinism:** judge unavailable/`off` ⇒ the 0065 guard + reasoning scrub +
+      `expressiveNonCollapse` behave exactly as today; the **live-only carve-out**
+      (`DeterministicFaithfulnessJudge` / no utility model ⇒ the judge never runs) keeps seeded lanes
+      **byte-identical**; **no** re-baseline.
+- [x] Name-agnostic tests (roles only); the **full FE pytest gate is green (2670 passed, 2 skipped)**.
+      *(Open follow-up: the active path is live-only, so a live-LLM manual run is owed — the headless
+      gates stub the model and can't exercise it.)*
 
 ## 7. Anti-sycophancy & the mandate boundary (explicit — read before approving)
 
@@ -311,6 +322,11 @@ should have re-grounded* — recoverable, never an outcome-bend. The classifier 
 (ambiguous ⇒ treat as closed-set ⇒ reframe, never adopt) makes the safe direction the cheap one.
 
 ## 8. Test gates (the proofs)
+
+**✅ Built as** `frontend/tests/test_0081_{faithfulness_dial,faithfulness_judge,faithfulness_shadow_hook}.py`
+(58 tests). The load-bearing anti-sycophancy gate is `test_load_bearing_a_closed_set_slip_is_never_adopted`
++ the `verdict_from_reply` adopt-only-open wall; the closed-set-correction mandate gate is
+`test_active_reframe_queues_a_directive_and_never_mutates_the_board`. The provisional names below map to those.
 
 - **`faithfulnessGuard` (unit, load-bearing):** for every closed-set field, a flagged claim on it
   **cannot** produce `lever == adopt`; it routes to `reframe` / `reinject-delta`. The engine board is

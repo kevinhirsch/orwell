@@ -192,6 +192,19 @@ DEFAULT_SETTINGS = {
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
     "utility_model_fallbacks": [],
+    # Feature 0081 — the DEDICATED faithfulness-judge model (the narration-faithfulness gate's LLM).
+    # Unset ⇒ resolve_endpoint("faithfulness") falls back to the Utility model, then the Default chat
+    # model. Operator config (global; the AI Settings tab is admin-only); persisted via /api/auth/settings.
+    "faithfulness_endpoint_id": "",
+    "faithfulness_model": "",
+    "faithfulness_model_fallbacks": [],
+    # Feature 0079/0080 + 0081 — the overseer operator dials (off | shadow | active), persisted via the
+    # admin /api/auth/settings route so the Settings UI controls them. The "off" default here exists ONLY
+    # so the settings allowlist accepts the key; the resolvers (overseer.overseer_mode /
+    # faithfulness.faithfulness_mode) gate the read on is_setting_overridden, so an UNSAVED dial still
+    # falls through to the ORWELL_OVERSEER* / ORWELL_FAITHFULNESS_MODE env fallback.
+    "overseer_mode": "off",
+    "faithfulness_mode": "off",
     "teacher_model": "",
     "teacher_enabled": False,
     # Skills: minimum self-reported confidence for an auto-written (LLM-authored)

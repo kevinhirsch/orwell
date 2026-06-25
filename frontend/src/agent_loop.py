@@ -2249,6 +2249,211 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         return False
 
 
+# ── Feature 0081 — the narration-FAITHFULNESS gate (the overseer's second role) ────────────────
+# Where _auto_record_scene / the stall belts above error-correct the model's UNDER-calls (pacing /
+# gap-repair), this judges the model's MIS-narration: prose that contradicts the board, drifts a
+# houseguest's persona, leaks hidden machinery, or drops a beat. P2 is SHADOW-mode only (judge + log,
+# no correction); the adopt/reframe correction lands in P3/P4. Vault-free, live-only, fail-soft.
+
+async def _faith_build_projection(owner) -> dict:
+    """Assemble the Vault-free PROJECTION the faithfulness judge reasons over: the live board (the
+    closed-set fields, mirroring chat_helpers._beat_signature) + the player's known visible state.
+    BOTH are Vault-free engine projections (getGameState / getVisibleStateFor) — no Vault handle is
+    ever touched, so a leak is caught as "an assertion beyond this projection", never by reading
+    hidden state (mandate #2). Fail-soft to a partial/empty dict on any read error."""
+    proj: dict = {}
+    _BOARD_FIELDS = ("week", "phase", "pending", "hoh", "hohName", "noms", "nomNames",
+                     "activeNames", "vetoHolder", "vetoUsed", "evicted", "evictedNames",
+                     "finished", "room", "present")
+    try:
+        from src import orwell_engine as _oe
+        gs = await _oe.get_game_state(owner)
+        if isinstance(gs, dict):
+            proj["board"] = {k: gs.get(k) for k in _BOARD_FIELDS if k in gs}
+            # the active roster (Vault-free: public id + name) — feeds the judge's leak/persona read
+            # AND the adopt path's recordInteraction, so adopt never depends on loop-local _house scope.
+            proj["roster"] = [{"id": h.get("id"), "name": h.get("name")}
+                              for h in (gs.get("house") or [])
+                              if isinstance(h, dict) and h.get("id") and h.get("name")
+                              and h.get("status", "active") == "active"]
+    except Exception:
+        pass
+    try:
+        from src import orwell_engine as _oe
+        vs = await _oe.get_visible_state(owner)
+        if isinstance(vs, dict):
+            proj["visible"] = vs
+    except Exception:
+        pass
+    return proj
+
+
+async def _faith_build_casting_projection(owner) -> dict:
+    """The Vault-free projection for the CASTING junction (P5): the player's own casting answers +
+    readiness state. These are the player's OWN inputs (not secret), so the judge can catch the
+    producer contradicting / re-asking them or pre-deciding the cast. ``get_game_state`` is a
+    Vault-free projection by the engine's contract. Fail-soft to ``{}``."""
+    proj: dict = {}
+    try:
+        from src import orwell_engine as _oe
+        gs = await _oe.get_game_state(owner)
+        if isinstance(gs, dict):
+            if isinstance(gs.get("casting"), dict):
+                proj["casting"] = gs["casting"]
+            proj["started"] = bool(gs.get("started"))
+    except Exception:
+        pass
+    return proj
+
+
+# The mandate-safe CLOSED-set corrections: each only QUEUES a next-turn prose directive in the 0065
+# _DESYNC_REGROUND seam — never a board mutation. The engine's outcome always stands; only how the
+# model narrates next turn changes.
+_FAITH_REFRAME_DIRECTIVE = (
+    "FAITHFULNESS RE-FRAME — your last narration asserted an OUTCOME the board does not support (the "
+    "engine's result is the source of truth and stands). Do NOT repeat or build on that claim. On "
+    "your next beat, play it as an in-fiction MISREAD — a rumor, a premature assumption, wishful "
+    "thinking — that the live board quietly corrects. Re-read the GAME CONTEXT and narrate from where "
+    "the board ACTUALLY is.")
+
+_FAITH_REGROUND_DIRECTIVE = (
+    "RE-GROUND ON THE BOARD — your last narration drifted from the engine truth. Read the current "
+    "GAME CONTEXT and voice ONLY what it states; do not repeat or build on the drifted claim.")
+
+_FAITH_VISIBLE_DIRECTIVE = (
+    "FAITHFULNESS CORRECTION — your last narration stated something the board does not support. On "
+    "your next beat, briefly and in character set the record straight for the player, then continue "
+    "from the live board (the engine's result stands).")
+
+
+def _faith_queue_reground(owner, directive) -> bool:
+    """Queue a NEXT-TURN re-ground directive (reusing the 0065 ``_DESYNC_REGROUND`` seam) — the ONLY
+    thing a closed-set faithfulness correction ever does. It NEVER mutates the board; it steers how
+    the model narrates next turn (``apply_game_framing`` pops it into the next prompt). Won't clobber
+    an existing re-ground (a 0065 desync takes precedence). Returns True iff it queued one."""
+    try:
+        from routes import chat_helpers as _ch
+        store = getattr(_ch, "_DESYNC_REGROUND", None)
+        if store is None or owner is None:
+            return False
+        if owner in store:
+            return False  # a re-ground is already queued (board correction in flight) — leave it
+        store[owner] = directive
+        return True
+    except Exception:
+        return False
+
+
+async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
+                       endpoint_url=None, model=None, headers=None, last_user=None,
+                       projection=None, context="in-game") -> None:
+    """Feature 0081 — the live faithfulness check (P2 shadow detection + P3 active 'adopt').
+
+    On a claim-bearing or engaged turn, judge the finalized narration against the player's Vault-free
+    projection. ALWAYS surface a detected slip on the OVERSEER ring (shadow + active both LOG). In
+    ``active`` mode, additionally DISPATCH the diegetic correction (trigger-only via
+    :func:`dispatch_correction`):
+
+      * ``adopt`` (open-set) — canonicalize the narrated detail by recording the scene (reusing the
+        0055 :func:`_auto_record_scene` extraction + recordInteraction), tagged **O3** for audit. The
+        roster comes from the Vault-free projection, so adopt never depends on loop-local ``_house``.
+      * ``reframe`` / ``reground`` (closed-set) — wired in P4; until then they log + defer (no-op).
+
+    THE WALL holds upstream — :meth:`FaithfulnessJudge.verdict_from_reply` already guarantees
+    ``adopt`` ⇒ open-set — so no correction here can ever bend a closed-set outcome. Live-only (no
+    utility model ⇒ the seeded floor stands, byte-identical) and FAIL-SOFT (never hurts a turn)."""
+    try:
+        from src.faithfulness import (faithfulness_mode, should_judge, FaithfulnessJudge,
+                                      dispatch_correction)
+        mode = faithfulness_mode()
+        if mode not in ("shadow", "active"):
+            return
+        if not should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene)):
+            return
+        # live-only carve-out (ruling D4): no model ⇒ nothing runs (seeded lanes unchanged). The judge
+        # resolves the DEDICATED faithfulness model (Settings → Faithfulness judge model), which itself
+        # falls back to the Utility model then the Default chat model.
+        _llm = None
+        try:
+            from src.orwell_cast_authoring import _resolve_llm_fn
+            _llm = await _resolve_llm_fn(owner, prefix="faithfulness", fallbacks_key="faithfulness")
+        except Exception:
+            _llm = None
+        if _llm is None:
+            return
+        # the junction may pass its own Vault-free projection (e.g. casting); else build the in-game one.
+        _proj = projection if projection is not None else await _faith_build_projection(owner)
+        judge = FaithfulnessJudge(_llm)
+        import inspect as _faith_insp
+        _raw = _llm(judge.build_prompt(narration or "", _proj, context))
+        if _faith_insp.isawaitable(_raw):
+            _raw = await asyncio.wait_for(_raw, timeout=12)   # bounded: a slow judge must not hang
+        verdict = judge.verdict_from_reply(_raw, narration or "", _proj)
+        if verdict is None or not verdict.is_slip:
+            return
+
+        from src import log_rings as _lr
+        # 1) ALWAYS surface the detection (shadow + active both log).
+        _tag = "active: correcting" if mode == "active" else "shadow: logged, not corrected"
+        _lr.record_overseer(
+            "anomaly", f"faith:{verdict.dimension}",
+            f"faithfulness {verdict.classification}-set slip ({verdict.dimension}) — proposed "
+            f"lever '{verdict.lever}' [{_tag}]: {verdict.rationale}",
+            lever=verdict.lever, beat_before=beat_before, ok=False, user=owner)
+        if mode != "active":
+            return
+
+        # 2) ACTIVE — dispatch the diegetic correction (trigger-only). Each lever performs a
+        #    mandate-safe action: 'adopt' RECORDS an open-set detail (the only durable write, and
+        #    never a board outcome); 'reframe'/'reground' only QUEUE a next-turn prose re-ground.
+        #    NONE of them ever mutates a closed-set outcome — the engine's result always stands.
+        _adopt_ok = {"v": False}
+        if verdict.lever == "adopt":
+            try:
+                _roster = _proj.get("roster") or []
+                _adopt_ok["v"] = bool(await _auto_record_scene(
+                    narration, last_user, _roster, endpoint_url, model, headers, owner))
+            except Exception:
+                _adopt_ok["v"] = False
+
+        def _do_reframe() -> bool:
+            # closed-set, reframable: queue a NEXT-TURN directive steering the model to play the false
+            # claim as an in-fiction misread (rumor / premature / wishful). Engine outcome stands.
+            return _faith_queue_reground(owner, _FAITH_REFRAME_DIRECTIVE)
+
+        def _do_reground() -> bool:
+            # closed-set, un-reframable: route by the configurable fallback (owner ruling O1). All
+            # three keep the truth unbent; only 'log-only' queues nothing.
+            from src.faithfulness import faithfulness_unreframable_mode
+            _fb = faithfulness_unreframable_mode()
+            if _fb == "log-only":
+                return False
+            return _faith_queue_reground(
+                owner, _FAITH_VISIBLE_DIRECTIVE if _fb == "visible" else _FAITH_REGROUND_DIRECTIVE)
+
+        _disp = dispatch_correction(verdict, {
+            "adopt": (lambda: _adopt_ok["v"]),
+            "reframe": _do_reframe,
+            "reground": _do_reground,
+        })
+
+        # Log the correction taken — adopt gets its O3 marker; reframe/reground note the queued
+        # next-turn directive. The board is NEVER mutated by any of these (the mandate gate).
+        _applied = bool(_disp.get("applied"))
+        if verdict.lever == "adopt":
+            _msg = ("adopted an open-set slip as canon via recordInteraction (O3) — "
+                    f"{'recorded' if _applied else 'nothing recordable'}")
+        else:
+            _msg = (f"queued a next-turn {verdict.lever} for a closed-set slip "
+                    f"({'applied' if _applied else 'deferred'}) — engine outcome unchanged")
+        _lr.record_overseer(
+            "action", f"faith:{verdict.lever}:{verdict.dimension}",
+            f"{_msg}: {verdict.rationale}",
+            lever=verdict.lever, beat_before=beat_before, ok=_applied, user=owner)
+    except Exception as _e:
+        logger.debug(f"[orwell] faithfulness check skipped: {_e}")
+
+
 # The CASTING twin of _auto_record_scene. The casting preamble tells the model to "record the
 # player's answers AS THEY LAND with updateCasting," but it reliably UNDER-CALLS it — and unlike every
 # other under-call-prone seam (recordInteraction/makeDeal/moveTo/markHouseguestMet, each belted),
@@ -5207,6 +5412,43 @@ async def stream_agent_loop(
                             beat_after=_ov_beat_after, ok=True, user=owner)
         except Exception as _ov_err:  # fail-soft: the overseer must never hurt a turn
             logger.debug(f"[orwell] overseer hook skipped: {_ov_err}")
+
+        # 0081 P2 — the narration-FAITHFULNESS gate (SHADOW: judge + log, no correction). Its OWN
+        # dial (faithfulness_mode), independent of the overseer above. Runs once per turn, post-turn,
+        # on a claim-bearing (reusing the 0065 closed-set-claim pre-filter) or engaged turn; live-only
+        # + fail-soft. The deterministic 0065 guard stays the pre-stream floor — this is the post-turn
+        # semantic layer.
+        try:
+            _faith_claim = False
+            try:
+                from routes.chat_helpers import _sentence_has_closed_set_claim
+                _faith_claim = bool(_sentence_has_closed_set_claim(_turn_narration_full or ""))
+            except Exception:
+                _faith_claim = False
+            await _faith_check(
+                _turn_narration_full, claim_bearing=_faith_claim,
+                engaged_scene=bool(_want_record), owner=owner,
+                beat_before=_ledger_beat_seq_before,
+                endpoint_url=endpoint_url, model=model, headers=headers,
+                last_user=_extract_last_user_message(messages))
+        except Exception as _faith_err:  # fail-soft: the faithfulness gate must never hurt a turn
+            logger.debug(f"[orwell] faithfulness gate skipped: {_faith_err}")
+
+    # 0081 P5 — the CASTING junction. The in-game hook above is gated to live-game turns, so the
+    # casting interview (a separate mode) gets its OWN faithfulness check against a casting projection
+    # (the player's own answers + readiness). Premiere + preview are live-game and already covered
+    # above (the in-game projection carries the roster + the pending decision). Live-only + fail-soft.
+    if game_mode == "casting" and owner:
+        try:
+            _cast_narr = "\n".join(t for t in round_texts if t)
+            _cast_proj = await _faith_build_casting_projection(owner)
+            await _faith_check(
+                _cast_narr, claim_bearing=False, engaged_scene=True, owner=owner,
+                endpoint_url=endpoint_url, model=model, headers=headers,
+                last_user=_extract_last_user_message(messages),
+                projection=_cast_proj, context="casting")
+        except Exception as _cast_faith_err:  # fail-soft: never hurt the casting turn
+            logger.debug(f"[orwell] casting faithfulness gate skipped: {_cast_faith_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.

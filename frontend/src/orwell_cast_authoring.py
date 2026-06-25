@@ -304,20 +304,31 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
 
 # ── the live wiring (best-effort, background; graceful no-op when no model) ────
 
-async def _resolve_llm_fn(owner: Optional[str]) -> Optional[LlmFn]:
+async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
+                          fallbacks_key: str = "utility") -> Optional[LlmFn]:
     """Build a one-shot completion fn over the user's UTILITY model (background-safe, like the email
-    triage path). Returns None when no usable endpoint resolves — authoring then silently no-ops."""
+    triage path). Returns None when no usable endpoint resolves — authoring then silently no-ops.
+
+    Feature 0081: pass ``prefix='faithfulness', fallbacks_key='faithfulness'`` to resolve the DEDICATED
+    faithfulness-judge model (settings ``faithfulness_*``) instead — ``resolve_endpoint`` itself chains
+    faithfulness → utility → default. The default call ``_resolve_llm_fn(owner)`` is byte-identical to
+    before (same utility resolution, same utility fallback chain, same image-filter + streaming tail)."""
     try:
-        from src.endpoint_resolver import resolve_endpoint, resolve_utility_fallback_candidates
+        from src.endpoint_resolver import (resolve_endpoint, resolve_utility_fallback_candidates,
+                                           _resolve_fallback_candidates)
         from src.llm_core import stream_llm_with_fallback
     except Exception:
         return None
-    url, model, headers = resolve_endpoint("utility", owner=owner)
+    url, model, headers = resolve_endpoint(prefix, owner=owner)
     if not url or not model:
         url, model, headers = resolve_endpoint("default", owner=owner)
     if not url or not model:
         return None
-    candidates = [(url, model, headers)] + (resolve_utility_fallback_candidates(owner=owner) or [])
+    if fallbacks_key == "utility":
+        _extra = resolve_utility_fallback_candidates(owner=owner) or []
+    else:
+        _extra = _resolve_fallback_candidates(f"{fallbacks_key}_model_fallbacks", owner=owner) or []
+    candidates = [(url, model, headers)] + _extra
 
     # #546: an image-only model (dall-e / flux / gpt-image / …) resolves fine as an endpoint but can
     # NOT do JSON/chat authoring — POSTing prose messages to it degrades silently (empty/garbage text

@@ -106,10 +106,13 @@ def test_retention_route_is_admin_gated(monkeypatch):
 
 # ── the status page renders + wires the toggle ──────────────────────────────────
 
-def test_status_page_renders_the_overseer_toggle(monkeypatch):
+def test_status_page_points_overseer_controls_to_settings(monkeypatch):
+    """The overseer dial moved to Settings → AI (feature 0081 relocation). /admin/status keeps the
+    labelled section as a pointer — the live diagnostics still stream there — but no longer hosts the
+    control itself."""
     monkeypatch.setenv("AUTH_ENABLED", "false")
     client = TestClient(_app(), raise_server_exceptions=False)
     body = client.get("/admin/status").text
-    assert 'id="overseer-toggle"' in body                # the control exists
-    assert "RUNTIME OVERSEER" in body                    # …in its own labelled section
-    assert "overseerEnabled" in body                     # the JS reads/writes the field
+    assert "RUNTIME OVERSEER" in body                    # the labelled section remains…
+    assert 'id="overseer-toggle"' not in body           # …but the control moved to Settings…
+    assert "Settings" in body                            # …and the pointer names where it went.

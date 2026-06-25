@@ -697,7 +697,7 @@ def setup_admin_health_routes() -> APIRouter:
         """The LLM I/O trace toggle + log-retention horizon + the live total-size
         readout (the universal logging setting on the status page). Best-effort."""
         require_admin(request)
-        from src import llm_trace, overseer
+        from src import llm_trace, overseer, faithfulness
         from src.settings import get_setting
         total = llm_trace.total_log_bytes()
         mode = overseer.overseer_mode()  # 0080: 'off' | 'shadow' | 'active'
@@ -707,6 +707,8 @@ def setup_admin_health_routes() -> APIRouter:
             # (true iff the mode is not 'off').
             "overseerMode": mode,
             "overseerEnabled": mode != "off",
+            # 0081: the narration-faithfulness gate rides its OWN independent dial.
+            "faithfulnessMode": faithfulness.faithfulness_mode(),
             "retentionDays": llm_trace.retention_days(),
             "choices": llm_trace.RETENTION_CHOICES,
             "totalBytes": total,
@@ -719,7 +721,7 @@ def setup_admin_health_routes() -> APIRouter:
         """Persist the trace toggle and/or retention horizon. Lowering the horizon
         trims immediately so the freed space shows up at once."""
         require_admin(request)
-        from src import llm_trace, overseer
+        from src import llm_trace, overseer, faithfulness
         from src.settings import load_settings, save_settings
         try:
             body = await request.json()
@@ -746,6 +748,12 @@ def setup_admin_health_routes() -> APIRouter:
             settings["overseer_mode"] = "shadow" if bool(body["overseerEnabled"]) else "off"
             settings.pop("overseer_enabled", None)
             changed = True
+        # 0081: the faithfulness gate's OWN dial, independent of the overseer mode above.
+        if "faithfulnessMode" in body:
+            fmode = body["faithfulnessMode"]
+            if isinstance(fmode, str) and fmode in faithfulness.FAITHFULNESS_MODES:
+                settings["faithfulness_mode"] = fmode
+                changed = True
         if "retentionDays" in body:
             try:
                 d = int(body["retentionDays"])
@@ -763,6 +771,7 @@ def setup_admin_health_routes() -> APIRouter:
             "traceEnabled": bool(settings.get("llm_trace_enabled", True)),
             "overseerMode": mode,
             "overseerEnabled": mode != "off",
+            "faithfulnessMode": faithfulness.faithfulness_mode(),  # 0081: independent dial
             "retentionDays": llm_trace.retention_days(),
             "totalBytes": result["totalBytes"],
             "totalHuman": result["totalHuman"],
@@ -1098,18 +1107,7 @@ _STATUS_PAGE = """<!doctype html>
   <span id="retmsg" class="sub"></span>
 </div>
 <h1 style="margin-top:26px">RUNTIME OVERSEER</h1>
-<div class="sub">The runtime loop overseer (feature 0079/0080) watches the engine↔LLM loop; when a symptom trips it diagnoses the root cause and logs it to the <strong>Overseer (live)</strong> stream above. <strong>Off</strong> — the deterministic floor stands (default). <strong>Shadow</strong> (0079) — it diagnoses and logs but does not act (the existing guardrails still do), so it is safe and changes nothing the player sees. <strong>Active</strong> (0080) — its verdict drives the correction live (the guardrails become the fail-soft floor; live-LLM only). The <code>ORWELL_OVERSEER_MODE</code> / <code>ORWELL_OVERSEER</code> env vars are the headless fallback when this control is unset.</div>
-<div class="actions" style="margin:8px 0;align-items:center;flex-wrap:wrap">
-  <label class="sub" style="display:flex;align-items:center;gap:6px">
-    overseer mode
-    <select id="overseer-toggle">
-      <option value="off">off — diagnostic floor (default)</option>
-      <option value="shadow">shadow — diagnose &amp; log (0079)</option>
-      <option value="active">active — act on the verdict (0080)</option>
-    </select>
-  </label>
-  <span id="overseermsg" class="sub"></span>
-</div>
+<div class="sub">The pacing-overseer and narration-faithfulness dials — and the dedicated faithfulness judge model — now live in <strong>Settings &rarr; AI &rarr; Runtime overseer</strong>. The live diagnostics still stream to the <strong>Overseer (live)</strong> panel above. The <code>ORWELL_OVERSEER_MODE</code> / <code>ORWELL_FAITHFULNESS_MODE</code> env vars remain the headless fallback.</div>
 <div id="err"></div>
 <script nonce="{{CSP_NONCE}}">
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1625,8 +1623,7 @@ async function loadOps() {
 loadOps();
 // ── log retention + LLM I/O trace controls ──
 const retGrid = document.getElementById("retgrid"), retDays = document.getElementById("ret-days"),
-      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg"),
-      overseerToggle = document.getElementById("overseer-toggle"), overseerMsg = document.getElementById("overseermsg");
+      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg");
 function retBytes(n) { n = Math.max(0, +n || 0); const u = ["B","KB","MB","GB"]; let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (i ? n.toFixed(1) : (n|0)) + " " + u[i]; }
 function renderRetention(d) {
@@ -1648,8 +1645,6 @@ async function loadRetention() {
     retDays.innerHTML = (d.choices || []).map(c => '<option value="' + esc(c.days) + '">' + esc(c.label) + "</option>").join("");
     retDays.value = String(d.retentionDays);
     traceToggle.checked = !!d.traceEnabled;
-    // 0080: the 3-state control reflects overseerMode; fall back to the legacy overseerEnabled flag.
-    if (overseerToggle) overseerToggle.value = d.overseerMode || (d.overseerEnabled ? "shadow" : "off");
     renderRetention(d);
   } catch (e) {}
 }
@@ -1664,16 +1659,6 @@ async function saveRetention(body, note) {
   } catch (e) { retMsg.innerHTML = '<span class="bad">save failed</span>'; }
 }
 traceToggle.addEventListener("change", () => saveRetention({ traceEnabled: traceToggle.checked }));
-if (overseerToggle) overseerToggle.addEventListener("change", async () => {
-  overseerMsg.textContent = "saving…";
-  try {
-    const r = await fetch("/api/admin/logs/retention", { method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overseerMode: overseerToggle.value }) });
-    const d = await r.json();
-    overseerToggle.value = d.overseerMode || (d.overseerEnabled ? "shadow" : "off");
-    overseerMsg.textContent = overseerToggle.value;
-  } catch (e) { overseerMsg.innerHTML = '<span class="bad">save failed</span>'; }
-});
 retDays.addEventListener("change", () => saveRetention({ retentionDays: +retDays.value }, "applying horizon…"));
 document.getElementById("trim-now").addEventListener("click", async () => {
   retMsg.textContent = "trimming…";
