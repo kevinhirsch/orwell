@@ -72,10 +72,14 @@ def overseer_mode() -> str:
     config must never crash the turn."""
     # 1) + 2) — the settings tier (the admin UI control). A broken read drops to the env path.
     try:
-        from src.settings import get_setting
-        mode = get_setting("overseer_mode", None)
-        if isinstance(mode, str) and mode in OVERSEER_MODES:
-            return mode
+        from src.settings import get_setting, is_setting_overridden
+        # Only an EXPLICITLY-saved value wins. ``overseer_mode`` lives in DEFAULT_SETTINGS purely so the
+        # admin /api/auth/settings route (allowlisted to DEFAULT_SETTINGS) can persist it; its "off"
+        # default must NOT shadow the env fallback, so we honor it only when actually saved.
+        if is_setting_overridden("overseer_mode"):
+            mode = get_setting("overseer_mode", None)
+            if isinstance(mode, str) and mode in OVERSEER_MODES:
+                return mode
         legacy = get_setting("overseer_enabled", None)
         if legacy is not None:
             return "shadow" if bool(legacy) else "off"

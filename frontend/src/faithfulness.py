@@ -59,10 +59,14 @@ def faithfulness_mode() -> str:
     """
     # 1) the settings tier (the admin UI control). A broken read drops to the env path.
     try:
-        from src.settings import get_setting
-        mode = get_setting("faithfulness_mode", None)
-        if isinstance(mode, str) and mode in FAITHFULNESS_MODES:
-            return mode
+        from src.settings import get_setting, is_setting_overridden
+        # Only an EXPLICITLY-saved value wins. ``faithfulness_mode`` lives in DEFAULT_SETTINGS purely so
+        # the admin /api/auth/settings route (allowlisted to DEFAULT_SETTINGS) can persist it; its "off"
+        # default must NOT shadow the env fallback, so honor it only when actually saved.
+        if is_setting_overridden("faithfulness_mode"):
+            mode = get_setting("faithfulness_mode", None)
+            if isinstance(mode, str) and mode in FAITHFULNESS_MODES:
+                return mode
     except Exception:
         pass
     # 2) the headless env knob.

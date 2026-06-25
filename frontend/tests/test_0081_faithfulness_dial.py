@@ -167,21 +167,23 @@ def test_overseer_dial_unaffected_by_faithfulness(monkeypatch, tmp_path):
     assert overseer_mode() == "active"
 
 
-# ── 4) SOURCE-PIN — /admin/status wires the faithfulness dial alongside the overseer one ──
+# ── 4) SOURCE-PIN — the dials + the faithfulness model picker live in Settings (moved off admin) ──
 
 _ADMIN_SRC = pathlib.Path(__file__).resolve().parents[1] / "routes" / "admin_health_routes.py"
+_FE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-def test_source_pin_admin_status_wires_the_faithfulness_dial():
-    """The ``/admin/status`` page exposes the faithfulness dial alongside the overseer one — its own
-    ``<select>``, the GET/POST ``faithfulnessMode`` field, and the ``faithfulness_mode`` settings
-    key written — so an operator can flip it independently of the runtime overseer."""
-    src = _ADMIN_SRC.read_text()
-    assert "faithfulness-toggle" in src       # the dedicated <select>
-    assert "faithfulnessMode" in src          # the GET/POST field
-    assert "faithfulness_mode" in src         # the settings key written
-    # …and it is genuinely a SECOND control, not a rename of the overseer one.
-    assert "overseer-toggle" in src
+def test_source_pin_overseer_controls_moved_to_settings():
+    """The overseer + faithfulness dials moved OUT of /admin/status INTO the Settings AI tab, and the
+    dedicated faithfulness model picker lives there too — all the operator AI config in one place."""
+    admin = _ADMIN_SRC.read_text()
+    assert "overseer-toggle" not in admin            # the dials are GONE from /admin/status…
+    assert "faithfulness-toggle" not in admin
+    html = (_FE_ROOT / "static" / "index.html").read_text()
+    js = (_FE_ROOT / "static" / "js" / "settings.js").read_text()
+    assert "set-overseerMode" in html and "set-faithMode" in html          # …the two dials now in Settings…
+    assert "set-faithEpSelect" in html and "set-faithModelSelect" in html   # …+ the dedicated model picker…
+    assert "initOverseerModes" in js and "initFaithfulnessModel" in js      # …wired in settings.js.
 
 
 # ── the un-reframable fallback dial (owner ruling O1) ──────────────────────────────
@@ -215,3 +217,15 @@ def test_unreframable_env_fallback_then_garbage_degrades_to_reground(monkeypatch
     assert faithfulness_unreframable_mode() == "visible"
     monkeypatch.setenv("ORWELL_FAITHFULNESS_UNREFRAMABLE", "nonsense")
     assert faithfulness_unreframable_mode() == "reground"   # garbage ⇒ the safe default
+
+
+# ── the dedicated faithfulness-judge model keys (Settings persistence) ─────────────
+
+def test_faithfulness_model_keys_are_in_default_settings():
+    """The dedicated faithfulness-judge model keys live in DEFAULT_SETTINGS so the admin
+    /api/auth/settings route (allowlisted to DEFAULT_SETTINGS keys) can persist them — and so
+    resolve_endpoint('faithfulness') reads them (falling back to utility -> default when unset)."""
+    from src.settings import DEFAULT_SETTINGS
+    for k in ("faithfulness_endpoint_id", "faithfulness_model", "faithfulness_model_fallbacks"):
+        assert k in DEFAULT_SETTINGS
+    assert DEFAULT_SETTINGS["faithfulness_model_fallbacks"] == []

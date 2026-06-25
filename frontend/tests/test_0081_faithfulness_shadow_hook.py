@@ -82,7 +82,7 @@ def _patch_engine_reads(monkeypatch):
 
 
 def _patch_llm(monkeypatch, reply):
-    async def _fake_resolve(owner):
+    async def _fake_resolve(owner=None, **kwargs):
         return lambda prompt: reply
     monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _fake_resolve)
 
@@ -136,7 +136,7 @@ def test_no_model_is_a_noop(monkeypatch, tmp_path):
     lane (which never wires a model) is byte-identical."""
     _set_mode(monkeypatch, tmp_path, "shadow")
 
-    async def _none(owner):
+    async def _none(owner=None, **kwargs):
         return None
     monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _none)
     logged = _capture_log(monkeypatch)
@@ -148,7 +148,7 @@ def test_off_mode_never_resolves_a_model(monkeypatch, tmp_path):
     _set_mode(monkeypatch, tmp_path, "off")
     resolved = []
 
-    async def _fake_resolve(owner):
+    async def _fake_resolve(owner=None, **kwargs):
         resolved.append(1)
         return lambda p: "{}"
     monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _fake_resolve)
@@ -162,7 +162,7 @@ def test_a_turn_with_no_claim_and_no_scene_never_wakes(monkeypatch, tmp_path):
     _set_mode(monkeypatch, tmp_path, "shadow")
     resolved = []
 
-    async def _fake_resolve(owner):
+    async def _fake_resolve(owner=None, **kwargs):
         resolved.append(1)
         return lambda p: "{}"
     monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _fake_resolve)
@@ -386,7 +386,7 @@ def test_casting_junction_judges_with_a_casting_projection_and_prompt(monkeypatc
     _set_mode(monkeypatch, tmp_path, "shadow")
     captured = {}
 
-    async def _fake_resolve(owner):
+    async def _fake_resolve(owner=None, **kwargs):
         def _llm(prompt):
             captured["prompt"] = prompt
             return json.dumps({"dimension": "board", "classification": "closed",
@@ -427,3 +427,24 @@ def test_source_pin_casting_junction_is_wired():
     src = _AGENT_LOOP_SRC.read_text()
     assert "_faith_build_casting_projection" in src      # the casting projection builder…
     assert 'context="casting"' in src                    # …and the casting-context call.
+
+
+def test_faith_check_resolves_the_dedicated_faithfulness_model(monkeypatch, tmp_path):
+    """The judge resolves the DEDICATED faithfulness model (the Settings 'faithfulness' prefix), not
+    the shared utility model directly — _resolve_llm_fn is called with prefix/fallbacks_key
+    'faithfulness' (resolve_endpoint then chains faithfulness -> utility -> default)."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    _patch_engine_reads(monkeypatch)
+    captured = {}
+
+    async def _fake_resolve(owner=None, **kwargs):
+        captured.update(kwargs)
+        return lambda prompt: json.dumps(
+            {"dimension": "none", "classification": "none", "lever": "none", "rationale": ""})
+    monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _fake_resolve)
+
+    _run(_faith_check("you won HOH", claim_bearing=True, engaged_scene=False, owner="u1",
+                      endpoint_url="http://x", model="m", headers={}, last_user="hi"))
+
+    assert captured.get("prefix") == "faithfulness"
+    assert captured.get("fallbacks_key") == "faithfulness"

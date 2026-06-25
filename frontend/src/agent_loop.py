@@ -2370,11 +2370,13 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
             return
         if not should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene)):
             return
-        # live-only carve-out (ruling D4): no utility model ⇒ nothing runs (seeded lanes unchanged).
+        # live-only carve-out (ruling D4): no model ⇒ nothing runs (seeded lanes unchanged). The judge
+        # resolves the DEDICATED faithfulness model (Settings → Faithfulness judge model), which itself
+        # falls back to the Utility model then the Default chat model.
         _llm = None
         try:
             from src.orwell_cast_authoring import _resolve_llm_fn
-            _llm = await _resolve_llm_fn(owner)
+            _llm = await _resolve_llm_fn(owner, prefix="faithfulness", fallbacks_key="faithfulness")
         except Exception:
             _llm = None
         if _llm is None:

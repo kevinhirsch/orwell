@@ -1107,31 +1107,7 @@ _STATUS_PAGE = """<!doctype html>
   <span id="retmsg" class="sub"></span>
 </div>
 <h1 style="margin-top:26px">RUNTIME OVERSEER</h1>
-<div class="sub">The runtime loop overseer (feature 0079/0080) watches the engine↔LLM loop; when a symptom trips it diagnoses the root cause and logs it to the <strong>Overseer (live)</strong> stream above. <strong>Off</strong> — the deterministic floor stands (default). <strong>Shadow</strong> (0079) — it diagnoses and logs but does not act (the existing guardrails still do), so it is safe and changes nothing the player sees. <strong>Active</strong> (0080) — its verdict drives the correction live (the guardrails become the fail-soft floor; live-LLM only). The <code>ORWELL_OVERSEER_MODE</code> / <code>ORWELL_OVERSEER</code> env vars are the headless fallback when this control is unset.</div>
-<div class="actions" style="margin:8px 0;align-items:center;flex-wrap:wrap">
-  <label class="sub" style="display:flex;align-items:center;gap:6px">
-    overseer mode
-    <select id="overseer-toggle">
-      <option value="off">off — diagnostic floor (default)</option>
-      <option value="shadow">shadow — diagnose &amp; log (0079)</option>
-      <option value="active">active — act on the verdict (0080)</option>
-    </select>
-  </label>
-  <span id="overseermsg" class="sub"></span>
-</div>
-<h1 style="margin-top:26px">NARRATION FAITHFULNESS</h1>
-<div class="sub">The narration-faithfulness gate (feature 0081) is the overseer's <strong>second role</strong>: on a claim-bearing turn it checks the narration against the board and against what the player legitimately knows, flagging prose that contradicts state, drifts a houseguest's persona, leaks hidden machinery, or drops a beat. It rides its <strong>own</strong> dial, independent of the runtime overseer above. <strong>Off</strong> — the deterministic floor stands (default). <strong>Shadow</strong> — it judges and logs but does not correct (safe; changes nothing the player sees). <strong>Active</strong> — its verdict drives a diegetic correction (adopt an open-set detail as canon / reframe a closed-set slip in-fiction; a consequential outcome is never bent; live-LLM only). The <code>ORWELL_FAITHFULNESS_MODE</code> env var is the headless fallback when this control is unset.</div>
-<div class="actions" style="margin:8px 0;align-items:center;flex-wrap:wrap">
-  <label class="sub" style="display:flex;align-items:center;gap:6px">
-    faithfulness mode
-    <select id="faithfulness-toggle">
-      <option value="off">off — deterministic floor (default)</option>
-      <option value="shadow">shadow — judge &amp; log</option>
-      <option value="active">active — correct on the verdict</option>
-    </select>
-  </label>
-  <span id="faithfulnessmsg" class="sub"></span>
-</div>
+<div class="sub">The pacing-overseer and narration-faithfulness dials — and the dedicated faithfulness judge model — now live in <strong>Settings &rarr; AI &rarr; Runtime overseer</strong>. The live diagnostics still stream to the <strong>Overseer (live)</strong> panel above. The <code>ORWELL_OVERSEER_MODE</code> / <code>ORWELL_FAITHFULNESS_MODE</code> env vars remain the headless fallback.</div>
 <div id="err"></div>
 <script nonce="{{CSP_NONCE}}">
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1647,9 +1623,7 @@ async function loadOps() {
 loadOps();
 // ── log retention + LLM I/O trace controls ──
 const retGrid = document.getElementById("retgrid"), retDays = document.getElementById("ret-days"),
-      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg"),
-      overseerToggle = document.getElementById("overseer-toggle"), overseerMsg = document.getElementById("overseermsg"),
-      faithfulnessToggle = document.getElementById("faithfulness-toggle"), faithfulnessMsg = document.getElementById("faithfulnessmsg");
+      traceToggle = document.getElementById("trace-toggle"), retMsg = document.getElementById("retmsg");
 function retBytes(n) { n = Math.max(0, +n || 0); const u = ["B","KB","MB","GB"]; let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (i ? n.toFixed(1) : (n|0)) + " " + u[i]; }
 function renderRetention(d) {
@@ -1671,10 +1645,6 @@ async function loadRetention() {
     retDays.innerHTML = (d.choices || []).map(c => '<option value="' + esc(c.days) + '">' + esc(c.label) + "</option>").join("");
     retDays.value = String(d.retentionDays);
     traceToggle.checked = !!d.traceEnabled;
-    // 0080: the 3-state control reflects overseerMode; fall back to the legacy overseerEnabled flag.
-    if (overseerToggle) overseerToggle.value = d.overseerMode || (d.overseerEnabled ? "shadow" : "off");
-    // 0081: the faithfulness gate's own independent dial.
-    if (faithfulnessToggle) faithfulnessToggle.value = d.faithfulnessMode || "off";
     renderRetention(d);
   } catch (e) {}
 }
@@ -1689,26 +1659,6 @@ async function saveRetention(body, note) {
   } catch (e) { retMsg.innerHTML = '<span class="bad">save failed</span>'; }
 }
 traceToggle.addEventListener("change", () => saveRetention({ traceEnabled: traceToggle.checked }));
-if (overseerToggle) overseerToggle.addEventListener("change", async () => {
-  overseerMsg.textContent = "saving…";
-  try {
-    const r = await fetch("/api/admin/logs/retention", { method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ overseerMode: overseerToggle.value }) });
-    const d = await r.json();
-    overseerToggle.value = d.overseerMode || (d.overseerEnabled ? "shadow" : "off");
-    overseerMsg.textContent = overseerToggle.value;
-  } catch (e) { overseerMsg.innerHTML = '<span class="bad">save failed</span>'; }
-});
-if (faithfulnessToggle) faithfulnessToggle.addEventListener("change", async () => {
-  faithfulnessMsg.textContent = "saving…";
-  try {
-    const r = await fetch("/api/admin/logs/retention", { method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ faithfulnessMode: faithfulnessToggle.value }) });
-    const d = await r.json();
-    faithfulnessToggle.value = d.faithfulnessMode || "off";
-    faithfulnessMsg.textContent = faithfulnessToggle.value;
-  } catch (e) { faithfulnessMsg.innerHTML = '<span class="bad">save failed</span>'; }
-});
 retDays.addEventListener("change", () => saveRetention({ retentionDays: +retDays.value }, "applying horizon…"));
 document.getElementById("trim-now").addEventListener("click", async () => {
   retMsg.textContent = "trimming…";
