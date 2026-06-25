@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Overseer continuity:** if you are orchestrating this work as an *overseer* (dispatching delegate
+> agents, reviewing, watching CI, merging), read [`SOUL.md`](SOUL.md) first — it holds the operating
+> model, dispatch discipline, the hard-won lessons (diagnose-before-revert, live-verify streaming
+> changes, the `stat -L` agent-health rule, the gitignored-`settings.json` test red herring), and a
+> current-state snapshot. It is operational continuity, distinct from the game's `CHARACTER`/`SOUL`.
+
 ## What this project is
 
 `orwell` is a rebuild of an immersive, single-player, text-based **_Big Brother_ simulation**

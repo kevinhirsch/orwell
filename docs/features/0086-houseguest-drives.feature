@@ -47,6 +47,30 @@ Feature: 0086 — Houseguest drives (everyone always plays; intensity varies)
       Then it becomes an active campaign with lobbying
       And below the threshold it stays a lean that nudges the vote far less than a campaign
 
+  Rule: A low lean moves only the owner's own ballot, never the electorate
+
+    Scenario: A quiet grudge tilts the owner's vote but no one else's
+      Given a houseguest holds a low-intensity grudge against the target
+      Then that houseguest's own vote leans toward evicting the target
+      And a third houseguest's vote is unmoved by it
+      And only a full campaign sways other voters
+
+    Scenario: Behavioral-only motivations never touch the seeded vote
+      Given a houseguest is laying low or building an alliance
+      Then their drive adds no term to the eviction vote
+
+  Rule: Drives are sticky — agendas hold until the board shifts
+
+    Scenario: A drive does not flip-flop across a stable board
+      Given a houseguest commits to a target
+      When the society runs several ticks with no board change
+      Then they hold the same target rather than re-rolling each tick
+
+    Scenario: A real board change re-aims the drive
+      Given a houseguest committed to a target
+      When the target is evicted or wins the veto
+      Then the drive re-aims rather than persisting on a dead target
+
   Rule: Perspective is symmetric and calibration is safe
 
     Scenario: A drive is computed from the owner's own reads, never an omniscient board

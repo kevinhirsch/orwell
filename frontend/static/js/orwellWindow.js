@@ -458,6 +458,11 @@ export class OrwellWindow {
     el.setAttribute('role', role);
     el.setAttribute('aria-label', this.o.title);
     if (this.o.modal) el.setAttribute('aria-modal', 'true');
+    // #837: the root is the SPAWN/focus-trap target (focused on mount so AT/keyboard
+    // users land inside the new window) — tabindex=-1 keeps it OUT of the Tab order and
+    // the global .ow-window:focus rule keeps it ring-free. The keyboard ring lives on the
+    // titlebar (tabindex=0) which a Tab user genuinely reaches.
+    el.setAttribute('tabindex', '-1');
     const tb = document.createElement('div');
     tb.className = 'ow-titlebar';
     tb.setAttribute('tabindex', '0');
@@ -750,14 +755,14 @@ export class OrwellWindow {
     }, { signal: this.ac.signal });
   }
 
-  // Move focus INTO the dialog on open (first focusable in the body, else the
-  // titlebar) so it lands inside the modal, never on body (J1-25).
+  // Move focus INTO the dialog on open so it lands inside the modal, never on body
+  // (J1-25). #837: focus the ring-free ROOT (tabindex=-1) on spawn — NOT the first
+  // interactive control, which would paint a focus ring the user never keyboard-asked
+  // for. The trap keeps Tab inside; the user's first Tab reaches the first control and
+  // THAT rings (keyboard intent). A text input the player is meant to type in is the one
+  // legit auto-focus exception, and the consuming panels own that decision themselves.
   _focusIntoModal() {
-    try {
-      const f = this.el.querySelector(
-        '.ow-body button, .ow-body [href], .ow-body input, .ow-body select, .ow-body textarea, .ow-body [tabindex]:not([tabindex="-1"])');
-      (f || this.titlebar).focus();
-    } catch (_) {}
+    try { (this.el || this.titlebar).focus({ preventScroll: true }); } catch (_) {}
   }
 
   open(opener) {
@@ -782,7 +787,7 @@ export class OrwellWindow {
     if (this._docked) {
       const railBody = document.getElementById('gadget-rail-body');
       (railBody || document.body).appendChild(el);
-      if (this.o.focus) this.titlebar.focus();
+      if (this.o.focus) this.el.focus({ preventScroll: true }); // #837: ring-free root, not the titlebar
       return this;
     }
     document.body.appendChild(el);
@@ -825,7 +830,7 @@ export class OrwellWindow {
     if (this.o.modal) this._mountModalChrome();
     this.raise();
     if (this.o.modal) this._focusIntoModal();
-    else if (this.o.focus) this.titlebar.focus();
+    else if (this.o.focus) this.el.focus({ preventScroll: true }); // #837: ring-free root, not the titlebar
     // 0064 Part F: apply a synced layout seed from another device once layout settles. min/dock/size
     // also restore via localStorage (the kit's existing load); this additionally covers POSITION and
     // keeps a just-opened window consistent with a change made elsewhere while it was closed.
