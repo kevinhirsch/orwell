@@ -79,7 +79,7 @@ export function confessionalFor(
   let target: EntityId | null = null;
   let ally: EntityId | null = null;
   let maxThreat = -Infinity;
-  let maxBond = -Infinity;
+  // First pass: the true biggest threat (their target) — unchanged read.
   for (const o of others) {
     if (o === npc) continue;
     const e = rel.edge(npc, o);
@@ -87,6 +87,15 @@ export function confessionalFor(
       maxThreat = e.threat;
       target = o;
     }
+  }
+  // Second pass: the strongest bond (their ally), EXCLUDING the target so the same
+  // houseguest is never named as both biggest threat and most-trusted (issue #839). With
+  // the top bond skipped this naturally falls to the runner-up; with 0/1 distinct others
+  // `ally` legitimately stays null. Selection over existing edges only — consumes no rng.
+  let maxBond = -Infinity;
+  for (const o of others) {
+    if (o === npc || o === target) continue;
+    const e = rel.edge(npc, o);
     const bond = (e.trust + e.affinity) / 2;
     if (bond > maxBond) {
       maxBond = bond;
