@@ -111,6 +111,40 @@ def test_gadget_rail_and_top_chrome_consume_inset_in_css():
     )
 
 
+# ── #758: the DESKTOP floating sidebar/rail consumes the inset SYNCHRONOUSLY (no `top` transition) ─
+def test_desktop_floating_sidebar_consumes_inset_without_animating_top():
+    """The default theme (glass → body.theme-frosted) floats #sidebar + .icon-rail as fixed glass
+    panels (the @media min-width:769px block). Their `top` consumes the LIVE --on-banner-inset so the
+    panel docks below a top banner. It MUST track that var SYNCHRONOUSLY: a `transition: top …` makes
+    the panel animate down over its duration when a banner appears (or re-measures taller as it wraps),
+    leaving a window where the computed top still sits UNDER the banner. That race is exactly the
+    flaky, sub-pixel-sensitive failure the responsive matrix's banner-inset probe caught on #sidebar
+    (different viewports failed run-to-run). Pin BOTH: the rule consumes the inset, and never animates
+    `top` (#758)."""
+    css = _read("static", "style.css")
+    # the floating-panel rule pairs #sidebar with .icon-rail as the rule's two selectors, then sets a
+    # fixed `top` from the inset (the @media min-width:769px "detached glass sidebar" block). Anchor on
+    # that exact selector pair so we land on the floating rule, not an earlier material/text-shadow one.
+    import re
+    m = re.search(r"body\.theme-frosted #sidebar,\s*\n\s*body\.theme-frosted \.icon-rail\s*\{", css)
+    assert m, "expected the floating sidebar/rail rule block (#sidebar + .icon-rail selector pair)."
+    i = m.start()
+    block = css[i:i + 900]
+    assert "position: fixed" in block, "the floating panel must be position:fixed (#758)."
+    # its top floor consumes the live inset (the calc/var), with a non-banner baseline (max(50px,…))
+    assert ("max(50px, calc(var(--on-banner-inset, 0px) + 8px))" in block or
+            "max(50px,calc(var(--on-banner-inset,0px) + 8px))" in block or
+            ("var(--on-banner-inset" in block and "top:" in block)), (
+        "the floating sidebar/rail `top` must consume --on-banner-inset so it docks below the banner (#758)."
+    )
+    # and it must NOT animate `top` — a transition on top lags the live inset and re-introduces the race.
+    assert "transition: top" not in block and "transition:top" not in block, (
+        "the floating sidebar/rail must NOT put `top` in a CSS transition — `top` consumes the live "
+        "--on-banner-inset and has to track it synchronously, or the panel briefly renders under a "
+        "newly-shown / wrapping banner (the flaky responsive-matrix banner-inset failure) (#758)."
+    )
+
+
 # ── #758b: the single banner host re-measures on EVERY height change (stacked cards / wrap / font) ─
 def test_banner_inset_recomputes_on_host_resize():
     """One host (#orwell-notice-banner) holds ALL stacked top banners; setBannerInset fires only on

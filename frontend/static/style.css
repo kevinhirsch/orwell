@@ -37483,7 +37483,12 @@ body.theme-frosted #sidebar {
     border-right-width: 1px !important;   /* float = full border, not just a docked right edge */
     z-index: 120;
     overflow: hidden;
-    transition: top 0.2s cubic-bezier(0.22,0.61,0.36,1);
+    /* #758: `top` consumes the LIVE --on-banner-inset and MUST track it SYNCHRONOUSLY — a
+       transition on `top` makes the floating panel ANIMATE down over 200ms when a banner
+       appears (or re-measures taller as it wraps), leaving a window where the panel's
+       computed top still sits UNDER the banner. That race is exactly what the responsive
+       matrix's banner-inset probe caught (flaky, height-/sub-pixel-sensitive). The inset is
+       pure CSS calc, so snapping is correct: never animate `top`. */
   }
   /* Right-side sidebar floats on the right edge instead. */
   body.theme-frosted.hamburger-right #sidebar,
