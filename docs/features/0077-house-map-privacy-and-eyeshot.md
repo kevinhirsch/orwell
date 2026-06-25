@@ -1,8 +1,19 @@
 # 0077 — House map, privacy & eyeshot (who you can see, who you can hear, who you have to track)
 
-> **Status:** 📝 **SPEC / sketch** (drafted 2026-06-22). **Gate (planned):** engine (Vitest +
-> dependency-cruiser + BDD `0077-house-map-privacy-and-eyeshot.feature`) and front-end (the L26
-> "Where you are" gadget consumes the new sightline-scoped projection). **Depends on:** 0049 (house
+> **Status:** 🟢 **BUILDING (phased).** **Phase 1 — the floor plan** (the recent-BB 13-room layout +
+> movement adjacency; bathroom off the hallway, private wing behind the hallway chokepoint, sealed
+> diary booth): **MERGED** (PR #772, calibration byte-identical). **Phase 2a — the SIGHTLINE graph
+> (eyeshot < adjacency):** **BUILT 2026-06-24** — `HOUSE_SIGHTLINE` + `areVisible`/`isPrivateRoom`
+> (`src/domain/house.ts`); `whereabouts().nearby` is now sightline-scoped, so a CLOSED door one room
+> over no longer leaks its occupants (the open public core sees across itself + the hallway mouth;
+> every bedroom/bathroom/lounge/HOH/storage/diary is opaque from outside). Gate:
+> `tests/unit/sightline0077.test.ts` + `tests/unit/whereaboutsSightline.test.ts` (+ the updated
+> presence/BDD/lever-manifest contracts). Read-side only ⇒ calibration byte-identical. **Phase 2b
+> (next) — tracked occupancy + conspicuousness + sub-zone earshot:** the `{visible, tracked}` belief
+> layer (who's behind a closed door, learned by watching a doorway, with pathway/confidence/stale),
+> the "two alone too long" conspicuousness read, and zone-scoped `rollOverhears`. **Gate (planned):**
+> engine (Vitest + dependency-cruiser + BDD `0077-house-map-privacy-and-eyeshot.feature`) and
+> front-end (the L26 "Where you are" gadget consumes the sightline-scoped projection). **Depends on:** 0049 (house
 > presence — the floor plan, `assignRooms`, `rollOverhears`, `whereabouts`), 0002 (events/pathways &
 > knowledge vs. suspicion — tracked occupancy is *knowledge with a pathway*), 0038 (gossip diffusion
 > — a tracked sighting spreads NPC-to-NPC), 0076 (motivated movement — exits feed the sightings this
