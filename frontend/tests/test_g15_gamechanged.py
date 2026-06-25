@@ -77,8 +77,15 @@ def test_the_helper_debounces_a_burst_into_one_event():
 
 # ── 3. every mutation seam calls it ──────────────────────────────────────────
 
+# FEJS-3 (issue #622): the seam previously listed only the seven lifecycle/outcome
+# tools and silently omitted eight other game-MUTATING beats — a sub-second parity
+# asymmetry on long multi-tool turns. They are now enumerated here so each is GATED
+# to route its freshness refresh through the one debounced dispatcher (no ad-hoc
+# CustomEvent — that stays the platform.js single-dispatcher invariant below).
 MUTATING_TOOLS = ["advanceGame", "submitDecision", "recordInteraction",
-                  "createCharacter", "updateCasting", "manageSandbox", "runCompetition"]
+                  "createCharacter", "updateCasting", "manageSandbox", "runCompetition",
+                  "moveTo", "moveHouseguest", "makeDeal", "markHouseguestMet", "turnIn",
+                  "surfaceInformationTo", "diaryRoom", "recordImageBeat"]
 
 
 def _chat_g15_block():
