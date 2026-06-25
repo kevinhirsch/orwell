@@ -512,6 +512,9 @@ import { onNarrowChange } from './platform.js';
       return;
     }
     _failures = 0; // E68: recovered — poll at full cadence again
+    // G11 follow-up: a successful status poll is a confirmed engine contact — latch it so
+    // any LATER fetch failure is reported as a genuine outage (INFO), not a startup race.
+    if (window.OrwellReport && window.OrwellReport.markConnected) window.OrwellReport.markConnected();
     markStale(false);
     // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
     st._state = (await fetchState()) || null;
