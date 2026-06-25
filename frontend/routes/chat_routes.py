@@ -843,6 +843,15 @@ def setup_chat_routes(
             # Register active stream for partial-save safety net
             _active_streams[session] = {"status": "streaming", "partial": "", "query": message, "is_research": effective_do_research, "mode": _effective_mode}
 
+            # Early SSE keepalive (E): flush the connection — commit the 200 + a byte — BEFORE the
+            # model's first token, which can be many seconds out on a cold/loaded provider. An
+            # intermediary (reverse proxy, tunnel, uvicorn worker idle-recycle) otherwise reaps a
+            # held-but-silent SSE connection, dropping the body with no terminal — exactly the
+            # transport break the browser misreads as a recoverable error and "recovers" from by
+            # puppeteering the composer. A `:`-prefixed comment is ignored by the client reader.
+            # (Full robustness still wants a periodic heartbeat + raised proxy idle timeouts.)
+            yield ": keepalive\n\n"
+
             if ctx.preprocessed.attachment_meta:
                 yield f"data: {json.dumps({'type': 'attachments', 'data': ctx.preprocessed.attachment_meta})}\n\n"
 
@@ -1371,13 +1380,42 @@ def setup_chat_routes(
                     _active_streams.pop(session, None)
 
         async def _safe_stream() -> AsyncGenerator[str, None]:
-            """Wrapper that guarantees _active_streams cleanup even if stream_with_save
-            raises before reaching a mode-specific finally block."""
+            """Wrapper that guarantees _active_streams cleanup AND a typed terminal chunk.
+
+            Every server-reachable failure — an exception out of the generator, or a normal exit
+            that never emitted ``[DONE]`` (an empty / half-built stream) — is converted into a clean
+            ``event: error`` + ``[DONE]`` on the wire, instead of the response body simply dropping.
+
+            A body that ends with no ``[DONE]`` sentinel is exactly what the browser misreads as a
+            recoverable network error (`reader.read()` throws) and then "recovers" from by
+            puppeteering the composer with a "stream dropped" retry. Terminating the stream cleanly
+            here removes that trigger at the source: the client's in-band error path renders it and
+            never enters auto-recovery."""
+            saw_done = False
             try:
                 async for chunk in stream_with_save():
+                    if chunk == "data: [DONE]\n\n":
+                        saw_done = True
                     yield chunk
+            except (asyncio.CancelledError, GeneratorExit):
+                # A genuine client disconnect — the mode-specific excepts already saved the partial.
+                # Don't synthesize a terminal: the client is gone, and the detached run lives on.
+                raise
+            except Exception as e:  # noqa: BLE001 — convert ANY generator failure into a surfaced error
+                logger.exception("chat_stream generator failed (session %s)", session)
+                if not saw_done:
+                    yield (f'event: error\ndata: '
+                           f'{json.dumps({"error": str(e) or "Stream failed.", "status": 500, "terminal": True})}\n\n')
+                    yield "data: [DONE]\n\n"
+                    saw_done = True
             finally:
                 _active_streams.pop(session, None)
+            if not saw_done:
+                # The generator returned without ever emitting [DONE] (an empty/dropped upstream stream).
+                # Close the body with a typed terminal so the client never sees a bare transport drop.
+                yield (f'event: error\ndata: '
+                       f'{json.dumps({"error": "The stream ended without a reply.", "status": 502, "terminal": True})}\n\n')
+                yield "data: [DONE]\n\n"
 
         # Compare panes are short-lived, single-shot generations whose sessions
         # exist only to drive that one pane — there's nothing to "resume" and

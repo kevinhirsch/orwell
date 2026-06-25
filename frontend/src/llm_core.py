@@ -2180,6 +2180,8 @@ async def _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
         is_last = (i == len(cands) - 1)
         emitted = False
         retried = False
+        saw_error = False
+        saw_done = False
         async for chunk in stream_llm(url, model, messages, headers=headers, **kwargs):
             if chunk.startswith("event: error"):
                 if not emitted and not is_last:
@@ -2192,7 +2194,14 @@ async def _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
                     else:
                         logger.warning(f"[fallback] candidate {model} failed; trying next")
                     break
+                saw_error = True
                 yield chunk
+                continue
+            # HOLD the terminal until we know the candidate produced output (D): an empty-but-[DONE]
+            # stream must be able to fail over (or surface a clean error) rather than terminate the wire
+            # as a silent success — the blank-bubble bug, and a flaky primary that never tries the fallback.
+            if chunk == "data: [DONE]\n\n":
+                saw_done = True
                 continue
             # Any data chunk other than the terminal [DONE] means real output.
             if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
@@ -2218,8 +2227,26 @@ async def _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
                     }) + '\n\n')
                 emitted = True
             yield chunk
-        if not retried:
-            return  # candidate finished (success, or terminal error already sent)
-    # Every candidate failed pre-content — surface the last error.
+        if retried:
+            continue  # a real pre-content error with fallbacks left — try the next candidate
+        if emitted or saw_error:
+            yield "data: [DONE]\n\n"  # a real reply OR a surfaced error — pass/ensure the held terminal
+            return
+        # EMPTY COMPLETION (D): the stream ended cleanly with zero content and no error. Fail over if any
+        # candidate is left; else surface a typed empty-completion error so the client never renders a
+        # blank assistant turn.
+        if not is_last:
+            last_error = ('event: error\ndata: '
+                          + json.dumps({"error": f"{model} returned an empty completion", "status": 502,
+                                        "error_type": "empty_completion"}) + '\n\n')
+            logger.warning(f"[fallback] candidate {model} returned an empty completion; trying next")
+            continue
+        yield ('event: error\ndata: '
+               + json.dumps({"error": "The model returned an empty completion.", "status": 502,
+                             "error_type": "empty_completion"}) + '\n\n')
+        yield "data: [DONE]\n\n"
+        return
+    # Every candidate failed pre-content — surface the last error and terminate.
     if last_error:
         yield last_error
+        yield "data: [DONE]\n\n"
