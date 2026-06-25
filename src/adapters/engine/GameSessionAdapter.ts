@@ -212,9 +212,9 @@ const MUTUAL_OFFSCREEN_VERBS: readonly string[] = [
  * Order-stable: the first row of any duplicate/mirror set is kept in place.
  */
 function coalesceDumpRows(
-  rows: ReadonlyArray<{ type: string; content: string }>,
-): Array<{ type: string; content: string }> {
-  const out: Array<{ type: string; content: string }> = [];
+  rows: ReadonlyArray<{ type: string; content: string; ts?: number }>,
+): Array<{ type: string; content: string; ts?: number }> {
+  const out: Array<{ type: string; content: string; ts?: number }> = [];
   const seenExact = new Set<string>();
   const seenMutual = new Set<string>();
   for (const r of rows) {
@@ -240,7 +240,7 @@ function coalesceDumpRows(
       if (seenMutual.has(mutualKey)) continue;
       seenMutual.add(mutualKey);
     }
-    out.push({ type: r.type, content: r.content });
+    out.push(r.ts !== undefined ? { type: r.type, content: r.content, ts: r.ts } : { type: r.type, content: r.content });
   }
   return out;
 }
@@ -1323,13 +1323,14 @@ export class GameSessionAdapter implements GameSession {
     // The FE renders each row as "[type] content", so `type` must be a READABLE label (not a raw kind
     // slug) and `content` clean, name-resolved prose — this is the Wall's ONE sanctioned reveal, shown
     // readably (audit: the live dump leaked "[hidden-thread] story-thread thread:npc:8:0 …").
-    const hiddenStory = events
+    const hiddenStory: Array<{ type: string; content: string; ts?: number }> = events
       .filter((e) => e.hidden)
       .map((e) => {
         // For a gossip/surfacing breadcrumb, prefer the joined belief (the concrete paraphrase) over the
         // internal "reaches <to>" plumbing; fall back to the scrubbed breadcrumb if no fact joined (#843).
         const belief = (e.type === "gossip" || e.type === "surfacing") ? beliefByEvent.get(e.id) : undefined;
-        return { type: retrospectiveLabel(e.type), content: this.retroScrub(belief ?? e.content) };
+        // #852 — carry the event's monotonic time marker so the dump can order chronologically.
+        return { type: retrospectiveLabel(e.type), content: this.retroScrub(belief ?? e.content), ts: e.ts };
       });
     // The structured hidden layers (threads + seeded relationships) render from the IN-MEMORY objects,
     // not their engine-only Vault audit strings — so every id is a NAME and no machine slug crosses. They
@@ -1378,11 +1379,22 @@ export class GameSessionAdapter implements GameSession {
         votedFor: { id: votedFor, name: this.nameOf(votedFor) },
       })),
     }));
+    // #852 — order the dump CHRONOLOGICALLY. Pre-season setup (threads, seeded ties, the day-one reads,
+    // sealed orientations) carries no event time marker, so it sorts FIRST (as setup); the live hidden
+    // layer then follows by its monotonic `ts`. A stable sort keeps same-`ts` rows in assembly order.
+    // (Week GROUPING is intentionally not attempted: events carry a monotonic tick, not a week number, so
+    // reconstructing week boundaries here would be fragile — chronological order is the robust win.)
+    const TS_FLOOR = Number.NEGATIVE_INFINITY;
+    const ordered = hiddenStory
+      .map((row, i) => ({ row, i }))
+      .sort((a, b) => (a.row.ts ?? TS_FLOOR) - (b.row.ts ?? TS_FLOOR) || a.i - b.i)
+      .map((x) => x.row);
     // #841/#842 — a pure render-time coalesce: drop byte-identical rows and collapse a symmetric
-    // off-screen pair (A↔B) into one. Never changes what was recorded — only what the operator sees.
+    // off-screen pair (A↔B) into one. After the chronological sort, the kept row is the EARLIEST.
+    // Never changes what was recorded — only what the operator sees.
     return {
       winner: this.live.winner ? this.named(this.live.winner) : null,
-      hiddenStory: coalesceDumpRows(hiddenStory),
+      hiddenStory: coalesceDumpRows(ordered),
       twists,
       evictionVotes,
     };

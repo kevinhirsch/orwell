@@ -947,8 +947,12 @@ export interface SeasonRecapView {
  */
 export interface RetrospectiveView {
   winner: NamedRef | null;
-  /** The hidden story in recorded order: off-screen scenes + confessionals (names humanized). */
-  hiddenStory: Array<{ type: string; content: string }>;
+  /**
+   * The hidden story in CHRONOLOGICAL order (#852): pre-season setup first, then the live hidden
+   * layer ordered by its time marker. Each row carries an optional `ts` (a monotonic marker — absent
+   * on pre-game setup rows, which sort first); names humanized, no raw ids/slugs.
+   */
+  hiddenStory: Array<{ type: string; content: string; ts?: number }>;
   /** The producer's sealed reserve twists: each kind + the week it fired (null = never fired). */
   twists: Array<{ kind: string; firedWeek: number | null }>;
   /**

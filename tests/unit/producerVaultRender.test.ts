@@ -146,3 +146,26 @@ describe("#841/#842 — the dump dedupes byte-identical rows and coalesces symme
     expect(dump.hiddenStory.filter((r) => /bonded with/.test(r.content)).length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("#852 — dump rows carry a time marker and come out chronologically", () => {
+  it("surfaces an ascending `ts` on the live hidden rows and orders the dump by it", () => {
+    const sb = liveSandbox("pvr-852", 7);
+    // Plant three hidden scenes IN ORDER. The EventStore is the monotonic-tick authority, so insertion
+    // order IS chronological order — assert the dump preserves it and exposes the marker.
+    const tag = "PVR852";
+    sb.engine.events.record({ id: "c1", ts: 9_990_001, type: "conversation", initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true, content: `${tag}-first a quiet aside` });
+    sb.engine.events.record({ id: "c2", ts: 9_990_002, type: "conversation", initiator: npc(3), witnessSet: [npc(3), npc(4)], hidden: true, content: `${tag}-second a hallway whisper` });
+    sb.engine.events.record({ id: "c3", ts: 9_990_003, type: "conversation", initiator: npc(5), witnessSet: [npc(5), npc(6)], hidden: true, content: `${tag}-third a late-night plan` });
+    const dump = sb.session.producerVaultDump()!;
+    // every live row exposes a numeric ts marker, and they are globally non-decreasing across the dump
+    const withTs = dump.hiddenStory.filter((r) => typeof r.ts === "number");
+    expect(withTs.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < withTs.length; i++) expect(withTs[i]!.ts!).toBeGreaterThanOrEqual(withTs[i - 1]!.ts!);
+    // our three planted scenes appear in the order they happened
+    const planted = dump.hiddenStory.filter((r) => r.content.includes(tag)).map((r) => r.content.match(/PVR852-(\w+)/)![1]);
+    expect(planted).toEqual(["first", "second", "third"]);
+    // pre-season setup rows (threads / ties / day-one reads) carry NO ts and sort to the front
+    const firstLiveIdx = dump.hiddenStory.findIndex((r) => typeof r.ts === "number");
+    for (let i = 0; i < firstLiveIdx; i++) expect(dump.hiddenStory[i]!.ts).toBeUndefined();
+  });
+});
