@@ -619,23 +619,38 @@ def main():
                     "(document.getElementById('user-bar-settings') ||"
                     " document.getElementById('tool-settings-btn') ||"
                     " document.getElementById('rail-settings') || {click(){}}).click()")
-                page.wait_for_timeout(350)  # let the kit window mount + the open fade settle
-                rail = page.evaluate("""
+                # Wait for the open transition to SETTLE rather than guessing a fixed
+                # delay. The kit window mounts, fades in, and the flex rail reflows; a
+                # fixed 350ms could catch the rail mid-reflow under CI-runner load — a
+                # boundary flake right at the 480 token (G6), since the orientation read
+                # flips while the flex is still settling. Poll until two consecutive
+                # measurements agree on orientation + rounded width, with a ceiling so a
+                # genuinely missing modal still falls through to the `rail is None` report.
+                _measure = """
                   (() => {
                     const overlay = document.querySelector('#settings-modal');
                     if (!overlay) return null;
                     const m = overlay.querySelector('.settings-modal-content');
                     const r = overlay.querySelector('.settings-sidebar');
                     const p = overlay.querySelector('.settings-panels');
-                    let out = null;
-                    if (m && r && p) {
-                      const rb = r.getBoundingClientRect(), pb = p.getBoundingClientRect();
-                      out = { modalW: m.getBoundingClientRect().width,
-                              left: rb.x < pb.x && rb.height > rb.width };
-                    }
-                    return out;
+                    if (!(m && r && p)) return null;
+                    const rb = r.getBoundingClientRect(), pb = p.getBoundingClientRect();
+                    return { modalW: m.getBoundingClientRect().width,
+                             left: rb.x < pb.x && rb.height > rb.width };
                   })()
-                """)
+                """
+                rail = _prev = None
+                for _ in range(16):  # ~16 × 80ms = ~1.3s ceiling, early-exits once stable
+                    page.wait_for_timeout(80)
+                    snap = page.evaluate(_measure)
+                    if (snap is not None and _prev is not None
+                            and snap["left"] == _prev["left"]
+                            and round(snap["modalW"]) == round(_prev["modalW"])):
+                        rail = snap  # two agreeing reads — the reflow has settled
+                        break
+                    _prev = snap
+                else:
+                    rail = _prev  # never stabilized — report on the last read we got
                 page.evaluate(
                     "(document.querySelector('#settings-modal .ow-close') || {click(){}}).click()")
                 page.wait_for_timeout(250)  # let the close fly-away finish + the node teardown
