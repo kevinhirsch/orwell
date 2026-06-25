@@ -106,13 +106,14 @@ def test_retention_route_is_admin_gated(monkeypatch):
 
 # ── the status page renders + wires the toggle ──────────────────────────────────
 
-def test_status_page_points_overseer_controls_to_settings(monkeypatch):
-    """The overseer dial moved to Settings → AI (feature 0081 relocation). /admin/status keeps the
-    labelled section as a pointer — the live diagnostics still stream there — but no longer hosts the
-    control itself."""
+def test_status_page_has_no_orphaned_overseer_config_section(monkeypatch):
+    """The overseer/faithfulness dials moved to Settings → AI (feature 0081 relocation). /admin/status
+    no longer shows a control-LESS 'RUNTIME OVERSEER' config header — that read as a broken, empty
+    section — but the live diagnostics still stream to the 'Overseer (live)' panel."""
     monkeypatch.setenv("AUTH_ENABLED", "false")
     client = TestClient(_app(), raise_server_exceptions=False)
     body = client.get("/admin/status").text
-    assert "RUNTIME OVERSEER" in body                    # the labelled section remains…
-    assert 'id="overseer-toggle"' not in body           # …but the control moved to Settings…
-    assert "Settings" in body                            # …and the pointer names where it went.
+    assert "RUNTIME OVERSEER" not in body               # the orphaned (control-less) config header is gone
+    assert 'id="overseer-toggle"' not in body           # the dial lives in Settings, never here
+    assert 'id="set-overseerMode"' not in body          # nor any overseer dial — those are Settings-only
+    assert "LOG RETENTION" in body                      # the rest of the status page renders intact
