@@ -229,3 +229,13 @@ def test_faithfulness_model_keys_are_in_default_settings():
     for k in ("faithfulness_endpoint_id", "faithfulness_model", "faithfulness_model_fallbacks"):
         assert k in DEFAULT_SETTINGS
     assert DEFAULT_SETTINGS["faithfulness_model_fallbacks"] == []
+
+
+def test_source_pin_get_settings_surfaces_resolved_env_aware_modes():
+    """The Settings dials must reflect what's IN EFFECT, so GET /api/auth/settings overrides
+    overseer_mode / faithfulness_mode with the RESOLVED (env-aware) values — and copies the settings
+    dict first so the TTL cache is never mutated."""
+    auth_src = (_FE_ROOT / "routes" / "auth_routes.py").read_text()
+    assert "dict(_load_settings())" in auth_src        # the cache-safe copy (never mutate the cache)
+    assert "_ov.overseer_mode()" in auth_src           # the resolved (env-aware) overseer mode…
+    assert "_fa.faithfulness_mode()" in auth_src       # …and faithfulness mode are surfaced
