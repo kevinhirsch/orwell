@@ -1,7 +1,20 @@
 # 0078 — Motivated off-screen society & intentional movement (co-presence earned, not arbitrary)
 
-> **Status:** 📝 **SPEC** (drafted 2026-06-23; **revised same day** — see owner direction). **Gate
-> (planned):** engine (Vitest + the **calibration pass** — `juryReach` + the gradient band re-verified
+> **Status:** 🟢 **Phase 1 BUILT 2026-06-25** (intentional movement + its calibration pass); **Phase 2
+> (nature clarity) deferred** as the follow-on. **Phase 1:** NPCs now move toward what their motivation
+> points at — `MOVEMENT_INTENT` constants (`src/engine/presenceConstants.ts`) + the intent types,
+> per-room `tanh`-bounded steering, and the unsatisfied-pursuit move-gate in `assignRooms`
+> (`src/engine/presence.ts`), wired off the relationship model by `movementIntentFor`
+> (`GameSessionAdapter`) and supplied on BOTH the base and weighted passes. Intent draws **no rng of its
+> own** (the per-NPC draw COUNT is unchanged); it is DELIBERATELY calibration-load-bearing (owner ruling:
+> location must affect play), so it shipped **with a calibration re-pass**: at the first-tried
+> `moveIntentStrength` the anti-sycophancy band broke marginally (active disadvantaged), and the lever was
+> **re-tuned to `0.2`** — at which **`juryReach` (20-seed) and the gradient (active ≥ passive reach & wins)
+> both hold green**. Gate: `tests/unit/intentionalMovement0078.test.ts` (trend-toward-target +
+> avoidance + the no-side-channel-draw invariant + opt-in byte-identity) + the green calibration sims.
+> **Phase 2 — nature clarity (friendly-vs-strategic split, friendly folds affinity only)** is NOT built;
+> the `.feature`'s Rule-3 scenarios cover it, so the BDD is wired when Phase 2 lands. **Gate
+> (Phase 2, planned):** engine (Vitest + the **calibration pass** — `juryReach` + the gradient band re-verified
 > on the new movement model) and BDD `0078-motivated-society-and-intentional-movement.feature`.
 > **Depends on:** 0049 (presence/movement — the assignment this makes goal-driven), 0017/0026 (the
 > relationship model — the motivation signal), 0040 (deals), 0044 (blocs), 0041 (souls/agenda), 0038

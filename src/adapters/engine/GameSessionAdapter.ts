@@ -16,10 +16,12 @@ import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
-import { assignRooms, zoneFor } from "../../engine/presence";
+import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
+import { moodWord } from "../../engine/voice";
+import type { Campaign } from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
-import { PRESENCE, PRIVACY } from "../../engine/presenceConstants";
+import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
 import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
 import type { Room, Zone, Occupancy } from "../../domain/house";
@@ -304,6 +306,12 @@ export class GameSessionAdapter implements GameSession {
   private onEvent?: (ev: BeatEvent) => void;
   /** Tracked promises (0039). Player-party deals only here; NPC↔NPC deals live off-screen in the Vault. */
   private readonly deals = new DealLedger();
+  /**
+   * Live NPC CAMPAIGNS (0085) — persistent strategic agendas. ENGINE-ONLY hidden strategy (targets/
+   * plans/progress + the per-perspective `knownTo`): it never crosses any outward seam. Phase A holds
+   * the field + persistence plumbing; Phase B populates it from the off-screen tick + feeds the tilt.
+   */
+  private campaigns: Campaign[] = [];
   /** Records a one-off witnessed event (deal made/broken) and returns its id. Wired by the registry. */
   private onPlayerEvent?: (content: string, witnessSet: EntityId[], type?: string) => string | undefined;
   /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
@@ -944,7 +952,17 @@ export class GameSessionAdapter implements GameSession {
         ...(npc.character.ethnicity !== undefined ? { ethnicity: npc.character.ethnicity } : {}),
         ...(npc.character.genderPresentation !== undefined ? { genderPresentation: npc.character.genderPresentation } : {}),
         ...(npc.character.outOrientation !== undefined ? { outOrientation: npc.character.outOrientation } : {}),
+        // 0084: voice them in their STORED voice fingerprint — how THIS houseguest talks, all season. A
+        // PUBLIC, byte-stable facet (no Vault, no number); absent only on a pre-0084 save.
+        ...(npc.character.voice !== undefined ? { voice: npc.character.voice } : {}),
       },
+      // 0084: the current MOOD as a Vault-safe affect word, derived live from the soul on two timescales
+      // (acute + marinated baseline). ACTIVE houseguests only (a juror is out of the house); observable
+      // carriage only — never a number, never the hidden cause.
+      ...(isActive ? (() => {
+        const s = this.soulObj(id);
+        return s ? { mood: moodWord(s.emotionalState, s.volatility, s.emotionalHistory) } : {};
+      })() : {}),
       whereabouts: room ? { room, present } : null,
       knows: (this.npcKnowledge?.known(id) ?? [])
         .slice(-GameSessionAdapter.VOICE_KNOWS_CAP)
@@ -1360,6 +1378,9 @@ export class GameSessionAdapter implements GameSession {
       house: this.house ? this.cloneHouse(this.house) : null,
       live: this.live ? fastClone(this.live) : null,
       deals: this.deals.serialize(),
+      // 0085: persist live campaigns so a multi-week agenda + its history survive a restart (accumulate,
+      // never thin). Engine-only hidden strategy — already inside the never-outward snapshot.
+      ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
       // L21/L24: the calibration-neutral base occupancy the off-screen society pairs on — persisted so the
       // society's positions stay reproducible across a restart and never reseed from the weighted view.
@@ -1502,6 +1523,8 @@ export class GameSessionAdapter implements GameSession {
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
     this.live = core.live ? cloneSession(core.live) : null;
     this.deals.load(core.deals ?? []);
+    // 0085: restore live campaigns (absent on pre-0085 saves ⇒ none).
+    this.campaigns = (core.campaigns ?? []).map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] }));
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
     // L21/L24: restore the calibration-neutral base occupancy (absent on pre-L21/L24 saves — the next tick
@@ -1741,6 +1764,13 @@ export class GameSessionAdapter implements GameSession {
       rng,
       affinity: (a, b) => this.rel.edge(a, b).affinity,
       hoh: this.ceremony.hoh ?? null,
+      // 0078: INTENTIONAL movement — supplied on BOTH passes (the base AND the weighted view). Unlike the
+      // L21/L24 personality `movement` (calibration-NEUTRAL, weighted-only), intent is DELIBERATELY
+      // calibration-load-bearing (owner ruling: location must affect play), so the off-screen society
+      // (which pairs on the BASE occupancy) sees the same motivated clustering the player observes. The
+      // PLAYER returns null (a person, never engine-driven by an agenda; `movePlayer` owns their moves),
+      // which keeps the player's room identical in both views (the base pass pins them either way).
+      intent: (id: EntityId) => (id === playerId ? null : this.movementIntentFor(id)),
       ...(weighted
         ? {
             movement: (id: EntityId) => (id === playerId ? null : {
@@ -1756,6 +1786,43 @@ export class GameSessionAdapter implements GameSession {
           }
         : {}),
     };
+  }
+
+  /**
+   * A houseguest's MOTIVATED movement targets this tick (feature 0078) — WHERE their agenda points,
+   * read off the directed relationship model (the same Vault-free edges presence already uses; no
+   * number crosses the wall, and this draws NO rng). An NPC is drawn toward whoever they have a strong
+   * CHARGED tie with — a bond to deepen OR a threat to WORK (any reason to seek them out) — and softly
+   * AWAY from a pure danger they have no bond to leverage. Co-presence thus reflects agenda, not luck.
+   *
+   * The signal is a BOUNDED read of the existing edge signals (no new state): toward-pull rises with
+   * `max(bondStrength, threat)` above the neutral baseline; a pull becomes `avoid` only when threat
+   * clearly dominates the bond (a houseguest you fear and have nothing to gain from — you keep distance).
+   * Returns only the meaningfully-charged others (a small set), so a typical tick steers an NPC toward
+   * the one or two houseguests their game actually centers on, leaving the rest to seeded drift.
+   */
+  private movementIntentFor(id: EntityId): MovementIntent | null {
+    if (!this.house) return null;
+    const C = RELATIONSHIP_CONSTANTS;
+    const neutralBond = (C.baseline.trust + C.baseline.affinity) / 2;
+    const pulls: MovementPull[] = [];
+    for (const other of this.presenceActive()) {
+      if (other === id) continue;
+      const e = this.rel.edge(id, other);
+      const bond = this.rel.bondStrength(id, other); // trust+affinity, shaded by demonstrated loyalty
+      const threat = e.threat;
+      // Charge = how far the strongest signal sits above neutral. Bond and threat BOTH pull you toward
+      // them (an ally to keep close, a rival to corner). Below-neutral on both ⇒ no agenda (skip).
+      const bondCharge = Math.max(0, bond - neutralBond);
+      const threatCharge = Math.max(0, threat - C.baseline.threat);
+      const charge = Math.max(bondCharge, threatCharge);
+      if (charge < MOVEMENT_INTENT.minCharge) continue; // not charged enough to bend movement — let drift rule
+      // AVOID only when a real danger clearly outweighs any bond to work — you keep distance from a pure
+      // threat, but you still CLOSE on a rival you can scheme against (a charged threat WITH some bond).
+      const avoid = threatCharge >= bondCharge * MOVEMENT_INTENT.avoidThreatDominance && bondCharge < MOVEMENT_INTENT.workableBondFloor;
+      pulls.push({ target: other, weight: charge, avoid });
+    }
+    return pulls.length ? pulls : null;
   }
 
   /**

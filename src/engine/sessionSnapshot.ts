@@ -5,6 +5,7 @@ import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
 import type { LiveSeasonState } from "./liveSeason";
 import type { Deal } from "../domain/deal";
+import type { Campaign } from "./campaigns";
 import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
 import type { Room, Zone } from "../domain/house";
@@ -74,6 +75,15 @@ export interface SessionCore {
   live?: LiveSeasonState | null;
   /** Tracked promises the player is party to (0039), so deals survive a restart (0030). */
   deals?: Deal[];
+  /**
+   * Live NPC CAMPAIGNS (feature 0085) — persistent, adaptive strategic agendas, so a multi-week
+   * campaign and its accumulated history survive a restart (0030) and ACCUMULATE, never thin
+   * (non-degradation #4). ENGINE-ONLY hidden strategy (it carries targets/plans/progress + the
+   * per-perspective `knownTo` set), so it never crosses the wall — the snapshot already doesn't.
+   * Absent on pre-0085 saves and whenever no campaign is running. (Phase A: the field + plumbing;
+   * Phase B populates it from the live off-screen tick.)
+   */
+  campaigns?: Campaign[];
   /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
   presence?: Record<EntityId, Room>;
   /**

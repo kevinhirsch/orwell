@@ -13,7 +13,13 @@ import { PLAYER } from "../../src/domain/ids";
 describe("B27b — a rumor can reach the player, legally", () => {
   it("diffusion lands a distorted, attributed belief on the player; the checkpoint stays green", () => {
     let landed = false;
-    for (const seed of [1, 2, 3, 4, 5]) {
+    // An existence proof — a B27b SCENE rumor CAN legally terminate at the player. The player now holds
+    // SEVERAL kinds of `told-by:` belief (a confided disclosure 0075, a "feeling around the house"
+    // thread, the 0077 conspicuousness whisper), so we isolate the scene rumor by its gloss signature
+    // ("word around the house") rather than grabbing the first told-by fact. The seed set is widened too,
+    // since feature 0078 (intentional movement) shifted the society's clustering — and thus which seeds
+    // land one within the bound; it stops at the first hit, so the wider set costs nothing once one lands.
+    for (const seed of Array.from({ length: 16 }, (_, i) => i + 1)) {
       const reg = new GameSessionRegistry();
       const user = `gossip-${seed}`;
       const orch = new Orchestrator(reg, { now: () => seed }, { seed });
@@ -24,7 +30,8 @@ describe("B27b — a rumor can reach the player, legally", () => {
         // EVERY tick must commit: legal gossip propagation may never read as a vault leak (the
         // pathway-aware heuristic) — a fail-closed rollback here would silently undo the rumor.
         expect(orch.advance(user, "offscreen-tick").integrity).toBe("ok");
-        const rumor = sb.engine.knowledge.knownTo(PLAYER).find((f) => f.pathway.startsWith("told-by:"));
+        const rumor = sb.engine.knowledge.knownTo(PLAYER).find(
+          (f) => f.pathway.startsWith("told-by:") && f.content.includes("word around the house"));
         if (rumor) {
           landed = true;
           // The belief carries provenance + decayed confidence + drift — never certainty.
