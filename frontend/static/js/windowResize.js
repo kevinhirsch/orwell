@@ -25,9 +25,75 @@
 const EDGE = 7;          // px proximity to a border that arms a resize grip
 const MIN_W = 320;       // smallest a window may be dragged to
 const MIN_H = 200;
+// #896 — the max-width cap gutter. The viewport cap is innerWidth − MAX_MARGIN*2, so a maxed
+// window keeps a CLEAR gap on BOTH sides — it can never drag flush to the screen edge. Sits a
+// touch wider than the kit's clampPos position-margin (4px) so "as wide as it goes" reads as an
+// OBVIOUS, deliberate bound rather than a window jammed against the glass.
+const MAX_MARGIN = 12;
 // Controls that must keep their own click/drag behaviour even when they sit
 // within EDGE px of the window border (close buttons, sliders, inputs, links).
 const INTERACTIVE = 'button, input, select, textarea, a, [contenteditable=""], [contenteditable="true"]';
+
+// #896 — the natural CONTENT width: the widest a window's content genuinely WANTS at 100%,
+// so a window can't be dragged into dead empty space past its content. Measured by letting the
+// window size to its content (`width: max-content`) for one synchronous layout read, then
+// restored — no committed style change, no visible flash (it runs inside one frame, between style
+// writes the browser never paints). Returns the element's intrinsic outer width (content + the
+// window's own padding/border, since box-sizing is border-box on .ow-window) rounded up.
+//
+// For content that legitimately reflows to ANY width (chat-style prose: a long paragraph with no
+// hard width), max-content is the single UNWRAPPED line — typically far wider than the viewport —
+// so the viewport cap governs and this never artificially constrains it (exactly the intended
+// "no finite content cap → viewport binds"). For intrinsic-width content (settings, cast, status
+// panels) max-content is a bounded, modest width < viewport, so the content cap binds and kills
+// the dead space. General + robust: no per-window numbers, reads whatever the content actually is.
+function naturalContentWidth(el) {
+  if (!el || !el.isConnected) return Infinity;
+  try {
+    const cs = getComputedStyle(el);
+    const prevWidth = el.style.width;
+    const prevMaxWidth = el.style.maxWidth;
+    const prevMinWidth = el.style.minWidth;
+    // Let it shrink-to-content. min-width:0 prevents the CSS min-width:180px floor (or any inline
+    // min) from inflating the read; max-width:none drops the 64vw cap so a genuinely wide intrinsic
+    // panel reports its true want; width:max-content sizes to the content's preferred inline size.
+    el.style.minWidth = '0';
+    el.style.maxWidth = 'none';
+    el.style.width = 'max-content';
+    // border-box → offsetWidth already includes padding + border, i.e. the window's full outer
+    // width at its natural content size. Read it (forces the synchronous layout), then restore.
+    const w = el.offsetWidth;
+    el.style.width = prevWidth;
+    el.style.maxWidth = prevMaxWidth;
+    el.style.minWidth = prevMinWidth;
+    if (cs.boxSizing && cs.boxSizing !== 'border-box') {
+      // content-box fallback: add the horizontal padding + border the offsetWidth would omit.
+      const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      const bord = (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0);
+      return Math.ceil(w + pad + bord);
+    }
+    return Math.ceil(w);
+  } catch (_) { return Infinity; }
+}
+
+// #896 — the single width cap used everywhere a width is grown, restored, or synced. The cap is
+//   min(naturalContentWidth, viewport − MAX_MARGIN*2)
+// floored at minW so it can never clamp a window below its own minimum. Pass a precomputed
+// `natural` (measured once at resize-start) to avoid re-measuring on every pointer-move; omit it
+// to measure on the spot (the restore / remote-apply paths).
+function widthCap(el, minW, natural) {
+  const viewportCap = window.innerWidth - MAX_MARGIN * 2;
+  const contentCap = (typeof natural === 'number') ? natural : naturalContentWidth(el);
+  return Math.max(minW, Math.min(viewportCap, contentCap));
+}
+
+// #896 — public cap helper for the kit host (orwellWindow.js): the SAME min(content, viewport−
+// margin) bound, so EVERY width-application site (pointer resize here, persisted restore, remote
+// cross-device sync, keyboard Shift+arrow resize, the viewport re-clamp) shares one definition of
+// "as wide as it should ever go." minW defaults to MIN_W when the caller has no per-window min.
+export function windowMaxWidth(el, minW) {
+  return widthCap(el, (typeof minW === 'number' && minW > 0) ? minW : MIN_W);
+}
 
 export function makeWindowResizable(content, options = {}) {
   if (!content) return;
@@ -83,6 +149,7 @@ export function makeWindowResizable(content, options = {}) {
   let resizing = false;
   let active = null;
   let startRect = null, startX = 0, startY = 0;
+  let startNaturalW = Infinity;   // #896: content cap measured once per gesture, in begin()
 
   function begin(cx, cy, edges) {
     resizing = true;
@@ -98,6 +165,11 @@ export function makeWindowResizable(content, options = {}) {
     const r = content.getBoundingClientRect();
     startRect = { left: r.left, top: r.top, width: r.width, height: r.height };
     startX = cx; startY = cy;
+    // #896: measure the natural content width ONCE, here — before any stretch — so move() can
+    // clamp against it without re-measuring (and re-laying-out) on every pointer event. Floored
+    // to the current width so a window already wider than its content (e.g. a restored size) can
+    // still be dragged from where it is rather than snapping inward mid-gesture.
+    startNaturalW = Math.max(naturalContentWidth(content), r.width);
     // Pin to fixed with explicit box, same as the drag helper does, so the
     // centering transform / margin stops fighting the new dimensions. Drop the
     // max-width/height caps (e.g. 85vh) so the window can actually grow.
@@ -127,10 +199,19 @@ export function makeWindowResizable(content, options = {}) {
     // the left/top so the window doesn't jump.
     if (width < minW) { if (active.l) left = startRect.left + (startRect.width - minW); width = minW; }
     if (height < minH) { if (active.t) top = startRect.top + (startRect.height - minH); height = minH; }
+    // #896 MAX-WIDTH CAP: a window can't grow past min(natural content width, viewport − margin),
+    // so there's no point dragging into dead empty space and it never reaches the screen edge. When
+    // pulling from the LEFT edge we cap the width AND re-anchor the left so the RIGHT edge stays put
+    // (the grabbed edge stops; the window doesn't slide). The content cap was measured in begin().
+    const maxW = widthCap(content, minW, startNaturalW);
+    if (width > maxW) { if (active.l) left = startRect.left + (startRect.width - maxW); width = maxW; }
     // Keep the window on-screen and never larger than the viewport.
     if (active.l && left < 0) { width += left; left = 0; }
     if (active.t && top < 0) { height += top; top = 0; }
-    if (left + width > vw) width = Math.max(minW, vw - left);
+    // #896: the RIGHT edge stops MAX_MARGIN short of the viewport edge — never flush — so an
+    // obvious gap always shows on the grow side, even when the window's left sits well inside
+    // (e.g. reflow content whose content cap exceeds the viewport: the viewport gap governs).
+    if (left + width > vw - MAX_MARGIN) width = Math.max(minW, vw - MAX_MARGIN - left);
     if (top + height > vh) height = Math.max(minH, vh - top);
     content.style.left = left + 'px';
     content.style.top = top + 'px';
@@ -220,12 +301,16 @@ export function makeWindowResizable(content, options = {}) {
       try {
         const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
         if (saved && saved.w && saved.h) {
-          const w = Math.max(minW, Math.min(saved.w, window.innerWidth));
+          // #896: a PERSISTED oversized width also clamps — measure the natural content cap with
+          // maxWidth:none cleared first so the read isn't pinned to the 64vw CSS cap, then apply the
+          // same min(content, viewport−margin) bound. A previously-saved width that exceeds the cap
+          // (saved on a wider screen, or before this cap existed) shrinks to the obvious bound.
+          content.style.maxWidth = 'none';
+          content.style.maxHeight = 'none';
+          const w = Math.min(Math.max(minW, saved.w), widthCap(content, minW));
           const h = Math.max(minH, Math.min(saved.h, window.innerHeight));
           content.style.width = w + 'px';
           content.style.height = h + 'px';
-          content.style.maxWidth = 'none';
-          content.style.maxHeight = 'none';
         }
       } catch (_) {}
     });
