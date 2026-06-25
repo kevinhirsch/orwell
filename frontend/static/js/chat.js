@@ -669,7 +669,6 @@ import { isNarrow } from './platform.js';
     let processingProbeTimer = null;
     let processingProbeAbort = null;
     let _renderStream = () => {};
-    let _commitRound = () => {};      // TURN COALESCING: freeze a round into the one turn bubble
     let _cancelThinkingTimer = () => {};
     let _removeThinkingSpinner = () => {};
     let timeoutId = null;
@@ -1195,29 +1194,13 @@ import { isNarrow } from './platform.js';
       streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
       if (streamingTTS) window.aiTTSManager.streamingStart();
       // Multi-bubble agent tracking
-      // TURN COALESCING (flicker fix): a single player turn fans out into N agent ROUNDS
-      // (tool-call rounds + narration rounds). We render ALL of a turn's rounds into ONE
-      // growing assistant bubble — `roundHolder` stays the SAME node for the whole turn — so
-      // the player never sees per-round bubbles mount → hide → jump. A pure tool-call round
-      // (no visible reply) appends NOTHING — no flashed bubble, no spinner remount. Each round
-      // that DOES produce narration freezes its reply into a static block in that one bubble
-      // (committed), and the next round streams below it. This matches the canonical reload /
-      // observer render (one bubble, concatenated reply, ONE <think> accordion).
-      let roundHolder = holder;       // The turn's single AI text bubble (does NOT change per round)
+      let roundHolder = holder;       // Current AI text bubble (changes per round)
       let roundText = '';             // Text accumulated for current round (MERGED reply+reasoning)
       // F8: per-round channel-split buffers. The BODY renders roundReplyText (reasoning-free by
       // construction); the live "Thinking" accordion renders roundReasoningText. These MUST be
       // reset wherever roundText is reset (agent_step / teacher_takeover) — see those sites.
-      let roundReplyText = '';        // deltas with json.thinking falsy (the public reply) — CURRENT round
-      let roundReasoningText = '';    // deltas with json.thinking truthy (reasoning → accordion) — CURRENT round
-      // Whether this turn has already frozen any prior round's reply as a static block in the
-      // one bubble. Drives whether a NEW live block is appended (vs. reusing the holder's body)
-      // and whether a finished empty round may hide the whole bubble (it may not, once content exists).
-      let turnHasCommittedReply = false;
-      // Turn-level committed buffers (reply/reasoning of PRIOR rounds this turn). Used only for
-      // the byte-equivalence sanity of the final render; the live DOM is authoritative.
-      let turnReplyText = '';
-      let turnReasoningText = '';
+      let roundReplyText = '';        // deltas with json.thinking falsy (the public reply)
+      let roundReasoningText = '';    // deltas with json.thinking truthy (reasoning → accordion)
       let currentToolBubble = null;   // Current tool execution bubble
       let roundFinalized = false;     // Whether current round's text is finalized
       let _sourcesHtml = '';          // Sources box HTML to prepend to body
@@ -1386,86 +1369,6 @@ import { isNarrow } from './platform.js';
           }));
         renderer.update(dt);
         uiModule.scrollHistory();
-      };
-
-      // TURN COALESCING: freeze the CURRENT round into the one turn bubble and prepare a clean
-      // slate for the NEXT round inside the SAME bubble. A round that produced no visible reply
-      // leaves no frozen block (so a pure tool-call round adds nothing — no flashed bubble).
-      // Reasoning already lives in the live "Thinking" accordion (its own DOM); we keep that
-      // node in place and only retire the reply stream-content so reasoning never re-paints into
-      // the public body. Resets the per-round buffers; the merged roundText is reset by the
-      // caller (agent_step) in lockstep, exactly as before.
-      _commitRound = () => {
-        const bodyEl = roundHolder.querySelector('.body');
-        if (!bodyEl) return;
-        // Drop the round's transient spinner / "Generating response" placeholder if still up.
-        if (spinner && spinner.element) { try { spinner.destroy(); } catch (_) {} spinner = null; }
-        const dt = stripToolBlocks(roundReplyText);
-        // Solidify the live reply container (if the thinking accordion collapsed in-place this
-        // round, the reply lives in .live-reply-content; otherwise it's the .stream-content).
-        const liveReply = bodyEl.querySelector('.live-reply-content');
-        if (dt.trim()) {
-          // Final, clean render of this round's reply (matches the per-round finalize render).
-          const html = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
-          if (liveReply) {
-            liveReply.innerHTML = html;
-            liveReply.classList.remove('live-reply-content');
-            liveReply._streamRenderer = null;
-            // Retire the parent stream-content (it holds this round's collapsed thinking accordion
-            // + reply) so _ensureStreamLayout makes a FRESH one for the next round.
-            const _scParent = liveReply.closest('.stream-content');
-            if (_scParent) {
-              _scParent.style.minHeight = '';
-              _scParent.classList.remove('stream-content');
-              _scParent.classList.add('committed-round');
-              _scParent._streamRenderer = null;
-            }
-          } else {
-            const sc = bodyEl.querySelector('.stream-content');
-            if (sc) {
-              sc.innerHTML = html;
-              sc.style.minHeight = '';
-              // Retire this stream-content so _ensureStreamLayout makes a FRESH one next round.
-              sc.classList.remove('stream-content');
-              sc.classList.add('committed-round');
-              sc._streamRenderer = null;
-            }
-          }
-          if (window.hljs) bodyEl.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
-          turnHasCommittedReply = true;
-        } else {
-          // No visible reply this round (pure tool/planning round). Remove the empty live reply
-          // container if one was created, and retire any empty stream-content so the next round
-          // starts clean — but do NOT touch a collapsed thinking accordion already in the body.
-          if (liveReply && !liveReply.textContent.trim()) liveReply.remove();
-          const sc = bodyEl.querySelector('.stream-content');
-          if (sc && !sc.querySelector('.thinking-section') && !sc.textContent.trim()) {
-            sc.remove();
-          } else if (sc) {
-            // Stream-content carries a thinking accordion but no reply — retire it so it stays
-            // visible (debug-collapsed) and the next round gets a fresh stream-content.
-            sc.classList.remove('stream-content');
-            sc.classList.add('committed-round');
-            sc._streamRenderer = null;
-          }
-        }
-        // Roll the committed reply/reasoning into the turn totals (used only for the final
-        // dataset.raw byte-equivalence check below — the live DOM is already correct).
-        turnReplyText += roundReplyText;
-        turnReasoningText += roundReasoningText;
-        // Reset the per-round split buffers; roundText is reset by the caller in lockstep.
-        roundReplyText = '';
-        roundReasoningText = '';
-        // The next round's accordion/spinner machinery rebuilds its own refs.
-        _liveThinkSection = null;
-        _liveThinkContent = null;
-        _liveThinkInner = null;
-        _liveThinkHeader = null;
-        _liveThinkSpinnerSlot = null;
-        _liveThinkTimerEl = null;
-        _liveThinkToggle = null;
-        _liveThinkDomId = null;
-        isThinking = false;
       };
 
       let _nextIsError = false;
@@ -2328,19 +2231,7 @@ import { isNarrow } from './platform.js';
                     _contentEl3.style.minHeight = '';  // clear streaming inflate
                     _contentEl3.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
                     if (window.hljs) roundHolder.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
-                  } else if (turnHasCommittedReply || roundHolder !== holder) {
-                    // TURN COALESCING: a tool fired with no visible reply this round. Do NOT hide
-                    // the whole turn bubble (it may already carry committed narration from earlier
-                    // rounds — hiding it is the "messages disappear" flicker). Just retire the empty
-                    // live stream-content so the next round / the spinner re-arms cleanly below.
-                    var _emptyBody = roundHolder.querySelector('.body');
-                    var _emptySc = _emptyBody && _emptyBody.querySelector('.stream-content');
-                    if (_emptySc && !_emptySc.querySelector('.thinking-section') && !_emptySc.textContent.trim()) {
-                      _emptySc.remove();
-                    }
                   } else {
-                    // First round of the turn produced nothing visible yet → the initial holder
-                    // can hide (same as before; the next round re-shows it on commit).
                     roundHolder.style.display = 'none';
                   }
                 }
@@ -2826,90 +2717,53 @@ import { isNarrow } from './platform.js';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 _renderStream();
-                // TURN COALESCING (flicker fix): a NEW agent round is starting. Do NOT spawn a
-                // fresh msg-continuation bubble (the old per-round bubble that mounted, hid when
-                // empty, and made the body "jump"). Instead FREEZE this round into the ONE turn
-                // bubble (`roundHolder` is unchanged) and stream the next round below it. A round
-                // with visible narration leaves a static block; a pure tool-call round leaves
-                // nothing — no flashed bubble. The spinner re-arms in the SAME body, one stable
-                // position for the whole turn. _commitRound resets the per-round split buffers; we
-                // reset the merged roundText here in lockstep (F8 contract).
-                //
-                // EXCEPTION: a teacher_takeover sets roundHolder=null to deliberately START a new
-                // bubble (student attempt vs. teacher attempt are different "speakers"). In that
-                // one case we DO create a fresh continuation bubble, as before.
+                // L6c (supersedes L6b): a NEW agent round is starting. Hide the previous bubble
+                // ONLY if it rendered no visible narration (a pure tool-only round); a round that
+                // produced real narration (the interviewer's line, a scene beat) PERSISTS. The old
+                // rule hid every intermediate round, losing a multi-line interview ("4 answers go
+                // away"). `roundReplyText` still holds the closing round here (reset is later, ~2706).
+                if (roundHolder && !stripToolBlocks(roundReplyText).trim()) {
+                  roundHolder.style.display = 'none';
+                }
+                // Mark thread as connected to bubble below
+                const _activeThread = document.querySelector('.agent-thread.streaming');
+                if (_activeThread) {
+                  _activeThread.classList.add('has-bottom');
+                }
+                // --- New round: create fresh AI bubble with spinner ---
                 currentToolBubble = null;
                 roundFinalized = false;
                 isThinking = false;
                 _docFenceOpened = false;
                 _docFenceContentStart = -1;
-                if (!roundHolder) {
-                  // --- Teacher-takeover (or any explicit reset): create a fresh AI bubble ---
-                  const box = document.getElementById('chat-history');
-                  const newWrap = document.createElement('div');
-                  newWrap.className = 'msg msg-ai msg-continuation streaming';
-                  const newRole = document.createElement('div');
-                  newRole.className = 'role';
-                  const metaS = sessionModule.getSessions().find(s => s.id === streamSessionId);
-                  const _roundRequested = holder?._requestedModel || metaS?.model;
-                  const _roundActual = holder?._actualModel || _roundRequested;
-                  newRole.textContent = isGameBuild() ? 'Big Brother' : (_modelRouteLabel(_roundRequested, _roundActual) || '');
-                  _applyModelColor(newRole, _roundActual);
-                  newWrap.appendChild(newRole);
-                  const newBody = document.createElement('div');
-                  newBody.className = 'body';
-                  newWrap.appendChild(newBody);
-                  box.appendChild(newWrap);
-                  roundHolder = newWrap;
-                  roundText = '';
-                  roundReplyText = '';
-                  roundReasoningText = '';
-                  turnHasCommittedReply = false;  // a brand-new bubble starts a fresh "turn" for coalescing
-                  turnReplyText = '';
-                  turnReasoningText = '';
-                  if (spinner && spinner.element) spinner.destroy();
-                  if (!_researchingStreamIds.has(streamSessionId)) {
-                    spinner = spinnerModule.create('Generating response', 'right', 'wave');
-                    newBody.appendChild(spinner.createElement());
-                    spinner.start();
-                  }
-                  if (streamingTTS) window.aiTTSManager._streamSentencesSent = 0;
-                  uiModule.scrollHistory();
-                  continue;
-                }
-                // --- Coalesce: freeze this round into the SAME bubble, re-arm one spinner ---
-                _commitRound();
+                const box = document.getElementById('chat-history');
+                const newWrap = document.createElement('div');
+                newWrap.className = 'msg msg-ai msg-continuation streaming';
+                // Add model name label
+                const newRole = document.createElement('div');
+                newRole.className = 'role';
+                const metaS = sessionModule.getSessions().find(s => s.id === streamSessionId);
+                const _roundRequested = holder?._requestedModel || metaS?.model;
+                const _roundActual = holder?._actualModel || _roundRequested;
+                // C14/immersion: a continuation round in the game build is still the show —
+                // never the raw model name as the sender.
+                newRole.textContent = isGameBuild() ? 'Big Brother' : (_modelRouteLabel(_roundRequested, _roundActual) || '');
+                _applyModelColor(newRole, _roundActual);
+                newWrap.appendChild(newRole);
+                const newBody = document.createElement('div');
+                newBody.className = 'body';
+                newWrap.appendChild(newBody);
+                box.appendChild(newWrap);
+                roundHolder = newWrap;
                 roundText = '';
-                // Mark thread as connected to the (continuing) bubble below
-                const _activeThread = document.querySelector('.agent-thread.streaming');
-                if (_activeThread) {
-                  _activeThread.classList.add('has-bottom');
-                }
-                // Ensure the turn bubble carries a role label even if round 1 was tool-only and
-                // the holder was created without one (defensive — the initial holder has a role).
-                if (!roundHolder.querySelector('.role')) {
-                  const newRole = document.createElement('div');
-                  newRole.className = 'role';
-                  const metaS = sessionModule.getSessions().find(s => s.id === streamSessionId);
-                  const _roundRequested = holder?._requestedModel || metaS?.model;
-                  const _roundActual = holder?._actualModel || _roundRequested;
-                  newRole.textContent = isGameBuild() ? 'Big Brother' : (_modelRouteLabel(_roundRequested, _roundActual) || '');
-                  _applyModelColor(newRole, _roundActual);
-                  roundHolder.insertBefore(newRole, roundHolder.firstChild);
-                }
-                roundHolder.classList.add('streaming');
-                // A prior pure-tool round may have hidden the (still-empty) holder — re-show it
-                // now that the next round is about to stream into the same bubble.
-                if (roundHolder.style.display === 'none') roundHolder.style.display = '';
-                // Re-arm the single per-turn spinner in the SAME body (skip for research —
-                // it has its own progress). Mount it in a fresh stream-content so it sits BELOW
-                // any frozen prior-round block, not over it.
-                if (spinner && spinner.element) { try { spinner.destroy(); } catch (_) {} spinner = null; }
+                roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
+                roundReasoningText = '';
+                // Destroy any previous spinner before creating new one
+                if (spinner && spinner.element) spinner.destroy();
+                // Show spinner while waiting for text (skip for research — has its own progress)
                 if (!_researchingStreamIds.has(streamSessionId)) {
-                  const _spinBody = roundHolder.querySelector('.body');
-                  const _spinSlot = _spinBody ? _ensureStreamLayout(_spinBody) : null;
                   spinner = spinnerModule.create('Generating response', 'right', 'wave');
-                  (_spinSlot || _spinBody || roundHolder).appendChild(spinner.createElement());
+                  newBody.appendChild(spinner.createElement());
                   spinner.start();
                 }
                 if (streamingTTS) window.aiTTSManager._streamSentencesSent = 0;
@@ -3049,82 +2903,68 @@ import { isNarrow } from './platform.js';
         const _streamContent = roundHolder.querySelector('.stream-content');
         if (_streamContent) _streamContent.style.minHeight = '';
 
-        // Finalize the LAST round into the one turn bubble — flatten its stream-content wrapper
-        // for clean DOM. Prior rounds are already frozen as `.committed-round` blocks ABOVE the
-        // live area (TURN COALESCING), so we must NEVER whole-body-innerHTML when committed
-        // content exists — that would wipe earlier narration + the role label (the "messages
-        // disappear" flicker). When there are committed blocks we render ONLY into the live area.
-        // F8: finalize from the reply-only buffer; reasoning lives in the accordion already.
+        // Finalize the last round's bubble — flatten stream-content wrapper for clean DOM.
+        // F8: finalize the BODY from the reply-only buffer; reasoning lives in the accordion
+        // already, so no extraction is needed (the old garbled-<think>/prefix dance is gone).
         const finalDisplay = stripToolBlocks(roundReplyText);
-        var _body4 = roundHolder.querySelector('.body');
-        var _hasCommitted = !!(_body4 && _body4.querySelector('.committed-round'));
         if (finalDisplay.trim()) {
+          var _body4 = roundHolder.querySelector('.body');
           // Preserve sources expanded state before final render
           var _wasExpanded = _sourcesExpanded || !!(_body4 && _body4.querySelector('.sources-content.expanded'));
 
           // If thinking was collapsed in-place during streaming, a reply container exists.
           var _liveReplyEl = _body4 && _body4.querySelector('.live-reply-content');
-          // The live stream-content holds this round's streamed reply (the normal case).
-          var _liveSc = _body4 && _body4.querySelector('.stream-content');
-          // Render reply into the live-reply container (thinking bar already showing).
-          // Build the final reply HTML once (reasoning already lives in the live accordion).
           var _finalReply = _liveReplyEl ? finalDisplay.trim() : '';
-          var _replySrc = _finalReply;
-          if (_liveReplyEl && /<think/i.test(_replySrc)) {
-            // #762: the live thinking accordion is ALREADY in the DOM (its own caret). Drop a
-            // leftover inline <think> from the reply BEFORE rendering so processWithThinking can't
-            // emit a SECOND accordion stacked under the live one (duplicate caret).
-            _replySrc = (markdownModule.extractThinkingBlocks(_replySrc).content || '').trim();
-          }
           if (_liveReplyEl && _finalReply) {
-            // GAME BUILD: route through processWithThinking so the L6b reply-scrub runs — the
-            // public bubble must never carry a reasoning preamble (the live accordion already
-            // holds the reasoning separately).
-            _liveReplyEl.innerHTML = isGameBuild()
+            // Render reply into the live-reply container (thinking bar already showing).
+            // #762: the live thinking accordion is ALREADY in the DOM (its own caret).
+            // If the reply buffer still carries a leftover inline <think> block,
+            // processWithThinking would emit a SECOND accordion here — two stacked
+            // thinking bars with two carets (different size/orientation). Drop any
+            // leftover think block from the reply BEFORE rendering so exactly one
+            // accordion (the live one above) remains; the caret is single + neutral.
+            var _replySrc = _finalReply;
+            if (/<think/i.test(_replySrc)) {
+              _replySrc = (markdownModule.extractThinkingBlocks(_replySrc).content || '').trim();
+            }
+            // GAME BUILD: route through processWithThinking so the L6b reply-scrub runs —
+            // the public bubble must never carry a reasoning preamble that bled into the
+            // reply text (the thinking accordion already holds the reasoning separately).
+            var _replyHtml = isGameBuild()
               ? markdownModule.processWithThinking(markdownModule.squashOutsideCode(_replySrc))
               : markdownModule.mdToHtml(markdownModule.squashOutsideCode(_replySrc));
+            _liveReplyEl.innerHTML = _replyHtml;
             _liveReplyEl.classList.remove('live-reply-content');
-            if (_sourcesData && !_hasCommitted) {
+            if (_sourcesData) {
               var _srcEl = document.createElement('div');
               _srcEl.innerHTML = _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded);
               _body4.insertBefore(_srcEl.firstChild || _srcEl, _body4.firstChild);
             }
             if (_findingsData) _body4.insertAdjacentHTML('beforeend', chatRenderer.buildFindingsBox(_findingsData));
-          } else if (_liveSc && _hasCommitted) {
-            // Coalesced turn with frozen blocks above: render ONLY into the live stream-content,
-            // leaving the committed prior-round blocks intact.
-            _liveSc.style.minHeight = '';
-            _liveSc.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(finalDisplay))
-              + (_findingsData ? chatRenderer.buildFindingsBox(_findingsData) : '');
           } else {
-            // Single-round turn (no committed blocks): full body re-render, exactly as before.
+            // Full re-render (reply empty or no live-reply container)
             _body4.innerHTML = (_sourcesData ? _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded) : '')
               + markdownModule.processWithThinking(markdownModule.squashOutsideCode(finalDisplay))
               + (_findingsData ? chatRenderer.buildFindingsBox(_findingsData) : '');
           }
-        } else if (_sourcesHtml && !_hasCommitted) {
+        } else if (_sourcesHtml) {
           var _body4b = roundHolder.querySelector('.body');
           var _wasExpanded2 = _sourcesExpanded || !!(_body4b && _body4b.querySelector('.sources-content.expanded'));
           _body4b.innerHTML = _sourcesData ? _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded2) : _sourcesHtml;
-        } else if (!_hasCommitted) {
-          // Last round had no visible reply AND there is no committed narration this turn.
-          // Show thinking in a collapsed section if that's all there is; otherwise drop the
-          // empty live stream-content (the bubble may still hold a prior thinking accordion).
+        } else if (roundHolder !== holder) {
+          // Check if there's thinking content worth showing
           const _thinkingOnly = markdownModule.extractThinkingBlocks(roundText);
-          var _emptySc2 = _body4 && _body4.querySelector('.stream-content');
-          if (_thinkingOnly.thinkingBlocks?.length && !_thinkingOnly.content && _emptySc2 &&
-              !_emptySc2.querySelector('.thinking-section')) {
-            _emptySc2.innerHTML = markdownModule.processWithThinking(roundText);
-            _emptySc2.classList.remove('stream-content');
-          } else if (_emptySc2 && !_emptySc2.querySelector('.thinking-section') && !_emptySc2.textContent.trim()) {
-            _emptySc2.remove();
-          }
-        } else {
-          // Coalesced turn, last round empty (pure tool/planning tail): retire the empty live
-          // stream-content; the committed narration above stays the visible reply.
-          var _emptySc3 = _body4 && _body4.querySelector('.stream-content');
-          if (_emptySc3 && !_emptySc3.querySelector('.thinking-section') && !_emptySc3.textContent.trim()) {
-            _emptySc3.remove();
+          if (_thinkingOnly.thinkingBlocks?.length && !_thinkingOnly.content) {
+            // Show thinking in a collapsed section even if no visible reply text
+            const _body4c = roundHolder.querySelector('.body');
+            if (_body4c) _body4c.innerHTML = markdownModule.processWithThinking(roundText);
+          } else {
+            roundHolder.style.display = 'none';
+            // Thread above expected a bubble below — remove has-bottom since bubble is hidden
+            const _lastThread = roundHolder.previousElementSibling;
+            if (_lastThread && _lastThread.classList.contains('agent-thread')) {
+              _lastThread.classList.remove('has-bottom');
+            }
           }
         }
 
@@ -3154,12 +2994,8 @@ import { isNarrow } from './platform.js';
           holder.querySelector('.body').appendChild(details);
         }
 
-        // Hide the turn bubble if the WHOLE turn produced no visible text (e.g. agent went
-        // straight to tools and never narrated). TURN COALESCING: holder IS the turn bubble, so
-        // we judge the whole bubble's text — a tool-only turn leaves an empty body and is hidden;
-        // any committed narration keeps it visible. (The old `holder !== roundHolder` guard is
-        // moot now that roundHolder never diverges from holder.)
-        if (holder.style.display !== 'none') {
+        // Hide first bubble if it has no visible text content (e.g. agent went straight to tools)
+        if (holder !== roundHolder && holder.style.display !== 'none') {
           const _hBody = holder.querySelector('.body');
           const _hText = _hBody ? _hBody.textContent.trim() : '';
           if (!_hText) holder.style.display = 'none';
