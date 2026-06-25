@@ -218,8 +218,8 @@ function _initModelPickerDropdown() {
 
   function _close() {
     if (menu.classList.contains('hidden')) return;
-    // Restore scroll button
-    const _scrollBtn = document.getElementById('scroll-bottom-btn');
+    // Restore scroll button (#887: the single jump-to-bottom button is #orwell-scroll-bottom)
+    const _scrollBtn = document.getElementById('orwell-scroll-bottom');
     if (_scrollBtn) _scrollBtn.style.display = '';
     menu.classList.add('closing');
     menu.addEventListener('animationend', function _onDone() {
@@ -681,8 +681,8 @@ function _initModelPickerDropdown() {
       // Focus the menu so its keydown handler (↑/↓/Enter/Esc) receives keys —
       // skip on mobile to avoid a keyboard/scroll bounce.
       if (!isNarrow()) menu.focus();
-      // Hide scroll button so it doesn't overlap
-      const _scrollBtn = document.getElementById('scroll-bottom-btn');
+      // Hide scroll button so it doesn't overlap (#887: now #orwell-scroll-bottom)
+      const _scrollBtn = document.getElementById('orwell-scroll-bottom');
       if (_scrollBtn) _scrollBtn.style.display = 'none';
     } else {
       _close();

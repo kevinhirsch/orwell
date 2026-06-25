@@ -1467,67 +1467,9 @@
     <div class="gadget-rail-strip" id="gadget-rail-strip" aria-label="Control-room gadgets"></div>
   </aside>
   <button id="gadget-rail-open" class="gadget-rail-open" type="button" title="The House" aria-label="Open the control room" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg></button>
-  <button id="scroll-bottom-btn" class="scroll-nav-btn" title="Scroll to bottom">▼</button>
-  <script nonce="{{CSP_NONCE}}">
-  (function(){
-    const container = document.getElementById('chat-history');
-    const chatBar = document.querySelector('.chat-input-bar');
-    const bottomBtn = document.getElementById('scroll-bottom-btn');
-    if (!container || !chatBar || !bottomBtn) return;
-
-    function reposition() {
-      const barRect = chatBar.getBoundingClientRect();
-      bottomBtn.style.bottom = (window.innerHeight - barRect.top + 16) + 'px';
-      bottomBtn.style.right = (window.innerWidth - barRect.right + 8) + 'px';
-    }
-
-    function update() {
-      reposition();
-      const scrollable = container.scrollHeight > container.clientHeight + 10;
-      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 300;
-      if (scrollable && !atBottom) {
-        bottomBtn.classList.remove('slide-out');
-        bottomBtn.classList.add('show');
-      } else if (bottomBtn.classList.contains('show')) {
-        bottomBtn.classList.add('slide-out');
-        bottomBtn.classList.remove('show');
-      }
-    }
-
-    let _scrollRaf = null;
-    let _scrollTimeout = null;
-    let _scrollingToBottom = false;
-
-    function cancelAutoScroll() {
-      if (_scrollRaf) { cancelAnimationFrame(_scrollRaf); _scrollRaf = null; }
-      if (_scrollTimeout) { clearTimeout(_scrollTimeout); _scrollTimeout = null; }
-      _scrollingToBottom = false;
-    }
-
-    container.addEventListener('scroll', update, {passive:true});
-    container.addEventListener('wheel', () => { if (_scrollingToBottom) cancelAutoScroll(); }, {passive:true});
-    container.addEventListener('touchstart', () => { if (_scrollingToBottom) cancelAutoScroll(); }, {passive:true});
-
-    bottomBtn.addEventListener('click', () => {
-      cancelAutoScroll();
-      const target = container.scrollHeight - container.clientHeight;
-      _scrollingToBottom = true;
-      function step() {
-        if (!_scrollingToBottom) return;
-        const diff = target - container.scrollTop;
-        if (diff <= 8) { container.scrollTop = target; _scrollingToBottom = false; return; }
-        container.scrollTop += diff * 0.2;
-        _scrollRaf = requestAnimationFrame(step);
-      }
-      step();
-      _scrollTimeout = setTimeout(() => { if (_scrollingToBottom) { container.scrollTop = target; _scrollingToBottom = false; } }, 1500);
-    });
-    new ResizeObserver(reposition).observe(chatBar);
-    new MutationObserver(update).observe(container, {childList:true, subtree:true});
-    window.addEventListener('resize', reposition);
-    update();
-  })();
-  </script>
+  <!-- #887: the single jump-to-bottom button is the JS-injected #orwell-scroll-bottom
+       (static/js/orwellScrollBottom.js). The old duplicate squircle #scroll-bottom-btn + its
+       inline script were retired here; the survivor absorbed the composer-anchored placement. -->
 
   <!-- Rename Session Modal -->
   <div id="rename-session-modal" class="modal hidden">
