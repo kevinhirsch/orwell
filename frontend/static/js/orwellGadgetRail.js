@@ -447,13 +447,26 @@
     return (node && node.parentNode === body && node.id) ? node : null;
   }
   function _gadgetFromPoint(x, y) {
-    var g = _gadgetOf(document.elementFromPoint(x, y));
-    if (g) return g;
+    // #798: while dragging, the grabbed gadget is translated UNDER the finger (transform +
+    // z-index:5), so a naive elementFromPoint here returns the DRAGGED gadget itself — the
+    // hit-test never sees the gadget being hovered, so `over === _drag.el` every time and the
+    // drop never reorders. Make the dragged element transparent to hit-testing for the probe so
+    // elementFromPoint resolves to the gadget BENEATH it.
+    var lifted = (_drag && _drag.el) ? _drag.el : null;
+    var prevPE = lifted ? lifted.style.pointerEvents : null;
+    if (lifted) lifted.style.pointerEvents = "none";
+    var hit;
+    try { hit = document.elementFromPoint(x, y); }
+    finally { if (lifted) { if (prevPE) lifted.style.pointerEvents = prevPE; else lifted.style.removeProperty("pointer-events"); } }
+    var g = _gadgetOf(hit);
+    if (g && (!lifted || g !== lifted)) return g;
     // Pointer is in a gap (inter-gadget margin / rail padding) — resolve to the nearest gadget by
-    // vertical center so a drop between gadgets still reorders.
+    // vertical center so a drop between gadgets still reorders. Skip the dragged gadget itself so
+    // we resolve to a real drop TARGET (otherwise the nearest is the grabbed card = a no-op).
     var best = null, bestD = Infinity;
     Array.prototype.forEach.call(body.children, function (c) {
       if (!c.id) return;
+      if (lifted && c === lifted) return;
       var r = c.getBoundingClientRect();
       var d = Math.abs((r.top + r.bottom) / 2 - y);
       if (d < bestD) { bestD = d; best = c; }

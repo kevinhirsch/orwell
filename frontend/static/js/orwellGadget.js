@@ -49,10 +49,14 @@
     st.textContent =
       // The card shell — the shared rail-gadget chrome. display:none by default; the
       // consuming gadget flips it via show()/hide() (content-driven, the rail observes).
+      // #797: gadget INSETS ride the --ow-space-* scale for clean, even, Apple-grade alignment
+      // across every gadget kind (no ad-hoc rem values): --ow-space-3 (12px) horizontal padding,
+      // --ow-space-2 (8px) vertical padding + margin + inner gaps, --ow-space-1 (4px) tightest gaps.
+      // Kept in lock-step with the source-of-truth copy in style.css (.og-* family).
       ".og-card {" +
       "  display: none;" +
-      "  margin: var(--space-2, .4rem) var(--space-2, .4rem) 0;" +
-      "  padding: var(--space-2, .4rem) var(--space-3, .55rem);" +
+      "  margin: var(--ow-space-2, 8px) var(--ow-space-2, 8px) 0;" +
+      "  padding: var(--ow-space-2, 8px) var(--ow-space-3, 12px);" +
       "  background: color-mix(in srgb, var(--panel, #111) 70%, transparent);" +
       "  color: var(--fg, #9cdef2);" +
       "  border: 1px solid var(--border, #355a66); border-radius: 10px;" +
@@ -63,29 +67,29 @@
       // the semibold weight token (the title colour mixed toward the panel). The whole
       // header is the collapse affordance when collapsible (role=button on it).
       ".og-card .og-head {" +
-      "  display: flex; align-items: center; gap: .4rem; margin: 0 0 .35rem;" +
+      "  display: flex; align-items: center; gap: var(--ow-space-2, 8px); margin: 0 0 var(--ow-space-2, 8px);" +
       "  font-size: var(--ow-fs-heading, .8125rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; }" +
       ".og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }" +
       // #729: the gadget-header focus ring is NEUTRAL (system-blue), never the theme red/accent —
       // the glass chrome carries no accent HUE. system-blue is the one sanctioned focus tint.
       ".og-card .og-head:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: 2px; border-radius: 4px; }" +
-      ".og-card .og-icon { flex: 0 0 auto; }" +
+      ".og-card .og-icon { flex: 0 0 auto; display: inline-flex; }" +
       ".og-card .og-title {" +
       "  flex: 1 1 auto; min-width: 0;" +
       "  color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111));" +
       "  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }" +
-      ".og-card .og-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: .25rem; }" +
+      ".og-card .og-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--ow-space-1, 4px); }" +
       // An action button (Open / Un-pin …) — the gadget-scale affordance (mirrors the old
       // .ocp-btn) at the 24px tap floor the kit-window controls use (J5 bumps coarse pointers).
       ".og-card .og-act {" +
       "  flex: 0 0 auto; background: rgba(255,255,255,.06);" +
       "  border: 1px solid var(--border, #355a66); color: inherit; cursor: pointer;" +
       "  border-radius: 6px; font: inherit; font-size: .68rem;" +
-      "  min-height: 24px; padding: 0 .45rem; opacity: .8; }" +
+      "  min-height: 24px; padding: 0 var(--ow-space-2, 8px); opacity: .8; }" +
       ".og-card .og-act:hover, .og-card .og-act:focus-visible {" +
       "  opacity: 1; background: rgba(255,255,255,.12); }" +
       // The collapse chevron — only when collapsible. Reduced-motion strips its transition.
-      ".og-card .og-chev { flex: 0 0 auto; opacity: .55; margin-left: .1rem; transition: transform .15s; }" +
+      ".og-card .og-chev { flex: 0 0 auto; opacity: .55; margin-left: var(--ow-space-1, 4px); transition: transform .15s; }" +
       ".og-card.og-collapsed .og-chev { transform: rotate(-90deg); }" +
       ".og-card.og-collapsed .og-body { display: none; }" +
       // The body holds the gadget's own content (its existing inner markup unchanged).
