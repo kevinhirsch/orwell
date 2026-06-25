@@ -188,77 +188,117 @@ def _is_image_generation_session(sess, owner: str | None = None) -> bool:
     return False
 
 
-def _recover_empty_session_model(sess, session_id: str, owner: str | None = None) -> bool:
-    """Re-populate sess.model from the matching endpoint's cached models.
+def _default_chat_target(owner: str | None) -> tuple[str, str]:
+    """The user's configured default (endpoint_id, model) for chat — the same source of truth as
+    GET /api/default-chat: per-user prefs first, then the global settings. Best-effort; ('', '') if
+    nothing is configured."""
+    ep_id = model = ""
+    try:
+        if owner:
+            from routes.prefs_routes import _load_for_user
+            prefs = _load_for_user(owner) or {}
+            ep_id = (prefs.get("default_endpoint_id") or "").strip()
+            model = (prefs.get("default_model") or "").strip()
+    except Exception:
+        pass
+    if not (ep_id or model):
+        try:
+            from src.settings import load_settings
+            s = load_settings() or {}
+            ep_id = (s.get("default_endpoint_id") or "").strip()
+            model = (s.get("default_model") or "").strip()
+        except Exception:
+            pass
+    return ep_id, model
 
-    Covers the window between endpoint setup and the first chat send: the
-    picker showed a model in the dropdown but the session record never got
-    written (Issue #587 — UI uses the cached endpoint list, not s.model).
-    Without this, we'd POST the upstream with model="" and get a generic
-    401/503 instead of using the model the user already picked.
+
+def _recover_empty_session_model(sess, session_id: str, owner: str | None = None) -> bool:
+    """Re-populate sess.model (and endpoint_url) so a model-less session can still send.
+
+    Covers two cases:
+      1. Issue #587 — the picker showed a model but the session row never got it written (the
+         endpoint the session already points at is matched and its first chat model is used).
+      2. The session has NO model AND no endpoint we can match — most often a game/canonical
+         session whose model binding was never written, or a stale one. Without recovery the send
+         is REFUSED ("No model selected") even though a default IS configured — the "I have a model
+         set / picked one, but the game still can't send and nothing reaches the API" bug. We fall
+         back to the user's CONFIGURED DEFAULT (default_endpoint_id + default_model), then to the
+         first enabled endpoint visible to them, and bind that to the session.
+
+    Also repairs a session whose saved model is a text→image model (it can't hold a conversation).
 
     Returns True iff sess.model was repaired.
-
-    Also repairs a session whose saved model is a text→image model: an endpoint that serves
-    both chat and image can have an image model persisted onto a chat session (the old
-    visible[0] recovery, or a corrupted default), and it can't hold a conversation — so we
-    re-derive the first real CHAT model in that case too.
     """
     from src.llm_core import is_image_model
+    from src.auth_helpers import owner_filter
+    from src.endpoint_resolver import _first_chat_model
     existing = getattr(sess, "model", None)
     if existing and not is_image_model(existing):
         return False
     db = SessionLocal()
     try:
-        # Prefer the endpoint whose base URL matches the session — we know the
-        # user already pointed this session at that endpoint, so its first
-        # cached model is the most defensible default.
+        # 1) Prefer the endpoint the session already points at (URL match) — the user pointed it here.
         ep = None
         if getattr(sess, "endpoint_url", ""):
             q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
             if owner:
-                from src.auth_helpers import owner_filter
-                q = owner_filter(q, ModelEndpoint, owner)
-            endpoints = q.all()
-            for cand in endpoints:
+                q = owner_filter(q, ModelEndpoint, owner, include_shared=True)
+            for cand in q.all():
                 if _session_url_matches_endpoint(sess.endpoint_url or "", cand.base_url or ""):
                     ep = cand
                     break
+        # 2) FALLBACK: no model + no matching endpoint. Resolve the configured default, then the first
+        #    enabled endpoint visible to the owner (shared included — it's a configured provider).
+        preferred_model = ""
+        if not ep:
+            default_ep_id, preferred_model = _default_chat_target(owner)
+            q2 = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
+            if owner:
+                q2 = owner_filter(q2, ModelEndpoint, owner, include_shared=True)
+            if default_ep_id:
+                ep = q2.filter(ModelEndpoint.id == default_ep_id).first()
+            if not ep:
+                ep = q2.first()
         if not ep:
             return False
         try:
             cached = json.loads(ep.cached_models) if isinstance(ep.cached_models, str) else (ep.cached_models or [])
         except Exception:
             cached = []
-        if not cached:
-            return False
         try:
             visible = _visible_models(cached, getattr(ep, "hidden_models", None))
         except Exception:
-            visible = cached
-        if not visible:
-            return False
-        # Pick the first CHAT model, not raw visible[0]: an endpoint that serves both
-        # chat and image models (e.g. OpenRouter with a "*-flash-image" portrait model
-        # in its list) must never recover a chat session onto the image model — that's
-        # the "empty/weird responses going to gemini" bug.
-        from src.endpoint_resolver import _first_chat_model
-        model = _first_chat_model(visible)
+            visible = cached or []
+        # Choose the model: the configured default IF the endpoint actually serves it (and it's a chat
+        # model) — honoring the user's pick; otherwise the endpoint's first real CHAT model (never an
+        # image model — the "responses going to gemini-flash-image" bug). If the endpoint has no cached
+        # list yet, trust the configured default (a freshly-added endpoint may be unprobed).
+        model = ""
+        if preferred_model and not is_image_model(preferred_model) and (preferred_model in (visible or [])):
+            model = preferred_model
+        if not model and visible:
+            model = _first_chat_model(visible) or ""
+        if not model and preferred_model and not is_image_model(preferred_model):
+            model = preferred_model
         if not isinstance(model, str) or not model.strip():
             return False
         model = model.strip()
-        # Persist so the next request, websocket reconnect, or page reload
-        # picks up the same model (we'd otherwise re-pick on every send
-        # and silently switch on the user if the cached order shifts).
+        new_url = (ep.base_url or getattr(sess, "endpoint_url", "") or "").strip()
+        # Persist model + endpoint (BOTH — the fallback may have re-pointed a model-less session at the
+        # default endpoint), so the next request / reconnect / reload picks up the same binding.
         db_session = db.query(DBSession).filter(DBSession.id == session_id).first()
         if db_session:
             db_session.model = model
+            if new_url:
+                db_session.endpoint_url = new_url
             db_session.updated_at = datetime.utcnow()
             db.commit()
         sess.model = model
+        if new_url:
+            sess.endpoint_url = new_url
         logger.info(
-            "Recovered empty session model for %s — picked %r from endpoint %s",
-            session_id, model, ep.id,
+            "Recovered empty session model for %s — bound %r @ %s (endpoint %s)",
+            session_id, model, new_url, ep.id,
         )
         return True
     except Exception as e:
