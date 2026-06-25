@@ -233,14 +233,14 @@ export function isCorpusName(fullName: string): boolean {
  * pre-seeded `used`/`usedGiven` sets carry CROSS-SEASON memory (NAME-1 / #547) so a new season's
  * cast avoids names used by prior seasons in the same game.
  *
- * RNG-SAFETY (E38 / #338): one iteration consumes EXACTLY two main-stream draws (one given, one
- * surname) — unchanged. In the common case (805 surnames ≫ a 15-cast) the first surname is
- * accepted, so the draw count and order are byte-identical to before and downstream stats /
- * volatility / names do not shift. A re-loop (and the extra draws it consumes) happens ONLY when a
- * given/full-name/surname would have COLLIDED — i.e. exactly the seeds that previously minted a
- * duplicate surname, which this fix must change by definition. The surname guard mirrors the
- * existing given/full-name guards (the same bounded loop + fail-stop contract; surnames are the
- * plentiful corpus — 805 vs a 15-cast — so the guard is far beyond reachable in practice).
+ * RNG-SAFETY (E38 / #338): the loop's RNG consumption is byte-identical to before #853 — it re-loops
+ * (drawing a fresh given + surname) ONLY on the original given / full-name collision conditions, never
+ * on a surname collision. A surname collision is resolved WITHOUT any draw: since a unique `given`
+ * already makes the full name unique, we deterministically advance through the corpus to the next free
+ * surname. So the main stream — and every downstream stat / volatility / age draw seeded off it — is
+ * unchanged for ALL seeds; only the surname STRING differs on the (rare) colliding seed, which is the
+ * fix. (An earlier approach re-looped on surname collisions, shifting the stream and breaking
+ * seed-pinned tests like portraitVariety's age band.)
  */
 function uniqueName(
   rng: RandomnessSource,
@@ -250,14 +250,30 @@ function uniqueName(
 ): string {
   for (let guard = 0; guard < 1000; guard++) {
     const given = rng.pick(GIVEN_NAMES);
-    const surname = rng.pick(SURNAMES);
-    const name = `${given} ${surname}`;
-    if (!used.has(name) && !usedGiven.has(given) && !usedSurnames.has(surname)) {
-      used.add(name);
-      usedGiven.add(given);
-      usedSurnames.add(surname);
-      return name;
+    let surname = rng.pick(SURNAMES);
+    // Re-loop ONLY on the original given / full-name collisions — NOT on a surname collision — so RNG
+    // consumption per iteration is byte-identical to before #853 (one given + one surname pick, same
+    // re-loop triggers). Re-looping on a surname collision shifted the main stream and perturbed
+    // downstream age / stat draws, breaking seed-pinned tests (portraitVariety's age band).
+    if (used.has(`${given} ${surname}`) || usedGiven.has(given)) continue;
+    // Surname de-dup WITHOUT consuming RNG: a unique `given` already makes the full name unique, so on
+    // a surname collision we deterministically advance through the corpus to the next free surname (no
+    // extra draw → main stream unchanged; both #853 and the #338 golden-RNG isolation hold).
+    if (usedSurnames.has(surname)) {
+      const start = SURNAMES.indexOf(surname);
+      for (let step = 1; step < SURNAMES.length; step++) {
+        const cand = SURNAMES[(start + step) % SURNAMES.length]!;
+        if (!usedSurnames.has(cand)) {
+          surname = cand;
+          break;
+        }
+      }
     }
+    const name = `${given} ${surname}`;
+    used.add(name);
+    usedGiven.add(given);
+    usedSurnames.add(surname);
+    return name;
   }
   // Same fail-stop contract as before (the guard is far beyond reachable: 805 surnames / 501 given
   // names vs a 15-cast leave ample headroom — seedPriorNames is the piece that keeps it that way).
