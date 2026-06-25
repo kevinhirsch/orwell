@@ -148,6 +148,32 @@ export function scaleImpact(impact: Partial<EdgeSignals>, factor: number): Parti
 }
 
 /**
+ * The FRIENDLY natures (feature 0078 Phase 2) — downtime social warmth, NOT game talk: a pair just
+ * hanging out or growing close. A house isn't always plotting, so these are the DEFAULT texture of
+ * ordinary life. Everything else (alliance / strategy / conflict / betrayal / gossip) is a GAME nature.
+ */
+export const FRIENDLY_NATURES: ReadonlySet<InteractionType> = new Set<InteractionType>(["bonding", "showmance"]);
+
+/**
+ * The relationship fold an off-screen scene of the given nature takes (feature 0078 Phase 2 — "co-presence
+ * is not game talk; motivation sets the nature"). A GAME nature folds its full strategic `IMPACT`
+ * (trust / threat / alignment that feed the vote math) — BYTE-IDENTICAL to the pre-0078 society, so the
+ * calibration spine is untouched there. A FRIENDLY nature warms the bond — AFFINITY ONLY — and folds NO
+ * strategic weight (owner ruling: friendly conversation builds the relationship without scheming, no
+ * vote-affecting change). Pure, draws no rng; the caller's fold takes the same four jitter draws either
+ * way (`applyOneDirection`), so swapping a game fold for the friendly one is draw-count-stable — only the
+ * friendly magnitudes shift, which the 0078 Phase-2 calibration pass re-verifies.
+ */
+export function natureFoldImpact(type: InteractionType): Partial<EdgeSignals> {
+  const base = RELATIONSHIP_CONSTANTS.IMPACT[type];
+  // A game scene folds the strategic weights, unchanged (same object ref ⇒ byte-identical). A friendly
+  // scene warms the bond ONLY — its affinity projection. (A friendly nature without an affinity impact
+  // would yield `{ affinity: undefined }`, which `applyOneDirection` reads as `?? 0` — i.e. no move —
+  // exactly as an empty fold; both friendly natures carry affinity today, so no empty-fold case arises.)
+  return FRIENDLY_NATURES.has(type) ? { affinity: base.affinity } : base;
+}
+
+/**
  * The hidden relationship consequence of each ceremony act (feature B38 / audit C1, reworked by
  * audit E47/E48). The weekly loop's most consequential moves — nominations, veto saves,
  * replacements, evictions, comp wins — must move trust/affinity/threat, not just be read. Each act

@@ -549,6 +549,26 @@ export class BbWorld extends World {
   txSeedA?: string;
   txSeedB?: string;
 
+  // Feature 0078 — motivated off-screen society & intentional movement scratch state. One bag (the
+  // scenario's "house lives" action is a closure so the shared When stays faithful across its rules).
+  ms?: {
+    reg?: import("../../src/composition/registry").GameSessionRegistry;
+    user?: string;
+    orch?: import("../../src/composition/orchestrator").Orchestrator;
+    sandbox?: import("../../src/composition/registry").UserSandbox;
+    live?: () => void;
+    scenes?: import("../../src/engine/offscreen").OffscreenScene[];
+    pairA?: Eid;
+    pairB?: Eid;
+    trend?: { motiveless: number; bonder: number; worker: number; shuffled: number };
+    nature?: { warmFriendly: number; warmConflict: number; threatGame: number; threatConflict: number };
+    recordsBefore?: number;
+    edgesBefore?: string;
+    awake?: Eid[];
+    asleep?: Eid[];
+    seasonResult?: { seed: number; status: string; f2Win: boolean; playerCompWins: number };
+  };
+
   constructor(options: IWorldOptions) {
     super(options);
   }

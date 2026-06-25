@@ -241,7 +241,7 @@ export interface MovementIntentConstants {
 }
 
 export const MOVEMENT_INTENT: MovementIntentConstants = {
-  moveIntentStrength: 0.2,
+  moveIntentStrength: 0.15,
   pursuitMoveBias: 0.18,
   maxRoomBonus: 2.0,
   minCharge: 0.08,
