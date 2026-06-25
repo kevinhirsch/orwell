@@ -141,9 +141,14 @@ def test_pointer_specular_suppressed_under_reduced_transparency():
 # ════════════════════════════════════════════════════════════════════════════
 
 def _craft_region():
-    # the dedicated craft region appended to style.css.
+    # the dedicated craft region appended to style.css. Bounded at the start of the next
+    # appended kit region (e.g. the OrwellSheet family, which legitimately uses var(--accent)
+    # for the anchored sheet rim — NOT part of the colorless glass craft) so these pins only
+    # ever inspect the #21/#26 craft CSS, never whatever is appended after it.
     idx = CSS.index("LIQUID-GLASS CRAFT REGION")
-    return CSS[idx:]
+    region = CSS[idx:]
+    end = region.find("OrwellSheet — THE iOS bottom-sheet kit")
+    return region if end == -1 else region[:end]
 
 
 def test_chromatic_fringe_limited_to_two_key_surfaces():

@@ -69,8 +69,12 @@
   // the freshly-armed (live, unconfirmed) next decision card out from under the player (TRANS-4).
   let _doneTimer = null;
   let _notice = null;   // #642: the OrwellNotice kit instance hosting the card (the zone anchor).
+  let _sheet = null;    // #753: the OrwellSheet (anchored, non-blocking action-sheet) hosting the card.
   function removeCard() {
     if (_doneTimer) { clearTimeout(_doneTimer); _doneTimer = null; }
+    // #753: prefer the sheet host (the non-blocking action-sheet) when present; fall back to the
+    // OrwellNotice host (the pre-#753 anchor) so a card mounted via either path tears down cleanly.
+    if (_sheet) { try { _sheet.dismiss("api"); } catch (_) {} _sheet = null; }
     if (_notice) { try { _notice.hide(); } catch (_) {} _notice = null; }
     const old = document.getElementById(CARD_ID);
     if (old) old.remove();
@@ -105,6 +109,22 @@
       .on-card.on-decision #${CARD_ID} {
         margin: 0; max-width: none; box-shadow: none; border: none; padding: 0;
         background: transparent; animation: none;
+      }
+      /* #753: hosted in the OrwellSheet anchored action-sheet (.ow-sheet-anchored owns the
+         grabber/accent-rim/glass/anchor), the decision card goes FLAT exactly as in the notice
+         host — drop its own margin/max-width/shadow/border/animation/bg so the sheet provides the
+         one chrome (no double frame, no squeezed note column). */
+      .ow-sheet.ow-sheet-anchored #${CARD_ID} {
+        margin: 0; max-width: none; box-shadow: none; border: none; padding: 0;
+        background: transparent; animation: none;
+      }
+      /* Under the glass theme the inner card must stay transparent (the sheet IS the glass) so it
+         never double-glasses — mirrors the .on-card.on-decision frosted rule below. (The .odec-risk
+         selector is listed FIRST so the j5_20 token-tint regex never matches this transparent rule.) */
+      body.theme-frosted .ow-sheet.ow-sheet-anchored #${CARD_ID}.odec-risk,
+      body.theme-frosted .ow-sheet.ow-sheet-anchored #${CARD_ID} {
+        background-color: transparent; background-image: none;
+        -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none;
       }
       #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
       #${CARD_ID} .odec-title { font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; flex: 1; }
@@ -662,8 +682,9 @@
         _doneTimer = setTimeout(() => {
           // J5-06: only remove if THIS card is still the lingering done-card — never a card that
           // re-armed into the same id within the 4s window (removeCard() also clears this timer).
-          // #642: remove the kit notice host too (if any) so no empty wrapper lingers in the zone.
+          // #642/#753: remove the host (sheet or notice) too (if any) so no empty wrapper lingers.
           if (card.isConnected && card.classList.contains("odec-done")) {
+            if (_sheet) { try { _sheet.dismiss("api"); } catch (_) {} _sheet = null; }
             if (_notice) { try { _notice.hide(); } catch (_) {} _notice = null; }
             card.remove();
           }
@@ -692,25 +713,46 @@
       }
     });
 
-    // #642: mount the card into the OrwellNotice kit's stacked above-composer zone (kind
-    // "decision" — it sits closest to the composer, the most action-demanding affordance). The
-    // kit's own corner × is suppressed (dismissible:false) — the card carries its OWN .odec-x
-    // with the per-signature dismiss semantics; persistDismiss:false (a decision is a live
-    // hard-stop, never a "dismissed forever" bit). The existing #orwell-decision-card element is
-    // appended INTO the kit card so all its CSS/selectors/escape-scope are untouched. Fail-open:
-    // with no kit, fall back to the in-stream #chat-history host (the legacy mount).
-    if (hasKit) {
+    // #753 (Genius #15/16/17): the decision card is now a NON-BLOCKING ANCHORED ACTION-SHEET
+    // (OrwellSheet, anchored placement) above the composer — deliberate, not a snap-modal that
+    // blocks the whole screen, so the player can keep reading the room and still talk it out
+    // instead. The sheet is the anchor/chrome (grabber + accent rim + glass fill); the existing
+    // #orwell-decision-card element is appended INTO the sheet body so ALL its rich internals
+    // (legal options, pick-count, the binding Confirm, the J5-20 risk skin, the per-signature
+    // dismiss, the boot/poll rearm) and every CSS selector / escape-scope are untouched. The
+    // decision is a live HARD-STOP affordance: the sheet renders dismissible:false (no kit ×, no
+    // swipe-away) — the card carries its OWN .odec-x with the per-signature dismiss semantics, and
+    // its card-scoped Escape still dismisses. Fail-open chain: OrwellSheet → the pre-#753
+    // OrwellNotice anchor → the in-stream #chat-history.
+    const hasSheet = !!(window.OrwellSheetKit && window.OrwellSheetKit.create &&
+      (document.querySelector(".chat-input-bar") || document.getElementById("chat-bar") ||
+       (window.OrwellNoticeKit && window.OrwellNoticeKit.ensureZone)));
+    if (hasSheet) {
+      _sheet = window.OrwellSheetKit.create({
+        id: "orwell-decision-sheet",
+        anchored: true,                 // non-modal: no scrim, no inert background — keep reading the room
+        title: titleFor(kind, pending.binding),
+        role: "group",                  // the inner card is the role="form" landmark; don't double it
+        dismissible: false,             // a live hard-stop: the card owns its own .odec-x dismiss
+      });
+      const host = _sheet.ensure();     // the .ow-sheet-body of the anchored action-sheet
+      // The sheet's title row would duplicate the card's own .odec-title — hide the sheet header so
+      // the card brings the single title + risk badge (no double chrome).
+      const sheetHead = _sheet.el && _sheet.el.querySelector(".ow-sheet-head");
+      if (sheetHead) sheetHead.style.display = "none";
+      host.appendChild(card);
+    } else if (hasKit) {
+      // Pre-#753 fallback: mount into the OrwellNotice kit's stacked above-composer zone (kind
+      // "decision"). Suppress the kit × (dismissible:false) — the card carries its OWN .odec-x.
       _notice = window.OrwellNoticeKit.create({
         id: "orwell-decision-notice",
         kind: "decision",
         title: titleFor(kind, pending.binding),
-        role: "presentation",     // the inner card is the role="form" landmark; don't double it
+        role: "presentation",
         dismissible: false,
         persistDismiss: false,
       });
       const host = _notice.ensure();   // the .on-body of the stacked kit card
-      // The kit's empty head reserves no useful space for the decision card — hide it (the card
-      // brings its own .odec-head with the title + risk badge).
       const kitHead = _notice.el && _notice.el.querySelector(".on-head");
       if (kitHead) kitHead.style.display = "none";
       host.appendChild(card);
