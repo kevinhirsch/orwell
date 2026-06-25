@@ -226,12 +226,34 @@ def test_j5_finale_tally_aria_label():
         "the finale tally span must carry an aria-label ('N votes')"
 
 
-# ── J5-15: finale stage label must be a live region ──
+# ── J5-15 → A11Y-3 (#598): the stage label must NOT be its OWN live region ──
+# A11Y-3 supersedes the original J5-15 contract. J5-15 made #ofin-stage aria-live, but that region
+# sits beside the hidden #ofin-announce announcer at the SAME polite priority, so the UNCHANGED
+# stage name re-announced every ~5s poll during jury questioning — drowning out the streamed Q&A /
+# vote reveals. The fix: #ofin-stage carries NO aria-live; a stage TRANSITION is announced once,
+# on change, through the one hidden #ofin-announce region (alongside the vote reveals).
 
-def test_j5_finale_stage_live_region():
+def test_a11y3_finale_stage_not_its_own_live_region():
     js = _read("static", "js", "orwellFinale.js")
-    assert re.search(r'id="ofin-stage"\s+aria-live="polite"', js), \
-        "the finale stage label must be aria-live so stage transitions are announced"
+    # #ofin-stage must NOT carry its own aria-live (the over-announce source).
+    assert not re.search(r'id="ofin-stage"\s+aria-live', js), \
+        "#ofin-stage must NOT be its own aria-live region (it re-announced the unchanged stage every poll) — A11Y-3"
+    # The hidden announcer must still exist as the ONE polite region.
+    assert re.search(r'id="ofin-announce"\s+aria-live="polite"', js), \
+        "the hidden #ofin-announce region must remain the one polite announcer — A11Y-3"
+
+
+def test_a11y3_stage_transition_announced_through_announce_region_on_change():
+    js = _read("static", "js", "orwellFinale.js")
+    # A stage CHANGE (not the unchanged stage) is tracked and announced once.
+    assert "_lastStage" in js, \
+        "the finale must track the last announced stage so a re-poll of the same stage stays silent — A11Y-3"
+    assert re.search(r"stageChanged\s*=\s*_lastStage\s*!==\s*null\s*&&\s*finale\.stage\s*!==\s*_lastStage", js), \
+        "a stage transition must be computed (changed AND not the first sync) — A11Y-3"
+    # The stage-change text must feed the hidden #ofin-announce region (the one announcer), not its own.
+    ann_block = re.search(r'getElementById\("ofin-announce"\).*?ann\.textContent', js, re.S)
+    assert ann_block and "stageChanged" in ann_block.group(0), \
+        "the stage-change announcement must be routed through the #ofin-announce region — A11Y-3"
 
 
 # ── R2-01: re-tapping the pre-selected comp chip must not clear a required single-pick ──

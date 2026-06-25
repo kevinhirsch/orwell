@@ -121,7 +121,7 @@ import * as modalManager from "./modalManager.js";
           border-color: rgba(255,255,255,0.14);
         }
       </style>
-      <div class="ofin-stage" id="ofin-stage" aria-live="polite"></div>
+      <div class="ofin-stage" id="ofin-stage"></div>
       <div class="ofin-final" id="ofin-final"></div>
       <div class="ofin-hd" id="ofin-reveal-hd" style="display:none">The votes</div>
       <div id="ofin-reveals"></div>
@@ -163,6 +163,14 @@ import * as modalManager from "./modalManager.js";
   // already on screen through the aria-live region (reload-persistence audit). Only reveals
   // that land DURING this page session are announced.
   let _lastRevealCount = -1;
+  // A11Y-3: the stage label is NO LONGER its own aria-live region (#ofin-stage re-announced the
+  // UNCHANGED stage name every ~5s poll during jury questioning, drowning out the streamed Q&A /
+  // vote reveals on the SAME-priority hidden #ofin-announce region). Instead we announce a stage
+  // CHANGE once, through the one hidden #ofin-announce region — tracking the last announced stage
+  // so a re-poll of the same stage stays silent. null = nothing announced yet this page session;
+  // the first render syncs WITHOUT announcing (mirrors _lastRevealCount), so a reload mid-finale
+  // never re-announces the stage already on screen.
+  let _lastStage = null;
 
   function render(finale) {
     const el = ensureUI();
@@ -183,7 +191,13 @@ import * as modalManager from "./modalManager.js";
 
     const finalists = Array.isArray(finale.finalists) ? finale.finalists : [];
     const reveals = Array.isArray(finale.reveals) ? finale.reveals : [];
-    document.getElementById("ofin-stage").textContent = STAGE_LABEL[finale.stage] || "The finale";
+    const stageLabel = STAGE_LABEL[finale.stage] || "The finale";
+    document.getElementById("ofin-stage").textContent = stageLabel;
+    // A11Y-3: announce a stage TRANSITION (not the unchanged stage on every poll) through the one
+    // hidden #ofin-announce region, alongside any fresh vote reveals below. Skip the very first
+    // sync of this page session (mirrors _lastRevealCount) so a reload mid-finale never re-announces.
+    const stageChanged = _lastStage !== null && finale.stage !== _lastStage;
+    _lastStage = finale.stage;
 
     // Finalists + a tally of the REVEALED votes only (never a pre-reveal total or the winner).
     const tally = {};
@@ -201,11 +215,18 @@ import * as modalManager from "./modalManager.js";
 
     // The reveal, in the order the engine read it (revealed votes only). New reveals
     // are ANNOUNCED politely (E67): the vote reading is the season's loudest moment.
+    // A11Y-3: a stage TRANSITION rides the SAME hidden polite region (announced once, on change),
+    // so a screen reader hears "Jury questions." once — never re-read every poll — and the fresh
+    // vote reveals join the same announcement when both land together.
     const ann = document.getElementById("ofin-announce");
-    if (ann && _lastRevealCount >= 0 && reveals.length > _lastRevealCount) {
-      const fresh = reveals.slice(_lastRevealCount)
-        .map((r) => nameOf(r.juror) + " votes for " + nameOf(r.votedFor) + ".");
-      ann.textContent = fresh.join(" ");
+    if (ann) {
+      const parts = [];
+      if (stageChanged) parts.push(stageLabel + ".");
+      if (_lastRevealCount >= 0 && reveals.length > _lastRevealCount) {
+        reveals.slice(_lastRevealCount)
+          .forEach((r) => parts.push(nameOf(r.juror) + " votes for " + nameOf(r.votedFor) + "."));
+      }
+      if (parts.length) ann.textContent = parts.join(" ");
     }
     _lastRevealCount = reveals.length;
     const revWrap = document.getElementById("ofin-reveals");
