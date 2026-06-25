@@ -32,6 +32,31 @@ export function humanizeIds(content: string, entities: ReadonlyArray<{ id: strin
 }
 
 /**
+ * A bare-word id (e.g. the player's `player`) collides with an ordinary English word, so resolving it
+ * blindly mangles dictionary prose (audit #845: a deep-profile goal "outlast every player" became
+ * "outlast every <name>"). The whole-token boundary already protects the PLURAL ("players"), but the
+ * SINGULAR dictionary word is spelled identically to the id. The reliable discriminator: an engine-
+ * interpolated id is never preceded by an English DETERMINER — beat prose interpolates a bare
+ * `${player}` ("player wins…", "the vote is read: player"), never "the player" / "every player".
+ * So a bare-word id directly following a determiner is the ordinary word and is left alone.
+ */
+const DETERMINERS: ReadonlySet<string> = new Set([
+  "a", "an", "the", "every", "each", "this", "that", "these", "those", "my", "your", "his", "her",
+  "its", "our", "their", "no", "any", "some", "one", "another", "per", "which", "whichever", "many",
+  "few", "several", "both", "either", "neither", "all",
+]);
+/** Is this id a plain alphabetic word (no `:`), i.e. dictionary-collision-prone (the `player` case)? */
+function isBareWordId(id: string): boolean {
+  return /^[a-z]+$/i.test(id);
+}
+/** The word immediately before `offset` in `content`, lowercased — "" if at the start. */
+function precedingWord(content: string, offset: number): string {
+  const before = content.slice(0, offset);
+  const m = /([A-Za-z]+)[^A-Za-z]*$/.exec(before);
+  return m ? m[1]!.toLowerCase() : "";
+}
+
+/**
  * Build a REUSABLE id→name substituter for a fixed roster. The matcher compiles ONCE (a single
  * alternation regex over all ids) and then applies to many strings — the hot player-projection path
  * cleans the whole growing event log per commit, so re-compiling 16 per-id regexes per event was a
@@ -42,6 +67,12 @@ export function humanizeIds(content: string, entities: ReadonlyArray<{ id: strin
  *   - the same `(?<![\w:]) … (?![\w:])` whole-token boundary, so the word "players" is never touched;
  *   - one left-to-right scan with non-overlapping matches reproduces the sequential `replace` result —
  *     names carry no id tokens, so an earlier substitution can never create a new match (same as before).
+ *
+ * #845: a bare-word id (the `player` collision) is ADDITIONALLY required to NOT directly follow an
+ * English determiner ("every player" → the ordinary word, left alone), so a real id token
+ * ("player wins…", "the vote is read: player") still resolves but a plain dictionary word never does.
+ * Colon-bearing ids (`npc:3`) are unaffected — they never collide with a word — so common content is
+ * byte-identical.
  */
 export function makeIdHumanizer(
   entities: ReadonlyArray<{ id: string; name: string }>,
@@ -55,7 +86,12 @@ export function makeIdHumanizer(
     .map((e) => e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("|");
   const re = new RegExp(`(?<![\\w:])(?:${alternation})(?![\\w:])`, "g");
-  return (content) => content.replace(re, (m) => byId.get(m) ?? m);
+  return (content) =>
+    content.replace(re, (m, offset: number) => {
+      // A bare-word id that directly follows a determiner is the ordinary English word — skip it (#845).
+      if (isBareWordId(m) && DETERMINERS.has(precedingWord(content, offset))) return m;
+      return byId.get(m) ?? m;
+    });
 }
 
 /**
@@ -149,17 +185,18 @@ export function humanizeForRetrospective(
   // 2) RESOLVE every entity id to a name.
   if (entities.length > 0) {
     const byId = new Map(entities.map((e) => [e.id, e.name] as const));
-    // The AGGRESSIVE (non-whole-token) passes resolve ids EMBEDDED in machine tokens. Restrict them to
-    // COLON-BEARING ids (`npc:3`, a compound `thread:npc:3:0`) — those never collide with an ordinary
-    // English word. A bare-word id like the player's `player` is deliberately EXCLUDED from them:
-    // resolving it non-whole-token would mangle the word "players" (audit A8). The whole-token pass
-    // below handles `player` safely.
-    const structuredAlt = entities
-      .filter((e) => e.id.includes(":"))
+    // The retrospective unseals HIDDEN scenes (which exclude the player) + AUTHORED deep-profile prose
+    // (secrets/goals/weakness), where the bare word "player" is an ordinary COMMON NOUN — the live repro
+    // (#845): a goal "outlast every player" became "outlast every <name>". The player's day-1 read label
+    // is already translated to "you" above, so the player's bare-word id is NEVER a legitimate subject
+    // here. So id resolution is restricted to COLON-BEARING ids (`npc:3`, `thread:npc:3:0`) only — those
+    // never collide with a word. Bare-word ids (`player`) are deliberately left as prose.
+    const structuredEntities = entities.filter((e) => e.id.includes(":"));
+    const structuredAlt = structuredEntities
       .sort((a, b) => b.id.length - a.id.length)
       .map((e) => e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
       .join("|");
-    out = humanizeIds(out, entities); // safe whole-token pass (a clean `npc:3` / `player`; protects "players")
+    out = humanizeIds(out, structuredEntities); // whole-token pass over colon-bearing ids only — never `player`
     if (structuredAlt) {
       // The COMPOUND machine thread identifier `thread:<npc>:<index>` is not player-readable, but it NAMES
       // a houseguest — RESOLVE the embedded id to that name and DROP the rest of the id.
