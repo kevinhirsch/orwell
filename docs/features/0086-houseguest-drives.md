@@ -1,6 +1,8 @@
 # 0086 — Houseguest drives (everyone always plays; intensity varies)
 
-> **Status:** 📝 **SPEC / draft** (authored 2026-06-25, from the post-0085 full-season diagnostic).
+> **Status:** 📝 **SPEC — owner-ruled, build-ready** (authored 2026-06-25 from the post-0085 full-season
+> diagnostic; design rulings #1–#4 decided in review — see "Owner rulings" below: a low lean DOES nudge
+> the vote, drives surface only subtly, NPCs only, the loud cap stays 4).
 > **Gate (planned):** engine (Vitest + property/calibration + dependency-cruiser + BDD
 > `0086-houseguest-drives.feature`). **Depends on:** 0085 (campaigns — a drive's *top gear* IS a
 > campaign; this generalizes formation), 0002/0026 (the relationship reads a drive is computed from),
@@ -101,18 +103,28 @@ fixes ship alongside; the drive gives them an anchor.)
 - **Anti-sycophancy:** intensity + the lean are engine-computed from the board, never narrated
   convenience; no raw number reaches the player.
 
+## Owner rulings (2026-06-25 — decided in review of this spec)
+
+1. ✅ **A low-intensity lean DOES nudge the vote** — a *small* bounded term for a `target`-drive (a
+   quiet grudge matters a little), **well under** a campaign's tilt, and **calibrated against the band**
+   so it never flattens variance (it must read as texture, not a second flat knob). The mid/high tiers
+   still carry the lobbying + the full campaign tilt; the low lean is the gentle floor.
+2. ✅ **Drives surface to the player only SUBTLY / inferred** — through behavior + pathways (who
+   clusters, who lobbies, a wary tone), **never** as data and never the narrator announcing a
+   motivation. Paranoia stays the human's to form (0017/0020). No "she's sizing you up" hand-holding.
+3. ✅ **NPCs only** — the player forms their own motivation as a human; the engine never models or
+   nudges the player's drive (consistent with 0085 keeping player campaigns as pure player-knowledge).
+4. ✅ **Keep the house legible** — the loud cap stays at **`maxConcurrent` 4** (≈3–5 active campaigns
+   mid-game); the rest simmer. The cap limits the *loud* layer only — everyone still carries a drive.
+
 ## Open questions / defaults (resolve at build)
 
-1. **Does a low-intensity lean tilt the vote at all, or only clustering/voice?** Default: a *small*
-   bounded vote lean for a `target`-drive (so a quiet grudge matters a little), well under a campaign's
-   tilt — but resolve against the calibration band (it must not flatten variance like a flat knob).
-2. **The promote threshold + the loud cap** — how many drives reach the campaign tier (start: the
-   existing `maxConcurrent` 4, with the threshold tuned so 3–5 loud campaigns run mid-game and the rest
-   simmer).
-3. **Motivation re-derivation cadence** — every tick vs. on board changes (start: per tick, cheap +
+1. **The exact low-lean magnitude + the promote threshold** — the small vote-lean weight and the
+   intensity cutoff that promotes a drive to a campaign. Tune against `juryReach`/the eviction
+   distribution (felt, never deterministic; never flattens variance).
+2. **Motivation re-derivation cadence** — every tick vs. on board changes (start: per tick, cheap +
    responsive; it's a read).
-4. **Cross-feature: feeding mood + suspicion.** A drive's `target` is the natural seed for a
+3. **Cross-feature: feeding mood + suspicion.** A drive's `target` is the natural seed for a
    houseguest's *suspicion* (they suspect their target is coming for them too) and for *what* they're
-   on edge about — wire in the companion mood/suspicion tuning, or keep 0086 to the drive layer and let
-   those consume it. (Recommend: 0086 exposes the drive; the mood/suspicion tuning consumes it.)
-5. **Player drive?** Out of scope — the player forms their own motivation (human-driven); 0086 is NPCs.
+   on edge about. Recommend: **0086 exposes the drive; the companion mood/suspicion tuning consumes
+   it** (keeps this feature to the drive layer).
