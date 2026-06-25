@@ -37958,37 +37958,83 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:active {
    button ink to that same neutral chrome ink and key the neutral fills off it, so a kit
    button is legible on glass in ANY scope — never accent hue on the label, no accent fill
    on the default/secondary control. */
+/* DEPTH TOKENS (WWDC25 310/356 parity, studied against the authentic Apple refs:
+   lg_hig_segmented_control_poster.png, lg_hig_ios_glass_over_light.png,
+   lg_hig_toolbar_grouping_correct.png, lg_color_160…tinted). A Liquid Glass button
+   FLOATS: it casts a real, soft, diffuse drop shadow (two layers — a tight contact +
+   a broad ambient, both LOW alpha — never a hard dark ring) AND carries a bright
+   full-perimeter SPECULAR RIM (a lit glass edge, brightest at the top where the light
+   sits — angle ≈ -60°, kube.io). The fill is TRANSLUCENT so the backdrop samples
+   through (tint-not-fill); the rim + shadow, not opacity, give it form. */
+:root {
+  /* floating drop shadow: contact + ambient, soft & low-alpha but PRESENT (a real cast
+     shadow giving the pill lift — cf. the segmented-control poster). */
+  --ow-btn-shadow: 0 1px 1.5px rgba(0,0,0,0.10), 0 4px 10px rgba(0,0,0,0.10), 0 10px 24px rgba(0,0,0,0.10);
+  --ow-btn-shadow-hover: 0 2px 4px rgba(0,0,0,0.12), 0 8px 18px rgba(0,0,0,0.13), 0 16px 34px rgba(0,0,0,0.14);
+  /* full-perimeter specular rim: a CRISP bright hairline all around + a stronger lit top
+     edge + a faint shaded bottom (light source top-left, angle ≈ -60°, kube.io) — the
+     pure-CSS equivalent of the feBlend rim-light. This, not opacity, gives the glass form. */
+  --ow-btn-rim: inset 0 0 0 0.5px rgba(255,255,255,0.5),
+                inset 0 1.5px 1px rgba(255,255,255,0.6),
+                inset 0 -1.5px 1.5px rgba(0,0,0,0.06);
+  /* a faint translucent glass veil so even a BARE .ow-btn reads as the material (not a
+     painted plate); variants tint over this. Kept light so the backdrop samples through. */
+  --ow-btn-veil: color-mix(in srgb, #ffffff 12%, transparent);
+  /* The kit-button material filter. The shared --ow-btn-glass adds brightness(1.12),
+     which over-lights the glass into a "painted bright plate"; a true Liquid Glass
+     button leans on BLUR + SATURATE (sampling the backdrop) with only a hair of
+     brightness, so the backdrop reads THROUGH it (tint-not-fill). Scoped to .ow-btn —
+     the shared token (and its other consumers) is untouched. */
+  --ow-btn-glass-kit: blur(14px) saturate(150%) brightness(1.04);
+}
 body.theme-frosted .ow-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--ow-space-2, 8px);
   min-height: var(--ow-tap-min, 44px); padding: var(--ow-space-2, 8px) var(--ow-space-4, 16px);
-  border-radius: var(--ow-btn-radius); border: 1px solid transparent;
+  border-radius: var(--ow-btn-radius);
+  /* the bright SPECULAR RIM (box-shadow) IS the glass edge, like Apple's pills — a dark
+     border would fight it; keep only a whisper of a hairline for a light-on-light edge. */
+  border: 1px solid color-mix(in srgb, #16191f 4%, transparent);
+  background-color: var(--ow-btn-veil);            /* translucent glass veil (not opaque) */
   color: #16191f;   /* dark monochrome ink on the light glass material (no accent hue) */
   font-family: var(--ow-ui-font); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -0.01em;
-  cursor: pointer; -webkit-backdrop-filter: var(--ow-btn-glass); backdrop-filter: var(--ow-btn-glass);
+  cursor: pointer;
+  -webkit-backdrop-filter: var(--ow-btn-glass-kit, var(--ow-btn-glass));
+  backdrop-filter: var(--ow-btn-glass-kit, var(--ow-btn-glass));
+  /* FLOAT: soft cast shadow + the full-perimeter specular rim (the depth/parity fix). */
+  box-shadow: var(--ow-btn-rim), var(--ow-btn-shadow);
   transition: background-color .18s ease, box-shadow .18s ease,
               transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease, opacity .15s ease;
 }
 body.theme-frosted .ow-btn-secondary {
-  /* a faint DARK wash + hairline on the light glass (keyed off the chrome ink, not --fg,
-     so it never inverts to a near-white plate in a non-dark-ink scope). */
-  background-color: color-mix(in srgb, #16191f 10%, transparent);
-  border-color: color-mix(in srgb, #16191f 18%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
+  /* SECONDARY-prominence: a faint DARK wash over the glass veil + the shared rim/shadow
+     (keyed off the chrome ink, not --fg, so it never inverts to a near-white plate). */
+  background-color: color-mix(in srgb, #16191f 9%, transparent);
+  border-color: color-mix(in srgb, #16191f 16%, transparent);
+  box-shadow: var(--ow-btn-rim), var(--ow-btn-shadow);
 }
-/* PROMINENT = brighter / more-OPAQUE NEUTRAL glass + Semibold label (owner: glass
-   is colorless; distinguish the primary action by LUMINOSITY + WEIGHT, not hue). The
-   label stays the dark chrome ink so it is legible on the bright white-glass fill (the
-   #726 amber-fill+light-label combo was ~1.49:1 — illegible; dark ink on this bright
-   fill clears WCAG AA / APCA comfortably). */
+/* PROMINENT = PRIMARY tint prominence (WWDC25 310 "tint, don't fill"). A translucent
+   tint rides OVER the luminous glass material — it is NOT an opaque solid plate (310:
+   "tint, don't fill"; 219: a solid fill "breaks the visual character of Liquid Glass").
+   The tint is `--ow-btn-tint-primary` (default = a luminous NEUTRAL wash — owner ruling:
+   glass is colorless, emphasis by LUMINOSITY + WEIGHT, not hue; override the token to an
+   accent wash to take 310's accent-tinted primary look). The label stays the dark chrome
+   ink so it is legible on the bright glass and carries NO accent hue (the #726 amber-fill
+   + light-label combo was ~1.49:1 — illegible; dark ink on this bright fill clears WCAG
+   AA / APCA comfortably). */
 body.theme-frosted .ow-btn-prominent {
   background:
-    radial-gradient(120% 100% at 30% 0%, rgba(255,255,255,0.30), transparent 55%),
-    rgba(255,255,255,0.26);
+    radial-gradient(120% 100% at 30% 0%, var(--ow-btn-tint-primary, rgba(255,255,255,0.30)), transparent 55%),
+    var(--ow-btn-tint-primary, rgba(255,255,255,0.26));
   color: #16191f;
   font-weight: var(--ow-fw-semibold, 600);
-  border-color: rgba(255,255,255,0.34);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5),
-              0 4px 14px rgba(0,0,0,0.22);
+  border-color: color-mix(in srgb, #16191f 6%, transparent);
+  /* the shared float shadow + a brighter specular rim (the primary action reads as the
+     most lit glass — luminosity, not hue; owner ruling). */
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.34),
+    inset 0 1px 1px rgba(255,255,255,0.7),
+    inset 0 -1px 1px rgba(0,0,0,0.05),
+    var(--ow-btn-shadow);
 }
 body.theme-frosted .ow-btn-icon {
   min-height: 0; padding: 0; width: 30px; height: 30px; border-radius: 50%;
@@ -38510,6 +38556,29 @@ body.theme-frosted .ow-window .ow-body button.settings-nav-item.active {
      red color"). A semantic, not a theme hue — legible label rides on top of it. */
   --ow-danger: var(--color-danger, #ff453a);
   --ow-on-danger: #fff;   /* white clears AA on the iOS-dark system red (#ff453a) */
+
+  /* ── TINT PROMINENCE (WWDC25 310 "Build an AppKit app with the new design") ──────
+     310's key button correction: "tint, don't fill" — a prominent button TINTS the
+     translucent glass (color on the *background*, never the label), it is NEVER an
+     opaque solid plate (a solid fill "breaks the visual character of Liquid Glass",
+     219). 310 names four `tintProminence` levels — automatic / none / secondary /
+     primary — which our variants map onto:
+        prominent  ≈ PRIMARY   (the single default action; 310: the default button
+                                auto-takes primary — keyEquivalent="\r")
+        secondary  ≈ SECONDARY (a subdued, supporting tint that doesn't upstage primary)
+        plain      ≈ NONE      (no tint)
+        destructive≈ SECONDARY-prominence RED (310: "destructive … with a level of
+                                prominence that doesn't overpower nearby controls").
+     A tint rides OVER the luminous glass as a translucent wash, so the label keeps the
+     dark chrome ink (#726) and stays legible — never an accent hue on the *text* (HIG
+     Color: "apply color to the background rather than to symbols or text"; the kit's
+     no-accent-on-text contract holds — these are *background* tints only).
+     The default tint stays NEUTRAL-luminous (owner ruling: glass is colorless — emphasis
+     by luminosity + weight). Override `--ow-btn-tint-primary` to an accent wash to take
+     310's accent-tinted primary look without touching any label. */
+  --ow-btn-tint-primary: rgba(255,255,255,0.30);   /* primary prominence — luminous neutral glass (override → accent wash) */
+  --ow-btn-tint-secondary: color-mix(in srgb, #16191f 10%, transparent);  /* secondary — subdued neutral wash */
+  --ow-btn-tint-danger: color-mix(in srgb, var(--ow-danger, #ff453a) 62%, transparent); /* secondary-prominence RED tint over glass (translucent, NOT a solid plate; deep enough the white on-danger label clears AA) */
 }
 
 /* ── BUTTON: round out .ow-btn additively (#773) ─────────────────────────────── */
@@ -38526,11 +38595,27 @@ body.theme-frosted .ow-btn-plain {
   backdrop-filter: none;
   color: var(--ow-control-ink, #16191f);
 }
-/* DESTRUCTIVE — system-red FILL, legible on-red LABEL (HIG Destructive role). The
-   red is a system semantic color, not the theme accent → no-accent-on-text holds. */
+/* DESTRUCTIVE — system-RED TINT at SECONDARY prominence (HIG Destructive role + WWDC25
+   310). 310: a destructive button's red "is a helpful hint that the action is destructive
+   but with a level of prominence that doesn't overpower nearby controls" → a RED TINT over
+   the glass, NOT an overpowering opaque solid plate. The tint (`--ow-btn-tint-danger`) is a
+   translucent wash of the system red (`--ow-danger`), a system semantic color (not the theme
+   accent → no-accent-on-text holds). The label rides the on-danger ink and stays legible on
+   the red-tinted glass. (For a maximally loud confirm — e.g. a final irreversible action —
+   add `.ow-btn-destructive-solid` to restore the opaque-red plate.) */
 body.theme-frosted .ow-btn-destructive {
-  background: var(--ow-danger, #ff453a);
+  background:
+    radial-gradient(120% 100% at 30% 0%, color-mix(in srgb, var(--ow-danger, #ff453a) 14%, transparent), transparent 55%),
+    var(--ow-btn-tint-danger, color-mix(in srgb, var(--ow-danger, #ff453a) 26%, transparent));
   color: var(--ow-on-danger, #fff);
+  border-color: color-mix(in srgb, var(--ow-danger, #ff453a) 55%, transparent);
+  /* the shared float shadow + a specular top rim (the red glass still floats + is lit). */
+  box-shadow: inset 0 1px 1px rgba(255,255,255,0.4), var(--ow-btn-shadow);
+}
+/* Opt-in PRIMARY-prominence destructive: the loud opaque-red plate (a final, irreversible
+   confirm). Reserve it like the -xl size — one per context, the point-of-no-return action. */
+body.theme-frosted .ow-btn-destructive.ow-btn-destructive-solid {
+  background: var(--ow-danger, #ff453a);
   border-color: color-mix(in srgb, #000 14%, var(--ow-danger, #ff453a));
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 14px rgba(0,0,0,0.22);
 }
@@ -38538,9 +38623,20 @@ body.theme-frosted .ow-btn-destructive {
 /* STATES — apply to EVERY variant (Apple: hover lift, iOS press dim + scale,
    system-blue focus ring, clear disabled). */
 body.theme-frosted .ow-btn:hover {
-  filter: brightness(1.06);
+  filter: brightness(1.04);
   transform: translateY(-1px);
+  /* lift the float: a deeper, softer cast shadow while keeping the specular rim. */
+  box-shadow: var(--ow-btn-rim), var(--ow-btn-shadow-hover);
 }
+/* prominent keeps its brighter rim on the elevated hover shadow. */
+body.theme-frosted .ow-btn-prominent:hover {
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.34),
+    inset 0 1px 1px rgba(255,255,255,0.7),
+    inset 0 -1px 1px rgba(0,0,0,0.05),
+    var(--ow-btn-shadow-hover);
+}
+body.theme-frosted .ow-btn-plain:hover { box-shadow: none; }
 body.theme-frosted .ow-btn-secondary:hover,
 body.theme-frosted .ow-btn-icon:hover { background-color: var(--ow-control-fill-hover); }
 body.theme-frosted .ow-btn-plain:hover {
@@ -38581,6 +38677,120 @@ body.theme-frosted .ow-btn.is-disabled {
 }
 @media (prefers-contrast: more) {
   body.theme-frosted .ow-btn { border-color: color-mix(in srgb, var(--fg) 50%, transparent) !important; }
+}
+
+/* ── SIZE LADDER + SHAPE-BY-SIZE (WWDC25 310 "Build an AppKit app with the new
+   design") ───────────────────────────────────────────────────────────────────────
+   310 establishes FIVE control sizes as a hierarchy and ties SHAPE to SIZE:
+     • mini / small / medium → ROUNDED RECTANGLE (horizontal density — "a great fit
+       for compact, high-density layouts", 356);
+     • large / EXTRA-LARGE (new in Tahoe) → CAPSULE (radius = ½ height, 356; "takes
+       advantage of Liquid Glass to provide emphasis in more spacious areas").
+   Extra-large is RESERVED for the single most-prominent action ("the actions that
+   people launch your app to get done") — don't make everything large.
+   310: "avoid hard-coding the heights of controls" — so every size sizes via PADDING +
+   LINE-HEIGHT (and font-size), never a fixed height; the ≥44px tap floor stays via
+   min-height on the base. The base .ow-btn keeps its capsule default so existing #775
+   consumers (bare .ow-btn) are untouched — these are OPT-IN size modifiers. */
+body.theme-frosted .ow-btn-sm {
+  padding: var(--ow-space-1, 4px) var(--ow-space-3, 12px);
+  line-height: 1.25; font-size: var(--ow-fs-caption, 0.8125rem);
+  border-radius: var(--ow-radius-inner, 16px);   /* small → rounded-rect */
+}
+body.theme-frosted .ow-btn-md {
+  padding: var(--ow-space-2, 8px) var(--ow-space-4, 16px);
+  line-height: 1.35; font-size: var(--ow-fs-body, 0.875rem);
+  border-radius: var(--ow-radius-inner, 16px);   /* medium → rounded-rect */
+}
+body.theme-frosted .ow-btn-lg {
+  padding: var(--ow-space-3, 12px) var(--ow-space-5, 24px);
+  line-height: 1.4; font-size: var(--ow-fs-body, 0.9375rem);
+  border-radius: var(--ow-radius-pill, 9999px);  /* large → capsule */
+}
+/* EXTRA-LARGE (new in Tahoe) — the single most-prominent action. Capsule, spacious. */
+body.theme-frosted .ow-btn-xl {
+  padding: var(--ow-space-4, 16px) var(--ow-space-6, 32px);
+  line-height: 1.45; font-size: var(--ow-fs-title, 1.0625rem);
+  font-weight: var(--ow-fw-semibold, 600);
+  border-radius: var(--ow-radius-pill, 9999px);  /* extra-large → capsule */
+}
+
+/* ── EXPLICIT TINT-PROMINENCE helpers (WWDC25 310 tintProminence) ────────────────
+   The four 310 levels as composable modifiers (the variants above already map onto
+   them; these let a consumer set prominence orthogonally). Tint rides OVER the glass
+   — never an opaque plate, never an accent on the label. */
+body.theme-frosted .ow-btn-prominence-none    { background: transparent; border-color: transparent; box-shadow: none; }
+body.theme-frosted .ow-btn-prominence-secondary {
+  background: var(--ow-btn-tint-secondary, color-mix(in srgb, #16191f 10%, transparent));
+  border-color: color-mix(in srgb, #16191f 18%, transparent);
+}
+body.theme-frosted .ow-btn-prominence-primary {
+  background:
+    radial-gradient(120% 100% at 30% 0%, var(--ow-btn-tint-primary, rgba(255,255,255,0.30)), transparent 55%),
+    var(--ow-btn-tint-primary, rgba(255,255,255,0.26));
+  border-color: rgba(255,255,255,0.34);
+}
+
+/* ── CONCENTRIC NESTING (WWDC25 356 concentric math) ─────────────────────────────
+   356's three shape types: fixed (constant radius), capsule (radius = ½ height), and
+   CONCENTRIC ("calculate their radius by subtracting padding from the parent's"). A
+   concentric button nested in a rounded container takes:
+        inner radius = parent radius − padding
+   356's trick for a control that must work BOTH nested and standalone: "use a
+   concentric shape with a FALLBACK radius — the concentric value adapts when nested,
+   and the fallback kicks in when the component stands alone." So a consumer sets the
+   parent radius + the inset on the button (or its container) and we compute the inner
+   radius; with neither set, the fallback (--ow-btn-concentric-fallback) stands. */
+body.theme-frosted .ow-btn-concentric {
+  --ow-btn-concentric-fallback: var(--ow-radius-inner, 16px);
+  border-radius: max(
+    0px,
+    calc(var(--ow-parent-radius, var(--ow-btn-concentric-fallback)) - var(--ow-parent-inset, 0px))
+  );
+}
+
+/* ── GROUPED GLASS BUTTONS (WWDC25 310 NSGlassEffectContainerView) ───────────────
+   310: adjacent glass elements must share ONE backdrop sample — "glass can't directly
+   sample other glass", and one sampling pass is faster. A .ow-btn-group is the web
+   analogue of NSGlassEffectContainerView: it is the ONE glass-sampling surface (it
+   carries the backdrop-filter), the buttons inside drop their own backdrop sample and
+   ride the group's, and they meld into a single capsule (segmented look) with hairline
+   separators — adjacent radii squared off, the outer corners capsule. At Full Glass the
+   group is the surface liquidGlass.js refracts (one shared sample region per group). */
+body.theme-frosted .ow-btn-group {
+  display: inline-flex; align-items: stretch;
+  border-radius: var(--ow-radius-pill, 9999px);
+  -webkit-backdrop-filter: var(--ow-btn-glass);
+  backdrop-filter: var(--ow-btn-glass);   /* the ONE shared backdrop sample for the group */
+  border: 1px solid var(--ow-control-rim);
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,0.12));
+  overflow: hidden;                        /* clip members to the group capsule */
+}
+body.theme-frosted .ow-btn-group > .ow-btn {
+  border-radius: 0;                        /* members square off; group owns the outer capsule */
+  border-width: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;                   /* members ride the group's ONE sample (no glass-on-glass) */
+}
+body.theme-frosted .ow-btn-group > .ow-btn + .ow-btn {
+  /* Apple's grouped toolbar (lg_hig_toolbar_grouping_correct) MELDS members into one
+     seamless capsule — at most a whisper of a divider, never a hard rule. */
+  box-shadow: inset 1px 0 0 rgba(0,0,0,0.04);
+}
+body.theme-frosted .ow-btn-group > .ow-btn:first-child {
+  border-top-left-radius: var(--ow-radius-pill, 9999px);
+  border-bottom-left-radius: var(--ow-radius-pill, 9999px);
+}
+body.theme-frosted .ow-btn-group > .ow-btn:last-child {
+  border-top-right-radius: var(--ow-radius-pill, 9999px);
+  border-bottom-right-radius: var(--ow-radius-pill, 9999px);
+}
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .ow-btn-group {
+    background-color: var(--panel, var(--bg)) !important;
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  }
 }
 
 /* ── FIELD: .ow-field — the canonical glass-appropriate text field ────────────── */

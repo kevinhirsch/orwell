@@ -99,13 +99,17 @@ Reused from the existing design system: `--ow-tap-min`, `--ow-ui-font`, `--ow-fw
 `.ow-btn` is the kit button base (already present; rounded out here additively — `.ow-btn`
 COLORS are owned/tuned by #726, this kit only adds variants + states without touching them).
 
-| Variant | Role | Look |
+| Variant | Role (WWDC25 310 prominence) | Look |
 |---|---|---|
-| `.ow-btn-prominent` | primary / default action | luminous **neutral** glass (emphasis = luminosity + weight, not hue — owner ruling; glass is colorless) |
-| `.ow-btn-secondary` | standard action | tinted-neutral glass + rim |
-| `.ow-btn-plain` | low-emphasis | borderless / text-only |
-| `.ow-btn-destructive` | Destructive (HIG role) | **system-red fill + legible on-red label** |
+| `.ow-btn-prominent` | primary / default action | luminous tinted glass — default tint **neutral** (emphasis = luminosity + weight, owner ruling; glass is colorless), `--ow-btn-tint-primary` opt-in **accent** wash for 310's accent-tinted primary |
+| `.ow-btn-secondary` | secondary / standard action | subdued neutral glass tint + rim |
+| `.ow-btn-plain` | none / low-emphasis | borderless / text-only |
+| `.ow-btn-destructive` | Destructive, secondary prominence | **system-red TINT over glass + legible on-red label** (`.ow-btn-destructive-solid` = opt-in loud opaque plate) |
 | `.ow-btn-icon` | icon-only | circular glass disc |
+
+Plus the **size ladder** (`.ow-btn-sm`/`-md`/`-lg`/`-xl`), the **concentric** modifier
+(`.ow-btn-concentric`), and the **grouped-glass** wrapper (`.ow-btn-group`) — see the
+WWDC25 310/356 sections below.
 
 States (all variants): `:hover` (lift), `:active` (iOS dim + slight scale-down `.97`),
 `:focus-visible` (system-blue ring), `:disabled` / `[disabled]` / `.is-disabled` (inert,
@@ -118,6 +122,102 @@ solidifies the glass fills; increased-contrast strengthens the border.
 <button class="ow-btn ow-btn-plain">Skip</button>
 <button class="ow-btn ow-btn-destructive">Delete</button>
 <button class="ow-btn ow-btn-icon" aria-label="Close">✕</button>
+```
+
+#### Depth & material (WWDC25 310/356 parity)
+
+A Liquid Glass button **floats**: it casts a soft, diffuse drop shadow (a real cast
+shadow — `--ow-btn-shadow`, contact + ambient at low alpha) and carries a **full-perimeter
+specular rim** (`--ow-btn-rim` — a bright lit glass edge, brightest at the top, light
+source ≈ -60° per kube.io). The fill is a **translucent glass veil** (`--ow-btn-veil`) +
+the kit material filter (`--ow-btn-glass-kit`: blur + saturate, only a hair of brightness
+so the **backdrop samples through** — *tint, not fill*). The rim + shadow, not opacity,
+give it form. Tuned against the authentic Apple refs (`images/lg_hig_segmented_control_poster.png`,
+`lg_hig_ios_glass_over_light.png`, `lg_hig_toolbar_grouping_correct.png`, `lg_color_160…tinted`).
+
+#### Size ladder — shape follows size (WWDC25 310)
+
+WWDC25 310 establishes a **five-size hierarchy** and ties **shape to size**. The size
+modifiers size via **padding + line-height**, never a hard-coded height (310: "avoid
+hard-coding the heights of controls"); the ≥44px tap floor stays on the base `.ow-btn`.
+
+| Modifier | Size | Shape |
+|---|---|---|
+| `.ow-btn-sm` | small | rounded-rect (`--ow-radius-inner`) — high-density |
+| `.ow-btn-md` | medium | rounded-rect (`--ow-radius-inner`) — high-density |
+| `.ow-btn-lg` | large | **capsule** (`9999px`) |
+| `.ow-btn-xl` | **extra-large** (new in Tahoe) | **capsule** — the single most-prominent action |
+
+> **Reserve `-xl` for the one prime action** per context ("the actions that people launch
+> your app to get done"). Don't make everything large.
+
+```html
+<button class="ow-btn ow-btn-secondary ow-btn-sm">Small</button>
+<button class="ow-btn ow-btn-secondary ow-btn-md">Medium</button>
+<button class="ow-btn ow-btn-prominent ow-btn-lg">Large</button>
+<button class="ow-btn ow-btn-prominent ow-btn-xl">Start the season</button>
+```
+
+#### Tint prominence — "tint, don't fill" (WWDC25 310)
+
+310's key button correction: a prominent button **tints the translucent glass** (color on
+the **background**, never the label), it is **never an opaque solid plate** (a solid fill
+"breaks the visual character of Liquid Glass", 219). 310 names four `tintProminence`
+levels, which our variants map onto:
+
+| Our variant | Apple `tintProminence` | Look |
+|---|---|---|
+| `.ow-btn-prominent` | **primary** | the single default action — luminous tinted glass (default tint = neutral; override `--ow-btn-tint-primary` to an accent wash for 310's accent-tinted primary) |
+| `.ow-btn-secondary` | **secondary** | a subdued neutral wash — supporting, doesn't upstage primary |
+| `.ow-btn-plain` | **none** | no tint (borderless) |
+| `.ow-btn-destructive` | **secondary**, system **red** | a red TINT over glass (`--ow-btn-tint-danger`) — danger signal that "doesn't overpower nearby controls" |
+
+> **One primary per context.** Exactly one `.ow-btn-prominent` (the default action) per
+> view — everything else `secondary`/`plain`. The orthogonal `.ow-btn-prominence-{none,
+> secondary,primary}` helpers let a consumer set prominence independently of a variant.
+> `.ow-btn-destructive-solid` is the **opt-in** loud opaque-red plate, reserved (like `-xl`)
+> for a single final, irreversible confirm. The tint is always a **background** tint — the
+> label keeps the dark chrome ink, **no accent hue on text** (HIG Color).
+
+```html
+<!-- accent-tinted primary (310 accent look): tint the BACKGROUND, not the label -->
+<button class="ow-btn ow-btn-prominent ow-btn-lg"
+        style="--ow-btn-tint-primary: color-mix(in srgb, #0a84ff 30%, transparent)">Play</button>
+```
+
+#### Concentric nesting (WWDC25 356)
+
+356's three shape types: **fixed** (constant radius), **capsule** (radius = ½ height), and
+**concentric** (radius = **parent radius − padding**). `.ow-btn-concentric` computes the
+inner radius from `--ow-parent-radius` and `--ow-parent-inset`, and — per 356's trick for a
+control that must work **both nested and standalone** — falls back to a standalone radius
+when neither is set ("the concentric value adapts when nested, the fallback kicks in when
+the component stands alone"). Works for buttons, and the same override applies to pop-up /
+segmented controls.
+
+```html
+<div style="padding:10px; border-radius:24px /* parent */">
+  <button class="ow-btn ow-btn-prominent ow-btn-concentric"
+          style="--ow-parent-radius:24px; --ow-parent-inset:10px">Nested</button>
+</div>
+<!-- standalone: the fallback radius stands -->
+<button class="ow-btn ow-btn-secondary ow-btn-concentric">Standalone</button>
+```
+
+#### Grouped glass — one shared backdrop sample (WWDC25 310)
+
+310: adjacent glass elements must **share ONE backdrop sample** — "glass can't directly
+sample other glass", and one sampling pass is faster (`NSGlassEffectContainerView`). The
+`.ow-btn-group` wrapper is the web analogue: the **group** carries the backdrop-filter (the
+one shared sample) and the outer capsule; its member `.ow-btn`s **drop their own sample**
+and ride the group's, melding into one seamless capsule (segmented look). At Full Glass the
+group is the surface `liquidGlass.js` refracts — one shared sample region per group.
+
+```html
+<span class="ow-btn-group">
+  <button class="ow-btn ow-btn-secondary" aria-label="Back">‹</button>
+  <button class="ow-btn ow-btn-secondary" aria-label="Forward">›</button>
+</span>
 ```
 
 ### Field — `.ow-field`

@@ -113,6 +113,52 @@
         <button class="ow-btn ow-btn-secondary ek-force-focus">Focus ring</button>
         <button class="ow-btn ow-btn-destructive ek-force-focus">Focus ring</button>
       </div>
+
+      <!-- SIZE LADDER (WWDC25 310: shape follows size; sm/md = rounded-rect, lg/xl = capsule) -->
+      <div class="ek-label">Size ladder — shape follows size (WWDC25 310): sm/md rounded-rect · lg/xl capsule</div>
+      <div class="ek-row" style="align-items:center">
+        <button class="ow-btn ow-btn-secondary ow-btn-sm">Small</button>
+        <button class="ow-btn ow-btn-secondary ow-btn-md">Medium</button>
+        <button class="ow-btn ow-btn-prominent ow-btn-lg">Large</button>
+        <button class="ow-btn ow-btn-prominent ow-btn-xl">Extra-large (the one prime action)</button>
+      </div>
+
+      <!-- TINT, NOT FILL (WWDC25 310): prominent = translucent tint OVER glass, never an opaque plate -->
+      <div class="ek-label">Tint, not fill (WWDC25 310) — translucent tinted glass, backdrop samples through</div>
+      <div class="ek-row" style="align-items:center">
+        <button class="ow-btn ow-btn-prominent ow-btn-lg">Primary (neutral tint)</button>
+        <button class="ow-btn ow-btn-prominent ow-btn-lg" style="--ow-btn-tint-primary: color-mix(in srgb, #0a84ff 30%, transparent)">Primary (accent tint)</button>
+        <button class="ow-btn ow-btn-destructive ow-btn-lg">Destructive (red tint, secondary)</button>
+        <button class="ow-btn ow-btn-destructive ow-btn-destructive-solid ow-btn-lg">Delete forever (solid)</button>
+      </div>
+
+      <!-- GROUPED GLASS (WWDC25 310 NSGlassEffectContainerView): ONE shared backdrop sample -->
+      <div class="ek-label">Grouped glass (WWDC25 310) — adjacent buttons share ONE backdrop sample (glass can't sample glass)</div>
+      <div class="ek-row" style="align-items:center">
+        <span class="ow-btn-group">
+          <button class="ow-btn ow-btn-secondary" aria-label="Back">‹</button>
+          <button class="ow-btn ow-btn-secondary" aria-label="Forward">›</button>
+        </span>
+        <span class="ow-btn-group">
+          <button class="ow-btn ow-btn-secondary">Day</button>
+          <button class="ow-btn ow-btn-secondary">Week</button>
+          <button class="ow-btn ow-btn-secondary">Month</button>
+        </span>
+      </div>
+
+      <!-- CONCENTRIC NESTING (WWDC25 356): inner radius = parent − padding, with a fallback -->
+      <div class="ek-label">Concentric nesting (WWDC25 356) — inner radius = parent − padding (nested), fallback standalone</div>
+      <div class="ek-row" style="align-items:center">
+        <span style="display:inline-flex; gap:8px; padding:10px; border-radius:24px;
+                     background:color-mix(in srgb,#16191f 7%,transparent);
+                     border:1px solid color-mix(in srgb,#16191f 12%,transparent)">
+          <button class="ow-btn ow-btn-prominent ow-btn-concentric"
+                  style="--ow-parent-radius:24px; --ow-parent-inset:10px">Nested</button>
+          <button class="ow-btn ow-btn-secondary ow-btn-concentric"
+                  style="--ow-parent-radius:24px; --ow-parent-inset:10px">Concentric</button>
+        </span>
+        <button class="ow-btn ow-btn-secondary ow-btn-concentric">Standalone (fallback)</button>
+      </div>
     </section>
 
     <!-- FIELDS -->

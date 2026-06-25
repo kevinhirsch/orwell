@@ -42,6 +42,86 @@ def test_button_full_apple_variant_set():
         assert sel in CSS, sel
 
 
+# ── WWDC25 310 button refinement (size ladder · tint-not-fill · concentric · group) ──
+
+def test_size_ladder_shape_follows_size():
+    # WWDC25 310: FIVE-size hierarchy; shape follows size — sm/md = rounded-rect,
+    # lg/xl = capsule. The new -xl (extra-large) is the most-prominent-action size.
+    for sel in (".ow-btn-sm", ".ow-btn-md", ".ow-btn-lg", ".ow-btn-xl"):
+        assert sel in CSS, sel
+    sm = re.search(r"\.ow-btn-sm\s*\{(.*?)\}", CSS, re.S).group(1)
+    md = re.search(r"\.ow-btn-md\s*\{(.*?)\}", CSS, re.S).group(1)
+    lg = re.search(r"\.ow-btn-lg\s*\{(.*?)\}", CSS, re.S).group(1)
+    xl = re.search(r"\.ow-btn-xl\s*\{(.*?)\}", CSS, re.S).group(1)
+    # sm/md → rounded-rect (the inner radius), lg/xl → capsule (the pill radius).
+    assert "--ow-radius-inner" in sm and "--ow-radius-inner" in md
+    assert "--ow-radius-pill" in lg and "--ow-radius-pill" in xl
+    # 310: "avoid hard-coding the heights of controls" — size via padding + line-height,
+    # never a fixed height/min-height on the size modifier.
+    for body in (sm, md, lg, xl):
+        assert "padding" in body and "line-height" in body
+        # a standalone height/min-height (NOT line-height) is the hard-code 310 forbids.
+        assert not re.search(r"(?<!line-)(?<!max-)(?<!min-)\bheight\s*:", body), \
+            "size variant must NOT hard-code a height"
+
+
+def test_prominent_is_tinted_glass_not_opaque_fill():
+    # WWDC25 310 "tint, don't fill": prominent is a TRANSLUCENT tint over the glass
+    # material, never an opaque solid plate. The tint token is translucent and the
+    # backdrop blur is composed (the backdrop samples through).
+    block = re.search(r"\.ow-btn-prominent\s*\{(.*?)\}", CSS, re.S).group(1)
+    # the fill is the tint token (translucent), not a flat opaque color.
+    assert "--ow-btn-tint-primary" in block
+    # the primary tint default is translucent (rgba/transparent), NOT a solid hex/opaque.
+    tint = re.search(r"--ow-btn-tint-primary:\s*([^;]+);", CSS).group(1)
+    assert ("rgba(" in tint or "transparent" in tint), \
+        f"primary tint must be translucent (tint-not-fill), got {tint!r}"
+    # the kit button rides a backdrop sample (glass), not a painted plate.
+    base = re.search(r"body\.theme-frosted \.ow-btn \{(.*?)\}", CSS, re.S).group(1)
+    assert "backdrop-filter" in base
+
+
+def test_destructive_is_red_tint_not_overpowering_solid():
+    # WWDC25 310: destructive red sits at SECONDARY prominence — a red TINT over glass,
+    # "a level of prominence that doesn't overpower nearby controls", NOT an opaque plate.
+    block = re.search(r"body\.theme-frosted \.ow-btn-destructive\s*\{(.*?)\}",
+                      CSS, re.S).group(1)
+    assert "--ow-btn-tint-danger" in block          # the translucent red tint
+    danger_tint = re.search(r"--ow-btn-tint-danger:\s*([^;]+);", CSS).group(1)
+    assert "transparent" in danger_tint, \
+        f"destructive must be a TRANSLUCENT red tint, got {danger_tint!r}"
+    # the loud opaque-red plate is an OPT-IN escape hatch only (a final irreversible act).
+    assert ".ow-btn-destructive-solid" in CSS
+
+
+def test_concentric_nesting_modifier_with_fallback():
+    # WWDC25 356: concentric inner radius = parent − padding, with a standalone FALLBACK.
+    block = re.search(r"\.ow-btn-concentric\s*\{(.*?)\}", CSS, re.S).group(1)
+    assert "--ow-parent-radius" in block            # parent radius
+    assert "--ow-parent-inset" in block             # the padding subtracted
+    assert "fallback" in block.lower()              # the standalone fallback radius
+
+
+def test_grouped_glass_shares_one_backdrop_sample():
+    # WWDC25 310 (NSGlassEffectContainerView): adjacent glass shares ONE backdrop sample
+    # ("glass can't directly sample other glass"). The group carries the backdrop-filter;
+    # its member buttons DROP their own sample and ride the group's.
+    grp = re.search(r"body\.theme-frosted \.ow-btn-group\s*\{(.*?)\}",
+                    CSS, re.S).group(1)
+    assert "backdrop-filter: var(--ow-btn-glass" in grp   # the ONE shared sample
+    member = re.search(r"body\.theme-frosted \.ow-btn-group > \.ow-btn\s*\{(.*?)\}",
+                       CSS, re.S).group(1)
+    assert "backdrop-filter: none" in member             # members ride the group's sample
+
+
+def test_button_floats_soft_shadow_and_specular_rim():
+    # the depth/parity fix: a Liquid Glass button FLOATS — a soft cast drop shadow + a
+    # full-perimeter specular rim (the lit glass edge), composed on the base .ow-btn.
+    assert "--ow-btn-shadow:" in CSS and "--ow-btn-rim:" in CSS
+    base = re.search(r"body\.theme-frosted \.ow-btn \{(.*?)\}", CSS, re.S).group(1)
+    assert "--ow-btn-shadow" in base and "--ow-btn-rim" in base
+
+
 def test_button_full_apple_state_set():
     # hover (lift), pressed/active (iOS dim+scale), focus-visible (ring), disabled.
     assert ".ow-btn:hover" in KIT
@@ -161,6 +241,23 @@ def test_demo_and_docs_exist_and_reference_the_kit():
     for sel in ("ow-btn-prominent", "ow-btn-destructive", "ow-field", "ow-check",
                 "ow-radio", "ow-switch", "ow-select", "ow-slider"):
         assert sel in demo, f"demo missing {sel}"
+    # WWDC25 310/356 additions are visible in the demo: the size ladder, the tinted
+    # (accent) prominent, the destructive, and a button group.
+    for sel in ("ow-btn-sm", "ow-btn-md", "ow-btn-lg", "ow-btn-xl",
+                "ow-btn-group", "ow-btn-concentric", "--ow-btn-tint-primary"):
+        assert sel in demo, f"demo missing WWDC-310 example: {sel}"
+
+
+def test_docs_document_sizes_prominence_and_concentric_group():
+    doc_path = os.path.join(os.path.dirname(FRONTEND), "docs", "design",
+                            "liquid-glass", "ELEMENT_KIT.md")
+    with open(doc_path, encoding="utf-8") as f:
+        doc = f.read()
+    # the size ladder + the tint-prominence mapping + concentric/group usage, cited.
+    assert "310" in doc and "356" in doc
+    for token in ("ow-btn-xl", "ow-btn-group", "ow-btn-concentric",
+                  "tint", "prominence"):
+        assert token in doc, f"doc missing {token}"
     # the docs file lives beside the liquid-glass references.
     doc_path = os.path.join(os.path.dirname(FRONTEND), "docs", "design",
                             "liquid-glass", "ELEMENT_KIT.md")
