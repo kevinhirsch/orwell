@@ -2154,9 +2154,21 @@ body.bg-pattern-perlin-flow {
         height: calc(100% - var(--on-banner-inset, 0px)); height: calc(100dvh - var(--on-banner-inset, 0px));
         width: min(300px, 86vw); z-index: 60; flex-shrink: 0;
         transform: translateX(102%); box-shadow: -6px 0 20px rgba(0,0,0,.35);
-        transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1);
+        /* #590 (RESP-NEW-1): the CLOSED drawer is GENUINELY STOWED, not merely slid off-canvas.
+           `transform: translateX(102%)` alone leaves the panel "rendered visible at off-screen
+           coords" — it still takes layout, so a getBoundingClientRect scan reports its content
+           (and the only close ×) ~290px past the right edge (the audit finding — WCAG 1.4.10
+           reflow / 2.5.5 reachability), and a keyboard/SR user could TAB into the off-screen
+           panel. `visibility: hidden` while closed removes it from the a11y tree + tab order and
+           stops it painting at off-screen coords; it flips to `visible` only when `.grail-open`
+           (the opener FAB / drawer reveal — content + × then sit fully on-screen). The visibility
+           flip is DELAYED on close (0.25s, the slide duration) so the slide-OUT still animates
+           fully before the panel is hidden; opening reveals it immediately. */
+        visibility: hidden;
+        transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s linear .25s;
       }
-      .gadget-rail.grail-open { transform: translateX(0); }
+      .gadget-rail.grail-open { transform: translateX(0); visibility: visible;
+        transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s; }
       /* no width drag-resize on the mobile slide-over drawer */
       .gadget-rail-resize-handle { display: none; }
       /* the drawer always shows its full body on mobile — no icon-strip mode */
