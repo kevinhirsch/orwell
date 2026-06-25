@@ -62,3 +62,41 @@ describe("#843 — a gossip/surfacing dump row shows the real belief, not the br
     expect(text).not.toMatch(/\bnpc:\d+\b/);
   });
 });
+
+describe("#846/#847 — the deep-profile dump row is structured and not duplicated by the threads", () => {
+  it("#846 — no `[Hidden side]` row concatenates secrets+goals+weakness into one run-on", () => {
+    const sb = liveSandbox("pvr-846", 7);
+    const dump = sb.session.producerVaultDump()!;
+    const sides = dump.hiddenStory.filter((r) => r.type === "Hidden side");
+    expect(sides.length).toBeGreaterThan(0);
+    // The defect was ONE row carrying the secrets AND the goals AND the weakness, semicolon-joined.
+    for (const s of sides) {
+      const isRunOn = /secretly/i.test(s.content) && /real game/i.test(s.content) && /blind spot/i.test(s.content);
+      expect(isRunOn, `Hidden side row is a multi-field run-on: ${s.content}`).toBe(false);
+    }
+    // The deep profile's unique, non-thread field IS surfaced: the houseguest's day-one read of the player.
+    const dayOne = sides.filter((s) => /day-one read of you:/i.test(s.content));
+    expect(dayOne.length).toBeGreaterThan(0);
+    for (const d of dayOne) expect(d.content).toMatch(/\S+ — day-one read of you: \S/);
+  });
+
+  it("#847 — a deep-profile secret renders ONCE (in the threads), not also in a Hidden side row", () => {
+    const sb = liveSandbox("pvr-847", 7);
+    const dump = sb.session.producerVaultDump()!;
+    const threadText = dump.hiddenStory.filter((r) => r.type === "Secret thread").map((r) => r.content).join("\n");
+    const sideText = dump.hiddenStory.filter((r) => r.type === "Hidden side").map((r) => r.content).join("\n");
+    expect(threadText.length).toBeGreaterThan(0);
+    // Take a distinctive multi-word fragment from a secret thread; it must NOT also appear among the
+    // Hidden side rows (the old blob double-printed it). Probe a few threads to avoid a degenerate pick.
+    const threads = dump.hiddenStory.filter((r) => r.type === "Secret thread");
+    let probed = 0;
+    for (const t of threads) {
+      const tail = t.content.split("—").slice(1).join("—").trim(); // the prose after the leading "<Name> —"
+      const frag = tail.replace(/\(.*?\)/g, "").trim().slice(0, 30);
+      if (frag.length < 12) continue;
+      probed++;
+      expect(sideText.includes(frag), `secret fragment double-printed in a Hidden side row: ${frag}`).toBe(false);
+    }
+    expect(probed, "no secret-thread fragment was substantial enough to probe").toBeGreaterThan(0);
+  });
+});

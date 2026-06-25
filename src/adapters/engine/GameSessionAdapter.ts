@@ -1278,6 +1278,16 @@ export class GameSessionAdapter implements GameSession {
     for (const t of this.storyThreads) {
       hiddenStory.push({ type: "Secret thread", content: storyThreadToRetrospectiveProse(t, nameOf) });
     }
+    // #847 — the deep profile's secrets / true-goals / weakness are ALSO the source of the secret
+    // threads above (each thread is derived from one of them), so re-rendering the deep-profile blob would
+    // print the same secret TWICE. The threads are the canonical, live (status-bearing) representation of
+    // those three; the deep profile uniquely carries the houseguest's DAY-ONE READ OF THE PLAYER, which no
+    // thread carries. So render the deep profile here as exactly that one non-duplicated, labeled line
+    // (from the IN-MEMORY structured object, never the raw Vault string) — and skip its Vault record below.
+    for (const [id, profile] of Object.entries(this.deepProfiles)) {
+      const read = profile.dayOnePerception?.read?.trim();
+      if (read) hiddenStory.push({ type: "Hidden side", content: `${nameOf(id)} — day-one read of you: ${read}` });
+    }
     for (const tie of this.seededRels.ties) {
       hiddenStory.push({ type: "Hidden tie", content: preGameTieToRetrospectiveProse(tie, nameOf) });
     }
@@ -1288,6 +1298,11 @@ export class GameSessionAdapter implements GameSession {
       // Rendered structurally elsewhere: twists via `twists` below; threads + seeded relationships from
       // the structured objects above (their raw Vault strings carry ids/slugs we must not echo).
       if (r.kind === "reserved-twist" || r.kind === "hidden-thread" || r.kind === "seeded-relationship") continue;
+      // #846/#847 — the deep-profile `hidden-attribute` blob is rendered structurally above (its day-one
+      // read) and its secrets/goals/weakness live in the threads, so SKIP the raw blob to avoid the
+      // semicolon run-on AND the double-printed secret. Other `hidden-attribute` records (e.g. a private
+      // orientation) are NOT deep profiles — they keep rendering normally.
+      if (r.kind === "hidden-attribute" && /^deep-profile\b/.test(r.content)) continue;
       hiddenStory.push({ type: retrospectiveLabel(r.kind), content: this.retroScrub(r.content) });
     }
     const fired = new Map((this.live.firedTwists ?? []).map((t) => [t.kind as string, t.beat]));
