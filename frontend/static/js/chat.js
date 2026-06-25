@@ -333,8 +333,21 @@ import { isNarrow } from './platform.js';
   /**
    * Handle chat form submission
    */
-  export async function handleChatSubmit(e) {
-    e.preventDefault();
+  export async function handleChatSubmit(e, overrideMsg = null, overrideOpts = null) {
+    if (e && e.preventDefault) e.preventDefault();
+    // Headless / programmatic send. Callers (auto-continue, stream-drop recovery, a choice-card
+    // pick, a slash dispatch) hand us the message text + options DIRECTLY, instead of the old
+    // anti-pattern of writing the user-visible composer (`el('message').value = …`) and synthesizing
+    // a `.send-btn` click. That puppeteering depended on UI timing (the deferred click could land
+    // while `isStreaming` was still true and toggle Stop instead of Send), polluted the composer, and
+    // stranded text on any failure. A headless send is plain text only — never a slash command or
+    // setup input — so the intercepts below are skipped for it, and the composer is never touched.
+    const _headless = overrideMsg != null;
+    if (_headless && overrideOpts) {
+      if (overrideOpts.hideUserBubble) _hideUserBubble = true;
+      if ('pendingContinue' in overrideOpts) _pendingContinue = overrideOpts.pendingContinue;
+      if (overrideOpts.autoContinue) _autoContinuePending = true;
+    }
     // Cancel research clarification timeout if active
     if (window._researchTimeoutTimer) {
       clearTimeout(window._researchTimeoutTimer);
@@ -357,8 +370,8 @@ import { isNarrow } from './platform.js';
       return;
     }
 
-    // If currently streaming, stop it
-    if (isStreaming) {
+    // If currently streaming, stop it (a headless/programmatic send never toggles Stop — it sends).
+    if (isStreaming && !_headless) {
       // Cancel server-side research if in progress
       const _cancelSid = sessionModule.getCurrentSessionId();
       if (_cancelSid && _researchingStreamIds.has(_cancelSid)) {
@@ -444,12 +457,9 @@ import { isNarrow } from './platform.js';
           _hideUserBubble = true;
           _pendingContinue = _stoppedHolder;
           const cutoff = stoppedContent;
-          const msgInput = uiModule.el('message');
-          if (msgInput) {
-            msgInput.value = 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.';
-            const sb = document.querySelector('.send-btn');
-            if (sb) sb.click();
-          }
+          // Headless send (no composer puppeteering) — the _hideUserBubble/_pendingContinue flags set
+          // above flow through; the continuation merges into the existing bubble.
+          handleChatSubmit(null, 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.');
         });
         stoppedIndicator.appendChild(continueBtn);
         currentHolder.querySelector('.body').appendChild(stoppedIndicator);
@@ -509,7 +519,7 @@ import { isNarrow } from './platform.js';
     };
 
     // --- Setup mode: intercept next message (but let slash commands through) ---
-    {
+    if (!_headless) {
       const el = uiModule.el;
       const rawMsg = (el('message').value || '').trim();
       const currentSetupMode = slashCommands.getSetupMode();
@@ -533,13 +543,13 @@ import { isNarrow } from './platform.js';
     }
 
     const el = uiModule.el;
-    const msg = el('message').value;
+    const msg = _headless ? overrideMsg : el('message').value;
     // Allow empty text when a regen carries over the original message's
     // attachment ids — a photo-only message still has something to send.
     if (!msg.trim() && !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) { _releaseSendFlag(); return; }
 
     // --- Slash commands: execute directly without AI (no session needed) ---
-    if (isCommand(msg.trim())) {
+    if (!_headless && isCommand(msg.trim())) {
       const handled = await handleSlashCommand(msg.trim());
       if (handled) {
         el('message').value = '';
@@ -731,6 +741,9 @@ import { isNarrow } from './platform.js';
         _userMsgEl = addMessage('user', userDisplay, null, _pendingAttachInfo ? { attachments: _pendingAttachInfo } : null);
         if (_userMsgEl) _userMsgEl.dataset.clientMsgId = _clientMsgId;
       }
+      // A headless send never touches the user's composer (no clear, no draft wipe, no keyboard
+      // dismiss) — the message came from a caller, not the textarea, so the user's draft is preserved.
+      if (!_headless) {
       messageInput.value = '';
       messageInput.style.height = '';
       messageInput.dispatchEvent(new Event('input'));
@@ -766,6 +779,7 @@ import { isNarrow } from './platform.js';
           }, 120);
         } catch {}
       }
+      } // end if (!_headless) composer reset
 
       let ids = [];
       try {
@@ -2022,12 +2036,7 @@ import { isNarrow } from './platform.js';
                     note.remove();
                     _hideUserBubble = true;
                     _pendingContinue = _holder;
-                    const msgInput = uiModule.el('message');
-                    if (msgInput) {
-                      msgInput.value = 'You hit the step limit before finishing — the task is not complete. Continue from exactly where you left off and keep going until it is done. Do NOT repeat work already done.';
-                      const sb = document.querySelector('.send-btn');
-                      if (sb) sb.click();
-                    }
+                    handleChatSubmit(null, 'You hit the step limit before finishing — the task is not complete. Continue from exactly where you left off and keep going until it is done. Do NOT repeat work already done.');
                   });
                   note.appendChild(contBtn);
                   _chatBox.appendChild(note);
@@ -2058,12 +2067,7 @@ import { isNarrow } from './platform.js';
                     note.remove();
                     _hideUserBubble = true;
                     _pendingContinue = _holder;
-                    const msgInput = uiModule.el('message');
-                    if (msgInput) {
-                      msgInput.value = 'Your previous response was cut off before it finished. Continue from exactly where you left off — do NOT repeat what you already wrote.';
-                      const sb = document.querySelector('.send-btn');
-                      if (sb) sb.click();
-                    }
+                    handleChatSubmit(null, 'Your previous response was cut off before it finished. Continue from exactly where you left off — do NOT repeat what you already wrote.');
                   });
                   note.appendChild(contBtn);
                   _chatBox.appendChild(note);
@@ -2628,10 +2632,7 @@ import { isNarrow } from './platform.js';
                     // normal user message (and the question persists as the
                     // assistant text above), so the affordances are spent.
                     card.remove();
-                    const mi = uiModule.el('message');
-                    if (mi) mi.value = text;
-                    const sb = document.querySelector('.send-btn');
-                    if (sb) sb.click();
+                    handleChatSubmit(null, text); // the picked option is sent as a normal user message
                   };
 
                   _opts.forEach((opt, i) => {
@@ -2891,12 +2892,7 @@ import { isNarrow } from './platform.js';
             _cont.textContent = '▸';
             _cont.addEventListener('click', () => {
               _stall.remove();
-              const mi = uiModule.el('message');
-              if (mi) {
-                mi.value = 'Continue — you stopped before finishing. Pick up exactly where you left off and complete the task.';
-                const sb = document.querySelector('.send-btn');
-                if (sb) sb.click();
-              }
+              handleChatSubmit(null, 'Continue — you stopped before finishing. Pick up exactly where you left off and complete the task.');
             });
             _stall.appendChild(_cont);
             (holder.querySelector('.body') || holder).appendChild(_stall);
@@ -3030,18 +3026,14 @@ import { isNarrow } from './platform.js';
             // the button's click, which would now open the plan menu instead of
             // toggling) so execution and every follow-up keep full write tools.
             try { if (window._setPlanMode) window._setPlanMode(false); } catch (_) {}
-            const _inp = el('message');
-            if (_inp) {
-              _inp.value = 'Approved — execute the plan. The full approved checklist is pinned '
-                + 'for you under "## ACTIVE PLAN"; do NOT go looking for it in tasks, notes, or '
-                + 'memory. Work through it in order, and after each step call the update_plan tool '
-                + 'with the full checklist and that step marked `- [x]`. Do the next unchecked item '
-                + 'until all are done.';
-              _inp.dispatchEvent(new Event('input'));
-            }
-            // Show a clean bubble; the full instruction still goes to the model.
+            // Show a clean bubble ("Approved the plan."); the full instruction goes to the model via the
+            // headless override (no composer puppeteering).
             _displayOverride = 'Approved the plan.';
-            handleChatSubmit({ preventDefault() {} });
+            handleChatSubmit(null, 'Approved — execute the plan. The full approved checklist is pinned '
+              + 'for you under "## ACTIVE PLAN"; do NOT go looking for it in tasks, notes, or '
+              + 'memory. Work through it in order, and after each step call the update_plan tool '
+              + 'with the full checklist and that step marked `- [x]`. Do the next unchecked item '
+              + 'until all are done.');
           };
           var _approveWrap = document.createElement('div');
           _approveWrap.className = 'plan-approve-bar';
@@ -3263,12 +3255,7 @@ import { isNarrow } from './platform.js';
               _hideUserBubble = true;
               _pendingContinue = holder;
               const cutoff = accumulated;
-              const msgInput = uiModule.el('message');
-              if (msgInput) {
-                msgInput.value = 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.';
-                const sb = document.querySelector('.send-btn');
-                if (sb) sb.click();
-              }
+              handleChatSubmit(null, 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.');
             });
             stoppedIndicator.appendChild(continueBtn);
             holder.querySelector('.body').appendChild(stoppedIndicator);
@@ -3553,39 +3540,59 @@ import { isNarrow } from './platform.js';
   }
 
   function _tryAutoRecover(holder, accumulated, sessionId) {
+    const tail = (accumulated || '').slice(-400);
+    // PRODUCED NOTHING: the stream died before any token. Do NOT silently auto-resend — the old path
+    // puppeteered the composer with a "stream dropped" prompt and `.send-btn.click()`, which frequently
+    // stranded that text in the box (the click landed while the button was still in Stop mode). Surface
+    // an honest, user-controlled Retry instead. Not gated by the auto-nudge cap (it's a human click).
+    if (!tail) {
+      _renderStreamDropRetry(holder, sessionId);
+      return true; // handled — the caller must not also render a generic "stream closed" error
+    }
+    // PARTIAL TEXT: a mid-stream cut. Continuing is genuinely useful, so auto-continue ONCE — but via a
+    // HEADLESS send (no composer write, no synthetic click, no stop/send race). Gated by the cap.
     if (_autoNudges >= _AUTO_NUDGE_CAP) return false;
     _autoNudges++;
-    if (holder && accumulated) {
+    if (holder) {
       holder.dataset.raw = accumulated;
       try {
         holder.querySelector('.body').innerHTML =
           markdownModule.processWithThinking(markdownModule.squashOutsideCode(accumulated));
       } catch (_) {}
     }
-    _pendingContinue = holder || null;   // merge the continuation into the same bubble
-    _hideUserBubble = true;              // no user bubble for the handshake
-    _autoContinuePending = true;         // don't reset the counter on this submit
-    const _abandon = () => {             // clear the pending flags so they can't
-      _pendingContinue = null;           // leak into whatever chat is now open
-      _hideUserBubble = false;
-      _autoContinuePending = false;
-    };
-    // Defer so the stream's finally resets state first — otherwise the send
-    // button is still in "stop" mode and clicking it would toggle, not send.
+    const prompt = `The stream dropped before you finished. It ended with:\n\n${tail}\n\nIf the task is fully complete, reply with just: DONE. Otherwise continue exactly where you left off and finish it — do not repeat what you already wrote.`;
+    // Defer so the dead stream's `finally` (currentAbort / isStreaming / holder cleanup) runs first.
     setTimeout(() => {
-      // The stream that died may not be the chat the user is now looking at —
-      // never inject the recovery handshake into the wrong conversation.
-      if (sessionId && sessionModule.getCurrentSessionId() !== sessionId) { _abandon(); return; }
-      const msgInput = uiModule.el('message');
-      const sb = document.querySelector('.send-btn');
-      if (!msgInput || !sb) { _abandon(); return; }
-      const tail = (accumulated || '').slice(-400);
-      msgInput.value = tail
-        ? `The stream dropped before you finished. It ended with:\n\n${tail}\n\nIf the task is fully complete, reply with just: DONE. Otherwise continue exactly where you left off and finish it — do not repeat what you already wrote.`
-        : `The stream dropped before you produced anything. If the task is already done, reply with just: DONE. Otherwise complete it now.`;
-      sb.click();
-    }, 200);
+      if (sessionId && sessionModule.getCurrentSessionId() !== sessionId) return; // wrong chat now — drop it
+      handleChatSubmit(null, prompt, { hideUserBubble: true, pendingContinue: holder, autoContinue: true });
+    }, 50);
     return true;
+  }
+
+  // A visible, user-controlled retry for a stream that died before producing anything — the honest
+  // replacement for the old composer-puppeteering auto-resend. The Retry button does a HEADLESS send
+  // (the user's original message is already persisted server-side, so this just re-engages the model).
+  function _renderStreamDropRetry(holder, sessionId) {
+    const target = holder && (holder.querySelector('.body') || holder);
+    if (!target || target.querySelector('.stream-drop-retry')) return;
+    const note = document.createElement('div');
+    note.className = 'stream-drop-retry';
+    note.style.cssText = 'display:flex;align-items:center;gap:8px;opacity:0.85;font-style:italic;';
+    const label = document.createElement('span');
+    label.textContent = 'Connection dropped before any reply.';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'continue-btn';
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', () => {
+      if (sessionId && sessionModule.getCurrentSessionId() !== sessionId) return; // wrong chat now
+      note.remove();
+      handleChatSubmit(null, "Your previous reply didn't come through — please answer my last message.",
+        { hideUserBubble: true, pendingContinue: holder });
+    });
+    note.appendChild(label);
+    note.appendChild(btn);
+    target.appendChild(note);
   }
 
   // (Removed FEJS-6: the dead stall-banner machinery + the deliberately-disabled
@@ -4433,11 +4440,8 @@ import { isNarrow } from './platform.js';
           allMsgs[i].remove();
         }
 
-        // Submit the edited text
-        const messageInput = uiModule.el('message');
-        messageInput.value = newText;
-        const submitBtn = document.querySelector('.send-btn');
-        if (submitBtn) submitBtn.click();
+        // Submit the edited text (headless — no composer puppeteering)
+        handleChatSubmit(null, newText);
       } catch (err) {
         console.error('Edit failed:', err);
         if (uiModule) uiModule.showError('Edit failed: ' + err.message);
@@ -4524,11 +4528,8 @@ import { isNarrow } from './platform.js';
       _hideUserBubble = true;
       _pendingRegenAttachments = _ids;
 
-      // Resubmit
-      const messageInput = uiModule.el('message');
-      messageInput.value = text;
-      const submitBtn = document.querySelector('.send-btn');
-      if (submitBtn) submitBtn.click();
+      // Resubmit (headless — no composer puppeteering)
+      handleChatSubmit(null, text);
     } catch (err) {
       console.error('Resend failed:', err);
       if (uiModule) uiModule.showError('Resend failed: ' + err.message);
@@ -4638,10 +4639,7 @@ import { isNarrow } from './platform.js';
       aiMsgElement.remove();
 
       _hideUserBubble = true;
-      const messageInput = uiModule.el('message');
-      messageInput.value = userText;
-      const submitBtn = document.querySelector('.send-btn');
-      if (submitBtn) submitBtn.click();
+      handleChatSubmit(null, userText); // headless regen — no composer puppeteering
 
     } catch (err) {
       console.error('Regenerate failed:', err);
@@ -5065,15 +5063,9 @@ import { isNarrow } from './platform.js';
     const box = uiModule.el ? uiModule.el('message') : document.getElementById('message');
     if (!box || typeof text !== 'string') return false;
     try {
-      _hideUserBubble = true;            // the cue is the producers reaching out — no player bubble
-      box.value = text;
-      box.dispatchEvent(new Event('input', { bubbles: true }));
-      handleChatSubmit({ preventDefault() {} });
-      // The value was captured synchronously inside handleChatSubmit above; clear it NOW so the
-      // cue text is never visible in the composer for the await-gap before the normal clear.
-      box.value = '';
-      box.style.height = '';
-      box.dispatchEvent(new Event('input', { bubbles: true }));
+      // Headless send: the cue goes straight to the model — no composer write, no synchronous-capture
+      // race, no immediate-clear dance. The producers reach out with no player bubble.
+      handleChatSubmit(null, text, { hideUserBubble: true });
       return true;
     } catch (_) {
       // Never leave the hide-bubble flag armed for a real next turn if the cue blew up.
@@ -5454,12 +5446,7 @@ import { isNarrow } from './platform.js';
     const sessionId = sessionModule.getCurrentSessionId();
     if (!sessionId) return;
 
-    const messageInput = uiModule.el('message');
-    if (messageInput) {
-      messageInput.value = 'Continue from where you left off.';
-      const submitBtn = document.querySelector('.send-btn');
-      if (submitBtn) submitBtn.click();
-    }
+    handleChatSubmit(null, 'Continue from where you left off.'); // headless — no composer puppeteering
   }
 
   // Open a chat attachment in the right place: images → Gallery editor; PDFs &
