@@ -246,6 +246,78 @@ def test_l34_kit_titlebar_has_no_solid_background_in_the_kit_css():
         "the kit .ow-titlebar must stay background-less (rides the frame)"
 
 
+# ── Glass theme background == the login mesh gradient (Task 3) ────────────────
+
+def test_glass_theme_bg_is_the_shared_login_mesh():
+    js = _read("static", "js", "theme.js")
+    # The glass theme's default wallpaper is the shared login mesh sentinel.
+    assert re.search(r"\bglass\s*:\s*'glass-mesh'", js), \
+        "the glass theme's default pattern must be the shared login mesh ('glass-mesh')"
+    # theme.js REUSES the login renderer (DRY) rather than duplicating it.
+    assert "from './login_bg.js'" in js
+    assert "mountMeshGradient" in js and "resolveLoginBackgroundConfig" in js, \
+        "theme.js must reuse login_bg.js's mesh renderer + config resolver"
+    # The mesh is painted into the #__wp wallpaper layer adaptiveGlass samples.
+    assert "applyGlassMeshBackground" in js
+    assert "WALLPAPER_ID" in js
+
+
+def test_glass_mesh_resolves_preset_from_the_login_background_source():
+    # The in-app glass background tracks the SAME admin-configured palette the
+    # login screen uses (so changing the login-bg palette changes both).
+    lb = _read("static", "js", "login_bg.js")
+    assert "export function mountMeshGradient(" in lb
+    assert "export async function resolveLoginBackgroundConfig(" in lb
+    assert "/api/auth/login-background" in lb, \
+        "the shared resolver must read the public login-background cosmetic config"
+    # Reduced motion ⇒ static mesh (the shared renderer adds .is-animated only
+    # when animate is true; theme.js gates animate on prefersReducedMotion).
+    js = _read("static", "js", "theme.js")
+    assert "_meshReducedMotion()" in js
+
+
+def test_shared_mesh_css_holds_the_five_presets_and_reduced_motion():
+    css = _read("static", "css", "meshGradient.css")
+    for preset in ("sunset", "aurora", "ocean", "gold", "lavender"):
+        assert f'data-lbg-preset="{preset}"' in css
+    # Static under reduced motion (Apple accessibility rule).
+    assert "@media (prefers-reduced-motion: reduce)" in css
+    # Both the login page and the app load it.
+    assert "/static/css/meshGradient.css" in _read("static", "index.html")
+    assert "/static/css/meshGradient.css" in _read("static", "login.html")
+
+
+# ── The theme window is an OrwellWindow kit window (Task 1) ────────────────────
+
+def test_theme_window_uses_the_orwellwindow_kit():
+    js = _read("static", "js", "theme.js")
+    # Created via the kit, mirroring settings.js (id 'theme-modal', modal dialog).
+    assert "window.OrwellWindowKit.create(" in js
+    m = re.search(r"OrwellWindowKit\.create\(\{(.*?)\}\);", js, re.S)
+    assert m, "the theme kit create() call must exist"
+    opts = m.group(1)
+    assert "id: 'theme-modal'" in opts
+    assert "modal: true" in opts
+    assert "minimizable: false" in opts
+    assert "slotKey: 'theme'" in opts
+    # Open/close route through the kit (no bespoke .hidden toggle anymore).
+    assert "win.open(" in js and "_themeWin.close()" in js
+    # The content card is hosted hidden until first open (the settings pattern).
+    html = _read("static", "index.html")
+    assert 'id="theme-host"' in html
+
+
+def test_pristine_old_default_telescreen_migrates_to_glass():
+    # A never-customized telescreen record (the stale OLD default) folds forward
+    # to glass; a deliberate/customized one is left alone.
+    js = _read("static", "js", "theme.js")
+    assert "_isPristineOldDefault" in js
+    assert "_PREV_DEFAULT_THEME = 'telescreen'" in js
+    # A deliberate selection is stamped so it's never migrated.
+    assert "obj._explicit = true" in js
+    assert "_explicit: true" in js  # the swatch-click save passes the stamp
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _frosted_bg_block(css):

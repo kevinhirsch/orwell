@@ -31,7 +31,7 @@
         // applyBgPattern runs at the END of _initWithSync, after an awaited
         // /api/prefs/theme read). The class brings the static base (style.css) up
         // front; the animated canvas overlays it when it spawns.
-        t = { name: 'glass', glassTier: 'full', bgPattern: 'perlin-flow',
+        t = { name: 'glass', glassTier: 'full', bgPattern: 'glass-mesh',
               colors: { bg:'#15171c', fg:'#eef1f4', panel:'#1d2026', border:'#3a3f47', red:'#9aa3af' },
               glass: true };
       }
@@ -324,6 +324,7 @@
   <link rel="stylesheet" href="/static/css/responsive-tokens.css">  <!-- Stream S: the responsive mechanism — MUST precede style.css -->
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/css/orwellHouseThemes.css">  <!-- 0052: the house themes' frost + micro-motion -->
+  <link rel="stylesheet" href="/static/css/meshGradient.css">  <!-- the shared login/glass-theme aurora mesh (reused into #__wp by theme.js) -->
   <link rel="stylesheet" href="/static/css/game-trim.css?v=20260608">  <!-- Orwell: hide non-game tool surfaces -->
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
@@ -583,7 +584,15 @@
   </div>
 
   <!-- Theme Popup (floating panel) -->
-  <div id="theme-modal" class="modal hidden">
+  <!-- Theme window — hosted HIDDEN here until the OrwellWindow kit's first open()
+       lifts #theme-popup into the kit's .ow-body (mirrors #settings-host). The kit
+       (id "theme-modal", created in theme.js initThemeKitWindow) supplies the glass
+       chrome, macOS traffic lights, sans UI font, centered modal placement, and the
+       scrim/inert/focus-trap. The legacy .modal-header below is dropped on first
+       open (the kit chrome replaces it); the Peek toggle is re-hosted into the kit
+       titlebar. The id stays "theme-host" so the static content keeps a home; every
+       el('theme-…') wiring finds it in this display:none host before promotion. -->
+  <div id="theme-host" style="display:none">
   <div id="theme-popup" class="modal-content admin-modal-content" role="dialog" aria-label="Theme" style="background:var(--bg)">
     <div class="modal-header theme-popup-header" id="theme-popup-header">
       <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/><circle cx="8" cy="9" r="1.5" fill="currentColor"/><circle cx="15" cy="14" r="1.5" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor"/></svg>Theme</h4>

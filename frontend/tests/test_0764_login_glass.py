@@ -82,9 +82,15 @@ def test_login_eye_blink_is_reduced_motion_safe():
 
 
 def test_login_has_five_gradient_presets():
-    html = _read("static/login.html")
+    # The five aurora-mesh palette presets now live in the SHARED stylesheet
+    # css/meshGradient.css (reused by the in-app glass theme), and login.html
+    # links it. Pin the presets in the shared file + the link in login.html.
+    css = _read("static/css/meshGradient.css")
     for preset in ("sunset", "aurora", "ocean", "gold", "lavender"):
-        assert f'data-lbg-preset="{preset}"' in html, f"the '{preset}' palette preset must exist"
+        assert f'data-lbg-preset="{preset}"' in css, f"the '{preset}' palette preset must exist (shared mesh CSS)"
+    html = _read("static/login.html")
+    assert "/static/css/meshGradient.css" in html, \
+        "login.html must link the shared mesh-gradient stylesheet"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

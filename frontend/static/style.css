@@ -5432,6 +5432,8 @@ body.bg-pattern-perlin-flow {
       #doclib-modal,
       #compare-model-overlay,
       #research-overlay,
+      /* #theme-modal + #settings-modal are OrwellWindow kit windows (.ow-window) —
+         they glide with the sidebar collapse exactly like the .modal family. */
       #theme-modal,
       #settings-modal,
       #email-lib-modal {
@@ -6774,26 +6776,17 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       font-size: 13px;
     }
 
-    /* ---------- Theme popup (uses .modal > .modal-content frame) ---------- */
-    #theme-modal { z-index: 260; }
+    /* ---------- Theme window CONTENT ----------
+       The window FRAME is now the OrwellWindow kit (.ow-window, modal:true) —
+       it owns geometry/z/scrim/titlebar (theme.js initThemeKitWindow), so the
+       old bespoke modal-frame rules here (#theme-modal z-index, #theme-popup
+       overflow/max-height, the legacy #theme-popup .modal-header chrome) are
+       retired. #theme-popup is now the kit's .ow-body CONTENT; only its inner
+       layout (tabs / grid / swatches / color rows / etc.) is styled below. */
     #theme-popup .theme-popup-sub { color: color-mix(in srgb, var(--fg) 50%, transparent); font-size: 11px; margin-bottom: 10px; }
-    /* `max-height` instead of a fixed height so the popup shrinks to fit its
-       content (avoids the leftover whitespace after the time-based switching
-       card was removed). The inner .theme-tab-panel keeps overflow:auto, so
-       any taller content still scrolls inside. */
-    #theme-popup { overflow-y: hidden; max-height: min(85vh, 600px); }
-    /* The popup ROOT is var(--bg) (inline) so its inner .admin-cards
-       (themselves var(--panel)) keep a visible contrast in the body. But
-       the base .modal-header is `background-color: inherit`, so the title
-       strip behind the Peek bar inherited that page-background var(--bg)
-       and read as a flat, mismatched gray — unlike every other window's
-       chrome, whose titlebar shows var(--win-bg) (= var(--panel)). Pin the
-       header to the shared window-chrome token so it matches the kit
-       (.ow-titlebar over var(--win-bg)) and the other modals, and tracks
-       theme changes (the house presets + the custom colors set right here
-       move --panel/--win-bg). Scoped to the header only — the body keeps
-       var(--bg) for its card contrast. */
-    #theme-popup .modal-header { flex-shrink: 0; background-color: var(--win-bg); }
+    /* #theme-popup is the content node inside .ow-body now (no own frame). Let it
+       fill the kit body; the kit window itself scrolls/sizes. */
+    #theme-popup { display: flex; flex-direction: column; min-height: 0; height: 100%; background: transparent; }
     #theme-popup .admin-tabs { margin: 0 -10px 8px; padding: 0 10px; flex-shrink: 0; }
     .theme-tab-panel { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 10px; }
 

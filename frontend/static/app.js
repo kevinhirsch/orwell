@@ -573,12 +573,9 @@ function initializeEventListeners() {
         return;
       }
 
-      // Theme popup
-      const themeModal = document.getElementById('theme-modal');
-      if (themeModal && !themeModal.classList.contains('hidden')) {
-        themeModule.closePopup();
-        return;
-      }
+      // Theme popup — now an OrwellWindow kit modal; the ui.js global Escape
+      // arbiter (OrwellWindowKit.dismissTop) owns its dismissal, exactly like
+      // Settings. No bespoke branch here (it would double-close).
 
       // Calendar owns a few inner Escape layers (settings panel, event form,
       // then the calendar modal itself). Let calendar.js handle those instead
@@ -1150,8 +1147,11 @@ function initializeEventListeners() {
   const toolThemeBtn = el('tool-theme-btn');
   if (toolThemeBtn) {
     toolThemeBtn.addEventListener('click', () => {
-      const tm = document.getElementById('theme-modal');
-      if (tm) tm.classList.remove('hidden');
+      // The Theme window is now an OrwellWindow kit window — open via the module
+      // (the kit owns build / geometry / scrim / focus-trap), not a bespoke
+      // .hidden strip on a static modal.
+      if (themeModule && themeModule.openPopup) themeModule.openPopup();
+      else if (themeModule && themeModule.togglePopup) themeModule.togglePopup();
     });
   }
 

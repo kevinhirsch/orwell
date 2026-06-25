@@ -213,12 +213,14 @@ def test_control_center_dock_is_glassed():
 
 def test_game_build_default_theme_has_animated_bg():
     theme = _read("static", "js", "theme.js")
-    # The default theme ships an animated canvas background so the glass has dynamic
-    # content to refract (glass → perlin-flow). The fresh-session resolver must
-    # apply the default theme's pattern (not drop to 'none').
+    # The default theme ships an animated background so the glass has dynamic
+    # content to refract. The glass theme's wallpaper is now the SHARED login
+    # mesh gradient (the same aurora the login screen lenses) rendered into #__wp,
+    # not the old perlin-flow canvas. The fresh-session resolver must still apply
+    # the default theme's pattern (not drop to 'none').
     assert "DEFAULT_THEME = 'glass'" in theme
-    assert re.search(r"\bglass\s*:\s*'perlin-flow'", theme), \
-        "the glass theme's default bg pattern must be perlin-flow"
+    assert re.search(r"\bglass\s*:\s*'glass-mesh'", theme), \
+        "the glass theme's default bg pattern must be the shared login mesh ('glass-mesh')"
     # fresh session resolves the active theme's pattern, not 'none'.
     assert "THEME_DEFAULT_PATTERN[activeName]" in theme
 

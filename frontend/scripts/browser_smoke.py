@@ -800,17 +800,27 @@ def main() -> int:
                   f"sidebar Theme entry is visible under the game build ({sidebar_theme})")
             check(sidebar_theme.get("memory") is False and sidebar_theme.get("tasks") is False,
                   f"other dropped Tools items stay hidden ({sidebar_theme})")
-            # Close the theme picker before the finale block — it's a legacy full-screen
-            # .modal (z~1001) and, left open, its scrim sits ABOVE the non-modal finale
-            # panel (z~501, correctly below a modal) and intercepts the trusted minimize
-            # click below. Test isolation only; closing it is the right teardown.
+            # Close the theme picker before the finale block — it is now an
+            # OrwellWindow KIT modal (.ow-window + its own .ow-scrim), and left
+            # open its scrim sits ABOVE the non-modal finale panel (z~501) and
+            # intercepts the trusted minimize click below. Close via the kit ×
+            # (.ow-close) so the window AND its scrim tear down. Test isolation
+            # only; closing it is the right teardown.
             page.evaluate("""() => {
               const t = document.getElementById('theme-modal');
-              if (!t || t.classList.contains('hidden')) return;
-              const c = t.querySelector('.close-btn, .modal-close, [data-close]');
-              if (c) c.click(); else t.classList.add('hidden');
+              if (!t) return;
+              const c = t.querySelector('.ow-close, .close-btn, .modal-close, [data-close]');
+              if (c) c.click();
             }""")
-            page.wait_for_timeout(200)
+            page.wait_for_timeout(300)
+            # Belt: the kit close animation is ~190ms — make sure the scrim is gone
+            # before the finale interactions (it would orphan-intercept otherwise).
+            try:
+                page.wait_for_function(
+                    "() => !document.querySelector('.ow-scrim[data-ow-scrim=\"theme-modal\"]')",
+                    timeout=2000)
+            except Exception:
+                pass
 
             # T20: a game panel's minimize-to-dock BEHAVIOR — carried by the FINALE now
             # (the remaining kit game panel; H5 folded social into the sidebar). Mount the
@@ -1175,48 +1185,35 @@ def main() -> int:
             }""")
             page.wait_for_timeout(120)
 
-            # G14 (DWE audit F9b): ONE z-authority for the .modal family —
-            # modalManager's _bringToFront defers to ui.js's counter instead of
-            # stamping a second 300s ladder with !important. Open theme, park it
-            # to the dock, restore from the chip (trusted clicks), THEN open
-            # settings fresh: the fresh open must sit visually ABOVE the
-            # dock-restored window (elementFromPoint at the content overlap),
-            # Escape must close settings first then theme (pickTopModal ==
-            # visual order), and no .modal may carry an inline !important z.
+            # G14 (DWE audit F9b) — UPDATED for the theme-kit migration: theme is
+            # now an OrwellWindow KIT modal (.ow-window, like settings), NOT a
+            # legacy minimizable .modal. So G14 now proves the ONE z-authority +
+            # Escape ordering across TWO kit modals: open theme, open settings
+            # fresh ON TOP, the fresh open sits visually ABOVE (elementFromPoint at
+            # the content overlap), Escape closes settings first then theme
+            # (OrwellWindowKit.dismissTop == visual/top order), and no kit window
+            # carries an inline !important z.
             page.click("#tool-theme-btn")
-            page.wait_for_timeout(600)  # static node — the `_` was injected at boot
-            check(page.evaluate("!document.getElementById('theme-modal').classList.contains('hidden')") is True,
-                  "G14: theme opens from the sidebar entry")
-            page.click("#theme-modal .modal-minimize-btn, #theme-modal .minimize-btn")
-            page.wait_for_timeout(400)
-            g14min = page.evaluate("""() => {
-              const m = document.getElementById('theme-modal');
-              return { parked: m.classList.contains('modal-minimized'),
-                       chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="theme-modal"]'),
-                       importantZ: m.style.getPropertyPriority('z-index') === 'important' };
-            }""")
-            check(g14min.get("parked") is True and g14min.get("chip") is True,
-                  f"G14: theme parks to a dock chip ({g14min})")
-            check(g14min.get("importantZ") is False,
-                  f"G14: a parked window holds NO inline !important z ({g14min})")
-            page.click("#minimized-dock .minimized-dock-chip[data-modal-id='theme-modal']")
-            page.wait_for_timeout(400)
-            check(page.evaluate("getComputedStyle(document.getElementById('theme-modal')).display !== 'none'") is True,
-                  "G14: the dock chip restores theme (trusted click)")
-            page.click("#user-bar-settings")
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(600)
+            check(page.evaluate("!!document.getElementById('theme-modal')") is True,
+                  "G14: theme opens from the sidebar entry (kit window built)")
+            # Both theme + settings are now MODAL kit windows — theme's scrim makes
+            # the gear inert (correct modal behavior), so a trusted gear click can't
+            # reach it. Open settings via its module to stack a second kit modal on
+            # top (the point here is the z-authority between two kit modals).
+            page.evaluate("import('/static/js/settings.js').then(m => (m.default||m).open())")
+            page.wait_for_timeout(600)
             g14 = page.evaluate("""() => {
-              const t = document.getElementById('theme-modal');
+              const t = document.getElementById('theme-modal');   // the kit .ow-window
               const s = document.getElementById('settings-modal');
-              const vis = (m) => m && !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none';
+              const vis = (m) => m && getComputedStyle(m).display !== 'none';
               if (!vis(t) || !vis(s)) return { error: 'both must be open', theme: vis(t), settings: vis(s) };
-              const r1 = t.querySelector('.modal-content').getBoundingClientRect();
-              const r2 = s.getBoundingClientRect();  // #553: settings is the .ow-window itself
+              const r1 = t.getBoundingClientRect();   // both are .ow-window now
+              const r2 = s.getBoundingClientRect();
               const L = Math.max(r1.left, r2.left), R = Math.min(r1.right, r2.right);
               const T = Math.max(r1.top, r2.top), B = Math.min(r1.bottom, r2.bottom);
               if (R <= L || B <= T) return { error: 'contents do not overlap' };
               const el = document.elementFromPoint((L + R) / 2, (T + B) / 2);
-              // #553: settings is a kit .ow-window, theme a legacy .modal — one authority spans both.
               const owner = el ? (el.closest('.modal, .ow-window') || {}).id || null : null;
               const importants = [...document.querySelectorAll('.modal, .ow-window')]
                 .filter(m => m.style.getPropertyPriority('z-index') === 'important').map(m => m.id);
@@ -1225,21 +1222,21 @@ def main() -> int:
                        settingsZ: parseInt(getComputedStyle(s).zIndex, 10) || 0 };
             }""")
             check(g14.get("owner") == "settings-modal" and g14.get("settingsZ", 0) > g14.get("themeZ", 0),
-                  f"G14: a fresh open sits visually ABOVE the dock-restored window ({g14})")
-            check(g14.get("importants") == [], f"G14: no .modal carries an inline !important z-index ({g14})")
+                  f"G14: a fresh kit modal sits visually ABOVE the earlier one ({g14})")
+            check(g14.get("importants") == [], f"G14: no kit window carries an inline !important z-index ({g14})")
             page.mouse.move(640, 700)  # neutral ground: keep the arbiter's hovered-window pass out of it
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
             g14esc = page.evaluate("""() => ({
               settingsClosed: !document.getElementById('settings-modal'),
-              themeOpen: !document.getElementById('theme-modal').classList.contains('hidden'),
+              themeOpen: !!document.getElementById('theme-modal'),
             })""")
             check(g14esc.get("settingsClosed") is True and g14esc.get("themeOpen") is True,
-                  f"G14: Escape closes the top window (settings kit modal) FIRST ({g14esc})")
+                  f"G14: Escape closes the TOP kit modal (settings) FIRST ({g14esc})")
             page.keyboard.press("Escape")
             page.wait_for_timeout(300)
-            check(page.evaluate("document.getElementById('theme-modal').classList.contains('hidden')") is True,
-                  "G14: the second Escape closes the dock-restored window (theme)")
+            check(page.evaluate("!document.getElementById('theme-modal')") is True,
+                  "G14: the second Escape closes the remaining kit modal (theme)")
 
             # F8 (wave 3): the WHOLE .modal family returns focus to its opener —
             # focus the gear for real, open settings, Escape, focus is back.
@@ -1280,32 +1277,28 @@ def main() -> int:
                   "G2: the settings window is interactive (trusted click inside lands)")
             page.evaluate("(document.querySelector('#settings-modal .ow-close')||{click(){}}).click()")
             page.wait_for_timeout(250)
-            # The launcher-agnostic minimize→restore contract for the legacy .modal family
-            # (theme-modal): minimized for real, healed by an arbitrary opener that only removes
-            # `.hidden` (exactly what tool-theme-btn / Settings → Appearance do) — the observer
-            # must run the real restore.
-            page.evaluate("document.getElementById('theme-modal').classList.remove('hidden')")
-            page.wait_for_timeout(250)
-            page.click("#theme-modal .modal-minimize-btn, #theme-modal .minimize-btn")
-            page.wait_for_timeout(250)
-            check(page.evaluate("document.getElementById('theme-modal').classList.contains('modal-minimized')") is True,
-                  "G2: theme window minimizes to the dock")
-            page.evaluate("document.getElementById('theme-modal').classList.remove('hidden')")  # any launcher
-            page.wait_for_timeout(250)
-            g2t = page.evaluate("""() => {
-              const m = document.getElementById('theme-modal');
-              return { visible: !m.classList.contains('hidden') && getComputedStyle(m).display !== 'none',
-                       unminimized: !m.classList.contains('modal-minimized'),
-                       chipGone: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="theme-modal"]') };
-            }""")
-            check(g2t.get("visible") is True and g2t.get("unminimized") is True and g2t.get("chipGone") is True,
-                  f"G2: an arbitrary un-hide heals the minimized theme window too ({g2t})")
-            page.evaluate("""() => {
-              const tm = document.getElementById('theme-modal');
-              const tb = tm.querySelector('.close-btn, .modal-close');
-              if (tb) tb.click(); else tm.classList.add('hidden');
-            }""")
-            page.wait_for_timeout(200)
+            # The Theme window migrated to the OrwellWindow kit too — it is a MODAL
+            # dialog (minimizable:false), exactly like Settings: it must NOT have a
+            # functional minimize-to-dock (a scrim'd modal tucked to a dock chip is
+            # nonsense; Escape/× dismiss it). Open it, assert any minimize light is
+            # inert/disabled and that × tears it (and its scrim) down.
+            page.click("#tool-theme-btn")
+            page.wait_for_timeout(300)
+            check(page.evaluate("!!document.getElementById('theme-modal')") is True,
+                  "G2: theme opens from the sidebar entry (kit modal)")
+            check(page.evaluate("""() => {
+                const m = document.querySelector('#theme-modal .ow-min, #theme-modal .modal-minimize-btn, #theme-modal .minimize-btn');
+                return !m || m.disabled === true;
+            }""") is True,
+                  "G2: the theme kit modal has no FUNCTIONAL minimize-to-dock (any light is inert/disabled)")
+            page.evaluate("(document.querySelector('#theme-modal .ow-close')||{click(){}}).click()")
+            page.wait_for_timeout(300)
+            g2t = page.evaluate("""() => ({
+              gone: !document.getElementById('theme-modal'),
+              scrimGone: !document.querySelector('.ow-scrim[data-ow-scrim="theme-modal"]'),
+            })""")
+            check(g2t.get("gone") is True and g2t.get("scrimGone") is True,
+                  f"G2: the kit × tears the theme window AND its scrim down ({g2t})")
 
             # F11 (wave 3): Escape while the decision card holds focus = the x path —
             # dismissed, never submitted.

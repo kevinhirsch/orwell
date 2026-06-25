@@ -7,6 +7,12 @@ import { initColorPickers, attachColorPicker } from './colorPicker.js';
 import { hexToRgb, onAccentColor } from './color/hex.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
+// The glass theme's wallpaper REUSES the login screen's mesh-gradient renderer
+// (DRY — one mesh, both surfaces). mountMeshGradient paints the shared
+// .login-bg-gradient layer (css/meshGradient.css); resolveLoginBackgroundConfig
+// reads the SAME public /api/auth/login-background the login page does, so
+// changing the admin login-bg palette changes the glass-theme app background too.
+import { mountMeshGradient, resolveLoginBackgroundConfig, prefersReducedMotion as _meshReducedMotion } from './login_bg.js';
 
 export const THEMES = {
   // ── Apple "Liquid Glass" (iOS 26 / macOS 26 "Tahoe", WWDC25). The DEFAULT and
@@ -78,9 +84,11 @@ const MAX_CUSTOM_THEMES = 8;
 
 // Default background patterns for built-in themes
 const THEME_DEFAULT_PATTERN = {
-  // The glass theme's signature animated wallpaper — a slow, flowing field the
-  // refraction has something to lens. (An image, if chosen, supersedes it.)
-  glass:      'perlin-flow',
+  // The glass theme's signature wallpaper — the SAME iOS/Sequoia mesh gradient
+  // the login screen renders (login_bg.js, palette from /api/auth/login-background),
+  // so the colorless glass chrome lenses the exact same aurora the login glass
+  // does. (A user wallpaper image, if chosen, supersedes it.)
+  glass:      'glass-mesh',
   // A5 (ruling #18) — every HOUSE theme ships a creative particles background that fits its
   // identity, reusing the existing canvas-particle machinery (behind the chat, perf-budgeted,
   // prefers-reduced-motion / document.hidden aware). Tinted to the theme's --fg by default.
@@ -746,6 +754,11 @@ export function applyBgImage(url) {
       + 'background-size:cover;background-position:center;background-repeat:no-repeat;';
     document.body.appendChild(wp);
   }
+  // A user image SUPERSEDES the glass mesh — drop the mesh child + marker so the
+  // image isn't sitting under (or fighting) the aurora layer.
+  wp.querySelectorAll('.login-bg-gradient').forEach((c) => c.remove());
+  wp.classList.remove('glass-mesh-wp');
+  wp.style.removeProperty('background-color');
   wp.style.backgroundImage = `url("${String(url).replace(/"/g, '\\"')}")`;
   // The page (html+body) carries an OPAQUE --bg that would cover the z-index:-1
   // wallpaper. `has-wallpaper` makes them transparent (CSS, author !important — it
@@ -836,11 +849,99 @@ function _bgStaticInit(initFn) {
   try { initFn(); } finally { window.requestAnimationFrame = realRaf; }
 }
 
+// ── The glass-theme mesh wallpaper (reuses the login mesh; #__wp) ──────────────
+// Resolved-config cache so a swatch click / re-apply doesn't re-fetch every time.
+let _glassMeshCfg = null;
+const GLASS_MESH_PATTERN = 'glass-mesh';
+
+// Paint the shared login mesh-gradient as the #__wp wallpaper. We do TWO things
+// so the layer is both visually rich AND legible under adaptiveGlass:
+//   1) set #__wp's OWN background-color to the preset BASE — adaptiveGlass samples
+//      #__wp's computed backgroundColor/backgroundImage (NOT child elements or
+//      ::before), so the base color gives it a correct luminance read.
+//   2) mount the rich .login-bg-gradient child (its ::before blobs + ::after ray)
+//      for the actual aurora visual the glass refracts.
+// prefers-reduced-motion ⇒ a STATIC mesh (no .is-animated), exactly like login.
+function _renderGlassMesh(cfg) {
+  const g = (cfg && cfg.gradient) || {};
+  let wp = document.getElementById(WALLPAPER_ID);
+  if (!wp) {
+    wp = document.createElement('div');
+    wp.id = WALLPAPER_ID;
+    wp.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;';
+    document.body.appendChild(wp);
+  }
+  wp.classList.add('glass-mesh-wp');
+  // Clear any prior image + any prior mesh child, then paint base + mount mesh.
+  wp.style.backgroundImage = '';
+  wp.querySelectorAll('.login-bg-gradient').forEach((c) => c.remove());
+  const animate = !_meshReducedMotion();
+  const el = mountMeshGradient(wp, {
+    animate, preset: g.preset, speed: g.speed, intensity: g.intensity,
+    extraClass: 'glass-mesh-layer',
+  });
+  // The mesh child fills #__wp; force it to the layer's own base so adaptiveGlass
+  // reads the right backdrop luminance off #__wp itself.
+  const base = getComputedStyle(el).getPropertyValue('--lbg-base').trim() || '#2a1c5e';
+  wp.style.backgroundColor = base;
+  document.body.classList.add('has-wallpaper');
+}
+
+/** Apply (or refresh) the glass-theme mesh wallpaper. Resolves the preset from
+ *  the same public login-background config the login page uses (cached), then
+ *  renders it into #__wp. Fail-soft: any error leaves the prior background. */
+export function applyGlassMeshBackground() {
+  try {
+    if (_glassMeshCfg) { _renderGlassMesh(_glassMeshCfg); return; }
+    resolveLoginBackgroundConfig().then((cfg) => {
+      _glassMeshCfg = cfg || { gradient: { preset: 'aurora' } };
+      // Only paint if the glass mesh is still the active pattern (the async
+      // resolve may land after the user switched themes).
+      if (document.body.classList.contains('bg-pattern-' + GLASS_MESH_PATTERN)) {
+        _renderGlassMesh(_glassMeshCfg);
+      }
+    }).catch(() => {
+      _glassMeshCfg = { gradient: { preset: 'aurora' } };
+      if (document.body.classList.contains('bg-pattern-' + GLASS_MESH_PATTERN)) _renderGlassMesh(_glassMeshCfg);
+    });
+  } catch (_) { /* fail-soft: keep whatever background is showing */ }
+}
+
+// Tear down the glass mesh wallpaper (when switching to a non-glass pattern or
+// to a user image). Removes the mesh child + the marker class + the base fill.
+function _clearGlassMesh() {
+  const wp = document.getElementById(WALLPAPER_ID);
+  if (!wp) return;
+  wp.querySelectorAll('.login-bg-gradient').forEach((c) => c.remove());
+  wp.classList.remove('glass-mesh-wp');
+  if (!wp.style.backgroundImage) {
+    // No image either ⇒ remove the layer entirely + restore the opaque page bg.
+    wp.remove();
+    document.body.classList.remove('has-wallpaper');
+  } else {
+    wp.style.removeProperty('background-color');
+  }
+}
+
 export function applyBgPattern(pattern) {
   const p = pattern || 'none';
   document.body.classList.remove(..._BG_CLASSES);
   // Clean up any canvas backgrounds
   document.querySelectorAll('#synapse-canvas, #rain-canvas, #constellations-canvas, #perlin-flow-canvas, #petals-canvas, #sparkles-canvas, #embers-canvas').forEach(c => c.remove());
+  // The glass mesh wallpaper (#__wp) is a special, non-canvas pattern: paint it
+  // via the shared login renderer, mark the body class so the async resolve knows
+  // it's still active, and skip the canvas machinery.
+  if (p === GLASS_MESH_PATTERN) {
+    document.body.classList.add('bg-pattern-' + GLASS_MESH_PATTERN);
+    applyGlassMeshBackground();
+    const ig0 = document.getElementById('theme-bg-intensity-group');
+    const sg0 = document.getElementById('theme-bg-size-group');
+    if (ig0) ig0.style.display = 'none';
+    if (sg0) sg0.style.display = 'none';
+    return;
+  }
+  // Leaving the glass mesh for any other pattern: tear the mesh layer down first.
+  _clearGlassMesh();
   if (p !== 'none') document.body.classList.add('bg-pattern-' + p);
   // Reduced-motion: render a STILL frame of the canvas pattern (not a blank canvas) so
   // canvas-only backgrounds (perlin-flow, embers, …) keep their texture with zero motion (BG-1).
@@ -856,12 +957,70 @@ export function applyBgPattern(pattern) {
   if (sg) sg.style.display = hide ? 'none' : '';
 }
 
+// The previous out-of-the-box default (before the Liquid Glass flip). A saved
+// record that is EXACTLY the pristine old default — telescreen, its canonical
+// palette, and no user customization at all — is the inherited old default, not
+// a deliberate choice; we migrate it forward to the new 'glass' default so a
+// returning player who never picked a theme lands on glass like a fresh one.
+const _PREV_DEFAULT_THEME = 'telescreen';
+
+// A telescreen record is "pristine old default" only if it carries NONE of the
+// markers of a deliberate selection or customization: no explicit-selection
+// stamp, no advanced color overrides, no wallpaper image, no non-default font/
+// density/pattern/effect/tier — i.e. it looks byte-identical to what the old
+// boot path auto-resolved when nothing was stored. ANY of these present ⇒ the
+// user touched it; leave it alone (never stomp a deliberate choice).
+function _isPristineOldDefault(obj) {
+  if (!obj || obj.name !== _PREV_DEFAULT_THEME) return false;
+  if (obj._explicit) return false;                 // stamped as a real selection
+  const c = obj.colors || {};
+  const ref = THEMES[_PREV_DEFAULT_THEME] || {};
+  // Colors must match the canonical telescreen palette (a customized telescreen
+  // — even via the color pickers — has different values and is left untouched).
+  for (const k of ['bg', 'fg', 'panel', 'border', 'red']) {
+    if ((c[k] || '').toLowerCase() !== (ref[k] || '').toLowerCase()) return false;
+  }
+  if (c.advanced) return false;
+  if (obj.bgImage) return false;
+  if (obj.font && obj.font !== DEFAULT_FONT) return false;
+  if (obj.density && obj.density !== DEFAULT_DENSITY) return false;
+  // The pattern/effect/tier, if present, must equal telescreen's own defaults.
+  const defPattern = THEME_DEFAULT_PATTERN[_PREV_DEFAULT_THEME] || 'none';
+  if (obj.bgPattern && obj.bgPattern !== defPattern) return false;
+  if (obj.bgEffectColor && obj.bgEffectColor !== (THEME_DEFAULT_EFFECT_COLOR[_PREV_DEFAULT_THEME] || '')) return false;
+  const defInt = THEME_DEFAULT_INTENSITY[_PREV_DEFAULT_THEME];
+  if (obj.bgEffectIntensity !== undefined && defInt !== undefined && obj.bgEffectIntensity !== defInt) return false;
+  if (obj.bgEffectSize !== undefined && obj.bgEffectSize !== 1) return false;
+  // A non-default tier (telescreen defaults to 'frosted') is a deliberate tweak.
+  const t = resolveGlassTier(obj, _PREV_DEFAULT_THEME);
+  if (t !== defaultGlassTierFor(_PREV_DEFAULT_THEME)) return false;
+  return true;
+}
+
 export function getSaved() {
   const obj = Storage.getJSON(LS_KEY, null);
   // Migration: 'chatgpt' preset was renamed to 'gpt'
   if (obj && obj.name === 'chatgpt') obj.name = 'gpt';
   // Migration: 'sakura' preset was renamed to 'ume'
   if (obj && obj.name === 'sakura') obj.name = 'ume';
+  // Migration: a pristine, never-customized telescreen record is the stale OLD
+  // default — fold it forward to the new glass default (and re-persist so the
+  // server copy + every other device converge). A deliberate / customized
+  // telescreen is left exactly as-is (_isPristineOldDefault returns false).
+  if (_isPristineOldDefault(obj)) {
+    const colors = { ...(THEMES[DEFAULT_THEME]) };
+    delete colors._key;
+    const migrated = {
+      name: DEFAULT_THEME, colors,
+      glassTier: defaultGlassTierFor(DEFAULT_THEME),
+      bgPattern: THEME_DEFAULT_PATTERN[DEFAULT_THEME] || 'none',
+    };
+    try {
+      Storage.setJSON(LS_KEY, migrated);
+      _syncToServer(migrated);
+    } catch (_) {}
+    return migrated;
+  }
   return obj;
 }
 
@@ -882,6 +1041,11 @@ export function save(name, colors, opts) {
     if (opts.glassTier !== undefined) obj.glassTier = opts.glassTier;
     // A chosen wallpaper image (URL or downscaled data URL). Empty ⇒ omit.
     if (opts.bgImage) obj.bgImage = opts.bgImage;
+    // Stamp a DELIBERATE selection so the stale-old-default migration
+    // (_isPristineOldDefault) never folds a theme the user actually chose. The
+    // swatch-click handler passes this; auto-saves (live color edits etc.) don't
+    // need it because they always diverge from the pristine palette anyway.
+    if (opts._explicit) obj._explicit = true;
   }
   Storage.setJSON(LS_KEY, obj);
   _syncToServer(obj);
@@ -927,12 +1091,10 @@ function syncAdvancedPickers(colors) {
 }
 
 export function initThemeUI() {
-  const themePopup = document.getElementById('theme-popup');
-  const themeHeader = document.getElementById('theme-popup-header');
-  if (themePopup && themeHeader && !themePopup.dataset.dragWired) {
-    themePopup.dataset.dragWired = '1';
-    makeDraggable(themePopup, themeHeader);
-  }
+  // The Theme window's drag/geometry is now owned by the OrwellWindow kit
+  // (initThemeKitWindow / togglePopup) — no bespoke makeDraggable wiring here.
+  // (makeDraggable stays exported for other consumers, e.g. sessions.js.)
+  initThemeKitWindow();
 
   // Attach the in-house color picker to every color input in the theme panel.
   // Safe to call repeatedly — the picker marks inputs it's already wrapped.
@@ -968,7 +1130,9 @@ export function initThemeUI() {
       // is meant to be Customize-only — peeking at the page while tweaking
       // colors — so swapping back to Themes (or Schedule) should look
       // exactly like the rest of the app's modals again.
-      const popup = document.getElementById('theme-popup');
+      // Peek fades the KIT FRAME (.ow-window) now — fall back to #theme-popup if
+      // the kit hasn't built yet.
+      const popup = _themePeekTarget();
       if (popup) {
         if (targetId === 'theme-tab-customize') {
           // Reapply the Peek toggle's current state.
@@ -978,9 +1142,9 @@ export function initThemeUI() {
           popup.style.removeProperty('background');
           popup.style.removeProperty('backdrop-filter');
           popup.style.removeProperty('-webkit-backdrop-filter');
-          // Clear the peek tint off the title strip too, so it reverts to
-          // its CSS window-chrome background when leaving Customize.
-          const hdr = document.getElementById('theme-popup-header');
+          // Clear the peek tint off the kit titlebar too, so it reverts to its
+          // CSS window-chrome background when leaving Customize.
+          const hdr = popup.querySelector('.ow-titlebar') || document.getElementById('theme-popup-header');
           if (hdr) hdr.style.removeProperty('background-color');
           popup.querySelectorAll('.admin-card').forEach(c => {
             c.style.removeProperty('background');
@@ -999,17 +1163,16 @@ export function initThemeUI() {
   // cleared when the user swaps to Themes / Schedule.
   (function _wireOpacityToggle() {
     const toggle = document.getElementById('theme-opacity-wrap');
-    const popup = document.getElementById('theme-popup');
-    if (!toggle || !popup || toggle.dataset.bound === '1') return;
+    if (!toggle || toggle.dataset.bound === '1') return;
     toggle.dataset.bound = '1';
     const PEEK = 55; // % opacity when peeking
-    // The title strip carries its OWN opaque var(--win-bg) (CSS, so it
-    // matches the other windows' chrome rather than the page bg). When
-    // peeking, fade it to the same translucent mix as the popup root so the
-    // whole window — header included — goes glassy; clear it on off so the
-    // header reverts to its CSS window-chrome background.
-    const header = document.getElementById('theme-popup-header');
+    // Peek fades the KIT FRAME (.ow-window) — resolve it live each apply (it may
+    // not be built/connected when this wires up). The kit titlebar fades with it
+    // so the whole window — header included — goes glassy.
     const apply = (on) => {
+      const popup = _themePeekTarget();
+      if (!popup) return;
+      const header = popup.querySelector('.ow-titlebar') || document.getElementById('theme-popup-header');
       const cards = popup.querySelectorAll('.admin-card');
       if (on) {
         // Fade the modal + each inner card via color-mix — never element
@@ -1203,7 +1366,7 @@ export function initThemeUI() {
         if (szs) szs.value = String(Math.round(sz * 100));
         _syncGlassTierControl(tier);
         _syncBgSourceControls(img);
-        save(name, colors, { font: f, density: d, bgPattern: (img ? 'none' : p), bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, glassTier: tier, bgImage: img });
+        save(name, colors, { font: f, density: d, bgPattern: (img ? 'none' : p), bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, glassTier: tier, bgImage: img, _explicit: true });
       });
     });
     g.querySelectorAll('.theme-delete-btn').forEach(btn => {
@@ -2105,32 +2268,81 @@ export function makeDraggable(el, handle) {
   makeWindowDraggable(dockTarget, dragOptions);
 }
 
-// Toggle the popup
-export function togglePopup() {
-  const modal = document.getElementById('theme-modal');
-  if (!modal) return;
-  const visible = !modal.classList.contains('hidden');
-  if (visible) {
-    modal.classList.add('hidden');
-  } else {
-    modal.classList.remove('hidden');
+// ── The Theme window is an OrwellWindow kit window (mirrors settings.js) ───────
+// It composes the unified kit: macOS traffic-light controls, the glass chrome,
+// the sans UI font, centered modal placement, scrim + inert background +
+// focus-trap (modal:true), Escape via the ui.js arbiter, and the F5 cross-
+// session geometry. The content node is the existing #theme-popup card, hosted
+// (hidden) in #theme-host until the kit's first open() moves it into .ow-body —
+// exactly the settings pattern (every el('theme-…') wiring still finds it in the
+// display:none host before then). The kit window keeps the id "theme-modal" so
+// every existing consumer (slashCommands tour, keyboard shortcuts, modalManager,
+// the Escape handler) keeps finding it: getElementById('theme-modal') resolves
+// to the .ow-window WHILE OPEN (no `hidden` class ⇒ "open"), and null when closed
+// (the consumers already treat null/hidden as "closed / needs opening").
+let _themeWin = null;
+
+// The element the "Peek" opacity fade targets: the kit frame (.ow-window) once
+// built, else the static #theme-popup card (pre-kit / fallback).
+function _themePeekTarget() {
+  return (_themeWin && _themeWin.el) || document.getElementById('theme-popup');
+}
+
+function initThemeKitWindow() {
+  if (_themeWin || !window.OrwellWindowKit) return _themeWin;
+  const content = document.getElementById('theme-popup');
+  if (!content) return null;
+  _themeWin = window.OrwellWindowKit.create({
+    id: 'theme-modal',
+    title: 'Theme',
+    modal: true,            // scrim + inert background + focus-trap + Escape via ui.js
+    minimizable: false,     // a modal dialog dismisses on Escape — opt out of minimize
+    slotKey: 'theme',       // F5: persisted geometry across sessions
+    resizable: true,
+    minWidth: 320, minHeight: 320,
+    content,                // moved into .ow-body on first open()
+  });
+  return _themeWin;
+}
+
+// On first open the kit has built its titlebar + moved the content into .ow-body.
+// Lift the salvaged "Peek" toggle into the kit titlebar (a right-side accessory,
+// NOT a traffic light) and drop the now-redundant legacy .modal-header (the kit
+// chrome provides the title + close ×). Idempotent. Mirrors settings.js.
+function _promoteThemeChrome() {
+  if (!_themeWin || !_themeWin.el) return;
+  const titlebar = _themeWin.el.querySelector('.ow-titlebar');
+  const peek = _themeWin.el.querySelector('#theme-opacity-wrap');
+  if (titlebar && peek && peek.parentElement !== titlebar) {
+    peek.classList.add('ow-titlebar-accessory');
+    titlebar.appendChild(peek);
   }
+  const legacyHeader = _themeWin.el.querySelector('.modal-header.theme-popup-header')
+    || _themeWin.el.querySelector('.modal-header');
+  if (legacyHeader) legacyHeader.remove();
+}
+
+// Toggle the popup (open if closed, close if open). The kit window is connected
+// only while open, so isConnected is the open-state probe (replaces the old
+// .hidden toggle). Lazily builds the kit on first call.
+export function togglePopup() {
+  const win = initThemeKitWindow();
+  if (!win) return;
+  if (win.el && win.el.isConnected) { win.close(); return; }
+  win.open(document.activeElement);
+  _promoteThemeChrome();
 }
 
 export function closePopup() {
-  const modal = document.getElementById('theme-modal');
-  if (!modal) return;
-  const content = modal.querySelector('.modal-content');
-  if (content && !content.classList.contains('modal-closing')) {
-    content.classList.add('modal-closing');
-    content.addEventListener('animationend', () => {
-      modal.classList.add('hidden');
-      content.classList.remove('modal-closing');
-    }, { once: true });
-    setTimeout(() => { if (!modal.classList.contains('hidden')) { modal.classList.add('hidden'); content.classList.remove('modal-closing'); } }, 250);
-  } else {
-    modal.classList.add('hidden');
-  }
+  // The kit owns the close animation, focus-return, and scrim teardown.
+  if (_themeWin) _themeWin.close();
+}
+
+// Open (idempotent) — used where an explicit open (not a toggle) is wanted.
+export function openPopup() {
+  const win = initThemeKitWindow();
+  if (!win) return;
+  if (!(win.el && win.el.isConnected)) { win.open(document.activeElement); _promoteThemeChrome(); }
 }
 
 // Expose for app.js wiring + AI ui_control
@@ -2689,10 +2901,10 @@ function _initEmbers() {
   draw();
 }
 
-const themeModule = { initThemeUI, togglePopup, closePopup, makeDraggable,
+const themeModule = { initThemeUI, togglePopup, closePopup, openPopup, makeDraggable,
                        THEMES, applyColors, applyFontDensity, applyBgPattern,
                        applyBgEffectColor, applyBgEffectIntensity, applyBgEffectSize,
-                       applyGlassTier, applyFrostedGlass, applyBgImage,
+                       applyGlassTier, applyFrostedGlass, applyBgImage, applyGlassMeshBackground,
                        save, getSaved, saveCustomTheme, deleteCustomTheme,
                        getCustomThemes };
 

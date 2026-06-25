@@ -121,16 +121,15 @@ def test_sourcepin_one_focus_return_implementation():
 
 
 def test_smoke_exercises_the_z_authority_for_real():
-    # The browser gate must drive the F9b pin with TRUSTED clicks: open theme,
-    # park it, restore from the chip, open settings fresh; prove visual order
-    # at the content overlap (elementFromPoint), the Escape order, and the
-    # no-inline-important sweep across every .modal.
+    # The browser gate drives the F9b pin across TWO kit modals (theme migrated to
+    # the OrwellWindow kit, like settings): open theme, open settings ON TOP, prove
+    # the fresh kit modal sits visually ABOVE at the content overlap
+    # (elementFromPoint), the Escape order (top-first), and the no-inline-important
+    # sweep across every kit window.
     smoke = _read("scripts", "browser_smoke.py")
     assert "G14 (DWE audit F9b)" in smoke
-    assert "page.click(\"#minimized-dock .minimized-dock-chip[data-modal-id='theme-modal']\")" in smoke
     assert "elementFromPoint" in smoke
-    assert "ABOVE the dock-restored window" in smoke
-    assert "no .modal carries an inline !important z-index" in smoke
-    assert "parked window holds NO inline !important z" in smoke
-    assert "Escape closes the top window (settings kit modal) FIRST" in smoke
-    assert "second Escape closes the dock-restored window" in smoke
+    assert "a fresh kit modal sits visually ABOVE the earlier one" in smoke
+    assert "no kit window carries an inline !important z-index" in smoke
+    assert "Escape closes the TOP kit modal (settings) FIRST" in smoke
+    assert "the second Escape closes the remaining kit modal (theme)" in smoke

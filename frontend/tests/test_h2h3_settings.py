@@ -133,7 +133,10 @@ def test_appearance_panel_ships_no_theme_card():
 def test_sidebar_theme_entry_and_modal_survive():
     html = _read("static/index.html")
     assert 'id="tool-theme-btn"' in html, "the standing sidebar theme entry must stay"
-    assert 'id="theme-modal"' in html
+    # The theme window migrated to the OrwellWindow kit: its content is hosted
+    # (hidden) in #theme-host and the kit window (id "theme-modal") is built at
+    # runtime by theme.js. The static markup carries the host + content card.
+    assert 'id="theme-host"' in html and 'id="theme-popup"' in html
 
 
 def test_dead_appearance_launcher_wiring_is_gone():
