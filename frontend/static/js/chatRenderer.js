@@ -2305,17 +2305,12 @@ export function addMessage(role, content, modelName, metadata) {
         continueBtn.textContent = '\u25B8';
         continueBtn.addEventListener('click', () => {
           stoppedIndicator.remove();
-          if (window.chatModule) {
-            window.chatModule.setHideUserBubble();
-            window.chatModule.setPendingContinue(wrap);
-            const rawText = wrap.dataset.raw || wrap.querySelector('.body')?.textContent || '';
-            const cutoff = rawText;
-            const msgInput = document.getElementById('message');
-            if (msgInput) {
-              msgInput.value = 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.';
-              const sb = document.querySelector('.send-btn');
-              if (sb) sb.click();
-            }
+          if (window.chatModule && window.chatModule.handleChatSubmit) {
+            const cutoff = wrap.dataset.raw || wrap.querySelector('.body')?.textContent || '';
+            // Headless send (no composer puppeteering); the continuation merges into the same bubble.
+            window.chatModule.handleChatSubmit(null,
+              'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.',
+              { hideUserBubble: true, pendingContinue: wrap });
           }
         });
         stoppedIndicator.appendChild(continueBtn);

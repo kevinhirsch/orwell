@@ -1965,11 +1965,17 @@ def setup_model_routes(model_discovery):
             # an already-corrupted persisted default SELF-HEAL on the next resolve.
             from src.llm_core import is_image_model
             from src.endpoint_resolver import _first_chat_model
-            if (not model or is_image_model(model)) and (
-                getattr(ep, "cached_models", None) or getattr(ep, "pinned_models", None)
-            ):
+            try:
+                visible = _visible_models(getattr(ep, "cached_models", None), getattr(ep, "hidden_models", None), getattr(ep, "pinned_models", None))
+            except Exception:
+                visible = []
+            # Re-derive the chat model when the stored default is unusable: empty, an image model (the
+            # "chat insists on gemini-flash-image" corruption), OR STALE (F) — a model the provider has
+            # since renamed/dropped so it is no longer in the endpoint's visible set (it would otherwise
+            # be dispatched and 404 mid-turn). `model` and `visible` are both exact provider id strings,
+            # so membership is a safe stale check. Self-heals an already-corrupted default on next resolve.
+            if visible and (not model or is_image_model(model) or model not in visible):
                 try:
-                    visible = _visible_models(ep.cached_models, getattr(ep, "hidden_models", None), getattr(ep, "pinned_models", None))
                     picked = _first_chat_model(visible)
                     if picked:
                         model = picked

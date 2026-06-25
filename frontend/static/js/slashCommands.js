@@ -6115,19 +6115,13 @@ async function handleSlashCommand(input) {
         if (md) {
           _showUser();
           const request = args.join(' ').trim();
-          const msgInput = document.getElementById('message');
           const composed =
             `Apply the skill below to my request, following its Procedure / Pitfalls / Verification.\n\n` +
             `--- BEGIN SKILL ---\n${md}\n--- END SKILL ---\n\n` +
             (request ? `Request: ${request}` : `Request: (use the skill as appropriate)`);
-          if (msgInput) {
-            msgInput.value = composed;
-            const form = document.getElementById('chat-form');
-            if (form && typeof form.requestSubmit === 'function') {
-              form.requestSubmit();
-            } else if (form) {
-              form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-            }
+          // Headless send (no composer puppeteering): the composed skill prompt goes straight to the model.
+          if (window.chatModule && window.chatModule.handleChatSubmit) {
+            window.chatModule.handleChatSubmit(null, composed);
           }
           return true;
         }
@@ -6170,16 +6164,9 @@ export function initSlashCommands(deps) {
     const trigger = e.target.closest('.setup-trigger-link');
     if (trigger) {
       e.preventDefault();
-      const messageInput = document.getElementById('message');
-      if (messageInput) {
-        messageInput.value = '/setup';
-        messageInput.dispatchEvent(new Event('input', { bubbles: true }));
-        messageInput.focus();
-        const chatForm = document.getElementById('chat-form');
-        if (chatForm) {
-          chatForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-        }
-      }
+      // Run the /setup slash command directly (no composer puppeteering / synthesized form submit).
+      handleSlashCommand('/setup');
+      document.getElementById('message')?.focus();
       return;
     }
 
