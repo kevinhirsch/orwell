@@ -52,11 +52,30 @@ Drive {
 
 ### How a drive *plays out* — three tiers of the same spectrum
 
+The crux (review ruling #5): **low and high touch DIFFERENT ballots.** A quiet lean moves only the
+*owner's own* vote (their will to act on their own grudge — one ballot); a campaign sways *other*
+voters (lobbying). This is what keeps the lean from double-counting the threat the vote already
+weights house-wide — a low drive can never bias the whole electorate, only its owner's single vote.
+
 | Intensity | What it does | Mechanism |
 |---|---|---|
-| **low** (a lean) | colors who they cluster with, how they vote at the margin, and the *framing* of their voice ("watch your back") — no lobbying, no campaign object | a small, bounded vote lean + presence/voice flavor |
+| **low** (a lean) | the owner's OWN vote leans toward their target, plus who they cluster with and the *framing* of their voice ("watch your back") — no lobbying, no campaign object, never sways anyone else | a small bounded term on the **owner's own** ballot + presence/voice flavor |
 | **mid** (working it) | begins lobbying — tells an ally, plants a seed; belief diffuses (`knownTo`) | promotes toward a campaign |
-| **high** (a campaign) | the full 0085 `Campaign` — sustained lobbying, the seeded vote tilt | **IS** an 0085 campaign |
+| **high** (a campaign) | the full 0085 `Campaign` — sustained lobbying that sways OTHER voters, the seeded tilt | **IS** an 0085 campaign |
+
+A drive's vote effect is **exactly one** of these (the spectrum is a single point, not additive): a
+promoted drive's effect is the **campaign tilt**, never the campaign tilt *plus* the owner's lean.
+
+**Only `target` drives touch the vote** (ruling #7). `self-preserve` has no low-lean — a nominee can't
+vote on their own eviction, so it acts *only* at the campaign tier (lobbying others to save them);
+`lay-low` / `build` / `win-power` are **behavioral-only** (clustering, voice, alliance texture) and
+never touch the seeded vote.
+
+**Drives are STICKY** (ruling #6): motivation is not re-rolled fresh each tick — a houseguest
+**commits** to their read (their target, their lay-low posture) and holds it until the board genuinely
+shifts (the target is evicted or wins the veto; the owner lands on the block). Hysteresis keeps the
+house's agendas coherent turn to turn instead of flip-flopping — the same commitment 0085's `replan`
+already gives a campaign, extended down to the quiet tier.
 
 So **`formCampaigns` is reframed**: it no longer *invents* a campaign from a bare threshold — it
 **promotes the highest-intensity drives into campaigns**. The cap (4) becomes a cap on *loud, active
@@ -73,15 +92,19 @@ fixes ship alongside; the drive gives them an anchor.)
 
 ## Engine seams
 
-- `src/engine/campaigns.ts` — add the `Drive` type + `deriveDrive(actor, board, rng)` (pure,
-  perspective-bound) and `driveConstants` (intensity weights, the promote thresholds, archetype
-  aggression). `formCampaigns` is reframed to **promote drives ≥ the campaign threshold** (highest
-  intensity first, capped), so the existing campaign machinery is unchanged downstream.
-- `GameSessionAdapter.campaignTick` — compute every active houseguest's drive each tick (engine-only),
-  promote to campaigns under the cap, and expose a **low-intensity lean** to `ctx().campaignTiltFor`
-  (a small bounded term for `target`-drives below the campaign tier, so a quiet grudge still nudges a
-  vote a little — far less than a full campaign). All behind the existing `ORWELL_CAMPAIGNS` flag and on
-  the dedicated rng ⇒ calibration byte-identical when off.
+- `src/engine/campaigns.ts` — add the `Drive` type + `deriveDrive(actor, board, prior, rng)` (pure,
+  perspective-bound, **sticky** — it takes the prior drive and only re-aims on a real board change) and
+  `driveConstants` (intensity weights, the promote threshold, archetype aggression, the low-lean
+  weight, the hysteresis margin). `formCampaigns` is reframed to **promote drives ≥ the campaign
+  threshold** (highest intensity first, capped), so the existing campaign machinery is unchanged
+  downstream.
+- `GameSessionAdapter.campaignTick` — compute + carry every active houseguest's (sticky) drive each
+  tick (engine-only); promote the top ones to campaigns under the cap. The **low lean** enters
+  `ctx().campaignTiltFor` as a small bounded term on the **OWNER'S OWN ballot only** (owner ∈ voters,
+  the nominee = their `target`) — *not* the lobbied-voter tilt a campaign applies — so a quiet grudge
+  moves one vote, never the electorate. A *promoted* drive applies the campaign tilt instead (never
+  both). Only `target` drives contribute; `self-preserve`/`lay-low`/`build`/`win-power` add no own-ballot
+  term. All behind `ORWELL_CAMPAIGNS` on the dedicated rng ⇒ calibration byte-identical when off.
 - Drives are **never stored as a number on any projection** and never crossed to the player; they
   surface only through behavior (clustering, voice framing, lobbying) + the existing pathways.
 
@@ -96,6 +119,16 @@ fixes ship alongside; the drive gives them an anchor.)
   but only ≤ cap are promoted to active campaigns; the rest still carry a (testable) lean.
 - **Promotion is monotonic:** raising a drive's intensity past the threshold promotes it to a campaign;
   below, it stays a lean (a small vote nudge, strictly less than a campaign's tilt).
+- **The lean moves only the OWNER's ballot (ruling #5):** a low `target` drive raises ONLY the owner's
+  own vote against their target — a third party's vote is unmoved by it (only a *campaign* sways
+  others). A promoted drive applies the campaign tilt, NOT both. Asserted at the vote: owner's vote
+  shifts, a bystander's does not.
+- **Drives are STICKY (ruling #6):** across ticks with an unchanged board, a houseguest keeps the same
+  target/posture (no flip-flop); it re-aims ONLY on a real board change (target evicted/veto-safe, or
+  the owner nominated). A property test ticks a stable board and asserts the drive holds.
+- **Only `target` drives touch the vote (ruling #7):** a `lay-low`/`build`/`win-power` drive adds no
+  vote term (behavioral only); `self-preserve` adds none at the low tier (a nominee can't vote on
+  themselves) — asserted: these motivations leave the seeded vote byte-identical.
 - **Perspective-bound (the omniscience ban holds):** a drive is computed from the owner's OWN reads;
   a houseguest's lean/target never reflects a campaign or threat they have no pathway to.
 - **Calibration byte-identical when off:** with `ORWELL_CAMPAIGNS` unset, no drive is computed and no
@@ -116,6 +149,15 @@ fixes ship alongside; the drive gives them an anchor.)
    nudges the player's drive (consistent with 0085 keeping player campaigns as pure player-knowledge).
 4. ✅ **Keep the house legible** — the loud cap stays at **`maxConcurrent` 4** (≈3–5 active campaigns
    mid-game); the rest simmer. The cap limits the *loud* layer only — everyone still carries a drive.
+5. ✅ **The low lean moves only the OWNER's own ballot** (decided in kink review) — a quiet `target`
+   grudge tilts the owner's single vote, never the electorate (that's the campaign tier's job). This
+   avoids double-counting the threat the vote already weights house-wide, and is the cleaner concept:
+   *your own will to act* vs. *working others*. A drive's vote effect is exactly one tier, never additive.
+6. ✅ **Drives are STICKY** — a houseguest commits to their read and holds it until the board genuinely
+   shifts (target gone/veto-safe, or owner nominated). Hysteresis, not a per-tick re-roll — the house's
+   agendas stay coherent turn to turn.
+7. ✅ **Only `target` drives touch the vote** — `self-preserve` acts only at the campaign tier (a nominee
+   can't vote on their own eviction); `lay-low`/`build`/`win-power` are behavioral-only.
 
 ## Open questions / defaults (resolve at build)
 
