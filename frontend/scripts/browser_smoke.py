@@ -1006,7 +1006,11 @@ def main() -> int:
               if (gear) gear.focus();
               const w = window.OrwellWindowKit.create({
                 id: 'ow-smoke-window', title: 'Production Test', slot: 'top-left', slotKey: 'owsmoke',
-                content: '<p>kit smoke</p>', icon: '' });
+                // #896: give the window content with a definite WIDE intrinsic width (700px) so the
+                // L11 corner/edge resize drags below stay UNDER the natural-content max-width cap and
+                // keep exercising real resizing. (A trivial-content window is now correctly capped near
+                // its content width — "no point going wider" — which the dedicated #896 checks assert.)
+                content: '<div style="width:700px">kit smoke</div>', icon: '' });
               w.open(document.activeElement);
               window._owSmoke = w;
               const el = document.getElementById('ow-smoke-window');
@@ -1129,6 +1133,74 @@ def main() -> int:
                   f"(dw {e_dw:.0f}~{EDGE_DW}, tol +/-{DRAG_TOL}, w {rmid['width']:.0f}->{redge['w']})")
             check(bool(redge["saved"]) and '"w"' in (redge["saved"] or ""),
                   f"L11: the resized geometry persists under winsize-ow-smoke-window ({redge['saved']!r})")
+
+            # #896 — the MAX-WIDTH CAP. A window can't be dragged past min(natural content width,
+            # viewport − margin): intrinsic-width content stops AT its content width (no dead space),
+            # reflow content (no finite content cap) stops at the viewport cap with a clear edge gap.
+            # First assert the exported cap math directly (deterministic), then prove a real over-drag
+            # lands at it for both content shapes.
+            cap = page.evaluate("""async () => {
+              const mod = await import('/static/js/windowResize.js');
+              const vw = window.innerWidth;
+              const mk = (id, html) => {
+                document.querySelectorAll('#'+id).forEach(n => n.remove());
+                const w = window.OrwellWindowKit.create({ id, title: id, content: html, icon: '' });
+                w.open(); return document.getElementById(id);
+              };
+              // Intrinsic: a fixed-width block → content cap binds, well under the viewport cap.
+              const ei = mk('ow-cap-intrinsic', "<div style='width:420px'>fixed</div>");
+              await new Promise(r => requestAnimationFrame(r));
+              const capI = Math.round(mod.windowMaxWidth(ei, 240));
+              // Reflow: a long paragraph that wraps to any width → content cap exceeds the viewport,
+              // so the cap is the viewport cap (innerWidth − margin*2 == vw − 24).
+              const er = mk('ow-cap-reflow', "<p style='margin:0'>" + ("wraps to any width ").repeat(40) + "</p>");
+              await new Promise(r => requestAnimationFrame(r));
+              const capR = Math.round(mod.windowMaxWidth(er, 240));
+              ei.remove(); er.remove();
+              return { vw, capI, capR, viewportCap: vw - 24 };
+            }""")
+            # intrinsic content cap binds: well under the viewport cap, ~ the content's own width.
+            check(cap["capI"] < cap["viewportCap"] - 100 and 380 <= cap["capI"] <= 560,
+                  f"#896: intrinsic content caps AT content width, not the viewport "
+                  f"(cap={cap['capI']}, viewportCap={cap['viewportCap']})")
+            # reflow content has no finite content cap → the viewport cap governs (vw − margin*2).
+            check(cap["capR"] == cap["viewportCap"],
+                  f"#896: reflow content caps at the viewport (cap={cap['capR']} == vw-24={cap['viewportCap']})")
+            # a real over-drag of an intrinsic window stops at/near the content cap (no dead space)
+            # and stays well inside the viewport (an obvious margin to the edge).
+            overdrag = page.evaluate("""async () => {
+              const id = 'ow-cap-drag';
+              document.querySelectorAll('#'+id).forEach(n => n.remove());
+              Object.keys(localStorage).filter(k => /^winsize-ow-cap-drag/.test(k)).forEach(k => localStorage.removeItem(k));
+              const w = window.OrwellWindowKit.create({ id, title: id,
+                content: "<div style='width:400px'>fixed</div>", icon: '' });
+              w.open(); const el = document.getElementById(id);
+              el.style.setProperty('transform','none','important'); el.style.setProperty('right','auto','important');
+              el.style.setProperty('bottom','auto','important'); el.style.setProperty('left','40px','important');
+              el.style.setProperty('top','60px','important'); el.style.setProperty('width','320px','important');
+              el.style.setProperty('height','220px','important');
+              await new Promise(r => setTimeout(r, 250));
+              window.__capDrag = el; return el.getBoundingClientRect().toJSON();
+            }""")
+            cdx = overdrag["x"] + overdrag["width"] - 2
+            cdy = overdrag["y"] + overdrag["height"] / 2
+            page.mouse.move(cdx, cdy)
+            page.mouse.down()
+            for i in range(1, 13):  # drag the right edge FAR past the screen edge
+                page.mouse.move(cdx + (cap["vw"] + 800) * i / 12, cdy)
+            page.mouse.up()
+            page.wait_for_timeout(150)
+            capped = page.evaluate("document.getElementById('ow-cap-drag').getBoundingClientRect().toJSON()")
+            page.evaluate("window.__capDrag && window.__capDrag.remove()")
+            # width never crossed the content cap (intrinsic content → ~content width, well under viewport)
+            check(round(capped["width"]) <= cap["capI"] + 4,
+                  f"#896: an over-dragged intrinsic window stops at the content cap "
+                  f"(width={capped['width']:.0f} <= {cap['capI']}+4)")
+            # and the right edge keeps a clear gap to the viewport — never flush, never past it
+            right_gap = cap["vw"] - (capped["x"] + capped["width"])
+            check(right_gap >= 6,
+                  f"#896: a maxed window keeps an obvious margin to the viewport edge "
+                  f"(rightGap={right_gap:.0f}px >= 6)")
 
             page.mouse.move(640, 500)  # neutral ground: the arbiter's hovered-window pass must not fire
             page.evaluate("document.body.focus()")

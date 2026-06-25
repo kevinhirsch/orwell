@@ -28,7 +28,7 @@
 // (the F-3 ratchet pins it).
 import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
-import { makeWindowResizable } from './windowResize.js';
+import { makeWindowResizable, windowMaxWidth } from './windowResize.js';
 import { isNarrow } from './platform.js';
 
 // A2 (#573, DWE audit F9): the kit no longer owns a PRIVATE z counter. The kit's
@@ -671,9 +671,13 @@ export class OrwellWindow {
       const gestureActive = document.body.classList.contains('window-resizing-active');
       if (this.el && !this._docked && !gestureActive) {
         if (typeof state.w === 'number' && typeof state.h === 'number') {
-          this.el.style.width = Math.max(this.o.minWidth, Math.min(state.w, window.innerWidth)) + 'px';
-          this.el.style.height = Math.max(this.o.minHeight, Math.min(state.h, window.innerHeight)) + 'px';
+          // #896: a width synced from another device clamps to the SAME max cap as a local resize —
+          // min(content, viewport−margin). Clear maxWidth FIRST so windowMaxWidth reads the true
+          // content want (not the 64vw CSS cap). A remote window from a wider screen lands bounded.
           this.el.style.maxWidth = 'none'; this.el.style.maxHeight = 'none';
+          const wCap = windowMaxWidth(this.el, this.o.minWidth);
+          this.el.style.width = Math.min(Math.max(this.o.minWidth, state.w), wCap) + 'px';
+          this.el.style.height = Math.max(this.o.minHeight, Math.min(state.h, window.innerHeight)) + 'px';
           try { localStorage.setItem('winsize-' + this.o.id, JSON.stringify({ w: Math.round(state.w), h: Math.round(state.h) })); } catch (_) {}
         }
         if (typeof state.x === 'number' && typeof state.y === 'number') {
@@ -703,11 +707,13 @@ export class OrwellWindow {
     // 3. Shrink-to-fit FIRST so the post-shrink size drives the position clamp.
     const r0 = this.el.getBoundingClientRect();
     const inset = bannerInset();  // #758: subtract a top banner so a tall window COMPRESSES to fit
+    // #896: width ceiling = the shared max cap min(content, viewport−margin) (not a bare viewport−8).
     const maxW = window.innerWidth - 8;
     const maxH = window.innerHeight - inset - 8;
-    if (r0.width > maxW) {
-      this.el.style.width = Math.max(this.o.minWidth, maxW) + 'px';
+    const widthCeil = windowMaxWidth(this.el, this.o.minWidth);
+    if (r0.width > widthCeil) {
       this.el.style.maxWidth = 'none';
+      this.el.style.width = Math.max(this.o.minWidth, widthCeil) + 'px';
     }
     if (r0.height > maxH) {
       this.el.style.height = Math.max(this.o.minHeight, maxH) + 'px';
@@ -715,10 +721,9 @@ export class OrwellWindow {
     }
     // 1. Slotted: let the slot engine re-anchor + clamp (it runs clampPos itself).
     if (this._slot) { this._slot.restack(); }
-    // 2. Clamp this window's own position into the viewport. clampPos only guarantees
-    //    a SLIVER stays on-screen (≥200px of a tall window's top); on a viewport SHRINK
-    //    we want the WHOLE window in view whenever it now fits, so pull left/top back so
-    //    the right/bottom edges land inside too (never past the 4px margin on either side).
+    // 2. Clamp this window's own position into the viewport. clampPos only guarantees a
+    //    SLIVER stays on-screen; on a viewport SHRINK we want the WHOLE window in view when
+    //    it fits, so pull left/top back so right/bottom land inside the margin.
     const m = 4;
     const topFloor = m + inset;  // #758: the top floor clears the banner
     const r = this.el.getBoundingClientRect();
@@ -746,7 +751,12 @@ export class OrwellWindow {
     e.preventDefault();
     const r = this.el.getBoundingClientRect();
     if (e.shiftKey && this.o.resizable) {
-      const w = Math.max(200, Math.min(window.innerWidth - 8, r.width + d[0]));
+      // #896: keyboard resize honors the SAME max cap as pointer resize — never grow a window past
+      // min(content, viewport−margin) (only enforce the cap when GROWING width, so a shrink from an
+      // already-oversized restored size still works). Floor stays the keyboard's own 200px.
+      const want = r.width + d[0];
+      const wCap = (d[0] > 0) ? Math.max(r.width, windowMaxWidth(this.el, this.o.minWidth)) : Infinity;
+      const w = Math.max(200, Math.min(wCap, window.innerWidth - 8, want));
       const h = Math.max(120, Math.min(window.innerHeight - 8, r.height + d[1]));
       this.el.style.width = w + 'px'; this.el.style.height = h + 'px';
       return;
