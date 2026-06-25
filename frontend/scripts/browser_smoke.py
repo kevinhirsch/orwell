@@ -254,7 +254,10 @@ def main() -> int:
                     return { sel, ts: getComputedStyle(el).textShadow };
                   };
                   out.darkInkShadows = [
-                    '.og-probe-lol .og-body', '.rail-probe-lol .gadget-rail-title',
+                    // NB (#8/#9): '.rail-probe-lol .gadget-rail-title' was removed — the rail head is
+                    // now LIGHT ink over the dark container, so its DARK legibility halo is CORRECT
+                    // (the dark halo is the bug only under DARK ink, not light ink).
+                    '.og-probe-lol .og-body',
                     '.adm-probe-lol', '#sidebar',
                     // #742/#725: the dark-ink window-kit titlebar must carry the LIGHT halo, never
                     // the dark --ow-glass-text-shadow (a dark shadow under dark ink = a smudge).
@@ -310,9 +313,11 @@ def main() -> int:
                           "picker", "pickerLabel", "menu",
                           # #725 kit-level: gadget card (title/full/muted) + settings row
                           "gadgetTitle", "gadgetFull", "gadgetMuted", "settingsRow",
-                          # gadget RAIL HEADER (outside the card dark-ink scope): "The House"
-                          # title + the rail control glyph — both must be dark on the light glass.
-                          "railTitle", "railClose",
+                          # NB (#8/#9): the gadget RAIL HEADER ("The House" title + controls) is NOT
+                          # in this dark-ink list anymore — the rail is a TRANSPARENT container over
+                          # the DARK app, so dark ink rendered it BLACK-on-black / illegible (owner
+                          # report). It now takes LIGHT --fg ink + a dark halo (like the dock chips /
+                          # chat bubbles); its legibility is asserted separately below.
                           # #742 window-kit titlebar — the .ow-title over the light-glass titlebar
                           # must be dark ink (it was ~1.09:1 light-on-light before the #742 fix).
                           "kitTitle"):
@@ -323,6 +328,17 @@ def main() -> int:
                 check(_l is not None and _l < 0.4,
                       f"no light-on-light: {_name} text is dark ink on the light glass "
                       f"(lum={_l}, color={_p.get('color')})")
+            # #8/#9: the gadget RAIL HEADER ("The House") is over the DARK app (transparent
+            # container), so it must be LIGHT, LEGIBLE ink — never the dark #16191f that rendered it
+            # black-on-black. Assert the title + control are LIGHT (high luminance) under glass.
+            for _rname in ("railTitle", "railClose"):
+                _rp = lol.get(_rname) or {}
+                if _rp.get("missing"):
+                    continue
+                _rl = _rp.get("lum")
+                check(_rl is not None and _rl >= 0.4,
+                      f"#8/#9: {_rname} is LIGHT, legible ink over the dark rail container "
+                      f"(not black-on-black) (lum={_rl}, color={_rp.get('color')})")
             # generic sweep over every text node on glass chrome — nothing light-on-light.
             _sweep = lol.get("sweepLight") or []
             check(not _sweep,

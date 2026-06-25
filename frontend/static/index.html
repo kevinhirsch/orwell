@@ -1409,9 +1409,12 @@
         <span class="grail-chevron" aria-hidden="true">›</span>
       </button>
       <span class="gadget-rail-title">The House</span>
-      <button class="gadget-rail-rearrange" id="gadget-rail-rearrange" type="button" title="Rearrange gadgets" aria-label="Rearrange gadgets" aria-pressed="false">⠿</button>
-      <button class="gadget-rail-swap" id="gadget-rail-swap" type="button" title="Swap sides" aria-label="Swap the control room to the other side">⇄</button>
-      <button class="gadget-rail-close" id="gadget-rail-close" type="button" title="Close" aria-label="Close the control room">×</button>
+      <!-- #8/#9: SVG LINE-ICON controls (were black-on-black text glyphs ⠿ ⇄ × — illegible under
+           the glass theme). currentColor stroke icons matching the kit's icon language; the
+           legible ink + halo come from the .gadget-rail-head light-ink rule in style.css. -->
+      <button class="gadget-rail-rearrange" id="gadget-rail-rearrange" type="button" title="Rearrange gadgets" aria-label="Rearrange gadgets" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="6" r="1.3"/><circle cx="16" cy="6" r="1.3"/><circle cx="8" cy="12" r="1.3"/><circle cx="16" cy="12" r="1.3"/><circle cx="8" cy="18" r="1.3"/><circle cx="16" cy="18" r="1.3"/></svg></button>
+      <button class="gadget-rail-swap" id="gadget-rail-swap" type="button" title="Swap sides" aria-label="Swap the control room to the other side"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg></button>
+      <button class="gadget-rail-close" id="gadget-rail-close" type="button" title="Close" aria-label="Close the control room"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="gadget-rail-body" id="gadget-rail-body"></div>
     <!-- The collapsed icon strip is DERIVED from the gadget registry in orwellGadgetRail.js —

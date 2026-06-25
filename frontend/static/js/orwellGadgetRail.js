@@ -49,6 +49,37 @@
   ];
   var REG_BY_ID = {};
   REGISTRY.forEach(function (g) { REG_BY_ID[g.id] = g; });
+
+  // ── SVG LINE ICONS (#8/#9) ────────────────────────────────────────────────
+  // The condensed strip used literal EMOJI (📋 clipboard, 🧭 compass, …), which break the
+  // app's SVG line-icon visual language (owner report). Render proper stroke icons instead:
+  // 24×24 viewBox, fill:none, stroke:currentColor, weight 2, round caps — identical to the
+  // #gadget-rail-open glyph in index.html and the rest of the kit's iconography. Keyed by
+  // gadget id; the registry `icon` emoji stays as the accessibility-free TOOLTIP fallback only
+  // (aria-label carries the real name). Adding a gadget: add an icon here too.
+  function _svg(inner) {
+    return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+           ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+           inner + '</svg>';
+  }
+  var SVG_ICON = {
+    // clipboard / production notes (House Status)
+    "orwell-status": _svg('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h4"/>'),
+    // handshake → two clasped hands, simplified (Your Deals)
+    "orwell-deals": _svg('<path d="M11 17l-2.5 2.5a1.8 1.8 0 0 1-2.6-2.6L9 13.4"/><path d="M13 7l2.5-2.5a1.8 1.8 0 0 1 2.6 2.6L15 10"/><path d="M8.5 12.5l3 3M11.5 9.5l3 3"/>'),
+    // two people (Pinned Cast)
+    "orwell-cast-pin": _svg('<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.5a3 3 0 0 1 0 5M21 20a6 6 0 0 0-4-5.7"/>'),
+    // compass (Where You Are)
+    "orwell-presence": _svg('<circle cx="12" cy="12" r="9"/><path d="M16 8l-2.5 5.5L8 16l2.5-5.5z"/>'),
+    // moon (Nightfall)
+    "orwell-night": _svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+    // trophy (The Finale)
+    "orwell-finale": _svg('<path d="M7 4h10v4a5 5 0 0 1-10 0z"/><path d="M7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3"/><path d="M10 13.5V17M14 13.5V17M8 20h8"/>'),
+    // clapperboard (The Cast)
+    "orwell-cast": _svg('<rect x="3" y="8" width="18" height="12" rx="1"/><path d="M3 8l2.5-4 4 2 4-2 4 2"/><path d="M5.5 4L8 8M9.5 6L12 10"/>'),
+    // film reel (Season Recap)
+    "orwell-retro": _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>')
+  };
   // Registry-declared ids, in canonical order — the base sequence the strip + inline `order`
   // both derive from (the per-user saved order, when present, takes precedence).
   function registryIds() {
@@ -172,7 +203,10 @@
       b.setAttribute("data-grail-gadget", id);
       b.title = g.title;
       b.setAttribute("aria-label", g.title);
-      b.textContent = g.icon;
+      // #8/#9: render the SVG line icon (consistent with the app's icon language); fall back to
+      // the registry emoji only if an id somehow lacks an SVG entry (keeps a label visible).
+      if (SVG_ICON[id]) b.innerHTML = SVG_ICON[id];
+      else b.textContent = g.icon;
       b.addEventListener("click", function () { focusGadget(id); });
       strip.appendChild(b);
     });
