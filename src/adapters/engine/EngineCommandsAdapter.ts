@@ -10,7 +10,8 @@ import { SeededRandom } from "../random/SeededRandom";
 import type { RelationshipModel, InteractionType } from "../../engine/relationships";
 import { foldHiddenImpact, foldGenerativeConsequence } from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
-import type { Occupancy } from "../../domain/house";
+import { PRESENCE } from "../../engine/presenceConstants";
+import { isPrivateRoom, zonesInEarshot, type Occupancy, type Zone } from "../../domain/house";
 import { StaleBeatError, EngineRefusal } from "../../domain/errors";
 import { IMAGE_BUDGET } from "../../engine/imageConstants";
 
@@ -48,6 +49,14 @@ export class EngineCommandsAdapter implements EngineCommands {
   private livingProvider?: () => Iterable<EntityId>;
   /** The live occupancy ground truth (0049); when unset, scenes are placeless (standalone — prior behavior). */
   private presenceProvider?: () => Occupancy | null;
+  /**
+   * The live SUB-ZONE of a houseguest in a zoned big room (0077 Phase 2, OPT-IN). When wired, co-presence
+   * witnessing is zone-scoped: a bystander in the SAME room but a DIFFERENT, out-of-earshot zone (the
+   * far end of the backyard) is NOT auto-added as a witness — two groups can share a big room without
+   * each overhearing the other. UNWIRED ⇒ every same-room occupant witnesses, exactly as the pre-0077
+   * build (back-compatible). Pure read-side; never a new rng draw, so calibration is untouched.
+   */
+  private zoneProvider?: (id: EntityId) => Zone | undefined;
   /**
    * L27: index a recorded social scene into a houseguest's SEMANTIC recall memory (0024). Every
    * houseguest who was in a scene remembers its SUMMARY, so later narrative is built from the STORE
@@ -114,6 +123,11 @@ export class EngineCommandsAdapter implements EngineCommands {
     this.presenceProvider = fn;
   }
 
+  /** Wire the live zone reader (0077) so co-presence witnessing is earshot-scoped within a big room. */
+  setZoneProvider(fn: (id: EntityId) => Zone | undefined): void {
+    this.zoneProvider = fn;
+  }
+
   /** Wire the semantic-recall index (L27/0024) so a recorded social scene becomes recallable later. */
   setSoulMemo(fn: (hg: EntityId, content: string) => void): void {
     this.soulMemo = fn;
@@ -170,9 +184,16 @@ export class EngineCommandsAdapter implements EngineCommands {
     // kept (presence only ADDS, never drops). Placeless (no provider / no room) keeps prior behavior.
     const occupancy = this.presenceProvider?.() ?? null;
     const room = occupancy?.get(req.initiator);
+    // 0077: the scene's earshot zone is the initiator's. A same-room bystander only WITNESSES if they
+    // share earshot (same/adjacent zone) — the far end of a big room (workout corner vs. poolside) does
+    // NOT. With no zone provider wired, both zones read `undefined`, `zonesInEarshot` is always true, and
+    // every same-room occupant witnesses, byte-identical to the pre-0077 build.
+    const sceneZone = occupancy && room ? this.zoneProvider?.(req.initiator) : undefined;
     if (occupancy && room) {
       for (const [id, where] of occupancy) {
-        if (where === room && !witnessSet.includes(id)) witnessSet.push(id);
+        if (where !== room || witnessSet.includes(id)) continue;
+        if (!zonesInEarshot(room, sceneZone, this.zoneProvider?.(id))) continue; // out of earshot across the big room
+        witnessSet.push(id);
       }
     }
     // Derive the id + ts from the store's current size (B40/audit C2): monotonic and restart-safe —
@@ -192,6 +213,9 @@ export class EngineCommandsAdapter implements EngineCommands {
       rollOverhears({
         eventId, room, content: req.content, participants: witnessSet,
         occupancy, knowledge: this.knowledge, rng: this.rng,
+        // 0077: a scene behind a closed door is harder to overhear. Player channel only — its own
+        // isolated `commands:` rng stream — so the off-screen society/calibration spine is untouched.
+        muffle: isPrivateRoom(room) ? PRESENCE.doorMuffle : 1,
       });
     }
     // Consequence (0023): the initiator's action moves how the OTHERS feel about them — a real,

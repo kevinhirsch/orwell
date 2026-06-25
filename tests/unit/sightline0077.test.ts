@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  HOUSE_ROOMS, HOUSE_SIGHTLINE, HOUSE_ADJACENCY, areVisible, areAdjacent, isPrivateRoom, type Room,
+  HOUSE_ROOMS, HOUSE_SIGHTLINE, HOUSE_ADJACENCY, areVisible, areAdjacent, isPrivateRoom,
+  ROOM_ZONES, isZonedRoom, zonesFor, zonesInEarshot, pickZone, type Room,
 } from "../../src/domain/house";
 
 /**
@@ -77,6 +78,49 @@ describe("0077 sightline — eyeshot is the privacy structure", () => {
         const bothCore = PUBLIC_CORE.includes(a) && PUBLIC_CORE.includes(b);
         expect(bothCore || areAdjacent(a, b), `${a}→${b} sightline has no opening`).toBe(true);
       }
+    }
+  });
+});
+
+describe("0077 zones — earshot subdivides a big room (eyeshot stays room-wide)", () => {
+  it("only the big rooms are zoned; every other room is a single space", () => {
+    expect([...ROOM_ZONES.keys()].sort()).toEqual(["backyard", "lounge"]);
+    for (const r of HOUSE_ROOMS) {
+      if (r === "backyard" || r === "lounge") expect(isZonedRoom(r), `${r} should be zoned`).toBe(true);
+      else { expect(isZonedRoom(r), `${r} should NOT be zoned`).toBe(false); expect(zonesFor(r)).toEqual([]); }
+    }
+    expect(zonesFor("backyard")).toEqual(["poolside", "patio", "workout"]);
+    expect(zonesFor("lounge")).toEqual(["couches", "window-nook"]);
+  });
+
+  it("earshot is same-or-adjacent zone; the backyard's two ends are out of earshot", () => {
+    // The pool and the workout corner are the line's two ends — NOT in earshot (the BDD case).
+    expect(zonesInEarshot("backyard", "poolside", "workout")).toBe(false);
+    // Adjacent zones carry a residual overhear.
+    expect(zonesInEarshot("backyard", "poolside", "patio")).toBe(true);
+    expect(zonesInEarshot("backyard", "patio", "workout")).toBe(true);
+    // Same zone is always in earshot; symmetric.
+    expect(zonesInEarshot("backyard", "patio", "patio")).toBe(true);
+    expect(zonesInEarshot("backyard", "workout", "poolside")).toBe(false);
+    // The lounge's two corners are deliberately separated — never in mutual earshot.
+    expect(zonesInEarshot("lounge", "couches", "window-nook")).toBe(false);
+  });
+
+  it("an un-zoned room (or absent zone info) is one space — pre-zone behavior preserved", () => {
+    // Same-room co-presence in an un-zoned room is always in earshot (no subdivision).
+    expect(zonesInEarshot("kitchen", "anything", "else")).toBe(true);
+    expect(zonesInEarshot("bedroom-a", undefined, undefined)).toBe(true);
+    // A missing zone on either side ⇒ treated as the same single space (back-compatible).
+    expect(zonesInEarshot("backyard", undefined, "workout")).toBe(true);
+    expect(zonesInEarshot("backyard", "poolside", undefined)).toBe(true);
+  });
+
+  it("pickZone is deterministic, in-range, and undefined for an un-zoned room", () => {
+    expect(pickZone("kitchen", 7)).toBeUndefined();
+    for (let k = -5; k < 12; k++) {
+      const z = pickZone("backyard", k);
+      expect(z !== undefined && zonesFor("backyard").includes(z), `key ${k} → in-range zone`).toBe(true);
+      expect(pickZone("backyard", k)).toBe(pickZone("backyard", k)); // stable for a given key
     }
   });
 });

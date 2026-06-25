@@ -81,6 +81,9 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // House presence (0049): recorded scenes are grounded in the live occupancy — co-present
   // houseguests witness them; occupants of adjacent rooms may overhear (both directions).
   commands.setPresenceProvider(() => session.occupancy());
+  // 0077 Phase 2: the live sub-zone reader, so co-presence witnessing in a big room (the backyard, the
+  // lounge) is earshot-scoped — the far end of the yard is not auto-witnessed. Unwired ⇒ pre-0077 behavior.
+  commands.setZoneProvider((id) => session.currentZone(id));
   // L27/L27b/0024: every recorded social scene is indexed into each houseguest's SEMANTIC recall
   // memory, so later story/narrative is built from the store recalled (ADR 0003), never the chat
   // window. Routed through the session's `recordSceneMemory` — NOT engine.soul.recordToSoul directly —

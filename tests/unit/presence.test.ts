@@ -440,7 +440,12 @@ describe("whereabouts (0049) — the Vault-free presence read", () => {
       expect(Object.keys(ref).sort()).toEqual(["id", "name"]);
     }
     // L21/L24: duration rides the view — the player's tenure + each companion's (a NamedRef + turnsHere).
-    expect(Object.keys(w).sort()).toEqual(["companions", "nearby", "present", "room", "turnsHere"]);
+    // 0077: `tracked` (closed-door beliefs) always rides the view; `zone`/`conspicuous` are optional.
+    const required = ["companions", "nearby", "present", "room", "tracked", "turnsHere"];
+    const allowed = [...required, "zone", "conspicuous"];
+    expect(required.every((k) => k in w)).toBe(true);
+    expect(Object.keys(w).every((k) => allowed.includes(k))).toBe(true);
+    expect(Array.isArray(w.tracked)).toBe(true);
     expect(typeof w.turnsHere).toBe("number");
     expect(w.turnsHere).toBeGreaterThanOrEqual(0);
     expect(w.companions.map((c) => c.id).sort()).toEqual(w.present.map((p) => p.id).sort()); // same people as present

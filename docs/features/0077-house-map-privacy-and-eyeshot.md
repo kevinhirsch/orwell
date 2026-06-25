@@ -8,12 +8,23 @@
 > over no longer leaks its occupants (the open public core sees across itself + the hallway mouth;
 > every bedroom/bathroom/lounge/HOH/storage/diary is opaque from outside). Gate:
 > `tests/unit/sightline0077.test.ts` + `tests/unit/whereaboutsSightline.test.ts` (+ the updated
-> presence/BDD/lever-manifest contracts). Read-side only ⇒ calibration byte-identical. **Phase 2b
-> (next) — tracked occupancy + conspicuousness + sub-zone earshot:** the `{visible, tracked}` belief
-> layer (who's behind a closed door, learned by watching a doorway, with pathway/confidence/stale),
-> the "two alone too long" conspicuousness read, and zone-scoped `rollOverhears`. **Gate (planned):**
-> engine (Vitest + dependency-cruiser + BDD `0077-house-map-privacy-and-eyeshot.feature`) and
-> front-end (the L26 "Where you are" gadget consumes the sightline-scoped projection). **Depends on:** 0049 (house
+> presence/BDD/lever-manifest contracts). Read-side only ⇒ calibration byte-identical. **Phase 2b —
+> tracked occupancy + conspicuousness + sub-zone earshot:** **BUILT 2026-06-25.** `whereabouts()` now
+> returns the `{present, nearby (=visible/sightline), tracked}` split: the **tracked** layer is who the
+> player BELIEVES is behind a closed door — acquired ONLY by watching them head in (the origin in the
+> player's eyeshot), carrying a 0002 pathway + confidence + an age-derived `stale` flag (never read off
+> the secret live position), decaying past a horizon and corrected on direct re-sighting (persisted —
+> 0007). The **conspicuousness** read ("you saw A and B slip into the lounge a while ago and haven't
+> seen them come out") is derived per-read (never stored), names who/where/how-long and never the
+> content, and rides the view + moment prompt; the suspicion diffuses NPC-to-NPC as Vault-free position
+> gossip (0038). **Sub-zones** (`ROOM_ZONES`: backyard poolside/patio/workout, lounge two corners) split
+> EARSHOT — co-presence witnessing in a big room is zone-scoped (the far end of the yard is out of
+> earshot) while eyeshot stays room-wide — plus an opt-in **closed-door muffle** on `rollOverhears`. Every
+> new behavior is **opt-in / read-side** (the off-screen society + `juryReach`/gradient spine pass none
+> of the new params ⇒ byte-identical; proven by `tests/unit/privacyEyeshot0077.test.ts`'s draw-count
+> guard + the green calibration gates). **Gate:** engine (Vitest `sightline0077`/`privacyEyeshot0077` +
+> dependency-cruiser + BDD `0077-house-map-privacy-and-eyeshot.feature`, wired into `cucumber.cjs`) and
+> front-end (the L26 "Where you are" gadget renders the tracked + conspicuousness layers). **Depends on:** 0049 (house
 > presence — the floor plan, `assignRooms`, `rollOverhears`, `whereabouts`), 0002 (events/pathways &
 > knowledge vs. suspicion — tracked occupancy is *knowledge with a pathway*), 0038 (gossip diffusion
 > — a tracked sighting spreads NPC-to-NPC), 0076 (motivated movement — exits feed the sightings this

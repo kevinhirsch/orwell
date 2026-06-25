@@ -152,8 +152,12 @@ Then("it reveals nothing about non-adjacent rooms", function (this: BbWorld) {
   // 0077 Phase 2: `nearby` is SIGHTLINE-scoped (eyeshot) — every reported room is one the player can
   // actually SEE into; a closed door one room over is never revealed (the stronger privacy claim).
   for (const n of w.nearby) assert.ok(areVisible(w.room as Room, n.room as Room), `${n.room} is in sightline`);
-  // L21/L24: duration rides the view (turnsHere + per-companion tenure) — still no non-adjacent room.
-  assert.deepEqual(Object.keys(w).sort(), ["companions", "nearby", "present", "room", "turnsHere"]);
+  // L21/L24 + 0077: duration + the tracked layer ride the view; `zone`/`conspicuous` are optional —
+  // still no non-adjacent room's occupants appear in the visible (`nearby`) set.
+  const required = ["companions", "nearby", "present", "room", "tracked", "turnsHere"];
+  const allowed = [...required, "zone", "conspicuous"];
+  assert.ok(required.every((k) => k in w), "the view carries the required keys");
+  assert.ok(Object.keys(w).every((k) => allowed.includes(k)), "the view carries no unexpected keys");
 });
 
 Then("it contains no motive, number, hidden state, or Vault sentinel", function (this: BbWorld) {

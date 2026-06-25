@@ -4,12 +4,30 @@
  * the HOH gravitates upstairs, schemers find space — all through the seeded RandomnessSource
  * (same seed, same trajectories), with movement constrained to the floor plan.
  */
-import { HOUSE_ROOMS, HOUSE_ADJACENCY, areAdjacent, type Room, type Occupancy } from "../domain/house";
+import { HOUSE_ROOMS, HOUSE_ADJACENCY, areAdjacent, isZonedRoom, pickZone, type Room, type Zone, type Occupancy } from "../domain/house";
 import { PLAYER } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { KnowledgeService } from "../ports/KnowledgeService";
 import { PRESENCE, MOVEMENT_PERSONALITY } from "./presenceConstants";
+
+/** A tiny deterministic string hash (FNV-1a) — pure, draws no rng. Used only to seat zones reproducibly. */
+function zoneHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+/**
+ * Deterministically seat an entity into a sub-zone of their (zoned) room (0077 Phase 2) — PURE, draws
+ * NO rng, and STABLE for a given (id, room, salt), so the same houseguest reads the same corner of the
+ * yard all game (flavor continuity) and the seating can never perturb the seeded calibration spine.
+ * Returns `undefined` for an un-zoned room. The salt is a per-game constant (the game seed).
+ */
+export function zoneFor(id: EntityId, room: Room, salt: string | number = ""): Zone | undefined {
+  if (!isZonedRoom(room)) return undefined;
+  return pickZone(room, zoneHash(`${salt}:${id}:${room}`));
+}
 
 /**
  * A houseguest's movement personality (L21/L24) — WHO they are, read off the static CHARACTER +
@@ -171,6 +189,14 @@ export function rollOverhears(deps: {
   occupancy: Occupancy;
   knowledge: KnowledgeService;
   rng: RandomnessSource;
+  /**
+   * Closed-door MUFFLE (0077 Phase 2, OPT-IN): a multiplier on the per-scene gate probability — a
+   * scene behind a closed door is harder to hear into. ABSENT ⇒ `1` ⇒ the gate threshold and thus
+   * the entire draw branch are BYTE-IDENTICAL to the pre-0077 build. The off-screen society/spine
+   * passes nothing here (calibration stays sacred); only the player channel — on its own isolated
+   * `commands:` rng stream — opts in.
+   */
+  muffle?: number;
 }): EntityId[] {
   const listeners: EntityId[] = [];
   for (const [id, where] of deps.occupancy) {
@@ -179,7 +205,9 @@ export function rollOverhears(deps: {
     listeners.push(id);
   }
   if (listeners.length === 0) return [];
-  if (deps.rng.next() >= PRESENCE.overhearProb) return []; // gated per scene, never guaranteed
+  // ONE gate draw, exactly as before — only the THRESHOLD shifts when a caller opts into the muffle
+  // (a closed-door scene is quieter). `muffle ?? 1` ⇒ no caller ⇒ the original `overhearProb`.
+  if (deps.rng.next() >= PRESENCE.overhearProb * (deps.muffle ?? 1)) return []; // gated per scene, never guaranteed
   const who = listeners.includes(PLAYER) ? PLAYER : listeners[deps.rng.int(listeners.length)]!;
   // Partial by DESIGN and by construction: the overhearer catches a strict fragment (never the
   // whole line), so a hidden scene's full content can never reach anyone verbatim through a wall —
