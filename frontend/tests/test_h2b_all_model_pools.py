@@ -274,14 +274,46 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
             page = browser.new_page()
             page.goto(base + "/", wait_until="load", timeout=30000)
             page.wait_for_timeout(4000)  # module graph + async init
-            # Dismiss the engine-down holding card if it mounted (it inerts the
-            # page behind it, which would swallow the gear click).
-            for _ in range(3):
-                if not page.evaluate("!!document.getElementById('orwell-onboarding')"):
+            # Open Settings past the pre-game onboarding overlay. The wizard inerts the page
+            # AND lays a backdrop scrim ([data-ow-scrim]) that intercepts the gear click while
+            # either is present; the wizard mounts ASYNC and can re-mount in the gap between a
+            # dismiss and the click, so a fixed dismiss-then-click loop is racy (the old
+            # 3xEscape idiom flaked on slow CI — it only checked #orwell-onboarding, never the
+            # lingering scrim). Converge: dismiss whatever overlay is up, then try the gear
+            # click, until the Settings kit modal is actually open. (Mirrors the hardened loop
+            # in test_h2h3_settings.py.)
+            def _overlay_present() -> bool:
+                return page.evaluate(
+                    """() => !!document.getElementById('orwell-onboarding')
+                              || !!document.querySelector('[data-ow-scrim]')"""
+                )
+
+            def _settings_open() -> bool:
+                return page.evaluate(
+                    """() => {
+                      const m = document.getElementById('settings-modal');
+                      if (!m || !m.isConnected) return false;
+                      const s = getComputedStyle(m);
+                      return s.display !== 'none' && s.visibility !== 'hidden'
+                             && m.getClientRects().length > 0;
+                    }"""
+                )
+
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if _settings_open():
                     break
-                page.keyboard.press("Escape")
-                page.wait_for_timeout(400)
-            page.click("#user-bar-settings", timeout=10000)  # open settings → initAll()
+                if _overlay_present():
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(250)  # cover the kit's ~190ms close fade + teardown
+                    continue
+                try:
+                    page.click("#user-bar-settings", timeout=2000)  # open settings → initAll()
+                except Exception:
+                    pass
+                page.wait_for_timeout(150)
+            else:
+                raise AssertionError("Settings modal never opened past the onboarding overlay")
             page.wait_for_function(
                 """() => {
                   const ep = document.getElementById('set-defaultEpSelect');
