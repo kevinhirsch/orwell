@@ -138,4 +138,26 @@ describe("0048 — humanizeForRetrospective resolves embedded ids + de-slugs, ke
     expect(out).not.toContain("Hero");       // the player name never leaked into authored prose
     expect(out).not.toMatch(/\bnpc:\d+\b/);
   });
+
+  // #845 (cross-lane) — the SAME hazard lives in a corpus VOCATION noun, not just template pool strings:
+  // a real `src/engine/data/vocations.ts` entry like "professional poker player" is interpolated into
+  // conditioned deep-profile prose, where the trailing word "player" must NOT mangle to the player name.
+  // Resolving only colon-bearing ids in the retrospective covers it (a bare "player" is never substituted).
+  it("surfaces a vocation noun like 'professional poker player' CLEAN — no name substitution (#845)", () => {
+    // A name whose surname token would make a leak unmistakable if the bare "player" id were resolved.
+    const roster = [{ id: "player", name: "Ryne ODonnell" }, { id: "npc:3", name: "Tess Vane" }];
+    // The vocation embedded in a secret, plus a bare mid-sentence "player", plus a clean npc id to resolve.
+    const raw = "deep-profile npc:3 | secrets: a former professional poker player coasting on a casual front | true-goals: read as a harmless social player";
+    const out = humanizeForRetrospective(raw, roster);
+    expect(out).toContain("Tess Vane");                 // the real id still resolves
+    expect(out).toContain("professional poker player"); // the vocation noun is intact (NOT "poker Ryne …")
+    expect(out).toContain("social player");             // a bare mid-sentence "player" stays a word
+    expect(out).not.toContain("Ryne");                  // the player name never leaks into the vocation/prose
+    expect(out).not.toContain("ODonnell");
+    expect(out).not.toMatch(/\bnpc:\d+\b/);
+
+    // And the bare vocation string on its own (as it sits in the corpus) is a no-op, with or without a roster.
+    expect(humanizeForRetrospective("professional poker player", roster)).toBe("professional poker player");
+    expect(humanizeForRetrospective("professional poker player", [])).toBe("professional poker player");
+  });
 });
