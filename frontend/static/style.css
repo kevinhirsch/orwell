@@ -57,6 +57,22 @@
   --ow-radius: 26px;            /* window/card/dialog surface (very rounded, Apple) */
   --ow-radius-inner: 16px;      /* a control nested inside a surface (concentric)   */
   --ow-radius-pill: 999px;      /* capsule / circular disc                          */
+  /* COMPUTED concentric radius (SwiftUI 2026 `.containerConcentric` / WWDC25 356).
+     A nested surface's corner should equal its PARENT radius minus the inset between
+     them — so the child's corner runs PARALLEL to the parent's, never a mismatched
+     corner. This is the .ow-btn-concentric precedent (inner = parent − padding)
+     GENERALIZED from controls to nested SURFACES (cards/panels inside windows).
+     A nested surface sets --ow-parent-radius + --ow-parent-inset ON ITSELF and reads
+     --ow-radius-concentric for its border-radius; the corner then adapts to the parent.
+     With neither set the fallback (--ow-radius-inner) stands, so a non-nested surface
+     is unchanged. max(0,…) guards a negative radius when the inset exceeds the parent.
+     NOTE: like .ow-btn-concentric, the calc is re-stated in each consuming rule (the
+     nested var()s must resolve in the CHILD's scope, not :root's), and this :root copy
+     keeps the canonical formula in one documented place + powers the contract fallback. */
+  --ow-radius-concentric: max(
+    0px,
+    calc(var(--ow-parent-radius, var(--ow-radius)) - var(--ow-parent-inset, 0px))
+  );
   /* Type ramp (SF default): weights — never thin on glass (Regular/Medium/Semibold/Bold).
      HIG Typography (#696): floor at Regular (400); avoid Light/Thin entirely. */
   --ow-fw-regular: 400;
@@ -37913,6 +37929,40 @@ body.theme-frosted .on-card button,
 body.theme-frosted .og-card button {
   border-radius: var(--ow-glass-radius-inner) !important;
 }
+
+/* COMPUTED concentric SURFACE nesting (--ow-radius-concentric / SwiftUI
+   .containerConcentric). The fixed --ow-glass-radius-inner above is a hand-tuned
+   approximation; a genuinely-nested surface should instead DERIVE its corner from
+   its parent so the two corners stay parallel. A nested card/panel sets the parent
+   radius + the inset between it and its parent ON ITSELF, then reads the computed
+   --ow-radius-concentric. With 26px parent − ~10px inset this lands on ~16px (the
+   old fixed inner value), but now it TRACKS the window if the window radius changes
+   — no second hand-tuned constant. Non-nested instances of these cards keep the
+   --ow-glass-radius surface treatment from the rule above (they aren't matched here).
+   (The vars + calc are re-stated here, not inherited from :root — nested var()s must
+   resolve in the CHILD's own scope; same pattern as .ow-btn-concentric.) */
+body.theme-frosted .ow-window > .ow-body .admin-card,
+body.theme-frosted .ow-window > .ow-body .og-card,
+body.theme-frosted .ow-window > .ow-body .on-card {
+  --ow-parent-radius: var(--ow-glass-radius);
+  --ow-parent-inset: 10px;   /* the .ow-body padding (≈.7rem) — the gap to the child  */
+  /* --ow-radius-concentric formula, re-stated so its var()s resolve in THIS scope. */
+  --ow-radius-concentric: max(
+    0px, calc(var(--ow-parent-radius) - var(--ow-parent-inset)));
+  border-radius: var(--ow-radius-concentric) !important;
+}
+
+/* The decision card in CHAT is a glass surface nested inside the chat scroll column
+   (the conversation is its container). It derives its corner concentrically from the
+   chat surface radius rather than carrying a bespoke fixed radius. */
+body.theme-frosted #orwell-decision-card {
+  --ow-parent-radius: var(--ow-glass-radius);
+  --ow-parent-inset: 8px;    /* the card's gutter inside the chat column */
+  --ow-radius-concentric: max(
+    0px, calc(var(--ow-parent-radius) - var(--ow-parent-inset)));
+  border-radius: var(--ow-radius-concentric) !important;
+}
+
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   border-radius: var(--ow-glass-radius-inner) !important;
 }
