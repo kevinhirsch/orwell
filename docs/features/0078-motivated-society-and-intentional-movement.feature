@@ -52,15 +52,25 @@ Feature: 0078 — Motivated off-screen society & intentional movement
       Then it records, folds its impact, and persists
       And nothing is left inert
 
-  Rule: Asleep houseguests neither move nor scheme (the night bound holds)
+  Rule: Asleep houseguests drop out of play (the night bound holds)
 
+    # A turned-in houseguest is OUT OF PLAY (ADR 0006: the bound is the emptying house, not a
+    # frozen coordinate) — gone from the society floor and the player-visible house, and never
+    # paired into an off-screen scene.
     Scenario: A turned-in houseguest drops out of the society
       Given the night has thinned the awake set
-      Then a houseguest who has gone to bed neither relocates nor appears in an off-screen scene
+      Then a houseguest who has gone to bed is absent from the awake house and appears in no off-screen scene
 
-  Rule: The anti-sycophancy floor holds on the new movement model
+  Rule: The anti-sycophancy floor is enforced for the new movement model
 
-    Scenario: Playing the game is never a disadvantage
-      When the calibration band is measured across seeded seasons on the intentional-movement model
-      Then an active player reaches the jury at least as often as a passive one
-      And an active player wins at least as often as a passive one
+    # The authoritative active-vs-passive band — an active player reaches the jury and wins at
+    # least as often as a passive one — is measured across many seeds in the heavy calibration
+    # sims (npm run test:heavy:jury + test:heavy:gradient), which run in CI on every engine
+    # change. Like 0073's structural wall proof, this scenario verifies that gate is WIRED for
+    # the intentional-movement model: it plays one real season through the live harness and
+    # confirms the floor's teeth are in force.
+    Scenario: The calibration floor runs on the intentional-movement model
+      Given the seeded calibration harness that plays passive seasons to a verdict
+      When one passive season is played to completion on the current model
+      Then it yields a well-formed outcome the band gate can score
+      And the floor demands every crowned passive season be earned on the public comp record

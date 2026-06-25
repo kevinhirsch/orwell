@@ -1,21 +1,26 @@
 # 0078 — Motivated off-screen society & intentional movement (co-presence earned, not arbitrary)
 
-> **Status:** 🟢 **Phase 1 BUILT 2026-06-25** (intentional movement + its calibration pass); **Phase 2
-> (nature clarity) deferred** as the follow-on. **Phase 1:** NPCs now move toward what their motivation
-> points at — `MOVEMENT_INTENT` constants (`src/engine/presenceConstants.ts`) + the intent types,
-> per-room `tanh`-bounded steering, and the unsatisfied-pursuit move-gate in `assignRooms`
-> (`src/engine/presence.ts`), wired off the relationship model by `movementIntentFor`
-> (`GameSessionAdapter`) and supplied on BOTH the base and weighted passes. Intent draws **no rng of its
-> own** (the per-NPC draw COUNT is unchanged); it is DELIBERATELY calibration-load-bearing (owner ruling:
-> location must affect play), so it shipped **with a calibration re-pass**: at the first-tried
-> `moveIntentStrength` the anti-sycophancy band broke marginally (active disadvantaged), and the lever was
-> **re-tuned to `0.2`** — at which **`juryReach` (20-seed) and the gradient (active ≥ passive reach & wins)
-> both hold green**. Gate: `tests/unit/intentionalMovement0078.test.ts` (trend-toward-target +
-> avoidance + the no-side-channel-draw invariant + opt-in byte-identity) + the green calibration sims.
-> **Phase 2 — nature clarity (friendly-vs-strategic split, friendly folds affinity only)** is NOT built;
-> the `.feature`'s Rule-3 scenarios cover it, so the BDD is wired when Phase 2 lands. **Gate
-> (Phase 2, planned):** engine (Vitest + the **calibration pass** — `juryReach` + the gradient band re-verified
-> on the new movement model) and BDD `0078-motivated-society-and-intentional-movement.feature`.
+> **Status:** 🟢 **BUILT 2026-06-25 (Phase 1 + Phase 2 — feature complete).** **Phase 1
+> (intentional movement):** NPCs move toward what their motivation points at — `MOVEMENT_INTENT`
+> constants (`src/engine/presenceConstants.ts`) + the intent types, per-room `tanh`-bounded steering,
+> and the unsatisfied-pursuit move-gate in `assignRooms` (`src/engine/presence.ts`), wired off the
+> relationship model by `movementIntentFor` (`GameSessionAdapter`) and supplied on BOTH the base and
+> weighted passes. Intent draws **no rng of its own** (the per-NPC draw COUNT is unchanged); it is
+> DELIBERATELY calibration-load-bearing (owner ruling: location must affect play). **Phase 2 (nature
+> clarity):** the scene's NATURE sets its fold — `natureFoldImpact` (`src/engine/relationshipConstants.ts`)
+> with `FRIENDLY_NATURES = {bonding, showmance}`; a **friendly** scene folds **affinity only** (no
+> strategic trust/threat/alignment, no vote-affecting change), a **game** scene folds its full strategic
+> `IMPACT` **byte-identically** to before (same four jitter draws via `applyOneDirection`, so the spine
+> stays in phase). The society fold in `src/composition/orchestrator.ts` now always routes through
+> `natureFoldImpact`. **Combined calibration re-pass:** the friendly-affinity-only fold reduced society
+> trust, so the move-intent lever was **re-tuned `0.2 → 0.15`** (`moveIntentStrength`) — at which
+> **`juryReach` (20-seed) and the gradient (active ≥ passive reach & wins) both hold green**. **Gate:**
+> `tests/unit/intentionalMovement0078.test.ts` (Phase 1 — trend-toward-target + avoidance + the
+> no-side-channel-draw invariant + opt-in byte-identity) + `tests/unit/natureClarity0078.test.ts`
+> (Phase 2 — friendly affinity-only, game byte-identical, draw-count-stable) + the green calibration
+> sims + BDD `0078-motivated-society-and-intentional-movement.feature` (wired into `cucumber.cjs`,
+> 8 scenarios green; the anti-sycophancy band is enforced authoritatively in the heavy sims, proved
+> wired here per the 0073 structural pattern).
 > **Depends on:** 0049 (presence/movement — the assignment this makes goal-driven), 0017/0026 (the
 > relationship model — the motivation signal), 0040 (deals), 0044 (blocs), 0041 (souls/agenda), 0038
 > (the off-screen society this enriches), 0066 (the awake set stays). **Relates to** 0077 (house map /
@@ -115,8 +120,9 @@ relationship folds, so the gates are re-measured/re-tuned:
 ## What must NOT change (guardrails)
 
 - **The Vault Wall** — the society stays hidden; only fragments/meetings surface via pathways (0002).
-- **The daily-event invariant**, the **awake-set** night gating (0066 — asleep NPCs neither move nor
-  scheme), **seeded determinism**, **non-degradation** (every scene records + folds + persists, 0023).
+- **The daily-event invariant**, the **awake-set** night gating (0066 — a turned-in houseguest drops
+  out of play: gone from the society floor and the player-visible house, never paired into an off-screen
+  scene), **seeded determinism**, **non-degradation** (every scene records + folds + persists, 0023).
 - **The conversation is the game** — this enriches the hidden sim + the player-facing texture; no
   dashboard, no normalizing the open set (`expressiveNonCollapse` stays green).
 - The L21/L24 **movement-stream isolation** discipline: intentional movement still rides a dedicated/
@@ -137,12 +143,13 @@ relationship folds, so the gates are re-measured/re-tuned:
 
 ## Phasing
 
-1. **Phase 1 — intentional movement.** Replace affinity-drift assignment with goal-driven NPC
+1. ✅ **Phase 1 — intentional movement (BUILT).** Replaced affinity-drift assignment with goal-driven NPC
    positioning (toward bonds/targets/privacy, away from threats). **Calibration pass** (`juryReach` +
-   gradient re-green). *This is the bulk of the work and the calibration risk.*
-2. **Phase 2 — nature clarity.** Make the game-vs-friendly split explicit and rebalanced so a house
-   has ample ordinary friendly life (affinity-only) and strategic beats stand out; verify friendly
-   folds affinity only.
+   gradient re-green at `moveIntentStrength 0.2`). *The bulk of the work and the calibration risk.*
+2. ✅ **Phase 2 — nature clarity (BUILT).** The game-vs-friendly split is explicit: `natureFoldImpact`
+   folds a friendly scene **affinity-only** (no strategic move, no vote-affecting change) and a game
+   scene byte-identically (the spine). Combined **calibration re-pass** re-tuned `moveIntentStrength`
+   to **0.15** (the friendly fold reduced society trust) — `juryReach` + gradient green.
 
 ## Open questions / defaults
 

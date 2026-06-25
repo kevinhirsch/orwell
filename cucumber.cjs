@@ -64,6 +64,7 @@ module.exports = {
       "docs/features/0072-multi-platform-gateway.feature",
       "docs/features/0073-structural-anti-sycophancy-wall.feature",
       "docs/features/0077-house-map-privacy-and-eyeshot.feature",
+      "docs/features/0078-motivated-society-and-intentional-movement.feature",
       "docs/features/0084-character-voice-and-mood.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],

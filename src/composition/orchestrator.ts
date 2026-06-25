@@ -4,7 +4,7 @@ import type { SessionSnapshot } from "../engine/sessionSnapshot";
 import { toGameState } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
-import { RELATIONSHIP_CONSTANTS, scaleImpact } from "../engine/relationshipConstants";
+import { scaleImpact, natureFoldImpact } from "../engine/relationshipConstants";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional } from "../engine/confessionals";
@@ -528,16 +528,21 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
   for (const s of scenes) {
     // 0066 Phase-2: a tired INITIATOR sways the partner LESS (reduced effectiveness, never a personality
-    // change). Scale is 1 when the clock is off ⇒ this is the EXACT prior `applyDirected` call (same rng
-    // draws) ⇒ byte-identical to the calibration spine; the scaled path fires only on the live clock-ON game.
+    // change). Scale is 1 when the clock is off ⇒ the fold is byte-identical to the calibration spine for
+    // a GAME nature; the scaled path fires only on the live clock-ON game.
+    //
+    // 0078 Phase 2 — the scene's NATURE sets its fold (`natureFoldImpact`): a GAME scene folds its full
+    // strategic IMPACT (trust/threat/alignment → the vote math), BYTE-IDENTICAL to before; a FRIENDLY
+    // scene (bonding/showmance — ordinary downtime warmth) folds AFFINITY ONLY, no strategic weight, no
+    // vote-affecting change. Always `applyImpactDirected` now, which takes the SAME four jitter draws as
+    // the old `applyDirected`, so the stream stays in phase — only friendly magnitudes shift (re-calibrated).
     const swayScale = sandbox.session.socialFoldScale(s.initiator);
-    if (swayScale === 1) {
-      sandbox.engine.relationships.applyDirected(s.partner, s.initiator, s.type, rng);
-    } else {
-      sandbox.engine.relationships.applyImpactDirected(
-        s.partner, s.initiator, scaleImpact(RELATIONSHIP_CONSTANTS.IMPACT[s.type], swayScale), rng,
-      );
-    }
+    const foldImpact = natureFoldImpact(s.type);
+    sandbox.engine.relationships.applyImpactDirected(
+      s.partner, s.initiator,
+      swayScale === 1 ? foldImpact : scaleImpact(foldImpact, swayScale),
+      rng,
+    );
     // NOTE (audit 2026-06-18): whole-house transitivity for OFF-SCREEN NPC↔NPC scenes (co-present
     // bystanders reading a scene by structural balance) was prototyped here but destabilized the
     // tuned jury-reach calibration gate (a passive player's finale wins crept past the cap) — the
