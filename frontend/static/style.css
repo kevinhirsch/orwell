@@ -22151,9 +22151,10 @@ body.gallery-selecting .gallery-dl-btn,
     margin: 0;
     width: 100%;
     max-width: none;
-    /* No own height cap — the content sizes to its layout (min-height:400px) and
-       the .ow-body owns the viewport cap + scrolling (overflow:auto). Forcing
-       height:100% here collapses the panel because the .ow-body is height:auto. */
+    /* No own height cap — the content fills the .ow-body, which caps the height
+       (kit max-height min(70vh,560px)); #890 moved the scroll INTO .settings-panels
+       (the .ow-body is overflow:hidden flex column — see the rules below) so the
+       sidebar stays pinned and the rounded corner is never overflowed. */
     max-height: none;
     /* The .ow-window IS the frame — don't double-frame inside the kit body. */
     border: none;
@@ -22179,15 +22180,39 @@ body.gallery-selecting .gallery-dl-btn,
   max-height: calc(min(85dvh, 720px) - 60px);
 }
 
-/* #553 — kit-hosted on desktop, drop the legacy 85dvh-60px cap on the inner
-   layout: the content no longer carries its own height cap (the .ow-body owns the
-   viewport cap + scrolling), so the layout should size to its content (its own
-   min-height:400px floor still applies) and let the .ow-body scroll when taller.
-   When the kit sets an inline height (resize/dock) the [style*="height"] / docked
-   rules below take over and make the layout flex-fill. */
+/* #553/#890 — kit-hosted on desktop. The OLD model let the inner layout grow to its
+   CONTENT height and made the kit .ow-body scroll the WHOLE thing (sidebar + panel) as
+   one tall block. That caused two reported defects: (4) on a long admin page the sidebar
+   scrolled away and a whole-window scrollbar appeared, and (5) the sidebar's square-
+   cornered background overflowed the body's scroll rectangle to the very bottom-left,
+   defeating the kit's rounded corner (the "hard corner / lost border-radius" report).
+   The fix: the .ow-body for Settings does NOT scroll — it is a flex column that the
+   .settings-modal-content + .settings-layout FILL, and the SCROLL lives inside
+   .settings-panels only. So the sidebar stays pinned within the rounded body (its bg
+   never reaches the window's bottom edge) and only the panel content scrolls — no
+   whole-window scrollbar, no hard corner. Capped to the body's own max-height so it
+   can't push past the window. (When the kit sets an inline height via resize/dock, the
+   [style*="height"] / docked rules below already flex-fill — same behaviour.) */
 @media (min-width: 769px) {
+  #settings-modal.ow-window > .ow-body {
+    overflow: hidden;            /* the panel owns the scroll, not the body */
+    display: flex; flex-direction: column;
+  }
+  #settings-modal.ow-window > .ow-body > .settings-modal-content {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  }
   #settings-modal.ow-window > .ow-body > .settings-modal-content .settings-layout {
+    flex: 1 1 auto;
+    min-height: 0;               /* allow the flex child to shrink so its panel can scroll */
+    /* the body already caps height (kit: min(70vh,560px)); fill it, don't grow past it */
     max-height: none;
+  }
+  /* the sidebar is pinned (never scrolls with the content); only the panels scroll */
+  #settings-modal.ow-window > .ow-body > .settings-modal-content .settings-sidebar {
+    min-height: 0; overflow-y: auto;
+  }
+  #settings-modal.ow-window > .ow-body > .settings-modal-content .settings-panels {
+    min-height: 0;
   }
 }
 
@@ -22222,6 +22247,11 @@ body.gallery-selecting .gallery-dl-btn,
 }
 
 .settings-sidebar-divider { height: 1px; background: var(--border); margin: 8px 12px; }
+/* #890: a divider/label pruned by pruneSidebarDividers() (no longer separating two
+   visible nav groups — e.g. the game build hides the whole Comms section). Hidden so
+   no leading/trailing/double separators linger in the sidebar. */
+.settings-sidebar-divider.settings-divider-pruned,
+.settings-sidebar-label.settings-divider-pruned { display: none !important; }
 .settings-sidebar-label {
   font-size: var(--fs-2xs);
   font-weight: 600;
@@ -22352,6 +22382,39 @@ body.gallery-selecting .gallery-dl-btn,
   overflow-y: auto;
   padding: 16px 20px;
   min-width: 0;
+}
+
+/* ── #890: the delightful in-place panel transition ───────────────────────────
+   Switching settings categories / opening an admin sub-view / "Add Models" is now a
+   tasteful crossfade + a small upward glide of the panel CONTENT inside the SAME kit
+   window — one window, one entrance; sub-navigation glides. Identical duration/easing
+   for EVERY page (the activateTab/open swap applies .settings-panel-enter to whichever
+   panel becomes visible). The motion is contained inside .settings-panels (which owns
+   the scroll), so there is no layout shift, no scrollbar flash, and no hard-corner.
+   Coherent with the OrwellWindow kit entrance (ow-open: fade + scale, ease-out) — same
+   gentle ease-out family, scaled down to a content-level micro-motion. */
+@keyframes settings-panel-enter {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+[data-settings-panel].settings-panel-enter {
+  /* match the kit's ow-open easing/feel (cubic ease-out), a touch longer for content */
+  animation: settings-panel-enter .22s cubic-bezier(.22, .61, .36, 1) both;
+  will-change: opacity, transform;
+}
+/* Accessibility: reduced-motion gets an INSTANT cross-dissolve only — no slide, no
+   large motion (delight must not break a11y). A very short opacity fade keeps the swap
+   from reading as a hard cut while honoring the preference. */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes settings-panel-enter {
+    from { opacity: 0; transform: none; }
+    to   { opacity: 1; transform: none; }
+  }
+  [data-settings-panel].settings-panel-enter {
+    animation-duration: .12s;
+    animation-timing-function: ease;
+    will-change: auto;
+  }
 }
 .settings-appearance-panel {
   flex-direction: column;

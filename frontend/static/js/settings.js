@@ -34,24 +34,58 @@ function safeRasterDataUrl(raw) {
 /* ── Tab switching ── */
 const ADMIN_TABS = new Set(['services', 'integrations', 'tools', 'users', 'system']);
 
+// #890: the delightful in-place entrance. Re-trigger the CSS crossfade+glide on the
+// panel that just became visible. Forcing a reflow between remove/add restarts the
+// animation reliably on every switch (not just the first). The motion is contained in
+// .settings-panels (which owns the scroll) — no layout shift, no scrollbar flash. CSS
+// honors prefers-reduced-motion (a short cross-dissolve, no slide).
+function _animatePanelEntrance(tab) {
+  if (!modalEl) return;
+  const panel = modalEl.querySelector(`[data-settings-panel="${tab}"]`);
+  if (!panel || panel.classList.contains('hidden')) return;
+  panel.classList.remove('settings-panel-enter');
+  // force reflow so re-adding the class restarts the animation
+  void panel.offsetWidth;
+  panel.classList.add('settings-panel-enter');
+  // self-clean so will-change doesn't linger and the class can re-arm next switch
+  const done = () => { panel.classList.remove('settings-panel-enter'); panel.removeEventListener('animationend', done); };
+  panel.addEventListener('animationend', done);
+}
+
+// The single panel-swap primitive shared by tab clicks AND the public open(tab).
+function _swapToPanel(tab) {
+  modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === tab));
+  modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== tab));
+  // Mark when the Appearance tab is open so the modal can go
+  // semi-transparent — lets the user see the rest of the UI react as
+  // they flip toggles instead of having to close + reopen the modal.
+  document.body.classList.toggle('settings-appearance-open', tab === 'appearance');
+  syncAppearanceOpacity(tab === 'appearance');
+  if (tab === 'ai') refreshAiModelEndpoints();
+  _animatePanelEntrance(tab);
+}
+
+// #890: ONE in-place panel swap for EVERY tab — admin tabs included. The defect:
+// clicking an admin tab (or "Add Models") routed through adminModule.open() →
+// settingsModule.open() → win.open(), which on an already-open kit window calls
+// restore() and RE-RUNS the kit fly-in animation (ow-anim-restore) even though the
+// window never moved or minimized — the "re-spawns / animates differently" report.
+// The admin panels are plain [data-settings-panel] siblings in the SAME content, so
+// switching to one is a class toggle, exactly like a user tab. Admin only needs its
+// lazy data fetch (_initData), which we run WITHOUT re-opening the window.
+function activateTab(tab) {
+  if (!modalEl || !tab) return;
+  // Lazy-init admin data on first visit to an admin tab — but NEVER re-open the window.
+  if (ADMIN_TABS.has(tab) && window.adminModule && !window.adminModule._initialized
+      && typeof window.adminModule._initData === 'function') {
+    try { window.adminModule._initData(); } catch (_) {}
+  }
+  _swapToPanel(tab);
+}
+
 function initTabs() {
   modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.settingsTab;
-      // Lazy-init admin when first clicking an admin tab
-      if (ADMIN_TABS.has(tab) && window.adminModule && typeof window.adminModule.open === 'function') {
-        window.adminModule.open(tab);
-        return;
-      }
-      modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === tab));
-      modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== tab));
-      // Mark when the Appearance tab is open so the modal can go
-      // semi-transparent — lets the user see the rest of the UI react as
-      // they flip toggles instead of having to close + reopen the modal.
-      document.body.classList.toggle('settings-appearance-open', tab === 'appearance');
-      syncAppearanceOpacity(tab === 'appearance');
-      if (tab === 'ai') refreshAiModelEndpoints();
-    });
+    btn.addEventListener('click', () => activateTab(btn.dataset.settingsTab));
   });
 }
 
@@ -5536,6 +5570,59 @@ async function initUnifiedIntegrations() {
 }
 
 /* ── Admin visibility sync ── */
+// #890: the sidebar dividers/labels are STATIC markup that bracket sections of nav
+// items. When a whole section is hidden — by the game-build CSS trim (Integrations/
+// Email/Reminders are display:none) or by admin gating (the AI/admin sections hide
+// for non-admins) — its surrounding dividers become extraneous: a leading divider
+// above nothing, a trailing one below nothing, or two dividers back-to-back with no
+// visible item between them. We prune them at runtime (no markup churn): walk the
+// sidebar in order and hide any divider/label that isn't separating two visible
+// nav-item groups. Idempotent — runs after every visibility recompute.
+function pruneSidebarDividers() {
+  if (!modalEl) return;
+  const sidebar = modalEl.querySelector('.settings-sidebar');
+  if (!sidebar) return;
+  const kids = Array.from(sidebar.children);
+  const visible = (el) => el && getComputedStyle(el).display !== 'none';
+  const isSep = (el) => el.classList.contains('settings-sidebar-divider')
+    || el.classList.contains('settings-sidebar-label');
+  const isItem = (el) => el.classList.contains('settings-nav-item');
+  // First clear any prior prune so a visibility change can re-show a divider that's now needed.
+  kids.forEach(el => { if (isSep(el)) el.classList.remove('settings-divider-pruned'); });
+  // A separator is KEPT only if there is a visible nav-item somewhere ABOVE it AND somewhere
+  // BELOW it within the sidebar (so it genuinely separates two visible groups). A label that
+  // heads an empty (all-hidden) group is pruned with its group's dividers. Adjacent separators
+  // collapse to the LAST one before the next visible item.
+  const hasVisibleItemAfter = (startIdx) => {
+    for (let j = startIdx + 1; j < kids.length; j++) {
+      if (isItem(kids[j]) && visible(kids[j])) return true;
+      // a label/divider doesn't count as content; keep scanning past separators
+    }
+    return false;
+  };
+  let seenVisibleItem = false;       // any visible nav-item encountered above the cursor
+  let pendingSep = null;             // the most recent separator awaiting a following item
+  kids.forEach((el, i) => {
+    if (isItem(el)) {
+      if (visible(el)) {
+        // a visible item closes the gap: the pending separator (if any) is legitimate — keep it
+        seenVisibleItem = true;
+        pendingSep = null;
+      }
+      return;
+    }
+    if (!isSep(el)) return;
+    // a separator with no visible item above it, OR no visible item below it, is extraneous
+    if (!seenVisibleItem || !hasVisibleItemAfter(i)) {
+      el.classList.add('settings-divider-pruned');
+      return;
+    }
+    // collapse runs of separators: prune the earlier one, keep only the latest before the item
+    if (pendingSep) pendingSep.classList.add('settings-divider-pruned');
+    pendingSep = el;
+  });
+}
+
 function syncAdminVisibility() {
   if (!modalEl) return;
   const isAdmin = !!window._isAdmin;
@@ -5555,6 +5642,9 @@ function syncAdminVisibility() {
       Array.from(cards).every(c => c.classList.contains('admin-only'));
     btn.style.display = (allAdminOnly && !isAdmin) ? 'none' : '';
   });
+  // #890: now that section visibility is settled, prune the dividers/labels that no
+  // longer separate two visible nav groups (leading/trailing/adjacent).
+  pruneSidebarDividers();
 }
 
 /* ═══════════════════════════════════════════
@@ -5588,7 +5678,12 @@ export function open(tab) {
   const _wasHidden = !(win && win.el && win.el.isConnected);
   // Show via the kit: builds (or restores) the .ow-window, restores the F5 cross-session geometry,
   // mounts the scrim + focus-trap (modal:true), and raises to the single z-authority. NO re-center.
-  if (win) win.open(document.activeElement);
+  // #890: only call win.open() when the window is NOT already on screen. On an already-open window
+  // win.open() falls through to restore() → the kit fly-in animation (ow-anim-restore), so a second
+  // open(tab) call (e.g. the user-bar Admin button while Settings is up, or any re-entry) re-spawned
+  // the window visually. When it's already open we just swap the tab in place below — no re-animate.
+  if (win && _wasHidden) win.open(document.activeElement);
+  else if (win) win.raise();   // already open: bring to front (z only), no entrance animation
   _ensurePeekInTitlebar();   // re-host the salvaged Peek toggle into the kit titlebar
   syncAdminVisibility();
   // Resolve which tab to show, respecting admin visibility (C30 / settings ruling):
@@ -5609,17 +5704,21 @@ export function open(tab) {
   // The markup default-active tab is admin-only `services`; for a player it's not visible, so land
   // on Appearance (not Account — the old fallback dropped zero-data players onto password/2FA/photo).
   if (!_tabVisible(activeTab)) activeTab = _tabVisible('appearance') ? 'appearance' : 'account';
-  // Always apply the selection so the matching panel shows (the markup default is
-  // `services`, which a non-admin must not see).
-  modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === activeTab));
-  modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== activeTab));
-  document.body.classList.toggle('settings-appearance-open', activeTab === 'appearance');
-  syncAppearanceOpacity(activeTab === 'appearance');
-  if (activeTab === 'ai') refreshAiModelEndpoints();
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }
+  // Always apply the selection so the matching panel shows (the markup default is
+  // `services`, which a non-admin must not see). #890: route through the shared swap
+  // primitive so the panel entrance plays the same delightful crossfade+glide as a tab
+  // click — but only animate the CONTENT when the window was already open. On a fresh
+  // open the kit's own ow-open entrance carries the whole window (one window, one
+  // entrance), so we skip the content micro-motion to avoid a double animation.
+  _swapToPanel(activeTab);
   if (_wasHidden) {
+    // On a fresh open the kit's own ow-open entrance carries the whole window — strip the
+    // content micro-motion so the two don't double up (one window, one entrance).
+    const _p = modalEl.querySelector(`[data-settings-panel="${activeTab}"]`);
+    if (_p) _p.classList.remove('settings-panel-enter');
     // #553: the kit modal traps focus + returns it to the opener on close. We just place the
     // initial focus on the active tab (more useful than the kit's first-focusable default).
     const firstStop = modalEl.querySelector('[data-settings-tab].active') || _settingsFocusables()[0];
