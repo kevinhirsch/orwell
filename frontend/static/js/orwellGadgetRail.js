@@ -157,9 +157,23 @@
       void el.offsetWidth; // force reflow so the keyframes can re-trigger
       el.classList.add("grail-focus-flash");
       el._grailFlashTimer = setTimeout(function () { el.classList.remove("grail-focus-flash"); el._grailFlashTimer = null; }, 900);
-      // move focus into the gadget (its own header if focusable, else the gadget)
-      var f = el.querySelector("[tabindex],button,a,[role='button']");
-      try { (f || el).focus({ preventScroll: true }); } catch (_) { try { (f || el).focus(); } catch (_) {} }
+      // #837: this is a CLICK-driven deep-link, not keyboard Tab — land focus on the
+      // ring-free gadget CONTAINER so it does NOT paint the .og-head :focus-visible ring on
+      // arrival. A temporary tabindex=-1 makes the card a programmatic-focus target (out of
+      // the Tab order, ring-free via [tabindex="-1"]:focus); cleaned up on blur so it never
+      // collides with edit-mode's own tabindex management. A keyboard Tab to the header still
+      // rings (keyboard intent preserved).
+      try {
+        var hadTab = el.hasAttribute("tabindex");
+        if (!hadTab) {
+          el.setAttribute("tabindex", "-1");
+          el.addEventListener("blur", function clean() {
+            if (!el.classList.contains("grail-dragging")) el.removeAttribute("tabindex");
+            el.removeEventListener("blur", clean);
+          }, { once: true });
+        }
+        el.focus({ preventScroll: true });
+      } catch (_) { try { el.focus(); } catch (_) {} }
     });
   }
 

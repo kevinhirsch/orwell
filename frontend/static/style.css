@@ -5977,10 +5977,32 @@ body.bg-pattern-perlin-flow {
       opacity: 0 !important;
       pointer-events: none;
     }
-    /* Focus outline for accessibility */
+    /* Focus outline for accessibility (WCAG 2.4.7) — a keyboard user Tabbing to an
+       interactive control MUST see this ring. Gated to :focus-visible so it paints on
+       keyboard intent, never on a plain pointer click. */
     :focus-visible {
       outline: 2px solid var(--red);
       outline-offset: 2px;
+    }
+    /* #837 — kill the ring on SPAWN / programmatic focus. Focus-trap roots and
+       dialog/window/sheet/card containers take a programmatic .focus() on MOUNT (focus
+       management / focus-trap) so AT/keyboard users land INSIDE the new surface. Those
+       roots are trap TARGETS, never keyboard Tab destinations, so they must never draw a
+       ring — even when the browser's :focus-visible heuristic carries "visible" over from
+       the click/keypress that opened them. This covers BOTH :focus and :focus-visible on
+       the ROOTS only; interactive controls inside keep their keyboard :focus-visible ring
+       (the rule above + each kit's own control rules). Do NOT extend this to a, button,
+       input, select, textarea, [role="button"], or [tabindex="0"] — that would regress
+       WCAG 2.4.7 for Tab users. */
+    [tabindex="-1"]:focus,
+    [tabindex="-1"]:focus-visible,
+    [role="dialog"]:focus,
+    [role="dialog"]:focus-visible,
+    .ow-window:focus,
+    .ow-window:focus-visible,
+    .ow-sheet:focus,
+    .ow-sheet:focus-visible {
+      outline: none;
     }
     /* Hamburger menu button */
     .hamburger {

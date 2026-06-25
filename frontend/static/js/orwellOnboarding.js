@@ -396,9 +396,12 @@
     // explicit card listener as a belt so a focused-card keypress always dismisses.
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") dismiss(); });
     setOnboardingActive(true); // suppress the splash tip/tagline while the wizard is up
-    // The kit already appended the window, inerted the background, trapped focus, and focused the
-    // first body control on open(). Move focus to the primary CTA (Start) once it's in the DOM.
-    try { go.focus(); } catch (_) {}
+    // The kit already appended the window, inerted the background, trapped focus, and landed
+    // focus on the ring-free window root on open(). #837: keep focus on the ring-free card
+    // root on spawn rather than stealing it to the primary CTA — auto-focusing the Start
+    // button would paint a focus ring the player never keyboard-asked for. A Tab still
+    // reaches Start (and rings, as keyboard intent should).
+    try { card.focus({ preventScroll: true }); } catch (_) {}
     refresh(); // populate the model summary + Start enabled-state
   }
 
