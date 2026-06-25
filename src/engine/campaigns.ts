@@ -64,6 +64,10 @@ export interface CampaignConstants {
   allyThreshold: number;
   /** Beats in a week (the standard cadence) — sets a week-horizon deadline. */
   weekBeats: number;
+  /** Progress accrued per advanced move (jittered) — a few ticks of lobbying build a real push. */
+  progressPerMove: number;
+  /** The ± jitter fraction on `progressPerMove` (seeded; the dedicated campaign stream). */
+  progressJitter: number;
 }
 
 export const CAMPAIGN: CampaignConstants = {
@@ -73,6 +77,8 @@ export const CAMPAIGN: CampaignConstants = {
   threatThreshold: 0.55,
   allyThreshold: 0.6,
   weekBeats: 5,
+  progressPerMove: 0.22,
+  progressJitter: 0.4,
 };
 
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -200,6 +206,43 @@ export function formCampaigns(actors: readonly CampaignActor[], deps: FormCampai
     });
   }
   return out;
+}
+
+const clampUp = (x: number): number => (x > 1 ? 1 : x < 0 ? 0 : x);
+
+export interface AdvanceDeps {
+  rng: RandomnessSource;
+  beat: number;
+  /** The owner's allies (highest-affinity first) — a lobby/plant move spreads the belief to one of them. */
+  alliesOf: (owner: EntityId) => readonly EntityId[];
+  c?: CampaignConstants;
+}
+
+/**
+ * Advance a campaign ONE move (PURE) — the per-tick execution. It pops the next move, accrues bounded
+ * `progress` (the campaign's push grows the more it's worked — the tilt scales with it), and on a
+ * lobby/plant move SPREADS the belief along the social graph: the next ally not yet aware is added to
+ * `knownTo` (the symmetric-perspective diffusion — a houseguest learns of a campaign only when a move
+ * reaches them). The plan rotates so a week-long campaign keeps working. Resolves at its deadline
+ * (`won` if it built real momentum, else `lost`). Draws only the supplied (DEDICATED) rng. Never mutates.
+ */
+export function advanceCampaign(camp: Campaign, deps: AdvanceDeps): Campaign {
+  if (camp.status !== "active") return camp;
+  const c = deps.c ?? CAMPAIGN;
+  if (deps.beat >= camp.deadlineBeat) {
+    return { ...camp, status: camp.progress >= 0.5 ? "won" : "lost" };
+  }
+  const move = camp.plan[0] ?? "lobby";
+  const rotated = [...camp.plan.slice(1), move];
+  const jitter = 1 + (deps.rng.next() * 2 - 1) * c.progressJitter;
+  const progress = clampUp(camp.progress + c.progressPerMove * jitter);
+  // A lobby/plant tells one more ally — the belief diffuses along the social graph (knownTo grows).
+  let knownTo = camp.knownTo;
+  if (move === "lobby" || move === "plant") {
+    const next = deps.alliesOf(camp.owners[0]!).find((a) => !knownTo.includes(a));
+    if (next !== undefined) knownTo = [...knownTo, next];
+  }
+  return { ...camp, plan: rotated, progress, knownTo };
 }
 
 /** The live board a campaign re-plans against. */

@@ -243,6 +243,10 @@ write_config() {
       # the game never breaks.
       echo "ORWELL_EMBEDDINGS=fastembed"
       echo "ORWELL_EMBED_CACHE=${DATA_DIR}/models"
+      # NPC campaigns (0085): the live game runs the strategic-campaign layer (hidden, adaptive
+      # agendas that tilt nominations/votes — engine-tallied, Vault-sealed). DEFAULT OFF in code so
+      # the seeded calibration gates stay byte-identical; the deploy opts in here.
+      echo "ORWELL_CAMPAIGNS=1"
       # Multi-user identity (audit E32): the FE ships with accounts ON by default, so the engine
       # must REQUIRE an asserted x-orwell-user — never silently collapse anonymous callers into a
       # shared "default" sandbox (cross-user isolation, feature 0021).

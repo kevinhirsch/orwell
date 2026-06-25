@@ -18,7 +18,10 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord } from "../../engine/voice";
-import type { Campaign } from "../../engine/campaigns";
+import {
+  formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN,
+  type Campaign, type CampaignActor, type Influence,
+} from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
 import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
@@ -231,6 +234,13 @@ function sanitizeFlavor(s: string, max = 160): string {
 const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-eviction"]);
 
 /**
+ * 0085 B2 — whether the live campaign layer runs by DEFAULT. OFF unless `ORWELL_CAMPAIGNS=1` (the deploy
+ * sets it; the calibration/UAT harness never does ⇒ every seeded gate is byte-identical). Read once at
+ * module load, like the watcher cadence; a test overrides per-session via `setCampaignsEnabled`.
+ */
+const CAMPAIGNS_ENABLED_DEFAULT = process.env.ORWELL_CAMPAIGNS === "1";
+
+/**
  * Engine-side implementation of the Vault-free game-session port. It runs the
  * OOBE (the one human-authored profile) and holds the active house, then projects
  * it to a Vault-free view: the player's own authored card plus a name-only house
@@ -312,6 +322,16 @@ export class GameSessionAdapter implements GameSession {
    * the field + persistence plumbing; Phase B populates it from the off-screen tick + feeds the tilt.
    */
   private campaigns: Campaign[] = [];
+  /**
+   * 0085 Phase B2 — whether the live campaign layer RUNS. DEFAULT OFF: the calibration/UAT harness
+   * composes its runtime without enabling it, so every seeded gate (juryReach/gradient/UAT) is
+   * BYTE-IDENTICAL; the live deploy enables it via `composeRuntime({ campaigns: true })`. When off,
+   * no campaign forms/advances and `ctx().campaignTiltFor` is absent ⇒ the seeded vote is unchanged.
+   */
+  private campaignsEnabled = CAMPAIGNS_ENABLED_DEFAULT;
+  /** The DEDICATED campaign rng tick counter — campaign draws fork off the game seed + this, never the
+   * shared society/vote stream (the L21/L24 isolation), so even live campaigns don't re-phase calibration. */
+  private campaignTickCount = 0;
   /** Records a one-off witnessed event (deal made/broken) and returns its id. Wired by the registry. */
   private onPlayerEvent?: (content: string, witnessSet: EntityId[], type?: string) => string | undefined;
   /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
@@ -1381,6 +1401,7 @@ export class GameSessionAdapter implements GameSession {
       // 0085: persist live campaigns so a multi-week agenda + its history survive a restart (accumulate,
       // never thin). Engine-only hidden strategy — already inside the never-outward snapshot.
       ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
+      ...(this.campaignTickCount > 0 ? { campaignTickCount: this.campaignTickCount } : {}),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
       // L21/L24: the calibration-neutral base occupancy the off-screen society pairs on — persisted so the
       // society's positions stay reproducible across a restart and never reseed from the weighted view.
@@ -1525,6 +1546,7 @@ export class GameSessionAdapter implements GameSession {
     this.deals.load(core.deals ?? []);
     // 0085: restore live campaigns (absent on pre-0085 saves ⇒ none).
     this.campaigns = (core.campaigns ?? []).map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] }));
+    this.campaignTickCount = core.campaignTickCount ?? 0;
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
     // L21/L24: restore the calibration-neutral base occupancy (absent on pre-L21/L24 saves — the next tick
@@ -3549,7 +3571,85 @@ export class GameSessionAdapter implements GameSession {
       // Open deals binding the houseguest (0039 → 0044): the vote leans to honor; the ledger still
       // reconciles a break with its full betrayal consequence downstream.
       dealsOf: (id) => this.deals.open().filter((d) => d.condition.promisors.includes(id)),
+      // 0085: the per-listener CAMPAIGN tilt — present ONLY when the campaign layer is enabled (off in
+      // the calibration harness ⇒ absent ⇒ byte-identical). A campaign to evict `target` that `voter` is
+      // AWARE of (knownTo) pushes their vote, scaled by owner persuasiveness × voter susceptibility ×
+      // trust × progress (the engine tallies; narration only voices). Bounded; never crosses the wall.
+      ...(this.campaignsEnabled ? { campaignTiltFor: (target, voter) => this.campaignTiltFor(target, voter) } : {}),
     };
+  }
+
+  /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
+  setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }
+
+  private influenceOf(id: EntityId): Influence {
+    const hg = this.house ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id)) : undefined;
+    return hg?.character.influence ?? { persuasiveness: 0.5, susceptibility: 0.5 };
+  }
+
+  /** The summed, character-mediated campaign push on `voter`'s vote against `target` (aware campaigns only). */
+  private campaignTiltFor(target: EntityId, voter: EntityId): number {
+    let sum = 0;
+    for (const c of this.campaigns) {
+      if (c.status !== "active" || c.goal !== "evict" || c.target !== target) continue;
+      if (!c.knownTo.includes(voter)) continue; // symmetric perspective: only an aware voter is swayed
+      const owner = c.owners[0]!;
+      sum += campaignTilt(c.progress, this.influenceOf(owner).persuasiveness, this.influenceOf(voter).susceptibility, this.rel.edge(owner, voter).trust);
+    }
+    return sum;
+  }
+
+  private threatReadsOf(owner: EntityId): Array<{ toward: EntityId; threat: number }> {
+    return this.livingIds().filter((id) => id !== owner)
+      .map((id) => ({ toward: id, threat: this.rel.edge(owner, id).threat }))
+      .sort((a, b) => b.threat - a.threat);
+  }
+
+  private allyReadsOf(owner: EntityId): Array<{ toward: EntityId; affinity: number }> {
+    return this.livingIds().filter((id) => id !== owner)
+      .map((id) => ({ toward: id, affinity: this.rel.edge(owner, id).affinity }))
+      .sort((a, b) => b.affinity - a.affinity);
+  }
+
+  private campaignActors(): CampaignActor[] {
+    return this.livingIds().filter((id) => id !== PLAYER).map((id) => ({
+      id, persuasiveness: this.influenceOf(id).persuasiveness,
+      threats: this.threatReadsOf(id), allies: this.allyReadsOf(id),
+    }));
+  }
+
+  /**
+   * Advance the live campaign layer one tick (0085 B2) — driven by the orchestrator's per-turn off-screen
+   * tick, ONLY when enabled. Prune dead owners, re-plan against the board, form up to the cap, then advance
+   * each active campaign one move. Uses a DEDICATED rng (never the shared society/vote stream), and its only
+   * effect on the seeded vote is the bounded `campaignTiltFor` provider — it never mutates the relationship
+   * edges. No-op (and zero draws) when disabled ⇒ the calibration spine is byte-identical.
+   */
+  campaignTick(): void {
+    if (!this.campaignsEnabled || !this.house) return;
+    this.campaignTickCount += 1;
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:campaigns:${this.campaignTickCount}`));
+    const beat = this.beatSeqNow();
+    const living = new Set(this.livingIds());
+    const nominees = new Set(this.ceremony.nominees);
+    // Prune campaigns whose owner is gone; re-plan the rest against the live board.
+    this.campaigns = this.campaigns
+      .filter((c) => living.has(c.owners[0]!))
+      .map((c) => c.status === "active"
+        ? replan(c, { active: living, ownerEndangered: nominees.has(c.owners[0]!), threats: this.threatReadsOf(c.owners[0]!) })
+        : c);
+    const activeCount = (): number => this.campaigns.filter((c) => c.status === "active").length;
+    // Form up to the cap (one active campaign per owner).
+    if (activeCount() < CAMPAIGN.maxConcurrent) {
+      for (const f of formCampaigns(this.campaignActors(), { rng, beat })) {
+        if (activeCount() >= CAMPAIGN.maxConcurrent) break;
+        if (!this.campaigns.some((c) => c.status === "active" && c.owners[0] === f.owners[0])) this.campaigns.push(f);
+      }
+    }
+    // Advance each active campaign one move (progress + knownTo diffusion), then drop the resolved.
+    this.campaigns = this.campaigns
+      .map((c) => c.status === "active" ? advanceCampaign(c, { rng, beat, alliesOf: (id) => this.allyReadsOf(id).map((a) => a.toward) }) : c)
+      .filter((c) => c.status === "active");
   }
 
   private statsOf(id: EntityId): Stats {
