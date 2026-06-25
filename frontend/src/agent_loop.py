@@ -4175,7 +4175,18 @@ async def stream_agent_loop(
                 # nudge the GM to voice THAT NPC drifting over to start a scene (in chat, where the weights
                 # actually move: the scene then folds via recordInteraction / the 0055 belt). When the lull
                 # persists past the grace window, the advance-nudge takes over and the week moves on.
+                #
+                # ONE-NARRATION-PER-TURN invariant (the same rule the advance ladder honors at
+                # `if _emitted_visible:` below): if the player has ALREADY been shown a scene this turn,
+                # we must NOT re-prompt the model for a SECOND narration — that second scene is appended
+                # to the SAME message and the player sees two scenes concatenated (the duplicate/overlapping
+                # bedroom-scene bug). Unlike the advance nudge, an approach has no engine state to commit
+                # silently (it's a lingering window, not a beat to advance), so we simply suppress it: the
+                # NPC who wants the player re-surfaces on the player's NEXT turn (socialInitiatives is
+                # re-read every finishing turn). Only re-prompt for an approach when nothing visible was
+                # shown yet — exactly where a single fresh "NPC drifts over" scene is what's wanted.
                 _want_approach = (_is_lull and (not _progressed) and (not _stale)
+                                  and (not _emitted_visible)
                                   and _turn_approach_nudges < _MAX_APPROACH_NUDGES_PER_TURN)
                 # The re-approach can fire on ANY finishing live turn (it watches the post-season
                 # state, not a tool gap), so we always need the game state to know if the season is
