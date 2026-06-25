@@ -2174,27 +2174,32 @@ def main() -> int:
               const vis = el => el && !el.hidden && getComputedStyle(el).display !== 'none';
               const items = (menuId, sel) => [...document.querySelectorAll(`#${menuId} ${sel}`)]
                 .filter(vis).map(i => (i.id + ' ' + (i.textContent || '')).replace(/\\s+/g, ' ').trim());
-              document.getElementById('export-dl-btn').click();
-              const exp = items('export-dropdown-menu', '.export-dropdown-item');
+              // #795: the top-center conversation caret DROPDOWN is gone — the only title-bar
+              // affordance is a pencil that renames the current conversation inline. (Its
+              // export sub-menu no longer exists in the title bar, so there is nothing to open.)
+              const renamePencil = document.getElementById('topbar-rename-btn');
               const ovfTrigger = document.getElementById('overflow-plus-btn');
               if (vis(ovfTrigger)) ovfTrigger.click();
               const ovf = items('overflow-menu', '.overflow-menu-item');
               // #760: in the game build, attach is promoted to a first-class VISIBLE
               // composer paperclip — there must be exactly one reachable attach affordance.
               const attachPaperclip = document.getElementById('composer-attach-btn');
-              return { export: exp, overflow: ovf,
-                       exportTrigger: vis(document.getElementById('export-dl-btn')),
+              return { overflow: ovf,
+                       renamePencilVisible: vis(renamePencil),
+                       exportDropdownGone: !document.getElementById('export-dl-btn')
+                                           && !document.getElementById('export-dropdown-menu'),
                        overflowTrigger: vis(ovfTrigger),
                        composerAttachVisible: vis(attachPaperclip),
                        trayAttachPresent: !!document.getElementById('overflow-attach-btn') };
             }""")
             page.keyboard.press("Escape")  # fold the overflow menu back
-            page.evaluate("document.body.click()")  # and dismiss the export dropdown
+            page.evaluate("document.body.click()")  # and dismiss any open popup
             page.wait_for_timeout(500)
-            check(len(g13_menus["export"]) >= 3,
-                  f"G13: the export menu presents its keep-set entries ({g13_menus['export']})")
-            check(g13_zombies(g13_menus["export"]) == [],
-                  f"G13: no export-menu entry names a dropped vertical ({g13_zombies(g13_menus['export'])})")
+            # #795: the title bar carries a rename pencil and NO conversation dropdown switcher.
+            check(g13_menus["renamePencilVisible"] is True,
+                  "G13/#795: the title-bar rename pencil (#topbar-rename-btn) is visible")
+            check(g13_menus["exportDropdownGone"] is True,
+                  "G13/#795: the top-center caret 'More' dropdown is gone (no dropdown switcher)")
             check(g13_zombies(g13_menus["overflow"]) == [],
                   f"G13: no overflow item present whose handler is the refusal path ({g13_zombies(g13_menus['overflow'])})")
             # The cascade is HIDE-ONLY and emptiness-driven (the G3 Tools-chevron rule):
@@ -2202,8 +2207,6 @@ def main() -> int:
             # emptied (here, #760 promoting attach to a first-class visible paperclip) has
             # its trigger correctly hidden — never over-hidden, never left as a zombie that
             # opens nothing. So: trigger-visible IFF the menu has visible items.
-            check(g13_menus["exportTrigger"] is True,
-                  "G13: the export launcher (keep-set items) stays visible (cascade never over-hides)")
             overflow_has_items = len(g13_menus["overflow"]) >= 1
             check(g13_menus["overflowTrigger"] is overflow_has_items,
                   "G13: the overflow chevron is visible IFF its menu has keep-set items "

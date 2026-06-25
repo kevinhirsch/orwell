@@ -459,6 +459,28 @@ body.bg-pattern-perlin-flow {
       color: var(--accent);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
     }
+    /* #795: the top-center pencil — the lone conversation affordance (no dropdown
+       switcher). Styled to match the old "More" caret so the header reads the same. */
+    .topbar-rename-btn {
+      background: none; border: none;
+      color: inherit;
+      cursor: pointer;
+      flex-shrink: 0;
+      margin-left: 2px;
+      padding: 4px 5px; border-radius: 4px;
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: color 0.08s, background 0.08s, opacity 0.08s;
+      opacity: 0.65;
+    }
+    .topbar-rename-btn:hover {
+      color: var(--accent);
+      opacity: 1;
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+    }
+    .topbar-rename-btn svg { display: block; }
+    /* While renaming, the input fills the title slot — drop the pencil so it
+       doesn't crowd the inline editor. */
+    .chat-meta-overlay:has(.session-rename-input) .topbar-rename-btn { display: none; }
     .export-dropdown-menu {
       display: none;
       position: fixed;
@@ -4704,16 +4726,58 @@ body.bg-pattern-perlin-flow {
       .section-header-flex h4::before {
         height: 18px;
       }
-      /* Compact top bar on mobile — align with sidebar header */
+      /* #800: on mobile the conversation title bar is a real title bar — the two
+         sidebar EXPAND ICONS fold INTO it (the hamburger at the left edge, the gadget /
+         control-room opener at the right edge), both as consistent kit line icons
+         vertically centered on the title row. The bar gives itself a defined height so
+         those corner controls read as part of it rather than free-floating FABs. The
+         buttons stay position:fixed (so they sit above the scroll + clear the banner),
+         but they are anchored to the SAME row center as the title via --ow-titlebar-top. */
+      :root { --ow-titlebar-h: 44px; }
       .chat-top-bar {
-        padding: 1px 8px;
-        min-height: 14px;
+        padding: 1px 44px;          /* reserve the corner-control gutters */
+        min-height: var(--ow-titlebar-h);
         margin-top: -31px;
         padding-top: 31px;
       }
       .chat-top-bar .chat-new-btn { display: none; }
       .chat-meta-overlay { font-size: 0.65em; max-width: 55%; overflow: visible; left: 50%; top: 50%; transform: translate(-50%, -50%); position: absolute; }
-      .chat-meta-overlay .export-dl-btn { display: inline-flex; }
+      .chat-meta-overlay .export-dl-btn,
+      .chat-meta-overlay .topbar-rename-btn { display: inline-flex; }
+
+      /* #800: shared anchor — the vertical center of the title-bar row, below any banner +
+         the safe-area inset. Both expand icons sit here so they line up with each other
+         AND with the centered title. */
+      /* center a 44px (touch-floor) corner control on the 44px title-bar row that starts
+         ~11px below the banner/safe-area: row top + (rowH - btnH)/2 ≈ +11px. */
+      :root { --ow-titlebar-top: calc(var(--on-banner-inset, 0px) + env(safe-area-inset-top, 0px) + 11px); }
+      .hamburger-btn,
+      body[data-game-build] .gadget-rail-open {
+        top: var(--ow-titlebar-top) !important;
+        width: 30px;
+        height: 30px;
+        z-index: 210;
+        opacity: 0.55;
+        color: var(--hamburger-color, var(--fg));
+        background: none;
+        border: none;
+        box-shadow: none;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.15s, background 0.15s;
+      }
+      .hamburger-btn { left: 7px !important; right: auto !important; }
+      body[data-game-build] .gadget-rail-open { right: 7px !important; left: auto !important; bottom: auto !important; }
+      /* the two icons share one visual language: line icons, currentColor, same hit-feel */
+      .hamburger-btn svg,
+      .gadget-rail-open svg { width: 20px; height: 20px; display: block; stroke: currentColor; }
+      .hamburger-btn:hover, .hamburger-btn:active,
+      .gadget-rail-open:hover, .gadget-rail-open:active {
+        opacity: 1;
+        background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
+      }
       /* Incognito — smaller on mobile */
       .incognito-btn {
         padding: 4px 10px;
@@ -37054,6 +37118,7 @@ body.theme-frosted .modal {
   .send-btn,                  /* composer send / new-chat button (37w in newchat mode) */
   .input-icon-btn,            /* composer toolbar: attach / more-tools (36w) */
   .export-dl-btn,             /* chat-meta export ▾ (36w) */
+  .topbar-rename-btn,         /* #795 chat-meta rename pencil (24w) — replaces export ▾ */
   .scroll-nav-btn,            /* scroll-to-latest ▼ (38w) */
   #orwell-scroll-bottom,      /* game scroll-to-latest (38×38, JS-injected) */
   .gadget-rail-open,          /* mobile gadget-drawer opener (42w) */
