@@ -14031,6 +14031,17 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
    Covers both the settings + theme kit-titlebar Peek toggles. */
 @media (max-width: 480px), (pointer: coarse) {
   .theme-opacity-wrap.theme-opacity-toggle { min-height: 44px; min-width: 44px; height: auto; }
+  /* When Peek is re-homed into the kit titlebar it ALSO carries .ow-titlebar-accessory,
+     whose `body.theme-frosted .ow-titlebar-accessory { min-height:24px }` rule (higher
+     specificity) was clamping the box back to 24px — the matrix measured 59x24 at
+     phone-390. Re-assert the 44px touch floor at higher specificity + !important so it
+     beats the accessory sizing in BOTH glass tiers. Desktop (no media match) is untouched,
+     so the compact 22px look stands there. Covers the settings + theme Peek toggles. */
+  .theme-opacity-wrap.theme-opacity-toggle.ow-titlebar-accessory,
+  body.theme-frosted .theme-opacity-wrap.theme-opacity-toggle.ow-titlebar-accessory {
+    min-height: 44px !important; min-width: 44px !important;
+    height: auto !important; max-height: none !important;
+  }
 }
 /* The title h4 already carries margin-right:auto to group header controls
    on the right. BOTH the Peek button AND the injected minimize button also
@@ -22346,6 +22357,28 @@ body.gallery-selecting .gallery-dl-btn,
   }
   .settings-panels {
     padding: 12px 14px;
+  }
+}
+
+/* TABLET TIER (769–920px viewport — above the mobile full-screen sheet at ≤768,
+   below the laptop tier at ≥1024): the kit window is capped at 64vw, so the
+   settings content lands in a 480–500px DEAD ZONE right at ~820px — the exact
+   knife-edge of the G6 rail stack/left decision. getBoundingClientRect (the
+   matrix's basis) and the @container resolution can fall on OPPOSITE sides of
+   the 480 token there depending on the runner (scrollbar gutter, vw rounding),
+   so the rail flickered between left and stacked across environments. Cap the
+   SETTINGS kit window narrow enough at this tier that its content is reliably
+   ≤480 — which lets the EXISTING `@container settings-modal (max-width:480px)`
+   rule do the stacking (container-driven, per the brief), with no boundary
+   ambiguity. A ~500px settings window at an ~820px viewport is cramped anyway,
+   so the stacked rail is the better layout here (the G6 intent). Laptop/desktop
+   (≥1024, ≥1366) are untouched — their wide modal keeps the LEFT rail. */
+@media (min-width: 769px) and (max-width: 920px) {
+  #settings-modal.ow-window {
+    /* window border (2px) + .ow-body horizontal padding (~23px) ≈ 25px of
+       chrome; cap at 500px ⇒ content ≤ ~475px ⇒ under the 480 token. !important
+       beats the kit's `max-width: 64vw` base rule. */
+    max-width: 500px !important;
   }
 }
 
