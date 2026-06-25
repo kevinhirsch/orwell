@@ -110,3 +110,27 @@ export const MOVEMENT_PERSONALITY: MovementPersonality = {
   moveProbCeil: 0.95,
   seekPullFloor: 0,
 };
+
+/**
+ * Tracked-occupancy & conspicuousness tunables (feature 0077 Phase 2b). Who is behind a CLOSED door is
+ * never an ambient read (the sightline graph makes those rooms opaque); it is KNOWLEDGE the player earns
+ * by WITNESSING a houseguest cross from a room they can see into a private one. Such a belief carries a
+ * pathway and an age — and it can go STALE: the player saw them go in, but (unwitnessed) they may have
+ * left. Once occupancy is tracked, a private room held by exactly a PAIR who have been in there a while
+ * emits a Vault-safe CONSPICUOUSNESS read — "two alone too long implies gameplay" (the content stays
+ * sealed; only the meeting is observable). All read-side, drawing NO rng (calibration-neutral).
+ */
+export interface TrackedOccupancyConstants {
+  /** Presence ticks a witnessed sighting stays "live" before it decays to a STALE "last seen" belief. */
+  staleTicks: number;
+  /** The exact believed pair-size in a private room that trips the "holed up together" read. */
+  conspicuousPair: number;
+  /** ...and how many ticks they must have been in there (since you saw them enter) for it to read as gameplay. */
+  conspicuousMinTicks: number;
+}
+
+export const TRACKED_OCCUPANCY: TrackedOccupancyConstants = {
+  staleTicks: 4,
+  conspicuousPair: 2,
+  conspicuousMinTicks: 3,
+};

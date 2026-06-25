@@ -808,6 +808,19 @@ export function renderGameContext(view: GameStateView): string {
         ? `    · ${roomLabel(n.room)}: ${n.present.map((p) => p.name).join(", ")}.`
         : `    · ${roomLabel(n.room)}: empty.`,
     );
+    // 0077 Phase 2b — TRACKED OCCUPANCY: who the player BELIEVES is behind a closed door (they watched
+    // them go in). NOT a live read — voice it as memory/belief ("you saw them slip into …"), flag a stale
+    // one as no-longer-certain, and NEVER narrate what is being SAID in there (the door is shut; only the
+    // meeting is observable). These people are NOT addressable until they come back into view.
+    const trackedLines = (wa.tracked ?? []).map((t) =>
+      `    · ${t.name} — you saw enter the ${roomLabel(t.room)}${t.stale ? " a while ago (may have moved since — unconfirmed)" : ""}.`,
+    );
+    // CONSPICUOUSNESS: a pair holed up behind a closed door a while — a Vault-safe READ (who/where/how-long
+    // only). Voice it as the player's own noticing ("…have been alone in there a while"); it is a hook for
+    // the player's paranoia, never an engine claim that they are scheming.
+    const conspicuousLines = (wa.conspicuous ?? []).map((c) =>
+      `    · ${c.who.map((p) => p.name).join(" and ")} have been alone in the ${roomLabel(c.room)} a while now (you saw them go in and they haven't come out).`,
+    );
     return [
       "- WHERE YOU ARE (engine truth — voice THIS room and THESE people EXACTLY; NEVER invent positions,",
       "  room changes, or \"still to arrive\" houseguests — the whole cast is already in the house):",
@@ -816,6 +829,10 @@ export function renderGameContext(view: GameStateView): string {
       ...(nearby.length
         ? ["    In view (each room you can SEE INTO and EXACTLY who is in it — voice this occupancy, never invent it; closed rooms are opaque and not listed):", ...nearby]
         : ["    No other rooms are in view (you can see into none from here)."]),
+      ...(trackedLines.length
+        ? ["    Behind closed doors — what you BELIEVE (you watched them go in; you canNOT see or hear in, only that they're there):", ...trackedLines]
+        : []),
+      ...(conspicuousLines.length ? ["    Worth noticing:", ...conspicuousLines] : []),
       // The model used to GUESS a room id for moveTo ("bedroom"?) and loop through "isn't mapping"
       // retries. Hand it the EXACT walkable rooms so it always names a real one (moveTo is forgiving,
       // but this removes the guessing entirely). These are the WHOLE house — only the player's room +

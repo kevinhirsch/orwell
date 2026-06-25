@@ -17,9 +17,9 @@ import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms } from "../../engine/presence";
-import { PRESENCE } from "../../engine/presenceConstants";
+import { PRESENCE, TRACKED_OCCUPANCY } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_SIGHTLINE, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
+import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
 import type { Room, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
@@ -346,6 +346,16 @@ export class GameSessionAdapter implements GameSession {
    * the movement trajectory stays reproducible across a restart. Advances ONCE per `presenceTick`.
    */
   private presenceTickCount = 0;
+  /**
+   * TRACKED OCCUPANCY (0077 Phase 2b) — the player's BELIEFS about who is behind a CLOSED door, keyed by
+   * houseguest: each holds the private `room` the player witnessed them enter and the `asOfTick` they saw
+   * it. This is acquired KNOWLEDGE (a witnessed-movement pathway), NOT the live map: it is set when the
+   * player sees a houseguest cross into a private room from a space they can see, refreshed on a later
+   * witnessed entry, and CLEARED when the player witnesses that houseguest in the open again — but if they
+   * leave unwitnessed it simply ages and goes stale (the player still thinks they're in there). Vault-free
+   * (room + tick only; no scene content). Persisted so a belief survives a restart (0030). Player-only.
+   */
+  private trackedOccupancy: Map<EntityId, { room: Room; asOfTick: number }> | null = null;
   /** The game's seed (B60/E12): per-moment rng keys off it — two same-named games never share streams. */
   private gameSeed: number | null = null;
   /** The per-season style anchor for portrait prompts (0051): seeded at cast time, stable through the season. */
@@ -1356,6 +1366,9 @@ export class GameSessionAdapter implements GameSession {
       // L21/L24: the dedicated movement stream's tick counter — persisted so the personality-weighted
       // movement trajectory stays reproducible across a restart (absent ⇒ 0).
       ...(this.presenceTickCount > 0 ? { presenceTickCount: this.presenceTickCount } : {}),
+      // 0077 Phase 2b: the player's tracked-occupancy beliefs (who is behind which closed door, as of which
+      // tick) — acquired knowledge with a pathway, so it survives a restart (absent when tracking no one).
+      ...(this.trackedOccupancy ? { trackedOccupancy: Object.fromEntries(this.trackedOccupancy) } : {}),
       ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       // The producer persona's seed (producer-persona feature) — persisted so the SAME off-camera casting
       // producer is voiced across turns and a restart (it is established pre-game, before any season seed).
@@ -1493,6 +1506,10 @@ export class GameSessionAdapter implements GameSession {
     this.presenceTenure = core.presenceTenure ? new Map(Object.entries(core.presenceTenure) as [EntityId, number][]) : null;
     // L21/L24: restore the dedicated movement stream's tick counter (absent on older saves ⇒ 0).
     this.presenceTickCount = core.presenceTickCount ?? 0;
+    // 0077 Phase 2b: restore the player's tracked-occupancy beliefs (absent on pre-0077 saves ⇒ none).
+    this.trackedOccupancy = core.trackedOccupancy
+      ? new Map(Object.entries(core.trackedOccupancy) as [EntityId, { room: Room; asOfTick: number }][])
+      : null;
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     // The producer persona's seed (producer-persona feature): restore so the SAME off-camera casting
     // producer is voiced after a restart. Persisted on feature+ saves; on a started game that predates
@@ -1830,6 +1847,40 @@ export class GameSessionAdapter implements GameSession {
     this.presence = next;
     this.presenceBase = nextBase;
     this.presenceTenure = tenure;
+    // 0077 Phase 2b: fold the movements the player WITNESSED this tick into their tracked-occupancy
+    // beliefs (who slipped behind a closed door, who came back into view). Observation-only — it reads
+    // the prev→next positions and draws NO rng, so the calibration spine is untouched.
+    this.noteWitnessedMovements(prev, next, realPlayerRoom ?? playerRoom ?? null);
+  }
+
+  /**
+   * Fold the movements the player WITNESSED this presence tick into their tracked-occupancy beliefs
+   * (0077 Phase 2b). The player's vantage is `playerRoom`. For each NPC: if they are now somewhere the
+   * player can SEE (their own room, or a sightline room), the player has eyes on them in the open — clear
+   * any belief (a live sighting beats a remembered one). Otherwise, if they MOVED INTO a private (closed)
+   * room FROM a room the player could see, the player watched them cross the threshold — record/refresh
+   * the belief, stamped with this tick. A houseguest who slips away UNWITNESSED keeps their old belief,
+   * which only ages and goes stale (the "saw them go in, they may have left" property). Positions only —
+   * NO rng (calibration-neutral), NO Vault (room + tick, never scene content). Player-only knowledge.
+   */
+  private noteWitnessedMovements(prev: Occupancy | null, next: Occupancy, playerRoom: Room | null): void {
+    if (!this.house || !playerRoom) return;
+    const me = this.house.player.id;
+    const beliefs = this.trackedOccupancy ?? new Map<EntityId, { room: Room; asOfTick: number }>();
+    const canSee = (r: Room): boolean => r === playerRoom || areVisible(playerRoom, r);
+    for (const [id, room] of next) {
+      if (id === me) continue;
+      if (canSee(room)) {
+        beliefs.delete(id); // in the open, no door between them — a live sighting clears the belief
+        continue;
+      }
+      const from = prev?.get(id);
+      // They went somewhere the player can't see. Did the player just watch them cross into a closed room?
+      if (isPrivateRoom(room) && from !== undefined && from !== room && canSee(from)) {
+        beliefs.set(id, { room, asOfTick: this.presenceTickCount });
+      }
+    }
+    this.trackedOccupancy = beliefs.size ? beliefs : null;
   }
 
   /**
@@ -2043,6 +2094,11 @@ export class GameSessionAdapter implements GameSession {
     // L21/L24: prune the calibration-neutral base in lockstep so the society never pairs an evictee.
     if (this.presenceBase) for (const id of [...this.presenceBase.keys()]) if (!active.has(id)) this.presenceBase.delete(id);
     if (this.presenceTenure) for (const id of [...this.presenceTenure.keys()]) if (!active.has(id)) this.presenceTenure.delete(id);
+    // 0077 Phase 2b: an evicted houseguest is no longer in any room — drop any belief about where they were.
+    if (this.trackedOccupancy) {
+      for (const id of [...this.trackedOccupancy.keys()]) if (!active.has(id)) this.trackedOccupancy.delete(id);
+      if (this.trackedOccupancy.size === 0) this.trackedOccupancy = null;
+    }
   }
 
   whereabouts(): WhereaboutsView | null {
@@ -2066,14 +2122,42 @@ export class GameSessionAdapter implements GameSession {
     // (a bedroom, the bathroom/lounge, the HOH/storage/diary) is opaque — standing one room over no
     // longer leaks who is behind it. Who is behind a closed door is earned by watching, never ambient.
     const present = inRoom(room);
+    const nearby = (HOUSE_SIGHTLINE.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) }));
+    // 0077 Phase 2b — TRACKED OCCUPANCY: what the player BELIEVES about who is behind a closed door,
+    // earned by witnessing them go in. A belief is suppressed the instant the player has a LIVE sighting
+    // (the houseguest is present or in a sightline room) — a real read beats a remembered one, so the view
+    // never contradicts itself. The rest carry their age + a `stale` flag (saw them go in; may have left).
+    const liveSightings = new Set<EntityId>([...present, ...nearby.flatMap((n) => n.present)].map((p) => p.id));
+    const tracked: NonNullable<WhereaboutsView["tracked"]> = [];
+    for (const [id, belief] of this.trackedOccupancy ?? []) {
+      if (liveSightings.has(id) || !isUp(id)) continue;
+      tracked.push({
+        id, name: this.nameOf(id), room: belief.room, asOf: belief.asOfTick,
+        stale: this.presenceTickCount - belief.asOfTick > TRACKED_OCCUPANCY.staleTicks,
+      });
+    }
+    // CONSPICUOUSNESS — derived per-read (never stored, ADR 0002): a private room the player believes is
+    // held by exactly a PAIR who went in a while ago and (unwitnessed) haven't come out. Vault-safe: who/
+    // where/how-long ONLY. Paranoia is the player's to form — the engine never says "they're scheming".
+    const byRoom = new Map<Room, typeof tracked>();
+    for (const t of tracked) (byRoom.get(t.room as Room) ?? byRoom.set(t.room as Room, []).get(t.room as Room)!).push(t);
+    const conspicuous: NonNullable<WhereaboutsView["conspicuous"]> = [];
+    for (const [r, group] of byRoom) {
+      if (group.length !== TRACKED_OCCUPANCY.conspicuousPair) continue;
+      const sinceTicks = Math.min(...group.map((t) => this.presenceTickCount - t.asOf));
+      if (sinceTicks < TRACKED_OCCUPANCY.conspicuousMinTicks) continue;
+      conspicuous.push({ room: r, who: group.map((t) => ({ id: t.id, name: t.name })), sinceTicks });
+    }
     return {
       room,
       present,
-      nearby: (HOUSE_SIGHTLINE.get(room) ?? []).map((r) => ({ room: r, present: inRoom(r) })),
+      nearby,
       // L21/L24: duration — the player's tenure in this room + each companion's, so the narrator
       // voices continuity (who has lingered with you vs. who just walked in) instead of resetting.
       turnsHere: this.presenceTenure?.get(me) ?? 0,
       companions: present.map((p) => ({ ...p, turnsHere: this.presenceTenure?.get(p.id) ?? 0 })),
+      ...(tracked.length ? { tracked } : {}),
+      ...(conspicuous.length ? { conspicuous } : {}),
     };
   }
 

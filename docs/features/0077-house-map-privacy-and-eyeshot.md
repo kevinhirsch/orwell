@@ -8,10 +8,17 @@
 > over no longer leaks its occupants (the open public core sees across itself + the hallway mouth;
 > every bedroom/bathroom/lounge/HOH/storage/diary is opaque from outside). Gate:
 > `tests/unit/sightline0077.test.ts` + `tests/unit/whereaboutsSightline.test.ts` (+ the updated
-> presence/BDD/lever-manifest contracts). Read-side only ⇒ calibration byte-identical. **Phase 2b
-> (next) — tracked occupancy + conspicuousness + sub-zone earshot:** the `{visible, tracked}` belief
-> layer (who's behind a closed door, learned by watching a doorway, with pathway/confidence/stale),
-> the "two alone too long" conspicuousness read, and zone-scoped `rollOverhears`. **Gate (planned):**
+> presence/BDD/lever-manifest contracts). Read-side only ⇒ calibration byte-identical. **Phase 2b — TRACKED
+> OCCUPANCY + the player-facing CONSPICUOUSNESS read:** **BUILT 2026-06-25** — `whereabouts()` now carries
+> `tracked` (beliefs about who is behind a closed door, earned by witnessing a houseguest cross into a
+> private room from a space the player can see; each with its age + a `stale` flag — saw them go in, may
+> have left) and `conspicuous` (a private room held by exactly a pair who went in a while ago and haven't
+> come out — who/where/how-long only, never the sealed scene). The witness fold is `noteWitnessedMovements`
+> at the end of `presenceTick` (observation-only, draws **no rng** ⇒ calibration byte-identical); beliefs
+> persist in `SessionCore.trackedOccupancy` (0030). Constants: `TRACKED_OCCUPANCY` in `presenceConstants.ts`.
+> Gate: `tests/unit/trackedOccupancy0077.test.ts`. **Phase 2c (next) — sub-zone earshot (zone-scoped
+> `rollOverhears`) + NPC-to-NPC suspicion diffusion of a sighting (0038) + wire the `.feature` into
+> `cucumber.cjs`.** **Gate (planned):**
 > engine (Vitest + dependency-cruiser + BDD `0077-house-map-privacy-and-eyeshot.feature`) and
 > front-end (the L26 "Where you are" gadget consumes the sightline-scoped projection). **Depends on:** 0049 (house
 > presence — the floor plan, `assignRooms`, `rollOverhears`, `whereabouts`), 0002 (events/pathways &

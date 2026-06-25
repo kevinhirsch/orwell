@@ -797,6 +797,22 @@ export interface WhereaboutsView {
    */
   turnsHere: number;
   companions: Array<{ id: EntityId; name: string; turnsHere: number }>;
+  /**
+   * TRACKED OCCUPANCY (0077 Phase 2b) — what the player BELIEVES about who is behind a CLOSED door,
+   * earned by witnessing a houseguest cross into a private room from a space the player could see (never
+   * an ambient read — closed rooms are opaque). Each belief carries the room, the age (`asOf` presence
+   * tick) and a `stale` flag: the player saw them go in, but unwitnessed they may have left, so an aged
+   * belief is "last seen", not the live map. Absent when the player has tracked no one (FE ignores it).
+   */
+  tracked?: Array<{ id: EntityId; name: string; room: string; asOf: number; stale: boolean }>;
+  /**
+   * CONSPICUOUSNESS (0077 Phase 2b) — derived per-read from tracked occupancy: a private room the player
+   * believes is held by exactly a PAIR who went in a while ago and (unwitnessed) haven't come out. The
+   * Vault-safe "two alone too long implies gameplay" read — who/where/how-long ONLY, never the scene's
+   * content (earshot is muffled; only the meeting is observable). Paranoia is the player's to form. Absent
+   * when nothing is conspicuous.
+   */
+  conspicuous?: Array<{ room: string; who: NamedRef[]; sinceTicks: number }>;
 }
 
 /**

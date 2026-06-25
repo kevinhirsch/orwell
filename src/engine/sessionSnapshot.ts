@@ -80,6 +80,14 @@ export interface SessionCore {
    * the deterministic sequence). The counter advances ONCE per `presenceTick`.
    */
   presenceTickCount?: number;
+  /**
+   * TRACKED OCCUPANCY (0077 Phase 2b) — the player's BELIEFS about who is behind a CLOSED door, keyed by
+   * houseguest (the private room they were witnessed entering + the presence tick it was seen). Acquired
+   * knowledge with a witnessed-movement pathway, so it must survive a restart (0030); it ages and goes
+   * stale on the read side. Vault-free (room + tick, no scene content). Absent on pre-0077 saves and
+   * whenever the player is tracking no one (a fresh game starts empty).
+   */
+  trackedOccupancy?: Record<EntityId, { room: Room; asOfTick: number }>;
   /** The game's seed (B60/audit E12): the per-moment rng keys off it, so two same-named games diverge. */
   seed?: number;
   /**
