@@ -61,6 +61,25 @@ Feature: 0085 — NPC campaigns & the scramble
       Then the player can learn that a campaign exists only through what they witness, are told, or overhear
       And the player never receives the sealed content of the schemers' private scenes
 
+  Rule: Perspective is symmetric — houseguests are no more omniscient than the player
+
+    Scenario: A bystander houseguest does not know a campaign they were never told of
+      Given two houseguests run a campaign against the target
+      And a third houseguest has no pathway to it
+      Then the third houseguest's voicing carries no trace of that campaign
+      And the third houseguest never acts on a campaign they do not know exists
+
+    Scenario: A houseguest acts on their own belief, not an omniscient ledger
+      Given two houseguests in different blocs hold different reads of the house
+      When each chooses their next strategic move
+      Then each acts on what they themselves have learned, not the full set of campaigns
+
+    Scenario: Belief in a campaign spreads only by pathway and drifts as it travels
+      Given one houseguest learns of a campaign by being lobbied
+      When that belief diffuses to others as gossip
+      Then it reaches them only through that pathway
+      And it may arrive partial, late, or distorted, never as shared certain truth
+
   Rule: The scramble — campaigns colliding at the vote
 
     Scenario: The secret count can diverge from what is said to the player's face

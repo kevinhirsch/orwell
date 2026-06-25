@@ -9,9 +9,10 @@
 > (the pathways + gossip the player learns a campaign through), 0077 (conspicuousness — a campaign's
 > meetings are observable even when its content is sealed), 0048 (the retrospective unseal of who was
 > working whom). **Sibling of** 0084 (voice) — voice makes the texture real, campaigns make the
-> strategy real. **Vault Wall (mandate #2):** a campaign's existence, its true target, and its plan are
-> **hidden NPC strategy** — the player learns of one only through a modeled pathway; the engine, not
-> narration, tallies whether it works.
+> strategy real. **Vault Wall (mandate #2 — symmetric):** a campaign's existence, target, and plan are
+> **its owner's private knowledge** — every OTHER houseguest *and* the player learns of one only through
+> the same modeled pathway (the player is just one limited perspective among sixteen; NPCs are never
+> omniscient about each other's plans). The engine, not narration, tallies whether it works.
 
 > **Owner direction (2026-06-25, this session):**
 > *"NPC and character campaigning — strategy executed over a period of time: a day, a week, or multiple
@@ -49,6 +50,32 @@ Campaign {
 It lives beside the other hidden engine state (souls, relationships, deals) and **never crosses the
 wall** — no player or admin surface returns a campaign.
 
+### Perspective is symmetric — no one is omniscient (not even the schemers)
+
+The Vault Wall is not "hide campaigns from the player." It is **per-entity limited perspective, and
+the player is one entity among sixteen.** A campaign is its **owner's private knowledge**; a bloc
+running a shared one knows it together; an ally who was lobbied knows the slice they were told.
+*Everyone else — NPCs and the player, identically — is in the dark, and learns it only through the
+same pathways* (witnessed move, telling, overhear, gossip). This is the existing `KnowledgeService` /
+`npcVoice` model (a houseguest structurally cannot voice what they never learned) applied to strategy.
+
+The split that makes it work (ADR 0005 — authority by openness):
+
+- **Closed set — the engine may be omniscient, because it only TALLIES.** The seeded resolver reads
+  every campaign at once *solely* to compute the vote outcome. That math has no "perspective" and is
+  never voiced or shown — it is the deterministic core.
+- **Open set — every houseguest acts on BELIEF, never the master list.** When an NPC chooses a move or
+  is voiced, they consult **their own** picture of who is gunning for whom — built only from what
+  reached them. Two houseguests in different blocs hold different, often **wrong**, pictures of the
+  house's campaigns. *That asymmetry is the game.* An NPC who was never lobbied and never saw the
+  meeting cannot scheme against a campaign they don't know exists — exactly as the player cannot.
+
+**The forbidden failure mode (tested against): "omniscient NPCs"** — the off-screen sim driving a
+houseguest from the global campaign ledger rather than from that houseguest's own pathway-acquired
+belief. Campaign *belief* diffuses NPC→NPC only through gossip/pathways and **drifts** with each
+retelling (0038), so what one houseguest "knows" about another's plan can be partial, late, or simply
+mistaken — the same distorted-belief-with-a-source the relationship model already produces.
+
 ### Generation — from goals + threat-reads
 
 NPCs form campaigns from their **deep-profile goals (0058)** crossed with the **live board**: who
@@ -70,7 +97,11 @@ mechanics*:
 - **throw / win** — bend a competition *intent* toward the goal (the existing intent system, 0006).
 
 The move is **motivated, not scripted**: which move fires is chosen by the owner's character + the
-board, through the seeded `RandomnessSource`.
+board, through the seeded `RandomnessSource`. Critically, a move is chosen from the **owner's own
+belief** of the board (who *they* think is a threat, who *they* trust), never an omniscient read of
+every other campaign — and a move that targets or recruits another houseguest only succeeds in
+*informing* that houseguest through the move's own pathway (a lobby tells the lobbied; a planted rumor
+diffuses and drifts). A bystander NPC with no pathway learns nothing.
 
 ### Adaptation — the board changes, the plan re-plans
 
@@ -146,6 +177,16 @@ eviction (E12); the per-owner attribution unseals only in the 0048 retrospective
 - **Vault-sealed:** no player or admin surface returns a campaign's existence, target, plan, or
   progress — a sentinel sweep over every player/admin projection is clean; the player's only knowledge
   of a campaign arrives through a recorded pathway (lobby scene / gossip / overhear / conspicuousness).
+- **Perspective is symmetric — NPCs are not omniscient (the headline guarantee):** a bystander NPC
+  outside a campaign's knowledge set never voices or acts on it — their `npcVoice` projection carries
+  no trace of a campaign they were never on a pathway to, and their off-screen moves are driven from
+  their OWN belief, not the global campaign ledger. The proof is a sentinel like the player's, run over
+  an *uninvolved NPC's* projection: a campaign two other houseguests are running must be absent from it
+  until a pathway reaches them. (The owner + lobbied allies DO know their own; that is the contrast.)
+- **Belief diffuses and drifts (NPC↔NPC, like the player):** once a houseguest learns of a campaign
+  through a pathway, that belief spreads further only by gossip and **drifts** with retelling — so two
+  houseguests can hold different, partial, or mistaken pictures of the same plan (no shared omniscient
+  truth; the engine's master ledger is read only by the closed-set tally, never by a voiced NPC).
 - **The blindside:** the hidden true vote count can diverge from houseguests' stated intentions; the
   staged reveal is anonymized (E12); attribution unseals only in the 0048 retrospective.
 - **Content stays sealed:** the player can learn *that* a campaign exists and *who/what* it targets

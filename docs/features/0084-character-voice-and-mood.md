@@ -77,6 +77,12 @@ A new **Vault-safe `mood`** is derived from the focal houseguest's live soul (`e
 - **Never a number, never the cause.** The *reason* they're rattled (a hidden betrayal, a Vault
   scene) stays sealed; only the affect surfaces. The player reads the mood as behaviour and **infers**
   the cause themselves (paranoia/empathy is the human's to form — 0017/0020).
+- **Symmetric perspective (0085's principle, applied to affect).** A mood is *observable*, so it is
+  legitimately readable by **anyone co-present** — other houseguests included, never the player alone.
+  But the *cause* is per-entity knowledge: only a houseguest who was on a pathway to the precipitating
+  event knows *why* the other is off. So an NPC voicing a co-present houseguest may note they seem
+  rattled, yet must not narrate the hidden reason unless they themselves learned it — the same limited
+  perspective the player stands behind.
 - It **changes as the soul evolves** — a betrayed houseguest's mood shifts within the same season,
   and the *voice* bends through its `stressTell` accordingly (a blunt houseguest who "goes quiet"
   reads as a real tell). This is the anti-sycophancy win: mood is **queried from the store**, not
