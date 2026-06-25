@@ -26,6 +26,18 @@ describe("replayability & naming — invariants across seeds", () => {
     }
   });
 
+  it("no two houseguests in a house share a surname (#853)", () => {
+    // Property over generated output ONLY — never seeded from sample names (HARD testing rule).
+    // The surname is the SECOND whitespace-delimited token of a two-token corpus display name.
+    for (let seed = 1; seed <= 50; seed++) {
+      const { npcs } = generateHouse(new SeededRandom(seed));
+      const surnames = npcs.map((n) => n.name.split(" ")[1]);
+      // Every NPC has a surname token, and the set of surnames is collision-free across the cast.
+      expect(surnames.every((s) => typeof s === "string" && s.length > 0), `seed ${seed}`).toBe(true);
+      expect(new Set(surnames).size, `seed ${seed} should have no duplicate surnames`).toBe(surnames.length);
+    }
+  });
+
   it("same seed is reproducible; different seeds share no identities", () => {
     const a1 = generateHouse(new SeededRandom(7)).npcs.map((n) => n.name);
     const a2 = generateHouse(new SeededRandom(7)).npcs.map((n) => n.name);
