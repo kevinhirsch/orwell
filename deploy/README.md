@@ -256,6 +256,41 @@ It resolves the engine save dir exactly the way the factory reset does (all thre
 generations), stops the services while it scrubs, and restarts them after. Use the **factory
 reset** instead when you also want accounts/settings gone (full OOBE).
 
+### Rebuild (destroy + re-provision, keep only the deploy token)
+
+The heaviest "nuke and pave" tier: **destroy the orwell LXC and re-provision a fresh one** (fresh
+OS + fresh code), preserving **only** the deploy `GIT_TOKEN`. The rebuilt box lands at first-run
+OOBE — you re-enter the LLM key once. Unlike the reset tiers it does **not** keep accounts, saves,
+or the LLM/provider config — it is a brand-new container. Reach for it when the **container
+itself** is wedged (a corrupt rootfs, a botched OS upgrade, drifted system state) and resetting
+the app data is not enough; for a clean app with a working container, prefer the reset tiers above.
+
+**Host-only.** It destroys an LXC, so it runs **on the Proxmox host** (it needs `pct`); a container
+cannot destroy itself, so it refuses if run inside the LXC — and the in-container `orwell` control
+panel can't host it for the same reason.
+
+```bash
+# from the Proxmox host (auto-locates the orwell LXC; CTID=<id> if not named "orwell")
+bash deploy/orwell-rebuild.sh             # prompts: type RESET
+bash deploy/orwell-rebuild.sh --dry-run   # preview EXACTLY what it would destroy + recreate; change nothing
+bash deploy/orwell-rebuild.sh --yes       # no prompt (automation)
+```
+
+**Fail-safe ordering — it never destroys without a recovered token AND a backup.** Before touching
+the old container it (1) salvages `GIT_TOKEN` from the old `data/.env` (read without ever printing
+it; supply `GIT_TOKEN=<pat>` explicitly to rebuild a box whose `.env` lost it), and (2) writes a
+**timestamped safety-net backup** of the old `data/` (engine `.env` + saves) and `frontend/data/`
+to the host at `/var/lib/orwell-backups/orwell-rebuild-<ctid>-<UTC>.tgz` (override the dir with
+`ORWELL_REBUILD_BACKUP_DIR`). If **either** step fails it **aborts and leaves the old container
+untouched**. The old container's resources (cores, RAM, rootfs size, `net0`/bridge, hostname) and
+UI port (`ORWELL_PORT`) are captured from `pct config` + the old `data/.env` and mapped onto
+`orwell.sh`'s env overrides so the new box matches the old one; the re-provision invokes the
+**local** sibling `deploy/orwell.sh --default` (never a GitHub fetch), passing the token via env.
+
+> **Public box caveat.** Token-only preservation does **not** carry over the
+> cloudflared/SSL/public-deployment profile. If the old box was reachable on the internet, re-run
+> the admin **Connect to the internet** wizard after the rebuild.
+
 ### Web-triggered update (the admin status page)
 
 The admin status page can trigger `orwell-update.sh` and watch its output live. The web tier
@@ -437,6 +472,7 @@ CTID=104 CORES=4 RAM_MB=8192 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
 | `orwell-factory-reset.sh` | **Wipe back to OOBE.** Stops the services, removes every per-user game sandbox (saves/souls/Vault under `data/<user>/`) and the entire front-end store (`frontend/data/` — DB, settings, uploads, app key), then restarts so the next visit starts at first-run onboarding. **Preserves `data/.env`** (config). Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
 | `orwell-oobe-reset.sh` | **Wipe back to OOBE, but KEEP the API-key / LLM config.** Same scrub as the factory reset (all accounts, chats, memory, MCP configs, settings, uploads, and every game) **except** it preserves the configured LLM/image providers (`model_endpoints`), the LLM-selection settings, and the keys that decrypt them (`.app_key`, `.key`, `api_keys.json`) — so an LLM is still configured at OOBE. Never touches `data/.env`. Delegates the FE-store surgery to `frontend/scripts/oobe_reset.py`. This is the script the admin **Factory Reset (OOBE)** button runs. Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
 | `orwell-update-reset.sh` | **Update, THEN OOBE reset — the combined middle tier (keep the API-key / LLM config).** Composes the two scripts above (re-implements neither): runs `orwell-update.sh --no-restart` (pull → rebuild → refresh FE deps), and **only if it succeeds** runs `orwell-oobe-reset.sh --yes` (wipe to first-run, preserve the LLM config, single final restart). **Fail-closed** — a failed update never wipes; a missing reset helper refuses up front. Never touches `data/.env`. This is the script the admin **Update + Reset** button runs. Host-aware bridge + `--yes` / `--dry-run` / `--no-restart`; prompts for `RESET` unless `--yes`. |
+| `orwell-rebuild.sh` | **DESTROY the LXC and re-provision a fresh one — keep ONLY the deploy token.** Host-only (needs `pct`; refuses inside a container). Captures the old container's cores/RAM/disk/`net0`/hostname + UI port, salvages `GIT_TOKEN` (without printing it), writes a timestamped safety-net backup of `data/` + `frontend/data/` to the host (`/var/lib/orwell-backups/`), then — **only if both the token and the backup succeeded** — `pct stop`/`pct destroy`s the old box and re-runs the local `orwell.sh --default` with the captured params. Lands at OOBE (re-enter the LLM key once; re-run the public-exposure wizard if the box was public). Destructive — prompts for `RESET` unless `--yes`; `--dry-run` previews. |
 | `frontend/scripts/oobe_reset.py` | The keep-API-keys FE-store surgery: export `model_endpoints` + the LLM-selection settings, rebuild a fresh `app.db` / `settings.json` carrying ONLY those, so no other table survives. Stdlib-`sqlite3` only (no SQLAlchemy/`core`); idempotent; honors `DATA_DIR` / `DATABASE_URL`. |
 | `systemd/orwell-engine.service` | `npm start` (the MCP server). |
 | `systemd/orwell-frontend.service` | `uvicorn app:app` (Orwell), reads `ORWELL_ENGINE_MCP_URL`. |
