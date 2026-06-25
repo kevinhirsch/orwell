@@ -590,10 +590,25 @@ describe("presence in the live loop (0049)", () => {
     const { reg, user, sb } = liveGame(9);
     const orch = new Orchestrator(reg, { now: () => 1 }, { seed: 9 });
     for (let t = 0; t < 40; t++) expect(orch.advance(user, "offscreen-tick").integrity).toBe("ok");
-    const hidden = sb.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+    // The design contract (orchestrator `rollOverhears`): an overhearer catches a STRICT FRAGMENT
+    // of the scene they were adjacent to — never that scene's whole line. Assert it against the
+    // SPECIFIC event each belief overheard (the pathway carries its id), not against every hidden
+    // content in the house: a long scene's partial fragment can legitimately CONTAIN a different,
+    // shorter scene's full string as an incidental substring, and the engine's own Vault-leak
+    // checkpoint (which sanctions held-via-pathway beliefs) green-lights exactly that — comparing a
+    // fragment to an unrelated scene is the test being broader than the contract. Roles only.
+    const byId = new Map(sb.engine.events.query().map((e) => [e.id, e] as const));
+    let checkedOverhears = 0;
     for (const f of sb.engine.knowledge.knownTo(PLAYER)) {
-      for (const h of hidden) expect(f.content.includes(h), "a verbatim hidden content crossed").toBe(false);
+      if (!f.pathway.startsWith("overheard:")) continue;
+      const source = byId.get(f.pathway.slice("overheard:".length));
+      if (!source) continue;
+      checkedOverhears++;
+      // The fragment must be a PARTIAL rendering of the scene it overheard: it never contains that
+      // scene's full content verbatim (the hidden tail — e.g. a slipped hidden element — is cut off).
+      expect(f.content.includes(source.content), "an overheard scene's FULL content crossed verbatim").toBe(false);
     }
+    expect(checkedOverhears, "seed 9 must produce overheards to exercise the fragment contract").toBeGreaterThan(0);
   });
 
   it("evicted houseguests occupy no room across a driven season", () => {

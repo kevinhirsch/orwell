@@ -15,6 +15,22 @@ export interface SocialGraph {
   neighbors(id: EntityId): EntityId[];
 }
 
+/**
+ * The undirected affinity for a candidate social-graph edge a↔b: the MAX of the two directed
+ * reads (issue #565). The social graph is undirected (`makeSocialGraph` symmetrizes adjacency),
+ * so edge SELECTION must be symmetric too — a rumor can travel along a bond whenever EITHER party
+ * is warm enough toward the other to carry it. The directed-only `edge(a,b).affinity` test (a→b
+ * only) structurally excluded the PLAYER (always built as `everyone[0]`, so only player→NPC was
+ * ever read) from the graph until their OWN outbound affinity crossed the threshold — so however
+ * warmly NPCs felt about them, a diffusion chain could never terminate at the player and the
+ * dramatic irony ran backwards. Reads only the GRADED relationship signals (decision 0002); the
+ * diffusion stays in the hidden layer and the player's knowledge updates only when a pathway
+ * actually terminates at them (the Vault Wall is unchanged — no Vault handle crosses here).
+ */
+export function gossipEdgeAffinity(rel: { edge(a: EntityId, b: EntityId): EdgeSignals }, a: EntityId, b: EntityId): number {
+  return Math.max(rel.edge(a, b).affinity, rel.edge(b, a).affinity);
+}
+
 export function makeSocialGraph(edges: ReadonlyArray<readonly [EntityId, EntityId]>): SocialGraph {
   const adj = new Map<EntityId, Set<EntityId>>();
   const link = (a: EntityId, b: EntityId): void => {
