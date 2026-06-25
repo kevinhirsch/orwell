@@ -105,17 +105,28 @@ export function makeIdHumanizer(
  *    for diffusion provenance, not narration).
  *
  * Pure and idempotent; runs AFTER `humanizeIds` (so any ids inside a slug are gone first).
+ *
+ * #844 — robust to two breadcrumb-scrub strandings, independent of call order: an OPTIONAL leading
+ * colon run before the keyword is consumed too (so an upstream pass that stripped the keyword's
+ * sibling can't leave a dangling `via :…`), and the leftover-colon sweep at the end drops any orphan
+ * `:token` machine fragment a partial slug left behind. Idempotent under repeated application.
  */
 export function tidyPathwaySlugs(content: string): string {
   let out = content;
   // The gossip drift marker: " · <drift phrase>#<digits>" (from src/engine/gossip.ts `distort`).
   out = out.replace(/\s*·\s*[^·#]*#\d+/g, "");
   // A bare pathway slug that leaked into content: `overheard:…`/`offscreen:…`/`told-by:…`/`gossip:…`
-  // followed by colon-joined machine tokens. Replace the whole run with a neutral gloss.
+  // followed by colon-joined machine tokens. Consume any leading-colon run (`:*`) too — a stranded
+  // colon from an upstream keyword strip would otherwise survive as `via :…`. Replace with a gloss.
   out = out.replace(
-    /\b(?:overheard|offscreen|told-by|gossip|surfaced)(?::[\w:-]+)+/gi,
+    /:*\b(?:overheard|offscreen|told-by|gossip|surfaced)(?::[\w:-]+)+/gi,
     "something they half-overheard",
   );
+  // Mop up an ORPHAN machine fragment a partial upstream strip left: a colon-led run of machine
+  // tokens (`:evt:surface:42`) that no longer has its keyword prefix. Never matches ordinary prose
+  // (a leading `:` then colon-joined `[\w-]` tokens is not natural text), so it can only catch slug
+  // debris. Leaves real time/score colons (`9:30`, `2:1`) alone — those are not colon-LED.
+  out = out.replace(/(?:^|\s):[\w-]+(?::[\w-]+)+/g, "");
   return out.trimEnd();
 }
 
@@ -172,7 +183,10 @@ export function humanizeForRetrospective(
     .replace(/\btrigger:\s*/g, "")
     .replace(/\((?:on-block|nominated-twice|cornered-socially|house-tightens|goal-demands-move)\)/g, "")
     .replace(/\bsurfaces via:[^\n]*/g, "")
-    .replace(/\b(?:gossip-diffused|told-by-confidant|overheard|witnessed)\b/g, "")
+    // Strip the BARE thread-pathway keywords (the `surfaces via:` comma-list members) — but NOT when one
+    // is the PREFIX of a colon-pathway slug (`overheard:offscreen:…`): the `(?!:)` guard leaves that slug
+    // whole so the pathway collapse below glosses it cleanly, instead of stranding a dangling `:` (#844).
+    .replace(/\b(?:gossip-diffused|told-by-confidant|overheard|witnessed)\b(?!:)/g, "")
     // deep-profile serialization (`deep-profile <id> | secrets: … | true-goals: … | weakness: … |
     // day-1 read of player: …`). The `day-1 read of player:` label is translated BEFORE the `player`
     // id is resolved, and the leading `deep-profile` tag is dropped (the resolved NAME leads the line).
@@ -182,6 +196,11 @@ export function humanizeForRetrospective(
     .replace(/\btrue-goals:\s*/g, "their real game — ")
     .replace(/\bweakness:\s*/g, "their blind spot — ")
     .replace(/\s*\|\s*/g, "; ");
+  // 1b) COLLAPSE colon-pathway slugs to a calm gloss BEFORE id resolution (#844). A breadcrumb pathway
+  //     like `told-by:npc:5` must be glossed while its embedded id is still a RAW token (`npc:5`) — if it
+  //     resolved to a name first ("told-by:Tom Garner"), the slug regex would stop at the space and strand
+  //     the surname ("…half-overheard Garner"). Collapsing first is order-robust and leaves no orphan.
+  out = tidyPathwaySlugs(out);
   // 2) RESOLVE every entity id to a name.
   if (entities.length > 0) {
     const byId = new Map(entities.map((e) => [e.id, e.name] as const));

@@ -105,6 +105,25 @@ describe("0048 — humanizeForRetrospective resolves embedded ids + de-slugs, ke
     expect(humanizeForRetrospective("thread:npc:8:0 [dormant]", [])).not.toMatch(/thread:|\[dormant\]/);
   });
 
+  // #844 — a knowledge/gossip BREADCRUMB pathway slug must collapse to a calm gloss with NO orphan
+  // surname stranded and NO stray `via :` colon, regardless of where id resolution lands.
+  it("collapses a gossip/surfacing pathway slug with no orphan name and no stray colon (#844)", () => {
+    const teller = [{ id: "player", name: "Hero" }, { id: "npc:8", name: "Pat Garner" }, { id: "npc:3", name: "Lee Vance" }];
+    // The `gossip ${pathway} reaches ${to}` breadcrumb: a `told-by:<id>` slug — the teller's id is INSIDE
+    // the slug, so resolving it first would strand the surname. It must not.
+    const gossip = humanizeForRetrospective("gossip told-by:npc:8 reaches npc:3", teller);
+    expect(gossip).not.toMatch(/\bnpc:\d+\b/);
+    expect(gossip).not.toContain("Garner");       // no orphan surname stranded after the gloss
+    expect(gossip).not.toMatch(/\btold-by\b/);
+    expect(gossip).toContain("Lee Vance");        // the recipient (a clean trailing id) still resolves
+    // The `surfaced to ${entity} via ${pathway}` breadcrumb: a colon-pathway whose keyword could be
+    // stripped upstream, leaving `via :…`. It must not.
+    const surf = humanizeForRetrospective("surfaced to npc:3 via overheard:offscreen:alliance:1:594987875", teller);
+    expect(surf).not.toMatch(/via\s+:/);          // no stray `via :`
+    expect(surf).not.toMatch(/(?:^|\s):[\w-]+:/); // no orphan colon-led machine fragment
+    expect(surf).toContain("Lee Vance");
+  });
+
   // #845 — the retrospective unseals AUTHORED deep-profile prose where "player" is a COMMON NOUN. The
   // bare-word player id is never a hidden-scene subject (hidden scenes exclude the player) and the
   // day-1-read label is pre-translated to "you", so a literal "player" must NEVER become the player name.
