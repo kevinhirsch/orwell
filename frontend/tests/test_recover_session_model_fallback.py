@@ -78,3 +78,42 @@ def test_session_with_a_valid_model_is_left_untouched(monkeypatch):
     sess = _Sess(model="deepseek/deepseek-v4-pro", endpoint_url="https://openrouter.ai/api/v1")
     assert chat_routes._recover_empty_session_model(sess, "sV", owner=None) is False
     assert sess.model == "deepseek/deepseek-v4-pro"
+
+
+def test_probed_endpoint_substituting_served_model_warns(monkeypatch, caplog):
+    # P3: when the endpoint IS probed and the configured default is NOT served, bind a served chat
+    # model (existing behavior) AND emit a "bound model not in endpoint served list" WARNING so the
+    # next reproduction of "no real completions" points straight here.
+    _seed("ep1", ["anthropic/claude-x", "meta/llama-y"])
+    monkeypatch.setattr(chat_routes, "_default_chat_target", lambda owner: ("ep1", "deepseek/deepseek-v4-pro"))
+    sess = _Sess(model="", endpoint_url="")
+    with caplog.at_level("WARNING"):
+        assert chat_routes._recover_empty_session_model(sess, "sW", owner=None) is True
+    assert sess.model != "deepseek/deepseek-v4-pro"
+    assert any("not in endpoint served list" in r.getMessage() for r in caplog.records)
+
+
+def test_probed_endpoint_no_chat_model_refuses_unserved_default(monkeypatch, caplog):
+    # P3 (the footgun): a PROBED endpoint that serves the configured default NOWHERE and offers no
+    # usable chat model substitute must NOT bind the unserved id (that dispatches every turn to a
+    # model the endpoint rejects → 200-empty / blank turn). Refuse + WARN instead.
+    _seed("ep1", ["openai/gpt-image-1", "google/gemini-flash-image"])  # only image models served
+    monkeypatch.setattr(chat_routes, "_default_chat_target", lambda owner: ("ep1", "deepseek/deepseek-v4-pro"))
+    sess = _Sess(model="", endpoint_url="")
+    with caplog.at_level("WARNING"):
+        result = chat_routes._recover_empty_session_model(sess, "sNoServe", owner=None)
+    assert result is False                       # refused to bind the unserved default
+    assert sess.model != "deepseek/deepseek-v4-pro"
+    assert any("not in endpoint served list" in r.getMessage() for r in caplog.records)
+
+
+def test_unprobed_endpoint_binds_default_but_warns_unverified(monkeypatch, caplog):
+    # P3: a genuinely UNPROBED endpoint (no cached_models) keeps the current behavior — trust the
+    # configured default — but logs a WARNING that the binding is unverified (cannot confirm served).
+    _seed("ep1", [])  # no probed model list
+    monkeypatch.setattr(chat_routes, "_default_chat_target", lambda owner: ("ep1", "deepseek/deepseek-v4-pro"))
+    sess = _Sess(model="", endpoint_url="")
+    with caplog.at_level("WARNING"):
+        assert chat_routes._recover_empty_session_model(sess, "sUnprobed", owner=None) is True
+    assert sess.model == "deepseek/deepseek-v4-pro"
+    assert any("UNVERIFIED" in r.getMessage() for r in caplog.records)

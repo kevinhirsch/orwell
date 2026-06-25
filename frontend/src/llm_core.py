@@ -1461,9 +1461,32 @@ async def _llm_call_async_impl(
                     await asyncio.sleep(LLMConfig.RETRY_DELAY)
                     continue
                 raise HTTPException(r.status_code, friendly)
-            logger.info(f"LLM async call to {target_url} succeeded in {duration:.2f}s (attempt {attempt})")
+            # Loud, always-on upstream diagnostic: a 200 with an EMPTY body is the live
+            # symptom (the memory-extraction path returned empty for every model). The status
+            # line alone can't distinguish a real completion from a 200-empty-at-the-edge.
+            _body_len = len(r.text or "")
+            logger.info(
+                f"LLM async call to {target_url} succeeded in {duration:.2f}s (attempt {attempt}); "
+                f"model={model} status={r.status_code} body_len={_body_len}"
+            )
+            if _body_len == 0:
+                logger.warning(
+                    f"upstream 200 but EMPTY body (non-stream) target_url={target_url} "
+                    f"model={model} status={r.status_code} — JSON parse will fail; likely a "
+                    f"200-empty-at-the-edge, not a real completion"
+                )
             _clear_host_dead(target_url)
-            data = r.json()
+            try:
+                data = r.json()
+            except Exception as _je:
+                # A 200 with an empty/non-JSON body lands here (the live "Expecting value: line 1
+                # column 1" symptom). Make it loud + typed so the next reproduction is conclusive,
+                # rather than a swallowed parse error indistinguishable from a real failure.
+                logger.warning(
+                    f"upstream 200 but UNPARSEABLE/EMPTY body (non-stream) target_url={target_url} "
+                    f"model={model} status={r.status_code} body_len={len(r.text or '')} parse_error={_je}"
+                )
+                raise HTTPException(502, f"Upstream {target_url} returned a 200 with no JSON body (empty completion)")
             # ADR 0010: surface the usage envelope for the meter (the caller records it). Non-streaming
             # OpenAI-compatible providers return it inline; only attach when present.
             if usage_sink is not None and isinstance(data, dict):
@@ -1799,6 +1822,36 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
     # Captured across chunks (the final delta carries it) and emitted as a `finish` event at [DONE] so the
     # agent loop can surface a Continue affordance instead of the reply silently stopping mid-sentence.
     _finish_reason = None
+    # Loud upstream-completion diagnostic counters (the missing counterpart to the non-stream
+    # "succeeded" line). The current logs can't tell a 200-empty-at-the-edge from a real empty
+    # completion — these make it conclusive. Vault-free: lengths/counts/finish_reason only.
+    _diag = {
+        "content_chars": 0,   # total content/reasoning chars streamed
+        "tool_call_seen": False,
+        "usage_seen": False,
+        "output_tokens": None,
+        "status": None,
+    }
+
+    def _log_stream_completion():
+        """ONE always-fires line at stream end (the streaming counterpart to the non-stream
+        'succeeded' log). Loud WARNINGs for the live symptoms: 200-but-empty, no usage chunk."""
+        logger.info(
+            f"LLM stream to {target_url} ended; model={model} status={_diag['status']} "
+            f"content_chars={_diag['content_chars']} tool_call_seen={_diag['tool_call_seen']} "
+            f"finish_reason={_finish_reason} usage_seen={_diag['usage_seen']} "
+            f"output_tokens={_diag['output_tokens']}"
+        )
+        if _diag["status"] == 200 and _diag["content_chars"] == 0 and not _diag["tool_call_seen"]:
+            logger.warning(
+                f"upstream 200 but EMPTY completion (stream) target_url={target_url} model={model} "
+                f"— no content and no tool/native call; likely a 200-empty-at-the-edge, not a real turn"
+            )
+        if not _diag["usage_seen"]:
+            logger.warning(
+                f"upstream stream produced NO usage chunk target_url={target_url} model={model} "
+                f"— token accounting unavailable (the ledger will record in=0/out=0)"
+            )
 
     def _emit_tool_calls():
         """Build the tool_calls event string if any were accumulated."""
@@ -1811,6 +1864,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         nonlocal _first_content_sent
         events = []
         for part, is_thinking in parts:
+            _diag["content_chars"] += len(part or "")
             if is_thinking:
                 events.append(_stream_delta_event(part, thinking=True))
                 continue
@@ -1827,6 +1881,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         client = _get_http_client()
         async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
             _clear_host_dead(target_url)
+            _diag["status"] = r.status_code
             if r.status_code != 200:
                 raw = (await r.aread()).decode(errors="replace")
                 friendly = _format_upstream_error(r.status_code, raw, target_url)
@@ -1853,6 +1908,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                         # "stop"/"tool_calls" are normal ends. Emitted before [DONE] so it rides the same turn.
                         if _finish_reason:
                             yield f'data: {json.dumps({"type": "finish", "reason": _finish_reason})}\n\n'
+                        _log_stream_completion()
                         yield "data: [DONE]\n\n"
                         return
 
@@ -1920,6 +1976,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                 if "usage" in j and not _delta_has_output:
                                     u = j["usage"] or {}
                                     _usage_data = {"input_tokens": u.get("prompt_tokens", 0), "output_tokens": u.get("completion_tokens", 0)}
+                                    _diag["usage_seen"] = True
+                                    _diag["output_tokens"] = _usage_data["output_tokens"]
                                     # ADR 0010 (the token-economy meter): surface the rest of the
                                     # envelope OpenRouter/OpenAI already return — cached-prompt tokens,
                                     # reasoning tokens (the dominant cost on a thinking model), and the
@@ -1963,9 +2021,11 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                         # Reasoning tokens (VLLM --reasoning-parser, e.g. Qwen3/DeepSeek-R1, Nemotron). vLLM 0.20.2 / NIM emit the field as `reasoning`; older builds use `reasoning_content`. Some OpenAI-compatible Ollama builds use `thinking`.
                                         reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking") or ""
                                         if reasoning:
+                                            _diag["content_chars"] += len(reasoning)
                                             yield _stream_delta_event(reasoning, thinking=True)
                                         content = delta.get("content") or ""
                                         if content:
+                                            _diag["content_chars"] += len(content)
                                             stripped = content.lstrip()
                                             # gpt-oss harmony format (<|channel|>analysis/final): route via the harmony
                                             # stream router. Sticky once the first marker appears — distinct from the
@@ -2062,6 +2122,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                                 _tc_acc[idx]["extra_content"] = tc["extra_content"]
                                             if func.get("name"):
                                                 _tc_acc[idx]["name"] = func["name"]
+                                                _diag["tool_call_seen"] = True
                                             if "arguments" in func:
                                                 # Guard against a null arguments delta: `func` can be
                                                 # {"arguments": None} (JSON null), and a raw `+= None`
@@ -2090,6 +2151,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             tc_event = _emit_tool_calls()
             if tc_event:
                 yield tc_event
+            _log_stream_completion()
             yield "data: [DONE]\n\n"
 
     except (httpx.ConnectError, httpx.ConnectTimeout) as e:
@@ -2182,9 +2244,15 @@ async def _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
         retried = False
         saw_error = False
         saw_done = False
+        # The live symptom is a 200 that streams ONLY a usage chunk (output_tokens=0) + [DONE]:
+        # zero content, zero tool calls. That metadata-only chunk must NOT count as "real output"
+        # or the turn renders blank. Track real content/tool output separately and, if the usage
+        # chunk arrives, whether it reported zero output tokens, so a 0-token completion fails over.
+        saw_real_output = False
+        saw_zero_token_usage = False
         async for chunk in stream_llm(url, model, messages, headers=headers, **kwargs):
             if chunk.startswith("event: error"):
-                if not emitted and not is_last:
+                if not saw_real_output and not is_last:
                     # Pre-content failure with fallbacks left — swallow and
                     # move to the next candidate.
                     last_error = chunk
@@ -2209,27 +2277,57 @@ async def _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
                     event_data = json.loads(chunk[6:])
                 except Exception:
                     event_data = {}
-                if event_data.get("type") == "model_actual":
+                _etype = event_data.get("type")
+                if _etype == "model_actual":
                     yield chunk
                     continue
+                # Metadata-only chunk types carry NO assistant output — they must not mark the
+                # turn as "real output" (a usage chunk with out=0 is exactly the live blank-turn
+                # bug). Note a zero-output-token usage chunk so it can drive the fail-over below.
+                _is_metadata = _etype in ("usage", "finish", "fallback", "tool_call_delta", "model_actual")
+                if _etype == "usage":
+                    _ot = (event_data.get("data") or {}).get("output_tokens")
+                    if _ot == 0:
+                        saw_zero_token_usage = True
+                # Real assistant output: a content/reasoning delta or accumulated tool calls.
+                _is_real = (not _is_metadata) and (
+                    bool(event_data.get("delta")) or _etype == "tool_calls"
+                )
                 # First real output from a NON-primary candidate: tell the client
                 # the selected model failed and another answered. Without this the
                 # fallback is invisible — a misconfigured provider looks like it
                 # works because the reply is shown under the originally selected
                 # model's name (e.g. a Bedrock/Claude endpoint that 400s every
                 # request but appears fine because another model silently answered).
-                if not emitted and i > 0:
+                if _is_real and not emitted and i > 0:
                     yield ('data: ' + json.dumps({
                         "type": "fallback",
                         "selected_model": primary_model,
                         "answered_by": model,
                         "reason": _summarize_stream_error(last_error),
                     }) + '\n\n')
-                emitted = True
+                if _is_real:
+                    emitted = True
+                    saw_real_output = True
             yield chunk
         if retried:
             continue  # a real pre-content error with fallbacks left — try the next candidate
-        if emitted or saw_error:
+        # EMPTY/ZERO-TOKEN COMPLETION (live symptom): zero real output but the stream emitted a
+        # usage chunk reporting output_tokens==0. That is NOT a real reply — treat it as empty so
+        # it fails over / surfaces, never a blank turn (the metadata-only chunk used to look "real").
+        if not saw_real_output and saw_zero_token_usage and not saw_error:
+            if not is_last:
+                last_error = ('event: error\ndata: '
+                              + json.dumps({"error": f"{model} returned an empty completion (0 output tokens)",
+                                            "status": 502, "error_type": "empty_completion"}) + '\n\n')
+                logger.warning(f"[fallback] candidate {model} returned 0 output tokens; trying next")
+                continue
+            yield ('event: error\ndata: '
+                   + json.dumps({"error": "The model returned an empty completion.", "status": 502,
+                                 "error_type": "empty_completion"}) + '\n\n')
+            yield "data: [DONE]\n\n"
+            return
+        if saw_real_output or saw_error:
             yield "data: [DONE]\n\n"  # a real reply OR a surfaced error — pass/ensure the held terminal
             return
         # EMPTY COMPLETION (D): the stream ended cleanly with zero content and no error. Fail over if any

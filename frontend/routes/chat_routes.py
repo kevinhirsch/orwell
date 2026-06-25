@@ -273,13 +273,44 @@ def _recover_empty_session_model(sess, session_id: str, owner: str | None = None
         # model) — honoring the user's pick; otherwise the endpoint's first real CHAT model (never an
         # image model — the "responses going to gemini-flash-image" bug). If the endpoint has no cached
         # list yet, trust the configured default (a freshly-added endpoint may be unprobed).
+        # A *probed* endpoint (non-empty cached_models) that does NOT serve the configured default must
+        # NEVER bind that id — that is the "200 empty / no real completions" footgun (every request
+        # dispatches a model the endpoint can't serve). Prefer a served chat model instead, and warn.
+        probed = bool(cached)  # cached_models present ⇒ the endpoint was probed
         model = ""
         if preferred_model and not is_image_model(preferred_model) and (preferred_model in (visible or [])):
             model = preferred_model
         if not model and visible:
-            model = _first_chat_model(visible) or ""
+            _cand = _first_chat_model(visible) or ""
+            # `_first_chat_model` falls through to models[0] for an all-image served list — never bind
+            # an image model as the chat default (the "responses going to gemini-flash-image" bug).
+            model = "" if (_cand and is_image_model(_cand)) else _cand
         if not model and preferred_model and not is_image_model(preferred_model):
+            if probed:
+                # Probed endpoint that does not serve the configured default and offers no chat model
+                # we can substitute — refuse to bind the unserved id (it would dispatch every turn to a
+                # model the endpoint rejects, returning a 200-empty / blank turn).
+                logger.warning(
+                    "bound model not in endpoint served list — refusing to bind configured default %r "
+                    "for %s (endpoint %s served=%d models, none usable as chat)",
+                    preferred_model, session_id, ep.id, len(visible or []),
+                )
+                return False
+            # Genuinely unprobed endpoint — trust the configured default, but flag that it is unverified
+            # (we cannot confirm the endpoint serves it; a later 200-empty would point here).
+            logger.warning(
+                "binding UNVERIFIED model %r for %s — endpoint %s has no probed model list; "
+                "cannot confirm it is served",
+                preferred_model, session_id, ep.id,
+            )
             model = preferred_model
+        if probed and preferred_model and model and model != preferred_model:
+            # We substituted a served model because the configured default is not in the served list.
+            logger.warning(
+                "bound model not in endpoint served list — substituted served chat model %r for "
+                "configured default %r (%s, endpoint %s)",
+                model, preferred_model, session_id, ep.id,
+            )
         if not isinstance(model, str) or not model.strip():
             return False
         model = model.strip()
