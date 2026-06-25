@@ -62,6 +62,12 @@ Feature: 0084 — Character voice & grounded mood
       Then their mood word changes from the baseline
       And it later settles back as the soul mean-reverts
 
+    Scenario: Mood marinates — a long stretch of hardship shifts the baseline itself
+      Given a houseguest worn down by many weeks of house dynamics
+      When the houseguest has a calm, uneventful moment
+      Then their mood still reads as worn rather than resetting to a neutral default
+      And a houseguest who has had a long safe run reads as lasting ease in the same calm moment
+
   Rule: Determinism and the lever contract
 
     Scenario: The same seed produces the same voices

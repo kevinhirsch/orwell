@@ -49,6 +49,12 @@ Feature: 0085 — NPC campaigns & the scramble
       Given a sustained campaign to evict the target
       Then the target can still survive the vote on some seeds
 
+    Scenario: How hard a campaign tilts depends on who is talking and who is listening
+      Given the same campaign run by a highly persuasive houseguest and by a low-persuasion one
+      Then the persuasive houseguest's campaign tilts the outcome more
+      And a gullible listener is swayed more than a stubborn, independent one
+      But neither persuasiveness nor gullibility changes the seeded determinism
+
   Rule: A campaign is hidden — the player learns of it only through a pathway
 
     Scenario: No surface reveals a campaign

@@ -74,6 +74,16 @@ A new **Vault-safe `mood`** is derived from the focal houseguest's live soul (`e
 - A short **affect word** ("on edge," "deflated," "riding high," "guarded," "buzzing," "flat") — the
   *observable* carriage, computed from the soul scalars (low `emotionalState` ⇒ distress words; high
   `volatility` ⇒ "volatile/raw" qualifier).
+- **Two timescales — the acute mood AND the marinated baseline (owner direction).** A real season is
+  ~3 months; mood should *marinate*, not just spike. So the read combines (a) the **acute** state —
+  the soul's current deviation, which spikes on a beat and mean-reverts within a few turns — with (b)
+  the **marinated baseline** — the soul's emotional *set-point*, which **0041 character evolution**
+  drags over weeks as house dynamics accumulate. Someone ground down over a brutal month reads as
+  chronically weary *even on a calm day* (low baseline) though their acute mood lifts after a small
+  win; someone on a long, safe run carries a lasting ease. The affect word reflects the acute state
+  *relative to* the drifted baseline, so both the moment and the long marinade show. (This is exactly
+  where the soul model already separates `emotionalState`'s mean-reversion target from its current
+  value — the baseline is the thing 0041 evolves; mood surfaces both.)
 - **Never a number, never the cause.** The *reason* they're rattled (a hidden betrayal, a Vault
   scene) stays sealed; only the affect surfaces. The player reads the mood as behaviour and **infers**
   the cause themselves (paranoia/empathy is the human's to form — 0017/0020).
@@ -129,9 +139,11 @@ ground truth to contradict).
 
 1. **Structured-vs-prose balance** — start with the 6 dials + `signature` + a small `lexicon`; tune
    once it's heard in a live read.
-2. **Does voice ever evolve?** Default **static** (identity). A rare, bounded long-game drift (someone
-   hardens over a brutal season) is a *possible* later nudge, but mood — not voice — should carry the
-   turn-to-turn dynamism. Resolve before adding any voice mutation.
+2. ✅ **Does voice ever evolve?** **RESOLVED (owner, 2026-06-25): voice is static — identity does not
+   drift.** All the dynamism lives in **mood**, which carries *both* the acute turn-to-turn spike and a
+   **marinated baseline** that house dynamics shift over the ~3-month season (above). "Someone hardens
+   over a brutal season" is modeled as the **baseline** drifting (0041), surfaced through mood and the
+   voice's existing `stressTell` — never as the voice fingerprint itself mutating.
 3. **Mood vocabulary + thresholds** — the affect-word set and the `emotionalState`/`volatility` cutoffs
    (a small Vault-free lookup; never a number to the player).
 4. **Player voice?** Out of scope — the player authors their own speech (human-driven). Voice is

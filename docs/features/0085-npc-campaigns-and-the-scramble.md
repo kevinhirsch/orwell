@@ -112,11 +112,33 @@ principle: a move that fits no enum still folds — strategy must never silently
 
 ### Resolution — it tilts the *seeded* outcome (the anti-sycophancy spine)
 
-This is the crux. A campaign's accumulated `progress` feeds the **existing seeded nomination/vote
-decision weights (0044, `decisions`/`decisionConstants`)** — a well-run "evict X" campaign measurably
-raises X's eviction odds; a "protect" campaign lowers them. **The engine tallies it; narration only
-voices it.** No campaign "wins" because the story wanted it to — it wins because the seeded math, fed
-by real accumulated moves, landed there. The campaign resolves `won`/`lost` at its deadline ceremony.
+This is the crux. A campaign's accumulated `progress` feeds the **existing seeded decision weights
+(0044, `decisions`/`decisionConstants`)** — not just the eviction **vote** but the other seeded
+decisions too (**nominations, the veto, replacement noms**): a well-run "evict X" campaign measurably
+raises X's odds of going up *and* going home; a "protect" campaign lowers them. **The engine tallies
+it; narration only voices it.** No campaign "wins" because the story wanted it to — it wins because the
+seeded math, fed by real accumulated moves, landed there. The campaign resolves `won`/`lost` at its
+deadline ceremony.
+
+#### How hard it tilts is CHARACTER-mediated, not a flat knob (owner direction)
+
+The magnitude of a campaign move's effect is **not a global constant** — it is a product of *who is
+talking* and *who is listening*, so a campaign is only as strong as the people running and receiving
+it. Two new static `CHARACTER` aptitudes (siblings of the comp stats; minted at cast time, byte-stable
+like `voice`):
+
+- **`persuasiveness`** — how much weight this houseguest's lobbying carries. A charismatic mastermind
+  or social butterfly lands hard; a blunt loner barely moves a vote. (Correlated with the `social`
+  stat + archetype, independently varied.)
+- **`susceptibility`** (gullibility ↔ conviction) — how easily this houseguest is *swayed* by others'
+  campaigns. A credulous follower flips on a whisper; a stubborn independent resists even a strong,
+  sustained push and may need overwhelming pressure to move.
+
+A move's per-listener tilt ≈ **`base × persuasiveness(owner) × susceptibility(listener) × trust(owner→
+listener)`**, then the seeded roll (temperature). So the *same* campaign lands differently on each
+member of the electorate: it flips the gullible ally, barely dents the skeptic, and lands hardest
+where the lobbied already trusts the lobbyist. This is what makes a "persuasive" houseguest genuinely
+dangerous and a "gullible" one a liability to their own alliance — strategy with texture, not a dial.
 
 ### The scramble — campaigns colliding at the vote
 
@@ -147,11 +169,17 @@ eviction (E12); the per-owner attribution unseals only in the 0048 retrospective
 - New `src/engine/campaigns.ts` — the `Campaign` type, generation (`formCampaigns`), the per-tick
   `advanceCampaign` (selects + applies one move via the existing fold paths), and `replan`. Pure +
   seeded; engine-only.
+- `src/engine/characterFactory.ts` — `Character` gains `persuasiveness` + `susceptibility` aptitudes
+  (byte-stable, archetype-correlated, independently varied — minted beside the comp stats + 0084
+  `voice`). New constants in `campaignConstants.ts` (the sibling-constants pattern) hold the trait
+  ranges + the `base` tilt and the trust/temperature mix.
 - `src/engine/offscreen.ts` — the society tick advances each active campaign one move (the single
   driver; no second loop).
-- `src/engine/decisions.ts` / `decisionConstants.ts` — nomination/vote weighting reads campaign
-  `progress` (a new bounded term beside `juryManagementWeight` et al.), so a sustained campaign tilts
-  the **seeded** outcome. **Calibration-critical:** the term must ride the existing decision stream
+- `src/engine/decisions.ts` / `decisionConstants.ts` — the nomination/veto/vote weighting reads a
+  campaign's `progress` **scaled per-listener by `persuasiveness × susceptibility × trust`** (a new
+  bounded term beside `juryManagementWeight` et al.), so a sustained, *well-pitched* campaign tilts the
+  **seeded** outcome and a poorly-pitched one barely registers. **Calibration-critical:** the term must
+  ride the existing decision stream
   with a controlled draw structure (the juryReach/gradient lesson) — gated by a property test that a
   campaign *shifts* the eviction distribution without de-seeding it.
 - `src/adapters/engine/GameSessionAdapter.ts` / `EngineCommandsAdapter.ts` — campaign moves that touch
@@ -174,6 +202,12 @@ eviction (E12); the per-owner attribution unseals only in the 0048 retrospective
   "evict X" campaign **raises X's eviction rate vs. a no-campaign baseline** — *and* that the run stays
   seeded (same seed ⇒ same result; the calibration gates stay green; the campaign term doesn't re-phase
   the juryReach spine).
+- **Character-mediated magnitude (the strategy knob):** the *same* campaign tilts **more** when its
+  owner is highly `persuasive` and **less** when run by a low-persuasion houseguest; and it sways a
+  **gullible** (high-`susceptibility`) listener far more than a **stubborn** one — a property test
+  holds the campaign fixed and varies only owner persuasiveness / listener susceptibility and shows the
+  eviction shift scale accordingly. `persuasiveness`/`susceptibility` are byte-stable across a
+  snapshot/restore (static `CHARACTER`, like the comp stats).
 - **Vault-sealed:** no player or admin surface returns a campaign's existence, target, plan, or
   progress — a sentinel sweep over every player/admin projection is clean; the player's only knowledge
   of a campaign arrives through a recorded pathway (lobby scene / gossip / overhear / conspicuousness).
@@ -200,9 +234,13 @@ eviction (E12); the per-owner attribution unseals only in the 0048 retrospective
 
 1. **How many concurrent campaigns** keep the house legible without sprawl? (Start: a small per-week
    cap, archetype-prioritized; scarcity is a feature — tune from a UAT walk.)
-2. **The decision-weight magnitude** — how hard `progress` tilts the seeded vote. Must be *felt* but
-   never deterministic (the underdog can still survive a campaign). Calibrate against the existing
-   eviction distribution; do **not** ship a value that flattens variance.
+2. ✅ **The decision-weight magnitude** — **RESOLVED (owner, 2026-06-25): it is a CHARACTER-mediated
+   strategy knob, not a flat constant.** The tilt scales with the owner's `persuasiveness` × each
+   listener's `susceptibility` (× trust), so "how hard a campaign tilts" is a property of *who* is
+   campaigning and *who* is listening (above). Still *felt but never deterministic* — the underdog can
+   survive even a strong campaign — and the `base` factor + trait ranges are calibrated against the
+   existing eviction distribution; do **not** ship values that flatten variance. (Remaining work is
+   tuning the ranges, not the architecture.)
 3. **Bloc campaigns vs. solo** — when does a bloc (0043) adopt a *shared* campaign vs. members running
    their own? (Start: a cohesive bloc shares one; loose ties stay solo.)
 4. **Player-campaign surface** — is the player's declared goal an explicit OOC "set a target" affordance
