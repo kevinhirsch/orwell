@@ -2680,6 +2680,11 @@ export class GameSessionAdapter implements GameSession {
       this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`)), false),
     );
     const meId = this.house!.player.id;
+    // Post-0085 diagnostic fix: the player ENTERS into the social heart of the house (the living room),
+    // never the seeded dead-end a premiere roll might drop them in (a passive player stranded in the
+    // bathroom sees an empty house all season). Override the PLAYER's slot only — no rng draw changes, so
+    // the NPC seating + the seeded society/calibration spine are byte-identical. They move by movePlayer next.
+    this.presence.set(meId, "living-room");
     const pr = this.presence.get(meId);
     if (pr) this.presenceBase.set(meId, pr);
     this.persist(); // durable save (0030): a started game must survive a restart

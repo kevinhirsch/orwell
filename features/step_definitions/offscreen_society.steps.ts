@@ -111,19 +111,26 @@ Then("its content may drift from the original with each retelling", function (th
 // --- 0038 Scenario: a distorted rumor reaches the player --------------------------------
 
 Given("the off-screen society has diffused a fact toward the player", function (this: BbWorld) {
-  // Drive the LIVE tick (the production wiring) until a rumor chain terminates at the player.
-  for (const seed of [1, 2, 3, 4, 5]) {
+  // Drive the LIVE tick (the production wiring) until a rumor chain terminates at the player. A generous
+  // seed search — WHICH seed lands a player-terminating chain shifted when the player began entering the
+  // living room (more scenes fall in their earshot), but the diffusion-to-player itself is unchanged.
+  // A genuine GOSSIP rumor (not a direct telling): a `told-by:` pathway carrying provenance + decayed
+  // confidence — that's the diffusion this scenario is about.
+  const isRumor = (f: { pathway: string; source?: unknown; confidence?: number }): boolean =>
+    f.pathway.startsWith("told-by:") && !!f.source && (f.confidence ?? 1) < 1;
+  for (const seed of Array.from({ length: 24 }, (_, i) => i + 1)) {
     osGame(this, seed);
     for (let t = 0; t < 60; t++) {
       assert.equal(this.osOrch!.advance(this.osUser!, "offscreen-tick").integrity, "ok", "legal gossip never reads as a leak");
-      if (this.osSandbox!.engine.knowledge.knownTo(PLAYER).some((f) => f.pathway.startsWith("told-by:"))) return;
+      if (this.osSandbox!.engine.knowledge.knownTo(PLAYER).some(isRumor)) return;
     }
   }
   assert.fail("no rumor terminated at the player across the seed set");
 });
 
 When("a diffusion pathway terminates at the player", function (this: BbWorld) {
-  this.osPlayerRumor = this.osSandbox!.engine.knowledge.knownTo(PLAYER).find((f) => f.pathway.startsWith("told-by:"));
+  this.osPlayerRumor = this.osSandbox!.engine.knowledge.knownTo(PLAYER)
+    .find((f) => f.pathway.startsWith("told-by:") && !!f.source && (f.confidence ?? 1) < 1);
   assert.ok(this.osPlayerRumor, "the player holds the rumor");
 });
 
