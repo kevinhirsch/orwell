@@ -253,6 +253,9 @@
     el.setAttribute("role", this.o.role || (anchored ? "group" : "dialog"));
     if (this.o.title) el.setAttribute("aria-label", this.o.title);
     if (!anchored) el.setAttribute("aria-modal", "true");
+    // #837: the sheet root is the SPAWN/focus-trap target — tabindex=-1 keeps it out of
+    // the Tab order and (.ow-sheet:focus / [tabindex="-1"]:focus) ring-free on mount.
+    el.setAttribute("tabindex", "-1");
 
     // The grabber handle (the iOS pill). Always rendered (it carries the detent meaning visually);
     // on an anchored sheet it is a non-interactive visual cap (CSS disables the drag target).
@@ -453,11 +456,10 @@
   };
 
   OrwellSheet.prototype._focusInto = function () {
-    try {
-      var f = this.el.querySelector(
-        ".ow-sheet-body button, .ow-sheet-body [href], .ow-sheet-body input, .ow-sheet-body select, .ow-sheet-body textarea, .ow-sheet-body [tabindex]:not([tabindex=\"-1\"])");
-      (f || this.el).focus();
-    } catch (_) {}
+    // #837: land on the ring-free sheet ROOT on spawn, NOT the first interactive control
+    // (which would paint a focus ring the user never keyboard-asked for). The trap keeps
+    // Tab inside; the first Tab reaches the first control and THAT rings (keyboard intent).
+    try { this.el.focus({ preventScroll: true }); } catch (_) {}
   };
 
   // ── open / dismiss ──────────────────────────────────────────────────────────
