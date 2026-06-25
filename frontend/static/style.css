@@ -14009,6 +14009,13 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
 }
 .theme-opacity-wrap.hidden { display: none; }
 .theme-opacity-wrap:hover { opacity: 1; }
+/* RESP (WCAG 2.5.5): the compact Peek toggle keeps its 22px desktop look, but on a
+   coarse-pointer / phone viewport it must meet the 44px touch floor. The responsive
+   matrix measures the element's OWN bounding rect, so grow the box (not just a hit halo).
+   Covers both the settings + theme kit-titlebar Peek toggles. */
+@media (max-width: 480px), (pointer: coarse) {
+  .theme-opacity-wrap.theme-opacity-toggle { min-height: 44px; min-width: 44px; height: auto; }
+}
 /* The title h4 already carries margin-right:auto to group header controls
    on the right. BOTH the Peek button AND the injected minimize button also
    have margin-left:auto — and multiple competing auto-margins split the
