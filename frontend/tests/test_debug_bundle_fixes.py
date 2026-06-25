@@ -5,13 +5,18 @@ Covers:
   • #546 — _resolve_llm_fn refuses an image-only model for JSON authoring (fail-soft).
   • #559 — the gateway-wide webhook secret is fail-closed when configured.
   • #560 — the gateway turn path is rate-limited and honors the per-user daily cap.
+  • Producer's Vault opt-in (mandate #2) — the debug bundle is Vault-free BY DEFAULT and
+    includes the live Producer's Vault ONLY behind the explicit ?vault=1 admin opt-in.
 
 Roles only; no houseguest/player names.
 """
 
 import importlib
+import json
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 # ── #581: session TTL ─────────────────────────────────────────────────────────
@@ -136,3 +141,145 @@ def test_gateway_daily_cap_fail_open_without_auth():
     tl = importlib.import_module("gateway.turn_limits")
     assert tl.daily_cap_exceeded("u", None) is False
     assert tl.daily_cap_exceeded("", object()) is False
+
+
+# ── Producer's Vault opt-in in the debug bundle (mandate #2) ──────────────────
+#
+# THE GATE (the Vault Wall, opt-in form): the downloadable debug bundle stays
+# Vault-free BY DEFAULT (byte-identically, as before this change) and may include
+# the live Producer's Vault ONLY behind the explicit ?vault=1 admin opt-in. The
+# opt-in must be admin-only and unreachable on any non-admin/player path. We plant
+# a recognizable Vault sentinel into the sanctioned producerVault unseal and prove:
+#   1. the DEFAULT bundle (no param) has NO Vault content (no section, sentinel absent);
+#   2. the ?vault=1 bundle (admin) DOES carry the Vault section (sentinel present);
+#   3. a non-admin cannot obtain the vault bundle (the admin gate holds, no leak).
+
+ahr = importlib.import_module("routes.admin_health_routes")
+orwell_engine = importlib.import_module("src.orwell_engine")
+
+# A recognizable off-screen secret — the kind of content that lives ONLY in the Vault.
+_VAULT_SENTINEL = "OFFSCREEN-VAULT-SENTINEL-do-not-leak"
+
+
+def _vault_app():
+    app = FastAPI()
+    app.include_router(ahr.setup_admin_health_routes())
+    app.include_router(ahr.setup_admin_status_page())
+    return app
+
+
+@pytest.fixture
+def quiet_bundle(monkeypatch):
+    """Make the bundle assemble cheaply + deterministically without a live engine,
+    AND plant the Vault sentinel into the sanctioned producerVault unseal."""
+    async def fake_snapshot(user):
+        return {"generatedAt": "2026-06-25T00:00:00+00:00", "engine": {"ok": True}}
+
+    async def fake_extras(user):
+        return {}
+
+    async def fake_producer_vault(user=None):
+        # The shape the status-page renderer expects, carrying the sentinel as hidden content.
+        return {"winner": None,
+                "hiddenStory": [{"type": "scheme", "content": _VAULT_SENTINEL}],
+                "twists": [], "evictionVotes": []}
+
+    monkeypatch.setattr(ahr, "_health_snapshot", fake_snapshot)
+    monkeypatch.setattr(ahr, "_bundle_extras", fake_extras)
+    monkeypatch.setattr(orwell_engine, "producer_vault", fake_producer_vault)
+
+
+def test_debug_bundle_default_is_vault_free(monkeypatch, quiet_bundle):
+    # (1) DEFAULT bundle (no param) — Vault-free: no section, sentinel absent.
+    monkeypatch.setenv("AUTH_ENABLED", "false")  # admin posture (gate bypassed)
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle")
+    assert r.status_code == 200
+    assert _VAULT_SENTINEL not in r.text, "the Vault leaked into the DEFAULT bundle"
+    bundle = json.loads(r.content)
+    assert "producerVault" not in bundle
+    assert "_SPOILERS" not in bundle
+
+
+def test_debug_bundle_vault_optin_includes_the_vault(monkeypatch, quiet_bundle):
+    # (2) ?vault=1 (admin) — the Vault section is present, sentinel included, clearly marked.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle?vault=1")
+    assert r.status_code == 200
+    assert _VAULT_SENTINEL in r.text, "the opt-in bundle must carry the unsealed Vault"
+    bundle = json.loads(r.content)
+    assert "producerVault" in bundle
+    # the section is clearly labelled as spoiler content
+    assert "_SPOILERS" in bundle and "Producer's Vault" in bundle["_SPOILERS"]
+    # the sentinel rides inside the producerVault section specifically
+    assert _VAULT_SENTINEL in json.dumps(bundle["producerVault"])
+
+
+def test_debug_bundle_vault_optin_alias(monkeypatch, quiet_bundle):
+    # The documented alias ?include_vault=1 behaves identically to ?vault=1.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle?include_vault=1")
+    assert r.status_code == 200
+    bundle = json.loads(r.content)
+    assert "producerVault" in bundle and _VAULT_SENTINEL in r.text
+
+
+def test_debug_bundle_vault_optin_is_admin_gated(monkeypatch, quiet_bundle):
+    # (3) A non-admin cannot obtain the vault bundle — the admin gate holds, nothing leaks.
+    monkeypatch.setenv("AUTH_ENABLED", "true")  # default posture, no admin session
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle?vault=1")
+    assert r.status_code == 403
+    assert _VAULT_SENTINEL not in r.text  # refused BEFORE any Vault content is assembled
+
+
+def test_debug_bundle_vault_optin_fail_soft(monkeypatch):
+    # The opt-in is fail-soft like the rest of the bundle: a broken unseal degrades to an
+    # {"error": ...} section, never a 500 — the bundle still assembles and downloads.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    async def fake_snapshot(user):
+        return {"generatedAt": "2026-06-25T00:00:00+00:00", "engine": {"ok": True}}
+
+    async def fake_extras(user):
+        return {}
+
+    async def boom(user=None):
+        raise RuntimeError("engine unreachable")
+
+    monkeypatch.setattr(ahr, "_health_snapshot", fake_snapshot)
+    monkeypatch.setattr(ahr, "_bundle_extras", fake_extras)
+    monkeypatch.setattr(orwell_engine, "producer_vault", boom)
+
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle?vault=1")
+    assert r.status_code == 200  # never a 500 — the bundle is the operator's last resort
+    bundle = json.loads(r.content)
+    assert "error" in bundle["producerVault"]
+
+
+def test_status_page_has_separate_spoiler_bundle_affordance(monkeypatch):
+    # The fallback status page exposes a SEPARATE, explicitly-labelled spoiler download
+    # (hitting ?vault=1) alongside the plain Vault-free bundle link.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    body = client.get("/admin/status").text
+    assert 'href="/api/admin/debug-bundle" download' in body  # the plain link stays Vault-free
+    assert 'id="bundle-vault"' in body                        # the separate spoiler control
+    assert "/api/admin/debug-bundle?vault=1" in body          # which hits the opt-in
+    assert "SPOILERS" in body
+
+
+def test_admin_health_card_has_separate_spoiler_bundle_affordance():
+    # The Settings Health & Logs card carries the SAME separate spoiler control in index.html,
+    # wired through a confirm in admin.js. The plain download link stays Vault-free.
+    import os
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    html = open(os.path.join(base, "static", "index.html"), encoding="utf-8").read()
+    js = open(os.path.join(base, "static", "js", "admin.js"), encoding="utf-8").read()
+    assert 'id="adm-health-bundle"' in html and "/api/admin/debug-bundle" in html
+    assert 'id="adm-health-bundle-vault"' in html and "SPOILERS" in html
+    assert "adm-health-bundle-vault" in js
+    assert "/api/admin/debug-bundle?vault=1" in js
