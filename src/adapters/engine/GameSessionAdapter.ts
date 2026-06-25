@@ -18,6 +18,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord } from "../../engine/voice";
+import type { Campaign } from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
 import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
@@ -305,6 +306,12 @@ export class GameSessionAdapter implements GameSession {
   private onEvent?: (ev: BeatEvent) => void;
   /** Tracked promises (0039). Player-party deals only here; NPC↔NPC deals live off-screen in the Vault. */
   private readonly deals = new DealLedger();
+  /**
+   * Live NPC CAMPAIGNS (0085) — persistent strategic agendas. ENGINE-ONLY hidden strategy (targets/
+   * plans/progress + the per-perspective `knownTo`): it never crosses any outward seam. Phase A holds
+   * the field + persistence plumbing; Phase B populates it from the off-screen tick + feeds the tilt.
+   */
+  private campaigns: Campaign[] = [];
   /** Records a one-off witnessed event (deal made/broken) and returns its id. Wired by the registry. */
   private onPlayerEvent?: (content: string, witnessSet: EntityId[], type?: string) => string | undefined;
   /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
@@ -1371,6 +1378,9 @@ export class GameSessionAdapter implements GameSession {
       house: this.house ? this.cloneHouse(this.house) : null,
       live: this.live ? fastClone(this.live) : null,
       deals: this.deals.serialize(),
+      // 0085: persist live campaigns so a multi-week agenda + its history survive a restart (accumulate,
+      // never thin). Engine-only hidden strategy — already inside the never-outward snapshot.
+      ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
       // L21/L24: the calibration-neutral base occupancy the off-screen society pairs on — persisted so the
       // society's positions stay reproducible across a restart and never reseed from the weighted view.
@@ -1513,6 +1523,8 @@ export class GameSessionAdapter implements GameSession {
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
     this.live = core.live ? cloneSession(core.live) : null;
     this.deals.load(core.deals ?? []);
+    // 0085: restore live campaigns (absent on pre-0085 saves ⇒ none).
+    this.campaigns = (core.campaigns ?? []).map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] }));
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
     // L21/L24: restore the calibration-neutral base occupancy (absent on pre-L21/L24 saves — the next tick

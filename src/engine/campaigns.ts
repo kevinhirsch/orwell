@@ -1,0 +1,235 @@
+/**
+ * NPC CAMPAIGNS (feature 0085) — strategy executed over TIME, not one-tick impulses. A `Campaign` is a
+ * houseguest's (or a bloc's) persistent, hidden, adaptive agenda: a GOAL aimed at a TARGET, pursued
+ * across many beats and re-planned as the board shifts, until it resolves at a ceremony.
+ *
+ * THIS MODULE IS PURE + ENGINE-ONLY (Vault-sealed). It holds hidden strategy and the per-perspective
+ * `knownTo` set (the symmetric-perspective spine: a campaign is its owner's private knowledge — every
+ * OTHER houseguest AND the player learns of it only through a pathway, never an omniscient read). No
+ * outward surface may import it (dependency-cruiser). It draws no I/O; magnitude is seeded.
+ *
+ * Phase A (this slice) is the model + the PURE logic (`generateInfluence`, `formCampaigns`,
+ * `campaignTilt`, `replan`), unit-tested in isolation and NOT yet wired into the live off-screen tick
+ * or the seeded decision weights — so it is inert and cannot perturb calibration. Phase B wires
+ * execution + the decision tilt (behind the calibration guard); Phase C the player surfacing + scramble.
+ */
+import type { EntityId } from "../domain/ids";
+import type { RandomnessSource } from "../ports/RandomnessSource";
+
+/** What a campaign is FOR. */
+export type CampaignGoal = "evict" | "protect" | "build-alliance" | "win-power" | "discredit";
+/** The concrete, adaptable steps — each folds through an EXISTING system (relationships/gossip/deals/…). */
+export type CampaignMove = "lobby" | "plant" | "deal" | "position" | "throw";
+/** A flip vote (day), a week's eviction push, or a season-long crusade. */
+export type CampaignHorizon = "day" | "week" | "season";
+export type CampaignStatus = "active" | "won" | "lost" | "abandoned";
+
+export interface Campaign {
+  id: string;
+  /** One schemer, or a bloc acting together (0043). */
+  owners: EntityId[];
+  goal: CampaignGoal;
+  /** Who it's aimed at (the evict/protect/discredit subject). */
+  target: EntityId;
+  /** The ordered, adaptable steps. */
+  plan: CampaignMove[];
+  /** How close to the goal (0..1) — VAULT-ONLY, never shown. */
+  progress: number;
+  horizon: CampaignHorizon;
+  status: CampaignStatus;
+  startedBeat: number;
+  deadlineBeat: number;
+  /** The owner's read of its odds (drifts with the board). */
+  confidence: number;
+  /**
+   * Per-perspective knowledge (the symmetric-perspective spine): WHO is aware this campaign exists.
+   * At formation this is the owners ONLY — it grows only as a pathway reaches someone (a lobby tells
+   * the lobbied; gossip diffuses + drifts). A houseguest NOT in this set cannot voice or act on it,
+   * exactly as the player cannot. The engine's omniscient read of ALL campaigns is for the closed-set
+   * TALLY only (never a voiced NPC).
+   */
+  knownTo: EntityId[];
+}
+
+export interface CampaignConstants {
+  /** The MAX tilt a fully-progressed, perfectly-pitched campaign adds to a seeded decision (Phase B). */
+  base: number;
+  /** Even no-trust lobbying lands a little (the floor of the trust multiplier). */
+  trustFloor: number;
+  /** How many campaigns may run at once — scarcity keeps the house legible. */
+  maxConcurrent: number;
+  /** A threat read at/above this can seed an "evict" campaign against the source. */
+  threatThreshold: number;
+  /** An affinity read at/above this can seed a "build-alliance" campaign. */
+  allyThreshold: number;
+  /** Beats in a week (the standard cadence) — sets a week-horizon deadline. */
+  weekBeats: number;
+}
+
+export const CAMPAIGN: CampaignConstants = {
+  base: 0.25,
+  trustFloor: 0.4,
+  maxConcurrent: 4,
+  threatThreshold: 0.55,
+  allyThreshold: 0.6,
+  weekBeats: 5,
+};
+
+const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+/**
+ * The two static CHARACTER aptitudes campaigns turn on (owner ruling 2026-06-25 — the tilt is a
+ * strategy knob made of PEOPLE, not a flat constant): `persuasiveness` (how much this houseguest's
+ * lobbying carries) and `susceptibility` (how easily THEY are swayed by others' campaigns —
+ * gullibility ↔ conviction). Archetype-correlated, jittered, in [0,1]. Byte-stable like the comp
+ * stats + the 0084 voice; minted off a side rng so they never touch the calibration stream.
+ */
+export interface Influence {
+  persuasiveness: number;
+  susceptibility: number;
+}
+
+const INFLUENCE_BIAS: Record<string, Influence> = {
+  "comp-beast": { persuasiveness: 0.45, susceptibility: 0.4 },
+  "mastermind": { persuasiveness: 0.82, susceptibility: 0.25 },
+  "social-butterfly": { persuasiveness: 0.74, susceptibility: 0.55 },
+  "floater": { persuasiveness: 0.4, susceptibility: 0.62 },
+  "villain": { persuasiveness: 0.72, susceptibility: 0.3 },
+  "underdog": { persuasiveness: 0.4, susceptibility: 0.66 },
+  "flirt": { persuasiveness: 0.7, susceptibility: 0.56 },
+  "loyalist": { persuasiveness: 0.5, susceptibility: 0.62 },
+  "wildcard": { persuasiveness: 0.55, susceptibility: 0.55 },
+  "analyst": { persuasiveness: 0.56, susceptibility: 0.28 },
+  "hothead": { persuasiveness: 0.46, susceptibility: 0.56 },
+  "peacemaker": { persuasiveness: 0.6, susceptibility: 0.64 },
+};
+const DEFAULT_BIAS: Influence = { persuasiveness: 0.5, susceptibility: 0.5 };
+const INFLUENCE_SPREAD = 0.15;
+
+function jitter(rng: RandomnessSource, center: number, spread = INFLUENCE_SPREAD): number {
+  return clamp01(center + (rng.next() * 2 - 1) * spread);
+}
+
+/** Mint a houseguest's influence aptitudes — archetype-biased, jittered, byte-stable. Two rng draws. */
+export function generateInfluence(rng: RandomnessSource, archetype: string): Influence {
+  const b = INFLUENCE_BIAS[archetype] ?? DEFAULT_BIAS;
+  return { persuasiveness: jitter(rng, b.persuasiveness), susceptibility: jitter(rng, b.susceptibility) };
+}
+
+/**
+ * The per-listener TILT a campaign move applies (Phase B feeds this into the seeded decision weights).
+ * CHARACTER-mediated, not flat: it scales with the owner's `persuasiveness`, the listener's
+ * `susceptibility`, the `trust` between them, and the campaign's accumulated `progress`. Bounded to
+ * `[0, base]`. Pure — no rng (the seeded roll happens at the decision site).
+ */
+export function campaignTilt(
+  progress: number,
+  persuasiveness: number,
+  susceptibility: number,
+  trust: number,
+  c: CampaignConstants = CAMPAIGN,
+): number {
+  const trustMult = c.trustFloor + (1 - c.trustFloor) * clamp01(trust);
+  return c.base * clamp01(progress) * clamp01(persuasiveness) * clamp01(susceptibility) * trustMult;
+}
+
+/** One houseguest's strategic situation, distilled for campaign formation (the adapter maps real state to this). */
+export interface CampaignActor {
+  id: EntityId;
+  /** Their strongest threat reads (who THEY see as dangerous) — directed, from the relationship model. */
+  threats: Array<{ toward: EntityId; threat: number }>;
+  /** Their strongest bonds (who THEY want to work with). */
+  allies: Array<{ toward: EntityId; affinity: number }>;
+  /** Their persuasiveness — the persuasive scheme more, and their campaigns are prioritized under the cap. */
+  persuasiveness: number;
+}
+
+export interface FormCampaignDeps {
+  rng: RandomnessSource;
+  /** The current beat (sets `startedBeat` + the horizon deadline). */
+  beat: number;
+  c?: CampaignConstants;
+}
+
+const PLAN_FOR: Record<CampaignGoal, CampaignMove[]> = {
+  evict: ["lobby", "plant", "lobby"],
+  protect: ["deal", "lobby"],
+  "build-alliance": ["deal", "position"],
+  "win-power": ["position", "lobby"],
+  discredit: ["plant", "lobby"],
+};
+
+/**
+ * Form the house's campaigns for this beat (PURE). Each actor with a strong-enough threat seeds an
+ * "evict" campaign against it; failing that, a strong bond seeds a "build-alliance". The most
+ * PERSUASIVE schemers are prioritized and the whole set is capped (`maxConcurrent`) — scarcity keeps
+ * the house legible. Every campaign starts known to its OWNER ONLY (symmetric perspective). Deterministic.
+ */
+export function formCampaigns(actors: readonly CampaignActor[], deps: FormCampaignDeps): Campaign[] {
+  const c = deps.c ?? CAMPAIGN;
+  // Most persuasive first — and stable on ties (by id) so the cap is deterministic.
+  const ordered = [...actors].sort((a, b) => b.persuasiveness - a.persuasiveness || (a.id < b.id ? -1 : 1));
+  const out: Campaign[] = [];
+  for (const a of ordered) {
+    if (out.length >= c.maxConcurrent) break;
+    const topThreat = [...a.threats].sort((x, y) => y.threat - x.threat)[0];
+    const topAlly = [...a.allies].sort((x, y) => y.affinity - x.affinity)[0];
+    let goal: CampaignGoal | null = null;
+    let target: EntityId | null = null;
+    let strength = 0;
+    if (topThreat && topThreat.threat >= c.threatThreshold) {
+      goal = "evict"; target = topThreat.toward; strength = topThreat.threat;
+    } else if (topAlly && topAlly.affinity >= c.allyThreshold) {
+      goal = "build-alliance"; target = topAlly.toward; strength = topAlly.affinity;
+    }
+    if (!goal || !target) continue;
+    const horizon: CampaignHorizon = goal === "build-alliance" ? "season" : "week";
+    const span = horizon === "season" ? c.weekBeats * 4 : c.weekBeats;
+    out.push({
+      id: `campaign:${a.id}:${deps.beat}`,
+      owners: [a.id],
+      goal, target,
+      plan: [...PLAN_FOR[goal]],
+      progress: 0,
+      horizon,
+      status: "active",
+      startedBeat: deps.beat,
+      deadlineBeat: deps.beat + span,
+      confidence: clamp01(strength),
+      knownTo: [a.id], // owner only — the symmetric-perspective spine
+    });
+  }
+  return out;
+}
+
+/** The live board a campaign re-plans against. */
+export interface CampaignBoard {
+  /** Who is still in the house. */
+  active: ReadonlySet<EntityId>;
+  /** Whether the campaign's OWNER is themselves endangered (on the block) — triggers a self-protect pivot. */
+  ownerEndangered: boolean;
+  /** The owner's CURRENT threat reads (to re-target after the old target escapes). */
+  threats?: Array<{ toward: EntityId; threat: number }>;
+}
+
+/**
+ * Adapt a campaign to a changed board (PURE) — a campaign is a plan, not a fixed script, and must never
+ * silently vanish (ADR 0005). If the owner is endangered it PIVOTS to self-protect. Else if the target
+ * is gone (evicted / no longer active) it RE-TARGETS to the next threat, or is abandoned if none remains.
+ * Otherwise it is unchanged. Returns a new object (never mutates).
+ */
+export function replan(campaign: Campaign, board: CampaignBoard, c: CampaignConstants = CAMPAIGN): Campaign {
+  if (campaign.status !== "active") return campaign;
+  const owner = campaign.owners[0]!;
+  if (board.ownerEndangered && campaign.goal !== "protect") {
+    return { ...campaign, goal: "protect", target: owner, plan: [...PLAN_FOR.protect] };
+  }
+  if (!board.active.has(campaign.target)) {
+    const next = (board.threats ?? [])
+      .filter((t) => t.toward !== campaign.target && board.active.has(t.toward) && t.threat >= c.threatThreshold)
+      .sort((x, y) => y.threat - x.threat)[0];
+    if (next) return { ...campaign, target: next.toward, plan: [...PLAN_FOR.evict], progress: 0, confidence: clamp01(next.threat) };
+    return { ...campaign, status: "abandoned" };
+  }
+  return campaign;
+}

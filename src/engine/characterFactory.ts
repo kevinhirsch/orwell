@@ -5,6 +5,7 @@ import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { physicalFacetToAppearance } from "./portraitPrompts";
 import { generateVoice, type VoiceProfile } from "./voice";
+import { generateInfluence, type Influence } from "./campaigns";
 import { GIVEN_NAMES } from "./data/givenNames";
 import { SURNAMES } from "./data/surnames";
 import { VOCATIONS } from "./data/vocations";
@@ -123,6 +124,13 @@ export interface Character {
    * pre-0084 saves (which load without it and re-derive nothing — the field stays as persisted).
    */
   voice?: VoiceProfile;
+  /**
+   * The static INFLUENCE aptitudes campaigns turn on (feature 0085): `persuasiveness` (how much this
+   * houseguest's lobbying carries) + `susceptibility` (how easily THEY are swayed by others' campaigns).
+   * ENGINE-ONLY inputs like the comp `stats` — NEVER projected to the player, byte-stable, minted off a
+   * names-keyed side rng (no main-stream draw ⇒ zero calibration impact). Optional for pre-0085 saves.
+   */
+  influence?: Influence;
   /**
    * Deep character profile — PUBLIC facets (feature 0058). A real multi-sentence `biography` (not a
    * one-liner) and a STRUCTURED `physicalCharacteristics` facet (the single source of truth shared by
@@ -658,12 +666,16 @@ export function generateHouse(
   // advancing stream, archetype-biased per NPC, so the cast sounds like sixteen people. Player-INDEPENDENT
   // and off the main stream (no calibration impact), byte-stable for the season (voice is identity).
   const voiceRng = new SeededRandom(hashSeed(`voice:${npcs.map((n) => n.name).join("|")}`));
+  // 0085: deal the static INFLUENCE aptitudes (persuasiveness/susceptibility) cast-wide off a names-keyed
+  // side rng — archetype-correlated, byte-stable, off the main stream (no calibration impact). Engine-only.
+  const influenceRng = new SeededRandom(hashSeed(`influence:${npcs.map((n) => n.name).join("|")}`));
   npcs.forEach((n, i) => {
     n.character.vocation = facets[i]!.vocation;
     n.character.hometown = facets[i]!.hometown;
     n.character.demeanor = demeanors[i]!;
     n.character.appearance = withBuild(n.character.appearance, builds[i]!);
     n.character.voice = generateVoice(voiceRng, n.character.archetype);
+    n.character.influence = generateInfluence(influenceRng, n.character.archetype);
   });
   return { npcs };
 }
