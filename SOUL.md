@@ -76,6 +76,42 @@ many parallel agents, not typing every edit myself.
    frontend/tests`.
 7. **Don't stack chat.js changes on an unconfirmed base.** After a chat fix, get the owner to
    deploy + confirm before building more on the send/render path.
+8. **Merge-on-green via background timers (webhooks don't deliver success).** After opening a PR,
+   arm a `Bash(run_in_background:true, "sleep ~150-260; echo wake")` timer; on wake read the PR's
+   check-runs, merge if `ci-gate`=success, else re-arm. `ci-gate` is the ONE required check (the
+   aggregate); **fe-pytest is the long pole (~6-7 min)** — when every other job is green and ci-gate
+   is "queued," it flips to success in seconds. One timer per cycle; don't poll tightly.
+9. **The stale-staged-file that REVERTS a merge (the stop-hook ghost).** Making a small fix directly
+   in the MAIN checkout (`git checkout -B <b> origin/main` → `git add <one file>` → commit) leaves
+   OTHER files staged in the index; they **travel across `checkout -B`** and resurface as a stale
+   staged change that, if committed, **reverts a just-merged PR**. Caught TWICE (a stale `test_h2b`
+   would've reverted #930; a stale `style.css` would've reverted #941 — the stop-hook flagged both).
+   Before trusting any staged change: `git diff --cached origin/main -- <file>`; discard stale ones
+   with `git restore --staged --worktree <file>`; keep the main checkout **detached at origin/main**
+   between fixes so it never squats on an agent's branch.
+10. **The onboarding-scrim flake is real — and fixed (#930).** `test_h2b_all_model_pools` /
+    `test_h2h3_settings` click `#user-bar-settings` while `[data-ow-scrim="orwell-onboarding"]` still
+    intercepts → Playwright 10s timeout; near-deterministic in some CI windows (failed a merge 3× in
+    a row). Fix = the **converging dismiss+click loop** (dismiss dialog OR scrim, retry the gear
+    click until `#settings-modal` is open). Port that loop if it shows up elsewhere; #925 tracks a sweep.
+11. **`git ls-remote <branch> && echo PUSHED` LIES.** An absent branch makes ls-remote exit 0 with
+    empty output, so `&&` fires a false "pushed." Confirm by grepping ls-remote output for the name,
+    or check the agent's worktree HEAD / `git -C <wt> diff --stat origin/main...HEAD`. (That 3-dot
+    diff is also how you get an agent's TRUE scope when its branch is behind main — `origin/main...HEAD`,
+    not the 2-dot, which shows phantom "deletions" of newer main commits.)
+12. **Diagnose-before-DISPATCH on "follow-on" PRs.** A merged follow-on (#572, "ADR-0010 per-class
+    max_tokens") silently **activated a dormant `max_tokens=4096` narration cap** → truncates
+    reasoning-model output (deepseek counts reasoning+visible against the cap) = the #835 P1 vector
+    resurfacing. The owner flagged it; I **verified on main** via the
+    `token_policy._DEFAULT_MAX_TOKENS["narration"]=4096 → agent_loop:_effective_max_tokens → llm_core
+    payload` trace BEFORE fanning out (fix #943: model-aware default). When a PR "wires up" an existing
+    constant, check what it now DOES live; and when two open PRs touch the same file (#620/#621 both
+    edit `token_policy.py`/`agent_loop.py`), **sequence, don't parallelize**.
+13. **Prove visual fixes with a before/after render — and watch for `!important` second sources.** The
+    owner is visual; every UI agent must capture before/after (filmstrip for motion) and the lead
+    relays them. Twice a fix needed a SECOND source the brief missed: the giant mobile kit buttons had
+    BOTH the global coarse floor AND a stronger `!important` J5-01 block (#944); always grep for an
+    `!important` rule overriding your target before declaring the cause.
 
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,
@@ -112,22 +148,31 @@ many parallel agents, not typing every edit myself.
   (PLAYER_TOOLS & INFRA_LEVERS) + McpServer dispatch; static gates miss a missing #4 → dead at
   runtime. Add a boundary test that dispatches through `McpServer.callTool`.
 
-## Where things stood when I wrote this (2026-06-25)
-The chat went from fully broken → working, across a hard P1 campaign:
-- **Fixed & merged:** OpenRouter URL (`/chat/completions`, #818), model-less-session fallback
-  (#814), duplicate narration (#819), scrollbars + log noise (#820), one-bubble coalesce (#822 —
-  later reverted #825), banner gutters + dock collapse-only (#824), glass-login + macOS sign-in
-  transition (#826), never-eat-message + truncation instrumentation (#836).
-- **In the merge train (owner delegated merge authority, in order as green):**
-  the onboarding-scrim **test-fix** (branch `claude/fix-onboarding-scrim-test`) → **#856**
-  focus-ring keyboard-only → **#855** the live-verified truncation fix (`_GAME_LEAK_START_RE`
-  narrowed). #855 is red only on the unrelated scrim flake; it needs the test-fix merged + main
-  pulled in + a green re-run.
-- **Open issues:** #827–#837 (truncation #835, timestamps #834, producer-bubble-until-refresh #828,
-  optimistic+aggregated send queue #830 [aggregate rapid sends into ONE turn], composer "+" attach
-  / drop paperclip #831, redo-coalesce-with-live-verification #829, focus-ring #837).
-- **⚠️ Reminder to surface:** the owner pasted a live OpenRouter API key in chat — tell them to
-  **rotate it** now that the live debug is done.
+## Where things stood when I wrote this (2026-06-25, evening — the UX-polish + day-1 session)
+A long delegated session: owner playtested live and fired off fixes; I ran the overseer loop
+(dispatch worktree agents → review → relay visuals → open PR → merge on green). Merge authority
+delegated throughout.
+- **Shipped to main this session:** chat label "Big Brother" → **"Orwell"** (#889); casting survives
+  provider 400s (#888); settings-window visual integrity (#896); window resize cap = min(content,
+  viewport−margin) (#902); duplicate-received-message dedup (#920); cast-photos **responsive 2×2
+  sideways gallery** (#923); **blinking favicon** eye (#932); gadget-rail orphan-1px-line drop (#931);
+  thinking-accordion top-pad (#941); the onboarding-scrim **flake fix** (#930).
+- **In flight (PRs open, merging on green):** **#943** narration max_tokens model-aware cap (the P1 —
+  fast-tracked), **#944** mobile kit-button proportion fix, **#887** jump-to-bottom consolidation
+  (circle look + squircle position/smooth-scroll, neutral outline — agent building), this **SOUL.md**
+  update.
+- **Specs / PO-questions filed:** the **Day-1 experience spec `0102`** (#915, merged) over five
+  sub-issues #905–#909 under umbrella #875 — build **gated on PO-questions #916/#917/#918** (owner
+  ruled "hold off"). The whole first-run audit's findings are tracked (#872✅/#874/#875/#871/#859/#887
+  + L-tier #910–#914). Messaging-resilience umbrella #891 (P0s: offline outbox, model-path
+  idempotency, replay-durable pushes). Whole-app responsive umbrella #893/#894 (mobile windows →
+  `OrwellSheet`; chat-tier findings #933 BLOCK fab-overlaps-decision-card, #934, #935, #936 casting
+  chat_stream 404). One-command `orwell-rebuild.sh` (#900, PR #903).
+- **⚠️ Rotate the key:** the owner pasted a fresh OpenRouter key (`sk-or-…`) for the live chat-tier
+  audit; it was used live, kept runtime-only in `scratchpad/.or_key`. Remind them to **rotate it** now
+  the audit's done.
+- **Calibration note:** `git log --oneline` for the true merged set — this prose drifts. Open agents
+  at write-time: #887 (scroll-bottom), and the merge train above.
 
 ## How to resume
 1. Read `CLAUDE.md` (authoritative), then `docs/features/README.md` + `git log --oneline` for live
