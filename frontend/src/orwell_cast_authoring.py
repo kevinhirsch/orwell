@@ -50,6 +50,11 @@ _SYSTEM = (
     "contestant — diverse and ordinary, NEVER invented/fantasy/gibberish; do not reuse the houseguest's "
     "current name.\n"
     '  "biography": a 2-3 sentence presentable backstory (life outside the house),\n'
+    '  "vocation": a SHORT occupation noun phrase (e.g. "court reporter"). KEEP the skeleton\'s '
+    "occupation by default; ONLY change it if your biography genuinely gives this person a different "
+    "job — and then set vocation to MATCH the biography. The public occupation and the biography must "
+    "name the SAME job, and the secrets must be grounded in THAT job (the engine keys the hidden stakes "
+    "off vocation),\n"
     '  "physicalCharacteristics": { "heightBuild", "skinTone", "hair", "facialFeatures", '
     '"distinguishingMark", "ageLook", "style" } — short phrases; this single facet is what BOTH '
     "the portrait and the narration read, so make it concrete and distinctive. The look must COHERE "
@@ -73,7 +78,9 @@ _SYSTEM = (
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
 # NOTE: `dayOnePerception` is INTENTIONALLY NOT authored here (anti-sycophancy) — the engine owns the
 # seeded, balanced Day-1 read. We never send it, so the authoring path carries zero player coupling.
-_PUBLIC_KEYS = ("name", "biography", "physicalCharacteristics")
+# `vocation` (#849): the PUBLIC occupation — forwarded so it stays in lockstep with an authored
+# biography and the engine re-grounds the hidden stakes off the job the player will infer.
+_PUBLIC_KEYS = ("name", "biography", "vocation", "physicalCharacteristics")
 _HIDDEN_KEYS = ("secrets", "trueGoals", "weakness")
 _PHYS_KEYS = ("heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style")
 
@@ -88,6 +95,9 @@ _BIO_MIN_CHARS = 80          # a coherent presentable backstory is more than a c
 _BIO_MIN_SENTENCES = 2       # >= 2 sentence terminators [.!?]
 _HIDDEN_ENTRY_MIN_CHARS = 12  # a real secret/weakness is more than a stray word
 _SENTENCE_TERMINATORS = re.compile(r"[.!?]")
+# `vocation` (#849) is a SHORT occupation noun phrase ("court reporter") — not a sentence. A value that
+# is empty or a runaway paragraph is degraded; drop it (the engine keeps the seeded vocation in lockstep).
+_VOCATION_MAX_CHARS = 60
 
 
 # The LLM-authored replacement display name guard — mirrors the engine's `isReasonableName`
@@ -199,6 +209,17 @@ def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
                 f"[cast-authoring] biography below floor for {houseguest_id} "
                 f"({len(bio)} chars, {len(_SENTENCE_TERMINATORS.findall(bio))} sentence(s)) — "
                 "omitting so the seeded floor stands")
+    # The PUBLIC occupation (#849) — forwarded so the engine keeps it in lockstep with the biography and
+    # re-grounds the hidden stakes off the job the player will infer. A blank / runaway value is dropped
+    # (the engine then leaves the seeded vocation — and its keyed stakes — untouched). Single line only.
+    if isinstance(obj.get("vocation"), str) and obj["vocation"].strip():
+        voc = " ".join(obj["vocation"].split())  # collapse whitespace/newlines to a clean noun phrase
+        if len(voc) <= _VOCATION_MAX_CHARS:
+            out["vocation"] = voc
+        else:
+            logger.warning(
+                f"[cast-authoring] vocation too long for {houseguest_id} ({len(voc)} chars) — "
+                "omitting so the seeded vocation stands")
     phys = obj.get("physicalCharacteristics")
     if isinstance(phys, dict):
         facet = {k: str(phys[k]).strip() for k in _PHYS_KEYS if isinstance(phys.get(k), (str, int)) and str(phys.get(k)).strip()}

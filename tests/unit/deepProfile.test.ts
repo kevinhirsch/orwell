@@ -392,3 +392,117 @@ describe("0058 / L28b write-back seam — LIVE, airtight, split-safe", () => {
     expect(res.reason).toMatch(/mirror/i);
   });
 });
+
+describe("#849 — an authored occupation change keeps vocation in LOCKSTEP and RE-GROUNDS the secret stakes", () => {
+  // The Producer's-Vault defect: a houseguest's PUBLIC occupation (the `vocation` the player reads,
+  // and the SAME facet the hidden secret stake is keyed off) could mismatch its hidden secrets — an
+  // authoring LLM re-wrote the public cover (biography → a new job) WITHOUT re-grounding `vocation`, so
+  // the seeded hidden stakes stayed keyed to the OLD job (e.g. a "court reporter" bio over business-owner
+  // stakes). The fix: when the author supplies a new `vocation`, the engine sets it in lockstep with the
+  // biography AND re-derives the seeded-floor secrets off the corrected occupation. We assert the
+  // RELATIONSHIP (the re-grounded secret now coheres with the new occupation, the old one is gone) — not
+  // any specific stake string — so the gate is robust to the hidden-stake taxonomy.
+
+  // The seeded character-conditioned secret always NAMES the houseguest's own concrete occupation
+  // (deepProfile's composeSecret interpolates the vocation noun) — that interpolation IS how the secret
+  // is bound to its job's sector. So "the secret coheres with the occupation the player would infer"
+  // is observable as: the secrets name the new occupation, and no longer name the old one.
+  const occursIn = (secrets: string[], needle: string): boolean =>
+    secrets.join("  ").toLowerCase().includes(needle.toLowerCase());
+
+  it("re-grounds the engine's seeded secrets when the occupation changes (no authored secrets)", () => {
+    const { sb } = liveGame("dp-occ-reground", 21);
+    const card = sb.session.getGameState().house.find((h) => h.status === "active")!;
+    const id = card.id;
+    const oldOccupation = card.vocation!;
+    expect(oldOccupation.length).toBeGreaterThan(0);
+    // A NEW public occupation in a clearly different line of work (distinct noun, distinct sector). The
+    // author re-writes the public cover but does NOT author secrets — so the engine owns the re-ground.
+    const newOccupation = "court reporter";
+    expect(newOccupation.toLowerCase()).not.toBe(oldOccupation.toLowerCase());
+
+    // The seeded floor BEFORE the change was grounded in the OLD occupation.
+    const secretsBefore = sb.session.snapshot().deepProfiles![id]!.secrets;
+    expect(occursIn(secretsBefore, oldOccupation)).toBe(true);
+
+    const res = sb.session.recordCastProfile({
+      houseguestId: id,
+      vocation: newOccupation,
+      biography: "Outside the house they spend their days in a courtroom taking down every word. They came here to do something nobody back home would expect.",
+    });
+    expect(res.accepted).toBe(true);
+    // (a) PUBLIC lockstep — the occupation the player reads is the new one, on the public card, alongside the biography.
+    expect(res.publicFields).toEqual(expect.arrayContaining(["vocation", "biography"]));
+    const after = sb.session.getGameState().house.find((h) => h.id === id)!;
+    expect(after.vocation).toBe(newOccupation);
+
+    // (b) HIDDEN re-ground (the core of #849) — the seeded secret stake now coheres with the NEW
+    // occupation's sector and no longer with the OLD job. Assert the relationship, not a stake string.
+    const secretsAfter = sb.session.snapshot().deepProfiles![id]!.secrets;
+    expect(occursIn(secretsAfter, newOccupation)).toBe(true);
+    expect(occursIn(secretsAfter, oldOccupation)).toBe(false);
+
+    // (c) Vault-safe: the result reports field NAMES only — it never echoes a hidden secret value.
+    expect(JSON.stringify(res)).not.toContain(secretsAfter[0]!);
+  });
+
+  it("an AUTHORED secret still wins (open set), while vocation is set in lockstep for the public card", () => {
+    const { sb } = liveGame("dp-occ-authored-secret", 22);
+    const id = sb.session.getGameState().house.find((h) => h.status === "active")!.id;
+    const authoredSecret = "is quietly bankrolling a sibling's tuition and cannot afford to lose";
+    const res = sb.session.recordCastProfile({
+      houseguestId: id,
+      vocation: "marine biologist",
+      secrets: [authoredSecret],
+    });
+    expect(res.accepted).toBe(true);
+    // the public occupation moved in lockstep…
+    expect(sb.session.getGameState().house.find((h) => h.id === id)!.vocation).toBe("marine biologist");
+    // …and the AUTHORED secret (the open set) is what's sealed — the engine does NOT overwrite it with a re-derived floor.
+    expect(sb.session.snapshot().deepProfiles![id]!.secrets).toEqual([authoredSecret]);
+  });
+
+  it("WITHOUT a vocation change, the seeded secrets are LEFT UNTOUCHED (no spurious re-derive)", () => {
+    const { sb } = liveGame("dp-occ-unchanged", 23);
+    const id = sb.session.getGameState().house.find((h) => h.status === "active")!.id;
+    const before = sb.session.snapshot().deepProfiles![id]!.secrets.slice();
+    // Author ONLY a biography (the common case) — no `vocation`. The hidden stakes must not move.
+    const res = sb.session.recordCastProfile({
+      houseguestId: id,
+      biography: "Outside the house they keep to themselves and read the room. They applied on a dare and surprised everyone.",
+    });
+    expect(res.accepted).toBe(true);
+    expect(res.publicFields).not.toContain("vocation");
+    expect(sb.session.snapshot().deepProfiles![id]!.secrets).toEqual(before);
+  });
+
+  it("a blank / whitespace vocation is IGNORED — the seeded occupation (and its keyed stakes) stand", () => {
+    const { sb } = liveGame("dp-occ-blank", 24);
+    const card = sb.session.getGameState().house.find((h) => h.status === "active")!;
+    const id = card.id;
+    const seededVocation = card.vocation!;
+    const before = sb.session.snapshot().deepProfiles![id]!.secrets.slice();
+    const res = sb.session.recordCastProfile({ houseguestId: id, vocation: "   " });
+    expect(res.accepted).toBe(true);
+    expect(res.publicFields).not.toContain("vocation");
+    expect(sb.session.getGameState().house.find((h) => h.id === id)!.vocation).toBe(seededVocation);
+    expect(sb.session.snapshot().deepProfiles![id]!.secrets).toEqual(before);
+  });
+
+  it("the move-in NPC→player edge (the Day-1 calibration) is UNTOUCHED by an occupation re-ground", () => {
+    const { sb } = liveGame("dp-occ-edge", 25);
+    const id = sb.session.getGameState().house.find((h) => h.status === "active")!.id;
+    const before = { ...sb.engine.relationships.edge(id, PLAYER) };
+    sb.session.recordCastProfile({
+      houseguestId: id,
+      vocation: "wildland firefighter",
+      biography: "Outside the house they chase fire lines across the back country every summer. They are here for one wild off-season.",
+    });
+    // The occupation re-ground is TEXT-ONLY (the seeded Day-1 leans are preserved) — the calibrated
+    // move-in edge the juryReach gate depends on must not move.
+    const after = sb.engine.relationships.edge(id, PLAYER);
+    expect(after.trust).toBeCloseTo(before.trust, 9);
+    expect(after.affinity).toBeCloseTo(before.affinity, 9);
+    expect(after.threat).toBeCloseTo(before.threat, 9);
+  });
+});
