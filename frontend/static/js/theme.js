@@ -12,7 +12,7 @@ import { snapModalToZone } from './tileManager.js';
 // .login-bg-gradient layer (css/meshGradient.css); resolveLoginBackgroundConfig
 // reads the SAME public /api/auth/login-background the login page does, so
 // changing the admin login-bg palette changes the glass-theme app background too.
-import { mountMeshGradient, resolveLoginBackgroundConfig, prefersReducedMotion as _meshReducedMotion } from './login_bg.js';
+import { mountMeshGradient, mountParticles as _mountParticles, resolveLoginBackgroundConfig, prefersReducedMotion as _meshReducedMotion } from './login_bg.js';
 
 export const THEMES = {
   // ── Apple "Liquid Glass" (iOS 26 / macOS 26 "Tahoe", WWDC25). The DEFAULT and
@@ -84,10 +84,12 @@ const MAX_CUSTOM_THEMES = 8;
 
 // Default background patterns for built-in themes
 const THEME_DEFAULT_PATTERN = {
-  // The glass theme's signature wallpaper — the SAME iOS/Sequoia mesh gradient
-  // the login screen renders (login_bg.js, palette from /api/auth/login-background),
-  // so the colorless glass chrome lenses the exact same aurora the login glass
-  // does. (A user wallpaper image, if chosen, supersedes it.)
+  // The glass theme's signature wallpaper — MIRRORS the login background. The
+  // 'glass-mesh' sentinel resolves the SAME /api/auth/login-background config the
+  // login page uses and paints whatever source it names (photo / gradient-mesh /
+  // particles), so the colorless glass chrome lenses the exact same backdrop the
+  // login glass did and the desktop reads as a continuation of the sign-in screen.
+  // (A user wallpaper image or an explicit pattern, if chosen, supersedes it.)
   glass:      'glass-mesh',
   // A5 (ruling #18) — every HOUSE theme ships a creative particles background that fits its
   // identity, reusing the existing canvas-particle machinery (behind the chat, perf-budgeted,
@@ -849,10 +851,40 @@ function _bgStaticInit(initFn) {
   try { initFn(); } finally { window.requestAnimationFrame = realRaf; }
 }
 
-// ── The glass-theme mesh wallpaper (reuses the login mesh; #__wp) ──────────────
+// ── The glass-theme DEFAULT wallpaper — MIRRORS the login background (#__wp) ────
+// The glass theme's default wallpaper reflects WHATEVER the admin configured the
+// login background to be (resolveLoginBackgroundConfig().source), so the desktop
+// reads as a continuation of the sign-in screen: a PHOTO login → the photo behind
+// the app; a GRADIENT/mesh login → that mesh; a PARTICLES login → the particle
+// field; a BUNDLED login → the mesh base (the app's own pattern system owns the
+// non-glass patterns, so the glass default falls back to the shared mesh there).
+// All sources drive the SAME #__wp layer adaptiveGlass samples + the glass chrome
+// lenses. This is the DEFAULT path ONLY: it runs for the 'glass-mesh' sentinel
+// pattern (the glass theme's THEME_DEFAULT_PATTERN). The moment a user explicitly
+// picks a wallpaper image or a different pattern, that selection wins (bgImage ⇒
+// applyBgImage + pattern 'none'; an explicit pattern ⇒ that pattern) and this
+// never runs.
+//
 // Resolved-config cache so a swatch click / re-apply doesn't re-fetch every time.
 let _glassMeshCfg = null;
 const GLASS_MESH_PATTERN = 'glass-mesh';
+
+// Ensure the #__wp layer exists and is marked as the glass default wallpaper.
+// Clears any prior wallpaper content (image / mesh child / particle canvas) so a
+// re-render or a source switch never stacks two backgrounds.
+function _ensureGlassWp() {
+  let wp = document.getElementById(WALLPAPER_ID);
+  if (!wp) {
+    wp = document.createElement('div');
+    wp.id = WALLPAPER_ID;
+    wp.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;';
+    document.body.appendChild(wp);
+  }
+  wp.classList.add('glass-mesh-wp');
+  wp.style.backgroundImage = '';
+  wp.querySelectorAll('.login-bg-gradient, .login-bg-photo, canvas.login-bg-particles').forEach((c) => c.remove());
+  return wp;
+}
 
 // Paint the shared login mesh-gradient as the #__wp wallpaper. We do TWO things
 // so the layer is both visually rich AND legible under adaptiveGlass:
@@ -864,17 +896,7 @@ const GLASS_MESH_PATTERN = 'glass-mesh';
 // prefers-reduced-motion ⇒ a STATIC mesh (no .is-animated), exactly like login.
 function _renderGlassMesh(cfg) {
   const g = (cfg && cfg.gradient) || {};
-  let wp = document.getElementById(WALLPAPER_ID);
-  if (!wp) {
-    wp = document.createElement('div');
-    wp.id = WALLPAPER_ID;
-    wp.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;';
-    document.body.appendChild(wp);
-  }
-  wp.classList.add('glass-mesh-wp');
-  // Clear any prior image + any prior mesh child, then paint base + mount mesh.
-  wp.style.backgroundImage = '';
-  wp.querySelectorAll('.login-bg-gradient').forEach((c) => c.remove());
+  const wp = _ensureGlassWp();
   const animate = !_meshReducedMotion();
   const el = mountMeshGradient(wp, {
     animate, preset: g.preset, speed: g.speed, intensity: g.intensity,
@@ -887,32 +909,113 @@ function _renderGlassMesh(cfg) {
   document.body.classList.add('has-wallpaper');
 }
 
-/** Apply (or refresh) the glass-theme mesh wallpaper. Resolves the preset from
- *  the same public login-background config the login page uses (cached), then
- *  renders it into #__wp. Fail-soft: any error leaves the prior background. */
+// Paint the admin's login PHOTO as the #__wp wallpaper (cover/center, like login),
+// over the mesh base so a slow/broken image never leaves a void. adaptiveGlass
+// reads the image off #__wp's own background-image once it loads. An empty photo
+// URL falls back to the bundled login image, matching the login page's behaviour.
+function _renderGlassPhoto(cfg) {
+  const wp = _ensureGlassWp();
+  // Mesh base first (graceful fallback + a real luminance read while the image
+  // loads / if it 404s) — same as the login's _mountPhoto.
+  _renderGlassMeshBaseInto(wp, cfg);
+  const url = (cfg && cfg.photoUrl) || '/static/img/login-bg.jpg';
+  const probe = new Image();
+  probe.onload = () => {
+    // Still the active default? (an async load can land after a theme switch).
+    if (!document.body.classList.contains('bg-pattern-' + GLASS_MESH_PATTERN)) return;
+    wp.style.backgroundImage = `url("${String(url).replace(/"/g, '%22')}")`;
+    wp.style.backgroundSize = 'cover';
+    wp.style.backgroundPosition = 'center';
+    wp.style.backgroundRepeat = 'no-repeat';
+    document.body.classList.add('has-wallpaper');
+  };
+  probe.onerror = () => { /* keep the mesh base */ };
+  probe.src = url;
+}
+
+// Paint the admin's login PARTICLE field as the #__wp wallpaper. The desktop
+// mounts it STATIC (a single still frame, no rAF) for performance — the app +
+// the glass refraction are already heavy, so a continuously-animating particle
+// canvas behind them is too costly to run all the time (the login, alone on
+// screen, animates). The mesh-base color underneath gives adaptiveGlass its read.
+function _renderGlassParticles(cfg) {
+  const wp = _ensureGlassWp();
+  // Set the base luminance from the preset (adaptiveGlass reads #__wp itself;
+  // the canvas child is transparent so a base color is required for a clean read).
+  _renderGlassBaseColorOnly(wp, cfg);
+  _mountParticles(wp, {
+    animate: false, // STILL behind the app (documented perf decision)
+    particles: cfg && cfg.particles,
+    gradient: cfg && cfg.gradient,
+  });
+  document.body.classList.add('has-wallpaper');
+}
+
+// Mount JUST the mesh visual + base color into an already-prepared #__wp (no
+// clear). Used as the photo's graceful base layer.
+function _renderGlassMeshBaseInto(wp, cfg) {
+  const g = (cfg && cfg.gradient) || {};
+  const animate = !_meshReducedMotion();
+  const el = mountMeshGradient(wp, {
+    animate, preset: g.preset, speed: g.speed, intensity: g.intensity,
+    extraClass: 'glass-mesh-layer',
+  });
+  const base = getComputedStyle(el).getPropertyValue('--lbg-base').trim() || '#2a1c5e';
+  wp.style.backgroundColor = base;
+}
+
+// Set #__wp's base color to the resolved preset's --lbg-base WITHOUT mounting the
+// mesh child (the particle source draws its own field over a flat base — matching
+// login_bg.js, which paints a gradient base then particles; here we keep it a flat
+// preset base so adaptiveGlass reads a clean luminance and the particles dominate).
+function _renderGlassBaseColorOnly(wp, cfg) {
+  const g = (cfg && cfg.gradient) || {};
+  // Mount a hidden mesh element only to read its computed --lbg-base, then drop it.
+  const probe = mountMeshGradient(wp, { animate: false, preset: g.preset, extraClass: 'glass-mesh-layer' });
+  const base = getComputedStyle(probe).getPropertyValue('--lbg-base').trim() || '#2a1c5e';
+  probe.remove();
+  wp.style.backgroundColor = base;
+}
+
+// Dispatch the default-wallpaper render by the resolved login-background SOURCE.
+function _renderGlassDefault(cfg) {
+  const source = (cfg && cfg.source) || 'gradient';
+  if (source === 'photo')     { _renderGlassPhoto(cfg); return; }
+  if (source === 'particles') { _renderGlassParticles(cfg); return; }
+  // 'gradient' (mesh), 'bundled', and anything unknown → the shared mesh. The
+  // app's own pattern engine owns the non-glass 'bundled' patterns; the glass
+  // DEFAULT keeps the cohesive shared mesh rather than animating a heavy canvas.
+  _renderGlassMesh(cfg);
+}
+
+/** Apply (or refresh) the glass-theme DEFAULT wallpaper. Resolves the source +
+ *  palette from the same public login-background config the login page uses
+ *  (cached), then renders the matching background into #__wp. Fail-soft: any
+ *  error leaves the prior background. */
 export function applyGlassMeshBackground() {
   try {
-    if (_glassMeshCfg) { _renderGlassMesh(_glassMeshCfg); return; }
+    if (_glassMeshCfg) { _renderGlassDefault(_glassMeshCfg); return; }
     resolveLoginBackgroundConfig().then((cfg) => {
-      _glassMeshCfg = cfg || { gradient: { preset: 'aurora' } };
+      _glassMeshCfg = cfg || { source: 'gradient', gradient: { preset: 'aurora' } };
       // Only paint if the glass mesh is still the active pattern (the async
       // resolve may land after the user switched themes).
       if (document.body.classList.contains('bg-pattern-' + GLASS_MESH_PATTERN)) {
-        _renderGlassMesh(_glassMeshCfg);
+        _renderGlassDefault(_glassMeshCfg);
       }
     }).catch(() => {
-      _glassMeshCfg = { gradient: { preset: 'aurora' } };
-      if (document.body.classList.contains('bg-pattern-' + GLASS_MESH_PATTERN)) _renderGlassMesh(_glassMeshCfg);
+      _glassMeshCfg = { source: 'gradient', gradient: { preset: 'aurora' } };
+      if (document.body.classList.contains('bg-pattern-' + GLASS_MESH_PATTERN)) _renderGlassDefault(_glassMeshCfg);
     });
   } catch (_) { /* fail-soft: keep whatever background is showing */ }
 }
 
-// Tear down the glass mesh wallpaper (when switching to a non-glass pattern or
-// to a user image). Removes the mesh child + the marker class + the base fill.
+// Tear down the glass default wallpaper (when switching to a non-glass pattern or
+// to a user image). Removes the mesh/photo/particle content + the marker class +
+// the base fill.
 function _clearGlassMesh() {
   const wp = document.getElementById(WALLPAPER_ID);
   if (!wp) return;
-  wp.querySelectorAll('.login-bg-gradient').forEach((c) => c.remove());
+  wp.querySelectorAll('.login-bg-gradient, .login-bg-photo, canvas.login-bg-particles').forEach((c) => c.remove());
   wp.classList.remove('glass-mesh-wp');
   if (!wp.style.backgroundImage) {
     // No image either ⇒ remove the layer entirely + restore the opaque page bg.

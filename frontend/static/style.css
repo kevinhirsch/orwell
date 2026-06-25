@@ -40982,3 +40982,77 @@ body.glass-full .chat-input-bar::before {
   .ow-sheet, .ow-sheet.ow-sheet-anim-in, .ow-sheet.ow-sheet-anim-out,
   .ow-sheet-scrim, .ow-sheet::before { animation: none !important; transition: none !important; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   macOS SIGN-IN TRANSITION (phase b) — the app-reveal entrance.
+   ────────────────────────────────────────────────────────────────────────────
+   On the FIRST app reveal after a successful login, body.signin-entrance is added
+   (signinTransition.js, gated on a one-shot flag consumed in index.html's head).
+   The persistent surfaces slide in from their ADJACENT edges — macOS-style — the
+   nav sidebar from the left, the gadget rail + Windows dock from the right, the
+   top conversation bar from the top, the composer from the bottom — and the
+   chat/main content does a soft fade+scale-in. The edges are subtly STAGGERED so
+   the desktop reads as assembling itself. The class is removed on animationend,
+   so this is a ONE-SHOT reveal that leaves NO residue: it cannot re-trigger on a
+   poll / orwell:gamechanged / restack (the #752 persistent-surface stability
+   rule — only a true first mount animates; everything else holds position).
+
+   prefers-reduced-motion: the class is never added (JS), and the rule below
+   neutralises every keyframe as belt-and-braces — instant reveal, no slide.
+   ════════════════════════════════════════════════════════════════════════════ */
+@keyframes signin-slide-from-left {
+  from { opacity: 0; transform: translateX(-26px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes signin-slide-from-right {
+  from { opacity: 0; transform: translateX(26px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes signin-slide-from-top {
+  from { opacity: 0; transform: translateY(-22px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes signin-slide-from-bottom {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes signin-content-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Apple-feel easing (a gentle overshoot-free decelerate) + a subtle stagger. */
+body.signin-entrance #sidebar,
+body.signin-entrance #icon-rail {
+  animation: signin-slide-from-left 0.5s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: 0.04s;
+}
+body.signin-entrance #gadget-rail,
+body.signin-entrance #minimized-dock {
+  animation: signin-slide-from-right 0.5s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: 0.12s;
+}
+body.signin-entrance .chat-top-bar {
+  animation: signin-slide-from-top 0.46s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: 0.08s;
+}
+body.signin-entrance .chat-input-bar {
+  animation: signin-slide-from-bottom 0.5s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: 0.16s;
+}
+body.signin-entrance .chat-history {
+  animation: signin-content-in 0.56s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: 0.06s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.signin-entrance #sidebar,
+  body.signin-entrance #icon-rail,
+  body.signin-entrance #gadget-rail,
+  body.signin-entrance #minimized-dock,
+  body.signin-entrance .chat-top-bar,
+  body.signin-entrance .chat-input-bar,
+  body.signin-entrance .chat-history {
+    animation: none !important;
+  }
+}

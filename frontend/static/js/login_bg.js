@@ -146,6 +146,21 @@ function _mountPhoto(host, photoUrl, gradient) {
 }
 
 // ── Particles (self-contained canvas; frozen under reduced motion) ──
+// Exported so the in-app glass-theme wallpaper (theme.js → #__wp) can mount the
+// SAME particle field the login does when the admin's login background is the
+// particle source (DRY — one renderer, both surfaces). `animate:false` paints a
+// single STILL frame (no rAF) — what the in-app desktop uses for performance:
+// the glass refraction + the app are heavy, so an always-animating particle
+// field behind them is too costly to run continuously (the login, with nothing
+// else on screen, animates). Returns the created canvas.
+export function mountParticles(host, opts) {
+  return _mountParticles(host, {
+    animate: !!(opts && opts.animate),
+    particles: (opts && opts.particles) || _normalize({}).particles,
+    gradient: (opts && opts.gradient) || _normalize({}).gradient,
+  });
+}
+
 function _mountParticles(host, { animate, particles, gradient }) {
   // Gradient base behind the particles so the glass always has color to refract.
   _mountGradient(host, { animate: false, gradient });
