@@ -9254,7 +9254,7 @@ body.hide-thinking .thinking-section { display: none !important; }
 .thinking-content.expanded {
   max-height: 300px;
   overflow-y: auto;
-  padding: 12px;
+  padding: 0 12px 12px;  /* no top padding — the accordion header already provides the gap */
 }
 
 .thinking-content-inner {
