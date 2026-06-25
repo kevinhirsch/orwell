@@ -63,10 +63,18 @@ def test_markdown_scrubs_plain_content_reasoning_preamble():
 # is now CONTENT (a round that produced visible narration persists; only an empty tool-only round is
 # hidden), not POSITION. The reasoning-preamble scrub (processWithThinking) still strips planning.
 
+# TURN COALESCING (2026-06-25) extends L6c: a single player turn's rounds are now coalesced into
+# ONE growing assistant bubble instead of one bubble per round. A round with visible narration is
+# FROZEN as a static block inside that one bubble; a pure tool-call round adds NOTHING (no flashed
+# bubble, no spinner remount). The L6c CONTENT discriminator survives (empty rounds contribute no
+# block); it is now applied WITHIN the single bubble rather than by mounting/hiding per-round nodes.
+
 def test_l6c_narration_round_with_following_tool_is_kept_live():
     """A round that produced visible narration renders even when a tool follows it; only an EMPTY
-    tool-only round is hidden. The old unconditional game-build hide at the tool_start finalize is
-    gone — game + non-game share one content-driven rule."""
+    tool-only round contributes nothing. The old unconditional game-build hide at the tool_start
+    finalize is gone — game + non-game share one content-driven rule. COALESCING: an empty round
+    no longer hides the whole turn bubble once it carries committed narration (that was the flicker);
+    it only retires the empty live stream-content."""
     chat = _read("static", "js", "chat.js")
     fin = chat[chat.index("Finalize current text bubble (only once per round)"):]
     fin = fin[:fin.index("Track tool name for contextual spinner labels")]
@@ -75,21 +83,28 @@ def test_l6c_narration_round_with_following_tool_is_kept_live():
     # a round with visible narration renders the reply (one shared rule, no game gate)
     assert "if (dt.trim())" in fin
     assert "markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt))" in fin
-    # only an empty round is hidden (the else branch survives)
-    assert "roundHolder.style.display = 'none';" in fin
+    # COALESCING: an empty round with committed content above does NOT hide the bubble; it retires
+    # the empty live stream-content. The whole-bubble hide only survives for the very first round.
+    assert "turnHasCommittedReply || roundHolder !== holder" in fin
+    assert "roundHolder.style.display = 'none';" in fin  # first-round-only hide still present
 
 
-def test_l6c_agent_step_hides_previous_round_only_when_empty():
-    """Starting a new agent round hides the previous bubble ONLY when it rendered no narration
-    (stripToolBlocks empty); a narration round persists. The old unconditional isGameBuild()-gated
-    hide is gone."""
+def test_l6c_agent_step_coalesces_round_into_one_turn_bubble():
+    """Starting a new agent round COALESCES the prior round into the SAME turn bubble (no new
+    per-round bubble that mounts then hides). The round is frozen via _commitRound; the per-round
+    split buffers reset in lockstep with roundText. A pure tool-call round contributes nothing."""
     chat = _read("static", "js", "chat.js")
     step = chat[chat.index("} else if (json.type === 'agent_step') {"):]
-    step = step[:step.index("New round: create fresh AI bubble")]
-    assert "!stripToolBlocks(roundReplyText).trim()" in step
-    assert "roundHolder.style.display = 'none';" in step
-    # the old unconditional game-build hide string is gone
-    assert "if (isGameBuild() && roundHolder) {" not in step
+    step = step[:step.index("} else if (json.type === 'budget_exceeded') {")]
+    # COALESCING: the round is frozen into the one bubble, not spawned as a new bubble.
+    assert "_commitRound();" in step
+    assert "roundText = '';" in step
+    # the merged-buffer F8 contract: roundText reset in lockstep (the split buffers reset inside
+    # _commitRound).
+    # the spinner re-arms in the SAME body for the next round (one stable position per turn)
+    assert "Re-arm the single per-turn spinner in the SAME body" in step
+    # the teacher_takeover exception still creates a fresh bubble (roundHolder was nulled)
+    assert "if (!roundHolder) {" in step
 
 
 def test_l6c_reload_renders_every_narration_round_not_just_last():
