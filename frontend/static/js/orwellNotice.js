@@ -215,6 +215,16 @@
       "  box-shadow: 0 2px 10px rgba(0,0,0,.4); text-align: center;" +
       "  padding: .5rem 2.2rem .5rem .8rem; }" +   // room for the corner × on the right
       "#" + BANNER_ID + " .on-card .on-head { padding-right: 0; justify-content: center; align-items: center; }" +
+      // Desktop: the banner respects the SAME side gutters the floating sidebar/dock do
+      // (those float inset at left/right: 10px). So instead of bleeding true edge-to-edge,
+      // inset the banner host by 10px on both sides and re-round / re-border the now-detached
+      // side+bottom edges (top stays flush with the viewport top). Mobile keeps it full-bleed.
+      "@media (min-width: 769px) {" +
+      "  #" + BANNER_ID + " { left: 10px; right: 10px; }" +
+      "  #" + BANNER_ID + " .on-card {" +
+      "    border-left: 1px solid var(--border, #355a66); border-right: 1px solid var(--border, #355a66);" +
+      "    border-bottom: 1px solid var(--border, #355a66);" +
+      "    border-radius: 0 0 var(--ow-glass-radius, 14px) var(--ow-glass-radius, 14px); } }" +
       // The banner's slide-down entrance (reduced-motion stripped with the rest).
       "@keyframes on-banner-in { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: none; } }" +
       ".on-card.on-anim-banner-in { animation: on-banner-in .22s ease-out both; }" +
