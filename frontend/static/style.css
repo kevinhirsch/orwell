@@ -2016,6 +2016,10 @@ body.bg-pattern-perlin-flow {
     .gadget-rail[data-collapsed="true"] .gadget-rail-rearrange,
     .gadget-rail[data-collapsed="true"] .gadget-rail-swap,
     .gadget-rail[data-collapsed="true"] .gadget-rail-close { display: none; }
+    /* Desktop: the dock can only be COLLAPSED, never closed — drop the redundant ×
+       (the collapse toggle is the single affordance). Mobile keeps the × as the
+       drawer dismiss (the @media ≤768 rules below re-show it). */
+    @media (min-width: 769px) { .gadget-rail-close { display: none !important; } }
     .gadget-rail[data-collapsed="true"] .gadget-rail-strip { display: flex; }
     .gadget-rail[data-collapsed="true"] .grail-chevron { transform: rotate(180deg); }
     .gadget-rail[data-collapsed="true"] .gadget-rail-head { justify-content: center; padding: .55rem 0; }
