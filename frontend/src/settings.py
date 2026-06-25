@@ -161,6 +161,20 @@ DEFAULT_SETTINGS = {
         "casting": "medium",
         "background-authoring": "low",
     },
+    # ADR 0010 / feature 0069 follow-on #1 — the admin-editable per-class `max_tokens` OUTPUT cap.
+    # The sibling of reasoning_budget: maps a call class to its output-token ceiling. Defaults mirror
+    # token_policy._DEFAULT_MAX_TOKENS. Valid classes are token_policy.CALL_CLASSES; a value must be an
+    # in-band positive int (token_policy.max_tokens_bounds(), 256..200000) — anything out-of-band /
+    # non-int / non-positive is rejected by the resolver and the class default stands, so a fat-fingered
+    # 0 or 10_000_000 can never become the live cap. A class absent from the map uses the code default.
+    # Read via get_setting("max_tokens_budget", {}) → token_policy.resolve_token_policy(); edit per class
+    # at runtime via the Token Economy settings card or POST /api/settings. Player never sees these.
+    "max_tokens_budget": {
+        "narration": 4096,
+        "utility-extraction": 1500,
+        "casting": 2048,
+        "background-authoring": 1200,
+    },
     # ADR 0010 / feature 0069 — the soft per-game spend-alert threshold in USD.
     # 0.0 = alert off. Compared against the running per-session cost total via
     # orwell_token_ledger.check_soft_alert (strictly-over semantics).

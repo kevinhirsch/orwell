@@ -8,11 +8,12 @@ cost lever on a reasoning model).
 
 Owner-ratified reasoning efforts (2026-06-21, ADR 0010 *Owner rulings* #1):
 narration = **medium**, utility-extraction = off/minimal, casting = **medium**,
-background-authoring = **low**. The per-class reasoning budget is **admin-editable
-at runtime** — the resolver reads an override from a settings dict the caller
-passes in. This module stays **pure**: it imports nothing (in particular nothing
-from ``settings.py``); the constants here are only the *defaults* the settings
-override.
+background-authoring = **low**. BOTH the per-class reasoning budget AND the
+per-class ``max_tokens`` output cap are **admin-editable at runtime** — the
+resolver reads overrides from a settings dict the caller passes in
+(``reasoning_budget`` and ``max_tokens_budget``, each a ``{call_class: value}``
+map). This module stays **pure**: it imports nothing (in particular nothing from
+``settings.py``); the constants here are only the *defaults* the settings override.
 
 Contract (ADR 0010 §5):
     resolve_token_policy(call_class, settings) ->
@@ -46,6 +47,12 @@ _DEFAULT_MAX_TOKENS = {
 # "off" -> reasoning omitted (None). The full set of admin-acceptable values.
 _VALID_EFFORTS = ("off", "low", "medium", "high")
 
+# Admin-acceptable bounds for a per-class ``max_tokens`` override. An override outside this
+# inclusive band (or a non-int / non-positive value) is rejected and the class default stands —
+# a fat-fingered 0 / negative / 10_000_000 can never become the live output cap.
+_MIN_MAX_TOKENS = 256
+_MAX_MAX_TOKENS = 200_000
+
 # The class whose defaults stand in for an unknown call class (never crash).
 _FALLBACK_CLASS = "narration"
 
@@ -53,6 +60,19 @@ _FALLBACK_CLASS = "narration"
 def valid_efforts() -> tuple[str, ...]:
     """The admin-acceptable reasoning-effort values (for the settings UI/tests)."""
     return _VALID_EFFORTS
+
+
+def max_tokens_bounds() -> tuple[int, int]:
+    """The admin-acceptable ``max_tokens`` override band (inclusive) — for the settings UI/tests."""
+    return (_MIN_MAX_TOKENS, _MAX_MAX_TOKENS)
+
+
+def _valid_max_tokens(v) -> bool:
+    """True iff ``v`` is an in-band positive integer admissible as a ``max_tokens`` override.
+    ``bool`` is rejected (a stray ``True``/``False`` is never a token count)."""
+    if isinstance(v, bool) or not isinstance(v, int):
+        return False
+    return _MIN_MAX_TOKENS <= v <= _MAX_MAX_TOKENS
 
 
 def _effort_to_reasoning(effort: str) -> dict | None:
@@ -71,16 +91,19 @@ def resolve_token_policy(call_class: str, settings: dict | None = None) -> dict:
     - ``reasoning``: ``{"effort": "low"|"medium"|"high"}`` per the effort, or
       ``None`` when the effort is ``"off"`` (the field is omitted from the payload).
       No class is ever default-by-omission — every class names an explicit posture.
-    - ``max_tokens``: the per-class default output cap (no settings override yet).
+    - ``max_tokens``: the per-class output cap — admin-editable at runtime (see below).
     - ``caching``: ``True`` for all classes (provider-automatic; the live model caches).
     - ``context_budget``: ``None`` — computed elsewhere by ``context_budget.py``;
       a reserved hook so the contract is stable.
 
-    Admin override: ``settings["reasoning_budget"][call_class]`` (one of
-    ``valid_efforts()``) wins over the class default. An unknown/garbage override
-    falls back to the class default; an unknown ``call_class`` falls back to the
-    ``"narration"`` defaults. Defensive: ``settings`` may be ``None``, may lack
-    ``"reasoning_budget"``, or may not be a dict — this never raises.
+    Admin overrides (both per-class, both defensively read, both wins-over-default):
+    - ``settings["reasoning_budget"][call_class]`` — one of ``valid_efforts()``.
+    - ``settings["max_tokens_budget"][call_class]`` — an in-band positive int
+      (``max_tokens_bounds()``); out-of-band / non-int / non-positive ⇒ class default.
+
+    An unknown/garbage override falls back to the class default; an unknown
+    ``call_class`` falls back to the ``"narration"`` defaults. Defensive: ``settings``
+    may be ``None``, may lack either key, or may not be a dict — this never raises.
 
     Pure and side-effect-free.
     """
@@ -90,13 +113,18 @@ def resolve_token_policy(call_class: str, settings: dict | None = None) -> dict:
     effort = _DEFAULT_EFFORT[resolved_class]
     max_tokens = _DEFAULT_MAX_TOKENS[resolved_class]
 
-    # Admin override, defensively read. Any malformed shape -> keep the default.
+    # Admin overrides, defensively read. Any malformed shape -> keep the default.
     if isinstance(settings, dict):
         overrides = settings.get("reasoning_budget")
         if isinstance(overrides, dict):
             candidate = overrides.get(call_class)
             if candidate in _VALID_EFFORTS:
                 effort = candidate
+        mt_overrides = settings.get("max_tokens_budget")
+        if isinstance(mt_overrides, dict):
+            mt_candidate = mt_overrides.get(call_class)
+            if _valid_max_tokens(mt_candidate):
+                max_tokens = mt_candidate
 
     return {
         "reasoning": _effort_to_reasoning(effort),

@@ -22,6 +22,7 @@ _spec.loader.exec_module(token_policy)
 
 resolve_token_policy = token_policy.resolve_token_policy
 valid_efforts = token_policy.valid_efforts
+max_tokens_bounds = token_policy.max_tokens_bounds
 CALL_CLASSES = token_policy.CALL_CLASSES
 
 
@@ -164,3 +165,54 @@ def test_valid_efforts_exposes_the_admin_acceptable_set():
     efforts = valid_efforts()
     assert "off" in efforts
     assert set(efforts) == {"off", "low", "medium", "high"}
+
+
+# --- 6. ADR 0010 #1: per-class max_tokens is admin-editable at runtime --------
+
+def test_max_tokens_override_beats_default():
+    settings = {"max_tokens_budget": {"narration": 8000}}
+    pol = resolve_token_policy("narration", settings)
+    assert pol["max_tokens"] == 8000
+    # the reasoning effort is untouched by a max_tokens override
+    assert pol["reasoning"] == {"effort": "medium"}
+
+
+def test_max_tokens_override_is_per_class_only():
+    settings = {"max_tokens_budget": {"casting": 9000}}
+    assert resolve_token_policy("casting", settings)["max_tokens"] == 9000
+    assert resolve_token_policy("narration", settings)["max_tokens"] == 4096  # untouched default
+
+
+def test_both_overrides_compose():
+    settings = {
+        "reasoning_budget": {"narration": "high"},
+        "max_tokens_budget": {"narration": 12000},
+    }
+    pol = resolve_token_policy("narration", settings)
+    assert pol["reasoning"] == {"effort": "high"}
+    assert pol["max_tokens"] == 12000
+
+
+def test_out_of_band_or_garbage_max_tokens_falls_back_to_class_default():
+    lo, hi = max_tokens_bounds()
+    for bad in (0, -1, lo - 1, hi + 1, "4096", 4096.0, True, None, [4096]):
+        settings = {"max_tokens_budget": {"narration": bad}}
+        pol = resolve_token_policy("narration", settings)
+        assert pol["max_tokens"] == 4096, bad  # class default stands; never the bad value
+
+
+def test_in_band_bounds_inclusive():
+    lo, hi = max_tokens_bounds()
+    assert resolve_token_policy("narration", {"max_tokens_budget": {"narration": lo}})["max_tokens"] == lo
+    assert resolve_token_policy("narration", {"max_tokens_budget": {"narration": hi}})["max_tokens"] == hi
+
+
+def test_max_tokens_budget_not_a_dict_never_raises():
+    for bad in ("nope", 5, ["x"], object()):
+        pol = resolve_token_policy("narration", {"max_tokens_budget": bad})
+        assert pol["max_tokens"] == 4096
+
+
+def test_max_tokens_bounds_shape():
+    lo, hi = max_tokens_bounds()
+    assert isinstance(lo, int) and isinstance(hi, int) and 0 < lo < hi

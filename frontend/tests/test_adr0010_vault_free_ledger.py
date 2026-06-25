@@ -12,9 +12,11 @@ import pytest
 ledger = importlib.import_module("src.orwell_token_ledger")
 
 # The exact field set an entry may hold — nothing outside this is ever persisted.
+# (ADR 0010 follow-on #3 added appliedMaxTokens (a count) + finishReason (a short known token).)
 _ALLOWED_KEYS = {
     "ts", "turnId", "session", "callClass",
     "inputTokens", "cachedTokens", "reasoningTokens", "outputTokens",
+    "appliedMaxTokens", "finishReason",
     "cost", "contextPercent", "provider",
 }
 
@@ -116,18 +118,20 @@ def test_record_clips_ids_and_never_stores_a_body():
         turn_id=big,
         call_class=big,
         provider=big,
+        finish_reason=big,  # a short known token (e.g. "length") — must clip, never hold a body
         # a string secret shoved into a numeric field coerces to 0 / 0.0 — never text
         input_tokens=_SENTINEL,
+        applied_max_tokens=_SENTINEL,
         cost=_SENTINEL,
         context_percent=_SENTINEL,
     )
     e = ledger.get_recent("player")[0]
     assert set(e.keys()) <= _ALLOWED_KEYS
-    # ids / class / provider are clipped to short tokens — no field holds a paragraph body
-    for f in ("session", "turnId", "callClass", "provider"):
+    # ids / class / provider / finishReason are clipped to short tokens — no field holds a paragraph body
+    for f in ("session", "turnId", "callClass", "provider", "finishReason"):
         assert len(e[f]) <= ledger._MAX_ID_LEN
     # the numeric fields rejected the smuggled string entirely
-    assert e["inputTokens"] == 0
+    assert e["inputTokens"] == 0 and e["appliedMaxTokens"] == 0
     assert e["cost"] == 0.0 and e["contextPercent"] == 0.0
 
 

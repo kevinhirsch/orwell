@@ -854,6 +854,13 @@ async function initTokenEconomySettings() {
     [el('set-reasoningCasting'), 'casting'],
     [el('set-reasoningAuthoring'), 'background-authoring'],
   ];
+  // ADR 0010 #1: the per-class max_tokens output cap (sibling of reasoning_budget).
+  const maxTokensEls = [
+    [el('set-maxTokensNarration'), 'narration'],
+    [el('set-maxTokensExtract'), 'utility-extraction'],
+    [el('set-maxTokensCasting'), 'casting'],
+    [el('set-maxTokensAuthoring'), 'background-authoring'],
+  ];
   const spendAlert = el('set-tokenSpendAlert');
   const pinThreshold = el('set-tokenPinThreshold');
   const tieringToggle = el('set-contextTieringToggle');
@@ -882,6 +889,8 @@ async function initTokenEconomySettings() {
     const s = await res.json();
     const rb = (s.reasoning_budget && typeof s.reasoning_budget === 'object') ? s.reasoning_budget : {};
     reasoningEls.forEach(([elx, cls]) => { if (elx) elx.value = rb[cls] || ''; });
+    const mtb = (s.max_tokens_budget && typeof s.max_tokens_budget === 'object') ? s.max_tokens_budget : {};
+    maxTokensEls.forEach(([elx, cls]) => { if (elx) elx.value = (mtb[cls] != null) ? String(mtb[cls]) : ''; });
     if (spendAlert) spendAlert.value = s.token_spend_alert_usd ? String(s.token_spend_alert_usd) : '';
     if (pinThreshold) pinThreshold.value = s.token_pin_threshold_tokens ? String(s.token_pin_threshold_tokens) : '';
     if (tieringToggle) tieringToggle.checked = !!s.context_tiering_enabled;
@@ -899,6 +908,25 @@ async function initTokenEconomySettings() {
     post({ reasoning_budget: rb });
   }
   reasoningEls.forEach(([elx]) => { if (elx) elx.addEventListener('change', saveReasoning); });
+
+  // ADR 0010 #1: max_tokens_budget is a per-class dict rebuilt from the four inputs. A blank field ⇒
+  // omit the class (use the engine default); an out-of-band value (must be 256..200000) is dropped with
+  // a hint — the resolver would reject it anyway, so it never becomes the live cap.
+  function saveMaxTokens() {
+    const mtb = {};
+    let bad = false;
+    maxTokensEls.forEach(([elx, cls]) => {
+      if (!elx) return;
+      const raw = (elx.value || '').trim();
+      if (!raw) return;  // blank ⇒ class default
+      const n = parseInt(raw, 10);
+      if (Number.isInteger(n) && n >= 256 && n <= 200000) mtb[cls] = n;
+      else bad = true;
+    });
+    if (bad) setMsg('max tokens must be 256–200000', false);
+    post({ max_tokens_budget: mtb });
+  }
+  maxTokensEls.forEach(([elx]) => { if (elx) elx.addEventListener('change', saveMaxTokens); });
 
   if (spendAlert) spendAlert.addEventListener('change', () => post({ token_spend_alert_usd: parseFloat(spendAlert.value) || 0 }));
   if (pinThreshold) pinThreshold.addEventListener('change', () => post({ token_pin_threshold_tokens: parseInt(pinThreshold.value, 10) || 0 }));
