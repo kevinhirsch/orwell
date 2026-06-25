@@ -65,6 +65,7 @@ module.exports = {
       "docs/features/0073-structural-anti-sycophancy-wall.feature",
       "docs/features/0077-house-map-privacy-and-eyeshot.feature",
       "docs/features/0084-character-voice-and-mood.feature",
+      "docs/features/0085-npc-campaigns-and-the-scramble.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

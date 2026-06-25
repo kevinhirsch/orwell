@@ -253,13 +253,18 @@ export interface CampaignBoard {
   ownerEndangered: boolean;
   /** The owner's CURRENT threat reads (to re-target after the old target escapes). */
   threats?: Array<{ toward: EntityId; threat: number }>;
+  /**
+   * The target is SAFE this week (won/used the veto, off the block) — an evict campaign against them
+   * can't land, so it re-aims even though they're still active. (Evicted ⇒ `!active.has(target)` already.)
+   */
+  targetSafe?: boolean;
 }
 
 /**
  * Adapt a campaign to a changed board (PURE) — a campaign is a plan, not a fixed script, and must never
- * silently vanish (ADR 0005). If the owner is endangered it PIVOTS to self-protect. Else if the target
- * is gone (evicted / no longer active) it RE-TARGETS to the next threat, or is abandoned if none remains.
- * Otherwise it is unchanged. Returns a new object (never mutates).
+ * silently vanish (ADR 0005). If the owner is endangered it PIVOTS to self-protect. Else if the target is
+ * gone (evicted) OR safe (won the veto), an EVICT campaign RE-TARGETS to the next threat, or is abandoned
+ * if none remains. Otherwise it is unchanged. Returns a new object (never mutates).
  */
 export function replan(campaign: Campaign, board: CampaignBoard, c: CampaignConstants = CAMPAIGN): Campaign {
   if (campaign.status !== "active") return campaign;
@@ -267,7 +272,9 @@ export function replan(campaign: Campaign, board: CampaignBoard, c: CampaignCons
   if (board.ownerEndangered && campaign.goal !== "protect") {
     return { ...campaign, goal: "protect", target: owner, plan: [...PLAN_FOR.protect] };
   }
-  if (!board.active.has(campaign.target)) {
+  const targetGone = !board.active.has(campaign.target);
+  const targetEscaped = campaign.goal === "evict" && board.targetSafe === true;
+  if (targetGone || targetEscaped) {
     const next = (board.threats ?? [])
       .filter((t) => t.toward !== campaign.target && board.active.has(t.toward) && t.threat >= c.threatThreshold)
       .sort((x, y) => y.threat - x.threat)[0];
