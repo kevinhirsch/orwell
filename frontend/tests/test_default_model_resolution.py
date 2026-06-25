@@ -182,3 +182,95 @@ def test_resolver_never_returns_image_model_even_when_default_is_image():
     assert pick and pick["mid"] != "google/gemini-2.5-flash-image", (
         f"the resolver must never hand back an image model as the chat default, got {pick}"
     )
+
+
+# ── #860: a factory/OOBE reset RESETS model selections to the OOB defaults ──────
+#
+# Root cause of #860: the reset preserved the previously-SELECTED models, so a stale placeholder
+# (sakana/fugu-ultra) the owner once had selected was faithfully re-kept across every reset — a
+# circular trap (Settings was locked, #870, so they couldn't change it either). The fix: a reset
+# keeps only the API key(s) + endpoint and RESETS the model selections, so they revert to the OOB
+# defaults (deepseek-v4-pro narrator, gemini-2.5-flash-image portraits). A real served selection
+# is also reset by design (owner ruling) — the defaults are what the owner wants post-reset.
+
+
+def _load_oobe_helper(monkeypatch, tmp_path):
+    import importlib.util
+    helper = os.path.join(FRONTEND, "scripts", "oobe_reset.py")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
+    spec = importlib.util.spec_from_file_location("oobe_reset_860", helper)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_reset_drops_stale_model_selection_so_defaults_stand(monkeypatch, tmp_path):
+    """A reset whose prior settings.json had a stale default_model=sakana/fugu-ultra (+ any
+    portrait pick) must NOT carry those across — they reset, so the merge over DEFAULT_SETTINGS
+    restores deepseek-v4-pro / gemini-2.5-flash-image."""
+    mod = _load_oobe_helper(monkeypatch, tmp_path)
+    setp = tmp_path / "settings.json"
+    setp.write_text(json.dumps({
+        "default_endpoint_id": "ep-or",
+        "default_model": "sakana/fugu-ultra",      # the stale placeholder that was stuck
+        "image_endpoint_id": "ep-or",
+        "image_model": "some/old-portrait-model",
+        "image_gen_enabled": True,                  # operational flag → kept
+        "theme": "midnight",                        # unrelated → dropped
+    }))
+    preserved = mod.export_preserved_settings(str(setp))
+
+    # The model/endpoint SELECTIONS are NOT preserved (they reset to defaults on load).
+    for reset_key in ("default_endpoint_id", "default_model", "image_endpoint_id", "image_model"):
+        assert reset_key not in preserved, f"{reset_key} must reset, not ride across a reset"
+    assert "sakana/fugu-ultra" not in json.dumps(preserved)
+    # Operational flags survive; unrelated settings are dropped.
+    assert preserved.get("image_gen_enabled") is True
+    assert "theme" not in preserved
+
+    # The effective post-reset values are the OOB defaults (merge over DEFAULT_SETTINGS).
+    from src.settings import DEFAULT_SETTINGS
+    effective = {**DEFAULT_SETTINGS, **preserved}
+    assert effective["default_model"] == "deepseek/deepseek-v4-pro"
+    assert effective["image_model"] == "google/gemini-2.5-flash-image"
+
+
+def test_reset_resets_even_a_valid_served_selection_to_defaults(monkeypatch, tmp_path):
+    """Per the owner ruling, a reset resets model selections to the defaults regardless — even a
+    perfectly valid prior pick. Only the API key + endpoint record (carried separately) survive."""
+    mod = _load_oobe_helper(monkeypatch, tmp_path)
+    setp = tmp_path / "settings.json"
+    setp.write_text(json.dumps({
+        "default_model": "deepseek/deepseek-v3.1",  # a real, valid earlier pick
+        "image_model": "google/gemini-2.0-flash-image",
+    }))
+    preserved = mod.export_preserved_settings(str(setp))
+    assert "default_model" not in preserved and "image_model" not in preserved
+
+    from src.settings import DEFAULT_SETTINGS
+    effective = {**DEFAULT_SETTINGS, **preserved}
+    assert effective["default_model"] == "deepseek/deepseek-v4-pro"
+    assert effective["image_model"] == "google/gemini-2.5-flash-image"
+
+
+def test_no_sakana_fugu_seed_anywhere_in_frontend_source():
+    """Belt-and-braces: sakana/fugu-ultra must never appear as a seed/default VALUE in FE source —
+    only as test/fixture/comment material. Guards against a build re-planting the placeholder."""
+    import subprocess
+    res = subprocess.run(
+        ["grep", "-rn", "sakana/fugu-ultra", os.path.join(FRONTEND, "src"),
+         os.path.join(FRONTEND, "scripts"), os.path.join(FRONTEND, "routes")],
+        capture_output=True, text=True,
+    )
+    # grep exit 1 == no matches. Any hit must be a COMMENT (documenting the #860 fix), never a
+    # value/assignment — a planted seed would be a non-comment line.
+    code_hits = []
+    for line in res.stdout.splitlines():
+        # "path:lineno:content" — inspect the content after the second colon.
+        parts = line.split(":", 2)
+        content = parts[2] if len(parts) == 3 else line
+        if content.lstrip().startswith("#"):
+            continue  # a comment mention is fine
+        code_hits.append(line)
+    assert not code_hits, f"sakana/fugu-ultra must not be a seed/value in FE source, found:\n" + "\n".join(code_hits)

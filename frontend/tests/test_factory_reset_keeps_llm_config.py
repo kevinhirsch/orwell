@@ -1,11 +1,12 @@
 """End-to-end: the FACTORY-reset SCRIPT (deploy/orwell-factory-reset.sh) keeps the LLM config.
 
-Per the product decision, "factory reset" returns the box to first-run OOBE while preserving ONLY
-the operator's LLM setup — the API keys, the selected models, and the model defaults — and wipes
-EVERYTHING else (accounts, sessions, uploads, AND every cast portrait / avatar / headshot, presets,
-…). The host script delegates to orwell-oobe-reset.sh so the two can never drift; this test runs the
-REAL factory-reset script over a sandboxed dev layout (no /opt, no systemd, --no-restart) and proves
-the delegation + the keep/wipe split end to end.
+Per the product decision (issue #860), "factory reset" returns the box to first-run OOBE while
+preserving ONLY the operator's LLM CREDENTIALS — the API keys + the provider endpoint(s) — and
+RESETS the selected models to the OOB defaults (deepseek-v4-pro narrator, gemini-2.5-flash-image
+portraits). Everything else is wiped (accounts, sessions, uploads, AND every cast portrait /
+avatar / headshot, presets, …). The host script delegates to orwell-oobe-reset.sh so the two can
+never drift; this test runs the REAL factory-reset script over a sandboxed dev layout (no /opt, no
+systemd, --no-restart) and proves the delegation + the keep/reset/wipe split end to end.
 
 Name-agnostic: roles only, no houseguests.
 """
@@ -36,7 +37,7 @@ def _seed_app_db(db_path):
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
-def test_factory_reset_keeps_keys_models_defaults_wipes_the_rest(tmp_path):
+def test_factory_reset_keeps_keys_resets_models_wipes_the_rest(tmp_path):
     app = tmp_path / "app"
     fe_data = app / "frontend" / "data"
     config = app / "data"               # CONFIG_DIR (holds .env + data/ops)
@@ -46,13 +47,14 @@ def test_factory_reset_keeps_keys_models_defaults_wipes_the_rest(tmp_path):
         d.mkdir(parents=True, exist_ok=True)
     shutil.copy(_OOBE_HELPER, fe_scripts / "oobe_reset.py")
 
-    # ── KEEP: the API-key / LLM config (key files + the provider table + the LLM-selection settings)
+    # ── KEEP: the API-key / LLM config (key files + the provider table + operational flags). The
+    # model SELECTIONS (incl. a stale sakana/fugu-ultra) RESET to defaults (#860) and must NOT ride.
     (fe_data / ".app_key").write_text("APPKEY")
     (fe_data / ".key").write_text("KEY")
     (fe_data / "api_keys.json").write_text("{}")
     _seed_app_db(str(fe_data / "app.db"))
     (fe_data / "settings.json").write_text(json.dumps({
-        "default_endpoint_id": "ep1", "default_model": "m", "image_model": "img",
+        "default_endpoint_id": "ep1", "default_model": "sakana/fugu-ultra", "image_model": "img",
         "image_quality": "high", "theme": "midnight",  # theme is NOT an LLM key → dropped
     }))
 
@@ -91,7 +93,7 @@ def test_factory_reset_keeps_keys_models_defaults_wipes_the_rest(tmp_path):
     assert not (fe_data / "headshots").exists()
     assert not (engine_saves / "player-1").exists()
 
-    # ── KEEP: the API keys + the provider table + ONLY the LLM-selection settings ──
+    # ── KEEP: the API keys + the provider table + ONLY the operational flags ──
     assert (fe_data / ".app_key").read_text() == "APPKEY"
     assert (fe_data / ".key").read_text() == "KEY"
     assert (fe_data / "api_keys.json").exists()
@@ -101,8 +103,12 @@ def test_factory_reset_keeps_keys_models_defaults_wipes_the_rest(tmp_path):
     conn.close()
     assert tables == {"model_endpoints"} and rows == [("ep1", "enc:KEEPME")]
     settings = json.loads((fe_data / "settings.json").read_text())
-    assert settings.get("default_endpoint_id") == "ep1"  # selected model kept
-    assert settings.get("image_quality") == "high"        # model default kept
+    # Model SELECTIONS reset to default (NOT preserved) — the stale fugu pick never rides (#860).
+    assert "default_endpoint_id" not in settings
+    assert "default_model" not in settings
+    assert "image_model" not in settings
+    assert "sakana/fugu-ultra" not in (fe_data / "settings.json").read_text()
+    assert settings.get("image_quality") == "high"        # operational flag kept
     assert "theme" not in settings                        # non-LLM setting dropped to OOBE default
 
     # ── engine config PRESERVED ──
