@@ -24,7 +24,9 @@ def _read(*parts):
 def test_sourcepin_holding_card_carries_an_explicit_way_out():
     js = _read("static", "js", "orwellOnboarding.js")
     assert "data-ob-dismiss" in js          # the always-present dismiss button
-    assert "Continue anyway" in js          # ...with operator-readable copy
+    # CONT-1 (#602): the dismiss copy is the in-fiction "Go in anyway" (was the OOC system-speak
+    # "Continue anyway") — pin the ACTUAL button textContent, not a coincidental comment match.
+    assert 'd.textContent = "Go in anyway"' in js   # ...with in-fiction, way-out copy
     assert '"Escape"' in js                 # Escape is the keyboard way out
 
 

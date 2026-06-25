@@ -132,6 +132,26 @@ def test_kit_aria_live_is_per_kind():
     assert "assertive" in kit and "polite" in kit
 
 
+def test_a11y11_dismiss_aria_label_is_context_specific():
+    # A11Y-11 (#598): the ONE dismiss affordance must carry a CONTEXT-SPECIFIC accessible name
+    # ("Dismiss — <this notice's title>"), never the bare context-free "Dismiss" that gives a
+    # screen-reader user no signal about WHICH banner/notice variant they are dismissing. Since
+    # every above-composer affordance + the top-of-viewport engine-status banner compose this one
+    # kit, fixing it here makes it context-specific across all banner variants at once.
+    import re
+    kit = _read("static", "js", KIT)
+    # The aria-label must be derived from the notice title (a template concat), not a literal "Dismiss".
+    assert re.search(r'setAttribute\(\s*"aria-label"\s*,\s*"Dismiss\s*—\s*"\s*\+\s*this\.o\.title\s*\)', kit), \
+        'the dismiss button aria-label must be "Dismiss — " + this.o.title (context-specific) — A11Y-11'
+    # A bare context-free aria-label="Dismiss" must NOT be used (the J4 audit's bare-Dismiss finding).
+    assert not re.search(r'setAttribute\(\s*"aria-label"\s*,\s*"Dismiss"\s*\)', kit), \
+        'the dismiss aria-label must never be the context-free bare "Dismiss" — A11Y-11'
+    # An in-place re-skin (update()) — used when a banner transitions variant (down → reconnecting) —
+    # must keep the dismiss label in sync with the NEW title, so it never goes stale/context-free.
+    assert re.search(r'dismissBtn\.setAttribute\(\s*"aria-label"\s*,\s*"Dismiss\s*—\s*"\s*\+\s*patch\.title\s*\)', kit), \
+        "update() must re-skin the dismiss aria-label to the new title when a banner changes variant — A11Y-11"
+
+
 def test_kit_never_dispatches_gamechanged():
     # g15 invariant: the single `orwell:gamechanged` dispatcher stays in platform.js. The kit
     # only emits the layout-sync event (an allowed seam); no ad-hoc gamechanged dispatch.

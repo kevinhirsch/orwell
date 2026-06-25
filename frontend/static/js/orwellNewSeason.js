@@ -239,7 +239,7 @@
       try {
         const r = await fetch("/api/orwell/conclude-season", { method: "POST", credentials: "same-origin" });
         const d = r.ok ? await r.json() : null;
-        if (!r.ok || !d) { setMsg((d && d.error) || "Couldn't conclude the season — try again.", true); _busy = false; btn.disabled = false; return; }
+        if (!r.ok || !d) { setMsg((d && d.error) || "The feeds wouldn't fast-forward to the finale — try again.", true); _busy = false; btn.disabled = false; return; }
         // The season is now over → post-season. Let THE shared dispatcher (G15) refresh every surface;
         // refresh() then swaps this window for the keep/recast hand-off, and the retrospective unlocks.
         _busy = false;
