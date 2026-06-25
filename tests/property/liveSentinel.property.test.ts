@@ -73,6 +73,10 @@ const args = (name: string, seed: number): Record<string, unknown> => {
     // (a no-op refusal once started). Both are Vault-free by construction; the sweep proves the canary
     // never bites their outputs either.
     case "recordCastProfile": return { houseguestId: npc(1), biography: "A two-sentence public backstory. It has presentable parts." };
+    // #544: the FE cast-identity write-back — a DESCRIPTIVE-only proposal on the live house. The sweep
+    // folds it (validate/repair/re-ground/re-seal a private orientation) and proves the result
+    // ({accepted, applied}) never echoes a soul/Vault/private-orientation sentinel.
+    case "recordCastIdentity": return { facets: { [npc(1)]: { ethnicity: "Korean American", orientation: "gay", out: false, age: 41 } } };
     case "preSeedCast": return { seed: 1 };
     // 0062: the FE zeitgeist write-back — PUBLIC real-world flavor only (no Vault, no game input).
     // The sweep proves the canary never bites its output (an empty subset is a valid capture).

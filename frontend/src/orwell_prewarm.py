@@ -119,12 +119,17 @@ def reset(user: Optional[str] = None) -> None:
         _STATE.pop(_key(user), None)
 
 
-async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=None) -> dict:
-    """AUTHOR WARM (earliest): pre-seed the cast in the engine, then deeply author it in the background.
+async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=None, identity=None) -> dict:
+    """AUTHOR WARM (earliest): pre-seed the cast in the engine, AI-seed its descriptive identity (#544),
+    then deeply author it in the background.
 
     Idempotent per user (a second call is a no-op that reports the in-flight warm). Releases the
     author-done gate when authoring finishes — success OR failure — so portrait warm never hangs.
     Returns ``{warmed, count, alreadyWarmed?, refused?}``.
+
+    The ``identity`` dep (default: the real ``orwell_cast_identity`` module) seeds the AI-driven cast
+    identity BEFORE authoring, so the authored look + portraits read the engine-validated heritage. Injected
+    for tests; a missing model makes it a silent no-op (the engine's deterministic floor stands).
     """
     if engine is None:
         from src import orwell_engine as engine
@@ -151,6 +156,24 @@ async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=Non
     st.prompts = res.get("portraitPrompts") or []
     cast = res.get("house") or []
     st.author_started = True
+
+    # #544 — the AI-driven IDENTITY seed runs FIRST (before deep authoring), so the engine has validated /
+    # repaired / folded the cast's descriptive identity (re-grounding skin tone from the final heritage)
+    # BEFORE the authoring prompt reads each houseguest's heritage. Best-effort + fail-soft: a missing model
+    # is a silent no-op and the engine's deterministic weighted floor stands. When it applied facets, RE-FETCH
+    # the warmed roster (pre_seed_cast is idempotent) so authoring + portraits read the AI-grounded cast.
+    try:
+        if identity is None:
+            from src import orwell_cast_identity as identity
+        applied = await identity.run_identity(cast, user)
+        if applied:
+            again = await engine.pre_seed_cast(user=user)
+            if isinstance(again, dict) and again.get("house"):
+                cast = again.get("house") or cast
+                st.prompts = again.get("portraitPrompts") or st.prompts
+    except Exception as e:  # identity seeding must never block onboarding
+        logger.info("[prewarm] cast-identity seed skipped: %s", e)
+
     # Pre-create a per-NPC gate for every houseguest that has a portrait prompt (#7), so portrait warm
     # can wait on the SAME Event objects the authoring callback sets — even if authoring is slow to start.
     for entry in st.prompts:

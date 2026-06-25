@@ -433,6 +433,19 @@ async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
     return await _call("recordCastProfile", profile, user=user)
 
 
+async def record_cast_identity(facets: dict, user: str | None = None) -> dict:
+    """Issue #544 (the AI half of the 0063 diversity floor): write the LLM-PROPOSED whole-cast
+    DESCRIPTIVE identity facets BACK to the engine. ``facets`` is ``{ <houseguestId>: { ethnicity?,
+    genderPresentation?, orientation?, out?, age? } }`` — descriptive identity ONLY, never a hidden
+    game weight. The engine validates + REPAIRS the proposal against the U.S.-population proportional
+    targets (so a lazy/biased/monochrome proposal can never skew the cast), re-grounds skin tone from
+    the final heritage, folds the PUBLIC facets onto the byte-stable cast, and re-seals each PRIVATE
+    orientation into the Vault. Returns ``{ accepted, applied, reason? }`` — counts only, Vault-free.
+    Lands on the pre-warmed cast pre-game (or the live house). Idempotent; with no proposal the
+    deterministic floor stands."""
+    return await _call("recordCastIdentity", {"facets": facets}, user=user)
+
+
 async def record_world_snapshot(snapshot: dict, user: str | None = None) -> dict:
     """Feature 0062: write a REAL captured move-in zeitgeist BACK to the engine, which persists it
     as the single FROZEN artifact and RECALLS it (never re-searches) all season. ``snapshot`` carries

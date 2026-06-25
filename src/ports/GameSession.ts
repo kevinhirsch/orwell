@@ -1099,6 +1099,59 @@ export interface RecordCastProfileResult {
   reason?: string;
 }
 
+/**
+ * The AI-driven cast-identity write-back (issue #544 — the deferred AI half of the 0063 diversity floor /
+ * the 2026-06-23 ruling). The FE producer-LLM PROPOSES each houseguest's DESCRIPTIVE identity facets
+ * targeting U.S.-population minority rates — heritage/ethnicity, gender presentation, orientation,
+ * disclosure, age — and writes them BACK here. The ENGINE then VALIDATES + REPAIRS the whole-cast proposal
+ * against the proportional targets already in `diversityConstants.ts`: recognized facets seed the deal, and
+ * the engine's floors/caps (BIPOC ≥, gender balance, age spread, LGBTQ+ ≥, per-heritage cap) GUARANTEE a
+ * realistic cast regardless of what the model returns (even a lazy/biased/monochrome proposal can't skew
+ * it). `skinTone` is re-grounded from the FINAL heritage (the PR #527 hinge), so text + portrait agree.
+ *
+ * The HARD BOUNDARY: this writes ONLY descriptive identity facets — NEVER a hidden game weight. Each NPC's
+ * seeded Day-1 read of the player and competition leans stay ENGINE-OWNED (anti-sycophancy #3 + the
+ * juryReach calibration depend on the net-zero-balanced seed). AI drives WHO the houseguests are; the engine
+ * drives the MATH of how they play. Calibration-neutral by construction (descriptive facets ride isolated
+ * sub-streams, never a competition/vote input — the #338 golden test stays the proof).
+ *
+ * Pre-game write-back: lands on the PRE-WARMED cast (0065) before the player finishes the interview, or on
+ * the live house if a season is already running. Best-effort/idempotent/fail-soft: with NO model, the engine
+ * never receives a proposal and the deterministic weighted floor (PR #527) simply stands. Vault-free out.
+ */
+export interface RecordCastIdentityReq {
+  /**
+   * The LLM-proposed descriptive identity facets per houseguest id. Any subset of houseguests and any subset
+   * of fields per houseguest — an omitted houseguest / field keeps the engine's seeded value. Unrecognized
+   * facet values (an unknown heritage / orientation / sub-floor age) are ignored in favor of the seeded deal.
+   */
+  facets: Record<EntityId, ProposedCastIdentityFacets>;
+}
+
+/** One houseguest's PROPOSED descriptive identity facets (all optional; descriptive-only, never a weight). */
+export interface ProposedCastIdentityFacets {
+  /** Heritage / cultural-identity label (matched against the engine's pool; unknown ⇒ seeded deal). */
+  ethnicity?: string;
+  /** How the houseguest presents — "man" | "woman" | "nonbinary" (validated against the known set). */
+  genderPresentation?: "man" | "woman" | "nonbinary";
+  /** Sexual orientation — "straight" | "gay" | "lesbian" | "bisexual" | "queer" | "pansexual" (validated). */
+  orientation?: string;
+  /** Whether a queer orientation is PUBLICLY OUT (true) or held PRIVATELY (false) — absent ⇒ engine roll. */
+  out?: boolean;
+  /** Age — accepted only at/above the engine's eligibility floor (descriptive; never a competition input). */
+  age?: number;
+}
+
+/** Whether the cast-identity write-back was accepted, Vault-free — counts only (no private value echoed). */
+export interface RecordCastIdentityResult {
+  /** True iff a cast existed (pre-warmed or live) to fold the validated/repaired identity layer onto. */
+  accepted: boolean;
+  /** How many houseguests had a proposed facet RECOGNIZED + applied (after validate/repair). */
+  applied: number;
+  /** Set when not accepted (no cast warmed / no game started). Vault-free reason. */
+  reason?: string;
+}
+
 /** The Vault-free skeleton of one recorded off-screen scene — public participant ids, room, and nature only (0070). */
 export interface OffscreenSceneSkeleton {
   /** The event id — used by the FE to address the texture write-back. */
@@ -1430,6 +1483,19 @@ export interface GameSession {
    * that houseguest (idempotent). The result never echoes a hidden value (it reports field NAMES only).
    */
   recordCastProfile(req: RecordCastProfileReq): RecordCastProfileResult;
+
+  /**
+   * The AI-driven cast-identity write-back seam (issue #544 — the deferred AI half of the 0063 diversity
+   * floor). The FE producer-LLM PROPOSES the whole cast's DESCRIPTIVE identity facets (heritage / gender
+   * presentation / orientation / disclosure / age) targeting U.S.-population rates; the ENGINE validates +
+   * REPAIRS the proposal against the proportional targets in `diversityConstants.ts` (so a lazy/biased model
+   * can never skew the cast), re-grounds `skinTone` from the FINAL heritage, folds the PUBLIC facets onto the
+   * byte-stable Characters, and re-seals each PRIVATE orientation into the Vault. NEVER accepts a hidden game
+   * weight — the seeded Day-1 read / competition leans stay engine-owned (anti-sycophancy #3 + juryReach).
+   * Calibration-neutral (descriptive facets ride isolated sub-streams). Lands on the pre-warmed cast pre-game
+   * or the live house; idempotent; with no proposal the deterministic floor stands. Vault-free out.
+   */
+  recordCastIdentity(req: RecordCastIdentityReq): RecordCastIdentityResult;
 
   /**
    * 0070: the Vault-free skeletons of the off-screen scenes recorded in the most recent tick —
