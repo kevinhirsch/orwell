@@ -74,9 +74,109 @@ function _handlePickerKeydown(e, listEl, itemSelector, closeFn) {
   }
 }
 
+// ── Image-model detector (chat-picker filter) ──
+// Mirror of settings.js `_isImageModel(mid)` — kept LOCAL on purpose so this
+// file doesn't import settings.js (a concurrent surface). SOURCE OF TRUTH:
+// frontend/static/js/settings.js `_isImageModel`. Keep this family list + the
+// generic-token rule in sync with it. The chat composer's model dropdown must
+// never offer a text→image model (it can only 400 on a chat completion); the
+// image flow resolves its own model independently (settings.js `_isImageModel`
+// / image_model), so filtering here never breaks image generation.
+function _isImageModelId(mid) {
+  const lower = String(mid || '').toLowerCase();
+  const families = [
+    'gpt-image', 'dall-e', 'dalle',
+    'flux', 'stable-diffusion', 'sdxl', 'sd3', 'sd-', 'playground-v',
+    'imagen', 'ideogram', 'recraft', 'kolors', 'kandinsky', 'pixart',
+    'firefly', 'titan-image', 'aura-flow', 'hidream', 'seedream',
+    'qwen-image', 'wan2', 'janus', 'omnigen', 'cogview', 'chroma',
+    'lumina', 'nano-banana', 'photon', 'phoenix', 'luma-photon',
+  ];
+  if (families.some((kw) => lower.includes(kw))) return true;
+  // Generic "image"/"text-to-image" tokens catch newer entrants, but never
+  // when paired with a vision/understanding marker (those are chat models).
+  if (/image|text-to-image|t2i/.test(lower)) {
+    return !/(vision|-vl\b|understand|caption|ocr|embed|rerank)/.test(lower);
+  }
+  return false;
+}
+
+// First non-image, non-offline model across the cached endpoints — the
+// arbitrary auto-pick floor. Returns {url, mid, endpointId} or null.
+// NEVER selects an image model (ties to the per-model filter above) so the
+// composer can't auto-resolve to e.g. gemini-2.5-flash-image.
+function _firstChatPick(items) {
+  for (const item of (items || [])) {
+    if (item.offline) continue;
+    const models = (item.models || []).concat(item.models_extra || []);
+    for (const mid of models) {
+      if (_isImageModelId(mid)) continue;
+      return { url: item.url, mid, endpointId: item.endpoint_id };
+    }
+  }
+  return null;
+}
+
+// Resolve the auto-pick when nothing is selected. Prefers the CONFIGURED
+// default (the server-resolved `/api/default-chat`, cached on
+// `window.__orwellDefaultChat` — out-of-box that's deepseek-v4-pro on the
+// OpenRouter endpoint) over an arbitrary first-listed model (the "fugu" bug:
+// the picker used to grab items[0].models[0]). Falls back to the first chat
+// model only when no default is configured / resolvable in the catalog. An
+// EXPLICIT user selection is handled earlier by callers — this only fires when
+// modelId is empty, so honoring the configured default never overrides a choice.
+function _resolveDefaultPick(items) {
+  const dc = (typeof window !== 'undefined' && window.__orwellDefaultChat) || null;
+  if (dc && dc.model && !_isImageModelId(dc.model)) {
+    // Only honor the configured default if the catalog actually offers it
+    // (a stale default for a removed endpoint must not pin a dead model).
+    const exists = (items || []).some(item => {
+      if (item.offline) return false;
+      const models = (item.models || []).concat(item.models_extra || []);
+      return models.includes(dc.model);
+    });
+    if (exists) {
+      // Prefer the default's own endpoint when it still serves the model.
+      const own = (items || []).find(item =>
+        !item.offline && String(item.endpoint_id || '') === String(dc.endpoint_id || '')
+        && (item.models || []).concat(item.models_extra || []).includes(dc.model));
+      if (own) return { url: own.url, mid: dc.model, endpointId: own.endpoint_id };
+      const any = (items || []).find(item =>
+        !item.offline && (item.models || []).concat(item.models_extra || []).includes(dc.model));
+      if (any) return { url: any.url, mid: dc.model, endpointId: any.endpoint_id };
+    }
+  }
+  return _firstChatPick(items);
+}
+
+// Best-effort: warm `window.__orwellDefaultChat` so the synchronous auto-pick
+// in updateModelPicker() can honor the configured default. Idempotent; fail-soft.
+let _defaultChatWarmed = false;
+function _warmDefaultChat() {
+  if (_defaultChatWarmed) return;
+  _defaultChatWarmed = true;
+  try {
+    fetch(`${API_BASE}/api/default-chat`, { credentials: 'same-origin' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(dc => {
+        if (dc && dc.model) {
+          try { window.__orwellDefaultChat = dc; } catch (_) {}
+          // Re-resolve the picker now that the configured default is known —
+          // if it auto-picked "fugu" before this landed, correct it.
+          try { updateModelPicker(); } catch (_) {}
+        }
+      })
+      .catch(() => {});
+  } catch (_) { /* offline / no endpoints — auto-pick floor still applies */ }
+}
+
 // Dependencies injected via initModelPicker()
 let _deps = null;
 let _autoSelectingDefault = false;
+// Last model the picker AUTO-selected (no user choice). Lets a late-arriving
+// configured default (warmed via /api/default-chat) correct an early arbitrary
+// auto-pick, while NEVER touching a model the user explicitly chose.
+let _autoPickedMid = null;
 
 function _modelExists(modelId, url) {
   if (!modelId || !window.modelsModule || !window.modelsModule.getCachedItems) return false;
@@ -102,6 +202,10 @@ function _modelExists(modelId, url) {
  */
 export function initModelPicker(deps) {
   _deps = deps;
+  // Warm the configured default (deepseek-v4-pro / OpenRouter out-of-box) so the
+  // synchronous auto-pick in updateModelPicker() can honor it from the start
+  // rather than landing on an arbitrary first-listed model ("fugu").
+  _warmDefaultChat();
   _initModelPickerDropdown();
 }
 
@@ -177,6 +281,16 @@ function _initModelPickerDropdown() {
       const probeResult = item.endpoint_id ? _localProbe[item.endpoint_id] : null;
       const isLocalDead = !!(probeResult && probeResult.alive === false);
       allModels.forEach((mid, i) => {
+        // Per-MODEL image filter. The endpoint-level `model_type==='image'`
+        // drop above only catches image-ONLY endpoints; a MIXED endpoint (e.g.
+        // an OpenRouter key that serves both chat models AND
+        // `google/gemini-2.5-flash-image`, `flux-*`, `dall-e-*`) is model_type
+        // 'llm', so its image models would otherwise leak into the chat picker.
+        // Filtering here covers EVERY picker path (browse, provider groups,
+        // search) since they all read this one list. Belt-and-suspenders with
+        // the endpoint-level drop. (Image generation is unaffected — it resolves
+        // its model via settings.js `_isImageModel` / image_model.)
+        if (_isImageModelId(mid)) return;
         // Deduplicate by model ID — prefer ONLINE endpoint entries over
         // offline duplicates so the user gets a working endpoint first
         // when the same model is exposed by both.
@@ -444,6 +558,9 @@ function _initModelPickerDropdown() {
   async function _pick(m) {
     const currentSessionId = _deps.getCurrentSessionId();
     const _pendingChat = _deps.getPendingChat();
+    // An explicit user pick — clear the auto-pick marker so the late-default
+    // correction never overrides this choice.
+    _autoPickedMid = null;
 
     // Remember this pick so it surfaces under "Recent" next time the picker
     // opens — the whole point of quick-switch.
@@ -622,6 +739,27 @@ export function updateModelPicker() {
       modelId = null;
     }
   }
+  // Late-default correction: if the current pending model was an arbitrary
+  // AUTO-pick (not a user choice) and the configured default has since resolved
+  // to a DIFFERENT model, re-point the pending chat at the configured default
+  // (the "fugu→deepseek-v4-pro" correction when /api/default-chat lands after a
+  // first render). Only touches auto-picks on a pending (unsaved) chat — an
+  // explicit selection clears `_autoPickedMid`, so a user's choice is never
+  // overridden.
+  if (modelId && !currentSessionId && _pendingChat && _autoPickedMid
+      && modelId === _autoPickedMid
+      && window.modelsModule && window.modelsModule.getCachedItems) {
+    const dc = (typeof window !== 'undefined' && window.__orwellDefaultChat) || null;
+    if (dc && dc.model && dc.model !== modelId && !_isImageModelId(dc.model)) {
+      const items = window.modelsModule.getCachedItems();
+      const pick = _resolveDefaultPick(items);
+      if (pick && pick.mid === dc.model && pick.mid !== modelId) {
+        modelId = pick.mid;
+        _autoPickedMid = pick.mid;
+        _deps.setPendingChat({ url: pick.url, modelId, endpointId: pick.endpointId });
+      }
+    }
+  }
   // SECURITY: deliberately NOT auto-injecting `orwell-model-favorites[0]`
   // here. localStorage favorites are per-browser, not per-user, so on a
   // shared browser the previous account's first favorited model would
@@ -639,33 +777,47 @@ export function updateModelPicker() {
       (item.models || []).concat(item.models_extra || []).forEach(m => allAvailable.push(m));
     });
     if (allAvailable.length > 0 && !allAvailable.includes(modelId)) {
-      // Model no longer available — switch to first available
-      const fallback = items.find(item => !item.offline && (item.models || []).length > 0);
-      if (fallback) {
-        modelId = fallback.models[0];
-        _deps.setPendingChat({ url: fallback.url, modelId, endpointId: fallback.endpoint_id });
+      // Model no longer available — fall back to the configured default
+      // (deepseek-v4-pro / OpenRouter out-of-box) or the first CHAT model,
+      // never an arbitrary first-listed (possibly image) model.
+      const pick = _resolveDefaultPick(items);
+      if (pick) {
+        modelId = pick.mid;
+        _autoPickedMid = pick.mid;
+        _deps.setPendingChat({ url: pick.url, modelId, endpointId: pick.endpointId });
       }
     }
   }
   if (!modelId && !_autoSelectingDefault && window.modelsModule && window.modelsModule.getCachedItems) {
     const items = window.modelsModule.getCachedItems();
-    const first = items.find(item => !item.offline && ((item.models || []).length || (item.models_extra || []).length));
-    if (first) {
-      const models = (first.models || []).concat(first.models_extra || []);
-      modelId = models[0];
+    // Honor the CONFIGURED default (deepseek-v4-pro / OpenRouter out-of-box,
+    // resolved server-side by /api/default-chat) before falling back to the
+    // first chat model. This is the "fugu" fix: the picker used to auto-pick
+    // items[0].models[0] — an arbitrary first-sorted model — ignoring the
+    // configured default. NEVER an image model. An explicit user selection is
+    // handled above (modelId already set), so this only fires when nothing is
+    // chosen — the configured default never overrides an explicit pick.
+    const pick = _resolveDefaultPick(items);
+    if (pick) {
+      modelId = pick.mid;
+      _autoPickedMid = pick.mid;
       if (!currentSessionId) {
-        _deps.setPendingChat({ url: first.url, modelId, endpointId: first.endpoint_id });
+        _deps.setPendingChat({ url: pick.url, modelId, endpointId: pick.endpointId });
       } else {
-        if (s) { s.model = modelId; s.endpoint_url = first.url; }
+        if (s) { s.model = modelId; s.endpoint_url = pick.url; }
         _autoSelectingDefault = true;
         const fd = new FormData();
         fd.append('model', modelId);
-        fd.append('endpoint_url', first.url || '');
-        if (first.endpoint_id) fd.append('endpoint_id', first.endpoint_id);
+        fd.append('endpoint_url', pick.url || '');
+        if (pick.endpointId) fd.append('endpoint_id', pick.endpointId);
         fetch(`${API_BASE}/api/session/${currentSessionId}`, { method: 'PATCH', body: fd })
           .catch(() => {})
           .finally(() => { _autoSelectingDefault = false; });
       }
+    } else {
+      // No configured default cached yet — warm it so the next render can
+      // honor it instead of leaving the picker stuck on an arbitrary pick.
+      _warmDefaultChat();
     }
   }
 
