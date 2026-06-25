@@ -150,3 +150,36 @@ def test_no_js_references_the_retired_squircle_id():
                 if m.group(1) != "orwell-scroll-bottom":
                     offenders.append(f"{p.name}: {m.group(1)}")
     assert not offenders, f"stray references to the retired squircle id: {offenders}"
+
+
+# ── 9. #948 — the button is mutually exclusive with the decision card ──────────
+# A decision card only appears at the bottom; the button only when scrolled up — so they must
+# never coexist (they share the above-composer slot and overlapped, #933). A visible
+# #orwell-decision-card hard-suppresses #orwell-scroll-bottom.
+
+def test_decision_card_suppression_helper_exists():
+    assert "function decisionCardVisible" in OSB
+    assert "orwell-decision-card" in OSB, \
+        "the suppression must key on the real decision-card id (#orwell-decision-card)"
+
+
+def test_update_suppresses_button_when_card_visible():
+    # The hide-condition (the `if (...)` that drops .osb-show) must include decisionCardVisible()
+    # so a card wins over scroll position. Match from `if (nearBottom(box)` up to the `{` that
+    # opens the branch body.
+    hide_cond = re.search(r"if \(nearBottom\(box\).*?\)\s*\{", OSB, flags=re.S)
+    assert hide_cond, "could not find the hide-condition in update()"
+    assert "decisionCardVisible()" in hide_cond.group(0), \
+        "update()'s hide-condition must include decisionCardVisible() (card wins over scroll pos)"
+
+
+def test_button_rechecks_on_card_mount_and_unmount():
+    # The card mounts OUTSIDE #chat-history (into a sheet/notice) and is .remove()'d on dismiss,
+    # so a body-subtree observer (or the orwell:pending event) must re-run update().
+    assert "function watchDecisionCard" in OSB
+    assert "document.body" in OSB and "subtree: true" in OSB, \
+        "a body-subtree MutationObserver should re-check on card mount/unmount"
+    assert ('addEventListener("orwell:pending"' in OSB
+            or "addEventListener('orwell:pending'" in OSB), \
+        "should also re-check on the orwell:pending event (fast belt)"
+    assert "watchDecisionCard()" in OSB, "watchDecisionCard must be wired in start()"

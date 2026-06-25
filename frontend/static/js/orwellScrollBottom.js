@@ -8,6 +8,8 @@
 // scrolled away, clearing on click / on reaching bottom. It is the SINGLE jump-to-bottom button —
 // #887 retired the duplicate squircle (#scroll-bottom-btn) and this one absorbed its
 // composer-anchored placement (sits just above the .chat-input-bar, recomputed on scroll/resize).
+// #948: it is mutually exclusive with the decision card — a visible #orwell-decision-card
+// hard-suppresses it (they share the above-composer slot and must never coexist).
 //
 // Pure FE, no engine/Vault coupling. Reduced-motion safe (the appear/disappear transition is
 // dropped under prefers-reduced-motion). Fails open: any error simply leaves the button hidden.
@@ -38,6 +40,25 @@
     try {
       return window.matchMedia &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch (_) { return false; }
+  }
+
+  // #948: a decision card (#orwell-decision-card, orwellDecision.js) and this button are
+  // MUTUALLY EXCLUSIVE by the owner's ruling — a card only appears when you're at the bottom and
+  // this button only when you're NOT at the bottom, so they must never coexist (they overlap above
+  // the composer, #933). Whenever a card is mounted AND visible, force-hide the button. Fail-open:
+  // any error → not suppressed (the button behaves exactly as before).
+  function decisionCardVisible() {
+    try {
+      var card = document.getElementById("orwell-decision-card");
+      if (!card || !document.body.contains(card)) return false;
+      if (card.hidden) return false;
+      var cs = window.getComputedStyle ? window.getComputedStyle(card) : null;
+      if (cs && (cs.display === "none" || cs.visibility === "hidden")) return false;
+      // A zero-size box is effectively not shown (e.g. mid-removal animation collapsed).
+      var r = card.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return false;
+      return true;
     } catch (_) { return false; }
   }
 
@@ -158,9 +179,13 @@
     if (!box || !btn) return;
     reposition();
     var hasContent = box.scrollHeight - box.clientHeight > NEAR_BOTTOM_PX;
-    if (nearBottom(box) || !hasContent) {
+    // #948: a visible decision card hard-suppresses the button — the two never coexist. This wins
+    // over the scroll position so that even if a card mounts while the reader is scrolled up (which
+    // would otherwise satisfy the show-condition), the button stays hidden. Unread stays counted so
+    // the badge is correct once the card clears.
+    if (nearBottom(box) || !hasContent || decisionCardVisible()) {
       btn.classList.remove("osb-show");
-      clearUnread();
+      if (!decisionCardVisible()) clearUnread();
     } else {
       btn.classList.add("osb-show");
     }
@@ -183,6 +208,19 @@
     mo.observe(box, { childList: true, subtree: true });
   }
 
+  // #948: re-check suppression whenever the decision card could appear/disappear. The card mounts
+  // into a sheet/notice OUTSIDE #chat-history (so watchNewMessages can't see it), and it is
+  // .remove()'d on dismiss — so watch the whole body subtree for the card's mount/unmount, and
+  // also listen for orwell:pending (the event that drives the card) as a fast belt.
+  function watchDecisionCard() {
+    if (typeof MutationObserver === "undefined") return;
+    try {
+      var mo = new MutationObserver(function () { update(); });
+      mo.observe(document.body, { childList: true, subtree: true });
+    } catch (_) {}
+    try { window.addEventListener("orwell:pending", update); } catch (_) {}
+  }
+
   function start() {
     var box = chatBox();
     if (!box) return;
@@ -195,6 +233,7 @@
       try { new ResizeObserver(reposition).observe(bar); } catch (_) {}
     }
     watchNewMessages(box);
+    watchDecisionCard();
     update();
   }
 
