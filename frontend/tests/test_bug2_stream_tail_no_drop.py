@@ -132,3 +132,65 @@ def test_short_unterminated_reply_still_fully_emitted(monkeypatch):
     short = "Ariana just looks at you for a long moment and says nothing at all only she"
     emitted = _drive_scrub_loop(monkeypatch, short)
     assert emitted == short, f"a terminator-less short reply was dropped: {emitted!r}"
+
+
+# ── BUG 2 root cause (2026-06-25 live RCA): the over-broad START scrub ──────────────────────────
+# Caught LIVE against real OpenRouter/DeepSeek-V4-Pro: the casting GM wrote a clean 855-char reply
+# ending with the in-character host line "I'll get the rest out of you another way." The server-side
+# `_GAME_LEAK_START_RE` deleted that whole sentence (BUG2-len: raw_reply=855 -> emitted_visible=813,
+# a 42-char drop), because the OLD pattern matched a BARE first-person modal at sentence start
+# ("I'll", "I'd", "I can", "Let me", "Now, I") and stopped — with NO requirement that a tool-PROCESS
+# verb follow. So legitimate first-person GM/NPC narration was silently truncated, which the player
+# reads as a mid-sentence cut. The fix requires an operator verb after the opener.
+#
+# A long in-character reply whose sentences OPEN with first-person modals but carry NO tool-process
+# verb must reach the bubble IN FULL. >1.5k chars; no closed-set board claims (guard is a no-op).
+_LONG_FIRST_PERSON_REPLY = (
+    "Big Brother leans back in the chair and lets the silence stretch until you fill it. "
+    "\"I'll be honest with you,\" he says, \"the wall behind me is bare for a reason.\"\n\n"
+    "I'll get the rest out of you another way. I can already tell you're the kind who plays "
+    "their cards close, and I'd respect that more if it weren't going to get you evicted in week "
+    "two. Let me show you how this works, since you clearly haven't done your homework.\n\n"
+    "Now, I'll walk you through the house one room at a time. First, I'll point you toward the "
+    "kitchen, where the alliances get cooked alongside the eggs. I can promise you that's where "
+    "half your game gets decided, and I'd bet you haven't thought about that at all.\n\n"
+    "\"I'll tell you a secret,\" he adds, lowering his voice as if the cameras weren't already "
+    "catching every word. \"I can see who's going to crack before they can. I'd put money on it.\" "
+    "Let me give you one piece of advice before the doors open: trust no one, and especially not "
+    "the ones who tell you to trust them.\n\n"
+    "I'll be watching you the whole way. I can make this season unforgettable, but only if you "
+    "give me something to work with. I'd hate to waste a good villain edit on someone who folds. "
+    "Let me be clear about the stakes here so there's no confusion later when it all goes sideways.\n\n"
+    "I can already picture the eviction night where you realize, far too late, who had your number "
+    "the entire time. I'd light a candle for that version of you, but production frowns on open "
+    "flames near the memory wall. Now, I'll let you in on one more thing before the music starts: "
+    "the people who survive in here are the ones who can hold two truths at once and never blink.\n\n"
+    "So let me ask you, one last time, before I send you in there to the wolves and the cameras "
+    "and the long sleepless nights"  # <-- deliberately unterminated tail
+)
+
+
+def test_in_character_first_person_lines_are_not_scrubbed(monkeypatch):
+    # Every sentence here opens with a first-person modal ("I'll", "I can", "I'd", "Let me",
+    # "Now, I'll", "First, I'll") but NONE narrate a tool/engine process — they are in-character GM
+    # dialogue/narration. The full reply must reach the player.
+    emitted = _drive_scrub_loop(monkeypatch, _LONG_FIRST_PERSON_REPLY)
+    assert len(_LONG_FIRST_PERSON_REPLY) > 1400
+    assert emitted == _LONG_FIRST_PERSON_REPLY, (
+        "the live-game scrub deleted an in-character first-person line (the BUG 2 over-broad START "
+        f"scrub). emitted {len(emitted)} of {len(_LONG_FIRST_PERSON_REPLY)} chars; "
+        f"tail seen: {emitted[-80:]!r}"
+    )
+
+
+def test_exact_live_captured_line_survives_scrub():
+    # The exact 42-char sentence the LIVE BUG2-len drop deleted. A focused unit check on the helper
+    # so a future regex change can't silently re-introduce the over-broad START scrub.
+    from src.agent_loop import _scrub_game_leak
+    line = " I'll get the rest out of you another way."
+    assert _scrub_game_leak(line) == line, (
+        f"the in-character host line was scrubbed as an operator aside: {_scrub_game_leak(line)!r}"
+    )
+    # And the leak it was confused with MUST still be stripped (no regression on the real contract).
+    assert _scrub_game_leak("I'll record this and advance the game.").strip() == ""
+    assert _scrub_game_leak("Now, I'll present the binding choice.").strip() == ""

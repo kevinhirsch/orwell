@@ -2646,12 +2646,28 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
 )
 
 # Sentence-START operator openers: in real GM narration the host/NPCs address the player as "you"
-# and never begin a sentence narrating their OWN process ("Actually wait, let me…", "I should…",
-# "Then I'll…"). Anchored to the sentence start so quoted NPC dialogue mid-sentence is untouched.
+# and never begin a sentence narrating their OWN process ("Actually wait, let me record…",
+# "I should advance…", "Then I'll re-read…"). Anchored to the sentence start so quoted NPC dialogue
+# mid-sentence is untouched.
+#
+# BUG 2 / truncation fix (2026-06-25): the opener ALONE is NOT enough — it MUST be followed by a
+# tool-PROCESS verb. The old pattern matched a bare first-person modal ("I'll", "I'd", "I can",
+# "let me", "Now, I") and stopped, so legitimate in-character first-person prose ("I'll get the rest
+# out of you another way.", "I can see the kitchen from here.", "Let me show you the bedroom.") was
+# silently DELETED from the player's bubble — read live as a mid-sentence/whole-sentence truncation.
+# Requiring an operator verb after the opener keeps the leak-strip (the model narrating its OWN
+# engine plan) while leaving ordinary scene prose untouched. (Tool names + machinery nouns are still
+# caught anywhere in the sentence by _GAME_LEAK_SENTENCE_RE, independent of how the sentence opens.)
+_OPERATOR_VERBS = (
+    r"record|advance|log|note|resolve|call|use|pull|fetch|present|place|check|see what|"
+    r"re-?read|re-?check|reconsider"
+)
 _GAME_LEAK_START_RE = re.compile(
     r"^\s*(?:actually[,.!]?\s+)?(?:but\s+)?(?:wait[,.!]?\s+)?(?:ok(?:ay)?[,.!]?\s+)?(?:hold on[,.!]?\s+)?"
     r"(?:i'?ll|i'?d|i should|i need to|i have to|i must|i am going to|i'?m going to|i can|"
-    r"let me|then,?\s+i|first,?\s+i|now,?\s+i|next,?\s+i)\b",
+    r"let me|then,?\s+i'?ll|first,?\s+i'?ll|now,?\s+i'?ll|next,?\s+i'?ll)\s+"
+    r"(?:now\s+|first\s+|then\s+|also\s+|just\s+)?"
+    r"(?:" + _OPERATOR_VERBS + r")\b",
     re.IGNORECASE,
 )
 
