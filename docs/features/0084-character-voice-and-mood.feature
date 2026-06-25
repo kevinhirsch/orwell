@@ -32,7 +32,7 @@ Feature: 0084 — Character voice & grounded mood
 
     Scenario: Voice survives a save round-trip unchanged
       Given a houseguest with a voice fingerprint
-      When the game is snapshotted and restored
+      When the cast is snapshotted and restored
       Then that houseguest's voice fingerprint is identical
 
     Scenario: Voice does not drift as the soul evolves
