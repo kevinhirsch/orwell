@@ -73,10 +73,20 @@
         // there during load and the bar "switches" colour once the app boots.
         var mtc = document.querySelector('meta[name="theme-color"]');
         if (mtc && c.bg) mtc.setAttribute('content', c.bg);
-        // Update favicon to match accent color
+        // Update favicon to match accent color. The favicon <link> has a SINGLE
+        // owner — the blinking-eye controller (faviconEye.js) — so accent, route,
+        // and blink never fight each other over the href. We set ACCENT STATE on
+        // it; it re-renders the open/closed eye in this accent. This inline script
+        // runs before the module loads, so we also stash the accent on
+        // window.__orwellFaviconState as a fallback the controller adopts on init.
         var ac = c.red || '#e06c75';
-        var fav = document.querySelector("link[rel='icon']");
-        if (fav) fav.href = 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linejoin='round'/><circle cx='16' cy='16' r='4.5' fill='" + ac + "'/></svg>");
+        try { (window.__orwellFaviconState = window.__orwellFaviconState || {}).accent = ac; } catch (_) {}
+        if (window.OrwellFaviconEye && window.OrwellFaviconEye.setAccent) {
+          window.OrwellFaviconEye.setAccent(ac);
+        } else {
+          var fav = document.querySelector("link[rel='icon']");
+          if (fav) fav.href = 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2 16Q9 7 16 7Q23 7 30 16Q23 25 16 25Q9 25 2 16Z' fill='none' stroke='" + ac + "' stroke-width='2.5' stroke-linejoin='round'/><circle cx='16' cy='16' r='4.5' fill='" + ac + "'/></svg>");
+        }
         // S6-4: luminance-aware text color for accent-backed CTAs, set from the
         // very first paint (theme.js re-derives the same value once it boots).
         // White-on-accent is only ~3.2:1 on the brand red; pick near-white or
@@ -262,9 +272,18 @@
           "<rect x='21' y='8' width='6' height='19' rx='1' fill='none' stroke='" + ac + "' stroke-width='2.5' transform='rotate(8 24 17)'/>",
       };
       var inner = SHAPES[path];
-      if (!inner) return; // Root path keeps the default eye icon.
+      if (!inner) return; // Root path keeps the default (blinking) eye icon.
       var svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>" + inner + "</svg>";
       var href = 'data:image/svg+xml,' + encodeURIComponent(svg);
+      // Route through the SINGLE favicon owner (faviconEye.js): this is a non-eye
+      // glyph, so the controller stops blinking and shows it. Stash it for the
+      // controller to adopt on init (this inline script runs before the module),
+      // and also write the <link> directly here so the route glyph paints before
+      // the module boots (the controller re-renders the same thing on adoption).
+      try { (window.__orwellFaviconState = window.__orwellFaviconState || {}).routeInner = inner; } catch (_) {}
+      if (window.OrwellFaviconEye && window.OrwellFaviconEye.setRoute) {
+        window.OrwellFaviconEye.setRoute(inner, false);
+      }
       var fav = document.querySelector("link[rel='icon']");
       if (!fav) { fav = document.createElement('link'); fav.rel = 'icon'; fav.type = 'image/svg+xml'; document.head.appendChild(fav); }
       fav.href = href;
@@ -2651,6 +2670,7 @@
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script type="module" src="/static/js/eyeBlink.js"></script>  <!-- #801: randomized ~7-10s hero-eye blink (shared w/ login) -->
+<script type="module" src="/static/js/faviconEye.js"></script>  <!-- blinking favicon: the SINGLE <link rel=icon> owner; blinks the tab eye on eyeBlink.js's cadence (open↔closed SVG swap), composes accent+route+blink -->
 <script defer src="/static/js/sessionSync.js?v=20260608"></script>  <!-- cross-device live sync -->
 <script defer src="/static/js/orwellLayoutSync.js?v=20260620"></script>  <!-- 0064 Part F: cross-device window/HUD layout sync -->
 <script src="/static/js/orwellReport.js"></script>  <!-- BB failure ring (G11): fail-open catches report here — absence becomes observable. Plain script, BEFORE the panels -->
