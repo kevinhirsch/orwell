@@ -6129,11 +6129,19 @@ async function handleSlashCommand(input) {
     } catch (_) { /* fall through to fuzzy match */ }
 
     // --- 5. Fuzzy match for typos ---
-    const suggestions = _fuzzyMatch(rawCmd);
-    if (suggestions.length) {
-      _showUser();
-      slashReply(`Unknown command "/${ctx.esc(rawCmd)}". Did you mean: ${suggestions.map(s => '<b>/'+s+'</b>').join(', ')}?`);
-      return true;
+    // ONLY for a deliberate "/"-prefixed command. A "!"-opener is NOT a reliable
+    // command signal: "!" frequently opens ordinary chat ("!important", a bare
+    // "!"), so a "!"-message that merely FUZZY-matches a command name must NOT be
+    // intercepted with a "Did you mean…" — it falls through to the AI. (A real "!"
+    // command already resolved exactly in steps 1–4 above; only the fuzzy guess is
+    // suppressed here.) A "/"-typo is clearly command-intended, so it keeps the hint.
+    if (input.startsWith('/')) {
+      const suggestions = _fuzzyMatch(rawCmd);
+      if (suggestions.length) {
+        _showUser();
+        slashReply(`Unknown command "/${ctx.esc(rawCmd)}". Did you mean: ${suggestions.map(s => '<b>/'+s+'</b>').join(', ')}?`);
+        return true;
+      }
     }
 
   } catch (err) {
