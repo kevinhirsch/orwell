@@ -443,6 +443,16 @@ PANEL
 exec bash "${APP_DIR}/deploy/orwell-menu.sh" "\$@"
 LAUNCH
   chmod 0755 /usr/local/bin/orwell
+
+  # `pct enter` minimal login shells omit /usr/local/bin from PATH, so `orwell` isn't found.
+  # Drop an idempotent profile.d snippet that ensures it's on PATH for login shells.
+  if [ ! -f /etc/profile.d/orwell-path.sh ]; then
+    cat > /etc/profile.d/orwell-path.sh <<'PATHSH'
+# orwell: ensure /usr/local/bin is on PATH (pct enter minimal login shells omit it)
+case ":${PATH}:" in *:/usr/local/bin:*) ;; *) PATH="/usr/local/bin:${PATH}" ;; esac
+PATHSH
+    chmod 0644 /etc/profile.d/orwell-path.sh
+  fi
 }
 
 verify_install() {
