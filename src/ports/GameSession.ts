@@ -826,6 +826,22 @@ export interface WhereaboutsView {
    * is the human's to form (0017); the engine reports the meeting, never the motive.
    */
   conspicuous?: string[];
+  /**
+   * 0106 — a LIVE whole-house EVENT is in session: an EXCLUSIVE set-piece (a competition, or a
+   * nomination / veto / eviction ceremony). When present, the whole house is gathered for it — so
+   * `present` lists everyone and `nearby` is empty (there are no side rooms to slip into, and the player
+   * cannot wander off until it resolves). Nobody is away in a private scene. For a COMPETITION,
+   * `competing` are the players and `spectating` are everyone else WATCHING and forming opinions as it
+   * goes — ALWAYS including the outgoing HOH, who sits out the next HOH; `youAreCompeting` is the
+   * player's own status (those three are absent for a ceremony, where the whole house simply attends).
+   * A purely OBSERVATIONAL projection (it never mutates the seeded sim) ⇒ calibration-identical.
+   */
+  houseEvent?: {
+    kind: "hoh-competition" | "veto-competition" | "nominations" | "veto-ceremony" | "eviction";
+    competing?: NamedRef[];
+    spectating?: NamedRef[];
+    youAreCompeting?: boolean;
+  };
 }
 
 /**
