@@ -901,7 +901,29 @@ async def _capture_beat_signature(user) -> Optional[dict]:
 # _narration_claims_outcome) with the signature field whose movement would confirm it really
 # happened. Deliberately narrow — a false positive nags the model on a clean turn, so every
 # pattern targets unambiguous outcome language, not mere mention ("if you're evicted…").
-_CLAIM_EVICTED_RE = re.compile(r"\b(?:is|been|was)\s+evicted\b|\bevicted\s+from\b", re.IGNORECASE)
+_CLAIM_EVICTED_RE = re.compile(
+    r"\b(?:is|been|was)\s+evicted\b|\bevicted\s+from\b|"
+    # F16 (#1014): the model narrates the eviction RESULT in other canon phrasings the original
+    # pattern missed — "votes to evict X", "the majority to evict X", "X is leaving/departing/going
+    # home"/"sent home". Each reads as a COMMITTED eviction outcome. Deliberately conservative: only
+    # COMMITTED-present/past forms ("is/are/has been leaving|sent home") — NOT "if you get evicted"
+    # (a conditional) or a room move ("leaving the kitchen"). Paired with the same count / evictee-
+    # identity check below, so a phantom or wrong evictee never reaches the player.
+    r"\bvotes?\s+to\s+evict\b|\bmajority\s+to\s+evict\b|"
+    r"\b(?:is|are|has been|have been)\s+(?:being\s+)?(?:sent\s+home|going\s+home|leaving\s+the\s+house|departing\s+the\s+house)\b",
+    re.IGNORECASE,
+)
+# F16 (#1014): when an eviction RESULT/TALLY claim NAMES a houseguest, extract that name so the
+# guard can compare it to the engine's just-evicted delta. Captures the target of the canonical
+# result phrasings ("votes to evict NAME", "NAME is evicted/leaving/going home/sent home",
+# "evicted NAME"). Names only; never a hidden field. A False match (no name captured) ⇒ the
+# count-only branch still applies (the original behavior), so this only ADDS precision.
+_EVICTEE_NAME_RES = (
+    re.compile(r"(?i:\b(?:votes?|majority)\s+to\s+evict\s+)([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2})"),
+    re.compile(r"(?i:\bevict(?:s|ed|ing)?\s+)([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2})"),
+    re.compile(r"\b([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2})(?i:\s+(?:is|are|has been|have been|was)\s+"
+               r"(?:being\s+)?(?:evicted|sent\s+home|going\s+home|leaving\s+the\s+house|departing\s+the\s+house))\b"),
+)
 _CLAIM_WINNER_RE = re.compile(
     r"\b(?:winner of (?:big brother|the season)|wins the season|is crowned|crowned the winner)\b",
     re.IGNORECASE,
@@ -957,6 +979,55 @@ _NOM_PHASES = ("nom", "nominat", "veto-ceremony", "veto_ceremony", "vetoceremony
 _VETO_PHASES = ("veto",)
 
 
+def _named_evictee_in_claim(text: str) -> Optional[str]:
+    """F16 (#1014): if an eviction RESULT/TALLY claim in `text` NAMES a houseguest as the one
+    leaving, return that name (as written); else None. Whole-claim extraction over the canonical
+    phrasings — never a fuzzy guess. The caller compares it to the engine's evicted delta."""
+    for rx in _EVICTEE_NAME_RES:
+        m = rx.search(text or "")
+        if m:
+            name = (m.group(1) or "").strip()
+            if name:
+                return name
+    return None
+
+
+def _eviction_evictee_mismatch(text: str, before: dict, after: dict) -> bool:
+    """F16 (#1014): True when the narration NAMES an eviction target who is an ACTIVE houseguest the
+    engine did NOT just evict (this turn's `evictedNames` delta). That is a fabricated/wrong evictee —
+    a player trusting the chat would believe the wrong person left. Conservative:
+
+      • only when a name is actually extracted (no name ⇒ fall back to the count-only branch);
+      • the named person must be on the ACTIVE roster (a name the model invented is a different,
+        out-of-scope problem — the roster guard owns that), AND
+      • the named person must NOT be in the just-evicted delta (after - before `evictedNames`).
+
+    Substring-safe: the named claim must match an active-roster name as a WHOLE name (so 'Trent' is
+    caught when the roster has 'Trent Tucker', but a partial-of-a-partial is not invented)."""
+    named = _named_evictee_in_claim(text)
+    if not named:
+        return False
+    active = {str(n).strip() for n in (after.get("activeNames") or []) if str(n).strip()}
+    before_ev = {str(n).strip() for n in (before.get("evictedNames") or []) if str(n).strip()}
+    after_ev = {str(n).strip() for n in (after.get("evictedNames") or []) if str(n).strip()}
+    just_evicted = after_ev - before_ev
+    nl = named.lower()
+
+    def _matches(roster_name: str) -> bool:
+        rn = roster_name.lower()
+        # whole-name OR first/last token match (the model often uses a first name for a full-name HG).
+        if nl == rn:
+            return True
+        toks = rn.split()
+        return nl in toks or any(nl == t for t in (named.lower().split()))
+
+    # The named person really just left ⇒ NOT a mismatch (the correct evictee, named — emit).
+    if any(_matches(e) for e in just_evicted):
+        return False
+    # The named person is an ACTIVE houseguest the engine did NOT evict ⇒ a wrong/fabricated evictee.
+    return any(_matches(a) for a in active)
+
+
 def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict) -> Optional[str]:
     """Compare the turn's narration against the before→after board delta. Return a SPECIFIC
     re-ground directive when the narration asserts an outcome the engine did NOT commit; else
@@ -970,9 +1041,33 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
 
     desync = None  # the specific outcome the narration claimed that the board never moved on
 
-    # (1) An eviction was narrated, but the evicted count didn't move → no one actually left.
-    if _CLAIM_EVICTED_RE.search(text) and after.get("evicted") == before.get("evicted"):
-        desync = "an EVICTION (a houseguest leaving the house)"
+    _phase_l = str(after.get("phase") or "").lower()
+    # (1) An eviction RESULT was narrated. Three ways it can be a phantom the engine never committed:
+    #   (1a) the evicted COUNT didn't move at all → no one actually left (the original check);
+    #   (1b) F16 (#1014): the claim NAMES a houseguest who is still ACTIVE and was NOT just evicted →
+    #        a fabricated/WRONG evictee even though SOMEONE may have left this turn (the engine and the
+    #        chat name different people — the player believes the wrong person went home);
+    #   (1c) F16 (#1014): the result is claimed AHEAD OF PHASE — a committed-eviction claim while the
+    #        engine is NOT in an eviction phase (and not in the finale) is a phantom by construction
+    #        (no eviction commits outside the eviction beat). The original count check missed this
+    #        because mid-comp/ceremony the count legitimately equals before, so (1a) never tripped.
+    if _CLAIM_EVICTED_RE.search(text):
+        _count_unmoved = after.get("evicted") == before.get("evicted")
+        if (_count_unmoved
+                and not _phase_l.startswith(_EVICTION_PHASES)
+                and not _phase_l.startswith(_FINALE_PHASES)):
+            # (1c) AHEAD OF PHASE — a committed-eviction claim while the engine is NOT at an eviction
+            # (or finale) beat AND nobody actually left is a phantom by construction; no eviction
+            # commits outside that beat. (A moved count is a REAL eviction whose phase has simply
+            # rolled past `eviction` by the time the after-signature was read — never flagged.)
+            desync = "an EVICTION RESULT narrated before the eviction (the engine is not at the eviction beat)"
+        elif _count_unmoved:
+            desync = "an EVICTION (a houseguest leaving the house)"
+        elif _eviction_evictee_mismatch(text, before, after):
+            # Name-free + count-free directive — the engine DID evict someone, but not who the model
+            # said; do NOT pre-announce the real evictee (the ballot is secret until the engine commits
+            # it through the reveal). Just forbid the wrong name and send the model back to the board.
+            desync = "the WRONG evictee leaving (you named a houseguest the engine did NOT evict)"
     # (2) A season winner / crowning was narrated, but the game isn't finished → premature crown.
     #     Scoped to FINALE phases: mid-season "crowned the winner" language is necessarily
     #     hypothetical flavor ("you could be crowned the winner someday"), never a committed

@@ -4414,9 +4414,32 @@ async def stream_agent_loop(
                 # caught). It does NOT suppress a genuine desync (a previewed-but-uncommitted outcome /
                 # an undelivered decision result): the model narrated an outcome ahead of the engine
                 # and still owes the commit.
+                # F14 (#1013) — the EVICTION-DRAIN allowance. The eviction reveal is a chain of
+                # DETERMINISTIC, E12-anonymized NPC beats (NPC votes → NPC goodbyes) the engine drips one
+                # per advanceGame, and the model reliably narrates the eviction as already-done WITHOUT
+                # advancing — so the engine sits at `phase:eviction, evicted:null` and never even RAISES
+                # the player's goodbye/vote pending. This stall is NOT a lull (the model is narrating), so
+                # the lull/stale gate never fires and the week wedges forever. So: while the model was
+                # framed on the eviction beat AND did NOT progress this turn, WANT the state fetch — the
+                # L39b force below then drains ONE NPC beat per turn (bypassing the lull gate) UNTIL the
+                # engine raises a PLAYER pending, at which point the force no-ops (the engine returns the
+                # pending unchanged) and the surface-the-pending belt brings up the card. Cheap: reads the
+                # phase the model was framed on this turn (stashed by apply_game_framing), no extra fetch.
+                _framed_phase = None
+                try:
+                    from routes import chat_helpers as _ch_fp
+                    _fk = _ch_fp._LAST_FRAMED_BEAT_KEY.get(owner or "")
+                    if isinstance(_fk, (tuple, list)) and len(_fk) >= 2:
+                        _framed_phase = _fk[1]
+                except Exception:
+                    _framed_phase = None
+                _in_eviction = str(_framed_phase or "").lower().startswith("eviction")
+                _want_drain_eviction = (_in_eviction and (not _progressed)
+                                        and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN)
                 _want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (
                     _previewed_uncommitted
                     or _decision_undelivered
+                    or _want_drain_eviction
                     or ((not _progressed) and _is_lull and _stale and not _runway_holding)))
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
@@ -4906,7 +4929,29 @@ async def stream_agent_loop(
                         # is one call away). A pending player decision is returned unchanged by the engine.
                         # (Only reached when NOTHING visible was shown yet — so this single narration is
                         # the turn's first and only scene, no double-narration.)
-                        if (_level >= _ADVANCE_FORCE_LEVEL
+                        # F14 (#1013): the EVICTION-DRAIN force fires IMMEDIATELY (no waiting through the
+                        # text rungs) — the eviction reveal is a deterministic NPC-beat chain the engine
+                        # drips one per advance, and every turn the model narrates past it is one more turn
+                        # the week is wedged. But it must drain ONLY the NPC beats: once the engine raises a
+                        # PLAYER pending (goodbye/vote), forcing again would just no-op AND we'd never let
+                        # the player decide — so gate the drain on "no player pending open right now". The
+                        # surface-the-pending belt (post-turn) then brings the card up. Read the live pending
+                        # here (a player pending is reachable only via game_status, not get_game_state).
+                        _eviction_drain_force = False
+                        if _want_drain_eviction and not _previewed_uncommitted and not _decision_undelivered:
+                            try:
+                                from src import orwell_engine as _oe_dr
+                                _st_dr = await _oe_dr.game_status(user=owner)
+                                _pend_dr = (_st_dr or {}).get("pending") if isinstance(_st_dr, dict) else None
+                                _phase_dr = str((_st_dr or {}).get("phase") or _phase or "").lower()
+                                # Drain ONLY while still in the eviction phase with NO open player pending.
+                                _eviction_drain_force = (_phase_dr.startswith("eviction")
+                                                         and not (isinstance(_pend_dr, dict)
+                                                                  and (_pend_dr.get("kind") or "").strip()))
+                            except Exception as _dr_e:
+                                logger.warning(f"[orwell] eviction-drain pending read skipped: {_dr_e}")
+                                _eviction_drain_force = False
+                        if ((_eviction_drain_force or _level >= _ADVANCE_FORCE_LEVEL)
                                 and not _previewed_uncommitted and not _decision_undelivered):
                             # F7 DOUBLE-ADVANCE GUARD: between the state read at the top of this block and
                             # this forced POST, another device (or the model's own tool path) may have
@@ -5631,6 +5676,31 @@ async def stream_agent_loop(
             await record_post_turn_desync_check(owner, _turn_narration_full)
         except Exception as _desync_err:
             logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
+
+        # F14 (#1013) — the SURFACE-THE-PENDING belt. The eviction sub-loop wedges because the model
+        # narrates "X has been evicted" with NO mutating tool call: it never calls submitDecision (so
+        # the per-tool `orwell:pending` seam in chat.js never fires) and never advanceGame's (so the
+        # turn-settled re-arm has nothing fresh to pull). When the engine is in fact WAITING on a
+        # player-owned decision (e.g. the `goodbye-message` / `eviction-vote` card) and this turn made
+        # NO progression/decision tool call, surface that card NOW so the player can act — instead of
+        # waiting out the decision-poll. This ONLY surfaces the card; it never picks the tone/vote (the
+        # player still resolves it through the card's engine-direct POST). Fail-open; never blocks the
+        # turn. Model-driven submit always wins: if the model called submitDecision/advanceGame this
+        # turn the per-tool seam already handled it, so we stand down.
+        try:
+            _turn_tool_names = {ev.get("tool") for ev in (tool_events or [])
+                                if isinstance(ev, dict) and ev.get("tool")}
+            if not (_turn_tool_names & _PROGRESSION_TOOLS):
+                from src import orwell_engine as _oe_pend
+                _pend_status = await _oe_pend.game_status(user=owner)
+                _pending = (_pend_status or {}).get("pending") if isinstance(_pend_status, dict) else None
+                if isinstance(_pending, dict) and (_pending.get("kind") or "").strip():
+                    logger.info(
+                        f"[orwell] surface-the-pending belt: emitting open player pending "
+                        f"'{_pending.get('kind')}' the model narrated past (user={owner})")
+                    yield f'data: {json.dumps({"type": "orwell_pending", "pending": _pending})}\n\n'
+        except Exception as _pend_err:
+            logger.warning(f"[orwell] surface-the-pending belt skipped: {_pend_err}")
 
         # 0076 — the PRESENCE/IDENTITY desync guard: catch the narration staging an off-scene or
         # evicted houseguest as acting in the player's scene (the "invented/teleported room" class).
