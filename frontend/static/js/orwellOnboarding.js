@@ -536,12 +536,61 @@
     } catch (_) {}
     return false;
   }
+  // #968 — a transient, Vault-free "the producers are getting the house ready" indicator. Cast
+  // seeding/pre-warm is kicked fire-and-forget when Settings closes (_orwellWarm("prewarm-cast")
+  // below); with NO player-visible signal the setup reads as FROZEN. This surfaces a NON-BLOCKING,
+  // advisory toast off the prewarm response (counts/flags only — never any cast content). It is purely
+  // advisory: the engine's deterministic floor stands if no model is wired (the response then reports
+  // warmed:false and we simply don't trumpet a warm). Rendered via the OrwellNotice kit's ephemeral
+  // toast (auto-dismissing, out of the chat flow); fail-soft (no kit ⇒ silent no-op). This is NOT a
+  // game-change signal — it never dispatches orwell:gamechanged (the g15 single dispatcher in
+  // platform.js owns that).
+  const _SEEDING_NOTICE_ID = "orwell-seeding-indicator";
+  let _seedingNotice = null;
+  function _orwellShowSeedingIndicator(resp) {
+    // Vault-free read: resp is {warmed, count, alreadyWarmed?} from prewarm-cast (counts + flags only).
+    // We only show the advisory when seeding actually engaged (warmed). A deterministic-floor-only run
+    // (no model wired ⇒ warmed:false) shows nothing — there is nothing to wait on.
+    if (!resp || !resp.warmed) return;
+    try {
+      if (!(window.OrwellNoticeKit && typeof window.OrwellNoticeKit.create === "function")) return;
+      // Reuse one card across re-route()s (the prewarm endpoint is idempotent and may be hit again);
+      // a re-show with the same id keeps the single card and re-arms its auto-dismiss (no flicker).
+      if (!_seedingNotice) {
+        _seedingNotice = window.OrwellNoticeKit.create({
+          id: _SEEDING_NOTICE_ID,
+          kind: "toast",                 // ephemeral, out of the chat flow, auto-dismissing
+          placement: "toast",
+          severity: "info",
+          icon: "info",
+          dismissible: true,
+          persistDismiss: false,         // advisory + transient — never write a "dismissed forever" bit
+          autoDismissMs: 6000,           // a brief, non-blocking heads-up
+        });
+      }
+      // Counts-only body: a houseguest count is Vault-free roster scale, never identity/content.
+      const n = (resp.count | 0);
+      const tail = n > 0 ? (" (" + n + " houseguests)") : "";
+      _seedingNotice.setBody("Producers are getting the house ready…" + tail);
+      _seedingNotice.show();             // idempotent: re-arms the timer if already up
+    } catch (_) { /* advisory only — never block onboarding on the indicator */ }
+  }
+
   // 0065 — cast pre-warm triggers (fire-and-forget; the server endpoints are idempotent). AUTHOR WARM
   // fires the instant a model is selectable (route(), before the interview); PORTRAIT WARM fires at the
   // first interview turn (the producers' opener) and the server holds it until authoring fully finishes.
+  // #968: the AUTHOR WARM (prewarm-cast) response carries {warmed, count} — surface the advisory
+  // seeding indicator off it so the setup never reads as frozen. The fetch stays best-effort.
   function _orwellWarm(path) {
     try {
-      fetch("/api/orwell/" + path, { method: "POST", credentials: "same-origin" }).catch(() => {});
+      const p = fetch("/api/orwell/" + path, { method: "POST", credentials: "same-origin" });
+      if (path === "prewarm-cast") {
+        p.then((r) => (r && r.ok ? r.json() : null))
+          .then((resp) => { _orwellShowSeedingIndicator(resp); })
+          .catch(() => {});
+      } else {
+        p.catch(() => {});
+      }
     } catch (_) {}
   }
 
@@ -602,17 +651,39 @@
   const RESUME_AFTER_PHOTO_LINE =
     "(Production cue — the cast photo step is done; acknowledge it briefly, in character as the " +
     "producers, and continue the casting interview.)";
+  // #969 — the resume cue used to fire ONCE after a 250ms timeout and then bail SILENTLY (no retry,
+  // no deferred re-fire) if a stream was still in flight or the composer was busy at that tick. In the
+  // OOBE sequence the photo box appears right after the producers' "send us a photo" turn, so that
+  // turn's stream is often STILL SETTLING at the 250ms tick → the cue was dropped → the player had to
+  // type "continue". The fix mirrors recordPhotoStep's backoff retry (orwellHeadshot.js): when the
+  // stream is busy, DON'T drop — RE-SCHEDULE with backoff until the in-flight turn settles, capped, and
+  // fail open to the composer only after exhausting the retries. A once-guard (_resumeSent, like the
+  // opener's _openSent) makes a retry idempotent so it can never double-fire if the stream ends
+  // between attempts.
+  const RESUME_MAX_ATTEMPTS = 8;     // ~250ms settle + up to 8 backoff rungs (400…3200ms) before failing open
+  let _resumeSent = false;
   window._orwellResumeAfterPhoto = function () {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
-    if (!gameBuild) return;
-    setTimeout(() => {
+    if (!gameBuild || _resumeSent) return;
+    const composerBusy = () => {
       try {
         const box = document.getElementById("message");
-        if (!box) return;
-        if (box.value.trim()) return;  // the player is mid-thought — don't stomp it
-        if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream()) {
-          return;                       // a turn is already running — let it finish
-        }
+        if (box && box.value.trim()) return true;   // the player is mid-thought — don't stomp it
+      } catch (_) {}
+      return false;
+    };
+    const streamBusy = () => {
+      try {
+        return !!(window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream());
+      } catch (_) { return false; }
+    };
+    // One actual send. Guarded by _resumeSent so a retry that races the stream ending can't fire twice.
+    const fire = () => {
+      if (_resumeSent) return;
+      const box = document.getElementById("message");
+      if (!box) { _resumeSent = true; return; }     // no composer at all — nothing more to do
+      _resumeSent = true;
+      try {
         if (window.chatModule && typeof window.chatModule.sendHiddenCue === "function") {
           window.chatModule.sendHiddenCue(RESUME_AFTER_PHOTO_LINE);
         } else if (window.chatModule && typeof window.chatModule.handleChatSubmit === "function") {
@@ -620,9 +691,35 @@
           box.value = RESUME_AFTER_PHOTO_LINE;
           box.dispatchEvent(new Event("input", { bubbles: true }));
           window.chatModule.handleChatSubmit({ preventDefault() {} });
+        } else {
+          // No send seam — fall back to a focused composer so the player can nudge it.
+          try { box.focus(); } catch (_) {}
         }
       } catch (_) { /* fail open — the composer is still the way in */ }
-    }, 250);
+    };
+    // attempt 0 keeps the original 250ms settle beat; later attempts back off (400ms, 800ms, …).
+    const attempt = (n) => {
+      if (_resumeSent) return;
+      try {
+        if (composerBusy()) {
+          // The player started typing — yield to them entirely and never stomp it. The composer is the
+          // way in; mark sent so we don't keep re-scheduling against their input.
+          _resumeSent = true;
+          return;
+        }
+        if (streamBusy()) {
+          // A turn is still running (the photo-prompt turn settling, or the player's own send). DON'T
+          // drop — re-schedule with backoff so the cue fires once it settles. Fail open to the composer
+          // only after exhausting the retries (the composer is always the way in — never wedge it).
+          if (n + 1 < RESUME_MAX_ATTEMPTS) {
+            setTimeout(() => attempt(n + 1), 400 * (n + 1));
+          }
+          return;
+        }
+        fire();
+      } catch (_) { /* fail open */ }
+    };
+    setTimeout(() => attempt(0), 250);
   };
 
   // E65: a season RESTART (season 2+) opens a FRESH chat session so the dead season's transcript
