@@ -2271,6 +2271,9 @@ export class GameSessionAdapter implements GameSession {
     // 0065 Part A — refuse a move computed against a superseded board BEFORE any mutation.
     this.guardBeatSeq(expectedBeatSeq);
     if (!this.house || !this.presence) return null;
+    // 0106: during a whole-house event (a comp or a ceremony) the player is gathered with the house — they
+    // cannot wander off into a side room until it resolves. Report the gathered scene unchanged (a no-op).
+    if (this.houseEventInSession()) return this.whereabouts();
     const me = this.house.player.id;
     const here = this.presence.get(me) ?? null;
     // Forgiving resolution (Vault-free, deterministic): natural names → a canonical room id; the
@@ -2474,11 +2477,65 @@ export class GameSessionAdapter implements GameSession {
     if (this.trackedSightings) for (const id of [...this.trackedSightings.keys()]) if (!active.has(id)) this.trackedSightings.delete(id);
   }
 
+  /**
+   * 0106 — is a whole-house EVENT the LIVE, unresolved beat (an EXCLUSIVE set-piece: a competition, or a
+   * nomination / veto / eviction ceremony)? True while the event's player decision is pending (or a comp
+   * is staging). For a COMPETITION it also returns the eligible competitor FIELD (the outgoing HOH sits
+   * out the HOH comp; the veto is the drawn six). A PURE read of the live state — it never mutates the
+   * seeded sim, so everything built on it is calibration-identical.
+   */
+  private houseEventInSession(): { kind: NonNullable<WhereaboutsView["houseEvent"]>["kind"]; field?: EntityId[] } | null {
+    const s = this.live;
+    if (!s) return null;
+    if (s.competition) { // a staged comp is running ⇒ its real field is authoritative
+      return { kind: s.competition.comp, field: [...s.competition.field] };
+    }
+    const p = s.pending;
+    if (!p) return null;
+    if (p.kind === "comp-intent" || p.kind === "comp-round") { // a comp surfaced but not yet staged
+      if (p.comp === "veto-competition") return { kind: "veto-competition", field: s.vetoField ? [...s.vetoField] : [] };
+      const finalThree = s.active.length === 3; // Final 3 lifts the outgoing-HOH restriction
+      return { kind: "hoh-competition", field: s.active.filter((id) => finalThree || id !== s.outgoingHoh) };
+    }
+    if (p.kind === "nominations") return { kind: "nominations" };
+    if (p.kind === "veto-decision" || p.kind === "replacement" || p.kind === "houseguests-choice") return { kind: "veto-ceremony" };
+    if (p.kind === "eviction-vote" || p.kind === "tie-break" || p.kind === "final-eviction") return { kind: "eviction" };
+    return null;
+  }
+
   whereabouts(): WhereaboutsView | null {
     if (!this.house || !this.presence) return null;
     const me = this.house.player.id;
     const room = this.presence.get(me);
     if (!room) return null; // the player is nowhere (out of the house)
+    // 0106: a whole-house EVENT (a comp or a ceremony) is an EXCLUSIVE set-piece — the whole house is
+    // gathered, there are NO side rooms to slip into, and nobody is off scheming. For a comp the field is
+    // split into competitors + spectators (the outgoing HOH among the watchers). A purely observational
+    // override of the live presence read (it never touches the seeded sim).
+    const ev = this.houseEventInSession();
+    if (ev) {
+      const named = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });
+      const others = this.livingIds().filter((id) => id !== me);
+      const compSplit = ev.field
+        ? (() => {
+            const field = new Set(ev.field!);
+            return {
+              competing: others.filter((id) => field.has(id)).map(named),
+              spectating: others.filter((id) => !field.has(id)).map(named), // incl. the outgoing HOH
+              youAreCompeting: field.has(me),
+            };
+          })()
+        : {};
+      return {
+        room,
+        present: others.map(named),       // the whole house is gathered for the event
+        nearby: [],                       // no side rooms during a whole-house event
+        turnsHere: this.presenceTenure?.get(me) ?? 0,
+        companions: others.map((id) => ({ ...named(id), turnsHere: 0 })),
+        tracked: [],
+        houseEvent: { kind: ev.kind, ...compSplit },
+      };
+    }
     // ADR 0006: as the night thins, houseguests who have turned in are no longer "around" — the house
     // empties for the player. `null` when the clock is off ⇒ everyone shows ⇒ byte-identical whereabouts.
     const awake = this.awakeNow();
