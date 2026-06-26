@@ -32,6 +32,10 @@ const BINARY_EXTENSIONS =
 const REDACTION_TEST_FIXTURES = new Set([
   "features/step_definitions/defensive_hardening.steps.ts",
   "frontend/tests/test_secret_redaction.py",
+  // Scrub-coverage fixtures carrying obviously-fake key shapes to prove the censor/settings
+  // scrubber catches token SHAPES (not real secrets) — exact-path exempt, same as above.
+  "frontend/tests/test_censor_no_overmatch.py",
+  "frontend/tests/test_settings_scrub_allowlist.py",
 ]);
 
 function inScope(f: string): boolean {
