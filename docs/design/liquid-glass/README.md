@@ -6,6 +6,8 @@ the glass system** — all of it was researched from Apple-authentic sources and
 so it survives (the live work happened in an ephemeral scratchpad). When changing any glass
 surface, read this first.
 
+> **See also:** [`../APPLE_GENIUS.md`](../APPLE_GENIUS.md) — the "apple genius" design-reviewer SOUL: the operating distillation of this knowledge base into a reusable HIG-parity review voice.
+
 ## Contents
 
 | File | What it is |
