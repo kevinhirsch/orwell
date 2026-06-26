@@ -121,6 +121,70 @@ game/illusion · `[POLISH]` noticeable but survivable · `[NIT]` tiny · `[LATEN
 - **Persona consistency** — NPCs held distinct, stable voices across turns (Asher's rambling, hands-
   talking "respect someone who gets the game"; Jett's watchful, gap-toothed, not-victimized read on his
   own nomination).
+- **The FULL SEASON completes (structural, model-free fast-forward) — and it's canon.** Driven
+  engine-direct from Week 3, the cast thinned **16 → Final 2** across Weeks 3–14 (real roster, in
+  sequence); the player (Theo) rode to the **Final 2**; each finalist took questions from **9 jurors**
+  (**Jury of 9** ✓); the **jury vote was revealed per-juror** ("Lara Baker votes for Trent Tucker" —
+  attributed at the finale, the canon contrast to the secret eviction ballots); **Trent Tucker won 9–0**.
+  Anti-sycophancy held at the finale (player lost) and the **anti-floater jury calibration showed** — a
+  passive floater who won no comps got **0 jury votes**. No Vault score-keys (`trust/threat/affinity/
+  soul`) appeared in the player-facing status across the endgame.
+
+---
+
+## Coverage & blind spots (what was / was NOT tested — read this before trusting the verdict)
+
+**Owner follow-up requested (2026-06-26):** a **live-LLM (model) review of the endgame moments** that
+were driven model-free below. *Not done in this pass.* This section is the explicit map of that gap and
+every other blind spot, so the verdict above is read with the right scope.
+
+### Tier A — tested LIVE (real `deepseek/deepseek-v4-pro` narration, real FE, ~30 turns)
+Casting interview → premiere/meet-all-15 → bedroom pick → **Week 1** (HOH comp + intent card, HOH social
+pitch, the un-narrated noms, veto chip-draw/comp/ceremony, eviction *up to the wedge*) → **Week 2** (HOH
+comp, HOH pitch, un-narrated noms, veto, eviction *up to the wedge*) → **Week 3** HOH-comp start + the
+desync-recovery turn. This is the basis for every leak / persona / parity / sync claim above.
+
+### Tier B — tested MODEL-FREE (engine + EchoNarrator; structure & Vault-safety only, **NO live narration**)
+The actual eviction *commits* for W1/W2 (vote tally, NPC goodbyes, player goodbye, `eviction-result`);
+the entire **Weeks 3-eviction → 14 fast-forward**; the **finale** (finalist statements, the 9-juror
+Q&A via `finale-answer` appeals, the per-juror jury-vote reveal, the winner crown); reaching post-season.
+Decisions here were **auto-resolved with arbitrary defaults** (nominate the first two options, vote the
+first, veto-not-used, appeal `own-game`) — so the *specific* outcomes (who left each week, the 9–0 vote)
+are artifacts of those defaults, **not** strategic play. What's validated is the **structure + Vault-
+safety + canon shape**, NOT narration quality or balance.
+
+### Tier C — NOT tested at all (blind spots)
+1. **LIVE endgame narration** (the requested follow-up) — finale statements, juror Q&A, the jury-vote
+   reveal, the winner announcement, the post-season **retrospective/Vault unseal**: all reached model-
+   free. Whether the live model stays grounded / in-persona / leak-free across a 9-juror finale is unknown.
+2. **LIVE eviction-subloop narration** — the live model *wedged* before the vote/goodbye/result every
+   time (F14/F16), so how it narrates a *committed* eviction live was never observed.
+3. **FE decision-CARD rendering** for `eviction-vote`, `goodbye-message`, `replacement`, `finale-
+   answer/-statement`, `juror-vote` — all submitted engine-direct here; their live FE card rendering is
+   unverified (and F14 shows at least the eviction cards don't surface in chat).
+4. **Replacement-nominee flow** — the veto was never *used* (the HOH held it both live weeks), so
+   veto-use → replacement nomination is untested. **"Houseguest's Choice" chip (F13)** never surfaced.
+5. **Tie-breaks** — HOH breaking an eviction tie, and the last-juror breaking a jury tie — never occurred.
+6. **The hidden layer (priority-#1 mandate)** — off-screen NPC-to-NPC scheming, gossip diffusion, deals,
+   blocs, confessionals, and whether the Soul/relationship weights **accumulate & deepen** (non-
+   degradation) — only the player-facing surface was visible; the Vault itself was **not** inspected
+   (that's the held Producer's-Vault export). One positive continuity signal seen: the model recalled
+   Theo's Week-1 Asher thread in Week 2.
+7. **Diary Room / confessionals** (player OOC channel) — not exercised.
+8. **In-character images / portraits** — no image provider wired (text model only); headshot/cast-photo
+   generation likely no-op'd and was untested.
+9. **Multi-device / concurrency / cross-tab sync** (ADR 0008/0064) — single browser context only.
+10. **Mobile / responsive** — desktop 1440×900 only; no mobile viewport / touch.
+11. **Time/sleep economy depth** — saw time-of-day advance (Morning→Afternoon→Night) but did not probe
+    the nightly presence economy or the hidden sleep/rest competition penalty (0066).
+12. **Model coverage** — only `deepseek/deepseek-v4-pro` (the OOB default) was genuinely played; the one
+    gpt-4o attempt was on a stale session (invalid). Pro-vs-Flash tier behavior untested.
+13. **Replayability** — one cast/seed only; no second season / seed-variation check.
+14. **Performance & cost** — no latency/token-cost measurement over a *live* full game (the long run was
+    model-free). Live turns on the reasoning model were ~30–90s each.
+15. **Admin/God-Mode Vault isolation, settings surfaces, TTS/audio** — not exercised.
+16. **The DEBUG BUNDLE + Producer's Vault JSON export** — **held** pending the owner's "testing over"
+    confirmation (so the Vault's actual hidden-layer richness is unverified — see #6).
 
 ---
 
