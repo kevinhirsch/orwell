@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { humanizeIds, humanizeForRetrospective } from "../../src/adapters/engine/humanize";
+import { confidenceWord, makeForPlayerScrub } from "../../src/domain/humanize";
 import { PLAYER, npc } from "../../src/domain/ids";
 
 /**
@@ -159,5 +160,52 @@ describe("0048 — humanizeForRetrospective resolves embedded ids + de-slugs, ke
     // And the bare vocation string on its own (as it sits in the corpus) is a no-op, with or without a roster.
     expect(humanizeForRetrospective("professional poker player", roster)).toBe("professional poker player");
     expect(humanizeForRetrospective("professional poker player", [])).toBe("professional poker player");
+  });
+});
+
+/**
+ * PV2 (#997) — the overhear/gossip surfacing PREFIX must render from real belief state: a never-empty
+ * SOURCE word and a GRADED confidence vocabulary, never the flat literal that rendered "(, muffled)"
+ * (empty source) and a single repeated "muffled" all season. Roles only — no fixture names.
+ */
+describe("PV2 (#997) — confidenceWord grades belief certainty into a clarity vocabulary", () => {
+  it("maps the [0,1] confidence band to a decaying clarity word, and clamps out-of-range", () => {
+    expect(confidenceWord(0.95)).toBe("clearly");
+    expect(confidenceWord(0.6)).toBe("mostly");
+    expect(confidenceWord(0.45)).toBe("muffled");
+    expect(confidenceWord(0.3)).toBe("faintly");
+    expect(confidenceWord(0.05)).toBe("barely");
+    // graded + monotonic: higher confidence is never a vaguer word
+    const words = [0, 0.25, 0.4, 0.55, 0.75, 1].map(confidenceWord);
+    expect(new Set(words).size).toBeGreaterThan(1); // genuinely graded, not flat
+    // bounded — a stray out-of-range value never throws or leaks a number
+    expect(confidenceWord(5)).toBe("clearly");
+    expect(confidenceWord(-2)).toBe("barely");
+  });
+});
+
+describe("PV2 (#997) — the overhear surfacing prefix renders with source + graded confidence", () => {
+  it("NEVER renders an empty source (the `(, muffled)` regression) — `overheard` is preserved", () => {
+    const long = "(overheard, muffled) The Floater clashed with The Veteran — they argued the noms in front of the whole house…";
+    for (const rendered of [makeForPlayerScrub([])(long), humanizeForRetrospective(long, [])]) {
+      expect(rendered).not.toMatch(/^\(\s*,/);          // never a gutted, sourceless prefix
+      expect(rendered).toMatch(/^\(overheard, /);        // the source word is intact
+    }
+  });
+
+  it("grades the confidence word by how much of the scene was caught (varied, not one flat 'muffled')", () => {
+    const tiny = "(overheard, muffled) they schemed…";
+    const big = "(overheard, muffled) The Floater clashed with The Veteran — they argued the noms in front of the whole house and it nearly came to blows…";
+    const scrub = makeForPlayerScrub([]);
+    const wordOf = (s: string) => /^\(overheard, (\w+)\)/.exec(scrub(s))?.[1];
+    expect(wordOf(tiny)).toBeTruthy();
+    expect(wordOf(big)).toBeTruthy();
+    expect(wordOf(tiny)).not.toBe(wordOf(big));         // a faint snatch reads differently from a clear earful
+  });
+
+  it("is idempotent and leaves non-overhear prose untouched", () => {
+    const once = makeForPlayerScrub([])("(overheard, muffled) a quiet plan about the votes…");
+    expect(makeForPlayerScrub([])(once)).toBe(once);    // re-running does not re-grade
+    expect(makeForPlayerScrub([])("word around the house is they are scheming")).toBe("word around the house is they are scheming");
   });
 });
