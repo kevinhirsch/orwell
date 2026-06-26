@@ -4716,11 +4716,29 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 prewarmed = False
 
             if prewarmed:
+                # The gated portrait warm shoots only AFTER authoring fully finishes (ADR 0013), and it
+                # DECLINES outright if author warm never actually started. #976: at unseal that left faces
+                # deferred to the lazy cast-window backfill whenever the warm-gate no-op'd. So always TRY
+                # the gated warm, then VERIFY it actually started portraits — if it declined / didn't
+                # (portraitsStarted still false), fall through to the same unconditional seeded-facet kick
+                # the no-prewarm branch uses, so generation begins immediately at season start. Idempotent
+                # (generate_and_store skips faces already on disk), budget-bounded (routes through the
+                # standard pipeline), fail-soft (no image provider ⇒ silent no-op), Vault-free (the same
+                # public-facet prompts). The background authored-portrait top-up below still runs.
+                portraits_started = False
                 try:
                     from src import orwell_prewarm
                     await orwell_prewarm.warm_portraits(owner)  # gated: never shoots before authoring done
+                    portraits_started = bool(
+                        orwell_prewarm.warm_state(owner).get("portraitsStarted", False))
                 except Exception:
-                    pass
+                    portraits_started = False
+                if not portraits_started and prompts:
+                    try:
+                        from src import orwell_portraits
+                        orwell_portraits.kickoff_generation(prompts, owner)
+                    except Exception:
+                        pass  # immediate kick is best-effort — never let it affect game start
             else:
                 # FALLBACK (no pre-warm — no model at casting open, or the trigger didn't fire): the
                 # original in-line pipeline. (a) start the move-in portraits NOW from the seeded facets,
