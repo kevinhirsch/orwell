@@ -329,11 +329,113 @@ def test_no_new_above_composer_affordance_hand_rolls_its_anchor():
         # only flag a file that ALSO anchors to the composer bar (so a generic `insertBefore(x,
         # bar)` in an unrelated list isn't a false positive)
         if ".chat-input-bar" in src and rx.search(src):
-            # chat.js's import-prompt banner anchors to #chat-bar and auto-dismisses — it is a
-            # transient TOAST, not a persistent affordance (classified out, like the in-stream
-            # notices). It does NOT use .chat-input-bar; this guard keys on .chat-input-bar.
+            # #951: chat.js's import-prompt banner was migrated ONTO the kit (it now composes
+            # window.OrwellNoticeKit.create, a "continue"-kind above-composer notice), so it no
+            # longer hand-rolls an anchor at all. This guard keys on .chat-input-bar regardless.
             rogue[name] = True
     assert not rogue, (
         f"NEW above-composer affordance(s) {sorted(rogue)} hand-roll an anchor against the "
         ".chat-input-bar — compose window.OrwellNoticeKit (the ONE stacked zone), #642."
+    )
+
+
+# ── #951: UNIFY ALL notifications onto the kit — the toast system + the import-prompt banner ──────
+#
+# Every notification surface must share the kit's ONE chrome/icon/dismiss/motion/a11y contract
+# (the "Reconnecting to Big Brother…" banner format). The legacy `.toast` system (showToast /
+# showError in ui.js) is now a kit consumer at the new "toast" placement, and chat.js's
+# import-prompt banner composes the kit too. These gates pin that and prevent the old bespoke
+# look from regrowing.
+
+
+def test_kit_supports_the_toast_placement():
+    kit = _read("static", "js", KIT)
+    # the new ephemeral-toast placement + its separate corner host
+    assert '"toast"' in kit or "toast" in kit
+    assert "orwell-notice-toast" in kit                 # the corner-toast host id
+    # the toast keeps the .on-card chrome but its OWN slide-from-right entrance/exit (mirrors the
+    # legacy toast motion) — both reduced-motion guarded with the rest.
+    assert "on-anim-toast-in" in kit and "on-anim-toast-out" in kit
+    # auto-dismiss (a toast is ephemeral) lives in the kit, not the consumer
+    assert "autoDismissMs" in kit and "_armAutoDismiss" in kit
+    # swipe-to-dismiss for touch is kit-owned now (moved out of ui.js)
+    assert "_wireSwipe" in kit
+
+
+def test_toast_placement_motion_is_reduced_motion_guarded():
+    kit = _read("static", "js", KIT)
+    # the toast slide-in/out join the same prefers-reduced-motion strip as the zone/banner anims
+    import re
+    m = re.search(r"prefers-reduced-motion: reduce\s*\)\s*\{([^}]*on-anim[^}]*)\}", kit)
+    assert m, "expected a reduced-motion block listing the kit animations"
+    block = m.group(1)
+    assert "on-anim-toast-in" in block and "on-anim-toast-out" in block, (
+        "the toast slide-in/out must be stripped under prefers-reduced-motion like every other "
+        "kit animation (#951)."
+    )
+
+
+def test_toast_severity_drives_role_and_arialive():
+    # #951: a toast's role/aria-live track its severity — an error/warn toast is consequential
+    # (role=alert, aria-live=assertive); a plain/success toast is a passive confirmation
+    # (role=status, aria-live=polite). This is the legacy showError's assertive announcement,
+    # preserved through the kit.
+    kit = _read("static", "js", KIT)
+    assert "_liveFor" in kit
+    # the toast branch maps error/warn → alert/assertive
+    assert "alert" in kit and "status" in kit
+    assert "assertive" in kit and "polite" in kit
+
+
+def test_showtoast_routes_through_the_kit_not_the_legacy_toast():
+    # The central toast API (ui.js showToast/showError) must compose the kit, NOT touch the old
+    # `.toast` element/classes — that is the unification (#951). The old hand-rolled DOM
+    # (#toast element, .toast/.show/.exiting classes, _wireToastSwipe) is gone from ui.js.
+    ui = _read("static", "js", "ui.js")
+    assert "OrwellNoticeKit.create(" in ui, (
+        "ui.js showToast/showError must compose window.OrwellNoticeKit (the toast placement) — #951."
+    )
+    assert "placement: 'toast'" in ui or 'placement: "toast"' in ui
+    # the legacy toast DOM is no longer driven from ui.js
+    assert "getElementById('toast')" not in ui and 'getElementById("toast")' not in ui, (
+        "ui.js must not drive the legacy #toast element anymore — route through the kit (#951)."
+    )
+    assert "classList.add('show')" not in ui and "classList.add('exiting')" not in ui, (
+        "ui.js must not toggle the legacy .toast .show/.exiting classes — the kit owns toast motion."
+    )
+    assert "_wireToastSwipe" not in ui, (
+        "swipe-to-dismiss moved into the kit (_wireSwipe) — ui.js must not re-implement it (#951)."
+    )
+    # the public API names are unchanged (88 callers depend on them)
+    assert "export function showToast(" in ui
+    assert "export function showError(" in ui
+
+
+def test_showtoast_preserves_action_and_icon_semantics():
+    # The unified toast still supports the legacy action affordance (Undo + Ctrl-Z hint + ×) and
+    # the leading icons (check → success severity, spinner → in-progress) — only the CHROME changed.
+    ui = _read("static", "js", "ui.js")
+    # the action button / hint / dismiss-× path is preserved
+    assert "actionLabel" in ui and "actionHint" in ui
+    # leadingIcon 'check' maps to the kit's success severity (its mono check glyph)
+    assert "'check'" in ui or '"check"' in ui
+    assert "success" in ui
+    # the spinner whirlpool (a live cue the static icon set doesn't cover) still renders
+    assert "createWhirlpool" in ui
+
+
+def test_import_prompt_banner_composes_the_kit():
+    # #951: chat.js's "Import to document library?" prompt was a hand-rolled above-composer banner
+    # with its own anchor + × ; it now composes the kit (a "continue"-kind notice), so it shares
+    # the ONE chrome/dismiss/motion/a11y contract.
+    chat = _read("static", "js", "chat.js")
+    assert "OrwellNoticeKit.create(" in chat, (
+        "chat.js's import-prompt banner must compose the OrwellNotice kit (#951)."
+    )
+    # it no longer hand-rolls its own .import-prompt-banner div / insertBefore against #chat-bar
+    assert "className = 'import-prompt-banner'" not in chat, (
+        "chat.js re-grew the bespoke .import-prompt-banner shell — compose the kit (#951)."
+    )
+    assert "import-prompt-dismiss" not in chat, (
+        "chat.js re-grew its bespoke dismiss × — the kit owns the ONE dismiss affordance (#951)."
     )

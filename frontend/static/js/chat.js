@@ -870,21 +870,26 @@ import { isNarrow } from './platform.js';
         chatRenderer.updateMessageAttachments(_userMsgEl, _pendingAttachInfo);
       }
 
-      // Offer to import text files to document library
-      if (_importableFiles.length > 0) {
-        const existing = document.getElementById('import-prompt-banner');
-        if (existing) existing.remove();
-        const banner = document.createElement('div');
-        banner.id = 'import-prompt-banner';
-        banner.className = 'import-prompt-banner';
+      // Offer to import text files to document library. #951: routed through the OrwellNotice kit
+      // (an above-composer "continue"-kind notice) so it shares the ONE chrome/dismiss/motion/a11y
+      // contract instead of hand-rolling its own banner + anchor + ×. Auto-dismisses after 15s.
+      if (_importableFiles.length > 0 && window.OrwellNoticeKit) {
         const label = _importableFiles.length === 1
           ? `Import "${_importableFiles[0].info.name}" to document library?`
           : `Import ${_importableFiles.length} files to document library?`;
-        const textEl = document.createElement('span');
-        textEl.textContent = label;
-        banner.appendChild(textEl);
+        const _imp = window.OrwellNoticeKit.create({
+          id: 'import-prompt-banner',
+          kind: 'continue',         // a quiet, dismissible above-composer nudge
+          title: label,
+          dismissible: true,
+          persistDismiss: false,    // transient: it must reappear on a future upload, not "forever"
+          autoDismissMs: 15000,
+        });
+        const body = document.createElement('span');
+        body.style.cssText = 'display:inline-flex;align-items:center;';
         const importBtn = document.createElement('button');
         importBtn.textContent = 'Import';
+        importBtn.style.cssText = 'padding:2px 12px;border:1px solid var(--fg);border-radius:4px;background:none;color:var(--fg);cursor:pointer;font-size:12px;';
         importBtn.addEventListener('click', async () => {
           importBtn.disabled = true;
           importBtn.textContent = 'Importing…';
@@ -904,19 +909,12 @@ import { isNarrow } from './platform.js';
               imported++;
             } catch (e) { console.error('Import failed:', info.name, e); }
           }
-          banner.textContent = `Imported ${imported} file${imported !== 1 ? 's' : ''}`;
-          setTimeout(() => banner.remove(), 2000);
+          _imp.update({ title: `Imported ${imported} file${imported !== 1 ? 's' : ''}`, body: '' });
+          setTimeout(() => _imp.hide(), 2000);
         });
-        banner.appendChild(importBtn);
-        const dismissBtn = document.createElement('button');
-        dismissBtn.textContent = '\u00d7';
-        dismissBtn.className = 'import-prompt-dismiss';
-        dismissBtn.addEventListener('click', () => banner.remove());
-        banner.appendChild(dismissBtn);
-        const chatBar = document.getElementById('chat-bar');
-        if (chatBar) chatBar.parentNode.insertBefore(banner, chatBar);
-        // Auto-dismiss after 15 seconds
-        setTimeout(() => { if (banner.parentNode) banner.remove(); }, 15000);
+        body.appendChild(importBtn);
+        _imp.show();
+        _imp.setBody(body);
       }
 
       // Auto-save document editor content before sending so the AI sees latest text
