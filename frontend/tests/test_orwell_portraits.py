@@ -138,6 +138,115 @@ def test_portraits_start_immediately_not_chained_behind_authoring(tmp_portraits,
     assert "player_name" not in str(captured.get("cast"))
 
 
+# --- #976: the prewarmed branch must still shoot when the gated warm declines/no-ops -------
+# When author warm ran during the interview, createCharacter routes portraits through the GATED
+# `warm_portraits` (ADR 0013). But that warm DECLINES outright when author warm never truly started,
+# and otherwise holds each face on a per-NPC authoring gate — so at unseal it can leave
+# `portraitsStarted` false and NOTHING shoots, deferring every face to the lazy cast-window backfill.
+# The fix: after the gated warm, if portraits still didn't start, fall through to the same
+# unconditional seeded-facet `kickoff_generation` the no-prewarm branch uses, so faces start at
+# season start, not on cast-window open.
+
+def test_prewarmed_branch_falls_through_to_kickoff_when_warm_declines(tmp_portraits, monkeypatch):
+    """#976 — prewarmed, but the gated portrait warm declines/no-ops (portraitsStarted stays false):
+    createCharacter must STILL kick `kickoff_generation` immediately, not defer to the backfill."""
+    tool_impl = importlib.import_module("src.tool_implementations")
+    prewarm = importlib.import_module("src.orwell_prewarm")
+
+    async def fake_create(*a, **k):
+        return {"started": True, "portraitPrompts": _PROMPTS}
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+
+    # Author warm ran during the interview → createCharacter takes the PREWARMED branch.
+    monkeypatch.setattr(prewarm, "warm_state",
+                        lambda user=None: {"authorStarted": True, "portraitsStarted": False})
+
+    # The gated warm DECLINES / no-ops (e.g. author warm never really started, or its faces are all
+    # still held on the authoring gate) — it does NOT start portraits.
+    warm_called = {"n": 0}
+
+    async def fake_warm(user=None):
+        warm_called["n"] += 1
+        return {"started": False, "reason": "author-warm-not-started"}
+    monkeypatch.setattr(prewarm, "warm_portraits", fake_warm)
+
+    captured = {}
+
+    def fake_kickoff(prompts, user):
+        captured["prompts"] = prompts
+        captured["user"] = user
+    monkeypatch.setattr(orwell_portraits, "kickoff_generation", fake_kickoff)
+
+    res = _run(tool_impl.do_create_character('{"playerName":"P"}', owner="bob"))
+    assert res["exit_code"] == 0
+    # The gated warm was attempted (idempotent kick preserved) …
+    assert warm_called["n"] == 1
+    # … and because it declined, generation STILL started immediately (no backfill deferral).
+    assert captured.get("user") == "bob"
+    assert captured.get("prompts") == _PROMPTS
+
+
+def test_prewarmed_branch_does_not_double_shoot_when_warm_started_portraits(tmp_portraits, monkeypatch):
+    """#976 idempotency guard — when the gated warm DID start portraits (portraitsStarted true), the
+    fall-through must NOT also fire `kickoff_generation` (no duplicate generation / double budget)."""
+    tool_impl = importlib.import_module("src.tool_implementations")
+    prewarm = importlib.import_module("src.orwell_prewarm")
+
+    async def fake_create(*a, **k):
+        return {"started": True, "portraitPrompts": _PROMPTS}
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+
+    monkeypatch.setattr(prewarm, "warm_state",
+                        lambda user=None: {"authorStarted": True, "portraitsStarted": True})
+
+    async def fake_warm(user=None):
+        return {"started": True}
+    monkeypatch.setattr(prewarm, "warm_portraits", fake_warm)
+
+    called = {"n": 0}
+
+    def fake_kickoff(prompts, user):
+        called["n"] += 1
+    monkeypatch.setattr(orwell_portraits, "kickoff_generation", fake_kickoff)
+
+    res = _run(tool_impl.do_create_character('{"playerName":"P"}', owner="bob"))
+    assert res["exit_code"] == 0
+    # The gated warm owns the faces — the immediate kick must NOT also fire.
+    assert called["n"] == 0
+
+
+def test_prewarmed_fall_through_is_fail_soft_with_no_image_provider(tmp_portraits, monkeypatch):
+    """#976 fail-soft — the declined-warm fall-through routes through the standard, availability-gated
+    pipeline; with NO image provider it is a silent no-op that NEVER raises / blocks game start."""
+    tool_impl = importlib.import_module("src.tool_implementations")
+    prewarm = importlib.import_module("src.orwell_prewarm")
+
+    async def fake_create(*a, **k):
+        return {"started": True, "portraitPrompts": _PROMPTS}
+    monkeypatch.setattr(orwell_engine, "create_character", fake_create)
+
+    monkeypatch.setattr(prewarm, "warm_state",
+                        lambda user=None: {"authorStarted": True, "portraitsStarted": False})
+
+    async def fake_warm(user=None):
+        return {"started": False, "reason": "author-warm-not-started"}
+    monkeypatch.setattr(prewarm, "warm_portraits", fake_warm)
+
+    # No image provider → generation is unavailable; the real kickoff/generate path must no-op silently.
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+
+    async def boom(prompt, user, reference_png=None):
+        raise AssertionError("generation must not run when unavailable")
+    # Force the availability gate closed so the whole pipeline is a true no-op even if scheduled.
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: False)
+    monkeypatch.setattr(orwell_portraits, "_generate_one", boom)
+
+    res = _run(tool_impl.do_create_character('{"playerName":"P"}', owner="carol"))
+    # Game start completed cleanly; nothing raised; no portraits dir created.
+    assert res["exit_code"] == 0
+    assert not (tmp_portraits / "carol").exists()
+
+
 # --- graceful absence: skip silently when generation is unavailable ---------------------
 
 def test_skips_silently_when_generation_unavailable(tmp_portraits, monkeypatch):
