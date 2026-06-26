@@ -117,6 +117,24 @@ many parallel agents, not typing every edit myself.
     already merging the same fix (#943) — a wasted duplicate (it luckily never pushed). Before fanning
     out, check `git log origin/main` AND the open-PR list for work the other session may already have in
     flight; a just-merged PR can also moot a queued item (it dropped NARR-5 + FEPY-3 from #620/#621).
+15. **"Healthy locally, refuses on the LAN" = loopback bind, not a dead service.** A destroy+rebuild
+    (`orwell-rebuild.sh`) preserves **only `GIT_TOKEN`** — everything else in `data/.env` is wiped,
+    including any `ORWELL_BIND_HOST=0.0.0.0` override. The frontend unit defaults to `127.0.0.1`, so a
+    rebuilt box passes its OWN login-panel healthchecks ("engine ● up / frontend ● up / tiers ● agree /
+    :80") while every LAN browser gets **connection refused**. The panel even advertises `play
+    http://<lan-ip>:80` — a URL that's refused. When "connection refused" coexists with a green panel,
+    suspect the bind host first: `grep ORWELL_BIND_HOST /opt/orwell/data/.env` + `curl 127.0.0.1:<port>`
+    (answers locally ⇒ wrong IP/port or loopback bind; also refused ⇒ a unit failed). Quick fix:
+    `echo 'ORWELL_BIND_HOST=0.0.0.0' >> data/.env && systemctl restart orwell-frontend`. Structural fix
+    shipped #958 (installer prompts + persists the bind host; rebuild salvages it). NB: enabling local
+    HTTPS *re-pins* it to loopback on purpose — the TLS terminator becomes the only LAN entrypoint.
+16. **"Reset" ≠ "rebuild" — clarify which before diagnosing.** The owner said "factory reset" but had run
+    a destroy+**rebuild**. The three reset tiers (factory/oobe/game) NEVER touch the root password and
+    NEVER destroy the container — they scrub app data + restart services (factory-reset just delegates to
+    oobe-reset). A **rebuild** destroys the LXC and `pct create` sets **no** root console password by
+    default (and rebuild doesn't carry the old one forward) ⇒ console login is *disabled*, use `pct enter
+    <CTID>` from the host. So "did the reset change my root password?" → no; "I can't console-login after a
+    rebuild" → expected, set one with `chpasswd` or `CT_ROOT_PASSWORD`. Always pin down reset-vs-rebuild.
 
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,
@@ -203,6 +221,35 @@ full open-issue backlog**, then ran an **oldest-first implementation sweep**.
   ONE combined agent. **Drop NARR-5 (done via #943) and FEPY-3 (done via #572)** — both already on main.
 - then **#626 → #655 → #659 → #663 → #71x/#72x Glass → #82x chat**, folding in the **verify-and-closes**
   for **#827/#835/#890** (already fixed on main, just never closed).
+
+## Where things stand (2026-06-26 — the deploy-debug + wind-down session)
+A continuation that started as a UX-merge wind-down and pivoted to a **live prod/dev deploy incident**.
+Merge authority delegated throughout; dispatched worktree agents, reviewed, relayed visuals, merged on green.
+- **Merged this session (4 PRs):** **#956** notification unification (all toasts/banners onto the
+  `OrwellNotice` kit — toast placement added, ~88 callers routed, engine-status "Big Brother" string left
+  untouched); **#957** archived the Apple-HIG **"apple genius"** design corpus + distilled
+  `docs/design/APPLE_GENIUS.md` (docs-only — the corpus was already on main; the new doc is the reusable
+  reviewer persona); **#958** the deploy bind-host fix (lesson 15 — installer prompts + persists
+  `ORWELL_BIND_HOST`, rebuild salvages it, login panel advertises the URL that actually works); **#959**
+  merged the status gadget's redundant name-list into the cast photo gallery (one roster surface; cast
+  docks expanded under the time-of-day gadget — FE suite 3251 green).
+- **The deploy incident (owner-facing, resolved with a one-liner + a structural PR):** owner ran
+  `orwell-rebuild.sh` on BOTH dev (204/orwelldev01) and prod (205/orwellprod01); both "refused to connect"
+  while their login panels showed healthy. Root cause = the rebuild wiped `ORWELL_BIND_HOST=0.0.0.0` from
+  `data/.env` (preserves only `GIT_TOKEN`) → loopback-only bind (lessons 15 + 16). Immediate fix handed to
+  the owner: `for ct in 204 205; do pct exec $ct -- bash -c "grep -q '^ORWELL_BIND_HOST=' …|| echo
+  'ORWELL_BIND_HOST=0.0.0.0' >> /opt/orwell/data/.env; systemctl restart orwell-frontend"; done`.
+- **"apple genius" finding:** no file literally named that exists — it's the owner's shorthand for the
+  Apple-HIG reviewer role. The knowledge base is `docs/design/liquid-glass/` (already on main); #957 adds
+  the SOUL-style `docs/design/APPLE_GENIUS.md` distillation. The `claude/liquid-glass-genius` branch (PR
+  #709, the Glass-theme work) is still **unmerged and parked** — that's the 3-tier Glass plan in
+  `~/.claude/plans/mighty-crunching-honey.md`, paused for owner approval (parity is the owner's call).
+- **⚠️ Still owed by the owner (carry forward):** **ROTATE the two secrets** pasted in earlier sessions
+  (the OpenRouter `sk-or-…` key in `scratchpad/.or_key` + the GitHub PAT `ghp_…`) — both used live,
+  runtime-only, never committed; still need rotating. And run the prod/dev rebuild verification once the
+  bind one-liner is in (the A4/#010 single-PAT deploy check).
+- **Still held (do NOT build until owner rules):** the Glass 3-tier theme plan (#709 / the plan file);
+  day-1 PO-questions #916/#917/#918; the "Big Brother" → "Orwell" engine-status chrome rename question.
 
 ## How to resume
 1. Read `CLAUDE.md` (authoritative), then `docs/features/README.md` + `git log --oneline` for live
