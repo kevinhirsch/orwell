@@ -149,6 +149,14 @@ APP_DIR="${APP_DIR:-/opt/orwell}"
 # helper from then on (updates/resets never re-prompt).
 GIT_TOKEN="${GIT_TOKEN:-}"
 ORWELL_PORT="${ORWELL_PORT:-${BBAI_PORT:-8080}}"   # ORWELL_* primary; BBAI_* deprecated fallback
+# Trusted-LAN exposure (feature 0067 / ADR 0007). The systemd unit's BUILT-IN default is loopback
+# (127.0.0.1), which is correct ONLY behind a reverse proxy / HTTPS / tunnel — a plain LAN browser
+# then gets "connection refused". This self-hosted app is reached DIRECTLY on the LAN in the common
+# case, so the installer DEFAULTS to binding all interfaces (0.0.0.0) and PERSISTS that choice into
+# data/.env (so a rebuild stays reachable). Set ORWELL_BIND_HOST=127.0.0.1 (or answer "no" to the
+# prompt) to keep loopback for the proxy/HTTPS case. If local HTTPS is later enabled,
+# orwell-https.sh re-pins this to 127.0.0.1 (the terminator becomes the only LAN entrypoint).
+ORWELL_BIND_HOST="${ORWELL_BIND_HOST:-0.0.0.0}"
 # Optional container root password (console login). pct enter from the host never needs one;
 # without it the LXC console rejects every login (pct create sets no password by default).
 CT_ROOT_PASSWORD="${CT_ROOT_PASSWORD:-}"
@@ -180,6 +188,14 @@ if interactive; then
     wt_input NET         "IP — 'dhcp' or CIDR (e.g. 192.168.1.50/24)" "$NET"
     [[ "$NET" != "dhcp" ]] && wt_input GATEWAY "Gateway (for the static IP)" "${GATEWAY:-}"
     wt_input ORWELL_PORT   "orwell UI port"                               "$ORWELL_PORT"
+    # Trusted-LAN exposure decision (default = yes ⇒ bind 0.0.0.0). "No" pins loopback for the
+    # reverse-proxy / HTTPS / tunnel case. Persisted into data/.env by the in-container installer.
+    if whiptail --title "$TITLE" --yes-button "LAN (direct)" --no-button "Behind proxy" --yesno \
+        "Expose the UI on your LAN (a trusted network)?\n\nChoose ${C_BOLD}LAN (direct)${C_OFF} if you'll reach it straight at http://<ip>:${ORWELL_PORT} — the common case for this self-hosted app.\n\nChoose ${C_BOLD}Behind proxy${C_OFF} only if it sits behind a reverse proxy / HTTPS / tunnel (then it stays on loopback, 127.0.0.1)." 16 72; then
+      ORWELL_BIND_HOST="0.0.0.0"
+    else
+      ORWELL_BIND_HOST="127.0.0.1"
+    fi
     wt_password CT_ROOT_PASSWORD "Container root password (console login)\nEmpty = none: 'pct enter ${CTID}' from this host always works without one."
     wt_input BRANCH      "Git branch"                                 "$BRANCH"
     wt_pick_template
@@ -283,13 +299,19 @@ pct exec "$CTID" -- bash -c "set -e; mkdir -p '${APP_DIR}'; cd '${APP_DIR}'; \
 msg "running in-container install (the checked-out deploy/orwell-install.sh)"
 pct exec "$CTID" -- bash -c \
   "export REPO='${REPO}' BRANCH='${BRANCH}' APP_DIR='${APP_DIR}' ORWELL_PORT='${ORWELL_PORT}' \
+          ORWELL_BIND_HOST='${ORWELL_BIND_HOST}' \
           ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' OLLAMA_HOST='${OLLAMA_HOST}'; \
    bash '${APP_DIR}/deploy/orwell-install.sh'"
 
 echo
 echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
 echo "  ${C_BOLD}${C_GRN}orwell is deployed in LXC ${CTID}.${C_OFF}"
-echo "  ${C_BOLD}play:${C_OFF}    http://${IP}:${ORWELL_PORT}"
+if [[ "$ORWELL_BIND_HOST" == "127.0.0.1" ]]; then
+  # Loopback bind: the LAN IP is NOT reachable directly — it sits behind a proxy/HTTPS/tunnel.
+  echo "  ${C_BOLD}play:${C_OFF}    http://127.0.0.1:${ORWELL_PORT}   ${C_DIM}(loopback — reach it via your reverse proxy / HTTPS / tunnel)${C_OFF}"
+else
+  echo "  ${C_BOLD}play:${C_OFF}    http://${IP}:${ORWELL_PORT}"
+fi
 echo "  ${C_DIM}enter:${C_OFF}   pct enter ${CTID}    ${C_DIM}then:${C_OFF} ${C_BOLD}orwell${C_OFF} ${C_DIM}(control panel)${C_OFF}"
 if [[ -n "$CT_ROOT_PASSWORD" ]]; then
   echo "  ${C_DIM}console:${C_OFF} root + the password you set (or 'pct enter ${CTID}' from this host)"

@@ -28,6 +28,13 @@ ENV_FILE="${APP_DIR}/data/.env"
 envv() { grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"' ; }
 ENGINE_PORT="$(envv ORWELL_ENGINE_PORT)"; ENGINE_PORT="${ENGINE_PORT:-$(envv BBAI_ENGINE_PORT)}"; ENGINE_PORT="${ENGINE_PORT:-8765}"
 FE_PORT="$(envv ORWELL_PORT)"; FE_PORT="${FE_PORT:-$(envv BBAI_PORT)}"; FE_PORT="${FE_PORT:-8080}"
+# Bind host decides the reachable URL we advertise (best-effort; the panel must NEVER error a login).
+# 0.0.0.0 ⇒ the LAN IP is reachable directly; 127.0.0.1 ⇒ loopback only (behind a proxy/HTTPS/tunnel),
+# so the LAN IP would be refused. The unit's built-in default is loopback; fall back to that here too.
+BIND_HOST="$(envv ORWELL_BIND_HOST)"; BIND_HOST="${BIND_HOST:-127.0.0.1}"
+# If local HTTPS is on (feature 0074), the real entrypoint is https on :443, not the FE's HTTP port.
+TLS_MODE="$(envv ORWELL_TLS_MODE)"
+TLS_NAME="$(envv ORWELL_TLS_LOCAL_NAMES)"; TLS_NAME="${TLS_NAME%%,*}"
 
 # ---- probes (each bounded; never block the prompt) ----
 # Colour the dots on a real terminal; on a pipe (the admin status page tees this to a log file —
@@ -81,7 +88,17 @@ echo -e "  engine   ${ENGINE_UNIT}   ${dim}unit${off}   ${ENGINE_HTTP}   ${dim}:
 echo -e "  frontend ${FE_UNIT}   ${dim}unit${off}   ${FE_HTTP}   ${dim}:${FE_PORT}${off}${TIERS:+   ${dim}tiers${off} ${TIERS}}"
 echo -e "  recall   ${EMBED}"
 echo -e "  saves    ${SAVES} sandbox(es)   ${dim}load${off} ${LOAD}   ${dim}mem${off} ${MEM}"
-[[ -n "$IP" ]] && echo -e "  play     ${bold}http://${IP}:${FE_PORT}${off}"
+# Advertise the URL that actually works for this bind/TLS posture (never mislead with a refused URL).
+if [[ "$TLS_MODE" == "local" ]]; then
+  # HTTPS terminator out front: reach it over https on the local name (or the LAN IP) — the FE itself
+  # is loopback. Show the name if configured, else fall back to the LAN IP.
+  echo -e "  play     ${bold}https://${TLS_NAME:-${IP:-127.0.0.1}}${off}   ${dim}(local HTTPS)${off}"
+elif [[ "$BIND_HOST" == "127.0.0.1" || "$BIND_HOST" == "localhost" ]]; then
+  # Loopback bind: the LAN IP is refused — advertise loopback and say why.
+  echo -e "  play     ${bold}http://127.0.0.1:${FE_PORT}${off}   ${dim}(loopback — via your proxy/HTTPS/tunnel)${off}"
+elif [[ -n "$IP" ]]; then
+  echo -e "  play     ${bold}http://${IP}:${FE_PORT}${off}"
+fi
 echo -e "  ─────────────────────────────────────────────"
 echo -e "  ${dim}manage:${off} ${bold}orwell${off} ${dim}(menu)${off}   ${dim}or:${off} orwell doctor · orwell update · orwell ready"
 echo -e ""
