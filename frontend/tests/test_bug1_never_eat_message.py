@@ -106,10 +106,15 @@ def test_later_render_block_adopts_the_early_bubble_not_a_duplicate():
 
 def test_client_msg_id_is_single_sourced_for_reconciliation():
     # ADR 0008 temp-id -> server-id reconciliation must still hold: exactly one `_clientMsgId`
-    # declaration (now hoisted to the early block) and it's the one appended to the form data.
-    assert SRC.count("const _clientMsgId = 'c-'") == 1, (
+    # declaration (the early block's) and it's the one appended to the form data. (#985 P2-A: a flushed
+    # outbox send re-uses its queued bubble's pre-stamped id via `_queuedClientMsgId || 'c-'…`, so the
+    # literal generator is wrapped — but there is still exactly ONE `const _clientMsgId =` declaration.)
+    assert SRC.count("const _clientMsgId = ") == 1, (
         "there must be exactly ONE _clientMsgId declaration (the early block's) — the later "
         "duplicate was removed so the temp-id->server-id reconcile uses one stable id."
+    )
+    assert "'c-' + ((window.crypto && crypto.randomUUID)" in SRC, (
+        "the client-temp-id generator (when no queued id is supplied) must remain."
     )
     assert "fd.append('client_msg_id', _clientMsgId)" in SRC, (
         "the optimistic bubble's client_msg_id must still be sent for server reconciliation."
