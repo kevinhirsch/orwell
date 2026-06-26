@@ -120,6 +120,20 @@
              adapt to ITS width (docked-in-rail narrow vs. a widened float), not the viewport. */
           container-type: inline-size;
           container-name: oc-win;
+          /* #977 (regression fix): container-type:inline-size applies INLINE-SIZE CONTAINMENT —
+             the element's width is computed WITHOUT regard to its contents. The kit's resize-cap
+             (#896, windowResize.js naturalContentWidth) measures the window at width:max-content
+             to learn how wide the content genuinely wants; a size-contained box reports ~0 there, so
+             the cap collapsed to min(content~0, viewport) = the kit minimum and the window could no
+             longer be dragged wider (the gallery's responsive @container reflow itself stayed intact —
+             only the OUTER window stopped growing, which froze the reflow at the default 2 columns).
+             contain-intrinsic-size is the standard companion to size containment: it supplies the
+             placeholder size a contained box reports for intrinsic sizing, so naturalContentWidth
+             reads a real "this gallery can use up to ~720px" want (covering the 1->4-column @container
+             range below, the widest breakpoint being >=620px) WITHOUT pinning the live floor — the
+             kit's inline width still governs the rendered size, so the window resizes freely from the
+             kit minimum up to this content cap and the gallery reflows column-count as it grows. */
+          contain-intrinsic-size: auto 720px;
         }
         /* #894: the cast roster is a HORIZONTAL, paged, scroll-snap gallery. At the normal widget
            width exactly 2 columns × 2 rows = 4 photos are visible; the rest of the 16-cast roster
