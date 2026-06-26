@@ -136,6 +136,48 @@ many parallel agents, not typing every edit myself.
     <CTID>` from the host. So "did the reset change my root password?" → no; "I can't console-login after a
     rebuild" → expected, set one with `chpasswd` or `CT_ROOT_PASSWORD`. Always pin down reset-vs-rebuild.
 
+17. **The live-LLM verify-environment recipe — and its four time-eating traps.** Standing up a real
+    engine+FE+model to live-verify an LLM-behavioral fix (the ONLY way to test these — gates stub the
+    narrator) has a precise recipe and traps that ate ~25 min before I pinned them. **Recipe:** build
+    engine (`npm run build`), run it with `ORWELL_ENGINE_TOKEN`; run the FE with `ORWELL_ENGINE_MCP_URL`
+    + `ORWELL_ENGINE_TOKEN` + `AUTH_ENABLED=false`; `POST /api/model-endpoints` (base_url
+    `https://openrouter.ai/api/v1`, api_key); **pin the model** (`PATCH /api/model-endpoints/{id}/models`
+    `{"pinned_models":[...]}`); **stamp the owner** (`UPDATE model_endpoints SET owner='<user>'`); write
+    `default_endpoint_id`+`default_model` straight into `frontend/data/settings.json` (read per-request);
+    drive every request with header `x-orwell-user: <user>`. **Trap A — `skip_probe=true` ⇒ OOBE
+    dead-end.** A skip-probed endpoint reports `offline=true, models=0`, so `anyModelConfigured()` is
+    false and the OOBE renders the **holding card** ("Go in anyway"), NOT the setup wizard, so
+    `[data-ob-setup-start]` never appears and casting never kicks off. Fix: pin a model → online+models>0
+    → gate passes → wizard mounts. **Trap B — `AUTH_ENABLED=false` ⇒ `owner=NULL` ⇒ F7.** The endpoint
+    saves owner-null; the chat path's `owner_filter(include_shared=False)` treats null-owner as "removed"
+    → **Error 400 / "empty response" on EVERY casting turn** (the exact playtest Honesty-note blocker).
+    Fix: stamp `owner` to the driving user. **Trap C — the holding card and the setup wizard share the
+    title "Production needs the feeds"** (= F1/#1022): indistinguishable in a screenshot; never trust the
+    title to know which screen you're on. **Trap D — `/api/settings` 404s** for PATCH/POST; settings are
+    a JSON file, edit it directly. **And: casting kickoff is the `[data-ob-setup-start]` button**
+    (poll-until-enabled → click → fires the `chat_stream` POST), NOT a typed message.
+
+18. **An in-band `settings.py` override silently masks a `token_policy` default bump.** #1007 "fixed"
+    cast-authoring by raising the `background-authoring` budget 1200→3000 — but only the `token_policy.py`
+    DEFAULT. `frontend/src/settings.py:176` seeds `max_tokens_budget["background-authoring"]=1200`, and
+    per token_policy's own contract an explicit in-band `max_tokens_budget[class]` override **WINS**. So
+    the fix was **dead on arrival in production** (every deploy seeds 1200) — and ALL gates passed because
+    they stub the LLM. When a "budget bump" PR doesn't take effect live, check BOTH the token_policy
+    default AND the `settings.py` `max_tokens_budget` seed (override wins). **deepseek-v4-pro is a
+    reasoning model:** the cap covers reasoning+visible, and the rich authoring prompt burns ~1300
+    reasoning tokens → at a 1200 cap it truncates (`finish_reason=length`) with `reply_chars=0` → no JSON
+    → floor. Direct probes proved the model is fine (valid JSON at 1200 on a simple prompt; clean JSON in
+    278 tokens with `reasoning:{enabled:false}`). Fix: raise the settings.py seed to 3000 AND/OR set
+    reasoning OFF for `background-authoring` (it's structured extraction, not a reasoning task — cheaper
+    and more reliable). General rule: for any structured-JSON extraction call on a reasoning model, kill
+    reasoning or the budget gets eaten before the body.
+
+19. **Live-verify catches what a green suite cannot — every time, for LLM-behavioral fixes.** #1007
+    merged with the full FE suite green and STILL mass-fell-back to the floor the instant a real reasoning
+    model ran it. The gates stub the narrator, so an LLM-behavioral "fix" (under-call belts, budgets,
+    JSON-coaxing, the F14/F16 eviction-seam belts) is **NOT verified until driven against the real model**.
+    Budget the live-env setup (lesson 17) into any such fix — it is not optional.
+
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,
   `ORWELL_GAME_BUILD=1`). The chat *is* the game; plain turns auto-escalate to the agent loop.
@@ -250,6 +292,37 @@ Merge authority delegated throughout; dispatched worktree agents, reviewed, rela
   bind one-liner is in (the A4/#010 single-PAT deploy check).
 - **Still held (do NOT build until owner rules):** the Glass 3-tier theme plan (#709 / the plan file);
   day-1 PO-questions #916/#917/#918; the "Big Brother" → "Orwell" engine-status chrome rename question.
+
+## Where things stand (2026-06-26 — the BB-nerd-auditor synthesis + live-verify + eviction-seam session)
+A continuation that cleared the merge train then ran a full cross-artifact audit and a live-LLM campaign.
+- **Cleared the prior train:** #1011 (secrets-scanner allowlist — unblocked main's engine lane after
+  #1004/#1005's FE-only fixtures tripped the scanner via path-filter skip), #1008/#1007/#1009/#1012 all
+  merged. The repo's `tests/unit/secrets.test.ts` uses an EXACT-path `REDACTION_TEST_FIXTURES` allowlist —
+  add new scrub-fixture files there.
+- **Cross-artifact synthesis (PR #1031, doc `docs/audits/2026-06-26-bb-nerd-auditor-synthesis.md`):** 6
+  parallel read-only auditors over the playtest doc (F1–F16) + the debug bundle (DB1–8) + the Producer's
+  Vault (PV1–5/SG7), zero contradictions. **Verdict: engine + hidden layer are SOUND** (anti-sycophancy
+  held — Vault-confirmed player vote overridden 4/9 weeks; bundle is Vault-free; hidden layer is rich,
+  mandates #1/#4 met at the engine layer). **The launch break is the player-surface narration seam** — one
+  shared root: the FE has belts for *progression* + *recording* but NONE for **surfacing/voicing an
+  engine-raised beat the model skipped** (F14/F16/F8/F12). DB metric: 0% tool-call rate on all sampled live
+  turns. Filed **18 issues #1013–#1030** + reopened #997 (PV2 gossip render regression).
+- **F14/F16 launch-blocker fix (the two P0s #1013/#1014):** worktree agent committed `532876b5` on
+  `worktree-agent-af8e015d30404d8d2` — surface-the-pending belt + eviction-drain on L39b + decision-route
+  follow-up advance (F14); broadened/identity-aware/ahead-of-phase outcome guard (F16). FE error-correction
+  + guard ONLY, engine untouched. **Full FE suite 3432 green**, fail-before/pass-after. **NEEDS LIVE-VERIFY**
+  (drive a real eviction) before PR/merge — do NOT merge on the green suite alone (lesson 19).
+- **#1007 is FAIL as-shipped (live-caught — lessons 18/19):** cast-authoring still mass-falls-back to the
+  floor on deepseek-v4-pro because `settings.py:176` `max_tokens_budget["background-authoring"]=1200`
+  OVERRIDES #1007's token_policy 3000. Fix owed: settings.py seed 1200→3000 + reasoning OFF for
+  background-authoring. #1009 was in live-verify at session end.
+- **Wave 3 (regex-retirement) is SEQUENCED after the eviction lane** — its P0 channel-split touches
+  `agent_loop.py`+`chat.js`, same files as the eviction Lane A; parallelizing would guarantee conflicts.
+- **Live env left running for verification:** engine :8765 (`devtoken`), FE :7000 (`AUTH_ENABLED=false`),
+  deepseek-v4-pro wired (endpoints owned by `verif1`, pinned). Drive as `x-orwell-user: verif1`. See lesson 17.
+- **⚠️ Secret to rotate (carry forward):** the owner pasted a NEW OpenRouter `sk-or-v1-…` key in chat this
+  session (used runtime-only, in `frontend/data/app.db` + settings, NEVER committed). Rotate it when done —
+  plus the still-owed earlier `sk-or-…`/`ghp_…` rotations.
 
 ## How to resume
 1. Read `CLAUDE.md` (authoritative), then `docs/features/README.md` + `git log --oneline` for live
