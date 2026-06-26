@@ -3810,9 +3810,24 @@ import { isNarrow } from './platform.js';
       // A bubble explicitly hidden via inline style is an intermediate/skipped row with no
       // server message — don't count it. (Hidden via class is rare; the live hide uses style.display.)
       const hidden = (el.style && el.style.display === 'none');
-      if (!hidden) n += 1;
+      if (hidden) return;
+      // #836 / "never eat a message": an UN-ADOPTED optimistic send (clientMsgId, no dbId yet) is a
+      // legitimate PENDING user bubble, NOT an orphan — its persisted row simply hasn't reached THIS
+      // /api/history snapshot (canonical-vs-per-tab adoption, an SSE reconcile racing the just-committed
+      // row, or a non-persisted/incognito turn). Excluding it from the divergence count means it never
+      // forces a destructive rebuild on its own; combined with the rebuild-time preservation in
+      // softReloadHistory it can never be ERASED. The next reload adopts it once its row appears.
+      if (_isPendingOptimisticBubble(el)) return;
+      n += 1;
     });
     return n;
+  }
+
+  /** #836 — a still-pending optimistic user send: carries a clientMsgId but has not yet been adopted
+   * (no dbId). Mirrors the sessions.js `wouldWipe` guard — such a bubble must SURVIVE any reconcile so
+   * "what I typed goes in the bubble, verbatim, every time" can never be violated by the rebuild. */
+  export function _isPendingOptimisticBubble(el) {
+    return !!(el && el.dataset && el.dataset.clientMsgId && !el.dataset.dbId);
   }
 
   /**
@@ -3902,6 +3917,17 @@ import { isNarrow } from './platform.js';
     }
     _pendingReconcile.delete(sessionId);
 
+    // #836 / "never eat a message": before we blow away the DOM, RESCUE any still-pending optimistic
+    // user bubble (clientMsgId, no dbId) whose persisted row is ABSENT from this server snapshot — so the
+    // authoritative rebuild can NEVER erase what the player just typed. A bubble whose client_msg_id IS
+    // present in `visible` is re-rendered from the server log below (no rescue needed); only the un-adopted
+    // pending sends are carried across, then normal adoption reconciles them when their row appears.
+    const _serverClientIds = new Set(
+      visible.map(m => m.metadata && m.metadata.client_msg_id).filter(Boolean)
+    );
+    const _pendingToPreserve = Array.from(box.querySelectorAll('.msg'))
+      .filter(el => _isPendingOptimisticBubble(el) && !_serverClientIds.has(el.dataset.clientMsgId));
+
     const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 120;
     const prevScrollTop = box.scrollTop;
     box.classList.add('no-animate');
@@ -3910,6 +3936,10 @@ import { isNarrow } from './platform.js';
       const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : { _fromHistory: true };
       chatRenderer.addMessage(msg.role, markdownModule.renderContent(_historyMsgText(msg)), modelName, meta);
     }
+    // Re-append the rescued pending sends after the authoritative log (they are the newest turn — the row
+    // the server hasn't surfaced yet). They keep their clientMsgId so the next reload's adopt pass claims
+    // them with zero churn the moment /api/history carries their persisted row.
+    for (const el of _pendingToPreserve) box.appendChild(el);
     box.classList.remove('no-animate');
     if (nearBottom) {
       if (uiModule.scrollHistoryInstant) uiModule.scrollHistoryInstant();
