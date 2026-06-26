@@ -235,6 +235,16 @@ DEFAULT_SETTINGS = {
     # faithfulness.faithfulness_mode) gate the read on is_setting_overridden, so an UNSAVED dial still
     # falls through to the ORWELL_OVERSEER* / ORWELL_FAITHFULNESS_MODE env fallback.
     "overseer_mode": "off",
+    # Verbose overseer/corrector DEBUG telemetry (OPT-IN, default OFF). Spellings: "off"/"0" (no
+    # telemetry, byte-identical behavior + no extra work), "log"/"1" (Tier 1 — cheap, log-only:
+    # record what NATURALLY happened — which corrector guardrails fired + the model's own tool
+    # calls; NO extra LLM calls), "force"/"2" (Tier 2 — EXPENSIVE: ALSO force-evaluate the
+    # corrector checks on turns they'd normally skip and log a "would-have-intervened" verdict;
+    # may run a read-only extraction call but NEVER fires the intervention). Resolved by
+    # src.orwell_overseer_debug.overseer_debug_tier(); the "off" default here exists ONLY so the
+    # settings allowlist accepts the key — the resolver gates on is_setting_overridden so an
+    # UNSAVED dial still falls through to the ORWELL_OVERSEER_DEBUG env fallback.
+    "overseer_debug": "off",
     "faithfulness_mode": "off",
     "teacher_model": "",
     "teacher_enabled": False,
