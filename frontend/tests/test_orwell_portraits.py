@@ -289,6 +289,58 @@ def test_not_regenerated_when_already_stored(tmp_portraits, monkeypatch):
     assert summary["generated"] == 0 and summary["skipped"] == 3
 
 
+def test_concurrent_runs_generate_each_id_exactly_once(tmp_portraits, monkeypatch):
+    """#998: two overlapping generate_and_store runs for the SAME ids must not double-generate.
+
+    On-disk idempotency alone (portrait_file is None) can't catch the not-yet-written tail when two
+    runs (eager fall-through × /roster backfill × per-NPC warm) pick up the same id before either
+    writes it. The per-(user,id) in-flight claim set is the precise guard. fake_gen blocks on a
+    barrier so BOTH runs are simultaneously past the claim point before any write lands — without
+    the claim set, both would generate every id.
+    """
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
+
+    NUM_RUNS = 2
+    EXPECTED = len(_PROMPTS)  # one generation per distinct id, total
+    per_id_calls = {}
+    release = asyncio.Event()
+    inflight = {"n": 0}
+
+    async def fake_gen(prompt, user, reference_png=None):
+        # Tag the call by its prompt (1:1 with id in _PROMPTS) so we can count per-id generations.
+        per_id_calls[prompt] = per_id_calls.get(prompt, 0) + 1
+        # Each run processes ids sequentially and blocks here on its FIRST generate, so at the
+        # overlap point exactly NUM_RUNS generations are simultaneously in flight (claimed, not yet
+        # written) — the precise window the bug exploited. Hold them all until both runs are here,
+        # THEN release so they finish; without the claim set both runs would generate every id.
+        inflight["n"] += 1
+        if inflight["n"] >= NUM_RUNS:
+            release.set()
+        # Bounded wait: a logic deadlock fails loudly instead of hanging the suite.
+        await asyncio.wait_for(release.wait(), timeout=5)
+        return b"PNG-" + prompt.encode()[:6]
+    monkeypatch.setattr(orwell_portraits, "_generate_one", fake_gen)
+
+    # Belt-and-suspenders: start from a clean in-flight map for this user.
+    orwell_portraits._INFLIGHT.pop("zoe", None)
+
+    async def both():
+        return await asyncio.gather(
+            orwell_portraits.generate_and_store(_PROMPTS, "zoe", record_beats=False),
+            orwell_portraits.generate_and_store(_PROMPTS, "zoe", record_beats=False),
+        )
+    _run(both())
+
+    # Each distinct prompt/id was generated EXACTLY once across the two concurrent runs.
+    assert all(c == 1 for c in per_id_calls.values()), per_id_calls
+    assert sum(per_id_calls.values()) == EXPECTED
+    # …and each portrait landed on disk once.
+    for hid in ("player", "npc_1", "npc_2"):
+        assert (tmp_portraits / "zoe" / f"{hid}.png").exists()
+    # The claim set is released (no leaked claims) after the runs complete.
+    assert not orwell_portraits._INFLIGHT.get("zoe")
+
+
 def test_portrait_ref_points_at_route_only_when_file_exists(tmp_portraits, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: True)
 

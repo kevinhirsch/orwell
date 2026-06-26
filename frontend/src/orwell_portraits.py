@@ -224,6 +224,16 @@ _PROVIDER_SEEN: dict = {}
 _LAST_MISSING: dict = {}
 _RECONCILER_TASK = None
 
+# #998: in-flight generation claim — per `_safe_user`, the set of `_safe_id`s whose generation
+# is CURRENTLY running (claimed but not yet written to disk). On-disk idempotency
+# (`portrait_file(...) is None`) alone double-generates the not-yet-written tail when two
+# concurrent `generate_and_store` runs (eager fall-through × /roster backfill × per-NPC warm)
+# pick up the same id before either writes it. A run claims each id immediately BEFORE awaiting
+# `_generate_one` and releases it in a `finally` after the write/failure, so an overlapping run
+# sees the claim and skips. Single-process, asyncio single-threaded ⇒ a plain dict[str, set] with
+# no lock is sufficient (claim/release straddle no awaits relative to each other for the SAME id).
+_INFLIGHT: dict = {}
+
 # The most recent _generate_one failure reason (+ an optional short detail — the provider's
 # own error code/message on an HTTP failure), consumed by the attempt logger. Module-level is
 # adequate: generate_and_store awaits each generation sequentially, and the log is best-effort
@@ -1391,6 +1401,14 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
         # The current facet's fingerprint (a stable hash of the engine's deterministic prompt).
         fp = _prompt_fingerprint(str(prompt))
 
+        # #998: an overlapping run already CLAIMED this id and is mid-generation (claimed but not
+        # yet written to disk, so the on-disk check below would not catch it) — skip, let that run
+        # land the one image. Mirrors the on-disk generate-once guard for the in-flight window.
+        sid = _safe_id(str(hid))
+        if sid in _INFLIGHT.setdefault(_safe_user(user), set()):
+            skipped += 1
+            continue
+
         # Generate-once: a stored portrait is never regenerated on restart — UNLESS the facet
         # changed. 0065 follow-up: compare the stored entry's fingerprint to the CURRENT prompt's.
         #   • stored fingerprint EXISTS and DIFFERS  ⇒ the stored face is stale → re-shoot (fall
@@ -1422,26 +1440,33 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
         source = "reference" if ref else "generated"
 
         _consume_gen_error(); _consume_gen_detail()  # clear any stale reason/detail
-        t0 = time.monotonic()
-        png = await _generate_one(str(prompt), user, reference_png=ref)
-        duration_ms = int((time.monotonic() - t0) * 1000)
-        if ref and not png:
-            source = "generated"  # reference failed; the log carries the reason
-        if not png:
-            log_attempt(str(hid), False, _consume_gen_error() or "generation-failed",
-                        duration_ms, detail=_consume_gen_detail())
-            skipped += 1
-            continue
+        # #998: CLAIM the id immediately before the (slow) generate, release in `finally` after the
+        # write/failure — an overlapping run that reaches the in-flight check above now skips it,
+        # so each id is generated exactly once even while its image is in flight (not yet on disk).
+        _INFLIGHT.setdefault(_safe_user(user), set()).add(sid)
         try:
-            _write_portrait(user, str(hid), png, str(name), source=source, fingerprint=fp)
-            log_attempt(str(hid), True, None, duration_ms)
-            generated += 1
-            _progress_tick(user)  # L15: one more face landed — the panel sees the live count move
-            newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
-        except Exception as e:
-            logger.info("[portraits] failed to persist %s: %s", hid, e)
-            log_attempt(str(hid), False, "persist-failed", duration_ms)
-            skipped += 1
+            t0 = time.monotonic()
+            png = await _generate_one(str(prompt), user, reference_png=ref)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            if ref and not png:
+                source = "generated"  # reference failed; the log carries the reason
+            if not png:
+                log_attempt(str(hid), False, _consume_gen_error() or "generation-failed",
+                            duration_ms, detail=_consume_gen_detail())
+                skipped += 1
+                continue
+            try:
+                _write_portrait(user, str(hid), png, str(name), source=source, fingerprint=fp)
+                log_attempt(str(hid), True, None, duration_ms)
+                generated += 1
+                _progress_tick(user)  # L15: one more face landed — the panel sees the live count move
+                newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
+            except Exception as e:
+                logger.info("[portraits] failed to persist %s: %s", hid, e)
+                log_attempt(str(hid), False, "persist-failed", duration_ms)
+                skipped += 1
+        finally:
+            _INFLIGHT.get(_safe_user(user), set()).discard(sid)
 
     # L17: before the run is declared complete, run the automated look-alike / mistake pass —
     # detect near-duplicate faces across the cast (from the structured, Vault-free prompt facets)
