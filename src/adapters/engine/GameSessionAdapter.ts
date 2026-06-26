@@ -4535,13 +4535,20 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * 0075 — was there a FRESH precipitating scene between the player and this houseguest (a favor, a
+   * 0075 — is there a FRESH precipitating scene between the player and this houseguest (a favor, a
    * rattled moment, a deal just struck)? The "no cold open" anchor: a confidence reads as prompted by
-   * what just happened, never a non-sequitur. Vault-free — reads only the recent player-witnessed
-   * relationship history the adapter already tracks (an open/kept deal between them is the concrete
-   * proxy a precipitating favor leaves behind).
+   * what just happened, never a non-sequitur. Vault-free — reads only player-witnessed state the adapter
+   * already tracks. TWO concrete proxies (audit: the hint never fired in normal play because only the
+   * second was wired, so a confidence was effectively gated behind a FORMAL DEAL):
+   *   (1) a LIVE scene — the houseguest is in the room WITH the player right now (a confidence happens
+   *       in the scene the two are sharing; this is the moment), and
+   *   (2) an owed-favor proxy surviving a past scene — an open/kept deal between them.
+   * The disclosure-motive floor (genuine closeness) is unchanged: only a close ally who is actually
+   * present clears it, so this broadens *reachability*, never the bar.
    */
   private recentPlayerSceneWith(npcId: EntityId): boolean {
+    const playerRoom = this.presence?.get(PLAYER) ?? null;
+    if (playerRoom !== null && this.presence?.get(npcId) === playerRoom) return true; // a live shared scene
     return this.deals.forParty(PLAYER).some(
       (d) => d.parties.includes(npcId) && (d.status === "open" || d.status === "kept"),
     );

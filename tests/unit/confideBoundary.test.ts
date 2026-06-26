@@ -6,6 +6,7 @@ import { PLAYER_TOOLS } from "../../src/surfaces/tools/registry";
 import { buildSandbox } from "../support/sandbox";
 import { PLAYER } from "../../src/domain/ids";
 import { RelationshipModel } from "../../src/engine/relationships";
+import { CONFIDENCE } from "../../src/engine/confidenceConstants";
 import type { GameHouse, HiddenElement } from "../../src/engine/characterFactory";
 import type { ConfideResult } from "../../src/ports/GameSession";
 
@@ -82,6 +83,46 @@ describe("0075 confide — the MCP boundary is OPEN (the four-place wiring is li
   it("refuses a missing npcId with a typed field name (the arg-guard)", async () => {
     const { server } = startedServer(12);
     await expect(server.callTool("confide", {})).rejects.toThrow(/npcId/);
+  });
+});
+
+describe("0075 mayConfide — reachable through a LIVE scene, not only a formal deal (audit fix)", () => {
+  // Max the MUTUAL warmth via the edges ALONE (no deals), so the closeness motive sits AT the tease floor
+  // (0.7·1.0 = 0.7). The disclosure bands + goodwill math are untouched — only the precipitant broadens.
+  function maxWarmth(session: GameSessionAdapter, npcId: string): void {
+    const rel = (session as unknown as { rel: RelationshipModel }).rel;
+    for (const [a, b] of [[npcId, PLAYER], [PLAYER, npcId]] as const) {
+      const e = rel.edge(a, b); e.trust = 1; e.affinity = 1; e.threat = 0;
+    }
+  }
+  function place(session: GameSessionAdapter, where: Array<{ who: string; room: string }>): void {
+    const presence = (session as unknown as { presence: Map<string, string> }).presence;
+    for (const { who, room } of where) presence.set(who, room);
+  }
+
+  it("a very-close ally IN THE ROOM with the player gets the hint — with no deal at all", () => {
+    const { session } = startedServer(21);
+    const { id } = firstNpcSecret(session);
+    maxWarmth(session, id);
+    place(session, [{ who: PLAYER, room: "kitchen" }, { who: id, room: "kitchen" }]);
+    const hint = session.npcVoice(id)!.mayConfide;
+    expect(hint?.ready).toBe(true);
+    expect(hint?.reason).toBe(CONFIDENCE.reasons.closeness); // no deal ⇒ the closeness reason, not a pact
+  });
+
+  it("the SAME ally elsewhere in the house gets no hint (a live scene IS the precipitant)", () => {
+    const { session } = startedServer(21);
+    const { id } = firstNpcSecret(session);
+    maxWarmth(session, id);
+    place(session, [{ who: PLAYER, room: "kitchen" }, { who: id, room: "backyard" }]);
+    expect(session.npcVoice(id)!.mayConfide).toBeUndefined(); // not in the scene + no deal ⇒ no cold open
+  });
+
+  it("a co-present but NOT-close houseguest still gets no hint (the closeness floor is unchanged)", () => {
+    const { session } = startedServer(21);
+    const { id } = firstNpcSecret(session);
+    place(session, [{ who: PLAYER, room: "kitchen" }, { who: id, room: "kitchen" }]); // present, but baseline bond
+    expect(session.npcVoice(id)!.mayConfide).toBeUndefined();
   });
 });
 
