@@ -1,0 +1,2338 @@
+{
+ "bundle": "orwell-debug",
+ "schema": 2,
+ "generatedAt": "2026-06-26T19:19:57.733570+00:00",
+ "health": {
+  "generatedAt": "2026-06-26T19:19:57.733570+00:00",
+  "engine": {
+   "ok": true,
+   "engineUrl": "http://127.0.0.1:8765",
+   "latencyMs": 1,
+   "uptimeSeconds": 4340,
+   "toolCalls": {
+    "total": 6477,
+    "failed": 512
+   },
+   "recentFailures": [
+    {
+     "ts": 1782501312873,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313008,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313134,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313259,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313379,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313487,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313598,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313703,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313811,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501313921,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314034,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314174,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314297,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314409,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314522,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314630,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314735,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314843,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501314962,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315081,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315191,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315299,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315411,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315513,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315626,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315728,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315831,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501315954,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501316072,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501316196,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501316298,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501316402,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501316510,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 1
+    },
+    {
+     "ts": 1782501316620,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501316722,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501316848,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 1
+    },
+    {
+     "ts": 1782501316965,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501317074,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 1
+    },
+    {
+     "ts": 1782501317178,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501317298,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501317412,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501317543,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501317651,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501317757,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501317866,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501317974,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501318079,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501318183,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 1
+    },
+    {
+     "ts": 1782501318281,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    },
+    {
+     "ts": 1782501318380,
+     "tool": "submitDecision",
+     "errorClass": "Error",
+     "durationMs": 0
+    }
+   ],
+   "embeddings": {
+    "provider": "deterministic",
+    "degraded": false
+   }
+  },
+  "frontend": {
+   "lastError": null,
+   "store": {
+    "sessions": 4,
+    "messages": 58,
+    "database_size_mb": 0.8
+   }
+  },
+  "tiersAgree": true,
+  "images": {
+   "enabled": true,
+   "model": "google/gemini-2.5-flash-image",
+   "quality": "medium",
+   "available": true,
+   "portraits": {
+    "total": 2,
+    "present": 0,
+    "missing": 2
+   }
+  },
+  "versions": {
+   "frontend": "v9.93",
+   "build": "d69be73",
+   "frontendApp": "0.9.1"
+  }
+ },
+ "recentFailures": [
+  {
+   "ts": 1782501312873,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313008,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313134,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313259,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313379,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313487,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313598,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313703,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313811,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501313921,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314034,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314174,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314297,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314409,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314522,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314630,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314735,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314843,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501314962,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315081,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315191,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315299,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315411,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315513,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315626,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315728,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315831,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501315954,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501316072,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501316196,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501316298,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501316402,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501316510,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 1
+  },
+  {
+   "ts": 1782501316620,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501316722,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501316848,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 1
+  },
+  {
+   "ts": 1782501316965,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501317074,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 1
+  },
+  {
+   "ts": 1782501317178,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501317298,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501317412,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501317543,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501317651,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501317757,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501317866,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501317974,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501318079,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501318183,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 1
+  },
+  {
+   "ts": 1782501318281,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  },
+  {
+   "ts": 1782501318380,
+   "tool": "submitDecision",
+   "errorClass": "Error",
+   "durationMs": 0
+  }
+ ],
+ "config": {
+  "AUTH_ENABLED": "true",
+  "ORWELL_DATA_DIR": "/home/user/orwell/frontend/data",
+  "ORWELL_ENGINE_MCP_URL": "http://127.0.0.1:8765",
+  "ORWELL_GAME_BUILD": "1"
+ },
+ "versions": {
+  "frontend": "v9.93",
+  "build": "d69be73",
+  "frontendApp": "0.9.1"
+ },
+ "systemInfo": {
+  "python": "3.11.15",
+  "platform": "Linux-6.18.5-x86_64-with-glibc2.39",
+  "pid": 16247,
+  "node": "v22.22.2",
+  "disk": {
+   "totalMb": 258019,
+   "freeMb": 29527,
+   "usedPct": 3.3
+  },
+  "memory": {
+   "totalMb": 16075,
+   "availableMb": 14070,
+   "swapTotalMb": 0
+  }
+ },
+ "featureFlags": {
+  "gameBuild": true,
+  "authEnabled": true,
+  "localhostBypass": false,
+  "embeddings": "fake",
+  "multiuser": false
+ },
+ "logs": {
+  "frontendTail": [
+   {
+    "ts": 1782501229339,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229361,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229384,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229409,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229429,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229450,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229471,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229494,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229519,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229541,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229563,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229586,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229607,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229627,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229648,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229672,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229691,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229712,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229734,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229755,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229776,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229797,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229819,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229840,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229860,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229885,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229908,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229932,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229956,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501229980,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230003,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230025,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230047,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230070,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230093,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230115,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230138,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230160,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230181,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230204,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230224,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230244,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230264,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230284,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230304,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230325,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230351,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230373,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230407,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230438,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230459,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230483,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230508,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230533,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230555,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230576,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230597,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230620,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230644,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230668,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230698,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230731,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230762,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230790,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230820,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230841,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230879,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230906,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230929,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230954,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501230980,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231001,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231023,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231046,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231066,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231087,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231108,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231129,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231153,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231175,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231195,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231215,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231240,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231263,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231285,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231306,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231327,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231348,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231368,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231389,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231412,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231441,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231461,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231482,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231502,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231523,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231546,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231573,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231596,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231638,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231675,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231708,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231740,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231767,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231796,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231826,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231850,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501231875,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501267196,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=13349 reply_chars=2181 reasoning_chars=11168 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2969"
+   },
+   {
+    "ts": 1782501267226,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=753 cached=0 reasoning=2467 out=2969 cap=0 finish=- cost=0.005089 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501271993,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=15262 reply_chars=2074 reasoning_chars=13188 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=3451"
+   },
+   {
+    "ts": 1782501272009,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=749 cached=0 reasoning=2982 out=3451 cap=0 finish=- cost=0.005819 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501289806,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=19942 reply_chars=2268 reasoning_chars=17674 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=4437"
+   },
+   {
+    "ts": 1782501289858,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=748 cached=0 reasoning=3915 out=4437 cap=0 finish=- cost=0.007318 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501291980,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=6954 reply_chars=2051 reasoning_chars=4903 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=1619"
+   },
+   {
+    "ts": 1782501291993,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=755 cached=0 reasoning=1126 out=1619 cap=0 finish=- cost=0.003037 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501311677,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501311799,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501311928,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312062,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312176,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312288,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312399,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312510,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312648,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312762,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312874,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313009,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313063,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=11888 reply_chars=2071 reasoning_chars=9817 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2697"
+   },
+   {
+    "ts": 1782501313088,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=749 cached=0 reasoning=2215 out=2697 cap=0 finish=- cost=0.004672 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501313135,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313260,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313380,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313489,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313599,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313705,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313812,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313922,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314036,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314175,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314299,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314410,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314523,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314631,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314736,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314844,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314964,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315082,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315192,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315300,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315412,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315514,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315628,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315729,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315832,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315955,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316074,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316197,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316299,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316403,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316511,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316621,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316723,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316849,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316966,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317075,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317179,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317299,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317413,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317544,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317652,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317759,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317867,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317975,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501318081,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501318183,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501318282,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501318381,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501321946,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=8875 reply_chars=2207 reasoning_chars=6668 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2013"
+   },
+   {
+    "ts": 1782501321963,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=755 cached=0 reasoning=1505 out=2013 cap=0 finish=- cost=0.003636 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501330701,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=10807 reply_chars=2366 reasoning_chars=8441 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2410"
+   },
+   {
+    "ts": 1782501330716,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=752 cached=0 reasoning=1869 out=2410 cap=0 finish=- cost=0.004238 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501347244,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=10163 reply_chars=2206 reasoning_chars=7957 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2290"
+   },
+   {
+    "ts": 1782501347270,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=750 cached=0 reasoning=1767 out=2290 cap=0 finish=- cost=0.004053 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501369664,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=14082 reply_chars=2113 reasoning_chars=11969 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=3162"
+   },
+   {
+    "ts": 1782501369685,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=748 cached=0 reasoning=2679 out=3162 cap=0 finish=- cost=0.005378 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501373459,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=11927 reply_chars=2015 reasoning_chars=9912 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2745"
+   },
+   {
+    "ts": 1782501373605,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=756 cached=0 reasoning=2261 out=2745 cap=0 finish=- cost=0.004750 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501385613,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=10658 reply_chars=2038 reasoning_chars=8620 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2368"
+   },
+   {
+    "ts": 1782501385866,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=749 cached=0 reasoning=1910 out=2368 cap=0 finish=- cost=0.004171 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501404334,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=8256 reply_chars=2232 reasoning_chars=6024 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=1811"
+   },
+   {
+    "ts": 1782501404521,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=756 cached=0 reasoning=1290 out=1811 cap=0 finish=- cost=0.003329 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501408991,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=11264 reply_chars=2452 reasoning_chars=8812 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2466"
+   },
+   {
+    "ts": 1782501409003,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=755 cached=0 reasoning=1908 out=2466 cap=0 finish=- cost=0.004325 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501435400,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=15305 reply_chars=1948 reasoning_chars=13357 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=3441"
+   },
+   {
+    "ts": 1782501435423,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=755 cached=512 reasoning=2993 out=3441 cap=0 finish=- cost=0.005451 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501445242,
+    "level": "INFO",
+    "logger": "src.llm_core",
+    "msg": "LLM stream to https://openrouter.ai/api/v1/chat/completions ended; model=deepseek/deepseek-v4-pro status=200 content_chars=12986 reply_chars=2194 reasoning_chars=10792 tool_call_seen=False finish_reason=stop usage_seen=True output_tokens=2895"
+   },
+   {
+    "ts": 1782501445264,
+    "level": "INFO",
+    "logger": "src.orwell_token_ledger",
+    "msg": "[orwell] token-ledger turn user=auditor session=b21774ad-b244-4556-b504-ce159c98523f turn=- class=background-authoring in=757 cached=0 reasoning=2379 out=2895 cap=0 finish=- cost=0.004979 ctx=0.0% provider=openrouter"
+   },
+   {
+    "ts": 1782501596868,
+    "level": "INFO",
+    "logger": "core.auth",
+    "msg": "Auth config loaded"
+   },
+   {
+    "ts": 1782501596868,
+    "level": "INFO",
+    "logger": "core.auth",
+    "msg": "Loaded 10 session(s) from disk"
+   }
+  ],
+  "recentErrors": [
+   {
+    "ts": 1782501311677,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501311799,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501311928,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312062,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312176,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312288,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312399,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312510,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312648,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312762,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501312874,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313009,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313135,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313260,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313380,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313489,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313599,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313705,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313812,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501313922,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314036,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314175,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314299,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314410,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314523,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314631,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314736,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314844,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501314964,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315082,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315192,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315300,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315412,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315514,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315628,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315729,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315832,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501315955,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316074,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316197,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316299,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316403,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316511,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316621,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316723,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316849,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501316966,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317075,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317179,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317299,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317413,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317544,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317652,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317759,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317867,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501317975,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501318081,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501318183,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501318282,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   },
+   {
+    "ts": 1782501318381,
+    "level": "WARNING",
+    "logger": "routes.orwell_routes",
+    "msg": "[orwell] decision failed: a legal finale appeal is required"
+   }
+  ]
+ },
+ "opsStatus": {
+  "updateTriggerInstalled": false,
+  "logs": []
+ },
+ "providerConfig": {
+  "endpoints": [
+   {
+    "name": "OpenRouter",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "modelType": "llm",
+    "endpointKind": "api",
+    "isEnabled": true,
+    "supportsTools": null,
+    "hasApiKey": true
+   },
+   {
+    "name": "ORproxy",
+    "baseUrl": "http://127.0.0.1:8799",
+    "modelType": "llm",
+    "endpointKind": "api",
+    "isEnabled": true,
+    "supportsTools": null,
+    "hasApiKey": true
+   },
+   {
+    "name": "ORproxy2",
+    "baseUrl": "http://localhost.openrouter.ai:8799",
+    "modelType": "llm",
+    "endpointKind": "api",
+    "isEnabled": true,
+    "supportsTools": null,
+    "hasApiKey": true
+   }
+  ]
+ },
+ "gameState": {
+  "available": true,
+  "started": true,
+  "week": 14,
+  "phase": "finale",
+  "day": 5,
+  "playerStatus": "active"
+ },
+ "sessions": {
+  "recent": [
+   {
+    "id": "b21774ad-b244-4556-b504-ce159c98523f",
+    "name": "Big Brother Casting Insights",
+    "owner": "auditor",
+    "model": "openai/gpt-4o",
+    "messageCount": 58,
+    "mode": "agent",
+    "createdAt": "2026-06-26T18:25:35.144302",
+    "lastAccessed": "2026-06-26T19:10:05.674925"
+   },
+   {
+    "id": "e7fd047c-39e8-46b6-9225-f2d46bdd4306",
+    "name": "",
+    "owner": "auditor",
+    "model": "",
+    "messageCount": 0,
+    "mode": null,
+    "createdAt": "2026-06-26T18:22:55.851783",
+    "lastAccessed": "2026-06-26T18:22:55"
+   },
+   {
+    "id": "c7b2b4b1-ba22-4964-bae4-f9c2985f6e11",
+    "name": "Casting interview",
+    "owner": "auditor",
+    "model": "",
+    "messageCount": 0,
+    "mode": null,
+    "createdAt": "2026-06-26T18:16:58.449893",
+    "lastAccessed": "2026-06-26T18:17:00.252774"
+   },
+   {
+    "id": "a233c22a-4410-4485-b88d-97b2be6a4247",
+    "name": "Casting interview",
+    "owner": "auditor",
+    "model": "",
+    "messageCount": 0,
+    "mode": null,
+    "createdAt": "2026-06-26T18:11:42.907568",
+    "lastAccessed": "2026-06-26T18:11:43.775869"
+   }
+  ]
+ }
+}
