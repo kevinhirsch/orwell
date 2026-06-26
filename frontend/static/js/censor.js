@@ -3,6 +3,16 @@
  * Sensitive Information Censor Module
  * Detects emails, passwords, API keys, tokens, etc. in chat responses
  * and blurs them. Click to reveal individual items.
+ *
+ * COSMETIC ONLY — this is NOT a security control. The module is a post-render visual
+ * nicety (a click-to-reveal blur applied by a MutationObserver over already-rendered chat):
+ * it never redacts the underlying text, never gates the data path, and runs entirely
+ * client-side after the content is already in the DOM. Patterns must therefore err toward
+ * NOT mangling legitimate content — a credential-SHAPED string that is actually a git SHA,
+ * a UUID, or a private-IP literal is a false positive that hurts readability with zero
+ * security upside, so those bare shapes are deliberately NOT matched. Only genuine
+ * credential shapes (real key prefixes, bearer tokens, PEM blocks, labelled secrets, JWTs,
+ * emails) are blurred.
  */
 
 let _enabled = true;
@@ -16,7 +26,19 @@ export const _prefEnabled = () => {
   }
 };
 
-// Patterns that indicate sensitive data
+// Patterns that indicate sensitive data.
+//
+// Two former patterns were DROPPED because they over-matched legitimate content with no
+// security upside (this module is cosmetic, see the header):
+//   - the bare-hex-run "hash" pattern blurred ANY 32+ hex run — git SHAs (which appear
+//     constantly in this repo's own chats), dashless UUIDs, MD5 of legit strings, hex
+//     colour lists, contract addresses. A bare hex run is not a credential; a genuine
+//     secret only carries meaning WITH a credential context (a "sha:"/"md5:" label, a real
+//     key prefix, or a labelled key=value), all of which the surviving api-key / credential
+//     / private-key patterns already catch — so it added no unique coverage, only false
+//     positives. Dropped outright.
+//   - the private-IP "internal-ip" pattern blurred benign private-IP literals in narration
+//     / dev-chat. A private IP is not a secret. Dropped outright.
 const PATTERNS = [
   // Emails
   { re: /\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b/g, label: 'email' },
@@ -33,12 +55,8 @@ const PATTERNS = [
   { re: /(?:^|\n)\s*(?:password|passwd|secret|api[_\-]?key|token|private[_\-]?key)[\t ]*\n\s*([^\s<]{4,})/gim, label: 'credential' },
   // SSH / PEM private keys (inline)
   { re: /-----BEGIN\s[\w\s]*PRIVATE KEY-----[\s\S]*?-----END\s[\w\s]*PRIVATE KEY-----/g, label: 'private-key' },
-  // Long hex strings (32+ chars) that look like hashes/tokens
-  { re: /\b[0-9a-f]{32,}\b/gi, label: 'hash' },
   // JWT tokens (three dot-separated base64 segments)
   { re: /\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b/g, label: 'jwt' },
-  // IP addresses with ports (internal networks)
-  { re: /\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}(?::\d+)?\b/g, label: 'internal-ip' },
 ];
 
 export function init() {
