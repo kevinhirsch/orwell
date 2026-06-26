@@ -347,7 +347,15 @@ body.bg-pattern-perlin-flow {
 
 /* ── Layout ── */
 
-    /* Top bar — session meta + incognito, single row */
+    /* Top bar — session meta + incognito, single row.
+       #950 — Apple pattern: the title cluster (.chat-meta-overlay) is the ONLY
+       centered element and is absolutely pinned to the bar's full border box
+       (inset:0 below), so it stays perfectly H+V centered regardless of the edge
+       controls (hamburger / new-chat / incognito), which float over the sides with
+       their own absolute offsets and NEVER displace the title. Padding is symmetric
+       (top == bottom) so the bar's geometric centre is its true middle — no
+       compensating translate fudge. The old hamburger-side padding shims are gone:
+       the centred cluster spans the border box and ignores them by construction. */
     .chat-top-bar {
       display: flex;
       align-items: center;
@@ -355,18 +363,12 @@ body.bg-pattern-perlin-flow {
       flex-shrink: 0;
       position: relative;
       z-index: 2;
-      padding: 5px 0 0;
-      min-height: 25px;
+      padding: 0;
+      min-height: 30px;
       box-sizing: border-box;
     }
     .chat-top-bar::after {
       content: none;
-    }
-    body.sidebar-collapsed.hamburger-left .chat-top-bar {
-      padding-left: 38px;
-    }
-    body.sidebar-collapsed.hamburger-right .chat-top-bar {
-      padding-right: 38px;
     }
     .incognito-indicator {
       position: absolute;
@@ -430,13 +432,16 @@ body.bg-pattern-perlin-flow {
       right: 42px;
     }
 
-    /* Session meta — sits at top of chat area, scrolls with content */
+    /* Session meta — the centered title cluster.
+       #950 — pinned to the bar's FULL box (inset:0) and flex-centered, so the
+       cluster (title + count + cost + rename) is perfectly H+V centered in the bar
+       at all times. The side controls float over it (their own absolute offsets) and
+       never push it. No translate fudge: symmetric bar padding makes 50% the true
+       middle. A long title truncates with ellipsis (#current-meta below) while the
+       cluster stays centered. */
     .chat-meta-overlay {
       position: absolute;
-      left: 0;
-      right: 0;
-      top: 50%;
-      transform: translateY(calc(-50% - 2px));
+      inset: 0;
       font-size: 0.75em;
       line-height: 1;
       /* 70% mix keeps the chat title clearly above the WCAG AA 4.5:1
@@ -447,6 +452,12 @@ body.bg-pattern-perlin-flow {
       align-items: center;
       justify-content: center;
       gap: 2px;
+      /* Symmetric side gutters reserve room for the floating edge controls
+         (hamburger / new-chat / incognito) so a LONG title truncates before it
+         slides under them — and, being equal on both sides, never shift the
+         centre. Wide enough to clear the collapsed-sidebar hamburger inset. */
+      padding-inline: 46px;
+      box-sizing: border-box;
       pointer-events: none;
     }
     .chat-meta-overlay > * {
@@ -455,6 +466,9 @@ body.bg-pattern-perlin-flow {
     .chat-meta-overlay #current-meta {
       overflow: hidden;
       text-overflow: ellipsis;
+      /* min-width:0 lets the title shrink inside the flex line so the ellipsis
+         actually triggers instead of forcing the cluster wider than the bar. */
+      min-width: 0;
       cursor: pointer;
     }
     .chat-meta-overlay:hover {
