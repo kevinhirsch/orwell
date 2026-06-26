@@ -46,13 +46,20 @@
   // placements compose the SAME base (chrome/dismiss/a11y/animation/sync); only the anchor +
   // a few placement rules differ (#642 owner add-on).
   var BANNER_ID = "orwell-notice-banner";
+  // The corner-toast host (#951) — a SEPARATE anchor for EPHEMERAL, auto-dismissing toasts
+  // (the old `.toast` system: "Session archived", "Copied", an Undo affordance, etc.). Fixed at
+  // the top-right corner of the viewport, OUT of the chat flow. Same .on-card chrome/icon/
+  // dismiss/a11y/animation as every other notice — only the anchor, the slide-in axis, and the
+  // auto-dismiss timer differ. This is what unifies the toast look onto the kit's `.on-*` family
+  // (#951: all notifications share ONE chrome/icon/dismiss/motion/a11y contract).
+  var TOAST_ID = "orwell-notice-toast";
 
   // Kind → ordering weight (lower mounts ABOVE, higher mounts at the BOTTOM, nearest the
   // composer). The decision card is the most action-demanding affordance, so it sits CLOSEST
   // to the composer (highest weight); the guide is the most ambient, so it floats to the top.
   // Several affordances present at once therefore stack in a DETERMINISTIC order, never
   // fighting for one slot. (Same kind ⇒ insertion order within the band.)
-  var KIND_ORDER = { guide: 10, "system-notice": 20, continue: 30, decision: 40 };
+  var KIND_ORDER = { guide: 10, "system-notice": 20, continue: 30, decision: 40, toast: 25 };
 
   // aria-live per kind: the decision + a broken-engine system notice are consequential and
   // get an assertive announcement; the ambient guide + the Continue nudge are polite.
@@ -61,6 +68,9 @@
     "system-notice": "assertive",
     continue: "polite",
     decision: "assertive",
+    // a toast is a brief confirmation/feedback line — polite (an error toast bumps to assertive
+    // per its severity, mapped in _roleFor / the consumer; see ui.js showError).
+    toast: "polite",
   };
 
   var REDUCED = function () {
@@ -87,10 +97,14 @@
     warn: _svg('<path d="M10 3.2 18 16.5H2L10 3.2Z"/><path d="M10 8.2v3.4"/><circle cx="10" cy="14.1" r=".5" fill="currentColor" stroke="none"/>'),
     // a circle "!" — an error / hard outage (red tint via on-sev-error)
     error: _svg('<circle cx="10" cy="10" r="7.5"/><path d="M10 6v4.6"/><circle cx="10" cy="13.6" r=".5" fill="currentColor" stroke="none"/>'),
+    // a check-mark — a success confirmation (#951: the old toast's green check, now a mono glyph in
+    // the kit's ONE icon language; the success colour is carried by the consumer's tint, not a glyph).
+    success: _svg('<polyline points="4.5 10.5 8.5 14.5 15.5 6"/>'),
   };
-  // system-notice severity → icon key (a degraded/reconnecting banner reads as a warning, a hard
-  // outage as an error). One mapping, so the engine-status states share the notice icon family.
-  var SEVERITY_ICON = { info: "info", warn: "warn", error: "error" };
+  // system-notice / toast severity → icon key (a degraded/reconnecting banner reads as a warning, a
+  // hard outage as an error; a toast success → check, error → error circle). One mapping, so every
+  // notice/banner/toast shares the same icon family. (#951 adds the success key for toasts.)
+  var SEVERITY_ICON = { info: "info", warn: "warn", error: "error", success: "success" };
 
   // #766 — ONLY ONE top banner may EVER be present. When a banner would overwrite another, severity
   // precedence decides: a higher-severity outage must never be silently clobbered by a low-priority
@@ -107,7 +121,7 @@
     var key = opts.icon;
     if (key && NOTICE_ICONS[key]) return { html: NOTICE_ICONS[key] };
     if (key) return { text: key };                       // a bespoke glyph string — render verbatim
-    if (opts.kind === "system-notice") {                 // auto-derive from severity (the banner path)
+    if (opts.kind === "system-notice" || opts.kind === "toast") {  // auto-derive from severity (banner/toast)
       var sk = SEVERITY_ICON[opts.severity || "info"];
       if (sk && NOTICE_ICONS[sk]) return { html: NOTICE_ICONS[sk] };
     }
@@ -191,6 +205,13 @@
       ".on-card.on-sev-error {" +
       "  border-color: var(--color-error, var(--red, #e06c75));" +
       "  background: linear-gradient(0deg, color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 10%, transparent), color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 10%, transparent)), var(--panel, #111); }" +
+      // success: a confirmation tint (the old toast's green check, now an .on-sev-* skin). Borders
+      // green; the icon (check) tints with it. #951.
+      ".on-card.on-sev-success { border-color: var(--green, #50fa7b); }" +
+      ".on-card.on-sev-success .on-icon { color: var(--green, #50fa7b); }" +
+      // toast: the ephemeral feedback card. Quiet by default (the accent left-edge the legacy toast
+      // used), a left accent border so it reads as a peer of the old `.toast` look. #951.
+      ".on-card.on-toast { border-left: 3px solid var(--accent, #e06c75); }" +
       // continue: a quiet nudge to keep going.
       ".on-card.on-continue { border-color: color-mix(in srgb, var(--accent, #e06c75) 50%, var(--border, #355a66)); }" +
       // ── motion (reduced-motion stripped) ──────────────────────────────────────
@@ -228,8 +249,39 @@
       // The banner's slide-down entrance (reduced-motion stripped with the rest).
       "@keyframes on-banner-in { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: none; } }" +
       ".on-card.on-anim-banner-in { animation: on-banner-in .22s ease-out both; }" +
+      // ── corner-toast placement (#951) ─────────────────────────────────────────
+      // The unified ephemeral-toast surface: the OLD `.toast` system, restyled onto the kit's
+      // `.on-card` chrome so a success/error/undo toast shares the SAME icon + dismiss + a11y +
+      // motion contract as every banner/notice. A fixed top-right host holding ≤1 card (one toast
+      // at a time, like the old singleton #toast). Slides in from the RIGHT (matching the legacy
+      // toast motion), auto-dismisses on a timer, OUT of the chat flow.
+      "#" + TOAST_ID + " {" +
+      "  position: fixed; top: 16px; right: 16px; left: auto; bottom: auto; z-index: 11000;" +
+      "  display: flex; flex-direction: column; align-items: flex-end; pointer-events: none;" +
+      "  max-width: min(360px, calc(100vw - 32px)); }" +
+      "#" + TOAST_ID + ":empty { display: none; }" +
+      // The toast card is a compact .on-card: a tighter row, a min size matching the old toast, and
+      // its own slide-from-right entrance/exit (the zone uses rise+fade; the banner slides down).
+      "#" + TOAST_ID + " .on-card {" +
+      "  min-width: min(220px, calc(100vw - 32px)); max-width: 100%;" +
+      "  padding: .55rem .75rem; }" +
+      // A toast with NO title (the common case — just a message line) collapses the header row so the
+      // message body leads; the icon (if any) floats beside it.
+      "#" + TOAST_ID + " .on-card .on-head:has(.on-title:empty) { margin: 0; }" +
+      "#" + TOAST_ID + " .on-card .on-body { margin-top: 0; }" +
+      // The toast slide-in (from the right) + slide-out (to the left) — mirrors the legacy toast.
+      "@keyframes on-toast-in { from { opacity: 0; transform: translateX(120%); } to { opacity: 1; transform: none; } }" +
+      "@keyframes on-toast-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(-120%); } }" +
+      ".on-card.on-anim-toast-in { animation: on-toast-in .35s cubic-bezier(0.22,1,0.36,1) both; }" +
+      ".on-card.on-anim-toast-out { animation: on-toast-out .3s cubic-bezier(0.22,1,0.36,1) both; }" +
+      // Mobile: the host receives touches so the swipe-to-dismiss gesture works (desktop stays
+      // pointer-events:none so a toast never blocks clicks; the card itself re-enables them).
+      "@media (max-width: 768px) {" +
+      "  #" + TOAST_ID + " { top: 12px; right: 12px; max-width: calc(100vw - 24px); }" +
+      "  #" + TOAST_ID + " .on-card { pointer-events: auto; touch-action: pan-x; } }" +
       "@media (prefers-reduced-motion: reduce) {" +
-      "  .on-card.on-anim-in, .on-card.on-anim-out, .on-card.on-anim-banner-in { animation: none; } }" +
+      "  .on-card.on-anim-in, .on-card.on-anim-out, .on-card.on-anim-banner-in," +
+      "  .on-card.on-anim-toast-in, .on-card.on-anim-toast-out { animation: none; } }" +
       // ── LIQUID GLASS (body.theme-frosted) ──────────────────────────────────────
       // Under the glass theme the notice card reads as the SAME ONE LIGHT GLASS as the
       // windows/sidebar — the kube music-player light fill. style.css now paints that light
@@ -354,6 +406,20 @@
     return host;
   }
 
+  // The corner-toast host (#951) — a fixed top-right bar holding the SINGLE live toast card. A
+  // SEPARATE anchor from the above-composer zone and the top banner; same base chrome. Created
+  // lazily on body. position:fixed so it never participates in the chat flow (no body inset — a
+  // toast is transient and small, unlike the top banner which reserves height).
+  function ensureToastHost() {
+    var host = document.getElementById(TOAST_ID);
+    if (host) return host;
+    ensureCss();
+    host = document.createElement("div");
+    host.id = TOAST_ID;
+    document.body.appendChild(host);
+    return host;
+  }
+
   // Body-inset compensation: a top banner is position:fixed, so without compensation it occludes
   // the top of the chat (worst exactly when connectivity is degraded). Reserve its height as body
   // padding-top while shown, release it when gone. A CSS var carries the value (a reduced-motion-
@@ -417,15 +483,21 @@
       //              transient notice (a connection banner) sets false so it reappears if the
       //              problem recurs and never writes a "dismissed forever" bit.
       // onDismiss(reason) — fired after a dismiss ('user' | 'remote' | 'api').
-      // placement — "above-composer" (default, the stacked zone above the composer) or
+      // placement — "above-composer" (default, the stacked zone above the composer),
       //              "top-banner" (a full-width fixed bar at the top of the viewport, for a
       //              GLOBAL outage signal — same base chrome/dismiss/a11y/anim/sync, different
-      //              anchor; reserves body padding-top so it never occludes the chat). #642.
+      //              anchor; reserves body padding-top so it never occludes the chat), #642, or
+      //              "toast" (#951: a fixed top-right corner card for an EPHEMERAL, auto-dismissing
+      //              confirmation/feedback toast — same base chrome/icon/dismiss/a11y, a slide-from-
+      //              right entrance, an auto-dismiss timer, and swipe-to-dismiss on touch).
+      // autoDismissMs — for a toast (or any notice): auto-dismiss after N ms (0/undefined ⇒ none).
+      //              A toast is ephemeral, so showToast/showError set this; a banner never does.
       kind: "guide",
       severity: "info",
       dismissible: true,
       persistDismiss: true,
       placement: "above-composer",
+      autoDismissMs: 0,
       onDismiss: null,
     }, opts || {});
     // id is required; title is optional (a hint is just a text line, a banner sets it via update()).
@@ -441,7 +513,21 @@
     if (this.o.role) return this.o.role;
     if (this.o.kind === "decision") return "form";
     if (this.o.kind === "system-notice") return "alert";
+    // #951: an error/warn toast is a consequential status → role=alert; a plain/success toast is a
+    // passive confirmation → role=status (a polite live region).
+    if (this.o.kind === "toast") {
+      return (this.o.severity === "error" || this.o.severity === "warn") ? "alert" : "status";
+    }
     return "note";
+  };
+
+  // The aria-live politeness for this notice. Per kind by default; a toast escalates to assertive
+  // for error/warn severities (matching its role), polite otherwise. #951.
+  OrwellNotice.prototype._liveFor = function () {
+    if (this.o.kind === "toast") {
+      return (this.o.severity === "error" || this.o.severity === "warn") ? "assertive" : "polite";
+    }
+    return KIND_LIVE[this.o.kind] || "polite";
   };
 
   // #764: render (or refresh, or remove) the leading icon from the kit's ONE monochrome set —
@@ -468,14 +554,15 @@
     var el = document.createElement("section");
     el.id = this.o.id;
     el.className = "on-card on-" + kind +
-      (this.o.kind === "system-notice" && this.o.severity ? " on-sev-" + this.o.severity : "");
+      ((kind === "system-notice" || kind === "toast") && this.o.severity ? " on-sev-" + this.o.severity : "");
     el.setAttribute("data-on-notice", "");
     el.setAttribute("data-on-kind", kind);
     el.setAttribute("role", this._roleFor());
     if (this.o.title) el.setAttribute("aria-label", this.o.title);
     // aria-live per kind — a consequential notice announces assertively; an ambient one politely.
-    var live = KIND_LIVE[kind] || "polite";
-    el.setAttribute("aria-live", live);
+    // #951: a toast bumps to assertive when its severity is error/warn (an error toast is
+    // consequential), polite otherwise — so the spoken urgency tracks the severity.
+    el.setAttribute("aria-live", this._liveFor());
 
     var head = document.createElement("div");
     head.className = "on-head";
@@ -519,15 +606,98 @@
   };
 
   OrwellNotice.prototype._isBanner = function () { return this.o.placement === "top-banner"; };
+  OrwellNotice.prototype._isToast = function () { return this.o.placement === "toast"; };
+
+  // Arm (or re-arm) the auto-dismiss timer for an ephemeral notice/toast. A no-op when
+  // autoDismissMs is falsy. Cleared on dismiss/hide so a re-shown card never double-fires.
+  OrwellNotice.prototype._armAutoDismiss = function () {
+    this._clearAutoDismiss();
+    var ms = this.o.autoDismissMs;
+    if (!ms) return;
+    var self = this;
+    this._autoTimer = setTimeout(function () {
+      self._autoTimer = null;
+      // A toast is transient: it auto-hides WITHOUT persisting a dismissal (persistDismiss:false),
+      // so the same id can show again next time. hide() is the no-persist exit.
+      self.hide();
+    }, ms);
+  };
+  OrwellNotice.prototype._clearAutoDismiss = function () {
+    if (this._autoTimer) { clearTimeout(this._autoTimer); this._autoTimer = null; }
+  };
+
+  // Wire swipe-to-dismiss on a toast card (touch only — desktop uses the × / auto-dismiss). Mirrors
+  // the legacy ui.js _wireToastSwipe: a horizontal drag past the threshold flings the card off and
+  // hides it early; less snaps back. Runs once per card.
+  OrwellNotice.prototype._wireSwipe = function () {
+    var el = this.el;
+    if (!el || el._onSwipeWired) return;
+    el._onSwipeWired = true;
+    var self = this, DISMISS_PX = 70, startX = 0, curX = 0, swiping = false;
+    el.addEventListener("touchstart", function (e) {
+      var t = e.touches && e.touches[0]; if (!t) return;
+      startX = curX = t.clientX; swiping = true;
+      el.style.transition = "none";
+    }, { passive: true });
+    el.addEventListener("touchmove", function (e) {
+      if (!swiping) return;
+      var t = e.touches && e.touches[0]; if (!t) return;
+      curX = t.clientX; var dx = curX - startX;
+      el.style.transform = "translateX(" + dx + "px)";
+      el.style.opacity = String(Math.max(0.2, 1 - Math.abs(dx) / 200));
+    }, { passive: true });
+    var end = function () {
+      if (!swiping) return; swiping = false;
+      var dx = curX - startX; el.style.transition = "";
+      if (Math.abs(dx) > DISMISS_PX) {
+        el.style.transform = "translateX(" + (dx > 0 ? "120%" : "-120%") + ")";
+        el.style.opacity = "0";
+        self._clearAutoDismiss();
+        setTimeout(function () { self.hide(); }, 180);
+      } else { el.style.transform = ""; el.style.opacity = ""; }
+    };
+    el.addEventListener("touchend", end);
+    el.addEventListener("touchcancel", end);
+  };
 
   // Mount the notice into its anchor (the stacked above-composer zone, or the top banner host).
   // Honors a persisted/synced dismissal: a notice the player dismissed before (and that persists)
   // won't re-mount. Idempotent.
   OrwellNotice.prototype.show = function () {
     if (this.o.persistDismiss && loadDismissed(this.o.id)) return null;
-    if (this.el && this.el.isConnected) return this.el;
+    // A toast already up just re-arms its timer (a re-show with fresh content keeps the same card,
+    // no flicker) — the consumer (showToast) refreshes the body/icon before calling show().
+    if (this.el && this.el.isConnected) {
+      if (this._isToast()) { this._armAutoDismiss(); }
+      return this.el;
+    }
     var el = this.el || this._build();
     var self = this;
+    if (this._isToast()) {
+      // #951: the unified ephemeral toast. A SINGLE corner host holding ≤1 card (the legacy toast
+      // was a singleton element). Replace any existing toast card (latest-wins — a toast is the most
+      // recent feedback line), slide in from the right, arm the auto-dismiss timer, wire swipe.
+      var thost = ensureToastHost();
+      var prior = thost.firstElementChild;
+      if (prior && prior !== el) {
+        var priorNotice = _byId[prior.id];
+        if (priorNotice && typeof priorNotice.hide === "function") priorNotice.hide();
+        else prior.remove();
+        while (thost.firstElementChild && thost.firstElementChild !== el) thost.firstElementChild.remove();
+      }
+      thost.appendChild(el);
+      _byId[this.o.id] = this;
+      this._wireSwipe();
+      if (!REDUCED()) {
+        el.classList.add("on-anim-toast-in");
+        el.addEventListener("animationend", function handler() {
+          el.classList.remove("on-anim-toast-in");
+          el.removeEventListener("animationend", handler);
+        }, { once: true });
+      }
+      this._armAutoDismiss();
+      return el;
+    }
     if (this._isBanner()) {
       var host = ensureBannerHost();
       // #766 — ONLY ONE top banner may EVER be present. If another notice's banner card is already
@@ -600,11 +770,19 @@
     patch = patch || {};
     if (!this.el) this._build();
     var iconDirty = false;
-    if (patch.severity != null && this.o.kind === "system-notice") {
-      this.el.classList.remove("on-sev-info", "on-sev-warn", "on-sev-error");
+    // #951: severity tinting applies to a system-notice (the banner) AND a toast (an error toast
+    // reads red, a success toast green) — both wear the .on-sev-* skins. Other kinds ignore it.
+    if (patch.severity != null && (this.o.kind === "system-notice" || this.o.kind === "toast")) {
+      this.el.classList.remove("on-sev-info", "on-sev-warn", "on-sev-error", "on-sev-success");
       this.o.severity = patch.severity;
       this.el.classList.add("on-sev-" + patch.severity);
       iconDirty = true;   // #764: a system-notice's icon is severity-derived — refresh it too
+      // #951: a toast's role/aria-live track severity (error/warn → alert/assertive) — keep them
+      // in sync when a reused toast card switches between a success line and an error line.
+      if (this.o.kind === "toast" && !this.o.role) {
+        this.el.setAttribute("role", this._roleFor());
+        this.el.setAttribute("aria-live", this._liveFor());
+      }
     }
     if (patch.title != null) {
       this.o.title = patch.title;
@@ -629,6 +807,7 @@
   // Remove the notice from the zone WITHOUT persisting a dismissal (a content gate closing it,
   // e.g. the premiere week ending). reduced-motion-safe fade-out.
   OrwellNotice.prototype.hide = function () {
+    this._clearAutoDismiss();   // #951: a manual/swipe hide cancels any pending auto-dismiss
     var el = this.el;
     if (!el || !el.isConnected) { if (this.el === el) this.el = null; return; }
     var self = this;
@@ -643,7 +822,9 @@
       }
     };
     if (REDUCED()) { done(); return; }
-    el.classList.add("on-anim-out");
+    // The toast slides off to the LEFT (its own keyframe), matching the legacy toast exit; every
+    // other placement uses the shared fade-out.
+    el.classList.add(this._isToast() ? "on-anim-toast-out" : "on-anim-out");
     el.addEventListener("animationend", done, { once: true });
     setTimeout(done, 260);  // belt: fire even if animationend is missed
   };

@@ -10,7 +10,6 @@ import spinnerModule from './spinner.js';
 import { registerMenuDismiss, dismissTopMenu, dismissOrRemove } from './escMenuStack.js';
 import { isNarrow } from './platform.js';
 
-let toastEl = null;
 let autoScrollEnabled = true;
 let hoveredToggleCard = null;
 let hoveredToggleWindow = null;
@@ -234,77 +233,37 @@ export async function copyToClipboard(text) {
   }
 }
 
-// Wire swipe-to-dismiss on the shared toast element. Runs once, the first
-// time a toast is shown. Tracks horizontal touch drag; if the user drags
-// more than DISMISS_PX, the toast slides off in the drag direction and
-// hides early. Anything less snaps back. Desktop unaffected (touch
-// listeners only fire from a touchscreen — mouse is handled by the
-// existing × button and auto-hide timer).
-function _wireToastSwipe(el) {
-  if (!el || el._swipeWired) return;
-  el._swipeWired = true;
-  const DISMISS_PX = 70;
-  let startX = 0, currentX = 0, swiping = false;
-  el.addEventListener('touchstart', (e) => {
-    if (!el.classList.contains('show')) return;
-    const t = e.touches[0];
-    if (!t) return;
-    startX = t.clientX;
-    currentX = t.clientX;
-    swiping = true;
-    // Kill the slide-in transition mid-flight so the touch tracks the
-    // finger 1:1 instead of fighting a still-running animation.
-    el.style.transition = 'none';
-  }, { passive: true });
-  el.addEventListener('touchmove', (e) => {
-    if (!swiping) return;
-    const t = e.touches[0];
-    if (!t) return;
-    currentX = t.clientX;
-    const dx = currentX - startX;
-    el.style.transform = `translateX(${dx}px)`;
-    // Fade as the toast leaves the rest position — visual cue for
-    // approaching the dismiss threshold.
-    el.style.opacity = String(Math.max(0.2, 1 - Math.abs(dx) / 200));
-  }, { passive: true });
-  const endSwipe = () => {
-    if (!swiping) return;
-    swiping = false;
-    const dx = currentX - startX;
-    // Restore the transition so the next mutation animates.
-    el.style.transition = '';
-    if (Math.abs(dx) > DISMISS_PX) {
-      // Fling off in the drag direction, then hide.
-      el.style.transform = `translateX(${dx > 0 ? '120%' : '-120%'})`;
-      el.style.opacity = '0';
-      clearTimeout(el._hideTimer);
-      setTimeout(() => {
-        el.classList.remove('show');
-        el.classList.add('exiting');
-        el.style.transform = '';
-        el.style.opacity = '';
-      }, 180);
-    } else {
-      // Snap back to rest.
-      el.style.transform = '';
-      el.style.opacity = '';
-    }
-  };
-  el.addEventListener('touchend', endSwipe);
-  el.addEventListener('touchcancel', endSwipe);
+// #951 — the unified toast. showToast/showError now route through the OrwellNotice kit's
+// "toast" placement so an ephemeral confirmation shares the SAME chrome/icon/dismiss/motion/a11y
+// contract as every banner/notice (the "Reconnecting to Big Brother…" banner family). The kit owns
+// the corner host, the slide-in/out, swipe-to-dismiss, and reduced-motion safety. Toasts stay
+// EPHEMERAL (auto-dismiss) — only the look is unified, not WHAT triggers each one. The public
+// showToast/showError API is unchanged (88 callers): same args, same behaviour.
+//
+// A single reused kit notice (one toast at a time, like the legacy singleton #toast). The kit
+// replaces the prior toast card when a new one shows, so we keep one instance and re-skin it.
+let _toastNotice = null;
+function _ensureToastNotice() {
+  if (_toastNotice) return _toastNotice;
+  if (!window.OrwellNoticeKit) return null;
+  _toastNotice = window.OrwellNoticeKit.create({
+    id: 'orwell-toast',
+    kind: 'toast',
+    placement: 'toast',
+    severity: 'info',
+    // a toast is transient — never persist/sync a "dismissed forever" bit (it must reappear next
+    // time), and never render the persistent × by default (it auto-dismisses); an action toast
+    // adds its own dismiss affordance in the body (Undo + ×), matching the legacy behaviour.
+    dismissible: false,
+    persistDismiss: false,
+  });
+  return _toastNotice;
 }
 
 /**
- * Show success toast message
+ * Show success toast message. Routed through the OrwellNotice kit (#951) — same API as before.
  */
 export function showToast(msg, durationOrOpts) {
-  if (!toastEl) {
-    toastEl = document.getElementById('toast');
-  }
-  _wireToastSwipe(toastEl);
-  toastEl.textContent = '';
-  toastEl.classList.remove('error');
-
   let duration = 1200, actionLabel = null, onAction = null, actionHint = null, actionIcon = null, leadingIcon = null;
   if (typeof durationOrOpts === 'object' && durationOrOpts) {
     duration = durationOrOpts.duration || 5000;
@@ -317,68 +276,62 @@ export function showToast(msg, durationOrOpts) {
     duration = durationOrOpts;
   }
 
-  const textSpan = document.createElement('span');
-  if (leadingIcon === 'check') {
-    const icon = document.createElement('span');
-    icon.className = 'toast-checkmark';
-    icon.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
-    toastEl.appendChild(icon);
-  } else if (leadingIcon === 'spinner') {
+  const n = _ensureToastNotice();
+  if (!n) return; // kit absent (degraded/headless) — fail-open, no toast
+
+  // The leading icon maps onto the kit's ONE monochrome icon language: a 'check' success glyph
+  // (severity:success → the kit's mono check), or the spinner whirlpool (a live in-progress cue
+  // the kit's static icon set doesn't cover, so it goes into the body as a node).
+  const severity = leadingIcon === 'check' ? 'success' : 'info';
+
+  // Build the body: the message text, then (optionally) the action affordance column + a dismiss ×,
+  // exactly like the legacy toast — but inside the kit card's .on-body.
+  const body = document.createElement('span');
+  body.style.cssText = 'display:inline-flex;align-items:center;gap:0;';
+  if (leadingIcon === 'spinner') {
     const wp = spinnerModule.createWhirlpool(14);
     const icon = wp.element;
     icon.classList.add('toast-whirlpool');
     icon.style.cssText = 'width:14px;height:14px;margin:0 8px 0 0;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;';
-    toastEl.appendChild(icon);
+    body.appendChild(icon);
   }
+  const textSpan = document.createElement('span');
   textSpan.textContent = msg;
-  toastEl.appendChild(textSpan);
+  body.appendChild(textSpan);
 
+  let hasAction = false;
   if (actionLabel && onAction) {
-    // Wrap the action in a small column so we can stack a Ctrl-Z-style hint
-    // directly under the button.
+    hasAction = true;
     const stack = document.createElement('span');
     stack.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;gap:1px;margin-left:10px;line-height:1;';
-
     const btn = document.createElement('button');
-    // If the caller supplied an SVG icon, prepend it. We trust the icon string
-    // (only set internally) — never accept caller-controlled HTML otherwise.
+    // Trust the icon string (only set internally) — never accept caller-controlled HTML otherwise.
     if (actionIcon) {
       btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;">${actionIcon}<span></span></span>`;
       btn.querySelector('span span').textContent = actionLabel;
     } else {
       btn.textContent = actionLabel;
     }
-    // The toast itself is `pointer-events: none` so it doesn't block clicks
-    // beneath it. With an action button we need to flip both the toast AND
-    // the button so the user can actually click Undo. The flag is reset on
-    // the next plain showToast / showError call (those overwrite textContent
-    // which strips the button + we clear inline style at the top below).
     btn.style.cssText = 'padding:2px 10px;border:1px solid var(--fg);border-radius:4px;background:none;color:var(--fg);cursor:pointer;font-size:12px;pointer-events:auto;display:inline-flex;align-items:center;';
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      toastEl.classList.remove('show');
-      toastEl.style.pointerEvents = ''; // TX-6: stop intercepting clicks during the exit slide
+      n.hide();
       onAction();
     });
     stack.appendChild(btn);
-
-    // Keyboard-shortcut hints (Ctrl+Z / ⌘Z) are meaningless on touch devices —
-    // skip them on mobile so the toast just shows the Undo button.
+    // Keyboard-shortcut hints are meaningless on touch — skip on mobile.
     if (actionHint && !isNarrow()) {
       const hint = document.createElement('span');
       hint.textContent = actionHint;
       hint.style.cssText = 'font-size:9px;opacity:0.55;letter-spacing:0.4px;text-transform:uppercase;font-family:var(--mono, monospace);margin-top:1px;pointer-events:none;';
       stack.appendChild(hint);
     }
-
-    toastEl.appendChild(stack);
-
-    // Small × to dismiss the toast without taking the action. Useful when
-    // the user already acted (or just doesn't want the banner sitting there).
+    body.appendChild(stack);
+    // A small × to dismiss without taking the action (mirrors the legacy action-toast ×).
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
-    closeBtn.setAttribute('aria-label', 'Dismiss');
+    closeBtn.setAttribute('aria-label', `Dismiss — ${msg}`);
     closeBtn.title = 'Dismiss';
     closeBtn.textContent = '×';
     closeBtn.style.cssText = 'margin-left:8px;padding:0;width:20px;height:20px;line-height:1;border:none;background:none;color:var(--fg);opacity:0.55;cursor:pointer;font-size:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;';
@@ -387,60 +340,31 @@ export function showToast(msg, durationOrOpts) {
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      clearTimeout(toastEl._hideTimer);
-      toastEl.classList.add('exiting');
-      toastEl.classList.remove('show');
-      toastEl.style.pointerEvents = ''; // TX-6: stop intercepting top-right clicks during the exit slide
+      n.hide();
     });
-    toastEl.appendChild(closeBtn);
-
-    toastEl.style.pointerEvents = 'auto';
-  } else {
-    // No action — restore the default non-blocking behavior.
-    toastEl.style.pointerEvents = '';
+    body.appendChild(closeBtn);
   }
 
-  // Pin to top-right via CSS — clear any legacy inline overrides so the
-  // slide-in-from-right / slide-out-to-left transition can run cleanly.
-  toastEl.style.left = '';
-  toastEl.style.transform = '';
-  toastEl.classList.remove('exiting');
-  toastEl.classList.add('show');
-  clearTimeout(toastEl._hideTimer);
-  toastEl._hideTimer = setTimeout(() => {
-    // Add `exiting` so the CSS rule slides it off to the LEFT instead of
-    // back to the right (where it came from). We piggyback on the same
-    // .toast base; .exiting overrides the resting transform.
-    toastEl.classList.add('exiting');
-    toastEl.classList.remove('show');
-    // Reset pointer-events so an action-toast (which sets it to 'auto'
-    // for its clickable button) doesn't leave the toast intercepting
-    // clicks after it's slid away. Was previously only cleared on the
-    // NEXT plain toast, so a lingering action-toast could appear to
-    // "lock" interaction near the top-right.
-    toastEl.style.pointerEvents = '';
-  }, duration);
+  // Re-skin the kit card: severity (→ icon + tint), a glyph-free title (toasts have none — the body
+  // carries the message), the body content, and the ephemeral auto-dismiss timer. An action toast
+  // needs pointer-events so its button is clickable — the kit card re-enables them; we make the host
+  // not swallow clicks by leaving the card pointer-events:auto (the kit card already is).
+  n.o.autoDismissMs = duration;
+  n.update({ severity, title: '', body });
+  n.show();
 }
 
 /**
- * Show error toast message
+ * Show error toast message. Routed through the OrwellNotice kit (#951) — red severity + assertive.
  */
 export function showError(msg) {
-  if (!toastEl) {
-    toastEl = document.getElementById('toast');
-  }
-  _wireToastSwipe(toastEl);
-  toastEl.textContent = msg;
-  toastEl.classList.add('error');
-  toastEl.style.left = '';
-  toastEl.style.transform = '';
-  toastEl.classList.remove('exiting');
-  toastEl.classList.add('show');
-  clearTimeout(toastEl._hideTimer);
-  toastEl._hideTimer = setTimeout(() => {
-    toastEl.classList.add('exiting');
-    toastEl.classList.remove('show');
-  }, 3000);
+  const n = _ensureToastNotice();
+  if (!n) return;
+  n.o.autoDismissMs = 3000;
+  const body = document.createElement('span');
+  body.textContent = msg;
+  n.update({ severity: 'error', title: '', body });
+  n.show();
 }
 
 /**
