@@ -71,6 +71,8 @@ game finding.** The latent code observation it surfaced is F7.
 | ID | Tag | Sev | Where | What feels off (1 line) | Evidence |
 |----|-----|-----|-------|-------------------------|----------|
 | **F14** | **CANON+SPIRIT** | **BLOCK** | **eviction → goodbye gate** | **The game wedges at every eviction.** The engine correctly raises a player `goodbye-message` pending (E34), but the model never surfaces the decision card — it narrates "X has been evicted" and loops; the engine stays `phase:eviction, evicted:null`, evictee still in house, and never reaches Week 2 | Turns 17–20 (4 nudges, incl. a lull): engine `evicted:null`, house 15, noms unchanged; direct `advanceGame` wedged at the `goodbye-message` beat (`/api/orwell/status` pending: `{kind:"goodbye-message", by:player, prompt:"record your goodbye message…"}`); only resolved by manually POSTing `/api/orwell/decision` + `advanceGame`. The card *did* render a full week late as a stale "Goodbye message" card (Turn 21) |
+| **F16** | **CANON** | **BLOCK** | **eviction outcome fabricated** | **The model narrates the WRONG evictee.** Week 2 it narrated "the majority votes to evict **Trent**" while the engine then tallied **~10–1 and evicted Asher**. The model fabricates an eviction result with no engine basis — and the engine contradicts it. A player trusting the chat believes the wrong person left | Turn 28 GM: "majority … evict Trent Tucker … Trent departing" while engine `phase:veto-competition, evicted:null`; driven manually, the engine's `eviction-reveal` beats tallied 10× "a vote to evict Asher" / 1× Trent → `eviction: Asher Calhoun` |
+| **F15** | **CANON** | **POLISH** | **roster not pruned** | The `house[]` roster still lists **15** after two evictions (Juliana + Asher both still in the array) — evicted houseguests aren't removed/flagged in the roster the cast surfaces read | `GET /api/orwell/state` `house[]` length stayed 15 across both evictions |
 | **F8** | **CANON+SPIRIT** | **POLISH (high) / soft BLOCK on spirit** | **ceremonies** | **Ceremonies are compressed while comps stage out.** The **nomination ceremony was never narrated** (noms appeared only in the HUD); **eviction night was one summary line** (no staged live vote). The iconic BB ceremony beats are missing | Turn 12→13: chat narrated only the Asher 1:1; engine jumped `nominations → veto-competition` with `noms:[Juliana, Jett]`; GM text had **zero** of nominat*/block/Juliana/Jett; Theo even asked "when did the ceremony happen?" and was ignored. Turn 17 eviction: "*The votes are in … Juliana Gaines is the first to be evicted*" — a result, not a ceremony |
 | **F12** | **CANON** | **POLISH** | **eviction night** | The player was **never prompted to author a goodbye message** (E34) and there was **no staged anonymized vote reveal** (E12's "a vote to evict …") — both core eviction-night beats were skipped with the ceremony compression | Turn 17: voted in narration, jumped straight to the evicted result; no `goodbye-message` pending card, no per-vote staging |
 | F2 | SPIRIT | POLISH | error UX | A failed turn shows only *"The model returned an empty response. Please try again or switch to a different model"* — a dead-end with no real recourse for a non-technical player | `src/agent_loop.py:3028`; seen repeatedly during the F7 endpoint issue |
@@ -104,8 +106,12 @@ game/illusion · `[POLISH]` noticeable but survivable · `[NIT]` tiny · `[LATEN
   eviction wedge.) The HUD also reset noms/veto for the new week.
 - **Engine ↔ narration ↔ gadget parity** — the "Where You Are" board, the GM's room descriptions, the
   HOH/noms/veto status, and the engine roster agreed throughout; time-of-day advanced Morning→Afternoon.
-- **Secret ballot (E12)** — the eviction was announced as a result ("Juliana Gaines is the first to be
-  evicted"), **no per-voter attribution** leaked.
+- **Secret ballot (E12) + real vote tally** — when driven through the engine, the eviction plays a
+  staged **anonymized** reveal ("*a vote to evict ⟨nominee⟩*", never "⟨voter⟩ voted to evict") and the
+  engine **tallies real votes**: Week 2 it counted ~10–1 and evicted **Asher**, *overriding* the
+  player's lone vote for Trent — the outcome is the house's, not the player's or the model's.
+- **Anti-sycophancy at the vote too** — the player's single eviction vote did not decide the result
+  (10–1 house majority). Outcomes stay the engine's across comps *and* votes.
 - **Vault Wall** — NPCs never revealed hidden targets/state; the HOH's real targets stayed implied and
   the player had to **infer** ("you sense a calculated undertone"). No secret numbers reached the player.
 - **Casting** — in-character ("Hugo, the casting desk"), acknowledges the superfan identity, and the
