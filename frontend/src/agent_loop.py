@@ -2644,6 +2644,10 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
     r"(?:" + "|".join(_GAME_TOOL_WORDS) + r")"
     # machinery NOUNS that never appear in in-character narration
     r"|\bthe (?:engine|system)\b"
+    # the APPLICATION the player runs us on (fourth-wall meta-leak, audit 2026-06-26): "the front
+    # end", "the app", "this app/website/site" never occur in in-character BB narration. Narrow
+    # alternation (no bare "front"/"app"/"site") so ordinary scene prose is untouched.
+    r"|\bfront[\s-]?end\b|\bthe app\b|\bthis (?:app|website|site)\b"
     r"|\bcomp-intent\b|\bpending (?:decision|binding)\b|\bbinding (?:choice|decision)\b"
     r"|\b(?:decision|choice) (?:card|cards|button|buttons)\b|\btool call\b|\bjumped ahead\b|\bnarratively\b"
     # first-person operator asides (process talk)

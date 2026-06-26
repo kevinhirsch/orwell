@@ -162,7 +162,10 @@ export function startsWithReasoningPrefix(text) {
 // (the planning preamble), then return whatever narration follows. If the whole
 // block is preamble, we return '' so the leak renders as nothing — fail-open to
 // hiding (immersion is the priority). Operates on raw text BEFORE markdown.
-const _REASONING_LINE_RE = /^\s*(?:let me\b|looking at\b|the game state\b|i need\b|i should\b|i'll\b|i will\b|i can\b|i'm going to\b|first,? i\b|now,? i\b|the (?:roster|cast|state) (?:shows|is)\b|let's (?:see|stay)\b|okay,? (?:so|let)\b|alright,? (?:so|let)\b|so,? i\b|based on the\b)/i;
+// The application-itself meta-leak (audit 2026-06-26): the model mirrors a player's OOC software
+// complaint into the fiction ("the front end is having a day", "the app froze"). Narrow alternation
+// (no bare "front"/"app"/"site") so ordinary in-character prose stays untouched.
+const _REASONING_LINE_RE = /^\s*(?:let me\b|looking at\b|the game state\b|i need\b|i should\b|i'll\b|i will\b|i can\b|i'm going to\b|first,? i\b|now,? i\b|the (?:roster|cast|state) (?:shows|is)\b|let's (?:see|stay)\b|okay,? (?:so|let)\b|alright,? (?:so|let)\b|so,? i\b|based on the\b|front[\s-]?end\b|the app\b|this (?:app|website|site)\b)/i;
 const _RAW_NPC_ID_RE = /\bnpc:\d+\b/i;
 
 export function scrubReasoningPreamble(text) {
@@ -203,6 +206,19 @@ const _RAW_NPC_ID_GLOBAL_RE = /\bnpc:\d+\b[ \t]*(?:[-–—:(]\s*)?/gi;
 // here as the single render engine both the live and reload paths funnel through.
 const _OOC_WHOLE_WRAP_RE = /^\s*\(\(([\s\S]*?)\)\)\s*$/;
 const _OOC_LEADING_PREFIX_RE = /^\s*ooc\s*:\s*/i;
+// Malformed-wrap salvage (audit 2026-06-26): the model sometimes opens a reply with a `((…))`
+// fragment and then continues in UNWRAPPED prose ("((Hey — you're through…)) The house is…").
+// That is neither a whole-message wrap nor in-room dialogue, so the literal markers used to render
+// verbatim beside the prose. When (and only when) a reply STARTS with a complete `((…))` fragment
+// that is immediately followed by more non-wrapped text, strip the stray markers from that leading
+// fragment and let the reply render as plain prose. Conservative: anchored to the start, requires a
+// closing `))` on the SAME leading fragment, and never fires on a true whole-message wrap (handled
+// above) — so balanced ((asides)) and ordinary prose are untouched.
+const _OOC_LEADING_FRAGMENT_RE = /^\s*\(\(([\s\S]*?)\)\)\s*(?=\S)/;
+function _salvageLeadingOocFragment(reply) {
+  if (!reply || _OOC_WHOLE_WRAP_RE.test(reply)) return reply;
+  return reply.replace(_OOC_LEADING_FRAGMENT_RE, (_m, inner) => (inner ? inner.trim() + ' ' : ''));
+}
 
 export function redactRawIds(text) {
   if (!text) return text;
@@ -585,6 +601,10 @@ export function processWithThinking(text) {
       else if (_OOC_LEADING_PREFIX_RE.test(reply)) {
         reply = reply.replace(_OOC_LEADING_PREFIX_RE, '').trim();
         oocAside = true;
+      } else {
+        // Salvage a malformed leading `((…))` fragment followed by unwrapped prose so the
+        // stray markers never render verbatim (renders as plain producer prose, not an aside).
+        reply = _salvageLeadingOocFragment(reply);
       }
     }
     // Prepend the reasoning accordion (collapsed by default), then the clean
