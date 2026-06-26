@@ -19,6 +19,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord } from "../../engine/voice";
+import { driveSuspicion } from "../../engine/suspicion";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN,
   deriveDrive, ownBallotLean, ARCHETYPE_AGGRESSION,
@@ -1058,9 +1059,22 @@ export class GameSessionAdapter implements GameSession {
       knows: (this.npcKnowledge?.known(id) ?? [])
         .slice(-GameSessionAdapter.VOICE_KNOWS_CAP)
         .map((f) => this.humanize(f.content)),
-      suspects: (this.npcKnowledge?.suspicions(id) ?? [])
-        .slice(-GameSessionAdapter.VOICE_SUSPECTS_CAP)
-        .map((f) => this.humanize(f.content)),
+      suspects: (() => {
+        const base = (this.npcKnowledge?.suspicions(id) ?? [])
+          .slice(-GameSessionAdapter.VOICE_SUSPECTS_CAP)
+          .map((f) => this.humanize(f.content));
+        // 0105: a houseguest's DRIVE (0086) gives them a specific, Vault-safe suspicion — the wary
+        // threat-READ behind the sealed plan, surfaced as a behavioral hunch so the narrator has someone
+        // specific to voice them watching (anchoring the 0084 mood). Present ONLY when the drive layer is
+        // live (⇒ campaigns off ⇒ no drive ⇒ this is absent ⇒ byte-identical projection). The PLAN, the
+        // intensity, the campaign never cross — only the hunch the houseguest would act out anyway.
+        if (isActive) {
+          const drv = this.drives.get(id);
+          const hunch = drv ? driveSuspicion(drv, drv.target !== undefined ? this.nameOf(drv.target) : undefined) : null;
+          if (hunch && !base.includes(hunch)) base.push(hunch);
+        }
+        return base;
+      })(),
       stances: others.map((other) => ({
         toward: { id: other, name: this.nameOf(other) },
         stance: relationshipLabel(this.rel.edge(id, other), dispositionOf(npc.character.archetype)),
