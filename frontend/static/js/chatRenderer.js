@@ -2,7 +2,7 @@
 // Extracted from chat.js — message rendering, sources, images, metrics
 
 import uiModule from './ui.js';
-import markdownModule from './markdown.js';
+import markdownModule, { svgifyEmoji as _svgifyEmoji } from './markdown.js';
 import { addAITTSButton } from './tts-ai.js';
 import { providerLogo, providerLabel } from './providers.js';
 import settingsModule from './settings.js';
@@ -2241,6 +2241,21 @@ export function addMessage(role, content, modelName, metadata) {
         '<think' + (thinkTime ? ` time="${thinkTime}"` : '') + '>' + metadata.thinking + '</think>\n\n' + text
       );
       b.innerHTML = sourcesPrefix + thinkHtml + findingsSuffix;
+    } else if (role === 'user') {
+      // USER-AUTHORED TEXT: render with the base markdown renderer, NOT
+      // processWithThinking. In the game build, processWithThinking runs the
+      // MODEL-reasoning leak scrubbers (scrubReasoningPreamble / redactRawIds)
+      // regardless of role, and those drop whole leading lines that match the
+      // reasoning-preamble pattern ("I'll …", "Let me …", "I need …", "So I …").
+      // A player message is verbatim by the owner's hard rule — what they typed
+      // goes in the bubble, every time — and never contains <think> blocks,
+      // operator asides, or raw npc:<id> leaks, so the scrub pipeline is both
+      // unnecessary and harmful here. mdToHtml still performs the same-origin
+      // inline image upgrade (uploaded casting photo / generated image) and all
+      // normal markdown; svgifyEmoji mirrors processWithThinking's emoji pass.
+      b.innerHTML = sourcesPrefix
+        + _svgifyEmoji(markdownModule.mdToHtml(text))
+        + findingsSuffix;
     } else {
       b.innerHTML = sourcesPrefix + markdownModule.processWithThinking(text) + findingsSuffix;
     }
@@ -2273,7 +2288,11 @@ export function addMessage(role, content, modelName, metadata) {
         // Extract instruction text (after "Instruction: ")
         const instrMatch = b.textContent.match(/Instruction:\s*([\s\S]*)$/);
         const instrText = instrMatch ? instrMatch[1].trim() : '';
-        b.innerHTML = '<span class="doc-edit-tag">Doc edit: ' + lineRef + '</span> ' + markdownModule.processWithThinking(instrText);
+        // User-authored instruction text — base markdown renderer, NOT the
+        // reasoning-scrub pipeline (see the role === 'user' note above): an
+        // instruction like "Let me rephrase line 3" must render verbatim.
+        b.innerHTML = '<span class="doc-edit-tag">Doc edit: ' + lineRef + '</span> '
+          + _svgifyEmoji(markdownModule.mdToHtml(instrText));
       }
 
       // Render attachment cards
