@@ -11,8 +11,9 @@ checks, screenshots).
 **Stack:** real engine (TS, :8765) + real FE (Python/FastAPI, :7000), **live LLM**
 `deepseek/deepseek-v4-pro` via OpenRouter (the OOB default narrator), configured through Settings (key
 held only in the git-ignored sandbox). Embeddings = deterministic fake (fine for play).
-**Scope played:** a full canonical Week 1 — casting interview → premiere/meet-everyone → HOH comp →
-nominations → veto comp → veto ceremony → first eviction. 17 player turns on the live model.
+**Scope played:** a full canonical Week 1 (casting → premiere/meet-everyone → HOH → nominations → veto
+→ veto ceremony → eviction) into the start of Week 2 (HOH-comp eligibility). 21 player turns on the live
+model. The Week-1 eviction had to be cleared by hand (F14) to reach Week 2.
 **Method:** authentic roleplay — the producers open, then every turn written in Theo's voice reacting
 to what the house actually said. Binding decisions (comp approach, vote) made by the auditor. Defects
 logged, not fixed mid-play.
@@ -35,13 +36,24 @@ announced with no per-voter attribution); NPC voices stayed **distinct and stabl
 **no production machinery leaked** into the player-visible text across 17 turns (the reasoning model's
 thinking stayed in the collapsed accordion).
 
-**The one real soft spot is the ceremonies.** Competitions *stage out* with elimination drama, but the
-**ceremonies get compressed**: the **nomination ceremony was never narrated at all** (the noms only
-appeared in the HUD — F8), and **eviction night was a single summary line** with no staged live vote
-and no player-authored goodbye messages (F8/F12). For a BB fan those ceremony beats — the nomination
-speech, the live one-by-one vote, the goodbyes — are the *emotional core*, and right now they're the
-thinnest part of an otherwise convincing week. Everything else is edge polish (onboarding copy, error
-UX). Fix the ceremony staging and this is a faithful BB loop.
+**But there is one launch-blocker: the game cannot get past the first eviction.** The engine does the
+right thing — at the eviction it raises a player **`goodbye-message`** pending ("record your goodbye
+message; your own words carry it" — canon E34). **The model never surfaces that decision card.** Instead
+it *narrates* the eviction as already done ("Juliana Gaines has been evicted") and then loops —
+re-narrating "ready for the next HOH?" every turn while the engine sits at `phase:eviction`,
+`evicted:null`, the evictee still in the house, and **never advances to Week 2** (verified directly:
+even a `advanceGame` wedges at the goodbye beat; even a lull turn doesn't trigger the FE's forced-advance).
+I had to drive the engine by hand — submit the goodbye via `/api/orwell/decision`, then `advanceGame` —
+to commit the eviction and reach Week 2. **A normal player would be permanently stuck after their first
+eviction** (F14). This is the same bug class as the un-narrated nomination ceremony (F8): the engine is
+correct, the model under-drives it. *Earlier in this doc I noted "Juliana evicted" as a positive — that
+was the model's narration; the engine had NOT committed it. Corrected here.*
+
+**The secondary soft spot is the rest of the ceremonies.** Competitions *stage out* with elimination
+drama, but the **nomination ceremony was never narrated** (noms appeared only in the HUD — F8) and the
+**eviction beats** (live vote, goodbyes) are skipped/un-surfaced (F12). For a BB fan those ceremony
+beats are the *emotional core*. Everything else is edge polish (onboarding copy, error UX). Fix the
+ceremony/decision surfacing — above all the eviction goodbye card — and this is a faithful BB loop.
 
 ### ⚠️ Honesty note — a "blocker" that was MY environment, not the game
 
@@ -58,6 +70,7 @@ game finding.** The latent code observation it surfaced is F7.
 
 | ID | Tag | Sev | Where | What feels off (1 line) | Evidence |
 |----|-----|-----|-------|-------------------------|----------|
+| **F14** | **CANON+SPIRIT** | **BLOCK** | **eviction → goodbye gate** | **The game wedges at every eviction.** The engine correctly raises a player `goodbye-message` pending (E34), but the model never surfaces the decision card — it narrates "X has been evicted" and loops; the engine stays `phase:eviction, evicted:null`, evictee still in house, and never reaches Week 2 | Turns 17–20 (4 nudges, incl. a lull): engine `evicted:null`, house 15, noms unchanged; direct `advanceGame` wedged at the `goodbye-message` beat (`/api/orwell/status` pending: `{kind:"goodbye-message", by:player, prompt:"record your goodbye message…"}`); only resolved by manually POSTing `/api/orwell/decision` + `advanceGame`. The card *did* render a full week late as a stale "Goodbye message" card (Turn 21) |
 | **F8** | **CANON+SPIRIT** | **POLISH (high) / soft BLOCK on spirit** | **ceremonies** | **Ceremonies are compressed while comps stage out.** The **nomination ceremony was never narrated** (noms appeared only in the HUD); **eviction night was one summary line** (no staged live vote). The iconic BB ceremony beats are missing | Turn 12→13: chat narrated only the Asher 1:1; engine jumped `nominations → veto-competition` with `noms:[Juliana, Jett]`; GM text had **zero** of nominat*/block/Juliana/Jett; Theo even asked "when did the ceremony happen?" and was ignored. Turn 17 eviction: "*The votes are in … Juliana Gaines is the first to be evicted*" — a result, not a ceremony |
 | **F12** | **CANON** | **POLISH** | **eviction night** | The player was **never prompted to author a goodbye message** (E34) and there was **no staged anonymized vote reveal** (E12's "a vote to evict …") — both core eviction-night beats were skipped with the ceremony compression | Turn 17: voted in narration, jumped straight to the evicted result; no `goodbye-message` pending card, no per-vote staging |
 | F2 | SPIRIT | POLISH | error UX | A failed turn shows only *"The model returned an empty response. Please try again or switch to a different model"* — a dead-end with no real recourse for a non-technical player | `src/agent_loop.py:3028`; seen repeatedly during the F7 endpoint issue |
@@ -85,6 +98,10 @@ game/illusion · `[POLISH]` noticeable but survivable · `[NIT]` tiny · `[LATEN
   rocker, floater teacher, mastermind marketer, etc.).
 - **Canon weekly loop** — premiere meet-everyone gate → HOH comp → nominations → **veto comp = six
   players (HOH + 2 noms + 3 chip-draws)** → veto ceremony → eviction. The structure is right.
+- **Eligibility enforced (Week 2)** — the Week-2 HOH field was exactly **the 13 eligible NPCs + the
+  player**: the **outgoing HOH (Asher) was excluded** *and* the evictee (Juliana) was gone. The
+  outgoing-HOH-can't-play rule is correctly enforced. (Reached only after manually clearing the F14
+  eviction wedge.) The HUD also reset noms/veto for the new week.
 - **Engine ↔ narration ↔ gadget parity** — the "Where You Are" board, the GM's room descriptions, the
   HOH/noms/veto status, and the engine roster agreed throughout; time-of-day advanced Morning→Afternoon.
 - **Secret ballot (E12)** — the eviction was announced as a result ("Juliana Gaines is the first to be
@@ -123,6 +140,15 @@ game/illusion · `[POLISH]` noticeable but survivable · `[NIT]` tiny · `[LATEN
 9. **Eviction:** **Juliana Gaines evicted** (Asher's target). Secret ballot respected (E12) — **but the
    eviction night was one summary line** (F8), no staged vote and no player goodbye message (F12).
 
-_End of Week 1. The harness supports continuing (the daemon is still live); paused here at a complete
-canonical week pending direction. The DEBUG BUNDLE + Producer's Vault JSON export are **held** until
-the operator confirms testing is over (owner instruction, 2026-06-26)._
+10. **Eviction wedge (F14):** the eviction **never committed** through normal play (4 nudges incl. a
+    lull) — the engine sat at `phase:eviction, evicted:null` with the player `goodbye-message` pending
+    never surfaced. Unblocked **by hand** (POST `/api/orwell/decision` goodbye + `advanceGame`); beat 68
+    `eviction-result: "Juliana Gaines leaves the house"` finally fired.
+11. **Week 2 reached:** the HOH-comp field was the **13 eligible NPCs + Theo** — **Asher (outgoing HOH)
+    excluded, Juliana gone** (eligibility ✓); a fresh `comp-round` intent card up. The stale
+    "Goodbye message" card rendered here, a week late (F14 surfacing lag).
+
+_Reached the start of Week 2. Authentic multi-week play is blocked by F14 (every eviction wedges until
+the goodbye card is surfaced); Week 2 was entered only by manually clearing it, which desyncs the chat
+from the engine. Paused here pending direction. The DEBUG BUNDLE + Producer's Vault JSON export are
+**held** until the operator confirms testing is over (owner instruction, 2026-06-26)._
