@@ -54,7 +54,10 @@ def test_casting_defaults_medium_effort():
 def test_background_authoring_defaults_low_effort():
     pol = resolve_token_policy("background-authoring")
     assert pol["reasoning"] == {"effort": "low"}
-    assert pol["max_tokens"] == 1200
+    # #1002: raised from 1200 to a comfortable floor — a full authored JSON cast profile must fit even
+    # on a reasoning model that counts reasoning+visible against the same cap (the 1200 cap risked the
+    # reasoning eating the budget and leaving an empty body, the silent no-op #1002 chased).
+    assert pol["max_tokens"] == 3000
 
 
 def test_caching_true_and_context_budget_none_for_all_classes():
