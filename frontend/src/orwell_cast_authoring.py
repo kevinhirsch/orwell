@@ -511,6 +511,9 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
                     owner, session=_sess or owner, turn_id=None, call_class="background-authoring",
                     input_tokens=_usage.get("input_tokens", 0), cached_tokens=_usage.get("cached_tokens", 0),
                     reasoning_tokens=_usage.get("reasoning_tokens", 0), output_tokens=_usage.get("output_tokens", 0),
+                    # DB3 (#1026): the cap WAS applied on the wire (max_tokens=_max_tokens above); log it so
+                    # the ledger shows appliedMaxTokens=_max_tokens, not cap=0. Omitting it mis-logged cap=0.
+                    applied_max_tokens=_max_tokens,
                     cost=float(_usage.get("cost") or 0), provider=_usage.get("provider"),
                 )
             except Exception:

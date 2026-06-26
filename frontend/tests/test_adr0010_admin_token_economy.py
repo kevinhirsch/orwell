@@ -166,7 +166,9 @@ def test_settings_keys_present_with_correct_defaults():
     # Populated with the owner-ratified optimized efforts (so the admin UI shows them).
     assert defaults["reasoning_budget"] == {
         "narration": "medium", "utility-extraction": "off",  # "off" = genuine disable (reasoning:{enabled:false})
-        "casting": "medium", "background-authoring": "low",
+        # #1007: background-authoring is "off" too — structured JSON extraction, not a reasoning task.
+        # An enabled reasoning channel burned the cap before any visible JSON on deepseek-v4-pro (0/15).
+        "casting": "medium", "background-authoring": "off",
     }
     assert "token_spend_alert_usd" in defaults
     assert isinstance(defaults["token_spend_alert_usd"], float)

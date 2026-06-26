@@ -147,6 +147,79 @@ def test_authoring_call_threads_response_format_onto_the_payload(monkeypatch):
     assert payload.get("response_format") == {"type": "json_object"}, payload
 
 
+# ── DB3 (#1026) — the authoring ledger entry logs the cap that WAS applied (not cap=0) ──────────────
+
+def test_authoring_record_turn_passes_applied_max_tokens(monkeypatch):
+    """DB3 (#1026): the cap IS applied on the wire (max_tokens=_max_tokens), so the per-authoring-call
+    ledger entry must carry that same value in ``applied_max_tokens`` — omitting it mis-logged cap=0.
+    We drive the live ``_fn`` with an owner + a usage SSE tail, capture the ``record_turn`` call, and
+    assert ``applied_max_tokens`` is the (#1007) 3000 floor — non-zero and == the wire cap."""
+    from src import llm_core as lc
+    from src import orwell_token_ledger as tl
+    import src.endpoint_resolver as er
+
+    OR_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+    class _FakeResp:
+        status_code = 200
+
+        async def aiter_lines(self):
+            # an OpenRouter-style JSON body delta, then a trailing usage chunk (upstream shape:
+            # a `usage` object on a no-output chunk, which stream_llm re-emits as a type:usage
+            # event the cast-authoring `_fn` reads), then DONE.
+            for ln in [
+                'data: {"choices":[{"delta":{"content":"{}"}}]}',
+                'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":34,'
+                '"completion_tokens_details":{"reasoning_tokens":0},"cost":0.001}}',
+                "data: [DONE]",
+            ]:
+                yield ln
+
+        async def aread(self):
+            return b""
+
+    class _FakeStreamCM:
+        def __init__(self, payload):
+            self._payload = payload
+
+        async def __aenter__(self):
+            return _FakeResp()
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _FakeClient:
+        def stream(self, method, url, json=None, headers=None, timeout=None):
+            return _FakeStreamCM(json)
+
+    monkeypatch.setattr(lc, "_get_http_client", lambda: _FakeClient())
+    monkeypatch.setattr(lc, "_is_host_dead", lambda u: False)
+    monkeypatch.setattr(lc, "note_model_activity", lambda *a, **k: None)
+    monkeypatch.setattr(lc, "_clear_host_dead", lambda *a, **k: None)
+    monkeypatch.setattr(er, "resolve_endpoint",
+                        lambda prefix, owner=None: (OR_URL, "deepseek/deepseek-v4-pro", {}))
+    monkeypatch.setattr(er, "resolve_utility_fallback_candidates", lambda owner=None: [])
+
+    # Capture the ledger call (fail-open import in _fn resolves to this module).
+    captured: dict = {}
+
+    def _capture_record_turn(user, **kwargs):
+        captured["user"] = user
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(tl, "record_turn", _capture_record_turn)
+
+    fn = _run(A._resolve_llm_fn("u"))  # owner="u" ⇒ the ledger branch fires
+    assert fn is not None
+    _run(fn([{"role": "user", "content": "author this houseguest"}]))
+
+    assert captured, "record_turn was not called (owner+usage should trigger the ledger entry)"
+    assert captured["call_class"] == "background-authoring"
+    # the cap WAS applied on the wire; the ledger must log it (the #1007 3000 floor), never cap=0.
+    assert captured.get("applied_max_tokens") == 3000, captured
+
+
 # ── 2 & 3. a prose reply triggers ONE retry, then logs a DISTINCT "no JSON found" no-op ─────────────
 
 def test_prose_reply_triggers_one_retry_then_logs_no_json_no_op():
