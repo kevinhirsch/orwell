@@ -1680,6 +1680,21 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       return;
     }
 
+    // #836 / "never eat a message": the canonical-adoption swap (chat.js _adoptCanonicalAfterStream)
+    // calls selectSession with a DIFFERENT id than the per-tab one the turn was POSTed under, so the
+    // `wouldWipe` same-session guard above does NOT fire. RESCUE any still-pending optimistic user send
+    // (clientMsgId, no dbId) whose persisted row is ABSENT from THIS snapshot, so the swap can't erase
+    // what the player just typed (canonical history racing the just-committed row). A bubble whose
+    // client_msg_id IS in msgHistory is re-rendered below and needs no rescue.
+    const _serverClientIds = new Set(
+      (msgHistory || []).map(m => m.metadata && m.metadata.client_msg_id).filter(Boolean)
+    );
+    const _pendingToPreserve = (!isOC && chatHistory)
+      ? Array.from(chatHistory.querySelectorAll('.msg')).filter(el =>
+          el.dataset && el.dataset.clientMsgId && !el.dataset.dbId &&
+          !_serverClientIds.has(el.dataset.clientMsgId))
+      : [];
+
     // Fade out old content, swap, fade in
     if (chatHistory) {
       chatHistory.style.transition = 'opacity 0.12s ease-out';
@@ -1732,6 +1747,12 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       if (window.chatModule && window.chatModule.showWelcomeScreen) window.chatModule.showWelcomeScreen();
       // Don't highlight empty sessions — feels like nothing is selected
       document.querySelectorAll('.list-item.active-session').forEach(el => el.classList.remove('active-session'));
+    }
+    // #836 — re-append the rescued pending sends (newest turn the server snapshot hasn't surfaced yet).
+    // They keep their clientMsgId so chat.js's adopt pass claims them with zero churn once the canonical
+    // /api/history carries their persisted row.
+    if (_pendingToPreserve.length && chatHistory) {
+      for (const el of _pendingToPreserve) chatHistory.appendChild(el);
     }
     uiModule.scrollHistoryInstant();
 
