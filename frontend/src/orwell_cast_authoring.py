@@ -72,7 +72,23 @@ _SYSTEM = (
     "Hard rules: this houseguest's STORYLINE is fully INDEPENDENT — their secrets, goals, weakness, "
     "and backstory exist on their own but must NEVER be built around, reference, or revolve around any "
     "single 'player' or main character; there is no protagonist here, only a cast of equals. Make this "
-    "person VISIBLY distinct from a generic warm, witty professional. JSON only."
+    "person VISIBLY distinct from a generic warm, witty professional.\n"
+    "OUTPUT CONTRACT (HARD, #1002): reply with a SINGLE raw JSON object and NOTHING else — no prose, "
+    "no markdown, no ```json fences, no preamble, no chain-of-thought in the body. The first character "
+    "of your reply MUST be '{' and the last MUST be '}'. JSON only."
+)
+
+# #1002: the OpenAI/OpenRouter structured-output request — threaded onto the authoring call so a model
+# that honours it returns strict JSON (no prose/reasoning leaking into the body). A provider that
+# ignores it is harmless: the prompt reinforcement above + the one-shot retry below still apply.
+_RESPONSE_FORMAT = {"type": "json_object"}
+
+# #1002: the one-shot reparse retry instruction. DeepSeek (and other reasoning models) reliably emit
+# reasoning/prose around the JSON instead of a bare object; when the first reply yields no JSON we retry
+# ONCE with this maximally-strict instruction appended before falling back to the seeded floor.
+_STRICT_RETRY = (
+    "Your previous reply did not contain a parseable JSON object. Reply now with ONLY the JSON object "
+    "for this houseguest — start with '{', end with '}', no prose, no markdown, no fences, no reasoning."
 )
 
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
@@ -256,6 +272,14 @@ def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
     return out
 
 
+def _no_json_in(text: str) -> bool:
+    """#1002 observability: True iff the reply contained NO parseable JSON object at all (the strongest
+    suspect — a reasoning model emitting prose/reasoning instead of a bare object). Distinct from "JSON
+    parsed but every field landed below the quality floor"; the two no-op causes are logged separately so
+    the silent fallback is diagnosable."""
+    return _extract_json(text or "") is None
+
+
 # ── the orchestrator (injectable — fully unit-testable) ───────────────────────
 
 LlmFn = Callable[[list[dict]], Awaitable[str]]
@@ -283,19 +307,52 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     authoring. It is never fired for an NPC that wasn't authored / was refused.
     """
     sem = asyncio.Semaphore(max(1, int(concurrency)))
+    # #1002: per-season tallies for the end-of-run diagnostic counter — how many NPCs fell back to the
+    # deterministic floor, and WHY (no JSON in the reply vs. JSON parsed but every field below the floor).
+    floor_no_json = 0     # the strongest suspect: a reasoning model emitted prose, no parseable object
+    floor_below = 0       # JSON parsed but nothing cleared the quality floor (seeded floor is richer)
 
     async def _author_one(npc: dict) -> int:
+        nonlocal floor_no_json, floor_below
         hid = npc.get("id")
         if not hid or hid == "player":
             return 0
         async with sem:
+            messages = build_authoring_messages(npc)
             try:
-                text = await llm_fn(build_authoring_messages(npc))
+                text = await llm_fn(messages)
             except Exception as e:  # the model can fail for one houseguest; carry on
                 logger.warning(f"[cast-authoring] llm failed for {hid}: {e}")
                 return 0
             profile = parse_authored_profile(text or "", hid)
+            # #1002: one-shot reparse retry — DeepSeek (and other reasoning models) reliably wrap or omit
+            # the JSON. If NOTHING parsed AND the reply had no JSON object at all, retry ONCE with a
+            # maximally-strict "JSON only" instruction before falling back to the seeded floor. Bounded
+            # (one retry), fail-soft (a retry that also fails just lands on the floor).
+            if not profile and _no_json_in(text or ""):
+                logger.info(
+                    f"[cast-authoring] no JSON in first reply for {hid} — retrying once with a "
+                    "strict JSON-only instruction")
+                try:
+                    text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
+                except Exception as e:
+                    # keep the original (no-JSON) reply for the no-op classification below
+                    logger.warning(f"[cast-authoring] llm retry failed for {hid}: {e}")
+                else:
+                    profile = parse_authored_profile(text or "", hid)
             if not profile:
+                # #1002: close the silent-None gap — distinguish the two no-op causes (mirrors the
+                # FEPY-5 write-back log style) so a whole-cast floor-fallback is diagnosable, not silent.
+                if _no_json_in(text or ""):
+                    floor_no_json += 1
+                    logger.warning(
+                        f"[cast-authoring] no JSON found in model reply for {hid} (after retry) — "
+                        "keeping the seeded floor")
+                else:
+                    floor_below += 1
+                    logger.warning(
+                        f"[cast-authoring] JSON parsed but all fields below the quality floor for {hid} "
+                        "— keeping the seeded floor")
                 return 0
             try:
                 res = await write_fn(profile)
@@ -319,7 +376,15 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
 
     results = await asyncio.gather(*[_author_one(npc) for npc in (cast or [])])
     written = sum(results)
-    logger.info(f"[cast-authoring] authored {written} houseguest profile(s)")
+    # #1002: the per-season diagnostic counter — the headline "did the LLM actually enrich the cast, or
+    # did it all fall back to the thin deterministic floor?" line. `total` counts the authorable NPCs
+    # (the player is human-authored and skipped); the floor tallies break down the non-op causes so a
+    # mass fallback is immediately diagnosable in the logs.
+    total = sum(1 for npc in (cast or []) if npc.get("id") and npc.get("id") != "player")
+    floor = total - written
+    logger.info(
+        f"[cast-authoring] cast authoring: authored {written}/{total} houseguests "
+        f"(floor fallback for {floor}: {floor_no_json} no-JSON, {floor_below} below-floor)")
     return written
 
 
@@ -376,19 +441,36 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
             )
             return None
 
-    # ADR 0010: the background-authoring reasoning budget (admin-overridable). Fail-open.
+    # ADR 0010: the background-authoring reasoning + output budget (admin-overridable). Fail-open.
     _policy = None
+    _max_tokens = 0
     try:
         from src.token_policy import resolve_token_policy
         from src.settings import get_setting as _gs
-        _policy = resolve_token_policy("background-authoring", {"reasoning_budget": _gs("reasoning_budget", {})})
+        _policy = resolve_token_policy("background-authoring", {
+            "reasoning_budget": _gs("reasoning_budget", {}),
+            "max_tokens_budget": _gs("max_tokens_budget", {}),
+        })
+        # #1002: APPLY the per-class output cap (raised to a comfortable floor in token_policy) as the
+        # call's max_tokens — a full authored JSON profile must fit even on a reasoning model that counts
+        # reasoning+visible against the same budget. Without this the call ran with no positive cap.
+        _mt = _policy.get("max_tokens") if isinstance(_policy, dict) else None
+        if isinstance(_mt, int) and not isinstance(_mt, bool) and _mt > 0:
+            _max_tokens = _mt
     except Exception:
         _policy = None
+        _max_tokens = 0
 
     async def _fn(messages: list[dict]) -> str:
         parts: list[str] = []
         _usage: dict = {}
-        async for chunk in stream_llm_with_fallback(candidates, messages, temperature=0.9, policy=_policy):
+        # #1002: request strict JSON (response_format) so a model that honours it can't leak prose/
+        # reasoning into the body. Threads through stream_llm_with_fallback → stream_llm onto the
+        # OpenAI-style payload; a provider that ignores it is harmless (the strict prompt + the one-shot
+        # retry in author_cast still apply). The policy already supplies the (raised, #1002) token budget.
+        async for chunk in stream_llm_with_fallback(
+            candidates, messages, temperature=0.9, policy=_policy,
+            max_tokens=_max_tokens, response_format=_RESPONSE_FORMAT):
             # stream_llm yields SSE-ish data lines; keep only the assistant text deltas.
             piece = _delta_text(chunk)
             if piece:
