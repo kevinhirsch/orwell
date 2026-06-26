@@ -993,8 +993,11 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         # user's daily brief must not include another user's notes or
         # events that happen to be stored with owner=None.
         try:
-            from core.auth import AuthManager
-            _allow_null = not AuthManager().is_configured
+            # Reuse the process-level AuthManager singleton (issue #966) rather
+            # than constructing a fresh one (re-reads auth.json/sessions.json)
+            # on every daily brief. Request-free path → cached fallback.
+            from src.auth_helpers import shared_auth_manager
+            _allow_null = not shared_auth_manager().is_configured
         except Exception:
             _allow_null = False
         db = SessionLocal()

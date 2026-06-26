@@ -546,6 +546,19 @@ async def _bundle_extras(user: str | None) -> dict:
         extras["gameState"] = await _game_state_summary(user)
     except Exception as e:
         extras["gameState"] = {"error": f"{type(e).__name__}: {e}"}
+    # Verbose overseer/corrector DEBUG telemetry (opt-in, default OFF). Only populated when the
+    # ORWELL_OVERSEER_DEBUG / settings `overseer_debug` flag is on — the recent ring-buffer entries
+    # (Vault-free: tool/guardrail NAMES, verdicts, injected-arg KEY shapes only). When off the
+    # section is omitted entirely, so the bundle is byte-unchanged.
+    try:
+        from src import orwell_overseer_debug as _ovd
+        if _ovd.overseer_debug_enabled():
+            extras["overseerDebug"] = {
+                "tier": _ovd.overseer_debug_tier(),
+                "recent": _ovd.get_recent(100),
+            }
+    except Exception as e:
+        extras["overseerDebug"] = {"error": f"{type(e).__name__}: {e}"}
     return extras
 
 

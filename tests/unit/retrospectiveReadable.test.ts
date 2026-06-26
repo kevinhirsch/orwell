@@ -156,6 +156,40 @@ describe("0048 retrospective — live, end-to-end (a played, finished season)", 
     }
   });
 
+  it("#996 — threads label by SOURCE CLASS: secret→'Secret thread', weakness→'Blind spot', goal→'Real game'", () => {
+    const sb = finishedSeason("retro-thread-labels", 7);
+    const retro = sb.session.seasonRetrospective();
+    expect(retro).not.toBeNull();
+
+    const byType = (t: string) => retro!.hiddenStory.filter((r) => r.type === t);
+    const secrets = byType("Secret thread");
+    const blindSpots = byType("Blind spot");
+    const realGames = byType("Real game");
+
+    // every NPC seeds 2–3 secret threads + exactly one weakness thread + one true-goal thread, so all
+    // three labels must appear (the bug: all of them stacked under "Secret thread").
+    expect(secrets.length).toBeGreaterThan(0);
+    expect(blindSpots.length).toBeGreaterThan(0);
+    expect(realGames.length).toBeGreaterThan(0);
+
+    // the weakness/goal threads are NOT mislabeled as secrets — and each is real, name-resolved prose
+    // matching the class naturalization ("Their blind spot…" / "Their real game…").
+    for (const r of blindSpots) {
+      expect(r.content).toMatch(/\S+ — /);
+      expect(r.content).toContain("Their blind spot");
+    }
+    for (const r of realGames) {
+      expect(r.content).toMatch(/\S+ — /);
+      expect(r.content).toContain("Their real game");
+    }
+
+    // the labels stay readable category words (no slug punctuation, capitalized) — unchanged contract.
+    for (const r of [...secrets, ...blindSpots, ...realGames]) {
+      expect(r.type).not.toMatch(/[:_]/);
+      expect(r.type[0]).toBe(r.type[0]!.toUpperCase());
+    }
+  });
+
   it("a seed with a seeded hidden tie renders it with BOTH houseguests named (no bare id)", () => {
     // sparseness: most seeds have no seeded relationships — probe for one that does, then finish it.
     let found = false;

@@ -426,8 +426,12 @@ def setup_task_routes(task_scheduler) -> APIRouter:
         if user == "internal-tool":
             return True
         try:
-            from core.auth import AuthManager
-            auth = AuthManager()
+            # Reuse the process-level AuthManager singleton (issue #966) rather
+            # than constructing a fresh one (re-reads auth.json/sessions.json)
+            # per admin check. No request is in scope here, so use the cached
+            # request-free instance.
+            from src.auth_helpers import shared_auth_manager
+            auth = shared_auth_manager()
             if not auth.is_configured:
                 # Unconfigured single-user deploy: trust the local owner.
                 return True

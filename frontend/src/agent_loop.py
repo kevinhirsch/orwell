@@ -2817,6 +2817,181 @@ def _record_sync_ledger_turn(owner, *, session_id, tool_events, beat_seq_before,
             pass
 
 
+def _overseer_debug_live_verdicts(*, model_tools: set, advance_nudges: int, record_nudges: int,
+                                  deal_nudges: int, move_nudges: int, npc_move_nudges: int,
+                                  premiere_marks: int):
+    """Build the per-turn corrector-guardrail verdicts for a LIVE-game turn (Tier 1 — observe what
+    NATURALLY happened). One :class:`GuardrailVerdict` per LIVE decision point, derived from the
+    per-turn counters the loop already holds + the tools the MODEL called itself:
+
+      verdict = model-called-it  → the model called the tool this turn (the corrector stood down);
+              = intervened        → the corrector FIRED this turn (the FE error-corrected the omission);
+              = n-a               → neither (no symptom this turn).
+
+    NOTE on the counter semantics: when the model calls a tool ITSELF this turn, the loop SETS the
+    matching nudge counter to 1 (e.g. `_turn_record_nudges = 1` on recordInteraction) so it does NOT
+    also back-fill — so a positive counter alone is ambiguous. We disambiguate with `model_tools`:
+    if the model called the tool, the verdict is `model-called-it`; else a positive counter means
+    the FE `intervened`. Vault-free: NAMES / verdict tokens / injected-arg KEY shapes only."""
+    from src.orwell_overseer_debug import (GuardrailVerdict as _GV,
+                                           V_MODEL, V_INTERVENED, V_NA)
+
+    def _verdict(model_called: bool, fired: bool) -> str:
+        if model_called:
+            return V_MODEL
+        return V_INTERVENED if fired else V_NA
+
+    out = []
+    # progression stall-nudge / forced advanceGame (L39b). The model progresses with advanceGame /
+    # submitDecision; the corrector nudges or FORCES advanceGame when it under-calls at a lull.
+    _adv_model = bool(model_tools & {"advanceGame", "submitDecision"})
+    out.append(_GV(
+        name="progression-stall-nudge",
+        verdict=_verdict(_adv_model, advance_nudges > 0),
+        description=("model called a progression tool" if _adv_model
+                     else f"nudged/forced advanceGame ({advance_nudges}x)" if advance_nudges > 0
+                     else "no advance-phase stall this turn"),
+        injected_tool=None if _adv_model else ("advanceGame" if advance_nudges > 0 else None),
+    ))
+    # _auto_record_scene (0055) → recordInteraction{withIds, kind, content}.
+    _rec_model = bool(model_tools & {"recordInteraction", "makeDeal"})
+    out.append(_GV(
+        name="_auto_record_scene",
+        verdict=_verdict(_rec_model, record_nudges > 0),
+        description=("model recorded the scene itself" if _rec_model
+                     else "back-filled the engaged scene's fold" if record_nudges > 0
+                     else "no engaged unrecorded scene this turn"),
+        injected_tool=None if _rec_model else ("recordInteraction" if record_nudges > 0 else None),
+        injected_args=([] if _rec_model or record_nudges == 0 else ["withIds", "kind", "content"]),
+    ))
+    # 0039 deal back-fill → makeDeal.
+    _deal_model = "makeDeal" in model_tools
+    out.append(_GV(
+        name="_auto_record_deal",
+        verdict=_verdict(_deal_model, deal_nudges > 0),
+        description=("model called makeDeal itself" if _deal_model
+                     else "back-filled a narrated deal" if deal_nudges > 0
+                     else "no struck deal this turn"),
+        injected_tool=None if _deal_model else ("makeDeal" if deal_nudges > 0 else None),
+    ))
+    # L21/L24 player auto-move → moveTo.
+    _move_model = "moveTo" in model_tools
+    out.append(_GV(
+        name="_auto_move_player",
+        verdict=_verdict(_move_model, move_nudges > 0),
+        description=("model called moveTo itself" if _move_model
+                     else "relayed the player's room change" if move_nudges > 0
+                     else "player did not move this turn"),
+        injected_tool=None if _move_model else ("moveTo" if move_nudges > 0 else None),
+    ))
+    # ADR 0009 NPC auto-move → moveHouseguest.
+    _npc_model = "moveHouseguest" in model_tools
+    out.append(_GV(
+        name="_auto_move_npc",
+        verdict=_verdict(_npc_model, npc_move_nudges > 0),
+        description=("model called moveHouseguest itself" if _npc_model
+                     else "relayed a houseguest's room change" if npc_move_nudges > 0
+                     else "no houseguest moved this turn"),
+        injected_tool=None if _npc_model else ("moveHouseguest" if npc_move_nudges > 0 else None),
+    ))
+    # #380 premiere markHouseguestMet auto-belt.
+    _met_model = "markHouseguestMet" in model_tools
+    out.append(_GV(
+        name="markHouseguestMet-premiere-belt",
+        verdict=_verdict(_met_model, premiere_marks > 0),
+        description=("model called markHouseguestMet itself" if _met_model
+                     else f"auto-marked {premiere_marks} intro(s)" if premiere_marks > 0
+                     else "not premiere / no intros to mark this turn"),
+        injected_tool=None if _met_model else ("markHouseguestMet" if premiere_marks > 0 else None),
+    ))
+    return out
+
+
+async def _overseer_debug_live_force_evals(*, narration, messages, model_recorded: bool,
+                                          already_intervened: bool, owner):
+    """TIER 2 (force) READ-ONLY force-evaluation for the LIVE-game record belt. Returns a list of
+    "would-have-intervened" :class:`GuardrailVerdict`s (each ``forced=True``) for the corrector
+    checks that NATURALLY skipped this turn — so the operator can see whether the corrector WOULD
+    have acted. It NEVER fires an intervention and NEVER changes state: it only re-checks the cheap
+    structural condition (an engaged scene that touched a houseguest) WITHOUT the extraction call."""
+    from src.orwell_overseer_debug import GuardrailVerdict as _GV, V_INTERVENED, V_NA
+    out = []
+    # Only meaningful for the record belt when it would otherwise be silent (the model recorded, OR
+    # the FE already intervened naturally — in which case Tier 1 already logged the real verdict).
+    if already_intervened:
+        return out
+    # Read-only roster fetch (no mutation). Fail-open: any hiccup ⇒ no force-eval verdict.
+    _names = []
+    try:
+        from src import orwell_engine as _oe_fe
+        _gs = await _oe_fe.get_game_state(owner)
+        _names = [h.get("name") for h in ((_gs or {}).get("house") or [])
+                  if isinstance(h, dict) and h.get("name")
+                  and h.get("status", "active") == "active"]
+    except Exception:
+        _names = []
+    _touched = False
+    try:
+        _touched = _scene_touched_houseguest(narration or "", messages, _names)
+    except Exception:
+        _touched = False
+    # The would-have verdict: an engaged scene that touched a houseguest but the FE did not back-fill
+    # this turn (because the model recorded it, or it read as a lull/solo beat). Marked forced=True.
+    out.append(_GV(
+        name="_auto_record_scene",
+        verdict=(V_INTERVENED if _touched else V_NA),
+        description=("would-have proposed a record (engaged scene touched a houseguest)" if _touched
+                     else "would-have stood down (no engaged houseguest scene)"),
+        injected_tool=("recordInteraction" if _touched else None),
+        injected_args=(["withIds", "kind", "content"] if _touched else []),
+        forced=True,
+    ))
+    return out
+
+
+def _overseer_debug_casting_verdicts(*, model_tools: set, record_belt: int, force: int, nudge: int):
+    """Build the per-turn corrector-guardrail verdicts for a CASTING turn (Tier 1). One
+    :class:`GuardrailVerdict` per casting decision point: the casting auto-record belt
+    (updateCasting), the createCharacter finalize fallback (force), and the substance/finalize
+    nudge. Vault-free: NAMES / verdict tokens / injected-arg KEY shapes only."""
+    from src.orwell_overseer_debug import (GuardrailVerdict as _GV, V_MODEL, V_INTERVENED, V_NA)
+
+    def _verdict(model_called: bool, fired: bool) -> str:
+        if model_called:
+            return V_MODEL
+        return V_INTERVENED if fired else V_NA
+
+    out = []
+    # _auto_record_casting → updateCasting (banks the player's just-given answer).
+    _uc_model = "updateCasting" in model_tools
+    out.append(_GV(
+        name="_auto_record_casting",
+        verdict=_verdict(_uc_model, record_belt > 0),
+        description=("model called updateCasting itself" if _uc_model
+                     else "back-filled the player's casting answer" if record_belt > 0
+                     else "no engaged casting answer to bank this turn"),
+        injected_tool=None if _uc_model else ("updateCasting" if record_belt > 0 else None),
+    ))
+    # createCharacter finalize fallback → createCharacter (force the season start when engine-ready).
+    _cc_model = "createCharacter" in model_tools
+    out.append(_GV(
+        name="createCharacter-finalize-fallback",
+        verdict=_verdict(_cc_model, force > 0),
+        description=("model called createCharacter itself" if _cc_model
+                     else "forced createCharacter to start the season" if force > 0
+                     else "casting not finalizable / not forced this turn"),
+        injected_tool=None if _cc_model else ("createCharacter" if force > 0 else None),
+    ))
+    # the casting finalize/substance steer (a text nudge — injects no tool).
+    out.append(_GV(
+        name="casting-substance-steer",
+        verdict=(V_INTERVENED if nudge > 0 else V_NA),
+        description=(f"nudged the model toward finalize/substance ({nudge}x)" if nudge > 0
+                    else "no casting nudge this turn"),
+    ))
+    return out
+
+
 def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
     """True when this turn was a scene with a houseguest — the player's line or the narration
     names someone on the roster (full name or first name). Cheap, name-based; good enough to
@@ -3581,6 +3756,13 @@ async def stream_agent_loop(
     # cancellation. Reset implicitly per turn (this is a fresh local each stream_agent_loop call).
     _turn_had_error = False
     _turn_reapproach_nudges = 0  # 0057: post-season re-approach, at most one per finishing turn
+    _turn_premiere_marks = 0  # #380 premiere markHouseguestMet auto-belt: intros the FE marked this turn
+    # Casting-mode corrector counters (for the verbose overseer-debug telemetry). Set when the FE
+    # error-corrects the model's omission this turn: the casting auto-record belt (updateCasting),
+    # the createCharacter finalize fallback (force), and the substance/finalize nudges.
+    _turn_casting_record_belt = 0  # _auto_record_casting fired (back-filled updateCasting)
+    _turn_casting_force = 0        # FORCED createCharacter (the finalize fallback)
+    _turn_casting_nudge = 0        # casting finalize/substance nudge fired
 
     # 0065 Part D — the per-turn sync-ledger baselines. Captured at turn START so the end-of-turn
     # entry records the beatSeq this turn moved (before→after) and the stale-beat 409s reconciled
@@ -4361,7 +4543,8 @@ async def stream_agent_loop(
                     # introduced by name — keeps the designed gate, guarantees the intros register.
                     # Pure persist side effect (never a re-prompt); runs before the other belts.
                     if _moment == "premiere":
-                        await _auto_mark_premiere_intros(_turn_narration, owner)
+                        _turn_premiere_marks += int(
+                            await _auto_mark_premiere_intros(_turn_narration, owner) or 0)
                     # ── L21/L24 auto-move belt (FIRST — a pure persist side effect, never a re-prompt).
                     # The player walked to a room this turn but the model never called moveTo, so the
                     # engine still has them in the OLD room and next turn's whereabouts would snap back.
@@ -4864,9 +5047,10 @@ async def stream_agent_loop(
                 # False), so attempting it on an error turn can only help, never block.
                 if (not _cast_recorded_this_turn and owner is not None
                         and (_emitted_visible or _turn_had_error)):
-                    await _auto_record_casting(
-                        _extract_last_user_message(messages), cleaned_round,
-                        endpoint_url, model, headers, owner)
+                    if await _auto_record_casting(
+                            _extract_last_user_message(messages), cleaned_round,
+                            endpoint_url, model, headers, owner):
+                        _turn_casting_record_belt += 1  # FE back-filled the player's casting answer
                 # ── Casting finalize fallback (the game won't START): the model under-calls
                 # createCharacter. If casting is finalizable (engine ready) AND the player signalled
                 # readiness but the model didn't finalize this turn, nudge — then, past the rungs,
@@ -4936,6 +5120,7 @@ async def stream_agent_loop(
                                 if bool(_eng.get("started")) and not _eng.get("createRefused"):
                                     _CASTING_STALL_LEVEL.pop(owner, None)
                                     _CASTING_SUBSTANCE_LEVEL.pop(owner, None)
+                                    _turn_casting_force += 1  # FE forced the season start (finalize fallback)
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
                                     messages.append({"role": "system", "content": _CASTING_FORCED_NOTE})
@@ -4966,6 +5151,7 @@ async def stream_agent_loop(
                                 logger.warning(f"[orwell] forced createCharacter failed: "
                                                f"{type(_e).__name__}: {_e}".rstrip(': '))
                         _cn = _CASTING_NUDGES[min(_clv, len(_CASTING_NUDGES) - 1)]
+                        _turn_casting_nudge += 1  # casting finalize nudge fired
                         logger.info(f"[orwell] casting finalize nudge (L{_clv}) round {round_num} user={owner}")
                         messages.append({"role": "system", "content": _cn})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
@@ -4993,6 +5179,7 @@ async def stream_agent_loop(
                             _CASTING_SUBSTANCE_LEVEL[owner] = _slv + 1
                             _gap = _casting.get("next") or ""
                             _missing = _casting.get("missing") or []
+                            _turn_casting_nudge += 1  # casting substance steer fired
                             messages.append({"role": "system",
                                              "content": _casting_substance_nudge(_gap, _missing)})
                             logger.info(f"[orwell] casting substance steer (turn {_slv + 1}, "
@@ -5481,6 +5668,57 @@ async def stream_agent_loop(
                             + _turn_npc_move_nudges),
         )
 
+        # VERBOSE OVERSEER/CORRECTOR DEBUG TELEMETRY (opt-in, default OFF — byte-identical when off).
+        # One Vault-free entry per live-game turn: which engine tools the MODEL called itself, and
+        # each corrector guardrail's verdict (model-called-it | intervened | n-a) with the args it
+        # injected. Tier 1 (log) records what NATURALLY happened from the per-turn counters the loop
+        # already holds; Tier 2 (force) is handled below in the casting/live force-eval (read-only).
+        # Fail-open — telemetry must never hurt a turn. The cheap `overseer_debug_enabled()` gate
+        # means the OFF default does NO extra work.
+        try:
+            from src import orwell_overseer_debug as _ovd
+            if _ovd.overseer_debug_enabled():
+                _ovd_model_tools = sorted({
+                    ev.get("tool") for ev in (tool_events or [])
+                    if isinstance(ev, dict) and ev.get("tool")})
+                # `_phase` is only bound when a nudge condition was evaluated this turn; default safe.
+                _ovd_phase = locals().get("_phase")
+                _ovd_guards = _overseer_debug_live_verdicts(
+                    model_tools=set(_ovd_model_tools),
+                    advance_nudges=_turn_advance_nudges,
+                    record_nudges=_turn_record_nudges,
+                    deal_nudges=_turn_deal_nudges,
+                    move_nudges=_turn_move_nudges,
+                    npc_move_nudges=_turn_npc_move_nudges,
+                    premiere_marks=_turn_premiere_marks,
+                )
+                # TIER 2 (force) — EXPENSIVE. On turns the record belt would normally SKIP (the model
+                # recorded itself, or the turn was a lull), READ-ONLY force-evaluate the engaged-scene
+                # condition and log a "would-have-intervened" verdict. It NEVER fires recordInteraction
+                # — it only re-checks the cheap structural condition (was this an engaged scene that
+                # touched a houseguest?) so the operator can see whether the corrector WOULD act. No
+                # extraction LLM call, no state change.
+                if _ovd.overseer_debug_force():
+                    try:
+                        _ovd_guards.extend(_overseer_debug_live_force_evals(
+                            narration=_turn_narration_full,
+                            messages=messages,
+                            model_recorded=bool(set(_ovd_model_tools) & _RECORD_TOOLS),
+                            already_intervened=(_turn_record_nudges > 0),
+                            owner=owner))
+                    except Exception as _fe_err:
+                        logger.debug(f"[overseer-debug] live force-eval skipped: {_fe_err}")
+                _ovd.record_turn(
+                    owner,
+                    session=session_id,
+                    game_mode="live",
+                    phase=_ovd_phase,
+                    model_tool_calls=_ovd_model_tools,
+                    guardrails=_ovd_guards,
+                )
+        except Exception as _ovd_err:  # fail-soft: telemetry never hurts a turn
+            logger.debug(f"[overseer-debug] live emit skipped: {_ovd_err}")
+
         # 0079 — the runtime loop overseer (opt-in, default OFF via the admin toggle / ORWELL_OVERSEER).
         # One holistic, Vault-free, post-turn diagnosis of the engine<->LLM loop. The symptom-gate is
         # SPARSE (a healthy turn trips nothing). On a symptom it runs the REASONING tier (LlmOverseer
@@ -5580,6 +5818,32 @@ async def stream_agent_loop(
                 projection=_cast_proj, context="casting")
         except Exception as _cast_faith_err:  # fail-soft: never hurt the casting turn
             logger.debug(f"[orwell] casting faithfulness gate skipped: {_cast_faith_err}")
+
+        # VERBOSE OVERSEER/CORRECTOR DEBUG TELEMETRY — the CASTING twin (opt-in, default OFF). One
+        # Vault-free entry per casting turn: which casting tools the MODEL called itself, and each
+        # casting-corrector guardrail's verdict (the auto-record belt, the createCharacter finalize
+        # fallback, the substance/finalize nudge). Fail-open; the cheap OFF gate ⇒ no extra work.
+        try:
+            from src import orwell_overseer_debug as _ovdc
+            if _ovdc.overseer_debug_enabled():
+                _ovdc_model_tools = sorted({
+                    ev.get("tool") for ev in (tool_events or [])
+                    if isinstance(ev, dict) and ev.get("tool")})
+                _ovdc.record_turn(
+                    owner,
+                    session=session_id,
+                    game_mode="casting",
+                    phase="casting",
+                    model_tool_calls=_ovdc_model_tools,
+                    guardrails=_overseer_debug_casting_verdicts(
+                        model_tools=set(_ovdc_model_tools),
+                        record_belt=_turn_casting_record_belt,
+                        force=_turn_casting_force,
+                        nudge=_turn_casting_nudge,
+                    ),
+                )
+        except Exception as _ovdc_err:  # fail-soft: telemetry never hurts a turn
+            logger.debug(f"[overseer-debug] casting emit skipped: {_ovdc_err}")
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.

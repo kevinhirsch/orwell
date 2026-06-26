@@ -190,6 +190,22 @@ function retrospectiveLabel(kind: string): string {
 }
 
 /**
+ * #996 — a houseguest's hidden story threads are derived from THREE distinct sources (2–3 secrets, the
+ * weakness, the first true goal). Labeling them all "Secret thread" stacked 4–5 contradictory "secrets"
+ * in the dump. Derive the row label from the thread's SOURCE CLASS instead — read off the premise tag
+ * (`secret —` / `weakness —` / `true goal —`, set at derive time in `deriveStoryThreads`), matching the
+ * prose naturalization in `storyThreadToRetrospectiveProse` ("Secretly… / Their blind spot… / Their real
+ * game…"). So the rows read as {2–3 secrets + 1 blind-spot + 1 real-game}, not 5 "secrets". Vault-free
+ * (a category label reveals nothing); a missing/unknown tag falls back to "Secret thread" (the prior
+ * behavior). Label-only — the thread content/derivation is untouched.
+ */
+function storyThreadLabel(premise: string): string {
+  if (premise.startsWith("weakness")) return "Blind spot";
+  if (premise.startsWith("true goal")) return "Real game";
+  return "Secret thread";
+}
+
+/**
  * The MUTUAL off-screen interaction verbs (mirroring the public `RICH_VERBS` phrasing in
  * `src/engine/offscreen.ts`). A scene recorded as `A <verb> B` and its counterpart `B <verb> A` are the
  * SAME mutual happening seen from each side — the dump should show it ONCE (#842). Render-time
@@ -1498,7 +1514,11 @@ export class GameSessionAdapter implements GameSession {
     // not their engine-only Vault audit strings — so every id is a NAME and no machine slug crosses. They
     // are therefore SKIPPED below when iterating the Vault records (rendered here once, readably, instead).
     for (const t of this.storyThreads) {
-      hiddenStory.push({ type: "Secret thread", content: storyThreadToRetrospectiveProse(t, nameOf) });
+      // #996 — label by SOURCE CLASS (secret → "Secret thread", weakness → "Blind spot", goal → "Real
+      // game"), not a flat "Secret thread", so a houseguest's {secrets + weakness + goal} threads don't all
+      // read as stacked contradictory secrets. The class is read off the premise tag; the prose body is
+      // already class-naturalized by `storyThreadToRetrospectiveProse`.
+      hiddenStory.push({ type: storyThreadLabel(t.premise), content: storyThreadToRetrospectiveProse(t, nameOf) });
     }
     // #847 — the deep profile's secrets / true-goals / weakness are ALSO the source of the secret
     // threads above (each thread is derived from one of them), so re-rendering the deep-profile blob would

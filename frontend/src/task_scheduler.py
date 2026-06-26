@@ -2169,6 +2169,19 @@ class TaskScheduler:
         if not owner or owner in {"internal-tool", "api", "demo", "system"}:
             logger.info(f"ensure_assistant_defaults: skip synthetic owner {owner!r}")
             return
+        # Game build: the inherited-workspace "Assistant" crew singleton (+ its pinned
+        # session and daily check-ins) is NOT part of the Big Brother game. Under
+        # ORWELL_GAME_BUILD it must NOT seed — otherwise every owner gets a stray
+        # "Assistant" session in the bundle (a non-game row the empty reaper / sidebar
+        # then has to reason about). The game IS the main chat.
+        try:
+            from src.settings import game_build_enabled
+            if game_build_enabled():
+                logger.info("ensure_assistant_defaults: skip — game build is enabled")
+                return
+        except Exception as e:
+            # Fail open to the historical behaviour only if the gate itself can't be read.
+            logger.debug(f"ensure_assistant_defaults: game-build gate check failed: {e}")
         from core.database import SessionLocal, CrewMember, ScheduledTask
         from core.database import Session as DbSession
 
