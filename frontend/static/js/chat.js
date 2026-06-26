@@ -42,6 +42,23 @@ import { isNarrow } from './platform.js';
   let _autoContinuePending = false; // marks the next submit as an auto-continue (don't reset the counter)
   const _AUTO_NUDGE_CAP = 3;
 
+  // ── #985 P2-A: the SEND OUTBOX ──────────────────────────────────────────────
+  // A message the player sends WHILE a turn is streaming must NOT be silently dropped (the old
+  // `isStreaming → Stop` branch aborted the reply and `return`ed before the new text was ever read).
+  // The owner's ruling was "Queue it": enqueue the new message into this in-memory FIFO, paint its
+  // optimistic bubble immediately (composes with #992 render-by-seq — a pending bubble carries a
+  // clientMsgId, NO dbId/seq, so it floats to the tail until its seq lands), clear the composer (the
+  // text is now safely captured here, not lost), and flush the queue IN ORDER the moment the current
+  // turn settles — one in flight at a time, mirroring the engine's server-side `_framed` serialization.
+  // Idempotent + multibrowser-safe: each item is keyed by its `clientMsgId`, which the existing
+  // optimistic-adopt path reconciles by, so a flush is at-most-once and reconciles cleanly across
+  // windows (sends target the canonical session per #990, render by seq per #992, mirror per #991).
+  // Items: { clientMsgId, text, bubbleEl }. STOP is reserved for the explicit Stop button / an EMPTY
+  // composer — "stop the current reply" and "send a new message" are no longer collapsed onto one
+  // silent action. In-memory only (reload-durable IndexedDB outbox is a #891 follow-up, see the PR note).
+  const _sendOutbox = [];
+  let _flushingOutbox = false;     // re-entrancy guard so only one flush send is dispatched at a time
+
   // shortModel and modelColor are now in chatRenderer.js
   var _shortModel = chatRenderer.shortModel;
   var _modelRouteLabel = chatRenderer.modelRouteLabel;
@@ -343,10 +360,19 @@ import { isNarrow } from './platform.js';
     // stranded text on any failure. A headless send is plain text only — never a slash command or
     // setup input — so the intercepts below are skipped for it, and the composer is never touched.
     const _headless = overrideMsg != null;
+    // #985 P2-A — a FLUSHED OUTBOX send is a headless send that re-uses the ALREADY-PAINTED optimistic
+    // bubble + its pre-stamped clientMsgId (so the send is at-most-once / idempotent and the bubble
+    // adopts cleanly instead of painting a duplicate). These flow through the same render/adopt path as
+    // a normal optimistic send below — they just skip the "paint a fresh bubble" + "generate a fresh id"
+    // steps. Absent (the common case) ⇒ byte-identical behaviour.
+    let _queuedClientMsgId = null;
+    let _queuedBubbleEl = null;
     if (_headless && overrideOpts) {
       if (overrideOpts.hideUserBubble) _hideUserBubble = true;
       if ('pendingContinue' in overrideOpts) _pendingContinue = overrideOpts.pendingContinue;
       if (overrideOpts.autoContinue) _autoContinuePending = true;
+      if (overrideOpts.queuedClientMsgId) _queuedClientMsgId = overrideOpts.queuedClientMsgId;
+      if (overrideOpts.queuedBubbleEl) _queuedBubbleEl = overrideOpts.queuedBubbleEl;
     }
     // Cancel research clarification timeout if active
     if (window._researchTimeoutTimer) {
@@ -368,6 +394,25 @@ import { isNarrow } from './platform.js';
     if (window.compareModule && window.compareModule.isActive()) {
       window.compareModule.handleCompareSubmit();
       return;
+    }
+
+    // #985 P2-A — SEND-WHILE-STREAMING → QUEUE, don't Stop. A user Send with NON-EMPTY composer text
+    // while a turn is in flight used to fall into the Stop branch below (abort the reply + `return`
+    // before the new text was ever read → the message was silently DROPPED). The owner ruled "Queue
+    // it": enqueue the new message, paint its optimistic bubble NOW, clear the composer, and flush in
+    // FIFO order when the current turn settles. Only a NON-headless, NON-command, NON-empty composer
+    // queues; an EMPTY composer (or the explicit Stop button) still falls through to the Stop branch,
+    // and a slash command runs through its own dispatcher below (never queued as chat). The compare/
+    // group routing above has already returned, so this is the plain-chat send path only.
+    if (isStreaming && !_headless) {
+      const _qInput = uiModule.el('message');
+      const _qText = _qInput ? (_qInput.value || '') : '';
+      const _qTrim = _qText.trim();
+      if (_qTrim && !isCommand(_qTrim) && slashCommands.getSetupMode && !slashCommands.getSetupMode()) {
+        _enqueueSend(_qText);
+        return;
+      }
+      // empty composer / slash / setup mode → fall through to the existing Stop semantics
     }
 
     // If currently streaming, stop it (a headless/programmatic send never toggles Stop — it sends).
@@ -573,16 +618,24 @@ import { isNarrow } from './platform.js';
     // ADR 0008: a client-temp id for the optimistic user bubble. The server stamps it on the
     // persisted user message, so on reconcile the sender ADOPTS this bubble to the canonical
     // {id, seq} (temp -> canonical) instead of fetching history and rendering a duplicate.
-    const _clientMsgId = 'c-' + ((window.crypto && crypto.randomUUID)
+    // #985 P2-A: a flushed outbox send carries its bubble's PRE-STAMPED clientMsgId so the POST below
+    // re-uses the exact same key the optimistic bubble already holds — at-most-once + clean adoption.
+    const _clientMsgId = _queuedClientMsgId || ('c-' + ((window.crypto && crypto.randomUUID)
       ? crypto.randomUUID()
-      : (Date.now() + '-' + Math.random().toString(36).slice(2)));
+      : (Date.now() + '-' + Math.random().toString(36).slice(2))));
     // The visible text for the optimistic bubble. Doc-edit context is folded into the display
     // string later (it only applies when a session already exists, never on the first-send path
     // these early returns guard), so the plain message is the correct pre-materialize display.
     const _earlyAttachInfo = (!_headless && fileHandlerModule.getPendingCount())
       ? fileHandlerModule.getPendingInfo() : null;
     let _userMsgEl = null;
-    if (_wantOptimisticBubble) {
+    if (_queuedBubbleEl) {
+      // #985 P2-A: a flushed outbox send already painted its bubble at enqueue time. ADOPT it (don't
+      // paint a second one) — the adopt block below settles its msg-pending state. It already carries
+      // the matching clientMsgId; re-stamp defensively so the POST + reconcile key are byte-identical.
+      _userMsgEl = _queuedBubbleEl;
+      _userMsgEl.dataset.clientMsgId = _clientMsgId;
+    } else if (_wantOptimisticBubble) {
       _userMsgEl = addMessage('user', _displayOverride || msg, null,
         _earlyAttachInfo ? { attachments: _earlyAttachInfo } : null);
       if (_userMsgEl) {
@@ -3562,6 +3615,10 @@ import { isNarrow } from './platform.js';
         const _toolRes = _el('tool-research-btn');
         if (_toolRes) _toolRes.classList.remove('active');
 
+        // #985 P2-A: the turn has settled and `updateSubmitButton('idle')` above cleared `isStreaming`,
+        // so DRAIN the next queued send (FIFO, one at a time). Deferred past this finally so the reconcile
+        // / peer-resume chains settle first and the flushed send re-enters cleanly. A no-op when empty.
+        try { setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 0); } catch (_) {}
       }
 
       // Research clarification timeout — if user doesn't reply within 5 min, show timeout
@@ -3598,6 +3655,78 @@ import { isNarrow } from './platform.js';
           sessionModule.loadSessions();
         }
       }, 3000);
+    }
+  }
+
+  // ── #985 P2-A: SEND OUTBOX — enqueue + flush ────────────────────────────────
+  /**
+   * Enqueue a Send made WHILE a turn is streaming. Paints the optimistic bubble NOW (pending shape:
+   * clientMsgId, no dbId/seq → floats to the tail per #992), captures the text in the FIFO, clears the
+   * composer (the words are safely held in the queue, never lost), and routes the freshness seam — so
+   * nothing is dropped and the queue flushes in order when the current turn settles. Mirrors the
+   * optimistic-bubble + composer-clear contract of the normal send path so a queued send is
+   * indistinguishable from an in-line one once it reconciles.
+   */
+  function _enqueueSend(text) {
+    const clientMsgId = 'c-' + ((window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : (Date.now() + '-' + Math.random().toString(36).slice(2)));
+    // Paint the optimistic bubble immediately (pending: clientMsgId, NO dbId/seq).
+    let bubbleEl = null;
+    try {
+      bubbleEl = chatRenderer.addMessage('user', text, null, null);
+      if (bubbleEl) {
+        bubbleEl.dataset.clientMsgId = clientMsgId;
+        bubbleEl.classList.add('msg-pending');
+      }
+      if (uiModule.setAutoScroll) uiModule.setAutoScroll(true);
+      if (uiModule.scrollHistory) uiModule.scrollHistory();
+    } catch (_) { /* a paint failure must not strand the text — it's still captured in the queue below */ }
+    _sendOutbox.push({ clientMsgId, text, bubbleEl });
+    // Clear the composer — the text is now held in the outbox (+ bubble), so it is safe (and expected:
+    // the player is free to compose the next message). Mirror the normal-send composer reset.
+    try {
+      const mi = uiModule.el('message');
+      if (mi) {
+        mi.value = '';
+        mi.style.height = '';
+        mi.dispatchEvent(new Event('input'));
+      }
+      if (window._orwellComposerDraftClear) window._orwellComposerDraftClear();
+    } catch (_) {}
+  }
+
+  /**
+   * Flush the next queued send IN ORDER once the current turn has settled (called from the stream-end
+   * finally). ONE in flight at a time: it dispatches a single headless send that re-uses the queued
+   * item's already-painted bubble + its clientMsgId (idempotent / at-most-once), and the NEXT item is
+   * picked up by that send's own stream-end finally — so the queue drains strictly FIFO, one turn per
+   * settle, with no double-send. Guards: never while a stream is live (would race the in-flight turn),
+   * never re-entrant. A no-op when the outbox is empty (the overwhelming common case).
+   */
+  // The flush dispatcher — defaults to a headless `handleChatSubmit`. Indirected through a swappable
+  // ref so the FIFO/idempotency browser gate can spy the dispatch without a real LLM stream; in
+  // production it IS `handleChatSubmit`, so behaviour is byte-identical.
+  let _outboxDispatch = (text, opts) => handleChatSubmit(null, text, opts);
+  function _flushSendOutbox() {
+    if (_flushingOutbox) return;
+    if (isStreaming) return;            // a turn is in flight — its finally will re-attempt the flush
+    if (_sendOutbox.length === 0) return;
+    const item = _sendOutbox.shift();
+    if (!item) return;
+    // If the queued bubble was somehow removed from the DOM (a destructive reload before flush), fall
+    // back to letting the send paint a fresh one — the text is never lost.
+    const bubbleAttached = item.bubbleEl && item.bubbleEl.isConnected;
+    _flushingOutbox = true;
+    try {
+      Promise.resolve(
+        _outboxDispatch(item.text, {
+          queuedClientMsgId: item.clientMsgId,
+          queuedBubbleEl: bubbleAttached ? item.bubbleEl : null,
+        })
+      ).catch(() => {}).finally(() => { _flushingOutbox = false; });
+    } catch (_) {
+      _flushingOutbox = false;
     }
   }
 
@@ -5872,6 +6001,11 @@ import { isNarrow } from './platform.js';
     _reorderBySeq,      // BUG 1: non-destructive seq reorder (the reconcile corrector)
     _isEmptyTurnNoSave, // BUG 2 (#985 P2-B): clean-empty-turn predicate (browser gate)
     _renderStreamDropRetry, // BUG 2: the user-controlled Retry control (browser gate)
+    _enqueueSend,       // #985 P2-A: enqueue a send-while-streaming into the outbox (browser gate)
+    _flushSendOutbox,   // #985 P2-A: drain the outbox FIFO at turn settle (browser gate)
+    _sendOutbox,        // #985 P2-A: the in-memory FIFO (inspected by the browser gate)
+    _isStreaming: () => isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
+    _setOutboxDispatch: (fn) => { _outboxDispatch = fn; }, // #985 P2-A: swap the flush dispatcher (browser gate)
   };
 
   // Single delegated handler for tool-call fold/expand. One listener on
