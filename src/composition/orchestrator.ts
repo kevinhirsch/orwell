@@ -531,6 +531,9 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
         // #840 — orientation + one-partner showmance discipline (mirrors the seeded layer).
         showmancePlausible: showmanceGate.plausible,
         hasActiveShowmance: showmanceGate.hasActiveShowmance,
+        // PV1 (#1029): the player may be NAMED as a SUBJECT of off-screen NPC cognition (never a
+        // witness/partner — they are not in `npcs`). Reaches the player only via gossip/pathway.
+        playerSubject: PLAYER,
         ...(occupancy ? { occupancy } : {}),
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
@@ -627,7 +630,7 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // reaches no one (player or admin); the player feels it only later through that NPC's behavior.
   if (scenes.length > 0) {
     const confessor = scenes[rng.int(scenes.length)]!.initiator;
-    recordConfessional(sandbox.engine.events, confessionalFor(confessor, ids, sandbox.engine.relationships), rng, clockNow);
+    recordConfessional(sandbox.engine.events, confessionalFor(confessor, ids, sandbox.engine.relationships, { player: PLAYER }), rng, clockNow);
   }
 
   if (trigger === "player-turn" && ids.length > 0) {
