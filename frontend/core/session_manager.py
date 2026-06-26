@@ -225,18 +225,146 @@ class SessionManager:
         # bypassed this method's broadcast (the dead leg). Do not re-publish here.
         self._persist_message(session_id, message)
 
+    def _recreate_db_session_row(self, db, session_id: str, cached: Session) -> DbSession:
+        """Re-mint a missing `sessions` row from the cached in-memory `Session`, AND backfill
+        any cached transcript that the row's removal cascade-deleted.
+
+        Loss-prevention self-heal: a persist whose parent row was removed out-of-band (the
+        empty-session reaper racing a fresh game session, a partial delete) must NOT drop the
+        message. The cached `Session` is the source of truth for the row's non-message fields;
+        rebuild the row from it so the message has a parent to land on.
+
+        Crucially, deleting the parent `sessions` row cascade-deletes its `chat_messages`
+        (FK ON DELETE + the ORM 'all, delete-orphan' relationship), so any ALREADY-persisted
+        turns are gone from the DB too — they survive only in `cached.history`. Re-insert each
+        cached message that is no longer in the DB, in order, BEFORE the caller appends the new
+        one, so a reload shows the FULL transcript (non-degradation), not just the latest turn.
+
+        Adds + flushes in the SAME transaction as the caller (which then commits it with the
+        new chat_messages insert), so the row + restored transcript commit atomically. Headers
+        are serialised the same way `create_session` stores them."""
+        headers = getattr(cached, "headers", None) or {}
+        db_session = DbSession(
+            id=session_id,
+            name=getattr(cached, "name", None) or "Recovered session",
+            endpoint_url=getattr(cached, "endpoint_url", "") or "",
+            model=getattr(cached, "model", "") or "",
+            rag=bool(getattr(cached, "rag", False)),
+            archived=bool(getattr(cached, "archived", False)),
+            headers=headers,
+            owner=getattr(cached, "owner", None),
+            is_important=bool(getattr(cached, "is_important", False)),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(db_session)
+        db.flush()  # materialise the row so the message inserts below have a parent
+
+        # Backfill cached transcript the cascade wiped. Best-effort, in scroll order. Each
+        # message keeps its previously-assigned _db_id/_seq when present (so the in-memory
+        # objects still match the DB ids after the heal); a missing id/seq is regenerated.
+        restored = 0
+        _seq_counter = 0
+        for hist_msg in list(getattr(cached, "history", None) or []):
+            try:
+                meta = hist_msg.metadata or {}
+                existing_id = meta.get("_db_id")
+                # Skip any message already present in the DB (defensive — after a partial
+                # delete some rows may survive). Match by id when we have one.
+                if existing_id is not None:
+                    already = (
+                        db.query(func.count(DbChatMessage.id))
+                        .filter(DbChatMessage.id == existing_id)
+                        .scalar()
+                    ) or 0
+                    if already:
+                        _seq_counter = max(_seq_counter, int(meta.get("_seq", _seq_counter)) + 1)
+                        continue
+                row_id = existing_id or str(uuid.uuid4())
+                seq = meta.get("_seq")
+                seq = int(seq) if seq is not None else _seq_counter
+                _seq_counter = max(_seq_counter, seq + 1)
+                _content = hist_msg.content
+                if isinstance(_content, list):
+                    _content = json.dumps(_content)
+                _meta_json = json.dumps(meta) if meta else None
+                db.add(DbChatMessage(
+                    id=row_id,
+                    session_id=session_id,
+                    role=hist_msg.role,
+                    content=_content,
+                    meta_data=_meta_json,
+                    timestamp=datetime.utcnow(),
+                    seq=seq,
+                ))
+                # Keep the in-memory message pinned to the (re)assigned id/seq.
+                if hist_msg.metadata is None:
+                    hist_msg.metadata = {}
+                hist_msg.metadata["_db_id"] = row_id
+                hist_msg.metadata["_seq"] = seq
+                restored += 1
+            except Exception as _e:
+                logger.error("Backfill of a cached message for %s skipped: %s", session_id, _e)
+        if restored:
+            db.flush()
+            logger.error(
+                "Backfilled %d cached transcript message(s) for %s after row recreation "
+                "(cascade-deleted history restored — non-degradation held)",
+                restored, session_id,
+            )
+        return db_session
+
     def _persist_message(self, session_id: str, message: ChatMessage):
         """Persist a single message to the database."""
         db = SessionLocal()
         try:
             db_session = db.query(DbSession).filter(DbSession.id == session_id).first()
             if db_session is None:
-                # A stream/tool callback can outlive a session delete. Do not
-                # create a chat_messages row with no parent session; also drop
-                # any stale cached session so later writes fail closed too.
-                self.sessions.pop(session_id, None)
-                logger.warning("Dropping message for deleted session %s", session_id)
-                return
+                # The parent DbSession row is gone. Message loss is the highest-severity
+                # class in this project, so DO NOT silently drop a real player message.
+                #
+                # Two distinct cases:
+                #   (a) CONFIRMED DELETE — no cached in-memory Session either. `delete_session`
+                #       pops `self.sessions[session_id]`, so a missing cache AND a missing row
+                #       is a genuine tombstone; a late stream/tool callback firing after that
+                #       has nothing legitimate to persist. Drop, but LOUDLY (error, with role +
+                #       phase) so a real drop is never silent.
+                #   (b) RACE / OUT-OF-BAND ROW REMOVAL — the cached `Session` still exists (it
+                #       was never deleted through the sanctioned door; the row was removed
+                #       out-of-band, e.g. the empty-session reaper racing a fresh game session,
+                #       or a partial delete). Here the in-memory session is the source of truth,
+                #       so LAZY-RECREATE the DbSession row from it and persist onto it. This
+                #       converts the dominant loss path into self-heal.
+                cached = self.sessions.get(session_id)
+                _phase = None
+                try:
+                    _phase = (message.metadata or {}).get("phase") if message.metadata else None
+                except Exception:
+                    _phase = None
+                if cached is None:
+                    logger.error(
+                        "Dropping message for deleted session %s (role=%s, phase=%s) — "
+                        "no cached session: confirmed tombstone",
+                        session_id, getattr(message, "role", "?"), _phase,
+                    )
+                    return
+                # Self-heal: re-mint the parent row from the cached Session and fall through
+                # to the normal persist below (which assigns seq, count, broadcasts).
+                try:
+                    db_session = self._recreate_db_session_row(db, session_id, cached)
+                    logger.error(
+                        "Recreated missing DbSession row for %s on persist (role=%s, phase=%s) — "
+                        "self-healed an out-of-band row removal instead of dropping the message",
+                        session_id, getattr(message, "role", "?"), _phase,
+                    )
+                except Exception as _recreate_err:
+                    logger.error(
+                        "Could NOT recreate missing DbSession row for %s; dropping message "
+                        "(role=%s, phase=%s): %s",
+                        session_id, getattr(message, "role", "?"), _phase, _recreate_err,
+                    )
+                    db.rollback()
+                    return
 
             msg_id = str(uuid.uuid4())
             msg_time = datetime.utcnow()
@@ -753,20 +881,68 @@ class SessionManager:
     # Cleanup
     # ------------------------------------------------------------------
 
-    def cleanup_empty_sessions(self, auto_archive_days: int = 30) -> dict:
-        """Clean up empty and old sessions."""
+    # Game-session markers the empty reaper must never delete on a 0-message window.
+    # The casting/canonical session is named "Casting interview" and is never renamed
+    # server-side (see orwellSeasonProgress.js); game-mode rows carry an 'agent' mode.
+    _GAME_SESSION_NAMES = {"casting interview"}
+    _GAME_SESSION_MODES = {"agent"}
+
+    def _is_reaper_exempt(self, db_session, fresh_cutoff) -> bool:
+        """True if this 0-message session must be spared by the empty-session reaper.
+
+        Two exemptions, either sufficient:
+          - GAME SESSION: a casting/canonical game session (name 'Casting interview', or an
+            agent-mode game row) legitimately holds 0 messages between minting and the first
+            persist. Reaping it races a live casting turn → message loss.
+          - FRESHLY CREATED: any row created within `fresh_grace_minutes` — defensive belt for
+            a game row whose name/mode isn't set yet at creation time (the per-tab orphan is
+            minted name='Casting interview' but a future surface might differ)."""
+        try:
+            name = (getattr(db_session, "name", "") or "").strip().lower()
+            if name in self._GAME_SESSION_NAMES:
+                return True
+            mode = (getattr(db_session, "mode", "") or "").strip().lower()
+            if mode in self._GAME_SESSION_MODES:
+                return True
+            created = getattr(db_session, "created_at", None)
+            if created is not None:
+                # created_at is stored naive-UTC (utcnow_naive); compare like-for-like. A tz-aware
+                # value (some paths pass datetime.now(timezone.utc)) is normalised to naive UTC.
+                if getattr(created, "tzinfo", None) is not None:
+                    created = created.astimezone(timezone.utc).replace(tzinfo=None)
+                if created >= fresh_cutoff:
+                    return True
+        except Exception:
+            # On any doubt, do NOT exempt — the reaper's job is to clean truly-empty rows;
+            # a self-heal recreate (#1) covers a mistaken delete of a live session.
+            return False
+        return False
+
+    def cleanup_empty_sessions(self, auto_archive_days: int = 30, fresh_grace_minutes: int = 15) -> dict:
+        """Clean up empty and old sessions.
+
+        `fresh_grace_minutes` exempts very-recently-created rows from the empty-session
+        reaper (see `_is_reaper_exempt`): a casting/canonical game session legitimately
+        has 0 messages for a window between minting the row and the first persist, and
+        deleting it out from under that persist is a message-loss path. (The #1 self-heal
+        recreates the row if it loses the race anyway; this stops the race from happening.)"""
         db = SessionLocal()
-        stats = {'deleted_empty': 0, 'archived_old': 0, 'total_checked': 0}
+        stats = {'deleted_empty': 0, 'archived_old': 0, 'total_checked': 0, 'exempt_empty': 0}
 
         try:
             all_sessions = db.query(DbSession).all()
             cutoff_date = utcnow_naive() - timedelta(days=auto_archive_days)
+            fresh_cutoff = utcnow_naive() - timedelta(minutes=max(0, fresh_grace_minutes))
 
             for db_session in all_sessions:
                 stats['total_checked'] += 1
 
-                # Delete empty sessions
+                # Delete empty sessions — UNLESS exempt (a game session, or freshly created
+                # within the grace window, which may legitimately carry 0 messages briefly).
                 if db_session.message_count == 0:
+                    if self._is_reaper_exempt(db_session, fresh_cutoff):
+                        stats['exempt_empty'] += 1
+                        continue
                     if db_session.id in self.sessions:
                         del self.sessions[db_session.id]
                     db.delete(db_session)
