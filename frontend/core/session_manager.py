@@ -60,7 +60,28 @@ class SessionManager:
     def __init__(self, sessions_file: str = None):
         # sessions_file kept for backward compat, not used
         self.sessions: Dict[str, Session] = {}
+        # F4 (lost-append race): a per-session async lock. The chat path's load→mutate→persist
+        # section is NOT atomic — a concurrent send + a reconcile/poll both call get_session, which
+        # can REPLACE self.sessions[session_id] with a freshly-hydrated object mid-request, orphaning
+        # an in-flight history.append (the user bubble that "vanishes"). The async chat handler holds
+        # `session_lock(id)` across that section so the two coroutines serialize, mirroring the
+        # engine's per-user enqueue discipline. Keyed by session id; created lazily; never global.
+        self._session_locks: Dict[str, "asyncio.Lock"] = {}
         self.load_sessions()
+
+    def session_lock(self, session_id: str) -> "asyncio.Lock":
+        """Return the per-session asyncio.Lock, creating it on first use.
+
+        F4: serialize the chat path's load→mutate→persist critical section against concurrent
+        get_session replaces / reconcile writes for the SAME session. Lazily created (idle sessions
+        cost nothing); per-id so independent sessions never contend. Lock creation itself is a single
+        sync dict op — safe under one event loop (no await before the dict write)."""
+        import asyncio
+        lock = self._session_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_id] = lock
+        return lock
 
     # ------------------------------------------------------------------
     # Loading
@@ -230,7 +251,6 @@ class SessionManager:
                 _content = json.dumps(_content)
             _meta_json = json.dumps(message.metadata) if message.metadata else None
             _now = datetime.now(timezone.utc)
-            _mc = len(self.sessions.get(session_id, {}).history) if session_id in self.sessions else 0
 
             # ADR 0008: assign the monotonic per-session `seq` (the authoritative chat order).
             # MAX(seq)+1 under the SQLite write lock, with the UNIQUE(session_id, seq) index as the
@@ -245,6 +265,21 @@ class SessionManager:
                     .scalar()
                 )
                 next_seq = 0 if _max_seq is None else int(_max_seq) + 1
+                # F1 (transcript-truncation fix): `message_count` MUST come from DB truth, never from
+                # `len(in_memory_history)`. A session loaded metadata-only (history=[]) — or one whose
+                # cache lost an append to a concurrent get_session replace — has an in-memory length that
+                # DISAGREES with the persisted `chat_messages` rows; writing that short count here made
+                # `load_sessions`' `message_count > 0` gate and the hydrate gate trust a TRUNCATED total
+                # (issue #936). Count the rows already persisted for this session (in this same write txn)
+                # and add 1 for the row about to commit. (== next_seq+1 for a dense seq, but COUNT(*)+1 is
+                # correct even when a legacy log has a sparse seq.) Recomputed each attempt so a lost-seq
+                # retry — which may see a newly-committed row from the winner — still writes the true total.
+                _existing_rows = (
+                    db.query(func.count(DbChatMessage.id))
+                    .filter(DbChatMessage.session_id == session_id)
+                    .scalar()
+                ) or 0
+                _mc = int(_existing_rows) + 1
                 db_message = DbChatMessage(
                     id=msg_id,
                     session_id=session_id,
@@ -481,8 +516,20 @@ class SessionManager:
                 except json.JSONDecodeError:
                     headers = {}
             session.name = db_session.name
-            session.endpoint_url = db_session.endpoint_url or ""
-            session.model = db_session.model or ""
+            # F2 (lost-model fix): only ADOPT a non-empty DB model. A blank DB row must NOT stomp a
+            # model just repaired in memory this same request. `_recover_empty_session_model` binds a
+            # model onto the cached `sess` (and persists it), but `get_session` calls this sync on the
+            # NEXT read BEFORE recovery re-runs — if the DB write lagged or the row is a different
+            # identity, an unconditional `model = db_session.model or ""` blanks the live binding and the
+            # turn refuses with "No model selected" / re-fires "Recovered empty session model" forever.
+            # The DB only ever ADDS a model here; clearing one is a deliberate op (endpoint delete) that
+            # goes through `_clear_orphaned_session_endpoint`, not a passive metadata refresh.
+            db_model = (db_session.model or "").strip()
+            if db_model:
+                session.model = db_model
+            db_url = (db_session.endpoint_url or "").strip()
+            if db_url or not getattr(session, "endpoint_url", ""):
+                session.endpoint_url = db_session.endpoint_url or ""
             session.headers = headers or {}
             session.rag = db_session.rag
             session.archived = db_session.archived
