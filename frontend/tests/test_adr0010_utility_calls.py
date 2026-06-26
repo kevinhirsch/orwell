@@ -85,9 +85,13 @@ def test_utility_call_is_metered_to_the_ledger(monkeypatch):
     assert abs(float(kw["cost"]) - 0.001) < 1e-9
 
 
-def test_background_authoring_class_resolves_low_effort(monkeypatch):
+def test_background_authoring_class_resolves_reasoning_off(monkeypatch):
+    # #1007: background-authoring is "off" (settings default) — structured JSON extraction, not a
+    # reasoning task. On a reasoning model that resolves to a GENUINE disable on the wire
+    # (reasoning:{"enabled": False}), not an omission (which would leave the provider default ON and
+    # burn the output cap before any visible JSON — the live 0/15 floor-fallback this fixes).
     payload, recorded, _text = _run(monkeypatch, call_class="background-authoring", user="tester")
-    assert payload.get("reasoning") == {"effort": "low"}      # background-authoring default
+    assert payload.get("reasoning") == {"enabled": False}
     assert len(recorded) == 1 and recorded[0][1]["call_class"] == "background-authoring"
 
 

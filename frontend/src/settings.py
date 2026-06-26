@@ -159,7 +159,14 @@ DEFAULT_SETTINGS = {
         "narration": "medium",
         "utility-extraction": "off",
         "casting": "medium",
-        "background-authoring": "low",
+        # #1007: OFF, not "low". Cast authoring is structured JSON extraction, not a reasoning
+        # task — the strict-JSON prompt forbids thinking. On a reasoning model (deepseek-v4-pro)
+        # an enabled reasoning channel burned ~1300 tokens BEFORE any visible JSON, blowing the
+        # output cap (finish_reason=length, empty body) → "no JSON found" → the whole cast fell
+        # to the deterministic floor (LIVE-CONFIRMED 0/15). token_policy + llm_core._apply_reasoning_budget
+        # turn "off" into an active reasoning:{"enabled":false} on the wire, so the model emits the
+        # JSON directly. Direct probe: reasoning-off returns valid JSON in ~278 tokens.
+        "background-authoring": "off",
     },
     # ADR 0010 / feature 0069 follow-on #1 — the admin-editable per-class `max_tokens` OUTPUT cap.
     # The sibling of reasoning_budget: maps a call class to its output-token ceiling. Defaults mirror
@@ -173,7 +180,11 @@ DEFAULT_SETTINGS = {
         "narration": 4096,
         "utility-extraction": 1500,
         "casting": 2048,
-        "background-authoring": 1200,
+        # #1007: 1200 → 3000 to MATCH the token_policy class default (_DEFAULT_MAX_TOKENS). This
+        # seed is an in-band override that WINS over that default, so the #1002/#1007 raise to 3000
+        # was DEAD until this seed moved too — at 1200 a full authored JSON profile could not fit
+        # alongside even a little reasoning. 3000 = the comfortable floor for the whole JSON object.
+        "background-authoring": 3000,
     },
     # ADR 0010 / feature 0069 — the soft per-game spend-alert threshold in USD.
     # 0.0 = alert off. Compared against the running per-session cost total via

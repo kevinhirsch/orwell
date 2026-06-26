@@ -57,7 +57,8 @@ def test_keys_present_in_default_settings():
     from src.settings import DEFAULT_SETTINGS
     assert DEFAULT_SETTINGS["reasoning_budget"] == {
         "narration": "medium", "utility-extraction": "off",  # "off" = genuine disable (reasoning:{enabled:false})
-        "casting": "medium", "background-authoring": "low",
+        # #1007: background-authoring is "off" — structured JSON extraction, not a reasoning task.
+        "casting": "medium", "background-authoring": "off",
     }
     assert DEFAULT_SETTINGS["openrouter_provider"] == {}
     assert DEFAULT_SETTINGS["token_spend_alert_usd"] == 0.0

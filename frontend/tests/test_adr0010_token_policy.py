@@ -60,6 +60,28 @@ def test_background_authoring_defaults_low_effort():
     assert pol["max_tokens"] == 3000
 
 
+def test_background_authoring_with_default_settings_seed_resolves_off_and_3000():
+    """#1007 (LIVE-CONFIRMED): the SETTINGS-SEEDED resolution — the path the live game actually
+    takes — must yield reasoning OFF + max_tokens 3000. The resolver treats the in-band
+    ``settings.py`` seed as WINNING over the token_policy code default, so a seed of
+    ``"low"``/``1200`` masked the #1002/#1007 raise and the cast fell 0/15 to the floor on
+    deepseek-v4-pro (reasoning burned ~1300 tokens before any JSON → finish_reason=length).
+    This pins the ACTUAL settings default seed (not a hand-rolled one) so the masking can't
+    silently come back."""
+    from src.settings import DEFAULT_SETTINGS
+
+    seed = {
+        "reasoning_budget": DEFAULT_SETTINGS["reasoning_budget"],
+        "max_tokens_budget": DEFAULT_SETTINGS["max_tokens_budget"],
+    }
+    pol = resolve_token_policy("background-authoring", seed)
+    # reasoning OFF ⇒ the field is omitted (None); llm_core._apply_reasoning_budget then sends
+    # reasoning:{"enabled": false} on the wire so a reasoning model emits the JSON directly.
+    assert pol["reasoning"] is None
+    # the seed no longer pins 1200 — the cap is the comfortable 3000 floor the JSON profile needs.
+    assert pol["max_tokens"] == 3000
+
+
 def test_caching_true_and_context_budget_none_for_all_classes():
     for call_class in CALL_CLASSES:
         pol = resolve_token_policy(call_class)
