@@ -211,7 +211,7 @@ import { onNarrowChange } from './platform.js';
       '<span class="os-tod" id="os-tod" hidden title="Time of day in the house"></span>' +
       '<span class="os-stale" id="os-stale" hidden title="Reconnecting to the feed…" aria-label="feed offline">●</span>';
     body.innerHTML = `
-        <div class="os-done" id="os-done" hidden>Season complete<span id="os-done-winner"></span></div>
+        <div class="os-done" id="os-done" hidden><span id="os-done-label"></span><span id="os-done-winner"></span></div>
         <div class="os-premiere" id="os-premiere" hidden>
           <div class="os-prem-obj">Meet the house<span class="os-prem-count" id="os-prem-count"></span></div>
           <div class="os-prem-left" id="os-prem-left" hidden></div>
@@ -333,6 +333,10 @@ import { onNarrowChange } from './platform.js';
       const w = st.winner && st.winner.name;
       if (doneEl) {
         doneEl.hidden = false;
+        // F6 (#1023): the terminal label is rendered FROM state here, never baked into the static
+        // gadget template — so a pre-game/empty render of the gadget carries no stale "Season complete".
+        const lbl = doneEl.querySelector("#os-done-label");
+        if (lbl) lbl.textContent = "Season complete";
         doneEl.querySelector("#os-done-winner").innerHTML =
           w ? ' — winner: <span class="os-winner">' + esc(w) + "</span>" : "";
       }

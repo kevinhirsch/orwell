@@ -2657,13 +2657,14 @@ def main() -> int:
             check(not f4_seat0.strip(),
                   f"P1: pre-game boot does NOT prefill the composer (no seat pre-prompt) ({f4_seat0!r})")
             # the SETUP WIZARD (its own modal, data-ob-setup), shown on every fresh game/season; the
-            # only welcome copy is the framing line "Production needs the feeds" and it shows the
-            # model SETUP (a narrator/portrait model summary + a "Choose models" door into Settings).
+            # only welcome copy is the framing line "Pick your season's models" (F1 #1022 — distinct
+            # from the holding-card model gate) and it shows the model SETUP (a narrator/portrait
+            # model summary + a "Choose models" door into Settings).
             f4_welcome = f4.evaluate(
                 "() => { const c = document.querySelector('#orwell-onboarding[data-ob-setup] .ob-card');"
                 "  return c ? c.textContent : ''; }")
             _wz = (f4_welcome or "").lower()
-            check("production needs the feeds" in _wz and ("model" in _wz or "casting" in _wz),
+            check("pick your season's models" in _wz and ("model" in _wz or "casting" in _wz),
                   f"P1: the setup wizard frames the feeds and shows model setup ({(f4_welcome or '')[:80]!r})")
             # the cast-photo box is HIDDEN at boot — it follows the producers' question, never the
             # wizard (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)

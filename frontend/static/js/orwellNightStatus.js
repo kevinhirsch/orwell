@@ -81,10 +81,17 @@
   function firstName(full) { return String(full || "").trim().split(/\s+/)[0] || ""; }
 
   function render(state) {
-    const el = ensureEl();
     const tod = state && state.started ? state.timeOfDay : null;
-    // Only while the in-game clock is actually running (the feature is on); otherwise the gadget is silent.
-    if (!tod || !TOD[tod]) { _gadget.hide(); el.removeAttribute("title"); _lastAnnounced = null; return; }
+    // F6 (#1023): only BUILD the gadget once the in-game clock is actually running, so the "Nightfall"
+    // card chrome is never baked into the DOM pre-game/clock-off (latent stale state). Pre-game we
+    // simply leave it unmounted; if a prior render already created it, hide that node.
+    if (!tod || !TOD[tod]) {
+      const existing = document.getElementById(ID);
+      if (existing && _gadget) { _gadget.hide(); existing.removeAttribute("title"); }
+      _lastAnnounced = null;
+      return;
+    }
+    const el = ensureEl();
     const [emoji, label] = TOD[tod];
 
     // PHASE LINE: the time-of-day indicator (emoji + label) at the top of the card body.
