@@ -164,9 +164,12 @@ def is_public_blocked_tool(tool_name: Optional[str]) -> bool:
 def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
     """Return True for admins, or when auth is not configured yet."""
     try:
-        from core.auth import AuthManager
+        # Reuse the process-level AuthManager singleton (issue #966) instead of
+        # constructing a fresh one (which re-reads auth.json/sessions.json) per
+        # call. This is a request-free path, so fall back to the cached instance.
+        from src.auth_helpers import shared_auth_manager
 
-        auth = AuthManager()
+        auth = shared_auth_manager()
         if not auth.is_configured:
             return True
         return bool(owner and auth.is_admin(owner))
