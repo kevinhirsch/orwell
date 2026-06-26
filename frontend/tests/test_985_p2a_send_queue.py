@@ -238,8 +238,17 @@ def test_enqueue_paints_bubble_clears_composer_and_queues(_app):
 
 
 # ── flush: multiple queued sends drain in FIFO order, exactly once each (no double-send). ─────────────
-_FLUSH_FIFO_HARNESS = r"""
-async () => {
+# The drain is a CHAIN of async hops (each send's stream-end finally schedules the NEXT flush via a
+# microtask + a `setTimeout(0)` — see _flushSendOutbox / _outboxDispatch in chat.js). So the harness
+# CANNOT assert after a FIXED sleep: under CI load the 3rd (tail) hop can land after any fixed window,
+# which intermittently red-x'd unrelated PRs (got ["first","second"]). Instead we install the spy +
+# kick the drain, then POLL from Python (page.wait_for_function) until all 3 have dispatched, with a
+# generous bounded timeout — deterministic, no logic change, and it still fails LOUDLY if a real
+# flush-chain drop ever stalls the drain below 3.
+_EXPECTED_FIFO = ["first", "second", "third"]
+
+_FLUSH_FIFO_SETUP = r"""
+() => {
   const chat = window.chatModule;
   if (!chat || !chat._enqueueSend || !chat._flushSendOutbox || !chat._setOutboxDispatch) {
     return { error: 'outbox flush helpers missing' };
@@ -254,21 +263,28 @@ async () => {
 
   // Spy the dispatcher: record (text, clientMsgId) in send order, then mimic the real stream-end
   // finally by scheduling the NEXT flush — so the queue drains FIFO, one at a time, via the chain.
+  // Stash the record on window so Python can poll it until the chain has fully drained.
   const sent = [];
+  window.__fifoSpy = sent;
   chat._setOutboxDispatch((text, opts) => {
     sent.push({ text, clientMsgId: opts && opts.queuedClientMsgId, hadBubble: !!(opts && opts.queuedBubbleEl) });
-    // The real send's finally defers `_flushSendOutbox(); restore on resolve.
+    // The real send's finally defers `_flushSendOutbox()`; mimic that to drain the chain FIFO.
     return Promise.resolve().then(() => { setTimeout(() => chat._flushSendOutbox(), 0); });
   });
 
-  // Kick the drain (the stream just settled).
+  // Kick the drain (the stream just settled). The chained flushes run asynchronously from here;
+  // Python polls window.__fifoSpy until all 3 land (condition-based — never a fixed sleep).
   chat._flushSendOutbox();
-  // Let the chained flushes run.
-  await new Promise(r => setTimeout(r, 300));
+  return { ok: true };
+}
+"""
 
+_FLUSH_FIFO_READ = r"""
+() => {
+  const chat = window.chatModule;
+  const sent = window.__fifoSpy || [];
   // Restore the real dispatcher so we don't leak the spy.
   chat._setOutboxDispatch((text, opts) => chat.handleChatSubmit(null, text, opts));
-
   const ids = sent.map(s => s.clientMsgId);
   return {
     order: sent.map(s => s.text),
@@ -285,10 +301,27 @@ def test_flush_drains_fifo_exactly_once(_app):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
         browser, page = _new_page(pw, _app)
-        result = page.evaluate(_FLUSH_FIFO_HARNESS)
+        setup = page.evaluate(_FLUSH_FIFO_SETUP)
+        assert "error" not in setup, setup.get("error")
+        # Condition-based wait: poll until the whole chain has drained all 3 (generous bounded
+        # timeout) — replaces the fixed 300ms sleep that dropped the async tail under CI load. If the
+        # flush chain ever GENUINELY stalls below 3, this raises a loud TimeoutError (a real bug)
+        # instead of silently asserting a short order.
+        try:
+            page.wait_for_function(
+                "() => (window.__fifoSpy || []).length >= 3",
+                timeout=15000,
+            )
+        except Exception as e:
+            spy = page.evaluate("() => (window.__fifoSpy || []).map(s => s.text)")
+            browser.close()
+            pytest.fail(
+                f"flush chain never drained all 3 within timeout (a real flush-chain stall, not a "
+                f"sleep race): dispatched {spy!r} — {e}"
+            )
+        result = page.evaluate(_FLUSH_FIFO_READ)
         browser.close()
-    assert "error" not in result, result.get("error")
-    assert result["order"] == ["first", "second", "third"], (
+    assert result["order"] == _EXPECTED_FIFO, (
         f"the outbox must flush in FIFO order, got {result['order']!r}"
     )
     assert result["sentCount"] == 3, f"all queued sends must flush (none lost), got {result['sentCount']}"
