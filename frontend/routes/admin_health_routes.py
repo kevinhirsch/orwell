@@ -307,23 +307,56 @@ def _ops_status_files() -> dict:
 def _provider_config() -> dict:
     """The configured LLM/image providers — REDACTED: names, models, and base-urls only,
     NEVER the api key. Pulled from the model_endpoints table (the key column is dropped here,
-    not just redacted). Best-effort; an unreadable store reads as an error string."""
+    not just redacted). Best-effort; an unreadable store reads as an error string.
+
+    DB7: the bundle must let an operator answer "which endpoint actually resolves?" — so we
+    surface the configured default (`defaultEndpointId` / `defaultModel`) and flag each endpoint
+    with `isDefault`, alongside `defaultResolved` (the default endpoint's name/baseUrl). `supportsTools`
+    is populated when the column is known (NULL = unknown ⇒ the agent_loop keyword heuristic decides);
+    a tool-less default endpoint is exactly what fails casting like F7, so it must be auditable."""
     out: dict = {"endpoints": []}
+    # Resolve the configured global default first so each endpoint can be flagged.
+    default_ep_id = ""
+    default_model = ""
+    try:
+        from src.settings import load_settings
+        _s = load_settings() or {}
+        default_ep_id = (_s.get("default_endpoint_id") or "").strip()
+        default_model = (_s.get("default_model") or "").strip()
+    except Exception:
+        pass
+    out["defaultEndpointId"] = default_ep_id or None
+    out["defaultModel"] = default_model or None
     try:
         from core.database import SessionLocal, ModelEndpoint
         db = SessionLocal()
         try:
+            default_resolved = None
             for ep in db.query(ModelEndpoint).all():
+                ep_id = getattr(ep, "id", None)
+                is_default = bool(default_ep_id) and ep_id == default_ep_id
                 # Whitelist of non-secret fields ONLY — api_key is never read.
-                out["endpoints"].append({
+                entry = {
+                    "id": ep_id,
                     "name": getattr(ep, "name", None),
                     "baseUrl": getattr(ep, "base_url", None),
                     "modelType": getattr(ep, "model_type", None),
                     "endpointKind": getattr(ep, "endpoint_kind", None),
                     "isEnabled": bool(getattr(ep, "is_enabled", False)),
+                    "isDefault": is_default,
                     "supportsTools": getattr(ep, "supports_tools", None),
                     "hasApiKey": bool(getattr(ep, "api_key", None)),  # presence only, never the value
-                })
+                }
+                out["endpoints"].append(entry)
+                if is_default:
+                    default_resolved = {
+                        "id": ep_id,
+                        "name": entry["name"],
+                        "baseUrl": entry["baseUrl"],
+                        "model": default_model or None,
+                        "supportsTools": entry["supportsTools"],
+                    }
+            out["defaultResolved"] = default_resolved
         finally:
             db.close()
     except Exception as e:
@@ -394,9 +427,14 @@ def _system_info() -> dict:
         out["node"] = None
     try:
         du = shutil.disk_usage(_data_dir())
+        # DB4: derive usedPct from (total - free), the SAME basis as freeMb.
+        # `du.used` uses different block accounting than `du.free` on an overlay
+        # fs, so `100*used/total` and `freeMb` contradict each other (reported
+        # 3.3% used while only ~11% was free). (total - free)/total is internally
+        # consistent with the freeMb we surface right next to it.
         out["disk"] = {"totalMb": du.total // (1024 * 1024),
                        "freeMb": du.free // (1024 * 1024),
-                       "usedPct": round(100 * du.used / du.total, 1) if du.total else None}
+                       "usedPct": round(100 * (du.total - du.free) / du.total, 1) if du.total else None}
     except Exception:
         pass
     try:

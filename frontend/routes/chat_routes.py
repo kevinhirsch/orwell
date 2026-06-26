@@ -101,7 +101,20 @@ def _sse_error_response(message: str, status: int = 400) -> StreamingResponse:
 
 
 def _clear_orphaned_session_endpoint(sess, owner: str | None = None) -> bool:
-    """Clear a session model if its endpoint was deleted from ModelEndpoint."""
+    """Clear a session model if its endpoint was deleted from ModelEndpoint.
+
+    F7/DB6: a NULL-owner ("legacy/shared") endpoint that a session points at must NOT be
+    treated as removed. The match query used ``owner_filter(include_shared=False)``, so a
+    null-owner endpoint never matched → the session was wrongly cleared → an opaque 400 on
+    every turn (the endpoint exists and is usable; the orphan-clear just couldn't see it).
+
+    Fix: match own-AND-shared (``include_shared=True``) so a session bound to a shared endpoint
+    is recognized as present. This does NOT leak another user's OWNED endpoint — a NULL-owner row
+    is shared/legacy and visible to every user by design (mirroring ``_recover_empty_session_model``,
+    which already resolves shared endpoints). When the only match is a NULL-owner endpoint, ADOPT it
+    for this user (stamp ``owner``) so subsequent owner-scoped resolution finds it cleanly. The
+    cross-user isolation mandate is preserved: we never match ``owner == <other user>``.
+    """
     if not getattr(sess, "endpoint_url", ""):
         return False
     db = SessionLocal()
@@ -109,10 +122,25 @@ def _clear_orphaned_session_endpoint(sess, owner: str | None = None) -> bool:
         q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
         if owner:
             from src.auth_helpers import owner_filter
-            q = owner_filter(q, ModelEndpoint, owner)
+            # include_shared=True: own + NULL-owner ONLY (never another user's owned row).
+            q = owner_filter(q, ModelEndpoint, owner, include_shared=True)
         endpoints = q.all()
         for ep in endpoints:
             if _session_url_matches_endpoint(sess.endpoint_url or "", ep.base_url or ""):
+                # Found a live, usable endpoint — the session is NOT orphaned.
+                # Adopt a shared (NULL-owner) endpoint for this user so later owner-scoped
+                # lookups resolve it directly. Best-effort; never blocks the turn.
+                if owner and getattr(ep, "owner", None) is None:
+                    try:
+                        ep.owner = owner
+                        db.commit()
+                        logger.info(
+                            "Adopted shared (owner=NULL) endpoint %s for user %s "
+                            "(session %s pointed at it)",
+                            getattr(ep, "id", "?"), owner, getattr(sess, "id", "?"),
+                        )
+                    except Exception:
+                        db.rollback()
                 return False
         db_session = db.query(DBSession).filter(DBSession.id == sess.id).first()
         if db_session:
@@ -129,6 +157,85 @@ def _clear_orphaned_session_endpoint(sess, owner: str | None = None) -> bool:
         return False
     finally:
         db.close()
+
+
+# DB6: how stale a 0-message, no-model casting-shell session must be before the reaper
+# touches it. Generous so a freshly-opened tab mid-setup (model not yet bound, no message
+# sent) is never deleted out from under the user.
+_ORPHAN_SHELL_REAP_MINUTES = 30
+
+
+def _reap_orphaned_shell_sessions(session_manager, owner: str | None,
+                                  older_than_minutes: int = _ORPHAN_SHELL_REAP_MINUTES) -> int:
+    """DB6: reap stale, never-used casting-shell sessions.
+
+    Orphaned 0-message shells accumulate when a casting interview is opened (a session row is
+    minted) but never used — they pile up forever and clutter the session list. Reap a session
+    ONLY when ALL hold:
+
+      * it belongs to ``owner`` (owner-scoped; a NULL-owner session is only reaped in single-user
+        mode where ``owner`` is empty — never across users);
+      * it has NO messages (``message_count == 0`` AND zero persisted ChatMessage rows — we verify
+        the rows so a stale/incorrect counter can't trigger a delete of a real conversation);
+      * it has NO model bound (a configured shell, not a chat the user set up to send);
+      * it is older than ``older_than_minutes`` (a fresh mid-setup tab is never reaped); AND
+      * it is NOT this user's CANONICAL game session — the live game's session is never deleted,
+        even if it currently shows 0 messages (a brand-new season before the first beat).
+
+    Best-effort and fail-soft: any error returns the count so far and never breaks the turn.
+    Returns the number of sessions reaped.
+    """
+    from datetime import timedelta
+    try:
+        canonical = None
+        try:
+            from src import orwell_game_session
+            canonical = orwell_game_session.get_game_session(owner)
+        except Exception:
+            canonical = None
+        cutoff = datetime.utcnow() - timedelta(minutes=max(0, older_than_minutes))
+        db = SessionLocal()
+        try:
+            q = db.query(DBSession).filter(
+                DBSession.message_count == 0,
+                ((DBSession.model == "") | (DBSession.model == None)),  # noqa: E711
+                DBSession.created_at < cutoff,
+            )
+            # Owner scope. When owner is set, only that user's rows (never NULL-owner shared rows,
+            # never another user's). When empty (single-user mode), any row qualifies.
+            if owner:
+                q = q.filter(DBSession.owner == owner)
+            candidates = q.all()
+            ids = [c.id for c in candidates]
+        finally:
+            db.close()
+        reaped = 0
+        for sid in ids:
+            if not sid or sid == canonical:
+                continue  # never delete the live game's canonical session
+            # Double-check no real messages exist (the counter could be stale).
+            mdb = SessionLocal()
+            try:
+                has_msg = (
+                    mdb.query(DBChatMessage.id)
+                    .filter(DBChatMessage.session_id == sid)
+                    .first()
+                    is not None
+                )
+            finally:
+                mdb.close()
+            if has_msg:
+                continue
+            try:
+                if session_manager.delete_session(sid):
+                    reaped += 1
+                    logger.info("Reaped orphaned 0-message shell session %s (owner=%s)", sid, owner)
+            except Exception:
+                logger.debug("orphan-shell reap of %s skipped", sid, exc_info=True)
+        return reaped
+    except Exception as e:
+        logger.debug("orphan-shell reaper skipped: %s", e)
+        return 0
 
 
 def _endpoint_cache_contains_model(endpoint, model: str) -> bool:
@@ -781,6 +888,14 @@ def setup_chat_routes(
                 _mirror_model_to_canonical_session(
                     session_manager, sess, session, getattr(ctx, "canonical_session", None),
                 )
+
+        # DB6: reap stale 0-message, no-model casting-shell sessions (owner-scoped, never the
+        # canonical game session). Outside the per-session lock — it only touches OTHER, idle
+        # sessions, never the one this turn holds. Best-effort; never blocks the turn.
+        try:
+            _reap_orphaned_shell_sessions(session_manager, owner)
+        except Exception:
+            logger.debug("orphan-shell reap pass skipped", exc_info=True)
 
         # The game IS the main chat: when the Orwell engine is reachable, always run
         # the agent loop so the model can call createCharacter (OOBE), getGameState,
