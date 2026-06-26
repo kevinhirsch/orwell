@@ -85,6 +85,16 @@ import { isNarrow } from './platform.js';
       default:        return fallback;
     }
   }
+  // #986 — the ONE in-progress ("model is generating a response") spinner label, so it reads in the
+  // same in-character "producers" voice across EVERY spinner-create site: the initial send, a
+  // continuation round, a resumeStream re-attach, and a background re-entry. Before this, only the
+  // initial-send site dressed its label through `_waitLabel`; the other three hard-coded "Generating
+  // response" / "Response streaming in background", so two windows watching the same run showed
+  // divergent labels. Routes through `_waitLabel('waiting', …)`, inheriting its game-build/non-game
+  // behavior (fail-open to the generic fallback outside the game build).
+  function _inProgressLabel(fallback) {
+    return _waitLabel('waiting', fallback || 'Generating response');
+  }
   function _setRoleModelLabel(roleEl, requestedModel, actualModel, opts) {
     if (!roleEl) return;
     opts = opts || {};
@@ -337,6 +347,62 @@ import { isNarrow } from './platform.js';
         submitBtn.classList.remove('mic-mode', 'newchat-mode');
       }
     }
+  }
+
+  // #971 — RECONCILE the composer button to the TRUE streaming state. The button is a state machine
+  // (Stop while streaming → Send/upload-file when idle, the latter via _updateSendBtnIcon's mic/
+  // newchat/send modes). It DESYNCS when a stream settles on a path that never calls
+  // updateSubmitButton('idle') — the chief offender is a BACKGROUNDED stream finishing (the
+  // `_isBgFinally` branch skips the idle reset), which strands `isStreaming = true` +
+  // `dataset.mode = 'streaming'`; the global `_updateSendBtnIcon` then early-returns on that stale
+  // 'streaming' mode and NEVER recovers, so the button is stuck on Stop even though nothing is
+  // streaming in the foreground. (The Enter/keydown SEND path is unaffected — it reads the live text,
+  // not the button — which is why "Enter still sends" while the button lies.)
+  //
+  // `_foregroundStreamLive()` is the single source of truth for "a turn is genuinely streaming into the
+  // session the user is looking at RIGHT NOW": isStreaming + a live reader (currentAbort) + we are on
+  // the streaming session and it is NOT detached to the background. Compose with #993: a non-empty
+  // composer while that is true should still read as SEND (the queue enqueues — it is NOT a Stop), so
+  // the button only shows Stop for a live foreground stream with an EMPTY composer; otherwise the
+  // global updater paints send/upload/mic from the composer/attachment state.
+  function _foregroundStreamLive() {
+    if (!isStreaming || !currentAbort) return false;
+    try {
+      const cur = sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId();
+      if (cur != null && _streamSessionId != null && cur !== _streamSessionId) return false;
+      if (_streamSessionId != null && _backgroundStreams.has(_streamSessionId)) return false;
+    } catch (_) {}
+    return true;
+  }
+  function _syncSubmitButtonState() {
+    const submitBtn = document.querySelector('.send-btn') || document.getElementById('submit');
+    if (!submitBtn) return;
+    const live = _foregroundStreamLive();
+    if (live) {
+      // A turn is genuinely streaming in the foreground. The button shows Stop ONLY when the composer
+      // is empty; with text it stays a Send affordance (#993 enqueues — never a silent Stop-and-drop).
+      const _mi = uiModule.el('message');
+      const hasText = !!(_mi && (_mi.value || '').trim().length > 0);
+      if (!hasText) {
+        if (submitBtn.dataset.mode !== 'streaming') updateSubmitButton('streaming', submitBtn);
+      } else if (submitBtn.dataset.mode === 'streaming') {
+        // Text was typed while a foreground stream runs: drop the Stop face, show Send, but DON'T flip
+        // the live `isStreaming` flag — clear only the button mode so _updateSendBtnIcon can repaint.
+        submitBtn.dataset.mode = '';
+        if (window._updateSendBtnIcon) window._updateSendBtnIcon();
+      }
+      return;
+    }
+    // Not streaming in the foreground. If the button is stuck on the Stop face (a backgrounded/settled
+    // stream left it there), clear the stale flag+mode and let the global updater repaint send/upload/
+    // mic from the live composer/attachment state.
+    if (isStreaming) isStreaming = false;
+    if (submitBtn.dataset.mode === 'streaming') {
+      submitBtn.dataset.mode = '';
+      delete submitBtn.dataset.phase;
+      submitBtn.classList.remove('recording', 'anim-launch', 'anim-land');
+    }
+    if (window._updateSendBtnIcon) window._updateSendBtnIcon();
   }
 
   // -----------------------------------------------------------------------
@@ -2891,7 +2957,7 @@ import { isNarrow } from './platform.js';
                 if (spinner && spinner.element) spinner.destroy();
                 // Show spinner while waiting for text (skip for research — has its own progress)
                 if (!_researchingStreamIds.has(streamSessionId)) {
-                  spinner = spinnerModule.create('Generating response', 'right', 'wave');
+                  spinner = spinnerModule.create(_inProgressLabel('Generating response'), 'right', 'wave');
                   newBody.appendChild(spinner.createElement());
                   spinner.start();
                 }
@@ -3619,6 +3685,13 @@ import { isNarrow } from './platform.js';
         // so DRAIN the next queued send (FIFO, one at a time). Deferred past this finally so the reconcile
         // / peer-resume chains settle first and the flushed send re-enters cleanly. A no-op when empty.
         try { setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 0); } catch (_) {}
+      } else {
+        // #971 — the turn settled while BACKGROUNDED, so the idle reset above was skipped and the button
+        // (and the `isStreaming` flag) can be stranded on Stop for whatever session is now in the
+        // foreground. Reconcile it to the true state: if this window is in fact looking at the settled
+        // session, the button repairs to Send/upload-file; a still-live foreground stream is untouched.
+        // Deferred so any selectSession/reconcile racing this finally settles first.
+        try { setTimeout(() => { try { _syncSubmitButtonState(); } catch (_) {} }, 0); } catch (_) {}
       }
 
       // Research clarification timeout — if user doesn't reply within 5 min, show timeout
@@ -4319,7 +4392,7 @@ import { isNarrow } from './platform.js';
     const contentDiv = holder.querySelector('.stream-content');
     box.appendChild(holder);
 
-    const spinner = spinnerModule.create('Generating response...', 'right');
+    const spinner = spinnerModule.create(_inProgressLabel('Generating response...'), 'right');
     holder.querySelector('.body').appendChild(spinner.createElement());
     spinner.start();
     uiModule.scrollHistory();
@@ -4518,7 +4591,7 @@ import { isNarrow } from './platform.js';
       _applyModelColor(holder.querySelector('.role'), meta && meta.model);
 
       var bodyDiv = holder.querySelector('.body');
-      var spinner = spinnerModule.create('Response streaming in background', 'right');
+      var spinner = spinnerModule.create(_inProgressLabel('Response streaming in background'), 'right');
       bodyDiv.appendChild(spinner.createElement());
       spinner.start();
 
@@ -4709,9 +4782,22 @@ import { isNarrow } from './platform.js';
       pre.dataset.btnPosComputed = '1';
     }, true);
 
+    // #971 — reconcile the composer button whenever a game mutation lands. A backgrounded stream that
+    // finished on another surface (or a peer-resumed run) can leave THIS window's button stuck on Stop;
+    // `orwell:gamechanged` (the debounced freshness seam, fired on every mutating tool result + the
+    // cross-device push) is the natural moment to repair it to the true streaming/idle state. Idempotent
+    // (a no-op when the button already matches), and never disturbs a genuinely live foreground stream.
+    window.addEventListener('orwell:gamechanged', () => {
+      try { _syncSubmitButtonState(); } catch (_) {}
+    });
+
     // Tab suspension recovery: when user tabs back in, check if stream froze
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
+      // #971 — on tab return, FIRST repair a button left stuck on Stop by a stream that settled while
+      // the tab was hidden/backgrounded (the `_isBgFinally` path never reset it). Cheap + idempotent;
+      // runs even when not streaming, so the stuck-Stop case recovers the moment the user looks back.
+      try { _syncSubmitButtonState(); } catch (_) {}
       if (!isStreaming) return;
 
       // Stream claims to be running — check if reader is actually alive
@@ -6006,6 +6092,18 @@ import { isNarrow } from './platform.js';
     _sendOutbox,        // #985 P2-A: the in-memory FIFO (inspected by the browser gate)
     _isStreaming: () => isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
     _setOutboxDispatch: (fn) => { _outboxDispatch = fn; }, // #985 P2-A: swap the flush dispatcher (browser gate)
+    _syncSubmitButtonState,  // #971: reconcile the composer button to the true streaming state (browser gate)
+    _foregroundStreamLive,   // #971: "is a turn genuinely streaming in the foreground" predicate (browser gate)
+    _inProgressLabel,        // #986: the unified in-progress spinner label helper (browser gate)
+    // #971 (browser gate only): force the internal stream flags so the button state machine can be
+    // exercised across the {composer text × streaming} matrix without a real network stream. Test-only;
+    // never called by app code. `sid` (the streaming session id) lets a test simulate a foreground vs.
+    // backgrounded/settled run.
+    _setStreamStateForTest: ({ streaming, hasAbort, sid } = {}) => {
+      isStreaming = !!streaming;
+      currentAbort = hasAbort ? (currentAbort || new AbortController()) : null;
+      if (sid !== undefined) _streamSessionId = sid;
+    },
   };
 
   // Single delegated handler for tool-call fold/expand. One listener on
