@@ -619,7 +619,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "the next. Do NOT re-ask the player who they vote to evict, do NOT reopen the Diary Room for a vote, " +
     "and do NOT say the vote hasn't happened or that you're waiting to reach it: it HAS happened and the " +
     "result is being read out beat by beat. If it feels like nothing new is coming, call advanceGame — " +
-    "the next ballot (or the eviction result) is waiting on the game, never on the player.",
+    "the next ballot (or the eviction result) is waiting on the game, never on the player. " +
+    "STATE A TALLY OR NAME THE EVICTEE ONLY FROM THE GAME'S LITERAL `eviction-result` BEAT handed to you " +
+    "THIS turn — never from your own running count, and never as a prediction. Until that result beat " +
+    "names who leaves, you do NOT know the evictee or the majority: do not say \"the majority votes to " +
+    "evict <name>\", do not name who is going home, and never name a houseguest as evicted whom the game " +
+    "has not yet announced. If you have not been handed the result beat, you have only anonymized ballots.",
   "twist-reveal":
     "MOMENT — A production twist fires. Big Brother interrupts the house with a reveal the game " +
     "just handed you (e.g. a DOUBLE EVICTION: the night is not over — a new HOH, a fast ceremony, a " +

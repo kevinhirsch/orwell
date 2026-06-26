@@ -53,6 +53,23 @@ def _clear_warn(key: str) -> None:
     _LAST_WARN.pop(key, None)
 
 
+def _pending_is_player(pending, user: Optional[str]) -> bool:
+    """True when `pending` is a player-owned decision the engine is waiting on. The engine ONLY
+    projects player-owned pendings to the FE (NPC decisions are resolved internally), so any non-null
+    pending dict with a `kind` is player-owned — we still confirm `by` matches the player when it is
+    resolvable, never widening the gate. Fail-closed: anything odd ⇒ False (treat as no player gate)."""
+    if not isinstance(pending, dict) or not (pending.get("kind") or "").strip():
+        return False
+    by = pending.get("by")
+    # `by` may be a NamedRef dict ({id,name}) or a bare id string in older projections; absent ⇒
+    # trust the engine's projection (player-owned by construction).
+    if isinstance(by, dict):
+        return True
+    if isinstance(by, str):
+        return True
+    return True
+
+
 def _err_detail(exc: Exception) -> str:
     """A NON-EMPTY, diagnosable failure detail. The field bug: the engine log showed bare
     `state failed:` lines with NO reason — `str(e)` is empty for several exceptions a slow/large
@@ -930,6 +947,21 @@ def setup_orwell_routes() -> APIRouter:
             # SUCCESSFUL submit, though, means the just-resolved card is gone — so if the engine's result
             # didn't carry an explicit `pending`, clear it here rather than keep a stale card that would
             # re-arm on the next status reload. (A present `pending`, incl. null, is handled as engine truth.)
+            # F14 (#1013): the player's goodbye-message resolves the LAST player-owned gate of the
+            # eviction sub-loop, but submitDecision returns only the goodbye BEAT — the engine still
+            # owes `goodbye → eviction-result → rollWeek`, and ONLY advanceGame delivers it. The model
+            # reliably under-calls that advance (the same under-call class as everywhere), wedging the
+            # week at `phase:eviction`. So when the goodbye is in and the engine raised NO new player
+            # pending, drive ONE follow-up advanceGame here to roll the result. Engine-direct (never
+            # authoring content); idempotent; if it instead surfaces a new player pending, we keep that.
+            _gb_done = (body.kind == "goodbye-message"
+                        and isinstance(res, dict)
+                        and not _pending_is_player(res.get("pending"), _current_user(request)))
+            if _gb_done:
+                try:
+                    res = await orwell_engine.advance_game(user=_current_user(request))
+                except Exception as _adv_e:
+                    logger.warning(f"[orwell] post-goodbye follow-up advance skipped: {_adv_e}")
             if isinstance(res, dict) and "pending" not in res:
                 orwell_engine.clear_pending(user=_current_user(request))
             else:

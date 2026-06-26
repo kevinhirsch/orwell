@@ -2756,6 +2756,20 @@ import { isNarrow } from './platform.js';
                 if (_isBg) continue;
                 chatStream.handleUIControl(json.data || {});
 
+              } else if (json.type === 'orwell_pending') {
+                // F14 (#1013): the SURFACE-THE-PENDING belt. The engine is waiting on a player-owned
+                // decision (e.g. the eviction goodbye/vote card), but the model narrated past it
+                // WITHOUT calling submitDecision/advanceGame — so the per-tool `orwell:pending` seam at
+                // the tool-result path never fired and the card would otherwise wait out the poll. The
+                // server-side belt detected the open player pending post-turn and emits it here so the
+                // card SURFACES immediately. This only SURFACES the decision card — it never picks the
+                // player's tone/vote (the player still resolves it through the card's engine-direct POST).
+                if (_isBg) continue;
+                try {
+                  const _p = (json.pending && json.pending.kind) ? json.pending : null;
+                  window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: _p } }));
+                } catch (_) {}
+
               } else if (json.type === 'ask_user') {
                 if (_isBg) continue;
                 _producedVisibleOutput = true;  // BUG 2: an ask_user prompt IS a real turn artifact

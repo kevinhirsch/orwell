@@ -846,7 +846,12 @@
         window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending } }));
       }
     } catch (_) { /* fail open — the conversation path always remains */ }
-  }, 15000);
+    // F14 (#1013): the eviction goodbye/vote card was surfacing a full WEEK late on the old 15s
+    // cadence (the model narrates the eviction with no mutating tool, so the per-tool `orwell:pending`
+    // seam never fires and only this poll catches it). Tighten to ~2.5s so a player-owned pending the
+    // chat narrated past appears almost immediately. Still respects an explicit dismissal (the
+    // per-signature guard above) and short-circuits when a card is already up — no extra nag, no churn.
+  }, 2500);
 
   window.addEventListener("orwell:pending", (e) => {
     try {

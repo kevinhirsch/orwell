@@ -37,7 +37,18 @@ SANCTIONED = {
     # inventing one. It never touches a player decision and never replaces a player interaction
     # (ADR 0003 §4 intact); it only error-corrects the model's documented engine bypass. Its guard
     # marker is the ceremony-phase allowlist that scopes the advance.
-    "advance_game": ("routes/chat_helpers.py", "_pre_resolve_npc_ceremony", "_CEREMONY_RESOLVE_PHASES"),
+    # F14 (#1013): a SECOND sanctioned advance site — the decision route. After the player's
+    # goodbye-message is submitted ENGINE-DIRECT (the C20 confirm path), submitDecision returns only
+    # the goodbye beat; the engine still owes `goodbye → eviction-result → rollWeek`, and the model
+    # reliably under-calls that delivery, wedging the week. The follow-up advance DELIVERS the result
+    # of a decision the player JUST CONFIRMED on the sanctioned path — it never resolves a NEW player
+    # decision (gated on no new player pending) and never replaces a player interaction (ADR 0003 §4
+    # intact). Its guard marker is that goodbye-scoped gate. `advance_game` therefore has TWO
+    # sanctioned sites; the guard accepts a list.
+    "advance_game": [
+        ("routes/chat_helpers.py", "_pre_resolve_npc_ceremony", "_CEREMONY_RESOLVE_PHASES"),
+        ("routes/orwell_routes.py", "orwell_decision", "_pending_is_player"),
+    ],
     # 0065 (cast photo as casting step #1): the /casting/photo route records ONLY the player's
     # photo-step marker (castPhoto uploaded/skipped). The photo box is a FE-only affordance the
     # narration model cannot observe, so the FE must mark the outcome — it augments, never replaces
@@ -61,13 +72,16 @@ def test_progressing_actions_reach_routes_only_through_sanctioned_confirm_paths(
             if not hits:
                 continue
             sanctioned = SANCTIONED.get(action)
-            assert sanctioned and f"routes/{fname}" == sanctioned[0], (
+            # An action may have ONE sanctioned site (a tuple) or SEVERAL (a list of tuples).
+            sites = sanctioned if isinstance(sanctioned, list) else ([sanctioned] if sanctioned else [])
+            site = next((s for s in sites if f"routes/{fname}" == s[0]), None)
+            assert site, (
                 f"routes/{fname} calls game-progressing orwell_engine.{action}() — UI must not "
                 "progress the game outside the sanctioned confirm paths (ADR 0003 §4)"
             )
             # The sanctioned path must still carry its explicit guard.
-            assert sanctioned[2] in src, (
-                f"the sanctioned {action} path lost its '{sanctioned[2]}' guard"
+            assert site[2] in src, (
+                f"the sanctioned {action} path lost its '{site[2]}' guard"
             )
 
 

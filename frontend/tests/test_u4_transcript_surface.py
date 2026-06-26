@@ -109,8 +109,15 @@ def test_d3_status_route_serves_the_cached_pending():
     # engine OMITS the key (an older engine). The old `or` re-surfaced a stale card on present-null.
     assert 'if isinstance(st, dict) and "pending" not in st:' in ROUTES
     assert 'st["pending"] = orwell_engine.last_pending' in ROUTES
-    # The poll must never advance the game (ADR 0003) — the route reads, only.
-    assert not re.search(r'def orwell_status.*?advance_game', ROUTES, re.S)
+    # The poll must never advance the game (ADR 0003) — the route reads, only. Scope the check to
+    # the orwell_status FUNCTION BODY (up to the next `@router`/`def`), so a sanctioned advance in a
+    # DIFFERENT route (F14: the goodbye follow-up in orwell_decision) is never a false positive.
+    _m = re.search(r'def orwell_status\b', ROUTES)
+    assert _m is not None
+    _rest = ROUTES[_m.end():]
+    _nxt = re.search(r'\n    @router\.|\n    async def |\n    def ', _rest)
+    _status_body = _rest[: _nxt.start()] if _nxt else _rest
+    assert "advance_game" not in _status_body, "the status poll route must never advance the game"
 
 
 def test_d3_decision_card_rearms_on_boot_and_gamechanged():
