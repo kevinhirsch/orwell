@@ -340,6 +340,61 @@ def _recover_empty_session_model(sess, session_id: str, owner: str | None = None
         db.close()
 
 
+def _mirror_model_to_canonical_session(session_manager, per_tab_sess, per_tab_id: str,
+                                       canonical_id: str | None) -> None:
+    """F2 (lost-model fix): when a FRAMED game/casting turn executes against a CANONICAL session id
+    that differs from the per-tab id this window POSTed under, the recovered/bound model lives on the
+    per-tab row — but the run is keyed on the canonical id (run_key) and convergence persists there.
+    Without mirroring, the model is "written to one identity, read from another": the canonical row
+    stays empty, so `_recover_empty_session_model` re-fires every turn ("Recovered empty session
+    model" forever) and a later sync_session_metadata against the empty canonical row can blank it.
+
+    Copy the per-tab session's (just-recovered) model + endpoint onto the canonical session — cached
+    object AND DB row — so the id the turn actually executes/persists against carries the binding.
+    Idempotent, best-effort: never blocks the turn. Only ever ADDS a model to the canonical row (it
+    never clears one — the F2 sync guard relies on the same "DB only adds a model" invariant).
+    """
+    try:
+        if not canonical_id or canonical_id == per_tab_id:
+            return
+        model = (getattr(per_tab_sess, "model", "") or "").strip()
+        if not model:
+            return
+        url = (getattr(per_tab_sess, "endpoint_url", "") or "").strip()
+        # Cached object (so this same request and the immediate next read see it without a DB round-trip).
+        try:
+            canon = session_manager.sessions.get(canonical_id)
+        except Exception:
+            canon = None
+        if canon is not None and not (getattr(canon, "model", "") or "").strip():
+            canon.model = model
+            if url and not (getattr(canon, "endpoint_url", "") or "").strip():
+                canon.endpoint_url = url
+        # DB row — only fill an EMPTY canonical model (never stomp a real one).
+        db = SessionLocal()
+        try:
+            row = db.query(DBSession).filter(DBSession.id == canonical_id).first()
+            if row is not None and not (row.model or "").strip():
+                row.model = model
+                if url and not (row.endpoint_url or "").strip():
+                    row.endpoint_url = url
+                try:
+                    row.updated_at = datetime.utcnow()
+                except Exception:
+                    pass
+                db.commit()
+                logger.info(
+                    "Mirrored model %r onto canonical session %s (from per-tab %s)",
+                    model, canonical_id, per_tab_id,
+                )
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug("model mirror to canonical session skipped: %s", e)
+
+
 def _set_user_time_from_request(request: Request) -> None:
     """Copy browser timezone headers into the per-request context.
 
@@ -457,6 +512,13 @@ def setup_chat_routes(
         # consequence-free imitation (narrated, never recorded). Decline to game-master:
         # game turns go through the streaming agent path the UI uses. (Belt — the E25 hoist
         # above normally refuses first; this covers a game starting between the two reads.)
+        #
+        # F5 (invariant — verified, intentionally unchanged): this discard is gated on
+        # `ctx.game_active`, which is True ONLY when a season is `started` (chat_helpers:2001).
+        # A CASTING / OOC turn is pre-game (`started` is False ⇒ game_active False), so it falls
+        # THROUGH this branch and is NEVER discarded — and casting runs on the STREAMING agent path,
+        # which has no discard at all. So `discard_last_user_message` can only fire for a turn this
+        # tool-less sync endpoint genuinely refused (recorded no effect): the precondition holds.
         if ctx.game_active:
             discard_last_user_message(sess)   # E25: never leave the refused turn persisted
             unmark_session_framed(session)    # P2: the refusal must not consume re-entry
@@ -609,7 +671,23 @@ def setup_chat_routes(
             # Verify ownership AFTER coerce (which may resolve a default session)
             # but BEFORE loading. Prevents cross-user session hijack.
             _verify_session_owner(request, session)
-            sess = session_manager.get_session(session)
+        except SessionNotFoundError as e:
+            return _sse_error_response(str(e), status=404)
+        except (ValueError, ValidationError):
+            return _sse_error_response("Invalid request parameters")
+
+        # F4 (lost-append race): hold the per-session lock across the WHOLE load→mutate→persist
+        # critical section (get_session → build_chat_context, which appends + persists the user
+        # message). Without it a concurrent reconcile/poll get_session can REPLACE
+        # self.sessions[session] mid-request and orphan the in-flight history.append (the user bubble
+        # that "vanishes"). One async loop, one lock per session id — independent sessions never
+        # contend; the section has no blocking sync I/O long enough to matter, and every exit path
+        # (return / raise) releases via the context manager. Mirrors the engine's per-user enqueue.
+        async with session_manager.session_lock(session):
+            try:
+                sess = session_manager.get_session(session)
+            except KeyError:
+                return _sse_error_response(f"Session '{session}' not found", status=404)
             owner = get_current_user(request)
             # The model/endpoint guards below decide whether this turn can reach an
             # LLM at all. They MUST surface to the player as a streamed error, never a
@@ -633,69 +711,76 @@ def setup_chat_routes(
                 return _sse_error_response(
                     "No model selected for this chat. Open the model picker and "
                     "choose one before sending.")
-        except SessionNotFoundError as e:
-            return _sse_error_response(str(e), status=404)
-        except (ValueError, ValidationError):
-            return _sse_error_response("Invalid request parameters")
 
-        # ------------------------------------------------------------------ #
-        # Privilege gates that must fire BEFORE any LLM work / token spend.
-        #   1. allowed_models — reject if session.model isn't in the user's
-        #      configured allowlist (empty list = "no restriction").
-        #   2. max_messages_per_day — count user-role ChatMessage rows owned
-        #      by this user in the last UTC day; 429 if at/over the cap.
-        # Admins always have full privileges via get_privileges (returns
-        # ADMIN_PRIVILEGES wholesale) so this is a no-op for them.
-        _enforce_chat_privileges(request, sess)
+            # ------------------------------------------------------------------ #
+            # Privilege gates that must fire BEFORE any LLM work / token spend.
+            #   1. allowed_models — reject if session.model isn't in the user's
+            #      configured allowlist (empty list = "no restriction").
+            #   2. max_messages_per_day — count user-role ChatMessage rows owned
+            #      by this user in the last UTC day; 429 if at/over the cap.
+            # Admins always have full privileges via get_privileges (returns
+            # ADMIN_PRIVILEGES wholesale) so this is a no-op for them.
+            _enforce_chat_privileges(request, sess)
 
-        # Ensure session has auth headers
-        resolve_session_auth(sess, session, owner=get_current_user(request))
+            # Ensure session has auth headers
+            resolve_session_auth(sess, session, owner=get_current_user(request))
 
-        # Check for research_pending BEFORE mode persist overwrites it
-        do_research = str(use_research).lower() == "true"
-        if not do_research:
-            if get_session_mode(session) == 'research_pending':
-                do_research = True
-                logger.info(f"Session {session} in research_pending — auto-triggering research")
+            # Check for research_pending BEFORE mode persist overwrites it
+            do_research = str(use_research).lower() == "true"
+            if not do_research:
+                if get_session_mode(session) == 'research_pending':
+                    do_research = True
+                    logger.info(f"Session {session} in research_pending — auto-triggering research")
 
-        att_ids = []
-        if body and isinstance(body.get("attachments"), list):
-            att_ids = [str(x) for x in body["attachments"]]
-        elif attachments:
-            try:
-                att_ids = [str(x) for x in json.loads(attachments)]
-            except Exception:
-                pass
+            att_ids = []
+            if body and isinstance(body.get("attachments"), list):
+                att_ids = [str(x) for x in body["attachments"]]
+            elif attachments:
+                try:
+                    att_ids = [str(x) for x in json.loads(attachments)]
+                except Exception:
+                    pass
 
-        no_memory = str(form_data.get("no_memory", "")).lower() == "true"
-        pre_context_tool_policy = build_effective_tool_policy(
-            last_user_message=message,
-        )
-        allow_tool_preprocessing = not pre_context_tool_policy.block_all_tool_calls
+            no_memory = str(form_data.get("no_memory", "")).lower() == "true"
+            pre_context_tool_policy = build_effective_tool_policy(
+                last_user_message=message,
+            )
+            allow_tool_preprocessing = not pre_context_tool_policy.block_all_tool_calls
 
-        # Build shared context (stream path uses enhanced_message for context preface)
-        ctx = await build_chat_context(
-            sess, request, chat_handler, chat_processor,
-            message=message,
-            session_id=session,
-            preset_id=preset_id,
-            att_ids=att_ids,
-            use_web=use_web,
-            use_rag=use_rag,
-            time_filter=time_filter,
-            incognito=incognito,
-            no_memory=no_memory,
-            search_context=search_context,
-            compare_mode=compare_mode,
-            webhook_manager=webhook_manager,
-            use_enhanced_message=True,
-            # Skills index only ships when the model can actually call
-            # manage_skills (agent mode). In plain chat or incognito the
-            # index would be useless / unwanted noise.
-            agent_mode=(chat_mode == "agent"),
-            allow_tool_preprocessing=allow_tool_preprocessing,
-            client_msg_id=client_msg_id,  # ADR 0008: round-trip the optimistic temp id
-        )
+            # Build shared context (stream path uses enhanced_message for context preface)
+            ctx = await build_chat_context(
+                sess, request, chat_handler, chat_processor,
+                message=message,
+                session_id=session,
+                preset_id=preset_id,
+                att_ids=att_ids,
+                use_web=use_web,
+                use_rag=use_rag,
+                time_filter=time_filter,
+                incognito=incognito,
+                no_memory=no_memory,
+                search_context=search_context,
+                compare_mode=compare_mode,
+                webhook_manager=webhook_manager,
+                use_enhanced_message=True,
+                # Skills index only ships when the model can actually call
+                # manage_skills (agent mode). In plain chat or incognito the
+                # index would be useless / unwanted noise.
+                agent_mode=(chat_mode == "agent"),
+                allow_tool_preprocessing=allow_tool_preprocessing,
+                client_msg_id=client_msg_id,  # ADR 0008: round-trip the optimistic temp id
+            )
+
+            # F2 (lost-model fix): build_chat_context resolved `canonical_session` (the framed
+            # game/casting run key). If the turn executes/persists against a canonical id that differs
+            # from the per-tab `session` this window POSTed under, mirror the just-recovered model onto
+            # the canonical row so the model is bound on the SAME identity the turn runs against —
+            # otherwise the canonical row stays empty and recovery re-fires every turn (the "Recovered
+            # empty session model" loop).
+            if getattr(ctx, "framed", False):
+                _mirror_model_to_canonical_session(
+                    session_manager, sess, session, getattr(ctx, "canonical_session", None),
+                )
 
         # The game IS the main chat: when the Orwell engine is reachable, always run
         # the agent loop so the model can call createCharacter (OOBE), getGameState,
