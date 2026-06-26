@@ -158,18 +158,11 @@ import { onNarrowChange } from './platform.js';
           font-size: .72em; font-weight: 700; letter-spacing: .02em;
           background: var(--accent, var(--red, #e06c75)); color: var(--on-accent, #fff);
         }
+        /* #955: the house TALLY only — "The House · N/N". The per-person name list was removed
+           from the status panel (it duplicated the cast PHOTO gallery, which is now the single
+           roster surface). This header keeps the at-a-glance attrition count; the names + faces
+           live in the Cast Photos gadget (#orwell-cast), which docks under the night gadget. */
         #orwell-status .os-roster-h { opacity: .55; font-size: max(.8em, 11px); margin: .4rem 0 .15rem; }
-        #orwell-status .os-roster { display: flex; flex-direction: column; gap: .05rem; max-height: 30vh; overflow: auto; }
-        /* J3-19: subordinate the "who's who" roster so it reads as a reference column, not a
-           second body of content competing with the chat narration — a reduced type step and a
-           colour mixed toward the panel (the same treatment .os-row .os-k uses). The player's
-           own row (.os-you) keeps full weight as the one anchor the eye returns to. */
-        #orwell-status .os-hg {
-          display: flex; justify-content: space-between; gap: .5rem;
-          font-size: .92em; color: color-mix(in srgb, var(--fg, #9cdef2) 72%, var(--panel, #111));
-        }
-        #orwell-status .os-hg.os-out { color: color-mix(in srgb, var(--fg, #9cdef2) 62%, var(--panel, #111)); text-decoration: line-through; }
-        #orwell-status .os-hg .os-seat { opacity: .6; font-size: .78em; text-decoration: none; }
         /* F4: the clean terminal/post-season state — shown instead of stale ceremony rows once the
            season is over (finished). */
         #orwell-status .os-done { margin: .2rem 0 .15rem; font-weight: 600; }
@@ -230,7 +223,6 @@ import { onNarrowChange } from './platform.js';
           <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
         </div>
         <div class="os-roster-h" id="os-roster-h" role="heading" aria-level="3">The House</div>
-        <div class="os-roster" id="os-roster"></div>
         <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
 
     // Collapse persistence stays E71 per user+game — the kit drives the DOM (class + chevron +
@@ -269,13 +261,6 @@ import { onNarrowChange } from './platform.js';
     "night": "🌙 Night", "late-night": "🌌 Late night",
   };
   const todLabel = (t) => TOD_LABELS[t] || "";
-
-  // E69: a correct English ordinal — 11/12/13 (and 111/112/113…) take "th".
-  function ordinal(n) {
-    const mod100 = n % 100;
-    if (mod100 >= 11 && mod100 <= 13) return n + "th";
-    return n + (["th", "st", "nd", "rd"][n % 10] || "th");
-  }
 
   // A3: announce only what CHANGED, in show terms — never a full re-read per poll.
   let _last = { phase: null, hoh: null, noms: null, veto: null };
@@ -423,8 +408,11 @@ import { onNarrowChange } from './platform.js';
     wrap.hidden = false;
   }
 
-  // The memory wall: who's still in, who's gone, the attrition count, and the player's own
-  // public role badge. All from getGameState().house[] + the ceremony status. No numbers.
+  // The head-count tally + the player's own public role badge. From getGameState().house[] + the
+  // ceremony status. No numbers. #955: the per-person NAME LIST was removed — it duplicated the
+  // cast PHOTO gallery (#orwell-cast), which is now the single roster surface. This keeps only the
+  // at-a-glance attrition count ("The House · N/N"), the premiere objective, the self badge, and
+  // the player's own rest cue.
   function renderRoster(el, st, state) {
     renderPremiere(el, state);
     const badgeEl = el.querySelector("#os-you-badge");
@@ -445,37 +433,19 @@ import { onNarrowChange } from './platform.js';
     // pre-build assignment — computeGameKey is the single source, F1).
     _gameKey = computeGameKey(state);
 
-    const rosterEl = el.querySelector("#os-roster");
+    // #955: the house TALLY ("The House · N/N") — the at-a-glance attrition count. The names + faces
+    // are the cast PHOTO gallery's job now (#orwell-cast), so this no longer renders a name list.
     const headEl = el.querySelector("#os-roster-h");
     const house = state && Array.isArray(state.house) ? state.house : null;
-    if (!house) { rosterEl.innerHTML = ""; headEl.style.display = "none"; return; }
+    if (!house) { headEl.style.display = "none"; return; }
     headEl.style.display = "";
 
-    // player (if still active) + NPCs, active first then evicted in eviction order.
+    // player (if still active) counts as a houseguest, so the count matches the cast gallery's
+    // active/total reading. No number about any houseguest crosses — just the head count.
     const playerActive = state.player && state.player.status === "active";
     const total = house.length + 1; // player + NPCs
     const activeCount = house.filter((h) => h.status === "active").length + (playerActive ? 1 : 0);
     headEl.textContent = "The House · " + activeCount + "/" + total;
-
-    const out = house.filter((h) => h.status !== "active");
-    const rows = [];
-    // S3-1: include the player as a roster row while still in the house, so the visible
-    // list matches the "active/total" count (which counts the player as a houseguest) —
-    // otherwise the header read "16/16" above a list of only the 15 NPCs.
-    if (playerActive) {
-      const youName = state.player && state.player.name ? state.player.name : "You";
-      rows.push('<div class="os-hg os-you"><span>' + esc(youName) +
-        '</span><span class="os-seat">you</span></div>');
-    }
-    house.filter((h) => h.status === "active").forEach((h) => {
-      rows.push('<div class="os-hg"><span>' + esc(h.name) + "</span></div>");
-    });
-    out.forEach((h, i) => {
-      const seat = h.status === "jury" ? "jury" : ordinal(i + 1) + " out";
-      rows.push('<div class="os-hg os-out"><span>' + esc(h.name) +
-        '</span><span class="os-seat">' + esc(seat) + "</span></div>");
-    });
-    rosterEl.innerHTML = rows.join("");
   }
 
   function esc(s) {

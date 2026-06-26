@@ -30,13 +30,15 @@ def test_s6_1_roster_header_has_a_min_legible_size():
     )
 
 
-# ── S3-1: the player appears in the roster so the count matches the visible list ─
+# ── S3-1: the player is counted in the house tally (#955: the text name-list was removed,
+#         but the player must still be counted toward "The House · N/N" so the tally matches
+#         the cast photo gallery, which counts the player as a houseguest) ──
 
 def test_s3_1_player_row_in_roster():
     js = _read("static/js/orwellStatusPanel.js")
     assert "os-you" in js and "playerActive" in js, (
-        "the roster must include a player ('you') row when active so the visible list matches "
-        "the active/total count (which counts the player)."
+        "the status panel must keep a player ('you') anchor and count the player toward the "
+        "active/total tally (which counts the player as a houseguest)."
     )
 
 

@@ -37,14 +37,17 @@
   // Every gadget that mounts into the rail MUST have a row here; that is what keeps the two
   // views in lock-step. (NPC approach-intent is deliberately NOT a gadget — approaches come
   // through chat, owner ruling 2026-06-18.)
+  // #955: the EXPANDED cast photo gallery is the roster and docks directly UNDER the
+  // Nightfall (time-of-day) gadget. Keep these orders in sync with the CSS fallback in
+  // style.css (.gadget-rail-body > #... { order: }).
   var REGISTRY = [
     { id: "orwell-status",   icon: "📋", title: "House Status",   order: 1 },
     { id: "orwell-deals",    icon: "🤝", title: "Your Deals",     order: 2 },
-    { id: "orwell-cast-pin", icon: "👥", title: "Pinned Cast",    order: 3 },
-    { id: "orwell-presence", icon: "🧭", title: "Where You Are",  order: 4 },
-    { id: "orwell-night",    icon: "🌙", title: "Nightfall",      order: 5 },
-    { id: "orwell-finale",   icon: "🏆", title: "The Finale",     order: 6 },
-    { id: "orwell-cast",     icon: "🎬", title: "The Cast",       order: 7 },
+    { id: "orwell-presence", icon: "🧭", title: "Where You Are",  order: 3 },
+    { id: "orwell-night",    icon: "🌙", title: "Nightfall",      order: 4 },
+    { id: "orwell-cast",     icon: "🎬", title: "The Cast",       order: 5 },
+    { id: "orwell-cast-pin", icon: "👥", title: "Pinned Cast",    order: 6 },
+    { id: "orwell-finale",   icon: "🏆", title: "The Finale",     order: 7 },
     { id: "orwell-retro",    icon: "📼", title: "Season Recap",   order: 8 },
   ];
   var REG_BY_ID = {};

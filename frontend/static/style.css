@@ -1997,13 +1997,17 @@ body.bg-pattern-perlin-flow {
        inline `order`; drag-reorder — L13 — overrides per-user). 0054 Phase 2 docked
        windows slot in after the always-on HUD gadgets; the rail body scrolls
        (overflow-y:auto) for tall ones. Keep these in sync with REGISTRY. */
+    /* #955: the EXPANDED cast photo gallery is the roster (the status panel's redundant
+       text name-list was removed). It docks directly UNDER the time-of-day gadget, so the
+       docked column reads: status power-state → deals → presence → nightfall → cast photos →
+       (compact pin) → finale → recap. */
     .gadget-rail-body > #orwell-status { order: 1; }
     .gadget-rail-body > #orwell-deals { order: 2; }     /* 0039: your deals */
-    .gadget-rail-body > #orwell-cast-pin { order: 3; }  /* L12: compact docked cast roster */
-    .gadget-rail-body > #orwell-presence { order: 4; }
-    .gadget-rail-body > #orwell-night { order: 5; }     /* 0066: nightfall — time of day + who's turned in */
-    .gadget-rail-body > #orwell-finale { order: 6; }    /* 0054 P2: docked finale */
-    .gadget-rail-body > #orwell-cast { order: 7; }      /* 0054 P2: docked full cast roster */
+    .gadget-rail-body > #orwell-presence { order: 3; }
+    .gadget-rail-body > #orwell-night { order: 4; }     /* 0066: nightfall — time of day + who's turned in */
+    .gadget-rail-body > #orwell-cast { order: 5; }      /* #955: docked EXPANDED cast roster, right under time-of-day */
+    .gadget-rail-body > #orwell-cast-pin { order: 6; }  /* L12: compact docked cast roster (opt-in / mobile) */
+    .gadget-rail-body > #orwell-finale { order: 7; }    /* 0054 P2: docked finale */
     .gadget-rail-body > #orwell-retro { order: 8; }     /* 0054 P2: docked retrospective */
     /* The collapsed icon strip: a column of up to 8 gadget icons in a 50px-wide rail.
        It SCROLLS (min-height:0 inside the flex column gives it a real overflow context)

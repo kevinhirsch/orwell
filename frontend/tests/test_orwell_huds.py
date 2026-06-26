@@ -56,7 +56,10 @@ def test_status_panel_backoff_recovers_on_success():
     assert "_failures = 0; // E68" in src
 
 
-def test_status_panel_ordinals_are_english():
-    # E69: 11th/12th/13th — never 11st/12nd/13rd.
+def test_status_panel_has_no_eviction_ordinal_trail():
+    # #955: the status panel's per-person name-list (and its "Nth out" eviction-seat ordinal
+    # trail) was removed — it duplicated the cast photo gallery, now the single roster surface.
+    # The ordinal() helper went with it, so the panel no longer carries the E69 ordinal logic.
     src = _read("orwellStatusPanel.js")
-    assert "mod100 >= 11 && mod100 <= 13" in src
+    assert "mod100 >= 11 && mod100 <= 13" not in src
+    assert "function ordinal(" not in src

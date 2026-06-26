@@ -27,33 +27,29 @@ def _read(rel):
         return fh.read()
 
 
-# ── J3-19: the status-panel roster is subordinated to the primary chat column ──
+# ── J3-19 / #955: the status panel no longer carries a "who's who" text name-list at all ──
+# J3-19 originally SUBORDINATED the right-rail roster name-rows (.os-hg) so they didn't compete
+# with the chat narration. #955 resolves the same concern more decisively: the redundant text
+# name-list was REMOVED entirely (it duplicated the cast photo gallery, now the single roster
+# surface), so there is no second content column left to subordinate.
 
-def test_j3_19_roster_rows_are_visually_subordinated():
+def test_955_status_panel_has_no_text_name_list():
     js = _read("static/js/orwellStatusPanel.js")
-    # The active roster rows (.os-hg) must carry a reduced type step AND a colour mixed
-    # toward the panel, so the right-rail "who's who" reads as reference, not a second
-    # content column competing with the narration bubbles.
-    m = re.search(
-        r"#orwell-status \.os-hg \{[^}]*\}", js, re.DOTALL
-    )
-    assert m, "the .os-hg base rule must exist."
-    rule = m.group(0)
-    assert "font-size: .92em" in rule, (
-        ".os-hg must take a reduced type step (J3-19 — subordinate the roster to the chat)."
-    )
-    assert "color-mix(in srgb, var(--fg" in rule and "var(--panel" in rule, (
-        ".os-hg name colour must be mixed toward --panel so it doesn't carry full narration "
-        "weight (J3-19 visual-hierarchy fix)."
+    # the per-houseguest name rows + their list container are gone…
+    assert "os-hg" not in js, "the per-houseguest name rows (.os-hg) must be removed (#955)."
+    assert 'id="os-roster"' not in js, "the text name-list container must be removed (#955)."
+    # …but the at-a-glance house TALLY header stays ("The House · N/N").
+    assert 'id="os-roster-h"' in js and '"The House · "' in js, (
+        "the house tally header (The House · N/N) must remain — only the name LIST is removed."
     )
 
 
 def test_j3_19_player_own_row_keeps_full_weight():
-    # The player's own anchor row (.os-you) must NOT be dimmed — it stays the one full-weight
-    # reference the eye returns to. (It is a separate selector from .os-hg.)
+    # The player's own anchor row (.os-you) — the ceremony "You" line + role badge + rest cue —
+    # must keep its own full-weight rule.
     js = _read("static/js/orwellStatusPanel.js")
     assert "#orwell-status .os-you { margin:" in js, (
-        ".os-you must keep its own (full-weight) rule, not inherit the dimmed .os-hg treatment."
+        ".os-you must keep its own (full-weight) rule."
     )
 
 
