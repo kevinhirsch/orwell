@@ -235,11 +235,34 @@ def test_setup_wizard_is_its_own_modal_not_in_chat():
     # scrim + inert + focus-trap + aria-modal), the same overlay machinery as the holding cards.
     assert "OrwellWindowKit.create" in onb
     assert "modal: true" in onb
-    # the ONLY welcome copy is the framing line; the rest is feed/model setup
+    # the ONLY welcome copy is the framing line; the rest is feed/model setup. F1 (#1022): the
+    # wizard heading is now DISTINCT from the holding-card model gate so the two read differently.
     seg = _setup_seg(onb)
-    assert "Production needs the feeds" in seg
+    assert "Pick your season's models" in seg
+    # the holding-card gate's framing must NOT be reused here (F1 — the two were indistinguishable)
+    assert "Production needs the feeds" not in seg
     # the old verbose welcome copy is gone
     assert "Welcome to the house" not in onb
+
+
+def test_onboarding_gates_read_distinctly():
+    # F1 (#1022): the holding-card MODEL GATE (no model configured — go in anyway) and the SETUP
+    # WIZARD (pick your season's models) used to share the same "Production needs the feeds" framing,
+    # leaving the two screens indistinguishable to a new player (and to an automated harness). They
+    # must now carry DISTINCT headings/copy.
+    onb = _read("static", "js", "orwellOnboarding.js")
+    wizard = _setup_seg(onb)
+    # the holding-card gate (mountHolding call in route()) and the wizard <h1> are different strings.
+    assert "No feed connected yet" in onb          # the J4 holding-card title
+    assert "Pick your season's models" in wizard   # the wizard <h1>
+    # the old shared framing is gone from BOTH gates' copy.
+    assert "Production needs the feeds" not in wizard
+    # and the model-gate holding card no longer uses it either (it is now the distinct title above).
+    route = onb[onb.index("async function route"):]
+    gate = route[route.index("mountHolding("):]
+    gate = gate[: gate.index(");")]
+    assert "Production needs the feeds" not in gate
+    assert "No feed connected yet" in gate
 
 
 def test_setup_wizard_shows_on_every_fresh_season():
@@ -284,8 +307,10 @@ def test_setup_wizard_sequenced_after_the_model_gate():
     route = onb[onb.index("async function route"):]
     # the model gate (J4) returns BEFORE the wizard mounts — production needs a feed first
     assert route.index("anyModelConfigured") < route.index("mountSetup(onProceed)")
-    # the framing line (the user's exact phrase) is the J4 holding card title AND the wizard h1
-    assert "Production needs the feeds" in onb
+    # F1 (#1022): the J4 holding card and the wizard now carry DISTINCT framing so a new player can
+    # tell the "no model — go in anyway" gate apart from the "pick your season's models" wizard.
+    assert "No feed connected yet" in onb        # J4 holding-card model gate
+    assert "Pick your season's models" in onb    # the setup wizard h1
     assert "Production needs a feed source" not in onb
 
 

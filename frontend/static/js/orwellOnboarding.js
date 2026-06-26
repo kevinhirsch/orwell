@@ -298,9 +298,9 @@
     // an empty image_model (which resolves to the gemini default at generation time).
     card.innerHTML = `
       <div class="ob-hold">
-        <h1>Production needs the feeds</h1>
-        <p class="ob-hold-sub">Pick the models that will run your season, then we'll roll. The
-          producers reach out the moment you're ready — they go first.</p>
+        <h1>Pick your season's models</h1>
+        <p class="ob-hold-sub">Choose the narrator and portrait models that will run your season,
+          then we'll roll. The producers reach out the moment you're ready — they go first.</p>
         <div class="ob-setup-models" aria-live="polite">
           <p class="ob-hold-sub ob-setup-chat">Narrator model: <b>…</b></p>
           <p class="ob-hold-sub ob-setup-image">Portrait model: <b>…</b></p>
@@ -815,7 +815,7 @@
         // pointed at setup — and a BUTTON that actually goes there (the copy's remedy must
         // be operable from the card; the page behind it is inert). Re-probe and continue.
         const admin = await isAdmin();
-        mountHolding("Production needs the feeds",
+        mountHolding("No feed connected yet",
           "No chat model is configured yet, so the house can't speak. " +
           (admin ? "Open Settings → Add Models (or type /setup) to connect one — casting begins the moment a feed is live."
                  : "Ask your administrator to connect a model — casting begins the moment a feed is live."),

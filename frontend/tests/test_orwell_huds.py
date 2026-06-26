@@ -63,3 +63,33 @@ def test_status_panel_has_no_eviction_ordinal_trail():
     src = _read("orwellStatusPanel.js")
     assert "mod100 >= 11 && mod100 <= 13" not in src
     assert "function ordinal(" not in src
+
+
+# ── F6 (#1023): pre-game terminal/night strings render FROM STATE, never baked static ──
+# The status panel is hidden pre-game (week < 1 → hidePanel), but a stale terminal string baked
+# into the static gadget innerHTML would be latent if the gadget ever rendered pre-game. The fix
+# renders "Season complete" / "Nightfall" dynamically from state instead.
+
+def test_status_panel_season_complete_is_not_a_static_template_literal():
+    src = _read("orwellStatusPanel.js")
+    # the terminal label must NOT be baked into the static body.innerHTML template (the #os-done div
+    # holds an empty label span filled at render time).
+    assert '<div class="os-done" id="os-done" hidden>Season complete' not in src, \
+        "F6: 'Season complete' must not be a static template literal in the gadget innerHTML"
+    assert 'id="os-done-label"' in src, "F6: the terminal label is an empty slot filled from state"
+    # and it IS set dynamically in the finished-render branch (only when st.finished).
+    assert 'lbl.textContent = "Season complete"' in src, \
+        "F6: 'Season complete' is written from state in the done branch"
+
+
+def test_night_gadget_chrome_is_built_only_when_the_clock_runs():
+    # F6: the "Nightfall" gadget card must not be MOUNTED pre-game / clock-off, so its chrome
+    # (the "Nightfall" title) is never a latent stale string in the DOM. render() only calls
+    # ensureEl() once a valid time-of-day is present; pre-game it leaves the gadget unmounted.
+    src = _read("orwellNightStatus.js")
+    # the guard returns BEFORE ensureEl() when there is no running clock (no eager build at top).
+    render_body = src[src.index("function render(state)"):]
+    guard_at = render_body.index("if (!tod || !TOD[tod])")
+    ensure_at = render_body.index("ensureEl()")
+    assert guard_at < ensure_at, \
+        "F6: the no-clock guard must return before ensureEl() — no eager gadget build pre-game"
