@@ -19,6 +19,14 @@ DATA_DIR="${DATA_DIR:-/opt/orwell/data}"
 # ORWELL_* are primary; BBAI_* are kept as a silent deprecated fallback.
 ORWELL_PORT="${ORWELL_PORT:-${BBAI_PORT:-8080}}"
 ORWELL_ENGINE_PORT="${ORWELL_ENGINE_PORT:-${BBAI_ENGINE_PORT:-8765}}"
+# Front-end bind host (feature 0067 / ADR 0007). DEFAULT 0.0.0.0 so a fresh install / rebuild stays
+# reachable on the LAN — the common self-hosted case; orwell.sh prompts and passes the operator's
+# choice through. 127.0.0.1 keeps loopback for a reverse-proxy / HTTPS / tunnel deploy. This value
+# is PERSISTED to data/.env (write_config) so it survives reboots and rebuilds; the systemd unit's
+# built-in default stays 127.0.0.1 (safe), and the EnvironmentFile value below overrides it.
+# NOTE: enabling local HTTPS later (orwell-https.sh) idempotently re-pins this to 127.0.0.1 — the
+# TLS terminator then becomes the only LAN entrypoint. That ordering is intentional and preserved.
+ORWELL_BIND_HOST="${ORWELL_BIND_HOST:-0.0.0.0}"
 
 # ── Guards (fail fast, with the reason) ────────────────────────────────────────────────────────
 [[ "$(id -u)" -eq 0 ]] || { echo "ERROR: run as root (inside the orwell container)." >&2; exit 1; }
@@ -221,6 +229,12 @@ write_config() {
       echo "ORWELL_ENGINE_PORT=${ORWELL_ENGINE_PORT}"
       echo "# front-end -> engine MCP endpoint"
       echo "ORWELL_ENGINE_MCP_URL=http://127.0.0.1:${ORWELL_ENGINE_PORT}"
+      # Front-end bind host (feature 0067 / ADR 0007). PERSISTED here so a fresh install / rebuild
+      # stays reachable: 0.0.0.0 (the installer default) exposes the UI on the LAN; 127.0.0.1 keeps
+      # it loopback-only for a reverse-proxy / HTTPS / tunnel deploy. The systemd unit's built-in
+      # default is 127.0.0.1; THIS value overrides it (the unit's EnvironmentFile=-data/.env).
+      # If local HTTPS is later enabled, orwell-https.sh idempotently re-pins this to 127.0.0.1.
+      echo "ORWELL_BIND_HOST=${ORWELL_BIND_HOST}"
       # Engine auth ON by default (B67/ops A1): one shared secret in this file equips BOTH
       # services (the engine enforces it; the front-end sends it) — even co-located behind
       # loopback.
@@ -276,6 +290,11 @@ write_config() {
   EFFECTIVE_PORT="${EFFECTIVE_PORT:-$ORWELL_PORT}"
   EFFECTIVE_ENGINE_PORT="$(sed -n 's/^ORWELL_ENGINE_PORT=//p' "${DATA_DIR}/.env" | tail -n1)"
   EFFECTIVE_ENGINE_PORT="${EFFECTIVE_ENGINE_PORT:-$ORWELL_ENGINE_PORT}"
+  # data/.env is also the source of truth for the bind host (the unit reads it via EnvironmentFile).
+  # On a re-run after HTTPS was enabled, .env holds 127.0.0.1 — the banner must reflect THAT, not
+  # the env-supplied value — so read it back here.
+  EFFECTIVE_BIND_HOST="$(sed -n 's/^ORWELL_BIND_HOST=//p' "${DATA_DIR}/.env" | tail -n1)"
+  EFFECTIVE_BIND_HOST="${EFFECTIVE_BIND_HOST:-$ORWELL_BIND_HOST}"
   if [[ "$EFFECTIVE_PORT" != "$ORWELL_PORT" ]]; then
     echo "NOTE: data/.env pins ORWELL_PORT=${EFFECTIVE_PORT} (the env-supplied ${ORWELL_PORT} is ignored on a re-run; edit data/.env to change it)"
   fi
@@ -478,7 +497,12 @@ main() {
   echo
   echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"
   echo "  ${C_BOLD}${C_GRN}orwell is installed and running.${C_OFF}"
-  echo "  ${C_BOLD}play:${C_OFF}    http://${ip:-<container-ip>}:${EFFECTIVE_PORT}"
+  if [[ "${EFFECTIVE_BIND_HOST:-0.0.0.0}" == "127.0.0.1" ]]; then
+    # Loopback bind (proxy/HTTPS/tunnel): the LAN IP is refused — advertise loopback, not the IP.
+    echo "  ${C_BOLD}play:${C_OFF}    http://127.0.0.1:${EFFECTIVE_PORT}   ${C_DIM}(loopback — reach it via your reverse proxy / HTTPS / tunnel)${C_OFF}"
+  else
+    echo "  ${C_BOLD}play:${C_OFF}    http://${ip:-<container-ip>}:${EFFECTIVE_PORT}"
+  fi
   echo "  ${C_DIM}app:${C_OFF}     ${APP_DIR}   ${C_DIM}data:${C_OFF} ${DATA_DIR}"
   echo "  ${C_DIM}manage:${C_OFF}  ${C_BOLD}orwell${C_OFF} ${C_DIM}(control panel)${C_OFF}   ${C_DIM}health:${C_OFF} orwell-panel"
   echo "${C_GRN}╶───────────────────────────────────────────────────────────╴${C_OFF}"

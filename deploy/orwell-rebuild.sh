@@ -133,12 +133,27 @@ if [[ "$ENGINE_RUNNING" -eq 1 ]]; then
 fi
 OLD_PORT="${OLD_PORT:-8080}"
 
+# Bind host from data/.env (ORWELL_BIND_HOST) — salvaged like the port so a rebuilt box keeps the
+# old box's LAN reachability. The unit's built-in default is loopback and orwell.sh's install-time
+# default is 0.0.0.0, so an old PROXY box (127.0.0.1) MUST carry that choice over or it would flip
+# to LAN on rebuild. Belt-and-suspenders for the install-time persistence: an empty result (old
+# .env had no value) lets orwell.sh apply its default (LAN=yes ⇒ 0.0.0.0). Not a secret, but read
+# the same careful way as the token (into a var over pct exec, never echoed onto a command line).
+OLD_BIND_HOST=""
+if [[ "$ENGINE_RUNNING" -eq 1 ]]; then
+  OLD_BIND_HOST="$(pct exec "$CTID" -- bash -c '
+    f="'"$OLD_APP_DIR"'/data/.env"
+    [ -f "$f" ] || exit 0
+    sed -n "s/^ORWELL_BIND_HOST=//p" "$f" | tail -n1' 2>/dev/null || true)"
+fi
+
 [[ -n "$OLD_CORES"   ]] && ow_ok "cores:   ${OLD_CORES}"      || ow_warn "cores not in config — orwell.sh default applies"
 [[ -n "$OLD_MEMORY"  ]] && ow_ok "memory:  ${OLD_MEMORY} MB"  || ow_warn "memory not in config — orwell.sh default applies"
 [[ -n "$OLD_DISK_GB" ]] && ow_ok "disk:    ${OLD_DISK_GB} GB" || ow_warn "rootfs size not parseable — orwell.sh default applies"
 [[ -n "$OLD_NET0"    ]] && ow_ok "net0:    ${OLD_NET0}"       || ow_warn "net0 not in config — orwell.sh default applies"
 ow_ok "hostname: ${OLD_HOSTNAME}"
 ow_ok "UI port:  ${OLD_PORT}"
+[[ -n "$OLD_BIND_HOST" ]] && ow_ok "bind host: ${OLD_BIND_HOST}" || ow_warn "bind host not in old .env — orwell.sh install default (LAN, 0.0.0.0) applies"
 ow_ok "app dir:  ${OLD_APP_DIR}"
 
 # ── 4. Salvage GIT_TOKEN (without ever printing it) ─────────────────────────────────────────────
@@ -220,6 +235,9 @@ ow_section "Confirm"
 # what the re-provision will use. Empty captures are simply not exported (orwell.sh applies its
 # own defaults), so the new box still comes up.
 declare -a REBUILD_ENV=( "CTID=${CTID}" "CT_HOSTNAME=${OLD_HOSTNAME}" "ORWELL_PORT=${OLD_PORT}" )
+# Carry the salvaged bind host (only when found) so the rebuilt box matches the old reachability;
+# absent ⇒ orwell.sh applies its install default (LAN, 0.0.0.0).
+[[ -n "$OLD_BIND_HOST" ]] && REBUILD_ENV+=( "ORWELL_BIND_HOST=${OLD_BIND_HOST}" )
 [[ -n "$OLD_CORES"   ]] && REBUILD_ENV+=( "CORES=${OLD_CORES}" )
 [[ -n "$OLD_MEMORY"  ]] && REBUILD_ENV+=( "RAM_MB=${OLD_MEMORY}" )
 [[ -n "$OLD_DISK_GB" ]] && REBUILD_ENV+=( "DISK_GB=${OLD_DISK_GB}" )

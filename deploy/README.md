@@ -9,13 +9,21 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
 ```
  LXC (Debian)
    ├─ orwell-engine.service     Node:   npm start  -> MCP server on 127.0.0.1:${ORWELL_ENGINE_PORT}
-   └─ orwell-frontend.service   Python: uvicorn app:app on ${ORWELL_BIND_HOST}:${ORWELL_PORT}  (loopback by default)
+   └─ orwell-frontend.service   Python: uvicorn app:app on ${ORWELL_BIND_HOST}:${ORWELL_PORT}  (LAN by default; see below)
    data: /opt/orwell/data       .env (secrets) + the save (SQLite + souls); preserved across updates
 ```
 
-> **Putting it on the internet?** The FE binds **loopback by default** (feature 0067 / ADR 0007) — a
-> public deploy puts a TLS-terminating reverse proxy / tunnel in front (Cloudflare Tunnel is the
-> recommended option). See [`expose/`](./expose/) and `docs/INSTALL.md → Public deployment (any domain)`.
+> **LAN vs behind a proxy.** The installer **asks** whether to expose the UI on your LAN and
+> **persists** the answer as `ORWELL_BIND_HOST` in `data/.env` (so a reboot/rebuild stays reachable).
+> The default — and the `--default` non-interactive answer — is **LAN (`0.0.0.0`)**: reach the game
+> directly at `http://<lan-ip>:${ORWELL_PORT}`. The systemd unit's *built-in* default stays
+> `127.0.0.1` (safe if `.env` is somehow missing); the `EnvironmentFile` value wins. Choose **"Behind
+> proxy"** (or set `ORWELL_BIND_HOST=127.0.0.1`) to keep loopback for a reverse proxy / HTTPS / tunnel.
+>
+> **Putting it on the internet?** Front it with a TLS-terminating reverse proxy / tunnel (Cloudflare
+> Tunnel is the recommended option) — that path pins the FE to loopback. See [`expose/`](./expose/)
+> and `docs/INSTALL.md → Public deployment (any domain)`. Enabling local HTTPS (`orwell https`) also
+> re-pins `ORWELL_BIND_HOST=127.0.0.1` (the terminator becomes the only LAN entrypoint).
 
 ## Recommended specs
 
