@@ -321,15 +321,78 @@ describe("the incremental casting intake (0050 — OOBE can be half-done)", () =
     expect(s.getGameState().player!.name).toBe("The Interviewee");
   });
 
-  it("updateCasting echoes keys it did not understand instead of silently dropping them (R4-01)", () => {
+  it("updateCasting echoes GENUINELY-unknown keys instead of silently dropping them (R4-01)", () => {
     const s = new GameSessionAdapter();
-    // `name` is not a casting field (the field is `playerName`); a model filing under it would
-    // otherwise have its answer vanish and casting would stall. The ignored keys are surfaced.
-    const st = s.updateCasting({ name: "Wrong Field", bogus: 1, playerName: "The Interviewee" } as never);
-    expect(st.ignoredKeys).toEqual(expect.arrayContaining(["name", "bogus"]));
+    // `bogus` is neither a casting field nor a recognized synonym; a model filing under it would
+    // otherwise have its answer vanish and casting would stall. The ignored key is surfaced.
+    const st = s.updateCasting({ bogus: 1, playerName: "The Interviewee" } as never);
+    expect(st.ignoredKeys).toEqual(["bogus"]);
     expect(st.known["playerName"]).toBe("The Interviewee"); // the understood key still lands
     // A clean update reports no ignored keys at all.
     expect(s.updateCasting({ motivation: "to win" }).ignoredKeys).toBeUndefined();
+  });
+
+  // --- #1033 / F-1: the model files the name under a SYNONYM key the engine now ALIASES, so the
+  // name is captured instead of silently dropped (the live deepseek wedge). ---
+  it("aliases a synonym key (`name` → `playerName`) so the name is captured, not dropped (#1033)", () => {
+    const s = new GameSessionAdapter();
+    // The live failure: the model wrote `updateCasting({ name: "…" })`; `name` is not the engine's
+    // field (`playerName`) and the value vanished, leaving casting stuck with `known={}`.
+    const st = s.updateCasting({ name: "The Interviewee" } as never);
+    expect(st.known["playerName"]).toBe("The Interviewee"); // the aliased name LANDS
+    expect(st.ready).toBe(true);
+    expect(st.missing).not.toContain("playerName");
+    // An aliased key is understood, so it is NOT echoed as ignored (no false "didn't land" signal).
+    expect(st.ignoredKeys).toBeUndefined();
+  });
+
+  it("mergeCastingUpdate aliases common synonyms onto canonical fields (#1033)", () => {
+    const intake = mergeCastingUpdate(emptyIntake(), {
+      name: "The Interviewee", bio: "a recorded life", why: "to win", notes: ["reads rooms"],
+    } as never);
+    expect(intake.playerName).toBe("The Interviewee");
+    expect(intake.backstory).toBe("a recorded life");
+    expect(intake.motivation).toBe("to win");
+    expect(intake.interviewNotes).toEqual(["reads rooms"]);
+  });
+
+  it("a canonical field always wins over its alias (no silent clobber, #1033)", () => {
+    const intake = mergeCastingUpdate(emptyIntake(), {
+      name: "From Alias", playerName: "From Canonical",
+    } as never);
+    expect(intake.playerName).toBe("From Canonical");
+  });
+
+  // --- #1033 / F-2: the createCharacter rejection path surfaces a clear, non-empty reason. ---
+  it("createCharacter without a name throws a clear, non-empty reason (#1033 / F-2)", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({ motivation: "to win" });
+    let message = "";
+    try {
+      s.createCharacter({});
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message.length).toBeGreaterThan(0);
+    expect(message).toMatch(/name/i);
+    expect(message).toMatch(/updateCasting/);
+  });
+
+  it("createCharacter refused as casting-incomplete carries a human reason (#1033 / F-2)", () => {
+    const s = new GameSessionAdapter();
+    // Name-only intake (the mobile short-circuit shape): finalize refuses for incompleteness.
+    s.updateCasting({ playerName: "The Interviewee" });
+    const view = s.createCharacter({});
+    expect(view.createRefused).toBe("casting-incomplete");
+    expect((view.createRefusedReason ?? "").length).toBeGreaterThan(0);
+  });
+
+  it("a refused in-progress createCharacter carries a human reason (#1033 / F-2)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "The Interviewee", seed: 5 });
+    const again = s.createCharacter({ playerName: "Someone New" });
+    expect(again.createRefused).toBe("in-progress");
+    expect((again.createRefusedReason ?? "").length).toBeGreaterThan(0);
   });
 
   it("the pre-game view carries the casting status (the engine, not the model, owns next)", () => {

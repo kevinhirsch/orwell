@@ -121,6 +121,41 @@ describe("0048/B56 — the recap is the record, not memory", () => {
   });
 });
 
+describe("SG7/#1030 — the finale jury vote unseals per-juror in the unseal", () => {
+  it("a finished season's unseal carries per-juror jury votes for both finalists", () => {
+    const { sb } = liveGame("retro-jury", 7);
+    playToEnd(sb.session);
+
+    // The retrospective and the producerVault dump share the same unseal render.
+    for (const retro of [sb.session.seasonRetrospective(), sb.session.producerVaultDump()]) {
+      expect(retro).not.toBeNull();
+      const jv = retro!.juryVotes;
+      expect(jv).toBeTruthy();
+      // Two finalists, each a named ref.
+      expect(jv!.finalists.length).toBe(2);
+      for (const f of jv!.finalists) expect(f.name.length).toBeGreaterThan(0);
+      // Per-juror attribution (mirrors evictionVotes): each juror voted for one of the two finalists.
+      expect(jv!.votes.length).toBeGreaterThan(0);
+      const finalistNames = new Set(jv!.finalists.map((f) => f.name));
+      for (const v of jv!.votes) {
+        expect(v.juror.name.length).toBeGreaterThan(0);
+        expect(finalistNames.has(v.votedFor.name)).toBe(true);
+      }
+      // The crowned winner must be the finalist who got the majority of the jury votes.
+      const tally = new Map<string, number>();
+      for (const v of jv!.votes) tally.set(v.votedFor.name, (tally.get(v.votedFor.name) ?? 0) + 1);
+      const top = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]!;
+      expect(retro!.winner!.name).toBe(top[0]);
+    }
+  });
+
+  it("a LIVE (unfinished) season's unseal has no jury votes yet (the finale hasn't tallied)", () => {
+    const { sb } = liveGame("retro-jury-live", 7);
+    // No finale yet ⇒ no jury votes block on the live debug dump.
+    expect(sb.session.producerVaultDump()!.juryVotes).toBeUndefined();
+  });
+});
+
 describe("0048/B56 — finished → new season lifecycle", () => {
   it("the prior season's snapshot stays finished; a fresh game begins cleanly for the same user", () => {
     const reg = new GameSessionRegistry();

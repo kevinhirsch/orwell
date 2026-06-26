@@ -278,6 +278,15 @@ export interface GameStateView {
    * started season (the prior state, if any, is untouched).
    */
   createRefused?: "in-progress" | "over" | "casting-incomplete";
+  /**
+   * A human-readable reason for `createRefused` (issue #1033 / F-2): the coded `createRefused` told
+   * the FE WHICH refusal, but a stuck casting loop surfaced no diagnosis to the model/player. This
+   * carries a plain-language reason string so the GM can tell the player WHY the season didn't start
+   * (e.g. "the interview still needs more substance …") instead of silently looping. Vault-free —
+   * it names only the missing player-authored intake, never any secret state. Present whenever
+   * `createRefused` is.
+   */
+  createRefusedReason?: string;
 }
 
 /**
@@ -980,6 +989,17 @@ export interface RetrospectiveView {
     evictee: NamedRef;
     votes: Array<{ voter: NamedRef; votedFor: NamedRef }>;
   }>;
+  /**
+   * The finale jury vote, per juror (SG7/#1030): which finalist each jury member voted for at the
+   * crowning. Mirrors `evictionVotes` (per-voter attribution) but for the final vote — present only
+   * once the finale's votes are tallied (post-season). Like `evictionVotes`, this unseals ONLY here,
+   * behind the same terminal gate; it is never revealed per-juror in-season (the live reveal stays
+   * one-at-a-time choreography). `finalists` echoes who was on the block at the end for context.
+   */
+  juryVotes?: {
+    finalists: NamedRef[];
+    votes: Array<{ juror: NamedRef; votedFor: NamedRef }>;
+  };
 }
 
 /**

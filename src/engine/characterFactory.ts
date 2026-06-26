@@ -660,10 +660,12 @@ export function generateHouse(
     const name = uniqueName(rng, used, usedGiven, usedSurnames);
     const strategyStyle = rng.pick(spec.styles);
     const stats = jittered(spec.bias, rng);
-    // The legacy archetype-flavored background line is RETAINED (byte-stable: it still consumes the
-    // same OCCUPATIONS main-stream pick so stats/volatility/names downstream never shift, E38/G24
-    // precedent). The CONCRETE diverse facets (vocation + hometown, L28) are dealt below off a side
-    // stream and never perturb the main one.
+    // The legacy archetype-flavored background line's OCCUPATIONS pick is RETAINED (byte-stable: it
+    // still consumes the same OCCUPATIONS main-stream draw so stats/volatility/names downstream never
+    // shift, E38/G24 precedent). But the legacy pool is uncapped (14 jobs, uncapped draw), so it
+    // CLUSTERS at premiere (F10/#1021 — "3 marketing, 2 firefighters"). The DRAW stays (byte-stability);
+    // the surfaced `background` string is RECOMPOSED below in the L28 second pass from the capped,
+    // cast-wide `vocation` (≤MAX_PER_VOCATION), so the clustered legacy job never reaches the roster.
     const background = `a ${rng.pick(OCCUPATIONS)} who plays as a ${spec.archetype}`;
     const volatility = rng.next();
     return {
@@ -712,6 +714,10 @@ export function generateHouse(
   npcs.forEach((n, i) => {
     n.character.vocation = facets[i]!.vocation;
     n.character.hometown = facets[i]!.hometown;
+    // F10/#1021: recompose the surfaced background from the CAPPED vocation, replacing the clustered
+    // legacy OCCUPATIONS job. The OCCUPATIONS draw above is untouched (byte-stability of the main
+    // stream); only WHICH job appears in the prose changes — to the diverse, ≤MAX_PER_VOCATION one.
+    n.character.background = `a ${facets[i]!.vocation} who plays as a ${n.character.archetype}`;
     n.character.demeanor = demeanors[i]!;
     n.character.appearance = withBuild(n.character.appearance, builds[i]!);
     n.character.voice = generateVoice(voiceRng, n.character.archetype);
