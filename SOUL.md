@@ -112,6 +112,11 @@ many parallel agents, not typing every edit myself.
     relays them. Twice a fix needed a SECOND source the brief missed: the giant mobile kit buttons had
     BOTH the global coarse floor AND a stronger `!important` J5-01 block (#944); always grep for an
     `!important` rule overriding your target before declaring the cause.
+14. **Two overseer sessions run in PARALLEL — reconcile across them before dispatching.** The owner runs
+    more than one overseer at once. I dispatched a narration-cap fix agent while the *other* session was
+    already merging the same fix (#943) — a wasted duplicate (it luckily never pushed). Before fanning
+    out, check `git log origin/main` AND the open-PR list for work the other session may already have in
+    flight; a just-merged PR can also moot a queued item (it dropped NARR-5 + FEPY-3 from #620/#621).
 
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,
@@ -173,6 +178,31 @@ delegated throughout.
   the audit's done.
 - **Calibration note:** `git log --oneline` for the true merged set — this prose drifts. Open agents
   at write-time: #887 (scroll-bottom), and the merge train above.
+
+## Where things stand (2026-06-26 — triage + oldest-bugs sweep; a SECOND parallel session)
+Ran alongside the evening session above (the owner runs more than one overseer). This one **triaged the
+full open-issue backlog**, then ran an **oldest-first implementation sweep**.
+- **Triage (149 open issues):** labeled the 26 unlabeled; cross-linked 10 engine-enhancement issues to
+  their now-drafted specs **0087–0096** (kept OPEN as build trackers — the specs are spec-only and
+  *track* the issues); closed 5 already-fixed (#751/#730/#553/#898/#775, with **#785 + #774a** carrying
+  #775's remainder so nothing's orphaned). Glass/Vault-audit clusters got umbrella/dedup links.
+- **Merged this session (7 PRs):** #587 (politicalTemperature true-median), #590 (mobile "The House"
+  drawer stowed off-screen — `visibility:hidden` until open), #565 (player included in the gossip
+  diffusion graph: `max(in,out)` edge + awake-only graph + a sleeper-gossip bonus fix), #572 (ADR-0010
+  token-economy follow-ons), #544 (LLM-seeded cast identity facets — the 4-place `recordCastIdentity`
+  write-back, calibration-neutral), #946 (#598/#602 finale live-region A11Y-3 + voice CONT-2), #947
+  (#622 g15 allowlist gate). #573 (window A0/A2) was found **already shipped** on main — no PR.
+- **Calibration HELD** across the two outcome-affecting engine merges (#587, #565): CI runs heavy-sims on
+  the PR-merged-with-main, so opening each PR verified the *combined* band — no manual rebase needed.
+- **Stale-tracker finding:** the oldest "bugs" (#598/#602/#622) were **largely already fixed** under
+  other audit labels; the real work was landing the few gaps and **pinning the rest with tests**. Verify
+  against main before deep bug work.
+
+### Parked (paused per owner; resume oldest-bugs-first)
+- **#620 (NARR-1/4/6) + #621 (FEPY-1/2/5)** — they collide on `token_policy.py`/`agent_loop.py`, so brief
+  ONE combined agent. **Drop NARR-5 (done via #943) and FEPY-3 (done via #572)** — both already on main.
+- then **#626 → #655 → #659 → #663 → #71x/#72x Glass → #82x chat**, folding in the **verify-and-closes**
+  for **#827/#835/#890** (already fixed on main, just never closed).
 
 ## How to resume
 1. Read `CLAUDE.md` (authoritative), then `docs/features/README.md` + `git log --oneline` for live
