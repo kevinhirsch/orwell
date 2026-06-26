@@ -57,7 +57,13 @@ _DEFAULT_MAX_TOKENS = {
     "narration": None,  # ⇒ model-aware default at the call site (full reasoning+answer headroom)
     "utility-extraction": 1500,
     "casting": None,    # ⇒ model-aware default (same reasoning-truncation applies; turns are short)
-    "background-authoring": 1200,
+    # #1002: a full authored JSON profile (name + 2-3 sentence bio + vocation + 7 physical facets +
+    # 2-3 secrets + 2 goals + weakness) is several hundred output tokens of strict JSON; on a REASONING
+    # utility model (deepseek-v4-pro) reasoning tokens count against this same cap, so a tight 1200
+    # cap risked the reasoning eating the budget and leaving an empty/truncated visible body (the exact
+    # silent no-op #1002 chased). Raised to a comfortable floor so a reasoning model can both think a
+    # little (effort stays "low" for this structured task) AND emit the whole JSON object.
+    "background-authoring": 3000,
 }
 # "off" -> reasoning omitted (None). The full set of admin-acceptable values.
 _VALID_EFFORTS = ("off", "low", "medium", "high")

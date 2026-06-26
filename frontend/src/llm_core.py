@@ -1601,8 +1601,15 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                      timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
                      tools: Optional[List[Dict]] = None, policy: Optional[Dict] = None,
                      session_id: Optional[str] = None, pin_provider: bool = False,
-                     provider_opts: Optional[Dict] = None):
+                     provider_opts: Optional[Dict] = None,
+                     response_format: Optional[Dict] = None):
     """Stream LLM responses with improved error handling.
+
+    ``response_format`` (optional): an OpenAI/OpenRouter-style structured-output request
+    (e.g. ``{"type": "json_object"}``) threaded onto the OpenAI-style chat payload so a
+    model that honours it returns strict JSON (used by the cast-authoring path, #1002). It is
+    sent only on the OpenAI-compatible branch (not anthropic/ollama); a provider that ignores
+    it is harmless, and absent ⇒ byte-identical to before.
 
     Yields SSE chunks:
       - data: {"delta": "text"}           — text content
@@ -1678,6 +1685,10 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
+        # #1002: structured-output request (e.g. {"type": "json_object"}) so a model that honours it
+        # returns strict JSON for the cast-authoring path. A provider that ignores it is harmless.
+        if response_format:
+            payload["response_format"] = response_format
         if tools:
             payload["tools"] = tools
         h = _provider_headers(provider, headers)
