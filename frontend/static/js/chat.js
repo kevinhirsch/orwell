@@ -1425,6 +1425,17 @@ import { isNarrow } from './platform.js';
 
       let _nextIsError = false;
       let _streamSawDone = false;
+      // BUG 2 (#985 P2-B): did the server persist ANY message this turn? A clean empty turn (the final
+      // round made a tool call but emitted no narration; the server's `if full_response:` save is
+      // skipped) emits NO `message_saved`. Combined with `accumulated === ''`, that is the
+      // "backend produced no turn" terminal state — distinct from a thrown network drop. We render the
+      // user-controlled Retry for it instead of silently hiding the empty bubble.
+      let _sawMessageSaved = false;
+      // BUG 2 — did the turn produce a VISIBLE artifact OTHER than narration text/a save? An in-character
+      // image, an ask_user prompt, a budget notice, a surfaced error etc. all leave `accumulated === ''`
+      // yet are a real, completed turn — NOT the empty-turn-with-no-recourse case. Set true on those so
+      // the empty-turn Retry never spuriously fires after one.
+      let _producedVisibleOutput = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2235,6 +2246,7 @@ import { isNarrow } from './platform.js';
                 // Wire the persisted DB id onto the just-streamed bubble so it
                 // can be edited/deleted immediately, without reloading the chat.
                 if (_isBg) continue;
+                _sawMessageSaved = true;   // BUG 2: the turn persisted a message — not the empty-turn case
                 if (currentHolder && json.id) currentHolder.dataset.dbId = json.id;
                 // ADR 0012 §2.2/§3.3: adopt the SERVER-minted timestamp so every window (sender,
                 // observer, a late reload) renders the IDENTICAL time string instead of each window's
@@ -2527,6 +2539,7 @@ import { isNarrow } from './platform.js';
                 }
                 // --- Render generated images inline ---
                 if (json.image_url) {
+                  _producedVisibleOutput = true;  // BUG 2: an image IS a real turn artifact
                   const chatBox = document.getElementById('chat-history');
                   chatBox.appendChild(_buildImageBubble(json.image_url, json.image_prompt, json.image_model, json.image_size, json.image_quality, json.image_id));
                   uiModule.scrollHistory();
@@ -2626,6 +2639,7 @@ import { isNarrow } from './platform.js';
 
               } else if (json.type === 'ask_user') {
                 if (_isBg) continue;
+                _producedVisibleOutput = true;  // BUG 2: an ask_user prompt IS a real turn artifact
                 // The agent posed a multiple-choice question; the turn has ended.
                 // Render clickable options at the bottom of the history. The
                 // user's pick is sent as the next message and the agent resumes.
@@ -2832,6 +2846,7 @@ import { isNarrow } from './platform.js';
                 uiModule.scrollHistory();
               } else if (json.type === 'budget_exceeded') {
                 if (_isBg) continue;
+                _producedVisibleOutput = true;  // BUG 2: the budget notice IS a visible turn artifact
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 const budgetDiv = document.createElement('div');
@@ -2889,6 +2904,7 @@ import { isNarrow } from './platform.js';
                 // --- Backend error (timeout, connection issue, etc.) ---
                 console.error('Stream error from backend:', json.error);
                 if (_isBg) continue;
+                _producedVisibleOutput = true;  // BUG 2: a surfaced error IS visible recourse already
                 if (spinner && spinner.element) spinner.destroy();
                 const errDiv = document.createElement('div');
                 errDiv.style.cssText = 'color: var(--color-error); font-style: italic; padding: 4px 0;';
@@ -3196,6 +3212,31 @@ import { isNarrow } from './platform.js';
               }).catch(e => console.warn('merge-last-assistant failed:', e));
             }
           }
+        }
+
+        // BUG 2 (#985 P2-B) — the CLEAN-EMPTY-TURN terminal state. A [DONE] arrived with NO assistant
+        // content (`accumulated === ''`), the server persisted nothing (`!_sawMessageSaved`, because its
+        // `if full_response:` save is skipped when the final round only made a tool call), and the turn
+        // produced no other visible artifact (no image / ask_user / budget / error). Pre-fix this hid the
+        // empty bubble (the "no visible text" branch above) and NEVER offered recourse — the catch-based
+        // _tryAutoRecover only fires on a THROWN error, and a clean [DONE] throws nothing. So the user's
+        // message sat unanswered with no way forward. Render the SAME user-controlled Retry the
+        // network-drop path builds (distinct copy: "no response" rather than "connection dropped"). Guard
+        // against the user-cancel path (handled by the abort branch) and the continue/auto-recover path.
+        const _turnWasCancelled = !!(currentAbort && currentAbort.signal && currentAbort.signal.aborted);
+        // Guard: only when the holder is still IN the DOM. A continue-merge above can remove `holder`
+        // (folding it into the prior bubble); rendering Retry into a detached node would be invisible.
+        if (holder && holder.parentNode &&
+            _isEmptyTurnNoSave({
+              sawDone: _streamSawDone,
+              sawSave: _sawMessageSaved,
+              producedVisible: _producedVisibleOutput,
+              accumulated,
+              cancelled: _turnWasCancelled,
+            })) {
+          _renderStreamDropRetry(holder, streamSessionId, {
+            label: "The narrator didn't respond. Your message was received — retry to continue.",
+          });
         }
       } // end if (!_isBgFinal)
 
@@ -3634,14 +3675,20 @@ import { isNarrow } from './platform.js';
   // A visible, user-controlled retry for a stream that died before producing anything — the honest
   // replacement for the old composer-puppeteering auto-resend. The Retry button does a HEADLESS send
   // (the user's original message is already persisted server-side, so this just re-engages the model).
-  function _renderStreamDropRetry(holder, sessionId) {
+  // BUG 2 (#985 P2-B): the SAME control also serves the clean-empty-turn terminal state (a [DONE] with
+  // no narration + no save) — passing `opts.label` swaps the message; the Retry mechanism is identical.
+  function _renderStreamDropRetry(holder, sessionId, opts) {
+    opts = opts || {};
     const target = holder && (holder.querySelector('.body') || holder);
     if (!target || target.querySelector('.stream-drop-retry')) return;
+    // BUG 2: the empty-turn holder was hidden by the finalize ("no visible text" branch) — make it
+    // visible again so the Retry control the player needs is actually on screen.
+    if (holder && holder.style && holder.style.display === 'none') holder.style.display = '';
     const note = document.createElement('div');
     note.className = 'stream-drop-retry';
     note.style.cssText = 'display:flex;align-items:center;gap:8px;opacity:0.85;font-style:italic;';
     const label = document.createElement('span');
-    label.textContent = 'Connection dropped before any reply.';
+    label.textContent = opts.label || 'Connection dropped before any reply.';
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'continue-btn';
@@ -3795,6 +3842,101 @@ import { isNarrow } from './platform.js';
   function _serverMsgId(msg) { return msg.id || (msg.metadata && msg.metadata._db_id) || null; }
 
   /**
+   * BUG 1 (ADR 0008 — render BY the authoritative seq, never by arrival order).
+   *
+   * The server assigns a monotonic `seq` per session (UNIQUE(session_id, seq)); the FE log is a
+   * replica of that total order. Every live insert (optimistic user send, stream holder, peer
+   * resume holder) is necessarily append-to-bottom because seq isn't known until the row persists —
+   * so two turns whose persistence interleaves (a peer write racing the local turn, two windows)
+   * could sit in ARRIVAL order, not seq order. Reconcile (`softReloadHistory`) rebuilds in seq order
+   * but only when DIVERGED and only when idle, leaving a visible out-of-seq window mid-stream.
+   *
+   * The structural fix: a single seq read (`_msgSeq`) + a single non-destructive reorder
+   * (`_reorderBySeq`) that the reconcile's ADOPT PASS runs on every reconcile attempt (it runs even
+   * while a stream is in flight — the `hasActiveStream` early-return is AFTER the adopt pass). A
+   * bubble that has been stamped with `data-seq` is moved into ascending-seq position WITHOUT a DOM
+   * wipe, reordering ONLY among the seq'd bubbles' own slots; bubbles with NO seq yet (a still-pending
+   * optimistic send, the LIVE streaming holder, an un-adopted orphan) and non-`.msg` nodes (tool
+   * threads) never move — so the live holder is never torn from its threads. Idempotent: a no-op when
+   * already ordered (the overwhelming common case). This makes it STRUCTURALLY impossible for an adopted
+   * bubble to remain out of seq order relative to server truth.
+   */
+  export function _msgSeq(el) {
+    if (!el || !el.dataset || el.dataset.seq == null || el.dataset.seq === '') return null;
+    const n = Number(el.dataset.seq);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /** Insert `el` into `box` at its `data-seq` position: before the first existing `.msg` whose seq
+   * is strictly greater. No seq on `el` (a pending/optimistic send) ⇒ append to bottom (the newest
+   * local turn). Used at the live insert sites so a bubble that DOES know its seq lands ordered. */
+  export function _insertBySeq(box, el) {
+    if (!box || !el) return;
+    const s = _msgSeq(el);
+    if (s == null) { box.appendChild(el); return; }
+    const kids = box.querySelectorAll('.msg');
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i] === el) continue;
+      const ks = _msgSeq(kids[i]);
+      if (ks != null && ks > s) { box.insertBefore(el, kids[i]); return; }
+    }
+    box.appendChild(el);
+  }
+
+  /** Non-destructive in-place reorder of the SEQ'D message bubbles in `#chat-history` to ascending
+   * `data-seq`. DELIBERATELY CONSERVATIVE: it reorders ONLY the `.msg[data-seq]` bubbles among
+   * themselves, reassigning them into the very DOM SLOTS those seq'd bubbles already occupy. Everything
+   * else — no-seq bubbles (a still-pending optimistic send, the LIVE streaming holder, an un-adopted
+   * orphan) AND non-`.msg` nodes (`.agent-thread` tool groups, decision cards, notices) — stays exactly
+   * where it is, so a mid-stream reconcile can never tear the live holder away from its tool threads or
+   * disturb thread `has-top`/`has-bottom` adjacency. A persisted bubble that landed out of arrival-vs-seq
+   * order (a peer write racing the local turn, two interleaved `message_saved`s) is moved into its seq
+   * slot WITHOUT a DOM wipe. Idempotent: zero churn when already ordered. Returns the count of bubbles
+   * actually moved so callers/tests can detect a real correction. */
+  export function _reorderBySeq(box) {
+    if (!box) return 0;
+    // The slots: the current DOM positions held by seq'd bubbles. We only ever permute WITHIN these.
+    const seqd = Array.from(box.querySelectorAll('.msg')).filter(el => _msgSeq(el) != null);
+    if (seqd.length < 2) return 0;
+    const wantOrder = seqd.slice().sort((a, b) => {
+      const as = _msgSeq(a), bs = _msgSeq(b);
+      if (as !== bs) return as - bs;          // ascending seq
+      return seqd.indexOf(a) - seqd.indexOf(b); // seq tie → preserve current relative order (stable)
+    });
+    // Already ordered? (common case — bail with zero churn).
+    let same = true;
+    for (let i = 0; i < seqd.length; i++) { if (wantOrder[i] !== seqd[i]) { same = false; break; } }
+    if (same) return 0;
+    // Reorder WITHIN the seq'd slots only: drop an empty placeholder where each seq'd bubble currently
+    // sits (preserving the exact slot positions among all the OTHER, untouched nodes), detach the seq'd
+    // bubbles, then fill the placeholders in ascending-seq order. No-seq bubbles (the live streaming
+    // holder, a pending optimistic send) and non-`.msg` nodes (tool threads, cards) never move — their
+    // surrounding placeholders are swapped under them.
+    const marks = seqd.map(() => document.createComment('seq-slot'));
+    for (let i = 0; i < seqd.length; i++) box.replaceChild(marks[i], seqd[i]);
+    let moved = 0;
+    for (let i = 0; i < marks.length; i++) {
+      if (wantOrder[i] !== seqd[i]) moved += 1;   // this slot's occupant changed
+      box.replaceChild(wantOrder[i], marks[i]);
+    }
+    return moved;
+  }
+
+  /**
+   * BUG 2 (#985 P2-B): the CLEAN-EMPTY-TURN predicate — pure so it can be gated without a live stream.
+   * True iff the stream ended cleanly (a `[DONE]`, not a thrown drop), persisted NO message
+   * (`!sawSave`), produced NO other visible artifact (`!producedVisible` — image/ask_user/budget/error),
+   * had NO assistant content (`accumulated` blank), and was NOT user-cancelled. That is the
+   * "backend produced no turn" state the FE must surface with a user-controlled Retry — distinct from
+   * a network drop (thrown error ⇒ the existing `_tryAutoRecover`/`_renderStreamDropRetry` path) and
+   * from a reasoning-only turn (non-blank `accumulated`, handled by the thinking-display branch).
+   */
+  export function _isEmptyTurnNoSave({ sawDone, sawSave, producedVisible, accumulated, cancelled } = {}) {
+    return !!sawDone && !sawSave && !producedVisible && !cancelled &&
+      (accumulated == null || String(accumulated).trim() === '');
+  }
+
+  /**
    * F5 (dedup hardening): count the message bubbles that SHOULD map 1:1 to a persisted server message
    * — i.e. exclude rows that are intentionally hidden (display:none): a tool-only continuation round
    * (chat.js ~2780) and a skippable production-cue user bubble. Those have no server counterpart, so
@@ -3881,6 +4023,16 @@ import { isNarrow } from './platform.js';
         if (msg.seq != null) el.dataset.seq = String(msg.seq);
       }
     }
+
+    // BUG 1 — REORDER PASS (non-destructive). Now that every matched bubble carries its authoritative
+    // `data-seq`, move any that are out of seq order back into place WITHOUT a DOM wipe. This runs on
+    // EVERY reconcile attempt — including the "converged"/early-return common case below AND while a
+    // stream is in flight (the `hasActiveStream` early-return is further down), so a bubble that was
+    // appended out of arrival-vs-seq order (a peer write racing the local turn, two interleaved
+    // `message_saved`s) is corrected the instant its seq is known, not only when a destructive rebuild
+    // finally fires. Idempotent: zero churn when already ordered. A still-pending optimistic send (no
+    // seq) keeps its place at the tail — exactly where the newest local turn belongs.
+    _reorderBySeq(box);
 
     // 2) DIVERGENCE CHECK — rendered id order vs. server seq order.
     // ADR 0012 (GAP 2): an error turn forces ONE content rebuild — the error bubble may already carry
@@ -5715,6 +5867,11 @@ import { isNarrow } from './platform.js';
     deferPeerResume,
     flushPendingPeerResume,
     _visibleMsgCount,   // F5 (dedup hardening): exposed for the reconcile-orphan browser gate
+    _msgSeq,            // BUG 1 (ADR 0008 seq order): exposed for the render-order browser gate
+    _insertBySeq,       // BUG 1: insert-by-seq choke point
+    _reorderBySeq,      // BUG 1: non-destructive seq reorder (the reconcile corrector)
+    _isEmptyTurnNoSave, // BUG 2 (#985 P2-B): clean-empty-turn predicate (browser gate)
+    _renderStreamDropRetry, // BUG 2: the user-controlled Retry control (browser gate)
   };
 
   // Single delegated handler for tool-call fold/expand. One listener on
