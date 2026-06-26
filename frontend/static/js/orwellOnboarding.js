@@ -595,12 +595,27 @@
   }
 
   let _openSent = false;
-  window._orwellOpenGameAfterCasting = function () {
+  window._orwellOpenGameAfterCasting = async function () {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     if (!gameBuild || _openSent) return;
     // Once-per-game: a producer opener already present (e.g. another device fired it and it synced
     // here) means we must never fire a second one.
     if (_conversationHasAssistantTurn()) { _openSent = true; return; }
+    // #987 — DUPLICATE EMPTY "Casting interview" session guard. A FRESH surface (a 2nd tab/device, or a
+    // reloaded tab) boots pre-game and routes through here; if it fires the kickoff cue, the hidden-cue
+    // send MATERIALIZES a NEW per-tab session row (name "Casting interview", mode=null, 0 msgs) BEFORE
+    // loadSessions()'s canonical-game ladder re-points to the REAL bound session — orphaning that new
+    // row (0 msgs, mode=null, lastAccessed==createdAt). So: if a canonical game is ALREADY bound,
+    // CONVERGE onto it and BAIL — never send the cue, never materialize a second per-tab identity.
+    // _convergeOnCanonicalGame() returns true whenever a bound id resolves (its `known` flag only gates
+    // the in-place selectSession, NOT the boolean return), so guarding on its result is reliable even
+    // before the session is in getSessions(). Mark _openSent so a later re-route can't re-fire. This
+    // ADDS a canonical-exists guard and keeps the existing _openSent / SEAT_TAKEN_KEY guards intact.
+    try {
+      if (await _convergeOnCanonicalGame()) { _openSent = true; return; }
+    } catch (_) { /* fail open — fall through to the normal kickoff if the probe hiccups */ }
+    if (_openSent) return;                                   // a concurrent path claimed the opener while we awaited
+    if (_conversationHasAssistantTurn()) { _openSent = true; return; } // or an opener synced in mid-await
     _openSent = true;
     // 0065 PORTRAIT WARM: the interview is opening (the first turn) — kick the portrait warm. The server
     // HOLDS it until author warm has fully finished, so faces are never shot from a half-authored store.
