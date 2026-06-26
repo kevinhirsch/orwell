@@ -93,7 +93,7 @@ export const SOCIETY = {
    * id) so the main `rng` stream — and the seeded calibration spine — stays byte-identical. Bounded /
    * occasional, exactly like the B50 hidden-element reveal it sits beside.
    */
-  playerSubjectProb: 0.3,
+  playerSubjectProb: 0.1,
 } as const;
 
 /**
