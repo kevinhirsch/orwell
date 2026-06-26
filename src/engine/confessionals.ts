@@ -40,6 +40,16 @@ export interface ConfessionalContext {
   emotionalState?: number;
   /** Seeded phrasing variance. Omitted ⇒ the first template (deterministic, pre-E55-compatible). */
   rng?: RandomnessSource;
+  /**
+   * PV1 (#1029) — the PLAYER as an eligible SUBJECT of an NPC's private read. The confessor draws its
+   * target/ally from `others` (the NPC roster) only, so the player — who rides the whole season — was
+   * NEVER named as a confessor's biggest threat or closest ally, even at Final 2. When supplied, the
+   * player is folded into the SAME engine-grounded read (`rel.edge(npc, player)`) as any houseguest, so
+   * an NPC can confess the player as their target or ally GROUNDED in real signals, never invented.
+   * The player is a SUBJECT only — `recordConfessional` still witnesses the confessing NPC ALONE, so
+   * the confessional stays Vault-only and reaches no one directly (the inverse player Diary Room, 0013).
+   */
+  player?: EntityId;
 }
 
 const MOOD_OF = (state: number): "rattled" | "steady" | "confident" =>
@@ -79,8 +89,13 @@ export function confessionalFor(
   let target: EntityId | null = null;
   let ally: EntityId | null = null;
   let maxThreat = -Infinity;
+  // PV1 (#1029) — the player is an eligible SUBJECT of this read (never invented; same engine signals
+  // as any houseguest). They are a candidate ONLY, never the confessor: `confessionalFor` is called
+  // for an NPC `npc` and the player is excluded as a confessor upstream (`involvedConfessionals`).
+  const candidates: readonly EntityId[] =
+    ctx.player && ctx.player !== npc && !others.includes(ctx.player) ? [...others, ctx.player] : others;
   // First pass: the true biggest threat (their target) — unchanged read.
-  for (const o of others) {
+  for (const o of candidates) {
     if (o === npc) continue;
     const e = rel.edge(npc, o);
     if (e.threat > maxThreat) {
@@ -93,7 +108,7 @@ export function confessionalFor(
   // the top bond skipped this naturally falls to the runner-up; with 0/1 distinct others
   // `ally` legitimately stays null. Selection over existing edges only — consumes no rng.
   let maxBond = -Infinity;
-  for (const o of others) {
+  for (const o of candidates) {
     if (o === npc || o === target) continue;
     const e = rel.edge(npc, o);
     const bond = (e.trust + e.affinity) / 2;

@@ -81,7 +81,37 @@ export const SOCIETY = {
   baseWeight: 0.08,
   /** Gossip is ambient — a flat propensity beside the edge-driven natures. */
   gossipWeight: 0.3,
+  /**
+   * PV1 (#1029) — how often an off-screen scene NAMES THE PLAYER as its SUBJECT. The player was
+   * structurally invisible to off-screen NPC cognition: partners are drawn from `npcs` only, so the
+   * player could never be a scene subject — over a whole game NO NPC ever schemed/whispered/assessed
+   * ABOUT them, though the player rode to Final 2. The fix lets an NPC's off-screen strategy/threat-
+   * assessment beat occasionally read the PLAYER, framed by the existing NPC→player hidden edge. The
+   * player is a SUBJECT only (named in the scene's hidden content), NEVER an initiator, NEVER in the
+   * witness set (they must never "see" these scenes), and it reaches them ONLY via the existing
+   * gossip/pathway mechanism — never directly. Rolled on a per-scene SIDE rng (hashed off the event
+   * id) so the main `rng` stream — and the seeded calibration spine — stays byte-identical. Bounded /
+   * occasional, exactly like the B50 hidden-element reveal it sits beside.
+   */
+  playerSubjectProb: 0.1,
 } as const;
+
+/**
+ * How an NPC initiator privately reads the PLAYER at an off-screen beat (PV1 #1029) — grounded in the
+ * NPC→player hidden edge, never invented. A real threat read frames the player as a TARGET; a real
+ * bond frames them as an ALLY; otherwise a watchful, undecided read. Returns the subject clause
+ * appended to the scene's already-hidden content. The player is NAMED, never witnessed.
+ */
+export function playerSubjectClause(e: EdgeSignals, initiator: EntityId, player: EntityId): string {
+  const bond = (e.trust + e.affinity) / 2;
+  if (e.threat >= SOCIETY.betrayalThreatFloor && e.threat >= bond) {
+    return ` — ${initiator} sizes up ${player} as a threat they need gone`;
+  }
+  if (bond >= SOCIETY.betrayalBondFloor && bond > e.threat) {
+    return ` — ${initiator} counts ${player} as someone to work with to the end`;
+  }
+  return ` — ${initiator} is still reading ${player}, unsure where they land`;
+}
 
 /** One weighted draw. `weights` must be non-negative; zero-total falls back to the first item. */
 function weightedPick<T>(items: readonly T[], weights: readonly number[], rng: RandomnessSource): T {
@@ -158,10 +188,22 @@ export function richOffscreenStretch(deps: {
    * paired earlier in THIS stretch), so no houseguest ever holds more than one active showmance.
    */
   hasActiveShowmance?: (id: EntityId) => boolean;
+  /**
+   * PV1 (#1029) — make the PLAYER a SUBJECT of off-screen NPC cognition. When supplied, an NPC
+   * initiator's STRATEGY / THREAT-or-TRUST assessment beat occasionally (gated by
+   * `SOCIETY.playerSubjectProb`) names the player in its still-HIDDEN content, framed by the
+   * initiator's `edgeOf` read of the player. CRITICAL (Vault Wall): the player is a SUBJECT only —
+   * `id` is NEVER added to the scene's witness set, NEVER becomes an initiator/partner, and these
+   * scenes reach the player ONLY through the existing gossip/pathway mechanism (they are hidden
+   * here). Rolled on the same per-scene SIDE rng as the B50 reveal, so the main `rng` stream stays
+   * byte-identical (omitted ⇒ no player subject: the pure tests and the pre-wiring tick are intact).
+   * Requires `edgeOf` (the motivated path) — in the legacy uniform draw there is no edge to read.
+   */
+  playerSubject?: EntityId;
 }): OffscreenScene[] {
   const {
     events, rng, npcs, interactions, hiddenElementsOf, edgeOf, occupancy,
-    showmancePlausible, hasActiveShowmance,
+    showmancePlausible, hasActiveShowmance, playerSubject,
   } = deps;
   const scenes: OffscreenScene[] = [];
   // #840 — houseguests who pick up a NEW showmance partner during this stretch, so a later scene in
@@ -244,6 +286,20 @@ export function richOffscreenStretch(deps: {
           event.content += ` — ${a} ${els[side.int(els.length)]!.detail}`;
           event.reveal = true; // structural (B54): the richness gate counts reveals from the store
         }
+      }
+    }
+    // PV1 (#1029) — the PLAYER as a SUBJECT of NPC cognition. On a STRATEGY/THREAT-driven scene the
+    // initiator occasionally turns their private read onto the player (never a partner here — the
+    // player is co-present in the *game*, not this NPC-only scene). The clause is grounded in the
+    // initiator's NPC→player edge. The player is NAMED in the still-hidden content but is NEVER added
+    // to `witnessSet` (so `validateEvent` holds and the player can never "see" it) and never becomes
+    // an actor — it surfaces only later via gossip/pathways. The side rng (keyed off the event id,
+    // distinct salt from the B50 reveal) keeps the main stream byte-identical; requires `edgeOf`.
+    if (playerSubject && edgeOf && playerSubject !== a && playerSubject !== b
+        && (type === "strategy" || type === "conflict" || type === "alliance")) {
+      const side = new SeededRandom(hashSeed(`${event.id}:player-subject`));
+      if (side.next() < SOCIETY.playerSubjectProb) {
+        event.content += playerSubjectClause(edgeOf(a, playerSubject), a, playerSubject);
       }
     }
     events.record(event);
