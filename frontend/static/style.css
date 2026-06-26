@@ -4692,7 +4692,6 @@ body.bg-pattern-perlin-flow {
     @media (max-width:768px){
       .box { max-height:none; }
       .chat-container { padding:10px; flex:1; margin-top:0; padding-top:42px; min-height:0; }
-      .scroll-nav-btn { width:44px; height:44px; font-size:14px; margin-bottom:0; }
       .send-btn { width:48px; height:48px !important; border-radius:12px; }
       .send-btn svg { width:22px; height:22px; }
       #compare-toggle-btn { display:none !important; }
@@ -5945,50 +5944,9 @@ body.bg-pattern-perlin-flow {
       .styled-prompt-box { width: 85vw; }
       .styled-prompt-input { font-size: 0.9rem; padding: 10px 12px; }
     }
-    /* Scroll navigation buttons */
-    .scroll-nav-btn {
-      position:fixed;
-      background:var(--panel);
-      color: var(--accent);
-      border:none;
-      border-radius:10px;
-      width:38px; height:38px;
-      padding:0;
-      display:flex; align-items:center; justify-content:center;
-      font-size:14px;
-      line-height:1;
-      font-family:inherit;
-      cursor:pointer;
-      opacity:0;
-      pointer-events:none;
-      transition: opacity .2s, transform .3s cubic-bezier(0.25, 1, 0.5, 1), background .15s;
-      z-index:100;
-      transform: translateY(0);
-    }
-    .scroll-nav-btn::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: 10px;
-      padding: 1px;
-      background: linear-gradient(to bottom, var(--border), color-mix(in srgb, var(--border) 30%, transparent));
-      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-      pointer-events: none;
-    }
-    #scroll-bottom-btn.show { opacity:1; pointer-events:auto; }
-    @media (hover: hover) and (pointer: fine) {
-      #scroll-bottom-btn.show:hover {
-        border-color: color-mix(in srgb, var(--fg) 25%, transparent);
-      }
-    }
-    #scroll-bottom-btn.slide-out {
-      transform: translateY(20px);
-      opacity: 0 !important;
-      pointer-events: none;
-    }
+    /* #887: the .scroll-nav-btn / #scroll-bottom-btn squircle was retired — the single
+       jump-to-bottom button is now the JS-injected #orwell-scroll-bottom circle, which carries
+       its own injected CSS (static/js/orwellScrollBottom.js). */
     /* Focus outline for accessibility (WCAG 2.4.7) — a keyboard user Tabbing to an
        interactive control MUST see this ring. Gated to :focus-visible so it paints on
        keyboard intent, never on a plain pointer click. */
@@ -37344,8 +37302,7 @@ body.theme-frosted .modal {
   .input-icon-btn,            /* composer toolbar: attach / more-tools (36w) */
   .export-dl-btn,             /* chat-meta export ▾ (36w) */
   .topbar-rename-btn,         /* #795 chat-meta rename pencil (24w) — replaces export ▾ */
-  .scroll-nav-btn,            /* scroll-to-latest ▼ (38w) */
-  #orwell-scroll-bottom,      /* game scroll-to-latest (38×38, JS-injected) */
+  #orwell-scroll-bottom,      /* game scroll-to-latest (38×38, JS-injected) — the single jump-to-bottom button (#887) */
   .gadget-rail-open,          /* mobile gadget-drawer opener (42w) */
   .orwell-premiere-tutorial .opt-dismiss {  /* "Close guide" (36h) */
     min-width: 44px !important;

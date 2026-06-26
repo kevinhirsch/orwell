@@ -376,7 +376,7 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
         small = page.evaluate("""
           [...document.querySelectorAll(
              'button, [role=button], a[role=button], a.btn, select, .settings-nav-item,'
-             + '.input-icon-btn, .export-dl-btn, .scroll-nav-btn, #orwell-scroll-bottom,'
+             + '.input-icon-btn, .export-dl-btn, #orwell-scroll-bottom,'
              + '.gadget-rail-open, .gadget-rail-head button, .ow-controls button, .ow-dismiss,'
              + '.minimized-dock-x, .oc-pin, .oc-backfill, .opt-dismiss')]
             .filter(e => e.offsetParent !== null && !e.classList.contains('tap-exempt'))
