@@ -89,6 +89,11 @@ ASCII **ORWELL** banner and runs each action with sectioned, step-by-step status
 `✓` done, `✗` failed); the installer and the login health panel share the same banner + glyphs. The
 login health panel advertises it.
 
+> `/usr/local/bin` is ensured on the login-shell `PATH` via `/etc/profile.d/orwell-path.sh`
+> (dropped idempotently by install/update), because `pct enter` minimal login shells omit it —
+> otherwise `orwell` is "command not found". On a live box that predates this, the one-shot
+> workaround is `export PATH="/usr/local/bin:$PATH"`.
+
 ```bash
 orwell                      # the interactive menu (inside the container)
 orwell doctor --status      # or a direct subcommand (skips the menu — good over SSH / in scripts)
