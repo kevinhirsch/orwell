@@ -72,3 +72,43 @@ def test_sentence_buffer_only_releases_complete_sentences():
     assert rem == " Delia looks up and sa"
     # nothing complete yet → all buffered
     assert _split_complete_sentences("I should rec")[0] == ""
+
+
+# ── The fourth-wall "front end" meta-leak (audit 2026-06-26) ──────────────────
+# A live casting interview had the in-character host MIRROR the player's OOC software complaint
+# INTO the fiction: "Whatever the front end ate, I've got you now", "the front end's having a
+# day", "before the front end eats it too". The application the player runs us on must never be
+# referenced in the player-visible body. Invariant (behavioral, not a fixed string): after the
+# scrub, no player-visible body contains the app-self meta vocabulary.
+
+def test_front_end_meta_leak_is_stripped_from_the_body():
+    leak = (
+        "Whatever the front end ate, I've got you now. "
+        "The front end's having a day. Let's get you on the wall before the front end eats it too. "
+        "You settle into the casting chair and the producer leans in."
+    )
+    out = _scrub_game_leak(leak)
+    # the app-self meta vocabulary is gone (case-insensitive, hyphen or space)
+    lowered = out.lower()
+    for banned in ("front end", "front-end", "the app", "website"):
+        assert banned not in lowered, banned
+    # the real in-character narration survives
+    assert "You settle into the casting chair and the producer leans in." in out
+
+
+def test_app_and_site_meta_complaints_are_stripped():
+    assert "the app" not in _scrub_game_leak("The app froze on you, but production has it handled.").lower()
+    assert "this site" not in _scrub_game_leak("This site lagged for a second there.").lower()
+    assert "this website" not in _scrub_game_leak("This website is glitching, hang tight.").lower()
+
+
+def test_scrub_stays_high_precision_around_ordinary_words():
+    # "app" / "front" / "site" inside ordinary in-character prose must NOT be touched — only the
+    # narrow phrases ("the app", "front end", "this app/website/site") are leaks.
+    legit = (
+        "You approach the front door of the house. "
+        "The applause from the live audience swells. "
+        "She fronts confidence she clearly doesn't feel. "
+        "The campsite story he told earlier still hangs in the air."
+    )
+    assert _scrub_game_leak(legit) == legit
