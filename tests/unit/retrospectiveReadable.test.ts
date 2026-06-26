@@ -87,6 +87,25 @@ describe("0048 retrospective — pure readable renderers (no ids, no slugs)", ()
     expect(scrubbed).toContain("The Nominee"); // the npc:8 EMBEDDED in thread:npc:8:0 still resolved
   });
 
+  it("spares the human-readable `(overheard, muffled)` overhear prefix yet still strips a bare keyword (#997)", () => {
+    // presence.ts writes overheard fragments with the display prefix `(overheard, muffled) …`. The bare-keyword
+    // strip (line 189) must NOT delete `overheard` there (the bug rendered `(, muffled) …`). The `(?![:,])`
+    // guard spares the comma-trailed display word.
+    const fragment = humanizeForRetrospective("(overheard, muffled) Foo clashed with Bar in the lounge…", []);
+    expect(fragment).toContain("(overheard, muffled)"); // the display prefix survives intact — NOT "(, muffled)"
+    expect(fragment).not.toContain("(, muffled)");
+
+    // …while a real `surfaces via:` bare-keyword list is STILL stripped (no regression). The whole `surfaces
+    // via:` clause is removed, AND a lone bare keyword (no comma/colon trailing) is gone too.
+    const stripped = humanizeForRetrospective(
+      "premise: keeps a secret\nsurfaces via: overheard, gossip-diffused\nthen overheard nothing else",
+      [],
+    );
+    expect(stripped).not.toContain("surfaces via:");   // the pathway clause dropped whole
+    expect(stripped).not.toMatch(/\boverheard\b(?![:,])/); // the trailing bare keyword stripped
+    expect(stripped).not.toContain("gossip-diffused");
+  });
+
   it("seeded-relationship prose resolves BOTH parties (the bare-id-on-one-side case)", () => {
     const roster = [{ id: "npc:3", name: "The Veteran" }, { id: "npc:7", name: "The Floater" }];
     const nameOf = (id: string): string => roster.find((r) => r.id === id)?.name ?? id;

@@ -186,7 +186,12 @@ export function humanizeForRetrospective(
     // Strip the BARE thread-pathway keywords (the `surfaces via:` comma-list members) — but NOT when one
     // is the PREFIX of a colon-pathway slug (`overheard:offscreen:…`): the `(?!:)` guard leaves that slug
     // whole so the pathway collapse below glosses it cleanly, instead of stranding a dangling `:` (#844).
-    .replace(/\b(?:gossip-diffused|told-by-confidant|overheard|witnessed)\b(?!:)/g, "")
+    // The `surfaces via:` comma-list is already removed WHOLE by the line above (`[^\n]*` eats the clause to
+    // end-of-line), so a bare list member never reaches here trailed by a `,`. The only remaining `keyword,`
+    // shape is the human-readable overhear PREFIX `(overheard, muffled) …` (presence.ts) — the added `,` in
+    // the guard spares that display word so it is not gutted to `(, muffled)` (#997), with no regression to
+    // the keyword strip.
+    .replace(/\b(?:gossip-diffused|told-by-confidant|overheard|witnessed)\b(?![:,])/g, "")
     // deep-profile serialization (`deep-profile <id> | secrets: … | true-goals: … | weakness: … |
     // day-1 read of player: …`). The `day-1 read of player:` label is translated BEFORE the `player`
     // id is resolved, and the leading `deep-profile` tag is dropped (the resolved NAME leads the line).
