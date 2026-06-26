@@ -1,8 +1,48 @@
 """Shared auth helpers used by all route files."""
 
 import os
-from typing import Optional
+from typing import Any, Optional
 from fastapi import Request, HTTPException
+
+
+# Process-level AuthManager singleton (issue #966).
+#
+# ``AuthManager.__init__`` re-reads ``auth.json`` + ``sessions.json`` from disk
+# and logs ("Auth config loaded" / "Loaded N session(s) from disk") on every
+# construction. The app holds ONE instance at ``app.state.auth_manager``
+# (``app.py``), but several hot per-request / system code paths used to build a
+# fresh ``AuthManager()`` each call — producing the ~60s log spam + wasted I/O.
+#
+# These helpers resolve that one shared instance. The request-scoped app state
+# is preferred (so a single app owns the live sessions/cookies); a lazily-built
+# module-level instance is the last-resort fallback for request-free / system
+# code paths (e.g. the portrait pipeline, background tasks, the daily brief),
+# which previously each constructed their own.
+_SHARED_AUTH_MANAGER: Any = None
+
+
+def shared_auth_manager(request: Optional[Request] = None) -> Any:
+    """Return the one shared :class:`AuthManager`, never re-reading per call.
+
+    Resolution order:
+      1. ``request.app.state.auth_manager`` — the live app singleton, when a
+         request context is available.
+      2. A process-level cached instance — lazily built ONCE for request-free
+         system paths, then reused.
+
+    Construction of ``AuthManager`` is the slow/log-spammy part, so it happens
+    at most once here outside the app's own startup instance.
+    """
+    global _SHARED_AUTH_MANAGER
+    if request is not None:
+        state = getattr(getattr(request, "app", None), "state", None)
+        mgr = getattr(state, "auth_manager", None)
+        if mgr is not None:
+            return mgr
+    if _SHARED_AUTH_MANAGER is None:
+        from core.auth import AuthManager
+        _SHARED_AUTH_MANAGER = AuthManager()
+    return _SHARED_AUTH_MANAGER
 
 
 def get_current_user(request: Request) -> Optional[str]:
@@ -165,7 +205,7 @@ def is_admin_user(user: Optional[str]) -> bool:
     if not user:
         return False
     try:
-        from core.auth import AuthManager
-        return bool(AuthManager().is_admin(user))
+        # Reuse the process-level singleton (issue #966) — request-free path.
+        return bool(shared_auth_manager().is_admin(user))
     except Exception:
         return False
