@@ -560,7 +560,23 @@ async function loadEndpoints() {
       return out;
     };
     queryAll('[data-adm-toggle-ep]').forEach(btn => {
-      btn.addEventListener('click', async (e) => { e.stopPropagation(); await fetch(`/api/model-endpoints/${btn.dataset.admToggleEp}`, { method: 'PATCH' }); loadEndpoints(); });
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await fetch(`/api/model-endpoints/${btn.dataset.admToggleEp}`, { method: 'PATCH' });
+        // #967 belt (a): ENABLING an endpoint is the "enable API access" action that unblocks the
+        // casting cold-start. loadEndpoints()'s own refreshModels() call is UNFORCED, so when the
+        // models were already scanned (cached) while the endpoint was disabled, refreshModels sees a
+        // fresh cache, SKIPS the fetch, and never observes the none→some transition that fires
+        // orwell:models-changed — so the onboarding wizard never re-routes and the producers' opener
+        // never fires. Force a refresh here so the transition IS observed. (refreshModels only fires
+        // the event on a genuine none→some edge, so disabling — some→none — never spuriously fires it.)
+        try {
+          if (window.modelsModule && window.modelsModule.refreshModels) {
+            await window.modelsModule.refreshModels(true);
+          }
+        } catch (_) {}
+        loadEndpoints();
+      });
     });
     queryAll('[data-adm-tools-select]').forEach(sel => {
       sel.addEventListener('change', async (e) => {

@@ -5760,6 +5760,22 @@ export function close() {
   document.body.classList.remove('settings-appearance-open');
   syncAppearanceOpacity(false); // clear any opacity-slider fade
   if (win) win.close();
+  // #967 belt (b): closing Settings is itself a trigger for the casting cold-start. The producers'
+  // opener only fires after the onboarding flow re-routes; that re-route normally rides
+  // orwell:models-changed (fired by models.js on the none→some edge). But if the player enabled API
+  // access while the model list was already warm-cached, that edge can go unobserved — so closing
+  // Settings would leave the screen sitting with no kickoff. On the game build, re-dispatch the
+  // SAME event the onboarding already listens for (orwell:models-changed → _reRouteAfterModelConfig
+  // → route()) so the wizard re-evaluates regardless of whether the none→some edge fired. This is
+  // the more robust belt (it doesn't depend on the edge being observed). route() is internally
+  // guarded — a no-op when a season is already running, mounts the setup wizard only when pre-game
+  // with a feed configured — so this is safe to fire on every close. (Reusing the existing onboarding
+  // event keeps the route logic in one place; no g15 gamechanged dispatch is involved here.)
+  try {
+    if (document.body && document.body.hasAttribute('data-game-build')) {
+      window.dispatchEvent(new CustomEvent('orwell:models-changed'));
+    }
+  } catch (_) {}
 }
 
 const settingsModule = { open, close, initIntegrations, initUnifiedIntegrations, syncAdminVisibility, refreshAiModelEndpoints };
