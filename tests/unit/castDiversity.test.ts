@@ -80,6 +80,25 @@ describe("L28/B — the cast carries concrete, DIVERSE backstories", () => {
     }
   });
 
+  // F10/#1021: the surfaced premiere `background` line must read off the CAPPED vocation, not the
+  // legacy uncapped OCCUPATIONS pool (14 jobs, uncapped draw) that clustered at premiere ("3
+  // marketing, 2 firefighters"). The legacy OCCUPATIONS draw still happens (byte-stability), but the
+  // string the roster shows is recomposed from the diverse, ≤MAX_PER_VOCATION vocation.
+  it("the surfaced background reflects the capped vocation — no >2 job clustering (F10/#1021)", () => {
+    for (const seed of [3, 17, 88, 256, 1009, 4242]) {
+      const { npcs } = generateHouse(new SeededRandom(seed));
+      for (const n of npcs) {
+        // the background prose names this NPC's actual (capped, diverse) vocation
+        expect(n.character.background).toContain(n.character.vocation!);
+      }
+      // the JOB woven into each background never piles up past the vocation cap
+      const jobInBackground = npcs.map((n) => n.character.vocation!);
+      for (const [, count] of tally(jobInBackground)) {
+        expect(count).toBeLessThanOrEqual(MAX_PER_VOCATION);
+      }
+    }
+  });
+
   it("hometowns spread across regions — no one region accents the whole house", () => {
     for (const seed of [3, 17, 88, 256, 1009, 4242]) {
       const { npcs } = generateHouse(new SeededRandom(seed));

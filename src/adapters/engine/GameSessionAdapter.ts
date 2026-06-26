@@ -1561,6 +1561,19 @@ export class GameSessionAdapter implements GameSession {
         votedFor: { id: votedFor, name: this.nameOf(votedFor) },
       })),
     }));
+    // SG7/#1030: the finale jury vote unseals HERE — per-juror attribution, mirroring `evictionVotes`,
+    // behind the same terminal gate. Read the already-tallied finale votes off the live state (juror →
+    // finalist); never recomputed. Absent until the finale's vote stage has set `finale.votes`.
+    const finale = this.live.finale;
+    const juryVotes = finale?.votes
+      ? {
+          finalists: finale.finalists.map((id) => this.named(id)!),
+          votes: Object.entries(finale.votes).map(([juror, votedFor]) => ({
+            juror: this.named(juror as EntityId)!,
+            votedFor: this.named(votedFor as EntityId)!,
+          })),
+        }
+      : undefined;
     // #852 — order the dump CHRONOLOGICALLY. Pre-season setup (threads, seeded ties, the day-one reads,
     // sealed orientations) carries no event time marker, so it sorts FIRST (as setup); the live hidden
     // layer then follows by its monotonic `ts`. A stable sort keeps same-`ts` rows in assembly order.
@@ -1579,6 +1592,7 @@ export class GameSessionAdapter implements GameSession {
       hiddenStory: coalesceDumpRows(ordered),
       twists,
       evictionVotes,
+      ...(juryVotes ? { juryVotes } : {}),
     };
   }
 
@@ -2868,7 +2882,13 @@ export class GameSessionAdapter implements GameSession {
       // The no-op returns the PRIOR season's view — but now SIGNALS the refusal (audit R4-05) so the
       // caller can tell "created" from "left untouched". Without it the model read the unchanged view
       // as success and narrated a new season the engine never started.
-      if (!req.confirmRestart) return { ...this.view(), createRefused: this.live?.finished ? "over" : "in-progress" };
+      if (!req.confirmRestart) return {
+        ...this.view(),
+        createRefused: this.live?.finished ? "over" : "in-progress",
+        createRefusedReason: this.live?.finished
+          ? "a season already finished for this player — start a new game from the menu (a confirmed restart) before casting again"
+          : "a season is already in progress for this player — it was left untouched; use the menu to restart rather than re-casting",
+      };
       // A CONFIRMED restart routes through the ONE sanctioned door (audit E1/D1/R1): the registry's
       // reset delegate — the SAME hinge the admin reset uses — forgets the orchestrator baseline,
       // rotates the dead season's saves, and creates season 2 in a clean sandbox. Without that the
@@ -2886,8 +2906,13 @@ export class GameSessionAdapter implements GameSession {
     });
     const playerName = merged.playerName;
     if (!playerName) {
+      // Issue #1033 / F-2: the rejection MUST surface a clear reason. The name may have been written
+      // under a synonym key (`name`) that the engine now aliases (issue #1033 / F-1) — if it STILL
+      // isn't here, the intake genuinely has no name. Name the field explicitly so the GM re-asks and
+      // records it with `updateCasting` rather than looping with no diagnosis (the message is the 400
+      // body the FE surfaces).
       throw new EngineRefusal(
-        "casting needs a name before the season can start — ask the player and record it with updateCasting",
+        "casting cannot finalize: no player name is on file — ask the player their name and record it with updateCasting(playerName) before createCharacter",
       );
     }
     // Completeness backstop (the mobile short-circuit fix, 0050): the forced FE finalize fires
@@ -2911,7 +2936,12 @@ export class GameSessionAdapter implements GameSession {
     const argsCarriedIdentity =
       !!effReq.playerName || effReq.seed !== undefined || !!effReq.archetype || !!effReq.strategyStyle;
     if (!hasSubstance && !argsCarriedIdentity) {
-      return { ...this.view(), createRefused: "casting-incomplete" };
+      return {
+        ...this.view(),
+        createRefused: "casting-incomplete",
+        createRefusedReason:
+          "the casting interview needs more than a name before the season can start — capture a backstory, a motivation, and how they'll play (updateCasting) and finalize again",
+      };
     }
     // 0065 — ADOPT a pre-warmed cast. If `preSeedCast` already generated (and the FE deeply authored)
     // the cast during the interview, finalize ATOP it: reuse its seed so the warmed cast is the cast that
