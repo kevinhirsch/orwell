@@ -314,23 +314,44 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                 page.wait_for_timeout(150)
             else:
                 raise AssertionError("Settings modal never opened past the onboarding overlay")
+            # Wait for EVERY endpoint-scoped card the pick below drives to be
+            # populated by its OWN async init() — not just the three originally
+            # gated here. Each init* is fire-and-forget (initAll() does not await
+            # them), so a select can lag the others on a slow runner; driving a
+            # `change` on a select whose options haven't arrived yet picks
+            # nothing (set-utilityEpSelect → firstReal()===undefined) or — for
+            # the TTS provider — fails to STICK: initTtsSettings() appends the
+            # `endpoint:<id>` <option> only after its first await resolves, so
+            # setting the value before then is silently rejected, isEndpoint() is
+            # false, and the TTS model select keeps its OpenAI markup fallback
+            # ({tts-1, tts-1-hd, gpt-4o-mini-tts}) — the historical h2b
+            # TTS-subset flake. Gate on the endpoint option's presence so the
+            # pick is deterministic.
             page.wait_for_function(
                 """() => {
-                  const ep = document.getElementById('set-defaultEpSelect');
-                  const img = document.getElementById('set-imgModelSelect');
-                  const rEp = document.getElementById('set-researchEndpoint');
-                  return ep && ep.options.length > 0
-                      && img && img.options.length > 1
-                      && rEp && rEp.options.length > 1;      // endpoint arrived
+                  const opts = (id) => {
+                    const s = document.getElementById(id);
+                    return s ? [...s.options].map(o => o.value) : [];
+                  };
+                  const hasReal = (id) => opts(id).some(v => v !== '');
+                  const ttsEndpointReady =
+                    opts('set-ttsProviderSelect').some(v => v.startsWith('endpoint:'));
+                  return hasReal('set-defaultEpSelect')
+                      && hasReal('set-utilityEpSelect')
+                      && opts('set-imgModelSelect').length > 1
+                      && opts('set-researchEndpoint').length > 1   // endpoint arrived
+                      && ttsEndpointReady;
                 }""",
                 timeout=15000,
             )
 
             # Drive each endpoint-scoped card onto the live endpoint the way a
             # user does (the chat card may hold a stale saved endpoint id, and
-            # utility/research start blank = inherit).
-            page.evaluate(
-                """(liveId) => {
+            # utility/research start blank = inherit). Kept as a re-runnable
+            # snippet so a trailing initTtsSettings() auth-settings await that
+            # resets the TTS provider to the saved default ("disabled") is simply
+            # re-overwritten by the convergence loop below.
+            pick_js = """(liveId) => {
                   const pick = (id, value) => {
                     const s = document.getElementById(id);
                     s.value = value;
@@ -346,14 +367,33 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                   // TTS: endpoint mode is the pool-fed path (markup options are
                   // only the no-data fallback).
                   pick('set-ttsProviderSelect', 'endpoint:' + liveId);
-                }""",
-                live_id,
-            )
+                }"""
+            page.evaluate(pick_js, live_id)
             page.wait_for_function(
                 "document.getElementById('set-defaultModelSelect').options.length > 0",
                 timeout=5000,
             )
-            page.wait_for_timeout(300)
+            # Wait for the TTS model select to actually reflect the live endpoint's
+            # TTS-capable model (the pool path) instead of the OpenAI markup
+            # fallback — re-applying the pick if a trailing initTtsSettings() await
+            # clobbered the provider in the gap. Replaces the old fixed 300ms
+            # sleep, which raced the TTS chain's second (auth-settings) await on a
+            # slow CI runner.
+            tts_deadline = time.monotonic() + 10
+            tts_vals = None
+            while time.monotonic() < tts_deadline:
+                tts_vals = page.evaluate(
+                    "() => [...document.getElementById('set-ttsModelSelect').options].map(o => o.value)"
+                )
+                if set(tts_vals) == {"h2b-tts-model"}:
+                    break
+                page.evaluate(pick_js, live_id)  # idempotent re-pick beats a late clobber
+                page.wait_for_timeout(150)
+            else:
+                raise AssertionError(
+                    "TTS model select never settled on the live endpoint's pool model "
+                    f"(last saw {tts_vals}) — initTtsSettings did not converge"
+                )
 
             opts = page.evaluate(
                 """() => {
