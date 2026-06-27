@@ -111,8 +111,52 @@ export function makeIdHumanizer(
  * sibling can't leave a dangling `via :…`), and the leftover-colon sweep at the end drops any orphan
  * `:token` machine fragment a partial slug left behind. Idempotent under repeated application.
  */
+/**
+ * PV2 (#997) — a GRADED, decaying vocabulary for how clearly a surfaced belief landed, from its [0,1]
+ * confidence. The overhear/gossip layer (presence.ts / gossip.ts) already computes a real, decaying
+ * confidence (per-hop decay, the partial-overhear discount), but the surfacing PREFIX rendered it flat
+ * ("muffled" every time, and a brittle scrub even gutted the source word to "(, muffled)"). This maps
+ * the confidence to a clarity word so a season's surfacings READ as graded — a near-certain whisper
+ * ("clearly") vs. a third-hand, half-decayed rumor ("barely"). Pure, Vault-free (a word, never a
+ * number), and bounded: out-of-range input clamps. The thresholds are coarse on purpose (this is
+ * texture, not telemetry).
+ */
+export function confidenceWord(confidence: number): string {
+  const c = Math.max(0, Math.min(1, confidence));
+  if (c >= 0.75) return "clearly";
+  if (c >= 0.55) return "mostly";
+  if (c >= 0.4) return "muffled";
+  if (c >= 0.25) return "faintly";
+  return "barely";
+}
+
+/**
+ * PV2 (#997) — render the OVERHEAR surfacing prefix from real belief state instead of the flat literal.
+ * The presence layer stores an overhear as `(overheard, muffled) <fragment>…` — `(overheard, muffled)`
+ * is a MACHINE SENTINEL kept byte-stable so the knowledge layer's content-lineage anchor
+ * (`InMemoryKnowledgeService.normalizeContent` strips exactly that literal) still recovers the clean
+ * fragment. At DISPLAY time we upgrade the sentinel to a graded, never-empty source clause:
+ *   - the SOURCE word `overheard` is always preserved (so a row never renders as `(, …)` — the #997
+ *     regression where a bare-keyword strip gutted it); and
+ *   - the flat `muffled` becomes a clarity word GRADED by how much of the scene was caught (the
+ *     fragment length is the in-content clarity proxy the render can see — a longer caught fragment
+ *     was heard more clearly), so a season's overhears read as varied, not one repeated "muffled".
+ * Pure and idempotent: only the literal sentinel is rewritten; an already-graded prefix or any other
+ * text is left untouched.
+ */
+export function humanizeOverhearPrefix(content: string): string {
+  return content.replace(/\(overheard,\s*muffled\)\s*([^]*?)(…|$)/, (_m, frag: string, tail: string) => {
+    // Clarity proxy: how much of the scene was caught. The presence overhear keeps ~60% of the source
+    // (PRESENCE.overhearFraction) then truncates with an ellipsis; a longer caught fragment ⇒ a clearer
+    // catch. Map the caught length to a confidence band, then to a clarity word. Coarse on purpose.
+    const caught = frag.trim();
+    const conf = caught.length >= 80 ? 0.75 : caught.length >= 45 ? 0.55 : caught.length >= 22 ? 0.4 : 0.25;
+    return `(overheard, ${confidenceWord(conf)}) ${caught}${tail}`;
+  });
+}
+
 export function tidyPathwaySlugs(content: string): string {
-  let out = content;
+  let out = humanizeOverhearPrefix(content);
   // The gossip drift marker: " · <drift phrase>#<digits>" (from src/engine/gossip.ts `distort`).
   out = out.replace(/\s*·\s*[^·#]*#\d+/g, "");
   // A bare pathway slug that leaked into content: `overheard:…`/`offscreen:…`/`told-by:…`/`gossip:…`
