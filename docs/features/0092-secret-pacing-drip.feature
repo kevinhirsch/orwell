@@ -12,7 +12,7 @@ Feature: 0092 — Secret-pacing drip (the paced "I knew it" payoff)
   # Role-only (testing rule): the-player, a houseguest, a close ally, a rival, a bystander.
 
   Background:
-    Given a started season with the player in the house
+    Given a started season with the player among a cast carrying sealed secrets
     And the secret-pacing drip is enabled
 
   Rule: A drip only ever crosses through a modeled in-game pathway

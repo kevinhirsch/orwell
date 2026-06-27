@@ -167,6 +167,11 @@ import {
   type ConfidenceSignals,
 } from "../../engine/confidence";
 import { CONFIDENCE, type DisclosureTier } from "../../engine/confidenceConstants";
+import {
+  rankPlayerBoundThreads, dripBudget, recencyFromAge, relationshipReads,
+  type PlayerBoundThread, type RankedThread,
+} from "../../engine/secretPacing";
+import { SECRET_PACING } from "../../engine/secretPacingConstants";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore, TrackedSighting } from "../../engine/sessionSnapshot";
@@ -348,6 +353,16 @@ const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
  * per-session via `setTriggersEnabled`.
  */
 const TRIGGERS_ENABLED_DEFAULT = process.env.ORWELL_TRIGGERS === "1";
+/**
+ * 0092 — whether the SECRET-PACING DRIP runs by DEFAULT. OFF unless `ORWELL_SECRET_PACING=1`. A DEDICATED
+ * flag (sibling to `ORWELL_CAMPAIGNS` / `ORWELL_TRAJECTORIES` / `ORWELL_SEEDED_TIE_SURFACING`) so
+ * calibration neutrality is provable in isolation: with it unset, the pacing pass takes ZERO draws, 0060's
+ * own flat surface-to-player path is the only one that runs, and every seeded gate (juryReach/gradient/UAT)
+ * is byte-identical to the pre-feature build. The calibration/UAT harness never sets it; the live deploy
+ * may. Read once at module load (like the watcher cadence + the sibling flags); a test overrides
+ * per-session via `setSecretPacingEnabled`. Default-off until the cadence is tuned against the UAT.
+ */
+const SECRET_PACING_ENABLED_DEFAULT = process.env.ORWELL_SECRET_PACING === "1";
 
 /**
  * Engine-side implementation of the Vault-free game-session port. It runs the
@@ -970,6 +985,24 @@ export class GameSessionAdapter implements GameSession {
    *  the shared society/vote stream, so even with the layer ON the seeded calibration spine is untouched.
    *  Bumped once per `runTriggerEruptions`. Persisted so the dedicated stream stays reproducible (absent ⇒ 0). */
   private triggerTickCount = 0;
+  /**
+   * 0092 — the secret-pacing drip's hidden weekly bookkeeping (engine-only; the pace is per-WEEK, not a
+   * per-tick probability). `pacingDripWeek` is the week `pacingDripCount` is FOR — a new week resets the
+   * count to 0; `pacingDripCount` is how many player-bound drips have fired this week (the hard weekly
+   * ceiling `SECRET_PACING.maxDripsPerWeek`); `pacingTickCount` is the DEDICATED rng's tick counter (so
+   * the seeded eligibility stream is reproducible and never aliases another dedicated stream). Persisted
+   * so the cadence + anti-spam survive a restart and the pace RESUMES (never resets). Absent on saves
+   * with pacing off / pre-0092 ⇒ 0 (non-degradation; the season cap `surfacedThreadCount` still binds).
+   */
+  private pacingDripWeek = 0;
+  private pacingDripCount = 0;
+  private pacingTickCount = 0;
+  /**
+   * 0092 — per-thread, the WEEK that thread last dripped toward the player (so the already-told penalty +
+   * the no-re-spam rule survive a restart). A thread's id ⇒ the last week it edged toward the player.
+   * Persisted alongside the counter above (siblings to 0060's `surfacedThreadCount`). Engine-only.
+   */
+  private pacingLastDrippedWeek: Record<string, number> = {};
   /**
    * 0075 — what each houseguest has CONFIDED to the player, by id. The tier is MONOTONIC for a true
    * confidence (never re-told at a lower tier than already reached); `truthful: false` marks a lie
@@ -1899,6 +1932,16 @@ export class GameSessionAdapter implements GameSession {
       // 0 (byte-shaped like a pre-0091 save / the layer off).
       ...(this.eruptionCount > 0 ? { eruptionCount: this.eruptionCount } : {}),
       ...(this.triggerTickCount > 0 ? { triggerTickCount: this.triggerTickCount } : {}),
+      // 0092 — the secret-pacing drip's hidden weekly bookkeeping (the per-week drip counter + the
+      // per-thread last-dripped week), persisted so the CADENCE and the no-re-spam penalty survive a
+      // restart — the pace resumes, it never resets (non-degradation, 0007/0030). Each field is gated
+      // INDEPENDENTLY on its own non-zero/non-empty value (never on a sibling), so the per-week context
+      // is never silently dropped after the count lazily rolls to 0 on a new week. Absent when pacing is
+      // off / nothing has dripped ⇒ start fresh (0/empty); the season cap above still binds either way.
+      ...(this.pacingDripWeek > 0 ? { pacingDripWeek: this.pacingDripWeek } : {}),
+      ...(this.pacingDripCount > 0 ? { pacingDripCount: this.pacingDripCount } : {}),
+      ...(this.pacingTickCount > 0 ? { pacingTickCount: this.pacingTickCount } : {}),
+      ...(Object.keys(this.pacingLastDrippedWeek).length ? { pacingLastDrippedWeek: cloneSession(this.pacingLastDrippedWeek) } : {}),
       // 0075 — the confidence ledger (what each houseguest has confided + the season lie count),
       // persisted so a restored game remembers exactly what the player was told and never re-opens the
       // lie cap or re-tells a secret at a lower tier (non-degradation, 0007/0030).
@@ -2098,6 +2141,13 @@ export class GameSessionAdapter implements GameSession {
     // saves / the layer off ⇒ 0). The per-trigger fired/lastFiredWeek flags are restored with the house above.
     this.eruptionCount = core.eruptionCount ?? 0;
     this.triggerTickCount = core.triggerTickCount ?? 0;
+    // 0092 — restore the secret-pacing drip's weekly bookkeeping (absent on pacing-off / pre-0092 saves
+    // ⇒ 0/empty, so the pace resumes from a clean slate and nothing re-spams; the season cap above still
+    // binds). The pace RESUMES across a restart, it never resets (non-degradation).
+    this.pacingDripWeek = core.pacingDripWeek ?? 0;
+    this.pacingDripCount = core.pacingDripCount ?? 0;
+    this.pacingTickCount = core.pacingTickCount ?? 0;
+    this.pacingLastDrippedWeek = core.pacingLastDrippedWeek ? cloneSession(core.pacingLastDrippedWeek) : {};
     // 0075 — restore the confidence ledger (absent on pre-0075 saves ⇒ empty/zero, never re-confides
     // a secret the player already heard, the cap intact).
     this.confideState = core.confideState ? cloneSession(core.confideState) : {};
@@ -3194,6 +3244,7 @@ export class GameSessionAdapter implements GameSession {
       this.confideState = {};
       this.lieCount = 0;
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
+      this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -3432,6 +3483,7 @@ export class GameSessionAdapter implements GameSession {
     this.confideState = {};
     this.lieCount = 0;
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
+    this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -3712,6 +3764,8 @@ export class GameSessionAdapter implements GameSession {
     this.lieCount = 0;
     // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent, the stream at 0.
     this.resetTieSurfacing();
+    // 0092 — a fresh season: the secret-pacing weekly cadence + anti-spam start clean.
+    this.resetSecretPacing();
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
     // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
@@ -3789,6 +3843,15 @@ export class GameSessionAdapter implements GameSession {
     this.playerTieSurfaceCount = 0;
     this.surfacedTieSubjects = new Set();
     this.tieScheduleTickCount = 0;
+  }
+
+  /** 0092 — clear the secret-pacing drip bookkeeping (a fresh season: the weekly counter + the per-thread
+   *  last-dripped week start empty, so the cadence + anti-spam begin from scratch). */
+  private resetSecretPacing(): void {
+    this.pacingDripWeek = 0;
+    this.pacingDripCount = 0;
+    this.pacingTickCount = 0;
+    this.pacingLastDrippedWeek = {};
   }
 
   private seedSeededRelationships(seed: number): void {
@@ -3957,6 +4020,163 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0092 — whether the SECRET-PACING DRIP runs. OPT-IN, default OFF — exactly like the ADR-0006 clock,
+   * the campaign layer, the trajectory layer, and the 0059 §5 tie-surfacing scheduler. When off (the
+   * default, and the state the seeded juryReach / gradient / UAT sims run in) `pacingDrip` returns
+   * IMMEDIATELY: it draws nothing and routes nothing, so 0060's own flat surface path is the only one
+   * that runs and every seeded outcome is BYTE-IDENTICAL to the pre-feature build. The deploy may turn
+   * it on once the cadence is tuned. A test overrides per-session via `setSecretPacingEnabled`.
+   */
+  private static secretPacingOverride: boolean | null = null;
+
+  /** The per-session override seam for the 0092 drip (a test flips it; reserved for a future admin toggle,
+   *  like its `setCampaignsEnabled`/`setTrajectoriesEnabled` siblings — not yet wired to an admin tool).
+   *  `null` ⇒ fall back to the `ORWELL_SECRET_PACING` env default. */
+  static setSecretPacingEnabled(enabled: boolean | null): void {
+    GameSessionAdapter.secretPacingOverride = enabled;
+  }
+
+  private get secretPacingEnabled(): boolean {
+    if (GameSessionAdapter.secretPacingOverride !== null) return GameSessionAdapter.secretPacingOverride;
+    return SECRET_PACING_ENABLED_DEFAULT;
+  }
+
+  /**
+   * 0092 — how much the player has ALREADY caught wind of one thread's secret ∈ [0,1] (the already-told
+   * penalty input; engine-only, never shown). Reads ONLY existing sealed state:
+   *   • THIS thread's own state — whether it has already SURFACED (0060) or this pacing layer dripped it
+   *     before. Either ⇒ the full 1.0 (the player already caught THIS secret; the drip moves on).
+   *   • The SOURCE-level 0075 confidence — a source authors several DISTINCT threads, so a confidence on
+   *     ANY one only DAMPENS their others (a fraction of the tier), never fully floors them. A LIE
+   *     (`truthful: false`) contributes NOTHING — the player was deceived, so the real secret's payoff
+   *     stays fully available (the "I knew it" lands hardest when you were lied to).
+   * The MAX of the two — once a secret has reached the player by a real route, the drip moves ON
+   * (anti-spam + non-degradation), but a single unrelated disclosure never permanently buries a source's
+   * other secrets.
+   */
+  private threadAlreadyTold(thread: StoryThread): number {
+    const tierFraction: Record<DisclosureTier, number> = { none: 0, tease: 0.4, partial: 0.7, full: 1 };
+    const confided = this.confideState[thread.sourceId];
+    // Only a TRUTHFUL confidence dampens; a lie leaves the real secret fully ripe. Source-level ⇒ a
+    // fraction (it's a related, not the same, disclosure); the thread's OWN state below carries the full weight.
+    const confidedTold = confided && confided.truthful
+      ? tierFraction[confided.tier] * SECRET_PACING.confidedSourceFraction
+      : 0;
+    const ownTold = (thread.status === "surfaced" || thread.id in this.pacingLastDrippedWeek) ? 1 : 0;
+    return Math.max(confidedTold, ownTold);
+  }
+
+  /**
+   * 0092 — can the chosen 0060 pathway ACTUALLY deliver this drip (audit deliverability guard)? Mirrors
+   * the conditions inside `surfaceThread`'s two branches: the `player` (confidant slip) channel needs the
+   * to-player seam wired; the `gossip` channel needs a living NPC OTHER than the source to whisper it AND
+   * the gossip seam wired. A drip only commits (spending the scarce weekly/season budget + setting the
+   * anti-spam state) when its channel can deliver — never burn a season slot on a silent no-op (e.g. a
+   * tension-ripe secret at Final-2 with no third party to carry it). The secret stays ripe for later.
+   */
+  private canDeliverDrip(sourceId: EntityId, channel: "player" | "gossip", pos: SeasonPosition): boolean {
+    if (channel === "player") return this.onThreadSurfaceToPlayer !== undefined;
+    const livingNpcs = (this.house?.npcs ?? [])
+      .map((n) => n.id)
+      .filter((id) => id !== sourceId && !pos.evicted.has(id));
+    return livingNpcs.length > 0 && this.onThreadGossip !== undefined;
+  }
+
+  /**
+   * Feature 0092 — the SECRET-PACING DRIP. Runs ONCE per bounded off-screen tick, BEFORE 0060's own
+   * surface-to-player decision (`scheduleStoryThreads`), and PACES which sealed secret edges toward THIS
+   * player and how fast. It is a thin scheduling/eligibility layer over 0060 — it adds NO new pathway:
+   * a chosen drip crosses through 0060's EXISTING anchored organs (`surfaceThread` → the confidant slip
+   * / `surfaceInformationTo` / the 0038 gossip chain), as the same Vault-safe belief 0060 already
+   * produces. The engine owns the schedule (which secret is ripe, whether the weekly budget allows it,
+   * whether the seeded eligibility roll passes); the model never selects or invents a secret (mandate #3).
+   *
+   * CALIBRATION (the load-bearing guarantee): returns `[]` immediately unless the flag is on, so the
+   * seeded sims never enter it. When on, EVERY roll is on a DEDICATED rng (off the game seed + a private
+   * tick counter — NEVER the shared society/competition/vote stream the orchestrator passes to
+   * `scheduleStoryThreads`), and the only thing it changes is WHICH already-Wall-safe surface 0060 picks
+   * and WHETHER the weekly budget allows it. The seeded comp/vote/jury spine is untouched.
+   *
+   * THE PACE: a per-WEEK budget (the heart of the feature), not a per-tick probability — a hard weekly
+   * ceiling (`maxDripsPerWeek`) layered UNDER 0060's `maxSurfacedPerSeason` season cap. The weekly budget
+   * can never push the season total past 0060's ceiling; it only SHAPES those scarce reveals into a
+   * paced, relationship-weighted cadence (about one a week, about people the player is circling).
+   */
+  pacingDrip(): RankedThread[] {
+    if (!this.secretPacingEnabled) return []; // default OFF ⇒ fully inert (the calibration spine untouched)
+    if (!this.house || this.storyThreads.length === 0) return [];
+
+    // Roll the per-WEEK counter over FIRST (a new live week resets the spent count to 0 — the cadence is
+    // per-week), so the persisted bookkeeping never trails the live week. Then read the (now-synced) budget.
+    if (this.pacingDripWeek !== this.week) { this.pacingDripWeek = this.week; this.pacingDripCount = 0; }
+    const budget = dripBudget({ week: this.pacingDripWeek, spentThisWeek: this.pacingDripCount, currentWeek: this.week });
+    // Two layered ceilings: the per-week budget (the pace) AND 0060's hard SEASON cap (the true ceiling on
+    // total payoff). Either spent ⇒ no player-bound drip this tick (surplus ripe threads still play out
+    // off-screen NPC↔NPC via 0060's own flat path — only the player-bound channel is paced here).
+    if (!budget.allowed || this.surfacedThreadCount >= THREAD.maxSurfacedPerSeason) return [];
+
+    const pos = this.seasonPosition();
+    // The drip rides the SAME freshly-moved house 0060 reads; only ACTIVE threads whose source is still in
+    // the house are eligible to edge toward the player (a dormant secret hasn't broken loose; an evicted
+    // source's secret isn't slipping). Build each candidate's already-read, Vault-hidden ripeness inputs.
+    const candidates: PlayerBoundThread[] = [];
+    for (const thread of this.storyThreads) {
+      if (thread.status !== "active") continue;
+      if (sourceWindowClosed(thread, pos)) continue;
+      // proximity + tension from the BOTH-WAY player↔source edges (the engine's own directed reads).
+      const reads = relationshipReads(
+        this.rel.edge(PLAYER, thread.sourceId),
+        this.rel.edge(thread.sourceId, PLAYER),
+      );
+      candidates.push({
+        id: thread.id,
+        sourceId: thread.sourceId,
+        proximity: reads.proximity,
+        tension: reads.tension,
+        recency: recencyFromAge(this.week - (thread.lifecycleWeek ?? this.week)),
+        alreadyTold: this.threadAlreadyTold(thread),
+      });
+    }
+    if (candidates.length === 0) return [];
+
+    // Seed-stable ranking (pure; no rng) — most-ripe first, the relevance floor drops secrets about people
+    // the player has no proximity AND no tension with (they keep churning off-screen, never edge over).
+    const ranked = rankPlayerBoundThreads(candidates);
+    if (ranked.length === 0) return [];
+    const top = ranked[0]!;
+    const channel: "player" | "gossip" = top.channel === "confidant" ? "player" : "gossip";
+    // DELIVERABILITY guard (audit): a drip must only commit when its chosen 0060 pathway can ACTUALLY
+    // deliver — the confidant slip needs the to-player seam wired; the gossip chain needs a living NPC
+    // origin to whisper it. If the chosen channel can't deliver, the secret stays ripe (no budget/cap
+    // burned on a reveal that reaches no one) — never spend a scarce season slot on a silent no-op.
+    if (!this.canDeliverDrip(top.sourceId, channel, pos)) return [];
+
+    // The DEDICATED stream — keyed off the game seed + the PRIVATE tick counter (distinct slug from every
+    // other dedicated stream so they never alias). Bump the tick counter HERE, adjacent to the only rng it
+    // keys (so the eligibility-roll stream is `one key per deliverable candidate`, gap-free + restart-
+    // stable). Zero touch to the orchestrator's shared per-user rng (the calibration spine).
+    this.pacingTickCount += 1;
+    const rng = new SeededRandom(hashSeed(`secret-pacing:${this.gameSeed ?? ""}:${this.pacingTickCount}`));
+    // A single bounded, seeded eligibility roll on the TOP candidate (a quiet tick — and a quiet week — is
+    // intentional; the season cap is the true ceiling). On a miss nothing crosses; the secret stays ripe.
+    if (rng.next() >= SECRET_PACING.dripEligibilityRate) return [];
+
+    const thread = this.storyThreads.find((t) => t.id === top.id);
+    if (!thread) return [];
+    // Route the ripe secret into 0060's EXISTING surface-to-player path — proximity-ripe prefers the
+    // confidant slip (a close source TELLS the player), tension-ripe prefers the gossip chain (a third
+    // party brings it). Either way it is the unchanged anchored organ; the drip only CHOSE and PACED it.
+    // It counts against 0060's season cap inside surfaceThread (surfacedThreadCount++), so the pace can
+    // never add payoff past the season ceiling.
+    this.surfaceThread(thread, pos, rng, channel);
+    // Charge the weekly budget + record the per-thread last-dripped week (the anti-spam state). Persistence
+    // is the orchestrator's batched commit (this rides its bounded tick) — no `persist()` here (R3).
+    this.pacingDripCount += 1;
+    this.pacingLastDrippedWeek[thread.id] = this.week;
+    return [top];
+  }
+
+  /**
    * Feature 0060 — the per-tick story-thread SCHEDULER. Rides the EXISTING bounded off-screen tick
    * (`orchestrator.defaultApply`), runs AFTER the tick's society/gossip/confessional steps so it reads
    * the freshly-moved house, and walks each thread's lifecycle once:
@@ -4056,15 +4276,31 @@ export class GameSessionAdapter implements GameSession {
    * actually confides. A stranger's gossip stays the ordinary vague `threadRumor`. The fuller variant is
    * STILL Vault-safe: keyed only by the public source CLASS (the same `weakness`/`true goal`/secret
    * prefix the class gloss already uses), never the verbatim premise/trigger, never a number (§7).
+   *
+   * `force` (0092): the secret-pacing drip selects a ripe thread and forces its CHANNEL — `player` routes
+   * straight to the existing to-player path (a confidant slip / anchored `surfaceInformationTo`), `gossip`
+   * routes straight to the existing NPC↔NPC diffusion (a chain that may reach the player). It changes ONLY
+   * which already-Wall-safe surface is chosen — NEVER the content (the same `threadRumor`/confidant
+   * paraphrase) and never a number. Absent (the default + the flag-off path) ⇒ the seeded
+   * `surfaceToPlayerProb` roll decides exactly as before, so 0060 is byte-identical when pacing is off.
    */
-  private surfaceThread(thread: StoryThread, pos: SeasonPosition, rng: RandomnessSource): void {
+  private surfaceThread(
+    thread: StoryThread, pos: SeasonPosition, rng: RandomnessSource, force?: "player" | "gossip",
+  ): void {
     const name = this.nameOf(thread.sourceId);
     const rumor = threadRumor(thread, name);
     // Choose an NPC ORIGIN for the rumor: a living NPC other than the source (someone who'd whisper it).
     const livingNpcs = (this.house?.npcs ?? [])
       .map((n) => n.id)
       .filter((id) => id !== thread.sourceId && !pos.evicted.has(id));
-    const toPlayer = rng.next() < THREAD.surfaceToPlayerProb && this.onThreadSurfaceToPlayer !== undefined;
+    // The to-player decision: 0092 may FORCE the channel (the drip chose it), else the unchanged seeded
+    // `surfaceToPlayerProb` roll. A forced `player` still requires the seam to be wired (the registry sets
+    // it); a forced `gossip` skips the to-player branch entirely. Default ⇒ byte-identical to before.
+    const toPlayer = force === "player"
+      ? this.onThreadSurfaceToPlayer !== undefined
+      : force === "gossip"
+        ? false
+        : rng.next() < THREAD.surfaceToPlayerProb && this.onThreadSurfaceToPlayer !== undefined;
     if (toPlayer && this.onThreadSurfaceToPlayer) {
       // Rare: a modeled pathway already reaches the player — surface a content-lineage-anchored belief
       // (E9). An unanchored attempt is correctly downgraded to a suspicion by 0002; either way the

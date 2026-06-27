@@ -215,6 +215,20 @@ export interface SessionCore {
    */
   triggerTickCount?: number;
   /**
+   * Feature 0092 — the secret-pacing drip's engine-only, HIDDEN weekly bookkeeping. `pacingDripWeek` is the
+   * week `pacingDripCount` is FOR (a new week resets the count — the cadence is per-WEEK); `pacingDripCount`
+   * is how many player-bound drips have fired this week (the hard weekly ceiling); `pacingTickCount` is the
+   * DEDICATED rng's tick counter (so the seeded eligibility stream is reproducible across a restart);
+   * `pacingLastDrippedWeek` maps a thread id → the last week it edged toward the player (the already-told
+   * penalty / no-re-spam state). Persisted so the CADENCE + anti-spam survive a restart and the pace
+   * RESUMES, never resets (non-degradation, 0007/0030). Absent on pacing-off / pre-0092 saves ⇒ 0/empty
+   * (the season cap `surfacedThreadCount` still binds, so the relaxation is benign and never leaky).
+   */
+  pacingDripWeek?: number;
+  pacingDripCount?: number;
+  pacingTickCount?: number;
+  pacingLastDrippedWeek?: Record<string, number>;
+  /**
    * Feature 0075 — the trust-gated confidence ledger: per-houseguest, the highest TIER they have
    * confided to the player (monotonic for a true secret) + whether that disclosure was truthful (a
    * lie is engine-side only). `confideLieCount` is the per-season lie count (the hard cap). Persisted

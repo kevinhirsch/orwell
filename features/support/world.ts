@@ -537,6 +537,16 @@ export class BbWorld extends World {
   stStaticA?: string;
   stStaticB?: string;
 
+  // Secret-pacing drip (0092) scratch state.
+  spRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  spSandbox?: import("../../src/composition/registry").UserSandbox;
+  spSandboxB?: import("../../src/composition/registry").UserSandbox;
+  spOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  spOrchB?: import("../../src/composition/orchestrator").Orchestrator;
+  spUser?: string;
+  spUserB?: string;
+  spSeed?: number;
+
   // Feature 0062 — the move-in zeitgeist snapshot scratch state.
   wsFix?: { reg: import("../../src/composition/registry").GameSessionRegistry; sb: import("../../src/composition/registry").UserSandbox; orch: import("../../src/composition/orchestrator").Orchestrator; user: string };
   wsFixB?: { reg: import("../../src/composition/registry").GameSessionRegistry; sb: import("../../src/composition/registry").UserSandbox; orch: import("../../src/composition/orchestrator").Orchestrator; user: string };
