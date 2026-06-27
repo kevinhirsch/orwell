@@ -55,6 +55,35 @@ export const VOICE_LEXICON_POOL: readonly string[] = [
 ];
 
 /**
+ * 0090 — PER-ARCHETYPE signature pools. 0084 dealt every houseguest a signature from ONE flat pool, so a
+ * villain and a peacemaker could draw the same line and read alike. Each archetype now gets its OWN small
+ * pool whose diction + cadence fit that archetype — the texture the reader actually feels. An archetype
+ * with no pool falls back to the flat `VOICE_SIGNATURES` (additive, byte-identical for it).
+ */
+export const VOICE_ARCHETYPE_SIGNATURES: Record<string, readonly string[]> = {
+  "comp-beast": ["cuts straight to the scoreboard", "talks in challenges won and lost", "states the play and moves on", "sizes everyone up like a bracket", "no wasted words — all business"],
+  "mastermind": ["lays out the board three moves ahead", "chooses each word, slowly", "frames everything as a calculation", "lets a silence sit before the real point", "speaks in contingencies and angles"],
+  "social-butterfly": ["bounces between five thoughts and circles back", "narrates the whole room's vibe", "turns every read into a story", "talks with their whole body, warm and loud", "folds everyone into the conversation"],
+  "floater": ["agrees with whoever spoke last", "keeps every answer pleasantly vague", "deflects the hard question with a shrug", "never quite lands on a side", "smiles and says little of substance"],
+  "villain": ["delivers a read like a verdict", "smiles while twisting the knife", "states the cruel thing plainly", "makes a threat sound like small talk", "owns every scheme without flinching"],
+  "underdog": ["undercuts themselves before anyone else can", "over-explains the simple thing", "laughs at their own odds", "downplays every win", "wears the long shot on their sleeve"],
+  "flirt": ["turns every line into a little dare", "holds eye contact a beat too long", "wraps a real read in a wink", "teases the answer out of you", "makes scheming sound like flirting"],
+  "loyalist": ["says the loyal thing and means it", "puts the alliance before the read", "talks in promises and 'we'", "wears their heart in every answer", "vouches for their people unprompted"],
+};
+
+/** 0090 — PER-ARCHETYPE habitual fillers (same fallback rule as the signatures). */
+export const VOICE_ARCHETYPE_LEXICON: Record<string, readonly string[]> = {
+  "comp-beast": ["bottom line", "straight up", "let's go", "easy", "for sure", "done"],
+  "mastermind": ["the way I see it", "in theory", "arguably", "precisely", "consider", "to be fair"],
+  "social-butterfly": ["okay so", "I love that", "wait", "literally", "you know?", "oh my gosh"],
+  "floater": ["I mean", "kind of", "we'll see", "maybe", "I guess", "either way"],
+  "villain": ["let's be honest", "obviously", "please", "cute", "bless", "darling"],
+  "underdog": ["I know, I know", "honestly", "somehow", "no way", "for real", "lucky me"],
+  "flirt": ["oh?", "c'mon", "tell me", "interesting", "mmhm", "you"],
+  "loyalist": ["honestly", "100%", "ride or die", "my people", "for real", "no question"],
+};
+
+/**
  * Per-archetype dial leanings — the value an archetype TENDS toward (applied with `BIAS_STRENGTH`),
  * so a `comp-beast` skews blunt/clipped and a `social-butterfly` warm/rambling, WITHOUT collapsing
  * the cast onto one voice (every other dial is still free, and the lean itself only sometimes wins).
@@ -71,7 +100,11 @@ export const VOICE_ARCHETYPE_BIAS: Record<string, Partial<Record<Dial, string>>>
   "loyalist": { directness: "candid", energy: "warm", stressTell: "over-explains" },
 };
 
-const BIAS_STRENGTH = 0.55; // chance the archetype's lean wins a biased dial (else a free pick)
+// 0090: anchor the archetype's CORE dials harder so an archetype reads distinctly (a comp-beast reliably
+// blunt/clipped), while every UN-biased dial stays a free pick so two of an archetype still differ. The
+// draw count is unchanged (one roll per dial), and voice rides a dedicated side rng, so this never
+// perturbs the calibration spine.
+const BIAS_STRENGTH = 0.8; // chance the archetype's lean wins a biased (core) dial (else a free pick)
 
 function pick<T>(rng: RandomnessSource, options: readonly T[]): T {
   return options[rng.int(options.length)]!;
@@ -97,10 +130,12 @@ export function generateVoice(rng: RandomnessSource, archetype: string): VoicePr
   const directness = pickDial(rng, "directness", lean.directness);
   const humor = pickDial(rng, "humor", lean.humor);
   const stressTell = pickDial(rng, "stressTell", lean.stressTell);
-  const signature = pick(rng, VOICE_SIGNATURES);
-  // One or two habitual fillers (distinct).
-  const a = pick(rng, VOICE_LEXICON_POOL);
-  const b = pick(rng, VOICE_LEXICON_POOL);
+  // 0090: draw the signature + fillers from the archetype's OWN pool when it has one (fallback = the flat
+  // pool, byte-identical for an un-pooled archetype). Same fixed draw count — one signature + two fillers.
+  const signature = pick(rng, VOICE_ARCHETYPE_SIGNATURES[archetype] ?? VOICE_SIGNATURES);
+  const lexPool = VOICE_ARCHETYPE_LEXICON[archetype] ?? VOICE_LEXICON_POOL;
+  const a = pick(rng, lexPool);
+  const b = pick(rng, lexPool);
   const lexicon = a === b ? [a] : [a, b];
   return { register, rhythm, energy, directness, humor, stressTell, signature, lexicon };
 }

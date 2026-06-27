@@ -5618,10 +5618,15 @@ export class GameSessionAdapter implements GameSession {
     const allEvents = this.record?.events() ?? [];
     const ctxFor = (npc: EntityId): ConfessionalContext => {
       const recentRng = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`));
+      // 0090 — the confessor's PUBLIC, byte-stable voice fingerprint, so their confessional reads in
+      // THEIR voice (curt vs. expansive phrasing) instead of one uniform template. Voice is public
+      // identity (no Vault, no number); a pre-0084 NPC simply has none ⇒ the templated fallback.
+      const voice = this.house?.npcs.find((n) => n.id === npc)?.character.voice;
       return {
         trigger: at.trigger,
         recentEvents: selectRecentForConfessional(allEvents, npc, allEvents.length, { rng: recentRng }),
         ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
+        ...(voice !== undefined ? { voice } : {}),
         rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`)),
       };
     };
