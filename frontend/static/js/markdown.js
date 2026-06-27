@@ -233,6 +233,64 @@ export function redactRawIds(text) {
   return kept.join('\n').replace(_RAW_NPC_ID_GLOBAL_RE, '');
 }
 
+// #1047 — tool-name / operator-aside SENTENCE scrub (game build, body only).
+// The preamble + whole-body LINE passes above only drop a STANDALONE line that
+// OPENS with an operator phrase. But during eviction narration the model leaked
+// its tool-process talk MID-PARAGRAPH, as one clause inside otherwise-clean
+// prose — "Let me call advanceGame and see what surfaces", "Let me advance the
+// game", "let me walk through it". A line that mixes that clause with real
+// narration is never line-dropped, so it reached the public bubble verbatim.
+// This is the missing SENTENCE-level pass (mirrors the FE Python _scrub_game_leak
+// in src/agent_loop.py): split the body into sentences and drop only the
+// sentences that are operator/tool asides, keeping every other sentence (and its
+// delimiter) byte-identical. HIGH-PRECISION — the markers (raw engine tool names,
+// "let me <tool-verb>…", "advance/move/push the game", "let me walk through it")
+// never occur in real in-character BB narration, so ordinary scene prose, NPC
+// dialogue, and legitimate first-person in-character lines are untouched. This is
+// the tactical scrub for #1047; the structural channel-split fix is tracked
+// separately (Wave 3 / the retire-the-regex roadmap).
+const _GAME_TOOL_WORDS = [
+  'advanceGame', 'recordInteraction', 'submitDecision', 'runCompetition',
+  'resolveCompetition', 'getGameState', 'gameStatus', 'markHouseguestMet',
+  'updateCasting', 'createCharacter', 'surfaceInformationTo', 'npcVoice',
+  'whereabouts', 'socialRead', 'makeDeal', 'getVisibleStateFor', 'moveTo',
+];
+// A sentence is a machinery aside when it mentions a raw engine tool name
+// ANYWHERE, OR carries a first-person operator/tool-process clause. The operator
+// clause requires an operator VERB after the opener (so legitimate in-character
+// first-person prose — "Let me show you the bedroom", "I can see the kitchen" —
+// is never matched): "let me (call|advance|run|check|record|walk through|…)…",
+// "I'll/I should/I need to … (record|advance|call|…)", "advance/move/push the
+// game". "walk through it/this" is included (the #1047 "let me walk through it").
+const _MACHINERY_ASIDE_RE = new RegExp(
+  '\\b(?:' + _GAME_TOOL_WORDS.join('|') + ')\\b'
+  + '|\\blet me\\s+(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
+    + '(?:call|advance|run|check|record|log|note|resolve|use|pull|fetch|see what|'
+    + 'walk through|re-?read|re-?check|reconsider)\\b'
+  + '|\\bi(?:\'ll|\'d| will| should| need to| have to| am going to| must| can)\\s+'
+    + '(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
+    + '(?:call|advance|run|record|log|note|resolve|use|pull|fetch|present|walk through)\\b'
+  + '|\\b(?:advance|move|push) the game\\b',
+  'i',
+);
+
+export function scrubMachineryAsides(text) {
+  if (!text) return text;
+  // Split keeping the sentence/line delimiter with each part so kept prose is
+  // byte-identical. A leading quote means the sentence is NPC speech, not an
+  // operator aside — protect it (mirrors redactRawIds' quoted-dialogue guard).
+  const parts = String(text).split(/(?<=[.!?\n])/);
+  const kept = parts.filter((part) => {
+    const trimmed = part.trim();
+    if (!trimmed) return true;
+    if (/^["“]/.test(trimmed)) return true;
+    return !_MACHINERY_ASIDE_RE.test(part);
+  });
+  // Collapse any double-space / stray blank-run left by a dropped mid-paragraph
+  // sentence so the surrounding prose reads clean (never merges across lines).
+  return kept.join('').replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n');
+}
+
 export function normalizeThinkingMarkup(text) {
   if (!text) return text;
   let normalized = text;
@@ -585,6 +643,12 @@ export function processWithThinking(text) {
       // so run the whole-body pass too (drop standalone operator lines anywhere,
       // redact raw ids everywhere). Belt-and-suspenders, content channel only.
       reply = (redactRawIds(reply) || '').trim();
+      // #1047: the line passes above only drop a STANDALONE operator line. A
+      // tool-process clause MID-PARAGRAPH ("Let me call advanceGame and see what
+      // surfaces", "Let me advance the game", "let me walk through it") rides
+      // inside otherwise-clean prose and survives them — run the sentence-level
+      // machinery-aside scrub so it never reaches the public bubble.
+      reply = (scrubMachineryAsides(reply) || '').trim();
     }
     // NARR-9: the GM marks an OUT-OF-CHARACTER answer by wrapping its WHOLE reply
     // in `((...))` (the momentPrompts contract). The reload renderer reclassifies
@@ -999,6 +1063,7 @@ const markdownModule = {
   startsWithReasoningPrefix,
   scrubReasoningPreamble,
   redactRawIds,
+  scrubMachineryAsides,
   renderMermaid
 };
 
