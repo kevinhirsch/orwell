@@ -1,51 +1,40 @@
 name: Security Scan (VulnHawk)
 
-# Advisory-only, AI-driven SAST scan (VulnHawk). Deliberately a SEPARATE workflow from ci.yml so it
-# is NOT part of the required `ci-gate` check — findings never block a merge. Point branch protection
-# at `ci-gate` (as today); leave this workflow OUT of the required set.
+# Advisory AI SAST scan (VulnHawk) on a LOCAL Ollama backend — ZERO Claude-subscription usage: it
+# never calls Claude (or any cloud LLM), the model runs entirely on your own Ollama. Runs ONCE DAILY
+# plus on manual dispatch; deliberately NOT on push/PR, so it never spends anything per change and
+# never competes with normal CI on every commit. Still files one deduped GitHub issue per finding.
+# Separate from ci.yml and OUT of the required `ci-gate` — it can never block a merge.
 #
-# Trade-offs accepted for this repo (see the PR description for the full rationale):
-#   * VulnHawk is a third-party COMPOSITE action. On the runner it does `pip install vulnhawk`
-#     (floating — NOT pinned, even though the `uses:` below is pinned to a commit SHA) and
-#     `npm install -g @anthropic-ai/claude-code`, then runs them. That is third-party code executing
-#     on our single self-hosted runner — the accepted "self-hosted + cloud LLM" posture.
-#   * The `claude-code` backend sends code chunks to Anthropic via the Claude Code CLI — FREE with a
-#     Claude subscription (no API-key billing). Private source therefore leaves our infra to the LLM;
-#     that egress is inherent to any cloud backend. Use `backend: ollama` if you ever want zero egress.
+# CONFIG lives in repo Actions *Variables* (Settings → Secrets and variables → Actions → Variables tab),
+# so model/host/scope change without editing this file. Variables (NOT secrets — Ollama is local/unauthenticated):
+#   OLLAMA_MODEL    — REQUIRED. The exact `ollama list` tag, e.g. `qwen2.5-coder:32b`. If unset, the
+#                     scan fails soft (continue-on-error) and files nothing.
+#   OLLAMA_HOST     — base URL the RUNNER can reach Ollama at. Default `http://127.0.0.1:11434` (correct
+#                     only if Ollama runs on the runner host itself). The action exposes no host input,
+#                     so we pass it via the standard OLLAMA_HOST env the Ollama client reads.
+#   VULNHAWK_TARGET — directory to scan. Default `.` (whole repo). Narrow it (e.g. `src`) to bound runtime.
 #
-# ONE-TIME SETUP — add a repository secret `CLAUDE_CODE_OAUTH_TOKEN`:
-#   On a machine logged into a Claude Max/Team subscription run `claude setup-token`, then add the
-#   value under Settings → Secrets and variables → Actions → New repository secret.
-#   Without the secret the scan fails soft (continue-on-error) and the job stays green.
+# HEADS-UP: this runs on your SINGLE self-hosted runner, so while a scan runs it occupies the runner and
+# serializes with CI. A local ~30B model is also slow + lower-quality than a frontier model. Do a manual
+# `workflow_dispatch` run first to measure duration/quality before trusting the daily cadence; narrow
+# VULNHAWK_TARGET if it ties the runner up too long.
 
 on:
-  push:
-    branches: [main]
-    # Only scan when actual code changes — a docs-only / deploy-only push never triggers the workflow,
-    # so it never appears as a check there (mirrors ci.yml's path-gating intent).
-    paths:
-      - 'src/**'
-      - 'frontend/**'
-      - '.github/workflows/security-scan.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'frontend/**'
-      - '.github/workflows/security-scan.yml'
+  schedule:
+    - cron: '41 8 * * *' # daily ~08:41 UTC (GitHub Actions cron is ALWAYS UTC); adjust to taste
+  workflow_dispatch: {} # manual on-demand run (Actions tab → this workflow → "Run workflow")
 
-# Match ci.yml: on the single self-hosted runner, cancel a superseded run on the same ref so a stale
-# scan nobody is waiting on doesn't tie the runner up. Keyed per ref (main and each PR are independent).
+# Only one scan at a time; let a running scan FINISH rather than be cancelled (a daily/manual cadence
+# has little contention, and we want the issue-filing scan to complete so findings actually get filed).
 concurrency:
-  group: secscan-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: secscan-${{ github.workflow }}
+  cancel-in-progress: false
 
-# Least privilege. `security-events: write` only matters if GitHub Advanced Security is enabled on this
-# (private) repo — it lets the action's internal SARIF upload reach the Security → Code Scanning tab.
-# Without GHAS that upload 403s, which is why the scan step below is `continue-on-error`.
+# Least privilege. No `security-events: write` — that only mattered for SARIF upload to Code Scanning,
+# which needs GitHub Advanced Security (not enabled on this private repo). Findings go to issues instead.
 permissions:
   contents: read
-  security-events: write
   issues: write # lets the github-script step below open issues for findings
 
 jobs:
@@ -54,51 +43,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The VulnHawk composite installs the Claude Code CLI via `npm install -g` but does NOT run
-      # setup-node itself. On GitHub-hosted runners Node is pre-baked; our self-hosted runner provides
-      # it per-job (see ci.yml), so without this the backend-CLI install has no npm on PATH. Node 22
-      # matches ci.yml; a user-writable global prefix also avoids needing sudo for `npm install -g`.
-      # Python is handled by the action's own setup-python step, so we don't add it here.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      # VulnHawk v0.2.0, pinned to the tag's commit SHA (the `@v0.2.0` tag itself is mutable). NOTE:
-      # the action internally runs `pip install vulnhawk`, which still floats to the latest build — SHA
-      # pinning the action does NOT pin the scanner package it pulls.
-      #
-      # Advisory posture (you chose non-blocking):
-      #   * fail-on-findings: false  → findings are informational, never fail the job.
-      #   * continue-on-error: true  → an internal SARIF-upload 403 (Code Scanning needs GitHub
-      #                                 Advanced Security on a private repo), a missing token, or a
-      #                                 v0.2.0 hiccup can't redden the run.
-      # Findings still surface in the job log (JSON/markdown output) and in the Security tab when GHAS
-      # is enabled. To make findings BLOCK merges later: set fail-on-findings 'true', drop
-      # continue-on-error, and add this job to ci-gate's `needs` in ci.yml.
-      - name: VulnHawk Security Scan
-        continue-on-error: true
+      # LOCAL Ollama backend → no Claude/cloud call at all (zero subscription usage). The composite's
+      # claude-code/codex CLI installs are skipped for backend=ollama, so no Node setup is needed here.
+      # Model + host + scope come from repo Variables (see header) so they're editable without code changes.
+      # VulnHawk's Ollama client reads OLLAMA_HOST (the action exposes no host input), so we set it here.
+      - name: VulnHawk Security Scan (Ollama, advisory)
+        continue-on-error: true # advisory: a model/host hiccup or v0.2.0 glitch can never redden the run
         uses: momenbasel/vulnhawk@b878413216e94ba3d6e634c9bf9920578f198ca0 # v0.2.0
         env:
-          # Belt-and-suspenders: the Claude Code CLI also reads the OAuth token from this env var in
-          # headless/CI mode, alongside the documented `claude-code-oauth-token` input below.
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OLLAMA_HOST: ${{ vars.OLLAMA_HOST || 'http://127.0.0.1:11434' }}
         with:
-          target: '.'
-          backend: 'claude-code' # free with a Claude subscription (no API-key billing)
-          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          target: ${{ vars.VULNHAWK_TARGET || '.' }}
+          backend: 'ollama'
+          model: ${{ vars.OLLAMA_MODEL }} # set this repo Variable to your exact `ollama list` tag
           severity: 'medium'
-          fail-on-findings: 'false'
+          fail-on-findings: 'false' # advisory — findings never fail the job
 
       # ── Findings → GitHub issues (free; no GitHub Advanced Security needed) ──────────────────────
       # Parse the SARIF the scan just wrote and open ONE issue per distinct finding. Uses only the
       # first-party github-script action (no extra third-party action — keeps the supply-chain surface
       # minimal). Deduped against every existing `vulnhawk`-labelled issue (open OR closed) via a
       # fingerprint marker in the body, so re-runs never duplicate and a closed issue is never re-filed.
-      # Push-to-main only (PR findings stay in the run log). Best-effort: wrapped in try/catch and given
-      # continue-on-error so it can never redden the advisory run. Capped at 25 new issues per run as a
-      # flood guard (the remainder are reported in the run summary, never silently dropped).
+      # Runs on schedule + manual dispatch (the only triggers). Best-effort: wrapped in try/catch and
+      # given continue-on-error so it can never redden the advisory run. Capped at 25 new issues per run
+      # as a flood guard (the remainder are reported in the run summary, never silently dropped).
       - name: File issues for new findings
-        if: github.event_name == 'push'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
