@@ -51,6 +51,7 @@ def test_refuse_and_surface_is_wired_into_the_finalize_fallback():
                             "src", "agent_loop.py"), encoding="utf-8").read()
     # the forced-createCharacter path branches on the engine's createRefused and surfaces the gap
     assert 'if _eng.get("createRefused"):' in src
-    assert "_casting_incomplete_steer(_missing)" in src
+    # #1033 (F-2): the steer now also receives the engine's plain-language createRefusedReason.
+    assert "_casting_incomplete_steer(" in src and "_missing, _refused_reason)" in src
     # and it does NOT march the stall counter further on a refusal (it isn't the model stalling)
     assert "undo this turn's bump" in src

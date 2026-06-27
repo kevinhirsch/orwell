@@ -1525,6 +1525,42 @@ def _eviction_reveal_steer(beat: str, content: str) -> str:
         "the engine's own result beat states it). Surface the reveal first; the rest of the house can wait."
     )
 
+
+# F8 (#1015) — the CEREMONY-NARRATION belt: the eviction-reveal steer's siblings. For an NPC HOH the
+# engine emits one `nominations` beat and SELF-ADVANCES the phase to `veto-competition` in the same
+# call (liveSeason.ts), so `momentForPhase` never lands on the well-written `nominations` fragment and
+# — because "nominations" isn't in the steered set — the model breezes past the ceremony into the next
+# scene (the auditor saw noms appear ONLY in the HUD; an NPC even asked "when did the ceremony
+# happen?"). The nomination/veto ceremonies are BB's emotional core. This is the SAME under-call class
+# as the eviction reveal: the engine already AUTHORED the ceremony in `event.content`; the model just
+# skipped voicing it. So when an advance/pre-resolve returns a ceremony beat with content, we append a
+# focused production note steering the model to voice THAT ceremony before any other scene. It
+# error-corrects the omission — it NEVER invents noms (the names are the engine's, in its own content).
+_CEREMONY_NARRATE_BEATS = {
+    "nominations", "nomination", "nomination-ceremony", "noms",
+    "veto-ceremony", "veto-result", "veto-decision",
+}
+
+
+def _ceremony_narration_steer(beat: str, content: str) -> str:
+    """The focused production note that makes the model VOICE a nomination / veto-ceremony beat the
+    engine just resolved (F8 #1015) — the ceremony twin of `_eviction_reveal_steer`. Never authors the
+    ceremony: it hands back the engine's own `event.content` (the nominees / veto decision the engine
+    already chose) and tells the model to narrate THAT ceremony now, before any other scene."""
+    line = (content or "").strip()
+    is_veto = "veto" in (beat or "").lower()
+    ritual = "VETO CEREMONY" if is_veto else "NOMINATION CEREMONY"
+    quoted = f' The engine ceremony you must voice: "{line}".' if line else ""
+    return (
+        f"\n\n(Production note, not for the player.) The engine just resolved the {ritual} above and is "
+        "about to move on. Voice THIS ceremony beat NOW, in full, before any backyard/alliance/strategy "
+        "scene and before you advance again — ceremonies are the heart of the week and the player must "
+        "SEE it happen." + quoted + " Narrate EXACTLY the nominees / veto decision the engine returned — "
+        "never invent who is on the block or who used the veto, and never soften or skip the moment. "
+        "Stage the ceremony (the Head of Household's reveal, the player's reaction in the room); the "
+        "rest of the house can wait."
+    )
+
 # ── Casting finalize fallback (audit 2026-06-20: the game won't reliably START) ─────────────────
 # The pre-game twin of the advance stall-guard. The model reliably UNDER-CALLS createCharacter:
 # with casting.ready=true and the player asking to start, it keeps interviewing (often waiting on
@@ -1598,11 +1634,16 @@ _CASTING_FIELD_LABELS = {
 }
 
 
-def _casting_incomplete_steer(missing: list) -> str:
+def _casting_incomplete_steer(missing: list, refused_reason: str = "") -> str:
     """#529 production note when a FORCED createCharacter was REFUSED `casting-incomplete`: the engine
     will NOT invent canon about the human player, so a required casting field is genuinely still missing.
     Steer the model to ASK the player for the named gap(s) and file the answer with updateCasting — it
-    must NOT re-call createCharacter (the engine will refuse again) and must NEVER make up the answer."""
+    must NOT re-call createCharacter (the engine will refuse again) and must NEVER make up the answer.
+
+    #1033 (F-2): the engine now hands back a plain-language `createRefusedReason` on the refusal. When
+    present we surface IT (the engine's own diagnosis of why the season didn't start) so a stuck casting
+    loop has a clear reason instead of a silent re-loop; the `missing` field labels still provide the
+    concrete gap to ask for. Both are Vault-free (only player-authored intake)."""
     labels: list[str] = []
     seen: set = set()
     for m in (missing or []):
@@ -1614,11 +1655,15 @@ def _casting_incomplete_steer(missing: list) -> str:
             seen.add(label)
             labels.append(label)
     gap = _join_casting_labels(labels) if labels else "a required casting detail they haven't given yet"
+    # #1033: lead with the engine's own reason when it surfaced one (it names only the missing
+    # player-authored intake — never secret state), so the model and player learn WHY it refused.
+    reason = (refused_reason or "").strip()
+    reason_clause = (f" The game's reason: {reason}." if reason else "")
     return ("(Production note, not for the player.) The season did NOT start: casting is incomplete — "
-            "we still need " + gap + ". The game will not invent anything about the player, so you must "
-            "ASK them for it directly and file their answer with updateCasting. Do NOT call "
-            "createCharacter again until they've supplied it, and NEVER make up the missing detail "
-            "yourself — ask the player, in character, and wait for their answer.")
+            "we still need " + gap + "." + reason_clause + " The game will not invent anything about the "
+            "player, so you must ASK them for it directly and file their answer with updateCasting. Do "
+            "NOT call createCharacter again until they've supplied it, and NEVER make up the missing "
+            "detail yourself — ask the player, in character, and wait for their answer.")
 
 
 def _join_casting_labels(items: list) -> str:
@@ -3172,10 +3217,27 @@ async def _run_verifier_subagent(
     return [r.strip() for r in reasons.split(";") if r.strip()]
 
 
+# F2 (#1017) — the in-character recovery line for a TRUE-empty live-game turn. A non-technical
+# player in the middle of a season can't "switch to a different model" from the chat, so the bare
+# operator string is a dead-end. In a live game (or casting) we instead surface an in-fiction
+# producer line that reads as part of the world and tells the player exactly what to do — say it
+# again — paired with a one-tap retry affordance below. NOT the FEPY-2 reasoning-recovery path
+# (that re-emits a real answer routed to the reasoning channel and stays untouched).
+_EMPTY_PRODUCER_LINE = (
+    "Production's feed glitched for a second there — we lost what just came through. Say that again?"
+)
+# The plain operator string for non-game (workspace) turns — kept verbatim so the existing
+# "empty response" / "switch to a different model" guidance still reaches a power user.
+_EMPTY_OPERATOR_LINE = (
+    "The model returned an empty response. Please try again or switch to a different model."
+)
+
+
 def _empty_response_fallback(
     full_response: str,
     round_reasoning: str,
     tool_events: list,
+    game_mode=False,
 ) -> tuple:
     """Return (final_response, sse_chunk_or_none) for the end-of-loop empty-response guard.
 
@@ -3189,19 +3251,32 @@ def _empty_response_fallback(
     Now, on an empty body with reasoning present, we RE-EMIT the reasoning as a non-thinking
     body delta so the player actually sees the answer.
 
+    F2 (#1017): the TRUE-empty branch (no body, no reasoning, no tools) was a dead-end for a
+    player mid-season — a bare "switch models" string they can't act on from chat. In a live
+    game / casting turn we now surface an in-character producer line; the callsite pairs it with
+    a `truncated`-type retry affordance (the existing `Continue ▸` pattern) so the player has a
+    one-tap recourse. The FEPY-2 reasoning-recovery branch is unchanged (load-bearing for Flash).
+
     Returns:
-        (final_response: str, chunk: str | None)
-            chunk is the SSE string to yield, or None if nothing should be emitted.
+        (final_response: str, chunk: str | None, retry: bool)
+            chunk is the SSE BODY frame to yield (or None). `retry` is True only for the
+            true-empty live-game case — the callsite then yields a separate `truncated` retry
+            affordance frame (kept a SEPARATE yield so each chunk stays one parseable SSE frame).
     """
     if full_response.strip() or tool_events:
-        return full_response, None
+        return full_response, None, False
     if round_reasoning.strip():
         # FEPY-2: surface the channel-routed answer in the body bubble (non-thinking delta) instead
         # of leaving it blank. It was streamed to the accordion as {thinking:true}; this body copy is
         # what the player reads as the GM's reply.
-        return round_reasoning, f'data: {json.dumps({"delta": round_reasoning})}\n\n'
-    _error_msg = "The model returned an empty response. Please try again or switch to a different model."
-    return _error_msg, f'data: {json.dumps({"delta": _error_msg})}\n\n'
+        return round_reasoning, f'data: {json.dumps({"delta": round_reasoning})}\n\n', False
+    # True-empty: nothing came back at all. In a live game / casting turn, keep the player IN the
+    # world — an in-character producer line + a retry affordance — instead of the operator string.
+    if game_mode:
+        return (_EMPTY_PRODUCER_LINE,
+                f'data: {json.dumps({"delta": _EMPTY_PRODUCER_LINE})}\n\n',
+                True)
+    return _EMPTY_OPERATOR_LINE, f'data: {json.dumps({"delta": _EMPTY_OPERATOR_LINE})}\n\n', False
 
 
 PLAN_MODE_DIRECTIVE = (
@@ -5180,14 +5255,19 @@ async def stream_agent_loop(
                                 # the interview is genuinely incomplete), and yield to the player to answer.
                                 if _eng.get("createRefused"):
                                     _missing = _eng.get("missing") or _eng.get("missingFields") or []
+                                    # #1033 (F-2): the engine now surfaces a plain-language reason for
+                                    # the refusal — pass it into the steer so a stuck casting loop has a
+                                    # diagnosis (Vault-free: it names only the missing player intake).
+                                    _refused_reason = str(_eng.get("createRefusedReason") or "")
                                     if owner is not None:
                                         _CASTING_STALL_LEVEL[owner] = _clv  # undo this turn's bump
                                     logger.info(
                                         "[orwell] forced createCharacter REFUSED (casting-incomplete, "
-                                        f"missing={_missing}) — surfacing the gap, round {round_num} "
-                                        f"user={owner}")
+                                        f"missing={_missing}, reason={_refused_reason!r}) — surfacing the "
+                                        f"gap, round {round_num} user={owner}")
                                     messages.append({"role": "system",
-                                                     "content": _casting_incomplete_steer(_missing)})
+                                                     "content": _casting_incomplete_steer(
+                                                         _missing, _refused_reason)})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
                                 logger.warning("[orwell] forced createCharacter did not start the "
@@ -5612,9 +5692,15 @@ async def stream_agent_loop(
             # the content is the engine's own (anonymized) `event.content`, never authored here.
             if _is_live_game and block.tool_type == "advanceGame" and isinstance(result, dict):
                 _ev = result.get("event")
-                if isinstance(_ev, dict) and str(_ev.get("beat") or "") in _EVICTION_STAGE_BEATS:
-                    formatted += _eviction_reveal_steer(str(_ev.get("beat") or ""),
-                                                         str(_ev.get("content") or ""))
+                if isinstance(_ev, dict):
+                    _ev_beat = str(_ev.get("beat") or "")
+                    _ev_content = str(_ev.get("content") or "")
+                    if _ev_beat in _EVICTION_STAGE_BEATS:
+                        formatted += _eviction_reveal_steer(_ev_beat, _ev_content)
+                    # F8 (#1015): the same belt for the nomination / veto ceremony the model breezes
+                    # past (NPC-HOH self-advances the phase, so the moment fragment never surfaces).
+                    elif _ev_beat in _CEREMONY_NARRATE_BEATS:
+                        formatted += _ceremony_narration_steer(_ev_beat, _ev_content)
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
 
@@ -5917,11 +6003,16 @@ async def stream_agent_loop(
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.
-    full_response, _fallback_chunk = _empty_response_fallback(
-        full_response, round_reasoning, tool_events
+    full_response, _fallback_chunk, _fallback_retry = _empty_response_fallback(
+        full_response, round_reasoning, tool_events, game_mode=game_mode
     )
     if _fallback_chunk:
         yield _fallback_chunk
+    # F2 (#1017): a true-empty live-game turn pairs the in-character producer line with a one-tap
+    # retry affordance (the existing `truncated` Continue button) — a SEPARATE yield so each SSE
+    # frame stays individually parseable. Reuses the chat.js `Continue ▸` handler; touches no JS.
+    if _fallback_retry:
+        yield f'data: {json.dumps({"type": "truncated"})}\n\n'
 
     # --- Final metrics ---
     total_duration = time.time() - total_start
