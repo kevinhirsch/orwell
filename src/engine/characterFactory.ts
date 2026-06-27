@@ -143,6 +143,19 @@ export interface Character {
   biography?: string;
   physicalCharacteristics?: PhysicalCharacteristics;
   /**
+   * One-time PROVENANCE flag for the season-start deep-profile authoring write-back (#1067). The seeded
+   * deterministic floor (`seedDeepProfiles`) sets `biography`/`physicalCharacteristics`/`vocation` to a
+   * PLACEHOLDER; the FE then authors a RICHER replacement via `recordCastProfile`. Replacing those public
+   * deep-profile facets is a legitimate season-start UPGRADE, not the memory-thinning the 0007/0031
+   * non-degradation guard exists to catch — but a byte-compare can't tell "richer authored" from
+   * "thinned". This flag is the discriminator (mirrors the 0062 `worldSnapshot.source` upgrade precedent):
+   * unset on the seeded floor, set `true` the first time authoring folds a public facet. `isSuperset`
+   * permits the facet change ONLY on the one-directional floor→authored transition; once `true`, the
+   * whole Character (authored bio included) is byte-stable forever — a later drift/thinning is still
+   * refused. Never projected to the player (it is not part of any outward view); Vault-free.
+   */
+  deepProfileAuthored?: boolean;
+  /**
    * PUBLIC diversity-identity facets (feature 0063) — the cast's engine-guaranteed authentic diversity.
    * `ethnicity` is a FIRST-CLASS heritage/cultural-identity facet (an authentic facet of a full
    * character, never a stereotype kit) that GROUNDS `physicalCharacteristics.skinTone` so text and

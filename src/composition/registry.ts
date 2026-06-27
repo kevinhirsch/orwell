@@ -146,9 +146,16 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // L28b — the AUTHORED write-back re-seals ONE houseguest: REPLACE that subject's prior profile +
   // thread records (idempotent, no stale/duplicated records) via the engine-only Vault upsert.
   session.setOnResealProfile((id, profile, threads) => {
-    engine.vault.replaceHidden({ kind: DEEP_PROFILE_KIND, subject: id }, [
+    // #1067 — scope the deep-profile re-seal to the EXACT record id. `DEEP_PROFILE_KIND` and
+    // `PRIVATE_ORIENTATION_KIND` are BOTH `"hidden-attribute"`, so a `{kind,subject}`-only replace would
+    // ALSO delete this houseguest's private-orientation record (a Vault non-degradation regression the
+    // 0031 checkpoint correctly refused — surfaced once the live authoring path actually persisted). The
+    // id selector touches ONLY `deep-profile:<id>`, leaving the co-kind orientation untouched.
+    engine.vault.replaceHidden({ id: deepProfileVaultId(id), kind: DEEP_PROFILE_KIND, subject: id }, [
       { id: deepProfileVaultId(id), kind: DEEP_PROFILE_KIND, subject: id, content: deepProfileToVaultContent(id, profile) },
     ]);
+    // Story threads (`hidden-thread`) are this subject's alone (no co-kind collision) and there are MANY
+    // per subject, so this stays a {kind,subject} replace of the whole set.
     engine.vault.replaceHidden(
       { kind: STORY_THREAD_KIND, subject: id },
       threads.map((t) => ({ id: t.id, kind: STORY_THREAD_KIND, subject: t.sourceId, content: storyThreadToVaultContent(t) })),
@@ -493,6 +500,15 @@ export class GameSessionRegistry {
       sb.syncAdmin();
       this.invalidateSnapshot(user);
       this.saveUser(user);
+      // #1067 — a background enrichment replaced live state OUTSIDE the `commit` seam (e.g. the season-start
+      // `recordCastProfile` authoring upgrade of the seeded-floor profile). RE-SEED the orchestrator's
+      // non-degradation baseline to this freshly-saved state — the SAME `seedBaseline` discipline a
+      // resume-from-disk uses (audit E6/R3) for a state set from outside `commit`. Without it the next
+      // player-turn commit would compare the authored candidate against the STALE floor baseline and refuse
+      // the turn as degradation (the #1067 live-verify losses). This never weakens non-degradation: the
+      // background save already persisted a legitimate superset of the floor, and re-baselining only makes
+      // FUTURE commits check against the richer authored state (strictly stronger going forward).
+      this.onBackgroundCommit?.(user);
     });
     sb.admin.setResetDelegate(() => {
       this.resetUser(user); // the admin reset re-onboards the REAL game (B58/E5; B36/C12 route here)
@@ -703,6 +719,15 @@ export class GameSessionRegistry {
 
   setOnReset(fn: (user: string) => void): void {
     this.onReset = fn;
+  }
+
+  /** Background-commit hook (#1067): the runtime wires this to `Orchestrator.seedBaseline` so a
+   *  fail-soft background enrichment (e.g. the season-start cast-authoring upgrade) re-seeds the
+   *  non-degradation baseline to the freshly-saved state — exactly like a resume-from-disk. */
+  private onBackgroundCommit?: (user: string) => void;
+
+  setOnBackgroundCommit(fn: (user: string) => void): void {
+    this.onBackgroundCommit = fn;
   }
 
   /** Vault-free per-user health (B58/E5+E6) — composed by the runtime over the orchestrator. */

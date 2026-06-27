@@ -532,6 +532,24 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                 async with write_lock:  # serialize: never two recordCastProfile commits at once
                     res = await write_fn(profile)
             except Exception as e:
+                # #1067: a `turn refused — integrity checkpoint failed (degradation)` 409 surfaces here as a
+                # RAISED exception (the engine boundary maps the refusal to HTTP 409), NOT a dict result — so
+                # it must be classified + retried + tallied exactly like the dict-degradation branch below.
+                # Previously this swallowed it as a bare `None`, so the end-of-run breakdown reported
+                # "0 degradation" even though every lost NPC was a degradation refusal (the live-verify
+                # miscount). Treat an integrity/degradation/turn-refused message as a (now usually transient)
+                # degradation: retry, then fall back to the floor with the correct sentinel.
+                _es = str(e).lower()
+                if "degrad" in _es or "integrity" in _es or "checkpoint" in _es or "turn refused" in _es:
+                    if attempt < _EMPTY_TRUNCATED_RETRIES:
+                        logger.info(
+                            f"[cast-authoring] write-back degradation (raised) for {hid} (attempt "
+                            f"{attempt + 1}/{1 + _EMPTY_TRUNCATED_RETRIES}) — retrying serialized")
+                        continue
+                    logger.warning(
+                        f"[cast-authoring] write-back still degraded (raised) for {hid} after retries — "
+                        "keeping the seeded floor")
+                    return "degradation"  # sentinel for the diagnostic tally (counted as floor_degradation)
                 logger.warning(f"[cast-authoring] write-back failed for {hid}: {e}")
                 return None
             if isinstance(res, dict) and res.get("accepted"):
