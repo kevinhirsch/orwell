@@ -1061,7 +1061,12 @@ def _download_attachment(uid, index, folder="INBOX", account=None):
     raw = msg_data[0][1]
     msg = email.message_from_bytes(raw)
 
-    target_dir = DATA_DIR / "mail-attachments" / f"{folder}_{uid}"
+    # Flatten the model-influenced folder/uid into ONE safe path segment so a
+    # value containing "/" or ".." can't escape DATA_DIR/mail-attachments. The
+    # IMAP folder hierarchy separator isn't meaningful here — this is only a
+    # local cache-dir name — so collapsing it is fine.
+    seg = re.sub(r"[^\w.-]", "_", f"{folder}_{uid}")
+    target_dir = DATA_DIR / "mail-attachments" / seg
     filepath = _extract_attachment_to_disk(msg, index, target_dir)
     if not filepath:
         return {"error": f"Attachment index {index} not found"}
