@@ -632,40 +632,116 @@
     // 0065 PORTRAIT WARM: the interview is opening (the first turn) — kick the portrait warm. The server
     // HOLDS it until author warm has fully finished, so faces are never shot from a half-authored store.
     _orwellWarm("warm-portraits");
-    // Give the welcome modal's teardown a beat, then auto-send through the normal submit path
-    // (the same seam chat.js uses for its own programmatic sends), with the user bubble hidden so
-    // the producers appear to reach out first.
-    setTimeout(() => {
+    // #967 (live re-fix) — the opener used to fire ONCE after a 250ms timeout: if a stream was settling
+    // at that single tick (line 644 set `_openSent = false; return`) OR the send seam (`window.chatModule`)
+    // wasn't ready yet, the cue was DROPPED with no reschedule and the chat sat silent — the player had to
+    // speak first (the salvaged cold-start log: n_ai_msgs=0, the player sent the opening line). On a real
+    // cold start the casting framing + prewarm POST + session materialization routinely leave a stream
+    // busy / chatModule not-yet-bound at exactly 250ms. The #969 fix gave the RESUME cue a backoff retry
+    // but left this OPENER single-shot. So mirror that retry here: when the turn is busy OR the send seam
+    // isn't ready, DON'T drop — re-schedule with backoff until it settles, capped, and fail open to the
+    // composer only after exhausting the rungs. The `_openSent` once-guard makes a retry idempotent.
+    _sendCueWithBackoff({
+      line: OPEN_GAME_LINE,
+      // BUG FIX (item 6 — composer hangs mid-page): clear the welcome-active state at send time so the
+      // composer DOCKS at the bottom immediately instead of staying lifted ~30vh up the page.
+      onBeforeSend: () => { try { if (window.chatModule && window.chatModule.hideWelcomeScreen) window.chatModule.hideWelcomeScreen(); } catch (_) {} },
+      // The opener is once-per-game (0064): if a producer opener arrived (synced from a peer) mid-retry,
+      // stand down rather than fire a second one.
+      shouldAbort: () => _conversationHasAssistantTurn(),
+      // Clear the sent latch so a later re-route can try again — but ONLY if we never sent. (A genuine
+      // send leaves the latch set by the helper; this re-arm fires only on the give-up branch.)
+      onGiveUp: () => { _openSent = false; },
+    });
+  };
+
+  // #967/#969 (shared) — fire a hidden producer cue ROBUSTLY: a single 250ms-then-drop send is the exact
+  // bug both issues hit live (the cue is lost if a stream is settling OR `window.chatModule` isn't bound
+  // yet at the one tick). This helper RE-SCHEDULES with backoff while the turn is busy OR the send seam
+  // isn't ready, capped, and fails open to a focused composer only after exhausting the rungs. It is the
+  // common kernel for the OPENER (#967) and the post-photo RESUME (#969). It NEVER stomps the player
+  // (a typed composer or a `shouldAbort()` true ⇒ stand down). Fail-open by construction.
+  const _CUE_MAX_ATTEMPTS = 8;     // ~250ms settle + up to 8 backoff rungs (400…3200ms) before failing open
+  function _sendCueWithBackoff(opts) {
+    const o = opts || {};
+    const line = o.line;
+    let _done = false;             // local per-call latch (in addition to the caller's once-guard)
+    const composerBusy = () => {
       try {
         const box = document.getElementById("message");
-        if (!box) { _openSent = false; return; }
-        if (box.value.trim()) return;                 // the player is mid-thought — don't stomp it
-        if (_conversationHasAssistantTurn()) return;  // 0064: a producer opener already arrived — done
-        if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream()) {
-          _openSent = false; return;                  // a turn is already running — let it finish
-        }
-        // BUG FIX (item 6 — composer hangs mid-page): clear the welcome-active state NOW, at send
-        // time, so the composer DOCKS at the bottom immediately instead of staying lifted ~30vh up
-        // the page until the first narration token clears it. (With the photo box now appearing
-        // over an already-docked chat, the old mid-page hang can't recur.)
-        try { if (window.chatModule && window.chatModule.hideWelcomeScreen) window.chatModule.hideWelcomeScreen(); } catch (_) {}
-        // BUG FIX (item 7 — cue text flashes): send via the hidden-cue seam, which hides the user
-        // bubble AND clears the composer synchronously so OPEN_GAME_LINE never lingers visibly.
+        if (box && box.value.trim()) return true;   // the player is mid-thought — never stomp it
+      } catch (_) {}
+      return false;
+    };
+    const streamBusy = () => {
+      try {
+        return !!(window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream());
+      } catch (_) { return false; }
+    };
+    // The send seam (chat.js) is READY when chatModule exposes a programmatic send. On a fresh cold-start
+    // load the IIFE may run this before chat.js has assigned window.chatModule — treat that as transient
+    // (reschedule), NOT a permanent drop to box.focus() (the old bug).
+    const seamReady = () => {
+      try {
+        return !!(window.chatModule
+          && (typeof window.chatModule.sendHiddenCue === "function"
+              || typeof window.chatModule.handleChatSubmit === "function"));
+      } catch (_) { return false; }
+    };
+    const fire = () => {
+      if (_done) return;
+      const box = document.getElementById("message");
+      if (!box) { _done = true; return; }           // no composer at all — nothing more to do
+      _done = true;
+      try { o.onBeforeSend && o.onBeforeSend(); } catch (_) {}
+      try {
         if (window.chatModule && typeof window.chatModule.sendHiddenCue === "function") {
-          window.chatModule.sendHiddenCue(OPEN_GAME_LINE);
+          // Send via the hidden-cue seam: hides the user bubble AND clears the composer synchronously so
+          // the cue text never lingers visibly.
+          window.chatModule.sendHiddenCue(line);
         } else if (window.chatModule && typeof window.chatModule.handleChatSubmit === "function") {
           // Legacy fallback: best-effort hide + submit (may flash the cue for a beat).
           try { if (window.chatModule.setHideUserBubble) window.chatModule.setHideUserBubble(); } catch (_) {}
-          box.value = OPEN_GAME_LINE;
+          box.value = line;
           box.dispatchEvent(new Event("input", { bubbles: true }));
           window.chatModule.handleChatSubmit({ preventDefault() {} });
         } else {
-          // No send seam available — fall back to a focused composer so the player can nudge it.
+          // No send seam even after the retries — fall back to a focused composer so the player can nudge
+          // it (the give-up branch; the caller re-arms its once-guard via onGiveUp).
           box.focus();
+          try { o.onGiveUp && o.onGiveUp(); } catch (_) {}
         }
-      } catch (_) { _openSent = false; /* fail open — the composer is still the way in */ }
-    }, 250);
-  };
+      } catch (_) {
+        try { o.onGiveUp && o.onGiveUp(); } catch (__) {}  // fail open — the composer is still the way in
+      }
+    };
+    const attempt = (n) => {
+      if (_done) return;
+      try {
+        if (composerBusy()) {                         // the player started typing — yield entirely
+          _done = true;
+          try { o.onGiveUp && o.onGiveUp(); } catch (_) {}
+          return;
+        }
+        if (o.shouldAbort && o.shouldAbort()) {       // an opener already arrived (peer-synced) etc.
+          _done = true;
+          return;                                     // stood down on purpose — do NOT re-arm/give up
+        }
+        // A turn is still running OR the send seam isn't bound yet — DON'T drop; re-schedule with backoff
+        // until it settles. Fail open to the composer only after exhausting the rungs.
+        if (streamBusy() || !seamReady()) {
+          if (n + 1 < _CUE_MAX_ATTEMPTS) {
+            setTimeout(() => attempt(n + 1), 400 * (n + 1));
+          } else {
+            fire();                                   // last rung: fire anyway (best-effort / give-up)
+          }
+          return;
+        }
+        fire();
+      } catch (_) { /* fail open */ }
+    };
+    setTimeout(() => attempt(0), 250);                // attempt 0 keeps the original 250ms settle beat
+  }
 
   // OOBE re-sequence (2026-06-20): the post-photo RESUME cue. After the player finalizes or skips
   // the cast photo (orwellHeadshot.js tears the box down and calls this), nudge the producers to
@@ -682,71 +758,26 @@
   // no deferred re-fire) if a stream was still in flight or the composer was busy at that tick. In the
   // OOBE sequence the photo box appears right after the producers' "send us a photo" turn, so that
   // turn's stream is often STILL SETTLING at the 250ms tick → the cue was dropped → the player had to
-  // type "continue". The fix mirrors recordPhotoStep's backoff retry (orwellHeadshot.js): when the
-  // stream is busy, DON'T drop — RE-SCHEDULE with backoff until the in-flight turn settles, capped, and
-  // fail open to the composer only after exhausting the retries. A once-guard (_resumeSent, like the
-  // opener's _openSent) makes a retry idempotent so it can never double-fire if the stream ends
+  // type "continue". An EARLIER retry pass (#969 first cut) covered `streamBusy` but STILL dropped the
+  // cue permanently when the send seam (`window.chatModule`) wasn't bound yet (it fell straight to
+  // box.focus() and latched sent) — so on a live finalize where the seam was momentarily unavailable the
+  // resume never fired and the player again had to type "continue". The robust fix routes BOTH the opener
+  // (#967) and this resume through the shared `_sendCueWithBackoff` kernel, which re-schedules on a busy
+  // stream OR an unready seam (capped, fail-open) so neither cue is ever single-shot-dropped. The
+  // `_resumeSent` once-guard makes a retry idempotent so it can never double-fire if the stream ends
   // between attempts.
-  const RESUME_MAX_ATTEMPTS = 8;     // ~250ms settle + up to 8 backoff rungs (400…3200ms) before failing open
   let _resumeSent = false;
   window._orwellResumeAfterPhoto = function () {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     if (!gameBuild || _resumeSent) return;
-    const composerBusy = () => {
-      try {
-        const box = document.getElementById("message");
-        if (box && box.value.trim()) return true;   // the player is mid-thought — don't stomp it
-      } catch (_) {}
-      return false;
-    };
-    const streamBusy = () => {
-      try {
-        return !!(window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream());
-      } catch (_) { return false; }
-    };
-    // One actual send. Guarded by _resumeSent so a retry that races the stream ending can't fire twice.
-    const fire = () => {
-      if (_resumeSent) return;
-      const box = document.getElementById("message");
-      if (!box) { _resumeSent = true; return; }     // no composer at all — nothing more to do
-      _resumeSent = true;
-      try {
-        if (window.chatModule && typeof window.chatModule.sendHiddenCue === "function") {
-          window.chatModule.sendHiddenCue(RESUME_AFTER_PHOTO_LINE);
-        } else if (window.chatModule && typeof window.chatModule.handleChatSubmit === "function") {
-          try { if (window.chatModule.setHideUserBubble) window.chatModule.setHideUserBubble(); } catch (_) {}
-          box.value = RESUME_AFTER_PHOTO_LINE;
-          box.dispatchEvent(new Event("input", { bubbles: true }));
-          window.chatModule.handleChatSubmit({ preventDefault() {} });
-        } else {
-          // No send seam — fall back to a focused composer so the player can nudge it.
-          try { box.focus(); } catch (_) {}
-        }
-      } catch (_) { /* fail open — the composer is still the way in */ }
-    };
-    // attempt 0 keeps the original 250ms settle beat; later attempts back off (400ms, 800ms, …).
-    const attempt = (n) => {
-      if (_resumeSent) return;
-      try {
-        if (composerBusy()) {
-          // The player started typing — yield to them entirely and never stomp it. The composer is the
-          // way in; mark sent so we don't keep re-scheduling against their input.
-          _resumeSent = true;
-          return;
-        }
-        if (streamBusy()) {
-          // A turn is still running (the photo-prompt turn settling, or the player's own send). DON'T
-          // drop — re-schedule with backoff so the cue fires once it settles. Fail open to the composer
-          // only after exhausting the retries (the composer is always the way in — never wedge it).
-          if (n + 1 < RESUME_MAX_ATTEMPTS) {
-            setTimeout(() => attempt(n + 1), 400 * (n + 1));
-          }
-          return;
-        }
-        fire();
-      } catch (_) { /* fail open */ }
-    };
-    setTimeout(() => attempt(0), 250);
+    _resumeSent = true;            // claim it up front; the helper's own per-call latch governs the send
+    _sendCueWithBackoff({
+      line: RESUME_AFTER_PHOTO_LINE,
+      // Unlike the opener this may legitimately fire AFTER the conversation is underway (the producers
+      // asked about the photo, the box came and went), so it does NOT abort on an existing assistant turn.
+      // Re-arm only on a genuine give-up (player typed / no seam ever) so a later trigger can retry.
+      onGiveUp: () => { _resumeSent = false; },
+    });
   };
 
   // E65: a season RESTART (season 2+) opens a FRESH chat session so the dead season's transcript

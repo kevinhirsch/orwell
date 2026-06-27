@@ -1314,6 +1314,18 @@ export class GameSessionAdapter implements GameSession {
         ?? ALL_ETHNICITIES.find((e) => e.heritage === target.character.ethnicity)?.skinTone;
       if (grounded) target.character.physicalCharacteristics.skinTone = grounded;
     }
+    // #1067 — MARK the season-start floor→authored UPGRADE of the PUBLIC deep-profile facets. The seeded
+    // floor (`seedDeepProfiles`) sets `biography`/`physicalCharacteristics`/`vocation` to a placeholder and
+    // the orchestrator persists it as the byte-stable baseline; this write-back replaces them with a richer
+    // authored version. Replacing a byte-stable Character facet would otherwise read as DEGRADATION at the
+    // 0031 checkpoint (the live-verify's "integrity checkpoint failed (degradation)" refusals — #1067) even
+    // though it ACCRETES detail. The provenance flag (persisted in the snapshot, read by `isSuperset`) makes
+    // the upgrade a SANCTIONED one-way transition — never a hole in non-degradation: once authored, the bio
+    // is byte-stable forever and a later thinning is still refused. Set whenever a public facet is authored.
+    if (req.biography !== undefined || req.physicalCharacteristics !== undefined
+        || (typeof req.vocation === "string" && req.vocation.trim().length > 0)) {
+      target.character.deepProfileAuthored = true;
+    }
 
     // (2) HIDDEN: merge the authored fields over the prior profile so it stays complete. The prior is
     // the seeded floor (always present after seedDeepProfiles; regenerate deterministically if missing).
@@ -1382,10 +1394,20 @@ export class GameSessionAdapter implements GameSession {
     // (5) Re-seal into the Vault — REPLACING this subject's prior profile + thread records (idempotent).
     this.onResealProfile?.(target.id, next, ctx.getThreads().filter((t) => t.sourceId === target.id));
 
-    // 0065: a pre-game authored profile lands on `prewarm`, which is durable state — persist it (the
-    // live path commits through the orchestrator hook around the tool call, as before). `persist()` is
-    // re-entrancy-guarded, so a wrapping commit still defers to one write.
+    // PERSIST. A pre-game authored profile lands on `prewarm` (durable pre-game state). A LIVE authored
+    // profile (#1067) is a SEASON-START FE-driven enrichment of byte-stable IDENTITY facets, exactly like
+    // the 0062 `recordWorldSnapshot` zeitgeist write-back: it must persist DURABLY but must NOT bump the
+    // closed-set `beatSeq` or run the integrity checkpoint. Previously the live path persisted NOTHING here
+    // and relied on a later, unrelated player-turn commit to flush it — which (a) could silently drop the
+    // write if no commit followed, and (b) made that commit's checkpoint compare the authored biography
+    // against the floor baseline and REFUSE the whole turn as degradation (the live-verify's "integrity
+    // checkpoint failed (degradation)" losses). Routing through `backgroundPersist` blind-saves the upgrade
+    // without a checkpoint (like the zeitgeist), and the `deepProfileAuthored` provenance flag lets the NEXT
+    // genuine player-turn commit's `isSuperset` recognize the floor→authored facet change as a sanctioned
+    // upgrade rather than a regression. Non-degradation is intact: the flag permits exactly the one-way
+    // floor→authored transition and the bio is byte-stable forever after.
     if (ctx.prewarm) this.persist();
+    else this.backgroundPersist();
 
     return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
   }
@@ -1499,9 +1521,14 @@ export class GameSessionAdapter implements GameSession {
     const entries = Object.entries(nextPrivate).map(([id, orientation]) => ({ id: id as EntityId, orientation }));
     if (entries.length) this.onSealPrivateOrientations?.(entries);
 
-    // A pre-game fold lands on `prewarm`, which is durable state — persist it. The live path commits through
-    // the orchestrator hook around the tool call. `persist()` is re-entrancy-guarded.
+    // A pre-game fold lands on `prewarm`, which is durable state — persist it. A LIVE fold (a season-2
+    // re-author) is the SAME class as the #1067 `recordCastProfile` upgrade: it re-grounds byte-stable
+    // public facets (e.g. `physicalCharacteristics.skinTone`) and re-seals the private orientation, so it
+    // must persist DURABLY without a beatSeq bump or the integrity checkpoint — route it through
+    // `backgroundPersist` (which re-seeds the non-degradation baseline) just like the profile write-back,
+    // rather than relying on an unrelated later commit (which would refuse the skinTone change as degradation).
     if (ctx.prewarm) this.persist();
+    else this.backgroundPersist();
 
     return { accepted: true, applied };
   }

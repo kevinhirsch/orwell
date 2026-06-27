@@ -32,9 +32,14 @@ export interface VaultStore {
   readHidden(query?: { kind?: HiddenKind; subject?: string }): HiddenRecord[];
   writeHidden(record: HiddenRecord): void;
   /**
-   * Atomically REPLACE every hidden record matching `query` with `records` (an idempotent upsert by
-   * subject+kind). Used by the 0058 / L28b authored write-back to re-seal ONE houseguest's profile +
-   * threads without leaving stale or duplicated records. Engine-only, like the rest of this port.
+   * Atomically REPLACE every hidden record matching `query` with `records` (an idempotent upsert). Used
+   * by the 0058 / L28b authored write-back to re-seal ONE houseguest's profile + threads without leaving
+   * stale or duplicated records. Engine-only, like the rest of this port.
+   *
+   * `id` (#1067) narrows the match to ONE exact record — REQUIRED when two record families share a
+   * `kind` for the same `subject` (the deep-profile + the private-orientation are BOTH `hidden-attribute`
+   * for the same houseguest, so a `{kind,subject}`-only re-seal of the profile would also DELETE the
+   * orientation — a Vault non-degradation regression). All provided query fields must match (AND).
    */
-  replaceHidden(query: { kind?: HiddenKind; subject?: string }, records: readonly HiddenRecord[]): void;
+  replaceHidden(query: { kind?: HiddenKind; subject?: string; id?: string }, records: readonly HiddenRecord[]): void;
 }
