@@ -365,6 +365,26 @@ export interface CastingStatusView {
 }
 
 /** The player makes a deal WITH a houseguest (player↔NPC). NPC↔NPC deals are off-screen/Vault-held. */
+/**
+ * 0107 — the player names an alliance. `members` are the houseguests they propose; the engine bond-GATES
+ * who actually joins (the unbonded decline), so this is a proposal, not a fiat. `name` is the player's
+ * label for it (the cementing act).
+ */
+export interface FormAllianceReq {
+  name: string;
+  members: EntityId[];
+  expectedBeatSeq?: number;
+}
+
+/** 0107 — a Vault-safe view of a named alliance: the NAME + members + whether the player founded it.
+ *  Never carries the cement/favor magnitudes (those stay engine-only). */
+export interface AllianceView {
+  id: string;
+  name: string;
+  members: NamedRef[];
+  youAreFounder: boolean;
+}
+
 export interface MakeDealReq {
   with: EntityId;
   kind: "safety" | "vote" | "final-two" | "target-other";
@@ -541,6 +561,8 @@ export interface PublicGameStatus {
    * fact the whole house knows, NEVER any secret/Vault data.
    */
   winner: NamedRef | null;
+  /** 0107 — the named alliances the player is a member of (Vault-safe: name + members, never a number). */
+  alliances?: AllianceView[];
 }
 
 /**
@@ -962,6 +984,8 @@ export interface SeasonRecapView {
   evicted: NamedRef[];
   /** Deals the player was party to, with their final status. */
   deals: DealView[];
+  /** 0107 — the named alliances the player is a member of (Vault-safe: name + members, never a number). */
+  alliances?: AllianceView[];
 }
 
 /**
@@ -1387,6 +1411,8 @@ export interface GameSession {
    * actions and makes a broken promise hurt. Returns the new deal's Vault-free projection.
    */
   makeDeal(req: MakeDealReq): DealView | null;
+  /** 0107 — the player names an alliance (bond-gated membership); null if nobody close enough joins. */
+  formAlliance(req: FormAllianceReq): AllianceView | null;
 
   /**
    * Feature 0075 — press an ally to open up (a trust-gated confidence). The SINGLE authority, like

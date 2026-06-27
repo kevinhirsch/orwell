@@ -337,6 +337,12 @@ export interface SeasonCtx {
    */
   loyaltyOf?: (id: EntityId) => number;
   /**
+   * 0107 — the NAMED-ALLIANCE cement fed into bloc detection: a bounded boost to a pair's mutual bond
+   * when they share a named alliance. Optional: omitted ⇒ 0 for every pair ⇒ the bloc read (and the
+   * votes it bends) is BYTE-IDENTICAL — the calibration spine holds when no alliances exist.
+   */
+  allianceTie?: (a: EntityId, b: EntityId) => number;
+  /**
    * The houseguest's static relationship DISPOSITION (0044): gates WHICH nomination tactic an HOH
    * plays (a loyalist sits a pawn; a schemer backdoors; neutral plays direct). Optional: pure
    * tests omit it and every HOH plays the direct, threat-primary read — byte-stable.
@@ -787,7 +793,7 @@ function creditResume(s: LiveSeasonState, id: EntityId): void {
 /** The house's CURRENT blocs (0043) — derived fresh per decision; [] when loyalty isn't wired. */
 function currentBlocs(s: LiveSeasonState, ctx: SeasonCtx): Bloc[] {
   if (!ctx.loyaltyOf) return [];
-  return detectBlocs({ rel: ctx.rel, active: s.active, loyaltyOf: ctx.loyaltyOf });
+  return detectBlocs({ rel: ctx.rel, active: s.active, loyaltyOf: ctx.loyaltyOf, ...(ctx.allianceTie ? { tieBoost: ctx.allianceTie } : {}) });
 }
 
 /**

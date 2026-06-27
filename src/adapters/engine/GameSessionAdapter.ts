@@ -2,7 +2,7 @@ import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
-  FinaleView, EvictionView, MakeDealReq, DealView, WhereaboutsView, HouseguestMoveResult,
+  FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
   SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
@@ -37,6 +37,8 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
+import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers } from "../../engine/alliances";
+import type { Alliance } from "../../engine/alliances";
 import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
 import type { ConfessionalContext } from "../../engine/confessionals";
 import { rankApproaches } from "../../engine/conversation";
@@ -440,6 +442,9 @@ export class GameSessionAdapter implements GameSession {
   private onEvent?: (ev: BeatEvent) => void;
   /** Tracked promises (0039). Player-party deals only here; NPC↔NPC deals live off-screen in the Vault. */
   private readonly deals = new DealLedger();
+  /** 0107 — live NAMED alliances (engine-only, Vault-sealed). Empty unless the player/NPCs name one ⇒ the
+   *  cement provider returns 0 for every pair ⇒ the seeded bloc/vote spine is byte-identical. */
+  private readonly alliances = new AllianceStore();
   /**
    * Live NPC CAMPAIGNS (0085) — persistent strategic agendas. ENGINE-ONLY hidden strategy (targets/
    * plans/progress + the per-perspective `knownTo`): it never crosses any outward seam. Phase A holds
@@ -1624,6 +1629,7 @@ export class GameSessionAdapter implements GameSession {
       highlights,
       evicted: (this.live?.evictionOrder ?? []).map((id) => ({ id, name: this.nameOf(id) })),
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
+      ...(this.alliances.forMember(PLAYER).length ? { alliances: this.playerAllianceViews() } : {}),
     };
   }
 
@@ -1884,6 +1890,8 @@ export class GameSessionAdapter implements GameSession {
       house: this.house ? this.cloneHouse(this.house) : null,
       live: this.live ? fastClone(this.live) : null,
       deals: this.deals.serialize(),
+      // 0107: persist named alliances so they survive a restart (accumulate, never thin). Engine-only.
+      ...(this.alliances.all().length ? { alliances: this.alliances.serialize() } : {}),
       // 0085: persist live campaigns so a multi-week agenda + its history survive a restart (accumulate,
       // never thin). Engine-only hidden strategy — already inside the never-outward snapshot.
       ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
@@ -2066,6 +2074,8 @@ export class GameSessionAdapter implements GameSession {
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
     this.live = core.live ? cloneSession(core.live) : null;
     this.deals.load(core.deals ?? []);
+    // 0107: restore named alliances (absent on pre-0107 saves ⇒ none).
+    this.alliances.load(core.alliances ?? []);
     // 0085: restore live campaigns (absent on pre-0085 saves ⇒ none).
     this.campaigns = (core.campaigns ?? []).map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] }));
     this.campaignTickCount = core.campaignTickCount ?? 0;
@@ -2294,6 +2304,7 @@ export class GameSessionAdapter implements GameSession {
       // /recap — otherwise it hangs on the last ceremony state post-season. Vault-free (public winner).
       finished: !!this.live?.finished,
       winner: this.named(this.live?.winner),
+      ...(this.alliances.forMember(PLAYER).length ? { alliances: this.playerAllianceViews() } : {}),
     };
   }
 
@@ -4525,6 +4536,9 @@ export class GameSessionAdapter implements GameSession {
         if (!hg) return 0.55;
         return derivedLoyalty(dispositionOf(hg.character.archetype), hg.soul.emotionalState);
       },
+      // 0107: the named-alliance cement into bloc detection — bounded, saturation-diluted; 0 for every
+      // pair when no alliance is named ⇒ the seeded bloc/vote read is byte-identical (the calibration spine).
+      allianceTie: (a, b) => allianceTieBoost(this.alliances.all(), a, b),
       // Static disposition (0044): gates which nomination tactic an HOH plays (pawn/backdoor/direct).
       dispositionOf: (id) => {
         const hg = this.house
@@ -5254,6 +5268,49 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0107 — the player NAMES an alliance with a set of houseguests. Bond-GATED (anti-watering-down): a
+   * proposed member joins only if their mutual bond with the player clears the floor; the unbonded
+   * DECLINE, so you can't name everyone your ally. Needs ≥2 willing members or it doesn't form. Recorded
+   * as the player's witnessed knowledge; the alliance then CEMENTS the bloc + banks favor (Vault-sealed
+   * magnitudes — the player sees the NAME + who's in, never a number).
+   */
+  formAlliance(req: FormAllianceReq): AllianceView | null {
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) return null;
+    const evicted = new Set(this.live.evictionOrder);
+    const proposed = [...new Set(req.members)].filter(
+      (id) => id !== PLAYER && this.house!.npcs.some((n) => n.id === id) && !evicted.has(id),
+    );
+    const bondOf = (a: EntityId, b: EntityId): number => (this.rel.edge(a, b).trust + this.rel.edge(a, b).affinity) / 2;
+    const willing = willingMembers(PLAYER, proposed, (m) => Math.min(bondOf(PLAYER, m), bondOf(m, PLAYER)));
+    if (willing.length < 2) return null; // nobody close enough bought in — no alliance of one
+    const name = (req.name ?? "").slice(0, 60).trim() || "our alliance";
+    const others = willing.filter((m) => m !== PLAYER);
+    this.onPlayerEvent?.(
+      `${this.nameOf(PLAYER)} forms an alliance "${name}" with ${others.map((m) => this.nameOf(m)).join(", ")}`,
+      willing, "alliance",
+    );
+    const a = this.alliances.add(name, PLAYER, willing, this.beatSeqNow());
+    this.persist();
+    return this.allianceView(a);
+  }
+
+  /** 0107 — a Vault-safe view of a named alliance (the NAME + member names + whether the player founded it). */
+  private allianceView(a: Alliance): AllianceView {
+    return {
+      id: a.id,
+      name: a.name,
+      members: a.members.map((m) => ({ id: m, name: this.nameOf(m) })),
+      youAreFounder: a.founder === PLAYER,
+    };
+  }
+
+  /** 0107 — the alliances the PLAYER is a member of (Vault-safe; never the cement/favor numbers). */
+  private playerAllianceViews(): AllianceView[] {
+    return this.alliances.forMember(PLAYER).map((a) => this.allianceView(a));
+  }
+
+  /**
    * 0075 — the trust-gated confidence (the single authority). The model presses the ally and calls this;
    * the ENGINE decides everything (whether they open up, how much, true or a lie) and RECORDS the
    * disclosure as the player's knowledge. Vault-safe by construction: an undisclosed secret is never
@@ -5348,6 +5405,9 @@ export class GameSessionAdapter implements GameSession {
       else if (d.status === "open") g += CONFIDENCE.openDealGoodwill;
       else if (d.status === "broken") g -= CONFIDENCE.brokenDealPenalty;
     }
+    // 0107: a NAMED alliance the player shares with this houseguest banks a little good favor (bounded,
+    // saturation-diluted) — the "easy favor with your allies" lever. 0 when they share none.
+    g += allianceFavor(this.alliances.all(), npcId, PLAYER);
     return Math.max(0, Math.min(1, g));
   }
 
@@ -6381,6 +6441,7 @@ export class GameSessionAdapter implements GameSession {
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
+      ...(this.alliances.forMember(PLAYER).length ? { alliances: this.playerAllianceViews() } : {}),
       // 0059/L40 — only PUBLIC (visible) showmances; sealed ties/showmances never surface here.
       ...(this.visibleShowmances().length ? { showmances: this.visibleShowmances() } : {}),
       // PREMIERE (feature #380 follow-on): the meet-everyone progress — who's met + who's still to

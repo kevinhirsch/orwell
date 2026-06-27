@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, RecordOffscreenSceneTextureReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, RecordOffscreenSceneTextureReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -114,6 +114,11 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["with"])) refuse("with", "a houseguest id (string)");
       if (!isStr(args["kind"])) refuse("kind", "a deal kind (string)");
       if (!isStr(args["terms"])) refuse("terms", "a non-empty string");
+      return;
+    case "formAlliance": // 0107
+      guardSyncFields(false);
+      if (!isStr(args["name"])) refuse("name", "an alliance name (string)");
+      if (!Array.isArray(args["members"])) refuse("members", "a list of houseguest ids");
       return;
     case "confide":
       guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
@@ -287,6 +292,8 @@ export class McpServer {
         return this.deps.session.turnIn();
       case "makeDeal":
         return this.deps.session.makeDeal(args as unknown as MakeDealReq);
+      case "formAlliance": // 0107
+        return this.deps.session.formAlliance(args as unknown as FormAllianceReq);
       case "confide":
         // 0075 — the trust-gated confidence: the engine decides + records; the model voices the result.
         return this.deps.session.confide(args["npcId"] as EntityId, args["expectedBeatSeq"] as number | undefined);
