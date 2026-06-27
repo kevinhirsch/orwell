@@ -340,6 +340,9 @@ class TestGameTrimHiddenElements:
         "#rail-memory",
         "#rail-notes",
         "#rail-tasks",
+        # #663: the Chats-section "Manage Chats (Library)" button opens the inherited
+        # workspace Library modal — an operator-reachable "way in" to a dropped vertical.
+        "#chats-library-btn",
         # Sidebar sections
         "#tools-section",
         "#email-section",
@@ -363,6 +366,7 @@ class TestGameTrimHiddenElements:
         "email-section",
         "tools-section",
         "rail-email",
+        "chats-library-btn",  # #663: the library opener that game-trim.css must hide
     ]
 
     @pytest.mark.parametrize("element_id", HTML_REQUIRED_IDS)
