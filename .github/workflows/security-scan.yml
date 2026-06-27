@@ -53,6 +53,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The VulnHawk composite installs the Claude Code CLI via `npm install -g` but does NOT run
+      # setup-node itself. On GitHub-hosted runners Node is pre-baked; our self-hosted runner provides
+      # it per-job (see ci.yml), so without this the backend-CLI install has no npm on PATH. Node 22
+      # matches ci.yml; a user-writable global prefix also avoids needing sudo for `npm install -g`.
+      # Python is handled by the action's own setup-python step, so we don't add it here.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       # VulnHawk v0.2.0, pinned to the tag's commit SHA (the `@v0.2.0` tag itself is mutable). NOTE:
       # the action internally runs `pip install vulnhawk`, which still floats to the latest build — SHA
       # pinning the action does NOT pin the scanner package it pulls.
