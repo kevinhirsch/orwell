@@ -11,6 +11,7 @@ import { SURNAMES } from "./data/surnames";
 import { VOCATIONS } from "./data/vocations";
 import { HOMETOWNS } from "./data/hometowns";
 import type { Hometown } from "./data/hometowns";
+import { TRIGGER, type EruptionKind } from "./triggerConstants";
 
 /**
  * CharacterFactory + OOBE (feature 0004). Generates a curated, randomly-named
@@ -71,11 +72,42 @@ export const ENSEMBLE = {
  * it surfaces RARELY into off-screen scene content (gated by `hiddenSurfaces`) and reaches the player
  * only if an in-game pathway later carries it (gossip / being told). Seed-stable (part of the static
  * character, 0007). Distinct from the dynamic Soul (0041 evolution): these are fixed secrets, not mood.
+ *
+ * Feature 0091 adds the `"trigger"` kind: a VOLATILE secret (a buried temper, a grudge they smile
+ * through, a desperate streak) carries, ENGINE-SIDE ONLY, a `volatility ∈ [0,1]` (how easily it goes
+ * off) and an eruption `kind` (the PUBLIC scene type it maps to). Under accumulated strain + a fresh
+ * spark + a temperature roll it FIRES a Vault-safe public house event the player witnesses — but the
+ * sealed `detail`/`volatility`/`kind` themselves NEVER cross the wall (only the eruption is seen).
  */
-export type HiddenElementKind = "secret-motive" | "pre-game-tie" | "concealed-aptitude" | "divergent-persona";
+export type HiddenElementKind = "secret-motive" | "pre-game-tie" | "concealed-aptitude" | "divergent-persona" | "trigger";
 export interface HiddenElement {
   kind: HiddenElementKind;
   detail: string;
+  /**
+   * Feature 0091 — TRIGGER elements only (engine-side, VAULT-class). How easily this volatile secret
+   * goes off ∈ [0,1] (the static charge minted on a dedicated side-rng). Never projected, never a number
+   * the player sees — identical Vault treatment to every other hidden element's content. Absent on a
+   * non-trigger element and on a pre-0091 save (which loads without it — the field simply stays absent).
+   */
+  volatility?: number;
+  /**
+   * Feature 0091 — TRIGGER elements only (engine-side, VAULT-class). The PUBLIC eruption scene type this
+   * trigger maps to (`blow-up` / `showmance-detonation` / `mask-slips` / `meltdown`) — a *type* of public
+   * blow-up, NEVER the sealed cause. Drives the eruption-pool line the narrator voices; the sealed detail
+   * stays Vault-side. Absent on a non-trigger element and on a pre-0091 save.
+   */
+  eruptionKind?: EruptionKind;
+  /**
+   * Feature 0091 — TRIGGER elements only. MONOTONIC fired flag (0007/0030): set true the first time this
+   * trigger erupts, so a one-shot fuse (a slipped mask) never re-fires and a restored game remembers which
+   * fuses are spent. Never cleared. Absent ⇒ never fired (a pre-0091 save / an un-armed element).
+   */
+  fired?: boolean;
+  /**
+   * Feature 0091 — TRIGGER elements only. The week this trigger last fired (0007/0030) — read against the
+   * re-arm cooldown so a re-armable blow-up/meltdown can't detonate two weeks running. Absent ⇒ never fired.
+   */
+  lastFiredWeek?: number;
 }
 
 export interface Character {
@@ -532,7 +564,10 @@ function generateAppearance(rng: RandomnessSource): { appearance: string; age: n
 }
 
 // --- Hidden-element generation (B50): typed secrets, engine-side, surfacing rarely ---
-const HIDDEN_ELEMENT_POOLS: Record<Exclude<HiddenElementKind, "concealed-aptitude">, readonly string[]> = {
+// `concealed-aptitude` is minted from `CONCEALED_APTITUDES` (stat-backed), and `trigger` is not a draw
+// pool at all (0091 — it is an ARMING of an already-minted volatile wording via `armTriggers`), so both
+// are excluded here.
+const HIDDEN_ELEMENT_POOLS: Record<Exclude<HiddenElementKind, "concealed-aptitude" | "trigger">, readonly string[]> = {
   "secret-motive": [
     "is secretly playing to win money for someone back home",
     "is here for redemption after a public failure",
@@ -586,18 +621,74 @@ export const HIDDEN_ELEMENT_GATES = {
   maxSecretMotives: 1,
 } as const;
 
-const HIDDEN_KINDS: readonly HiddenElementKind[] = ["secret-motive", "pre-game-tie", "concealed-aptitude", "divergent-persona"];
+// The DRAW kinds (0091: `"trigger"` is NOT here — it is armed from an existing wording, not drawn).
+const HIDDEN_KINDS: readonly Exclude<HiddenElementKind, "trigger">[] = ["secret-motive", "pre-game-tie", "concealed-aptitude", "divergent-persona"];
 
 /** How many hidden elements each NPC carries (the mandate's "tons", bounded for a season). */
 export const HIDDEN_ELEMENT_RANGE = { min: 3, max: 6 } as const;
+
+/**
+ * Feature 0091 — which already-minted VOLATILE hidden-element wordings can be ARMED into triggers, and the
+ * PUBLIC eruption scene type each maps to. The volatile lines the B50 pools already contain (a smiled-through
+ * grudge, a cut-first loyalist, a quietly-desperate gambler, a kept mask) are reclassified into the `"trigger"`
+ * kind when armed — but ONLY a wording in this map can ever become a trigger (no other hidden element fires),
+ * and the per-NPC cap + population sparseness keep most of the cast un-triggered (the 0059 "≤2 ties"
+ * discipline). The eruption kind is the PUBLIC scene type (`blow-up`/`meltdown`/`mask-slips`), never the
+ * sealed wording. `showmance-detonation` has no B50 wording to arm yet (deep profiles, 0058, author the
+ * richest ones); the eruption pool for it still exists for when one is added.
+ */
+export const TRIGGER_WORDINGS: ReadonlyMap<string, EruptionKind> = new Map([
+  // divergent-persona volatile lines — a temper / a turn / a dropped mask
+  ["smiles through a grudge they will never forget", "blow-up"],
+  ["looks fiercely loyal but will cut first when it counts", "blow-up"],
+  ["plays sweet but keeps a private target list", "mask-slips"],
+  ["acts like a harmless floater while reading the whole house", "mask-slips"],
+  ["seems naive but clocks every move", "mask-slips"],
+  // secret-motive volatile line — a desperate streak that breaks under pressure
+  ["is quietly desperate and will gamble bigger than they let on", "meltdown"],
+] as const);
+
+/**
+ * Feature 0091 — ARM a houseguest's eligible volatile hidden elements into triggers, IN PLACE, on a
+ * DEDICATED side rng (so the B50 hidden-element draw sequence above is byte-IDENTICAL — only an armed
+ * element gains a `kind`/`volatility`/`eruptionKind`; nothing is added/removed/reordered). Bounded + rare:
+ * the per-NPC `maxTriggers` cap and the per-element `population` sparseness roll keep most of the cast
+ * un-triggered. Pure; takes its own rng so the main house stream stays byte-stable (0007). Mutates the
+ * passed elements in place and returns them (a no-op when no element is an eligible volatile wording).
+ */
+export function armTriggers(elements: HiddenElement[], rng: RandomnessSource, c = TRIGGER): HiddenElement[] {
+  let armed = 0;
+  for (const el of elements) {
+    if (armed >= c.maxTriggers) break;
+    const eruptionKind = TRIGGER_WORDINGS.get(el.detail);
+    if (eruptionKind === undefined) continue;          // not a volatile wording — never a trigger
+    // Population sparseness: most volatile wordings stay inert (a house of ticking bombs is noise). One
+    // roll per eligible element keeps the dedicated stream deterministic.
+    if (rng.next() >= c.population) continue;
+    el.kind = "trigger";
+    el.eruptionKind = eruptionKind;
+    el.volatility = c.volatilityMintMin + rng.next() * (c.volatilityMintMax - c.volatilityMintMin);
+    armed++;
+  }
+  return elements;
+}
 
 /**
  * Mint 3–6 DISTINCT, seeded, typed hidden elements for one NPC (B50). Driven by a SIDE rng (hashed off
  * the name) at generation so it never perturbs the main house stream (stats/names stay byte-stable, 0007).
  * With a `fit` (audit C9), the secrets are internally CONSISTENT: at most one secret-motive, and a
  * concealed aptitude only where the hidden stats genuinely back it AND the public persona conceals it.
+ *
+ * Feature 0091 — AFTER the B50 mint, the eligible volatile lines are ARMED into triggers under a per-NPC
+ * cap + sparseness, on a DEDICATED `triggerRng` (so the B50 draw sequence is byte-identical; only an armed
+ * element gains its `volatility`/eruption `kind`). Callers that don't pass a `triggerRng` mint exactly the
+ * pre-0091 elements (no trigger ever armed) — pure tests and the legacy path stay byte-stable.
  */
-export function generateHiddenElements(rng: RandomnessSource, fit?: HiddenElementFit): HiddenElement[] {
+export function generateHiddenElements(
+  rng: RandomnessSource,
+  fit?: HiddenElementFit,
+  triggerRng?: RandomnessSource,
+): HiddenElement[] {
   const count = HIDDEN_ELEMENT_RANGE.min + rng.int(HIDDEN_ELEMENT_RANGE.max - HIDDEN_ELEMENT_RANGE.min + 1); // 3..6
   const G = HIDDEN_ELEMENT_GATES;
   const aptitudes = CONCEALED_APTITUDES.filter((a) =>
@@ -622,6 +713,8 @@ export function generateHiddenElements(rng: RandomnessSource, fit?: HiddenElemen
       if (kind === "secret-motive") motives++;
     }
   }
+  // 0091: arm eligible volatile lines into triggers on the DEDICATED side rng (byte-stable B50 stream).
+  if (triggerRng) armTriggers(out, triggerRng);
   return out;
 }
 
@@ -693,9 +786,13 @@ export function generateHouse(
         ...generateAppearance(new SeededRandom(hashSeed(`${name}:${i}`))),
         // B50: minted off a SEPARATE side rng so the main stream stays byte-stable (engine-side secrets).
         // C9: minted against the NPC's REAL stats + PUBLIC archetype bias, so secrets stay consistent.
+        // 0091: trigger ARMING runs on its OWN dedicated side rng (a distinct `:trigger:` stream), so the
+        // B50 hidden-element draw sequence is byte-identical AND the main house stream is untouched — the
+        // calibration spine (and every seed-pinned test) is byte-stable whether triggers arm or not.
         hiddenElements: generateHiddenElements(
           new SeededRandom(hashSeed(`${name}:hidden:${i}`)),
           { stats, publicBias: spec.bias },
+          new SeededRandom(hashSeed(`${name}:trigger:${i}`)),
         ),
       },
       soul: { emotionalBaseline: 0.5, volatility, emotionalState: 0.5, emotionalHistory: [], memory: [] },

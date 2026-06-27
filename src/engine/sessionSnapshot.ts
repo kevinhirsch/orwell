@@ -200,6 +200,21 @@ export interface SessionCore {
   nominationWeeks?: Record<EntityId, number[]>;
   surfacedThreadCount?: number;
   /**
+   * Feature 0091 — the per-season TRIGGER-ERUPTION count (sibling to `surfacedThreadCount`): how many
+   * volatile triggers have fired this season. MONOTONIC, persisted so the hard `eruptionCapPerSeason` is
+   * never re-opened by a reload (0007/0030) and a few-per-season pacing holds across a restart. ENGINE-ONLY
+   * — a count carries no Vault content. Absent on a pre-0091 save / when the trigger layer is off ⇒ 0. (The
+   * per-trigger `fired`/`lastFiredWeek` flags themselves ride on the byte-stable `Character.hiddenElements`.)
+   */
+  eruptionCount?: number;
+  /**
+   * Feature 0091 — the DEDICATED trigger-rng tick counter: the trigger check forks its rng off the game seed
+   * + this counter, never the shared society/vote stream, so even the layer ON can't perturb calibration.
+   * Persisted so the dedicated stream stays reproducible across a restart; absent ⇒ 0. Never a calibration
+   * input (its own forked stream), never a `counts()` dimension. ENGINE-ONLY.
+   */
+  triggerTickCount?: number;
+  /**
    * Feature 0075 — the trust-gated confidence ledger: per-houseguest, the highest TIER they have
    * confided to the player (monotonic for a true secret) + whether that disclosure was truthful (a
    * lie is engine-side only). `confideLieCount` is the per-season lie count (the hard cap). Persisted

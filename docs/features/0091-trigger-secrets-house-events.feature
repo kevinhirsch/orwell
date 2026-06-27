@@ -22,7 +22,7 @@ Feature: 0091 — Trigger secrets fire house events (the foreseeable blow-up)
       When a fresh precipitating scene sparks them in a beat the player witnesses
       Then their trigger fires as a public house event the player witnesses
       And the public house event names no sealed trigger wording
-      And no number is ever shown to the player
+      And no sealed trigger number is shown to the player
 
     Scenario: A calm houseguest with the same trigger does not fire
       Given a houseguest carrying the same volatile sealed trigger attribute

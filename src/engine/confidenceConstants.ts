@@ -69,7 +69,9 @@ export const CONFIDENCE = {
     "pre-game-tie": "they let slip there's history with someone in this house",
     "concealed-aptitude": "they hinted they're better at this game than they've been letting on",
     "divergent-persona": "the way they talk to you in private doesn't match the version the house sees",
-  } as Record<HiddenElementKind, string>,
+    // 0091 — a `trigger` is a volatility that ERUPTS (witnessed), never a confidable fact; it is excluded
+    // from the confidence path (`headlineSecretOf` skips it), so no gloss/fabrication key is needed for it.
+  } as Record<Exclude<HiddenElementKind, "trigger">, string>,
 
   // ── fabricated (FALSE) admissions — engine-authored from the public archetype, NEVER a real secret ──
   // Generic, plausible, kind-shaped lies. A lie is not a leak: none of these is anyone's actual sealed
@@ -91,5 +93,6 @@ export const CONFIDENCE = {
       "what you see is what you get with me — I don't have a game face, this is just who I am",
       "I know I seem guarded but with you I've got nothing to hide, I swear",
     ],
-  } as Record<HiddenElementKind, readonly string[]>,
+    // 0091 — `trigger` excluded (a volatility erupts, it is never confided; see teaseGloss above).
+  } as Record<Exclude<HiddenElementKind, "trigger">, readonly string[]>,
 } as const;

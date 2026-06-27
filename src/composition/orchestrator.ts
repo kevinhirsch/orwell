@@ -512,7 +512,13 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // Off-screen society (0038): the house lives in MORE than one way — varied typed scenes the
   // player never witnesses (hidden; 0003), each folded with its REAL interaction nature (0023). A
   // houseguest's hidden element (B50) rarely slips into a scene's hidden content (rare-reveal loop).
-  const hiddenOf = new Map((core.house?.npcs ?? []).map((n) => [n.id, n.character.hiddenElements]));
+  // 0091: a `trigger` element is EXCLUDED from this rare-reveal flavor pool — a trigger is pure sealed
+  // state that manifests ONLY as its public ERUPTION (the `runTriggerEruptions` house event), never as
+  // ordinary off-screen flavor that could later gossip-paraphrase toward the player ("X has a buried
+  // temper"). The eruption is the one channel; the sealed wording itself stays fully inert. (This reads a
+  // per-NPC SIDE rng only — the seeded calibration spine is untouched.)
+  const hiddenOf = new Map((core.house?.npcs ?? [])
+    .map((n) => [n.id, n.character.hiddenElements.filter((e) => e.kind !== "trigger")] as const));
   // ADR 0006: at night the house thins — houseguests past their character-driven bedtime have turned in
   // and leave the off-screen society (the night owls scheme on without them; a turned-in player misses
   // it). IDENTITY when the clock is off ⇒ the hidden society + the seeded calibration spine are byte-identical.
@@ -664,6 +670,26 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
       rng,
       clockNow,
     );
+  }
+
+  // 0091 — TRIGGER ERUPTIONS: AFTER the society/confessional folds, a plausibly-strained, co-present
+  // houseguest whose volatile sealed trigger meets a fresh SPARK this tick (a conflict/betrayal scene that
+  // just named them) can DETONATE into a Vault-safe PUBLIC house event the player witnesses. STRICTLY
+  // OPT-IN (default-OFF `ORWELL_TRIGGERS`): when off — the default, and the state the seeded juryReach/
+  // gradient/UAT sims run in — the call is skipped entirely (no precipitant map built, no draw, no event,
+  // no fold), so this tick is byte-identical to the pre-feature build and the seeded competition/vote spine
+  // is untouched. When on, the fire check runs on a DEDICATED rng INSIDE the session (never this shared
+  // stream above) — the load-bearing calibration-neutrality guarantee. The precipitant is THIS tick's fresh
+  // sparks: a conflict/betrayal scene anchors the eruption to a live moment (the no-cold-open guarantee).
+  if (sandbox.session.triggersEnabledNow()) {
+    const precipitants = new Map<EntityId, number>();
+    for (const s of scenes) {
+      const spark = s.type === "betrayal" ? 1 : s.type === "conflict" ? 0.8 : 0;
+      if (spark === 0) continue;
+      precipitants.set(s.initiator, Math.max(precipitants.get(s.initiator) ?? 0, spark));
+      precipitants.set(s.partner, Math.max(precipitants.get(s.partner) ?? 0, spark));
+    }
+    sandbox.session.runTriggerEruptions(sandbox.engine.events, precipitants);
   }
 
   if (trigger === "player-turn" && ids.length > 0) {
