@@ -489,10 +489,10 @@ def test_pre_stream_provider_error_persists_friendly_fallback_not_raw_error():
     is the single string both windows must converge to. _empty_response_fallback is the source."""
     from src.agent_loop import _empty_response_fallback
     # empty content + no tools → the friendly fallback (yielded AND persisted as full_response).
-    final, chunk = _empty_response_fallback("", "", [])
+    final, chunk, _retry = _empty_response_fallback("", "", [])
     assert "empty response" in final.lower(), "the persisted/peer text is the friendly fallback"
     assert "Error 503" not in final, "the raw provider error is NEVER the persisted text"
     assert chunk and "delta" in chunk, "the fallback is also streamed as a delta (so a fresh window sees it)"
     # real content is untouched (no fallback) — the error path is the ONLY divergence source here.
-    final2, chunk2 = _empty_response_fallback("real narration", "", [])
+    final2, chunk2, _retry2 = _empty_response_fallback("real narration", "", [])
     assert final2 == "real narration" and chunk2 is None

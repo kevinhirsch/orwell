@@ -315,4 +315,14 @@ def test_empty_agent_turn_surfaces_a_notice_not_a_blank(monkeypatch):
                if "delta" in e and not e.get("thinking") and (e.get("delta") or "").strip()]
     # The loop's end-of-turn guard emits a visible notice rather than vanishing.
     assert visible, "the agent loop must surface a notice for an empty turn, never a blank"
-    assert any("empty response" in (e.get("delta") or "").lower() for e in visible)
+    # F2 (#1017): an in-game/casting empty turn now surfaces an IN-CHARACTER producer recovery line
+    # (NOT the operator "empty response / switch models" dead-end a player can't act on from chat),
+    # paired with a one-tap `truncated` retry affordance. The operator string is reserved for
+    # non-game workspace turns.
+    import src.agent_loop as _al
+    assert any(_al._EMPTY_PRODUCER_LINE == (e.get("delta") or "") for e in visible), \
+        "a casting/in-game empty turn must surface the in-character producer recovery line"
+    assert not any("empty response" in (e.get("delta") or "").lower() for e in visible), \
+        "the operator dead-end string must not reach an in-game player"
+    assert any(e.get("type") == "truncated" for e in events), \
+        "a one-tap retry affordance must accompany the recovery line"
