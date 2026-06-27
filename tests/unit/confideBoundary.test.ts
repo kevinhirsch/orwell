@@ -6,6 +6,7 @@ import { PLAYER_TOOLS } from "../../src/surfaces/tools/registry";
 import { buildSandbox } from "../support/sandbox";
 import { PLAYER } from "../../src/domain/ids";
 import { RelationshipModel } from "../../src/engine/relationships";
+import { CONFIDENCE } from "../../src/engine/confidenceConstants";
 import type { GameHouse, HiddenElement } from "../../src/engine/characterFactory";
 import type { ConfideResult } from "../../src/ports/GameSession";
 
@@ -64,6 +65,18 @@ function earnFullConfidence(session: GameSessionAdapter, npcId: string): void {
   }
   // Goodwill from the 0039 deal ledger (open pacts) — warmth alone never clears the gate by design.
   for (let i = 0; i < 3; i++) session.makeDeal({ with: npcId, kind: "final-two", terms: "ride or die" });
+}
+
+/** Set a houseguest up as a manipulator the player reads as a high threat with no warmth — the strategic
+ *  (lie) pull, not genuine closeness. Seeded so the lie roll actually fires (verified by the seed scan). */
+function setupLiar(session: GameSessionAdapter, npcId: string): void {
+  const house = (session as unknown as { house: GameHouse }).house;
+  house.npcs.find((n) => n.id === npcId)!.character.archetype = "mastermind";
+  const rel = (session as unknown as { rel: RelationshipModel }).rel;
+  for (const [a, b] of [[npcId, PLAYER], [PLAYER, npcId]] as const) {
+    const e = rel.edge(a, b);
+    e.trust = 0; e.affinity = 0; e.threat = 0.95;
+  }
 }
 
 describe("0075 confide — the MCP boundary is OPEN (the four-place wiring is live)", () => {
@@ -138,5 +151,62 @@ describe("0075 confide — the Vault Wall holds structurally (the load-bearing t
     const again = a.session.confide(sa.id)!;
     expect(again.tier).toBe(ra.tier);
     expect(again.content).toBe(ra.content);
+  });
+});
+
+describe("0075 confide — the PASSIVE LIE-CATCH (spec open-Q #4)", () => {
+  it("a schemer plants a lie: a fabricated admission, no real secret of anyone, recorded untrue", () => {
+    const { session, sb } = startedServer(1);
+    const { id, secret } = firstNpcSecret(session);
+    setupLiar(session, id);
+
+    const lie = session.confide(id)!;
+    expect(lie.disclosed).toBe(true);
+    expect(lie.truthful).toBe(false); // the engine's hidden record: this is a lie
+    expect(lie.content).not.toBe(secret.detail); // a lie is NOT a leak — never a real secret
+    // the player believes the claim (it is recorded as their knowledge) with NO truth/lie marker on it.
+    const known = sb.engine.knowledge.knownTo(PLAYER).find((f) => f.content === lie.content)!;
+    expect(known).toBeDefined();
+    expect(JSON.stringify(known)).not.toMatch(/truthful|"lie"/);
+    // the hidden layer knows it is false.
+    expect((session as unknown as { confideState: Record<string, { truthful: boolean }> }).confideState[id]!.truthful).toBe(false);
+  });
+
+  it("a later true pathway catches the lie: the belief flips to the truth + a betrayal-grade blow", () => {
+    const { session, sb } = startedServer(1);
+    const { id, secret } = firstNpcSecret(session);
+    const rel = (session as unknown as { rel: RelationshipModel }).rel;
+
+    // 1) the schemer plants a lie — the player believes a fabrication, not the real secret.
+    setupLiar(session, id);
+    const lie = session.confide(id)!;
+    expect(lie.truthful).toBe(false);
+    expect(sb.engine.knowledge.knownTo(PLAYER).some((f) => f.content.includes(secret.detail))).toBe(false);
+
+    // 2) the bond is genuinely earned and a TRUE pathway later delivers the real thing.
+    earnFullConfidence(session, id);
+    const before = { ...rel.edge(PLAYER, id) };
+    const truth = session.confide(id)!;
+    expect(truth.truthful).toBe(true);
+    expect(truth.content).toBe(secret.detail);
+
+    // the belief flips: the real secret is now the player's recorded knowledge.
+    expect(sb.engine.knowledge.knownTo(PLAYER).some((f) => f.content.includes(secret.detail))).toBe(true);
+    // a betrayal-grade blow lands on the player's read of the liar (trust down hard, threat up).
+    const after = rel.edge(PLAYER, id);
+    expect(after.trust).toBeLessThan(before.trust - 0.15);
+    expect(after.threat).toBeGreaterThan(before.threat);
+  });
+
+  it("lies are capped per season (a house of liars is noise, not drama)", () => {
+    const { session } = startedServer(1);
+    const house = (session as unknown as { house: GameHouse }).house;
+    for (const npc of house.npcs) {
+      if (!(npc.character.hiddenElements ?? []).length) continue;
+      setupLiar(session, npc.id);
+      session.confide(npc.id);
+    }
+    const lieCount = (session as unknown as { lieCount: number }).lieCount;
+    expect(lieCount).toBeLessThanOrEqual(CONFIDENCE.maxLiesPerSeason);
   });
 });

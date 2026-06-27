@@ -8,11 +8,12 @@
 > pathway (`registry.setOnConfide` → `surfaceInformationTo`). **Gate:** `tests/unit/confidence.test.ts`
 > (pure) + `tests/unit/confideBoundary.test.ts` (the MCP-boundary + the load-bearing Vault-wall test).
 > Gated/opt-in by construction — `confide` fires only on the player lever and `mayConfide` takes no
-> rng, so the seeded calibration spine is byte-identical. **Fast-follows (not in the first PR):** (a)
-> wiring the full `.feature` into `cucumber.cjs` (its lie-catch + full-season scenarios cover the
-> deferred enrichment below); (b) the **passive lie-catch** — a later true pathway flips the belief +
-> the betrayal-grade blow when the player acts on it (spec open-Q #4, deferred); (c) the **FE
-> agent-loop guardrail** that error-corrects a `confide` under-call (0055 sibling, pytest-gated).
+> rng, so the seeded calibration spine is byte-identical. **Built since (2026-06-27, for #564):** (a) the
+> full `.feature` is wired into `cucumber.cjs` (9 scenarios, `features/step_definitions/confidence.steps.ts`);
+> (b) the **passive lie-catch** — a later truthful pathway flips the player's belief to the truth and folds
+> a betrayal-grade blow on the player→liar edge in place of the warm bond bump (spec open-Q #4), gated by
+> `confideBoundary.test.ts` + the BDD scenarios. **Fast-follow still owed:** the **FE agent-loop guardrail**
+> that error-corrects a `confide` under-call (0055 sibling, pytest-gated).
 > **Depends on:** 0001 (Vault Wall), 0002
 > (event visibility & pathway propagation / `surfaceInformationTo`), 0017/0026 (relationship math),
 > 0023 (consequence & memory fold), 0039 (deals — the favor/goodwill ledger), 0041 (soul / emotional
@@ -217,5 +218,11 @@ secret instead of a real one:
 2. **Default bands:** start `tease ≈ confidantBondThreshold (0.7)`, `partial ≈ 0.8`, `full ≈ 0.9`
    of the combined motive, tuned against the UAT once live.
 3. **Lie cap:** default ≤2/season (mirrors 0059's "≤2 ties / ≤2 showmances" sparseness).
-4. **Catching a lie:** v1 surfaces the contradiction passively (a later true pathway flips the
-   belief); a louder "you realize \<name\> lied to you" beat is a possible enrichment.
+4. **Catching a lie:** ✅ **BUILT (v1, 2026-06-27).** A later truthful pathway from the houseguest who
+   lied flips the player's belief to the truth (recorded at the higher truthful confidence) and folds a
+   betrayal-grade blow on the player→liar edge (`IMPACT.betrayal`) in place of the warm bond bump — the
+   player lever only, so the seeded calibration spine is byte-identical (the fold does the same 4 jitter
+   draws the old bond bump did). The blow lands **exactly once**: the catch flips `confideState[npc]` to
+   truthful, so any later press at the same-or-lower tier is absorbed by the monotonic re-tell guard (no
+   double-penalty). Gate: `confideBoundary.test.ts` + the BDD `0075` lie-catch scenario. A louder "you realize \<name\> lied to you" beat (a different
+   pathway delivering the truth, an explicit catch announcement) remains a possible enrichment.
