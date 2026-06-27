@@ -221,6 +221,8 @@ secret instead of a real one:
 4. **Catching a lie:** ✅ **BUILT (v1, 2026-06-27).** A later truthful pathway from the houseguest who
    lied flips the player's belief to the truth (recorded at the higher truthful confidence) and folds a
    betrayal-grade blow on the player→liar edge (`IMPACT.betrayal`) in place of the warm bond bump — the
-   player lever only, so the seeded calibration spine is byte-identical. Gate: `confideBoundary.test.ts`
-   + the BDD `0075` lie-catch scenario. A louder "you realize \<name\> lied to you" beat (a different
+   player lever only, so the seeded calibration spine is byte-identical (the fold does the same 4 jitter
+   draws the old bond bump did). The blow lands **exactly once**: the catch flips `confideState[npc]` to
+   truthful, so any later press at the same-or-lower tier is absorbed by the monotonic re-tell guard (no
+   double-penalty). Gate: `confideBoundary.test.ts` + the BDD `0075` lie-catch scenario. A louder "you realize \<name\> lied to you" beat (a different
    pathway delivering the truth, an explicit catch announcement) remains a possible enrichment.
