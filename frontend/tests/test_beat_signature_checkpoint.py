@@ -310,9 +310,11 @@ def test_agent_loop_calls_post_turn_desync_check_in_live_path():
 
 def test_framing_consumes_reground_and_stores_signature():
     src = _read("routes", "chat_helpers.py")
-    assert "_DESYNC_REGROUND.pop(user" in src
-    assert "_LAST_BEAT_SIG[user] = await _capture_beat_signature(user)" in src
-    # The consume/capture runs inside apply_game_framing's started branch, fail-open.
-    consume = src.index("_DESYNC_REGROUND.pop(user")
+    # #1045: the checkpoint now keys the desync stores via the STABLE _desync_key (canonical-session
+    # fallback when user=None) so the spine functions single-tenant. The consume + capture run inside
+    # apply_game_framing's started branch, fail-open.
+    assert "_DESYNC_REGROUND.pop(_dkey, None)" in src
+    assert "_LAST_BEAT_SIG[_dkey] = await _capture_beat_signature(user)" in src
+    consume = src.index("_DESYNC_REGROUND.pop(_dkey")
     assert "beat-signature checkpoint skipped" in src
     assert "except Exception" in src[consume:consume + 600]

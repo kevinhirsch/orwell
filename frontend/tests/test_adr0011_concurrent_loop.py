@@ -81,8 +81,11 @@ def test_peer_advance_fails_safe_on_unknown_keys():
 def test_framing_stashes_the_beat_key():
     js = _read("routes", "chat_helpers.py")
     assert "_LAST_FRAMED_BEAT_KEY" in js
-    # stashed from the SAME game_state framing already reads (zero extra engine call)
-    assert '_LAST_FRAMED_BEAT_KEY[user] = (game_state.get("week"), game_state.get("phase"), moment)' in js
+    # stashed from the SAME game_state framing already reads (zero extra engine call). The base key is
+    # (week, phase, moment); F9 (#1019) folds the open pending's `kind` in as a 4th element so an
+    # out-of-band decision-card POST that resolves the pending flips the key.
+    assert '(game_state.get("week"), game_state.get("phase"), moment)' in js
+    assert "_pending_kind" in js
 
 
 def test_advance_nudge_is_gated_on_not_peer_advanced():

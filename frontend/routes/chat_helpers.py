@@ -154,6 +154,22 @@ CASTING_HEADSHOT_ON_FILE_NOTE = (
     "not keep interviewing once everything required is on file and the player is ready to go."
 )
 
+# #1034 — casting narration register/framing (live-verify, deepseek). The casting interview reliably
+# slips on register with the live model: a deliberate fourth-wall break ("Let me drop the producer
+# persona for a second"), an informal / borderline-meta aside ("I can't pull up a cast lol"), and
+# degenerate ultra-terse turns ("Name.", "Your name:") where the visible body collapses to near-
+# nothing after a long reasoning trace. This note rides the pre-game (casting) framing to hold the
+# producer persona, the register, and a minimum substance per turn. Framing only — never engine state.
+CASTING_REGISTER_NOTE = (
+    "PRODUCTION VOICE (not for the player): you are the show's PRODUCER running this casting "
+    "interview — stay IN that persona for the whole turn. Do NOT break the fourth wall or drop the "
+    "persona (never say things like \"let me drop the producer persona\"), and do NOT slip into an "
+    "informal or meta register (no \"lol\", no out-of-character asides about the app or the cast not "
+    "existing yet). Every reply must carry real SUBSTANCE — a warm, specific producer beat that moves "
+    "the interview forward (a question, a reaction, a next step). Never collapse a turn to a bare "
+    "one-word prompt like \"Name.\" or \"Your name:\"; ask it in a full, in-character line."
+)
+
 # Used ONLY when the game is confirmed started but the per-moment prompt fetch hiccups: the game is
 # real, so we must stay in character and never claim the feeds are down — but we lack the precise
 # moment context, so we forbid inventing specific outcomes (the Vault Wall / anti-fabrication line).
@@ -520,6 +536,38 @@ _LAST_BEAT_SIG: dict = {}
 _DESYNC_REGROUND: dict = {}
 
 
+# #1045 — the STABLE per-turn desync-state key for `_LAST_BEAT_SIG` / `_DESYNC_REGROUND`.
+#
+# The desync spine keys its per-turn BEFORE-signature on the `user` identity. Under a single-tenant
+# path — `AUTH_ENABLED=false`, or any caller that never resolves a logged-in user — the FE chat route
+# runs with `user=None`. Keying the baseline on `None` makes the guard EFFECTIVELY INERT: nothing
+# distinguishes one turn's baseline from another's, and on a fresh process the baseline is simply
+# absent so the pre-emission guard fails open on every turn (the #1045 live-drive finding — a
+# fabricated running vote tally + a committed eviction streamed AHEAD of the engine commit, never
+# held). The fix: when there is no `user`, key on the CANONICAL GAME-SESSION id instead (0064's
+# per-user binding), so the guard has a stable per-game baseline single-tenant too.
+#
+# Cross-user isolation is UNWEAKENED by construction: a real user always has a truthy `user`, so it
+# keys on its own identity and NEVER on the session fallback — two real users can never collide. The
+# session fallback only ever engages for the userless (single-tenant) posture, where the canonical
+# binding is the stable per-game handle. Both the WRITER (the framing checkpoint) and every guard
+# READER route through this one resolver so they always agree on the key. Fail-soft: any hiccup (no
+# binding yet, store error) falls back to the raw `user` — byte-identical to the prior behaviour.
+def _desync_key(user):
+    """The stable key for the per-turn desync stores. `user` when present; else the canonical
+    game-session id (`gs:<id>`) so the guard still functions single-tenant (`user=None`)."""
+    if user:
+        return user
+    try:
+        from src import orwell_game_session
+        sid = orwell_game_session.get_game_session(user)
+        if isinstance(sid, str) and sid.strip():
+            return "gs:" + sid.strip()
+    except Exception:
+        pass
+    return user
+
+
 # ── ADR 0009 (D1) — the per-turn OCCUPANCY FREEZE for the whereabouts gadget ───────────────── #
 #
 # The gadget polls live presence. But the once-per-turn OFF-SCREEN presenceTick re-seats the house
@@ -795,8 +843,11 @@ async def _handle_stale_beat(user, exc) -> None:
         # Re-read the live board to reconcile precisely (also refreshes last-seen from the reads).
         await _capture_beat_signature(user)
         # Stash a re-ground so the NEXT turn pins the model back to the moved board (reuse the spine).
-        if user is not None:
-            _DESYNC_REGROUND[user] = (
+        # #1045: key on the stable desync key so the re-ground is consumed single-tenant too (the
+        # canonical-session fallback gives a real key even when user=None, where this used to no-op).
+        _sb_key = _desync_key(user)
+        if _sb_key is not None:
+            _DESYNC_REGROUND[_sb_key] = (
                 "RE-GROUND ON THE BOARD — a game action was computed against a stale view of the "
                 "board (it had already moved on), so the engine (the source of truth) refused it and "
                 "nothing changed. Re-read the live state with gameStatus / getGameState and pick up "
@@ -910,6 +961,15 @@ _CLAIM_EVICTED_RE = re.compile(
     # (a conditional) or a room move ("leaving the kitchen"). Paired with the same count / evictee-
     # identity check below, so a phantom or wrong evictee never reaches the player.
     r"\bvotes?\s+to\s+evict\b|\bmajority\s+to\s+evict\b|"
+    # #1045: live running-count / committed-departure phrasings the live drive surfaced that the
+    # above missed — "N (votes) to evict", a UNANIMOUS / landslide result, "voted out", and an
+    # explicit "out of the house/game" (a committed exit). "voted out" and "out of the house/game"
+    # are unambiguous COMMITTED forms (never a room move / a generic "lights out") so they are safe
+    # in any phase; the spelled/numeric "to evict" tally pairs with the same count check below.
+    r"\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s+(?:votes?\s+)?to\s+evict\b|"
+    r"\bunanimous(?:ly)?\s+(?:vote\s+)?to\s+evict\b|"
+    r"\b(?:is|are|was|were|has been|have been|been)\s+(?:being\s+)?voted\s+out\b|"
+    r"\b(?:is|are|was|were|has been|have been)\s+(?:now\s+)?out\s+of\s+the\s+(?:house|game)\b|"
     r"\b(?:is|are|has been|have been)\s+(?:being\s+)?(?:sent\s+home|going\s+home|leaving\s+the\s+house|departing\s+the\s+house)\b",
     re.IGNORECASE,
 )
@@ -932,7 +992,17 @@ _CLAIM_NEW_HOH_RE = re.compile(
     r"\bwins (?:the )?(?:head of household|hoh)\b|\bnew (?:head of household|hoh)\b",
     re.IGNORECASE,
 )
-_CLAIM_TALLY_RE = re.compile(r"\b\d+\s*(?:votes?|-)\s*(?:to|–|-)\s*\d+\b", re.IGNORECASE)
+# A numeric OR spelled-out "N to M" vote tally. #1045: the live drive narrated a RUNNING tally in
+# words ("nine to one", "ten to one", "eleven to evict") that the numeric-only pattern missed. The
+# engine NEVER counts (it hands anonymized ballots only), so ANY "N to M" tally — figures or words —
+# narrated before the engine's commit is a fabrication. The spelled form requires the "to" joiner so
+# ordinary prose ("one or two of them") never matches.
+_TALLY_NUM = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)"
+_CLAIM_TALLY_RE = re.compile(
+    r"\b\d+\s*(?:votes?|-)\s*(?:to|–|-)\s*\d+\b|"
+    r"\b" + _TALLY_NUM + r"\s+(?:votes?\s+)?(?:to|–|-)\s+(?:" + _TALLY_NUM + r"|evict\b)",
+    re.IGNORECASE,
+)
 # LIVE-7 (#540): the eviction RESULT narrated as a count/majority during the staged secret-ballot
 # reveal — "that's the majority", "N votes to evict … the majority", "comes up one vote short". The
 # engine's reveal only ever hands over ANONYMIZED ballots ("a vote to evict X"); it never gives the
@@ -941,7 +1011,10 @@ _CLAIM_TALLY_RE = re.compile(r"\b\d+\s*(?:votes?|-)\s*(?:to|–|-)\s*\d+\b", re.
 _CLAIM_EVICT_RESULT_RE = re.compile(
     r"\bthe majority\b|\b(?:reach(?:es|ed|ing)?|has|have|that'?s|secur(?:es|ed))\s+(?:the\s+|a\s+)?majority\b|"
     r"\bmajority\s+(?:to\s+evict|vote)\b|\bcome[sd]?\s+up\s+(?:\w+\s+){0,2}?(?:vote|votes)\s+short\b|"
-    r"\bone\s+(?:vote\s+)?short\b",
+    r"\bone\s+(?:vote\s+)?short\b|"
+    # #1045: a UNANIMOUS / landslide self-narrated result during the staged reveal is the same
+    # fabrication — the engine never tells the player the vote was unanimous (anonymized ballots only).
+    r"\bunanimous(?:ly)?\b|\bthe\s+vote\s+is\s+unanimous\b",
     re.IGNORECASE,
 )
 # NARR-8 (#574): a NOMINATION was narrated as committed ("nominated X for eviction", "puts X on
@@ -1148,13 +1221,14 @@ async def record_post_turn_desync_check(user, narration: str) -> None:
     the engine never committed, stash a re-ground directive for the next turn. Fail-open — never
     raises, never blocks the turn that's finishing."""
     try:
+        _dkey = _desync_key(user)  # #1045: stable key — functions single-tenant (user=None) too.
         after = await _capture_beat_signature(user)
-        before = _LAST_BEAT_SIG.get(user)
+        before = _LAST_BEAT_SIG.get(_dkey)
         if not before or not after:
             return
         directive = _narration_claims_outcome(narration or "", before, after)
         if directive:
-            _DESYNC_REGROUND[user] = directive
+            _DESYNC_REGROUND[_dkey] = directive
             logger.warning(
                 "[orwell] beat-signature desync detected for user=%s — re-grounding next turn", user,
             )
@@ -1277,20 +1351,21 @@ async def record_post_turn_presence_check(user, narration: str) -> None:
     stashed this turn. Fail-open — never raises, never blocks the finishing turn."""
     try:
         from src import orwell_engine
+        _dkey = _desync_key(user)  # #1045: stable key — functions single-tenant (user=None) too.
         state = await orwell_engine.get_game_state(user=user)
         facts = _presence_facts(state if isinstance(state, dict) else {})
         if not facts:
             return
         # The player moved rooms during the turn ⇒ multi-scene; the narration may stage the room they
         # just left. Skip rather than risk a false flag (the top false-positive source).
-        before = _LAST_BEAT_SIG.get(user)
+        before = _LAST_BEAT_SIG.get(_dkey)
         if isinstance(before, dict) and before.get("room") and before.get("room") != facts["room"]:
             return
         directive = _presence_desync_directive(narration or "", facts)
         if not directive:
             return
-        existing = _DESYNC_REGROUND.get(user)
-        _DESYNC_REGROUND[user] = (existing + "\n\n" + directive) if existing else directive
+        existing = _DESYNC_REGROUND.get(_dkey)
+        _DESYNC_REGROUND[_dkey] = (existing + "\n\n" + directive) if existing else directive
         logger.warning("[orwell] presence desync detected for user=%s — re-grounding next turn", user)
     except Exception as e:
         logger.warning("[orwell] post-turn presence check skipped for user=%s: %s", user, e)
@@ -1372,7 +1447,8 @@ async def record_post_turn_roster_check(user, narration: str) -> None:
     finale (jurors return). Combines with (never clobbers) any re-ground already stashed this turn.
     Fail-open — never raises, never blocks the finishing turn."""
     try:
-        sig = _LAST_BEAT_SIG.get(user)
+        _dkey = _desync_key(user)  # #1045: stable key — functions single-tenant (user=None) too.
+        sig = _LAST_BEAT_SIG.get(_dkey)
         if not sig:
             return  # pre-game / no baseline → nothing to ground against
         if str(sig.get("phase") or "").lower().startswith(_FINALE_PHASES):
@@ -1401,8 +1477,8 @@ async def record_post_turn_roster_check(user, narration: str) -> None:
             "getGameState) and voice ONLY the houseguests who are actually in the season — use their "
             "EXACT names, and never introduce a name that is not on the roster."
         )
-        existing = _DESYNC_REGROUND.get(user)
-        _DESYNC_REGROUND[user] = (existing + "\n\n" + directive) if existing else directive
+        existing = _DESYNC_REGROUND.get(_dkey)
+        _DESYNC_REGROUND[_dkey] = (existing + "\n\n" + directive) if existing else directive
         logger.warning(
             "[orwell] invented-houseguest detected for user=%s (%s) — re-grounding next turn",
             user, ", ".join(invented),
@@ -1474,7 +1550,8 @@ async def screen_streamed_outcome(user, sentence: str) -> bool:
     try:
         if not sentence or not sentence.strip():
             return True
-        before = _LAST_BEAT_SIG.get(user)
+        _dkey = _desync_key(user)  # #1045: stable key — functions single-tenant (user=None) too.
+        before = _LAST_BEAT_SIG.get(_dkey)
         # No BEFORE baseline this turn (a fresh process, a framing hiccup) — we cannot tell phantom
         # from real, so EMIT and let the post-turn re-ground be the backstop (conservatism).
         if not before:
@@ -1489,7 +1566,7 @@ async def screen_streamed_outcome(user, sentence: str) -> bool:
         # next-turn re-ground as a backstop (reuse the existing desync mechanism, do not invent a
         # second one). The post-turn check would otherwise have produced this same directive a turn
         # too late; Part C just gets there one turn earlier.
-        _DESYNC_REGROUND[user] = directive
+        _DESYNC_REGROUND[_dkey] = directive
         logger.warning(
             "[orwell] pre-emission guard HELD a phantom closed-set outcome for user=%s — "
             "dropped before emission, re-grounding next turn", user,
@@ -1577,7 +1654,7 @@ def _text_mentions_evicted_houseguest(user, text: str) -> bool:
     legitimately reappear). Keeps creative prose with no out-of-house name off the screening path."""
     if not text:
         return False
-    sig = _LAST_BEAT_SIG.get(user)
+    sig = _LAST_BEAT_SIG.get(_desync_key(user))  # #1045: stable key (single-tenant safe).
     if not sig:
         return False
     if str(sig.get("phase") or "").lower().startswith(_FINALE_PHASES):
@@ -1608,7 +1685,8 @@ async def screen_streamed_location(user, sentence: str) -> bool:
     try:
         if not sentence or not sentence.strip():
             return True
-        sig = _LAST_BEAT_SIG.get(user)
+        _dkey = _desync_key(user)  # #1045: stable key — functions single-tenant (user=None) too.
+        sig = _LAST_BEAT_SIG.get(_dkey)
         if not sig:
             return True  # no baseline this turn → uncertain, emit.
         if str(sig.get("phase") or "").lower().startswith(_FINALE_PHASES):
@@ -1619,7 +1697,7 @@ async def screen_streamed_location(user, sentence: str) -> bool:
         who = _sentence_places_evicted(sentence, evicted_names)
         if not who:
             return True
-        _DESYNC_REGROUND[user] = (
+        _DESYNC_REGROUND[_dkey] = (
             "RE-GROUND ON THE BOARD — last turn you placed " + who + " in a room, but they have been "
             "EVICTED and are no longer in the house — an evicted houseguest cannot appear in any room. "
             "The engine is the source of truth: re-read the live roster and voice only the houseguests "
@@ -1700,7 +1778,8 @@ async def screen_streamed_nominee(user, sentence: str) -> bool:
     try:
         if not sentence or not sentence.strip():
             return True
-        sig = _LAST_BEAT_SIG.get(user)
+        _dkey = _desync_key(user)  # #1045: stable key — functions single-tenant (user=None) too.
+        sig = _LAST_BEAT_SIG.get(_dkey)
         if not sig:
             return True
         if not str(sig.get("phase") or "").lower().startswith(_NOMINEE_GUARD_PHASES):
@@ -1712,7 +1791,7 @@ async def screen_streamed_nominee(user, sentence: str) -> bool:
         who = _sentence_names_wrong_nominee(sentence, nom_names, active_names)
         if not who:
             return True
-        _DESYNC_REGROUND[user] = (
+        _DESYNC_REGROUND[_dkey] = (
             "RE-GROUND ON WHO IS ON THE BLOCK — last turn you named " + who + " as a nominee, but the "
             "engine's nominees are " + _join_names(sorted(nom_names)) + " (the same names the House "
             "Status panel shows). Who is on the block is engine truth, not yours to improvise: re-read "
@@ -2069,7 +2148,8 @@ async def apply_game_framing(
     # 0076: the PREVIOUS turn's beat signature (room + present company), captured before this turn's
     # checkpoint overwrites `_LAST_BEAT_SIG` — so we can diff the room's company and voice NPC
     # arrivals/departures as beats. None on a fresh context ⇒ no movement cue (the full block stands).
-    _prev_presence_sig = _LAST_BEAT_SIG.get(user)
+    # #1045: read via the same stable desync key the checkpoint writes (canonical-session fallback).
+    _prev_presence_sig = _LAST_BEAT_SIG.get(_desync_key(user))
 
     # 1) Is the engine reachable AT ALL? This single call decides feeds-down — NOT the moment fetch.
     try:
@@ -2113,8 +2193,25 @@ async def apply_game_framing(
         # agent loop can distinguish a concurrent PEER's advance from the model under-calling — the
         # two-tab "20-step loop" fix. Engine's raw fields (NOT the RE_ENTRY display moment). Zero extra
         # read (game_state already in hand); Vault-free; fail-open (absent ⇒ the loop check is inert).
+        #
+        # F9 (#1019): a comp-intent (or any decision) submitted OUT OF BAND via the decision-card POST
+        # resolves the engine's `pending` WITHOUT moving (week, phase, moment) — so the 3-field key did
+        # NOT change mid-competition and the peer-advance detector never fired, swallowing the advance
+        # for a dead turn. Fold the open pending's `kind` into the key as a 4th element so a RESOLVED
+        # pending (the POST cleared it, or a peer answered it) flips the key and the loop sees the move.
+        # Back-compat by construction: when there is NO open pending the key stays the original 3-tuple
+        # (byte-identical to the prior contract — `_beat_key_at_read` is also a 3-tuple, so single-tab
+        # play and the seeded gates are unchanged); the 4th element appears ONLY while a player pending
+        # is open, where the engine is already BLOCKED on the player and the auto-advance must hold
+        # anyway. `pending` is the Vault-free `PendingDecisionView`; we key on its stable `kind` scalar.
         if user is not None and moment is not None:
-            _LAST_FRAMED_BEAT_KEY[user] = (game_state.get("week"), game_state.get("phase"), moment)
+            _pending = game_state.get("pending")
+            _pending_kind = _pending.get("kind") if isinstance(_pending, dict) else None
+            _LAST_FRAMED_BEAT_KEY[user] = (
+                (game_state.get("week"), game_state.get("phase"), moment, _pending_kind)
+                if _pending_kind is not None
+                else (game_state.get("week"), game_state.get("phase"), moment)
+            )
         if session_id is not None and session_id not in _SESSION_GAME_FRAMED:
             moment = RE_ENTRY_MOMENT
         try:
@@ -2169,10 +2266,14 @@ async def apply_game_framing(
         # snapshot the CURRENT board so the next post-turn check has a baseline to diff against.
         # Best-effort / fail-open: any hiccup leaves the turn framed exactly as before.
         try:
-            _reground = _DESYNC_REGROUND.pop(user, None)
+            # #1045: key the desync stores stably (canonical-session fallback when user=None) so the
+            # pre-emission guard has a real per-turn baseline single-tenant too. The binding is already
+            # established above (the game-active branch bound it before this checkpoint).
+            _dkey = _desync_key(user)
+            _reground = _DESYNC_REGROUND.pop(_dkey, None)
             if _reground:
                 gm_prompt = gm_prompt + "\n\n" + _reground
-            _LAST_BEAT_SIG[user] = await _capture_beat_signature(user)
+            _LAST_BEAT_SIG[_dkey] = await _capture_beat_signature(user)
         except Exception as e:
             logger.warning("[orwell] beat-signature checkpoint skipped for user=%s: %s", _gkey, e)
         # 0065 Part E2: ADDITIVE — alongside the full authoritative GAME CONTEXT block (built into the
@@ -2189,7 +2290,7 @@ async def apply_game_framing(
         # `_LAST_BEAT_SIG[user]` was just refreshed to THIS turn's signature above, so diff against the
         # previous one captured at the top of the turn. Only fires on an unchanged player room.
         try:
-            _move_line = _render_presence_movement(_prev_presence_sig, _LAST_BEAT_SIG.get(user))
+            _move_line = _render_presence_movement(_prev_presence_sig, _LAST_BEAT_SIG.get(_desync_key(user)))
             if _move_line:
                 gm_prompt = gm_prompt + "\n\n" + _move_line
         except Exception as e:
@@ -2222,6 +2323,10 @@ async def apply_game_framing(
             except Exception as e:
                 logger.warning("[orwell] interview moment-prompt fetch failed for user=%s: %s", _gkey, e)
                 pre_prompt = PRE_GAME_PROMPT
+            # #1034: reinforce the casting register — hold the producer persona, stay out of the
+            # informal/meta register, and keep a minimum substance per turn (no degenerate "Name."
+            # collapse). Rides every pre-game turn (the engine moment prompt OR the static fallback).
+            pre_prompt = pre_prompt + "\n\n" + CASTING_REGISTER_NOTE
             # A/C fix (2026-06-20): once the cast headshot is on file, tell the model the photo is
             # handled so it stops re-asking for it and can finalize. Fail-open — never block a turn.
             try:
