@@ -83,6 +83,20 @@ _SYSTEM = (
 # ignores it is harmless: the prompt reinforcement above + the one-shot retry below still apply.
 _RESPONSE_FORMAT = {"type": "json_object"}
 
+# #1044: the authoring sampling temperature. This is a STRUCTURED-OUTPUT task (emit one JSON object),
+# not a creative free-write — the variety lives in WHAT each houseguest is, which the per-NPC skeleton +
+# the rich prompt already drive. A high temperature (the old 0.9) measurably hurts strict-JSON adherence
+# on reasoning models (deepseek-v4-pro) for the complex deep-profile prompt; a moderate value keeps ample
+# persona variety while improving the odds the reply is a clean, parseable object on the first pass.
+_AUTHOR_TEMPERATURE = 0.6
+
+# #1044: the floor visible-output budget for an authoring call. With reasoning forced OFF (below) the
+# whole cap is the answer; a full deep-profile JSON object is ~500-800 tokens, so this leaves generous
+# headroom for a verbose biography without truncation. Applied even if an admin set the per-class
+# `max_tokens_budget` too low (the observed live value was 1200 — fine once reasoning is off, but we
+# never want authoring to truncate a profile mid-object).
+_AUTHOR_MIN_OUTPUT_TOKENS = 2000
+
 # #1002: the one-shot reparse retry instruction. DeepSeek (and other reasoning models) reliably emit
 # reasoning/prose around the JSON instead of a bare object; when the first reply yields no JSON we retry
 # ONCE with this maximally-strict instruction appended before falling back to the seeded floor.
@@ -176,23 +190,68 @@ def build_authoring_messages(npc: dict) -> list[dict]:
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]
 
 
+def _balanced_json_objects(text: str):
+    """Yield each top-level balanced ``{...}`` candidate substring in `text`, in order, string-aware
+    (braces inside JSON string literals are ignored). This survives a prose preamble/epilogue AND a
+    trailing second object/garbage that a naive first-`{`/last-`}` slice would swallow (e.g.
+    ``Here is the profile: {…} Hope that helps!``). Each candidate is a complete brace-balanced span."""
+    depth = 0
+    start = -1
+    in_str = False
+    esc = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start != -1:
+                    yield text[start:i + 1]
+                    start = -1
+
+
 def _extract_json(text: str) -> Optional[dict]:
-    """Pull the first JSON object out of the model's reply (tolerant of ```json fences / chatter)."""
+    """Pull the first usable JSON OBJECT out of the model's reply — robust to prose-wrapped output.
+
+    Strategy (in order):
+      1. a ```json … ``` fenced block, if present;
+      2. otherwise scan for the first *balanced* ``{…}`` span and parse it (string-aware so braces
+         inside string values don't throw off the balance) — surviving a prose preamble/epilogue and
+         a stray trailing object. If the first balanced span fails to parse, try the next one.
+    A reasoning model that emits "Here's the profile: {…}" or wraps the object in commentary therefore
+    still yields the profile instead of nuking the whole houseguest to the seeded floor (#1044)."""
     if not text:
         return None
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
-    raw = fenced.group(1) if fenced else None
-    if raw is None:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
-        raw = text[start:end + 1]
-    try:
-        obj = json.loads(raw)
-        return obj if isinstance(obj, dict) else None
-    except (ValueError, TypeError):
-        return None
+    if fenced:
+        try:
+            obj = json.loads(fenced.group(1))
+            if isinstance(obj, dict):
+                return obj
+        except (ValueError, TypeError):
+            pass  # fall through to the balanced-brace scan
+    # Balanced-brace scan: tolerant of prose around the object and a stray trailing object/garbage
+    # (the naive first-`{`/last-`}` slice would over-grab and fail to parse in both cases).
+    for candidate in _balanced_json_objects(text):
+        try:
+            obj = json.loads(candidate)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
 
 
 def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
@@ -461,6 +520,26 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
         _policy = None
         _max_tokens = 0
 
+    # #1044 — the SECOND root cause (the live 0/15 that survived the #1007 budget raise): the resolved
+    # `background-authoring` policy turns reasoning ON (effort "low") on a reasoning model. On
+    # deepseek-v4-pro the rich deep-profile prompt makes the model spend the ENTIRE output budget on
+    # reasoning tokens (`thinking: true` deltas) and a mid-stream provider error / budget exhaustion
+    # then lands BEFORE any visible JSON — so the body is empty/truncated prose and `_extract_json`
+    # finds nothing. Authoring is pure STRUCTURED EXTRACTION (emit one JSON object) — reasoning adds no
+    # value here, only burns the budget. Force reasoning OFF for the authoring call (independent of the
+    # admin effort knob, which governs the player-facing narrator, not this background utility task):
+    # `_apply_reasoning_budget` translates `reasoning=None` into an explicit `{"enabled": false}` on
+    # OpenRouter, so visible JSON streams from the first token. Verified live: reasoning-off + a roomy
+    # cap returns a clean, parseable object every call.
+    if isinstance(_policy, dict):
+        _policy = dict(_policy)
+        _policy["reasoning"] = None  # explicit OFF (omit-vs-disable handled by _apply_reasoning_budget)
+    # Guarantee a comfortable visible-output budget regardless of any admin `max_tokens_budget` override
+    # that set the authoring cap too low (a full JSON profile is ~500-800 tokens; with reasoning OFF the
+    # whole cap is the answer, but keep generous headroom so a verbose biography never truncates).
+    if _max_tokens < _AUTHOR_MIN_OUTPUT_TOKENS:
+        _max_tokens = _AUTHOR_MIN_OUTPUT_TOKENS
+
     async def _fn(messages: list[dict]) -> str:
         parts: list[str] = []
         _usage: dict = {}
@@ -469,7 +548,7 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
         # OpenAI-style payload; a provider that ignores it is harmless (the strict prompt + the one-shot
         # retry in author_cast still apply). The policy already supplies the (raised, #1002) token budget.
         async for chunk in stream_llm_with_fallback(
-            candidates, messages, temperature=0.9, policy=_policy,
+            candidates, messages, temperature=_AUTHOR_TEMPERATURE, policy=_policy,
             max_tokens=_max_tokens, response_format=_RESPONSE_FORMAT):
             # stream_llm yields SSE-ish data lines; keep only the assistant text deltas.
             piece = _delta_text(chunk)
@@ -524,19 +603,39 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
 
 
 def _delta_text(chunk) -> str:
-    """Extract assistant text from a stream_llm chunk (a dict delta or an SSE 'data:' line)."""
+    """Extract the assistant's VISIBLE-content text from one `stream_llm` SSE chunk.
+
+    #1044 — the real, load-bearing shape: `stream_llm` emits visible content as
+    ``data: {"delta": "<text>"}`` and reasoning/thinking as ``data: {"delta": "<text>", "thinking": true}``
+    (see `_stream_delta_event` in `llm_core`). The old reader only looked at ``content``/``text`` keys, so
+    it dropped EVERY content chunk — the authoring `_fn` returned an empty string, `_extract_json` found
+    nothing, and the whole cast fell back to the seeded floor (`authored 0/15`) even when the model
+    streamed perfect JSON.
+
+    We now:
+      • read the `delta` key (the real streaming key) first, then fall back to `content`/`text` for any
+        dict-shaped chunk (back-compat);
+      • SKIP thinking/reasoning deltas (``thinking: true``) — reasoning must never pollute the JSON body;
+      • SKIP non-text event chunks (``type`` set: usage / finish / tool_calls / model_actual / …).
+    """
     if isinstance(chunk, dict):
-        return str(chunk.get("content") or chunk.get("text") or "")
+        if chunk.get("thinking") or chunk.get("type"):
+            return ""
+        return str(chunk.get("delta") or chunk.get("content") or chunk.get("text") or "")
     s = str(chunk or "")
     if s.startswith("data:"):
         body = s[5:].strip()
         if body and body != "[DONE]":
             try:
                 d = json.loads(body)
-                if isinstance(d, dict):
-                    return str(d.get("content") or d.get("text") or "")
             except (ValueError, TypeError):
                 return ""
+            if isinstance(d, dict):
+                # Drop reasoning deltas and typed meta events (usage/finish/tool_calls/model_actual);
+                # keep ONLY the visible-content `delta` (then content/text for any older shape).
+                if d.get("thinking") or d.get("type"):
+                    return ""
+                return str(d.get("delta") or d.get("content") or d.get("text") or "")
         return ""
     return s
 

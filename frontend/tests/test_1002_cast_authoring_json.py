@@ -350,3 +350,21 @@ def test_per_season_counter_logs_authored_over_total_with_floor_breakdown():
         # the breakdown distinguishes the two no-op causes
         assert "1 no-JSON" in text
         assert "1 below-floor" in text
+
+
+# ── #1044: _extract_json is robust to prose-wrapped output (the live deepseek failure mode) ──────────
+
+def test_extract_json_survives_prose_wrapped_object():
+    """#1044: deepseek-v4-pro sometimes wraps the profile in commentary ("Here's the profile: {…} Hope
+    that helps!") instead of emitting a bare object. The old first-`{`/last-`}` slice broke on a trailing
+    sentence; the balanced, string-aware scan recovers the object instead of nuking the houseguest to the
+    seeded floor."""
+    from src.orwell_cast_authoring import _extract_json
+    prose = 'Sure! Here is the secret bible:\n{"name": "X", "biography": "grew up {downtown}", "k": 1}\nHope that helps!'
+    obj = _extract_json(prose)
+    assert obj is not None and obj.get("name") == "X" and obj.get("k") == 1
+    # a brace inside a string value must not break the balance
+    assert obj.get("biography") == "grew up {downtown}"
+    # a bare object still parses; pure prose with no object yields None (→ the seeded floor)
+    assert _extract_json('{"a": 2}') == {"a": 2}
+    assert _extract_json("no json here at all, just chatter") is None
