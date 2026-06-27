@@ -42,16 +42,33 @@
   // Best-effort + fail-open: any failure (pre-game, no game bound, fetch error) resolves null and the
   // caller falls back to the per-tab session — the original behavior.
   var _canon = { id: null, at: 0, inflight: false };
+  // A RESOLVED binding is cached for 4s (a restart's unbind is still picked up within the window). But
+  // while the game is bound NOWHERE yet — the common cold-start: a season exists but no window has
+  // bound a canonical chat, or a peer hasn't yet sent the first framed turn that binds it — re-poll
+  // FAST so a peer DISCOVERS the binding within a few hundred ms of the other window's first send, not
+  // up to a full 1.5s tick later. The realtime-mirror window is only as long as ONE stream; a coarse
+  // discovery poll subscribes the peer AFTER the sender already settled (the live mirror can't engage;
+  // B sat blank then popped a late reconcile). R2 / ship-gate F5.
   var _CANON_TTL_MS = 4000;
+  var _CANON_UNBOUND_TTL_MS = 350;
   function refreshCanonical() {
     if (!gameBuildOn()) { _canon = { id: null, at: 0, inflight: false }; return; }
     var now = Date.now();
-    if (_canon.inflight || (now - _canon.at) < _CANON_TTL_MS) return;
+    var ttl = _canon.id ? _CANON_TTL_MS : _CANON_UNBOUND_TTL_MS;
+    if (_canon.inflight || (now - _canon.at) < ttl) return;
     _canon.inflight = true;
     try {
       fetch(API_BASE + '/api/orwell/game-session', { credentials: 'same-origin' })
         .then(function (r) { return r && r.ok ? r.json() : null; })
-        .then(function (j) { _canon = { id: (j && j.sessionId) || null, at: Date.now(), inflight: false }; })
+        .then(function (j) {
+          var prev = _canon.id;
+          _canon = { id: (j && j.sessionId) || null, at: Date.now(), inflight: false };
+          // R2 (F5 realtime mirror): the canonical id just resolved to a NEW value. Don't wait for the
+          // next 1.5s tick to (re)bind the SSE channel — bind NOW so this window is listening on the
+          // canonical channel BEFORE the next peer turn (it then receives the run-started invitation
+          // and live-attaches during the stream). tick() is idempotent (no-op if already on this id).
+          if (_canon.id && _canon.id !== prev) { try { tick(); } catch (_) {} }
+        })
         .catch(function () { _canon = { id: null, at: Date.now(), inflight: false }; });
     } catch (_) { _canon = { id: null, at: Date.now(), inflight: false }; }
   }
@@ -60,7 +77,13 @@
   // re-resolves instead of staying pinned to a stale id. We only LISTEN (platform.js's debounced
   // orwell:gamechanged is the ONE g15 dispatcher — we never dispatch it).
   try {
-    window.addEventListener('orwell:gamechanged', function () { _canon = { id: null, at: 0, inflight: false }; });
+    window.addEventListener('orwell:gamechanged', function () {
+      _canon = { id: null, at: 0, inflight: false };
+      // R2: a game just bound/changed — re-resolve the canonical id and (re)bind the SSE channel
+      // PROMPTLY (refreshCanonical re-ticks on a new id) so this window subscribes to the new canonical
+      // channel right away instead of lagging a tick behind.
+      try { refreshCanonical(); } catch (_) {}
+    });
   } catch (_) {}
 
   function parse(e) { try { return JSON.parse(e.data); } catch (_) { return {}; } }
@@ -139,31 +162,35 @@
     // and rebuilds only when genuinely diverged — so reconciling on our own echo is a cheap no-op.
     if (type === 'run-started') {
       // #985 (P2-C): a peer whose per-tab view hasn't converged still receives this invitation on the
-      // canonical channel. Converge its VIEW onto the canonical session first (so the reconcile +
-      // live attach land where the player sees them), then reconcile the just-persisted user turn and
-      // attach to the live reply. When we ARE already on the session, convergeView is a no-op and this
-      // is byte-identical to the original same-tab fast path.
+      // canonical channel. Converge its VIEW onto the canonical session first (so the live attach +
+      // reconcile land where the player sees them). When we ARE already on the session, convergeView is
+      // a no-op and this is byte-identical to the original same-tab fast path.
       convergeView(id).then(function () {
-        // A device sent a message: reconcile its (just-persisted) user turn, then — if WE are idle —
-        // attach to the live reply. Sequential so the rebuild lands before the live bubble appends.
-        return Promise.resolve(cm.softReloadHistory && cm.softReloadHistory(id));
-      }).then(function () {
-        // Still on (or converged onto) this session, and resume is available.
-        if (!isWatchedSession(id) || !cm.resumeStream) return;
-        // ADR 0012 (GAP 1 — the ±1 cross-tab live-attach lag): if WE are mid-stream for this same
-        // (canonical) session — our OWN concurrent POST is in flight — `hasActiveStream(id)` is true,
-        // so we MUST NOT resume now (that would double-render our own run). But the peer's run is
-        // durable (it chained as the current `_RUNS[canonical]`, still resumable within the evict
-        // grace), so DON'T drop the invitation: defer it, and chat.js's stream-end finally RE-ATTEMPTS
-        // the attach the moment our stream settles → we mirror the peer's turn LIVE instead of catching
-        // up only on a later poll/reconcile (the one-window-behind offset the 50× smoke caught). When
-        // we're idle, attach immediately (the original fast path). resumeStream/hasActiveStream are the
-        // double-resume guard: resumeStream no-ops if a reader already owns the live render for `id`.
-        if (cm.hasActiveStream && cm.hasActiveStream(id)) {
-          if (cm.deferPeerResume) cm.deferPeerResume(id);
-        } else {
-          cm.resumeStream(id);
+        // R2 (F5 realtime mirror) — ATTACH THE LIVE STREAM FIRST, reconcile AFTER. The old order ran
+        // softReloadHistory (a full /api/history fetch + DOM rebuild) BEFORE resume, so a peer sat
+        // blank through the whole fetch+rebuild and only painted the turn when that late reconcile
+        // popped — through the non-incremental rebuild renderer, not a live stream. Resuming FIRST
+        // makes the peer mount the SHARED incremental renderer and paint the sender's tokens DURING the
+        // stream. softReloadHistory then runs as the SETTLE reconcile: it adopts the resumed bubble by
+        // its {id, seq} with zero churn (it carries data-db-id from the replayed message_saved) and
+        // DEFERS past the live resume (hasActiveStream includes _resumingStreams), so it can never yank
+        // the live bubble.
+        if (isWatchedSession(id) && cm.resumeStream) {
+          // ADR 0012 (GAP 1): if OUR OWN POST stream is in flight for this same (canonical) session,
+          // resuming now would double-render our own run — DEFER the peer attach and let chat.js's
+          // stream-end finally re-attempt it the moment our stream settles. When we're idle, attach
+          // immediately. resumeStream/hasActiveStream are the double-resume guard (no-op if a reader
+          // already owns the live render for `id`).
+          if (cm.hasActiveStream && cm.hasActiveStream(id)) {
+            if (cm.deferPeerResume) cm.deferPeerResume(id);
+          } else {
+            try { cm.resumeStream(id); } catch (_) {}
+          }
         }
+        // Reconcile the just-persisted user turn. softReloadHistory is idempotent + seq-aware and
+        // defers past the now-active resume, so this is a cheap adopt that lands the user bubble in
+        // order without disturbing the live reply.
+        return Promise.resolve(cm.softReloadHistory && cm.softReloadHistory(id));
       });
     } else if (type === 'message-added') {
       scheduleReconcile(id);
