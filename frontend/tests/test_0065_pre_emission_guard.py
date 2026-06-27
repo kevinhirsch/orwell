@@ -321,11 +321,16 @@ def test_guard_returns_text_unchanged_when_no_closed_set_claim(monkeypatch):
     assert out == text
 
 
-def test_guard_is_a_noop_without_an_owner(monkeypatch):
-    async def boom(user=None):
-        raise AssertionError("the guard touched the engine with no owner")
-
-    monkeypatch.setattr(orwell_engine, "game_status", boom)
+def test_guard_fails_open_without_owner_and_no_baseline(monkeypatch):
+    """F16 (#1014): the guard NO LONGER bails on a falsy `owner` (that made it inert single-tenant —
+    `AUTH_ENABLED=false`). With `owner=None`/`""` and NO per-turn baseline stashed, it still fails
+    OPEN — the missing baseline (not the missing owner) means we cannot tell phantom from real, so the
+    text emits unchanged. The single-tenant SCREENING path (owner=None WITH a session baseline) is
+    pinned in test_1014_guard_owner_none.py."""
+    # No canonical session binding → _desync_key falls soft to the raw (None) user, and with no
+    # baseline the screen returns True (emit) BEFORE any board read. Either way the text is unchanged.
+    monkeypatch.setattr("src.orwell_game_session.get_game_session", lambda user: None)
+    chat_helpers._LAST_BEAT_SIG.pop(None, None)
     text = "After the vote, one houseguest is evicted from the house."
     assert _run(agent_loop._pre_emission_outcome_guard(text, None)) == text
     assert _run(agent_loop._pre_emission_outcome_guard(text, "")) == text
