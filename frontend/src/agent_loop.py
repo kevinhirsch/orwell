@@ -2678,6 +2678,122 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
         return False
 
 
+# ── 0075 — the trust-gated CONFIDE under-call belt (the _auto_record_scene / _auto_record_deal sibling) ──
+#
+# The narration model reliably UNDER-calls `confide`: it voices a houseguest opening up — or the player
+# pressing them to ("what's really going on with you?", "you can tell me", "talk to me") — without ever
+# calling the engine `confide(npcId)` lever, so the trust-gated disclosure NEVER FIRES (no earned secret,
+# no lie, no vulnerability fold). The engine is fine; the model just skips the call (exactly the 0055 /
+# 0039 class). So when the player's turn is clearly PRESSING an ally to open up and the model did not call
+# `confide`, the FE calls it itself — and the ENGINE adjudicates (`disclosureMotive` decides whether they
+# disclose, how much, and truth-vs-lie). If the bond/goodwill is unearned the engine returns
+# `{disclosed:false}` HARMLESSLY — the safe default — so a false trip costs nothing. We NEVER engine-author
+# a confession; the engine is the single authority (mandate #2 / anti-sycophancy). Model-driven `confide`
+# always takes precedence. Player↔ONE-houseguest only (the confide shape).
+#
+# We do NOT depend on `npcVoice.mayConfide` — it is NOT surfaced to the FE. We detect the press from the
+# player's OWN line (a cheap pre-filter) and let the constrained extraction pick the ally in the scene.
+#
+# A deliberately BROAD pre-filter over the PLAYER'S line — pressing-to-open-up language is varied ("what's
+# really going on", "you can trust me", "talk to me", "what aren't you telling me", "open up", "between
+# us"). A missed signal means a silently-dropped earned confidence; a false hit only costs a rare
+# extraction call that returns npcId:null AND, even if it named someone, a `{disclosed:false}` engine
+# no-op. So we err wide and let the extraction + the engine's motive gate be the real gatekeepers.
+_CONFIDE_PRESS_RE = re.compile(
+    r"(?:"
+    r"what(?:'?s| is| are you|'?re you)?\s+(?:really\s+)?(?:going on|wrong|bothering|eating|up)\b|"
+    r"what\s+(?:aren'?t|are'?nt|are you not|haven'?t)\s+you\s+(?:telling|saying)\b|"
+    r"\bwhat'?s on your mind\b|\bwhat are you (?:hiding|not saying)\b|"
+    r"you can (?:tell me|trust me|talk to me|confide in me|open up|be honest|be real)\b|"
+    r"\b(?:talk|open up|be real|be honest|level with me|come clean)\s+(?:to|with)?\s*me\b|"
+    r"\bopen up to me\b|\btalk to me\b|\blevel with me\b|\bcome clean\b|"
+    r"(?:tell|trust)\s+me\s+(?:the truth|what'?s|everything|the real)\b|"
+    r"what(?:'?s| is) (?:the )?(?:real|truth|going on with you)\b|"
+    r"(?:between|just) (?:us|you and me)\b|"
+    r"you don'?t have to (?:hide|pretend|carry)\b|"
+    r"i'?m here for you\b|i won'?t (?:tell|say) (?:anyone|a soul)\b|"
+    r"(?:i can see|i know) (?:something'?s|there'?s something)\b"
+    r")", re.I)
+
+
+async def _auto_confide(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
+    """GUARANTEE an earned confidence FIRES (0075 FE follow-on — the 0055 `_auto_record_scene` sibling).
+    When the player's turn clearly PRESSES an ally to open up but the model skipped `confide`, a
+    constrained extraction names the houseguest the player is in a 1:1-ish scene with and we call
+    `confide(npcId)` ourselves. The ENGINE is the single authority — it decides whether they disclose,
+    how much, and truth-vs-lie; an unearned motive returns `{disclosed:false}` harmlessly (the safe
+    default). We NEVER author a confession. Model-driven `confide` always takes precedence (this only
+    fills the gap). Fail-closed: any hiccup just skips. Player↔ONE-houseguest only.
+
+    Returns True iff we actually issued a `confide` call for a roster houseguest (whether or not the
+    engine ultimately disclosed) — used only for logging; the engine's `{disclosed:false}` is fine."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        roster = "\n".join(f'{h.get("id")} = {h.get("name")}'
+                           for h in house if h.get("id") and h.get("name"))
+        if not roster:
+            return False
+        # Center the extraction on the press moment: in a multi-round turn the "you can tell me" beat may
+        # sit anywhere, so window on the first press-signal hit in the player's line rather than the head.
+        _m = _CONFIDE_PRESS_RE.search(last_user or "")
+        press = (last_user[max(0, _m.start() - 200): _m.start() + 400] if _m else (last_user or "")[:800])
+        msgs = [
+            {"role": "system", "content":
+                "Decide whether the PLAYER is pressing ONE specific houseguest to open up / confide a "
+                "secret in this Big Brother scene, and if so WHICH houseguest. Reply IMMEDIATELY with "
+                "ONLY a JSON object — no analysis, no thinking, no prose, no code fence:\n"
+                '{"npcId":"<the houseguest id from the roster the player is pressing, or null>"}\n'
+                "Pick a houseguest ONLY when the player is genuinely urging THAT person to be honest / "
+                'tell them what\'s really going on / open up ("what aren\'t you telling me?", "you can '
+                'trust me", "talk to me", "what\'s really going on with you?"). They must be in a '
+                "one-on-one-ish moment with that single houseguest. If the player is NOT pressing anyone "
+                "to open up (small talk, strategy, a group scene, only listening), reply "
+                '{"npcId":null}. Never invent — the id MUST be one from the roster.'},
+            {"role": "user", "content":
+                f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{press}\n\n"
+                f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
+        ]
+        # Room for a reasoning model to think THEN emit the tiny npcId JSON (see _auto_record_scene).
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.1, max_tokens=1200, timeout=45,
+                                   call_class="utility-extraction", user=owner) or ""
+        # The JSON may sit after a reasoning block — take the LAST object carrying an "npcId" key.
+        obj = _last_json_object_with_key(raw, "npcId")
+        if obj is None:
+            logger.info(f"[orwell] auto-confide: no parseable JSON (len={len(raw)}) user={owner}")
+            return False
+        npc_id = obj.get("npcId")
+        if not isinstance(npc_id, str):
+            return False  # null / not pressing anyone → nothing to do
+        valid = {h.get("id") for h in house}
+        if npc_id not in valid:
+            logger.info(f"[orwell] auto-confide: npcId {npc_id!r} not on roster — skipped user={owner}")
+            return False
+        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A stale 409 (the board
+        # moved under us mid-turn) is reconciled-and-skipped (None) — the press re-derives next turn; never
+        # a stomp, never an exception escapes. The ENGINE decides the disclosure; a `{disclosed:false}` is
+        # a perfectly good (and common) result — we only guarantee the lever FIRES.
+        res = await _backfill_with_cas(owner, _oe.confide, npc_id, user=owner)
+        if res is None:
+            return False
+        _disclosed = bool(res.get("disclosed")) if isinstance(res, dict) else False
+        logger.info(f"[orwell] auto-confided (npc={npc_id}, disclosed={_disclosed}) user={owner}")
+        try:  # 0079: surface this gap-repair on the overseer diagnostic log
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "gap-repair",
+                f"pressed an ally to open up (confide) the model narrated but never called — "
+                f"engine adjudicated (disclosed={_disclosed})",
+                lever="confide", ok=True, user=owner)
+        except Exception:
+            pass
+        return True
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-confide failed: {_e}")
+        return False
+
+
 # ── Operator-aside scrub (audit 2026-06-18) ───────────────────────────────────────────
 # In a LIVE game the narration model sometimes leaks its PLANNING into the visible channel —
 # "I should record this interaction, then advance the game", "The advanceGame call will move us to
@@ -3832,6 +3948,7 @@ async def stream_agent_loop(
     _turn_advance_nudges = 0
     _turn_record_nudges = 0
     _turn_deal_nudges = 0  # 0039 deal back-fill: at most one auto-makeDeal per finishing turn
+    _turn_confide_nudges = 0  # 0075 confide belt: at most one auto-confide per finishing turn
     _turn_move_nudges = 0  # L21/L24 auto-move belt: at most one auto-move per finishing turn
     _turn_npc_move_nudges = 0  # ADR 0009 NPC auto-move belt: at most one per finishing turn
     _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
@@ -4546,6 +4663,17 @@ async def stream_agent_loop(
                 _turn_narration = "\n".join(t for t in round_texts if t)
                 _want_deal = (_turn_deal_nudges < 1
                               and bool(_DEAL_SIGNAL_RE.search(_turn_narration)))
+                # 0075 confide belt: the player PRESSED an ally to open up but the model never called
+                # confide, so the trust-gated disclosure never fired. Gated on a cheap press-language
+                # pre-filter over the player's OWN last message (the player is the one pressing) and the
+                # per-turn cap (`_turn_confide_nudges` is set to 1 when the model calls confide itself, so
+                # model-driven confides always win). Deliberately NOT gated on `_progressed`/`_is_lull`/
+                # `_recorded`: a press to open up commonly rides a turn that also banks a generic scene.
+                # The constrained extraction (npcId:null when no ally is pressed) AND the engine's motive
+                # gate (`{disclosed:false}` when unearned) are the real gatekeepers, not these gates.
+                _last_user_for_confide = _extract_last_user_message(messages) or ""
+                _want_confide = (_turn_confide_nudges < 1
+                                 and bool(_CONFIDE_PRESS_RE.search(_last_user_for_confide)))
                 # L21/L24 auto-move belt: the player walked somewhere this turn but the model never
                 # called moveTo, so the engine still has them in the OLD room and next turn's
                 # whereabouts will snap back. Gated on a cheap movement-language pre-filter over the
@@ -4595,7 +4723,7 @@ async def stream_agent_loop(
                 # state, not a tool gap), so we always need the game state to know if the season is
                 # over — fetch it whenever any nudge MIGHT fire.
                 _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
-                if _want_advance or _want_record or _want_deal or _want_move or _want_npc_move or _want_approach or _want_reapproach:
+                if _want_confide or _want_advance or _want_record or _want_deal or _want_move or _want_npc_move or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     _beat_key_at_read = None  # F7: the beat we OBSERVED stalled, to detect a race before forcing
                     try:
@@ -5144,6 +5272,18 @@ async def stream_agent_loop(
                         if await _auto_record_deal(_turn_narration, _extract_last_user_message(messages),
                                                    _house, endpoint_url, model, headers, owner):
                             _turn_record_nudges = max(_turn_record_nudges, 1)  # deal banked the fold
+                    # 0075: the player pressed an ally to open up but the model never called confide, so
+                    # the trust-gated disclosure never fired. Back-fill it — the ENGINE adjudicates
+                    # (whether they disclose, how much, truth-vs-lie); an unearned motive returns
+                    # {disclosed:false} harmlessly. Requires the turn's scene actually touched a houseguest
+                    # (the 1:1-ish precondition — reuse `_touched_deal`, computed over the WHOLE turn, since
+                    # a press+disclosure can sit in an earlier round of a multi-round turn); the extraction
+                    # names WHICH houseguest, the engine decides the rest. Model-driven confide always wins
+                    # (_turn_confide_nudges is set to 1 on its tool call, which makes _want_confide False).
+                    if _want_confide and _touched_deal:
+                        _turn_confide_nudges += 1  # once per turn
+                        await _auto_confide(_turn_narration, _last_user_for_confide,
+                                            _house, endpoint_url, model, headers, owner)
                     if _want_record and _touched and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN:
                         _turn_record_nudges += 1  # once per turn
                         await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
@@ -5699,6 +5839,8 @@ async def stream_agent_loop(
                 _turn_record_nudges = 1  # model recorded organically — don't also auto-record
             if _is_live_game and block.tool_type == "makeDeal":
                 _turn_deal_nudges = 1  # model struck the deal itself — don't also back-fill one
+            if _is_live_game and block.tool_type == "confide":
+                _turn_confide_nudges = 1  # model called confide itself — don't also back-fill one (0075)
 
             formatted = format_tool_result(desc, result)
             # LIVE-4 (#541): an advanceGame that returned an eviction-STAGE beat gets a focused steer
