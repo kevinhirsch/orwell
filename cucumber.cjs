@@ -70,6 +70,7 @@ module.exports = {
       "docs/features/0085-npc-campaigns-and-the-scramble.feature",
       "docs/features/0086-houseguest-drives.feature",
       "docs/features/0087-relationship-trajectories.feature",
+      "docs/features/0088-living-current-read.feature",
       "docs/features/0089-reactive-confessionals.feature",
       "docs/features/0091-trigger-secrets-house-events.feature",
       "docs/features/0092-secret-pacing-drip.feature",

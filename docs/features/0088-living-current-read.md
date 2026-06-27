@@ -1,6 +1,6 @@
 # 0088 — A living, current read of the player (your reputation, shifting in real time)
 
-> **Status:** 📝 **SPEC — drafted 2026-06-25, not yet built.** Tracks issue **#864**.
+> **Status:** ✅ **BUILT.** Tracks issue **#864**.
 > **Gate (planned):** engine (Vitest + a property/distribution gate + the dependency-cruiser Vault
 > boundary + BDD `0088-living-current-read.feature`) and front-end (the voicing path consumes the new
 > Vault-safe `currentRead` carriage cue through `getMomentPrompt`/`npcVoice`, pytest-gated).

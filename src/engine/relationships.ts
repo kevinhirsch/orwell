@@ -3,6 +3,7 @@ import type { RandomnessSource } from "../ports/RandomnessSource";
 import { TEMPERATURE_CONSTANTS } from "../domain/temperatureConstants";
 import {
   RELATIONSHIP_CONSTANTS,
+  CURRENT_READ,
   clamp01 as clamp,
   scaleImpact,
   type EdgeSignals,
@@ -54,6 +55,50 @@ export function relationshipLabel(
   const bondScore = bond * bondW;
   if (threatScore >= bondScore) return threatScore > constants.thresholds.enemy ? "enemy" : "acquaintance";
   return bondScore > constants.thresholds.ally ? "ally" : "acquaintance";
+}
+
+/**
+ * Feature 0088 — a living, per-NPC CURRENT read of the player, DERIVED on the spot
+ * from the already-evolving hidden NPC→player edge (distinct from the FROZEN
+ * dayOnePerception). Surfaced BEHAVIOR-ONLY as a Vault-safe carriage cue + a drift
+ * word. Pure: no rng, no I/O, no Vault handle. Never a number, never the edge value.
+ *
+ * @param signals  The NPC→player edge signals (trust/affinity/threat).
+ * @param disposition  The holder's framing (clash reads warmer as threat, etc.).
+ * @param soulState  Optional emotional state (0..1), shades the toward word.
+ * @param anchorBond  Optional anchor bond at a reference point (e.g. start of week);
+ *                    absent ⇒ drift = "steady".
+ */
+export function currentReadOf(
+  signals: Pick<EdgeSignals, "trust" | "affinity" | "threat">,
+  disposition: RelationshipDisposition,
+  soulState?: number,
+  anchorBond?: number,
+): { toward: string; drift: "warming" | "cooling" | "steady" } {
+  const bond = (signals.trust + signals.affinity) / 2;
+  // Disposition shades: a clash holder reads even a warm edge more guardedly.
+  const dispScale = disposition === "bond" ? 1.15 : disposition === "clash" ? 0.85 : 1.0;
+  // Soul shade: a rattled soul (low emotionalState) reads neutrally cooler.
+  const soulScale = soulState !== undefined ? 0.75 + soulState * 0.5 : 1.0; // 0.75..1.25
+  const effective = clamp(bond * dispScale * soulScale);
+
+  const T = CURRENT_READ.toward;
+  const W = CURRENT_READ.words;
+  let toward: string;
+  if (effective >= T.warm) toward = W.warm;
+  else if (effective >= T.friendly) toward = W.friendly;
+  else if (effective >= T.neutral) toward = W.neutral;
+  else if (effective >= T.guarded) toward = W.guarded;
+  else toward = W.wary;
+
+  let drift: "warming" | "cooling" | "steady" = "steady";
+  if (anchorBond !== undefined) {
+    const delta = bond - anchorBond;
+    if (delta > CURRENT_READ.driftEpsilon) drift = "warming";
+    else if (delta < -CURRENT_READ.driftEpsilon) drift = "cooling";
+  }
+
+  return { toward, drift };
 }
 
 export class RelationshipModel {

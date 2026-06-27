@@ -105,6 +105,13 @@ export interface SessionCore {
    */
   trajectories?: Record<string, Trajectory>;
   /**
+   * Feature 0088 — per-NPC CURRENT-READ anchor bonds (the NPC→player bond at the start of the
+   * current week), so `drift` reads warming/cooling/steady. A derived Vault-only convenience —
+   * never a label, never crossed, never an input to any roll. Keyed by NPC id → the (trust+affinity)/2
+   * bond at the anchor point. Absent on pre-0088 saves (drift reads "steady").
+   */
+  readAnchors?: Record<EntityId, number>;
+  /**
    * The tiny per-pair ring buffer of recent FOLD signals (0087) the phase is derived from — `"a->b"` → the
    * last `recencyWindow` signed bond/threat deltas (+ betrayal flag). Persisted beside `trajectories` so a
    * restored game derives the SAME phase from the SAME history. ENGINE-ONLY + Vault-free (deltas of a

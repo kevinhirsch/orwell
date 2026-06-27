@@ -281,3 +281,29 @@ export const CONSEQUENCE_EMPHASIS: Record<"slight" | "notable" | "strong", numbe
 export const DEAL_IMPACTS = {
   honored: { trust: +0.06, affinity: +0.03, alignment: +0.04, reliability: +0.1 } as Partial<EdgeSignals>,
 } as const;
+
+/**
+ * Feature 0088 — a derived carriage word from the live NPC→player edge.
+ * A sibling of `relationshipLabel`, oriented at the player and delta-aware
+ * (drift = warming / cooling / steady since a per-week anchor). Pure read,
+ * no rng, never a stored label. Vault-safe: a word only, never a number.
+ */
+export const CURRENT_READ = {
+  /** Bond thresholds for carriage words (bond = (trust + affinity) / 2). */
+  toward: {
+    warm: 0.6,      // ≥ warm  → "warm and open"
+    friendly: 0.45, // ≥ friendly → "friendly"
+    neutral: 0.3,   // ≥ neutral → "neutral"
+    guarded: 0.15,  // ≥ guarded → "guarded"
+    // else → "wary"
+  } as const,
+  /** How big a bond move counts as warming/cooling vs. steady. */
+  driftEpsilon: 0.08,
+  words: {
+    warm: "warm and open",
+    friendly: "friendly",
+    neutral: "neutral",
+    guarded: "guarded",
+    wary: "wary",
+  } as const,
+} as const;
