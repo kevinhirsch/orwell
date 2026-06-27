@@ -46,7 +46,10 @@ describe("cast voices (B61)", () => {
     const { view } = start();
     const ctx = renderGameContext(view);
     const first = view.house[0]!;
-    expect(ctx).toContain(`${first.name} — ${first.archetype}, plays ${first.strategyStyle}`);
+    // F3 (#1016): the line no longer LEADS with the archetype — it leads with the observable facets and
+    // demotes archetype/strategyStyle into a fenced private cue (asserted by the dedicated suite below).
+    expect(ctx).toContain(`${first.name}`);
+    expect(ctx).toContain(`plays ${first.strategyStyle}`);
     expect(ctx).toContain(first.background!);
     // never a stat or a number that reads as one beyond age
     expect(ctx).not.toMatch(/physical|mental: |social: |trust|threat|hiddenElement/i);

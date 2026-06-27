@@ -591,6 +591,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "draw, including any Houseguest's Choice pick). Name THOSE EXACT players; never invent, guess, " +
     "or substitute who is competing. If gameStatus shows no veto players yet, the chip draw has NOT " +
     "run — call advanceGame to draw them and do NOT narrate any names you do not have. " +
+    "VOICE THE CHIP DRAW AS ITS OWN RITUAL BEAT — do NOT skip straight to the seated six. The HOH and " +
+    "the two nominees are locked in; the other three seats are drawn from a bag of chips, and BB canon " +
+    "is to read each draw out loud, one houseguest at a time, with the reactions. When the GAME's " +
+    "veto-draw beat names a \"Houseguest's Choice\" chip, that is the showcase moment: voice WHO drew it " +
+    "and, since the rules let them, WHO they picked to play instead of a random name — name exactly the " +
+    "player the GAME recorded for that pick, never your own substitute. Play the draw before the comp. " +
     "RESOLVE BEFORE YOU NARRATE THE RESULT: the winner is the GAME's to decide, NEVER yours to guess, " +
     "and the HOH-comp winner is NOT automatically the veto winner. Call advanceGame to RESOLVE the comp " +
     "(or runCompetition to preview the same winner) and READ who actually won FIRST; only THEN write the " +
@@ -793,18 +799,15 @@ export function renderGameContext(view: GameStateView): string {
   const roster = view.house.map((h) => {
     const mark = ceremonyMark(h.id);
     if (h.status !== "active" || !h.archetype) return `  - ${h.name} (${h.status})${mark}`;
+    // F3 (#1016): the roster line LEADS with the OBSERVABLE facets — how this person looks, carries
+    // themselves, where they're from — the material the player meets and forms their OWN read from.
+    // The archetype/strategyStyle is the most strategically SPOILER-Y token (the exact label the prose
+    // rules then forbid voicing); leading with it made the model narrate the scouting report it was told
+    // not to give ("as a comp-beast, she's known for…"). So it is DEMOTED to a fenced PRIVATE voice cue
+    // at the tail of the line — NOT removed (the model still needs it as the persona-consistency anchor),
+    // but framed as a private steer, never a fact to read aloud. Public facet, not Vault state: the player
+    // should INFER the strategy from play, not be told it.
     const vibe = [
-      `${h.archetype}, plays ${h.strategyStyle}`,
-      h.background,
-      // L28: the STORED concrete backstory facets — voice THESE (a real, diverse cast), never invent
-      // or mirror the player's job/hometown. Origin colors who they ARE; the game still happens in LA.
-      [h.vocation, h.hometown && `from ${h.hometown}`].filter(Boolean).join(", "),
-      // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
-      // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
-      h.demeanor && `comes across as ${h.demeanor}`,
-      // 0058: the STORED public biography — voice THIS established backstory, never invent (and drift)
-      // one. It is the presentable §3 backstory; the hidden secrets/goals never appear here (the wall).
-      h.biography,
       // L29/L23: the houseguest's PHYSICAL look — voice the SAME source the portrait was drawn from, so
       // the narrated description and the cast photo never diverge. The STRUCTURED `physicalCharacteristics`
       // facet (height/build, skin tone, hair, features, distinguishing mark, age-look + style) is the
@@ -812,6 +815,18 @@ export function renderGameContext(view: GameStateView): string {
       // look when present (richer + more differentiating than the prose `appearance`), and we fall back to
       // the prose `appearance` only for pre-0058 saves that never seeded a facet. All PUBLIC, Vault-free.
       [h.age, physicalLook(h), h.presentation].filter(Boolean).join(", "),
+      // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
+      // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
+      h.demeanor && `comes across as ${h.demeanor}`,
+      // L28: the STORED concrete backstory facets — voice THESE (a real, diverse cast), never invent
+      // or mirror the player's job/hometown. Origin colors who they ARE; the game still happens in LA.
+      [h.vocation, h.hometown && `from ${h.hometown}`].filter(Boolean).join(", "),
+      h.background,
+      // 0058: the STORED public biography — voice THIS established backstory, never invent (and drift)
+      // one. It is the presentable §3 backstory; the hidden secrets/goals never appear here (the wall).
+      h.biography,
+      // F3: the archetype/strategy DEMOTED to a fenced private cue — last, and explicitly never voiced.
+      `(private voice cue, never said aloud: ${h.archetype}, plays ${h.strategyStyle} — let the player INFER this from how they play, never narrate it)`,
     ].filter(Boolean).join("; ");
     return `  - ${h.name}${mark} — ${vibe}`;
   }).join("\n");
