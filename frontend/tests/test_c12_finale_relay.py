@@ -370,7 +370,9 @@ def test_game_build_no_started_game_gets_the_pre_game_casting_voice(monkeypatch)
     preface = [{"role": "system", "content": "base"}]
     ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "p"))
     assert (ea, ga, fd) == (True, False, False)
-    assert preface[0]["content"] == chat_helpers.PRE_GAME_PROMPT
+    # The static producer steer leads; #1034 appends the casting-register reinforcement.
+    assert preface[0]["content"].startswith(chat_helpers.PRE_GAME_PROMPT)
+    assert chat_helpers.CASTING_REGISTER_NOTE in preface[0]["content"]
     assert preface[1]["content"] == "base"
 
 

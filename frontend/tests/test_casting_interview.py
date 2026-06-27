@@ -64,8 +64,10 @@ def test_pre_game_falls_back_to_the_static_steer_when_the_moment_fetch_fails(mon
     preface = [{"role": "system", "content": "base"}]
     ea, ga, fd = _run(chat_helpers.apply_game_framing(preface, "p"))
     assert (ea, ga, fd) == (True, False, False)
-    # Never a generic assistant: the static producer steer frames the turn instead.
-    assert preface[0]["content"] == chat_helpers.PRE_GAME_PROMPT
+    # Never a generic assistant: the static producer steer frames the turn instead (#1034 appends
+    # the casting-register reinforcement after it).
+    assert preface[0]["content"].startswith(chat_helpers.PRE_GAME_PROMPT)
+    assert chat_helpers.CASTING_REGISTER_NOTE in preface[0]["content"]
     assert "updateCasting" in chat_helpers.PRE_GAME_PROMPT
 
 
