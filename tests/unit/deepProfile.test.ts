@@ -377,7 +377,11 @@ describe("0058 / L28b write-back seam — LIVE, airtight, split-safe", () => {
     const id = sb.session.getGameState().house[0]!.id;
     const write = () => sb.session.recordCastProfile({ houseguestId: id, secrets: ["a single authored secret"], weakness: "one authored weakness" });
     write(); write();
-    const profiles = sb.engine.vault.readHidden({ kind: "hidden-attribute", subject: id });
+    // #1067 — scope the read to the deep-profile RECORD id: `DEEP_PROFILE_KIND` and the private-orientation
+    // both serialize as `"hidden-attribute"`, so a kind-only read returns both. The deep profile is the one
+    // with the `deep-profile:<id>` id; it must be present exactly once (not duplicated by the re-seal).
+    const profiles = sb.engine.vault.readHidden({ kind: "hidden-attribute", subject: id })
+      .filter((r) => r.id === `deep-profile:${id}`);
     expect(profiles.length).toBe(1); // not duplicated
     // the sealed profile is the AUTHORED one
     expect(profiles[0]!.content).toContain("a single authored secret");

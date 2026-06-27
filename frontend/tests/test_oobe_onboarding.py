@@ -164,14 +164,23 @@ def test_producers_open_with_a_hidden_kickoff_on_welcome_dismiss():
     onb = _read("static", "js", "orwellOnboarding.js")
     seg = onb[onb.index("window._orwellOpenGameAfterCasting"):]
     seg = seg[: seg.index("\n  };")]
-    assert "sendHiddenCue" in seg
-    # fired once, game-build only, never over the player's own typing or an in-flight stream
+    # #967 live re-fix: the kickoff now DISPATCHES through the shared `_sendCueWithBackoff` kernel (which
+    # actually calls sendHiddenCue) instead of a single-shot send — so a busy stream / unready seam
+    # re-schedules instead of dropping the opener.
+    assert "_sendCueWithBackoff" in seg
+    assert "OPEN_GAME_LINE" in seg
+    # fired once, game-build only
     assert "_openSent" in seg
     assert "data-game-build" in seg
-    assert "value.trim()" in seg
-    assert "hasActiveStream" in seg
-    # item 6: the welcome-active lift is cleared at send time so the composer docks immediately
+    # item 6: the welcome-active lift is cleared at send time so the composer docks immediately (now via
+    # the kernel's onBeforeSend hook the opener passes in)
     assert "hideWelcomeScreen" in seg
+    # the actual send seam + busy/typing guards live on the kernel
+    kern = onb[onb.index("function _sendCueWithBackoff"):]
+    kern = kern[: kern.index("\n  }\n")]
+    assert "sendHiddenCue" in kern
+    assert "value.trim()" in kern or "composerBusy" in kern
+    assert "hasActiveStream" in kern
 
 
 def test_welcome_dismiss_runs_the_kickoff():
@@ -192,10 +201,17 @@ def test_resume_cue_after_photo_exists():
     assert "window._orwellResumeAfterPhoto" in onb
     seg = onb[onb.index("window._orwellResumeAfterPhoto"):]
     seg = seg[: seg.index("\n  };")]
-    assert "sendHiddenCue" in seg
+    # #969 live re-fix: the resume DISPATCHES through the shared `_sendCueWithBackoff` kernel (busy-stream
+    # / unready-seam backoff) instead of its own single-shot path.
+    assert "_sendCueWithBackoff" in seg
+    assert "RESUME_AFTER_PHOTO_LINE" in seg
     assert "data-game-build" in seg
-    assert "value.trim()" in seg
-    assert "hasActiveStream" in seg
+    # the actual send seam + busy/typing guards live on the shared kernel
+    kern = onb[onb.index("function _sendCueWithBackoff"):]
+    kern = kern[: kern.index("\n  }\n")]
+    assert "sendHiddenCue" in kern
+    assert "value.trim()" in kern or "composerBusy" in kern
+    assert "hasActiveStream" in kern
 
 
 def test_headshot_finalize_triggers_the_resume_cue():

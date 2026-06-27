@@ -231,6 +231,44 @@ def test_persistent_degradation_logs_the_distinct_degradation_no_op():
         assert "1 degradation" in sink.text  # the counter breakdown
 
 
+def test_raised_turn_refused_is_retried_then_accepts():
+    """#1067: the engine maps `turn refused — integrity checkpoint failed (degradation)` to an HTTP 409,
+    which the FE client surfaces as a RAISED exception (not a dict result). It must be classified +
+    retried like a dict-degradation, and the idempotent retry lands."""
+    writes = {"n": 0}
+
+    async def llm_fn(messages):
+        return json.dumps(_FULL)
+
+    async def write_fn(profile):
+        writes["n"] += 1
+        if writes["n"] == 1:
+            raise RuntimeError("turn refused — integrity checkpoint failed (degradation); state unchanged")
+        return {"accepted": True}
+
+    n = _run(A.author_cast([{"id": "npc:1", "name": "A"}], llm_fn, write_fn))
+    assert n == 1
+    assert writes["n"] == 2, "the RAISED degradation refusal must be retried"
+
+
+def test_persistent_raised_turn_refused_is_counted_as_degradation():
+    """#1067: a `turn refused (degradation)` RAISED on every attempt authors nothing AND is tallied as a
+    degradation in the breakdown counter — the live-verify bug was that this raised-409 path reported
+    '0 degradation' even though every lost NPC was a degradation refusal (it returned a bare None)."""
+    async def llm_fn(messages):
+        return json.dumps(_FULL)
+
+    async def write_fn(profile):
+        raise RuntimeError("turn refused — integrity checkpoint failed (degradation); state unchanged")
+
+    with _LogSink() as sink:
+        n = _run(A.author_cast([{"id": "npc:1", "name": "A"}], llm_fn, write_fn))
+
+    assert n == 0
+    if sink.available:
+        assert "1 degradation" in sink.text  # the raised refusal is now counted, not reported as 0
+
+
 def test_writeback_is_serialized_single_flight():
     """The write-back lock serializes commits: never two recordCastProfile commits in flight at once,
     even with several NPCs authored concurrently (the live-verify's collision source)."""
