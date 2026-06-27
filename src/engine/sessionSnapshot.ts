@@ -92,6 +92,10 @@ export interface SessionCore {
   /** The DEDICATED campaign-rng tick counter (0085 B2) — persisted so the campaign trajectory stays
    * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream). */
   campaignTickCount?: number;
+  /** The DEDICATED jury-house-rng tick counter (0100) — persisted so the isolated grudge stream stays
+   * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream).
+   * The accumulated grudge itself rides on `live.juryGrudge` (engine-only; restored with the live state). */
+  juryHouseTickCount?: number;
   /** Every active houseguest's current DRIVE (0086) — sticky motivation+intensity, so an agenda survives a
    * restart instead of re-rolling. ENGINE-ONLY (hidden strategy). Absent on pre-0086 saves / when the
    * campaign layer is off. */

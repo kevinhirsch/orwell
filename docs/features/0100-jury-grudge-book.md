@@ -1,6 +1,11 @@
 # 0100 — The jury grudge book, made felt (evicted jurors gossip; goodbyes decide the crown)
 
-> **Status:** 🟕 **SPEC — drafted, not built.** The design for making jury management *tense and
+> **Status:** ✅ **BUILT (2026-06-27; Tracks #882).** Engine-internal, opt-in behind `ORWELL_JURY_HOUSE`
+> (default off ⇒ byte-identical calibration): `src/engine/juryHouse.ts` (`runJuryHouseStretch`) +
+> `src/engine/juryHouseConstants.ts` (`JURY_HOUSE`), wired from the orchestrator's off-screen tick via the
+> self-gated adapter `juryHouseTick`, accumulated into the persisted `live.juryGrudge`, consumed at the
+> finale by `edgeAsJuryRel`. Gated by `tests/unit/juryHouse.test.ts`, `tests/unit/juryHouseAdapter.test.ts`,
+> and the BDD `0100-jury-grudge-book.feature` (in `cucumber.cjs`). The design for making jury management *tense and
 > legible-by-behavior*: the last nine evictees keep living in a sequestered **jury house** where they
 > gossip about the player and each other (hidden, NPC↔NPC), and their final votes reflect the
 > accumulated treatment they carried in **plus** what the jury house does to those reads. *"Every

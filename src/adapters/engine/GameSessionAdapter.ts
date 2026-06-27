@@ -26,6 +26,8 @@ import {
   type Campaign, type CampaignActor, type Influence, type Drive,
 } from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
+import { runJuryHouseStretch } from "../../engine/juryHouse";
+import { JURY_HOUSE } from "../../engine/juryHouseConstants";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
 import type { EventStore } from "../../ports/EventStore";
 import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
@@ -367,6 +369,15 @@ const TRIGGERS_ENABLED_DEFAULT = process.env.ORWELL_TRIGGERS === "1";
  * per-session via `setSecretPacingEnabled`. Default-off until the cadence is tuned against the UAT.
  */
 const SECRET_PACING_ENABLED_DEFAULT = process.env.ORWELL_SECRET_PACING === "1";
+/**
+ * 0100 — whether the JURY-HOUSE grudge layer runs by DEFAULT. OFF unless `ORWELL_JURY_HOUSE=1`. A
+ * DEDICATED flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is
+ * provable in isolation: with it unset NO jury-house stretch runs, NO draw is taken (the dedicated
+ * stream never advances), and NO grudge is applied ⇒ the seeded `juryReach`/UAT spine is byte-identical
+ * to today. The calibration/UAT harness never sets it; the live deploy does. Read once at module load
+ * (like the campaign/trajectory flags); a test overrides per-session via `setJuryHouseEnabled`.
+ */
+const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 
 /**
  * Engine-side implementation of the Vault-free game-session port. It runs the
@@ -463,6 +474,17 @@ export class GameSessionAdapter implements GameSession {
   /** The DEDICATED campaign rng tick counter — campaign draws fork off the game seed + this, never the
    * shared society/vote stream (the L21/L24 isolation), so even live campaigns don't re-phase calibration. */
   private campaignTickCount = 0;
+  /**
+   * 0100 — whether the JURY-HOUSE grudge layer RUNS. DEFAULT OFF: the calibration/UAT harness leaves it
+   * off, so with it unset NO jury-house stretch runs, NO draw is taken, and NO grudge is applied ⇒ every
+   * seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL; the live deploy enables it. A test flips it
+   * via `setJuryHouseEnabled`.
+   */
+  private juryHouseEnabled = JURY_HOUSE_ENABLED_DEFAULT;
+  /** The DEDICATED jury-house rng tick counter — jury-house draws fork off the game seed + this, NEVER the
+   * orchestrator's shared society/competition/vote stream, so even with the layer ON the main house's seeded
+   * outcomes stay in phase (only the hidden finale lean changes). Persisted so the stream is restart-stable. */
+  private juryHouseTickCount = 0;
   /**
    * 0086 — every active houseguest's current DRIVE (motivation + intensity), keyed by id. Computed each
    * campaignTick (sticky — carried from the prior tick), engine-only + Vault-sealed, never projected. The
@@ -1914,6 +1936,10 @@ export class GameSessionAdapter implements GameSession {
       ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
       ...(this.drives.size ? { drives: Object.fromEntries([...this.drives].map(([k, v]) => [k, { ...v }])) as Record<EntityId, Drive> } : {}),
       ...(this.campaignTickCount > 0 ? { campaignTickCount: this.campaignTickCount } : {}),
+      // 0100 — the DEDICATED jury-house rng tick counter, persisted so the isolated grudge stream stays
+      // reproducible across a restart (the accumulated grudge itself rides on `live.juryGrudge`). Absent ⇒
+      // 0 on restore (byte-shaped as a pre-0100 save).
+      ...(this.juryHouseTickCount > 0 ? { juryHouseTickCount: this.juryHouseTickCount } : {}),
       // 0087: persist the hidden relationship-trajectory momentum + its recent-fold ring buffers, so a
       // multi-week arc RESUMES mid-curdle (0007/0030) and ACCUMULATES, never thins. Vault-class hidden state
       // (no player/admin-visible number) — already inside the never-outward snapshot. Absent ⇒ byte-shaped
@@ -2099,6 +2125,9 @@ export class GameSessionAdapter implements GameSession {
     // 0085: restore live campaigns (absent on pre-0085 saves ⇒ none).
     this.campaigns = (core.campaigns ?? []).map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] }));
     this.campaignTickCount = core.campaignTickCount ?? 0;
+    // 0100: restore the dedicated jury-house rng tick counter (absent on pre-0100 saves ⇒ 0). The
+    // accumulated grudge itself rides on `live.juryGrudge`, restored with the live state above.
+    this.juryHouseTickCount = core.juryHouseTickCount ?? 0;
     // 0086: restore live drives (absent on pre-0086 saves ⇒ none ⇒ re-derived on the next campaign tick).
     this.drives = core.drives ? new Map(Object.entries(core.drives) as [EntityId, Drive][]) : new Map();
     // 0087: restore the hidden relationship-trajectory momentum + recent-fold ring buffers (absent on
@@ -4903,6 +4932,67 @@ export class GameSessionAdapter implements GameSession {
       return; // one new alliance per tick (bounded)
     }
   }
+
+  /**
+   * 0100 — advance the sequestered JURY HOUSE one bounded stretch: the last-nine evictees keep living
+   * (hidden juror↔juror scenes) and a grievance one juror carried out DIFFUSES to others, hardening the
+   * room's read of the responsible houseguest before the finale. Called once per off-screen tick by the
+   * orchestrator, AFTER all main-house society/gossip work, passing the live `events`/`knowledge`.
+   *
+   * SELF-GATED (the `campaignTick` discipline): a no-op (ZERO draws, no grudge) unless the layer is
+   * enabled AND a jury already exists — so with the flag off the seeded `juryReach`/UAT spine is
+   * byte-identical. Runs on a DEDICATED, isolated rng (forked off the game seed + the jury-house tick
+   * counter, NEVER the orchestrator's shared society/competition/vote stream), so even ON it never
+   * re-phases the main house's seeded outcomes; only the hidden finale lean changes.
+   *
+   * Vault Wall (mandate #2): records ONLY hidden events (witness set = the two jurors, EXCLUDES the
+   * player — the player is not in the jury house) and folds the grudge into the SEPARATE, saturated
+   * `live.juryGrudge` map the finale reads — never a player- or admin-visible number, never a live edge.
+   */
+  juryHouseTick(events: EventStore, knowledge: KnowledgeService): void {
+    if (!this.juryHouseEnabled || !this.house || !this.live) return;
+    // The jury is exactly the last-nine evictees (0014/0045). The jury house models the NPC jurors only —
+    // the player forms their OWN read (ADR 0003 / 0086 ruling #3), so a player-juror is excluded from the
+    // grudge computation (they still EXPERIENCE the jury house as in-character life around them).
+    const evicted = this.live.evictionOrder ?? [];
+    const jurors = evicted.slice(-9).filter((id) => id !== this.house!.player.id);
+    if (jurors.length < 2) return; // sequester hasn't produced a society yet (pre-jury / first juror only)
+    // Whom a grudge can matter against: the still-in-the-game houseguests (the potential finalists),
+    // INCLUDING the player — jury management cuts both ways (audit A5), so a juror the player blindsided
+    // on the way out can sour the room against the PLAYER's own finale. A grievance recorded against an
+    // already-evicted houseguest can never reach the finale vote, so only the responsible houseguests
+    // still standing are carried here.
+    const finalists = this.livingIds();
+    // DEDICATED stream — zero touch to the orchestrator's shared per-user rng (the calibration spine).
+    this.juryHouseTickCount += 1;
+    const rng = new SeededRandom(hashSeed(`jury-house:${this.gameSeed ?? ""}:${this.juryHouseTickCount}`));
+    const result = runJuryHouseStretch({
+      events,
+      rng,
+      knowledge,
+      jurors,
+      edgeOf: (a, b) => this.rel.edge(a, b),
+      mannerOf: (juror, finalist) => this.live!.mannerByEvictee?.[juror]?.[finalist] ?? {},
+      finalists,
+    });
+    // Fold the bounded grudge increments into the persisted per-(juror, finalist) accumulator: MONOTONIC
+    // (grudges only deepen) and SATURATED (clamped to the cap), so a restored game resumes with the
+    // accumulated bitterness intact and a grudge can never run away over a long sequester (0007/#4).
+    if (result.grudges.length > 0) {
+      const map = (this.live.juryGrudge ??= {});
+      for (const g of result.grudges) {
+        const row = (map[g.juror] ??= {});
+        row[g.finalist] = Math.min(JURY_HOUSE.adjustmentCap, (row[g.finalist] ?? 0) + g.delta);
+      }
+    }
+  }
+
+  /** Turn the JURY-HOUSE grudge layer on/off (0100). Off by default — the calibration harness leaves it off
+   *  (with it off no stretch runs ⇒ zero draws ⇒ the seeded spine is byte-identical). */
+  setJuryHouseEnabled(on: boolean): void { this.juryHouseEnabled = on; }
+
+  /** Whether the jury-house layer is live (0100) — exposed for the orchestrator's wiring symmetry/tests. */
+  juryHouseEnabledNow(): boolean { return this.juryHouseEnabled; }
 
   private archetypeOf(id: EntityId): string {
     return this.house?.npcs.find((n) => n.id === id)?.character.archetype ?? "floater";
