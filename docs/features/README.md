@@ -124,7 +124,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0056 | [Season-to-season character continuity](./0056-season-character-continuity.md) | unit + FE | ✅ Built |
 | 0057 | [Seasons as levels](./0057-seasons-as-levels.md) | FE | ✅ Built · live browser validation landed (`browser_smoke.py:1197` validates the season-progress bar + "Season N" chip + new-season window) |
 | 0058 | [Deep character profiles](./0058-deep-character-profiles.md) | BDD | ✅ Built · Phase 1 + Phase 2 |
-| 0059 | [Hidden seeded relationships](./0059-hidden-seeded-relationships.md) | engine | ✅ Built · orientation-aware via 0063 |
+| 0059 | [Hidden seeded relationships](./0059-hidden-seeded-relationships.md) | engine | ✅ Built · orientation-aware via 0063 · §5 organic stage-advancement surfacing scheduler now built (issue #605): showmance arc spark→bond→visible (`advanceShowmances`) + the pre-game-TIE discovery scheduler (`advanceSeededTies`, opt-in `ORWELL_SEEDED_TIE_SURFACING`, default OFF) — pathway-only (0002) + the 0023 discovery fold, sealed off player AND admin, monotonic/persistent. Calibration-neutral when off (proved byte-identical vs. main; `tests/unit/seededTieSurfacing.test.ts`) |
 | 0060 | [Story-thread scheduler (0058 Phase 2)](./0060-story-thread-scheduler.md) | BDD | ✅ Built |
 | 0061 | [Player self-eviction](./0061-player-self-eviction.md) | BDD | ✅ Built |
 | 0062 | [Move-in zeitgeist snapshot](./0062-world-snapshot-zeitgeist.md) | BDD + FE | ✅ Built · `src/engine/zeitgeist.ts` (frozen + seed-reproducible + flavor-only) **+ the FE `web_search` capture lane** (`frontend/src/orwell_zeitgeist.py`) writing the real move-in zeitgeist back via `recordWorldSnapshot` |

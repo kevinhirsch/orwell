@@ -1,17 +1,29 @@
 # 0059 — Hidden seeded relationships (pre-game ties & showmances)
 
-> **Status:** ✅ **CORE BUILT** (unit-gated, following the 0054/0055/0056 convention — no standalone
+> **Status:** ✅ **BUILT** (unit-gated, following the 0054/0055/0056 convention — no standalone
 > `.feature`). `src/engine/seededRelationships.ts` seeds **0–2 sparse pre-game ties + 0–2 showmances**
 > off the 0025 reserve governance; the adapter folds each pair's small standing affinity bias onto the
 > move-in edges, **seals** the layer into the Vault (new `seeded-relationship` HiddenKind — invisible to
 > player AND admin), and **persists** it (a showmance stage never resets). Gate:
 > `tests/unit/seededRelationships.test.ts` — sparseness over 80 seeds (no NPC in two pairs), the wall
 > (sentinel + structural markers never cross), the affinity fold, the Vault seal, round-trip persistence.
-> Pairs with the shipped **L40 moment-prompt restraint**. **DEFERRED (the §5 follow-on):** the organic
-> **stage-advancement surfacing scheduler** (spark→bond→visible via pathways 0002 + the consequence
-> fold 0023) — analogous to 0058 Phase 1's dormant threads. Consolidates ledger items **L35** (pre-game
-> relationships, approved 2026-06-19, twist-gated) and **L40** (showmance OVERLOAD). **Depth reference
-> (FORMAT/DEPTH only):** `docs/legacy/BB_ProducersVault.md` §4 (pre-game relationships) + §6 (showmance).
+> Pairs with the shipped **L40 moment-prompt restraint**. **§5 FOLLOW-ON NOW BUILT (issue #605):** the
+> organic **stage-advancement surfacing scheduler** (spark→bond→visible via pathways 0002 + the
+> consequence fold 0023) — analogous to 0058 Phase 1's dormant threads. Two halves: the **showmance arc**
+> ships in the core (`GameSessionAdapter.advanceShowmances` → `nextShowmanceStage`, surfacing at `visible`
+> as a PUBLIC house fact via `onShowmanceSurfaced`, wired into the off-screen tick), and the deferred
+> **pre-game-TIE discovery scheduler** is now built (`GameSessionAdapter.advanceSeededTies` + the pure
+> `src/engine/seededTieSurfacing.ts` + tunables in `src/engine/seededRelationshipConstants.ts`): as a
+> sealed tie's live edge warms past an observable floor, a positioned observer notices, a Vault-free read
+> ("they seem unusually tight") diffuses NPC↔NPC (0038) and rarely/capped reaches the player (0002, never
+> the sealed `nature`), and the discovery folds a third-party re-read (0023). **Opt-in, default OFF**
+> (`ORWELL_SEEDED_TIE_SURFACING`) on a **dedicated rng** ⇒ provably calibration-neutral when off (the
+> off-screen stream is byte-identical to the pre-feature build; `tests/unit/seededTieSurfacing.test.ts` is
+> the §6 gate — organic-only surfacing, the wall on player AND admin, monotonicity + persistence,
+> player-showmance-earned, and the neutrality battery; `juryReach` re-verified green). Consolidates ledger
+> items **L35** (pre-game relationships, approved 2026-06-19, twist-gated) and **L40** (showmance
+> OVERLOAD). **Depth reference (FORMAT/DEPTH only):** `docs/legacy/BB_ProducersVault.md` §4 (pre-game
+> relationships) + §6 (showmance).
 
 ## 1. Summary
 

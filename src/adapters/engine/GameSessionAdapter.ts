@@ -149,6 +149,8 @@ import {
   preGameTieToRetrospectiveProse, showmanceToRetrospectiveProse,
 } from "../../engine/seededRelationships";
 import type { SeededRelationships } from "../../engine/seededRelationships";
+import { surfaceSeededTies } from "../../engine/seededTieSurfacing";
+import type { SurfacedTie } from "../../engine/seededTieSurfacing";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
 import {
   generateDiversityLayer, repairDiversityLayer, privateOrientationToVaultContent, showmancePlausible,
@@ -830,6 +832,36 @@ export class GameSessionAdapter implements GameSession {
   private seededRels: SeededRelationships = { ties: [], showmances: [] };
   private tieBudget = DEFAULT_TIE_BUDGET;
   private showmanceBudget = DEFAULT_SHOWMANCE_BUDGET;
+
+  /**
+   * 0059 §5 — the per-season count of pre-game TIES that have surfaced TO THE PLAYER (the L40-style hard
+   * cap, `SEEDED_TIE_SURFACING.maxPlayerSurfacesPerSeason`). Persisted (monotonic within a season; reset
+   * by a fresh `createCharacter`). Only ever advanced by `advanceSeededTies`, and only when the flag is on.
+   */
+  private playerTieSurfaceCount = 0;
+  /** 0059 §5 — the subjects of ties already surfaced to the player, so a tie never re-spends the cap. */
+  private surfacedTieSubjects = new Set<EntityId>();
+  /**
+   * 0059 §5 — a DEDICATED scheduler tick counter for the tie-surfacing rng (off the game seed). Varies the
+   * dedicated stream each tick WITHOUT ever touching the shared society/vote stream (calibration spine).
+   * Bumped per `advanceSeededTies` call (only when the opt-in flag is on). Persisted so the stream is
+   * stable across a restart. Distinct from `presenceTickCount` so the two dedicated streams never alias.
+   */
+  private tieScheduleTickCount = 0;
+
+  /**
+   * 0059 §5 — the tie-surfacing SEAMS (the session holds no events/knowledge handle, exactly like the
+   * 0060 thread scheduler). `onTieSurfaceToPlayer` lands the Vault-free observation in the player's
+   * knowledge through an anchored `told-by` pathway (the registry wires the in-game pathway); it returns
+   * whether the player came to hold it. NPC↔NPC diffusion is done in-helper against the `knowledge`
+   * handed to `advanceSeededTies`. Nothing crosses but the observable read "they seem unusually close"
+   * (never the sealed `nature`). Unwired ⇒ the to-player surfacing is simply skipped (NPC-side only).
+   */
+  private onTieSurfaceToPlayer?: (subject: EntityId, observation: string) => boolean;
+
+  setOnTieSurfaceToPlayer(fn: (subject: EntityId, observation: string) => boolean): void {
+    this.onTieSurfaceToPlayer = fn;
+  }
 
   /**
    * The engine-only HIDDEN private-orientation map (feature 0063): the orientation of each houseguest
@@ -1837,6 +1869,13 @@ export class GameSessionAdapter implements GameSession {
       ...(this.lieCount > 0 ? { confideLieCount: this.lieCount } : {}),
       ...(this.seededRels.ties.length || this.seededRels.showmances.length
         ? { seededRelationships: cloneSession(this.seededRels) } : {}),
+      // 0059 §5 — the tie-surfacing scheduler's hidden bookkeeping: the season player-surface cap counter,
+      // the subjects already surfaced to the player (so a tie never re-spends the cap), and the dedicated
+      // stream's tick counter. Persisted so a discovered tie stays discovered, the cap is never re-opened
+      // by a reload, and the dedicated rng stays reproducible across a restart (non-degradation, 0007).
+      ...(this.playerTieSurfaceCount > 0 ? { playerTieSurfaceCount: this.playerTieSurfaceCount } : {}),
+      ...(this.surfacedTieSubjects.size > 0 ? { surfacedTieSubjects: [...this.surfacedTieSubjects] } : {}),
+      ...(this.tieScheduleTickCount > 0 ? { tieScheduleTickCount: this.tieScheduleTickCount } : {}),
       // 0063: the engine-only HIDDEN private-orientation map — persisted so a closeted houseguest's
       // sealed orientation survives a restart losslessly and never silently resets. ENGINE-ONLY (the
       // snapshot never crosses the wall). The PUBLIC facets ride on the persisted Character (byte-stable).
@@ -2051,6 +2090,11 @@ export class GameSessionAdapter implements GameSession {
     } else {
       this.seededRels = { ties: [], showmances: [] };
     }
+    // 0059 §5 — restore the tie-surfacing bookkeeping (absent on pre-§5 saves ⇒ zero/empty: the cap is
+    // intact, no tie has surfaced, the dedicated stream restarts at 0). Never silently re-opens the cap.
+    this.playerTieSurfaceCount = core.playerTieSurfaceCount ?? 0;
+    this.surfacedTieSubjects = new Set(core.surfacedTieSubjects ?? []);
+    this.tieScheduleTickCount = core.tieScheduleTickCount ?? 0;
     this.rebuildSoulIndex();
     this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
     // 0070 — restore the prose texture layer (persisted so voiced scenes survive a restart byte-identical).
@@ -3106,6 +3150,7 @@ export class GameSessionAdapter implements GameSession {
       this.surfacedThreadCount = 0;
       this.confideState = {};
       this.lieCount = 0;
+      this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -3341,6 +3386,7 @@ export class GameSessionAdapter implements GameSession {
     this.surfacedThreadCount = 0;
     this.confideState = {};
     this.lieCount = 0;
+    this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -3616,6 +3662,8 @@ export class GameSessionAdapter implements GameSession {
     // 0075 — a fresh season has heard no confidences and spent no lies.
     this.confideState = {};
     this.lieCount = 0;
+    // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent, the stream at 0.
+    this.resetTieSurfacing();
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
     // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
@@ -3688,6 +3736,13 @@ export class GameSessionAdapter implements GameSession {
     return { plausible, hasActiveShowmance: (id) => partnered.has(id) };
   }
 
+  /** 0059 §5 — clear the tie-surfacing bookkeeping (a fresh season: nothing discovered, the cap unspent). */
+  private resetTieSurfacing(): void {
+    this.playerTieSurfaceCount = 0;
+    this.surfacedTieSubjects = new Set();
+    this.tieScheduleTickCount = 0;
+  }
+
   private seedSeededRelationships(seed: number): void {
     if (!this.house) return;
     const rng = new SeededRandom(hashSeed(`${seed}:seeded-relationships`));
@@ -3732,6 +3787,81 @@ export class GameSessionAdapter implements GameSession {
         }
       }
     }
+    return surfaced;
+  }
+
+  /**
+   * 0059 §5 — whether the organic pre-game-TIE surfacing scheduler runs. OPT-IN, default OFF — exactly
+   * like the ADR-0006 clock and the wall-clock watcher. When off (the default, and the state the seeded
+   * juryReach / gradient / UAT sims run in) `advanceSeededTies` returns IMMEDIATELY: it draws nothing,
+   * records nothing, and folds nothing, so the off-screen tick's draw count/order and every seeded
+   * outcome are BYTE-IDENTICAL to the pre-feature build. The deploy turns it on for the texture; the
+   * showmance arc (`advanceShowmances`) is unaffected by this flag (it ships in the 0059 core).
+   */
+  private static seededTieSurfacingOverride: boolean | null = null;
+
+  /** Flip the 0059 §5 tie-surfacing scheduler at runtime (admin-only, via the composition delegate). `null` ⇒ env. */
+  static setSeededTieSurfacingEnabled(enabled: boolean | null): void {
+    GameSessionAdapter.seededTieSurfacingOverride = enabled;
+  }
+
+  private get seededTieSurfacingEnabled(): boolean {
+    if (GameSessionAdapter.seededTieSurfacingOverride !== null) return GameSessionAdapter.seededTieSurfacingOverride;
+    const v = process.env.ORWELL_SEEDED_TIE_SURFACING;
+    return v === "1" || v === "true" || v === "on";
+  }
+
+  /**
+   * 0059 §5 — the per-tick pre-game-TIE surfacing scheduler (the DEFERRED follow-on; mirrors 0058's
+   * dormant-thread scheduler + 0077's `whisperPairings`). As a sealed tie's live edge genuinely warms
+   * over weeks, a careful observer eventually NOTICES the pair are unusually close and a Vault-free
+   * belief diffuses NPC↔NPC (0038); a chain reaching the player lands a player belief (0002), capped per
+   * season. A freshly discovered tie shifts the observer's third-party read via the 0023 fold (§5).
+   *
+   * STRICTLY OPT-IN + CALIBRATION-NEUTRAL: returns `[]` immediately unless the flag is on (so the seeded
+   * sims never enter it). When on, every roll is on a DEDICATED rng (off the game seed + a private tick
+   * counter — NEVER the shared society/vote stream the orchestrator passes), the NPC↔NPC diffusion takes
+   * NO relationship fold, and only the discovery fold (flag-gated) moves an edge. Nothing crosses but the
+   * observable read "they seem unusually close" — never the sealed `nature`, never a banner.
+   */
+  advanceSeededTies(knowledge: KnowledgeService): SurfacedTie[] {
+    if (!this.seededTieSurfacingEnabled) return []; // default OFF ⇒ fully inert (calibration spine untouched)
+    if (!this.house || this.seededRels.ties.length === 0) return [];
+    this.tieScheduleTickCount += 1;
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const awake = this.awakeNow();
+    const npcs = this.house.npcs
+      .map((n) => n.id)
+      .filter((id) => !evicted.has(id) && (!awake || awake.has(id)));
+    if (npcs.length < 2) return [];
+    // DEDICATED stream — keyed off the game seed + a PRIVATE tick counter (distinct from presenceTickCount
+    // so the two dedicated streams never alias). Zero touch to the orchestrator's shared per-user rng.
+    const rng = new SeededRandom(hashSeed(`seeded-tie-surfacing:${this.gameSeed ?? ""}:${this.tieScheduleTickCount}`));
+    const surfaced = surfaceSeededTies({
+      ties: this.seededRels.ties,
+      npcs,
+      player: this.house.player.id,
+      affinity: (a, b) => this.rel.edge(a, b).affinity,
+      nameOf: (id) => this.nameOf(id),
+      knowledge,
+      occupancy: this.presence ?? undefined,
+      surfaceToPlayer: (subject, observation) => {
+        const reached = this.onTieSurfaceToPlayer?.(subject, observation) ?? false;
+        if (reached) { this.playerTieSurfaceCount += 1; this.surfacedTieSubjects.add(subject); }
+        return reached;
+      },
+      // §5 consequence fold — the OBSERVER re-reads the pair as a hidden duo (a strategic realization):
+      // their directed read of EACH of the pair moves by the 0023 `strategy` fold. Reuses foldHiddenImpact
+      // (one fold implementation, zero drift); engine-only (moves a hidden edge — the player sees only the
+      // observer's later behavior). Runs on a DEDICATED fold rng (never the shared stream).
+      foldDiscovery: (observer, pair) => {
+        const foldRng = new SeededRandom(hashSeed(`tie-discovery-fold:${this.gameSeed ?? ""}:${this.tieScheduleTickCount}:${observer}`));
+        for (const member of pair) foldHiddenImpact(this.rel, foldRng, member, [observer], "strategy", [observer]);
+      },
+      alreadySurfacedToPlayer: (subject) => this.surfacedTieSubjects.has(subject),
+      playerSurfaceCount: this.playerTieSurfaceCount,
+      rng,
+    });
     return surfaced;
   }
 

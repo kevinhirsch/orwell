@@ -216,6 +216,17 @@ export interface SessionCore {
    */
   seededRelationships?: import("./seededRelationships").SeededRelationships;
   /**
+   * 0059 §5 — the organic tie-surfacing scheduler's hidden bookkeeping (the DEFERRED follow-on, opt-in).
+   * `playerTieSurfaceCount` is the per-season count of pre-game ties that have surfaced TO THE PLAYER (the
+   * hard cap); `surfacedTieSubjects` are the tie subjects already surfaced (so a tie never re-spends the
+   * cap); `tieScheduleTickCount` is the DEDICATED rng's tick counter. Persisted so a discovered tie stays
+   * discovered, the cap is never re-opened by a reload, and the stream stays reproducible (non-degradation,
+   * 0007/0030). All ENGINE-ONLY (Vault-sealed). Absent on saves with the scheduler off / pre-§5 (⇒ 0/empty).
+   */
+  playerTieSurfaceCount?: number;
+  surfacedTieSubjects?: string[];
+  tieScheduleTickCount?: number;
+  /**
    * The engine-only HIDDEN private-orientation map (feature 0063): the orientation of each houseguest who
    * holds it PRIVATELY (closeted / not-yet-out), Vault-sealed from the player AND the admin. Persisted so
    * a closeted orientation never silently resets and survives a restart (0030). ENGINE-ONLY (same

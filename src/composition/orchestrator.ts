@@ -683,6 +683,13 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // relationship fold ⇒ calibration byte-identical (the seeded society/vote spine is untouched; the
   // gossip/surfacing events it records are a type `nextHouseEvent`/confessionals never scan).
   sandbox.session.whisperPairings(sandbox.engine.knowledge);
+  // 0059 §5 — the organic pre-game-TIE surfacing scheduler (the DEFERRED follow-on). Runs LAST, like the
+  // whisper above, and is STRICTLY OPT-IN (default-OFF `ORWELL_SEEDED_TIE_SURFACING`): when off — the
+  // default, and the state the seeded juryReach/gradient/UAT sims run in — it returns immediately and
+  // touches nothing (no draw, no event, no fold), so this tick is byte-identical to the pre-feature build.
+  // When on, it surfaces a warmed seeded tie through a DEDICATED rng (never this shared stream) + 0002
+  // pathways and folds the discovery via 0023 — texture, never the calibration spine.
+  sandbox.session.advanceSeededTies(sandbox.engine.knowledge);
   // Every recorded scene (+ the player-turn day) counts toward the advance.
   return sandbox.engine.events.count() - before;
 }

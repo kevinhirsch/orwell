@@ -12,6 +12,7 @@ import {
   DEEP_PROFILE_KIND, STORY_THREAD_KIND, deepProfileVaultId, deepProfileToVaultContent, storyThreadToVaultContent,
 } from "../engine/deepProfile";
 import { preGameTieToVaultContent, showmanceToVaultContent } from "../engine/seededRelationships";
+import { SEEDED_TIE_SURFACING } from "../engine/seededRelationshipConstants";
 import {
   PRIVATE_ORIENTATION_KIND, privateOrientationVaultId, privateOrientationToVaultContent,
 } from "../engine/diversity";
@@ -248,6 +249,24 @@ function buildUserSandbox(user = "default"): UserSandbox {
     // The confidant first HOLDS the rumor (an origin belief), so the told-by pathway is content-anchored.
     engine.knowledge.seedBelief(confidant, { content: rumor, originalContent: rumor, factId, confidence: 0.6, hops: 1, distortion: 1, source: confidant }, "origin");
     const fact = engine.knowledge.surfaceInformationTo(PLAYER, { content: rumor, subject, confidence: 0.5 }, `told-by:${confidant}`);
+    return fact !== null;
+  });
+  // 0059 §5 — a sealed pre-game TIE surfaces TO THE PLAYER (rare): the SAME anchored-pathway machinery the
+  // thread seam uses. A living NPC confidant (not in the pair) first HOLDS the Vault-free observation
+  // ("those two seem unusually tight"), then it surfaces `told-by:<npc>` as a content-anchored BELIEF —
+  // correctly the player's KNOWLEDGE (a soft read they form paranoia around), never the sealed `nature`,
+  // never Vault content. An unanchored attempt is downgraded to a suspicion by 0002. Returns whether the
+  // player came to hold it (the scheduler counts it once against the season cap). `subject` is the pair's
+  // `a` (the cap is keyed on it). Same low confidence as a behavioral read, never a confirmed fact.
+  session.setOnTieSurfaceToPlayer((subject, observation) => {
+    const core = session.snapshot();
+    if (!core.house) return false;
+    const evicted = new Set(core.live?.evictionOrder ?? []);
+    const confidant = core.house.npcs.map((n) => n.id).find((id) => id !== subject && !evicted.has(id));
+    if (!confidant) return false;
+    const factId = `tie-belief:${subject}:${engine.events.count()}`;
+    engine.knowledge.seedBelief(confidant, { content: observation, originalContent: observation, factId, confidence: 0.6, hops: 1, distortion: 1, source: confidant }, "origin");
+    const fact = engine.knowledge.surfaceInformationTo(PLAYER, { content: observation, subject, confidence: SEEDED_TIE_SURFACING.surfacedConfidence }, `told-by:${confidant}`);
     return fact !== null;
   });
   // 0075 — a houseguest CONFIDES in the player (the engine already decided whether/how much/true). The
