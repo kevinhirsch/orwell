@@ -42,6 +42,15 @@ export interface AllianceConstants {
   joinBondFloor: number;
   /** How much heavier a betrayal of a NAMED co-ally is vs. an unspoken bond (multiplier on the demerit). */
   betrayalMultiplier: number;
+  /** Phase B: an NPC names an alliance only over co-members whose mutual bond clears this (higher than the
+   *  player floor — an NPC commits to real bonds, not a hopeful pitch). */
+  npcAllyFloor: number;
+  /** Phase B: the most houseguests an NPC-named alliance starts with (the founder + up to this−1 allies). */
+  maxNpcSize: number;
+  /** Phase B: an NPC founder pitches the PLAYER into their alliance only when their mutual bond clears this. */
+  pitchPlayerFloor: number;
+  /** Phase B: the bounded threat bump a named-alliance betrayal lands on the wronged → betrayer edge. */
+  betrayalThreatBump: number;
 }
 
 export const ALLIANCE: AllianceConstants = {
@@ -50,7 +59,32 @@ export const ALLIANCE: AllianceConstants = {
   saturationFalloff: 0.6,
   joinBondFloor: 0.45,
   betrayalMultiplier: 1.5,
+  npcAllyFloor: 0.58,
+  maxNpcSize: 4,
+  pitchPlayerFloor: 0.6,
+  betrayalThreatBump: 0.18,
 };
+
+/** Generic, BB-plausible alliance NAMES (never a houseguest name) — an NPC names theirs from this pool. */
+export const ALLIANCE_NAMES: readonly string[] = [
+  "The Brigade", "The Committee", "The Core", "The Nucleus", "Final Four", "The Quad", "Six Pack",
+  "The Pact", "The Syndicate", "The Inner Circle", "The Crew", "The Founders", "The Outsiders",
+  "The Regulators", "The Hitmen", "The Bloc Party", "The Round Table", "The Cartel",
+];
+
+/** Pick an unused alliance name (seeded); falls back to a numbered one if the pool is exhausted. */
+export function pickAllianceName(rng: { int(n: number): number }, taken: ReadonlySet<string>): string {
+  const free = ALLIANCE_NAMES.filter((n) => !taken.has(n));
+  if (free.length > 0) return free[rng.int(free.length)]!;
+  return `${ALLIANCE_NAMES[rng.int(ALLIANCE_NAMES.length)]!} ${taken.size + 1}`;
+}
+
+/** Whether two member lists are the same set (order-independent) — the NPC-formation dedup. */
+export function sameMembers(a: readonly EntityId[], b: readonly EntityId[]): boolean {
+  if (a.length !== b.length) return false;
+  const s = new Set(a);
+  return b.every((m) => s.has(m));
+}
 
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -140,6 +174,41 @@ export class AllianceStore {
   }
 
   forMember(member: EntityId): Alliance[] { return alliancesOf(this.alliances, member); }
+
+  byId(id: string): Alliance | undefined { return this.alliances.find((a) => a.id === id); }
+
+  /** The alliances a houseguest is AWARE of but NOT a member of (a pitch they can still accept). */
+  pitchesFor(who: EntityId): Alliance[] {
+    return this.alliances.filter((a) => a.knownTo.includes(who) && !a.members.includes(who));
+  }
+
+  /** Make `who` aware of an alliance (a pitch surfaces it without enrolling them). */
+  reveal(id: string, who: EntityId): void {
+    const a = this.byId(id);
+    if (a && !a.knownTo.includes(who)) a.knownTo.push(who);
+  }
+
+  /** Enroll `who` (they accepted a pitch); also makes them aware. No-op if already a member. */
+  join(id: string, who: EntityId): Alliance | undefined {
+    const a = this.byId(id);
+    if (!a) return undefined;
+    if (!a.members.includes(who)) a.members.push(who);
+    if (!a.knownTo.includes(who)) a.knownTo.push(who);
+    return a;
+  }
+
+  /** Remove `who` (they betrayed it / left); an alliance that falls below two members dissolves. */
+  removeMember(id: string, who: EntityId): void {
+    const a = this.byId(id);
+    if (!a) return;
+    a.members = a.members.filter((m) => m !== who);
+    if (a.members.length < 2) this.alliances = this.alliances.filter((x) => x.id !== id);
+  }
+
+  /** Every active alliance the two houseguests SHARE (for the betrayal-stakes fold). */
+  shared(a: EntityId, b: EntityId): Alliance[] {
+    return this.alliances.filter((al) => al.members.includes(a) && al.members.includes(b));
+  }
 
   /** Drop any member who has left the game (evicted); a one-member alliance dissolves. */
   prune(living: ReadonlySet<EntityId>): void {

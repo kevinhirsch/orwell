@@ -1,10 +1,12 @@
 # 0107 — Named alliances
 
-> **Status:** ✅ **BUILT — Phase A** (2026-06-26 — `src/engine/alliances.ts` + the player `formAlliance`
-> seam (4-place MCP), the cement into `detectBlocs`, the favor into the 0075 goodwill ledger, Vault-safe
-> projection on `gameStatus`/`SeasonRecapView`, and persistence; gated by `tests/unit/alliances0107.test.ts`).
-> **Phase B (next):** NPCs autonomously forming alliances off-screen + pitching the player; the heavier
-> *betrayal stakes* fold. **Gate:** engine (Vitest + dependency-cruiser). **Depends on:** 0043 (the
+> **Status:** ✅ **BUILT — Phase A + B** (2026-06-26 — A: `src/engine/alliances.ts` + the player
+> `formAlliance` seam, the cement into `detectBlocs`, the favor into the 0075 goodwill ledger, Vault-safe
+> projection + persistence. B: NPCs autonomously NAME alliances off-screen (`formNpcAlliances` in the gated
+> `campaignTick`) + **pitch the player** (`gameStatus.alliancePitches` + the `joinAlliance` seam), and the
+> **betrayal-stakes fold** (`reconcileAllianceBetrayals` — a named betrayal bumps threat, fires a witnessed
+> betrayal, and fractures the alliance). Gated by `alliances0107` + `alliancesNpc0107b`.)
+> **Gate:** engine (Vitest + dependency-cruiser). **Depends on:** 0043 (the
 > emergent bloc this cements), 0039 (the deal/goodwill ledger it feeds), 0002/0026 (the bonds it gates on),
 > 0086 (the `build` drive that will drive NPC formation in Phase B). **Calibration:** every effect is
 > 0/identity when no alliance is shared ⇒ `juryReach`/UAT **byte-identical** (re-verified within band).
@@ -72,8 +74,22 @@ The show drowns in meaningless alliances; three guardrails keep these meaningful
 - **Persists** — a named alliance survives a snapshot/restore; the MCP boundary dispatches `formAlliance`.
 - **Calibration byte-identical** — no alliance ⇒ the cement provider returns 0 ⇒ `juryReach` within band.
 
-## Phase B (next)
+## Phase B (built)
 
-NPCs forming named alliances among bonded `build`-drive (0086) members off-screen and **pitching the
-player** into one; the **heavier betrayal-stakes** fold when a binding adverse action hits a named co-ally;
-and surfacing alliances the player only *learns of* through a pathway (the `knownTo` perspective set).
+- **NPCs name alliances off-screen** — `formNpcAlliances` runs in the gated `campaignTick`: a `build`-drive
+  (0086) founder over real mutual bonds (the higher `npcAllyFloor`) names an alliance with their
+  strongest-bonded allies (the player is never auto-enrolled). Bounded: one new alliance per tick, one
+  foundership per NPC, deduped by member set; seeded on the dedicated campaign rng.
+- **They pitch the player** — a founder bonded to the player past `pitchPlayerFloor` `reveal`s the alliance
+  to them; it surfaces on `gameStatus.alliancePitches` (aware, not a member). The player accepts with
+  **`joinAlliance(allianceId)`** (a player tool, 4-place MCP) — only a live pitch they're close enough to
+  the founder for; a cold "add me" is refused.
+- **Betraying a named ally cuts deeper** — `reconcileAllianceBetrayals` fires when a binding ADVERSE action
+  (nominate / replace / vote-evict) hits a named co-ally: a bounded threat ▲ / affinity ▼ on the wronged →
+  betrayer edge, a jury demerit, a witnessed betrayal event, and the betrayer **leaves** the alliance (it
+  fractures). Gated by a shared alliance existing ⇒ none ⇒ no fold ⇒ byte-identical.
+
+### Still open (future)
+
+NPC↔NPC alliance *diffusion* (a third NPC learning of an alliance via gossip), and richer NPC pitch
+cadence (an NPC re-pitching, or souring when the player declines).

@@ -2,7 +2,7 @@ import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
-  FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
+  FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
   SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
@@ -37,7 +37,7 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
-import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers } from "../../engine/alliances";
+import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAllianceName, sameMembers, ALLIANCE } from "../../engine/alliances";
 import type { Alliance } from "../../engine/alliances";
 import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
 import type { ConfessionalContext } from "../../engine/confessionals";
@@ -335,6 +335,8 @@ const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-e
  * module load, like the watcher cadence; a test overrides per-session via `setCampaignsEnabled`.
  */
 const CAMPAIGNS_ENABLED_DEFAULT = process.env.ORWELL_CAMPAIGNS === "1";
+/** 0107 Phase B — the binding-action kinds that count as a betrayal of a named co-ally. */
+const ALLIANCE_ADVERSE = new Set(["nominate", "replace", "vote-evict"]);
 
 /**
  * 0087 — whether the RELATIONSHIP-TRAJECTORY layer runs by DEFAULT. OFF unless `ORWELL_TRAJECTORIES=1`.
@@ -2325,6 +2327,8 @@ export class GameSessionAdapter implements GameSession {
       finished: !!this.live?.finished,
       winner: this.named(this.live?.winner),
       ...(this.alliances.forMember(PLAYER).length ? { alliances: this.playerAllianceViews() } : {}),
+      // 0107 Phase B: alliances an NPC has pitched the player (aware of, not yet in) — accept via joinAlliance.
+      ...(this.alliances.pitchesFor(PLAYER).length ? { alliancePitches: this.alliances.pitchesFor(PLAYER).map((a) => this.allianceView(a)) } : {}),
     };
   }
 
@@ -4861,6 +4865,43 @@ export class GameSessionAdapter implements GameSession {
       }, this.drives.get(a.id)));
     }
     this.drives = nextDrives;
+    // 0107 Phase B: NPCs name alliances off-screen + pitch the player (gated by campaignsEnabled ⇒ the
+    // passive calibration harness forms none ⇒ the cement provider stays 0 ⇒ juryReach byte-identical).
+    this.formNpcAlliances(rng);
+  }
+
+  /**
+   * 0107 Phase B — NPCs autonomously NAME alliances off-screen. A `build`-drive (0086) founder over real
+   * mutual bonds (the `npcAllyFloor`, higher than the player's pitch floor) names an alliance with their
+   * strongest-bonded allies, then PITCHES the player if they're bonded enough (revealing it so the player
+   * can accept via `joinAlliance`). Bounded: at most ONE new alliance per tick, one foundership per NPC,
+   * deduped by member set. Uses the dedicated campaign rng (seeded). Gated by `campaignTick`'s flag.
+   */
+  private formNpcAlliances(rng: SeededRandom): void {
+    const beat = this.beatSeqNow();
+    const npcs = this.livingIds().filter((id) => id !== PLAYER);
+    const bondOf = (a: EntityId, b: EntityId): number => (this.rel.edge(a, b).trust + this.rel.edge(a, b).affinity) / 2;
+    const mutual = (a: EntityId, b: EntityId): number => Math.min(bondOf(a, b), bondOf(b, a));
+    // A founder: a build-drive NPC who hasn't already founded an active alliance.
+    const founders = npcs
+      .filter((id) => this.drives.get(id)?.motivation === "build" && !this.alliances.all().some((a) => a.founder === id))
+      .sort();
+    const npcFloor = { ...ALLIANCE, joinBondFloor: ALLIANCE.npcAllyFloor };
+    for (const founder of founders) {
+      const proposed = npcs
+        .filter((m) => m !== founder)
+        .sort((a, b) => mutual(founder, b) - mutual(founder, a) || a.localeCompare(b))
+        .slice(0, ALLIANCE.maxNpcSize - 1);
+      const willing = willingMembers(founder, proposed, (m) => mutual(founder, m), npcFloor);
+      if (willing.length < 2) continue; // nobody bonded enough — no alliance this tick
+      if (this.alliances.all().some((a) => sameMembers(a.members, willing))) continue; // dedup
+      const name = pickAllianceName(rng, new Set(this.alliances.all().map((a) => a.name)));
+      const a = this.alliances.add(name, founder, willing, beat);
+      // Pitch the player: a founder bonded enough reveals the alliance so the player can accept it.
+      if (mutual(founder, PLAYER) >= ALLIANCE.pitchPlayerFloor) this.alliances.reveal(a.id, PLAYER);
+      this.persist();
+      return; // one new alliance per tick (bounded)
+    }
   }
 
   private archetypeOf(id: EntityId): string {
@@ -5331,6 +5372,49 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0107 Phase B — the player ACCEPTS an NPC's pitch and joins their alliance. Only a live pitch (the
+   * player is `knownTo` but not a member) AND a close enough bond with the founder lets them in — a cold
+   * "add me" to an alliance they were never offered is refused. Recorded as the player's knowledge.
+   */
+  joinAlliance(req: JoinAllianceReq): AllianceView | null {
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) return null;
+    const a = this.alliances.byId(req.allianceId);
+    if (!a || a.members.includes(PLAYER) || !a.knownTo.includes(PLAYER)) return null; // not an open pitch
+    const bondOf = (x: EntityId, y: EntityId): number => (this.rel.edge(x, y).trust + this.rel.edge(x, y).affinity) / 2;
+    if (Math.min(bondOf(PLAYER, a.founder), bondOf(a.founder, PLAYER)) < ALLIANCE.joinBondFloor) return null; // not close enough
+    const joined = this.alliances.join(a.id, PLAYER)!;
+    this.onPlayerEvent?.(`${this.nameOf(PLAYER)} joins the alliance "${joined.name}"`, [...joined.members], "alliance");
+    this.persist();
+    return this.allianceView(joined);
+  }
+
+  /**
+   * 0107 Phase B — the named-alliance BETRAYAL fold: when a houseguest takes a binding ADVERSE action
+   * (nominate / replace / vote-evict) against someone they share a named alliance with, that betrayal
+   * cuts deeper than an unspoken one — a bounded threat ▲ / affinity ▼ on the wronged → betrayer edge, a
+   * jury demerit, a witnessed reveal, and the betrayer leaves the alliance (it fractures). Gated by a
+   * SHARED alliance existing ⇒ no alliances ⇒ no fold ⇒ the seeded spine is byte-identical.
+   */
+  private reconcileAllianceBetrayals(action: BindingAction): void {
+    if (!this.live || !ALLIANCE_ADVERSE.has(action.kind)) return;
+    for (const target of action.targets) {
+      if (target === action.actor) continue;
+      for (const al of this.alliances.shared(action.actor, target)) {
+        const e = this.rel.edge(target, action.actor);
+        e.threat = Math.min(1, e.threat + ALLIANCE.betrayalThreatBump);
+        e.affinity = Math.max(0, e.affinity - ALLIANCE.betrayalThreatBump);
+        recordDealBetrayal(this.live, target, action.actor);
+        this.onPlayerEvent?.(
+          `${this.nameOf(action.actor)} turned on the alliance "${al.name}", moving against ${this.nameOf(target)}`,
+          [target, action.actor], "betrayal",
+        );
+        this.alliances.removeMember(al.id, action.actor); // the betrayer is out — the alliance fractures
+      }
+    }
+  }
+
+  /**
    * 0075 — the trust-gated confidence (the single authority). The model presses the ally and calls this;
    * the ENGINE decides everything (whether they open up, how much, true or a lie) and RECORDS the
    * disclosure as the player's knowledge. Vault-safe by construction: an undisclosed secret is never
@@ -5543,7 +5627,7 @@ export class GameSessionAdapter implements GameSession {
     if (ev) this.onEvent?.({ ...ev, content: this.humanize(ev.content) });
     // 0039/E42: a binding ceremony beat may honor or break open deals — the engine adjudicates
     // EVERY binding actor's action (NPC votes and tie-breaks included), never only the player's.
-    if (ev) for (const action of this.bindingActionsFor(ev)) this.reconcileDeals(action);
+    if (ev) for (const action of this.bindingActionsFor(ev)) { this.reconcileDeals(action); this.reconcileAllianceBetrayals(action); }
     // 0040/E55: at the week's dramatic beats the directly-involved houseguests privately confess
     // their REAL engine-grounded read — Vault-only (witnessed by them alone), reaching no one.
     if (ev) this.recordCeremonyConfessionals(ev);

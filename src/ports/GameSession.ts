@@ -376,6 +376,12 @@ export interface FormAllianceReq {
   expectedBeatSeq?: number;
 }
 
+/** 0107 Phase B — the player accepts an alliance an NPC pitched them into (by its id). */
+export interface JoinAllianceReq {
+  allianceId: string;
+  expectedBeatSeq?: number;
+}
+
 /** 0107 — a Vault-safe view of a named alliance: the NAME + members + whether the player founded it.
  *  Never carries the cement/favor magnitudes (those stay engine-only). */
 export interface AllianceView {
@@ -563,6 +569,8 @@ export interface PublicGameStatus {
   winner: NamedRef | null;
   /** 0107 — the named alliances the player is a member of (Vault-safe: name + members, never a number). */
   alliances?: AllianceView[];
+  /** 0107 Phase B — alliances an NPC has pitched the player (aware of, not yet a member): `joinAlliance` to accept. */
+  alliancePitches?: AllianceView[];
 }
 
 /**
@@ -1421,6 +1429,8 @@ export interface GameSession {
   makeDeal(req: MakeDealReq): DealView | null;
   /** 0107 — the player names an alliance (bond-gated membership); null if nobody close enough joins. */
   formAlliance(req: FormAllianceReq): AllianceView | null;
+  /** 0107 Phase B — the player accepts an NPC's pitch and joins their alliance; null if not a live pitch. */
+  joinAlliance(req: JoinAllianceReq): AllianceView | null;
 
   /**
    * Feature 0075 — press an ally to open up (a trust-gated confidence). The SINGLE authority, like

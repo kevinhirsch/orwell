@@ -53,6 +53,7 @@ const args = (name: string, seed: number): Record<string, unknown> => {
     case "diaryRoom": return { entry: "my private read" };
     case "makeDeal": return { with: npc(1), kind: "safety", terms: "we ride together" };
     case "formAlliance": return { name: "The Test Alliance", members: [npc(1), npc(2)] }; // 0107
+    case "joinAlliance": return { allianceId: "alliance:nope" }; // 0107 Phase B (no such pitch ⇒ null, never throws)
     // 0075: press a houseguest to confide — the returned content (whatever tier, even a fabricated
     // lie) must NEVER carry a planted sealed sentinel; the engine only ever discloses the secret it
     // chose + recorded, blurred/glossed to the tier, and a lie is engine-authored, not a real secret.
