@@ -2866,10 +2866,15 @@ def _split_complete_sentences(buf: str):
 
 def _scrub_game_leak(text: str) -> str:
     """Drop whole sentences that are operator asides / tool-process narration; keep the rest
-    verbatim (delimiters preserved). Used both on the live stream and on the saved message."""
+    verbatim (delimiters preserved). Used both on the live stream and on the saved message.
+
+    #1109(b) — ALSO split on `;` so a machinery aside joined to a legit leading clause by a
+    semicolon ("You can shade, spin, or play a character; the engine will take it from there.")
+    drops ONLY the offending clause, not the whole sentence. The semicolon delimiter is kept on
+    the surviving clause, so a sentence with no machinery clause re-joins byte-identically."""
     if not text:
         return text
-    parts = re.split(r"(?<=[.!?\n])", text)
+    parts = re.split(r"(?<=[.!?\n;])", text)
     return "".join(
         p for p in parts
         if not _GAME_LEAK_SENTENCE_RE.search(p) and not _GAME_LEAK_START_RE.match(p)
@@ -5304,6 +5309,23 @@ async def stream_agent_loop(
                         "any tool — just the moment, in your narrator voice.")})
                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                     continue
+                # #1110 — DOUBLE-BLANK guard: the model produced reasoning-only on round 1 AND the
+                # re-prompt round ALSO returned nothing visible (we already spent the single narrate
+                # nudge, so the `if` above is now False). Without this the turn would end on a wholly
+                # EMPTY bubble. Emit a minimal in-character continuation so the player always gets
+                # SOMETHING to act on (still nothing leaked — this is plain scene-cue prose, no meta,
+                # no machinery, no reasoning). Fires at most once per turn (`_turn_narrate_nudges`
+                # is already 1 here, and we don't `continue`, so we never loop on it).
+                elif not _emitted_visible and _is_live_game:
+                    logger.info(
+                        f"[orwell] double-blank guard: re-prompt also produced no narration — emitting "
+                        f"a minimal in-character continuation round {round_num} user={owner}")
+                    _blank_fallback = (
+                        "The moment hangs for a beat. The house keeps moving around you — "
+                        "what do you want to do?")
+                    full_response += _blank_fallback
+                    _emitted_visible = True
+                    yield f'data: {json.dumps({"delta": _blank_fallback})}\n\n'
             elif game_mode == "casting":
                 # ── Casting auto-record belt: GUARANTEE the player's answers reach the engine. The
                 # model is told to record them AS THEY LAND with updateCasting but reliably under-calls

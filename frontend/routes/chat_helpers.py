@@ -2428,12 +2428,57 @@ def fallback_in_flight(user) -> bool:
     return user in _fallback_in_flight
 
 
+async def _e22_rich_extract(user, player_message, narration) -> bool:
+    """#1105 — route the E22 fallback through the SAME constrained extraction the richer 0055
+    belt (`_auto_record_scene`) uses, so the fallback record carries the scene's SHAPE (a
+    Vault-free `consequence` descriptor — which edges move, which way, relative emphasis), not
+    just the deterministic `kind`-floor fold. ADR 0005: only direction/emphasis/targeting cross;
+    the engine keeps the magnitude (no raw number), so an absent/invalid descriptor is byte-
+    identical to today's floor fold. Returns True when the richer belt banked a fold; False (and
+    the caller falls back to the floor digest) when no model/house resolves, the scene was solo,
+    or anything hiccups. Fully fail-soft — never raises into the fire-and-forget caller."""
+    try:
+        # The house roster (Vault-free public id+name) — feeds the extraction's withIds targeting.
+        # A short timeout keeps this best-effort probe fail-FAST: no engine ⇒ we drop to the floor
+        # digest quickly rather than blocking the fire-and-forget guard on the full framing timeout.
+        from src import orwell_engine as _oe
+        gs = await _oe.get_game_state(user, timeout=2.0)
+        house = [
+            {"id": h.get("id"), "name": h.get("name")}
+            for h in ((gs or {}).get("house") or [])
+            if isinstance(h, dict) and h.get("id") and h.get("name")
+        ]
+        if not house:
+            return False
+        # Resolve a background-utility model exactly like the FE's other best-effort belts; no
+        # model ⇒ the engine's deterministic floor simply stands (we fall back to the digest).
+        from src.endpoint_resolver import resolve_endpoint
+        url, model, headers = resolve_endpoint("utility", owner=user)
+        if not url or not model:
+            url, model, headers = resolve_endpoint("default", owner=user)
+        if not url or not model:
+            return False
+        from src.agent_loop import _auto_record_scene
+        return bool(await _auto_record_scene(
+            narration, player_message, house, url, model, headers, user))
+    except Exception as e:  # pragma: no cover - belt-and-suspenders; never break the fallback
+        logger.warning("[orwell] E22 rich extraction failed for user=%s: %s", user, e)
+        return False
+
+
 async def ensure_turn_recorded(user, player_message, narration, tools_called) -> bool:
     """E22 — the server-side guard for the cardinal sin. Prompt wording told the model to
     record scenes; nothing ENFORCED it (the GM asking "Record this interaction?" was the
     symptom). On a completed game turn with non-trivial narration and ZERO engine writes,
-    fold a bounded digest of the exchange into the record so the beat has consequence and
-    memory. Returns True when a fallback record was made.
+    fold the exchange into the record so the beat has consequence and memory. Returns True
+    when a fallback record was made.
+
+    #1105: try the RICHER extraction first (`_auto_record_scene` via `_e22_rich_extract`) so
+    the fallback carries the scene's SHAPE (an ADR-0005 `consequence` descriptor), not just a
+    generic floor-fold digest — the model called `recordInteraction` ~once a game while this
+    fallback fired dozens of times, so a flat digest was FLATTENING (not losing) the
+    relationship shape the scene implied. The bounded floor digest stays the LAST resort (no
+    model / solo beat / hiccup).
 
     L18: single-flight per user — a fallback fired while one is still in flight for the same
     user is skipped rather than stacked, so the fire-and-forget guard can never pile a backlog
@@ -2447,23 +2492,32 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
     _unrecorded_turn_fallbacks += 1
     logger.warning(
         "[orwell] E22 guard: game turn narrated with no engine write — recording a fallback "
-        "digest (process count=%d)", _unrecorded_turn_fallbacks,
+        "(process count=%d)", _unrecorded_turn_fallbacks,
     )
     # L18: don't race a fallback already committing for this user (or pile a backlog behind the
-    # next live turn). The under-call is recorded above; one in-flight digest per user is enough.
+    # next live turn). The under-call is recorded above; one in-flight fallback per user is enough.
     if user in _fallback_in_flight:
         logger.warning(
             "[orwell] E22 guard: a fallback write is already in flight for user=%s — "
             "skipping this one to avoid stacking engine writes", user,
         )
         return False
-    digest = (
-        "Scene (auto-recorded): the player said: "
-        f"{str(player_message or '').strip()[:GAME_TURN_DIGEST_CHARS]!r}. "
-        f"What happened: {text[:GAME_TURN_DIGEST_CHARS]}"
-    )
     _fallback_in_flight.add(user)
     try:
+        # #1105: the RICHER belt first — `_auto_record_scene` does its OWN CAS-guarded
+        # recordInteraction with the scene-shape `consequence` descriptor. Banked ⇒ done (we do
+        # NOT also write a second, flatter digest for the same turn).
+        try:
+            if await _e22_rich_extract(user, player_message, text):
+                return True
+        except Exception as e:  # never let the rich path break the floor fallback
+            logger.warning("[orwell] E22 rich extraction errored for user=%s: %s", user, e)
+        # LAST resort: the bounded `kind`-floor digest (no model, a solo beat, or a hiccup above).
+        digest = (
+            "Scene (auto-recorded): the player said: "
+            f"{str(player_message or '').strip()[:GAME_TURN_DIGEST_CHARS]!r}. "
+            f"What happened: {text[:GAME_TURN_DIGEST_CHARS]}"
+        )
         from src import orwell_engine
         # 0065 Part A: this is an FE-ISSUED recordInteraction (the E22 fallback) — attach the current
         # last-seen CAS token and refresh last-seen from its response. A stale 409 (the board moved

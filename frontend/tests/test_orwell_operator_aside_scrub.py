@@ -112,3 +112,32 @@ def test_scrub_stays_high_precision_around_ordinary_words():
         "The campsite story he told earlier still hangs in the air."
     )
     assert _scrub_game_leak(legit) == legit
+
+
+# ── #1109(b): a legit clause joined to a machinery aside by a SEMICOLON must survive ──
+# The scrub split on [.!?\n] only, so a machinery clause riding AFTER a semicolon dropped the
+# WHOLE sentence — including the legitimate leading clause before the ";". Splitting on ";" too
+# keeps the leading clause and drops only the offending one.
+
+def test_semicolon_joined_machinery_aside_keeps_the_leading_clause():
+    leak = "You can shade, spin, or play a character; the engine will take it from there."
+    out = _scrub_game_leak(leak)
+    # the legit leading clause survives (it is NOT a machinery aside)
+    assert "You can shade, spin, or play a character" in out
+    # the machinery clause is gone
+    assert "the engine" not in out.lower()
+
+
+def test_semicolon_clause_split_does_not_over_scrub_ordinary_prose():
+    # an ordinary semicolon-joined sentence with no machinery clause re-joins byte-identical
+    legit = ("The lights dim over the living room; the houseguests trade nervous glances. "
+             "Who do you trust?")
+    assert _scrub_game_leak(legit) == legit
+
+
+def test_semicolon_aside_in_the_leading_clause_keeps_the_trailing_clause():
+    # the machinery clause can also be FIRST — the legit trailing clause must still survive
+    leak = "I'll advance the game; you head back to the kitchen as the house wakes up."
+    out = _scrub_game_leak(leak)
+    assert "advance the game" not in out.lower()
+    assert "you head back to the kitchen as the house wakes up." in out

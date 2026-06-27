@@ -391,6 +391,69 @@ def test_a_failed_fallback_releases_the_in_flight_slot(monkeypatch):
     assert chat_helpers.fallback_in_flight("z") is False  # slot released despite the failure
 
 
+# ── #1105: the E22 fallback routes through the RICHER extraction first ───────────────
+#
+# The model called recordInteraction ~once a whole game while the E22 fallback fired dozens of
+# times with a generic, descriptor-less digest — so per ADR 0005 the engine applied only the
+# deterministic kind-floor fold and the relationship SHAPE the scene implied was FLATTENED. The
+# fix routes the fallback through the same constrained extraction the 0055 _auto_record_scene
+# belt uses (model-proposed {withIds, kind, content, consequence}), so the fallback carries scene
+# shape — falling back to the flat floor digest ONLY when no model/house resolves or it hiccups.
+
+
+def test_e22_fallback_prefers_the_rich_extraction(monkeypatch):
+    """When the richer extraction banks a scene-shape fold, the E22 fallback does NOT also write
+    a second, flatter floor digest for the same turn (no double record, the rich fold wins)."""
+    floor_calls = _capture_record(monkeypatch)
+    rich_calls = []
+
+    async def fake_rich(user, player_message, narration):
+        rich_calls.append({"user": user, "msg": player_message})
+        return True  # banked a scene-shape fold via _auto_record_scene's own recordInteraction
+
+    monkeypatch.setattr(chat_helpers, "_e22_rich_extract", fake_rich)
+    narration = "The kitchen goes quiet as the player works the room at length. " * 4
+    recorded = _run(chat_helpers.ensure_turn_recorded(
+        "u", "I press my ally and warm up to the swing vote.", narration, ["getGameState"]))
+    assert recorded is True
+    # the rich belt ran; the flat floor digest did NOT (no descriptor-less double record)
+    assert len(rich_calls) == 1 and rich_calls[0]["user"] == "u"
+    assert floor_calls == []
+    # the slot is released afterward (no wedge)
+    assert chat_helpers.fallback_in_flight("u") is False
+
+
+def test_e22_fallback_drops_to_the_floor_digest_when_rich_extraction_declines(monkeypatch):
+    """No model / no house / a solo beat / a hiccup ⇒ the richer path returns False, and the
+    bounded kind-floor digest still GUARANTEES the under-called turn folds SOMETHING (the 0023
+    consequence loop never silently drops a scene)."""
+    floor_calls = _capture_record(monkeypatch)
+
+    async def decline_rich(user, player_message, narration):
+        return False  # e.g. no utility model configured, or a solo internal beat
+
+    monkeypatch.setattr(chat_helpers, "_e22_rich_extract", decline_rich)
+    narration = "A tense beat unfolds as the player sizes up the house, recounted in full. " * 4
+    recorded = _run(chat_helpers.ensure_turn_recorded(
+        "u", "I size up the room.", narration, ["getGameState"]))
+    assert recorded is True
+    # exactly the legacy floor digest landed (both sides of the exchange, bounded)
+    assert len(floor_calls) == 1
+    assert "I size up the room." in floor_calls[0]["content"]
+    assert len(floor_calls[0]["content"]) <= 2 * chat_helpers.GAME_TURN_DIGEST_CHARS + 120
+
+
+def test_e22_rich_extraction_no_house_declines_without_a_model_call(monkeypatch):
+    """_e22_rich_extract returns False (and never reaches the LLM) when the engine reports no
+    house roster — the floor digest then stands. Proves the rich path is fail-soft end to end."""
+    async def empty_state(user, timeout=None):
+        return {"started": True, "house": []}
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", empty_state)
+    out = _run(chat_helpers._e22_rich_extract("u", "msg", "A long narrated beat. " * 5))
+    assert out is False
+
+
 # ── E24/P7: incognito cannot strip game framing under the game build ────────────────
 
 

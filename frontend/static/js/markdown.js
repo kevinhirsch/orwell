@@ -298,6 +298,11 @@ const _GAME_TOOL_WORDS = [
 // game". "walk through it/this" is included (the #1047 "let me walk through it").
 const _MACHINERY_ASIDE_RE = new RegExp(
   '\\b(?:' + _GAME_TOOL_WORDS.join('|') + ')\\b'
+  // #1109(a) — machinery NOUNS that never appear in in-character BB narration (parity with the
+  // Python _GAME_LEAK_SENTENCE_RE in src/agent_loop.py): "the engine/system/model" + the app the
+  // player runs us on ("the front end", "the app", "this app/website/site"). Defense-in-depth so
+  // the JS body scrub catches a mid-paragraph fourth-wall leak the line/preamble passes can miss.
+  + '|\\bthe (?:engine|system|model|front[\\s-]?end)\\b|\\bthe app\\b|\\bthis (?:app|website|site)\\b'
   + '|\\blet me\\s+(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
     + '(?:call|advance|run|check|record|log|note|resolve|use|pull|fetch|see what|'
     + 'walk through|re-?read|re-?check|reconsider)\\b'
