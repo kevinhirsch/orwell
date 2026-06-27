@@ -48,5 +48,9 @@
     "better-sqlite3": "12.11.1",
     "fastembed": "2.1.0",
     "sqlite-vec": "0.1.9"
+  },
+  "overrides": {
+    "tar": "7.5.16",
+    "onnxruntime-node": "1.24.2"
   }
 }

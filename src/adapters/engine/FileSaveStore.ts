@@ -2,7 +2,7 @@ import {
   mkdirSync, readdirSync, readFileSync, renameSync, existsSync, unlinkSync,
   openSync, writeSync, fsyncSync, closeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { UserSaveStore } from "../../ports/UserSaveStore";
 import type { SessionSnapshot } from "../../engine/sessionSnapshot";
 
@@ -38,12 +38,32 @@ export class FileSaveStore implements UserSaveStore {
       dataDir ?? process.env.ORWELL_DATA_DIR ?? process.env.BBAI_DATA_DIR ?? "./.orwell-data";
   }
 
+  /**
+   * Defense-in-depth path containment (issue #1072). Every disk path this store touches is built
+   * from a `join()` whose first user-derived segment is a HEX encoding of the user id (`userDir`) and
+   * whose leaf is a numeric `vNNNNNN.json` (`fileFor`) — so a user-controlled string can never reach
+   * the path verbatim and `..`/`/`/`\` can never appear in a segment. This helper makes that
+   * guarantee *structural* rather than incidental: it resolves the candidate against the resolved
+   * `dataDir` and throws if the result escapes the base, so even a future caller that fed an attacker
+   * string in could not traverse out. It returns the original `join()`-built path UNCHANGED for any
+   * legitimate input (the resolve is a containment ASSERTION only, never a path rewrite), so existing
+   * saves keep their exact on-disk paths — non-degradation (feature 0007/0030) stays byte-identical.
+   */
+  private resolveWithin(joined: string): string {
+    const base = resolve(this.dataDir);
+    const real = resolve(joined);
+    if (real !== base && !real.startsWith(base + sep)) {
+      throw new Error("FileSaveStore: refusing a path that escapes the data dir");
+    }
+    return joined;
+  }
+
   private userDir(user: string): string {
-    return join(this.dataDir, Buffer.from(user, "utf8").toString("hex"));
+    return this.resolveWithin(join(this.dataDir, Buffer.from(user, "utf8").toString("hex")));
   }
 
   private fileFor(dir: string, version: number): string {
-    return join(dir, `v${String(version).padStart(6, "0")}.json`);
+    return this.resolveWithin(join(dir, `v${String(version).padStart(6, "0")}.json`));
   }
 
   /** Save versions present in `dir`, descending. Quarantined (`.corrupt`) files no longer match. */
