@@ -238,7 +238,13 @@ def finish_game():
 
 
 GAME_SURFACES = ["#orwell-status", "#orwell-presence",
-                 "#orwell-retro", "#orwell-decision-card", "[id*='ofin']", "[class*='odec']"]
+                 "#orwell-retro", "#orwell-decision-card", "[id*='ofin']", "[class*='odec']",
+                 # #933: the jump-to-bottom fab shares the above-composer slot with the decision card
+                 # and overlapped it at <=360px. The card now hard-suppresses the fab (#948), so they
+                 # never coexist — register the fab in the D2 overlap sweep so a regression that lets
+                 # them paint together is caught (the fab is opacity:0/hidden otherwise, so is_visible()
+                 # filters it out in the no-card case).
+                 "#orwell-scroll-bottom"]
 CHROME = {"composer": "#chat-form", "sidebar": "#sidebar"}
 
 
