@@ -227,6 +227,7 @@ messages with the repo's required trailers.
 | `namesCheck.mjs` | single clean API turn that **forces a named scene** and checks GM names vs the engine roster. |
 | `coreScenes.mjs` / `gameScenes.mjs` / `state1.mjs` | scripted captures of login/home/settings/themes and the game windows (cast, finale, decision card, social, diary, status HUD). |
 | `gameLoopUI.mjs` | a *mechanical* through-the-UI driver (sends agent turns, answers cards/ask_user) — useful to confirm the engine integration works under explicit prompting, and to reach late states fast. **Not** a substitute for persona roleplay. |
+| `mirror_live_parity.mjs` + `run_mirror_gate.sh` | the **F5 two-window live-parity gate** (§10) — boots the stack + a deterministic streamed fake model and asserts window B mirrors window A's **LIVE** render (renders DURING A's stream, through the same incremental renderer), not just the settled transcript. Model-independent, no key. |
 
 All scripts read secrets from `.audit-telemetry/.secrets.env` (`ADMIN_USER/ADMIN_PW/OR_KEY/OR_BASE/OR_MODEL`) and
 write to `.audit-telemetry/shots/`. They are committed here **as reference tooling**; the runtime sandbox, browsers,
@@ -302,3 +303,37 @@ season-2 attempt:
   critical play. Pro's discipline is **not yet cleanly confirmed** — the clean pro run is blocked by the two
   confounders above; do that next (authentic casting + pinned pro), checking `advanceGame` is called and the
   engine advances comp → nominations with real roster names.
+
+---
+
+## 10. The two-window live-parity gate (F5 / ADR 0012 §3.3 / refactor-roadmap R0)
+
+`mirror_live_parity.mjs` + `run_mirror_gate.sh` are the **executable, model-independent** gate for the
+#1 release blocker — **F5 realtime two-window mirror parity**. Where `mirror_filmstrip.mjs` diffs only
+the *settled* transcript (and so reports "lockstep PASS" while the live stream grinds), this gate diffs
+the **live render behaviour** during streaming, which is exactly where the two FE paths diverge.
+
+**Run (no API key — deterministic fake streamed model):**
+```bash
+bash docs/audits/playtest-harness/run_mirror_gate.sh
+```
+It stands up engine + `fake_model_server.mjs` + front-end + a STARTED game, opens two windows on the one
+canonical session, sends a turn from A, and asserts B mirrors A's LIVE stream. Exits non-zero on divergence.
+
+**What it asserts** (PASS only if all hold), from the timestamp-aligned DOM filmstrip:
+- `bStartsDuringAStream` — B begins rendering the turn WHILE A is still streaming (not blank-then-pop).
+- `bUsesIncrementalRenderer` — B mounts the same live streaming container A does (`createStreamRenderer`),
+  not a full-`innerHTML`-repaint reconcile (`renderDelta`).
+- `lagWithinBudget` — B converges within `MIRROR_LAG_BUDGET_MS` (default 2500) of A's settle.
+
+**Current verdict: RED.** On `main`, B sits blank through A's entire stream (~2-4 s), then pops a late
+`softReloadHistory` reconcile through a different (non-incremental) renderer — exactly the "scratch and
+grind". Representative telemetry: A first-render ~2.0 s / settles ~3.9 s; **B first-render ~5.8 s**; A
+`incrementalStream=true` / **B `incrementalStream=false`** (B does 0 streaming-container mounts).
+
+**Green-after:** when **refactor-roadmap R2** unifies the mirror's live render path onto the sender's
+incremental renderer (B live-attaches via `resumeStream` and streams through the same `createStreamRenderer`),
+all three checks pass. Then promote it to a required CI gate (it already runs key-free against the
+deterministic narrator, like `browser_smoke.py`/`deploy/smoke.sh`) and delete the `xfail` on
+`frontend/tests/test_0012_mirror.py::test_chat_client_mirror_does_not_full_repaint_per_delta` (the fast
+source-pin tripwire — it XPASSes the moment R2 lands).
