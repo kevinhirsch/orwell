@@ -1,0 +1,80 @@
+name: Security Scan (VulnHawk)
+
+# Advisory-only, AI-driven SAST scan (VulnHawk). Deliberately a SEPARATE workflow from ci.yml so it
+# is NOT part of the required `ci-gate` check — findings never block a merge. Point branch protection
+# at `ci-gate` (as today); leave this workflow OUT of the required set.
+#
+# Trade-offs accepted for this repo (see the PR description for the full rationale):
+#   * VulnHawk is a third-party COMPOSITE action. On the runner it does `pip install vulnhawk`
+#     (floating — NOT pinned, even though the `uses:` below is pinned to a commit SHA) and
+#     `npm install -g @anthropic-ai/claude-code`, then runs them. That is third-party code executing
+#     on our single self-hosted runner — the accepted "self-hosted + cloud LLM" posture.
+#   * The `claude-code` backend sends code chunks to Anthropic via the Claude Code CLI — FREE with a
+#     Claude subscription (no API-key billing). Private source therefore leaves our infra to the LLM;
+#     that egress is inherent to any cloud backend. Use `backend: ollama` if you ever want zero egress.
+#
+# ONE-TIME SETUP — add a repository secret `CLAUDE_CODE_OAUTH_TOKEN`:
+#   On a machine logged into a Claude Max/Team subscription run `claude setup-token`, then add the
+#   value under Settings → Secrets and variables → Actions → New repository secret.
+#   Without the secret the scan fails soft (continue-on-error) and the job stays green.
+
+on:
+  push:
+    branches: [main]
+    # Only scan when actual code changes — a docs-only / deploy-only push never triggers the workflow,
+    # so it never appears as a check there (mirrors ci.yml's path-gating intent).
+    paths:
+      - 'src/**'
+      - 'frontend/**'
+      - '.github/workflows/security-scan.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'frontend/**'
+      - '.github/workflows/security-scan.yml'
+
+# Match ci.yml: on the single self-hosted runner, cancel a superseded run on the same ref so a stale
+# scan nobody is waiting on doesn't tie the runner up. Keyed per ref (main and each PR are independent).
+concurrency:
+  group: secscan-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege. `security-events: write` only matters if GitHub Advanced Security is enabled on this
+# (private) repo — it lets the action's internal SARIF upload reach the Security → Code Scanning tab.
+# Without GHAS that upload 403s, which is why the scan step below is `continue-on-error`.
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  vulnhawk:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      # VulnHawk v0.2.0, pinned to the tag's commit SHA (the `@v0.2.0` tag itself is mutable). NOTE:
+      # the action internally runs `pip install vulnhawk`, which still floats to the latest build — SHA
+      # pinning the action does NOT pin the scanner package it pulls.
+      #
+      # Advisory posture (you chose non-blocking):
+      #   * fail-on-findings: false  → findings are informational, never fail the job.
+      #   * continue-on-error: true  → an internal SARIF-upload 403 (Code Scanning needs GitHub
+      #                                 Advanced Security on a private repo), a missing token, or a
+      #                                 v0.2.0 hiccup can't redden the run.
+      # Findings still surface in the job log (JSON/markdown output) and in the Security tab when GHAS
+      # is enabled. To make findings BLOCK merges later: set fail-on-findings 'true', drop
+      # continue-on-error, and add this job to ci-gate's `needs` in ci.yml.
+      - name: VulnHawk Security Scan
+        continue-on-error: true
+        uses: momenbasel/vulnhawk@b878413216e94ba3d6e634c9bf9920578f198ca0 # v0.2.0
+        env:
+          # Belt-and-suspenders: the Claude Code CLI also reads the OAuth token from this env var in
+          # headless/CI mode, alongside the documented `claude-code-oauth-token` input below.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          target: '.'
+          backend: 'claude-code' # free with a Claude subscription (no API-key billing)
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          severity: 'medium'
+          fail-on-findings: 'false'
