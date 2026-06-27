@@ -5338,6 +5338,11 @@ import { isNarrow } from './platform.js';
    */
   export async function checkPendingResearch(sessionId) {
     if (!sessionId) return;
+    // #1035 (F-8): deep research is a DROPPED vertical under the game build (trigger_research /
+    // manage_research are not in the keep-set), so /api/research/status can only ever 404 here —
+    // this poll fired once per session-select and spammed ~one 404 per turn. Skip it in the game
+    // build; the full inherited workspace (ORWELL_GAME_BUILD=0) still polls normally.
+    if (document.body && document.body.hasAttribute('data-game-build')) return;
     try {
       const res = await fetch(`${API_BASE}/api/research/status/${sessionId}`);
       if (!res.ok) return; // 404 = no research for this session
