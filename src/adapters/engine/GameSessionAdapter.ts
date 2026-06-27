@@ -127,7 +127,7 @@ import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
 import { EngineRefusal, StaleBeatError } from "../../domain/errors";
-import { RelationshipModel, relationshipLabel } from "../../engine/relationships";
+import { RelationshipModel, relationshipLabel, currentReadOf } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
   newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
@@ -609,6 +609,9 @@ export class GameSessionAdapter implements GameSession {
    * it owns a fresh model — the loop still runs, just without cross-fold history.
    */
   constructor(private readonly rel: RelationshipModel = new RelationshipModel(0.5)) {}
+
+  /** Feature 0088 — per-NPC current-read anchor bonds (Vault-only; persisted in snapshot). */
+  private readAnchors = new Map<EntityId, number>();
 
   /** Wire a persistence callback invoked after every mutation (durable save, 0030). */
   setOnPersist(fn: () => void): void {
@@ -1246,6 +1249,18 @@ export class GameSessionAdapter implements GameSession {
       // 0075: the Vault-safe emergent confidence hint (reason + warmth word only) — present ONLY for an
       // ACTIVE houseguest the player has earned a confidence from, and only when the scene precipitates it.
       ...(isActive ? (() => { const m = this.mayConfideFor(npc); return m ? { mayConfide: m } : {}; })() : {}),
+      // 0088: the living CURRENT read of the player — a Vault-safe carriage word + drift word, derived
+      // live from the evolving NPC→player edge (distinct from the frozen dayOnePerception). ACTIVE only;
+      // the anchor is Vault-only (persisted in the snapshot, never crossed). Sibling of 0084's `mood`.
+      ...(isActive && this.house ? (() => {
+        const playerId = this.house!.player.id;
+        const edge = this.rel.edge(id, playerId);
+        const disp = dispositionOf(npc.character.archetype);
+        const soul = this.soulObj(id);
+        const anchor = this.readAnchors.get(id);
+        const read = currentReadOf(edge, disp, soul?.emotionalState, anchor);
+        return { currentRead: read };
+      })() : {}),
     };
   }
 
@@ -1919,10 +1934,13 @@ export class GameSessionAdapter implements GameSession {
         : {}),
       // 0077: the player's tracked closed-door beliefs — persisted so the privacy payoff accumulates
       // across a restart (0007). Absent/empty ⇒ omitted (byte-identical to a pre-0077 save).
-      ...(this.trackedSightings && this.trackedSightings.size > 0
-        ? { trackedSightings: Object.fromEntries(this.trackedSightings) as Record<EntityId, TrackedSighting> }
-        : {}),
-      ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
+       ...(this.trackedSightings && this.trackedSightings.size > 0
+         ? { trackedSightings: Object.fromEntries(this.trackedSightings) as Record<EntityId, TrackedSighting> }
+         : {}),
+       // 0088: persist per-NPC current-read anchor bonds so drift reads warming/cooling/steady across
+       // a restart. Vault-only (derived convenience — never a label, never crossed). Absent ⇒ steady.
+       ...(this.readAnchors.size > 0 ? { readAnchors: Object.fromEntries(this.readAnchors) as Record<EntityId, number> } : {}),
+       ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       // The producer persona's seed (producer-persona feature) — persisted so the SAME off-camera casting
       // producer is voiced across turns and a restart (it is established pre-game, before any season seed).
       ...(this.producerSeed !== null ? { producerSeed: this.producerSeed } : {}),
@@ -2102,6 +2120,8 @@ export class GameSessionAdapter implements GameSession {
     this.trackedSightings = core.trackedSightings
       ? new Map(Object.entries(core.trackedSightings) as [EntityId, TrackedSighting][])
       : null;
+    // 0088: restore per-NPC current-read anchor bonds (absent on pre-0088 saves ⇒ empty ⇒ drift "steady").
+    this.readAnchors = core.readAnchors ? new Map(Object.entries(core.readAnchors) as [EntityId, number][]) : new Map();
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     // The producer persona's seed (producer-persona feature): restore so the SAME off-camera casting
     // producer is voiced after a restart. Persisted on feature+ saves; on a started game that predates
@@ -5667,6 +5687,9 @@ export class GameSessionAdapter implements GameSession {
   private syncProjection(): void {
     const s = this.live;
     if (!s) return;
+    // 0088: detect week advance — snapshot the NPC→player bond as the drift anchor
+    // so "warming"/"cooling" reads relative to start-of-week.
+    const weekChanged = s.week !== this.week;
     this.week = s.week;
     this.phase = s.finished ? "finale" : s.beat;
     this.ceremony = {
@@ -5675,6 +5698,16 @@ export class GameSessionAdapter implements GameSession {
       vetoHolder: s.vetoHolder,
       vetoUsed: s.vetoUsed,
     };
+    if (weekChanged && this.house) {
+      const playerId = this.house.player.id;
+      const evicted = new Set(this.live?.evictionOrder ?? []);
+      for (const npc of this.house.npcs) {
+        if (!evicted.has(npc.id)) {
+          const bond = (this.rel.edge(npc.id, playerId).trust + this.rel.edge(npc.id, playerId).affinity) / 2;
+          this.readAnchors.set(npc.id, bond);
+        }
+      }
+    }
   }
 
   private toDecisionInput(req: SubmitDecisionReq): DecisionInput {

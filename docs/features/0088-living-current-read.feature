@@ -32,7 +32,7 @@ Feature: 0088 — A living, current read of the player
     Scenario: The day-one read never changes even as the current read moves
       Given a houseguest with a sealed day-one read of the player
       When the player's conduct moves that houseguest's current read across the season
-      And the season is snapshotted and restored
+      And the current read is snapshotted and restored
       Then the sealed day-one read of the player is unchanged
       And the current read may disagree with the day-one read
       And the gap between the first impression and the current read is itself voiceable
@@ -40,7 +40,7 @@ Feature: 0088 — A living, current read of the player
   Rule: Vault Wall — never a number, never to admin
 
     Scenario: The current read surfaces only as observable conduct, never a number
-      When the voicing projection for a houseguest is read
+      When the voicing projection for a houseguest is read through the current read path
       Then any current read of the player is a carriage word, not a signal value
       And the projection carries no trust, affinity, or threat number toward the player
       And the projection carries no hidden cause for the read

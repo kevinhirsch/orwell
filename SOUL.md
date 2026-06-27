@@ -352,6 +352,21 @@ A continuation that cleared the merge train then ran a full cross-artifact audit
 2. Check open PRs/issues in `kevinhirsch/orwell`; re-subscribe to anything in flight.
 3. Re-establish the hourly PR backstop cron.
 4. Be the overseer: dispatch disjoint, review hard, verify live for stream/render work, relay
-   visuals, track as issues, merge only within granted scope. Diagnose before you revert.
+    visuals, track as issues, merge only within granted scope. Diagnose before you revert.
+22. **Minimum build bar — every feature must ship with these three things or it isn't done.**
+    (a) A **dedicated calibration-neutrality proof** — the sealed outcome battery: hash the
+    competition/vote/jury stream with the feature ON vs OFF (SHA256 or an identically-seeded
+    outcome comparison); prove zero draws / byte-identical when the flag is off. The pattern
+    lives in `tests/unit/triggerOutcomeNeutral.test.ts` and `tests/unit/stagedTrajectoryNeutral.test.ts`
+    — replicate it, never skip it. (b) **Single-tunable-module convention** — every new
+    constant set gets its own module (`*Constants.ts`), the B59 grep gate pattern (one tunable
+    home, no inline numbers at call sites). The precedent is `CONFIDENCE`, `THREAD`, `GOSSIP`,
+    `DRIVE`, `TRIGGER` — not inlining numbers into the parent module. (c) **Self-verified gates**
+    before calling a branch ready — typecheck, arch, unit, and the BDD `.feature` MUST all pass
+    in the worktree before commit. A green report from a delegate doesn't count until you've run
+    the gates yourself (lesson 19: the suite stubs the LLM, so a green suite with a dead path
+    is the normal failure mode). This session lost a head-to-head to another overseer's builds
+    on exactly this bar — they shipped dedicated neutrality proofs + convention-aligned constants
+    modules + verified-green gates; mine didn't. Never again.
 
 — Written for the next me, with care. The work is good; hold the line that made it good. 🫡

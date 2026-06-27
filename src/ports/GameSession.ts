@@ -967,6 +967,14 @@ export interface NpcVoiceView {
    * no readiness this scene (the common case).
    */
   mayConfide?: { ready: true; reason: string; warmth: "high" | "growing" };
+  /**
+   * Feature 0088 — a living, per-NPC CURRENT read of the player, derived from the evolving
+   * NPC→player edge (distinct from the frozen `dayOnePerception`). Surfaced BEHAVIOR-ONLY:
+   * a Vault-safe `toward` carriage word + a `drift` word. Never a number, never the edge
+   * value, never a hidden cause. Present for ACTIVE houseguests only; absent on pre-0088 saves.
+   * Sibling of `mood` (0084) — mood is how they feel; this is how they feel ABOUT YOU.
+   */
+  currentRead?: { toward: string; drift: "warming" | "cooling" | "steady" };
 }
 
 /**
