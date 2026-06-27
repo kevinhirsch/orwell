@@ -29,6 +29,8 @@ import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
 import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
+import { shouldFire, eruptionEvent } from "../../engine/triggers";
+import { TRIGGER, ERUPTION_POOL } from "../../engine/triggerConstants";
 import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
 import type { Room, Zone, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
@@ -337,6 +339,14 @@ const CAMPAIGNS_ENABLED_DEFAULT = process.env.ORWELL_CAMPAIGNS === "1";
 const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
 
 /**
+ * 0091 — whether the trigger-secrets → house-events layer runs by DEFAULT. OFF unless
+ * ORWELL_TRIGGERS=1. A DEDICATED flag so calibration neutrality is provable in isolation: with it
+ * unset, NO trigger check runs, NO draws happen, and every seeded gate (juryReach/gradient/UAT)
+ * is BYTE-IDENTICAL. Read once at module load; a test overrides per-instance via setTriggersEnabled.
+ */
+const TRIGGERS_ENABLED_DEFAULT = process.env.ORWELL_TRIGGERS === "1";
+
+/**
  * Engine-side implementation of the Vault-free game-session port. It runs the
  * OOBE (the one human-authored profile) and holds the active house, then projects
  * it to a Vault-free view: the player's own authored card plus a name-only house
@@ -456,6 +466,22 @@ export class GameSessionAdapter implements GameSession {
    * beside `trajectories` so a restored game derives the same phase; absent on a pre-0087 save ⇒ empty.
    */
   private trajectoryFolds: Map<string, FoldSignal[]> = new Map();
+  /**
+   * 0091 — whether the trigger-secrets → house-events layer RUNS. DEFAULT OFF (the dedicated
+   * `ORWELL_TRIGGERS` flag): when off, NO trigger check runs, NO draws happen, and every seeded
+   * gate (juryReach/gradient/UAT) is BYTE-IDENTICAL. Per instance; a test flips it via
+   * `setTriggersEnabled`.
+   */
+  private triggersEnabled = TRIGGERS_ENABLED_DEFAULT;
+  /** 0091 — the DEDICATED trigger rng tick counter — off the game seed; never the shared stream. */
+  private triggerTickCount = 0;
+  /**
+   * 0091 — the DEDICATED per-trigger fired flags, keyed by `"npc:N:idx"`. ENGINE-ONLY sealed state
+   * (the monotonic fired flag). Persisted so a one-shot trigger never re-fires (0007/0030).
+   */
+  private triggerFiredFlags: Record<string, boolean> = {};
+  /** 0091 — the per-season eruption count (the hard cap, TRIGGER.maxEruptionsPerSeason). */
+  private seasonEruptionCount = 0;
   /** Records a one-off witnessed event (deal made/broken) and returns its id. Wired by the registry. */
   private onPlayerEvent?: (content: string, witnessSet: EntityId[], type?: string) => string | undefined;
   /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
@@ -1885,6 +1911,13 @@ export class GameSessionAdapter implements GameSession {
       // byte-identical (0030). Absent when no texture has been written back (pre-0070 saves).
       ...(this.textureOverrides.size > 0
         ? { textureOverrides: Object.fromEntries(this.textureOverrides) } : {}),
+      // 0091 — persist per-trigger fired flags + the season eruption count so a one-shot trigger
+      // never re-fires and the cap is never re-opened by a restart (non-degradation, 0007/0030).
+      ...(Object.keys(this.triggerFiredFlags).length ? { triggerFiredFlags: { ...this.triggerFiredFlags } } : {}),
+      ...(this.seasonEruptionCount > 0 ? { seasonEruptionCount: this.seasonEruptionCount } : {}),
+      // 0091 — persist the dedicated trigger rng tick counter so the stream stays reproducible
+      // across a restart (absent ⇒ 0).
+      ...(this.triggerTickCount > 0 ? { triggerTickCount: this.triggerTickCount } : {}),
     };
   }
 
@@ -2100,6 +2133,13 @@ export class GameSessionAdapter implements GameSession {
     // 0070 — restore the prose texture layer (persisted so voiced scenes survive a restart byte-identical).
     // Absent on pre-0070 saves ⇒ empty (the deterministic template content simply stands, no regression).
     this.textureOverrides = core.textureOverrides ? new Map(Object.entries(core.textureOverrides)) : new Map();
+    // 0091 — restore per-trigger fired flags + season eruption count (absent on pre-0091 saves ⇒ empty/0).
+    // Also propagate the fired flags back onto the live house objects' hidden elements so the monotonic
+    // on-shot gate holds in-process without re-reading the snapshot map for every trigger check.
+    this.triggerFiredFlags = core.triggerFiredFlags ? { ...core.triggerFiredFlags } : {};
+    this.seasonEruptionCount = core.seasonEruptionCount ?? 0;
+    this.triggerTickCount = core.triggerTickCount ?? 0;
+    this.propagateTriggerFiredFlags();
     // lastTickOffscreenIds is TRANSIENT (never persisted) — starts empty on every restore; the FE
     // re-fans-out on the next off-screen tick.
     this.lastTickOffscreenIds = [];
@@ -4214,6 +4254,13 @@ export class GameSessionAdapter implements GameSession {
    *  it off (with it off the off-screen tick passes no `trajectoryOf` ⇒ the seeded spine is byte-identical). */
   setTrajectoriesEnabled(on: boolean): void { this.trajectoriesEnabled = on; }
 
+  /** Whether the trigger-secrets layer is live (0091) — the orchestrator reads this so it only fires
+   *  its dedicated rng when on (off ⇒ zero draws ⇒ the calibration spine is byte-identical). */
+  triggersEnabledNow(): boolean { return this.triggersEnabled; }
+
+  /** Turn the trigger-secrets layer on/off (0091). Off by default — the calibration harness leaves it off. */
+  setTriggersEnabled(on: boolean): void { this.triggersEnabled = on; }
+
   /** Whether the trajectory layer is live (0087) — the orchestrator reads this so it passes `trajectoryOf`
    *  ONLY when on (off ⇒ the off-screen call is byte-identical to the pre-feature stretch). */
   trajectoriesEnabledNow(): boolean { return this.trajectoriesEnabled; }
@@ -4384,6 +4431,113 @@ export class GameSessionAdapter implements GameSession {
       }, this.drives.get(a.id)));
     }
     this.drives = nextDrives;
+  }
+
+  /**
+   * 0091 — the per-tick TRIGGER SECRETS → HOUSE EVENTS check. Runs AFTER the off-screen society
+   * folds, on a DEDICATED rng (never the shared stream). SELF-GATED by `ORWELL_TRIGGERS`:
+   * when off (the default, and the state the calibration/UAT harness runs in), it returns
+   * immediately — ZERO draws — so every seeded gate (juryReach/gradient/UAT) is byte-identical.
+   *
+   * For each NPC's trigger-typed hidden element that hasn't fired yet, computes pressure from
+   * their live soul strain + trigger volatility, checks `shouldFire` against a seeded
+   * temperature roll, and — only when a precipitant exists (the no-cold-open guarantee) —
+   * records a VAULT-FREE public `house-event` as the eruption. The sealed trigger attribute
+   * (its wording, its volatility, its `kind`) NEVER reaches the event or any player surface.
+   * Folds soul consequence on the erupter + records the witness event.
+   *
+   * @param precipitant true when THIS tick carried a spark (an off-screen scene, a
+   *   player turn, a ceremony beat — something to set off the fuse). No precipitant ⇒ no
+   *   detonation (the no-cold-open guarantee).
+   * @param rng the dedicated rng stream for trigger rolls (keyed off the game seed +
+   *   triggerTickCount — never the shared society/vote stream)
+   * @param clockNow wall-clock ms for the event timestamp
+   * @returns the eruption event content string, or null when nothing fired
+   */
+  triggerTick(precipitant: boolean, clockNow: number): string | null {
+    if (!this.triggersEnabled || !this.house) return null;
+    if (this.seasonEruptionCount >= TRIGGER.maxEruptionsPerSeason) return null;
+    if (!precipitant) return null; // no cold open
+
+    this.triggerTickCount += 1;
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:triggers:${this.triggerTickCount}`));
+
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const living = this.house.npcs.filter((n) => !evicted.has(n.id));
+
+    for (const npc of living) {
+      const elements = npc.character.hiddenElements;
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i]!;
+        if (el.kind !== "trigger" || !el.volatility || !el.eruptionKind || el.fired) continue;
+
+        const soul = npc.soul;
+        const strain = 1 - soul.emotionalState;
+        if (!shouldFire(el, strain, precipitant, rng)) continue;
+
+        el.fired = true;
+        el.lastFiredWeek = this.week;
+        this.triggerFiredFlags[`${npc.id}:${i}`] = true;
+        this.seasonEruptionCount += 1;
+
+        const eruptionContent = eruptionEvent(
+          el.eruptionKind,
+          this.lastEruptionContent(),
+          rng,
+        );
+
+        const day = dayOfWeek(this.phase);
+        const stamp = day !== null ? `Week ${this.week}, day ${day}` : `Week ${this.week}`;
+        const content = `${stamp}: ${eruptionContent}`;
+
+        if (this.onPlayerEvent) {
+          this.onPlayerEvent(content, [this.house.player.id, npc.id], "house-event");
+        }
+
+        this.inflect(npc.id, "scheme");
+        this.recordSceneMemory(npc.id, `eruption: ${el.eruptionKind} — ${eruptionContent}`);
+
+        this.persist();
+        return content;
+      }
+    }
+    return null;
+  }
+
+  private lastEruptionContent(): string | null {
+    if (!this.record) return null;
+    const events = this.record.events();
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === "house-event" && e.content.includes(": ")) {
+        const body = e.content.slice(e.content.indexOf(": ") + 2).trim();
+        for (const pool of Object.values(ERUPTION_POOL)) {
+          if (pool.some((line) => body === line || body.includes(line.slice(0, 40)))) {
+            return body;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Propagate the persisted trigger-fired flags back onto the LIVE house objects' hidden
+   * elements so the one-shot gate holds in-process without re-reading the snapshot map.
+   * Called after a restore to sync the live objects. Idempotent — a flag already set stays set.
+   */
+  private propagateTriggerFiredFlags(): void {
+    if (!this.house) return;
+    for (const npc of this.house.npcs) {
+      const elements = npc.character.hiddenElements;
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i]!;
+        if (el.kind === "trigger" && el.volatility && el.eruptionKind) {
+          const key = `${npc.id}:${i}`;
+          if (this.triggerFiredFlags[key]) el.fired = true;
+        }
+      }
+    }
   }
 
   private archetypeOf(id: EntityId): string {

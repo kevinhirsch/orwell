@@ -690,6 +690,13 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // When on, it surfaces a warmed seeded tie through a DEDICATED rng (never this shared stream) + 0002
   // pathways and folds the discovery via 0023 — texture, never the calibration spine.
   sandbox.session.advanceSeededTies(sandbox.engine.knowledge);
+  // 0091 — trigger secrets → house events: after the society folds, check whether any houseguest's
+  // sealed trigger has earned enough strain + a precipitant + the temperature roll to FIRE. The
+  // eruption is recorded as a VAULT-FREE public house event — the player witnesses the blow-up, never
+  // the trigger. SELF-GATED by ORWELL_TRIGGERS (DEFAULT OFF): when off — the default, and the state
+  // the calibration/UAT harness runs in — this returns immediately with ZERO draws, so every seeded
+  // competition/vote/jury gate is byte-identical.
+  sandbox.session.triggerTick(trigger === "player-turn" || scenes.length > 0, clockNow);
   // Every recorded scene (+ the player-turn day) counts toward the advance.
   return sandbox.engine.events.count() - before;
 }

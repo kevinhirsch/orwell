@@ -71,6 +71,7 @@ module.exports = {
       "docs/features/0086-houseguest-drives.feature",
       "docs/features/0087-relationship-trajectories.feature",
       "docs/features/0105-suspicion-and-mood-anchoring.feature",
+      "docs/features/0091-trigger-secrets-house-events.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

@@ -259,7 +259,27 @@ export interface SessionCore {
    * closed set). Persisted so enriched scenes survive a restart byte-identical (0030). Absent on
    * pre-0070 saves (no texture; the deterministic template content simply stands).
    */
-  textureOverrides?: Record<string, string>;
+   textureOverrides?: Record<string, string>;
+  /**
+   * Feature 0091 — the per-trigger fired flags, keyed by houseguest id + trigger index so a one-shot
+   * trigger (a mask, once slipped, stays dropped) never re-fires and a restored game remembers exactly
+   * which fuses are spent. ENGINE-ONLY (sealed state). Persisted so the monotonic `fired` flag survives
+   * a restart (0007/0030) — ACCUMULATES (never thins). Absent on pre-0091 saves and when the feature is off
+   * ⇒ every trigger starts unfired. A fired trigger's `fired` flag, once true, is never cleared.
+   * Key format: `"npc:N:idx"` (the index into the houseguest's hiddenElements array).
+   */
+  triggerFiredFlags?: Record<string, boolean>;
+  /**
+   * Feature 0091 — the per-season ERUPTION COUNT (the hard cap, `TRIGGER.maxEruptionsPerSeason`).
+   * Persisted so the cap is never re-opened by a restart. Absent on pre-0091 saves ⇒ 0.
+   */
+  seasonEruptionCount?: number;
+  /**
+   * Feature 0091 — the DEDICATED trigger-rng tick counter. Persisted so the trigger trajectory stays
+   * reproducible across a restart; absent ⇒ 0. Distinct from campaignTickCount/presenceTickCount so the
+   * dedicated streams never alias.
+   */
+  triggerTickCount?: number;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */

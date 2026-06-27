@@ -1,7 +1,6 @@
 # 0091 — Trigger secrets fire house events (the foreseeable blow-up)
 
-> **Status:** 🟡 **SPEC ONLY (drafted 2026-06-25).** Design + executable Gherkin only — no source,
-> no `cucumber.cjs` wiring, no README index row yet. Built next as a new queue item.
+> **Status:** 🟢 **BUILT (2026-06-27).** Pure engine + orchestrator-wired + BDD + unit-gated.
 > **Tracks #869.**
 > **Depends on:** 0001 (Vault Wall), 0002 (event visibility — a witnessed house event is the
 > player's knowledge), 0008 (the daily-event invariant + the `house-event` type this rides), 0038

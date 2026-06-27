@@ -69,6 +69,7 @@ export const CONFIDENCE = {
     "pre-game-tie": "they let slip there's history with someone in this house",
     "concealed-aptitude": "they hinted they're better at this game than they've been letting on",
     "divergent-persona": "the way they talk to you in private doesn't match the version the house sees",
+    "trigger": "they've let slip something about themselves that could blow up if pushed",
   } as Record<HiddenElementKind, string>,
 
   // ── fabricated (FALSE) admissions — engine-authored from the public archetype, NEVER a real secret ──
@@ -90,6 +91,10 @@ export const CONFIDENCE = {
     "divergent-persona": [
       "what you see is what you get with me — I don't have a game face, this is just who I am",
       "I know I seem guarded but with you I've got nothing to hide, I swear",
+    ],
+    "trigger": [
+      "everyone thinks I'm intense but I've never once lost it in a game — I'm level-headed",
+      "I know people expect me to crack, but that version of me isn't walking through that door",
     ],
   } as Record<HiddenElementKind, readonly string[]>,
 } as const;

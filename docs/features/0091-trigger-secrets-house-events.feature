@@ -12,7 +12,7 @@ Feature: 0091 — Trigger secrets fire house events (the foreseeable blow-up)
   # a witness, the house.
 
   Background:
-    Given a started season with the player in the house
+    Given a house with generated cast carrying sealed trigger attributes
 
   Rule: A trigger fires only under earned stress, never from a quiet stretch
 

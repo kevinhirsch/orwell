@@ -11,6 +11,7 @@ import { SURNAMES } from "./data/surnames";
 import { VOCATIONS } from "./data/vocations";
 import { HOMETOWNS } from "./data/hometowns";
 import type { Hometown } from "./data/hometowns";
+import { TRIGGER, type EruptionKind, ERUPTION_POOL } from "./triggerConstants";
 
 /**
  * CharacterFactory + OOBE (feature 0004). Generates a curated, randomly-named
@@ -72,10 +73,28 @@ export const ENSEMBLE = {
  * only if an in-game pathway later carries it (gossip / being told). Seed-stable (part of the static
  * character, 0007). Distinct from the dynamic Soul (0041 evolution): these are fixed secrets, not mood.
  */
-export type HiddenElementKind = "secret-motive" | "pre-game-tie" | "concealed-aptitude" | "divergent-persona";
+export type HiddenElementKind = "secret-motive" | "pre-game-tie" | "concealed-aptitude" | "divergent-persona" | "trigger";
 export interface HiddenElement {
   kind: HiddenElementKind;
   detail: string;
+  /**
+   * Engine-only: for "trigger" elements, how easily this one goes off (0..1).
+   * NEVER projected — a sealed attribute like every other hidden element field.
+   */
+  volatility?: number;
+  /**
+   * Engine-only: for "trigger" elements, the eruption KIND it maps to (public scene type).
+   * NEVER projected or surfaced; only the eruption event it produces is public.
+   */
+  eruptionKind?: import("./triggerConstants").EruptionKind;
+  /**
+   * Engine-only, monotonic: true after this trigger has FIRED, so it never re-fires.
+   * Persisted (0030); never cleared. One-shot triggers (mask-slips) stay spent;
+   * blow-up/meltdown elements that re-arm get a fresh trigger entry on later minting.
+   */
+  fired?: boolean;
+  /** The week this trigger fired, for the persistence audit (0030). Engine-only, never projected. */
+  lastFiredWeek?: number;
 }
 
 export interface Character {
@@ -550,9 +569,16 @@ const HIDDEN_ELEMENT_POOLS: Record<Exclude<HiddenElementKind, "concealed-aptitud
   "divergent-persona": [
     "plays sweet but keeps a private target list",
     "acts like a harmless floater while reading the whole house",
-    "smiles through a grudge they will never forget",
     "seems naive but clocks every move",
     "looks fiercely loyal but will cut first when it counts",
+  ],
+  "trigger": [
+    "smiles through a grudge they will never forget",
+    "buries a temper that already cost them dearly",
+    "is quietly desperate and will gamble bigger than they let on",
+    "is one bad night away from a blow-up they've been told would sink them",
+    "holds a simmering resentment that only needs one push to boil over",
+    "has a breaking point they're desperately trying to hide from the cameras",
   ],
 };
 
@@ -586,7 +612,7 @@ export const HIDDEN_ELEMENT_GATES = {
   maxSecretMotives: 1,
 } as const;
 
-const HIDDEN_KINDS: readonly HiddenElementKind[] = ["secret-motive", "pre-game-tie", "concealed-aptitude", "divergent-persona"];
+const HIDDEN_KINDS: readonly HiddenElementKind[] = ["secret-motive", "pre-game-tie", "concealed-aptitude", "divergent-persona", "trigger"];
 
 /** How many hidden elements each NPC carries (the mandate's "tons", bounded for a season). */
 export const HIDDEN_ELEMENT_RANGE = { min: 3, max: 6 } as const;
@@ -605,12 +631,16 @@ export function generateHiddenElements(rng: RandomnessSource, fit?: HiddenElemen
   const out: HiddenElement[] = [];
   const seen = new Set<string>();
   let motives = 0;
+  let triggers = 0;
   for (let attempts = 0; out.length < count && attempts < 200; attempts++) {
     const kind = rng.pick(HIDDEN_KINDS);
     let detail: string;
     if (kind === "concealed-aptitude") {
       if (aptitudes.length === 0) continue; // nothing backable/concealable — never mint flavor (C9)
       detail = aptitudes[rng.int(aptitudes.length)]!.detail;
+    } else if (kind === "trigger") {
+      if (triggers >= TRIGGER.maxTriggersPerNpc) continue; // per-NPC cap — sparse, not a house of bombs
+      detail = rng.pick(HIDDEN_ELEMENT_POOLS[kind]);
     } else {
       if (kind === "secret-motive" && fit && motives >= G.maxSecretMotives) continue; // one motive max (C9)
       detail = rng.pick(HIDDEN_ELEMENT_POOLS[kind]);
@@ -618,7 +648,15 @@ export function generateHiddenElements(rng: RandomnessSource, fit?: HiddenElemen
     const key = `${kind}::${detail}`;
     if (!seen.has(key)) {
       seen.add(key);
-      out.push({ kind, detail });
+      const el: HiddenElement = { kind, detail };
+      if (kind === "trigger") {
+        triggers++;
+        el.volatility = +(TRIGGER.volatilityFloor + rng.next() * (TRIGGER.volatilityCeiling - TRIGGER.volatilityFloor)).toFixed(3);
+        const eruptionKinds: EruptionKind[] = ["blow-up", "showmance-detonation", "mask-slips", "meltdown"];
+        el.eruptionKind = rng.pick(eruptionKinds);
+        el.fired = false;
+      }
+      out.push(el);
       if (kind === "secret-motive") motives++;
     }
   }
