@@ -48,12 +48,23 @@ def _wire(monkeypatch, *, phase, pending, calls):
 
 
 def test_resolves_an_npc_ceremony_with_no_player_pending(monkeypatch):
+    # C-02 invariant (engine decides, never the model): the unresolved NPC nominations MUST be advanced
+    # for real and its outcome carried into the framing. #1127 only DELAYS this by a bounded post-HOH
+    # social window at `nominations` (the player works the new HOH first) — so drive the pre-resolve
+    # until it advances, then assert the engine's real nominees are grounded. The C-02 guarantee holds:
+    # the noms are still resolved by the engine, never invented by the model — just no longer on turn one.
     calls = []
     _wire(monkeypatch, phase="nominations", pending=None, calls=calls)
     state = {"started": True, "phase": "nominations", "moment": "nominations", "nominees": []}
-    out = _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
-    assert "advance" in calls, "an unresolved NPC ceremony must be advanced for real"
+    out = None
+    for _ in range(chat_helpers._SOCIAL_RUNWAY_TURNS + 2):
+        out = _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+        if "advance" in calls:
+            break
+    assert "advance" in calls, "an unresolved NPC ceremony must be advanced for real (after the #1127 window)"
     assert out.get("nominees") == ["A", "B"], "framing must carry the engine's real outcome forward"
+    # …and the player WITNESSES the ceremony — the turn that resolved the noms is framed on `nominations`.
+    assert out.get("moment") == "nominations", "the NPC nomination ceremony is played as a witnessed beat"
 
 
 def test_never_forces_a_player_decision(monkeypatch):
@@ -101,10 +112,16 @@ def test_does_not_fire_off_a_driven_phase(monkeypatch):
 
 @pytest.mark.parametrize("phase", ["nominations", "veto-ceremony", "eviction"])
 def test_covers_every_intent_free_ceremony(monkeypatch, phase):
+    # Every intent-free ceremony is ultimately advanced for real (C-02). #1127 adds a bounded social
+    # window at `nominations` ONLY (the crown→noms gap), so that phase advances after the window while
+    # veto-ceremony / eviction still advance on the first turn — drive a few turns to cover both.
     calls = []
     _wire(monkeypatch, phase=phase, pending=None, calls=calls)
     state = {"started": True, "phase": phase, "moment": phase}
-    _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+    for _ in range(chat_helpers._SOCIAL_RUNWAY_TURNS + 2):
+        _run(chat_helpers._pre_resolve_npc_ceremony("u", state, retry=False))
+        if "advance" in calls:
+            break
     assert "advance" in calls, phase
 
 
