@@ -4567,13 +4567,26 @@ export class GameSessionAdapter implements GameSession {
       return { disclosed: true, tier: prior.tier, truthful: true, content: discloseTrue(secret, prior.tier) };
     }
 
+    // 0075 — the PASSIVE LIE-CATCH (spec open-Q #4). A genuine, truthful disclosure from a houseguest who
+    // PREVIOUSLY planted a lie is the contradicting truth finally reaching the player through a real
+    // pathway (they bonded, and now tell the real thing). The earlier false belief flips to the truth
+    // (recorded below at the higher truthful confidence), and the realization folds a BETRAYAL-grade blow
+    // on the player's read of the liar — in place of the warm bond bump (you do not warmly bond on the
+    // beat you catch them out). The player lever only ⇒ never on the seeded sim path ⇒ byte-identical.
+    const catchingLie = decision.truthful && prior?.truthful === false;
+
     const content = decision.truthful ? discloseTrue(secret, decision.tier) : fabricate(rng, secret.kind);
     // Record it as the player's knowledge through the in-game `told-by` pathway (0002, E9) — so it is
     // correctly Journal-visible knowledge, never Vault content. A lie is recorded the same way (the
     // player believes it); the engine knows it is false (`confideState.truthful`).
     this.onConfide?.(npcId, content, decision.truthful ? 0.85 : 0.6);
-    // Fold the vulnerability bond bump (0023): opening up DEEPENS the bond toward the player.
-    foldHiddenImpact(this.rel, rng, npcId, [npcId, PLAYER], CONFIDENCE.bondNature, [PLAYER]);
+    if (catchingLie) {
+      // The player catches the earlier lie: a betrayal-grade blow on the player→liar edge (0026 IMPACT.betrayal).
+      this.rel.applyDirected(PLAYER, npcId, "betrayal", rng);
+    } else {
+      // Fold the vulnerability bond bump (0023): opening up DEEPENS the bond toward the player.
+      foldHiddenImpact(this.rel, rng, npcId, [npcId, PLAYER], CONFIDENCE.bondNature, [PLAYER]);
+    }
     if (!decision.truthful) this.lieCount++;
     this.confideState[npcId] = { tier: decision.tier, truthful: decision.truthful };
     this.persist();
