@@ -38,6 +38,13 @@
 #tool-notes-btn,
 #tool-tasks-btn,
 
+/* #663: the Chats-section "Manage Chats (Library)" header button opens the FULL inherited
+ * workspace Library modal (Documents / Archive / Research tabs) — the operator's reported
+ * "way in" to the library under the game build. The Library is not part of the Big Brother
+ * game (its backend routers are unmounted server-side), so hide this launcher too. The
+ * Chats section + its session-sort control stay; only the Library opener goes. */
+#chats-library-btn,
+
 /* Sidebar Email section */
 #email-section,
 

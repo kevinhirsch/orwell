@@ -62,11 +62,23 @@
 
   // --- the composer mode ---------------------------------------------------------
 
+  // #655 — the pill MUST mount directly above the VISIBLE composer (.chat-input-bar), not
+  // relative to #chat-form. The real submit form (#chat-form) is a HIDDEN, EMPTY element
+  // (style="display:none") that sits AFTER .chat-input-bar — the send button targets it via
+  // form="chat-form". Anchoring the pill on that form dropped it BELOW the composer, off the
+  // bottom of the page. On mobile (small viewport + on-screen keyboard) the pill was then
+  // never visible, so tapping the affordance looked like a no-op — the reported "the Diary
+  // Room doesn't open." Anchor on the input bar so the pill always appears right above where
+  // the player types, on every viewport.
+  function composerBar() {
+    return document.querySelector(".chat-input-bar") || composerForm();
+  }
+
   function ensurePill() {
     let pill = document.getElementById(PILL_ID);
     if (pill) return pill;
-    const form = composerForm();
-    if (!form) return null;
+    const anchor = composerBar();
+    if (!anchor || !anchor.parentElement) return null;
     pill = document.createElement("div");
     pill.id = PILL_ID;
     pill.setAttribute("role", "status");
@@ -77,7 +89,7 @@
     pill.innerHTML = `<span>📔 Diary Room — private &amp; out-of-character; the house never hears this.</span>
       <button type="button" id="orwell-dr-exit" class="ow-btn ow-btn-plain" aria-label="Leave the Diary Room" title="Leave the Diary Room"
         style="color:inherit;font-size:1em;min-width:44px;min-height:44px;padding:0 2px;">×</button>`;
-    form.parentElement.insertBefore(pill, form);
+    anchor.parentElement.insertBefore(pill, anchor);
     pill.querySelector("#orwell-dr-exit").addEventListener("click", exitDRMode);
     return pill;
   }
