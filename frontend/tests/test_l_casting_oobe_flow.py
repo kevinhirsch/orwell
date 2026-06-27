@@ -118,14 +118,20 @@ def test_l5_producers_auto_open_the_game_on_welcome_dismiss():
     assert "window._orwellOpenGameAfterCasting" in js
     seg = js[js.index("window._orwellOpenGameAfterCasting"):]
     seg = seg[: seg.index("\n  };")]
-    # it AUTO-SENDS via the hidden-cue seam (this single cutover departs from the prefill-only rule)
-    assert "sendHiddenCue" in seg
-    # ...but only once, only on the game build, and never over the player's own typing /
-    # an in-flight stream
+    # #967 live re-fix: it AUTO-SENDS through the shared `_sendCueWithBackoff` kernel (the single cutover
+    # from the prefill-only rule), which actually calls the hidden-cue seam — but retries on a busy
+    # stream / unready seam instead of single-shot-dropping the opener.
+    assert "_sendCueWithBackoff" in seg
+    assert "OPEN_GAME_LINE" in seg
+    # ...but only once, only on the game build
     assert "data-game-build" in seg
     assert "_openSent" in seg
-    assert "value.trim()" in seg
-    assert "hasActiveStream" in seg
+    # the hidden-cue seam + the busy/typing guards live on the kernel
+    kern = js[js.index("function _sendCueWithBackoff"):]
+    kern = kern[: kern.index("\n  }\n")]
+    assert "sendHiddenCue" in kern
+    assert "value.trim()" in kern or "composerBusy" in kern
+    assert "hasActiveStream" in kern
 
 
 def test_l5_headshot_finalize_resumes_not_opens():
@@ -143,19 +149,28 @@ def test_969_resume_cue_reschedules_on_active_stream_with_once_guard():
     js = _read("static", "js", "orwellOnboarding.js")
     seg = js[js.index("window._orwellResumeAfterPhoto"):]
     seg = seg[: seg.index("\n  };")]
-    # it RE-SCHEDULES (backoff) rather than dropping when a stream is busy
-    assert "setTimeout" in seg
-    assert "RESUME_MAX_ATTEMPTS" in seg
+    # #969 live re-fix: the resume now DISPATCHES through the shared `_sendCueWithBackoff` kernel, which
+    # re-schedules (backoff) rather than dropping when a stream is busy OR the send seam isn't ready yet.
+    assert "_sendCueWithBackoff" in seg, (
+        "the resume cue must dispatch through the retrying _sendCueWithBackoff kernel"
+    )
     # a once-guard makes a retry idempotent so it can never double-fire if the stream ends mid-retry
     assert "_resumeSent" in seg
-    assert "hasActiveStream" in seg
-    # still bails to the player when they're mid-thought, and stays game-build-only
-    assert "value.trim()" in seg or "composerBusy" in seg
+    # stays game-build-only
     assert "data-game-build" in seg
-    # the original "return; // drop" on an active stream is GONE — the busy branch re-schedules
-    busy = seg[seg.index("streamBusy"):]
-    # the re-schedule lives inside the stream-busy handling
-    assert "attempt(n + 1)" in busy
+    # The shared kernel carries the actual retry mechanism: it re-schedules on a busy stream OR an
+    # unready seam, capped, and yields to the player mid-thought. Pin those on the kernel itself.
+    kern = js[js.index("function _sendCueWithBackoff"):]
+    kern = kern[: kern.index("\n  }\n")]
+    assert "setTimeout" in kern
+    assert "_CUE_MAX_ATTEMPTS" in kern
+    assert "hasActiveStream" in kern
+    assert "composerBusy" in kern or "value.trim()" in kern
+    # the busy / unready-seam branch re-schedules (backoff), it does NOT silently drop
+    assert "attempt(n + 1)" in kern
+    # the new robustness: an unready send seam (chatModule not bound yet) is treated as transient
+    # (re-schedule), the exact permanent-drop gap that left the live resume un-fired
+    assert "seamReady" in kern
 
 
 def _node_drive_resume(script_body):
@@ -272,6 +287,123 @@ def test_969_resume_cue_yields_to_the_player_typing():
         "process.stdout.write(JSON.stringify({ fired: globalThis.getCues().length }));\n"
     )
     assert out["fired"] == 0, "the resume cue must yield to the player's own typing"
+
+
+# ── #967 / #969 LIVE re-fix: the cue retries when the SEND SEAM (window.chatModule) isn't ready ──
+# Salvaged cold-start log: after setup completed, the producers' opener never fired (n_ai_msgs=0) and
+# the player had to speak first; and the post-photo resume needed a manual "continue". Both were the
+# SAME single-shot drop: the cue fired in one 250ms timeout and, if the send seam was momentarily
+# unavailable (chatModule not yet bound on a fresh load) OR a stream was settling, it bailed with no
+# retry. The shared `_sendCueWithBackoff` kernel now re-schedules on an unready seam too. These drive
+# the REAL IIFE with the seam INITIALLY ABSENT, then bound, and prove the cue still lands exactly once.
+
+
+def _node_drive_with_late_seam(trigger_call):
+    """Drive the real orwellOnboarding.js IIFE where `window.chatModule` is ABSENT at first (the send
+    seam isn't ready), can be installed later via setSeamReady(), and the stream is idle. `trigger_call`
+    is the JS that invokes the cue under test (the opener or the resume). Returns the cues + the count
+    captured before vs. after the seam is installed."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available for the late-seam check")
+    mod = os.path.join(STATIC, "js", "orwellOnboarding.js").replace("\\", "/")
+    harness = (
+        "globalThis.window = globalThis;\n"
+        "globalThis.matchMedia = () => ({ matches: false });\n"
+        "let _now = 0; let _timers = []; let _id = 1;\n"
+        "globalThis.setTimeout = (fn, ms) => { const id=_id++; _timers.push({id, fn, due:_now+(ms||0)}); return id; };\n"
+        "globalThis.clearTimeout = (id) => { _timers = _timers.filter(t => t.id !== id); };\n"
+        "function tick(ms){ _now += ms; "
+        "  for (let guard=0; guard<10000; guard++){ "
+        "    const ready = _timers.filter(t => t.due <= _now).sort((a,b)=>a.due-b.due); "
+        "    if (!ready.length) break; const t = ready[0]; "
+        "    _timers = _timers.filter(x => x.id !== t.id); try { t.fn(); } catch(_){} } }\n"
+        "globalThis.tick = tick;\n"
+        "let _composerValue = '';\n"
+        "const box = { get value(){return _composerValue;}, set value(v){_composerValue=v;}, "
+        "  focus(){}, dispatchEvent(){} };\n"
+        "let _cues = [];\n"
+        "globalThis.getCues = () => _cues.slice();\n"
+        # The send seam (window.chatModule) is ABSENT initially — exactly the fresh-load race where the
+        # cue fires before chat.js has bound chatModule. Installing it later proves the retry waited.
+        "globalThis.setSeamReady = () => { globalThis.chatModule = { hasActiveStream: () => false, "
+        "  hideWelcomeScreen: () => {}, sendHiddenCue: (line) => { _cues.push(line); } }; "
+        "  globalThis.window.chatModule = globalThis.chatModule; };\n"
+        "const byId = { message: box };\n"
+        "globalThis.localStorage = { _d:{}, getItem(k){return this._d[k]||null;}, "
+        "  setItem(k,v){this._d[k]=String(v);}, removeItem(k){delete this._d[k];} };\n"
+        # #chat-history has NO assistant turn so the opener's empty-conversation belts pass.
+        "globalThis.document = {\n"
+        "  head: { appendChild(){}, },\n"
+        "  body: { dataset:{}, classList:{ add(){}, remove(){}, toggle(){} }, "
+        "    hasAttribute: (a) => a === 'data-game-build', "
+        "    style:{ setProperty(){}, removeProperty(){} } },\n"
+        "  getElementById: (id) => byId[id] || null,\n"
+        "  querySelector: () => null, createElement: () => ({ style:{}, setAttribute(){}, "
+        "    addEventListener(){}, appendChild(){}, classList:{add(){},remove(){}} }),\n"
+        "  addEventListener(){}, readyState:'complete',\n"
+        "};\n"
+        "globalThis.addEventListener = () => {};\n"
+        "globalThis.removeEventListener = () => {};\n"
+        "globalThis.CustomEvent = function(){};\n"
+        "globalThis.dispatchEvent = () => {};\n"
+        "globalThis.window.OrwellWindowKit = { create: () => ({ open(){}, close(){}, destroy(){}, el:{ "
+        "  id:'', setAttribute(){}, addEventListener(){}, focus(){}, querySelector(){return null;} } }) };\n"
+        # The opener awaits GET /api/orwell/game-session (converge) — resolve it to NOTHING bound so the
+        # opener proceeds to dispatch; the warm POST resolves empty. The resume touches no fetch here.
+        "globalThis.fetch = (url) => {\n"
+        "  const u = String(url);\n"
+        "  if (u.indexOf('/api/orwell/game-session') !== -1) return Promise.resolve({ ok:true, json:()=>Promise.resolve({ sessionId:null }) });\n"
+        "  return Promise.resolve({ ok:true, json:()=>Promise.resolve({}) });\n"
+        "};\n"
+        "process.on('unhandledRejection', () => {});\n"
+        "import fs from 'node:fs';\n"
+        f"const src = fs.readFileSync('{mod}', 'utf8');\n"
+        "(0, eval)(src);\n"
+    )
+    script = (
+        trigger_call +
+        # settle any awaited microtasks (the opener awaits converge), then the 250ms first attempt fires
+        # with NO seam → it must re-schedule, NOT drop.
+        "await (async () => { for (let i=0;i<20;i++){ await new Promise(r => setImmediate(r)); } })();\n"
+        "globalThis.tick(250);\n"
+        "for (let i=0;i<20;i++){ await new Promise(r => setImmediate(r)); }\n"
+        "const beforeSeam = globalThis.getCues().length;\n"
+        # now the send seam binds (chat.js loaded) — a backoff rung must fire the cue
+        "globalThis.setSeamReady();\n"
+        "for (let i=0;i<5;i++){ globalThis.tick(1000); "
+        "  for (let j=0;j<10;j++){ } }\n"
+        "const afterSeam = globalThis.getCues();\n"
+        "process.stdout.write(JSON.stringify({ beforeSeam, fired: afterSeam.length, cue: afterSeam[0] || null }));\n"
+    )
+    proc = subprocess.run(
+        [node, "--input-type=module", "-e", harness + script],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, f"node failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def test_967_opener_retries_until_the_send_seam_is_ready():
+    # #967 LIVE root cause: the opener fired once at 250ms; if window.chatModule wasn't bound yet it
+    # dropped the cue with no retry → the chat sat silent, the player spoke first. The kernel must
+    # re-schedule on an unready seam and fire the opener once the seam binds.
+    out = _node_drive_with_late_seam(
+        "await globalThis.window._orwellOpenGameAfterCasting();\n")
+    assert out["beforeSeam"] == 0, "the opener must NOT drop to a no-op while the send seam is unready"
+    assert out["fired"] == 1, "the opener must fire exactly once after the send seam binds"
+    assert out["cue"] and "casting interview" in out["cue"]
+
+
+def test_969_resume_retries_until_the_send_seam_is_ready():
+    # #969 LIVE root cause: the resume's earlier retry covered a busy stream but STILL permanently
+    # dropped the cue (box.focus + latch sent) when the send seam was momentarily unavailable. The
+    # kernel must treat an unready seam as transient and fire the resume once it binds.
+    out = _node_drive_with_late_seam(
+        "globalThis.window._orwellResumeAfterPhoto();\n")
+    assert out["beforeSeam"] == 0, "the resume must NOT drop to a no-op while the send seam is unready"
+    assert out["fired"] == 1, "the resume must fire exactly once after the send seam binds"
+    assert out["cue"] and "casting interview" in out["cue"]
 
 
 # ── #968: a transient, Vault-free seeding indicator during casting ──────────────────────────
