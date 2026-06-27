@@ -1,23 +1,29 @@
 name: Security Scan (VulnHawk)
 
-# Advisory AI SAST scan (VulnHawk) on a LOCAL Ollama backend — ZERO Claude-subscription usage: it
-# never calls Claude (or any cloud LLM), the model runs entirely on your own Ollama. Runs ONCE DAILY
+# Advisory AI SAST scan (VulnHawk) against your LOCAL Ollama box (reached via its OpenAI-compatible
+# API) — ZERO Claude-subscription usage: it never calls Claude or any cloud LLM. Runs ONCE DAILY
 # plus on manual dispatch; deliberately NOT on push/PR, so it never spends anything per change and
 # never competes with normal CI on every commit. Still files one deduped GitHub issue per finding.
 # Separate from ci.yml and OUT of the required `ci-gate` — it can never block a merge.
 #
-# CONFIG lives in repo Actions *Variables* (Settings → Secrets and variables → Actions → Variables tab),
-# so model/host/scope change without editing this file. Variables (NOT secrets — Ollama is local/unauthenticated):
-#   OLLAMA_MODEL    — REQUIRED. The exact `ollama list` tag, e.g. `qwen2.5-coder:32b`. If unset, the
-#                     scan fails soft (continue-on-error) and files nothing.
-#   OLLAMA_HOST     — base URL the RUNNER can reach Ollama at. Default `http://127.0.0.1:11434` (correct
-#                     only if Ollama runs on the runner host itself). The action exposes no host input,
-#                     so we pass it via the standard OLLAMA_HOST env the Ollama client reads.
-#   VULNHAWK_TARGET — directory to scan. Default `.` (whole repo). Narrow it (e.g. `src`) to bound runtime.
+# WHY the `openai` backend for a *local* model: VulnHawk's native `ollama` backend is hard-pinned to
+# localhost — it instantiates OllamaLLM(model=...) and never reads OLLAMA_HOST — so it cannot reach a
+# remote Ollama box. Its `openai` backend, however, does AsyncOpenAI(api_key=...) with no base_url, so
+# the OpenAI SDK reads OPENAI_BASE_URL from env. We point that at Ollama's OpenAI-compatible /v1
+# endpoint: same local model on your box, zero cloud calls. `api-key` is a dummy non-empty string
+# (Ollama ignores it, but VulnHawk requires OPENAI_API_KEY to be set).
 #
-# HEADS-UP: this runs on your SINGLE self-hosted runner, so while a scan runs it occupies the runner and
-# serializes with CI. A local ~30B model is also slow + lower-quality than a frontier model. Do a manual
-# `workflow_dispatch` run first to measure duration/quality before trusting the daily cadence; narrow
+# CONFIG is baked with working defaults (your box) and overridable via repo Actions *Variables*
+# (Settings → Secrets and variables → Actions → Variables tab) — no YAML edit needed to change them:
+#   VULNHAWK_MODEL           — Ollama model tag, NO provider prefix      (default: qwen3.6:27b)
+#   VULNHAWK_OPENAI_BASE_URL — your box's OpenAI-compatible endpoint, WITH /v1
+#                              (default: http://10.0.1.225:11434/v1)
+#   VULNHAWK_TARGET          — directory to scan (default '.'; narrow e.g. 'src' to bound runtime)
+#
+# HEADS-UP: runs on your SINGLE self-hosted runner, so a scan occupies it (serializes with CI) while
+# running, and the runner must be able to reach 10.0.1.225:11434. A local ~30B model is slow + weaker
+# than a frontier model. Do a manual `workflow_dispatch` run first to measure duration/quality (and to
+# confirm it actually connected — check the log) before trusting the daily cadence; narrow
 # VULNHAWK_TARGET if it ties the runner up too long.
 
 on:
@@ -43,19 +49,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # LOCAL Ollama backend → no Claude/cloud call at all (zero subscription usage). The composite's
-      # claude-code/codex CLI installs are skipped for backend=ollama, so no Node setup is needed here.
-      # Model + host + scope come from repo Variables (see header) so they're editable without code changes.
-      # VulnHawk's Ollama client reads OLLAMA_HOST (the action exposes no host input), so we set it here.
-      - name: VulnHawk Security Scan (Ollama, advisory)
-        continue-on-error: true # advisory: a model/host hiccup or v0.2.0 glitch can never redden the run
+      # Remote Ollama via its OpenAI-compatible /v1 endpoint → no Claude/cloud call at all (zero
+      # subscription usage). The composite's claude-code/codex CLI installs are skipped for any non-CLI
+      # backend, so no Node setup is needed here. OPENAI_BASE_URL (read by the OpenAI SDK) points the
+      # `openai` backend at your box; model/url/scope come from repo Variables with your box as defaults.
+      - name: VulnHawk Security Scan (remote Ollama via OpenAI-compatible API, advisory)
+        continue-on-error: true # advisory: an unreachable host or v0.2.0 glitch can never redden the run
         uses: momenbasel/vulnhawk@b878413216e94ba3d6e634c9bf9920578f198ca0 # v0.2.0
         env:
-          OLLAMA_HOST: ${{ vars.OLLAMA_HOST || 'http://127.0.0.1:11434' }}
+          OPENAI_BASE_URL: ${{ vars.VULNHAWK_OPENAI_BASE_URL || 'http://10.0.1.225:11434/v1' }}
         with:
           target: ${{ vars.VULNHAWK_TARGET || '.' }}
-          backend: 'ollama'
-          model: ${{ vars.OLLAMA_MODEL }} # set this repo Variable to your exact `ollama list` tag
+          backend: 'openai' # OpenAI-compatible client → talks to the remote Ollama /v1 endpoint above
+          model: ${{ vars.VULNHAWK_MODEL || 'qwen3.6:27b' }} # bare `ollama list` tag (no provider prefix)
+          api-key: 'ollama' # dummy non-empty: Ollama ignores it, but VulnHawk requires OPENAI_API_KEY set
           severity: 'medium'
           fail-on-findings: 'false' # advisory — findings never fail the job
 
