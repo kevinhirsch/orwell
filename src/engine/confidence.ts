@@ -93,7 +93,18 @@ export function decideConfidence(
  *  model the full earned text. Pure + stable. */
 function blur(detail: string): string {
   const firstClause = detail.split(/[.!?:—(]/)[0]!.trim();
-  return firstClause.replace(/\b\d[\d,]*\b/g, "some").replace(/\s+/g, " ").trim();
+  const redacted = firstClause.replace(/\b\d[\d,]*\b/g, "some").replace(/\s+/g, " ").trim();
+  // A terse single-clause secret (e.g. a generated one-line motive) has no sharp specifics for the
+  // redaction above to drop — it would then be a NO-OP and `partial` would hand over the whole premise.
+  // Fall back to keeping only the leading half of the gist, so the partial tier is always STRICTLY less
+  // than the full secret while staying grounded in its opening — the partial tier must withhold for every
+  // secret shape, not only structured ones.
+  const normalized = detail.replace(/\s+/g, " ").trim();
+  if (redacted === normalized) {
+    const words = redacted.split(" ");
+    if (words.length > 3) return words.slice(0, Math.ceil(words.length / 2)).join(" ");
+  }
+  return redacted;
 }
 
 /**
