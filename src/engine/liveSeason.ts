@@ -242,6 +242,19 @@ export interface LiveSeasonState {
    */
   mannerByEvictee?: Record<EntityId, Record<EntityId, EvictionManner>>;
   /**
+   * The accumulated JURY-HOUSE grudge adjustment (feature 0100): juryGrudge[juror][finalist] is the
+   * BOUNDED (0..`JURY_HOUSE.adjustmentCap`), MONOTONIC amount the sequestered jury house has hardened
+   * this juror's hidden read of the responsible finalist — what a grievance, spread juror-to-juror in
+   * the room the player can't enter, did to it AFTER the snapshot frozen at eviction. Consumed at the
+   * finale by `edgeAsJuryRel` ALONGSIDE the recorded manner: it lowers the juror's bond read of that
+   * finalist, sized UNDER the manner lean so it DEEPENS (never swamps) jury management. ENGINE-ONLY:
+   * never crosses the wall — the player feels it only as a colder juror and a vote that breaks. Absent
+   * unless `ORWELL_JURY_HOUSE` is enabled and a grievance diffused ⇒ byte-identical to the pre-feature
+   * vote (the grudge is computed on a DEDICATED rng; off ⇒ no draw, no grudge). Persisted with the
+   * season (rides on this `live` state), so a restored mid-jury game resumes with the bitterness intact.
+   */
+  juryGrudge?: Record<EntityId, Record<EntityId, number>>;
+  /**
    * The per-week eviction ballot record (E12): who voted to evict whom, kept ENGINE-ONLY for
    * manner/deal reconciliation and for the 0048 retrospective UNSEALING. Eviction votes are
    * secret ballots in Big Brother — no projection attributes a weekly vote to its voter while
@@ -1259,11 +1272,26 @@ function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: Entit
  * is CENTERED on the edge baseline (E54): a juror with no protective track record reads 0 (neutral),
  * demonstrated loyalty reads positive, proven disloyalty negative — `juryLean` weights it below
  * relationship+manner.
+ *
+ * 0100 — the ACCUMULATED jury-house grudge (`s.juryGrudge[juror][finalist]`, bounded + saturated) is
+ * folded in here, ALONGSIDE the recorded manner: it lowers the juror's BOND read (trust + affinity)
+ * of the finalist, so a juror the jury house soured on goes in colder than the snapshot at their own
+ * eviction implied. This is the ONLY change to the vote path — a richer (still hidden) lean INPUT; the
+ * tally/tie-break/reveal are reused verbatim. Absent grudge (the default, or with `ORWELL_JURY_HOUSE`
+ * off) ⇒ a zero subtraction ⇒ byte-identical to the pre-feature read. The grudge is sized UNDER the
+ * manner lean (`JURY_HOUSE.adjustmentCap < |MANNER_LEAN.betrayed|`), so it DEEPENS jury management,
+ * never swamps it. ENGINE-ONLY: no number crosses the wall.
  */
-function edgeAsJuryRel(juror: EntityId, finalist: EntityId, ctx: SeasonCtx): JuryRel {
+function edgeAsJuryRel(s: LiveSeasonState, juror: EntityId, finalist: EntityId, ctx: SeasonCtx): JuryRel {
   const e = ctx.rel.edge(juror, finalist);
+  const grudge = s.juryGrudge?.[juror]?.[finalist] ?? 0;
+  const cool = (x: number): number => Math.max(0, Math.min(1, x - grudge));
   return {
-    trust: e.trust, affinity: e.affinity, threat: e.threat,
+    // The grudge cools the bond read toward the finalist (clamped to [0,1]); threat/reliability are
+    // unchanged. A colder bond lowers `juryLean`'s relationship term, exactly as a hardened room should.
+    trust: cool(e.trust),
+    affinity: cool(e.affinity),
+    threat: e.threat,
     reliability: e.reliability - RELATIONSHIP_CONSTANTS.baseline.reliability,
   };
 }
@@ -1301,7 +1329,7 @@ function appealMade(
 function appealPerf(
   f: FinaleProgress, finalist: EntityId, juror: EntityId, ctx: SeasonCtx, s: LiveSeasonState,
 ): number {
-  const rel = edgeAsJuryRel(juror, finalist, ctx);
+  const rel = edgeAsJuryRel(s, juror, finalist, ctx);
   const manner = mannerFor(s, juror, finalist);
   const made = appealMade(f, finalist, juror);
   if (made !== undefined) return appealEffect(made, rel, manner);
@@ -1337,7 +1365,7 @@ function precomputeVotes(s: LiveSeasonState, ctx: SeasonCtx, f: FinaleProgress, 
   for (const juror of f.jury) {
     if (votes[juror]) continue; // the player's own vote (recorded interactively) is kept
     const leanFor = (fin: EntityId): number =>
-      juryLean(edgeAsJuryRel(juror, fin, ctx), mannerFor(s, juror, fin)) +
+      juryLean(edgeAsJuryRel(s, juror, fin, ctx), mannerFor(s, juror, fin)) +
       // GAME RESPECT (ruling 2026-06-11): jurors weigh who actually PLAYED — the public resume
       // (comp wins) splits the two finalists; a goat with no game starts every juror down a
       // bounded notch. Grievance (manner) can still outvote it: bitter juries stay possible.
@@ -1382,7 +1410,7 @@ function advanceFinale(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource
         return null;
       }
       // NPC finalist answers optimally for this juror (deterministic argmax), recorded for the tally.
-      const appeal = bestAppeal(edgeAsJuryRel(q.juror, q.finalist, ctx), mannerFor(s, q.juror, q.finalist));
+      const appeal = bestAppeal(edgeAsJuryRel(s, q.juror, q.finalist, ctx), mannerFor(s, q.juror, q.finalist));
       recordAppeal(f, q.finalist, q.juror, appeal);
       f.questionIx += 1;
       return { beat: "finale", content: `${q.finalist} answers ${q.juror}`, participants: [q.finalist, q.juror] };
@@ -1597,11 +1625,11 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
     case "finale-statement":
       return { kind: "finale-statement", statement: "" };
     case "finale-answer":
-      return { kind: "finale-answer", appeal: bestAppeal(edgeAsJuryRel(p.juror, p.by, ctx), mannerFor(s, p.juror, p.by)) };
+      return { kind: "finale-answer", appeal: bestAppeal(edgeAsJuryRel(s, p.juror, p.by, ctx), mannerFor(s, p.juror, p.by)) };
     case "juror-question":
       return { kind: "juror-question", question: "" };
     case "juror-vote": {
-      const lean = (fin: EntityId): number => juryLean(edgeAsJuryRel(p.by, fin, ctx), mannerFor(s, p.by, fin));
+      const lean = (fin: EntityId): number => juryLean(edgeAsJuryRel(s, p.by, fin, ctx), mannerFor(s, p.by, fin));
       return { kind: "juror-vote", vote: lean(p.finalists[0]) >= lean(p.finalists[1]) ? p.finalists[0] : p.finalists[1] };
     }
     case "self-evict":
@@ -1765,7 +1793,7 @@ export function applyDecision(
       const p = s.pending;
       if (!p || p.kind !== "juror-question") throw new Error("no pending juror question");
       s.pending = undefined;
-      const appeal = bestAppeal(edgeAsJuryRel(p.by, p.finalist, ctx), mannerFor(s, p.by, p.finalist));
+      const appeal = bestAppeal(edgeAsJuryRel(s, p.by, p.finalist, ctx), mannerFor(s, p.by, p.finalist));
       recordAppeal(f, p.finalist, p.by, appeal);
       f.questionIx += 1;
       return { beat: "finale", content: `${p.by} questions ${p.finalist}; ${p.finalist} answers`, participants: [p.finalist, p.by] };

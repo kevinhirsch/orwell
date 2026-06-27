@@ -591,6 +591,31 @@ export class BbWorld extends World {
     seasonResult?: { seed: number; status: string; f2Win: boolean; playerCompWins: number };
   };
 
+  // Feature 0100 — the jury grudge book scratch state (one bag).
+  jh?: {
+    reg?: import("../../src/composition/registry").GameSessionRegistry;
+    user?: string;
+    sandbox?: import("../../src/composition/registry").UserSandbox;
+    jurors?: Eid[];
+    finalist?: Eid;
+    otherFinalist?: Eid;
+    grievanceJuror?: Eid;
+    closeJuror?: Eid;
+    isolatedJuror?: Eid;
+    preJurorEvictee?: Eid;
+    enabled?: boolean;
+    sentinels?: string[];
+    closeGrudgeBefore?: number;
+    closeGrudgeAfter?: number;
+    isolatedGrudgeAfter?: number;
+    bitterWinRate?: number;
+    snapshotWinRate?: number;
+    cleanWinRate?: number;
+    seededHashA?: string;
+    seededHashB?: string;
+    finaleBlob?: string;
+  };
+
   constructor(options: IWorldOptions) {
     super(options);
   }

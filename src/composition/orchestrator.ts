@@ -612,6 +612,16 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   // harness — which never enables them — is byte-identical. Uses its own dedicated rng, never this tick's.
   sandbox.session.campaignTick();
 
+  // 0100 — advance the sequestered JURY HOUSE one bounded stretch: the last-nine evictees keep living
+  // (hidden juror↔juror scenes) and a grievance one juror carried out DIFFUSES to others, hardening the
+  // room's read of the responsible houseguest before the finale. SELF-GATED: a no-op (ZERO draws, no
+  // grudge) unless the layer is enabled (ORWELL_JURY_HOUSE=1) AND a jury already exists, so the
+  // calibration harness — which never enables it — is byte-identical. Uses its OWN dedicated, isolated rng
+  // (never this tick's shared stream), and records ONLY hidden events (witness set = jurors, EXCLUDES the
+  // player). The main-house exclusion of evicted houseguests above is UNCHANGED — this is a strictly
+  // ADDITIVE second society whose only downstream effect is the (hidden) jury lean, read at the finale.
+  sandbox.session.juryHouseTick(sandbox.engine.events, sandbox.engine.knowledge);
+
   // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
   // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
   // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at
