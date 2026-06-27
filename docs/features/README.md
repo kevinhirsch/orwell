@@ -219,3 +219,21 @@ panel) and `portraitDescriptorFor` (a Vault-free descriptor over 0004's public a
 **0018/0019** formalize `getMomentPrompt` + the `pendingDecision`/`executeDecision` decision seam
 (as built: `submitDecision`, with `advanceGame` driving the loop — the engine surfaces the legal
 option set; binding choices execute only through validation).
+
+## Ship-gate F5 — realtime two-window live-mirror parity (FE; executable backing)
+
+The launch-acceptance bar's **F5** (realtime two-window mirror parity — the #1 release blocker;
+`docs/audits/2026-06-27-ship-gate.md`) is FE-side and has **executable BDD backing outside the
+Cucumber lane** (that lane is the TS engine and cannot run an FE-render scenario). Per
+[ADR 0015](../decisions/0015-collapse-duplicated-live-render-paths.md) (the render-layer half of
+[ADR 0012](../decisions/0012-two-window-lockstep-mirror.md) / refactor-roadmap **R2**), message
+*delivery* is sound — the defect is a render-layer duplication, and the fix collapses the observer
+onto the sender's one incremental renderer. Its acceptance is the Given/When/Then in
+[ADR 0015 §Testability](../decisions/0015-collapse-duplicated-live-render-paths.md#testability--acceptance):
+*two windows on one started game → A streams a turn → B renders it live, through the same incremental
+renderer, within a bounded lag → reasoning never reaches the public bubble.* Executable gate:
+`docs/audits/playtest-harness/mirror_live_parity.mjs` (run via `run_mirror_gate.sh`, key-free against
+a deterministic fake streamed model — harness README §10) + the `frontend/tests/test_0012_mirror.py`
+`xfail` tripwire. Currently **RED** on `main` (B sits blank, then a late `softReloadHistory` reconcile
+through the non-incremental path); flips green when **R2** unifies the live render path, at which point
+the harness becomes a required CI gate and the tripwire `xfail` is removed.
