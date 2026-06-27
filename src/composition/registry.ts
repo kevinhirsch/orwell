@@ -280,6 +280,22 @@ function buildUserSandbox(user = "default"): UserSandbox {
     const fact = engine.knowledge.surfaceInformationTo(PLAYER, { content, subject: npcId, confidence }, `told-by:${npcId}`);
     return fact !== null;
   });
+  // 0093/0099 — secrets as power. The player's own knowledge READER (so a wielded `factId` is validated
+  // against what the player legitimately holds — the Vault bright line; a non-learned secret is rejected,
+  // no minting). Returns the player's facts with id + content + subject + lineage factId.
+  session.setPlayerKnowledgeReader(() =>
+    engine.knowledge.knownTo(PLAYER).map((f) => ({ id: f.id, content: f.content, subject: f.subject, factId: f.factId })),
+  );
+  // 0093/0099 — surface an EXPOSED/TRADED secret INTO a houseguest's knowledge through the in-game
+  // pathway (the player is the source). The recipient first HOLDS the content (a seeded origin belief so
+  // the told-by/overheard pathway is content-anchored, E9), then it surfaces as their KNOWLEDGE — never a
+  // Vault read. Mirrors `setOnConfide`. Returns whether they came to hold it.
+  session.setOnSurfaceToHouseguest((npcId, content, subject, pathway, confidence) => {
+    const factId = `secret-power:${npcId}:${engine.events.count()}`;
+    engine.knowledge.seedBelief(npcId, { content, originalContent: content, factId, confidence: 0.9, hops: 0, distortion: 0, source: PLAYER }, "origin");
+    const fact = engine.knowledge.surfaceInformationTo(npcId, { content, subject, confidence }, pathway);
+    return fact !== null;
+  });
   // Weekly-loop beats (0011) are player-witnessed events: record them so they enter the
   // player's knowledge and the durable snapshot (never hidden — the player lived them).
   session.setOnEvent((ev) => engine.events.record({
