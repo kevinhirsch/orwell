@@ -239,6 +239,13 @@ function ensureCss() {
     }
     .ow-controls button:hover, .ow-controls button:focus-visible,
     .ow-dismiss:hover, .ow-dismiss:focus-visible { opacity: 1; background: rgba(255,255,255,.08); }
+    /* #911: the minimize control is ALWAYS rendered (the macOS cluster keeps its shape — see
+       the build comment), but a non-minimizable window's disabled placeholder must NOT show its
+       raw '–' glyph in the legacy (non-frosted) chrome — that bare en-dash read as a mystery
+       "first button" on the setup wizard. The frosted theme greys it to a glyphless disc
+       (style.css); here the legacy fallback simply hides the disabled placeholder so only
+       functional controls render. (Scoped :not(.theme-frosted) so the frosted disc still shows.) */
+    body:not(.theme-frosted) .ow-controls .ow-min[disabled] { display: none; }
     /* Coarse-pointer (touch) sizing — Apple-proportionate titlebar chrome. The kit
        controls carry the tap-exempt class (set where they're built) so they ESCAPE the
        global responsive-tokens.css coarse floor (button:not(.tap-exempt) -> 44px), which

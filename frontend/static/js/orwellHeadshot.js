@@ -134,10 +134,16 @@
           font-size: 18px; opacity: 1; background: rgba(0,0,0,.72); }
       }
       @media (prefers-reduced-motion: reduce) { .ow-headshot-studio .hs-libdel { transition: none; } }
-      /* "Choose Your Character" pill — a competition-style CTA rendered in the chat right after
-         the producer's opener; clicking it opens the cast-photo box (which no longer auto-opens).
-         Matches the decision-card accent pill (rounded, --accent, ≥44px tap target). */
-      #orwell-choose-character { display: flex; justify-content: center; margin: 10px 0 6px; }
+      /* "Choose Your Character" pill — a competition-style CTA. #913: it is now PINNED above the
+         composer (the OrwellNotice "guide" zone, like the decision card), not appended inline into
+         the chat history where it scrolled away and orphaned. Clicking it opens the cast-photo box
+         (which no longer auto-opens). Matches the decision-card accent pill (rounded, --accent,
+         ≥44px tap target). When mounted via the kit, #orwell-choose-character is the .on-card host:
+         center the button inside the kit body. The legacy in-stream fallback wrapper carries the
+         same id, so center its direct button too. */
+      #orwell-choose-character > .hs-choose-btn { margin: 4px auto; display: block; }
+      #orwell-choose-character .on-body { display: flex; justify-content: center; }
+      #orwell-choose-character .on-body > .hs-choose-btn { margin: 0; }
       /* #775 element-kit migration (owner request): the "Choose Your Character" pill composes the
          kit's .ow-btn .ow-btn-prominent — a liquid-glass PROMINENT CTA (the kit is the ONE source of
          truth for the glass chrome). This bespoke rule keeps ONLY the pill-specific SHAPE (the wide
@@ -599,29 +605,58 @@
   // (right after that message). The box opens only when the player clicks the pill — then the
   // pill is removed. This keeps the box from popping unbidden over the live narration.
   const PILL_ID = "orwell-choose-character";
+  let _pillNotice = null;   // #913: the OrwellNotice kit instance hosting the pill above the composer.
+  // #913: the pill used to be appended INLINE into #chat-history, so as the casting conversation
+  // grew it scrolled out of the focal zone and orphaned in the backlog as a dead CTA. PIN it above
+  // the composer instead — the same stacked OrwellNotice zone the decision card and the game guide
+  // use (.chat-input-bar anchor) — so it stays in view for the whole casting step and tears down
+  // cleanly. Fail-open to the legacy in-stream append only if the kit/anchor is unavailable (the
+  // CTA must always reach the player).
   function showPill() {
     if (_win || document.getElementById(ID)) return;        // box already open ⇒ no pill
     if (document.getElementById(PILL_ID)) return;           // pill already shown
-    const hist = document.getElementById("chat-history");
-    if (!hist) return;
     // Inject the pill CSS BEFORE the button is in the DOM — otherwise it paints once with default
     // browser styling (a small, left-aligned plain button) and only snaps to the centered accent
     // pill when ensureCss() later runs from the box mount. ensureCss() is idempotent, so calling it
     // here costs nothing on repeat and kills that "two looks" flash. (live walkthrough, 2026-06-21)
     ensureCss();
-    const wrap = document.createElement("div");
-    wrap.id = PILL_ID;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "ow-btn ow-btn-prominent hs-choose-btn";
     btn.textContent = "Choose Your Character";
     btn.setAttribute("aria-label", "Choose your character — open your cast photo");
     btn.addEventListener("click", () => { removePill(); mount(); });
+
+    const hasKit = !!(window.OrwellNoticeKit && document.querySelector(".chat-input-bar"));
+    if (hasKit) {
+      // Pin into the above-composer notice zone (kind "guide" — a non-blocking prompt, not a
+      // hard-stop decision). dismissible:false — the pill is removed by route() / a skip, not a × .
+      _pillNotice = window.OrwellNoticeKit.create({
+        id: PILL_ID,
+        kind: "guide",
+        title: "",
+        dismissible: false,
+        persistDismiss: false,
+      });
+      const host = _pillNotice.ensure();
+      const head = _pillNotice.el && _pillNotice.el.querySelector(".on-head");
+      if (head) head.style.display = "none";   // no heading — just the centered CTA
+      host.appendChild(btn);
+      return;
+    }
+    // Fail-open: the legacy in-stream placement (kit/anchor unavailable). Still wrapped so the
+    // existing #orwell-choose-character CSS + the removePill() lookup keep working.
+    const hist = document.getElementById("chat-history");
+    if (!hist) return;
+    const wrap = document.createElement("div");
+    wrap.id = PILL_ID;
     wrap.appendChild(btn);
     hist.appendChild(wrap);
     try { hist.scrollTop = hist.scrollHeight; } catch (_) {}
   }
   function removePill() {
+    // Tear down whichever host the pill used (kit notice or the legacy in-stream wrapper).
+    if (_pillNotice) { try { _pillNotice.hide(); } catch (_) {} _pillNotice = null; }
     const p = document.getElementById(PILL_ID); if (p) p.remove();
   }
 
@@ -701,6 +736,42 @@
       if (_win || document.getElementById(ID) || document.getElementById(PILL_ID)) return; // box/pill up already
       if (t) clearTimeout(t);
       t = setTimeout(route, 400);                          // fire after the stream settles
+    });
+    obs.observe(hist, { childList: true, subtree: true, characterData: true });
+  })();
+
+  // #913: VERBAL-SKIP belt. The authoritative removal is route() (the engine drops "castPhoto" from
+  // casting.missing once the model calls updateCasting({castPhoto:"skipped"}) → gamechanged → route
+  // → unmount → removePill). But the model RELIABLY UNDER-CALLS that tool (the project's recurring
+  // gap): on a plain "skip the photo" it often just acknowledges in prose, leaving the step in
+  // `missing` and the pill pinned as a dead CTA. This belt watches the transcript for the player
+  // verbally declining the photo and removes the pill immediately — a client-side error-correction
+  // of the model's omission (never engine-authored content; the engine stays the source of truth,
+  // and recordPhotoStep("skipped") still fires to clear the step for real). Pre-game only.
+  const SKIP_RE = /\b(?:skip|no photo|without a photo|don'?t want (?:a|the|my) photo|maybe later|not now)\b/i;
+  const PHOTO_RE = /\b(?:photo|picture|headshot|portrait|pic|image)\b/i;
+  function _looksLikeVerbalPhotoSkip(text) {
+    if (!text) return false;
+    const t = String(text);
+    // "skip"/"maybe later" already imply the current step; require the photo noun only for the
+    // weaker "no"/"not now" phrasings to avoid false positives on unrelated chatter.
+    if (/\b(?:skip|maybe later)\b/i.test(t)) return true;
+    return SKIP_RE.test(t) && PHOTO_RE.test(t);
+  }
+  (function watchTranscriptForVerbalSkip() {
+    const hist = document.getElementById("chat-history");
+    if (!hist || typeof MutationObserver === "undefined") return;
+    const obs = new MutationObserver(function () {
+      if (!_maybePregame) { obs.disconnect(); return; }     // season underway ⇒ stop watching
+      if (!document.getElementById(PILL_ID)) return;        // no pill up ⇒ nothing to clear
+      if (_win || document.getElementById(ID)) return;      // box open ⇒ the box owns the skip
+      const last = hist.querySelector(".msg-user:last-of-type");
+      if (!last) return;
+      if (_looksLikeVerbalPhotoSkip(last.textContent || "")) {
+        _photoHandledLocally = true;                        // R5: the player acted — don't re-trap
+        removePill();                                       // immediate: the dead CTA is gone now
+        try { recordPhotoStep("skipped"); } catch (_) {}    // clear the step engine-side for real
+      }
     });
     obs.observe(hist, { childList: true, subtree: true, characterData: true });
   })();
