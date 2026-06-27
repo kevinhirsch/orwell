@@ -2,7 +2,7 @@ import type { EntityId } from "../domain/ids";
 import { PLAYER } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { RelationshipModel } from "./relationships";
-import { DEAL_IMPACTS } from "./relationshipConstants";
+import { DEAL_IMPACTS, DEAL_DURATION } from "./relationshipConstants";
 import {
   type BindingAction,
   type Deal,
@@ -35,10 +35,38 @@ export type { BindingAction, Deal, DealKind } from "../domain/deal";
  * an injected `ReconcileSink`, so the ledger is unit-testable and the integration owns the wiring.
  */
 
+/**
+ * Feature 0109 — the bounded, engine-owned multiplier on a broken deal's betrayal-shock, derived from
+ * its NEGOTIATED duration (the "when do you turn?" lever). Pure: no rng, no I/O, no Vault. The result
+ * is a HIDDEN magnitude (mandate #2/#3) — it never crosses to the player or admin; only the deal's
+ * `expiresWeek` TERM is player-knowledge. Three cases, in priority order:
+ *   • `vague` ⇒ `DEAL_DURATION.vagueSoften` (< 1): an unspoken term softens the betrayal (ambiguity).
+ *   • explicit `expiresWeek` + a known `currentWeek` ⇒ `min(maxScale, 1 + perWeekRemaining · weeksLeft)`
+ *     where `weeksLeft = max(0, expiresWeek − currentWeek)` — more life left ⇒ a bigger shock, capped.
+ *     (At/after the term, `weeksLeft` is 0 ⇒ scale 1; the break would normally be adjudicated fair-game
+ *     by then, but the floor is exactly the pre-0109 magnitude.)
+ *   • neither (no duration, or an explicit term with no `currentWeek` to measure against) ⇒ 1 — the
+ *     identity floor, so a no-duration break folds BYTE-IDENTICALLY to 0039 (the calibration proof).
+ */
+export function breakSeverityScale(deal: Deal, currentWeek?: number): number {
+  if (deal.vague) return DEAL_DURATION.vagueSoften;
+  if (deal.expiresWeek !== undefined && currentWeek !== undefined) {
+    const weeksLeft = Math.max(0, deal.expiresWeek - currentWeek);
+    return Math.min(DEAL_DURATION.maxScale, 1 + DEAL_DURATION.perWeekRemaining * weeksLeft);
+  }
+  return 1;
+}
+
 /** Where reconciliation routes its consequences. All optional so status logic is testable in isolation. */
 export interface ReconcileSink {
   rel?: RelationshipModel;
   rng?: RandomnessSource;
+  /**
+   * The current week (feature 0109) — lets `applyBreak` scale the betrayal-shock by a deal's
+   * REMAINING explicit term (`breakSeverityScale`). Absent ⇒ scale 1 for explicit deals (a `vague`
+   * deal still softens without it), so omitting it is byte-identical to pre-0109.
+   */
+  currentWeek?: number;
   /** Record a jury-management demerit: `wronged` will weigh `breaker`'s betrayal in their later lean. */
   juryDemerit?: (wronged: EntityId, breaker: EntityId, deal: Deal) => void;
   /** Record the witnessed reveal of a break into the wronged party's knowledge (returns its event id). */
@@ -57,8 +85,17 @@ export class DealLedger {
   private seq = 0;
 
   /** Make a new OPEN deal between two parties. `id`/`madeEventId` are assigned/threaded by the caller.
-   *  `madeWeek` (E43) anchors the week-scoped horizon of `safety`/`vote` promises. */
-  make(parties: [EntityId, EntityId], kind: DealKind, terms: string, madeEventId?: string, madeWeek?: number): Deal {
+   *  `madeWeek` (E43) anchors the week-scoped horizon of `safety`/`vote` promises. `duration` (0109) is
+   *  the optional NEGOTIATED term — exactly one of an explicit `expiresWeek` or the `vague` label; absent
+   *  ⇒ the kind-implied horizon (byte-identical to pre-0109). */
+  make(
+    parties: [EntityId, EntityId],
+    kind: DealKind,
+    terms: string,
+    madeEventId?: string,
+    madeWeek?: number,
+    duration?: { expiresWeek?: number; vague?: boolean },
+  ): Deal {
     const deal: Deal = {
       id: `deal:${++this.seq}`,
       parties,
@@ -68,6 +105,8 @@ export class DealLedger {
       status: "open",
       ...(madeEventId ? { madeEventId } : {}),
       ...(madeWeek !== undefined ? { madeWeek } : {}),
+      ...(duration?.expiresWeek !== undefined ? { expiresWeek: duration.expiresWeek } : {}),
+      ...(duration?.vague ? { vague: true } : {}),
     };
     this.deals.push(deal);
     return deal;
@@ -125,15 +164,23 @@ export class DealLedger {
   }
 
   /**
-   * Resolve week-scoped (`safety`/`vote`) deals whose week has passed un-broken (E43): the house
-   * rolled into `currentWeek` and the promise ran its course — mark them `kept`. Deals without a
-   * recorded `madeWeek` (pre-E43 saves) are left alone. Returns the deals it resolved.
+   * Resolve deals whose binding term has passed un-broken — mark them `kept`. Two ways a term runs out:
+   *   • E43 kind-horizon: a week-scoped (`safety`/`vote`) deal whose `madeWeek` is behind `currentWeek`.
+   *   • 0109 NEGOTIATED term: ANY deal with an explicit `expiresWeek` once `currentWeek > expiresWeek`
+   *     — a named term generalizes the kind-implied horizon, so an un-broken `final-two` with a term
+   *     that has lapsed also resolves kept (turning after a mutually-known expiry is fair game, never
+   *     a betrayal). A `vague` deal carries NO numeric expiry, so it never expires here.
+   * Deals with neither an applicable `madeWeek` nor an `expiresWeek` (pre-E43/0109 saves) are left
+   * alone — byte-identical to before. Returns the deals it resolved.
    */
   expireWeekScoped(currentWeek: number): Deal[] {
     const resolved: Deal[] = [];
     for (const deal of this.deals) {
-      if (deal.status !== "open" || horizonOf(deal.kind) !== "week") continue;
-      if (deal.madeWeek !== undefined && deal.madeWeek < currentWeek) {
+      if (deal.status !== "open") continue;
+      const kindHorizonPassed =
+        horizonOf(deal.kind) === "week" && deal.madeWeek !== undefined && deal.madeWeek < currentWeek;
+      const negotiatedTermPassed = deal.expiresWeek !== undefined && currentWeek > deal.expiresWeek;
+      if (kindHorizonPassed || negotiatedTermPassed) {
         deal.status = "kept";
         resolved.push(deal);
       }
@@ -151,8 +198,12 @@ export class DealLedger {
 
   /** The betrayal-shock fold + jury demerit + (if witnessed) the reveal event. */
   private applyBreak(deal: Deal, wronged: EntityId, breaker: EntityId, sink: ReconcileSink): void {
-    // 0026: the wronged party's hidden read of the breaker takes the large, slow-decaying betrayal hit.
-    if (sink.rel && sink.rng) sink.rel.applyDirected(wronged, breaker, "betrayal", sink.rng);
+    // 0026 + 0109: the wronged party's hidden read of the breaker takes the large, slow-decaying
+    // betrayal hit — SCALED by how much negotiated life the deal had left (a near/at-end or vague break
+    // hurts less; a freshly-renewed one more). No duration / no week ⇒ scale 1 ⇒ byte-identical to 0039.
+    if (sink.rel && sink.rng) {
+      sink.rel.applyDirected(wronged, breaker, "betrayal", sink.rng, breakSeverityScale(deal, sink.currentWeek));
+    }
     // 0014: a discrete jury-management demerit (weighs that juror's later lean against the breaker).
     sink.juryDemerit?.(wronged, breaker, deal);
     // 0002: the wronged party learns it as a witnessed event when they see/learn the break.

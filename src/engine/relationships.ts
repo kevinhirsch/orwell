@@ -175,9 +175,16 @@ export class RelationshipModel {
   /**
    * Directed update: only `holder`→`other` moves. One-sided investment (A bonds with B
    * who never reciprocates) makes the edges asymmetric — the heart of decision 0002.
+   *
+   * `scale` (feature 0109) multiplies the named impact's magnitude before the proven rule runs —
+   * the engine-owned betrayal-duration lever (a near/at-end break costs less, a freshly-renewed one
+   * more). DEFAULT 1 passes the base impact OBJECT UNCHANGED (same ref ⇒ byte-identical to pre-0109,
+   * the calibration floor); only a `scale !== 1` builds a scaled copy. The four-draw jitter stream is
+   * untouched either way (`scaleImpact` only changes the magnitudes `applyOneDirection` reads).
    */
-  applyDirected(holder: EntityId, other: EntityId, type: InteractionType, rng: RandomnessSource): void {
-    this.applyOneDirection(holder, other, this.constants.IMPACT[type], rng);
+  applyDirected(holder: EntityId, other: EntityId, type: InteractionType, rng: RandomnessSource, scale = 1): void {
+    const base = this.constants.IMPACT[type];
+    this.applyOneDirection(holder, other, scale === 1 ? base : scaleImpact(base, scale), rng);
   }
 
   /**
