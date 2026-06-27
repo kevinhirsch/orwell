@@ -327,25 +327,24 @@ def test_chat_client_shared_canonical_render_shape():
     assert "chatRenderer.addMessage('assistant', _combined(), model, meta_);" in chat
 
 
-@pytest.mark.xfail(strict=True, reason="R2 not yet implemented: the mirror (resumeStream) still "
-                   "full-innerHTML-repaints per delta instead of the shared incremental renderer. "
-                   "This XPASSes once R2 unifies the live render path — when it does, DELETE this "
-                   "marker. Behaviour-true proof: docs/audits/playtest-harness/run_mirror_gate.sh.")
 def test_chat_client_mirror_does_not_full_repaint_per_delta():
     """ADR 0012 §3.3 / refactor-roadmap R2 — the LIVE-streaming-render-parity gap (FAST tripwire).
 
     test_chat_client_shared_canonical_render_shape pins the SETTLED shape (reasoning in a closed
     <think> accordion) and that both paths CALL processWithThinking — but it is silent on the live
-    streaming MECHANISM, and that silence is the two-window 'scratch and grind'. The sender's primary
+    streaming MECHANISM, and that silence WAS the two-window 'scratch and grind'. The sender's primary
     loop renders deltas through createStreamRenderer (freeze finalized blocks + token-fade incremental
-    tail); the observer's resumeStream path full-innerHTML-repaints the whole bubble on EVERY delta
-    (renderDelta). Same shared token stream, two different live render engines → the windows diverge
-    visibly while streaming and only converge at settle when both rebuild from /api/history.
+    tail); the observer's resumeStream path USED to full-innerHTML-repaint the whole bubble on EVERY
+    delta (renderDelta). Same shared token stream, two different live render engines → the windows
+    diverged visibly while streaming and only converged at settle when both rebuilt from /api/history.
 
-    This is the cheap source-pin tripwire (forbid the per-delta full-repaint in the mirror path); the
-    behaviour-true proof is the two-window harness docs/audits/playtest-harness/mirror_live_parity.mjs
+    R2 unified them: resumeStream now feeds the SHARED incremental renderer (`_renderLiveStream` →
+    createStreamRenderer) — reply into `.live-reply-content`, reasoning into a collapsed accordion (the
+    channel split) — so the observer streams through the same machinery the sender does. This is the
+    cheap source-pin tripwire (forbid the per-delta full-repaint in the mirror path); the behaviour-
+    true proof is the two-window harness docs/audits/playtest-harness/mirror_live_parity.mjs
     (run_mirror_gate.sh), which measures that B renders DURING A's stream through the same incremental
-    renderer. RED until R2 unifies the two live render paths."""
+    renderer. GREEN once R2 unified the two live render paths."""
     chat = _read("static", "js", "chat.js")
     # the observer must NOT full-repaint the bubble on every delta (that is renderDelta today).
     assert "contentDiv.innerHTML = markdownModule.processWithThinking(" not in chat, (
