@@ -59,6 +59,15 @@ export interface PersistedCharacter {
    */
   biography?: string;
   physicalCharacteristics?: PhysicalCharacteristics;
+  /**
+   * Provenance flag for the season-start deep-profile authoring write-back (#1067). Unset on the seeded
+   * deterministic floor; set `true` the first time `recordCastProfile` authors a richer PUBLIC facet
+   * (`biography`/`physicalCharacteristics`/`vocation`). `isSuperset` permits those facets to
+   * change ONLY on the one-directional floor→authored transition (a sanctioned UPGRADE, exactly like the
+   * 0062 `worldSnapshot` web_search upgrade), and treats them as byte-stable once authored — so a later
+   * drift/thinning is still refused (mandate #4 intact). Absent on pre-#1067 saves (load as unset).
+   */
+  deepProfileAuthored?: boolean;
 }
 
 /** A hunch in the persisted projection (audit C4) — counted + superset-checked like knowledge. */
@@ -132,6 +141,49 @@ export function counts(state: GameState): DetailCounts {
 }
 
 const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/** The PUBLIC deep-profile facets the season-start authoring write-back (#1067) may upgrade off the
+ *  seeded floor. Everything else on the static Character stays byte-stable on EVERY path. */
+const AUTHORABLE_FACETS: ReadonlyArray<keyof PersistedCharacter> = [
+  "biography", "physicalCharacteristics", "vocation",
+];
+
+/**
+ * Is `late` a SANCTIONED season-start authoring upgrade of `early` (#1067)? The seeded deterministic
+ * floor sets placeholder public deep-profile facets; the FE then authors a richer replacement via
+ * `recordCastProfile`. That accretes detail (mandate #4 wants exactly this) but a byte-compare can't tell
+ * "richer authored" from "thinned", so this gates the exception narrowly — mirroring the 0062 worldSnapshot
+ * web_search upgrade. Permitted ONLY when ALL hold:
+ *   1. one-directional: the earlier side was NOT authored and the later side IS (`true → …` never qualifies,
+ *      so an authored profile is byte-stable forever and a `true → unset` regression is refused);
+ *   2. every NON-authorable field is byte-identical (the upgrade can't smuggle a change into the byte-stable
+ *      identity — archetype/stats/background/ethnicity/voice/…);
+ *   3. neither authorable facet is DROPPED to absent (an authored profile only ever replaces value-with-
+ *      value, never deletes a public facet the floor had — that WOULD be a thinning).
+ * Length/content of the replacement is NOT second-guessed — the floor bio is a deterministic PLACEHOLDER
+ * and the authored bio is the producer's real backstory; this is the one sanctioned identity upgrade
+ * (exactly the worldSnapshot web_search precedent), and the durable guarantee is that it is one-directional
+ * and FROZEN thereafter (a `true → …` never qualifies, so a post-authoring drift/thin is still refused).
+ */
+function isSanctionedProfileUpgrade(early: PersistedCharacter, late: PersistedCharacter): boolean {
+  // (1) strictly floor → authored.
+  if (early.deepProfileAuthored === true || late.deepProfileAuthored !== true) return false;
+  // (2) every field OTHER than the authorable facets (+ the provenance flag itself) must be byte-identical
+  // — the upgrade can never smuggle a change into the byte-stable identity. Compare both with those keys
+  // stripped from BOTH sides.
+  const strip = (c: PersistedCharacter): Record<string, unknown> => {
+    const rest: Record<string, unknown> = { ...(c as unknown as Record<string, unknown>) };
+    for (const k of AUTHORABLE_FACETS) delete rest[k as string];
+    delete rest["deepProfileAuthored"];
+    return rest;
+  };
+  if (!sameJson(strip(early), strip(late))) return false;
+  // (3) a public facet the floor HAD may never be dropped to absent on the upgrade (value→value only).
+  for (const k of AUTHORABLE_FACETS) {
+    if (early[k] !== undefined && late[k] === undefined) return false;
+  }
+  return true;
+}
 
 /**
  * Superset by stable identity AND content (audit C4): nothing previously persisted may be
@@ -211,7 +263,22 @@ export function isSuperset(later: GameState, earlier: GameState, opts: { trustEv
 
   for (const [id, early] of Object.entries(earlier.characters)) {
     const late = later.characters[id];
-    if (!late || !sameJson(late, early)) return false;
+    if (!late) return false;
+    if (sameJson(late, early)) continue;
+    // The static CHARACTER is byte-stable — EXCEPT the ONE sanctioned season-start UPGRADE (#1067): the FE
+    // authoring write-back (`recordCastProfile`) replaces the seeded-floor PUBLIC deep-profile facets
+    // (`biography` / `physicalCharacteristics` / `vocation` / `appearance`) with a richer authored version.
+    // That is an accretion of detail, not the memory-thinning this guard exists to catch — but a byte-
+    // compare can't tell the two apart, so the `deepProfileAuthored` provenance flag is the discriminator
+    // (mirrors the 0062 worldSnapshot web_search upgrade just below). The upgrade is permitted ONLY when:
+    //   (a) the earlier side was NOT yet authored AND the later side IS — strictly one-directional, so an
+    //       authored profile can never drift/thin back (`true → true` falls through to the byte-compare and
+    //       a `true → unset` regression is refused);
+    //   (b) EVERY field OTHER than the four authorable public facets is byte-identical — the upgrade may
+    //       never smuggle a change into the byte-stable identity (archetype/stats/background/ethnicity/…);
+    //   (c) `biography` does not SHORTEN — the authored bio must be at least as rich as the floor it
+    //       replaces (defense in depth: the floor stays the lower bound even on the sanctioned path).
+    if (!isSanctionedProfileUpgrade(early, late)) return false;
   }
 
   // 0062 — the move-in zeitgeist snapshot is a FROZEN artifact: once captured it must never regenerate

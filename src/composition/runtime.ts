@@ -122,6 +122,11 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   // dead season's baseline/faults/rng, so season 2's first commit is a first commit, never a
   // "degradation" against a finished season.
   registry.setOnReset((user) => orchestrator.forgetUser(user));
+  // #1067 — a fail-soft background enrichment (the season-start cast-authoring upgrade) replaced live
+  // state outside the commit seam; re-seed the non-degradation baseline to the freshly-saved state so the
+  // next player-turn commit isn't refused as a "degradation" against the stale floor baseline (the same
+  // seedBaseline discipline a resume-from-disk uses — audit E6).
+  registry.setOnBackgroundCommit((user) => orchestrator.seedBaseline(user));
   // God Mode can SEE sandbox health (B58/audit E5+E6): integrity, faults, the circuit state.
   registry.setHealthProvider((user) => orchestrator.sandboxHealth(user));
   // Preload saved users at boot (B60/audit E11): without this, every deploy froze each house until

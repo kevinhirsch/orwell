@@ -372,6 +372,10 @@ export function toGameState(snap: SessionSnapshot): GameState {
       ...(hg.character.biography !== undefined ? { biography: hg.character.biography } : {}),
       ...(hg.character.physicalCharacteristics !== undefined
         ? { physicalCharacteristics: hg.character.physicalCharacteristics } : {}),
+      // #1067: the season-start authoring provenance flag — drives the ONE sanctioned floor→authored public-
+      // facet upgrade the 0031 checkpoint permits. Spread (not nested) so it stays absent on the seeded floor
+      // and on pre-#1067 saves (no spurious change to the byte-compare for an un-authored character).
+      ...(hg.character.deepProfileAuthored === true ? { deepProfileAuthored: true } : {}),
     };
     souls[hg.id] = {
       emotionalState: hg.soul.emotionalState,
