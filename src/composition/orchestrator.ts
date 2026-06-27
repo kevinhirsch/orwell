@@ -648,18 +648,19 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // NPC interiority (0040): an involved houseguest privately confesses their REAL read — Vault-only
   // (witnessed by them alone), grounded in their actual relationship signals, never invented. It
   // reaches no one (player or admin); the player feels it only later through that NPC's behavior.
-  // 0089: the confessional reacts to a concrete recent event the confessor witnessed — "after the
-  // veto ceremony…" — additive to 0040's grounded target/ally read.
   if (scenes.length > 0) {
     const confessor = scenes[rng.int(scenes.length)]!.initiator;
-    const witnessed = sandbox.engine.events.query({ witnessedBy: confessor });
-    const recentEvents = selectRecentForConfessional(witnessed, confessor);
+    // 0089 — the off-screen confessional REACTS to the confessor's OWN witnessed events too (the scenes
+    // they were just part of are already recorded this tick). `selectRecentForConfessional` bounds to
+    // `witnessedBy: confessor` and returns only Vault-safe class-keyed gists — never another houseguest's
+    // hidden read (mandate #2/#3). The tiebreak rng is DEDICATED (derived off confessor + clock + log
+    // size), never the shared society/vote stream `rng`, so the seeded calibration spine is untouched
+    // (the selection draws no rng at all unless two of the confessor's events fully tie).
+    const recentRng = new SeededRandom(hashSeed(`${core.seed ?? ""}:confessional-recent:${confessor}:${clockNow}:${before}`));
+    const recentEvents = selectRecentForConfessional(sandbox.engine.events.query(), confessor, clockNow, { rng: recentRng });
     recordConfessional(
       sandbox.engine.events,
-      confessionalFor(confessor, ids, sandbox.engine.relationships, {
-        player: PLAYER,
-        ...(recentEvents.length > 0 ? { recentEvents } : {}),
-      }),
+      confessionalFor(confessor, ids, sandbox.engine.relationships, { player: PLAYER, recentEvents }),
       rng,
       clockNow,
     );

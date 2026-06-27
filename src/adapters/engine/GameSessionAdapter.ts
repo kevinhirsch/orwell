@@ -598,14 +598,6 @@ export class GameSessionAdapter implements GameSession {
     this.onRestart = fn;
   }
 
-  /** 0089 — provider for reading confessor-witnessed events to anchor reactive confessionals. */
-  private queryEvents?: (witnessedBy: EntityId) => GameEvent[];
-
-  /** 0089 — wire the event-store query so `recordCeremonyConfessionals` can read recent events. */
-  setEventsQuery(fn: (witnessedBy: EntityId) => GameEvent[]): void {
-    this.queryEvents = fn;
-  }
-
   /**
    * 0065 (advance-warm) — the NEXT-season warm delegate, wired by the registry (mirrors `onRestart`).
    * `preSeedCast` warms onto THIS adapter's pre-game store and is refused while a season runs; the
@@ -5090,20 +5082,21 @@ export class GameSessionAdapter implements GameSession {
     const at = this.confessorsFor(ev);
     if (!at) return;
     const everyone = [this.house.player.id, ...this.house.npcs.map((n) => n.id)];
+    // 0089 — the confessor's OWN witnessed events (the just-recorded ceremony beat is already in the
+    // log: `commit` records it via `onEvent` before this runs). `selectRecentForConfessional` filters
+    // to `witnessedBy: npc` itself and returns only Vault-safe class-keyed gists, so a confessional
+    // reacts to what THIS houseguest lived — never another's hidden read (mandate #2/#3). The seeded
+    // tiebreak rng is dedicated (same `confessional:` family), never the shared society/vote stream, so
+    // the calibration spine stays byte-identical (the selection draws no rng unless two events fully tie).
+    const allEvents = this.record?.events() ?? [];
     const ctxFor = (npc: EntityId): ConfessionalContext => {
-      const ctx: ConfessionalContext = {
+      const recentRng = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`));
+      return {
         trigger: at.trigger,
+        recentEvents: selectRecentForConfessional(allEvents, npc, allEvents.length, { rng: recentRng }),
         ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
         rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`)),
       };
-      // 0089: enrich with recent concrete events from the confessor's OWN witness set so the
-      // confessional reacts to a real beat ("after the veto ceremony…") — additive to 0040.
-      if (this.queryEvents) {
-        const witnessed = this.queryEvents(npc);
-        const recent = selectRecentForConfessional(witnessed, npc);
-        if (recent.length > 0) ctx.recentEvents = recent;
-      }
-      return ctx;
     };
     for (const conf of involvedConfessionals(at.involved, everyone, this.rel, ctxFor)) {
       // witnessSet = [the confessing NPC] → hidden=true (the player is never a witness, 0002).
