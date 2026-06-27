@@ -7,6 +7,7 @@ import type { LiveSeasonState } from "./liveSeason";
 import type { Deal } from "../domain/deal";
 import type { Campaign, Drive } from "./campaigns";
 import type { Trajectory, FoldSignal } from "./trajectory";
+import type { Alliance } from "./alliances";
 import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
 import type { Room, Zone } from "../domain/house";
@@ -76,6 +77,9 @@ export interface SessionCore {
   live?: LiveSeasonState | null;
   /** Tracked promises the player is party to (0039), so deals survive a restart (0030). */
   deals?: Deal[];
+  /** Named alliances (feature 0107) — explicit multi-party pacts, persisted so they survive a restart
+   *  (0030) and accumulate. ENGINE-ONLY (the cement/favor magnitudes never cross). Absent ⇒ none. */
+  alliances?: Alliance[];
   /**
    * Live NPC CAMPAIGNS (feature 0085) — persistent, adaptive strategic agendas, so a multi-week
    * campaign and its accumulated history survive a restart (0030) and ACCUMULATE, never thin

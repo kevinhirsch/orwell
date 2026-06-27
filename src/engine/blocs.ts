@@ -58,6 +58,13 @@ export interface BlocDeps {
   loyaltyOf?: (id: EntityId) => number;
   /** Mutual-bond threshold for a bloc edge; defaults to the model's alliance threshold (0.5). */
   threshold?: number;
+  /**
+   * 0107 — the NAMED-ALLIANCE cement: a bounded boost added to a pair's effective mutual bond, so naming
+   * an alliance pulls co-members together + tightens the bloc. Omitted ⇒ 0 for every pair ⇒ BYTE-IDENTICAL
+   * detection (the calibration spine). The boost is bounded by the alliance layer, never enough to
+   * fabricate a bloc from nothing — the real bonds still rule.
+   */
+  tieBoost?: (a: EntityId, b: EntityId) => number;
 }
 
 const bondOf = (rel: RelationshipModel, a: EntityId, b: EntityId): number => {
@@ -79,12 +86,15 @@ export function detectBlocs(deps: BlocDeps): Bloc[] {
   const { rel, active } = deps;
   const threshold = deps.threshold ?? 0.5;
   const loyaltyOf = deps.loyaltyOf ?? ((): number => 0.55);
+  // 0107: the cemented mutual bond — the raw bond plus the bounded named-alliance tie boost (0 by default).
+  const tie = deps.tieBoost ?? ((): number => 0);
+  const bond = (a: EntityId, b: EntityId): number => Math.min(1, mutualBond(rel, a, b) + tie(a, b));
 
   // 1) Every qualifying mutual edge, strongest first (stable order for determinism).
   const edges: Array<{ a: EntityId; b: EntityId; w: number }> = [];
   for (let i = 0; i < active.length; i++) {
     for (let j = i + 1; j < active.length; j++) {
-      const w = mutualBond(rel, active[i]!, active[j]!);
+      const w = bond(active[i]!, active[j]!);
       if (w >= threshold) edges.push({ a: active[i]!, b: active[j]!, w });
     }
   }
@@ -96,7 +106,7 @@ export function detectBlocs(deps: BlocDeps): Bloc[] {
   // is also what makes fracture work: a betrayal that collapses one internal edge excludes the
   // betrayer from the next read even when a common friend remains.
   const qualifies = (m: EntityId, cluster: ReadonlySet<EntityId>): boolean =>
-    [...cluster].every((x) => mutualBond(rel, m, x) >= threshold);
+    [...cluster].every((x) => bond(m, x) >= threshold);
   const blocOf = new Map<EntityId, Set<EntityId>>();
   for (const { a, b } of edges) {
     const ba = blocOf.get(a);
@@ -131,9 +141,9 @@ export function detectBlocs(deps: BlocDeps): Bloc[] {
       if (loyaltyOf(m) >= BLOC.defectionLoyalty) continue;
       const inside = snapshot.filter((x) => x !== m);
       if (inside.length === 0) continue;
-      const weakestInside = Math.min(...inside.map((x) => mutualBond(rel, m, x)));
+      const weakestInside = Math.min(...inside.map((x) => bond(m, x)));
       const outside = active.filter((x) => x !== m && !cluster.has(x));
-      const bestOutside = outside.length ? Math.max(...outside.map((x) => mutualBond(rel, m, x))) : 0;
+      const bestOutside = outside.length ? Math.max(...outside.map((x) => bond(m, x))) : 0;
       if (bestOutside > weakestInside + BLOC.defectionMargin) {
         toDefect.push({ cluster, member: m });
       }
@@ -159,7 +169,7 @@ export function detectBlocs(deps: BlocDeps): Bloc[] {
     let cohesion = 1;
     for (let i = 0; i < members.length; i++) {
       for (let j = i + 1; j < members.length; j++) {
-        cohesion = Math.min(cohesion, mutualBond(rel, members[i]!, members[j]!));
+        cohesion = Math.min(cohesion, bond(members[i]!, members[j]!));
       }
     }
     const loyalties = members.map(loyaltyOf);
