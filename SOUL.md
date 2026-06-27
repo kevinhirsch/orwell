@@ -177,6 +177,16 @@ many parallel agents, not typing every edit myself.
     model ran it. The gates stub the narrator, so an LLM-behavioral "fix" (under-call belts, budgets,
     JSON-coaxing, the F14/F16 eviction-seam belts) is **NOT verified until driven against the real model**.
     Budget the live-env setup (lesson 17) into any such fix — it is not optional.
+20. **A live-verify agent MUST dump its full evidence back to the overseer before it dematerializes —
+    standing owner rule, every playtest, forever.** A delegate's worktree/tmp + its transcript are
+    reclaimed when the instance ends; if the evidence isn't in its FINAL REPORT to me, it's gone, and
+    a live-verify whose findings died with the agent was wasted. So EVERY live-verify/playtest brief
+    MUST end with: "Before you finish, paste your COMPLETE evidence inline in your final message —
+    per-fix PASS/FAIL/INCONCLUSIVE with the concrete GM text + engine state + tool-call/beatSeq trace,
+    any NEW defects with repro + raw telemetry, the exact env recipe + traps, and if you wrote a
+    debug-export file, BOTH its absolute path AND its key contents pasted inline (the path alone dies
+    with the worktree)." Don't accept a summarized verdict — require the raw telemetry verbatim. The
+    owner stated this explicitly (2026-06-27) and it applies to all future live-verify runs.
 
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,
