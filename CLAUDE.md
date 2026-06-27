@@ -71,6 +71,7 @@ are authoritative and reference each other as companions.
 | `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. `README.md` there holds the live per-feature **status index** and the **Amendments to shipped specs** table (implementers must pick those up). |
 | `docs/IMPLEMENTATION_QUEUE.md` | **Live work queue** — per-item implementation prompts (B/C/D/U/L-numbered lanes), dispatch order + dependencies, and the truest prose snapshot of what's done vs. remaining. |
 | `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). The 2026-06-11 **house-audit pattern** (real FE + real engine driven headless under Playwright, DOC-ONLY) produced `2026-06-11-dwe-window-audit.md` (windowing), `2026-06-11-refresh-persistence-audit.md` (every transient UI state × reload), and `2026-06-11-settings-wiring-audit.md` (every settings control × {wired, persisted, applied}). |
+| `docs/design/` | **UI design docs.** `liquid-glass/` is the visual language (glass morphism tokens, the `.ow-*` window kit, animation contracts) that all FE work must compose. `APPLE_GENIUS.md` is the UX reference tone. Read `docs/design/liquid-glass/` before any front-end UI change. |
 | `docs/legacy/BB_GameBible.md` | **Legacy reference only.** The old chat-prompt implementation being replaced. Source of the *concrete* mechanics, but its fixed player persona / names are illustrative — never hard-code them. Same rule for the vendored v1 transcripts in `docs/legacy/meta-feedback/`. |
 
 ## The non-negotiable mandate
@@ -302,6 +303,8 @@ them before touching the chat stream or the HUD.
   The **stall watchdog (`_startStallWatchdog`) is deliberately DISABLED** — the server-side stall
   detector + auto-continue loop-breaker supersede the old "still working?" banner; don't re-enable it.
 
+- **Most `frontend/` files are vendored Hermes infrastructure — not game-specific.** The game-specific Python surface is: `frontend/routes/orwell_routes.py` (game SSE, `/api/orwell/*`), `frontend/routes/chat_helpers.py` (casting framing, pre-emission guard), `frontend/routes/session_routes.py`, `frontend/src/agent_loop.py` (the narration loop + guardrails), `frontend/src/orwell_*.py` (cast authoring, prewarm, zeitgeist, sync ledger), and `frontend/tests/test_0*.py` + `test_orwell_*.py`. The other 50+ route files and most of `frontend/src/` are shared workspace infrastructure — edit them only if the game's change genuinely requires it.
+
 - **Run the WHOLE FE suite before pushing FE changes.** `cd frontend && python3 -m pytest tests/`
   (venv at `frontend/.venv`). Many gates are source-pinned convention checks (g15, the reasoning
   scrub, the render contract) that live outside obvious keywords — a `-k` subset can pass green while
@@ -428,6 +431,7 @@ core, then ports + in-memory adapters with Vault/God-Mode isolation green).
   live-Vault dump; see mandate #2). Never extend Vault exposure beyond it.
 - Don't mislabel player-witnessed events as off-screen/secret.
 - Don't let persisted detail degrade over time.
+- **Don't use `git stash` inside a worktree-isolated agent.** The `.git` stash store is shared across all concurrent worktrees. Multiple agents stashing simultaneously intermix entries; a `stash pop` can apply another agent's files to your tree silently. Use a temporary commit instead (`git commit -m wip`), then `git reset HEAD~1` when done.
 
 ## Building & testing
 
