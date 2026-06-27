@@ -112,11 +112,13 @@ describe("E55/C12 — live ceremony confessionals reach the record AND the soul"
       expect(c.hidden).toBe(true);
       expect(c.witnessSet.includes(PLAYER)).toBe(false);
     }
-    // E55: more than one beat confesses now — distinct triggers appear across the week.
+    // E55: more than one beat confesses now — distinct triggers appear across the week. 0089 made the
+    // ceremony confessional REACTIVE: it opens with the concrete recent beat and still names its trigger
+    // ("…— after the veto ceremony:"), so the trigger label now appears mid-line (case-insensitive scan).
     const triggers = new Set<string>();
     for (const c of confs) {
-      const m = c.content.match(/After (the [a-z ]+):/);
-      if (m) triggers.add(m[1]!);
+      const m = c.content.match(/after (the [a-z ]+):/i);
+      if (m) triggers.add(m[1]!.toLowerCase());
     }
     expect(triggers.size, `distinct confession triggers (saw: ${[...triggers].join(", ")})`).toBeGreaterThanOrEqual(2);
 

@@ -7,7 +7,7 @@ import { richOffscreenStretch } from "../engine/offscreen";
 import { scaleImpact, natureFoldImpact } from "../engine/relationshipConstants";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, gossipEdgeAffinity, GOSSIP } from "../engine/gossip";
-import { confessionalFor, recordConfessional } from "../engine/confessionals";
+import { confessionalFor, recordConfessional, selectRecentForConfessional } from "../engine/confessionals";
 import { nextHouseEvent } from "../engine/houseEvents";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
@@ -650,7 +650,20 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // reaches no one (player or admin); the player feels it only later through that NPC's behavior.
   if (scenes.length > 0) {
     const confessor = scenes[rng.int(scenes.length)]!.initiator;
-    recordConfessional(sandbox.engine.events, confessionalFor(confessor, ids, sandbox.engine.relationships, { player: PLAYER }), rng, clockNow);
+    // 0089 — the off-screen confessional REACTS to the confessor's OWN witnessed events too (the scenes
+    // they were just part of are already recorded this tick). `selectRecentForConfessional` bounds to
+    // `witnessedBy: confessor` and returns only Vault-safe class-keyed gists — never another houseguest's
+    // hidden read (mandate #2/#3). The tiebreak rng is DEDICATED (derived off confessor + clock + log
+    // size), never the shared society/vote stream `rng`, so the seeded calibration spine is untouched
+    // (the selection draws no rng at all unless two of the confessor's events fully tie).
+    const recentRng = new SeededRandom(hashSeed(`${core.seed ?? ""}:confessional-recent:${confessor}:${clockNow}:${before}`));
+    const recentEvents = selectRecentForConfessional(sandbox.engine.events.query(), confessor, clockNow, { rng: recentRng });
+    recordConfessional(
+      sandbox.engine.events,
+      confessionalFor(confessor, ids, sandbox.engine.relationships, { player: PLAYER, recentEvents }),
+      rng,
+      clockNow,
+    );
   }
 
   if (trigger === "player-turn" && ids.length > 0) {

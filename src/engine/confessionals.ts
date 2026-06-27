@@ -1,9 +1,11 @@
 import type { EventStore } from "../ports/EventStore";
 import type { RandomnessSource } from "../ports/RandomnessSource";
-import type { EntityId } from "../domain/event";
+import type { EntityId, GameEvent } from "../domain/event";
 import { PLAYER } from "../domain/ids";
 import type { SoulProvider } from "../ports/SoulProvider";
 import type { RelationshipModel } from "./relationships";
+import { CONFESSIONAL, salienceClassOf } from "./confessionalConstants";
+import type { SalienceClass } from "./confessionalConstants";
 
 /**
  * NPC Diary Room confessionals (feature 0040). A houseguest's private read of their
@@ -29,6 +31,22 @@ export interface Confessional {
 }
 
 /**
+ * A single Vault-safe FACT a reactive confessional reacts to (feature 0089). The caller has ALREADY
+ * selected this from the confessor's OWN witnessed events (`witnessedBy: npc`) and redacted it to this
+ * shape — so it carries the event's CLASS, the confessor's ROLE in it, and a class-keyed `gist`, and
+ * NEVER a raw number, another houseguest's sealed read, or the verbatim content of another participant.
+ * `confessionalFor` opens the line with the `gist` (the concrete beat the confessor lived) when present.
+ */
+export interface RecentEventFact {
+  /** The event's salience class (competition / ceremony / reveal / social / flavor). */
+  type: SalienceClass;
+  /** The confessor's role in the event: they initiated it, or merely witnessed it. */
+  role: "initiator" | "witness";
+  /** A Vault-safe, class-keyed phrase the confessional opens with — never a premise, never a number. */
+  gist: string;
+}
+
+/**
  * The structured context a confessional is composed FROM (audit E55): the beat that triggered it,
  * the confessor's soul state, and a seeded rng for phrasing — so confessionals vary across a
  * season (the 0048 unsealing payoff) instead of one canned line.
@@ -36,6 +54,16 @@ export interface Confessional {
 export interface ConfessionalContext {
   /** The triggering beat/scene, e.g. "the nomination ceremony" / "the veto ceremony". */
   trigger?: string;
+  /**
+   * Feature 0089 — the confessor's OWN recent witnessed events, already selected + redacted to
+   * Vault-safe gists by the caller (`selectRecentForConfessional`). When present and NON-EMPTY,
+   * `confessionalFor` opens the reaction with the concrete recent beat (a real Diary Room cut: "after
+   * the veto ceremony…") instead of the bare `trigger` label, then keeps the grounded target/ally read.
+   * ABSENT (or empty) ⇒ the composer falls back to today's `trigger` behavior, BYTE-IDENTICAL to 0040
+   * (additive, back-compatible). The facts come ONLY from the confessor's witness set — never a free
+   * Vault read — and carry no number/other-houseguest sealed state (mandate #2/#3).
+   */
+  recentEvents?: readonly RecentEventFact[];
   /** The confessor's hidden emotional state (0..1; 0.5 = calm) — colors the voice. */
   emotionalState?: number;
   /** Seeded phrasing variance. Omitted ⇒ the first template (deterministic, pre-E55-compatible). */
@@ -121,7 +149,22 @@ export function confessionalFor(
   const targetStr = target ? pick(TARGET_LINES).replace("{T}", target) : "I'm still reading the room";
   const allyStr = ally ? pick(ALLY_LINES).replace("{A}", ally) : "I'm not sure who to trust yet";
   const mood = ctx.emotionalState !== undefined ? MOOD_OF(ctx.emotionalState) : undefined;
-  const opening = ctx.trigger ? `After ${ctx.trigger}: ` : "";
+  // Feature 0089 — when the caller hands over the confessor's OWN recent witnessed events, the line
+  // OPENS with the concrete beat the engine selected (a real Diary Room reaction), then still names its
+  // `trigger` beat so the structured occasion stays discoverable. The gists are already Vault-safe +
+  // class-keyed (no number, no other-houseguest sealed read). With NO `recentEvents` the opening is
+  // EXACTLY the 0040 `trigger` opener ⇒ the whole `content` is BYTE-IDENTICAL to 0040 (the back-compat
+  // guarantee). The reacted facts NEVER assert an outcome the engine did not produce — they reference a
+  // CLASS of beat the confessor lived ("after that competition", "after where that ceremony left me"),
+  // so a reactive confessional can never fabricate a result (anti-sycophancy #3 / ADR 0005).
+  const reactedGists = [...new Set((ctx.recentEvents ?? []).slice(0, CONFESSIONAL.anchorCount).map((f) => f.gist))];
+  const reaction =
+    reactedGists.length > 0
+      ? `${reactedGists.join(", and ")}${ctx.trigger ? ` — after ${ctx.trigger}` : ""}: `
+      : ctx.trigger
+        ? `After ${ctx.trigger}: `
+        : "";
+  const opening = reaction;
   const moodStr = mood ? ` ${MOOD_LINES[mood]}.` : "";
   return {
     npc,
@@ -131,6 +174,58 @@ export function confessionalFor(
     ...(ctx.trigger ? { trigger: ctx.trigger } : {}),
     ...(mood ? { mood } : {}),
   };
+}
+
+/**
+ * Feature 0089 — the pure SELECTOR/RANKER for a reactive confessional. Given the recorded events and the
+ * confessor `npc`, it returns the top-N recent events THE CONFESSOR WITNESSED, redacted to Vault-safe
+ * `RecentEventFact` gists, for `confessionalFor` to open the reaction with.
+ *
+ * The Vault Wall is structural here (mandate #2): the selector keeps ONLY events whose witness set
+ * includes `npc` (`witnessedBy: npc`) — never another houseguest's hidden read, another's confessional,
+ * or an off-screen scene the confessor was not in — so a confessional reacts to *what this person
+ * lived*, never omniscient board truth. It returns no number and no other-houseguest sealed state: each
+ * fact is the event's CLASS + the confessor's ROLE + a class-keyed `gist` (`confessionalConstants.ts`).
+ *
+ * Anti-sycophancy (mandate #3): the ENGINE selects which events + their factual class from the recorded
+ * log; the model never selects or invents one. Determinism (0007): the ranking consumes NO rng beyond a
+ * single optional seeded tiebreak (`opts.rng`) for events that tie on BOTH salience AND recency — it
+ * draws on no shared stream, so the seeded society/competition/vote spine is untouched. Selection over
+ * EXISTING events only; with the same history + seed it returns the same facts.
+ */
+export function selectRecentForConfessional(
+  events: readonly GameEvent[],
+  npc: EntityId,
+  now: number,
+  opts: { window?: number; count?: number; rng?: RandomnessSource } = {},
+): RecentEventFact[] {
+  const window = opts.window ?? CONFESSIONAL.recencyWindow;
+  const count = opts.count ?? CONFESSIONAL.anchorCount;
+  // Witness-set bound (the crux): only what the confessor legitimately witnessed. We also drop the
+  // confessor's OWN confessionals — a confessional reacting to a prior confessional is self-referential
+  // noise (and we never re-voice another confessional's content). `idx` preserves the append order so
+  // recency is the original log position, not the post-filter position.
+  const witnessed = events
+    .map((ev, idx) => ({ ev, idx }))
+    .filter(({ ev }) => ev.witnessSet.includes(npc) && ev.type !== "confessional");
+  if (witnessed.length === 0) return [];
+  // Consider only the most-recent `window` events the confessor witnessed, then rank.
+  const recent = witnessed.slice(-window);
+  const ranked = recent
+    .map(({ ev, idx }) => {
+      const cls = salienceClassOf(ev);
+      return { ev, idx, cls, salience: CONFESSIONAL.salience[cls] ?? CONFESSIONAL.salience.flavor! };
+    })
+    .sort((a, b) => {
+      if (b.salience !== a.salience) return b.salience - a.salience; // more salient first
+      if (b.idx !== a.idx) return b.idx - a.idx; // then more recent (later in the log) first
+      return opts.rng ? opts.rng.int(2) * 2 - 1 : 0; // a true tie: seeded coin (no shared-stream draw)
+    });
+  void now; // accepted for symmetry with ts-based windows; recency is the log position here
+  return ranked.slice(0, count).map(({ ev, cls }) => {
+    const role: "initiator" | "witness" = ev.initiator === npc ? "initiator" : "witness";
+    return { type: cls, role, gist: CONFESSIONAL.gists[cls]![role] };
+  });
 }
 
 /**

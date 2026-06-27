@@ -300,6 +300,18 @@ export class BbWorld extends World {
   confSandboxA?: import("../../src/composition/registry").UserSandbox;
   confSandboxB?: import("../../src/composition/registry").UserSandbox;
 
+  // Reactive confessionals (0089) scratch state.
+  rcRegistry?: import("../../src/composition/registry").GameSessionRegistry;
+  rcRegistryB?: import("../../src/composition/registry").GameSessionRegistry;
+  rcUser?: string;
+  rcUserB?: string;
+  rcSandbox?: import("../../src/composition/registry").UserSandbox;
+  rcEvents?: GameEvent[];
+  rcRecentFacts?: import("../../src/engine/confessionals").RecentEventFact[];
+  rcConfessional?: import("../../src/engine/confessionals").Confessional;
+  rcConfRel?: RelationshipModel;
+  rcConfessor?: EntityId;
+
   // Endgame structure (0045) scratch state.
   egSession?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
   egState?: import("../../src/engine/liveSeason").LiveSeasonState;

@@ -36,7 +36,7 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
-import { involvedConfessionals, recordConfessionalToSoul } from "../../engine/confessionals";
+import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
 import type { ConfessionalContext } from "../../engine/confessionals";
 import { rankApproaches } from "../../engine/conversation";
 import { DECISION } from "../../engine/decisionConstants";
@@ -5082,11 +5082,22 @@ export class GameSessionAdapter implements GameSession {
     const at = this.confessorsFor(ev);
     if (!at) return;
     const everyone = [this.house.player.id, ...this.house.npcs.map((n) => n.id)];
-    const ctxFor = (npc: EntityId): ConfessionalContext => ({
-      trigger: at.trigger,
-      ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
-      rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`)),
-    });
+    // 0089 — the confessor's OWN witnessed events (the just-recorded ceremony beat is already in the
+    // log: `commit` records it via `onEvent` before this runs). `selectRecentForConfessional` filters
+    // to `witnessedBy: npc` itself and returns only Vault-safe class-keyed gists, so a confessional
+    // reacts to what THIS houseguest lived — never another's hidden read (mandate #2/#3). The seeded
+    // tiebreak rng is dedicated (same `confessional:` family), never the shared society/vote stream, so
+    // the calibration spine stays byte-identical (the selection draws no rng unless two events fully tie).
+    const allEvents = this.record?.events() ?? [];
+    const ctxFor = (npc: EntityId): ConfessionalContext => {
+      const recentRng = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`));
+      return {
+        trigger: at.trigger,
+        recentEvents: selectRecentForConfessional(allEvents, npc, allEvents.length, { rng: recentRng }),
+        ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
+        rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`)),
+      };
+    };
     for (const conf of involvedConfessionals(at.involved, everyone, this.rel, ctxFor)) {
       // witnessSet = [the confessing NPC] → hidden=true (the player is never a witness, 0002).
       this.onPlayerEvent(conf.content, [conf.npc], "confessional");
