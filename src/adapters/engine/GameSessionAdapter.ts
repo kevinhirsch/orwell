@@ -36,7 +36,7 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
-import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
+import { involvedConfessionals, recordConfessionalToSoul } from "../../engine/confessionals";
 import type { ConfessionalContext } from "../../engine/confessionals";
 import { rankApproaches } from "../../engine/conversation";
 import { DECISION } from "../../engine/decisionConstants";
@@ -596,14 +596,6 @@ export class GameSessionAdapter implements GameSession {
 
   setOnRestart(fn: (req: CreateCharacterReq) => GameStateView): void {
     this.onRestart = fn;
-  }
-
-  /** 0089 — provider for reading confessor-witnessed events to anchor reactive confessionals. */
-  private queryEvents?: (witnessedBy: EntityId) => GameEvent[];
-
-  /** 0089 — wire the event-store query so `recordCeremonyConfessionals` can read recent events. */
-  setEventsQuery(fn: (witnessedBy: EntityId) => GameEvent[]): void {
-    this.queryEvents = fn;
   }
 
   /**
@@ -5090,21 +5082,11 @@ export class GameSessionAdapter implements GameSession {
     const at = this.confessorsFor(ev);
     if (!at) return;
     const everyone = [this.house.player.id, ...this.house.npcs.map((n) => n.id)];
-    const ctxFor = (npc: EntityId): ConfessionalContext => {
-      const ctx: ConfessionalContext = {
-        trigger: at.trigger,
-        ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
-        rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`)),
-      };
-      // 0089: enrich with recent concrete events from the confessor's OWN witness set so the
-      // confessional reacts to a real beat ("after the veto ceremony…") — additive to 0040.
-      if (this.queryEvents) {
-        const witnessed = this.queryEvents(npc);
-        const recent = selectRecentForConfessional(witnessed, npc);
-        if (recent.length > 0) ctx.recentEvents = recent;
-      }
-      return ctx;
-    };
+    const ctxFor = (npc: EntityId): ConfessionalContext => ({
+      trigger: at.trigger,
+      ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
+      rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`)),
+    });
     for (const conf of involvedConfessionals(at.involved, everyone, this.rel, ctxFor)) {
       // witnessSet = [the confessing NPC] → hidden=true (the player is never a witness, 0002).
       this.onPlayerEvent(conf.content, [conf.npc], "confessional");

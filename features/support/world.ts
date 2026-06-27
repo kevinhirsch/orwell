@@ -299,17 +299,6 @@ export class BbWorld extends World {
   confUserSandbox?: import("../../src/composition/registry").UserSandbox;
   confSandboxA?: import("../../src/composition/registry").UserSandbox;
   confSandboxB?: import("../../src/composition/registry").UserSandbox;
-  // --- 0089 reactive confessionals scratch state ---
-  recentEventsArg?: import("../../src/engine/confessionals").ConfessionalRecentEvent[];
-  confessional0040?: import("../../src/engine/confessionals").Confessional;
-  confessionalB?: import("../../src/engine/confessionals").Confessional;
-  confRelB?: RelationshipModel;
-  confTrigger?: string;
-  confRng?: import("../../src/adapters/random/SeededRandom").SeededRandom;
-  npcEventStore?: import("../../src/adapters/inmemory/InMemoryEventStore").InMemoryEventStore;
-  confRecentEvents?: import("../../src/engine/confessionals").ConfessionalRecentEvent[];
-  reactiveEventStore?: import("../../src/adapters/inmemory/InMemoryEventStore").InMemoryEventStore;
-  reactiveConf?: import("../../src/engine/confessionals").Confessional;
 
   // Endgame structure (0045) scratch state.
   egSession?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;

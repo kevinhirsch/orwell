@@ -1,6 +1,6 @@
 import type { EventStore } from "../ports/EventStore";
 import type { RandomnessSource } from "../ports/RandomnessSource";
-import type { EntityId, GameEvent } from "../domain/event";
+import type { EntityId } from "../domain/event";
 import { PLAYER } from "../domain/ids";
 import type { SoulProvider } from "../ports/SoulProvider";
 import type { RelationshipModel } from "./relationships";
@@ -29,17 +29,6 @@ export interface Confessional {
 }
 
 /**
- * 0089 — a Vault-safe gist of a recent event a confessional REACTS to. The confessor's OWN witnessed
- * event, reduced to its type + the confessor's role in it + a type-derived phrase — never a number,
- * never another houseguest's hidden state, never anything outside the confessor's own witness set.
- */
-export interface ConfessionalRecentEvent {
-  type: string;
-  role: "initiator" | "participant";
-  gist: string;
-}
-
-/**
  * The structured context a confessional is composed FROM (audit E55): the beat that triggered it,
  * the confessor's soul state, and a seeded rng for phrasing — so confessionals vary across a
  * season (the 0048 unsealing payoff) instead of one canned line.
@@ -61,81 +50,6 @@ export interface ConfessionalContext {
    * the confessional stays Vault-only and reaches no one directly (the inverse player Diary Room, 0013).
    */
   player?: EntityId;
-  /**
-   * 0089 — recent concrete events the confessor WITNESSED, already selected + redacted by the caller
-   * (from the confessor's own witness set — never another's hidden state). When present, the
-   * confessional OPENS with a reaction to the top event ("After the veto ceremony…") before the
-   * standing target/ally read. ABSENT ⇒ byte-identical to 0040 (additive, back-compatible).
-   */
-  recentEvents?: ConfessionalRecentEvent[];
-}
-
-/** 0089 — max recent events per confessional (anchors the reaction). */
-const CONFESSIONAL_MAX_RECENT = 2;
-/** 0089 — lookback window: the last N events in the log to scan. */
-const CONFESSIONAL_RECENCY_WINDOW = 12;
-
-const EVENT_SALIENCE: Readonly<Record<string, number>> = {
-  nominations: 100,
-  "veto-ceremony": 100,
-  eviction: 100,
-  competition: 80,
-  conversation: 50,
-  "house-event": 30,
-};
-const SALIENCE_FLOOR = 20;
-
-/** Salience weight: ceremony > competition > conversation > ambient. Confessionals excluded. */
-function salienceWeight(type: string): number {
-  return EVENT_SALIENCE[type] ?? SALIENCE_FLOOR;
-}
-
-/** Vault-safe gist from event type — a short phrase, never another's hidden state. */
-function eventGist(type: string): string {
-  switch (type) {
-    case "nominations": return "the nomination ceremony";
-    case "veto-ceremony": return "the veto ceremony";
-    case "eviction": return "the eviction vote";
-    case "competition": return "the competition";
-    case "conversation": return "a conversation";
-    default: return `a ${type.replace(/-/g, " ")}`;
-  }
-}
-
-/**
- * 0089 — select the confessor's recent witnessed events, ranked by recency + salience, returning
- * top N as Vault-safe gists. The caller pre-filters events to the confessor's own witness set;
- * this function only ranks the already-filtered list. Pure + deterministic: same events + same npc
- * ⇒ same selection (recency breaks salience ties; no rng consumed). NEVER includes another's
- * hidden state — the events are the confessor's OWN witness set.
- */
-export function selectRecentForConfessional(
-  events: readonly GameEvent[],
-  npc: EntityId,
-  opts?: { maxEvents?: number; recencyWindow?: number },
-): ConfessionalRecentEvent[] {
-  const max = opts?.maxEvents ?? CONFESSIONAL_MAX_RECENT;
-  const window = opts?.recencyWindow ?? CONFESSIONAL_RECENCY_WINDOW;
-  const total = events.length;
-  if (total === 0) return [];
-
-  const start = Math.max(0, total - window);
-  const scored: Array<{ weight: number; idx: number; type: string; initiator: EntityId }> = [];
-  for (let i = start; i < total; i++) {
-    const e = events[i]!;
-    if (!e.witnessSet.includes(npc)) continue;
-    if (e.type === "confessional" || e.type === "house-event") continue;
-    scored.push({ weight: salienceWeight(e.type), idx: i, type: e.type, initiator: e.initiator });
-  }
-  if (scored.length === 0) return [];
-
-  scored.sort((a, b) => b.weight - a.weight || b.idx - a.idx);
-
-  return scored.slice(0, max).map((r) => ({
-    type: r.type,
-    role: r.initiator === npc ? "initiator" : "participant",
-    gist: eventGist(r.type),
-  }));
 }
 
 const MOOD_OF = (state: number): "rattled" | "steady" | "confident" =>
@@ -207,18 +121,8 @@ export function confessionalFor(
   const targetStr = target ? pick(TARGET_LINES).replace("{T}", target) : "I'm still reading the room";
   const allyStr = ally ? pick(ALLY_LINES).replace("{A}", ally) : "I'm not sure who to trust yet";
   const mood = ctx.emotionalState !== undefined ? MOOD_OF(ctx.emotionalState) : undefined;
+  const opening = ctx.trigger ? `After ${ctx.trigger}: ` : "";
   const moodStr = mood ? ` ${MOOD_LINES[mood]}.` : "";
-  // 0089: when recentEvents present, open with a reaction to the concrete beat ("After the veto ceremony…")
-  // instead of the static trigger label. Falls back to 0040 trigger-label when ABSENT (byte-identical).
-  const opening = ctx.recentEvents && ctx.recentEvents.length > 0
-    ? (() => {
-        const top = ctx.recentEvents[0]!;
-        const rolePhrase = top.role === "initiator" ? "I was at the center of" : "I witnessed";
-        // 0040 back-compat: still include the trigger label as context, but the reaction leads
-        const tail = ctx.trigger ? ` during ${ctx.trigger}` : "";
-        return `After ${top.gist} (${rolePhrase})${tail}: `;
-      })()
-    : ctx.trigger ? `After ${ctx.trigger}: ` : "";
   return {
     npc,
     target,

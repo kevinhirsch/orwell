@@ -1,6 +1,6 @@
 # 0089 — Reactive confessionals (the Diary Room remembers what just happened)
 
-> **Status:** ✅ **BUILT (2026-06-27) · BDD-gated in `cucumber.cjs`.** Tracks issue **#866**.
+> **Status:** 📝 **SPEC (priority-ordered; not yet built).** Tracks issue **#866**.
 > **Depends on:** 0040 (NPC confessionals — `confessionalFor` / `recordConfessional` / `involvedConfessionals`
 > + the `ConfessionalContext.trigger` this generalizes), 0002 (event visibility & the witness-derived
 > hidden flag — confessionals are `witnessSet:[npc]`, never the player), 0017/0026 (the relationship reads a

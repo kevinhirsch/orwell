@@ -302,10 +302,6 @@ function buildUserSandbox(user = "default"): UserSandbox {
     });
     return id;
   });
-  // 0089 — confessional reactive-events query: read the confessor's own witnessed events
-  // so the confessional reacts to a concrete recent beat ("after the veto ceremony…").
-  session.setEventsQuery((npc) => engine.events.query({ witnessedBy: npc }));
-
   const deps = { player: outward.player, admin: outward.admin, summary: outward.summary, commands, session };
   // B58/audit E5: the admin's inspectable state mirrors the LIVE session's public facts (week,
   // phase, roles-only roster) — refreshed on every persisted mutation, never a never-updated stub.
