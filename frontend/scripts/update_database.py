@@ -31,6 +31,13 @@ def add_column_sqlite(db_path, table_name, column_name, column_type, default_val
     Add a column to a SQLite table by creating a new table, copying data, and renaming.
     This is necessary because SQLite has limited ALTER TABLE support.
     """
+    import re
+    
+    if not re.match(r'^[a-zA-Z0-9_]+$', str(table_name)):
+        raise ValueError("Invalid input")
+    if not re.match(r'^[a-zA-Z0-9_]+$', str(column_name)):
+        raise ValueError("Invalid input")
+    
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -38,6 +45,10 @@ def add_column_sqlite(db_path, table_name, column_name, column_type, default_val
     cursor.execute(f"PRAGMA table_info({table_name})")
     columns = cursor.fetchall()
     column_names = [col[1] for col in columns]
+    
+    for col_name in column_names:
+        if not re.match(r'^[a-zA-Z0-9_]+$', str(col_name)):
+            raise ValueError("Invalid input")
     
     # Create new table with additional column
     new_table_name = f"{table_name}_new"
