@@ -1,6 +1,6 @@
 # 0099 — Secrets as a tradeable currency (information becomes diplomacy)
 
-> **Status:** 🟡 **PO-REVIEW SPEC — needs owner rulings before build (see § "PO review" below).**
+> **Status:** 🟢 **PO REVIEW RESOLVED (owner, 2026-06-27) — BUILD-READY.** Build TOGETHER with 0093 (#862) as one *secrets-as-power* mechanic (leverage / expose / **trade**); **deception + player bluff first-class**. See § "PO review" + `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #880.
 > Tracks **#880**. This is a *design proposal awaiting decisions*; it is the **sibling / extension of
 > 0093** (secrets as strategic levers) and **very likely shares one build spec with 0093** — "learn →
 > leverage → expose → **trade**" is one mechanic, and 0099 should be specced/built **alongside 0093**

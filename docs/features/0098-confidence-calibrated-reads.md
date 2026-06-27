@@ -1,10 +1,10 @@
 # 0098 — Confidence-calibrated reads (bold correct reads pay off; blind faith burns)
 
-> **Status:** 🟕 **SPEC (drafted 2026-06-25) — PO REVIEW + CALIBRATION-SENSITIVE.** Design note +
-> executable `.feature`. Not yet built. **This spec touches the calibration spine** (the seeded
-> competition/eviction distributions) and so carries a prominent **"PO review — owner rulings
-> needed"** section below and a load-bearing default-off / byte-identical guarantee. It must be
-> defended by the heavy sims (`juryReach` / the calibration gradient / the UAT) before it ships.
+> **Status:** ❄️ **FROZEN — parked by owner (2026-06-27); preserved, not built. #879 closed *not planned* (reopenable).**
+> Owner ruling + **standing principle for all future specs:** a player input must never modulate a seeded
+> outcome distribution — not the direction, and **not even the variance**. The certainty is the human's to
+> feel; the game must not model "how sure you are" and let it touch outcomes. See
+> `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27). The original design note + `.feature` follow unchanged.
 > **Builds on (does NOT duplicate):** the 0002 belief model — every belief the player holds already
 > carries a per-belief **`confidence`** (and a `distortion`) on `KnowledgeFact`
 > (`src/ports/KnowledgeService.ts`, lodged by `src/engine/gossip.ts`'s diffusion / decay and by

@@ -1,6 +1,6 @@
 # 0102 — The Day-1 experience (the first session is the first move of the social game)
 
-> **Status:** 🟡 **PO-REVIEW SPEC — design proposal; needs owner rulings before build (see § "PO review").**
+> **Status:** 🟢 **PO REVIEW RESOLVED (owner, 2026-06-27) — BUILD-READY.** Category-level casting strategy (no kill-list); **champagne-circle premiere** (mingle → circle → mingle → first HOH); three sequenced PRs; Vault-free needle. See § "PO review" + `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #875.
 > Tracks the first-run → end-of-day-1 audit (`docs/audits` / `scratchpad/audit_day1/AUDIT_REPORT.md`) and
 > its umbrella **#875**. This is the **coherent design** over five already-filed sub-issues — it does not
 > introduce a parallel system; it sequences and constrains them as **one first-session experience** rather
