@@ -301,9 +301,13 @@ def _read(*parts):
 def test_agent_loop_calls_post_turn_desync_check_in_live_path():
     src = _read("src", "agent_loop.py")
     assert "record_post_turn_desync_check(" in src
-    # It rides the finished live-game turn, guarded by _is_live_game + owner, fail-open.
+    # F16 (#1014): the desync layer rides the finished live-game turn guarded on `_is_live_game`
+    # ALONE (no longer `and owner`) — so it fires single-tenant (`owner=None` under AUTH_ENABLED=false)
+    # too. Fail-open.
     call = src.index("record_post_turn_desync_check(")
-    head = src.rindex("if _is_live_game and owner:", 0, call)
+    head = src.rindex("if _is_live_game:", 0, call)
+    # The gate guarding this call must NOT also require `owner` (that made it inert single-tenant).
+    assert "if _is_live_game and owner:" not in src[head:call]
     assert "try:" in src[head:call]
     assert "except Exception" in src[call:call + 600]
 

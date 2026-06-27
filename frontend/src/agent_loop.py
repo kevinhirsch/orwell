@@ -2769,10 +2769,18 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
 
     ADR 0005 principle #1 (hard): jurisdiction is closed-set board claims ONLY. Sentences with no
     closed-set claim language never reach the async verify — they are kept untouched, delimiters and
-    all (creative/social prose is never held). Fail-open by construction: no owner, or any hiccup,
+    all (creative/social prose is never held). Fail-open by construction: absent text, or any hiccup,
     returns the text unchanged. Granularity is the SENTENCE — never the whole chunk — so a suspect
-    sentence is dropped while its neighbours still stream live."""
-    if not text or not owner:
+    sentence is dropped while its neighbours still stream live.
+
+    F16 (#1014): the guard MUST fire single-tenant too. Under `AUTH_ENABLED=false` (a legitimate home
+    deploy), `owner` is None on every turn — yet the live board still exists. The downstream
+    `chat_helpers` screening already resolves the canonical game-session id via `_desync_key` (#1045)
+    for its per-turn stores AND reads the live board with `user=None`, so it works with no `owner`. We
+    therefore NO LONGER bail on a falsy `owner` — only on genuinely-absent text. The cheap
+    `_sentence_has_closed_set_claim` pre-filter below still keeps every non-closed-set sentence off the
+    screening path, so the open set is untouched and a claim-free turn streams byte-identically."""
+    if not text:
         return text
     try:
         from routes import chat_helpers
@@ -5762,14 +5770,33 @@ async def stream_agent_loop(
     # early), the check stashes a re-ground directive that apply_game_framing injects NEXT turn.
     # The pending-barrier catches narrating past an open PLAYER decision; this catches narrating
     # past an advanceGame beat with no pending. Once per turn, fail-open — never breaks the turn.
-    if _is_live_game and owner:
+    #
+    # F16 (#1014): the two desync layers (this board check + the 0076 presence check below) fire on
+    # `_is_live_game` REGARDLESS of `owner`. Under `AUTH_ENABLED=false` (single-tenant home deploy)
+    # `owner` is None every turn, yet the live board exists — and the helpers key their per-turn stores
+    # via `_desync_key` (#1045) and read the board with `user=None`, so they function with no owner.
+    # Gating the WHOLE desync spine on `owner` made it inert single-tenant (a premature vote tally
+    # streamed un-held). The non-desync belts below stay `owner`-gated (unchanged scope).
+    if _is_live_game:
+        _turn_narration_full = "\n".join(t for t in round_texts if t)
         try:
             from routes.chat_helpers import record_post_turn_desync_check
-            _turn_narration_full = "\n".join(t for t in round_texts if t)
             await record_post_turn_desync_check(owner, _turn_narration_full)
         except Exception as _desync_err:
             logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
 
+        # 0076 — the PRESENCE/IDENTITY desync guard: catch the narration staging an off-scene or
+        # evicted houseguest as acting in the player's scene (the "invented/teleported room" class).
+        # Closed-set only, post-turn, gentle next-turn re-ground (combines with the board check's).
+        # Fires single-tenant too (F16 #1014) — `user=None` reads the live board, stores key on
+        # `_desync_key`.
+        try:
+            from routes.chat_helpers import record_post_turn_presence_check
+            await record_post_turn_presence_check(owner, _turn_narration_full)
+        except Exception as _pres_err:
+            logger.warning(f"[orwell] post-turn presence check failed: {_pres_err}")
+
+    if _is_live_game and owner:
         # F14 (#1013) — the SURFACE-THE-PENDING belt. The eviction sub-loop wedges because the model
         # narrates "X has been evicted" with NO mutating tool call: it never calls submitDecision (so
         # the per-tool `orwell:pending` seam in chat.js never fires) and never advanceGame's (so the
@@ -5794,15 +5821,6 @@ async def stream_agent_loop(
                     yield f'data: {json.dumps({"type": "orwell_pending", "pending": _pending})}\n\n'
         except Exception as _pend_err:
             logger.warning(f"[orwell] surface-the-pending belt skipped: {_pend_err}")
-
-        # 0076 — the PRESENCE/IDENTITY desync guard: catch the narration staging an off-scene or
-        # evicted houseguest as acting in the player's scene (the "invented/teleported room" class).
-        # Closed-set only, post-turn, gentle next-turn re-ground (combines with the board check's).
-        try:
-            from routes.chat_helpers import record_post_turn_presence_check
-            await record_post_turn_presence_check(owner, _turn_narration_full)
-        except Exception as _pres_err:
-            logger.warning(f"[orwell] post-turn presence check failed: {_pres_err}")
 
         # NARR-3 (#613) — the INVENTED-HOUSEGUEST roster-validation backstop: catch the narration
         # staging a houseguest name that is on NEITHER the active nor the out-of-house roster (an
