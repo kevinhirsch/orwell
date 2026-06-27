@@ -48,12 +48,21 @@ def test_987_opener_awaits_converge_and_bails_before_sending_the_cue():
     assert "await _convergeOnCanonicalGame()" in seg, (
         "the opener must await the canonical-game probe before firing the kickoff"
     )
-    # the converge+bail happens BEFORE the OPEN_GAME_LINE cue is sent (ordering is the whole fix)
+    # the converge+bail happens BEFORE the OPEN_GAME_LINE cue is dispatched (ordering is the whole fix).
+    # #967 live re-fix: the actual send now routes through the shared `_sendCueWithBackoff` kernel, so the
+    # opener DISPATCHES the cue via `_sendCueWithBackoff({ line: OPEN_GAME_LINE … })` (the literal
+    # `sendHiddenCue(OPEN_GAME_LINE)` moved into the kernel). The ordering invariant is unchanged: the
+    # canonical-exists converge must precede the cue dispatch.
     converge_at = seg.index("await _convergeOnCanonicalGame()")
-    cue_at = seg.index("sendHiddenCue(OPEN_GAME_LINE)")
+    cue_at = seg.index("OPEN_GAME_LINE")
     assert converge_at < cue_at, (
         "the canonical-exists guard must run BEFORE the kickoff cue, or the duplicate session is "
         "already materialized by the time we converge (the exact #987 race)"
+    )
+    # the opener dispatches through the robust backoff kernel (the live re-fix), not a single-shot send
+    assert "_sendCueWithBackoff" in seg, (
+        "the opener must dispatch the cue through the retrying _sendCueWithBackoff kernel so a busy "
+        "stream / unready send seam re-schedules instead of single-shot-dropping (#967 live re-fix)"
     )
     # references the issue for traceability, and keeps the existing once/seat guards intact
     assert "#987" in seg
