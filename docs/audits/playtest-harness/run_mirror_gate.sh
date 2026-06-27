@@ -15,6 +15,7 @@ LOGS="$SANDBOX/logs"; mkdir -p "$LOGS"
 ENGINE_PORT=8765; FE_PORT=7000; FAKE_PORT=8011
 ADMIN_USER=admin; ADMIN_PW="mirror-gate-pw"   # stable throwaway local admin (never committed)
 FE_DATA="$ROOT/frontend/data"                 # the dir the app actually reads (auth.json is hardcoded data/auth.json)
+LIVE="${MIRROR_LIVE:-}"                        # MIRROR_LIVE=1 → real OpenRouter model (env ORWELL_TEST_OPENROUTER_KEY); else the deterministic fake
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export PW_CHROMIUM=/opt/pw-browsers/chromium
 export BASE_URL="http://127.0.0.1:$FE_PORT"; export ENGINE_URL="http://127.0.0.1:$ENGINE_PORT"
@@ -50,10 +51,15 @@ rm -rf "$SANDBOX/engine-data"; mkdir -p "$SANDBOX/engine-data"
     exec node dist/main.js >"$LOGS/engine.log" 2>&1 ) & PIDS+=($!)
 wait_http "$ENGINE_URL/health" engine || { tail -20 "$LOGS/engine.log"; exit 1; }
 
-# 2) deterministic fake model
-say "2) fake model :$FAKE_PORT"
-( FAKE_MODEL_PORT=$FAKE_PORT exec node "$HARNESS/fake_model_server.mjs" >"$LOGS/fake.log" 2>&1 ) & PIDS+=($!)
-wait_http "http://127.0.0.1:$FAKE_PORT/v1/models" fake-model || { tail "$LOGS/fake.log"; exit 1; }
+# 2) model: the deterministic fake (default) OR a real provider for the live pre-merge pass
+if [ -z "$LIVE" ]; then
+  say "2) fake model :$FAKE_PORT"
+  ( FAKE_MODEL_PORT=$FAKE_PORT exec node "$HARNESS/fake_model_server.mjs" >"$LOGS/fake.log" 2>&1 ) & PIDS+=($!)
+  wait_http "http://127.0.0.1:$FAKE_PORT/v1/models" fake-model || { tail "$LOGS/fake.log"; exit 1; }
+else
+  say "2) LIVE model (real provider; fake skipped)"
+  [ -n "${ORWELL_TEST_OPENROUTER_KEY:-}" ] || { echo "!! MIRROR_LIVE=1 needs ORWELL_TEST_OPENROUTER_KEY in the env (runtime-only)"; exit 1; }
+fi
 
 # 3) front-end (auth ON + admin account → endpoints get owner=admin, dodging the owner-NULL 400 trap)
 say "3) front-end :$FE_PORT"
@@ -67,18 +73,23 @@ rm -f "$FE_DATA/auth.json" "$FE_DATA/sessions.json" "$FE_DATA/app.db" "$FE_DATA/
     exec .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port $FE_PORT >"$LOGS/fe.log" 2>&1 ) & PIDS+=($!)
 wait_http "$BASE_URL/login" frontend || { tail -30 "$LOGS/fe.log"; exit 1; }
 
-# 4) admin login + point the default model at the fake server
-say "4) configure model → fake server"
+# 4) admin login + point the default model at the fake server (or the real provider when LIVE)
+if [ -z "$LIVE" ]; then
+  EP_NAME=Fake;       EP_BASE="http://127.0.0.1:$FAKE_PORT/v1";   EP_KEY=fake-key;                        EP_MODEL="fake/echo-stream"
+else
+  EP_NAME=OpenRouter; EP_BASE="https://openrouter.ai/api/v1";     EP_KEY="$ORWELL_TEST_OPENROUTER_KEY";    EP_MODEL="${MIRROR_LIVE_MODEL:-deepseek/deepseek-v4-pro}"
+fi
+say "4) configure model → $EP_NAME ($EP_MODEL)"
 CK="$SANDBOX/cookies.txt"
 curl -s -c "$CK" -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
   -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PW\"}" -o "$LOGS/login.json"
 EP=$(curl -s -b "$CK" -X POST "$BASE_URL/api/model-endpoints" \
-  -F "name=Fake" -F "base_url=http://127.0.0.1:$FAKE_PORT/v1" -F "api_key=fake-key" \
+  -F "name=$EP_NAME" -F "base_url=$EP_BASE" -F "api_key=$EP_KEY" \
   -F "endpoint_kind=api" -F "model_type=llm" -F "require_models=true" | tee "$LOGS/endpoint.json" \
   | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).id||'')}catch(_){console.log('')}})")
 echo "endpoint id: ${EP:-<none>}"
 curl -s -b "$CK" -X POST "$BASE_URL/api/auth/settings" -H 'Content-Type: application/json' \
-  -d "{\"default_endpoint_id\":\"$EP\",\"default_model\":\"fake/echo-stream\",\"default_model_fallbacks\":[]}" -o "$LOGS/settings.json"
+  -d "{\"default_endpoint_id\":\"$EP\",\"default_model\":\"$EP_MODEL\",\"default_model_fallbacks\":[]}" -o "$LOGS/settings.json"
 curl -s -b "$CK" "$BASE_URL/api/default-chat" -o "$LOGS/default-chat.json"; echo "default-chat: $(cat "$LOGS/default-chat.json")"
 
 # 5) seed a STARTED season (debug door) so canonical keying engages and B mirrors live
