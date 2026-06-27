@@ -64,6 +64,17 @@ describe("discloseTrue — only `full` crosses the whole secret (Vault Wall by t
     expect(tease).not.toContain("4,000");           // the premise never crosses at tease
     expect(tease).not.toContain("brother");
   });
+
+  it("partial withholds even a TERSE single-clause secret (the blur fallback — never the whole premise)", () => {
+    // The generated cast's motives are one-line phrases with no number/clause for the redactor to drop;
+    // without the fallback, `partial` would equal `full`. The fallback keeps only the leading gist.
+    const terse: HiddenElement = { kind: "secret-motive", detail: "is here for redemption after a public failure" };
+    const partial = discloseTrue(terse, "partial");
+    expect(partial).not.toBe(terse.detail);                  // the whole premise never crosses at partial
+    expect(partial.length).toBeLessThan(terse.detail.length);
+    expect(terse.detail.startsWith(partial)).toBe(true);     // still grounded in the real secret's opening
+    expect(discloseTrue(terse, "full")).toBe(terse.detail);  // only `full` crosses the whole thing
+  });
 });
 
 describe("lies (owner steer #3) — strategic, capped, and never a real leak", () => {
