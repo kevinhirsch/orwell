@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import sys
 
@@ -117,6 +118,9 @@ def export_model_endpoints(path: str) -> list[dict]:
         ).fetchone():
             return []
         cols = _table_columns(conn, "model_endpoints")
+        for col in cols:
+            if not re.match(r'^[a-zA-Z0-9_]+$', str(col)):
+                raise ValueError("Invalid input")
         out = []
         for row in conn.execute(f"SELECT {', '.join(cols)} FROM model_endpoints").fetchall():
             out.append(dict(zip(cols, row)))
@@ -176,6 +180,9 @@ def rebuild_db_with_endpoints(path: str, rows: list[dict], columns: list[str]) -
         # A minimal, app-compatible model_endpoints schema. The app's SQLAlchemy
         # create_all + migrations will reconcile/extend it on next boot; we only need the
         # columns we are carrying to round-trip. Use the exported column set verbatim.
+        for col in columns:
+            if not re.match(r'^[a-zA-Z0-9_]+$', str(col)):
+                raise ValueError("Invalid input")
         col_defs = ", ".join(f'"{c}" TEXT' for c in columns)
         conn.execute(f'CREATE TABLE model_endpoints ({col_defs})')
         placeholders = ", ".join("?" for _ in columns)

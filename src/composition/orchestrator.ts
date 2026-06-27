@@ -534,9 +534,20 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
         // PV1 (#1029): the player may be NAMED as a SUBJECT of off-screen NPC cognition (never a
         // witness/partner — they are not in `npcs`). Reaches the player only via gossip/pathway.
         playerSubject: PLAYER,
+        // 0087: when the trajectory layer is ON, the directed arc's hidden momentum TILTS this scene's
+        // nature weights toward continuing the arc (a curdling pair clashes more). Passed ONLY when enabled
+        // so the off-screen call is byte-identical to the pre-feature stretch when off; the tilt adds NO
+        // rng (it re-weights the SAME single nature draw), so the seeded competition/vote spine stays in
+        // phase even with it on.
+        ...(sandbox.session.trajectoriesEnabledNow()
+          ? { trajectoryOf: (a: EntityId, b: EntityId) => sandbox.session.trajectoryOf(a, b) }
+          : {}),
         ...(occupancy ? { occupancy } : {}),
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society
+  // 0087: the directed pairs that folded a scene THIS tick keep their freshly-built momentum; every other
+  // tracked arc decays toward steady afterwards (the neglect cadence). Empty + unused when the layer is off.
+  const touchedTrajectories = new Set<string>();
   for (const s of scenes) {
     // 0066 Phase-2: a tired INITIATOR sways the partner LESS (reduced effectiveness, never a personality
     // change). Scale is 1 when the clock is off ⇒ the fold is byte-identical to the calibration spine for
@@ -563,6 +574,11 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
     // 0041 (the linchpin pays off): the scene also deepens the initiator's soul — their arc accrues
     // and their mood drifts by the scene's nature, so the house's souls evolve BETWEEN turns (0038).
     sandbox.session.recordOffscreenScene(s.initiator, s.partner, s.type); // E50 — both roles evolve
+    // 0087: fold the scene into the directed `initiator→partner` arc's hidden MOMENTUM (after the
+    // relationship fold). Engine-side + pure (no rng): a no-op when the trajectory layer is off ⇒ the
+    // calibration spine is untouched; when on, it updates the momentum that biases the NEXT tick's natures.
+    sandbox.session.recordTrajectoryFold(s.initiator, s.partner, s.type);
+    touchedTrajectories.add(`${s.initiator}->${s.partner}`);
     // 0049: the scene happens WHERE its initiator is; anyone one room over — INCLUDING the player —
     // may catch a piece of it. A successful roll is a real, traceable `overheard:` pathway (0002),
     // partial and lower-confidence: eavesdropping is information-gathering, never narrative vibes.
@@ -577,6 +593,10 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // 0070 — register this tick's scene ids with the session so `getOffscreenSceneSkeletons` returns
   // the CURRENT batch (transient; refreshed every tick; the event store is the durable source).
   sandbox.session.notifyOffscreenTick(scenes.map((s) => s.event.id));
+
+  // 0087: decay every directed arc NOT fed this tick toward steady (the neglect cadence, mirroring 0026's
+  // edge decay) — an unfed arc reverts to flat. Pure + no rng; a no-op when the trajectory layer is off.
+  sandbox.session.decayUntouchedTrajectories(touchedTrajectories);
 
   // 0085 B2 — advance the live campaign layer one tick (form/advance/re-plan + diffuse knownTo). SELF-
   // GATED: a no-op (and zero draws) unless campaigns are enabled (ORWELL_CAMPAIGNS=1), so the calibration

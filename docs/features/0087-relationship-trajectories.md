@@ -1,7 +1,25 @@
 # 0087 — Relationship trajectories (a bond that warms or curdles, with momentum)
 
-> **Status:** 🟡 **SPEC ONLY (drafted 2026-06-25).** Design note + executable `.feature`; not yet
-> wired into `cucumber.cjs`, the README index, or any source. Tracks #863.
+> **Status:** ✅ **BUILT (2026-06-27).** Design note + executable `.feature`, wired into `cucumber.cjs`
+> and green. Source: `src/engine/trajectory.ts` (the pure `Trajectory` / `deriveTrajectory` /
+> `decayTrajectory` / `tiltNatureWeights`) + `src/engine/trajectoryConstants.ts` (the single tunable);
+> the optional `trajectoryOf` dep on `richOffscreenStretch` (`src/engine/offscreen.ts`); the momentum
+> store + per-pair fold ring buffers + persistence on `GameSessionAdapter`; and the off-screen-tick wiring
+> in `src/composition/orchestrator.ts`. Opt-in behind the **dedicated `ORWELL_TRAJECTORIES` flag**
+> (default OFF) so neutrality is provable in isolation. Gates: `tests/unit/trajectoryOutcomeNeutral.test.ts`
+> (the byte-identity / draw-stream battery), `tests/unit/trajectory0087.test.ts` (the pure derivation +
+> tilt), `tests/unit/trajectoryWiring0087.test.ts` (wiring + persistence + the Vault-wall byte-identity
+> proof), and the `juryReach` / UAT spines (re-verified byte-identical with the flag off). Tracks #863.
+>
+> **Open questions resolved at build (per §"Open questions / defaults"):** (1) the flag — a **dedicated
+> `ORWELL_TRAJECTORIES`** (not a reuse of `ORWELL_CAMPAIGNS`), so the calibration spine is provably
+> byte-identical with trajectories alone disabled; (2) recency window 4 folds, momentum building per
+> consistent fold and **spiking on betrayal**, decaying at the 0026 neglect cadence; (3) a tight,
+> momentum-scaled tilt cap (≤60% of a nature's own weight at full momentum) so off-arc beats stay
+> possible (criterion 2); (4) **`NPC→player` trajectories YES** — engine-computed, behavior-only, never
+> shown (the directed `recordTrajectoryFold` keys any `a→b` pair, the player included); the player's read
+> of any NPC stays purely human-driven; (5) trajectories do **not** feed 0086 drives yet (a later pass —
+> this feature only exposes the layer).
 > **Depends on:** 0002 (the relationship model — the directed graded edges a trajectory rides on),
 > 0017/0026 (the relationship math + the single `relationshipConstants` tunable), 0023 (the hidden
 > consequence/memory fold a trajectory accumulates from), 0038/0078 (the off-screen society redesign
