@@ -186,7 +186,19 @@ many parallel agents, not typing every edit myself.
     any NEW defects with repro + raw telemetry, the exact env recipe + traps, and if you wrote a
     debug-export file, BOTH its absolute path AND its key contents pasted inline (the path alone dies
     with the worktree)." Don't accept a summarized verdict — require the raw telemetry verbatim. The
-    owner stated this explicitly (2026-06-27) and it applies to all future live-verify runs.
+    owner stated this explicitly (2026-06-27) and it applies to all future live-verify runs. *(Worked
+    perfectly the first time it was enforced: the consolidating-verify dump gave 8 per-fix verdicts + 3
+    new defects + the env recipe inline, which is how F16/#1045 was caught still-inert and #1044 caught
+    at 3/15.)*
+21. **NEVER `git stash` inside a worktree-agent — the `.git` stash store is SHARED across concurrent
+    worktrees.** Three agents in one campaign (the chat-UI, casting-UX, and Diary-Room batches) each ran
+    `git stash` to characterize a flaky test against clean main; the shared `refs/stash` intermixed/
+    consumed another live worktree-agent's stash, and one agent's `stash pop` applied FOREIGN files
+    (another batch's edits leaked into its tree). Each recovered (the committed diff was clean — verify
+    with `git diff origin/main..HEAD --stat`, NOT `git diff origin/main` which includes the dirty tree),
+    but it's a latent footgun. EVERY worktree-agent brief must say: "Do NOT use `git stash` in this
+    worktree; to compare against clean main use `git diff origin/main..HEAD` or a throwaway clone." And as
+    overseer, ALWAYS verify a delegate branch with the committed-only diff before pushing.
 
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,
