@@ -75,6 +75,7 @@ module.exports = {
       "docs/features/0091-trigger-secrets-house-events.feature",
       "docs/features/0092-secret-pacing-drip.feature",
       "docs/features/0100-jury-grudge-book.feature",
+      "docs/features/0104-season-notoriety.feature",
       "docs/features/0105-suspicion-and-mood-anchoring.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],

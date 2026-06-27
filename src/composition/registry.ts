@@ -22,6 +22,9 @@ import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
 import type { SummaryService } from "../services/SummaryService";
 import type { UserSaveStore } from "../ports/UserSaveStore";
+import type { UserNotorietyStore } from "../ports/UserNotorietyStore";
+import { InMemoryUserNotorietyStore } from "../adapters/engine/FileUserNotorietyStore";
+import { deriveNotoriety } from "../engine/notoriety";
 import type { PreSeedNextSeasonReq, PreSeedNextSeasonView } from "../ports/GameSession";
 import { SNAPSHOT_VERSION, snapshotCompatible } from "../engine/sessionSnapshot";
 import type { SessionSnapshot } from "../engine/sessionSnapshot";
@@ -425,8 +428,21 @@ export class GameSessionRegistry {
    * `sandboxFor` recalls the user's saved game on first build, and every mutation
    * saves it. With no store, the registry is purely in-memory (the prior behavior).
    */
-  constructor(private readonly saveStore?: UserSaveStore, opts: { maxResident?: number } = {}) {
+  /**
+   * 0104 — account-level NOTORIETY store (per-user; never a cross-user read, R3). Defaults to a shared
+   * in-memory store so the feature works in tests/runtime without explicit wiring; the durable
+   * `FileUserNotorietyStore` is injected by the runtime when a save store is composed. SEPARATE from
+   * `saveStore` so the season-restart save rotation never touches it (account reputation survives the
+   * cutover by construction, R4).
+   */
+  private readonly notorietyStore: UserNotorietyStore;
+
+  constructor(
+    private readonly saveStore?: UserSaveStore,
+    opts: { maxResident?: number; notorietyStore?: UserNotorietyStore } = {},
+  ) {
     this.maxResident = Math.max(1, opts.maxResident ?? GameSessionRegistry.DEFAULT_MAX_RESIDENT);
+    this.notorietyStore = opts.notorietyStore ?? new InMemoryUserNotorietyStore();
   }
 
   /** R3 — invalidate the user's cached snapshot: advance the rev so the next export recomputes. */
@@ -538,6 +554,13 @@ export class GameSessionRegistry {
     // rotated, a clean sandbox — and season 2 is created THERE. Two doors, one hinge.
     sb.session.setOnRestart((req) => {
       const fresh = this.resetUser(user);
+      // 0104 — the DIEGETIC opt-in (R4): the player returns as the SAME character (`carriesNotoriety`,
+      // set by the adapter from `keepCharacter`) ⇒ carry their accumulated NOTORIETY into the new cast's
+      // day-one reads. A NEW character carries NOTHING ⇒ `seedFirstImpressions` is byte-identical (the
+      // clean slate). Per-user read (R3): `read(user)` returns ONLY this physical user's own reputation,
+      // never another user's. `resetUser` (above) already derived + accumulated the DEAD season's
+      // notoriety, so a returning player's reputation reflects the season they just finished.
+      if (req.carriesNotoriety) fresh.session.setNotoriety(this.notorietyStore.read(user));
       return fresh.session.createCharacter(req);
     });
     // 0065 (advance-warm) — the NEXT-season warm routes to the registry-level holding store (the running
@@ -712,6 +735,17 @@ export class GameSessionRegistry {
    * via `onReset` (so season 2's first commit isn't a "degradation" against a finished season — E1).
    */
   resetUser(user: string): UserSandbox {
+    // 0104 — DERIVE + accumulate the dead season's NOTORIETY BEFORE the sandbox is dropped (this is the
+    // only point the finished season still exists — the same cutover `captureNextSeasonWarm` rides). It
+    // reads ONLY the dead season's OPEN-SET outcome (placement / comp wins / eviction roles / jury reach
+    // — no Vault handle, R1), accumulates monotonically into the per-USER store (R3 — keyed to this
+    // physical user, never a cross-user read), and is BEST-EFFORT/FAIL-SOFT: a failure to record
+    // notoriety must NEVER block the season cutover or the next game (it is wrapped + swallowed). A
+    // season that did not actually finish yields no outcome ⇒ nothing accumulated.
+    try {
+      const outcome = this.sandboxes.get(user)?.session.openSetOutcome();
+      if (outcome) this.notorietyStore.accumulate(user, deriveNotoriety(outcome));
+    } catch { /* notoriety is a retention nicety — never let it wedge a reset */ }
     // G12: the dead season's queued (derived) soul-index work must not crowd the shared
     // breathing lane the new season seeds through — discard it with the sandbox it served.
     this.sandboxes.get(user)?.engine.soul.discardPending();
