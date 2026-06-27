@@ -78,6 +78,10 @@ try {
 const _researchingSessions = new Set();
 const _streamingSessions = new Set();   // Background chat streams (not polled against research API)
 const _completedSessions = new Set();   // Sessions with completed background streams
+// #1035 (F-8): sessions already probed for a detached server stream this page-load. The probe only
+// needs to fire once per session (a refresh-detached stream is what it recovers); re-probing on every
+// in-app session switch produced a 404-per-turn. Lives for the page lifetime (a reload clears it).
+const _serverStreamProbed = new Set();
 let _researchPollTimer = null;
 
 // Session list keyboard navigation state
@@ -2241,6 +2245,15 @@ async function _checkServerStream(sessionId) {
 
     // Skip if the SSE reader is still actively connected — it handles rendering
     if (window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream(sessionId)) return;
+
+    // #1035 (F-8): this probe exists to RE-ATTACH a server stream that was detached by a PAGE
+    // RELOAD (the FE then has no in-memory record of it). selectSession() runs it on EVERY session
+    // switch, so on a session with no detached run it 404'd ~once per turn (log spam, wasted req).
+    // A stream that starts within THIS page is tracked locally (hasActiveStream + checkBackgroundStream
+    // above), so a single probe per session per page-load suffices: once we've confirmed no detached
+    // server stream for a session, don't re-probe it on subsequent in-app switches.
+    if (_serverStreamProbed.has(sessionId)) return;
+    _serverStreamProbed.add(sessionId);
 
     const res = await fetch(`${API_BASE}/api/chat/stream_status/${sessionId}`);
     if (!res.ok) return; // 404 = no active stream

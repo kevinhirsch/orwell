@@ -1650,6 +1650,13 @@ def _casting_incomplete_steer(missing: list, refused_reason: str = "") -> str:
         key = str(m).strip()
         if not key:
             continue
+        # #1035 (F-6): castPhoto is OPTIONAL — the engine never counts it toward `finalizable` and
+        # the cast-photo box is a skippable mid-interview step. It nonetheless tops the engine's raw
+        # `missing` list, so surfacing it here told the model "we still need their cast photo" and
+        # made the headshot read as a hard gate on intake. Drop it from the gap the model is steered
+        # to demand; a refused finalize is never about the photo.
+        if key == "castPhoto":
+            continue
         label = _CASTING_FIELD_LABELS.get(key, key)
         if label not in seen:
             seen.add(label)

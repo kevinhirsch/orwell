@@ -581,8 +581,20 @@
   // first interview turn (the producers' opener) and the server holds it until authoring fully finishes.
   // #968: the AUTHOR WARM (prewarm-cast) response carries {warmed, count} — surface the advisory
   // seeding indicator off it so the setup never reads as frozen. The fetch stays best-effort.
+  // #1035 (F-10) — DEDUP the AUTHOR-WARM trigger. route() fires _orwellWarm("prewarm-cast")
+  // and re-fires on every orwell:models-changed (_reRouteAfterModelConfig), so a single pre-game
+  // load kicked prewarm-cast TWICE (~28s apart). The server endpoint is idempotent (no duplicate
+  // authoring), but the redundant request traffic is wasteful. A per-load once-guard collapses the
+  // pre-game author-warm to a single fire; it is CLEARED on a genuine restart/new-season
+  // (_orwellMarkRestart) so the next season re-warms its fresh cast.
+  let _authorWarmKicked = false;
+  function _resetAuthorWarmGuard() { _authorWarmKicked = false; }
   function _orwellWarm(path) {
     try {
+      if (path === "prewarm-cast") {
+        if (_authorWarmKicked) return;   // already kicked this pre-game pass — the endpoint is idempotent
+        _authorWarmKicked = true;
+      }
       const p = fetch("/api/orwell/" + path, { method: "POST", credentials: "same-origin" });
       if (path === "prewarm-cast") {
         p.then((r) => (r && r.ok ? r.json() : null))
@@ -758,6 +770,8 @@
   // (the createCharacter success path) so a future engine-driven restart can still arm it.
   window._orwellMarkRestart = () => {
     try { window._orwellRestartArmed = true; } catch (_) {}
+    // #1035 (F-10): a new season has a fresh cast — re-arm the author-warm so route() warms it once.
+    try { _resetAuthorWarmGuard(); } catch (_) {}
     // OOBE re-sequence (2026-06-20): a restart/new-season/reset begins a FRESH casting flow, so the
     // welcome must greet again. Both genuine restart entry points (settings.js reset-progress and
     // orwellNewSeason.js next-season) call this, so clearing the per-user seen-marker here covers
