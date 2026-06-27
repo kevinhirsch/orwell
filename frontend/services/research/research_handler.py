@@ -10,6 +10,7 @@ Includes a task registry so research survives page refreshes and can be cancelle
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Optional, Dict
@@ -19,6 +20,22 @@ from src.research_utils import is_low_quality
 logger = logging.getLogger(__name__)
 
 RESEARCH_DATA_DIR = Path("data/deep_research")
+_RESEARCH_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,128}$")
+
+
+def _research_json_path(session_id: str) -> Optional[Path]:
+    # SECURITY: contain the session_id → path join. Reject anything that isn't a
+    # plain id (no "/" or ".." can pass the allowlist) and re-confirm the
+    # resolved path stays under RESEARCH_DATA_DIR. Mirrors src/research_handler.py.
+    if not isinstance(session_id, str) or not _RESEARCH_SESSION_ID_RE.fullmatch(session_id):
+        return None
+    root = RESEARCH_DATA_DIR.resolve()
+    path = (RESEARCH_DATA_DIR / f"{session_id}.json").resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    return path
 
 
 class ResearchHandler:
@@ -58,6 +75,9 @@ class ResearchHandler:
         llm_headers: dict = None,
     ) -> dict:
         """Start research as a background task. Returns task info dict."""
+        if _research_json_path(session_id) is None:
+            raise ValueError("Invalid research session_id")
+
         # Cancel any existing research for this session
         if session_id in self._active_tasks:
             existing = self._active_tasks[session_id]
@@ -113,7 +133,9 @@ class ResearchHandler:
                 "started_at": entry["started_at"],
             }
         # Check disk for completed research
-        path = RESEARCH_DATA_DIR / f"{session_id}.json"
+        path = _research_json_path(session_id)
+        if path is None:
+            return None
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -150,7 +172,9 @@ class ResearchHandler:
             if entry["status"] in ("done", "error", "cancelled"):
                 return entry.get("result")
         # Check disk
-        path = RESEARCH_DATA_DIR / f"{session_id}.json"
+        path = _research_json_path(session_id)
+        if path is None:
+            return None
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -170,7 +194,9 @@ class ResearchHandler:
             if researcher and researcher.findings:
                 return self._extract_sources(researcher.findings)
         # Check disk
-        path = RESEARCH_DATA_DIR / f"{session_id}.json"
+        path = _research_json_path(session_id)
+        if path is None:
+            return None
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
@@ -196,7 +222,9 @@ class ResearchHandler:
     def clear_result(self, session_id: str):
         """Remove persisted result after it's been consumed."""
         self._active_tasks.pop(session_id, None)
-        path = RESEARCH_DATA_DIR / f"{session_id}.json"
+        path = _research_json_path(session_id)
+        if path is None:
+            return
         if path.exists():
             try:
                 path.unlink()
@@ -206,6 +234,10 @@ class ResearchHandler:
     def _save_result(self, session_id: str, entry: dict):
         """Persist completed research result to disk."""
         try:
+            path = _research_json_path(session_id)
+            if path is None:
+                logger.error("Refusing to save research result for invalid session_id: %r", session_id)
+                return
             # Extract and cache sources
             sources = []
             researcher = entry.get("researcher")
@@ -213,7 +245,6 @@ class ResearchHandler:
                 sources = self._extract_sources(researcher.findings)
             entry["sources"] = sources
 
-            path = RESEARCH_DATA_DIR / f"{session_id}.json"
             data = {
                 "query": entry["query"],
                 "status": entry["status"],
