@@ -115,8 +115,10 @@ describe("E55/C12 — live ceremony confessionals reach the record AND the soul"
     // E55: more than one beat confesses now — distinct triggers appear across the week.
     const triggers = new Set<string>();
     for (const c of confs) {
-      const m = c.content.match(/After (the [a-z ]+):/);
-      if (m) triggers.add(m[1]!);
+      // 0089: reactive events change the opening to "After <gist> (I witnessed) during <trigger>:"
+      // while 0040 produces "After <trigger>:". Match both forms — gist may be "the nomination…" or "a conversation".
+      const m = c.content.match(/After ([a-z][a-z ]+?:|(?:the |a )[a-z ]+)/);
+      if (m) triggers.add(m[1]!.replace(/:$/, "").trim());
     }
     expect(triggers.size, `distinct confession triggers (saw: ${[...triggers].join(", ")})`).toBeGreaterThanOrEqual(2);
 
