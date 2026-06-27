@@ -1,7 +1,13 @@
 # 0091 — Trigger secrets fire house events (the foreseeable blow-up)
 
-> **Status:** 🟡 **SPEC ONLY (drafted 2026-06-25).** Design + executable Gherkin only — no source,
-> no `cucumber.cjs` wiring, no README index row yet. Built next as a new queue item.
+> **Status:** ✅ **BUILT (2026-06-27).** Engine + BDD green and wired into `cucumber.cjs`.
+> Source: `src/engine/triggers.ts` + `src/engine/triggerConstants.ts`; the `trigger` hidden-element kind +
+> `armTriggers` in `src/engine/characterFactory.ts`; `runTriggerEruptions` + the `ORWELL_TRIGGERS` flag in
+> `src/adapters/engine/GameSessionAdapter.ts`; the orchestrator's bounded-tick wiring in
+> `src/composition/orchestrator.ts`. Gates: `tests/unit/triggers.test.ts`,
+> `tests/unit/triggerEruptions.test.ts` (live wiring + the Vault sweep before/after a fire),
+> `tests/unit/triggerOutcomeNeutral.test.ts` (the byte-identity calibration-neutrality gate), and the BDD
+> `0091-trigger-secrets-house-events.feature`. The `juryReach` heavy gate stays in band with the flag OFF.
 > **Tracks #869.**
 > **Depends on:** 0001 (Vault Wall), 0002 (event visibility — a witnessed house event is the
 > player's knowledge), 0008 (the daily-event invariant + the `house-event` type this rides), 0038

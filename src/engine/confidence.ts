@@ -114,11 +114,17 @@ function blur(detail: string): string {
  *   • `full`    → the secret verbatim (only this tier crosses the whole thing — it was earned).
  * `none` never reaches here (the caller short-circuits on `disclosed: false`).
  */
+/** The hidden-element kinds a confidence can be ABOUT (0091 — a `trigger` erupts, it is never confided). */
+type ConfidableKind = keyof typeof CONFIDENCE.teaseGloss;
+const isConfidableKind = (k: HiddenElement["kind"]): k is ConfidableKind => k !== "trigger";
+
 export function discloseTrue(secret: HiddenElement, tier: DisclosureTier): string {
   switch (tier) {
     case "full": return secret.detail;
     case "partial": return blur(secret.detail);
-    case "tease": return CONFIDENCE.teaseGloss[secret.kind];
+    // 0091 — a trigger is never confided (`headlineSecretOf` excludes it), so this is always a confidable
+    // kind in practice; the guard keeps the index total and never leaks a sealed trigger gloss.
+    case "tease": return isConfidableKind(secret.kind) ? CONFIDENCE.teaseGloss[secret.kind] : "";
     default: return "";
   }
 }
@@ -129,8 +135,9 @@ export function discloseTrue(secret: HiddenElement, tier: DisclosureTier): strin
  * own secret kind so the lie is plausibly "about" the same thing, but the TEXT is always generic/false.
  */
 export function fabricate(rng: RandomnessSource, prefer?: HiddenElement["kind"]): string {
-  const kinds = Object.keys(CONFIDENCE.fabrications) as (keyof typeof CONFIDENCE.fabrications)[];
-  const kind = prefer && CONFIDENCE.fabrications[prefer] ? prefer : kinds[rng.int(kinds.length)]!;
+  const kinds = Object.keys(CONFIDENCE.fabrications) as ConfidableKind[];
+  const wanted = prefer && isConfidableKind(prefer) ? prefer : undefined; // 0091 — never a trigger
+  const kind = wanted ?? kinds[rng.int(kinds.length)]!;
   const pool = CONFIDENCE.fabrications[kind];
   return pool[rng.int(pool.length)]!;
 }

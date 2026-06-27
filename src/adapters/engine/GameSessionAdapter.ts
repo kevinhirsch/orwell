@@ -27,6 +27,7 @@ import {
 } from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
+import type { EventStore } from "../../ports/EventStore";
 import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
 import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
@@ -118,6 +119,8 @@ import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engin
 import { producerForSeed, renderProducerVoice, type Producer } from "../../engine/producerPersona";
 import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
+import { strain as triggerStrain, shouldFire, eruptionEvent } from "../../engine/triggers";
+import { TRIGGER, type EruptionKind } from "../../engine/triggerConstants";
 import { SeededRandom } from "../random/SeededRandom";
 import { PLAYER } from "../../domain/ids";
 import type { EntityId } from "../../domain/ids";
@@ -335,6 +338,16 @@ const CAMPAIGNS_ENABLED_DEFAULT = process.env.ORWELL_CAMPAIGNS === "1";
  * per-session via `setTrajectoriesEnabled`.
  */
 const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
+
+/**
+ * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
+ * flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is provable in
+ * isolation: with it unset, the orchestrator never runs the trigger check ⇒ ZERO draws on any rng ⇒ every
+ * seeded gate (juryReach/gradient/UAT) is byte-identical (the load-bearing determinism guarantee). The
+ * calibration/UAT harness never sets it; the live deploy does. Read once at module load; a test overrides
+ * per-session via `setTriggersEnabled`.
+ */
+const TRIGGERS_ENABLED_DEFAULT = process.env.ORWELL_TRIGGERS === "1";
 
 /**
  * Engine-side implementation of the Vault-free game-session port. It runs the
@@ -939,6 +952,24 @@ export class GameSessionAdapter implements GameSession {
   private nominationWeeks: Record<EntityId, number[]> = {};
   /** 0060 — the count of threads that have ever SURFACED this season (the hard restraint cap, §5). */
   private surfacedThreadCount = 0;
+  /**
+   * 0091 — whether the TRIGGER-ERUPTION layer RUNS. DEFAULT OFF (the dedicated `ORWELL_TRIGGERS` flag):
+   * when off, the orchestrator never calls `runTriggerEruptions` ⇒ ZERO draws on any rng ⇒ every seeded
+   * gate is byte-identical (the calibration-neutrality guarantee). Per instance; a test flips it via
+   * `setTriggersEnabled`.
+   */
+  private triggersEnabled = TRIGGERS_ENABLED_DEFAULT;
+  /**
+   * 0091 — the per-season count of volatile triggers that have FIRED (sibling to `surfacedThreadCount`).
+   * MONOTONIC; the hard `eruptionCapPerSeason` reads it so a few-per-season pacing holds and a reload never
+   * re-opens the cap (0007/0030). ENGINE-ONLY (a count carries no Vault content). Reset to 0 on a season
+   * restart, like `surfacedThreadCount`.
+   */
+  private eruptionCount = 0;
+  /** 0091 — the DEDICATED trigger-rng tick counter: the trigger check forks off the game seed + this, never
+   *  the shared society/vote stream, so even with the layer ON the seeded calibration spine is untouched.
+   *  Bumped once per `runTriggerEruptions`. Persisted so the dedicated stream stays reproducible (absent ⇒ 0). */
+  private triggerTickCount = 0;
   /**
    * 0075 — what each houseguest has CONFIDED to the player, by id. The tier is MONOTONIC for a true
    * confidence (never re-told at a lower tier than already reached); `truthful: false` marks a lie
@@ -1862,6 +1893,12 @@ export class GameSessionAdapter implements GameSession {
       // persisted so a driven thread stays driven and the cap is never re-opened by a reload.
       ...(Object.keys(this.nominationWeeks).length ? { nominationWeeks: cloneSession(this.nominationWeeks) } : {}),
       ...(this.surfacedThreadCount > 0 ? { surfacedThreadCount: this.surfacedThreadCount } : {}),
+      // 0091 — the per-season trigger-eruption count (the hard cap) + the dedicated trigger-rng tick counter,
+      // persisted so the cap is never re-opened by a reload and the dedicated stream stays reproducible
+      // (0007/0030). The per-trigger fired/lastFiredWeek flags ride on the byte-stable house above. Absent ⇒
+      // 0 (byte-shaped like a pre-0091 save / the layer off).
+      ...(this.eruptionCount > 0 ? { eruptionCount: this.eruptionCount } : {}),
+      ...(this.triggerTickCount > 0 ? { triggerTickCount: this.triggerTickCount } : {}),
       // 0075 — the confidence ledger (what each houseguest has confided + the season lie count),
       // persisted so a restored game remembers exactly what the player was told and never re-opens the
       // lie cap or re-tells a secret at a lower tier (non-degradation, 0007/0030).
@@ -2057,6 +2094,10 @@ export class GameSessionAdapter implements GameSession {
     // relaxation on a legacy resume, since pre-0060 saves carried no surfaced threads to over-count).
     this.nominationWeeks = core.nominationWeeks ? cloneSession(core.nominationWeeks) : {};
     this.surfacedThreadCount = core.surfacedThreadCount ?? 0;
+    // 0091 — restore the per-season eruption count + dedicated trigger-rng tick counter (absent on pre-0091
+    // saves / the layer off ⇒ 0). The per-trigger fired/lastFiredWeek flags are restored with the house above.
+    this.eruptionCount = core.eruptionCount ?? 0;
+    this.triggerTickCount = core.triggerTickCount ?? 0;
     // 0075 — restore the confidence ledger (absent on pre-0075 saves ⇒ empty/zero, never re-confides
     // a secret the player already heard, the cap intact).
     this.confideState = core.confideState ? cloneSession(core.confideState) : {};
@@ -3148,6 +3189,8 @@ export class GameSessionAdapter implements GameSession {
       this.groundedSkinTones = adopt.groundedSkinTones;
       this.nominationWeeks = {};
       this.surfacedThreadCount = 0;
+      this.eruptionCount = 0; // 0091 — a fresh season starts with no eruptions + an unspent cap
+      this.triggerTickCount = 0;
       this.confideState = {};
       this.lieCount = 0;
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
@@ -3384,6 +3427,8 @@ export class GameSessionAdapter implements GameSession {
     this.groundedSkinTones = {};
     this.nominationWeeks = {};
     this.surfacedThreadCount = 0;
+    this.eruptionCount = 0; // 0091 — a fresh season starts with no eruptions + an unspent cap
+    this.triggerTickCount = 0;
     this.confideState = {};
     this.lieCount = 0;
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
@@ -3659,6 +3704,9 @@ export class GameSessionAdapter implements GameSession {
     // 0060 — a fresh season starts with no nomination history and an unspent surfacing cap.
     this.nominationWeeks = {};
     this.surfacedThreadCount = 0;
+    // 0091 — a fresh season starts with no eruptions, an unspent cap, and a fresh trigger-rng stream.
+    this.eruptionCount = 0;
+    this.triggerTickCount = 0;
     // 0075 — a fresh season has heard no confidences and spent no lies.
     this.confideState = {};
     this.lieCount = 0;
@@ -4281,6 +4329,113 @@ export class GameSessionAdapter implements GameSession {
     return { bondDelta, threatDelta: imp.threat ?? 0, betrayal: type === "betrayal" };
   }
 
+  // ─── 0091 — TRIGGER SECRETS & HOUSE-EVENT ERUPTIONS ─────────────────────────────────────────────
+
+  /** Turn the trigger-eruption layer on/off (0091). OFF by default — the calibration harness leaves it off
+   *  (off ⇒ the orchestrator never runs the check ⇒ ZERO draws ⇒ the seeded spine is byte-identical). */
+  setTriggersEnabled(on: boolean): void { this.triggersEnabled = on; }
+
+  /** Whether the trigger layer is live (0091) — the orchestrator reads this so it runs the check ONLY when
+   *  on (off ⇒ no call, no draw, byte-identical calibration). */
+  triggersEnabledNow(): boolean { return this.triggersEnabled; }
+
+  /** Map a fired eruption to the erupter's soul fold (0041/0023). A `meltdown`/`showmance-detonation` is a
+   *  spiral — `betrayed` deepens distress AND raises volatility, so the charge climbs further. A `blow-up`/
+   *  `mask-slips` is a release — `calm` settles VOLATILITY (the arousal half of strain, via the 0028 family),
+   *  so the wound-tight edge eases after venting even though the underlying distress (`emotionalState`) only
+   *  mean-reverts at its usual cadence; this is the bounded "the storm passed" relaxation, never a reset. */
+  private static eruptionEmotion(kind: EruptionKind): EmotionalEvent {
+    return kind === "meltdown" || kind === "showmance-detonation" ? "betrayed" : "calm";
+  }
+
+  /**
+   * 0091 — run the TRIGGER check this tick: for each plausibly-strained, co-present erupting houseguest,
+   * evaluate `pressure(volatility × strain × precipitant)` and on a fire RECORD a Vault-safe public eruption
+   * `house-event` (player-witnessed) + fold the soul/witness consequence. SELF-GATED by `triggersEnabled` ⇒
+   * a no-op (ZERO draws on any rng) when off, so the orchestrator's shared society/vote stream is untouched
+   * and the seeded calibration spine is byte-identical (the load-bearing guarantee). Runs on a DEDICATED
+   * session side-rng (forked off the game seed + the trigger tick counter) — NEVER the shared tick stream.
+   *
+   * `precipitants` maps a houseguest id → the spark strength ∈ [0,1] of what JUST happened to them this tick
+   * (a fresh conflict/betrayal scene, a nomination). NO precipitant ⇒ pressure 0 ⇒ no fire (the no-cold-open
+   * guarantee: a trigger never fires out of a quiet stretch). The sealed `detail`/`volatility`/eruption-kind
+   * never reach the recorded event or any projection — only the generic public eruption line does (mandate #2).
+   *
+   * `events` (the EventStore) is HANDED in by the orchestrator (the `whisperPairings(knowledge)` precedent —
+   * the session owns the rng + house + rel; the store is the orchestrator's), so the eruption EVENT is
+   * recorded here in the session, anti-repeat consulted against the live `house-event` history.
+   */
+  runTriggerEruptions(events: EventStore, precipitants: ReadonlyMap<EntityId, number>): void {
+    if (!this.triggersEnabled || !this.house) return;
+    if (this.eruptionCount >= TRIGGER.eruptionCapPerSeason) return; // season cap spent — no draws, no fire
+    if (precipitants.size === 0) return; // no spark anywhere this tick ⇒ nothing to evaluate (no cold open)
+    this.triggerTickCount += 1;
+    // DEDICATED stream — zero touch to the orchestrator's shared per-user rng (the calibration spine).
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:triggers:${this.triggerTickCount}`));
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const awake = this.awakeNow();
+    // A trigger only fires for a LIVING NPC who is co-present (still on the floor / awake) AND has a fresh
+    // spark this tick — and we evaluate in a STABLE id order so the dedicated stream is deterministic.
+    const candidates = this.house.npcs
+      .filter((n) => !evicted.has(n.id) && (!awake || awake.has(n.id)) && (precipitants.get(n.id) ?? 0) > 0)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const n of candidates) {
+      if (this.eruptionCount >= TRIGGER.eruptionCapPerSeason) break; // cap reached mid-tick
+      const trig = n.character.hiddenElements.find((e) => e.kind === "trigger");
+      // An armed trigger carries both the eruption kind + a numeric volatility (set together by `armTriggers`).
+      if (!trig || trig.eruptionKind === undefined || typeof trig.volatility !== "number") continue;
+      const eruptionKind = trig.eruptionKind;
+      // The per-kind re-arm policy: a one-shot (a slipped mask) never re-fires; a re-armable kind waits out
+      // the cooldown. A spent fuse is skipped WITHOUT drawing (keeps the dedicated stream tied to live fires).
+      if (trig.fired) {
+        if (TRIGGER.oneShotKinds.includes(eruptionKind)) continue;
+        if (trig.lastFiredWeek !== undefined && this.week - trig.lastFiredWeek < TRIGGER.reArmCooldownWeeks) continue;
+      }
+      const strainNow = triggerStrain(n.soul);
+      const precipitant = Math.min(1, Math.max(0, precipitants.get(n.id) ?? 0));
+      if (!shouldFire({ volatility: trig.volatility, kind: eruptionKind }, strainNow, precipitant, rng)) continue;
+      // FIRE — a Vault-safe PUBLIC eruption the player witnesses. The recorded content is a GENERIC pool line
+      // (no name, no sealed wording, no number); the connection trigger → event stays Vault-side.
+      const content = eruptionEvent(eruptionKind, events, rng, { week: this.week, phase: this.phase });
+      events.record({
+        id: `trigger:erupt:${this.gameSeed ?? 0}:${this.triggerTickCount}:${n.id}`,
+        // The EventStore is the monotonic tick authority (B60/E12): any non-advancing ts is normalized to
+        // last+1, so a deterministic placeholder keeps the record reproducible (never a wall clock).
+        ts: 0,
+        type: "house-event",
+        initiator: n.id,
+        witnessSet: [PLAYER, n.id], // player-witnessed ⇒ ordinary player knowledge (0002), never secret
+        hidden: false,
+        content,
+      });
+      // Durable consequence (0023/0041): the erupter's soul folds (charge spent or volatility raised), and
+      // co-present witnesses' reads of them shift along the existing pathway (0026) — a real fold, no number.
+      this.inflect(n.id, GameSessionAdapter.eruptionEmotion(eruptionKind));
+      this.foldEruptionWitnesses(n.id, rng);
+      // Mark the fuse spent (monotonic, persisted on the byte-stable house) + bump the season cap counter.
+      trig.fired = true;
+      trig.lastFiredWeek = this.week;
+      this.eruptionCount += 1;
+    }
+  }
+
+  /** 0091 — a public eruption shifts how the co-present house (and the player) reads the erupter: a small
+   *  THREAT/CONFLICT fold along the existing relationship pathway (0026), drawn on the DEDICATED trigger rng
+   *  (never the shared spine). The player is a witness like anyone — their read of the erupter moves, never a
+   *  number shown. No-op if no one else is on the floor. */
+  private foldEruptionWitnesses(erupter: EntityId, rng: SeededRandom): void {
+    const room = this.presence?.get(erupter);
+    const awake = this.awakeNow();
+    const witnesses = this.livingIds().filter(
+      (id) => id !== erupter && (!this.presence || !room || this.presence.get(id) === room) && (!awake || awake.has(id)),
+    );
+    for (const w of witnesses) {
+      // Seeing someone blow up reads as conflict toward them (threat ▲, warmth ▼) — the society's own
+      // `conflict` impact, directed witness → erupter. Drawn on the dedicated trigger rng only.
+      this.rel.applyImpactDirected(w, erupter, RELATIONSHIP_CONSTANTS.IMPACT.conflict, rng);
+    }
+  }
+
   /**
    * The player's OWN declared campaign target (0085 C) — a player-level, OOC intent, exactly like a
    * Diary-Room strategy: it is the PLAYER'S knowledge with NO in-game pathway to any NPC. It NEVER seeds
@@ -4871,7 +5026,11 @@ export class GameSessionAdapter implements GameSession {
 
   /** 0075 — the headline sealed secret a houseguest would confide (their first hidden element). */
   private headlineSecretOf(npc: { character: { hiddenElements?: HiddenElement[] } }): HiddenElement | undefined {
-    return npc.character.hiddenElements?.[0];
+    // 0091 — a TRIGGER is a volatility, not a confidable fact: it ERUPTS (a witnessed public consequence,
+    // 0091), it is never TOLD (the 0075 confidence path). So a confidence is drawn from the first NON-trigger
+    // hidden element — the trigger's sealed wording NEVER crosses the confidence pathway (the inverse
+    // companion to 0075: in 0091 the attribute itself stays fully sealed; only its effect is seen).
+    return npc.character.hiddenElements?.find((e) => e.kind !== "trigger");
   }
 
   /** 0075 — assemble the Vault-hidden confidence signals from the existing relationship + deal ledger. */
