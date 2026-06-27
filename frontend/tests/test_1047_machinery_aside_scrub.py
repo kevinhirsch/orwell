@@ -112,6 +112,43 @@ def test_strips_the_exact_1047_leak_phrases_from_the_body():
 
 
 @pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_strips_machinery_nouns_parity_with_python_scrub_1109a():
+    # #1109(a) — the JS body scrub must catch the machinery NOUNS ("the engine/system/model" + the
+    # app the player runs us on) the same way the Python _GAME_LEAK_SENTENCE_RE does, so the two
+    # scrub layers reach parity (defense-in-depth). These rode mid-paragraph inside clean prose.
+    cases = [
+        ["You can shade, spin, or play a character. The engine will take it from there. "
+         "The medallion catches the light.",
+         "You can shade, spin, or play a character. The medallion catches the light."],
+        ["The votes are in. The system tallies them. The room holds its breath.",
+         "The votes are in. The room holds its breath."],
+        ["The model decides the outcome. The houseguests file in one by one.",
+         "The houseguests file in one by one."],
+        ["Whatever the front end ate, I've got you now. You settle into the casting chair.",
+         "You settle into the casting chair."],
+        ["The app froze for a second. The producer leans in with a grin.",
+         "The producer leans in with a grin."],
+    ]
+    res = _run_scrub(cases)
+    assert "OK" in res.stdout, f"stdout={res.stdout!r} stderr={res.stderr!r}"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_machinery_noun_scrub_stays_high_precision_1109a():
+    # ordinary in-character prose containing "engine/front/app/site" as plain words is UNTOUCHED —
+    # only the narrow "the engine/system/model", "the/front end", "the app", "this app/website/site"
+    # phrases are leaks (mirrors the Python high-precision guard).
+    cases = [
+        ["You approach the front door as the audience applauds. The applause swells.",
+         "You approach the front door as the audience applauds. The applause swells."],
+        ["The campsite story he told still hangs in the air. She fronts confidence she lacks.",
+         "The campsite story he told still hangs in the air. She fronts confidence she lacks."],
+    ]
+    res = _run_scrub(cases)
+    assert "OK" in res.stdout, f"stdout={res.stdout!r} stderr={res.stderr!r}"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
 def test_normal_narration_is_untouched_no_over_scrub():
     cases = [
         # ordinary scene prose passes through byte-identical
