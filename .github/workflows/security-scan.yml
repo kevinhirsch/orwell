@@ -28,7 +28,7 @@ name: Security Scan (VulnHawk)
 
 on:
   schedule:
-    - cron: '41 8 * * *' # daily ~08:41 UTC (GitHub Actions cron is ALWAYS UTC); adjust to taste
+    - cron: '0 9 * * *' # daily 02:00 AZT (UTC-7, no DST) = 09:00 UTC
   workflow_dispatch: {} # manual on-demand run (Actions tab → this workflow → "Run workflow")
 
 # Only one scan at a time; let a running scan FINISH rather than be cancelled (a daily/manual cadence
