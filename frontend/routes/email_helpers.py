@@ -283,6 +283,9 @@ def _email_cache_owner_clause(owner: str = "") -> tuple[str, tuple[str, ...]]:
 
 def _ensure_owner_scoped_email_cache_table(conn, table: str, create_sql: str, columns: list[str]):
     """Rebuild legacy Message-ID-only cache tables with owner in the PK."""
+    import re
+    if not re.match(r'^[a-zA-Z0-9_]+$', str(table)):
+        raise ValueError("Invalid input")
     conn.execute(create_sql)
     try:
         info = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -295,6 +298,9 @@ def _ensure_owner_scoped_email_cache_table(conn, table: str, create_sql: str, co
         conn.execute(create_sql)
         old_cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table}__old)").fetchall()]
         copy_cols = [c for c in columns if c != "owner" and c in old_cols]
+        for col in copy_cols:
+            if not re.match(r'^[a-zA-Z0-9_]+$', str(col)):
+                raise ValueError("Invalid input")
         source_owner = "COALESCE(owner, '')" if "owner" in old_cols else "''"
         target_cols = ["owner", *copy_cols]
         select_exprs = [source_owner, *copy_cols]
