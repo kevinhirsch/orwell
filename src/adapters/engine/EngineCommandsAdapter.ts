@@ -11,7 +11,7 @@ import type { RelationshipModel, InteractionType } from "../../engine/relationsh
 import { foldHiddenImpact, foldGenerativeConsequence } from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
 import { PRESENCE } from "../../engine/presenceConstants";
-import { isPrivateRoom, zonesInEarshot, type Occupancy, type Zone } from "../../domain/house";
+import { isPrivateRoom, zonesSameEarshot, type Occupancy, type Zone } from "../../domain/house";
 import { StaleBeatError, EngineRefusal } from "../../domain/errors";
 import { IMAGE_BUDGET } from "../../engine/imageConstants";
 
@@ -184,15 +184,16 @@ export class EngineCommandsAdapter implements EngineCommands {
     // kept (presence only ADDS, never drops). Placeless (no provider / no room) keeps prior behavior.
     const occupancy = this.presenceProvider?.() ?? null;
     const room = occupancy?.get(req.initiator);
-    // 0077: the scene's earshot zone is the initiator's. A same-room bystander only WITNESSES if they
-    // share earshot (same/adjacent zone) — the far end of a big room (workout corner vs. poolside) does
-    // NOT. With no zone provider wired, both zones read `undefined`, `zonesInEarshot` is always true, and
-    // every same-room occupant witnesses, byte-identical to the pre-0077 build.
+    // 0077 (PO ruling #791): the scene's earshot zone is the initiator's. A same-room bystander becomes
+    // a FULL CO-WITNESS only when they share the SAME zone — an ADJACENT zone is NOT full earshot (it is
+    // overhear-eligible only; handled below by `rollOverhears`), and a FAR zone (workout corner vs.
+    // poolside) hears nothing. With no zone provider wired, both zones read `undefined`,
+    // `zonesSameEarshot` is always true, and every same-room occupant witnesses, byte-identical to pre-0077.
     const sceneZone = occupancy && room ? this.zoneProvider?.(req.initiator) : undefined;
     if (occupancy && room) {
       for (const [id, where] of occupancy) {
         if (where !== room || witnessSet.includes(id)) continue;
-        if (!zonesInEarshot(room, sceneZone, this.zoneProvider?.(id))) continue; // out of earshot across the big room
+        if (!zonesSameEarshot(room, sceneZone, this.zoneProvider?.(id))) continue; // only same-zone co-presence witnesses in full
         witnessSet.push(id);
       }
     }
@@ -216,6 +217,12 @@ export class EngineCommandsAdapter implements EngineCommands {
         // 0077: a scene behind a closed door is harder to overhear. Player channel only — its own
         // isolated `commands:` rng stream — so the off-screen society/calibration spine is untouched.
         muffle: isPrivateRoom(room) ? PRESENCE.doorMuffle : 1,
+        // 0077 (PO ruling #791): a SAME-ROOM ADJACENT-zone bystander (the patio next to the pool) is NOT
+        // a full witness above — they instead become overhear-eligible here, catching the same rare,
+        // partial, lower-confidence fragment an adjacent ROOM does. Same zone = witness (already in the
+        // set above); far zone = nothing. Zone reads are the live zone provider; unwired ⇒ no zoned
+        // listeners ⇒ byte-identical to the pre-ruling adjacent-room-only overhear path.
+        sceneZone, zoneOf: this.zoneProvider,
       });
     }
     // Consequence (0023): the initiator's action moves how the OTHERS feel about them — a real,

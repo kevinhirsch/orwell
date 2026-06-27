@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   HOUSE_ROOMS, HOUSE_SIGHTLINE, HOUSE_ADJACENCY, areVisible, areAdjacent, isPrivateRoom,
-  ROOM_ZONES, isZonedRoom, zonesFor, zonesInEarshot, pickZone, type Room,
+  ROOM_ZONES, isZonedRoom, zonesFor, zonesInEarshot, zonesSameEarshot, zonesAdjacentEarshot,
+  pickZone, type Room,
 } from "../../src/domain/house";
 
 /**
@@ -113,6 +114,45 @@ describe("0077 zones — earshot subdivides a big room (eyeshot stays room-wide)
     // A missing zone on either side ⇒ treated as the same single space (back-compatible).
     expect(zonesInEarshot("backyard", undefined, "workout")).toBe(true);
     expect(zonesInEarshot("backyard", "poolside", undefined)).toBe(true);
+  });
+
+  it("witness vs. overhear split (PO ruling #791): same-zone = FULL witness, adjacent-zone = OVERHEAR only, far = nothing", () => {
+    // SAME zone ⇒ full earshot (the witness predicate), but NOT an adjacent-overhear.
+    expect(zonesSameEarshot("backyard", "patio", "patio")).toBe(true);
+    expect(zonesAdjacentEarshot("backyard", "patio", "patio")).toBe(false);
+    // ADJACENT, distinct zone ⇒ overhear-eligible only, NEVER a full witness.
+    expect(zonesSameEarshot("backyard", "poolside", "patio")).toBe(false);
+    expect(zonesAdjacentEarshot("backyard", "poolside", "patio")).toBe(true);
+    expect(zonesSameEarshot("backyard", "patio", "workout")).toBe(false);
+    expect(zonesAdjacentEarshot("backyard", "patio", "workout")).toBe(true);
+    // FAR zone (the line's two ends) ⇒ neither witness NOR overhear.
+    expect(zonesSameEarshot("backyard", "poolside", "workout")).toBe(false);
+    expect(zonesAdjacentEarshot("backyard", "poolside", "workout")).toBe(false);
+    // The lounge's two corners are non-adjacent ⇒ far ⇒ nothing either way.
+    expect(zonesSameEarshot("lounge", "couches", "window-nook")).toBe(false);
+    expect(zonesAdjacentEarshot("lounge", "couches", "window-nook")).toBe(false);
+    // The union `zonesInEarshot` is exactly same OR adjacent (and symmetric).
+    expect(zonesInEarshot("backyard", "poolside", "patio")).toBe(true);   // adjacent
+    expect(zonesInEarshot("backyard", "workout", "poolside")).toBe(false); // far
+  });
+
+  it("an un-zoned room / absent zone info is ONE space — same-earshot witness, no intra-room overhear", () => {
+    // Un-zoned / undefined ⇒ the same single space: a full witness (zonesSameEarshot), and there is no
+    // SEPARATE adjacent-zone to overhear from (zonesAdjacentEarshot is false) — pre-ruling behavior.
+    expect(zonesSameEarshot("kitchen", "anything", "else")).toBe(true);
+    expect(zonesAdjacentEarshot("kitchen", "anything", "else")).toBe(false);
+    expect(zonesSameEarshot("bedroom-a", undefined, undefined)).toBe(true);
+    expect(zonesAdjacentEarshot("bedroom-a", undefined, undefined)).toBe(false);
+    expect(zonesSameEarshot("backyard", undefined, "workout")).toBe(true);
+    expect(zonesAdjacentEarshot("backyard", undefined, "workout")).toBe(false);
+  });
+
+  it("both zone predicates are symmetric (a hears b ⇔ b hears a)", () => {
+    const zs = zonesFor("backyard");
+    for (const a of zs) for (const b of zs) {
+      expect(zonesSameEarshot("backyard", a, b)).toBe(zonesSameEarshot("backyard", b, a));
+      expect(zonesAdjacentEarshot("backyard", a, b)).toBe(zonesAdjacentEarshot("backyard", b, a));
+    }
   });
 
   it("pickZone is deterministic, in-range, and undefined for an un-zoned room", () => {

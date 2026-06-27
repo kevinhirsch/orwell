@@ -542,6 +542,52 @@ describe("presence in the live loop (0049)", () => {
     expect(ev.hidden).toBe(false);                  // the player witnessed it — never secret (0002)
   });
 
+  it("zone earshot split (PO ruling #791): same-zone = full witness, adjacent-zone = partial overhear, far-zone = nothing", () => {
+    // A zoned big room (the backyard, a line poolside↔patio↔workout): the player's scene is poolside.
+    //  • a SAME-zone (poolside) bystander  ⇒ a FULL co-witness (in the witness set, full content)
+    //  • an ADJACENT-zone (patio) bystander ⇒ NOT a witness; a RARE, PARTIAL, lower-confidence overhear
+    //  • a FAR-zone (workout) bystander     ⇒ nothing at all (out of earshot)
+    const { sb } = liveGame(7);
+    const occupancy = new Map<EntityId, Room>([
+      [PLAYER, "backyard"], [npc(1), "backyard"], [npc(2), "backyard"], [npc(3), "backyard"],
+    ]);
+    const zones = new Map<EntityId, string>([
+      [PLAYER, "poolside"], [npc(1), "poolside"], [npc(2), "patio"], [npc(3), "workout"],
+    ]);
+    sb.commands.setPresenceProvider(() => occupancy);
+    sb.commands.setZoneProvider((id) => zones.get(id));
+
+    let sameWitnessAlways = true;
+    let adjOverheard = 0, adjEverWitness = 0, farEverHeard = 0;
+    const scenes = 200;
+    for (let i = 0; i < scenes; i++) {
+      const { eventId } = sb.commands.recordInteraction({
+        initiator: PLAYER, witnessSet: [PLAYER], content: `a quiet poolside plan number ${i}`,
+      });
+      const ev = sb.engine.events.query().find((e) => e.id === eventId)!;
+      if (!ev.witnessSet.includes(npc(1))) sameWitnessAlways = false; // same-zone ⇒ always a full witness
+      if (ev.witnessSet.includes(npc(2))) adjEverWitness++;            // adjacent-zone ⇒ NEVER a full witness
+      if (ev.witnessSet.includes(npc(3))) farEverHeard++;             // far-zone ⇒ NEVER a witness either
+      // the overhear pathway (partial, lower-confidence) may reach the adjacent-zone bystander…
+      if (sb.engine.knowledge.knownTo(npc(2)).some((f) => f.pathway === `overheard:${eventId}`)) adjOverheard++;
+      // …but NEVER the far-zone one.
+      if (sb.engine.knowledge.knownTo(npc(3)).some((f) => f.pathway === `overheard:${eventId}`)) farEverHeard++;
+    }
+    expect(sameWitnessAlways, "the same-zone bystander is always a full co-witness").toBe(true);
+    expect(adjEverWitness, "the adjacent-zone bystander is never a FULL witness").toBe(0);
+    expect(adjOverheard, "the adjacent-zone bystander DOES sometimes catch a partial overhear").toBeGreaterThan(0);
+    expect(adjOverheard, "but only sometimes — an overhear is rare/gated, never guaranteed").toBeLessThan(scenes);
+    expect(farEverHeard, "the far-zone bystander hears nothing — no witness, no overhear").toBe(0);
+
+    // The partial overhear is a LOWER-confidence belief and never carries the scene's full content.
+    const beliefs = sb.engine.knowledge.knownTo(npc(2)).filter((f) => f.pathway.startsWith("overheard:"));
+    expect(beliefs.length).toBeGreaterThan(0);
+    for (const b of beliefs) {
+      expect(b.confidence).toBe(PRESENCE.overhearConfidence);                       // lower-confidence
+      expect(b.content.includes("a quiet poolside plan number"), "verbatim content crossed").toBe(false);
+    }
+  });
+
   it("an NPC next door can overhear the player (gated), via a traceable pathway", () => {
     const { sb } = liveGame(6);
     const occupancy = new Map<EntityId, Room>([

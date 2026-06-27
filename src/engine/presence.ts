@@ -4,7 +4,7 @@
  * the HOH gravitates upstairs, schemers find space — all through the seeded RandomnessSource
  * (same seed, same trajectories), with movement constrained to the floor plan.
  */
-import { HOUSE_ROOMS, HOUSE_ADJACENCY, areAdjacent, isZonedRoom, pickZone, type Room, type Zone, type Occupancy } from "../domain/house";
+import { HOUSE_ROOMS, HOUSE_ADJACENCY, areAdjacent, isZonedRoom, pickZone, zonesAdjacentEarshot, type Room, type Zone, type Occupancy } from "../domain/house";
 import { PLAYER } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
@@ -302,12 +302,27 @@ export function rollOverhears(deps: {
    * `commands:` rng stream — opts in.
    */
   muffle?: number;
+  /**
+   * The scene's own SUB-ZONE within a big room (0077 / PO ruling #791, OPT-IN). When supplied along
+   * with `zoneOf`, a SAME-ROOM bystander in an ADJACENT, distinct zone (the patio next to the pool) is
+   * an overhear-eligible listener too — they catch the same rare, partial, lower-confidence fragment an
+   * adjacent ROOM does, rather than becoming a full witness. Same-zone occupants are already in the
+   * scene's witness set (passed as `participants`) and are excluded; FAR zones never hear. ABSENT (or
+   * `zoneOf` unwired) ⇒ no zoned listeners ⇒ the listener set + every draw are BYTE-IDENTICAL to the
+   * pre-ruling adjacent-room-only path. The off-screen society/spine passes neither (calibration sacred).
+   */
+  sceneZone?: Zone;
+  zoneOf?: (id: EntityId) => Zone | undefined;
 }): EntityId[] {
   const listeners: EntityId[] = [];
   for (const [id, where] of deps.occupancy) {
     if (deps.participants.includes(id)) continue; // you can't overhear your own scene
-    if (!areAdjacent(where, deps.room)) continue; // walls work; only next door listens
-    listeners.push(id);
+    if (areAdjacent(where, deps.room)) { listeners.push(id); continue; } // walls work; next door listens
+    // 0077 (PO ruling #791): a SAME-ROOM ADJACENT-zone bystander overhears a fragment (not a witness).
+    // Only when zone info is supplied (player channel); FAR/same zones are excluded (same ⇒ witness).
+    if (where === deps.room && deps.zoneOf && zonesAdjacentEarshot(deps.room, deps.sceneZone, deps.zoneOf(id))) {
+      listeners.push(id);
+    }
   }
   if (listeners.length === 0) return [];
   // ONE gate draw, exactly as before — only the THRESHOLD shifts when a caller opts into the muffle

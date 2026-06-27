@@ -147,16 +147,43 @@ export function zonesFor(room: Room): readonly Zone[] {
 }
 
 /**
- * Whether two zones of the SAME room are within earshot of each other (0077): the same zone always
- * is; adjacent zones carry a residual overhear; far zones (and the two lounge corners) do not. An
- * un-zoned room has at most one zone, so any two co-present occupants there are trivially in earshot
- * (`a === b`), preserving the pre-zone "same room ⇒ in earshot" behavior. `undefined` zones (no zone
- * info supplied) are treated as the same single space — back-compatible.
+ * Whether two zones of the SAME room share FULL earshot — i.e. are the SAME zone (PO ruling, issue
+ * #791). The same zone always is; an un-zoned room has at most one zone, so any two co-present
+ * occupants there are trivially same-zone (`a === b`), preserving the pre-zone "same room ⇒ in
+ * earshot" behavior; `undefined` zones (no zone info supplied) are treated as the same single space —
+ * back-compatible. This is the WITNESS predicate: only a SAME-zone bystander is auto-added as a full
+ * co-witness. An ADJACENT zone is NOT a full witness — it is overhear-eligible only (`zonesAdjacentEarshot`).
+ */
+export function zonesSameEarshot(room: Room, a: Zone | undefined, b: Zone | undefined): boolean {
+  if (a === undefined || b === undefined || a === b) return true;
+  // An UN-zoned room is one single space — any two occupants there are full earshot (pre-zone behavior).
+  if (!isZonedRoom(room)) return true;
+  // Distinct, defined zones in a ZONED room are never the SAME zone (regardless of adjacency).
+  return false;
+}
+
+/**
+ * Whether two zones of the SAME room are ADJACENT but DISTINCT (0077 / PO ruling #791): close enough
+ * for a RARE, PARTIAL, lower-confidence OVERHEAR — the same fragment treatment an adjacent ROOM gets —
+ * but NOT full earshot (that is `zonesSameEarshot`). False for the same zone (that is full earshot, not
+ * an overhear), for un-zoned/undefined zones (one space — no intra-room overhear path), and for FAR
+ * zones (the two ends of the backyard line, the two lounge corners — out of earshot entirely). The
+ * backyard line poolside↔patio↔workout makes patio adjacent to both ends; the lounge corners are
+ * deliberately non-adjacent (two private corners). Symmetric by construction (asserted by the tests).
+ */
+export function zonesAdjacentEarshot(room: Room, a: Zone | undefined, b: Zone | undefined): boolean {
+  if (a === undefined || b === undefined || a === b) return false;
+  if (!isZonedRoom(room)) return false;
+  return (ZONE_ADJACENCY.get(room)?.get(a) ?? []).includes(b);
+}
+
+/**
+ * Whether two zones of the SAME room are within earshot of each other AT ALL (0077): same zone OR
+ * adjacent zone. The UNION of `zonesSameEarshot` + `zonesAdjacentEarshot`, retained for callers that
+ * only need "can these two hear each other in any form". Far zones (the lounge corners) are not.
  */
 export function zonesInEarshot(room: Room, a: Zone | undefined, b: Zone | undefined): boolean {
-  if (a === undefined || b === undefined || a === b) return true;
-  if (!isZonedRoom(room)) return true;
-  return (ZONE_ADJACENCY.get(room)?.get(a) ?? []).includes(b);
+  return zonesSameEarshot(room, a, b) || zonesAdjacentEarshot(room, a, b);
 }
 
 /**
