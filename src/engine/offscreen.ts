@@ -6,6 +6,7 @@ import type { InteractionType } from "./relationships";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed, type HiddenElement } from "./characterFactory";
 import { hiddenSurfaces } from "../domain/temperatureConstants";
+import { tiltNatureWeights, type Trajectory } from "./trajectory";
 
 /**
  * Minimal off-screen life: records NPC-to-NPC interactions the player is not
@@ -200,10 +201,21 @@ export function richOffscreenStretch(deps: {
    * Requires `edgeOf` (the motivated path) — in the legacy uniform draw there is no edge to read.
    */
   playerSubject?: EntityId;
+  /**
+   * RELATIONSHIP TRAJECTORIES (feature 0087, opt-in via `ORWELL_TRAJECTORIES`). When supplied (live-society
+   * trajectories ON), the directed `a→b` arc's hidden momentum TILTS this scene's nature weights toward
+   * continuing the arc (`tiltNatureWeights` over `natureWeights`'s output) BEFORE the existing single
+   * `weightedPick` — so a curdling friendship gets more clash scenes as it cools. CRITICAL (calibration):
+   * the tilt re-weights the SAME draw and adds NO rng — draw count/order are unchanged, only which nature a
+   * draw lands on shifts — so the seeded competition/vote spine reading this same stream stays in phase.
+   * Absent (the default) ⇒ today's `natureWeights` exactly (byte-identical). Requires `edgeOf` (the
+   * motivated path; the legacy uniform draw has no per-pair nature weights to tilt).
+   */
+  trajectoryOf?: (a: EntityId, b: EntityId) => Trajectory;
 }): OffscreenScene[] {
   const {
     events, rng, npcs, interactions, hiddenElementsOf, edgeOf, occupancy,
-    showmancePlausible, hasActiveShowmance, playerSubject,
+    showmancePlausible, hasActiveShowmance, playerSubject, trajectoryOf,
   } = deps;
   const scenes: OffscreenScene[] = [];
   // #840 — houseguests who pick up a NEW showmance partner during this stretch, so a later scene in
@@ -233,7 +245,14 @@ export function richOffscreenStretch(deps: {
         }),
         rng,
       );
-      type = weightedPick(RICH_TYPES, natureWeights(edgeOf(a, b)), rng);
+      // The scene's nature follows the initiator's read (E45). Feature 0087: when a trajectory is
+      // supplied, the directed `a→b` arc's momentum TILTS those weights toward continuing the arc FIRST
+      // (`tiltNatureWeights`) — a `steady`/zero-momentum arc is the identity (byte-identical). The tilt is
+      // applied to the SAME single `weightedPick` below, so it consumes NO extra rng: the off-screen draw
+      // sequence is unchanged with trajectories on, only which nature this one draw lands on shifts.
+      const baseWeights = natureWeights(edgeOf(a, b));
+      const weights = trajectoryOf ? tiltNatureWeights(RICH_TYPES, baseWeights, trajectoryOf(a, b)) : baseWeights;
+      type = weightedPick(RICH_TYPES, weights, rng);
     } else {
       // The legacy uniform draw (kept byte-stable for pure tests and the pre-E45 tick).
       a = rng.pick(npcs);

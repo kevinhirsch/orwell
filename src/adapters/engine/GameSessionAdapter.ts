@@ -109,6 +109,11 @@ import {
   CEREMONY_IMPACTS, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
+import {
+  deriveTrajectory, decayTrajectory, STEADY,
+  type Trajectory, type FoldSignal,
+} from "../../engine/trajectory";
+import { TRAJECTORY_CONSTANTS } from "../../engine/trajectoryConstants";
 import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engine/momentPrompts";
 import { producerForSeed, renderProducerVoice, type Producer } from "../../engine/producerPersona";
 import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
@@ -320,6 +325,16 @@ const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-e
 const CAMPAIGNS_ENABLED_DEFAULT = process.env.ORWELL_CAMPAIGNS === "1";
 
 /**
+ * 0087 — whether the RELATIONSHIP-TRAJECTORY layer runs by DEFAULT. OFF unless `ORWELL_TRAJECTORIES=1`.
+ * A DEDICATED flag (not a reuse of `ORWELL_CAMPAIGNS`) so calibration neutrality is provable in isolation:
+ * with it unset, NO trajectory is computed, `natureWeights` is the identity, and every seeded gate
+ * (juryReach/gradient/UAT) is byte-identical. The calibration/UAT harness never sets it; the live deploy
+ * does. Read once at module load (like the watcher cadence + the campaign flag); a test overrides
+ * per-session via `setTrajectoriesEnabled`.
+ */
+const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
+
+/**
  * Engine-side implementation of the Vault-free game-session port. It runs the
  * OOBE (the one human-authored profile) and holds the active house, then projects
  * it to a Vault-free view: the player's own authored card plus a name-only house
@@ -418,6 +433,27 @@ export class GameSessionAdapter implements GameSession {
    * vote. Empty unless the campaign layer is enabled ⇒ no drives ⇒ no lean ⇒ calibration byte-identical.
    */
   private drives: Map<EntityId, Drive> = new Map();
+  /**
+   * 0087 — whether the RELATIONSHIP-TRAJECTORY layer RUNS. DEFAULT OFF (the dedicated `ORWELL_TRAJECTORIES`
+   * flag): when off, no momentum is computed, the off-screen tick passes no `trajectoryOf` ⇒ `natureWeights`
+   * is the identity, and every seeded gate is BYTE-IDENTICAL (the calibration-neutrality guarantee). Per
+   * instance; a test flips it via `setTrajectoriesEnabled`.
+   */
+  private trajectoriesEnabled = TRAJECTORIES_ENABLED_DEFAULT;
+  /**
+   * 0087 — the hidden MOMENTUM per directed pair, keyed `a->b`. VAULT-CLASS hidden engine state (mandate
+   * #2): it appears on NO player- or admin-facing projection — it reaches the player only as the KINDS of
+   * off-screen scenes the arc produces (overheard/told). Persisted in the snapshot so an arc resumes
+   * mid-curdle (0007/0030); absent on a pre-0087 save ⇒ every pair resumes at `steady`/0.
+   */
+  private trajectories: Map<string, Trajectory> = new Map();
+  /**
+   * 0087 — the tiny per-pair ring buffer of recent FOLD signals (the last `recencyWindow`), from which
+   * `deriveTrajectory` reads the arc's current direction. Engine-only; Vault-free (each entry is a signed
+   * bond/threat DELTA + a betrayal flag derived from the scene's nature, never a raw edge number). Persisted
+   * beside `trajectories` so a restored game derives the same phase; absent on a pre-0087 save ⇒ empty.
+   */
+  private trajectoryFolds: Map<string, FoldSignal[]> = new Map();
   /** Records a one-off witnessed event (deal made/broken) and returns its id. Wired by the registry. */
   private onPlayerEvent?: (content: string, witnessSet: EntityId[], type?: string) => string | undefined;
   /** Optional narrator for the snarky tagline (0033); none ⇒ the curated state-aware fallback. */
@@ -1719,6 +1755,12 @@ export class GameSessionAdapter implements GameSession {
       ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
       ...(this.drives.size ? { drives: Object.fromEntries([...this.drives].map(([k, v]) => [k, { ...v }])) as Record<EntityId, Drive> } : {}),
       ...(this.campaignTickCount > 0 ? { campaignTickCount: this.campaignTickCount } : {}),
+      // 0087: persist the hidden relationship-trajectory momentum + its recent-fold ring buffers, so a
+      // multi-week arc RESUMES mid-curdle (0007/0030) and ACCUMULATES, never thins. Vault-class hidden state
+      // (no player/admin-visible number) — already inside the never-outward snapshot. Absent ⇒ byte-shaped
+      // as a pre-0087 save (resume at steady/0).
+      ...(this.trajectories.size ? { trajectories: Object.fromEntries([...this.trajectories].map(([k, v]) => [k, { ...v }])) } : {}),
+      ...(this.trajectoryFolds.size ? { trajectoryFolds: Object.fromEntries([...this.trajectoryFolds].map(([k, v]) => [k, v.map((f) => ({ ...f }))])) } : {}),
       ...(this.presence ? { presence: Object.fromEntries(this.presence) as Record<EntityId, Room> } : {}),
       // L21/L24: the calibration-neutral base occupancy the off-screen society pairs on — persisted so the
       // society's positions stay reproducible across a restart and never reseed from the weighted view.
@@ -1866,6 +1908,12 @@ export class GameSessionAdapter implements GameSession {
     this.campaignTickCount = core.campaignTickCount ?? 0;
     // 0086: restore live drives (absent on pre-0086 saves ⇒ none ⇒ re-derived on the next campaign tick).
     this.drives = core.drives ? new Map(Object.entries(core.drives) as [EntityId, Drive][]) : new Map();
+    // 0087: restore the hidden relationship-trajectory momentum + recent-fold ring buffers (absent on
+    // pre-0087 saves ⇒ empty ⇒ every pair resumes at steady/0, byte-identical to a pre-feature load).
+    this.trajectories = core.trajectories ? new Map(Object.entries(core.trajectories)) : new Map();
+    this.trajectoryFolds = core.trajectoryFolds
+      ? new Map(Object.entries(core.trajectoryFolds).map(([k, v]) => [k, v.map((f) => ({ ...f }))]))
+      : new Map();
     // Pre-0049 saves carry no presence — migrate forward (the next tick seats everyone afresh).
     this.presence = core.presence ? new Map(Object.entries(core.presence) as [EntityId, Room][]) : null;
     // L21/L24: restore the calibration-neutral base occupancy (absent on pre-L21/L24 saves — the next tick
@@ -4004,6 +4052,77 @@ export class GameSessionAdapter implements GameSession {
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }
+
+  /** Turn the RELATIONSHIP-TRAJECTORY layer on/off (0087). Off by default — the calibration harness leaves
+   *  it off (with it off the off-screen tick passes no `trajectoryOf` ⇒ the seeded spine is byte-identical). */
+  setTrajectoriesEnabled(on: boolean): void { this.trajectoriesEnabled = on; }
+
+  /** Whether the trajectory layer is live (0087) — the orchestrator reads this so it passes `trajectoryOf`
+   *  ONLY when on (off ⇒ the off-screen call is byte-identical to the pre-feature stretch). */
+  trajectoriesEnabledNow(): boolean { return this.trajectoriesEnabled; }
+
+  /**
+   * The directed `a→b` arc's hidden TRAJECTORY (0087) — passed to the off-screen society's nature pick when
+   * the layer is ON. Returns `STEADY` (no tilt) when the layer is off OR the pair has no momentum yet, so a
+   * disabled layer / a fresh pair is the identity (byte-identical to today's `natureWeights`). VAULT-ONLY —
+   * called only from the engine-side off-screen tick, never from any outward projection.
+   */
+  trajectoryOf(a: EntityId, b: EntityId): Trajectory {
+    if (!this.trajectoriesEnabled) return STEADY;
+    return this.trajectories.get(`${a}->${b}`) ?? STEADY;
+  }
+
+  /**
+   * Fold one just-recorded off-screen scene into the directed `initiator→partner` arc's momentum (0087) —
+   * called ENGINE-SIDE by the off-screen tick AFTER the relationship fold, ONLY when the layer is on. The
+   * scene's NATURE is mapped to a Vault-free `FoldSignal` (a signed bond/threat delta from the SAME nature
+   * IMPACT the fold applied + a betrayal flag — never a raw edge number), appended to the pair's tiny ring
+   * buffer (capped to the recency window), and `deriveTrajectory` re-derives the phase + momentum. Pure +
+   * deterministic (no rng): same history ⇒ same arc. No-op when the layer is off ⇒ nothing to persist and
+   * the calibration spine is untouched.
+   */
+  recordTrajectoryFold(initiator: EntityId, partner: EntityId, type: InteractionType): void {
+    if (!this.trajectoriesEnabled) return;
+    const key = `${initiator}->${partner}`;
+    const folds = this.trajectoryFolds.get(key) ?? [];
+    folds.push(GameSessionAdapter.foldSignalFor(type));
+    while (folds.length > TRAJECTORY_CONSTANTS.recencyWindow) folds.shift();
+    this.trajectoryFolds.set(key, folds);
+    this.trajectories.set(key, deriveTrajectory(folds, this.trajectories.get(key)));
+  }
+
+  /**
+   * Decay every directed arc NOT fed this tick toward `steady` (0087) — mirrors 0026's edge neglect decay,
+   * so an unfed arc reverts to a flat relationship at the same cadence. `touched` is the set of `a->b` keys
+   * that folded a scene this tick (those keep their freshly-built momentum). Pure, no rng. No-op when the
+   * layer is off. A pair whose momentum decays below the phase floor is dropped to `STEADY` and forgotten.
+   */
+  decayUntouchedTrajectories(touched: ReadonlySet<string>): void {
+    if (!this.trajectoriesEnabled) return;
+    for (const [key, traj] of this.trajectories) {
+      if (touched.has(key)) continue;
+      const next = decayTrajectory(traj);
+      if (next.momentum <= 0 || next.phase === "steady") {
+        this.trajectories.delete(key);
+        this.trajectoryFolds.delete(key);
+      } else {
+        this.trajectories.set(key, next);
+      }
+    }
+  }
+
+  /**
+   * Map an off-screen scene's NATURE to its Vault-free trajectory FOLD signal (0087). The signed deltas come
+   * from the SAME `RELATIONSHIP_CONSTANTS.IMPACT` magnitudes the relationship fold applies — `bondDelta` is
+   * the (affinity+trust)/2 move (+ warmer, − cooler), `threatDelta` the threat move — so the arc's direction
+   * agrees with how the edge actually moved. `betrayal` flags the souring-momentum injector. Pure + static;
+   * carries NO raw edge state (only the nature's constant shape), so it crosses no wall.
+   */
+  private static foldSignalFor(type: InteractionType): FoldSignal {
+    const imp = RELATIONSHIP_CONSTANTS.IMPACT[type];
+    const bondDelta = ((imp.affinity ?? 0) + (imp.trust ?? 0)) / 2;
+    return { bondDelta, threatDelta: imp.threat ?? 0, betrayal: type === "betrayal" };
+  }
 
   /**
    * The player's OWN declared campaign target (0085 C) — a player-level, OOC intent, exactly like a

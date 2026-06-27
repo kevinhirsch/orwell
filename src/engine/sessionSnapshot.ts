@@ -6,6 +6,7 @@ import type { EntityId } from "../domain/ids";
 import type { LiveSeasonState } from "./liveSeason";
 import type { Deal } from "../domain/deal";
 import type { Campaign, Drive } from "./campaigns";
+import type { Trajectory, FoldSignal } from "./trajectory";
 import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
 import type { Room, Zone } from "../domain/house";
@@ -91,6 +92,21 @@ export interface SessionCore {
    * restart instead of re-rolling. ENGINE-ONLY (hidden strategy). Absent on pre-0086 saves / when the
    * campaign layer is off. */
   drives?: Record<EntityId, Drive>;
+  /**
+   * RELATIONSHIP TRAJECTORIES (feature 0087) — the hidden MOMENTUM per directed pair (`"a->b"` → {phase,
+   * momentum}), so a multi-week arc RESUMES mid-curdle across a restart and ACCUMULATES, never thins
+   * (non-degradation #4). VAULT-CLASS hidden engine state (it carries no player/admin-visible number): the
+   * snapshot itself never crosses the wall. Absent on pre-0087 saves AND whenever the trajectory layer is
+   * off ⇒ every pair resumes at `steady`/0 (byte-identical to a pre-feature load).
+   */
+  trajectories?: Record<string, Trajectory>;
+  /**
+   * The tiny per-pair ring buffer of recent FOLD signals (0087) the phase is derived from — `"a->b"` → the
+   * last `recencyWindow` signed bond/threat deltas (+ betrayal flag). Persisted beside `trajectories` so a
+   * restored game derives the SAME phase from the SAME history. ENGINE-ONLY + Vault-free (deltas of a
+   * nature's constant shape, never a raw edge number). Absent on pre-0087 saves / when the layer is off.
+   */
+  trajectoryFolds?: Record<string, FoldSignal[]>;
   /** Who is in which room (0049), so presence survives a restart. Absent pre-0049 (reseeded on tick). */
   presence?: Record<EntityId, Room>;
   /**
