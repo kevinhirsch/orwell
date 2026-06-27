@@ -170,6 +170,46 @@ describe("0065 Part A — compare-and-swap stale-write rejection", () => {
     const ok = sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "chat", expectedBeatSeq: session.gameStatus().beatSeq });
     expect(ok.eventId).toBeTruthy();
   });
+
+  // R1c / audit A-S3 / issue #591 — the consequence FOLD (the hidden trust/affinity move that is "the
+  // whole point of the game", mandate #4) lands EXACTLY ONCE across a stale-409 → reconcile → re-attempt.
+  // The event-count guard above proves nothing was RECORDED on a stale write; this is the stronger claim
+  // the FE's reconcile-and-re-attempt (`_backfill_with_cas`, frontend/src/agent_loop.py) relies on: a
+  // stale `recordInteraction` folds ZERO impact (so a re-attempt cannot LOSE the scene's only fold — the
+  // bug), and because the engine throws `StaleBeatError` BEFORE any mutation the re-attempt against the
+  // FRESH beatSeq folds the SAME impact exactly once (it can never DOUBLE-apply — there was no first
+  // apply to race). This is the engine-side idempotency assertion the FE retry leans on; recordInteraction
+  // needs no idempotencyKey precisely because the CAS guard makes the stale path a pure no-op.
+  it("a stale recordInteraction folds NOTHING; the re-attempt at the fresh beatSeq folds exactly once (#591)", () => {
+    // Control: a single clean fold of the SAME scene on a sibling sandbox (same seed ⇒ same rng path),
+    // so we can assert the stale→retry sequence moves the edge to the IDENTICAL place (once, not twice).
+    const control = startedRuntime();
+    const cSeq = control.session.gameStatus().beatSeq;
+    control.sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a bond", kind: "bonding", expectedBeatSeq: cSeq });
+    const expectedEdge = { ...control.sb.engine.relationships.edge(npc(1), PLAYER) }; // the partner's edge toward the initiator
+
+    const { sb, session } = startedRuntime();
+    const before = { ...sb.engine.relationships.edge(npc(1), PLAYER) };
+
+    // 1. A stale write (the board moved under it) is refused BEFORE folding — the edge is UNCHANGED.
+    //    Dropping this scene here (the old reconcile-and-SKIP) would EVAPORATE its only consequence fold.
+    const seen = session.gameStatus().beatSeq;
+    expect(() =>
+      sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a bond", kind: "bonding", expectedBeatSeq: seen - 1 }),
+    ).toThrow(StaleBeatError);
+    expect(sb.engine.relationships.edge(npc(1), PLAYER)).toEqual(before); // no fold on the stale path
+
+    // 2. Reconcile to the fresh beatSeq and RE-ATTEMPT the SAME scene — the fold lands now (not lost).
+    const fresh = session.gameStatus().beatSeq;
+    sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a bond", kind: "bonding", expectedBeatSeq: fresh });
+    const after = sb.engine.relationships.edge(npc(1), PLAYER);
+
+    // The edge MOVED (the fold landed, mandate #4 — it did NOT evaporate)…
+    expect(after.affinity).toBeGreaterThan(before.affinity);
+    expect(after.trust).toBeGreaterThan(before.trust);
+    // …and it landed EXACTLY ONCE: identical to the single clean control fold, never double-applied.
+    expect(after).toEqual(expectedEdge);
+  });
 });
 
 describe("0065 Part B — idempotency keys on progression tools", () => {
