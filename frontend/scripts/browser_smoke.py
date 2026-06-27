@@ -2700,15 +2700,16 @@ def main() -> int:
             pill = f4.evaluate("""() => ({
               pill: !!document.getElementById('orwell-choose-character'),
               text: ((document.querySelector('.hs-choose-btn') || {}).textContent || '').trim(),
-              afterMsg: (() => { const h=document.getElementById('chat-history'),
+              // #913: the pill is now PINNED above the composer (the OrwellNotice zone), NOT appended
+              // inline into chat-history where it scrolled away. Assert it is OUTSIDE chat-history.
+              pinnedAboveComposer: (() => { const h=document.getElementById('chat-history'),
                                  p=document.getElementById('orwell-choose-character');
-                return !!(h && p && h.contains(p) && p.previousElementSibling &&
-                          p.previousElementSibling.classList.contains('msg-ai')); })(),
+                return !!(p && (!h || !h.contains(p))); })(),
               boxAutoOpened: !!document.getElementById('orwell-headshot'),
             })""")
             check(pill.get("pill") is True and pill.get("text") == "Choose Your Character"
-                  and pill.get("afterMsg") is True and pill.get("boxAutoOpened") is False,
-                  f"P1/Thing2: the 'Choose Your Character' pill appears after the opener; the box does NOT auto-open ({pill})")
+                  and pill.get("pinnedAboveComposer") is True and pill.get("boxAutoOpened") is False,
+                  f"P1/Thing2/#913: the 'Choose Your Character' pill appears pinned above the composer (not inline in history); the box does NOT auto-open ({pill})")
             # Clicking the pill opens the box (and removes the pill).
             f4.click(".hs-choose-btn")
             f4.wait_for_timeout(800)
