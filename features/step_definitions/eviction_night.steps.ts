@@ -71,13 +71,21 @@ When("the eviction is advanced through the seam", function (this: BbWorld) {
   }
 });
 
-Then("the eviction votes are revealed one at a time", function (this: BbWorld) {
-  // Each step through the votes stage reveals exactly ONE more vote than the last.
+Then("the eviction votes are revealed monotonically in a few batched rounds", function (this: BbWorld) {
+  // The reveal is BATCHED (live-verify 2026-06-27): each step through the votes stage reveals one OR a
+  // batch of ballots (so a big eviction lands in ~4-8 rounds, not ~14) — the revealed count strictly
+  // INCREASES each step and never skips past the electorate.
+  const electorate = this.enElectorate!;
   const counts = this.enViews!
     .filter((v) => v.eviction && v.eviction.stage === "votes")
     .map((v) => v.eviction!.votesRevealed.length);
   assert.ok(counts.length >= 2, "several reveal steps");
-  for (let i = 1; i < counts.length; i++) assert.equal(counts[i], counts[i - 1]! + 1, "one vote revealed per advance");
+  // A LARGE electorate must NOT take one-per-advance (the slog the batching fixes): far fewer rounds.
+  if (electorate >= 8) assert.ok(counts.length <= 8, "a big eviction resolves in a handful of batched rounds");
+  for (let i = 1; i < counts.length; i++) {
+    assert.ok(counts[i]! > counts[i - 1]!, "each advance reveals at least one more ballot");
+    assert.ok(counts[i]! <= electorate, "never reveals past the electorate");
+  }
 });
 
 Then("the reveal order is the same for the same seed", function (this: BbWorld) {
@@ -165,7 +173,9 @@ Then("every revealed ballot is anonymized", function (this: BbWorld) {
   // projection's entries carry the nominee only; no voter attribution exists on any surface.
   const reveals = this.enViews!.filter((v) => v.event?.beat === "eviction-reveal");
   assert.ok(reveals.length >= 2, "ballots were revealed");
-  for (const v of reveals) assert.match(v.event!.content, /^a vote to evict /, "the ballot reads anonymized");
+  // The reveal is BATCHED (live-verify 2026-06-27): a round reads "a vote to evict X" (one ballot) or
+  // "N votes to evict X" (a batch) — anonymized either way (the nominee, never the voter).
+  for (const v of reveals) assert.match(v.event!.content, /(^|, )(a|\d+) votes? to evict /, "the ballot reads anonymized");
   for (const v of this.enViews!) {
     if (!v.eviction) continue;
     for (const r of v.eviction.votesRevealed) assert.deepEqual(Object.keys(r), ["votedFor"]);

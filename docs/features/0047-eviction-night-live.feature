@@ -4,15 +4,16 @@
 
 Feature: Eviction night live
 
-  The weekly eviction plays out live: the votes are revealed one at a time in a seeded order with a
-  revealed-only tally, the evicted houseguest gets a goodbye, and goodbye messages from the house shape how
-  that evictee later votes as a juror. The engine decides the reveal order and the outcome; no pre-reveal
-  tally ever crosses the wall.
+  The weekly eviction plays out live: the votes are revealed in a seeded order — batched into a handful
+  of reveal rounds (live-verify 2026-06-27, mirroring the staged-comp pacing, so a big eviction is not a
+  ~14-advance slog) — with a revealed-only tally, the evicted houseguest gets a goodbye, and goodbye
+  messages from the house shape how that evictee later votes as a juror. The engine decides the reveal
+  order and the outcome; no pre-reveal tally ever crosses the wall.
 
-  Scenario: Votes are revealed one at a time in a deterministic order
+  Scenario: Votes are revealed in batched rounds in a deterministic order
     Given a started game at an eviction with a decided vote
     When the eviction is advanced through the seam
-    Then the eviction votes are revealed one at a time
+    Then the eviction votes are revealed monotonically in a few batched rounds
     And the reveal order is the same for the same seed
     And the running tally shows only the votes revealed so far
 
