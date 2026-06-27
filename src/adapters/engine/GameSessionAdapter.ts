@@ -30,7 +30,7 @@ import type { KnowledgeService } from "../../ports/KnowledgeService";
 import type { EventStore } from "../../ports/EventStore";
 import { PRESENCE, PRIVACY, MOVEMENT_INTENT } from "../../engine/presenceConstants";
 import { dayOfWeek } from "../../engine/houseEvents";
-import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS } from "../../domain/house";
+import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS, zonesFor } from "../../domain/house";
 import type { Room, Zone, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
 import type { CastingIntake } from "../../engine/castingIntake";
@@ -528,6 +528,17 @@ export class GameSessionAdapter implements GameSession {
    * the movement trajectory stays reproducible across a restart. Advances ONCE per `presenceTick`.
    */
   private presenceTickCount = 0;
+  /**
+   * SEATED sub-zones (issue #792 — the PO ruling: sub-zones are SEATED into `assignRooms`, not computed
+   * on-read). Each houseguest in a zoned big room (backyard/lounge) holds a per-id sub-zone here — the
+   * player-facing weighted view — so a long stay can organically DRIFT corner-to-corner and two bonded
+   * houseguests can CLUSTER into one corner (affinity-weighted, like the room-level clustering). Seeded
+   * from the deterministic `zoneFor` on a fresh seat (the on-read helper becomes the seeding fallback),
+   * then evolved on the DEDICATED movement stream (never the shared spine) so it is calibration-neutral.
+   * Persisted tenure-style beside `presence` (0007 — only-forward); absent on a pre-feature save ⇒ the
+   * next tick seats everyone fresh (no error). Vault-free presence projection, never Vault content.
+   */
+  private presenceZone: Map<EntityId, Zone> | null = null;
   /**
    * TRACKED OCCUPANCY (0077 Phase 2 — the privacy payoff): the PLAYER's beliefs about who is behind a
    * CLOSED door. NOT the live map — acquired knowledge: a sighting lands only when the player WITNESSES
@@ -1892,6 +1903,12 @@ export class GameSessionAdapter implements GameSession {
       // L21/L24: the dedicated movement stream's tick counter — persisted so the personality-weighted
       // movement trajectory stays reproducible across a restart (absent ⇒ 0).
       ...(this.presenceTickCount > 0 ? { presenceTickCount: this.presenceTickCount } : {}),
+      // issue #792: the SEATED sub-zones (player-facing view) — persisted tenure-style so drift/cluster
+      // history survives a restart (0007, only-forward) and never reseeds from scratch. Absent/empty ⇒
+      // omitted (byte-identical to a pre-feature save; the next tick seats fresh). Vault-free position.
+      ...(this.presenceZone && this.presenceZone.size > 0
+        ? { presenceZone: Object.fromEntries(this.presenceZone) as Record<EntityId, Zone> }
+        : {}),
       // 0077: the player's tracked closed-door beliefs — persisted so the privacy payoff accumulates
       // across a restart (0007). Absent/empty ⇒ omitted (byte-identical to a pre-0077 save).
       ...(this.trackedSightings && this.trackedSightings.size > 0
@@ -2068,6 +2085,9 @@ export class GameSessionAdapter implements GameSession {
     this.presenceTenure = core.presenceTenure ? new Map(Object.entries(core.presenceTenure) as [EntityId, number][]) : null;
     // L21/L24: restore the dedicated movement stream's tick counter (absent on older saves ⇒ 0).
     this.presenceTickCount = core.presenceTickCount ?? 0;
+    // issue #792: restore the SEATED sub-zones (acquired drift/cluster history survives a restart). A
+    // pre-feature save carries none ⇒ null ⇒ the next tick seats everyone fresh from `zoneFor`, NO error.
+    this.presenceZone = core.presenceZone ? new Map(Object.entries(core.presenceZone) as [EntityId, Zone][]) : null;
     // 0077: restore the player's tracked closed-door beliefs (acquired knowledge survives a restart).
     this.trackedSightings = core.trackedSightings
       ? new Map(Object.entries(core.trackedSightings) as [EntityId, TrackedSighting][])
@@ -2309,12 +2329,18 @@ export class GameSessionAdapter implements GameSession {
     rng: RandomnessSource,
     weighted: boolean,
     sceneRoom?: Room | null,
+    // issue #792: SEATED sub-zone output + the prior seating, supplied ONLY on the weighted, player-facing
+    // pass (so zone drift/cluster draws ride the DEDICATED movement stream, never the shared spine).
+    zonesOut?: Map<EntityId, Zone>,
+    previousZones?: ReadonlyMap<EntityId, Zone> | null,
   ): Parameters<typeof assignRooms>[2] {
     const playerId = this.house?.player.id;
     return {
       rng,
       affinity: (a, b) => this.rel.edge(a, b).affinity,
       hoh: this.ceremony.hoh ?? null,
+      // issue #792: seat sub-zones on the weighted pass only (calibration-neutral, dedicated stream).
+      ...(zonesOut ? { zonesOut, previousZones: previousZones ?? null, zoneSalt: this.gameSeed ?? "" } : {}),
       // 0078: INTENTIONAL movement — supplied on BOTH passes (the base AND the weighted view). Unlike the
       // L21/L24 personality `movement` (calibration-NEUTRAL, weighted-only), intent is DELIBERATELY
       // calibration-load-bearing (owner ruling: location must affect play), so the off-screen society
@@ -2433,19 +2459,24 @@ export class GameSessionAdapter implements GameSession {
     // Compute one assignment for a given weighting. `weighted` ⇒ the DEDICATED movement stream (isolated
     // from calibration); un-weighted ⇒ the caller's SHARED `rng` (the calibrated spine the society reads),
     // falling back to the dedicated stream only when no shared rng is supplied (standalone/test callers).
+    // issue #792: the weighted pass seats sub-zones into THIS map (drift reads the prior seating). The base
+    // pass passes no `zonesOut` ⇒ seats nothing ⇒ draws nothing extra on the shared stream (calibration-safe).
+    const nextZone = new Map<EntityId, Zone>();
     const assign = (previous: Occupancy | null, weighted: boolean): Map<EntityId, Room> => {
       const stream = weighted ? this.movementRng() : (rng ?? this.movementRng());
       // 0076: present company holds the player's live scene — but ONLY in the weighted, player-facing view
       // (the base pass stays calibration-neutral). No scene exists at premiere seating (no player room yet).
       const sceneRoom = weighted ? playerRoom : null;
+      const zonesOut = weighted ? nextZone : undefined;
+      const prevZones = weighted ? this.presenceZone : null;
       if (!previous) {
         // Premiere seating — the ONE time everyone (the player included) is placed at once.
-        return assignRooms(this.presenceActive(), null, this.presenceDeps(stream, weighted, sceneRoom));
+        return assignRooms(this.presenceActive(), null, this.presenceDeps(stream, weighted, sceneRoom, zonesOut, prevZones));
       }
       // L21/L24: the PLAYER is a person — the engine NEVER auto-relocates them. Pin them (in BOTH views) at
       // their real room; the engine drives only the NPCs around the held player.
       const pinned = playerRoom ? new Map<EntityId, Room>([[me, playerRoom]]) : null;
-      return assignRooms(this.presenceActive().filter((id) => id !== me), previous, this.presenceDeps(stream, weighted, sceneRoom), pinned);
+      return assignRooms(this.presenceActive().filter((id) => id !== me), previous, this.presenceDeps(stream, weighted, sceneRoom, zonesOut, prevZones), pinned);
     };
 
     // The BASE draws from the SHARED `rng` FIRST — the same single un-weighted `assignRooms` call (same
@@ -2466,6 +2497,13 @@ export class GameSessionAdapter implements GameSession {
       const stayed = prev?.get(id) === room;
       tenure.set(id, stayed ? (this.presenceTenure?.get(id) ?? 0) + 1 : 0);
     }
+    // issue #792: commit the freshly-seated sub-zones (player-facing view) BEFORE the tracked-sighting
+    // observe loop, so a sighting into a zoned private room (the lounge) records this tick's seated zone.
+    // `seatZones` only writes ids in zoned rooms, so a houseguest who left a zoned room simply drops out.
+    this.presence = next;
+    this.presenceBase = nextBase;
+    this.presenceTenure = tenure;
+    this.presenceZone = nextZone;
     // 0077: the player TRACKS any houseguest they watched head into a closed room this tick — their
     // origin was in the player's eyeshot. Pure read-side (no rng), so the calibration spine is untouched.
     const meRoom = next.get(me);
@@ -2475,9 +2513,6 @@ export class GameSessionAdapter implements GameSession {
         if (from && from !== room) this.observeMoveIntoPrivate(id, from, room, meRoom);
       }
     }
-    this.presence = next;
-    this.presenceBase = nextBase;
-    this.presenceTenure = tenure;
   }
 
   /**
@@ -2792,7 +2827,7 @@ export class GameSessionAdapter implements GameSession {
     }));
     // CONSPICUOUSNESS (two alone too long) is DERIVED from the same beliefs — Vault-free who/where/how-long.
     const conspicuous = this.conspicuousFrom(now);
-    const myZone = zoneFor(me, room, this.gameSeed ?? "");
+    const myZone = this.seatedZone(me, room);
     return {
       room,
       ...(myZone ? { zone: myZone } : {}),
@@ -2810,7 +2845,20 @@ export class GameSessionAdapter implements GameSession {
   /** 0077: a houseguest's live sub-zone in a zoned big room (Vault-free flavor); undefined elsewhere. */
   currentZone(id: EntityId): Zone | undefined {
     const r = this.presence?.get(id);
-    return r ? zoneFor(id, r, this.gameSeed ?? "") : undefined;
+    return r ? this.seatedZone(id, r) : undefined;
+  }
+
+  /**
+   * issue #792: a houseguest's SEATED sub-zone for the room they are in — the persisted seat from
+   * `presenceTick` (enables drift + clustering). Falls back to the deterministic on-read `zoneFor`
+   * (the seeding fallback) when no seat exists yet (a pre-feature save before the next tick re-seats, or
+   * a read between game-start and the first tick). Validates the seat against the room's zones (a stale
+   * cross-room seat ⇒ fall back), so the result is always a valid zone of `room` or undefined (un-zoned).
+   */
+  private seatedZone(id: EntityId, room: Room): Zone | undefined {
+    const seat = this.presenceZone?.get(id);
+    if (seat !== undefined && zonesFor(room).includes(seat)) return seat;
+    return zoneFor(id, room, this.gameSeed ?? "");
   }
 
   /**
@@ -2824,7 +2872,7 @@ export class GameSessionAdapter implements GameSession {
     if (origin !== playerRoom && !areVisible(playerRoom, origin)) return; // the player didn't see them go
     (this.trackedSightings ??= new Map()).set(subject, {
       room: dest,
-      zone: zoneFor(subject, dest, this.gameSeed ?? ""),
+      zone: this.seatedZone(subject, dest),
       tick: this.presenceTickCount,
       pathway: `tracked:${subject}:${this.presenceTickCount}`,
       confidence: PRIVACY.trackedConfidence,
@@ -3277,10 +3325,14 @@ export class GameSessionAdapter implements GameSession {
     // seed BOTH views from the SAME premiere stream — the player-facing WEIGHTED positions (`presence`)
     // and the calibration-neutral BASE the off-screen society pairs on (`presenceBase`). The player's
     // room is forced identical in both (they are never personality-weighted).
+    // issue #792: seat the initial sub-zones on the weighted premiere pass (no prior seating ⇒ fresh
+    // deterministic seats from `zoneFor`, the seeding fallback); rides the premiere stream, not the spine.
+    const premiereZone = new Map<EntityId, Zone>();
     this.presence = assignRooms(
       this.presenceActive(), null,
-      this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`)), true),
+      this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`)), true, null, premiereZone, null),
     );
+    this.presenceZone = premiereZone;
     this.presenceBase = assignRooms(
       this.presenceActive(), null,
       this.presenceDeps(new SeededRandom(hashSeed(`${seed}:presence`)), false),

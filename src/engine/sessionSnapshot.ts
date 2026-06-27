@@ -127,6 +127,16 @@ export interface SessionCore {
    */
   presenceTickCount?: number;
   /**
+   * SEATED sub-zones (issue #792 — the PO ruling: sub-zones SEATED into `assignRooms`, not computed
+   * on-read). Each houseguest in a zoned big room (backyard/lounge) holds a per-id sub-zone (the
+   * player-facing view), so a stay can DRIFT corner-to-corner and bonded houseguests can CLUSTER. Seeded
+   * from the deterministic `zoneFor` on a fresh seat, evolved on the DEDICATED movement stream (never the
+   * shared spine ⇒ calibration-neutral). Persisted so drift/cluster history survives a restart (0007,
+   * only-forward); ABSENT on a pre-feature save ⇒ the next tick seats everyone fresh, no error. Vault-free
+   * position projection (never Vault content).
+   */
+  presenceZone?: Record<EntityId, Zone>;
+  /**
    * TRACKED OCCUPANCY (0077 Phase 2): the PLAYER's persisted beliefs about who is behind a closed door —
    * acquired knowledge (a witnessed movement), keyed by subject, carrying a pathway + confidence + the
    * sighting tick. Persisted so the privacy payoff accumulates across a restart (0007); absent on older
