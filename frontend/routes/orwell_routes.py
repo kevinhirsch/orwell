@@ -142,6 +142,49 @@ def _publish_game_updated(user: Optional[str]) -> None:
         logger.debug("[orwell] game-updated publish skipped", exc_info=True)
 
 
+# ── DB1/DB2 (#1025): debounce a rapidly-repeated IDENTICAL FAILING decision ──────────────────────
+# A buggy/over-eager client (or a 502-misread retry loop) can fire the SAME invalid decision dozens
+# of times a second — the prod debug bundle showed 60 refused POSTs in 5.5s, all "a legal finale
+# appeal is required", which evicted real history from the 200-line log ring (DB8). Even with the
+# status fix below (a client-validation error now reads as a permanent 400, not a "retry me" 502), a
+# misbehaving client can still storm. So suppress an identical failing (kind, payload) from the same
+# user inside a short window: the engine is never re-hit, and the FE returns the SAME refusal it just
+# gave (a stable 400) without logging again. A genuine RE-SUBMISSION (the player edits a field, or the
+# window lapses) is never suppressed; a SUCCESS clears the record so the next failure is fresh.
+_DECISION_FAIL_WINDOW_S = 2.0
+_LAST_DECISION_FAIL: dict[str, dict] = {}
+
+
+def _decision_fail_key(user: Optional[str], decision: dict) -> str:
+    """A stable identity for one (user, decision) attempt — the user plus the canonical JSON of the
+    submitted payload, so a byte-identical resubmission collides and an edited one does not."""
+    return f"{user or ''}|{json.dumps(decision, sort_keys=True, default=str)}"
+
+
+def _recent_decision_failure(user: Optional[str], decision: dict) -> Optional[dict]:
+    """The cached refusal for this exact (user, decision) if it failed within the debounce window,
+    else None. Expired/cleared records are pruned so the dict can't grow unbounded under a storm."""
+    key = _decision_fail_key(user, decision)
+    rec = _LAST_DECISION_FAIL.get(key)
+    if rec and (_time.monotonic() - rec["ts"]) <= _DECISION_FAIL_WINDOW_S:
+        return rec
+    if rec is not None:
+        _LAST_DECISION_FAIL.pop(key, None)
+    return None
+
+
+def _remember_decision_failure(user: Optional[str], decision: dict, status: int, error: str) -> None:
+    _LAST_DECISION_FAIL[_decision_fail_key(user, decision)] = {
+        "ts": _time.monotonic(), "status": status, "error": error,
+    }
+
+
+def _clear_decision_failure(user: Optional[str], decision: dict) -> None:
+    """A successful submit means the prior refusal is stale — drop it so a later identical-looking
+    payload is judged fresh, never suppressed against an outcome that no longer holds."""
+    _LAST_DECISION_FAIL.pop(_decision_fail_key(user, decision), None)
+
+
 # ── Calibration instrumentation: capture the per-season PUBLIC outcome when a season finishes ─────
 # The owner chose "instrument & gather data first" over tuning the calibration weights. This is the
 # data-gathering half: when a season ends, we durably log the public, player-known outcome facts a
@@ -940,8 +983,17 @@ def setup_orwell_routes() -> APIRouter:
         if body.kind not in _DECISION_KINDS:
             return JSONResponse(status_code=400, content={"error": f"unknown decision kind: {body.kind}"})
         decision = {k: v for k, v in body.model_dump().items() if v is not None}
+        user = _current_user(request)
+        # DB1/DB2 (#1025): if this EXACT decision just failed (within the debounce window), replay the
+        # cached refusal WITHOUT re-hitting the engine or re-logging. Stops a buggy client from
+        # storming the engine + log ring with the same invalid POST 60×/5s. An edited payload or a
+        # lapsed window is judged fresh (different/expired key); a success clears the record.
+        _dup = _recent_decision_failure(user, decision)
+        if _dup is not None:
+            return JSONResponse(status_code=_dup["status"],
+                                content={"error": _dup["error"], "debounced": True})
         try:
-            res = await orwell_engine.submit_decision(decision, user=_current_user(request))
+            res = await orwell_engine.submit_decision(decision, user=user)
             # D3/E66 + F5: mirror the engine's `pending` into the FE cache. remember_pending now KEEPS
             # the cache when a view OMITS `pending` (the route's omit-fallback for an old engine). A
             # SUCCESSFUL submit, though, means the just-resolved card is gone — so if the engine's result
@@ -956,27 +1008,40 @@ def setup_orwell_routes() -> APIRouter:
             # authoring content); idempotent; if it instead surfaces a new player pending, we keep that.
             _gb_done = (body.kind == "goodbye-message"
                         and isinstance(res, dict)
-                        and not _pending_is_player(res.get("pending"), _current_user(request)))
+                        and not _pending_is_player(res.get("pending"), user))
             if _gb_done:
                 try:
-                    res = await orwell_engine.advance_game(user=_current_user(request))
+                    res = await orwell_engine.advance_game(user=user)
                 except Exception as _adv_e:
                     logger.warning(f"[orwell] post-goodbye follow-up advance skipped: {_adv_e}")
             if isinstance(res, dict) and "pending" not in res:
-                orwell_engine.clear_pending(user=_current_user(request))
+                orwell_engine.clear_pending(user=user)
             else:
-                orwell_engine.remember_pending(res, user=_current_user(request))
-            _publish_game_updated(_current_user(request))  # 0064: instant cross-device HUD reconcile
+                orwell_engine.remember_pending(res, user=user)
+            _publish_game_updated(user)  # 0064: instant cross-device HUD reconcile
+            _clear_decision_failure(user, decision)  # DB1/DB2: a success retires any prior refusal
             return res
         except orwell_engine.EngineToolError as e:
             # A stale decision-card POST after the game has ended (or pre-game) — the engine refused
             # because there is no active game. Benign 409, not a false "engine unreachable" 502.
             if e.no_game:
                 return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
-            logger.warning(f"[orwell] decision failed: {e}")
-            return JSONResponse(status_code=502, content={"error": str(e)})
+            # DB1/DB2 (#1025): the engine ANSWERED with a structured error — it is reachable. Propagate
+            # the engine's REAL status (e.g. a deliberate 400 client/validation refusal like "a legal
+            # finale appeal is required", E31) instead of a hardcoded 502. 502 is in the client's
+            # _TRANSIENT_STATUSES ("retry me"), so rewriting a permanent 400 into 502 invited a retry
+            # storm. Reserve 502 for genuine unreachability (the bare `except` below). A missing/odd
+            # status falls back to 502 so an unclassifiable engine answer still reads as a problem.
+            status = e.status if isinstance(e.status, int) and 400 <= e.status < 600 else 502
+            _warn_throttled(f"decision-fail:{user or ''}", f"[orwell] decision failed (HTTP {status}): {e}")
+            _remember_decision_failure(user, decision, status, str(e))  # debounce an identical repeat
+            return JSONResponse(status_code=status, content={"error": str(e)})
         except Exception as e:
-            logger.warning(f"[orwell] decision failed: {e}")
+            # No structured engine answer — a genuine transport outage. THIS is the 502 case. NOT
+            # debounced: an outage is transient and the client SHOULD be free to retry into a recovery
+            # (the engine client's own backoff already throttles the wire); only an engine-ANSWERED
+            # refusal (above) is a permanent verdict worth suppressing on an identical repeat.
+            _warn_throttled(f"decision-fail:{user or ''}", f"[orwell] decision failed: {e}")
             return JSONResponse(status_code=502, content={"error": f"engine unreachable: {e}"})
 
     @router.post("/self-eviction/request")
