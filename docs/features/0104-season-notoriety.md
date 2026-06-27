@@ -1,7 +1,10 @@
 # 0104 — Season-over-season notoriety (a reputation that precedes you into a new cast)
 
-> **Status:** 📝 **SPEC — drafted 2026-06-25, not yet built. PO-REVIEW required (see the rulings
-> section below — four owner decisions gate the build).** Tracks issue **#886**.
+> **Status:** 🟢 **PO REVIEW RESOLVED (owner, 2026-06-27) — BUILD-READY.** R1 bounded open-set
+> `NotorietySummary`; R2 both Day-1 bias + narrative reference with **per-NPC recognition** wiggle room;
+> R3 per-user/per-character isolation; R4 **diegetic opt-in** (return as the same character vs. create a
+> new one) — the character identity + notoriety persist at the account level across a season-reset. See
+> `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #886. Tracks issue **#886**.
 > **Gate (planned):** engine (Vitest + a property/distribution gate + the dependency-cruiser Vault
 > boundary + BDD `0104-season-notoriety.feature`); the calibration spine stays the proof that it is
 > opt-in/byte-identical (`tests/property/juryReach.property.test.ts` + the UAT lane unchanged when the
