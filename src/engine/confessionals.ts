@@ -6,6 +6,7 @@ import type { SoulProvider } from "../ports/SoulProvider";
 import type { RelationshipModel } from "./relationships";
 import { CONFESSIONAL, salienceClassOf } from "./confessionalConstants";
 import type { SalienceClass } from "./confessionalConstants";
+import type { VoiceProfile } from "../domain/voiceProfile";
 
 /**
  * NPC Diary Room confessionals (feature 0040). A houseguest's private read of their
@@ -78,6 +79,17 @@ export interface ConfessionalContext {
    * the confessional stays Vault-only and reaches no one directly (the inverse player Diary Room, 0013).
    */
   player?: EntityId;
+  /**
+   * Feature 0090 — the confessor's PUBLIC, byte-stable 0084 voice fingerprint. When supplied, the
+   * target/ally lines are drawn from voice-keyed PARALLEL pools (a clipped/blunt voice confesses curtly,
+   * a rambling/warm voice expansively) and a habitual `lexicon` filler is woven in deterministically, so
+   * a comp-beast's confessional and a social-butterfly's read as two different PEOPLE even on identical
+   * engine-grounded content (same target, same ally — that truth never changes; only the phrasing does).
+   * ABSENT ⇒ the composer uses the original shared `TARGET_LINES`/`ALLY_LINES`, BYTE-IDENTICAL to 0040
+   * (additive, back-compatible — the calibration spine is untouched). Voice carries NO hidden state
+   * (mandate #2): it is read only for PHRASING and never moves a closed-set value (ADR 0005).
+   */
+  voice?: VoiceProfile;
 }
 
 const MOOD_OF = (state: number): "rattled" | "steady" | "confident" =>
@@ -101,6 +113,51 @@ const MOOD_LINES: Record<"rattled" | "steady" | "confident", string> = {
   steady: "I'm keeping my head down and my eyes open",
   confident: "honestly? I feel untouchable right now",
 };
+
+/**
+ * Feature 0090 — VOICE-KEYED parallel target/ally pools. The same engine-grounded read ({T}/{A}) phrased
+ * in three textures so the cast stops confessing in one uniform template voice: CURT (a clipped/blunt
+ * voice — comp-beast, mastermind under pressure), EXPANSIVE (a rambling/warm voice — social-butterfly,
+ * flirt), and MEASURED (the existing balanced pool, reused as the middle register). The pools are
+ * deterministic data; the seeded `pick` chooses within the selected style exactly as the 0040 path does,
+ * so a voiced confessional is as reproducible as an un-voiced one. Only the PHRASING differs across the
+ * three — every line names the same {T}/{A} the engine computed (voice never moves a fact, ADR 0005).
+ */
+const CURT_TARGET_LINES = [
+  "{T} goes. Simple as that",
+  "{T}'s my target. Done",
+  "I'm coming for {T} — no debate",
+  "{T}. That's the name. Period",
+];
+const CURT_ALLY_LINES = [
+  "{A}'s my one. That's it",
+  "I trust {A}. Nobody else",
+  "{A} and me — locked",
+  "Ride or die? {A}",
+];
+const EXPANSIVE_TARGET_LINES = [
+  "okay so the thing is, {T} is just — they're playing everyone, and honestly it scares me a little, so yeah, {T} has to go",
+  "I keep coming back to {T}, you know? Every single road to the end somehow runs straight through them, and I just can't have that",
+  "look, I love a lot of people in here, but {T}? {T} is the one keeping me up at night, and I think deep down we all know they've got to go",
+  "if I'm being real with myself, {T} is the biggest threat I've got, and the longer I sit on that the worse it gets for me",
+];
+const EXPANSIVE_ALLY_LINES = [
+  "but {A} — oh my gosh, {A} is the one person in here I genuinely, completely trust, like with everything",
+  "and then there's {A}, who honestly just gets me — we see this whole house exactly the same way, it's kind of wild",
+  "if I've got a ride-or-die in this place, a real one, it's {A}, hundred percent, no question about it",
+  "the only person I'd actually walk to the end with is {A} — I'd do it in a heartbeat, that's how much I mean it",
+];
+
+/**
+ * Feature 0090 — map a voice fingerprint to one of the three confessional textures. Reads only the PUBLIC
+ * 0084 dials (`rhythm`/`directness`/`energy`), never any hidden state. A clipped/blunt voice ⇒ curt; a
+ * rambling or warm/manic voice ⇒ expansive; everything else ⇒ the existing measured pool.
+ */
+function voiceStyle(voice: VoiceProfile): "curt" | "expansive" | "measured" {
+  if (voice.rhythm === "clipped" || voice.directness === "blunt") return "curt";
+  if (voice.rhythm === "rambling" || voice.energy === "manic" || voice.energy === "warm") return "expansive";
+  return "measured";
+}
 
 /**
  * Build an NPC's confessional from their ACTUAL relationship signals (anti-sycophancy:
@@ -146,8 +203,21 @@ export function confessionalFor(
     }
   }
   const pick = (lines: readonly string[]): string => (ctx.rng ? lines[ctx.rng.int(lines.length)]! : lines[0]!);
-  const targetStr = target ? pick(TARGET_LINES).replace("{T}", target) : "I'm still reading the room";
-  const allyStr = ally ? pick(ALLY_LINES).replace("{A}", ally) : "I'm not sure who to trust yet";
+  // Feature 0090 — select the voice-keyed parallel pool when the confessor's 0084 voice is supplied; with
+  // NO voice we use the exact 0040 shared pools (byte-identical fallback). A habitual `lexicon` filler is
+  // woven in front of the target read for an expansive voice only (a warm/rambling cadence) — deterministic
+  // (the first filler, no extra rng draw), a light seasoning per the no-catchphrase rule, never for a curt
+  // voice (clipped voices don't pad). The {T}/{A} substitution is identical across all three styles.
+  const style = ctx.voice ? voiceStyle(ctx.voice) : "measured";
+  const targetPool =
+    style === "curt" ? CURT_TARGET_LINES : style === "expansive" ? EXPANSIVE_TARGET_LINES : TARGET_LINES;
+  const allyPool = style === "curt" ? CURT_ALLY_LINES : style === "expansive" ? EXPANSIVE_ALLY_LINES : ALLY_LINES;
+  const filler =
+    style === "expansive" && ctx.voice && ctx.voice.lexicon.length > 0 ? `${ctx.voice.lexicon[0]}, ` : "";
+  const targetStr = target
+    ? `${filler}${pick(targetPool).replace("{T}", target)}`
+    : "I'm still reading the room";
+  const allyStr = ally ? pick(allyPool).replace("{A}", ally) : "I'm not sure who to trust yet";
   const mood = ctx.emotionalState !== undefined ? MOOD_OF(ctx.emotionalState) : undefined;
   // Feature 0089 — when the caller hands over the confessor's OWN recent witnessed events, the line
   // OPENS with the concrete beat the engine selected (a real Diary Room reaction), then still names its

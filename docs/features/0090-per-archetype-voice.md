@@ -1,6 +1,12 @@
 # 0090 — Per-archetype voice (the cast reads as different people)
 
-> **Status:** 🟡 **SPEC (drafted 2026-06-25)** — Tracks #868. The next layer on top of the **already
+> **Status:** ✅ **BUILT (2026-06-27)** — Tracks #868. Per-archetype `signature`/`lexicon` pools +
+> harder dial anchoring in `src/engine/voice.ts`, and the voice fingerprint THREADED through the
+> engine-authored confessional prose (`src/engine/confessionals.ts` voice-keyed parallel pools, wired in
+> `GameSessionAdapter`), with the `momentPrompts` voicing lever tightened to govern diction + cadence.
+> Gates: `tests/unit/voice0090.test.ts` (per-archetype distinctiveness, voiced-confessional diction,
+> byte-identical fallback, Vault-safety) + the juryReach calibration band (byte-identical — voice rides
+> the isolated side rng, the confessional phrasing consumes no extra draw). The next layer on top of the **already
 > shipped** 0084 voice fingerprint: 0084 *minted* a per-houseguest `VoiceProfile` and surfaced it on
 > `npcVoice`; 0090 makes that voice **genuinely distinctive per archetype + per soul** AND threads it
 > through the prose the **engine itself authors** (confessionals, the deep-profile hidden prose, the
