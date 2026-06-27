@@ -127,6 +127,22 @@ def _current_user(request: Request) -> Optional[str]:
         return getattr(getattr(request, "state", None), "current_user", None)
 
 
+def _is_live_chat_session(session_id: str) -> bool:
+    """GAP-1: is ``session_id`` a LIVE chat-session row? The canonical game-session binding is only
+    usable while the chat it names still exists; a chat-wipe (or any out-of-band row removal) leaves
+    the id dangling, and the mirror SSE / history / resume endpoints all 404 a dead id forever. The
+    binding is always to a real FE chat row, so existence in the ``sessions`` table is the liveness
+    test. Errors resolve True (caller-side fail-soft never unbinds a good id on a transient hiccup)."""
+    if not session_id:
+        return False
+    from core.database import Session as _DbSession, SessionLocal as _SessionLocal
+    db = _SessionLocal()
+    try:
+        return db.query(_DbSession.id).filter(_DbSession.id == session_id).first() is not None
+    finally:
+        db.close()
+
+
 def _publish_game_updated(user: Optional[str]) -> None:
     """0064 §B/D — ping every device viewing the canonical game session that the board changed (a
     binding decision, a self-evict) so the non-driving device reconciles its HUD INSTANTLY instead of
@@ -1162,9 +1178,16 @@ def setup_orwell_routes() -> APIRouter:
         opens for the game, so the existing cross-device sync engages instead of each device
         running its own parallel casting interview. Vault-free (a session id carries no secret);
         scoped to the caller's own user. ``{sessionId: <id or null>}`` — null means nothing is
-        bound yet (the first device binds it via POST after it creates the chat)."""
+        bound yet (the first device binds it via POST after it creates the chat).
+
+        GAP-1: the stored id is VALIDATED to be a LIVE chat-session row before it is handed out. A
+        stale binding — one that survived a chat-wipe, or otherwise points at a row that no longer
+        exists — is unbound here, so ``sessionSync.js`` never subscribes the mirror stream to a dead
+        channel (which 404s forever and can collapse a live window's DOM on convergence)."""
         from src import orwell_game_session
-        return {"sessionId": orwell_game_session.get_game_session(_current_user(request))}
+        user = _current_user(request)
+        sid = orwell_game_session.resolve_live_game_session(user, _is_live_chat_session)
+        return {"sessionId": sid}
 
     @router.post("/game-session")
     async def orwell_bind_game_session(body: BindGameSessionRequest, request: Request):

@@ -104,13 +104,18 @@ def test_framed_run_keyed_on_canonical_session():
 
 
 def test_ctx_exposes_canonical_session_for_framed_turn():
-    """ctx.canonical_session is the first-writer-wins bound session for a framed turn (so the run can
-    key on it); the per-tab session for a non-framed turn (byte-identical single-chat behavior)."""
+    """ctx.canonical_session is the first-writer-wins bound session for a framed, STARTED-game turn (so
+    the run can key on it); the per-tab session otherwise — a non-framed turn AND a casting turn
+    (GAP-2-b1, byte-identical single-chat behavior). The bound id is also liveness-validated before
+    use (GAP-1) so a dead canonical id can never key a run."""
     src = _read("routes", "chat_helpers.py")
     assert "canonical_session: Optional[str] = None" in src
     assert "def _resolve_canonical_session" in src
-    assert "orwell_game_session.get_game_session(user) or session_id" in src
-    assert "canonical_session=_resolve_canonical_session(user, session_id, framed)" in src
+    # GAP-1: resolved through the liveness-validating store helper (a dead id is unbound + falls back)
+    assert "orwell_game_session.resolve_live_game_session(user, _is_live_chat_session)" in src
+    # GAP-2-b1: casting (framed but not game_active) keys per-tab
+    assert "if not framed or not game_active:" in src
+    assert "canonical_session=_resolve_canonical_session(user, session_id, framed, game_active)" in src
 
 
 def test_loser_window_gets_a_canonical_session_adopt_signal():

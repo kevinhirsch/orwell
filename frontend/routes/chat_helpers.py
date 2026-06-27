@@ -3181,20 +3181,51 @@ async def build_chat_context(
         game_active=game_active,
         feed_down=feed_down,
         framed=framed,
-        canonical_session=_resolve_canonical_session(user, session_id, framed),
+        canonical_session=_resolve_canonical_session(user, session_id, framed, game_active),
     )
 
 
-def _resolve_canonical_session(user, session_id: str, framed: bool) -> Optional[str]:
-    """ADR 0012 §3.1: the canonical game session to key the shared run on. For a framed game/casting
-    turn it is the first-writer-wins bound session (so every window on the game converges on one
-    run); otherwise the per-tab session (no change). Best-effort — any failure falls back to the
-    per-tab session, so the run is never mis-keyed."""
-    if not framed:
+def _is_live_chat_session(session_id: str) -> bool:
+    """GAP-1: is ``session_id`` a LIVE chat-session row? The canonical binding is only usable while
+    the chat it names exists; a chat-wipe (or any out-of-band row removal) leaves it dangling and the
+    mirror SSE / history / resume endpoints 404 it forever. Existence in the ``sessions`` table is the
+    liveness test. Fail-soft: a lookup error resolves True so a transient hiccup never unbinds a good
+    id (resolve_live_game_session only unbinds on a CONFIRMED-dead id)."""
+    if not session_id:
+        return False
+    db = SessionLocal()
+    try:
+        return db.query(DBSession.id).filter(DBSession.id == session_id).first() is not None
+    finally:
+        db.close()
+
+
+def _resolve_canonical_session(user, session_id: str, framed: bool, game_active: bool = True) -> Optional[str]:
+    """ADR 0012 §3.1: the canonical game session to key the shared run on. For a framed, STARTED-game
+    turn it is the first-writer-wins bound session (so every window on the live game converges on one
+    run); otherwise the per-tab session. Best-effort — any failure falls back to the per-tab session,
+    so the run is never mis-keyed.
+
+    GAP-2-b1: a CASTING turn (``framed`` but ``not game_active``) must key on the PER-TAB session, not
+    the canonical one. The FE deliberately gates canonical convergence off until the season is started
+    (sessions.js / orwellOnboarding route() on ``started !== false``), so a casting window NEVER
+    converges its view — yet the turn persists under its per-tab session. Keying the run on a foreign
+    canonical id while persistence + the FE view stay per-tab made the window adopt the canonical
+    session on settle (``canonical_session`` event → selectSession) and reload a history that does NOT
+    contain the just-streamed reply — the casting AI bubble VANISHED (A_count 2→1). Restricting the
+    canonical key to a live game keeps casting strictly per-tab: run key, persistence, and the FE view
+    all agree, so the reply stays rendered. Two casting tabs simply remain independent (they don't
+    mirror) — see GAP-2-b2 — but neither corrupts the other.
+
+    GAP-1: a stale canonical id (survived a chat-wipe / points at a removed row) is VALIDATED and
+    unbound before it is used — keying a run on a dead id would 404 the mirror stream forever and
+    collapse a converging window's DOM. A confirmed-dead binding falls back to the per-tab session."""
+    if not framed or not game_active:
         return session_id
     try:
         from src import orwell_game_session
-        return orwell_game_session.get_game_session(user) or session_id
+        canonical = orwell_game_session.resolve_live_game_session(user, _is_live_chat_session)
+        return canonical or session_id
     except Exception:
         return session_id
 

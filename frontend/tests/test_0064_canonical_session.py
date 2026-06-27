@@ -66,6 +66,10 @@ def test_store_empty_id_never_binds():
 
 def test_route_resolve_then_bind_idempotent(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
+    # GAP-1: the GET route now liveness-validates the bound id. These tests bind synthetic ids with no
+    # DB row, so stub the predicate to "live" — they exercise the first-writer-wins binding mechanics,
+    # not liveness (which has its own coverage in test_canonical_session_liveness.py).
+    monkeypatch.setattr(orwell_routes, "_is_live_chat_session", lambda sid: True)
     client = TestClient(_app(), raise_server_exceptions=False)
 
     # nothing bound yet
@@ -101,6 +105,9 @@ def test_reset_progress_rotates_binding(monkeypatch):
     monkeypatch.setattr(orwell_engine, "manage_sandbox", fake_reset)
     monkeypatch.setattr(orwell_engine, "remember_pending", lambda *a, **k: None)
     monkeypatch.setattr(orwell_routes.orwell_portraits, "scrub_user", lambda *a, **k: None)
+    # GAP-1: the bound synthetic id has no DB row — stub liveness so the GET reflects the BINDING
+    # state (the point of this test) rather than unbinding a phantom id.
+    monkeypatch.setattr(orwell_routes, "_is_live_chat_session", lambda sid: True)
 
     client = TestClient(_app(), raise_server_exceptions=False)
     client.post("/api/orwell/game-session", json={"sessionId": "sess-A"})
