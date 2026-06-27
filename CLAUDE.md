@@ -70,7 +70,7 @@ are authoritative and reference each other as companions.
 | `docs/decisions/` | **Decision records (ADRs 0001–0014)** — accepted refinements to the canonical mechanics. 0001 competition stats / Character-Soul split / veto "Houseguest's Choice" · 0002 organic relationship model · 0003 the conversation is the game · 0004 embedding provider (fastembed/ONNX) · 0005 split authority by openness · 0006 in-game time/sleep/presence economy · 0007 public-internet exposure · 0008 cross-tab/-device chat consistency · 0009 location/movement single source of truth · 0010 token-economy architecture · 0011 concurrent engine-drive beat-aware guardrails · 0012 two-window lockstep "Messenger mirror" · 0013 cast photos require a model-authored identity · 0014 local & tunable HTTPS (LAN-trusted, with or without a domain). (`README.md` there indexes them.) |
 | `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. `README.md` there holds the live per-feature **status index** and the **Amendments to shipped specs** table (implementers must pick those up). |
 | `docs/IMPLEMENTATION_QUEUE.md` | **Live work queue** — per-item implementation prompts (B/C/D/U/L-numbered lanes), dispatch order + dependencies, and the truest prose snapshot of what's done vs. remaining. |
-| `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). The 2026-06-11 **house-audit pattern** (real FE + real engine driven headless under Playwright, DOC-ONLY) produced `2026-06-11-dwe-window-audit.md` (windowing), `2026-06-11-refresh-persistence-audit.md` (every transient UI state × reload), and `2026-06-11-settings-wiring-audit.md` (every settings control × {wired, persisted, applied}). |
+| `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). The 2026-06-11 **house-audit pattern** (real FE + real engine driven headless under Playwright, DOC-ONLY) produced `2026-06-11-dwe-window-audit.md` (windowing), `2026-06-11-refresh-persistence-audit.md` (every transient UI state × reload), and `2026-06-11-settings-wiring-audit.md` (every settings control × {wired, persisted, applied}). The **`2026-06-27-ship-gate.md`** is the **launch-acceptance bar** — the authoritative "what blocks ship": the FE-airtight standard **F1–F5** (no missing messages, right status, smart queueing, multi-window concurrency, realtime two-window mirror parity — the #1 release blocker) and the casting→eviction golden path **G1–G9**, each with the real-model gate that proves it, plus the launch-blocker / post-launch / parked triage of every open issue. |
 | `docs/legacy/BB_GameBible.md` | **Legacy reference only.** The old chat-prompt implementation being replaced. Source of the *concrete* mechanics, but its fixed player persona / names are illustrative — never hard-code them. Same rule for the vendored v1 transcripts in `docs/legacy/meta-feedback/`. |
 
 ## The non-negotiable mandate
@@ -289,6 +289,19 @@ them before touching the chat stream or the HUD.
   tool routes through it. Cross-**device** reconcile is a *separate* seam: `_publish_game_updated`
   (feature 0064, server-push) in `frontend/routes/orwell_routes.py`. Wiring a new mutation? Call the
   helper; don't add a poll or an ad-hoc dispatch.
+
+- **Two-window realtime parity rides on a LIVE canonical-session binding (ADR 0008/0012).** Two
+  windows on one game mirror each other only when the *canonical game-session id*
+  (`GET /api/orwell/game-session`, stored in `frontend/src/orwell_game_session.py`) resolves to a
+  **live FE chat-session row**: the persistent mirror stream `GET /api/chat/events/{id}` + resume
+  `GET /api/chat/resume/{id}` both 404 a non-row id, and `_resolve_canonical_session`
+  (`routes/chat_helpers.py`) is the server run-key. Convergence is gated on `started !== false` — a
+  started game mirrors; casting stays per-tab by design. Two regressions to never reintroduce (both
+  fixed): a session-delete that doesn't **unbind** the canonical id leaves the mirror subscribed to a
+  dead channel and *collapses the window* (#1085), and resolving the canonical id during casting
+  causes a settle-time session switch that *strips the just-streamed reply* (#1086). Always validate
+  the binding resolves live before subscribing, and unbind on delete. The multi-window airtight bar
+  (F1–F5) is the authoritative gate: `docs/audits/2026-06-27-ship-gate.md`.
 
 - **The live stream splits by channel — reasoning must NEVER reach the public bubble.** In
   `frontend/static/js/chat.js` the streaming loop keeps two per-round buffers: `roundReplyText`
