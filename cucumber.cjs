@@ -76,6 +76,7 @@ module.exports = {
       "docs/features/0092-secret-pacing-drip.feature",
       "docs/features/0100-jury-grudge-book.feature",
       "docs/features/0105-suspicion-and-mood-anchoring.feature",
+      "docs/features/0109-deal-duration.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
