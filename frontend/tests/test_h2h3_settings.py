@@ -300,7 +300,12 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
                     break
                 if _overlay_present():
                     page.keyboard.press("Escape")
-                    page.wait_for_timeout(250)  # cover the kit's ~190ms close fade + teardown
+                    # Wait for the scrim to detach rather than a fixed delay,
+                    # so a slow CI runner doesn't race the kit's ~190ms teardown.
+                    try:
+                        page.wait_for_selector('[data-ow-scrim]', state='detached', timeout=3000)
+                    except Exception:
+                        pass
                     continue
                 # No overlay in the way — try to open Settings. Use a short per-attempt
                 # timeout so a wizard re-mounting onto the gear mid-click just loops back to
