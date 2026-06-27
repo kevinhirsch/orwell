@@ -85,6 +85,15 @@ When("the voicing projection for a houseguest is read through the current read p
   assert.ok(s.crNpc, "must have an NPC");
 });
 
+// 0088 snapshot/restore — uses the 0088 session (crSession), avoiding 0060's "the season is
+// snapshotted and restored" step (which expects stSandbox and would read undefined here).
+When("the current read is snapshotted and restored", function (this: BbWorld) {
+  const s = cr(this);
+  assert.ok(s.crSession, "must have a session to snapshot");
+  const core = s.crSession!.snapshot();
+  s.crSession!.restore(core);
+});
+
 // When the voicing projection is read — set up CV state for 0084's step definition compatibility.
 // The 0084 feature's step expects cvSession/cvIds to be populated by "a started season with a
 // generated cast". Our 0088 scenarios use "a started season with the player in the house"
