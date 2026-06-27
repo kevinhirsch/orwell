@@ -72,3 +72,62 @@ describe("F13 (#1018) — the veto fragment instructs voicing the chip draw / Ho
     expect(frag.toLowerCase()).toContain("never your own substitute");
   });
 });
+
+describe("#1108 — STATIC CHARACTER facts re-grounded as fixed/authoritative (no scene-to-scene drift)", () => {
+  const view = (seed = 31) =>
+    new GameSessionAdapter().createCharacter({ playerName: "The Player", seed });
+
+  it("the roster framing marks each houseguest's identity facts as FIXED and AUTHORITATIVE", () => {
+    const ctx = renderGameContext(view());
+    // The re-grounding clause: identity is stable for the whole season, voiced consistently.
+    expect(ctx).toContain("FIXED AND AUTHORITATIVE");
+    expect(ctx.toLowerCase()).toContain("never re-invent");
+    expect(ctx.toLowerCase()).toContain("do not change or drift from scene to scene");
+    // It names the concrete stable CHARACTER facets the model must not confabulate.
+    expect(ctx.toLowerCase()).toContain("vocation/profession");
+    expect(ctx.toLowerCase()).toContain("single source of truth for who each person is");
+  });
+
+  it("a beat that names a houseguest carries that houseguest's stable vocation in the prompt", () => {
+    const v = view(44);
+    const ctx = renderGameContext(v);
+    // Pick an active houseguest whose CHARACTER carries a vocation (the drifting facet in #1108).
+    const withVocation = v.house.find((h) => h.status === "active" && h.vocation);
+    expect(withVocation).toBeTruthy();
+    // Their stable vocation is GROUNDED into the prompt, on their own roster line — so the model
+    // voices a consistent profession instead of re-confabulating one (court-reporter ⇄ roller-derby).
+    const line = ctx.split("\n").find((l) => l.includes(`- ${withVocation!.name}`))!;
+    expect(line).toBeTruthy();
+    expect(line).toContain(withVocation!.vocation!);
+  });
+
+  it("the re-grounding surfaces ONLY public CHARACTER facets — never SOUL / Vault state", () => {
+    const ctx = renderGameContext(view(7)).toLowerCase();
+    // No hidden relationship/soul numbers ever appear in the public projection (the Vault Wall).
+    expect(ctx).not.toContain("trust:");
+    expect(ctx).not.toContain("threat level");
+    expect(ctx).not.toContain("affinity");
+    expect(ctx).not.toContain("secret");
+    expect(ctx).not.toContain("hidden goal");
+  });
+});
+
+describe("#1107 — eviction reveal forbids a fabricated full numeric vote tally", () => {
+  it("the eviction moment instructs voicing ONLY anonymized ballots + the committed result", () => {
+    const frag = MOMENT_PROMPTS["eviction"]!;
+    expect(frag).toContain("NEVER FABRICATE A FULL NUMERIC TALLY");
+    // it must keep the model on the engine's anonymized ballots, not a self-authored count
+    expect(frag.toLowerCase()).toContain("anonymized partial ballots");
+    expect(frag.toLowerCase()).toContain("a vote to evict");
+  });
+
+  it("the fragment bans a per-number two-sided count that exceeds the legal voter set", () => {
+    const frag = MOMENT_PROMPTS["eviction"]!;
+    // the exact failure mode (#1107): a phantom-ballot count above the legal voters
+    expect(frag.toLowerCase()).toContain("phantom ballot");
+    expect(frag.toLowerCase()).toContain("more votes than there are legal voters");
+    // and it spells out WHY: 16 minus HOH minus the two nominees ⇒ far fewer actually vote
+    expect(frag.toLowerCase()).toContain("minus the hoh and the two nominees");
+    expect(frag.toLowerCase()).toContain("never state a number of votes that could not");
+  });
+});

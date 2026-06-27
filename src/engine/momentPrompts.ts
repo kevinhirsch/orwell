@@ -630,7 +630,16 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "THIS turn — never from your own running count, and never as a prediction. Until that result beat " +
     "names who leaves, you do NOT know the evictee or the majority: do not say \"the majority votes to " +
     "evict <name>\", do not name who is going home, and never name a houseguest as evicted whom the game " +
-    "has not yet announced. If you have not been handed the result beat, you have only anonymized ballots.",
+    "has not yet announced. If you have not been handed the result beat, you have only anonymized ballots. " +
+    "NEVER FABRICATE A FULL NUMERIC TALLY. The engine hands you anonymized partial ballots (\"a vote to " +
+    "evict <name>\") and a committed result — voice ONLY those. Do NOT announce a complete two-sided vote " +
+    "count of your own (\"by a vote of 8 to 6\", \"7-5\", \"it's 9 to 1\") unless the game's own ballots add " +
+    "up to EXACTLY that split. Inventing a tally is a fabrication: a made-up count routinely conjures a " +
+    "PHANTOM BALLOT — more votes than there are legal voters (the house is 16, minus the HOH and the two " +
+    "nominees, so far fewer people actually vote) — which is impossible and instantly breaks the show. When " +
+    "in doubt, voice the anonymized ballots and the committed result the game gave you and stop; never " +
+    "supply a per-number tally the game did not hand you, and never state a number of votes that could not " +
+    "have legally been cast.",
   "twist-reveal":
     "MOMENT — A production twist fires. Big Brother interrupts the house with a reveal the game " +
     "just handed you (e.g. a DOUBLE EVICTION: the night is not over — a new HOH, a fast ceremony, a " +
@@ -961,7 +970,16 @@ export function renderGameContext(view: GameStateView): string {
     "  (npcVoice reports that) — they do NOT know each other's backstory, job, hometown, or history unless",
     "  it was witnessed, told, or gossiped (on premiere/day 1, essentially nothing yet — they are strangers",
     "  who just met). Describe people ONLY by what is observable and never say an archetype, a strategy, or",
-    "  a danger label out loud — the player discovers who everyone is by watching them play:",
+    "  a danger label out loud — the player discovers who everyone is by watching them play.",
+    "  THESE IDENTITY FACTS ARE FIXED AND AUTHORITATIVE — voice each houseguest CONSISTENTLY, never re-invent",
+    "  them. Every houseguest's name, vocation/profession, hometown, background, and biography below are their",
+    "  STABLE identity for the WHOLE season: they do NOT change or drift from scene to scene. A court reporter",
+    "  stays a court reporter in week 1 and week 8 — never a roller-derby blocker the next time they appear;",
+    "  an electrician stays an electrician, never re-cast with a new job to fit a moment. Before you place,",
+    "  mention, or voice anyone, GROUND yourself in their line here and keep that person EXACTLY who the roster",
+    "  says they are — same name, same job, same hometown, same story, every time they appear. Never",
+    "  confabulate a new profession, a new backstory, or a different identity for a houseguest you have already",
+    "  established; this roster is the single source of truth for who each person IS:",
     roster,
   ].join("\n");
 }
