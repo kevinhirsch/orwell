@@ -220,6 +220,40 @@ function _salvageLeadingOocFragment(reply) {
   return reply.replace(_OOC_LEADING_FRAGMENT_RE, (_m, inner) => (inner ? inner.trim() + ' ' : ''));
 }
 
+// #970: a SINGLE model turn may carry a leading OUT-OF-CHARACTER `((...))` block AND, after a line
+// break, un-parenthesized IN-CHARACTER prose ("((You're safe this week.))\n\nThe living room hums…").
+// The momentPrompts contract is "never both", so this is a model slip — but when it happens the
+// renderer must SEGMENT it into TWO bubbles: a styled producer-aside bubble for the `((...))` block,
+// then the trailing prose as its OWN NORMAL in-character bubble (NOT wrapped in the aside class). The
+// old behavior marked the WHOLE remaining turn as an aside (_OOC_LEADING_PREFIX path) or crammed both
+// into one bubble.
+//
+// Returns { aside, prose }: `aside` is the OOC inner text (markers stripped) ONLY when the reply
+// STARTS with a COMPLETE `((...))` block that is FOLLOWED by non-empty, non-parenthesized trailing
+// prose; `prose` is that trailing text. Otherwise `aside` is null and `prose` is the reply unchanged.
+//
+// Conservative by design — it fires ONLY on a clear leading complete block + real trailing prose:
+//   · a true WHOLE-message wrap (the entire reply is `((...))`) returns { aside:null } here so the
+//     caller's whole-wrap rule keeps it a SINGLE aside bubble (no regression);
+//   · a reply with no leading `((` returns { aside:null } and renders byte-identically to today;
+//   · the trailing remainder must itself be real prose (a non-empty tail that is NOT just another
+//     `((...))` wrap), so an empty / whitespace-only / re-wrapped tail does not trigger the split.
+const _OOC_LEADING_BLOCK_RE = /^\s*\(\(([\s\S]*?)\)\)([\s\S]*)$/;
+function _segmentLeadingOocAside(reply) {
+  if (!reply) return { aside: null, prose: reply };
+  // A genuine whole-message wrap is the caller's job (single aside bubble) — never split it.
+  if (_OOC_WHOLE_WRAP_RE.test(reply)) return { aside: null, prose: reply };
+  const m = reply.match(_OOC_LEADING_BLOCK_RE);
+  if (!m) return { aside: null, prose: reply };
+  const aside = (m[1] || '').trim();
+  const prose = (m[2] || '').trim();
+  // Need BOTH a meaningful aside AND real trailing prose to justify two bubbles. A trailing remainder
+  // that is itself just another `((...))` wrap is not in-character prose — leave it for the existing
+  // salvage/whole-wrap rules rather than emitting it as a normal bubble.
+  if (!aside || !prose || _OOC_WHOLE_WRAP_RE.test(prose)) return { aside: null, prose: reply };
+  return { aside, prose };
+}
+
 export function redactRawIds(text) {
   if (!text) return text;
   const lines = String(text).split('\n');
@@ -659,7 +693,18 @@ export function processWithThinking(text) {
     // a spoken-in-room line. Only a WHOLE-message wrap qualifies (never a heuristic
     // guess on free narration); mirrors orwellOocAside.detectOocAside's contract.
     let oocAside = false;
+    // #970: a single turn that LEADS with a complete `((...))` OOC block and then carries
+    // un-parenthesized in-character prose must render as TWO bubbles — a styled producer-aside for
+    // the block, then the prose as its own NORMAL bubble. Try that split FIRST; if it fires, `reply`
+    // becomes the trailing prose (rendered normally) and `leadingAsideText` holds the aside content.
+    // A true whole-message wrap returns no split (aside:null) and falls through to the whole-wrap
+    // rule below, so it stays a SINGLE aside bubble (no regression).
+    let leadingAsideText = null;
     if (reply) {
+      const seg = _segmentLeadingOocAside(reply);
+      if (seg.aside) { leadingAsideText = seg.aside; reply = seg.prose; }
+    }
+    if (reply && !leadingAsideText) {
       const m = reply.match(_OOC_WHOLE_WRAP_RE);
       if (m && (m[1] || '').trim()) { reply = m[1].trim(); oocAside = true; }
       else if (_OOC_LEADING_PREFIX_RE.test(reply)) {
@@ -678,6 +723,12 @@ export function processWithThinking(text) {
       thinkingBlocks.forEach((block, index) => {
         if (block && block.trim()) gbHtml += createThinkingSection(block, index, thinkingTime);
       });
+    }
+    // #970: emit the leading OOC block as its OWN styled aside bubble, THEN the in-character prose
+    // as a separate normal bubble below it. Both halves go through mdToHtml (the prose already ran
+    // the machinery/reasoning scrubs above), so reasoning can never reach either public bubble.
+    if (leadingAsideText) {
+      gbHtml += `<div class="ooc-producer-aside">${mdToHtml(leadingAsideText)}</div>`;
     }
     if (reply) {
       const replyHtml = mdToHtml(reply);
