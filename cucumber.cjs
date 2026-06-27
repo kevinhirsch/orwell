@@ -72,6 +72,7 @@ module.exports = {
       "docs/features/0087-relationship-trajectories.feature",
       "docs/features/0089-reactive-confessionals.feature",
       "docs/features/0091-trigger-secrets-house-events.feature",
+      "docs/features/0092-secret-pacing-drip.feature",
       "docs/features/0105-suspicion-and-mood-anchoring.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],

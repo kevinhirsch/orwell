@@ -1,7 +1,13 @@
 # 0092 — Secret-pacing drip (the paced "I knew it" payoff)
 
-> **Status:** 🟡 **SPEC ONLY (drafted 2026-06-25).** Design + executable Gherkin only — no source,
-> no `cucumber.cjs` wiring, no README index row yet. Built next as a new queue item.
+> **Status:** ✅ **BUILT (2026-06-27).** `src/engine/secretPacing.ts` + `secretPacingConstants.ts` (the
+> pure pacing core + the `SECRET_PACING` tunable), `GameSessionAdapter.pacingDrip` (the pass, run before
+> 0060's surface decision in the bounded tick; routes a ripe top candidate into 0060's existing anchored
+> `surfaceThread` via the new `force` channel), the per-week drip counter + per-thread `lastDrippedWeek`
+> persisted in the snapshot, the dedicated `ORWELL_SECRET_PACING` flag (default-off, calibration-neutral).
+> Gated by `tests/unit/secretPacing.test.ts` (ripeness/budget/routing/Vault-sentinel) +
+> `tests/unit/secretPacingNeutral.test.ts` (the load-bearing recording-rng byte-identity gate) + BDD
+> `0092-secret-pacing-drip.feature` (wired in `cucumber.cjs`).
 > **Tracks #861.**
 > **Depends on:** 0001 (Vault Wall), 0002 (event visibility & **pathway propagation** —
 > `surfaceInformationTo` with content-lineage anchoring; the only way a sealed fact legitimately

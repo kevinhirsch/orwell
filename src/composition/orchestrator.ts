@@ -486,8 +486,11 @@ export class Orchestrator {
   }
 }
 
-/** The default state-mutating step: a varied off-screen society + (player-turn) a witnessed day. */
-function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number, interactions = 3): number {
+/** The default state-mutating step: a varied off-screen society + (player-turn) a witnessed day.
+ *  Exported for the calibration-NEUTRALITY gates (the `richOffscreenStretch`/`scheduleStoryThreads`
+ *  pattern): a test drives this directly with a RECORDING rng to prove the seeded draw stream the
+ *  competition/vote/jury spine shares is byte-identical with a default-off feature flag on or off. */
+export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number, interactions = 3): number {
   const core = sandbox.session.snapshot();
   // B52/audit D5: evicted houseguests stop living — they leave the off-screen society the moment
   // they go (no more scheming/confessing weeks after eviction). Only the LIVING NPCs of the REAL
@@ -708,6 +711,16 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // crosses into `visible` becomes a PUBLIC house fact; the adapter's onShowmanceSurfaced hook (wired
   // in the registry) records the player-witnessed beat. Pre-visible showmances stay Vault-sealed.
   sandbox.session.advanceShowmances();
+  // 0092 — the SECRET-PACING DRIP runs BEFORE 0060's surface-to-player decision: it PACES which sealed
+  // secret edges toward THIS player and how fast (a per-week budget, relationship-weighted), routing a
+  // ripe top candidate into 0060's EXISTING anchored surface path (the confidant slip / gossip chain) —
+  // it adds no new pathway. STRICTLY OPT-IN (default-OFF `ORWELL_SECRET_PACING`): when off — the default,
+  // and the state the seeded juryReach/gradient/UAT sims run in — it returns immediately and draws
+  // nothing, so 0060's own flat path is the only one that runs and this tick is byte-identical to the
+  // pre-feature build. When on, every roll is on a DEDICATED rng INSIDE the session (never this shared
+  // stream), and the only thing it changes is which already-Wall-safe surface 0060 picks + whether the
+  // weekly budget allows it ⇒ the seeded comp/vote/jury spine is untouched (the load-bearing guarantee).
+  sandbox.session.pacingDrip();
   // 0060 — the story-thread scheduler rides THIS bounded tick (after society/gossip/confessional, so it
   // reads the freshly-moved house). It walks each seeded thread's lifecycle — dormant→active (reusing
   // the 0023 fold), active→surfaced (reusing 0038 gossip / 0002 pathways, capped per §5), and →resolved
