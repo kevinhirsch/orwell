@@ -43,6 +43,21 @@ export interface PresenceConstants {
    * off-screen society/orchestrator spine passes nothing, so the calibration draws are byte-identical.
    */
   doorMuffle: number;
+  /**
+   * SEATED sub-zone DRIFT (issue #792 — zones seated into `assignRooms`, not computed on-read): the
+   * per-tick chance a houseguest who is HOLDING their zoned room shifts to a DIFFERENT sub-zone (corner
+   * to corner), so a long stay reads as organic ambling instead of a fixed deterministic corner. Modest
+   * — most ticks they stay put in their corner. Drawn ONLY on the dedicated movement stream (the seated
+   * `zonesOut` opt-in), NEVER the shared/base calibration spine ⇒ zone seating is calibration-neutral.
+   */
+  zoneDriftProb: number;
+  /**
+   * SEATED sub-zone CLUSTER pull (issue #792): the weight a candidate zone gains for each already-seated
+   * zone-mate the mover has affinity toward — so two specific bonded houseguests can end up sharing a
+   * corner (affinity clustering, the zone-scoped sibling of the room-level `affinityPull`). `0` ⇒ no
+   * clustering (zones seed/drift on bare seeded variance). Read-side weighting only — draws no extra rng.
+   */
+  zoneClusterPull: number;
 }
 
 export const PRESENCE: PresenceConstants = {
@@ -54,6 +69,8 @@ export const PRESENCE: PresenceConstants = {
   overhearConfidence: 0.4,
   overhearFraction: 0.6,
   doorMuffle: 0.4,
+  zoneDriftProb: 0.25,
+  zoneClusterPull: 1.0,
 };
 
 /**

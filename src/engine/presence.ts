@@ -4,7 +4,7 @@
  * the HOH gravitates upstairs, schemers find space — all through the seeded RandomnessSource
  * (same seed, same trajectories), with movement constrained to the floor plan.
  */
-import { HOUSE_ROOMS, HOUSE_ADJACENCY, areAdjacent, isZonedRoom, pickZone, zonesAdjacentEarshot, type Room, type Zone, type Occupancy } from "../domain/house";
+import { HOUSE_ROOMS, HOUSE_ADJACENCY, areAdjacent, isZonedRoom, pickZone, zonesAdjacentEarshot, zonesFor, type Room, type Zone, type Occupancy } from "../domain/house";
 import { PLAYER } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
@@ -27,6 +27,71 @@ function zoneHash(s: string): number {
 export function zoneFor(id: EntityId, room: Room, salt: string | number = ""): Zone | undefined {
   if (!isZonedRoom(room)) return undefined;
   return pickZone(room, zoneHash(`${salt}:${id}:${room}`));
+}
+
+/**
+ * SEATED sub-zone assignment (issue #792 — the PO ruling: move sub-zones from on-read `zoneFor` to a
+ * persisted, per-id SEAT written by `assignRooms`, enabling organic DRIFT and affinity CLUSTERING).
+ *
+ * For each id placed in a ZONED room, seat a zone into `out`:
+ *   • FRESH seat — they were NOT in this zoned room last tick (just arrived, or no prior zone): seed the
+ *     INITIAL seat from `zoneFor` (the on-read helper becomes the seeding fallback — stable per (id,room,
+ *     salt)), then optionally cluster toward already-seated zone-mates the mover has affinity to.
+ *   • HELD seat — they kept the same zoned room and already have a zone: most ticks they STAY in their
+ *     corner; with chance `zoneDriftProb` they DRIFT to a re-rolled (cluster-weighted) zone.
+ * Un-zoned rooms seat nothing (no entry in `out`). Every draw rides the caller-supplied `rng` — which the
+ * adapter routes to the DEDICATED movement stream (never the shared society/competition/vote spine), so
+ * seated zones stay calibration-neutral exactly like the L21/L24 weighted occupancy.
+ *
+ * `salt` is the per-game seed (continuity of the fresh seat across a restart). `affinity`/`clusterPull`
+ * are optional (absent ⇒ no clustering — bare seeded seat/drift). `prevZones` is last tick's seating.
+ */
+export function seatZones(
+  occupancy: ReadonlyMap<EntityId, Room>,
+  prevZones: ReadonlyMap<EntityId, Zone> | null | undefined,
+  out: Map<EntityId, Zone>,
+  deps: { rng: RandomnessSource; salt?: string | number; affinity?: (a: EntityId, b: EntityId) => number; clusterPull?: number },
+): void {
+  const salt = deps.salt ?? "";
+  const clusterPull = deps.clusterPull ?? 0;
+  for (const [id, room] of occupancy) {
+    if (!isZonedRoom(room)) continue; // un-zoned room ⇒ no seat (the lone-space default)
+    const zones = zonesFor(room);
+    const heldZone = prevZones?.get(id);
+    // A HELD seat = the houseguest carries a prior zone that is VALID FOR THE CURRENT ROOM. Zone
+    // vocabularies don't overlap between rooms (backyard: poolside/patio/workout; lounge: couches/
+    // window-nook), so a prior zone valid here means they kept this zoned room — no prior-room read needed.
+    const held = heldZone !== undefined && zones.includes(heldZone);
+    if (held) {
+      // Hold the corner most ticks; occasionally amble to another (cluster-weighted) zone. ONE drift draw.
+      if (deps.rng.next() >= PRESENCE.zoneDriftProb) { out.set(id, heldZone); continue; }
+    }
+    // Fresh seat OR a drift: the INITIAL candidate is the on-read deterministic zone (the seeding
+    // fallback), then affinity-cluster toward already-seated zone-mates in this same room. ONE seat draw
+    // when clustering is active (a weighted pick); otherwise the deterministic seed needs no draw.
+    const seed = zoneFor(id, room, salt) ?? zones[0]!;
+    if (clusterPull <= 0 || !deps.affinity) { out.set(id, held ? pickDriftZone(zones, heldZone!) : seed); continue; }
+    // Weight each zone by affinity to those already seated there this pass (zone-scoped clustering).
+    const weights = zones.map((z) => {
+      let w = z === seed ? 1.5 : 1; // a mild home-corner prior so the deterministic seed still anchors
+      for (const [other, oz] of out) {
+        if (other === id) continue;
+        if (occupancy.get(other) === room && oz === z) w += clusterPull * Math.max(0, deps.affinity!(id, other));
+      }
+      return w;
+    });
+    const total = weights.reduce((a, b) => a + b, 0);
+    let roll = deps.rng.next() * total;
+    let chosen = zones[zones.length - 1]!;
+    for (let i = 0; i < zones.length; i++) { roll -= weights[i]!; if (roll <= 0) { chosen = zones[i]!; break; } }
+    out.set(id, chosen);
+  }
+}
+
+/** Pick a drift destination zone DIFFERENT from the current one (corner-to-corner); falls back to current if alone. */
+function pickDriftZone(zones: readonly Zone[], current: Zone): Zone {
+  const others = zones.filter((z) => z !== current);
+  return others.length ? others[0]! : current;
 }
 
 /**
@@ -111,6 +176,19 @@ export interface PresenceDeps {
    * draw as the ordinary path (only the THRESHOLD differs), so the per-NPC draw count is unchanged.
    */
   sceneMoveProb?: number;
+  /**
+   * SEATED sub-zone output (issue #792 — opt-in). When supplied, `assignRooms` also SEATS each placed
+   * houseguest's sub-zone into this map (for zoned rooms only), enabling persisted DRIFT + affinity
+   * CLUSTERING via `seatZones`. ABSENT (every base-pass / legacy caller) ⇒ no zone seating, no extra
+   * `rng` draw — byte-identical. The CALLER must route `rng` to the DEDICATED movement stream and pass
+   * `zonesOut` ONLY on the player-facing weighted pass, so seated zones stay calibration-neutral (never
+   * the shared society/competition/vote spine — the L21/L24 isolation discipline).
+   */
+  zonesOut?: Map<EntityId, Zone>;
+  /** Last tick's seated zones (issue #792) — held seats stay put / drift; absent ⇒ everyone seats fresh. */
+  previousZones?: ReadonlyMap<EntityId, Zone> | null;
+  /** The per-game salt (the game seed) for the deterministic fresh-seat fallback (issue #792). */
+  zoneSalt?: string | number;
 }
 
 /** The signed social deviation from center, used by both the move-rate and seek-pull nudges. */
@@ -273,6 +351,17 @@ export function assignRooms(
       if (roll <= 0) { chosen = candidates[i]!; break; }
     }
     next.set(id, chosen);
+  }
+  // SEAT sub-zones (issue #792, OPT-IN). Only when the caller supplies `zonesOut` — i.e. the player-
+  // facing weighted pass on the DEDICATED movement stream — so the base/calibration pass draws nothing
+  // here and the seeded spine is byte-identical. Drift/cluster ride the SAME `deps.rng` as the placement.
+  if (deps.zonesOut) {
+    seatZones(next, deps.previousZones, deps.zonesOut, {
+      rng: deps.rng,
+      salt: deps.zoneSalt,
+      affinity: deps.affinity,
+      clusterPull: PRESENCE.zoneClusterPull,
+    });
   }
   return next;
 }
