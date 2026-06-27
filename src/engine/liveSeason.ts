@@ -508,6 +508,45 @@ function stagedBatchSize(fieldSize: number): number {
 }
 
 /**
+ * Staged-eviction-reveal pacing (live-verify 2026-06-27, mirrors the staged-comp ruling above): a
+ * 14-voter eviction read one ballot per `advanceGame` is a ~14-advance slog of mostly-empty
+ * "producers deliberating" beats — and that flood of inert beats lets the narration model race ahead
+ * of the engine and pre-announce the result. Instead the votes are revealed in FEWER, BIGGER batches —
+ * roughly this many rounds total — so a big eviction lands in ~4-8 reveal beats. A small ballot set (a
+ * Final-3/4 two-or-three-vote eviction) stays at one ballot per round, already inside the band. Like the
+ * comp staging this is PRESENTATION ONLY: the same seeded reveal ORDER, the same precomputed tally, the
+ * same evictee on the same last ballot, and ZERO randomness consumed — only how many ballots a single
+ * advance reveals changes. Tunable.
+ */
+const STAGED_EVICTION_TARGET_ROUNDS = 5;
+
+/** Ballots to reveal per staged eviction round so the votes stage resolves in ~target rounds (≥1). */
+function stagedEvictionBatchSize(voteCount: number): number {
+  return Math.max(1, Math.ceil(voteCount / STAGED_EVICTION_TARGET_ROUNDS));
+}
+
+/**
+ * The anonymized summary of the ballots read in ONE batched reveal round (E12: names the nominee a
+ * ballot evicts, NEVER the voter, and never a cumulative tally or the evictee). One ballot reads as the
+ * familiar "a vote to evict X"; a batch reads "N votes to evict X" per nominee touched this round.
+ */
+function batchedRevealContent(e: EvictionProgress, from: number, to: number): string {
+  const counts: Record<EntityId, number> = {};
+  for (let i = from; i < to; i++) {
+    const votedFor = e.voteOf[e.revealOrder[i]!]!;
+    counts[votedFor] = (counts[votedFor] ?? 0) + 1;
+  }
+  // Preserve the nominee order for a stable, deterministic phrasing.
+  const parts: string[] = [];
+  for (const nominee of e.nominees) {
+    const n = counts[nominee];
+    if (!n) continue;
+    parts.push(n === 1 ? `a vote to evict ${nominee}` : `${n} votes to evict ${nominee}`);
+  }
+  return parts.join(", ");
+}
+
+/**
  * Advance the staged competition ONE step (0006 staged-rounds evolution) — PRESENTATION ONLY. The
  * outcome (winner + drop order) is already fixed; this reveals one elimination at a time, narrowing
  * the field, and pauses for the player's per-round approach (`comp-round`) when they are STILL IN. That
@@ -1134,13 +1173,21 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
   switch (e.stage) {
     case "votes": {
       if (e.revealIx < e.revealOrder.length) {
-        const voter = e.revealOrder[e.revealIx]!;
-        const votedFor = e.voteOf[voter]!;
-        e.revealIx += 1;
-        // E12: eviction votes are SECRET BALLOTS — the reveal reads the ballot, never the voter
-        // ("a vote to evict X…"). `voteOf` stays engine-internal (manner/deal reconciliation);
-        // attributions unseal only in the 0048 post-season retrospective.
-        return { beat: "eviction-reveal", content: `a vote to evict ${votedFor}`, participants: [votedFor] };
+        // Reveal a BATCH of ballots this advance (live-verify 2026-06-27): one ballot per advance made a
+        // 14-voter eviction a ~14-advance slog of inert beats and let the model race ahead of the engine.
+        // The batch size is derived from the TOTAL ballot count (stable + restart-safe — no extra state),
+        // so the votes stage lands in ~4-8 rounds. PRESENTATION ONLY: the seeded reveal ORDER, the
+        // precomputed tally, and the evictee on the LAST ballot are all unchanged; NO randomness here.
+        const batch = stagedEvictionBatchSize(e.revealOrder.length);
+        const from = e.revealIx;
+        const to = Math.min(from + batch, e.revealOrder.length);
+        e.revealIx = to;
+        // E12: eviction votes are SECRET BALLOTS — the reveal reads the ballot(s), never the voter
+        // ("a vote to evict X…" / "N votes to evict X"). `voteOf` stays engine-internal (manner/deal
+        // reconciliation); attributions unseal only in the 0048 post-season retrospective. Anonymized
+        // and never a cumulative tally or the evictee — `revealedTally` stays revealed-only.
+        const participants = e.revealOrder.slice(from, to).map((voter) => e.voteOf[voter]!);
+        return { beat: "eviction-reveal", content: batchedRevealContent(e, from, to), participants };
       }
       // The last vote is read: the tally decides (HOH breaks a tie — the player HOH pauses, B44).
       const tally = revealedTally(e);
