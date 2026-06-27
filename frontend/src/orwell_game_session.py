@@ -102,3 +102,41 @@ def clear_game_session(user: str | None) -> None:
         if k in data:
             del data[k]
             atomic_write_json(str(GAME_SESSION_PATH), data, indent=2)
+
+
+def clear_all_game_sessions() -> None:
+    """Unbind EVERY user's canonical game session — the admin "wipe all chats" door
+    (``DELETE /api/sessions/all``) deletes every session+message row, so every stored canonical id
+    is now dangling. Without this the bound id survives as a dead pointer and the whole sync layer
+    (mirror SSE subscribe, history fetch, canonical-run keying) aims at a session that 404s forever
+    (GAP-1). Idempotent; a missing/empty store is a no-op."""
+    with _LOCK:
+        data = _load()
+        if data:
+            atomic_write_json(str(GAME_SESSION_PATH), {}, indent=2)
+
+
+def resolve_live_game_session(user: str | None, is_live) -> str | None:
+    """The user's bound canonical game session id IF it still resolves to a LIVE session, else None
+    — and a dead binding is UNBOUND as a side effect so the next resolve starts clean.
+
+    ``is_live`` is a caller-supplied predicate ``(session_id) -> bool`` (the store stays DB-free —
+    liveness is a chat-session-row fact the route layer owns). A stale canonical id — one that
+    survived a chat-wipe, or an engine-sandbox id that was never an FE chat row — makes the mirror
+    stream / history / resume endpoints 404 forever and can collapse a live window's DOM on
+    convergence (GAP-1); validating before the FE subscribes turns that into a clean rebind.
+
+    Best-effort + fail-soft: a predicate that raises is treated as "live" (we never unbind on a
+    transient lookup error — only on a confirmed-dead id), so this can never lose a good binding."""
+    sid = get_game_session(user)
+    if not sid:
+        return None
+    try:
+        live = bool(is_live(sid))
+    except Exception:
+        # Don't punish a good binding for a transient lookup failure.
+        return sid
+    if live:
+        return sid
+    clear_game_session(user)
+    return None

@@ -580,6 +580,16 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
 
             # Delete the session and all its messages
             if session_manager.delete_session(sid):
+                # GAP-1: if this WAS the user's canonical game session, unbind it — otherwise the
+                # binding survives as a dead pointer the sync layer keeps aiming at (mirror SSE
+                # 404, history 404, DOM collapse on convergence). The next resolve rebinds clean.
+                try:
+                    from src import orwell_game_session
+                    user = effective_user(request)
+                    if orwell_game_session.get_game_session(user) == sid:
+                        orwell_game_session.clear_game_session(user)
+                except Exception:
+                    logger.debug("[orwell] canonical unbind on delete skipped", exc_info=True)
                 return {"status": "deleted"}
             else:
                 raise HTTPException(404, "Session not found")
@@ -609,6 +619,15 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             db.query(DbSession).delete()
             db.commit()
             session_manager.sessions.clear()
+            # GAP-1: every canonical game-session binding now points at a deleted row. Unbind them
+            # all, or the whole sync layer (mirror SSE subscribe, history fetch, canonical-run
+            # keying) aims at a dead session that 404s forever — and convergence onto that phantom
+            # id can collapse a live window's DOM. The next resolve mints a clean binding.
+            try:
+                from src import orwell_game_session
+                orwell_game_session.clear_all_game_sessions()
+            except Exception:
+                logger.debug("[orwell] clear_all_game_sessions skipped", exc_info=True)
             logger.info(f"Admin deleted all {count} sessions")
             return {"status": "deleted", "count": count}
         except Exception as e:
