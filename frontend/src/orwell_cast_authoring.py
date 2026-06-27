@@ -105,6 +105,27 @@ _STRICT_RETRY = (
     "for this houseguest — start with '{', end with '}', no prose, no markdown, no fences, no reasoning."
 )
 
+# #1057: the retry instruction for an EMPTY or TRUNCATED visible body. The live-verify proved that under
+# the concurrent authoring burst (15 calls sharing the OpenRouter endpoint with premiere narration),
+# deepseek-v4-pro emits an EMPTY `text` channel or a JSON object that is CLIPPED mid-stream (finish_reason
+# "length" / the budget exhausted before the closing brace). Neither is the #1002 "the model emitted
+# prose INSTEAD of JSON" failure — there was no full body to reparse — so that retry never fired and the
+# call fell straight to the floor. This re-issues the call (reasoning already OFF, the roomy
+# _AUTHOR_MIN_OUTPUT_TOKENS floor) asking for the COMPLETE object, compactly, so it fits the budget.
+_TRUNCATION_RETRY = (
+    "Your previous reply was empty or cut off before the JSON object was complete. Reply now with the "
+    "COMPLETE JSON object for this houseguest in one piece — start with '{', end with '}', keep every "
+    "field concise so the whole object fits, no prose, no markdown, no fences, no reasoning."
+)
+
+# #1057: how many times to re-issue a call whose VISIBLE body came back EMPTY or TRUNCATED (clipped JSON).
+# This is the DOMINANT live failure (provider truncation under the concurrent burst), distinct from the
+# #1002 "full body, no JSON" prose case. Bounded + fail-soft: after the budget is spent the call lands on
+# the seeded floor exactly as before. A small backoff between attempts gives a transient provider
+# overload under the burst time to clear.
+_EMPTY_TRUNCATED_RETRIES = 2
+_RETRY_BACKOFF_SECONDS = 0.4
+
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
 # NOTE: `dayOnePerception` is INTENTIONALLY NOT authored here (anti-sycophancy) — the engine owns the
 # seeded, balanced Day-1 read. We never send it, so the authoring path carries zero player coupling.
@@ -116,7 +137,16 @@ _PHYS_KEYS = ("heightBuild", "skinTone", "hair", "facialFeatures", "distinguishi
 
 # Bounded concurrency for `author_cast` (#5): author NPCs in parallel but never flood the utility
 # endpoint — at most this many authoring LLM calls are in flight at once.
-_AUTHOR_CONCURRENCY = 3
+#
+# #1057: lowered 3 → 2. The live-verify proved that at 3 the 15-call authoring burst — running CONCURRENT
+# with premiere narration on the SAME OpenRouter endpoint — pushed deepseek-v4-pro into emitting empty /
+# truncated `text` (12/15 fell to the floor). Dropping the in-flight authoring load to 2 measurably eases
+# the provider pressure while keeping authoring well under a couple of minutes for a 15-NPC cast (15 calls
+# / 2 in flight, each a few seconds, plus the empty/truncated retries below). It is fail-soft background
+# work, so throughput is secondary to NOT truncating — but 2 (not 1) keeps it from dragging on. The
+# empty/truncated retry (below) is the primary defense; this just lowers the rate at which the burst
+# trips truncation in the first place.
+_AUTHOR_CONCURRENCY = 2
 
 # Quality floor (#3, FE-side guard): a degraded/thin authored field must never overwrite the richer
 # deterministic seeded floor in the engine. Since recordCastProfile only overwrites the fields it
@@ -339,6 +369,55 @@ def _no_json_in(text: str) -> bool:
     return _extract_json(text or "") is None
 
 
+def _has_unbalanced_open_brace(text: str) -> bool:
+    """True iff `text` contains an UNCLOSED top-level ``{`` — i.e. a JSON object the provider started
+    streaming but never finished (the live truncation shape: the body opens the object, streams several
+    fields, then the stream is cut by finish_reason "length" / a mid-stream provider error before the
+    closing brace). String-aware so a brace inside a string literal is ignored. Distinct from "no JSON at
+    all" (pure prose, no opening brace) — that is the #1002 case, not truncation."""
+    depth = 0
+    in_str = False
+    esc = False
+    saw_open = False
+    for ch in text or "":
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+            saw_open = True
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+    return saw_open and depth > 0
+
+
+def _classify_visible_body(text: str) -> str:
+    """#1057: classify a model reply's VISIBLE body so the authoring loop can pick the right recovery.
+    Returns one of:
+      • "ok"        — a usable JSON object is present (parse it; no retry needed);
+      • "empty"     — the visible body is empty/whitespace-only (the provider returned nothing — RETRY);
+      • "truncated" — an UNCLOSED ``{`` (the object was clipped mid-stream by length/error — RETRY);
+      • "no_json"   — a NON-empty, brace-balanced body with no parseable object (genuine prose — the
+                      #1002 reparse case, a different retry).
+    The two RETRY shapes (empty / truncated) are the live-verify's dominant failure (provider
+    truncation under the concurrent burst); the existing #1002 reparse only covered "no_json"."""
+    if _extract_json(text or "") is not None:
+        return "ok"
+    if not (text or "").strip():
+        return "empty"
+    if _has_unbalanced_open_brace(text or ""):
+        return "truncated"
+    return "no_json"
+
+
 # ── the orchestrator (injectable — fully unit-testable) ───────────────────────
 
 LlmFn = Callable[[list[dict]], Awaitable[str]]
@@ -364,66 +443,160 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     `on_authored(houseguest_id)` — when supplied — is fired AFTER each successful, engine-accepted
     write-back (per-NPC portrait gating, #7). It is best-effort: a callback raising never aborts
     authoring. It is never fired for an NPC that wasn't authored / was refused.
+
+    #1057 — ROBUSTNESS to the live concurrent-burst failure (the live-verify authored only 3/15):
+      • the LLM call retries on an EMPTY or TRUNCATED visible body (provider truncation under the burst),
+        not just on the #1002 "full body, no JSON" prose case;
+      • lower concurrency (2) eases the provider pressure that triggers the truncation;
+      • the engine write-back is SERIALIZED through a single-flight lock and retried on a transient
+        `degradation` / refused result, so concurrent `recordCastProfile` calls no longer collide on the
+        orchestrator integrity checkpoint (the live-verify's 3 `degradation` refusals).
+    All three stay fail-soft: after the bounded retries the call simply lands on the seeded floor.
     """
     sem = asyncio.Semaphore(max(1, int(concurrency)))
-    # #1002: per-season tallies for the end-of-run diagnostic counter — how many NPCs fell back to the
-    # deterministic floor, and WHY (no JSON in the reply vs. JSON parsed but every field below the floor).
-    floor_no_json = 0     # the strongest suspect: a reasoning model emitted prose, no parseable object
+    # #1057: SERIALIZE the engine write-back. The per-NPC recordCastProfile write-backs collide on the
+    # orchestrator integrity checkpoint when they run concurrently (the live-verify's 3 `degradation`
+    # refusals dropped good profiles). A single-flight lock funnels every write-back through one at a time
+    # — authoring still parallelizes the (slow) LLM calls, only the (fast) commit is serialized.
+    write_lock = asyncio.Lock()
+    # #1002 / #1057: per-season tallies for the end-of-run diagnostic counter — how many NPCs fell back to
+    # the deterministic floor, and WHY. The breakdown distinguishes every no-op cause so a live-verify can
+    # read exactly where the loss is (no-JSON prose vs. empty/truncated provider output vs. a write-back
+    # degradation vs. JSON parsed but below the quality floor).
+    floor_no_json = 0     # a reasoning model emitted prose, no parseable object (the #1002 case)
+    floor_empty = 0       # #1057: the provider returned an EMPTY visible body (after retries)
+    floor_truncated = 0   # #1057: the provider returned a CLIPPED/unbalanced object (after retries)
+    floor_degradation = 0  # #1057: the write-back was refused as a transient degradation (after retries)
     floor_below = 0       # JSON parsed but nothing cleared the quality floor (seeded floor is richer)
 
+    async def _call_with_retries(npc: dict, hid: str):
+        """Issue the authoring call(s) for one NPC and return its parsed profile (or None).
+
+        Layered, bounded, fail-soft recovery for the live failure modes:
+          1. first call;
+          2. #1057 — EMPTY or TRUNCATED visible body ⇒ re-issue (up to `_EMPTY_TRUNCATED_RETRIES`,
+             small backoff) asking for the COMPLETE object (the dominant burst-truncation failure);
+          3. #1002 — a NON-empty body with NO parseable JSON (genuine prose) ⇒ ONE strict-JSON reparse.
+        Returns (profile_or_None, last_text) so the caller can classify the final no-op cause."""
+        messages = build_authoring_messages(npc)
+        try:
+            text = await llm_fn(messages)
+        except Exception as e:  # the model can fail for one houseguest; carry on
+            logger.warning(f"[cast-authoring] llm failed for {hid}: {e}")
+            return None, ""
+        profile = parse_authored_profile(text or "", hid)
+        # #1057: retry on EMPTY / TRUNCATED visible body — the provider returned nothing usable because the
+        # body was empty or the object was clipped mid-stream (burst truncation), NOT because it emitted
+        # prose instead of JSON. Re-issue asking for the complete object; reasoning is already OFF and the
+        # roomy _AUTHOR_MIN_OUTPUT_TOKENS floor is applied in `_resolve_llm_fn`.
+        attempt = 0
+        while profile is None and _classify_visible_body(text or "") in ("empty", "truncated") \
+                and attempt < _EMPTY_TRUNCATED_RETRIES:
+            attempt += 1
+            shape = _classify_visible_body(text or "")
+            logger.info(
+                f"[cast-authoring] {shape} visible body for {hid} (attempt {attempt}/"
+                f"{_EMPTY_TRUNCATED_RETRIES}) — re-issuing for the complete object")
+            if _RETRY_BACKOFF_SECONDS:
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
+            try:
+                text = await llm_fn(messages + [{"role": "user", "content": _TRUNCATION_RETRY}])
+            except Exception as e:
+                logger.warning(f"[cast-authoring] llm empty/truncated retry failed for {hid}: {e}")
+                break
+            profile = parse_authored_profile(text or "", hid)
+        # #1002: one-shot reparse retry — a NON-empty body with NO JSON object at all (genuine prose).
+        # Distinct from the empty/truncated case above; only fires when there WAS a full body to reparse.
+        if profile is None and _classify_visible_body(text or "") == "no_json":
+            logger.info(
+                f"[cast-authoring] no JSON in reply for {hid} — retrying once with a "
+                "strict JSON-only instruction")
+            try:
+                text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
+            except Exception as e:
+                logger.warning(f"[cast-authoring] llm retry failed for {hid}: {e}")
+            else:
+                profile = parse_authored_profile(text or "", hid)
+        return profile, (text or "")
+
+    async def _write_with_retries(profile: dict, hid: str):
+        """#1057: commit one profile through the SERIALIZED single-flight write-back, retrying a transient
+        `degradation` / refused result (a concurrency collision on the orchestrator integrity checkpoint,
+        not a permanent reject). Returns the accepted result dict, or None on a terminal failure. The
+        write-back is idempotent per houseguest, so a retry is safe."""
+        last = None
+        for attempt in range(1 + _EMPTY_TRUNCATED_RETRIES):
+            if attempt and _RETRY_BACKOFF_SECONDS:
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
+            try:
+                async with write_lock:  # serialize: never two recordCastProfile commits at once
+                    res = await write_fn(profile)
+            except Exception as e:
+                logger.warning(f"[cast-authoring] write-back failed for {hid}: {e}")
+                return None
+            if isinstance(res, dict) and res.get("accepted"):
+                return res
+            last = res
+            _reason = res.get("reason") if isinstance(res, dict) else f"non-dict result ({type(res).__name__})"
+            # A transient degradation/refused commit is a concurrency collision — retry. Anything else is
+            # a permanent reject (validation etc.) — don't hammer it; fall through to the floor.
+            _rs = str(_reason or "").lower()
+            if "degrad" in _rs or "integrity" in _rs or "checkpoint" in _rs:
+                if attempt < _EMPTY_TRUNCATED_RETRIES:
+                    logger.info(
+                        f"[cast-authoring] write-back degradation for {hid} (attempt "
+                        f"{attempt + 1}/{1 + _EMPTY_TRUNCATED_RETRIES}) — retrying serialized")
+                    continue
+                logger.warning(
+                    f"[cast-authoring] write-back still degraded for {hid} after retries — "
+                    "keeping the seeded floor")
+                return "degradation"  # sentinel for the diagnostic tally
+            # permanent / unexpected non-accept
+            logger.warning(f"[cast-authoring] write-back not accepted for {hid}: {_reason or 'accepted=false'}")
+            return None
+        return last
+
     async def _author_one(npc: dict) -> int:
-        nonlocal floor_no_json, floor_below
+        nonlocal floor_no_json, floor_empty, floor_truncated, floor_degradation, floor_below
         hid = npc.get("id")
         if not hid or hid == "player":
             return 0
         async with sem:
-            messages = build_authoring_messages(npc)
-            try:
-                text = await llm_fn(messages)
-            except Exception as e:  # the model can fail for one houseguest; carry on
-                logger.warning(f"[cast-authoring] llm failed for {hid}: {e}")
-                return 0
-            profile = parse_authored_profile(text or "", hid)
-            # #1002: one-shot reparse retry — DeepSeek (and other reasoning models) reliably wrap or omit
-            # the JSON. If NOTHING parsed AND the reply had no JSON object at all, retry ONCE with a
-            # maximally-strict "JSON only" instruction before falling back to the seeded floor. Bounded
-            # (one retry), fail-soft (a retry that also fails just lands on the floor).
-            if not profile and _no_json_in(text or ""):
-                logger.info(
-                    f"[cast-authoring] no JSON in first reply for {hid} — retrying once with a "
-                    "strict JSON-only instruction")
-                try:
-                    text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
-                except Exception as e:
-                    # keep the original (no-JSON) reply for the no-op classification below
-                    logger.warning(f"[cast-authoring] llm retry failed for {hid}: {e}")
-                else:
-                    profile = parse_authored_profile(text or "", hid)
+            profile, text = await _call_with_retries(npc, hid)
             if not profile:
-                # #1002: close the silent-None gap — distinguish the two no-op causes (mirrors the
-                # FEPY-5 write-back log style) so a whole-cast floor-fallback is diagnosable, not silent.
-                if _no_json_in(text or ""):
+                # #1002 / #1057: close the silent-None gap — distinguish the no-op causes so a whole-cast
+                # floor-fallback is diagnosable, not silent. Classify the FINAL reply body.
+                shape = _classify_visible_body(text or "")
+                if shape == "empty":
+                    floor_empty += 1
+                    logger.warning(
+                        f"[cast-authoring] empty model reply for {hid} (after retries) — "
+                        "keeping the seeded floor")
+                elif shape == "truncated":
+                    floor_truncated += 1
+                    logger.warning(
+                        f"[cast-authoring] truncated model reply for {hid} (after retries) — "
+                        "keeping the seeded floor")
+                elif shape == "no_json":
                     floor_no_json += 1
                     logger.warning(
                         f"[cast-authoring] no JSON found in model reply for {hid} (after retry) — "
                         "keeping the seeded floor")
-                else:
+                else:  # parsed JSON, but every field landed below the quality floor
                     floor_below += 1
                     logger.warning(
                         f"[cast-authoring] JSON parsed but all fields below the quality floor for {hid} "
                         "— keeping the seeded floor")
                 return 0
-            try:
-                res = await write_fn(profile)
-            except Exception as e:
-                logger.warning(f"[cast-authoring] write-back failed for {hid}: {e}")
-                return 0
+            # #1057: the write-back is SERIALIZED + degradation-retried (it must not run concurrently
+            # against the orchestrator integrity checkpoint).
+            res = await _write_with_retries(profile, hid)
+        if res == "degradation":
+            floor_degradation += 1
+            return 0
         if not (isinstance(res, dict) and res.get("accepted")):
-            # FEPY-5 (#621): a rejected/odd write-back was silently dropped here (unlike
-            # orwell_prewarm / orwell_zeitgeist) — a refused recordCastProfile was invisible. Log it so
-            # the no-op is diagnosable; the seeded floor still stands (best-effort, never aborts).
-            _reason = res.get("reason") if isinstance(res, dict) else f"non-dict result ({type(res).__name__})"
-            logger.warning(f"[cast-authoring] write-back not accepted for {hid}: {_reason or 'accepted=false'}")
+            # FEPY-5 (#621): a rejected/odd write-back was silently dropped here — already logged inside
+            # `_write_with_retries`; the seeded floor still stands (best-effort, never aborts).
             return 0
         # The write-back landed — signal this one NPC's completion so its portrait can shoot now (#7).
         if on_authored is not None:
@@ -435,15 +608,17 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
 
     results = await asyncio.gather(*[_author_one(npc) for npc in (cast or [])])
     written = sum(results)
-    # #1002: the per-season diagnostic counter — the headline "did the LLM actually enrich the cast, or
-    # did it all fall back to the thin deterministic floor?" line. `total` counts the authorable NPCs
-    # (the player is human-authored and skipped); the floor tallies break down the non-op causes so a
-    # mass fallback is immediately diagnosable in the logs.
+    # #1002 / #1057: the per-season diagnostic counter — the headline "did the LLM actually enrich the
+    # cast, or did it all fall back to the thin deterministic floor?" line. `total` counts the authorable
+    # NPCs (the player is human-authored and skipped); the floor tallies break down EVERY no-op cause so a
+    # mass fallback is immediately diagnosable in the logs — empty / truncated / degradation are each
+    # visible now (the live-verify's dominant failures), beside the original no-JSON / below-floor.
     total = sum(1 for npc in (cast or []) if npc.get("id") and npc.get("id") != "player")
     floor = total - written
     logger.info(
         f"[cast-authoring] cast authoring: authored {written}/{total} houseguests "
-        f"(floor fallback for {floor}: {floor_no_json} no-JSON, {floor_below} below-floor)")
+        f"(floor fallback for {floor}: {floor_no_json} no-JSON, {floor_empty} empty, "
+        f"{floor_truncated} truncated, {floor_degradation} degradation, {floor_below} below-floor)")
     return written
 
 
