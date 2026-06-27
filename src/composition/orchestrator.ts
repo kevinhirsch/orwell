@@ -7,7 +7,7 @@ import { richOffscreenStretch } from "../engine/offscreen";
 import { scaleImpact, natureFoldImpact } from "../engine/relationshipConstants";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, gossipEdgeAffinity, GOSSIP } from "../engine/gossip";
-import { confessionalFor, recordConfessional } from "../engine/confessionals";
+import { confessionalFor, recordConfessional, selectRecentForConfessional } from "../engine/confessionals";
 import { nextHouseEvent } from "../engine/houseEvents";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
@@ -648,9 +648,21 @@ function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom,
   // NPC interiority (0040): an involved houseguest privately confesses their REAL read — Vault-only
   // (witnessed by them alone), grounded in their actual relationship signals, never invented. It
   // reaches no one (player or admin); the player feels it only later through that NPC's behavior.
+  // 0089: the confessional reacts to a concrete recent event the confessor witnessed — "after the
+  // veto ceremony…" — additive to 0040's grounded target/ally read.
   if (scenes.length > 0) {
     const confessor = scenes[rng.int(scenes.length)]!.initiator;
-    recordConfessional(sandbox.engine.events, confessionalFor(confessor, ids, sandbox.engine.relationships, { player: PLAYER }), rng, clockNow);
+    const witnessed = sandbox.engine.events.query({ witnessedBy: confessor });
+    const recentEvents = selectRecentForConfessional(witnessed, confessor);
+    recordConfessional(
+      sandbox.engine.events,
+      confessionalFor(confessor, ids, sandbox.engine.relationships, {
+        player: PLAYER,
+        ...(recentEvents.length > 0 ? { recentEvents } : {}),
+      }),
+      rng,
+      clockNow,
+    );
   }
 
   if (trigger === "player-turn" && ids.length > 0) {

@@ -70,6 +70,7 @@ module.exports = {
       "docs/features/0085-npc-campaigns-and-the-scramble.feature",
       "docs/features/0086-houseguest-drives.feature",
       "docs/features/0087-relationship-trajectories.feature",
+      "docs/features/0089-reactive-confessionals.feature",
       "docs/features/0105-suspicion-and-mood-anchoring.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
