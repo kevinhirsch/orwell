@@ -86,11 +86,21 @@
   body {
     font-family: var(--login-font);
     background: var(--bg); color: var(--fg);
-    display: flex; justify-content: center; align-items: flex-start;
+    /* #859: the login / create-account card is CENTERED on screen (H + V) like the
+       OrwellWindow kit's centered modals — not top-anchored. The mobile soft-keyboard
+       handler (JS, below) flips to a top anchor only while the keyboard is open, so the
+       focused field stays visible; the default resting state is true-centered. */
+    display: flex; justify-content: center; align-items: center;
     min-height: 100vh; min-height: 100dvh;
-    padding-top: 15vh;
+    padding-top: 0;
     transition: padding-top 0.2s ease;
     overflow: hidden; /* the bg layers cover the viewport; nothing scrolls behind them */
+  }
+  /* #859: while the mobile soft keyboard is open, top-anchor the card (set by the
+     visualViewport handler) so the active input isn't pushed off-screen. */
+  body.kbd-open {
+    align-items: flex-start;
+    padding-top: 5vh;
   }
   /* The background host — the CONTENT layer the glass floats over. Fixed,
      full-viewport, behind everything (z-index:0). login_bg.js mounts ONE of
@@ -725,13 +735,15 @@ if (window.visualViewport) {
     const vvh = window.visualViewport.height;
     const wh = window.innerHeight;
     if (vvh < wh * 0.8) {
-      document.body.style.paddingTop = '5vh';
+      // #859: keyboard open → top-anchor the (otherwise centered) card so the focused
+      // field stays visible. The .kbd-open class owns the anchor (CSS), not an inline shim.
+      document.body.classList.add('kbd-open');
       // Keep the active input visible without jumping the whole card to the top
       if (document.activeElement && document.activeElement.tagName === 'INPUT') {
         document.activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     } else {
-      document.body.style.paddingTop = '';
+      document.body.classList.remove('kbd-open');
     }
   });
 }

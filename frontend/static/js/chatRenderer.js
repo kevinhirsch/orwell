@@ -1933,6 +1933,11 @@ export function addMessage(role, content, modelName, metadata) {
       let lastWrap = null;
       let firstMsgAi = null;
       let lastMsgAi = null;
+      // #834: role + timestamp attach to the FIRST VISIBLE bubble of the turn, NOT strictly
+      // round 0. When round 0 is a hidden tool-call (e.g. getGameState — empty txt, no bubble),
+      // the first rendered bubble is a later round; it must still carry the role+timestamp header
+      // (and NOT read as a continuation), or the received message shows no timestamp.
+      let renderedFirstVisible = false;
 
       const toolsByRound = {};
       for (const ev of toolEvents) {
@@ -1963,8 +1968,11 @@ export function addMessage(role, content, modelName, metadata) {
         const _gbSkipIntermediateText = false;
 
         if (txt && !_gbSkipIntermediateText) {
+          // #834: the FIRST visible bubble of the turn owns the role+timestamp header and is
+          // NOT a continuation, even when earlier rounds were hidden tool-calls.
+          const isFirstVisible = !renderedFirstVisible;
           const wrap = document.createElement('div');
-          wrap.className = 'msg msg-ai' + (r > 0 ? ' msg-continuation' : '');
+          wrap.className = 'msg msg-ai' + (isFirstVisible ? '' : ' msg-continuation');
           const roleEl = document.createElement('div');
           roleEl.className = 'role';
           const pair = replyModelPair(modelName, metadata);
@@ -1978,7 +1986,7 @@ export function addMessage(role, content, modelName, metadata) {
             roleEl.title = pair.requestedModel + ' -> ' + contModel;
           }
           applyModelColor(roleEl, contModel);
-          if (r === 0) roleEl.appendChild(roleTimestamp(metadata?.timestamp));
+          if (isFirstVisible) roleEl.appendChild(roleTimestamp(metadata?.timestamp));
           wrap.appendChild(roleEl);
           const body = document.createElement('div');
           body.className = 'body';
@@ -2007,6 +2015,7 @@ export function addMessage(role, content, modelName, metadata) {
           lastWrap = wrap;
           if (!firstMsgAi) firstMsgAi = wrap;
           lastMsgAi = wrap;
+          renderedFirstVisible = true;  // #834: subsequent bubbles are continuations
         }
 
         // Whether a TEXT bubble was actually rendered above this round's tools.

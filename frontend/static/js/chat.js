@@ -1366,6 +1366,12 @@ import { isNarrow } from './platform.js';
       if (streamingTTS) window.aiTTSManager.streamingStart();
       // Multi-bubble agent tracking
       let roundHolder = holder;       // Current AI text bubble (changes per round)
+      // #834: has a VISIBLE turn-header bubble (role + timestamp, not a continuation) been shown
+      // yet? The initial `holder` carries the header, but it is hidden at agent_step when the round
+      // produced no narration (a pure hidden tool-call round, e.g. getGameState). When that header
+      // is hidden, the next continuation bubble must be PROMOTED to the turn header (role +
+      // timestamp, NOT a continuation) so the received message still shows a timestamp.
+      let turnHeaderShown = true;     // the initial holder starts as the visible header
       let roundText = '';             // Text accumulated for current round (MERGED reply+reasoning)
       // F8: per-round channel-split buffers. The BODY renders roundReplyText (reasoning-free by
       // construction); the live "Thinking" accordion renders roundReasoningText. These MUST be
@@ -2933,6 +2939,10 @@ import { isNarrow } from './platform.js';
                 // away"). `roundReplyText` still holds the closing round here (reset is later, ~2706).
                 if (roundHolder && !stripToolBlocks(roundReplyText).trim()) {
                   roundHolder.style.display = 'none';
+                  // #834: this round's bubble is being hidden. If it was the turn's only visible
+                  // header (no later visible bubble has taken over yet), the turn currently has NO
+                  // visible header — flag it so the NEXT bubble is promoted to header + timestamp.
+                  if (!roundHolder.classList.contains('msg-continuation')) turnHeaderShown = false;
                 }
                 // Mark thread as connected to bubble below
                 const _activeThread = document.querySelector('.agent-thread.streaming');
@@ -2947,7 +2957,12 @@ import { isNarrow } from './platform.js';
                 _docFenceContentStart = -1;
                 const box = document.getElementById('chat-history');
                 const newWrap = document.createElement('div');
-                newWrap.className = 'msg msg-ai msg-continuation streaming';
+                // #834: when no visible turn-header exists yet (round 0 was a hidden tool-call), this
+                // bubble is the FIRST VISIBLE one — promote it to the header (role + timestamp, NOT a
+                // continuation) so the received message carries a timestamp. Otherwise it's a normal
+                // continuation. Mirrors the reload path's first-visible logic in chatRenderer.js.
+                const _isTurnHeader = !turnHeaderShown;
+                newWrap.className = 'msg msg-ai streaming' + (_isTurnHeader ? '' : ' msg-continuation');
                 // Add model name label
                 const newRole = document.createElement('div');
                 newRole.className = 'role';
@@ -2958,6 +2973,13 @@ import { isNarrow } from './platform.js';
                 // never the raw model name as the sender.
                 newRole.textContent = isGameBuild() ? 'Orwell' : (_modelRouteLabel(_roundRequested, _roundActual) || '');
                 _applyModelColor(newRole, _roundActual);
+                // #834: a promoted header bubble carries the timestamp (matches the initial holder +
+                // the reload path). roleTimestamp() with no arg falls back to "now" — correct for a
+                // live turn. Continuation rounds keep no per-round timestamp (unchanged).
+                if (_isTurnHeader) {
+                  newRole.appendChild(chatRenderer.roleTimestamp());
+                  turnHeaderShown = true;
+                }
                 newWrap.appendChild(newRole);
                 const newBody = document.createElement('div');
                 newBody.className = 'body';
