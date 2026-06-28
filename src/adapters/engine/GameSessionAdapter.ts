@@ -3197,8 +3197,9 @@ export class GameSessionAdapter implements GameSession {
 
   /** The OBSERVABLE public read of one active houseguest (PUBLIC facets only — no Vault, no numbers). */
   private firstImpressionOf(n: GameHouse["npcs"][number]): FirstImpressionView {
-    // Exactly the Vault-free facets the roster card already exposes (B61/L28): archetype, strategy
-    // style, background, age, presentation, demeanor. NEVER the soul, hiddenElements, or a number.
+    // Exactly the Vault-free facets the roster card already exposes (B61/L28/#1140): archetype, strategy
+    // style, background, age, presentation, demeanor, genderPresentation. NEVER the soul, hiddenElements,
+    // or a number; gender PRESENTATION only (a private orientation stays Vault-sealed).
     return {
       houseguest: { id: n.id, name: n.name },
       met: this.premiereMet.has(n.id),
@@ -3208,6 +3209,7 @@ export class GameSessionAdapter implements GameSession {
       ...(n.character.age !== undefined ? { age: n.character.age } : {}),
       ...(n.character.presentation !== undefined ? { presentation: n.character.presentation } : {}),
       ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
     };
   }
 

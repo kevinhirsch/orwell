@@ -11,6 +11,9 @@
  */
 
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
+import { genderPresentationPhrase } from "../domain/gender";
+
+export { genderPresentationPhrase };
 
 /** The public appearance facets available on the Vault-free HouseguestCard (B61). */
 export interface PublicAppearanceFacets {
@@ -55,14 +58,6 @@ export function physicalFacetToAppearance(p: PhysicalCharacteristics): string {
   if (p.distinguishingMark && !/^none\b/i.test(p.distinguishingMark.trim())) parts.push(p.distinguishingMark);
   parts.push(p.ageLook);
   return parts.join(", ");
-}
-
-/**
- * A dignified, plain phrase for how a subject presents (feature 0063) — feeds the portrait SUBJECT line
- * so the face matches who the character is. Authentic, never a caricature.
- */
-export function genderPresentationPhrase(g: "man" | "woman" | "nonbinary"): string {
-  return g === "man" ? "a man" : g === "woman" ? "a woman" : "androgynous, nonbinary presentation";
 }
 
 /** A generated portrait prompt ready to hand to an image provider. */
