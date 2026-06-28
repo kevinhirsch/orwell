@@ -108,16 +108,33 @@ export function buildPortraitPrompt(
   const backdrop = BACKDROP_VARIANTS[(shot >>> 16) % BACKDROP_VARIANTS.length]!;
   // L29: prefer the STRUCTURED facet (distinct faces, one source of truth with the narration); fall
   // back to the prose `appearance` for pre-0058 saves that never seeded a facet.
+  // #1140 NOTE (deferred follow-up): the stored physicalCharacteristics (build/hair/etc.) are gender-
+  // AGNOSTIC pools today, so a re-picked / flipped facet keeps whatever build+hair were dealt. The directive
+  // gender phrase below is the load-bearing cue; gender-AWARE build/hair pools (so the described body+hair
+  // also lean with the presentation) are a larger, deliberately-deferred change — do NOT mutate the stored
+  // facets here (they are byte-stable, 0007/0031).
   const physical = physicalCharacteristics ? physicalFacetToAppearance(physicalCharacteristics) : appearance;
   const styleLine = physicalCharacteristics?.style
     ? `${presentation}, ${physicalCharacteristics.style}`
     : presentation;
-  // 0063: build a SUBJECT line that reflects the unique person — the heritage (an authentic, accurate
-  // likeness — never a caricature) + how they present + their age. The skin tone in `physical` is already
-  // grounded in this same heritage, so the description is internally consistent and dignified.
-  const subjectParts = [`${name}`, `${age} years old`];
-  if (genderPresentation) subjectParts.push(genderPresentationPhrase(genderPresentation));
+  // 0063 + #1140 Fix B: build a SUBJECT line that reflects the unique person — how they present + their
+  // heritage (an authentic, accurate likeness, never a caricature) + age. The skin tone in `physical` is
+  // already grounded in this same heritage, so the description is internally consistent and dignified.
+  //
+  // De-bias the NAME: lead with the GENDER phrase (the directive cue), not the bare proper noun. A NAME can
+  // read gendered to an image model (a unisex/flipped/AI-overridden name like "Marlon" on a woman), and if
+  // it's the FIRST/strongest token the model renders the NAME's gender, contradicting the stored facet. So
+  // the gender phrase comes FIRST, the name trails as a plain identification tag, and the directive phrase
+  // is REPEATED right after the name so the cue still flanks it. The engine carries `genderPresentation` for
+  // the whole cast, so the lead phrase is effectively always present (the `if` only guards a legacy absence).
+  const genderPhrase = genderPresentation ? genderPresentationPhrase(genderPresentation) : undefined;
+  const subjectParts: string[] = [];
+  if (genderPhrase) subjectParts.push(genderPhrase);
+  subjectParts.push(`${age} years old`);
   if (ethnicity) subjectParts.push(`of ${ethnicity} heritage`);
+  // The name LAST, as an identifier — and re-state the gender cue alongside it so the proper noun never
+  // stands as the lone, dominant gender signal in the prompt.
+  subjectParts.push(genderPhrase ? `named ${name} (${genderPhrase})` : `named ${name}`);
   // 0063: the observable DEMEANOR colors the EXPRESSION line — the face matches the personality (a blunt
   // person reads guarded, a warm one reads open) instead of every portrait sharing one default affect.
   const expressionLine = demeanor ? `${expression}, ${demeanor}` : expression;

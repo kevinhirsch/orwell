@@ -17,9 +17,19 @@
  * (`diversity.ts` `privateOrientationToVaultContent`) and MUST NEVER ride here.
  */
 
-/** How a subject presents — a dignified, plain phrase. Authentic, never a caricature (feature 0063). */
+/**
+ * How a subject presents — a dignified, DIRECTIVE phrase. Authentic, never a caricature (feature 0063).
+ *
+ * #1140 Fix B: the phrase is the strongest gender cue the IMAGE model gets, so it states BOTH the noun
+ * ("a man"/"a woman") AND the presentation ("masculine"/"feminine presentation") — the redundant, explicit
+ * cue keeps the render on the STORED facet even when the proper-noun NAME in the prompt leans the other way
+ * (a unisex/flipped/AI-overridden name). The narration reads the same phrase, so prose + portrait stay
+ * anchored to the one facet. (Wording only — descriptive, calibration-neutral.)
+ */
 export function genderPresentationPhrase(g: "man" | "woman" | "nonbinary"): string {
-  return g === "man" ? "a man" : g === "woman" ? "a woman" : "androgynous, nonbinary presentation";
+  return g === "man" ? "a man (masculine presentation)"
+    : g === "woman" ? "a woman (feminine presentation)"
+    : "a person of androgynous, nonbinary presentation";
 }
 
 /**

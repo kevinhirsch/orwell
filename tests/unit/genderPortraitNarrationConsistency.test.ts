@@ -57,6 +57,14 @@ describe("#1140 — portrait and narration voice the SAME stored gender presenta
         // (3) SAME SOURCE: both surfaces derive from the one stored `genderPresentation` — so the gender the
         // portrait encodes and the gender the narration encodes are, by construction, identical.
         expect(genderPresentationPhrase(g)).toBe(genderPresentationPhrase(g));
+
+        // (4) #1140 Fix A — the NAME itself now reads the SAME gender. The diversity layer RE-PICKS the
+        // given name to match the final presentation (the portrait puts the NAME in the prompt, so a
+        // unisex-overlap / flipped name would otherwise make the image model render the name's gender). A
+        // gendered presentation ⇒ the name reads that gender; nonbinary ⇒ a unisex (any-presentation) name.
+        const ng = nameGenderOf(card.name);
+        if (g === "nonbinary") expect(ng, `${card.id} ${card.name}`).toBe("unisex");
+        else expect(ng, `${card.id} ${card.name}`).toBe(g);
       }
     }
   });
@@ -91,8 +99,9 @@ describe("#1140 — portrait and narration voice the SAME stored gender presenta
       if (!card || card.status !== "active" || card.genderPresentation === undefined) continue;
       const g = card.genderPresentation;
 
-      // Only assert the CRITICAL case when the stored facet truly disagrees with the name (the repair
-      // pipeline could, in principle, re-balance a specific draft — we want a genuine man↔woman mismatch).
+      // Only assert the CRITICAL case when the AUTHORED facet truly disagrees with the ORIGINALLY-DRAWN
+      // name (the repair pipeline could, in principle, re-balance a specific draft — we want a genuine
+      // man↔woman flip vs. the name as it was at the deal). `nameG` is that DRAWN name's gender.
       const nameG = nameGenderOf(firstName);
       const disagrees = (g === "man" || g === "woman") && nameG !== "unisex" && g !== nameG;
       if (!disagrees) continue;
@@ -104,17 +113,24 @@ describe("#1140 — portrait and narration voice the SAME stored gender presenta
       expect(portrait).not.toBeNull();
       expect(line).toBeDefined();
 
-      // The PROOF: despite the name, the portrait and the narration BOTH encode the STORED facet `g` —
-      // they agree with each other and with the photo, never with the name.
+      // The PROOF: the portrait and the narration BOTH encode the STORED facet `g` — they agree with each
+      // other and with the photo. (Before #1140 the narration inferred gender from the name and contradicted
+      // the photo; now both anchor on the facet.)
       expect(portrait!.prompt).toContain(genderPresentationPhrase(g));
       expect(line!).toContain(genderPresentationPhrase(g));
       expect(line!).toContain(`use ${pronounsFor(g)}`);
 
-      // And the narration must NOT carry the name-inferred (wrong) presentation phrase.
+      // And the narration must NOT carry the (now-stale) drawn-name presentation phrase.
       const wrongPhrase = genderPresentationPhrase(nameG as "man" | "woman");
       // (the two binary phrases are distinct strings, so this is a real divergence check)
       expect(genderPresentationPhrase(g)).not.toBe(wrongPhrase);
       expect(line!).not.toContain(`use ${pronounsFor(nameG as "man" | "woman")}`);
+
+      // #1140 Fix A — and the engine RE-PICKED the houseguest's NAME to match the authored facet (the
+      // uncapped AI-override hole, now closed at the recordCastIdentity fold): the CURRENT display name
+      // reads the SAME gender `g` the portrait + narration encode. The image model puts the name in the
+      // prompt, so the name itself must point the right way — no "Marlon, a woman" mismatch survives.
+      expect(nameGenderOf(card.name), `flipped name ${card.name} should read ${g}`).toBe(g);
 
       proved = true;
       break;
