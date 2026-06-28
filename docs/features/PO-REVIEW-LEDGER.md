@@ -1,0 +1,143 @@
+# PO Review Ledger
+
+The single source of truth for **product-owner sign-off** on every feature. We comb through the
+feature set one at a time; the PO marks each **Approved / Expand / Delete / Defer**, and the
+decision is recorded here with the date and any notes.
+
+This ledger tracks **PO sign-off** — it is distinct from the **build status** in
+[`README.md`](./README.md) (which tracks *built vs. spec-only vs. deferred*). A feature can be
+built but not yet PO-reviewed, or PO-approved but not yet built.
+
+## Decision legend
+
+| Mark | Meaning |
+|---|---|
+| ✅ **Approved** | PO reviewed the scenarios and signs off as-is. |
+| ✏️ **Expand** | PO wants added/changed scenarios; new ones written BDD-first, then it becomes Approved. |
+| 🗑️ **Delete** | PO wants the feature removed. |
+| ⏸️ **Defer** | PO parks it intentionally (keep the spec, don't build now). |
+| ⬜ **Pending** | Not yet reviewed. |
+
+## Sign-off table
+
+| # | Feature | Build status | PO Decision | Date | Notes |
+|---|---|---|---|---|---|
+| 0001 | Vault Wall isolation | ✅ Built | ⬜ Pending | — | — |
+| 0002 | Event visibility & propagation | ✅ Built | ⬜ Pending | — | — |
+| 0003 | Behavioral fidelity | ✅ Built | ⬜ Pending | — | — |
+| 0004 | Replayability & naming | ✅ Built | ⬜ Pending | — | — |
+| 0005 | Competition eligibility | ✅ Built | ⬜ Pending | — | — |
+| 0006 | Outcomes by stats + temperature | ✅ Built | ⬜ Pending | — | — |
+| 0007 | Persistence non-degradation | ✅ Built | ⬜ Pending | — | — |
+| 0008 | Daily-event invariant | ✅ Built | ⬜ Pending | — | — |
+| 0009 | MCP tool boundary | ✅ Built | ⬜ Pending | — | — |
+| 0010 | One-liner deployment & update | 🚧 Built (host smoke owed) | ⬜ Pending | — | — |
+| 0011 | Weekly loop orchestration | ✅ Built | ⬜ Pending | — | — |
+| 0012 | Conversation & scene system | ✅ Built | ⬜ Pending | — | — |
+| 0013 | The Diary Room | ✅ Built | ⬜ Pending | — | — |
+| 0014 | Jury & endgame | ✅ Built | ⬜ Pending | — | — |
+| 0015 | Character creation (OOBE) | ✅ Built | ⬜ Pending | — | — |
+| 0016 | God Mode (admin port) | ✅ Built | ⬜ Pending | — | — |
+| 0017 | Relationship model | ✅ Built | ⬜ Pending | — | — |
+| 0018 | Narrative & moment orchestration | ✅ Built | ⬜ Pending | — | — |
+| 0019 | Agent-driven play loop | ✅ Built | ⬜ Pending | — | — |
+| 0020 | Player experience (status, decisions, portraits) | ✅ Built | ⬜ Pending | — | — |
+| 0021 | Game session & save lifecycle | ✅ Built | ⬜ Pending | — | — |
+| 0022 | Player experience MVP-2 (rich game UI) | ⏸ Deferred | ⬜ Pending | — | — |
+| 0023 | Consequence & memory (the backbone) | ✅ Built | ⬜ Pending | — | — |
+| 0024 | Soul storage & memory recall | ✅ Built | ⬜ Pending | — | — |
+| 0025 | Reserve twists | ✅ Built | ⬜ Pending | — | — |
+| 0026 | Relationship math | ✅ Built | ⬜ Pending | — | — |
+| 0027 | NarrativePort LLM adapter | ✅ Built | ⬜ Pending | — | — |
+| 0028 | Temperature & emotional constants | ✅ Built | ⬜ Pending | — | — |
+| 0029 | App admin & user management | ✅ Built | ⬜ Pending | — | — |
+| 0030 | Durable game persistence (survive restart) | ✅ Built | ⬜ Pending | — | — |
+| 0031 | Game orchestrator & integrity watcher | ✅ Built | ⬜ Pending | — | — |
+| 0032 | Front-end surface reduction ("game build") | ✅ Built | ⬜ Pending | — | — |
+| 0033 | Dynamic player tagline | ✅ Built | ⬜ Pending | — | — |
+| 0034 | Live weekly progression & decision seam | ✅ Built | ⬜ Pending | — | — |
+| 0035 | Live off-screen life (the watcher) | ✅ Built | ⬜ Pending | — | — |
+| 0036 | Live social surface (approaches + Diary Room) | ✅ Built | ⬜ Pending | — | — |
+| 0037 | Live jury-vote choreography (the finale) | ✅ Built | ⬜ Pending | — | — |
+| 0038 | Live off-screen society | ✅ Built | ⬜ Pending | — | — |
+| 0039 | Promise & deal tracking | ✅ Built | ⬜ Pending | — | — |
+| 0040 | NPC confessionals | ✅ Built | ⬜ Pending | — | — |
+| 0041 | Character evolution & arc (the linchpin) | ✅ Built | ⬜ Pending | — | — |
+| 0042 | Competition library | ✅ Built | ⬜ Pending | — | — |
+| 0043 | Emergent bloc behavior | ✅ Built | ⬜ Pending | — | — |
+| 0044 | Strategic nomination & vote refinements | ✅ Built | ⬜ Pending | — | — |
+| 0045 | Endgame structure (Final 5 → Final 2) | ✅ Built | ⬜ Pending | — | — |
+| 0046 | Player eviction & the juror's seat | ✅ Built | ⬜ Pending | — | — |
+| 0047 | Eviction night live (reveal + goodbyes) | ✅ Built | ⬜ Pending | — | — |
+| 0048 | Season retrospective & Vault unsealing | ✅ Built | ⬜ Pending | — | — |
+| 0049 | House presence & lingering | ✅ Built | ⬜ Pending | — | — |
+| 0050 | The casting interview | ✅ Built | ⬜ Pending | — | — |
+| 0051 | In-character images (portraits/headshots) | ✅ Built | ⬜ Pending | — | — |
+| 0052 | House themes (five seasons) | ✅ Built | ⬜ Pending | — | — |
+| 0053 | Admin transcript retrieval | ✅ Built | ⬜ Pending | — | — |
+| 0054 | Control-room gadget rail | ✅ Built | ⬜ Pending | — | — |
+| 0055 | Social play moves the weights | ✅ Built | ⬜ Pending | — | — |
+| 0056 | Season-to-season character continuity | ✅ Built | ⬜ Pending | — | — |
+| 0057 | Seasons as levels | ✅ Built | ⬜ Pending | — | — |
+| 0058 | Deep character profiles | ✅ Built | ⬜ Pending | — | — |
+| 0059 | Hidden seeded relationships | ✅ Built | ⬜ Pending | — | — |
+| 0060 | Story-thread scheduler | ✅ Built | ⬜ Pending | — | — |
+| 0061 | Player self-eviction | ✅ Built | ⬜ Pending | — | — |
+| 0062 | Move-in zeitgeist snapshot | ✅ Built | ⬜ Pending | — | — |
+| 0063 | Casting diversity floor | ✅ Built | ⬜ Pending | — | — |
+| 0064 | Live multi-device game sync | ✅ Built | ⬜ Pending | — | — |
+| 0065 | Cast pre-warm (deep-author before portraits) | ✅ Built | ⬜ Pending | — | — |
+| 0066 | In-game time of day & sleep economy | ✅ Built | ⬜ Pending | — | — |
+| 0067 | Public internet exposure | 🚧 Built (host smoke owed) | ⬜ Pending | — | — |
+| 0068 | Admin "Connect to internet" panel | 🚧 Built (host smoke owed) | ⬜ Pending | — | — |
+| 0069 | Token economy & context budget | ✅ Built | ⬜ Pending | — | — |
+| 0070 | Off-screen texture enrichment | ✅ Built | ⬜ Pending | — | — |
+| 0071 | Defensive hardening (redaction, URL guards) | ✅ Built | ⬜ Pending | — | — |
+| 0072 | Multi-platform gateway | ✅ Built | ⬜ Pending | — | — |
+| 0073 | Structural anti-sycophancy wall (CI gate) | ✅ Built | ⬜ Pending | — | — |
+| 0074 | Local & tunable HTTPS | ✅ Built | ⬜ Pending | — | — |
+| 0075 | Trust-gated confidences | ✅ Built | ⬜ Pending | — | — |
+| 0076 | Presence grounding & motivated movement | ✅ Built | ⬜ Pending | — | — |
+| 0077 | House map, privacy & eyeshot | ✅ Built | ⬜ Pending | — | — |
+| 0078 | Motivated society & intentional movement | ✅ Built | ⬜ Pending | — | — |
+| 0079 | Runtime overseer & diagnostic log | ✅ Built | ⬜ Pending | — | — |
+| 0080 | Active overseer (acts on its verdict) | 📝 Spec only | ⬜ Pending | — | — |
+| 0081 | Narration-faithfulness gate | ✅ Built | ⬜ Pending | — | — |
+| 0084 | Character voice & grounded mood | ✅ Built | ⬜ Pending | — | — |
+| 0085 | NPC campaigns & the scramble | ✅ Built | ⬜ Pending | — | — |
+| 0086 | Houseguest drives | ✅ Built | ⬜ Pending | — | — |
+| 0087 | Relationship trajectories (warming/cooling) | ✅ Built | ⬜ Pending | — | — |
+| 0088 | Living "current read of you" | ✅ Built | ⬜ Pending | — | — |
+| 0089 | Reactive confessionals | ✅ Built | ⬜ Pending | — | — |
+| 0090 | Per-archetype voice | ✅ Built | ⬜ Pending | — | — |
+| 0091 | Trigger secrets → house events | ✅ Built | ⬜ Pending | — | — |
+| 0092 | Secret-pacing drip | ✅ Built | ⬜ Pending | — | — |
+| 0093 | Secrets as strategic levers | 🟢 Build-ready (PO resolved) | ⬜ Pending | — | Index notes PO-resolved 2026-06-27 (build w/ 0099) — confirm here |
+| 0094 | Distorted gossip has consequences | 📝 Spec only | ⬜ Pending | — | — |
+| 0095 | Pre-show ties → time-bombs | 📝 Spec only | ⬜ Pending | — | — |
+| 0096 | Emergent nemesis | 📝 Spec only | ⬜ Pending | — | — |
+| 0097 | Suspicion ledger | ❄️ Frozen/parked | ⬜ Pending | — | Index notes parked 2026-06-27 (over-tells player) — confirm Defer |
+| 0098 | Confidence-calibrated reads | ❄️ Frozen/parked | ⬜ Pending | — | Index notes parked 2026-06-27 — confirm Defer |
+| 0099 | Secrets as currency | 🟢 Build-ready (PO resolved) | ⬜ Pending | — | Index notes PO-resolved 2026-06-27 (build w/ 0093) — confirm here |
+| 0100 | Jury grudge book | ✅ Built | ⬜ Pending | — | — |
+| 0101 | NPC myth-making | 📝 Spec only | ⬜ Pending | — | — |
+| 0102 | Weekly recap → daily bedtime recap | 🟢 Build-ready (PO resolved) | ⬜ Pending | — | Redesigned 2026-06-27; filename rename pending. NOTE: number collides w/ 0102-day-1-experience |
+| 0103 | Edit-bay foreshadowing | ❄️ Frozen/parked | ⬜ Pending | — | Index notes parked 2026-06-27 (spoiler-adjacent) — confirm Defer |
+| 0104 | Season-over-season notoriety | ✅ Built | ⬜ Pending | — | — |
+| 0105 | Drive-anchored suspicion | ✅ Built | ⬜ Pending | — | — |
+| 0106 | Whole-house events are exclusive set-pieces | ✅ Built | ⬜ Pending | — | — |
+| 0107 | Named alliances | ✅ Built | ⬜ Pending | — | NOTE: number collides w/ 0107-llm-call-observability draft |
+| 0108 | Real-model golden-path CI gate | 📝 Spec only | ⬜ Pending | — | — |
+| 0109 | Negotiated deal duration | 🟢 Build-ready | ⬜ Pending | — | Amends 0039 |
+
+## Numbering housekeeping (flagged during the comb-through)
+
+These are bookkeeping collisions/gaps to untangle so the review queue stays clean. They are not
+game bugs.
+
+| Issue | Detail |
+|---|---|
+| Duplicate `0102` | `0102-weekly-recap-cliffhanger` (tracked in the index) **and** `0102-day-1-experience` (the premiere spec) share the number. |
+| Duplicate `0107` | `0107-named-alliances` (tracked, built) **and** a separate `0107-llm-call-observability` draft share the number. |
+| Unused numbers | `0082` and `0083` have no feature. |
+| Untracked premiere spec | `0102-day-1-experience` is not a row in the README index; needs its own number + ledger row. |
