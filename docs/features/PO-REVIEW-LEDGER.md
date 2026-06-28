@@ -22,11 +22,11 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 
 | # | Feature | Build status | PO Decision | Date | Notes |
 |---|---|---|---|---|---|
-| 0001 | Vault Wall isolation | ✅ Built | ⬜ Pending | — | — |
-| 0002 | Event visibility & propagation | ✅ Built | ⬜ Pending | — | — |
-| 0003 | Behavioral fidelity | ✅ Built | ⬜ Pending | — | — |
-| 0004 | Replayability & naming | ✅ Built | ⬜ Pending | — | — |
-| 0005 | Competition eligibility | ✅ Built | ⬜ Pending | — | — |
+| 0001 | Vault Wall isolation | ✅ Built | ✅ Approved | 2026-06-28 | — |
+| 0002 | Event visibility & propagation | ✅ Built | ✅ Approved | 2026-06-28 | — |
+| 0003 | Behavioral fidelity | ✅ Built | ✅ Approved | 2026-06-28 | — |
+| 0004 | Replayability & naming | ✅ Built | ✅ Approved (expanded) | 2026-06-28 | DONE+GREEN: wired the parked "public appearance fields for portraits" scenario into the live BDD suite (567 scenarios pass) |
+| 0005 | Competition eligibility | ✅ Built | ✏️ Expand | 2026-06-28 | Houseguest's Choice (veto draw) must pick strongest **strategic** choice, not merely strongest bond. Test written as PENDING-BUILD block in the .feature; build is opt-in + calibration-neutral (changes the veto field → seeded outcomes). See build queue below |
 | 0006 | Outcomes by stats + temperature | ✅ Built | ⬜ Pending | — | — |
 | 0007 | Persistence non-degradation | ✅ Built | ⬜ Pending | — | — |
 | 0008 | Daily-event invariant | ✅ Built | ⬜ Pending | — | — |
@@ -129,6 +129,14 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0107 | Named alliances | ✅ Built | ⬜ Pending | — | NOTE: number collides w/ 0107-llm-call-observability draft |
 | 0108 | Real-model golden-path CI gate | 📝 Spec only | ⬜ Pending | — | — |
 | 0109 | Negotiated deal duration | 🟢 Build-ready | ⬜ Pending | — | Amends 0039 |
+
+## Build queue (PO ✏️ Expand decisions awaiting engine work)
+
+Scenarios written/agreed during review that still need implementation to go green.
+
+| # | What to build | Notes |
+|---|---|---|
+| 0005 | Strategic "Houseguest's Choice" veto pick (replace pure strongest-bond) | Add a strategic-ally selection in the relationship engine; wire `liveSeason` HC pick to it; un-comment the two pending scenarios + add step defs. Ship **opt-in, default-off** with a calibration-neutrality guard (the HC pick changes the veto field → seeded competition outcomes; default-off must stay byte-identical). After a calibration re-baseline, strategic can become default. |
 
 ## Numbering housekeeping (flagged during the comb-through)
 
