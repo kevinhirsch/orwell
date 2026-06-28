@@ -26,7 +26,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0002 | Event visibility & propagation | ✅ Built | ✅ Approved | 2026-06-28 | — |
 | 0003 | Behavioral fidelity | ✅ Built | ✅ Approved | 2026-06-28 | — |
 | 0004 | Replayability & naming | ✅ Built | ✅ Approved (expanded) | 2026-06-28 | DONE+GREEN: wired the parked "public appearance fields for portraits" scenario into the live BDD suite (567 scenarios pass) |
-| 0005 | Competition eligibility | ✅ Built | ✏️ Expand | 2026-06-28 | Houseguest's Choice (veto draw) must pick strongest **strategic** choice, not merely strongest bond. Test written as PENDING-BUILD block in the .feature; build is opt-in + calibration-neutral (changes the veto field → seeded outcomes). See build queue below |
+| 0005 | Competition eligibility | ✅ Built | ✅ Approved (expansion queued) | 2026-06-28 | Houseguest's Choice (veto draw) must pick strongest **strategic** choice, not merely strongest bond. Test written as PENDING-BUILD block in the .feature; build is opt-in + calibration-neutral (changes the veto field → seeded outcomes). See build queue below |
 | 0006 | Outcomes by stats + temperature | ✅ Built | ⬜ Pending | — | — |
 | 0007 | Persistence non-degradation | ✅ Built | ⬜ Pending | — | — |
 | 0008 | Daily-event invariant | ✅ Built | ⬜ Pending | — | — |
