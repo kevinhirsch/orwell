@@ -74,6 +74,8 @@ module.exports = {
       "docs/features/0089-reactive-confessionals.feature",
       "docs/features/0091-trigger-secrets-house-events.feature",
       "docs/features/0092-secret-pacing-drip.feature",
+      "docs/features/0093-secrets-as-levers.feature",
+      "docs/features/0099-secrets-as-currency.feature",
       "docs/features/0100-jury-grudge-book.feature",
       "docs/features/0105-suspicion-and-mood-anchoring.feature",
       "docs/features/0109-deal-duration.feature",
