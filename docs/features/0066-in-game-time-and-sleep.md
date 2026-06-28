@@ -115,6 +115,12 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
 
 ## 9. Open decisions for the owner (Phase-2 extensions — deferred, on the PO review list)
 
+> **RESOLVED (owner, 2026-06-27): build all three Phase-2 extensions** (#1125) — **per-conversation clock
+> advance first** (most player-felt, pacing-only, no calibration risk), then NPC next-day social fatigue,
+> then the compounding multi-night fatigue meter, each behind the opt-in byte-identical discipline. The
+> env-default split stays (engine `ORWELL_TIME_OF_DAY` OFF for calibration; FE session default ON, ruling
+> #583). See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27).
+
 Built and shipped: the clock, the sleep→competition penalty, the bedtime lever, the social economy
 (the house thins; night owls scheme on), the settings switch, and the Nightfall gadget. Deliberately
 deferred per ADR 0006 — **for owner review before scheduling**:

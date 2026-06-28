@@ -263,6 +263,18 @@ export interface SessionCore {
   confideState?: Record<EntityId, { tier: "none" | "tease" | "partial" | "full"; truthful: boolean }>;
   confideLieCount?: number;
   /**
+   * Features 0093 + 0099 — secrets as power. `secretUsedAs` maps each learned `factId` the player has
+   * WIELDED to how (`leverage` | `exposed` | `traded`), so a spent secret can't be re-wielded; the
+   * counts are the per-season caps (expose/trade/player-bluff). Persisted so a restored game remembers
+   * which secrets are spent and never re-opens a cap. Absent on pre-0093 saves ⇒ empty/zero (non-degradation).
+   */
+  secretUsedAs?: Record<string, "leverage" | "exposed" | "traded">;
+  secretExposeCount?: number;
+  secretTradeCount?: number;
+  secretPlayerBluffCount?: number;
+  /** deception — per NPC who BELIEVED a player bluff, the subject(s) lied about (the passive lie-catch ledger). */
+  secretPlayerBluffBelief?: Record<EntityId, EntityId[]>;
+  /**
    * The engine-only HIDDEN seeded relationship layer (feature 0059): the sparse pre-game ties +
    * showmances seeded at cast time, Vault-sealed from the player AND the admin. Persisted so a
    * showmance stage never silently resets and the layer survives a restart (0030). ENGINE-ONLY (same

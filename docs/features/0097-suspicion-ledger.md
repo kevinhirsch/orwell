@@ -1,8 +1,10 @@
 # 0097 — The suspicion ledger (a player-private "called it / wrong" scorecard)
 
-> **Status:** 🟦 **SPEC — PO review required** (drafted 2026-06-25). **Tracks #878.** This is a
-> **PO-review spec**: it carries open owner rulings (see [§ PO review](#po-review--owner-rulings-needed))
-> and is intentionally *not* built until those land. BDD/TDD-first per `CLAUDE.md` workflow.
+> **Status:** ❄️ **FROZEN — parked by owner (2026-06-27); preserved, not built. #878 closed *not planned* (reopenable).**
+> Owner ruling: not load-bearing, and it risks the game over-telling the player / paranoia-as-spreadsheet
+> (ADR 0003; "the feeling is theirs", 0017/0020). **If revived,** the chosen shape is on record: a DR-style
+> OOC surface (R1), reveal-time-only scoring (R2), and player-authored player-knowledge with `NO_NPC_PATHWAY`
+> (R3). See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27). The original PO-review spec follows unchanged.
 > **Depends on:** 0013 (the **Player Diary Room** — the OOC, player-knowledge-only channel this
 > generalizes, and whose `NO_NPC_PATHWAY` wall it inherits wholesale), 0001 (the Vault Wall),
 > 0002 (event visibility & pathway propagation — the only way a fact legitimately becomes the

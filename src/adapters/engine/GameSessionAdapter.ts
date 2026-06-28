@@ -4,6 +4,7 @@ import type {
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
   SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult,
+  ExposeSecretReq, ExposeResult, TradeSecretReq, TradeResult, SecretLeverDescriptor,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
   PreSeedNextSeasonReq, PreSeedNextSeasonView,
@@ -114,6 +115,8 @@ import {
   CEREMONY_IMPACTS, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
+import { notorietyBias, recognitionFor } from "../../engine/notoriety";
+import type { NotorietySummary, OpenSetSeasonOutcome } from "../../engine/notoriety";
 import {
   deriveTrajectory, decayTrajectory, STEADY,
   type Trajectory, type FoldSignal,
@@ -171,6 +174,12 @@ import {
   type ConfidenceSignals,
 } from "../../engine/confidence";
 import { CONFIDENCE, type DisclosureTier } from "../../engine/confidenceConstants";
+import {
+  severityOf, leverageStrength, leverageDealBoost, dealAcceptance, exposeOutcome,
+  tradeValue, tradeDealBoost, tradeOutcome, bluffBelieved,
+  type LeverageSignals, type TradeSignals,
+} from "../../engine/leverage";
+import { LEVERAGE, SECRET_TRADE } from "../../engine/leverageConstants";
 import {
   rankPlayerBoundThreads, dripBudget, recencyFromAge, relationshipReads,
   type PlayerBoundThread, type RankedThread,
@@ -1001,6 +1010,16 @@ export class GameSessionAdapter implements GameSession {
     this.onConfide = fn;
   }
 
+  /** 0093/0099 — wire the player's own knowledge reader (validate a wielded factId; resolve its subject). */
+  setPlayerKnowledgeReader(fn: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string }>): void {
+    this.playerKnowledgeReader = fn;
+  }
+
+  /** 0093/0099 — wire the in-game pathway that surfaces an exposed/traded secret into a houseguest's knowledge. */
+  setOnSurfaceToHouseguest(fn: (npcId: EntityId, content: string, subject: EntityId | undefined, pathway: string, confidence: number) => boolean): void {
+    this.onSurfaceToHouseguest = fn;
+  }
+
   /**
    * 0060 §3 (`nominated-twice`) — engine-only, hidden bookkeeping: the DISTINCT weeks each houseguest
    * has been on the block, accrued each schedule tick from the live ceremony nominees. Persisted in the
@@ -1010,6 +1029,16 @@ export class GameSessionAdapter implements GameSession {
   private nominationWeeks: Record<EntityId, number[]> = {};
   /** 0060 — the count of threads that have ever SURFACED this season (the hard restraint cap, §5). */
   private surfacedThreadCount = 0;
+  /**
+   * 0104 — the returning player's accumulated season-over-season NOTORIETY, set ONLY when the player
+   * chose to come back as the SAME character (the diegetic opt-in, R4 — the registry hands it in via
+   * `setNotoriety` on a `keepCharacter` restart). Null on a fresh / new-character / no-prior-season
+   * game ⇒ `seedFirstImpressions` folds NO bias and is BYTE-IDENTICAL (the calibration-neutrality
+   * guarantee). It is a bounded OPEN-SET summary — never a Vault read, never a number to the player.
+   * Folded ONCE at `seedFirstImpressions`; thereafter it is just the move-in edges. Not persisted on
+   * THIS session (it lives at the account level in the `UserNotorietyStore`); held only to seed day one.
+   */
+  private notoriety: NotorietySummary | null = null;
   /**
    * 0091 — whether the TRIGGER-ERUPTION layer RUNS. DEFAULT OFF (the dedicated `ORWELL_TRIGGERS` flag):
    * when off, the orchestrator never calls `runTriggerEruptions` ⇒ ZERO draws on any rng ⇒ every seeded
@@ -1062,6 +1091,41 @@ export class GameSessionAdapter implements GameSession {
    * player's knowledge, not Vault content. Returns whether the player came to hold the belief.
    */
   private onConfide?: (npcId: EntityId, content: string, confidence: number) => boolean;
+
+  /**
+   * Features 0093 + 0099 — secrets as power. Per learned `factId` the player has WIELDED, a monotonic
+   * `usedAs` marker (`leverage` | `exposed` | `traded`) so a secret can't be re-wielded after it's spent
+   * (exposing makes it public; trading widens who knows). Persisted (non-degradation, 0007/0030) so a
+   * restored game remembers exactly which secrets the player has spent. Engine-only — never projected.
+   */
+  private secretUsedAs: Record<string, "leverage" | "exposed" | "traded"> = {};
+  /** 0093 — the per-season count of exposes (the hard `LEVERAGE.maxExposesPerSeason` cap). Persisted. */
+  private exposeCount = 0;
+  /** 0099 — the per-season count of trades (the hard `SECRET_TRADE.maxTradesPerSeason` cap). Persisted. */
+  private tradeCount = 0;
+  /** deception — the per-season count of the PLAYER's bluffs (the `LEVERAGE.maxPlayerBluffsPerSeason` cap). Persisted. */
+  private playerBluffCount = 0;
+  /**
+   * deception — the PASSIVE LIE-CATCH ledger (owner direction): per NPC who BELIEVED a player BLUFF, the
+   * subject(s) the player lied about. When a genuine contradicting pathway later reaches that NPC (the
+   * REAL truth about the same subject — an honest expose/trade), the bluff is caught and the bluffer takes
+   * a betrayal-grade, recoverable hit from that NPC. Engine-only; persisted (non-degradation, 0007/0030).
+   */
+  private playerBluffBelief: Record<EntityId, EntityId[]> = {};
+  /**
+   * 0093/0099 — the player's own KNOWLEDGE reader (wired by the composition root, like the npc-knowledge
+   * providers): returns the player's learned facts so the lever can VALIDATE that a wielded `factId` is
+   * one the player legitimately holds (the Vault bright line — a non-learned secret is rejected, no
+   * Vault-minting) and resolve which houseguest it is about. Returns [] when unwired.
+   */
+  private playerKnowledgeReader?: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string }>;
+  /**
+   * 0093/0099 — surface a fact INTO another houseguest's (or the house's) knowledge through the in-game
+   * pathway (wired by the composition root, mirroring `onConfide`). The player is the teller for an
+   * expose/trade (`told-by:player` / `overheard`): the engine records the witnessed pathway event so the
+   * recipient correctly comes to KNOW the secret — never a Vault read. Returns whether it surfaced.
+   */
+  private onSurfaceToHouseguest?: (npcId: EntityId, content: string, subject: EntityId | undefined, pathway: string, confidence: number) => boolean;
   /** 0066 Phase-2: per-NIGHT conflict tally per houseguest (cleared at each new day). A character conflict
    *  drains the people in it ⇒ they turn in earlier tonight. In-memory + ephemeral (a mid-day reload simply
    *  resets it); only ever populated on the clock-ON path, so the calibration spine is unaffected. */
@@ -2018,6 +2082,14 @@ export class GameSessionAdapter implements GameSession {
       // lie cap or re-tells a secret at a lower tier (non-degradation, 0007/0030).
       ...(Object.keys(this.confideState).length ? { confideState: cloneSession(this.confideState) } : {}),
       ...(this.lieCount > 0 ? { confideLieCount: this.lieCount } : {}),
+      // 0093/0099 — secrets as power: which learned secrets the player has SPENT (`usedAs`) + the per-
+      // season expose/trade/bluff counts. Persisted so a restored game remembers a spent secret can't be
+      // re-wielded and the season caps don't reopen (non-degradation, 0007/0030). Engine-only.
+      ...(Object.keys(this.secretUsedAs).length ? { secretUsedAs: cloneSession(this.secretUsedAs) } : {}),
+      ...(this.exposeCount > 0 ? { secretExposeCount: this.exposeCount } : {}),
+      ...(this.tradeCount > 0 ? { secretTradeCount: this.tradeCount } : {}),
+      ...(this.playerBluffCount > 0 ? { secretPlayerBluffCount: this.playerBluffCount } : {}),
+      ...(Object.keys(this.playerBluffBelief).length ? { secretPlayerBluffBelief: cloneSession(this.playerBluffBelief) } : {}),
       ...(this.seededRels.ties.length || this.seededRels.showmances.length
         ? { seededRelationships: cloneSession(this.seededRels) } : {}),
       // 0059 §5 — the tie-surfacing scheduler's hidden bookkeeping: the season player-surface cap counter,
@@ -2233,6 +2305,13 @@ export class GameSessionAdapter implements GameSession {
     // a secret the player already heard, the cap intact).
     this.confideState = core.confideState ? cloneSession(core.confideState) : {};
     this.lieCount = core.confideLieCount ?? 0;
+    // 0093/0099 — restore the secrets-as-power ledger (absent on pre-0093 saves ⇒ empty/zero): which
+    // secrets the player has spent + the per-season caps, so a spent secret stays spent across a restart.
+    this.secretUsedAs = core.secretUsedAs ? cloneSession(core.secretUsedAs) : {};
+    this.exposeCount = core.secretExposeCount ?? 0;
+    this.tradeCount = core.secretTradeCount ?? 0;
+    this.playerBluffCount = core.secretPlayerBluffCount ?? 0;
+    this.playerBluffBelief = core.secretPlayerBluffBelief ? cloneSession(core.secretPlayerBluffBelief) : {};
     // 0063 — restore the engine-only HIDDEN private orientations (a closeted orientation must never
     // silently reset) FIRST, so the 0059 showmance re-derive below can read them for its eligibility gate.
     // Persisted on 0063+ saves; on a pre-0063 (or legacy) save with a seed, re-derive deterministically —
@@ -3196,6 +3275,10 @@ export class GameSessionAdapter implements GameSession {
       ...req,
       ...(carried ? { keepCharacter: false } : {}),
       ...(priorCastNames && priorCastNames.length ? { priorCastNames } : {}),
+      // 0104 (R4) — signal a SAME-CHARACTER return so the registry folds this user's notoriety into the
+      // new cast's day-one reads. Derived from `keepCharacter` here because the line above strips it to
+      // false (the fresh session has no prior house to carry from, so the flag would otherwise be lost).
+      ...(carried ? { carriesNotoriety: true } : {}),
     };
     // Non-degradation at its single most destructive point (B36/audit A2): an already-started game is
     // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
@@ -3355,6 +3438,7 @@ export class GameSessionAdapter implements GameSession {
       this.triggerTickCount = 0;
       this.confideState = {};
       this.lieCount = 0;
+      this.resetSecretPower(); // 0093/0099 — a fresh season has spent no secrets and an unspent cap
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.prewarm = null; // consumed
@@ -3598,6 +3682,7 @@ export class GameSessionAdapter implements GameSession {
     this.triggerTickCount = 0;
     this.confideState = {};
     this.lieCount = 0;
+    this.resetSecretPower(); // 0093/0099 — a warmed/fresh cast has spent no secrets, the caps unspent
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.persist(); // a warmed cast is durable pre-game state (0030)
@@ -3778,6 +3863,27 @@ export class GameSessionAdapter implements GameSession {
       e.affinity = clamp01(e.affinity + MOVE_IN.spread * p.affinityLean);
       e.threat = clamp01(e.threat + MOVE_IN.spread * p.threatLean);
     }
+    // 0104 — a reputation that PRECEDES the player into a NEW cast. ONLY when the player returned as
+    // the SAME character (the diegetic opt-in, R4) is `this.notoriety` set; otherwise this whole block
+    // is skipped and the move-in edges are BYTE-IDENTICAL (the calibration-neutrality guarantee). The
+    // bias rides a DEDICATED `:notoriety` sub-rng forked off the seed — NEVER the shared `:relationships`
+    // stream above — so even with a notoriety folded, the move-in SCATTER of every edge is unchanged
+    // (the only edges that move are the NPC→player ones, and only their direction tilts). Each NPC draws
+    // ONE recognition level (R2: not everyone has heard about the player; some hold a distorted version),
+    // then the bounded, archetype-shaded, signed direction nudges the NPC→player edge INSIDE the existing
+    // `MOVE_IN.spread` envelope — never a number to the player, never a comp/vote roll, never the player's
+    // OWN edges. The engine still owns every outcome magnitude (mandate #3). Folded once, here.
+    if (this.notoriety) {
+      const nrng = new SeededRandom(hashSeed(`${seed}:notoriety`));
+      for (const n of this.house?.npcs ?? []) {
+        const archetype = n.character.archetype;
+        const recognition = recognitionFor(nrng); // ONE per-NPC awareness, applied across all signals
+        const e = this.rel.edge(n.id, PLAYER);
+        e.trust = clamp01(e.trust + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "trust", recognition));
+        e.affinity = clamp01(e.affinity + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "affinity", recognition));
+        e.threat = clamp01(e.threat + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "threat", recognition));
+      }
+    }
   }
 
   /**
@@ -3878,6 +3984,7 @@ export class GameSessionAdapter implements GameSession {
     // 0075 — a fresh season has heard no confidences and spent no lies.
     this.confideState = {};
     this.lieCount = 0;
+    this.resetSecretPower(); // 0093/0099 — a fresh season has spent no secrets, the caps unspent
     // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent, the stream at 0.
     this.resetTieSurfacing();
     // 0092 — a fresh season: the secret-pacing weekly cadence + anti-spam start clean.
@@ -3959,6 +4066,15 @@ export class GameSessionAdapter implements GameSession {
     this.playerTieSurfaceCount = 0;
     this.surfacedTieSubjects = new Set();
     this.tieScheduleTickCount = 0;
+  }
+
+  /** 0093/0099 — clear the secrets-as-power ledger (a fresh season: no secret spent, every cap unspent). */
+  private resetSecretPower(): void {
+    this.secretUsedAs = {};
+    this.exposeCount = 0;
+    this.tradeCount = 0;
+    this.playerBluffCount = 0;
+    this.playerBluffBelief = {};
   }
 
   /** 0092 — clear the secret-pacing drip bookkeeping (a fresh season: the weekly counter + the per-thread
@@ -4682,6 +4798,73 @@ export class GameSessionAdapter implements GameSession {
     const imp = RELATIONSHIP_CONSTANTS.IMPACT[type];
     const bondDelta = ((imp.affinity ?? 0) + (imp.trust ?? 0)) / 2;
     return { bondDelta, threatDelta: imp.threat ?? 0, betrayal: type === "betrayal" };
+  }
+
+  // ─── 0104 — SEASON-OVER-SEASON NOTORIETY (a reputation that precedes the player) ─────────────────
+
+  /**
+   * 0104 — hand this session the returning player's accumulated NOTORIETY so `seedFirstImpressions`
+   * folds the day-one bias (the registry calls this on a `keepCharacter` restart — the diegetic
+   * opt-in, R4). A NEW character / no prior season passes `null` (or never calls this) ⇒ no bias ⇒
+   * byte-identical. MUST be set BEFORE `createCharacter` runs `seedFirstImpressions` (the registry's
+   * restart hook sets it on the fresh sandbox before delegating the create). Vault-free in: a bounded
+   * open-set summary, never a Vault read.
+   */
+  setNotoriety(summary: NotorietySummary | null): void { this.notoriety = summary; }
+
+  /**
+   * 0104 — the (Vault-free) notoriety the narrator may VOICE as a returning-cast callback (the
+   * `legendBeats` gist — "word is you're not someone to cross", ADR 0003: facts to voice, never a
+   * script, never the numbers). Returns null when the player did not return as the same character.
+   * Only the gist crosses; the reputation FACETS / the day-one biases never leave the engine.
+   */
+  notorietySummary(): NotorietySummary | null { return this.notoriety; }
+
+  /**
+   * 0104 — build the OPEN-SET season outcome record the registry derives notoriety from, at the
+   * season-end terminal. PURE projection of the live season's PUBLIC ceremony record (placement, the
+   * player's comp wins, how each evictee read the PLAYER's role in their eviction, jury reach + the
+   * finale vote share) — facts the player witnessed / the 0048 retrospective unseals. NO Vault handle,
+   * NO soul, NO hidden edge crosses (R1). Returns null until a season has actually FINISHED.
+   */
+  openSetOutcome(): OpenSetSeasonOutcome | null {
+    if (!this.house || !this.live?.finished) return null;
+    const me = this.house.player.id;
+    const castSize = 1 + this.house.npcs.length;
+    // Numeric placement: winner = 1, runner-up = 2; otherwise from the eviction order (the later you
+    // were evicted, the better the placement). The i-th (0-based) evictee placed `castSize - i`.
+    const order = this.live.evictionOrder ?? [];
+    let placement: number;
+    if (this.live.winner === me) placement = 1;
+    else if (this.live.finalTwo?.includes(me)) placement = 2;
+    else {
+      const idx = order.indexOf(me);
+      placement = idx >= 0 ? castSize - idx : castSize; // never-evicted-but-not-a-finalist guard ⇒ worst
+    }
+    // The player's comp wins — the public-facts `resume` tally (HOH reigns + veto wins).
+    const playerCompWins = this.live.resume?.[me] ?? 0;
+    // How each evictee read the PLAYER's role in their eviction (open-set: `mannerByEvictee[evictee][PLAYER]`;
+    // the player witnessed it / the retrospective unseals it). Only the categorical reads cross — never
+    // the hidden edge numbers behind them.
+    const manner = this.live.mannerByEvictee ?? {};
+    const playerEvictionRoles: OpenSetSeasonOutcome["playerEvictionRoles"] = [];
+    for (const evictee of Object.keys(manner)) {
+      const m = manner[evictee]?.[me];
+      if (m) playerEvictionRoles.push({ blindsided: m.blindsided, betrayed: m.betrayed, respected: m.respected });
+    }
+    const reachedFinalTwo = this.live.finalTwo?.includes(me) ?? false;
+    // Reached the jury = a juror seat (one of the last 9 evictees) OR a finalist (a deeper run still counts).
+    const jurors = new Set(order.slice(-9));
+    const reachedJury = reachedFinalTwo || jurors.has(me);
+    // The finale jury-vote share the player won (open-set ceremony fact) — only meaningful as a finalist.
+    let juryVoteShare = 0;
+    const votes = this.live.finale?.votes;
+    if (reachedFinalTwo && votes) {
+      const cast = Object.values(votes);
+      const forMe = cast.filter((v) => v === me).length;
+      juryVoteShare = cast.length > 0 ? forMe / cast.length : 0;
+    }
+    return { placement, castSize, playerCompWins, playerEvictionRoles, reachedJury, reachedFinalTwo, juryVoteShare };
   }
 
   // ─── 0091 — TRIGGER SECRETS & HOUSE-EVENT ERUPTIONS ─────────────────────────────────────────────
@@ -5414,8 +5597,208 @@ export class GameSessionAdapter implements GameSession {
     );
     // `madeWeek` (E43) anchors the horizon: a safety/vote promise binds through THIS week's eviction.
     const deal = this.deals.make([PLAYER, target], req.kind, terms, evId, this.live.week);
+    // 0093 — OPTIONAL leverage: a secret the player holds ABOUT the partner colors the deal's formation
+    // and folds the squeeze (a wary partner resents it / a persuadable one is bound tighter). The threat
+    // persists while the deal is open — it is NOT spent here (only `exposeSecret` spends it). Absent ⇒
+    // no extra rng, no fold — byte-identical to 0039.
+    if (req.leverage) this.applyDealLeverage(req.leverage, target, deal.id);
+    // 0099 — OPTIONAL traded secret: a secret about a THIRD party handed to the partner as consideration
+    // (valued to the PARTNER); colors formation, surfaces the secret to the partner, and warms/sours them.
+    if (req.tradedSecret) this.applyDealTrade(req.tradedSecret, target);
     this.persist();
     return this.dealView(deal);
+  }
+
+  /**
+   * 0093 — the secret-power per-moment seeded rng, keyed on (game seed, use, factId/subject, week, phase).
+   * Repeated presses within a beat reach the same decision; a later beat re-rolls. No raw rng leaks the
+   * outcome (anti-sycophancy). Sibling of the `confide` rng derivation.
+   */
+  private secretRng(use: string, key: string): SeededRandom {
+    return new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:secret:${use}:${key}:${this.week}:${this.phase}`));
+  }
+
+  /**
+   * 0093/0099 — resolve a wielded secret descriptor to its SUBJECT + a Vault-safe severity. For a REAL
+   * secret (a `factId`) it validates the player legitimately holds it (`knownTo(player)` — the bright
+   * line; a non-learned/spent fact is rejected) and reads the subject + the holding NPC's PUBLIC secret
+   * KIND for severity (never the sealed text). For a BLUFF it reads NOTHING from the Vault: severity is
+   * the default and the subject is the claimed `subject`. Returns `null` when invalid (rejected).
+   */
+  private resolveWieldedSecret(
+    d: { factId?: string; bluff?: boolean; subject?: EntityId },
+  ): { subject: EntityId; severity: number; factId?: string; bluff: boolean } | null {
+    if (d.bluff) {
+      // A bluff invents a claim — no Vault read. It needs a named subject to fold against.
+      if (!d.subject || !this.isActiveNpc(d.subject)) return null;
+      return { subject: d.subject, severity: LEVERAGE.defaultSeverity, bluff: true };
+    }
+    if (!d.factId) return null;
+    // The bright line: the player can only wield a fact they LEGITIMATELY HOLD. Reject anything else —
+    // a suspicion, a never-learned secret, another entity's knowledge. No Vault-minting.
+    const fact = (this.playerKnowledgeReader?.() ?? []).find((f) => (f.factId ?? f.id) === d.factId || f.id === d.factId);
+    if (!fact) return null;
+    if (this.secretUsedAs[d.factId] === "exposed") return null; // spent (public) — never re-wielded
+    // The subject is the houseguest the fact is about (the knowledge `subject`, or the descriptor's hint).
+    const subject = fact.subject ?? d.subject;
+    if (!subject || !this.isActiveNpc(subject)) return null;
+    // Severity from the subject's PUBLIC secret KIND (never the sealed text) — the 0075 gloss sibling.
+    const npc = this.house?.npcs.find((n) => n.id === subject);
+    const secret = npc ? this.headlineSecretOf(npc) : undefined;
+    return { subject, severity: severityOf(secret?.kind), factId: d.factId, bluff: false };
+  }
+
+  /** Whether an id is an active (non-evicted) NPC in the live house. */
+  private isActiveNpc(id: EntityId): boolean {
+    if (!this.house || !this.live || id === PLAYER) return false;
+    return this.house.npcs.some((n) => n.id === id) && !this.live.evictionOrder.includes(id);
+  }
+
+  /** 0093 — the player→partner SIGNED warmth ((trust+affinity)/2 − threat) the deal-acceptance read uses. */
+  private signedWarmthTowardPlayer(npcId: EntityId): number {
+    const e = this.rel.edge(npcId, PLAYER);
+    return (e.trust + e.affinity) / 2 - e.threat;
+  }
+
+  /**
+   * 0093 — fold the LEVERAGE of a held secret against the deal partner. Computes the bounded, seeded
+   * `leverageStrength`, then the acceptance read AFTER the boost: a persuadable partner is bound a little
+   * tighter (a `strategy`-grade warm fold — the pressure landed), a WARY partner (the read lands below the
+   * refusal floor) RESENTS the squeeze (the `squeezeBacklash` fold sours their read of the player). A
+   * BLUFF folds the same shape weighted by BELIEF (and never tells the player whether it matched a truth);
+   * a believed bluff is the same press, a disbelieved one bounces. The threat persists while the deal is
+   * open — the secret is NOT marked spent here. The player never sees a number (anti-sycophancy).
+   */
+  private applyDealLeverage(d: SecretLeverDescriptor, partner: EntityId, _dealId: string): void {
+    const resolved = this.resolveWieldedSecret({ ...d, subject: partner }); // leverage is ALWAYS about the partner
+    // Leverage presses the PARTNER, so the secret must be about the partner (or a bluff claiming so).
+    if (!resolved || (resolved.subject !== partner)) {
+      // An invalid/irrelevant leverage simply does nothing (the deal still forms) — no fold, no spend.
+      return;
+    }
+    const rng = this.secretRng("leverage", resolved.factId ?? `bluff:${partner}`);
+    if (resolved.bluff) {
+      this.playerBluffCount = Math.min(this.playerBluffCount + 1, LEVERAGE.maxPlayerBluffsPerSeason + 1);
+      const e = this.rel.edge(partner, PLAYER);
+      // Plausibility leans on the partner's own self-threat proxy — bluffing someone is dicey; if they
+      // DON'T believe it, the squeeze bounces (no fold). If they do, it presses like a real leverage.
+      if (!bluffBelieved(e.trust, e.threat, rng)) return;
+    }
+    const npc = this.house!.npcs.find((n) => n.id === partner)!;
+    const strength = leverageStrength(this.leverageSignalsFor(npc), rng);
+    const { accepts } = dealAcceptance(this.signedWarmthTowardPlayer(partner), leverageDealBoost(strength), LEVERAGE.refusalFloor);
+    if (accepts) {
+      // The pressure landed — the PARTNER is bound a little tighter: a strategy-grade fold on the
+      // partner→player edge (initiator PLAYER, toward [partner], so the PARTNER's read of the player moves).
+      foldHiddenImpact(this.rel, rng, PLAYER, [PLAYER, partner], "strategy", [partner]);
+    } else {
+      // A wary partner calls the squeeze and RESENTS it — their hidden read of the player sours (bounded).
+      this.rel.applyImpactDirected(partner, PLAYER, LEVERAGE.squeezeBacklash, rng);
+    }
+  }
+
+  /** 0093 — assemble the Vault-hidden leverageStrength signals (the subject's soul + their read of the player). */
+  private leverageSignalsFor(npc: { id: EntityId; soul?: { emotionalState?: number }; character: { hiddenElements?: HiddenElement[] } }): LeverageSignals {
+    const e = this.rel.edge(npc.id, PLAYER);
+    return {
+      severity: severityOf(this.headlineSecretOf(npc)?.kind),
+      subjectEmotionalState: npc.soul?.emotionalState ?? 0.5,
+      subjectTrust: e.trust, subjectAffinity: e.affinity, subjectThreat: e.threat,
+    };
+  }
+
+  /**
+   * 0099 — fold the TRADE of a held secret to the deal partner (the recipient). Values the secret TO THE
+   * RECIPIENT (their reads of the secret's SUBJECT — a rival's secret is gold to that rival's enemy,
+   * worthless to their ally), resolves whether they take it, warms them toward the giver (an accepted
+   * trade) or sours them (peddling a worthless secret), surfaces the secret into the recipient's
+   * knowledge (a recorded `told` pathway — never a Vault read), and marks the secret `traded`/caps it.
+   */
+  private applyDealTrade(d: SecretLeverDescriptor, recipient: EntityId): void {
+    this.resolveAndTrade(d, recipient, "deal");
+  }
+
+  /**
+   * 0099 — the shared trade resolution (used by `makeDeal`'s `tradedSecret` and the `tradeSecret` lever).
+   * Returns whether the recipient accepted (and the Vault-safe reason on a refusal). Validates ownership,
+   * values to the recipient, folds, surfaces the secret, marks used, caps. `null` on an invalid setup.
+   */
+  private resolveAndTrade(
+    d: SecretLeverDescriptor, recipient: EntityId, _via: "deal" | "swap",
+  ): { accepted: boolean; refused?: TradeResult["refused"]; narratable?: string } | null {
+    if (!this.isActiveNpc(recipient)) return { accepted: false, refused: "no-recipient" };
+    if (this.tradeCount >= SECRET_TRADE.maxTradesPerSeason) return { accepted: false, refused: "capped" };
+    const resolved = this.resolveWieldedSecret(d);
+    if (!resolved) return { accepted: false, refused: "not-learned" };
+    if (resolved.subject === recipient) return { accepted: false, refused: "not-learned" }; // can't trade a secret TO its own subject
+    const rng = this.secretRng("trade", `${resolved.factId ?? `bluff:${resolved.subject}`}:${recipient}`);
+    if (resolved.bluff) {
+      this.playerBluffCount = Math.min(this.playerBluffCount + 1, LEVERAGE.maxPlayerBluffsPerSeason + 1);
+      const re = this.rel.edge(recipient, PLAYER);
+      if (!bluffBelieved(re.trust, this.rel.edge(recipient, resolved.subject).threat, rng)) {
+        return { accepted: false, refused: "declined" }; // they don't buy the fabricated secret
+      }
+    }
+    const value = tradeValue(this.tradeSignalsFor(recipient, resolved.subject, resolved.severity), rng);
+    const folds = tradeOutcome(value, this.signedWarmthTowardPlayer(recipient), rng);
+    if (folds.accepted) {
+      if (folds.recipientFold) this.rel.applyImpactDirected(recipient, PLAYER, folds.recipientFold, rng);
+      if (resolved.bluff) {
+        // A BELIEVED bluff: record it so a later contradicting TRUTH about the same subject catches the
+        // player out (the passive lie-catch). A real trade DELIVERS the truth, so it also CATCHES any
+        // earlier bluff the player told THIS recipient about this subject.
+        this.recordPlayerBluffBelief(recipient, resolved.subject);
+      } else {
+        this.catchPlayerBluff(recipient, resolved.subject, rng); // a real truth contradicts a prior bluff
+        // The recipient now HOLDS the traded secret — a recorded `told-by:player` pathway (never a Vault read).
+        const content = this.factContentFor(resolved.factId!) ?? `${this.nameOf(PLAYER)} shared a secret about ${this.nameOf(resolved.subject)}`;
+        this.onSurfaceToHouseguest?.(recipient, content, resolved.subject, `told-by:${PLAYER}`, 0.8);
+      }
+      // Mark the REAL secret traded (monotonic — it has been spent into the economy); a bluff is not a real fact.
+      if (resolved.factId && this.secretUsedAs[resolved.factId] !== "exposed") this.secretUsedAs[resolved.factId] = "traded";
+      this.tradeCount++;
+      return { accepted: true, narratable: "they took the trade" };
+    }
+    // Refused — peddling a secret they don't want reads as untrustworthy (a bounded sour on their read).
+    if (folds.traderBacklash) this.rel.applyImpactDirected(recipient, PLAYER, folds.traderBacklash, rng);
+    return { accepted: false, refused: "declined", narratable: "they didn't bite" };
+  }
+
+  /** 0099 — assemble the Vault-hidden tradeValue signals (the RECIPIENT's reads of the secret's subject + the player). */
+  private tradeSignalsFor(recipient: EntityId, subject: EntityId, severity: number): TradeSignals {
+    const toSubject = this.rel.edge(recipient, subject);
+    const toPlayer = this.rel.edge(recipient, PLAYER);
+    return {
+      severity,
+      recipientThreatOfSubject: toSubject.threat,
+      recipientAffinityForSubject: toSubject.affinity,
+      recipientTrustOfPlayer: toPlayer.trust,
+    };
+  }
+
+  /** 0093/0099 — the player-facing CONTENT of a learned fact (so a trade surfaces the SAME content the player holds). */
+  private factContentFor(factId: string): string | undefined {
+    return (this.playerKnowledgeReader?.() ?? []).find((f) => (f.factId ?? f.id) === factId || f.id === factId)?.content;
+  }
+
+  /** deception — record that `npc` BELIEVED a player bluff about `subject` (the passive lie-catch ledger). */
+  private recordPlayerBluffBelief(npc: EntityId, subject: EntityId): void {
+    const subjects = (this.playerBluffBelief[npc] ??= []);
+    if (!subjects.includes(subject)) subjects.push(subject);
+  }
+
+  /**
+   * deception — the PASSIVE LIE-CATCH (owner direction): a genuine contradicting pathway about `subject`
+   * has just reached `npc`. If the player earlier BLUFFED this `npc` about this `subject`, the bluff is
+   * CAUGHT — the bluffer takes a betrayal-grade, recoverable hit on the npc→player edge (0026
+   * `IMPACT.betrayal`), and the caught bluff is cleared (it can't re-fire). The player never sees a number.
+   */
+  private catchPlayerBluff(npc: EntityId, subject: EntityId, rng: SeededRandom): void {
+    const subjects = this.playerBluffBelief[npc];
+    if (!subjects || !subjects.includes(subject)) return;
+    this.rel.applyDirected(npc, PLAYER, "betrayal", rng); // the npc realizes the player lied to them
+    this.playerBluffBelief[npc] = subjects.filter((s) => s !== subject);
+    recordDealBetrayal(this.live!, npc, PLAYER); // a jury-management demerit too (they remember the lie)
   }
 
   /**
@@ -5561,6 +5944,130 @@ export class GameSessionAdapter implements GameSession {
     this.confideState[npcId] = { tier: decision.tier, truthful: decision.truthful };
     this.persist();
     return { disclosed: true, tier: decision.tier, truthful: decision.truthful, content };
+  }
+
+  /**
+   * 0093 — OUT a learned secret to the house (the single engine authority). Validates the player
+   * legitimately holds the `factId` (a non-learned secret is REJECTED — the Vault bright line; no
+   * minting), caps per season, resolves the bounded, seeded standing hit on the subject (folded onto
+   * EVERY other active houseguest's read of them — the house re-reads them as a liability) + the
+   * betrayal-grade backlash on the exposer FROM the subject + the smaller house recoil + an optional
+   * jury mark, RECORDS the exposure as a witnessed pathway event so the house now KNOWS it (0002 —
+   * never a Vault read), and marks the secret SPENT (`usedAs: exposed` — never re-wielded). A `bluff`
+   * is a separate path: a public CLAIM with no Vault read, folded on belief; the engine never tells the
+   * player whether it matched a truth. No number ever crosses (anti-sycophancy). `null` pre-game.
+   */
+  exposeSecret(req: ExposeSecretReq): ExposeResult | null {
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) return null;
+    // A real secret already exposed (public) can't be exposed again — checked BEFORE resolution (the
+    // resolver rejects a spent fact as un-wieldable, which would otherwise read as `not-learned`).
+    if (req.factId && this.secretUsedAs[req.factId] === "exposed") return { exposed: false, refused: "already-spent" };
+    if (this.exposeCount >= LEVERAGE.maxExposesPerSeason) return { exposed: false, refused: "capped" };
+    const resolved = this.resolveWieldedSecret({ factId: req.factId, bluff: req.bluff, subject: req.subject });
+    if (!resolved) return { exposed: false, refused: req.bluff ? "no-subject" : "not-learned" };
+    const subject = resolved.subject;
+    const rng = this.secretRng("expose", resolved.factId ?? `bluff:${subject}`);
+    if (resolved.bluff) {
+      this.playerBluffCount = Math.min(this.playerBluffCount + 1, LEVERAGE.maxPlayerBluffsPerSeason + 1);
+      // A public bluff lands by the HOUSE's average willingness to believe a claim about the subject —
+      // plausibility on their collective threat read. If it bounces, the exposer just takes the recoil
+      // (crying wolf), no subject hit. The engine never reveals whether it matched a real truth.
+      const houseThreat = this.avgHouseThreatOf(subject);
+      if (!bluffBelieved(this.avgHouseTrustOfPlayer(), houseThreat, rng)) {
+        // Disbelieved — only the exposer recoil (a thin ruthlessness/credibility cost), no standing hit.
+        this.foldHouseRecoilOnExposer(subject, rng);
+        this.exposeCount++;
+        this.persist();
+        return { exposed: true, subjectImpactNarratable: "the house didn't seem to buy it" };
+      }
+    }
+    const folds = exposeOutcome(resolved.severity, rng);
+    // The standing hit: EVERY other active houseguest re-reads the subject as a liability (bounded fold).
+    const evicted = new Set(this.live.evictionOrder);
+    for (const other of this.house.npcs) {
+      if (other.id === subject || evicted.has(other.id)) continue;
+      this.rel.applyImpactDirected(other.id, subject, folds.subjectHit, rng);
+      if (resolved.bluff) {
+        // A believed BLUFF expose: record it against each houseguest so a later contradicting TRUTH catches it.
+        this.recordPlayerBluffBelief(other.id, subject);
+      } else {
+        // A REAL expose DELIVERS the truth to the house — it CATCHES any earlier bluff about this subject.
+        this.catchPlayerBluff(other.id, subject, rng);
+      }
+    }
+    // The exposer takes the betrayal-grade hit FROM the subject (the deepest wound — outing IS betrayal).
+    this.rel.applyImpactDirected(subject, PLAYER, folds.exposerBacklashFromSubject, rng);
+    // The rest of the house recoils a little from the exposer (ruthlessness read).
+    this.foldHouseRecoilOnExposer(subject, rng);
+    // The jury mark (0014): the subject's eventual jurors weigh the outing against the exposer.
+    if (folds.juryMark) recordDealBetrayal(this.live, subject, PLAYER);
+    // Surface the exposure to the house as a WITNESSED pathway event — the house now KNOWS it (0002).
+    const content = resolved.bluff ? `${this.nameOf(PLAYER)} outed something about ${this.nameOf(subject)} to the house`
+      : this.factContentFor(resolved.factId!) ?? `${this.nameOf(PLAYER)} exposed a secret about ${this.nameOf(subject)}`;
+    this.exposeToHouse(subject, content, resolved.bluff ? 0.6 : 0.85);
+    // Mark the REAL secret SPENT (public ⇒ never re-leveraged). A bluff is not a real fact to mark.
+    if (resolved.factId) this.secretUsedAs[resolved.factId] = "exposed";
+    this.exposeCount++;
+    this.persist();
+    return { exposed: true, subjectImpactNarratable: "the house is reeling from it" };
+  }
+
+  /**
+   * 0099 — TRADE a held secret to a THIRD-PARTY recipient for a one-off concession (a comp throw, a
+   * secret-for-secret swap). The single engine authority — see `resolveAndTrade` for the resolution; this
+   * is the public lever for a NON-deal trade (a standing deal uses `makeDeal`'s `tradedSecret`). `null`
+   * pre-game / for an unknown recipient.
+   */
+  tradeSecret(req: TradeSecretReq): TradeResult | null {
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) return null;
+    const out = this.resolveAndTrade(
+      { factId: req.factId, bluff: req.bluff, subject: req.subject }, req.toNpcId, "swap",
+    );
+    if (!out) return { accepted: false, refused: "no-recipient" };
+    this.persist();
+    return out;
+  }
+
+  /** 0093 — the rest of the house recoils a little from the EXPOSER (outing reads as ruthless). */
+  private foldHouseRecoilOnExposer(subject: EntityId, rng: SeededRandom): void {
+    if (!this.house || !this.live) return;
+    const evicted = new Set(this.live.evictionOrder);
+    for (const other of this.house.npcs) {
+      if (other.id === subject || evicted.has(other.id)) continue;
+      this.rel.applyImpactDirected(other.id, PLAYER, LEVERAGE.exposerBacklashFromHouse, rng);
+    }
+  }
+
+  /** 0093 — surface an exposed secret to EVERY other active houseguest as witnessed knowledge (0002). The
+   *  player is the teller (`told-by:player`): the house learns it BECAUSE the player outed it — a recorded
+   *  in-game pathway anchored on the player's own held content (E9), never a Vault read. */
+  private exposeToHouse(subject: EntityId, content: string, confidence: number): void {
+    if (!this.house || !this.live) return;
+    const evicted = new Set(this.live.evictionOrder);
+    for (const other of this.house.npcs) {
+      if (other.id === subject || evicted.has(other.id)) continue;
+      this.onSurfaceToHouseguest?.(other.id, content, subject, `told-by:${PLAYER}`, confidence);
+    }
+  }
+
+  /** 0093 — the house's average TRUST in the player (a bluff's believability proxy). */
+  private avgHouseTrustOfPlayer(): number {
+    if (!this.house || !this.live) return 0;
+    const evicted = new Set(this.live.evictionOrder);
+    const npcs = this.house.npcs.filter((n) => !evicted.has(n.id));
+    if (!npcs.length) return 0;
+    return npcs.reduce((s, n) => s + this.rel.edge(n.id, PLAYER).trust, 0) / npcs.length;
+  }
+
+  /** 0093 — the house's average THREAT read of a subject (a bluff's plausibility proxy). */
+  private avgHouseThreatOf(subject: EntityId): number {
+    if (!this.house || !this.live) return 0.5;
+    const evicted = new Set(this.live.evictionOrder);
+    const npcs = this.house.npcs.filter((n) => !evicted.has(n.id) && n.id !== subject);
+    if (!npcs.length) return 0.5;
+    return npcs.reduce((s, n) => s + this.rel.edge(n.id, subject).threat, 0) / npcs.length;
   }
 
   /** 0075 — the headline sealed secret a houseguest would confide (their first hidden element). */

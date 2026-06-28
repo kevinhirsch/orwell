@@ -1,8 +1,10 @@
 # 0102 — Weekly recap + cliffhanger (each HOH-week is an episode)
 
-> **Status:** 📝 **SPEC — PO review required** (drafted 2026-06-25). Two owner rulings are open
-> (R1 surface, R2 cliffhanger safety) — see **PO review** below; do **not** start building until they
-> land. **Tracks #884.**
+> **Status:** 🟢 **PO REVIEW RESOLVED (owner, 2026-06-27) — REDESIGNED.** Now a **daily "day in review"
+> pop-up window** (window kit) fired at the player's in-game **bedtime** (0066), **replacing the weekly
+> recap**; Vault-safe (the player's witnessed/known events only); the "tomorrow…" forward-nod stays
+> non-committal and suppresses on a quiet day. **This filename is now a misnomer — rename to daily recap.**
+> See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #884. **Tracks #884.**
 > **Depends on:** 0001 (Vault Wall — the whole safety argument), 0002 (event visibility & the
 > `surfaceInformationTo` pathway model — what counts as the player's knowledge), 0048 (the
 > post-season recap precedent — `seasonRecap()` is the structural template this generalizes to a
