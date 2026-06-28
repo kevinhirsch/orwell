@@ -1,6 +1,6 @@
 # 0093 — Secrets as strategic levers (information becomes power)
 
-> **Status:** 🟡 **PO-REVIEW SPEC — needs owner rulings before build (see § "PO review" below).**
+> **Status:** 🟢 **PO REVIEW RESOLVED (owner, 2026-06-27) — BUILD-READY.** R1–R4 settled; builds as ONE *secrets-as-power* spec WITH 0099 (#880) — expose = first-class `exposeSecret` lever, leverage = `makeDeal` descriptor, real-but-recoverable ceiling, **deception / bluff first-class**. See § "PO review" + `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #862.
 > Tracks **#862**. This is a *design proposal awaiting decisions*; it likely warrants its **own build
 > spec** once R1–R4 are ruled. Nothing here is implemented.
 > **Builds on (does NOT duplicate):** **0075** (trust-gated confidences — the pathway by which a player

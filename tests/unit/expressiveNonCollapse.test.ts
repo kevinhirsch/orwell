@@ -259,4 +259,67 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
       expect(b.engine.relationships.edge(pb, PLAYER)).toEqual(a.engine.relationships.edge(pa, PLAYER));
     });
   });
+
+  describe("(6) SECRETS AS POWER (0093/0099) — the model proposes WHICH secret/target/prose; the engine owns the MAGNITUDE", () => {
+    // Wielding a held secret (leverage / expose / trade) is the same ADR 0005 split: the open set is which
+    // secret, which target, and the prose; the closed set is HOW MUCH it moves a read. No number crosses,
+    // and the lever's PROSE rides through losslessly while the engine keeps the bounded, seeded amount.
+    function learnAbout(sb: ReturnType<typeof freshSandbox>, subject: string): string {
+      sb.engine.knowledge.seedBelief(subject, { content: `the truth about ${subject}`, originalContent: "x", factId: `seed:${subject}`, confidence: 0.9, hops: 0, distortion: 0, source: subject }, "origin");
+      sb.engine.knowledge.surfaceInformationTo(PLAYER, { content: `the truth about ${subject}`, subject, confidence: 0.85 }, `told-by:${subject}`);
+      const f = sb.engine.knowledge.knownTo(PLAYER).find((k) => k.subject === subject)!;
+      return f.factId ?? f.id;
+    }
+
+    it("an EXPOSE folds a real, bounded consequence (the open-set move is consequenced, never inert) and crosses NO number", () => {
+      const sb = freshSandbox("adr0005-expose", 601);
+      const subject = sb.session.livingIds().find((id) => id !== PLAYER)!;
+      const other = sb.session.livingIds().find((id) => id !== PLAYER && id !== subject)!;
+      const before = { ...sb.engine.relationships.edge(other, subject) };
+      const f = learnAbout(sb, subject);
+      const res = sb.session.exposeSecret({ factId: f })!;
+      // The house re-reads the subject (a real fold) — the information actually changed the board.
+      const after = sb.engine.relationships.edge(other, subject);
+      const moved = Math.abs(after.threat - before.threat) > 1e-9 || Math.abs(after.affinity - before.affinity) > 1e-9;
+      expect(moved).toBe(true);
+      // …yet the RESULT carries no magnitude — only a Vault-safe narratable phrase (anti-sycophancy).
+      expect(JSON.stringify(res)).not.toMatch(/[-+]?\d+\.\d+/);
+    });
+
+    it("a TRADE's value is the RECIPIENT's read (the open set), and the engine — not the model — decides if it lands", () => {
+      // The SAME secret offered to two recipients with opposite reads of its subject moves the board
+      // differently — proof the engine owns the magnitude from the recipient's perspective, not the model.
+      const wants = freshSandbox("adr0005-trade-wants", 602);
+      const dontcare = freshSandbox("adr0005-trade-dc", 602);
+      const subjW = wants.session.livingIds().filter((id) => id !== PLAYER);
+      const subjD = dontcare.session.livingIds().filter((id) => id !== PLAYER);
+      // Recipient who FEARS the subject + trusts the player ⇒ values it ⇒ accepts.
+      const rw = wants.engine.relationships.edge(subjW[1]!, PLAYER); rw.trust = 0.9; rw.affinity = 0.8; rw.threat = 0.05;
+      const rws = wants.engine.relationships.edge(subjW[1]!, subjW[0]!); rws.threat = 0.9; rws.affinity = 0.05;
+      // Recipient ALLIED with the subject ⇒ the secret is worthless to them; with only LUKEWARM warmth to
+      // the player, a worthless trade doesn't clear the bar ⇒ they decline (the value is decisive).
+      const rd = dontcare.engine.relationships.edge(subjD[1]!, PLAYER); rd.trust = 0.1; rd.affinity = 0.1; rd.threat = 0.35;
+      const rds = dontcare.engine.relationships.edge(subjD[1]!, subjD[0]!); rds.threat = 0.02; rds.affinity = 0.95;
+
+      const fW = learnAbout(wants, subjW[0]!);
+      const fD = learnAbout(dontcare, subjD[0]!);
+      const accW = (wants.session.tradeSecret({ factId: fW, toNpcId: subjW[1]! }) as { accepted: boolean }).accepted;
+      const accD = (dontcare.session.tradeSecret({ factId: fD, toNpcId: subjD[1]! }) as { accepted: boolean }).accepted;
+      expect(accW).toBe(true); // the recipient who wanted it took it
+      expect(accD).toBe(false); // the recipient who didn't care declined — the engine owns the value
+    });
+
+    it("NO REGRESSION — a season with no lever invoked is byte-identical (the expressive gate's secrets-as-power corollary)", () => {
+      // The secrets-as-power code adds nothing to the seeded fold path unless a lever is invoked; two
+      // identical no-lever runs fold byte-identically (the broader proof is `secretPowerNeutral.test.ts`).
+      const a = freshSandbox("adr0005-sp-regress", 603);
+      const b = freshSandbox("adr0005-sp-regress", 603);
+      const pa = a.session.livingIds().find((id) => id !== PLAYER)!;
+      const pb = b.session.livingIds().find((id) => id !== PLAYER)!;
+      const content = "An ordinary scheme by the hammock.";
+      a.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, pa], kind: "strategy", content });
+      b.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, pb], kind: "strategy", content });
+      expect(b.engine.relationships.edge(pb, PLAYER)).toEqual(a.engine.relationships.edge(pa, PLAYER));
+    });
+  });
 });

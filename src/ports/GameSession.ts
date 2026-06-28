@@ -391,16 +391,112 @@ export interface AllianceView {
   youAreFounder: boolean;
 }
 
+/**
+ * Features 0093 + 0099 — an optional, Vault-free descriptor for wielding a held secret WHILE making a
+ * deal: `leverage` (0093 — a secret the player holds ABOUT the deal partner, pressed to color THAT
+ * partner's formation likelihood) or `tradedSecret` (0099 — a secret the player holds about a THIRD
+ * party, handed to the deal partner as consideration, valued to THE PARTNER). Either references a
+ * `factId` the player already legitimately holds (validated against `knownTo(player)` — the player can
+ * only wield what they learned), OR is a `bluff` (a fabricated claim that reads NOTHING from the Vault).
+ * Absent ⇒ deal formation is BYTE-IDENTICAL to 0039 (fully opt-in). The engine owns the magnitude.
+ */
+export interface SecretLeverDescriptor {
+  /** The learned fact the player wields (by its knowledge `factId`). Required unless `bluff` is set. */
+  factId?: string;
+  /**
+   * A BLUFF (deception, owner direction 2026-06-27): the player invents a claim instead of wielding a
+   * real held fact. No `factId` / no Vault read; the engine folds on BELIEF (trust × plausibility) and
+   * NEVER tells the player whether the bluff matched a real truth. `subject` names who the bluff is about.
+   */
+  bluff?: boolean;
+  /** For a `tradedSecret`/bluff: the houseguest the secret is ABOUT (the third-party subject). */
+  subject?: EntityId;
+}
+
 export interface MakeDealReq {
   with: EntityId;
   kind: "safety" | "vote" | "final-two" | "target-other";
   terms: string;
+  /**
+   * 0093 — OPTIONAL leverage: a secret the player holds ABOUT the deal partner (`with`), pressed to make
+   * them more likely to enter/honor the deal. The threat persists while the deal is open (owner R4);
+   * EXPOSING the secret spends it. The engine owns the bounded, seeded factor; a wary partner can refuse
+   * and resent it. Absent ⇒ deal formation byte-identical to 0039.
+   */
+  leverage?: SecretLeverDescriptor;
+  /**
+   * 0099 — OPTIONAL traded secret: a secret the player holds about a THIRD party, handed to the deal
+   * partner (`with`) as consideration. Valued to the PARTNER (what they'd do with it); the partner learns
+   * the secret via a recorded `told` pathway. Absent ⇒ deal formation byte-identical to 0039/0093.
+   */
+  tradedSecret?: SecretLeverDescriptor;
   /**
    * Optional compare-and-swap token (0065 Part A): the `beatSeq` the caller computed this write
    * against. When present and `!== current`, the engine REFUSES with a typed `stale-beat` conflict
    * (HTTP 409, no state change). Absent ⇒ byte-identical to the pre-0065 path (opt-in).
    */
   expectedBeatSeq?: number;
+}
+
+/**
+ * 0093 — the player OUTS a learned secret to the house (or a specific audience). The single engine
+ * authority (like `runCompetition` / `confide`): the model previews/voices, the ENGINE resolves the
+ * bounded, seeded standing fold + exposer backlash + records the exposure as a witnessed pathway event.
+ */
+export interface ExposeSecretReq {
+  /** The learned fact the player exposes (by its knowledge `factId`). Required unless `bluff` is set. */
+  factId?: string;
+  /** A BLUFF expose (deception): the player publicly CLAIMS a secret they did not learn. No Vault read. */
+  bluff?: boolean;
+  /** The houseguest the secret is ABOUT (the subject who takes the standing hit). Required for a bluff. */
+  subject?: EntityId;
+  /** 0065 Part A — optional compare-and-swap token; stale ⇒ 409, no exposure. */
+  expectedBeatSeq?: number;
+}
+
+/**
+ * 0093 — the result of an `exposeSecret`. The engine decided the bounded standing fold + backlash and
+ * recorded the exposure as a witnessed pathway event. `exposed` is whether it went through (a non-learned
+ * `factId`, a spent secret, or the season cap ⇒ false). NO number ever crosses — only what the model may
+ * voice (`subjectImpactNarratable` is a Vault-safe phrase, never a magnitude).
+ */
+export interface ExposeResult {
+  exposed: boolean;
+  /** Why an expose was refused (Vault-free): "not-learned" | "already-spent" | "capped" | "no-subject". */
+  refused?: "not-learned" | "already-spent" | "capped" | "no-subject";
+  /** A Vault-safe phrase the model may voice for the fallout — never a number, never the hidden delta. */
+  subjectImpactNarratable?: string;
+}
+
+/**
+ * 0099 — the player TRADES a held secret to a THIRD-PARTY recipient for a one-off, non-deal concession
+ * (a comp throw, a secret-for-secret swap). The single engine authority: the engine values the secret
+ * to the recipient, resolves whether they take it, folds the relationship change, and records the trade
+ * as a witnessed `told` pathway event (the recipient now holds the secret). For a STANDING deal, use
+ * `makeDeal`'s `tradedSecret` descriptor instead.
+ */
+export interface TradeSecretReq {
+  /** The learned fact the player offers (by its knowledge `factId`). Required unless `bluff` is set. */
+  factId?: string;
+  /** The recipient houseguest the secret is handed to (NOT necessarily its subject). */
+  toNpcId: EntityId;
+  /** A BLUFF trade (deception): the player offers a fabricated secret. No Vault read. */
+  bluff?: boolean;
+  /** For a bluff: who the fabricated secret is about. */
+  subject?: EntityId;
+  /** What the player asks in return (Vault-free label for the model to voice — never an outcome lever). */
+  askKind?: string;
+  /** 0065 Part A — optional compare-and-swap token. */
+  expectedBeatSeq?: number;
+}
+
+/** 0099 — the result of a `tradeSecret`. `accepted` is whether the recipient took it; no number crosses. */
+export interface TradeResult {
+  accepted: boolean;
+  /** Why a trade was refused (Vault-free): "not-learned" | "already-spent" | "capped" | "declined" | "no-recipient". */
+  refused?: "not-learned" | "already-spent" | "capped" | "declined" | "no-recipient";
+  /** A Vault-safe phrase the model may voice — never a number, never the trade value. */
+  narratable?: string;
 }
 
 /**
@@ -1456,6 +1552,32 @@ export interface GameSession {
    * 0065 Part A: optional `expectedBeatSeq` compare-and-swap (stale ⇒ 409, no disclosure).
    */
   confide(npcId: EntityId, expectedBeatSeq?: number): ConfideResult | null;
+
+  /**
+   * 0093 — OUT a learned secret to the house. The single engine authority (like `runCompetition` /
+   * `confide`): the model previews/voices, the ENGINE validates the player legitimately holds the
+   * `factId` (a non-learned secret is REJECTED — no Vault-minting), resolves the bounded, seeded
+   * standing hit on the subject + the betrayal-grade backlash on the exposer (0026) + an optional jury
+   * mark (0014), records the exposure as a witnessed pathway event so the house now KNOWS it (0002,
+   * `surfaceInformationTo`), marks the secret SPENT (`usedAs: exposed` — never re-leveraged), and
+   * increments the per-season expose cap. A `bluff` is a SEPARATE sanctioned path: the player publicly
+   * CLAIMS a secret they did not learn — it reads NOTHING from the Vault, folds on belief, and the
+   * engine never tells the player whether it matched a real truth. Returns `{ exposed, … }` — NO number.
+   * `null` pre-game / for an unknown subject.
+   */
+  exposeSecret(req: ExposeSecretReq): ExposeResult | null;
+
+  /**
+   * 0099 — TRADE a held secret to a THIRD-PARTY recipient for a one-off concession. The single engine
+   * authority: the engine values the secret TO THE RECIPIENT (what they'd do with it — bounded, seeded),
+   * resolves whether they take it, folds the relationship change (a valued trade warms the recipient; a
+   * refused one sours their read of the peddler), records the trade as a witnessed `told` pathway event
+   * (the recipient now HOLDS the secret, 0002), marks it `usedAs: traded`, and increments the per-season
+   * trade cap. Validates `knownTo(player)` (a non-learned/suspicion-only fact is REJECTED) unless `bluff`.
+   * Returns `{ accepted, … }` — NO number. `null` pre-game / for an unknown recipient.
+   */
+  tradeSecret(req: TradeSecretReq): TradeResult | null;
+
   /**
    * Which houseguests want to approach the player right now (0012/0036) — relationship-driven
    * (allies scheme, rivals probe), so scenes start from EITHER side, not only player→NPC. Returns

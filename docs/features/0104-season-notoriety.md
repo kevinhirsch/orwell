@@ -3,7 +3,9 @@
 > **Status:** ✅ **BUILT (2026-06-27).** PO review resolved (owner, 2026-06-27 — R1 bounded open-set
 > `NotorietySummary`; R2 Day-1 bias + narrative reference with **per-NPC recognition** wiggle room; R3
 > per-user/per-character isolation; R4 **diegetic opt-in** — return as the same character vs. create a new
-> one). Tracks issue **#886**. Seams: `src/engine/notoriety.ts` (pure derive/accumulate/bias) +
+> one — the character identity + notoriety persist at the account level across a season-reset). See
+> `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #886. Tracks issue **#886**. Seams:
+> `src/engine/notoriety.ts` (pure derive/accumulate/bias) +
 > `src/engine/notorietyConstants.ts` (the single `NOTORIETY` tunable) + `src/ports/UserNotorietyStore.ts`
 > (`FileUserNotorietyStore`/`InMemoryUserNotorietyStore`) + `registry.resetUser`/`setOnRestart` (derive at
 > the season-end terminal, fold on a `keepCharacter`→`carriesNotoriety` restart) + the one bias term in

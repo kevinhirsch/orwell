@@ -291,6 +291,19 @@ export class BbWorld extends World {
   dealThreatBefore?: number;
   dealVault?: VaultDatum;
 
+  // Negotiated deal duration (0109) scratch state.
+  ddLedger?: import("../../src/engine/deals").DealLedger;
+  ddLedgerB?: import("../../src/engine/deals").DealLedger;
+  ddRel?: RelationshipModel;
+  ddRelB?: RelationshipModel;
+  ddDeal?: import("../../src/domain/deal").Deal;
+  ddDealB?: import("../../src/domain/deal").Deal;
+  ddThreat0?: number;
+  ddThreat0B?: number;
+  ddTrust0?: number;
+  ddEdgeAfter?: import("../../src/engine/relationshipConstants").EdgeSignals;
+  ddEdgeRef?: import("../../src/engine/relationshipConstants").EdgeSignals;
+
   // NPC confessionals (0040) scratch state.
   confRel?: RelationshipModel;
   confessor?: EntityId;
