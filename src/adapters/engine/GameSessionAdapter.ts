@@ -138,11 +138,11 @@ import {
   newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
-  advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
+  advanceClock, advanceClockPerConversation, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -389,6 +389,27 @@ const SECRET_PACING_ENABLED_DEFAULT = process.env.ORWELL_SECRET_PACING === "1";
 const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 
 /**
+ * 0066 Phase-2 (#1125) — the three sleep-economy EXTENSIONS, each behind its OWN dedicated opt-in flag
+ * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`/`ORWELL_JURY_HOUSE`), default OFF, so calibration
+ * neutrality is provable for EACH in isolation (the brief: "each behind its own opt-in flag, byte-identical
+ * when off"). All three only mean anything while the master clock is running (`ORWELL_TIME_OF_DAY`); each
+ * gates ON TOP of it, and when its own flag is off its effect is the identity (scale 1 / meter 0 / no extra
+ * advance) ⇒ every seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL. None adds a draw to ANY rng —
+ * the social-fatigue + multi-night terms are pure functions of already-decided state (no side-stream
+ * needed; the main competition/vote/jury stream is never re-phased). A test flips each per-session.
+ *
+ *  1. `ORWELL_TIME_PER_CONVERSATION` — the per-conversation clock advance (the day's finite scheming time,
+ *     felt turn-by-turn). Pacing-only; never rushes an engaged scene (clamps at late-night, never wraps).
+ *  2. `ORWELL_SOCIAL_FATIGUE` — a tired houseguest sways the house LESS next day + a conflict drains them
+ *     to an earlier bedtime (social, not just comps).
+ *  3. `ORWELL_MULTI_NIGHT_FATIGUE` — the compounding multi-night fatigue meter (consecutive late nights
+ *     stack a deeper deficit; rested nights recover).
+ */
+const PER_CONVERSATION_CLOCK_ENABLED_DEFAULT = process.env.ORWELL_TIME_PER_CONVERSATION === "1";
+const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE === "1";
+const MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_MULTI_NIGHT_FATIGUE === "1";
+
+/**
  * Engine-side implementation of the Vault-free game-session port. It runs the
  * OOBE (the one human-authored profile) and holds the active house, then projects
  * it to a Vault-free view: the player's own authored card plus a name-only house
@@ -490,6 +511,16 @@ export class GameSessionAdapter implements GameSession {
    * via `setJuryHouseEnabled`.
    */
   private juryHouseEnabled = JURY_HOUSE_ENABLED_DEFAULT;
+  /**
+   * 0066 Phase-2 (#1125) — the three sleep-economy extension flags, each DEFAULT OFF (its dedicated env
+   * default) and each self-gated: when off, its effect is the identity so the seeded calibration spine is
+   * BYTE-IDENTICAL (proven per-extension by the dedicated neutrality tests). All three also require the
+   * master clock (`timeOfDayEnabled`). A test flips each via its `set*Enabled` setter.
+   *   1. per-conversation clock advance · 2. NPC next-day social fatigue · 3. compounding multi-night meter.
+   */
+  private perConversationClockEnabled = PER_CONVERSATION_CLOCK_ENABLED_DEFAULT;
+  private socialFatigueEnabled = SOCIAL_FATIGUE_ENABLED_DEFAULT;
+  private multiNightFatigueEnabled = MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT;
   /** The DEDICATED jury-house rng tick counter — jury-house draws fork off the game seed + this, NEVER the
    * orchestrator's shared society/competition/vote stream, so even with the layer ON the main house's seeded
    * outcomes stay in phase (only the hidden finale lean changes). Persisted so the stream is restart-stable. */
@@ -2763,10 +2794,10 @@ export class GameSessionAdapter implements GameSession {
     return new Set(
       awakeSet({
         active: this.presenceActive(),
-        phase: this.live.timeOfDay,
+        hour: this.live.nightDepth ?? WAKE_HOUR, // the clock-HOUR (8..32) — the 24-hour model (#1125)
         player: this.house.player.id,
         playerRetired: this.live.playerRetired ?? false,
-        bedtimeOf: (id) => phaseForDepth(this.effectiveBedDepth(id)), // chronotype-aware + conflict-drained (0066 Phase-2)
+        bedtimeOf: (id) => this.effectiveBedDepth(id), // chronotype bedtime HOUR, conflict-drained (0066 Phase-2)
       }),
     );
   }
@@ -2783,32 +2814,40 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * 0066 Phase-2: the off-screen fold-magnitude scale (≤1) for a scene's INITIATOR — a tired houseguest
-   * sways the house LESS (reduced EFFECTIVENESS, never a personality change; the scene's nature is
-   * unchanged). Returns 1 (no scaling) when the clock is off ⇒ the hidden society + its seeded calibration
-   * spine are BYTE-IDENTICAL; reduced sway only on the live clock-ON path, keyed off the same hidden rest
-   * deficit the competition fold consumes. No number crosses the wall.
+   * 0066 Phase-2 (Extension 2 — NPC next-day social fatigue): the off-screen fold-magnitude scale (≤1) for
+   * a scene's INITIATOR — a tired houseguest sways the house LESS (reduced EFFECTIVENESS, never a
+   * personality change; the scene's nature is unchanged). Returns 1 (NO scaling) unless the dedicated
+   * social-fatigue flag is on (AND the clock is running) ⇒ the hidden society + its seeded calibration
+   * spine are BYTE-IDENTICAL; reduced sway only on that live path, keyed off the same hidden rest deficit
+   * the competition fold consumes. Pure — no rng. No number crosses the wall.
    */
   socialFoldScale(id: EntityId): number {
+    if (!this.socialFatigueEnabled) return 1; // Extension 2 off ⇒ the off-screen fold is byte-identical
     return socialSwayScale(this.restDeficitOf(id));
   }
 
   /** The hidden rest deficit (0..1) a houseguest carries TODAY: tonight's immediate deficit (graded by how
-   *  late they were up — conflict-drained) COMBINED with the compounding multi-night fatigue meter. 0 when
-   *  the clock is off ⇒ byte-identical to the calibration spine. Feeds both the comp fold and social sway. */
+   *  late they were up — conflict-drained when Extension 2 is on) plus, ONLY when Extension 3 is on, the
+   *  compounding multi-night fatigue meter. 0 when the clock is off ⇒ byte-identical to the calibration
+   *  spine. Feeds the comp fold (Phase-1) and the social sway (Extension 2). Pure — no rng. */
   private restDeficitOf(id: EntityId): number {
     if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
     const immediate = id === PLAYER
       ? playerRestDeficit(this.live)
       : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id));
+    // Extension 3 (compounding multi-night meter): only ADD the accumulated meter when its own flag is
+    // on; off ⇒ just the single-night immediate deficit (byte-identical to the Phase-1 comp term).
+    if (!this.multiNightFatigueEnabled) return immediate;
     const fatigue = id === PLAYER ? (this.live.playerFatigue ?? 0) : (this.live.npcFatigue?.[id] ?? 0);
     return combinedRestDeficit(immediate, fatigue);
   }
 
-  /** Roll every houseguest's multi-night fatigue meter at a genuine NIGHT-END (the player turned in, or the
-   *  house ran to the bitter end). EMA: decay the prior, add the night just ended. Fires once per night. */
+  /** 0066 Phase-2 (Extension 3): roll every houseguest's multi-night fatigue meter at a genuine NIGHT-END
+   *  (the player turned in, or the house ran to the bitter end). EMA: decay the prior, add the night just
+   *  ended. Fires once per night. A NO-OP unless Extension 3 is enabled ⇒ the meter stays absent ⇒ 0 ⇒
+   *  byte-identical. Pure — no rng. */
   private accrueNightFatigue(): void {
-    if (!this.live || !this.house) return;
+    if (!this.multiNightFatigueEnabled || !this.live || !this.house) return;
     const lastNight = (id: EntityId): number => id === PLAYER
       ? playerRestDeficit(this.live!)
       : npcRestDeficit(this.live!, this.statsOf(id), id, this.effectiveBedDepth(id));
@@ -2818,20 +2857,22 @@ export class GameSessionAdapter implements GameSession {
     this.live.npcFatigue = next;
   }
 
-  /** 0066 Phase-2: an NPC's effective turn-in DEPTH tonight = their chronotype bedtime pulled EARLIER by
-   *  any conflicts they were in this night (a fight drains you to bed). Floored. Drives both who is awake
-   *  late (`awakeNow`) and their next-day comp deficit, coherently. */
+  /** 0066 Phase-2: an NPC's effective turn-in HOUR tonight = their chronotype bedtime hour, pulled EARLIER
+   *  by any conflicts they were in this night (Extension 2 — a fight drains you to bed). Floored at the
+   *  early-evening hour. Drives both who is awake late (`awakeNow`) and their next-day sleep deficit,
+   *  coherently. With Extension 2 off the conflict tally is never populated, so this is just the base
+   *  chronotype bedtime hour ⇒ byte-identical. */
   private effectiveBedDepth(id: EntityId): number {
-    const base = bedtimeDepthFor(this.statsOf(id), id);
+    const base = bedtimeDepthFor(this.statsOf(id), id); // clock-HOUR (24-hour model)
     const conflicts = this.nightConflicts.get(id) ?? 0;
     return Math.max(BEDTIME_DEPTH_FLOOR, base - CONFLICT_BEDTIME_DRAIN * conflicts);
   }
 
-  /** Clear the per-night conflict tally at the moment the day rolls over (a fresh morning at depth 0) —
+  /** Clear the per-night conflict tally at the moment the day rolls over (a fresh morning at the 8am wake) —
    *  tonight's fights don't follow anyone into tomorrow. Called right after the clock advances / the player
    *  turns in; a no-op mid-day (still the same night) and harmless at game start (empty). */
   private rollNightConflicts(): void {
-    if (this.live?.timeOfDay === DAY_START && (this.live?.nightDepth ?? 0) === 0) this.nightConflicts.clear();
+    if (this.live?.timeOfDay === DAY_START && (this.live?.nightDepth ?? WAKE_HOUR) === WAKE_HOUR) this.nightConflicts.clear();
   }
 
   /**
@@ -4739,6 +4780,35 @@ export class GameSessionAdapter implements GameSession {
    *  ONLY when on (off ⇒ the off-screen call is byte-identical to the pre-feature stretch). */
   trajectoriesEnabledNow(): boolean { return this.trajectoriesEnabled; }
 
+  // --- 0066 Phase-2 (#1125): the three sleep-economy extension flags (each default OFF) --------------
+
+  /** Extension 1 — the per-conversation clock advance. Off by default — calibration leaves it off. */
+  setPerConversationClockEnabled(on: boolean): void { this.perConversationClockEnabled = on; }
+  /** Extension 2 — NPC next-day social fatigue (dampened sway + conflict-drained bedtime). Off by default. */
+  setSocialFatigueEnabled(on: boolean): void { this.socialFatigueEnabled = on; }
+  /** Extension 3 — the compounding multi-night fatigue meter. Off by default. */
+  setMultiNightFatigueEnabled(on: boolean): void { this.multiNightFatigueEnabled = on; }
+
+  /**
+   * 0066 Phase-2 (Extension 1) — advance the clock a SMALL step as the player lingers/plays WITHIN a beat.
+   * The orchestrator's per-turn off-screen tick calls this once per player TURN (debounced for aux tool
+   * calls, E57/R5), so the day's finite scheming time is felt turn-by-turn. SELF-GATED: a NO-OP unless the
+   * dedicated flag is on AND the master clock is running AND the clock has initialized (the first ceremony
+   * beat starts the day). Pacing-only — it clamps at late-night and NEVER wraps the night without the
+   * player's own `turnIn` (ADR 0003 / the lull rule), so it can never rush an engaged scene past their
+   * bedtime decision. Off ⇒ nothing advances ⇒ byte-identical. No rng. (Persisted via the snapshot like
+   * the per-beat clock.)
+   */
+  advanceClockPerConversation(opts?: { kind?: ConversationKind; proposedHours?: number }): void {
+    if (!this.perConversationClockEnabled || !this.timeOfDayEnabled) return;
+    if (!this.live || this.live.timeOfDay === undefined) return; // dormant until the per-beat clock starts the day
+    // Extension 5 (LOOSE conversation durations, ADR 0005 for time): the felt duration is the scene KIND's
+    // type-bounded commit of the LLM-proposed hours; absent a kind/proposal ⇒ the small per-conversation
+    // floor (byte-identical to "no proposal"). Never 0, never a day-skip; the clock still clamps + never wraps.
+    const hours = opts?.kind ? conversationHours(opts.kind, opts.proposedHours) : CLOCK.perConversationHours;
+    advanceClockPerConversation(this.live, hours);
+  }
+
   /**
    * The directed `a→b` arc's hidden TRAJECTORY (0087) — passed to the off-screen society's nature pick when
    * the layer is ON. Returns `STEADY` (no tilt) when the layer is off OR the pair has no momentum yet, so a
@@ -5319,9 +5389,10 @@ export class GameSessionAdapter implements GameSession {
   recordOffscreenScene(initiator: EntityId, partner: EntityId, type: InteractionType): void {
     this.inflect(initiator, offscreenEmotion(type, "initiator"));
     this.inflect(partner, offscreenEmotion(type, "partner"));
-    // 0066 Phase-2: a conflict drains BOTH ⇒ they turn in earlier tonight (clock-ON only — the tally is
-    // read by `effectiveBedDepth`; off ⇒ never populated ⇒ no effect, byte-identical).
-    if (this.timeOfDayEnabled && this.live?.timeOfDay && (type === "conflict" || type === "betrayal")) {
+    // 0066 Phase-2 (Extension 2): a conflict drains BOTH ⇒ they turn in earlier tonight. Gated on the
+    // dedicated social-fatigue flag (and the clock) — the tally is read by `effectiveBedDepth`; off ⇒
+    // never populated ⇒ no effect on who's awake or any deficit ⇒ byte-identical.
+    if (this.socialFatigueEnabled && this.timeOfDayEnabled && this.live?.timeOfDay && (type === "conflict" || type === "betrayal")) {
       this.nightConflicts.set(initiator, (this.nightConflicts.get(initiator) ?? 0) + 1);
       this.nightConflicts.set(partner, (this.nightConflicts.get(partner) ?? 0) + 1);
     }
@@ -5456,9 +5527,10 @@ export class GameSessionAdapter implements GameSession {
         if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
           const wasRetired = this.live!.playerRetired ?? false;
           advanceClock(this.live!);
-          // A genuine night-end is the WRAP (the house ran to the bitter end) — NOT the morning after a
-          // turnIn (that night already accrued). Detect: a fresh morning we did NOT reach via retirement.
-          if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? 0) === 0) this.accrueNightFatigue();
+          // A genuine night-end is the 8am-wake WRAP (the house ran to the bitter end) — NOT the morning
+          // after a turnIn (that night already accrued). Detect: a fresh morning (back at the wake hour) we
+          // did NOT reach via retirement.
+          if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? WAKE_HOUR) === WAKE_HOUR) this.accrueNightFatigue();
           this.rollNightConflicts();
         }
         this.commit(ev);
@@ -7107,7 +7179,7 @@ export class GameSessionAdapter implements GameSession {
         status,
         // ADR 0006 §Principle 5: the player's OWN qualitative tiredness (their body is their knowledge) —
         // a cue, never a number, and never any NPC's sleep state. Present only once the clock is running.
-        ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { restStatus: restStatusFor(this.live.lastSleepPhase ?? DAY_START) } : {}),
+        ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { restStatus: restStatusFor(this.live.lastSleepPhase ?? WAKE_HOUR) } : {}),
         // The casting card (0050): the interview's payoff, re-showable all season. Tier WORDS are
         // derived from the hidden balanced stats here, engine-side — the numbers never serialize out.
         castingCard: {

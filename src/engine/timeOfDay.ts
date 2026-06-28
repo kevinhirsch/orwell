@@ -1,29 +1,42 @@
 /**
- * In-game time of day + the nightly presence economy (ADR 0006). A PURE domain helper:
- * the five public day-phases, how the clock advances by PLAY (never a wall-clock), each
- * houseguest's character-driven bedtime, the awake-set predicate the house thins through,
- * the player's own qualitative rest read, and the hidden rest DEFICIT the competition fold
- * consumes. No I/O and — critically — no shared-stream randomness: a bedtime is DERIVED
- * deterministically from a houseguest's STATIC aptitudes (CHARACTER, never the soul/Vault),
- * so the seeded calibration spine (juryReach / UAT golden streams) stays byte-identical and
- * a bedtime is stable for the whole season (it is who they are, not a roll).
+ * In-game time of day + the nightly sleep economy (ADR 0006), the accepted 24-HOUR model (#1125). A PURE
+ * domain helper: the five public day-phases as HOUR BANDS, how the clock advances by PLAY (never a
+ * wall-clock), each houseguest's character-driven bedtime HOUR, the BIDIRECTIONAL awake set (the house
+ * thins toward midnight then refills toward the 8am wake), the player's own qualitative rest read, and the
+ * hidden GRADED sleep DEBT the competition fold consumes. No I/O and — critically — no shared-stream
+ * randomness: a bedtime is DERIVED deterministically from a houseguest's STATIC aptitudes (CHARACTER,
+ * never the soul/Vault), so the seeded calibration spine (juryReach / UAT golden streams) stays
+ * byte-identical and a bedtime is stable for the whole season (it is who they are, not a roll).
  *
- * The bound on "functionally infinite" scheming is diegetic (ADR 0006 §Principle 3): as the
- * clock rolls toward late-night, houseguests turn in at their own bedtime, the awake set
- * shrinks toward empty, and play runs out of PEOPLE — no mechanical curfew. The player is
- * never auto-slept (Principle 6); they choose when to turn in.
+ * THE DAY (hours-of-day, from the 8am forced wake):
+ *   morning [8,12) · afternoon [12,16) · evening [16,20) · night [20,24) · late-night [24,32)
+ * The clock runs `hourOfDay` ∈ [8, 32) and CLAMPS at the bitter end — it never silently wraps; a new day
+ * begins ONLY at the 8am forced wake (everyone up). The player is never auto-slept (Principle 6); they
+ * choose when to turn in. The bound on "functionally infinite" scheming is diegetic (Principle 3): as the
+ * night runs past midnight, NPCs turn in and the awake set thins; then pre-dawn larks wake and it refills.
  */
+
+import { CLOCK, SLEEP, EVENT_DURATION } from "./sleepConstants";
+
+export { SLEEP, type SleepConstants } from "./sleepConstants";
 
 /** The five PUBLIC day-phases (ADR 0006). Not a clock — a coarse, shared, Vault-free band. */
 export type TimeOfDay = "morning" | "afternoon" | "evening" | "night" | "late-night";
 
-/** Phase order — the day runs front to back; `late-night` is the last phase before a new morning. */
+/** Phase order — the day runs front to back; `late-night` is the last phase before the 8am wake. */
 export const TIME_OF_DAY_ORDER: readonly TimeOfDay[] = [
   "morning", "afternoon", "evening", "night", "late-night",
 ];
 
-/** The day begins here (the morning after every night). */
+/** The day begins here (the 8am forced wake after every night). */
 export const DAY_START: TimeOfDay = "morning";
+
+/** The clock-hour a fresh day starts at (the 8am forced wake) — the canonical `hourOfDay` floor. */
+export const WAKE_HOUR = CLOCK.wakeHour;
+/** The clock-hour the day ENDS at (the next 8am): `hourOfDay` clamps just below this. */
+export const DAY_END_HOUR = CLOCK.wakeHour + CLOCK.dayLengthHours;
+/** The length of one day-PERIOD in hours (morning/afternoon/evening/night are each this; 4h). */
+export const PERIOD_HOURS = CLOCK.phaseStartsHour.afternoon - CLOCK.phaseStartsHour.morning;
 
 /** Public, natural display label for the time-of-day HUD (the morning→late-night graphic, no clock). */
 export const TIME_OF_DAY_LABEL: Record<TimeOfDay, string> = {
@@ -43,36 +56,7 @@ export interface BedtimeStats {
   social: number;
 }
 
-export interface SleepConstants {
-  /**
-   * The "night-owl score" is `social − physical`: the social game stays up to scheme; the
-   * comp-focused protect their sleep. A houseguest beds at `evening` below the early-sleeper
-   * cut, at `late-night` above the night-owl cut (the rare tail), and at `night` in between.
-   */
-  earlySleeperBelow: number;
-  nightOwlAbove: number;
-  /**
-   * The hidden rest DEFICIT (0..1) carried INTO a competition by how late one was up the night
-   * before — the floor of the sleep→comp penalty (ADR 0006 §Principle 4). A houseguest sharp and
-   * rested (bed by `evening`/`night`) carries none; a night-owl who ran to `late-night` carries the
-   * most. Bounded; combined with the outcome `sleepPenalty` weight, never a raw number to the player.
-   */
-  deficitByLatestPhase: Record<TimeOfDay, number>;
-}
-
-export const SLEEP: SleepConstants = {
-  earlySleeperBelow: -0.08,
-  nightOwlAbove: 0.12,
-  // Up through `night` is a healthy night (ENG-NEW-1: was 0.25, contradicting this very comment);
-  // only pushing into `late-night` — staying up to the bitter end — costs real sharpness.
-  deficitByLatestPhase: {
-    morning: 0,
-    afternoon: 0,
-    evening: 0,
-    night: 0,
-    "late-night": 1,
-  },
-};
+const clamp = (x: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, x));
 
 /** Position of a phase in the day (0 = morning … 4 = late-night). */
 export function phaseIndex(phase: TimeOfDay): number {
@@ -80,89 +64,40 @@ export function phaseIndex(phase: TimeOfDay): number {
 }
 
 /**
- * The next phase as the day rolls forward by PLAY. Clamps at `late-night` — the day does NOT
- * silently wrap to the next morning here; a new day begins only when the night actually ends
- * (the player turns in, or the house has emptied), via `rollToMorning`. So advancing the clock
- * can never skip past the late-night beat where the player's bedtime choice lives.
+ * The next phase as the day rolls forward by PLAY. Clamps at `late-night` — the day does NOT silently
+ * wrap to the next morning here; a new day begins only at the 8am forced wake (`rollToMorning`). So
+ * advancing the clock can never skip past the late-night band where the player's bedtime choice lives.
  */
 export function nextPhase(phase: TimeOfDay): TimeOfDay {
   const i = phaseIndex(phase);
   return TIME_OF_DAY_ORDER[Math.min(i + 1, TIME_OF_DAY_ORDER.length - 1)]!;
 }
 
-/** Whether the day has reached its final, thinning hours (the bedtime decision becomes live here). */
+/** Whether the day has reached its final, post-midnight hours (the bedtime decision is live here). */
 export function isLateNight(phase: TimeOfDay): boolean {
   return phase === "late-night";
 }
 
-/**
- * The LATEST phase a houseguest stays awake to — their character-driven bedtime. DERIVED purely
- * from static aptitudes (the social game stays up, the comp-focused sleep), so it is byte-stable
- * for the season and draws NO randomness. A few houseguests are night owls (bed at `late-night`);
- * most bed at `night`; the comp-focused bed at `evening`.
- */
-export function bedtimeFor(stats: BedtimeStats): TimeOfDay {
-  const owlScore = stats.social - stats.physical;
-  if (owlScore > SLEEP.nightOwlAbove) return "late-night";
-  if (owlScore < SLEEP.earlySleeperBelow) return "evening";
-  return "night";
-}
+// --- The hour clock <-> the public phase band ------------------------------------------------------
 
-/** Whether a houseguest with the given bedtime is still awake at this phase (awake through it, asleep after). */
-export function isAwakeAt(phase: TimeOfDay, bedtime: TimeOfDay): boolean {
-  return phaseIndex(phase) <= phaseIndex(bedtime);
+/** Project a clock-HOUR (8..32) onto the public 5-phase band. Clamps to the day's bounds. */
+export function phaseForHour(hour: number): TimeOfDay {
+  const h = clamp(hour, WAKE_HOUR, DAY_END_HOUR - 0.0001);
+  const p = CLOCK.phaseStartsHour;
+  if (h < p.afternoon) return "morning";
+  if (h < p.evening) return "afternoon";
+  if (h < p.night) return "evening";
+  if (h < p.lateNight) return "night";
+  return "late-night";
 }
 
 /**
- * The awake set at a phase: the active houseguests still up. The PLAYER is always awake unless
- * they have chosen to turn in (never auto-slept — ADR 0006 §Principle 6). As the night gets late
- * this shrinks toward (at most) the player + the night owls — the diegetic bound.
+ * Back-compat shim: the live state field is still named `nightDepth`, but in the 24-hour model it carries
+ * the clock-HOUR (8..32), not a 0..1 depth. `phaseForDepth` therefore just delegates to `phaseForHour`.
+ * (The field name is kept so persisted saves round-trip; the value's meaning is the hour-of-day.)
  */
-export function awakeSet(opts: {
-  active: readonly string[];
-  phase: TimeOfDay;
-  player: string;
-  playerRetired: boolean;
-  bedtimeOf: (id: string) => TimeOfDay;
-}): string[] {
-  return opts.active.filter((id) =>
-    id === opts.player ? !opts.playerRetired : isAwakeAt(opts.phase, opts.bedtimeOf(id)),
-  );
-}
-
-/**
- * The hidden rest deficit (0..1) a houseguest carries into a competition, from the latest phase
- * they were awake the night before. Slice-2 input to the comp fold; never surfaced as a number.
- */
-export function restDeficitFor(latestPhaseAwake: TimeOfDay): number {
-  return SLEEP.deficitByLatestPhase[latestPhaseAwake];
-}
-
-/**
- * The player's OWN qualitative tiredness, from how late they stayed up. Their own body is their
- * own knowledge (ADR 0006 §Principle 5) — a cue, never a number, and never any NPC's state.
- */
-export function restStatusFor(latestPhaseAwake: TimeOfDay): RestStatus {
-  if (isLateNight(latestPhaseAwake)) return "running on empty";
-  if (latestPhaseAwake === "night") return "tired";
-  return "rested";
-}
-
-// --- Continuous "night depth" (0066 Phase-2; gated) -----------------------------------------------
-//
-// The 5 phases are too coarse to grade the sleep trade or vary bedtimes by character. A hidden,
-// continuous `nightDepth` (0 = start of morning … 1 = the bitter end of late-night) carries that
-// richness; the PUBLIC surface stays the same 5-phase enum, PROJECTED via `phaseForDepth` (the FE/HUD
-// is unchanged). All ENGINE-only and only ever non-zero when the opt-in clock is running, so the
-// seeded calibration spine stays byte-identical (depth absent ⇒ 0 ⇒ every helper below returns its
-// pre-feature value). No rng anywhere here — a bedtime is DERIVED, never rolled.
-
-const clamp = (x: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, x));
-
-/** Project the hidden depth (0..1) onto the public 5-phase band — even fifths, `late-night` last. */
-export function phaseForDepth(depth: number): TimeOfDay {
-  const i = Math.min(TIME_OF_DAY_ORDER.length - 1, Math.floor(clamp(depth, 0, 1) * TIME_OF_DAY_ORDER.length));
-  return TIME_OF_DAY_ORDER[i]!;
+export function phaseForDepth(hour: number): TimeOfDay {
+  return phaseForHour(hour);
 }
 
 /** A small deterministic string→[0,1) hash (FNV-1a; NO rng, NO imports) for per-NPC chronotype spread. */
@@ -175,67 +110,192 @@ function hashUnit(s: string): number {
   return ((h >>> 0) % 100000) / 100000;
 }
 
+// --- Character-driven bedtimes (in clock-hours) ----------------------------------------------------
+
 /**
- * A houseguest's CHRONOTYPE turn-in DEPTH (0..1): how deep into the night they stay before bed. It is
- * its OWN axis — the `social − physical` lean (the social game stays up; the comp-focused protect sleep)
- * blended with a DETERMINISTIC per-NPC variation hashed off the id — so two similar-stat houseguests
- * still differ, yet a bedtime is byte-stable for the season and draws no randomness. Maps to roughly
- * `evening` for the earliest birds → deep `late-night` for the strongest owls. With no `id` (the legacy
- * call shape) the chronotype variation is omitted — a pure function of stats, stable as before.
+ * A houseguest's CHARACTER bedtime HOUR. DERIVED purely from static aptitudes — the `social − physical`
+ * lean (the social game stays up to scheme; the comp-focused protect their sleep) blended with a
+ * DETERMINISTIC per-NPC variation hashed off the id, so two similar-stat houseguests still differ, yet a
+ * bedtime is byte-stable for the season and draws no randomness. Maps to `[earliestBedHour, latestBedHour]`
+ * — roughly 21:00 for the earliest larks (→ a pre-dawn riser) to ~2am for the strongest owls (→ real
+ * debt). With no `id` (the legacy call shape) the chronotype variation is omitted — a pure stats function.
+ */
+export function bedtimeHourFor(stats: BedtimeStats, id?: string): number {
+  const lean = clamp((stats.social - stats.physical) / 0.5, -1, 1); // social → owl (+), comp-focused → lark (−)
+  const jitter = id ? hashUnit(id) * 2 - 1 : 0;                     // deterministic per-NPC spread, ∈ [−1, 1)
+  const chrono = clamp(0.6 * lean + 0.4 * jitter, -1, 1);          // ∈ [−1, 1]
+  const span = SLEEP.latestBedHour - SLEEP.earliestBedHour;
+  return SLEEP.earliestBedHour + ((chrono + 1) / 2) * span;        // ∈ [earliestBedHour, latestBedHour]
+}
+
+/**
+ * Back-compat: `bedtimeDepthFor` now returns the bedtime as a clock-HOUR (the field name is legacy; the
+ * value is the hour, consumed by `awakeSet`/`phaseForHour` consistently). Same signature as before.
  */
 export function bedtimeDepthFor(stats: BedtimeStats, id?: string): number {
-  const lean = clamp((stats.social - stats.physical) / 0.5, -1, 1); // social → owl (+), comp-focused → early (−)
-  const jitter = id ? hashUnit(id) * 2 - 1 : 0;                     // deterministic per-NPC spread, ∈ [−1, 1)
-  const chrono = clamp(0.6 * lean + 0.4 * jitter, -1, 1);
-  return 0.45 + ((chrono + 1) / 2) * 0.5;                           // ∈ [0.45, 0.95]: evening → deep late-night
+  return bedtimeHourFor(stats, id);
 }
 
 /**
- * The GRADED hidden rest deficit (0..1) carried into a competition by how deep into the night one was up
- * (the continuous replacement for the binary `SLEEP.deficitByLatestPhase`). A healthy night (bed by the
- * end of `night`, depth ≤ 0.8) carries NONE — preserving the ENG-NEW-1 fairness invariant (no archetype
- * sleep tax on a normal night) — and the cost ramps only WITHIN `late-night` (0.8 → 1.0), so the deeper
- * into the small hours you ran, the more it bites. Bounded; combined with the outcome `sleepPenalty`
- * weight, never a raw number to the player.
+ * The coarse 5-phase character bedtime (the legacy projection): the PHASE a houseguest's bedtime HOUR
+ * falls in. Larks bed in `evening`/`night`, owls in `late-night`. Kept for the older callers/tests.
  */
-export function restDeficitForDepth(depth: number): number {
-  return clamp((depth - 0.8) / 0.2, 0, 1); // 0 through `night` (≤0.8) → 1 at the bitter end (1.0)
+export function bedtimeFor(stats: BedtimeStats): TimeOfDay {
+  return phaseForHour(bedtimeHourFor(stats));
 }
 
-// 0066 Phase-2: a tired houseguest is less able to MOVE THE NEEDLE socially — the magnitude of the
-// relationship fold their scenes drive on others is dampened (EFFECTIVENESS, never a personality change:
-// the scene's nature is unchanged, only how far it shifts the other's belief). Floored so even a wrecked
-// houseguest still has SOME sway. `SOCIAL_SWAY_DAMP` = the dampening at a full deficit.
-export const SOCIAL_SWAY_DAMP = 0.6;
-export const SOCIAL_SWAY_FLOOR = 0.4;
+// --- The BIDIRECTIONAL awake set -------------------------------------------------------------------
 
-/** The fold-magnitude scale (≤1) for a houseguest carrying `deficit` rest debt. 1 at deficit 0 (rested ⇒
- *  byte-identical), dropping to the floor at a full deficit. Symmetric: worse at warming AND at souring. */
-export function socialSwayScale(deficit: number): number {
-  return Math.max(SOCIAL_SWAY_FLOOR, 1 - SOCIAL_SWAY_DAMP * clamp(deficit, 0, 1));
+/**
+ * Whether a houseguest with bedtime hour `bedHour` is awake at clock-hour `hour`. BIDIRECTIONAL across the
+ * late-night block (ADR 0006, the 24-hour model):
+ *   • Before they turn in (`hour < bedHour`) they are awake.
+ *   • After they turn in they sleep `sleepNeedHours`, UNLESS the 8am wake comes first.
+ *   • If they bedded BEFORE midnight, they wake in the pre-dawn tail (`bedHour + sleepNeedHours`) and are
+ *     awake again until the new day — the early-riser window.
+ * So the awake set SHRINKS evening→midnight (owls retiring) then GROWS midnight→8am (larks rising).
+ */
+export function isAwakeAtHour(hour: number, bedHour: number): boolean {
+  if (hour < bedHour) return true;                     // still up tonight
+  const wakeAgain = bedHour + CLOCK.sleepNeedHours;     // when their 8h sleep would end
+  return hour >= wakeAgain;                             // back up in the pre-dawn window (if before the 8am wake)
 }
 
-// 0066 Phase-2: a CHARACTER conflict drains the houseguest in it, so they turn in EARLIER that night
-// (the emotional dimension flows conflict → earlier bedtime — sleep debt never AUTHORS conflict; the
-// causation runs the other way). Each conflict pulls their effective turn-in depth earlier; floored so
-// they never bed before the early-evening. Engine-only; the player never sees a number.
-export const CONFLICT_BEDTIME_DRAIN = 0.08;
-export const BEDTIME_DEPTH_FLOOR = 0.4;
-
-// 0066 Phase-2: a COMPOUNDING multi-night fatigue meter (0..1). One late night stings the next day
-// (the immediate deficit); a STRING of them wears you down further. `fatigueMeter` is an EMA of the
-// nightly deficits — each new night adds last night's deficit and decays the prior by RECOVERY (so a
-// rested night recovers, consecutive late nights stack toward 1). It ADDS to the immediate deficit
-// (weighted, bounded) for both the comp fold and social sway. Engine-only; 0 absent ⇒ byte-identical off.
-export const FATIGUE_RECOVERY = 0.5; // how much of yesterday's fatigue carries into today (a rested night halves it)
-export const FATIGUE_WEIGHT = 0.5;   // how much the accumulated meter adds on top of the immediate deficit
-
-/** Roll the fatigue meter forward one night: decay the prior, add last night's deficit. Bounded [0,1]. */
-export function accrueFatigue(prevMeter: number, lastNightDeficit: number): number {
-  return clamp(prevMeter * FATIGUE_RECOVERY + lastNightDeficit, 0, 1);
+/** Legacy phase-keyed awake predicate (coarse): awake through their bedtime phase, asleep after. Kept for
+ *  the old call shape; the live society uses the hour-keyed `awakeSet` below. */
+export function isAwakeAt(phase: TimeOfDay, bedtime: TimeOfDay): boolean {
+  return phaseIndex(phase) <= phaseIndex(bedtime);
 }
 
-/** Combine tonight's immediate deficit with the accumulated multi-night fatigue (bounded). */
-export function combinedRestDeficit(immediate: number, fatigueMeter: number): number {
-  return clamp(immediate + FATIGUE_WEIGHT * fatigueMeter, 0, 1);
+/**
+ * The awake set at a clock-HOUR: the active houseguests still up (or risen again pre-dawn). The PLAYER is
+ * always awake unless they have chosen to turn in (never auto-slept — ADR 0006 §Principle 6). `bedtimeOf`
+ * returns each NPC's bedtime HOUR. As the night runs past midnight this thins toward the player + the
+ * latest owls, then refills as pre-dawn larks rise — the diegetic, bidirectional bound.
+ */
+export function awakeSet(opts: {
+  active: readonly string[];
+  hour: number;
+  player: string;
+  playerRetired: boolean;
+  bedtimeOf: (id: string) => number;
+}): string[] {
+  return opts.active.filter((id) =>
+    id === opts.player ? !opts.playerRetired : isAwakeAtHour(opts.hour, opts.bedtimeOf(id)),
+  );
 }
+
+// --- Sleep debt (graded, symmetric) ----------------------------------------------------------------
+
+/**
+ * The sleep DEBT in HOURS a houseguest carries from how late they were up: the hours of their 8-hour need
+ * cut short by the 8am forced wake. Bed at/before midnight ⇒ 0 (their 8h finishes by 8am — a lark even
+ * wakes early). Bed AFTER midnight ⇒ `bedHour − midnight`, capped at `maxDebtHours`. Symmetric (the same
+ * math for the player and every NPC). Pure; no rng.
+ */
+export function sleepDebtHours(bedHour: number): number {
+  return clamp(bedHour - CLOCK.midnightHour, 0, SLEEP.maxDebtHours);
+}
+
+/**
+ * The GRADED hidden sleep deficit (0..1) from a bedtime HOUR — `sleepDebtHours` normalized by the cap.
+ * 0 for a healthy night (bed by midnight), ramping to 1 for a full night up. This is the continuous
+ * replacement for the old binary table; it feeds the comp fold + (ext2) social sway + (ext3) the meter.
+ * Bounded; combined with the outcome `sleepPenalty` weight, never a raw number to the player.
+ */
+export function sleepDeficitForBedHour(bedHour: number): number {
+  return sleepDebtHours(bedHour) / SLEEP.maxDebtHours;
+}
+
+/**
+ * Back-compat: `restDeficitForDepth` now takes the clock-HOUR the houseguest was last awake to (the field
+ * is `lastSleepDepth`, legacy name, now an hour) and returns the graded 0..1 deficit. Bed by midnight ⇒ 0.
+ */
+export function restDeficitForDepth(lastAwakeHour: number): number {
+  return sleepDeficitForBedHour(lastAwakeHour);
+}
+
+/**
+ * Legacy phase-keyed deficit (coarse): only `late-night` (post-midnight) carries any cost. Kept for the
+ * old call shape (`restDeficitFor(bedtimeFor(stats))`); the live path uses the graded hour version.
+ */
+export function restDeficitFor(latestPhaseAwake: TimeOfDay): number {
+  return latestPhaseAwake === "late-night" ? 1 : 0;
+}
+
+/**
+ * The player's OWN qualitative tiredness, from the graded sleep deficit (0..1). Their own body is their own
+ * knowledge (ADR 0006 §Principle 5) — a cue, never a number, and never any NPC's state. Rested below a
+ * mild deficit, tired in the middle, running-on-empty near a full night up.
+ */
+export function restStatusForDeficit(deficit: number): RestStatus {
+  if (deficit >= 0.6) return "running on empty";
+  if (deficit > 0) return "tired";
+  return "rested";
+}
+
+/**
+ * Back-compat: `restStatusFor` now takes the clock-HOUR last awake (legacy `lastSleepPhase` was a phase;
+ * callers pass the hour). Maps through the graded deficit so the cue tracks the real debt.
+ */
+export function restStatusFor(lastAwakeHour: number): RestStatus {
+  return restStatusForDeficit(sleepDeficitForBedHour(lastAwakeHour));
+}
+
+// --- Event durations + seeded start-within-period (#1125 — deterministic, no shared-stream rng) ----
+//
+// A timed beat (a competition / ceremony / eviction) starts at a SEEDED offset WITHIN its 4-hour period
+// (not pinned to the edge) and may SPILL into the next period. The offset is a deterministic hash of the
+// seed + a beat key — a SIDE computation that draws NO shared-stream rng, so the seeded calibration spine
+// is untouched (the comps/votes resolve on the same stream regardless of when, in-fiction, they "start").
+// Comps vary BY TYPE (the 0042 library): pass the competition's own `durationHours` to override the default.
+
+/** The hours a beat occupies. Comps default to the library/EVENT_DURATION value; pass an override per type. */
+export function eventSpanHours(beat: "competition" | "ceremony" | "eviction", overrideHours?: number): number {
+  if (overrideHours !== undefined && Number.isFinite(overrideHours) && overrideHours > 0) return overrideHours;
+  return EVENT_DURATION.hoursByBeat[beat];
+}
+
+/**
+ * The SEEDED start HOUR of a beat within its period: `periodStartHour` + a deterministic offset in
+ * `[0, periodHours · startWindowFrac)`. Hashes the seed + `beatKey` (e.g. `"hoh:w1"`) — same seed+key ⇒
+ * same start (replay-stable), different beats ⇒ different offsets (not all pinned to the period edge). The
+ * 4-hour period length is `PERIOD_HOURS`. Draws NO shared rng. Pure.
+ */
+export function eventStartHour(periodStartHour: number, seed: number, beatKey: string): number {
+  const window = PERIOD_HOURS * EVENT_DURATION.startWindowFrac;
+  let h = (Math.imul(seed | 0, 0x01000193) >>> 0) ^ 0x811c9dc5;
+  for (let i = 0; i < beatKey.length; i++) { h ^= beatKey.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  const frac = ((h >>> 0) % 100000) / 100000; // ∈ [0,1)
+  return periodStartHour + frac * window;
+}
+
+/** Whether a beat starting at `startHour` and running `spanHours` SPILLS past its 4-hour period boundary. */
+export function eventSpillsPeriod(startHour: number, spanHours: number): boolean {
+  const periodStart = WAKE_HOUR + Math.floor((startHour - WAKE_HOUR) / PERIOD_HOURS) * PERIOD_HOURS;
+  return startHour + spanHours > periodStart + PERIOD_HOURS;
+}
+
+// --- Phase-2 extension math (re-exported from the single tunable home) ----------------------------
+//
+// `socialSwayScale` (Extension 2) dampens a tired houseguest's fold EFFECTIVENESS; `accrueFatigue`/
+// `combinedRestDeficit` (Extension 3) compound consecutive late nights; `conversationHours` (Extension 5)
+// commits the LOOSE, type-bounded felt duration. All pure — no rng — and gated OFF (scale 1 / meter 0 /
+// baseline floor) by their dedicated flags ⇒ byte-identical when off.
+export {
+  socialSwayScale, accrueFatigue, combinedRestDeficit, conversationHours,
+  SOCIAL_FATIGUE, FATIGUE, CONVERSATION_DURATION,
+  type ConversationKind,
+} from "./sleepConstants";
+// `CLOCK` + `EVENT_DURATION` are also used in this module's bodies (imported above) — re-export the local bindings.
+export { CLOCK, EVENT_DURATION };
+
+// Legacy-name aliases for the few call/test sites that referenced the flat constants by name (kept so this
+// refactor is byte-neutral to importers; the values now live in `sleepConstants`).
+import { SOCIAL_FATIGUE, FATIGUE } from "./sleepConstants";
+export const SOCIAL_SWAY_DAMP = SOCIAL_FATIGUE.swayDamp;
+export const SOCIAL_SWAY_FLOOR = SOCIAL_FATIGUE.swayFloor;
+export const CONFLICT_BEDTIME_DRAIN = SOCIAL_FATIGUE.conflictBedtimeDrainHours;
+export const BEDTIME_DEPTH_FLOOR = SOCIAL_FATIGUE.bedtimeHourFloor;
+export const FATIGUE_RECOVERY = FATIGUE.recovery;
+export const FATIGUE_WEIGHT = FATIGUE.weight;
