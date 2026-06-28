@@ -604,6 +604,37 @@ export class BbWorld extends World {
     seasonResult?: { seed: number; status: string; f2Win: boolean; playerCompWins: number };
   };
 
+  // Feature 0066 — in-game time of day & the nightly sleep economy scratch state (one bag).
+  sleep?: {
+    clockEnabled?: boolean;
+    perConversation?: boolean;
+    socialFatigue?: boolean;
+    multiNight?: boolean;
+    session?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+    reg?: import("../../src/composition/registry").GameSessionRegistry;
+    orch?: import("../../src/composition/orchestrator").Orchestrator;
+    user?: string;
+    phasesSeen?: Set<string>;
+    restCue?: string;
+    timeOfDay?: string;
+    asleep?: string[];
+    bedHour?: number;
+    restedWinRate?: number;
+    tiredWinRate?: number;
+    favoriteCanLose?: boolean;
+    depthBefore?: number;
+    depthAfter?: number;
+    phaseBefore?: string;
+    phaseAfter?: string;
+    fatigueN1?: number;
+    fatigueN3?: number;
+    fatigueRecovered?: number;
+    seededOutcomeOff?: string;
+    seededOutcomeOn?: string;
+    swayOff?: number;
+    swayTired?: number;
+  };
+
   // Feature 0100 — the jury grudge book scratch state (one bag).
   jh?: {
     reg?: import("../../src/composition/registry").GameSessionRegistry;
