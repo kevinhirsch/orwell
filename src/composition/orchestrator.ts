@@ -357,6 +357,14 @@ export class Orchestrator {
     const last = this.lastTurnTickAt.get(user);
     if (!progressed && last !== undefined && now - last < this.auxTickDebounceMs) return; // E57/R5
     this.lastTurnTickAt.set(user, now);
+    // 0066 Phase-2 (Extension 1 — per-conversation clock advance): this is the once-per-player-TURN,
+    // debounced seam (NOT the wall-clock watcher), so it is exactly "as the player lingers/plays". Press
+    // the clock a small step here — the day's finite scheming time felt turn-by-turn. SELF-GATED in the
+    // session (a no-op unless ORWELL_TIME_PER_CONVERSATION + the master clock are on): off ⇒ nothing
+    // advances ⇒ byte-identical (the seeded spine never runs turn-driven anyway, but this keeps the
+    // guarantee explicit). Pacing-only — it clamps at late-night and never wraps the night without the
+    // player's own turnIn (ADR 0003 / the lull rule), so it cannot rush an engaged scene. No rng.
+    this.registry.sandboxFor(user).session.advanceClockPerConversation();
     // R3: the commit just exported this. A9: a supplementary tick — an empty society this tick is
     // a clean no-op, not a daily-event fault (the live loop owns that invariant via its beats).
     this.advance(user, "offscreen-tick", { baseline: candidate, supplementary: true });
