@@ -896,6 +896,12 @@ export interface FirstImpressionView {
   presentation?: string;
   /** The observable voice register / demeanor (L28) — how they come across in the room. */
   demeanor?: string;
+  /**
+   * How the houseguest PRESENTS (feature 0063; #1140) — a PUBLIC facet already on the roster card, so the
+   * premiere introduction voices the SAME stored gender/pronouns the portrait encodes (never inferred from
+   * the name). Gender PRESENTATION only — a private orientation stays Vault-sealed and never appears here.
+   */
+  genderPresentation?: "man" | "woman" | "nonbinary";
 }
 
 /**

@@ -4,6 +4,7 @@ import { ARCHETYPES, ALL_STRATEGY_STYLES } from "./characterFactory";
 import { neutralizeForPrompt } from "./castingIntake";
 import { dayOfWeek } from "./houseEvents";
 import { physicalFacetToAppearance } from "./portraitPrompts";
+import { genderPresentationPhrase, pronounsFor } from "../domain/gender";
 
 /**
  * The canonical list of room names the narrator may walk the player to (Vault-free; the house's
@@ -902,6 +903,12 @@ export function renderGameContext(view: GameStateView): string {
       // look when present (richer + more differentiating than the prose `appearance`), and we fall back to
       // the prose `appearance` only for pre-0058 saves that never seeded a facet. All PUBLIC, Vault-free.
       [h.age, physicalLook(h), h.presentation].filter(Boolean).join(", "),
+      // #1140: voice the SAME STORED `genderPresentation` facet the PORTRAIT was drawn from, and hand the
+      // model the pronoun set, so the narrated gender/pronouns can never diverge from the cast photo. The
+      // engine deliberately lets `genderPresentation` disagree with the NAME (diversity.ts), so the model
+      // must anchor on THIS facet — never infer gender from the name. PUBLIC facet (gender PRESENTATION,
+      // never orientation — a private orientation stays Vault-sealed and never appears here).
+      h.genderPresentation && `${genderPresentationPhrase(h.genderPresentation)} (use ${pronounsFor(h.genderPresentation)})`,
       // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
       // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
       h.demeanor && `comes across as ${h.demeanor}`,
@@ -994,12 +1001,16 @@ export function renderGameContext(view: GameStateView): string {
   // Present ONLY in the premiere moment (`view.premiere` is absent otherwise). PUBLIC facets only — no
   // Vault data, no numbers, never an assertion of how the player feels (anti-sycophancy).
   const pr = view.premiere ?? null;
-  const observable = (fi: { archetype?: string; presentation?: string; demeanor?: string; background?: string; age?: number }): string => {
+  const observable = (fi: { archetype?: string; presentation?: string; demeanor?: string; background?: string; age?: number; genderPresentation?: "man" | "woman" | "nonbinary" }): string => {
     // The same Vault-free public facets the roster exposes — the observable read the player "clocks".
     const bits = [
       fi.archetype, // their archetype is the model's PRIVATE voice cue (never said aloud), but listing it
       // here lets the producer voice the observable energy that READS as that type — the player infers it.
       fi.presentation,
+      // #1140: the STORED gender presentation + pronoun set, so the premiere introductions voice the SAME
+      // facet the portrait encodes (never inferring gender from the name). PUBLIC presentation, never
+      // orientation.
+      fi.genderPresentation && `${genderPresentationPhrase(fi.genderPresentation)} (use ${pronounsFor(fi.genderPresentation)})`,
       fi.demeanor && `comes across as ${fi.demeanor}`,
       fi.background,
       fi.age !== undefined ? `${fi.age}` : undefined,

@@ -166,6 +166,7 @@ import {
   generateDiversityLayer, repairDiversityLayer, privateOrientationToVaultContent, showmancePlausible,
 } from "../../engine/diversity";
 import type { ProposedIdentityFacets } from "../../engine/diversity";
+import { nameGenderOf, pickGivenNameFor } from "../../engine/data/nameGender";
 import type { Orientation, GenderPresentation } from "../../engine/diversityConstants";
 import { ALL_ETHNICITIES } from "../../engine/diversityConstants";
 import { foldHiddenImpact } from "../../engine/consequence";
@@ -992,6 +993,18 @@ export class GameSessionAdapter implements GameSession {
   private groundedSkinTones: Record<EntityId, string> = {};
 
   /**
+   * #1140 — RE-PICKED display names per NPC id (a given-name token swapped to match the final gender
+   * presentation; surname kept). Computed by `seedDiversity` but APPLIED to `n.character.name` only AFTER
+   * `seedDeepProfiles` (via `applyDiversityRenames`): the deep layer keys its sub-streams off `hg.name`
+   * (`deepProfile.ts`), so renaming the Character before it runs would shift the deep profile / Day-1
+   * perception / story threads — and therefore the seeded vote/jury outcomes. Deferring the write keeps the
+   * deep layer (and the whole outcome stream) byte-identical with the rename on vs. off. Transient
+   * (re-derivable from the diversity layer); not separately persisted — the renamed name lives on the
+   * byte-stable Character once applied.
+   */
+  private pendingRenames: Record<EntityId, string> = {};
+
+  /**
    * Seal hook for the HIDDEN private orientations (feature 0063) — the registry writes the Vault audit
    * copy + recall index, exactly like `onSealProfiles`. Engine-only: a private orientation is a secret
    * (off the player AND admin), so it rides this hook, never an outward projection.
@@ -1705,6 +1718,13 @@ export class GameSessionAdapter implements GameSession {
       n.character.age = pub.age;
       ctx.setGrounded(n.id, pub.skinTone);
       if (n.character.physicalCharacteristics) n.character.physicalCharacteristics.skinTone = pub.skinTone;
+      // #1140 — apply the gender-coherent re-pick directly: a recordCastIdentity fold lands on an
+      // ALREADY-BUILT cast (the name-keyed deep layer is already seeded), so there's no re-seeding to defer —
+      // writing the name now closes the UNCAPPED, UNFLAGGED AI-override hole (a proposal could flip the facet
+      // off the name and leave the portrait rendering the name's gender). The given-name token is swapped to
+      // the final presentation, surname kept, so name + portrait + narration read the same gender. (The
+      // display name lives on the Houseguest wrapper — `n.name` — not on the static Character.)
+      if (pub.name !== undefined) n.name = pub.name;
       if (proposed[n.id]) applied++;
     }
 
@@ -3238,8 +3258,9 @@ export class GameSessionAdapter implements GameSession {
 
   /** The OBSERVABLE public read of one active houseguest (PUBLIC facets only — no Vault, no numbers). */
   private firstImpressionOf(n: GameHouse["npcs"][number]): FirstImpressionView {
-    // Exactly the Vault-free facets the roster card already exposes (B61/L28): archetype, strategy
-    // style, background, age, presentation, demeanor. NEVER the soul, hiddenElements, or a number.
+    // Exactly the Vault-free facets the roster card already exposes (B61/L28/#1140): archetype, strategy
+    // style, background, age, presentation, demeanor, genderPresentation. NEVER the soul, hiddenElements,
+    // or a number; gender PRESENTATION only (a private orientation stays Vault-sealed).
     return {
       houseguest: { id: n.id, name: n.name },
       met: this.premiereMet.has(n.id),
@@ -3249,6 +3270,7 @@ export class GameSessionAdapter implements GameSession {
       ...(n.character.age !== undefined ? { age: n.character.age } : {}),
       ...(n.character.presentation !== undefined ? { presentation: n.character.presentation } : {}),
       ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
     };
   }
 
@@ -3497,9 +3519,17 @@ export class GameSessionAdapter implements GameSession {
       // story threads are sealed engine-side (into the Vault + the recall index) via `onSealProfiles`.
       // Done BEFORE seedFirstImpressions so the Day-1 perception can seed the NPC→player edge.
       this.seedDeepProfiles(seed);
+      // #1140 — NOW the name-keyed deep layer is fixed off the original names; apply the deferred gender-
+      // coherent renames onto the byte-stable Character (no-op when nothing was renamed).
+      this.applyDiversityRenames();
       // A stale warm whose seed didn't match an explicit one is discarded (the season is now started).
       this.prewarm = null;
     }
+    // #1140 ∩ NAME-1 (#547): cross-season de-collision of the gender-coherent re-pick — run for BOTH the
+    // adopt and plain branches with the SAME prior names, so a re-pick never reintroduces a prior-season
+    // given name AND the warm-cast/plain-restart casts stay byte-identical (the diversity-layer rename is
+    // prior-season-UNAWARE on purpose; this is where cross-season memory is restored). No-op without priors.
+    this.decollidePriorNames(seed, effReq.priorCastNames);
     // Seed first impressions so NPC decisions are differentiated from move-in (without this,
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
@@ -3702,6 +3732,7 @@ export class GameSessionAdapter implements GameSession {
     this.house = { player: temp.player, npcs };
     this.seedDiversity(seed);    // folds public diversity facets + seals private orientations to the Vault
     this.seedDeepProfiles(seed); // folds the §3 deep layer + seals the hidden profile/threads to the Vault
+    this.applyDiversityRenames(); // #1140 — apply gender-coherent renames AFTER the name-keyed deep layer
     // Capture the finished cast into the holding store, then RESET back to a clean pre-game state (the
     // cast lives in `prewarm` from here; the live house does not exist until `createCharacter`).
     this.prewarm = {
@@ -3960,6 +3991,7 @@ export class GameSessionAdapter implements GameSession {
     if (process.env.ORWELL_DISABLE_DIVERSITY === "1") return;
     const layer = generateDiversityLayer(seed, this.house.npcs);
     // PUBLIC fold — onto the static Character (byte-stable from here on; superset-guarded).
+    this.pendingRenames = {};
     for (const n of this.house.npcs) {
       const pub = layer.public[n.id];
       if (!pub) continue;
@@ -3974,6 +4006,10 @@ export class GameSessionAdapter implements GameSession {
       // If the structured physical facet already exists (e.g. on a re-run path), ground its skin tone
       // now; otherwise seedDeepProfiles applies the grounding when it builds the facet.
       if (n.character.physicalCharacteristics) n.character.physicalCharacteristics.skinTone = pub.skinTone;
+      // #1140 — STASH the re-picked name (when the layer changed it to match the final gender presentation);
+      // DON'T write it to the Character yet — applyDiversityRenames does that AFTER seedDeepProfiles so the
+      // name-keyed deep layer (and the outcome stream it feeds) stays byte-identical. (See pendingRenames.)
+      if (pub.name !== undefined) this.pendingRenames[n.id] = pub.name;
     }
     // HIDDEN — engine-only, sealed off the player AND admin (a private orientation is a secret).
     this.privateOrientations = { ...layer.privateOrientations };
@@ -3989,6 +4025,59 @@ export class GameSessionAdapter implements GameSession {
     // Seal the private orientations into the Vault (engine-only audit copy, the §5 wall).
     const entries = Object.entries(layer.privateOrientations).map(([id, orientation]) => ({ id: id as EntityId, orientation }));
     if (entries.length) this.onSealPrivateOrientations?.(entries);
+  }
+
+  /**
+   * #1140 — apply the deferred diversity RENAMES onto the byte-stable Character. Called AFTER
+   * `seedDeepProfiles` so the name-keyed deep layer was seeded off the ORIGINAL drawn names (keeping the
+   * deep profile / Day-1 perception / story threads — and the seeded outcome stream they feed —
+   * byte-identical with the rename on vs. off). From here the renamed name is the houseguest's stable
+   * public name. A no-op when no draft was renamed (the common case). Mirrors at both seed sites.
+   */
+  private applyDiversityRenames(): void {
+    if (!this.house) return;
+    for (const n of this.house.npcs) {
+      const renamed = this.pendingRenames[n.id];
+      // The display name lives on the Houseguest wrapper (`n.name`), not on the static Character.
+      if (renamed) n.name = renamed;
+    }
+    this.pendingRenames = {};
+  }
+
+  /**
+   * #1140 ∩ NAME-1 (#547) — cross-season de-collision of the gender-coherent re-pick. The diversity rename
+   * (step 7.5 in `diversity.ts`) keeps given names unique WITHIN the cast but is prior-season-UNAWARE (so the
+   * advance-warm and plain-restart paths, which adopt vs. re-seed, stay byte-identical there). This pass —
+   * run in `createCharacter` for BOTH paths AFTER the cast is finalized, with the SAME `priorCastNames` — is
+   * where cross-season memory is restored: any houseguest whose GIVEN name collides with a prior-season name
+   * is re-picked to a SAME-GENDER name that avoids both the prior-season set AND the current cast. So a re-pick
+   * never reintroduces a prior name, AND warm == plain (identical inputs ⇒ identical output). Deterministic
+   * off a dedicated `:rename-decollide` sub-stream; a no-op when nothing collides (the common case).
+   */
+  private decollidePriorNames(seed: number, priorCastNames?: readonly string[]): void {
+    if (!this.house || !priorCastNames || priorCastNames.length === 0) return;
+    const priorGiven = new Set<string>();
+    for (const full of priorCastNames) { const g = (full ?? "").trim().split(" ")[0]; if (g) priorGiven.add(g); }
+    if (priorGiven.size === 0) return;
+    const rng = new SeededRandom(hashSeed(`${seed}:rename-decollide`));
+    // Avoid every given name currently in the cast AND every prior-season given name.
+    const used = new Set<string>(priorGiven);
+    for (const n of this.house.npcs) used.add(n.name.split(" ")[0]!);
+    for (const n of this.house.npcs) {
+      const parts = n.name.split(" ");
+      const given = parts[0]!;
+      if (!priorGiven.has(given)) continue; // no cross-season collision — keep the name
+      // Re-pick a SAME-GENDER name (gender coherence holds through the de-collision). The stored facet is
+      // always present after seedDiversity; the `nameGenderOf` fallback only covers a legacy missing facet
+      // (and a unisex/legacy read maps to a nonbinary-coherent unisex pick — never a wrong-gender name).
+      const facet = n.character.genderPresentation;
+      const g: "man" | "woman" | "nonbinary" =
+        facet ?? (nameGenderOf(given) === "man" ? "man" : nameGenderOf(given) === "woman" ? "woman" : "nonbinary");
+      used.delete(given); // free the colliding given before picking the replacement
+      const next = pickGivenNameFor(g, rng, used);
+      used.add(next);
+      n.name = parts.length > 1 ? `${next} ${parts.slice(1).join(" ")}` : next;
+    }
   }
 
   private seedDeepProfiles(seed: number): void {

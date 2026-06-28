@@ -8,6 +8,7 @@ import { startNewGame } from "../../src/engine/characterFactory";
 import {
   generateDiversityLayer, showmanceIdentities, showmancePlausible, privateOrientationVaultId,
 } from "../../src/engine/diversity";
+import { nameGenderOf } from "../../src/engine/data/nameGender";
 import {
   MIN_BIPOC, MIN_QUEER, MIN_PER_BINARY_GENDER, MIN_PER_AGE_BAND, MAX_NONBINARY,
   AGE_BANDS, AGE_ELIGIBILITY_FLOOR, ageBandOf,
@@ -139,10 +140,22 @@ Then("neither binary gender falls below the gender-balance minimum", function (t
 });
 
 Then("each houseguest's name coheres with their gender presentation", function (this: BbWorld) {
-  const layer = generateDiversityLayer(this.dvSeed!, this.dvSandbox!.session.snapshot().house!.npcs);
-  // A byte-stable name draw can skew single-gender; the floor's last-resort flip is bounded & rare.
+  // #1140 — coherence is now a GUARANTEE: the rename pass re-picks any name that disagreed with the final
+  // gender presentation, so EVERY houseguest's name reads the gender the portrait + narration encode. The
+  // old bounded "≤ 2/cast balance-flip exception" is retired — assert ZERO mismatches.
+  const npcs = this.dvSandbox!.session.snapshot().house!.npcs;
+  const layer = generateDiversityLayer(this.dvSeed!, npcs);
   const incoherent = Object.values(layer.public).filter((p) => !p.nameCoheres).length;
-  assert.ok(incoherent <= 2, `too many name/presentation mismatches: ${incoherent}`);
+  assert.equal(incoherent, 0, `name/presentation mismatches: ${incoherent}`);
+  // Belt-and-braces: the houseguest's ACTUAL (possibly renamed) name on the live roster reads the SAME
+  // gender as the stored presentation — a gendered name matches, a nonbinary one keeps a unisex name.
+  for (const n of npcs) {
+    const g = n.character.genderPresentation;
+    if (g === undefined) continue;
+    const ng = nameGenderOf(n.name);
+    if (g === "nonbinary") assert.equal(ng, "unisex", `${n.id} nonbinary name not unisex: ${n.name}`);
+    else assert.equal(ng, g, `${n.id} name ${n.name} reads ${ng}, presentation ${g}`);
+  }
 });
 
 When("every houseguest's age is read", function (this: BbWorld) {
@@ -380,10 +393,24 @@ When("the identical seeded competition is resolved for both", function (this: Bb
     // OUTCOME: it can tip a tone word without ever moving an eviction, a vote, the winner, or the order
     // (asserted separately below). The 0006 staged-rounds comp surfaces such a tone flip; identity still
     // never bends an OUTCOME (eviction order + winner stay byte-identical — the real isolation guarantee).
+    //
+    // #1140: the diversity layer now RE-PICKS houseguest NAMES to cohere with the final gender presentation
+    // (descriptive), so the ON run's beat prose carries DIFFERENT names than the OFF run's — by design, NOT
+    // an outcome change (the mechanical truth is WHO by id, in what order). So we NEUTRALIZE names → ids per
+    // run before comparing; a real mechanical/content divergence still shows, only the rename is tolerated.
+    const roster = [sb.session.getGameState().player, ...sb.session.getGameState().house]
+      .filter((h): h is NonNullable<typeof h> => !!h && typeof h.name === "string" && h.name.length > 0)
+      .map((h) => ({ id: h.id, name: h.name }))
+      .sort((a, b) => b.name.length - a.name.length); // longest-first so a substring name can't pre-empt
+    const neutralizeNames = (s: string): string => {
+      let out = s;
+      for (const { id, name } of roster) out = out.split(name).join(id);
+      return out;
+    };
     const norm = (beat?: string, content?: string): string =>
       beat === "eviction-goodbye"
-        ? `${beat}:${(content ?? "").replace(/ a (warm|respectful|cold) goodbye message/, " a goodbye message")}`
-        : `${beat}:${content}`;
+        ? `${beat}:${neutralizeNames((content ?? "").replace(/ a (warm|respectful|cold) goodbye message/, " a goodbye message"))}`
+        : `${beat}:${neutralizeNames(content ?? "")}`;
     const beats: string[] = [];
     for (let i = 0; i < 5000; i++) {
       const adv = sb.session.advanceGame() as { finished: boolean; pending: { kind: string; options?: Array<{ id: string }> } | null; event?: { beat?: string; content?: string } | null };
