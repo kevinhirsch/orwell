@@ -283,3 +283,99 @@ def test_clear_social_runway_drops_the_landed_done_marker(monkeypatch):
     assert chat_helpers._RUNWAY_LAST_DONE.get("u") is not None, "the lingered-through beat was marked done"
     chat_helpers.clear_social_runway("u")
     assert "u" not in chat_helpers._RUNWAY_LAST_DONE, "reset drops the #1127 lingered-through marker"
+
+
+# ── #1127 hardening: the runway must arm + HOLD even when `user is None` (AUTH OFF) ─────────────────
+#
+# Root cause found LIVE: the FE-internal `user` is `None` under `AUTH_ENABLED=false` (the `x-orwell-user`
+# header is ENGINE-isolation only, not FE auth). The post-HOH hold keyed its state directly on `user`,
+# so with `user is None` the arm early-returned and the hold-block guarded on `if user is not None` —
+# the hold went SILENTLY INERT and the montage returned (proven live: Run 1 montaged with user=None;
+# Runs 2-3 with a real cookie user PASSED). The live-verify recipe (SOUL lesson 17) ALWAYS runs auth-off,
+# so without these tests a future live-verify exercises a posture the suite never covered. The fix keys
+# runway state via `_runway_key`, which collapses a `None` user onto a stable sentinel. These tests pin
+# that the auth-off path behaves IDENTICALLY to the auth-on path (arm, hold, then drive once spent).
+
+def _clear_anon():
+    chat_helpers.clear_social_runway(None)
+
+
+def _pre_anon(eng, *, player_msg=None):
+    """Drive the pre-resolve with the AUTH-OFF identity (`user is None`)."""
+    return _run(chat_helpers._pre_resolve_npc_ceremony(
+        None, eng.state(), retry=False, player_msg=player_msg))
+
+
+def test_runway_key_falls_back_to_a_stable_sentinel_when_user_is_none():
+    # The keying primitive itself: a present user keys as-is; a None user keys a STABLE non-None sentinel.
+    assert chat_helpers._runway_key("u") == "u", "a present user keys exactly as before"
+    k1 = chat_helpers._runway_key(None)
+    k2 = chat_helpers._runway_key(None)
+    assert k1 is not None, "a None user must NOT key on None (that made the hold inert under auth-off)"
+    assert k1 == k2, "the None fallback is stable across turns (single-user auth-off session)"
+
+
+def test_arm_runway_arms_even_when_user_is_none():
+    # Auth-off must not no-op the arm (it used to early-return on `user is None`).
+    _clear_anon()
+    try:
+        chat_helpers._arm_runway(None, "1:nominations")
+        assert chat_helpers._RUNWAY_LEFT.get(chat_helpers._runway_key(None), 0) > 0, (
+            "the runway must arm under auth-off (user is None), not silently no-op")
+    finally:
+        _clear_anon()
+
+
+def test_landing_at_nominations_holds_the_post_hoh_window_when_user_is_none(monkeypatch):
+    # THE live-verify defect: the FIRST spectator turn at `nominations` under auth-off must HOLD the
+    # post-HOH window (a social beat), NOT pre-resolve the NPC noms. Mirrors the auth-on test above with
+    # `user is None` — the exact posture SOUL lesson 17's recipe runs in.
+    _clear_anon()
+    try:
+        eng = _Engine(start="nominations", pending=None).wire(monkeypatch)
+        out = _pre_anon(eng)
+        assert eng.advances == 0, (
+            "auth-off: the NPC nominations must NOT be pre-resolved on the first spectator turn")
+        assert out.get("moment") == "social", (
+            "auth-off: the player still gets their post-HOH social window first (#1127 hardening)")
+        assert out.get("phase") == "nominations", "the HUD's real phase is untouched"
+    finally:
+        _clear_anon()
+
+
+def test_runway_holds_then_drives_when_user_is_none(monkeypatch):
+    # The full auth-off lifecycle: hold the bounded window, then drive the noms for real once spent —
+    # identical to the auth-on guarantee, proving the hold is no longer inert when `user is None`.
+    _clear_anon()
+    try:
+        eng = _Engine(start="nominations", pending=None).wire(monkeypatch)
+        held = 0
+        drove = False
+        for _ in range(chat_helpers._SOCIAL_RUNWAY_TURNS + 2):
+            out = _pre_anon(eng)
+            if eng.advances == 0:
+                held += 1
+                assert out.get("moment") == "social", "auth-off: still holding the post-HOH window"
+            else:
+                drove = True
+                break
+        assert held >= 1, "auth-off: at least one guaranteed playable social turn before the noms drive"
+        assert drove, "auth-off: the noms are eventually driven for real once the window is spent"
+    finally:
+        _clear_anon()
+
+
+def test_no_force_march_past_nominations_when_user_is_none(monkeypatch):
+    # The whole-week guard for the auth-off landing case: several spectator turns must HOLD, then play
+    # the ceremony — never steamroll nominations → veto. This is the live-verify montage, pinned green.
+    _clear_anon()
+    try:
+        eng = _Engine(start="nominations", pending=None).wire(monkeypatch)
+        moments = [(_pre_anon(eng)).get("moment")
+                   for _ in range(chat_helpers._SOCIAL_RUNWAY_TURNS + 1)]
+        assert moments.count("social") >= 1, "auth-off: the post-HOH window held at least one social turn"
+        assert "nominations" in moments, "auth-off: the nomination ceremony was played as a witnessed beat"
+        assert eng.advances <= 1, (
+            f"auth-off force-marched {eng.advances} beats — the hold went inert (the #1127 root cause)")
+    finally:
+        _clear_anon()

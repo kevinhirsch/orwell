@@ -288,6 +288,25 @@ _RUNWAY_SIG: dict = {}
 # `clear_social_runway`.
 _RUNWAY_LAST_DONE: dict = {}
 
+# #1127 hardening — the runway state above is keyed by `user`, but the FE-internal `user` is `None`
+# whenever auth is OFF (`AUTH_ENABLED=false`): the `x-orwell-user` header is ENGINE-isolation only,
+# not FE auth, so an unauthenticated request carries no FE user. Keying the runway directly on `None`
+# made the post-HOH hold go SILENTLY INERT under auth-off — the very posture the live-verify recipe
+# (SOUL lesson 17) runs in — so the montage returned (proven live: Run 1 montaged with user=None;
+# Runs 2-3 with a real cookie user PASSED). `_runway_key` collapses a `None` user onto a STABLE
+# sentinel so the hold arms + holds in EVERY posture; a PRESENT user keys exactly as before (no
+# behavior change for auth-on). Auth-off is single-user by nature (one FE-internal identity), so a
+# fixed sentinel is a correct, stable key across that session's turns.
+_ANON_RUNWAY_KEY = "_anon"
+
+
+def _runway_key(user):
+    """The dict key for this user's social-runway state. Falls back to a stable sentinel when the
+    FE-internal `user` is `None` (auth-off), so the post-HOH hold is never silently inert. A present
+    user keys exactly as today."""
+    return user if user is not None else _ANON_RUNWAY_KEY
+
+
 # The engine's own social beat (a real moment prompt, momentPrompts.ts `social`): a quieter beat of
 # conversations/bonding/scheming. Used as the moment OVERRIDE while a runway holds, so the GM plays
 # the lingering, never the not-yet-resolved ceremony.
@@ -320,19 +339,20 @@ def _arm_runway(user, sig: str) -> None:
     """Arm a fresh social runway for `user` keyed to the `(week:phase)` we just entered. Called when
     the pre-resolve drives a ceremony and lands the player in a NEW spectator beat — OR when the
     player LANDS on a fresh spectator-ceremony beat via their own decision (#1127, the crown→
-    nominations gap) — so the NEXT few turns are theirs to socialize before the ceremony is driven."""
-    if user is None:
-        return
-    _RUNWAY_LEFT[user] = _SOCIAL_RUNWAY_TURNS
-    _RUNWAY_SIG[user] = sig
+    nominations gap) — so the NEXT few turns are theirs to socialize before the ceremony is driven.
+    Keys via `_runway_key` so the hold also arms under auth-off (`user is None` ⇒ stable sentinel)."""
+    key = _runway_key(user)
+    _RUNWAY_LEFT[key] = _SOCIAL_RUNWAY_TURNS
+    _RUNWAY_SIG[key] = sig
 
 
 def clear_social_runway(user) -> None:
     """Drop any held runway for a user — the game reset/ended, so the next ceremony should not be
     held back by stale lingering state. Pacing only; safe to call when none is armed."""
-    _RUNWAY_LEFT.pop(user, None)
-    _RUNWAY_SIG.pop(user, None)
-    _RUNWAY_LAST_DONE.pop(user, None)  # #1127: forget the lingered-through marker on reset/end
+    key = _runway_key(user)
+    _RUNWAY_LEFT.pop(key, None)
+    _RUNWAY_SIG.pop(key, None)
+    _RUNWAY_LAST_DONE.pop(key, None)  # #1127: forget the lingered-through marker on reset/end
 
 
 # ── The pending-decision BARRIER (a chat↔engine DESYNC class) ──────────── #
@@ -2022,13 +2042,16 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
 
         sig = _runway_sig(game_state)
         ready = _player_signals_ready(player_msg)
-        left = _RUNWAY_LEFT.get(user, 0)
+        # #1127 hardening — key runway state via `_runway_key` so a `None` user (auth-off) still arms
+        # and holds. The arm/hold/landed-arm paths below ALL key on `rkey`, never `user` directly, so
+        # the post-HOH hold works in every auth posture (an auth-on present user keys exactly as today).
+        rkey = _runway_key(user)
+        left = _RUNWAY_LEFT.get(rkey, 0)
         # HOLD the social runway: still counting down for THIS beat and the player hasn't asked to
         # move on. We give them the engine's `social` moment and do not advance — genuine social
         # opportunity before the next ceremony (the force-march fix). Readiness cuts it short.
-        if _RUNWAY_SIG.get(user) == sig and left > 0 and not ready:
-            if user is not None:
-                _RUNWAY_LEFT[user] = left - 1
+        if _RUNWAY_SIG.get(rkey) == sig and left > 0 and not ready:
+            _RUNWAY_LEFT[rkey] = left - 1
             logger.info("[orwell] social runway holding %s for user=%s (%d left) — lingering before "
                         "the next ceremony", phase, user, left - 1)
             return _hold_for_social(game_state)
@@ -2047,18 +2070,18 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         # noms') cuts it short and falls through to drive it now. We mark the beat done the moment its
         # runway is spent (just below) so an emptied runway is never re-armed (which would loop the lull
         # forever and never drive the ceremony).
-        if user is not None and phase in _LANDED_RUNWAY_PHASES:
-            already_lingered = (_RUNWAY_LAST_DONE.get(user) == sig
-                                or (_RUNWAY_SIG.get(user) == sig and left == 0))
+        if phase in _LANDED_RUNWAY_PHASES:
+            already_lingered = (_RUNWAY_LAST_DONE.get(rkey) == sig
+                                or (_RUNWAY_SIG.get(rkey) == sig and left == 0))
             if already_lingered:
                 # The runway for THIS beat is spent — remember that so we don't re-arm it, and proceed to
                 # drive the ceremony for real (the original arm-on-advance flow continues below).
-                _RUNWAY_LAST_DONE[user] = sig
-            elif not ready and _RUNWAY_SIG.get(user) != sig:
+                _RUNWAY_LAST_DONE[rkey] = sig
+            elif not ready and _RUNWAY_SIG.get(rkey) != sig:
                 # A genuinely fresh `nominations` beat we have never held: arm the runway and give the
                 # player their social window NOW, before the NPC noms are pre-resolved.
                 _arm_runway(user, sig)
-                _RUNWAY_LEFT[user] = _SOCIAL_RUNWAY_TURNS - 1  # this turn is the first of the runway
+                _RUNWAY_LEFT[rkey] = _SOCIAL_RUNWAY_TURNS - 1  # this turn is the first of the runway
                 logger.info("[orwell] armed social runway for user=%s at landed %s (%d social turns) — "
                             "holding the post-HOH window before the ceremony (#1127)",
                             user, phase, _SOCIAL_RUNWAY_TURNS)

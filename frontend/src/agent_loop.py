@@ -4581,7 +4581,11 @@ async def stream_agent_loop(
                 # both respect it.
                 try:
                     from routes import chat_helpers as _ch
-                    _runway_holding = _ch._RUNWAY_LEFT.get(owner or "", 0) > 0
+                    # #1127 hardening — key via `_runway_key` so this read matches how chat_helpers
+                    # ARMS the runway (a `None` owner under auth-off keys the stable sentinel, not the
+                    # ad-hoc `owner or ""`); otherwise the hold would be invisible here and the plain
+                    # stall-advance would shove past the protected social play under auth-off.
+                    _runway_holding = _ch._RUNWAY_LEFT.get(_ch._runway_key(owner), 0) > 0
                 except Exception:
                     _runway_holding = False
                 # #670: did the pre-resolve already walk a real beat THIS turn (a ceremony OR a staged
