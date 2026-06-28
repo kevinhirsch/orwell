@@ -99,9 +99,17 @@ curl -s -b "$CK" -X POST "$BASE_URL/api/orwell/new-game" -H 'Content-Type: appli
 echo "new-game: $(head -c 200 "$LOGS/new-game.json")"
 curl -s -b "$CK" "$BASE_URL/api/orwell/state" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log('started=',j.started,'house=',(j.house||[]).length,'beat=',j.beatSeq)}catch(e){console.log('state parse err')}})"
 
-# 6) run the gate
-say "6) MIRROR LIVE-PARITY GATE"
-cd "$ROOT" && node "$HARNESS/mirror_live_parity.mjs"
-GATE=$?
-echo ""; echo "gate exit: $GATE  (0=PASS windows mirror live · 1=FAIL diverge · 2=precondition unmet)"
+# 6) run the gate — MIRROR_HUD=1 selects the HUD-parity gate (F5 status/gadget half, 0064 §B/D);
+#    default is the chat-render live-parity gate (F5 chat-render half, R2 / ADR 0015).
+if [ -n "${MIRROR_HUD:-}" ]; then
+  say "6) MIRROR HUD-PARITY GATE (F5 status/gadget half · 0064 §B/D)"
+  cd "$ROOT" && node "$HARNESS/mirror_hud_parity.mjs"
+  GATE=$?
+  echo ""; echo "gate exit: $GATE  (0=PASS B's HUD mirrors A's mutation off the push · 1=FAIL stale-until-poll · 2=precondition unmet)"
+else
+  say "6) MIRROR LIVE-PARITY GATE"
+  cd "$ROOT" && node "$HARNESS/mirror_live_parity.mjs"
+  GATE=$?
+  echo ""; echo "gate exit: $GATE  (0=PASS windows mirror live · 1=FAIL diverge · 2=precondition unmet)"
+fi
 exit $GATE
