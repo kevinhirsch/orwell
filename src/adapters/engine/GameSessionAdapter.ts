@@ -115,6 +115,8 @@ import {
   CEREMONY_IMPACTS, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
+import { notorietyBias, recognitionFor } from "../../engine/notoriety";
+import type { NotorietySummary, OpenSetSeasonOutcome } from "../../engine/notoriety";
 import {
   deriveTrajectory, decayTrajectory, STEADY,
   type Trajectory, type FoldSignal,
@@ -1027,6 +1029,16 @@ export class GameSessionAdapter implements GameSession {
   private nominationWeeks: Record<EntityId, number[]> = {};
   /** 0060 — the count of threads that have ever SURFACED this season (the hard restraint cap, §5). */
   private surfacedThreadCount = 0;
+  /**
+   * 0104 — the returning player's accumulated season-over-season NOTORIETY, set ONLY when the player
+   * chose to come back as the SAME character (the diegetic opt-in, R4 — the registry hands it in via
+   * `setNotoriety` on a `keepCharacter` restart). Null on a fresh / new-character / no-prior-season
+   * game ⇒ `seedFirstImpressions` folds NO bias and is BYTE-IDENTICAL (the calibration-neutrality
+   * guarantee). It is a bounded OPEN-SET summary — never a Vault read, never a number to the player.
+   * Folded ONCE at `seedFirstImpressions`; thereafter it is just the move-in edges. Not persisted on
+   * THIS session (it lives at the account level in the `UserNotorietyStore`); held only to seed day one.
+   */
+  private notoriety: NotorietySummary | null = null;
   /**
    * 0091 — whether the TRIGGER-ERUPTION layer RUNS. DEFAULT OFF (the dedicated `ORWELL_TRIGGERS` flag):
    * when off, the orchestrator never calls `runTriggerEruptions` ⇒ ZERO draws on any rng ⇒ every seeded
@@ -3263,6 +3275,10 @@ export class GameSessionAdapter implements GameSession {
       ...req,
       ...(carried ? { keepCharacter: false } : {}),
       ...(priorCastNames && priorCastNames.length ? { priorCastNames } : {}),
+      // 0104 (R4) — signal a SAME-CHARACTER return so the registry folds this user's notoriety into the
+      // new cast's day-one reads. Derived from `keepCharacter` here because the line above strips it to
+      // false (the fresh session has no prior house to carry from, so the flag would otherwise be lost).
+      ...(carried ? { carriesNotoriety: true } : {}),
     };
     // Non-degradation at its single most destructive point (B36/audit A2): an already-started game is
     // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
@@ -3846,6 +3862,27 @@ export class GameSessionAdapter implements GameSession {
       e.trust = clamp01(e.trust + MOVE_IN.spread * p.trustLean);
       e.affinity = clamp01(e.affinity + MOVE_IN.spread * p.affinityLean);
       e.threat = clamp01(e.threat + MOVE_IN.spread * p.threatLean);
+    }
+    // 0104 — a reputation that PRECEDES the player into a NEW cast. ONLY when the player returned as
+    // the SAME character (the diegetic opt-in, R4) is `this.notoriety` set; otherwise this whole block
+    // is skipped and the move-in edges are BYTE-IDENTICAL (the calibration-neutrality guarantee). The
+    // bias rides a DEDICATED `:notoriety` sub-rng forked off the seed — NEVER the shared `:relationships`
+    // stream above — so even with a notoriety folded, the move-in SCATTER of every edge is unchanged
+    // (the only edges that move are the NPC→player ones, and only their direction tilts). Each NPC draws
+    // ONE recognition level (R2: not everyone has heard about the player; some hold a distorted version),
+    // then the bounded, archetype-shaded, signed direction nudges the NPC→player edge INSIDE the existing
+    // `MOVE_IN.spread` envelope — never a number to the player, never a comp/vote roll, never the player's
+    // OWN edges. The engine still owns every outcome magnitude (mandate #3). Folded once, here.
+    if (this.notoriety) {
+      const nrng = new SeededRandom(hashSeed(`${seed}:notoriety`));
+      for (const n of this.house?.npcs ?? []) {
+        const archetype = n.character.archetype;
+        const recognition = recognitionFor(nrng); // ONE per-NPC awareness, applied across all signals
+        const e = this.rel.edge(n.id, PLAYER);
+        e.trust = clamp01(e.trust + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "trust", recognition));
+        e.affinity = clamp01(e.affinity + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "affinity", recognition));
+        e.threat = clamp01(e.threat + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "threat", recognition));
+      }
     }
   }
 
@@ -4761,6 +4798,73 @@ export class GameSessionAdapter implements GameSession {
     const imp = RELATIONSHIP_CONSTANTS.IMPACT[type];
     const bondDelta = ((imp.affinity ?? 0) + (imp.trust ?? 0)) / 2;
     return { bondDelta, threatDelta: imp.threat ?? 0, betrayal: type === "betrayal" };
+  }
+
+  // ─── 0104 — SEASON-OVER-SEASON NOTORIETY (a reputation that precedes the player) ─────────────────
+
+  /**
+   * 0104 — hand this session the returning player's accumulated NOTORIETY so `seedFirstImpressions`
+   * folds the day-one bias (the registry calls this on a `keepCharacter` restart — the diegetic
+   * opt-in, R4). A NEW character / no prior season passes `null` (or never calls this) ⇒ no bias ⇒
+   * byte-identical. MUST be set BEFORE `createCharacter` runs `seedFirstImpressions` (the registry's
+   * restart hook sets it on the fresh sandbox before delegating the create). Vault-free in: a bounded
+   * open-set summary, never a Vault read.
+   */
+  setNotoriety(summary: NotorietySummary | null): void { this.notoriety = summary; }
+
+  /**
+   * 0104 — the (Vault-free) notoriety the narrator may VOICE as a returning-cast callback (the
+   * `legendBeats` gist — "word is you're not someone to cross", ADR 0003: facts to voice, never a
+   * script, never the numbers). Returns null when the player did not return as the same character.
+   * Only the gist crosses; the reputation FACETS / the day-one biases never leave the engine.
+   */
+  notorietySummary(): NotorietySummary | null { return this.notoriety; }
+
+  /**
+   * 0104 — build the OPEN-SET season outcome record the registry derives notoriety from, at the
+   * season-end terminal. PURE projection of the live season's PUBLIC ceremony record (placement, the
+   * player's comp wins, how each evictee read the PLAYER's role in their eviction, jury reach + the
+   * finale vote share) — facts the player witnessed / the 0048 retrospective unseals. NO Vault handle,
+   * NO soul, NO hidden edge crosses (R1). Returns null until a season has actually FINISHED.
+   */
+  openSetOutcome(): OpenSetSeasonOutcome | null {
+    if (!this.house || !this.live?.finished) return null;
+    const me = this.house.player.id;
+    const castSize = 1 + this.house.npcs.length;
+    // Numeric placement: winner = 1, runner-up = 2; otherwise from the eviction order (the later you
+    // were evicted, the better the placement). The i-th (0-based) evictee placed `castSize - i`.
+    const order = this.live.evictionOrder ?? [];
+    let placement: number;
+    if (this.live.winner === me) placement = 1;
+    else if (this.live.finalTwo?.includes(me)) placement = 2;
+    else {
+      const idx = order.indexOf(me);
+      placement = idx >= 0 ? castSize - idx : castSize; // never-evicted-but-not-a-finalist guard ⇒ worst
+    }
+    // The player's comp wins — the public-facts `resume` tally (HOH reigns + veto wins).
+    const playerCompWins = this.live.resume?.[me] ?? 0;
+    // How each evictee read the PLAYER's role in their eviction (open-set: `mannerByEvictee[evictee][PLAYER]`;
+    // the player witnessed it / the retrospective unseals it). Only the categorical reads cross — never
+    // the hidden edge numbers behind them.
+    const manner = this.live.mannerByEvictee ?? {};
+    const playerEvictionRoles: OpenSetSeasonOutcome["playerEvictionRoles"] = [];
+    for (const evictee of Object.keys(manner)) {
+      const m = manner[evictee]?.[me];
+      if (m) playerEvictionRoles.push({ blindsided: m.blindsided, betrayed: m.betrayed, respected: m.respected });
+    }
+    const reachedFinalTwo = this.live.finalTwo?.includes(me) ?? false;
+    // Reached the jury = a juror seat (one of the last 9 evictees) OR a finalist (a deeper run still counts).
+    const jurors = new Set(order.slice(-9));
+    const reachedJury = reachedFinalTwo || jurors.has(me);
+    // The finale jury-vote share the player won (open-set ceremony fact) — only meaningful as a finalist.
+    let juryVoteShare = 0;
+    const votes = this.live.finale?.votes;
+    if (reachedFinalTwo && votes) {
+      const cast = Object.values(votes);
+      const forMe = cast.filter((v) => v === me).length;
+      juryVoteShare = cast.length > 0 ? forMe / cast.length : 0;
+    }
+    return { placement, castSize, playerCompWins, playerEvictionRoles, reachedJury, reachedFinalTwo, juryVoteShare };
   }
 
   // ─── 0091 — TRIGGER SECRETS & HOUSE-EVENT ERUPTIONS ─────────────────────────────────────────────

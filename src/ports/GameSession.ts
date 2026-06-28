@@ -563,6 +563,15 @@ export interface CreateCharacterReq {
    * if the corpus has no headroom to honor every exclusion, the sampler relaxes it rather than failing.
    */
   priorCastNames?: string[];
+  /**
+   * Season-over-season NOTORIETY carry (0104 / R4 — the diegetic opt-in). ENGINE-INTERNAL: the adapter
+   * sets it true when this confirmed restart is a SAME-CHARACTER return (`keepCharacter`), so the
+   * registry's restart hook folds the user's accumulated notoriety into the new cast's day-one reads. A
+   * NEW-character restart leaves it absent ⇒ a clean slate ⇒ byte-identical `seedFirstImpressions`.
+   * Never part of the player tool's documented schema (like `confirmRestart` / `priorCastNames`); the
+   * adapter derives it from `keepCharacter` because the strip to `keepCharacter:false` happens first.
+   */
+  carriesNotoriety?: boolean;
 }
 
 export interface MomentPromptReq {
