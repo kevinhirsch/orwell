@@ -135,6 +135,29 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    presents the legal options — set the scene and let that card take the choice; do NOT also re-ask",
   "    the same decision with ask_user (that double-asks the player the same thing two ways).",
   "",
+  // ── #1127 ANTI-MONTAGE / TIME DISCIPLINE (new section — the post-HOH fast-forward fix) ──────────
+  // The model reliably MONTAGES elapsed time ("a day passes…", "the house resets", "now it's day three")
+  // and narrates a ceremony as already-over ("noms have wrapped"), skipping the playable social runway
+  // AND the ceremony itself. This is persona/framing only (mandate #2) — it adds a discipline rule; it
+  // never authors an outcome or invents content. It complements (does not replace) the FINALITY / "A NEW
+  // WEEK DOES NOT EXIST" rules above: those forbid jumping AHEAD of the game's outcomes; this forbids
+  // jumping over LIVED TIME and pre-narrating a ceremony the player has not witnessed.
+  "TIME DISCIPLINE — NARRATE ONLY THE LIVE MOMENT, NEVER A MONTAGE (read this with FINALITY above). You",
+  "narrate the house in REAL TIME, beat by beat — the present, live moment ONLY. You may NOT fast-forward,",
+  "skip, or summarize elapsed time to get to the next beat: never write 'a day passes', 'the house resets',",
+  "'later that night', 'the next morning', 'now it's day three', or any time-skip that jumps the player over",
+  "hours or days they did not live. Time only moves when the GAME moves it (an advanceGame beat, the clock",
+  "the GAME CONTEXT reports) — not because your narration wants to reach the next ceremony faster. Honor the",
+  "IN-GAME TIME OF DAY the GAME CONTEXT reports: if it says evening, set the scene in the evening — never",
+  "open on a 'fresh morning' or any hour the GAME did not state. And you may NOT narrate a CEREMONY",
+  "(nominations, the veto ceremony, an eviction) as ALREADY HAVING HAPPENED: if the board shows nominees",
+  "(or a veto result, or an evictee) that you did NOT just witness being named in THIS live scene, do NOT",
+  "say it 'already wrapped' or recap it as done — you set the scene at the CURRENT beat and let the player",
+  "LIVE the lull and then the ceremony itself when the GAME brings it up. When power has just changed hands",
+  "(a new HOH is crowned) the very next thing is the LIVED AFTERMATH — the scramble, the reactions, the",
+  "campaigning — at the current hour, NOT a jump-cut to 'nominations are done'. A montage that skips the",
+  "social play or stages a ceremony as backstory steals the game the player came to live.",
+  "",
   "PACING IS ENGAGEMENT, NEVER A TURN COUNT. Most of the game is the social play — scheming, bonding,",
   "paranoia, the politicking between beats — and that is the BEST part: let it run as long as it has",
   "real juice. A player deep in a substantive scene (working an ally, reading a threat, building or",
@@ -617,7 +640,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "GAME CONTEXT (the status block / the roster's nominee marks) — name THOSE EXACT two houseguests, " +
     "never invent, guess, or substitute a nominee. If no nominees are shown, the ceremony has not been " +
     "run yet: do NOT narrate any names — you do not know them. Once you have them, play the dread, the " +
-    "speeches, the table reactions, and record the ceremony with recordInteraction.",
+    "speeches, the table reactions, and record the ceremony with recordInteraction. " +
+    // #1127 — when an NPC is HOH the player is a SPECTATOR at this ceremony; the FE drives the noms for
+    // real only after the post-HOH social window, then frames THIS beat so the player WITNESSES the
+    // ceremony. The model must PLAY it live, at the current time of day, never recap it as already-over.
+    "PLAY THE CEREMONY AS A LIVE SET-PIECE THE PLAYER WITNESSES — never recap it as already-done. This is " +
+    "the moment itself, at the in-game time of day the GAME CONTEXT reports: the house gathers, the HOH " +
+    "speaks, the key turns, each nominee's name lands in the room. Do NOT skip elapsed time to reach it " +
+    "('a day passes', 'the next morning') and do NOT narrate it in the past as a thing that 'already " +
+    "wrapped' — the player lives this ceremony as it happens. When an NPC holds the power, voice their " +
+    "ceremony and the table's reactions; the player watches it unfold. Then move forward from the room the " +
+    "gathering left — never stitch it over as if it never happened.",
   "veto-competition":
     "MOMENT — Power of Veto competition. SIX houseguests play, and WHO plays is DECIDED BY THE " +
     "GAME — the drawn six are in gameStatus (veto.players: HOH + the two nominees + three by chip " +
@@ -681,7 +714,19 @@ export const MOMENT_PROMPTS: Record<string, string> = {
   social:
     "MOMENT — Social play. A quieter beat: conversations, bonding, paranoia, off-screen scheming the " +
     "player half-glimpses. Use recordInteraction for scenes; surfaceInformationTo when a houseguest " +
-    "lets the player in on something.",
+    "lets the player in on something. " +
+    // #1127 — the social runway after a power change is the playable window the FE deliberately HOLDS so
+    // the player is never fast-forwarded past their scheming. The model must PLAY this live moment, never
+    // montage past it to the next ceremony.
+    "THIS IS A LIVE, PRESENT-TENSE MOMENT — PLAY IT, DO NOT SKIP IT. Stay in the here-and-now at the " +
+    "in-game time of day the GAME CONTEXT reports (if it says evening, it is evening — never open on a " +
+    "'fresh morning' the GAME did not state). Do NOT fast-forward or summarize elapsed time to reach the " +
+    "next beat — no 'a day passes', 'the house resets', 'later that night', 'now it's day three'. If a new " +
+    "Head of Household was just crowned, THIS is the lived aftermath: the scramble, the side conversations, " +
+    "the player working the new HOH and reading the room — at the CURRENT hour. And do NOT narrate the next " +
+    "ceremony as already over: if the board shows nominees (or a veto result) you did not just witness being " +
+    "named, you have NOT reached that ceremony yet — never say it 'already wrapped'; set the scene now and " +
+    "let the player live the lull until the GAME brings the ceremony up as its own beat.",
   "diary-room":
     "MOMENT — Diary Room. A private, out-of-character producer aside. The player's own space — " +
     "nothing said here reaches any NPC, so do not let it change the house. Listen; read their game.",
