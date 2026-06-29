@@ -219,11 +219,12 @@ DEFAULT_SETTINGS = {
     "task_endpoint_id": "",
     "task_model": "",
     "default_endpoint_id": "",
-    # OOB default chat model. OpenRouter is the default provider (added at first-run setup);
-    # deepseek-v4-pro is the out-of-box selected chat model. `default_endpoint_id` stays empty so
-    # resolution binds it to the first enabled endpoint (the OpenRouter one the setup wizard
-    # creates); the setup wizard also writes the endpoint id explicitly once it exists.
-    "default_model": "deepseek/deepseek-v4-pro",
+    # OOB default chat/narration model. OpenRouter is the default provider (added at first-run
+    # setup); z-ai/glm-4.7 is the out-of-box selected model (chat box + narrator + onboarding all
+    # read this resolved default). `default_endpoint_id` stays empty so resolution binds it to the
+    # first enabled endpoint (the OpenRouter one the setup wizard creates); the setup wizard also
+    # writes the endpoint id explicitly once it exists.
+    "default_model": "z-ai/glm-4.7",
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat
