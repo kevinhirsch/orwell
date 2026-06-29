@@ -18,6 +18,8 @@
  * A name not in the lexicon falls back to "unisex" (treated as fully flexible) — safe by construction.
  */
 
+import type { RandomnessSource } from "../../ports/RandomnessSource";
+
 export type NameGender = "man" | "woman" | "unisex";
 
 const MEN: readonly string[] = [
@@ -99,4 +101,37 @@ export function nameGenderOf(givenName: string): NameGender {
   if (MEN_SET.has(g)) return "man";
   if (WOMEN_SET.has(g)) return "woman";
   return "unisex";
+}
+
+// ── #1140 — re-pick a given name to MATCH a final gender presentation ────────────────────────────────
+// The name is drawn on the byte-stable MAIN house stream BEFORE the diversity layer decides the final
+// `genderPresentation`, so a balance-flip / nonbinary / AI-override can leave the NAME pointing one way
+// and the FACET the other (the portrait + narration then read the facet — a "Marlon, a woman" mismatch).
+// `diversity.ts` closes that AFTER its repairs are final by swapping the given-name TOKEN to one of the
+// target gender, KEEPING the surname (descriptive-only, on a dedicated isolated sub-stream — never the
+// outcome stream; see the calibration-neutrality note there). These pools are the source of truth for
+// "a name that reads UNAMBIGUOUSLY as <gender>": pre-filtered so `nameGenderOf(pick) === <gender>` holds
+// by construction (a "man" pick is in MEN but NOT also UNISEX — an Adrian/Marlon/Shawn stays ambiguous and
+// would re-trigger the very mismatch we're closing). A "nonbinary" presentation reads from UNISEX (a
+// genuinely ambiguous name that coheres with any presentation). Plain data — never crosses the Vault.
+
+/** A given name reads UNAMBIGUOUSLY as a man (in MEN, and NOT also unisex — so `nameGenderOf` is "man"). */
+const UNAMBIGUOUS_MEN: readonly string[] = MEN.filter((n) => !UNISEX_SET.has(n));
+/** A given name reads UNAMBIGUOUSLY as a woman (in WOMEN, and NOT also unisex). */
+const UNAMBIGUOUS_WOMEN: readonly string[] = WOMEN.filter((n) => !UNISEX_SET.has(n));
+
+/**
+ * Pick a given name whose `nameGenderOf` is exactly `gender`, avoiding any already-used given name in
+ * `usedGiven` (so the cast keeps unique given names, mirroring the main-stream draw). Deterministic off the
+ * supplied seeded `rng`. For "man"/"woman" the pool is the unambiguous gendered set; for "nonbinary" it is
+ * the unisex set (a name that coheres with any presentation). Falls back to the full gendered set (never
+ * spins) if every unused name is exhausted — far beyond a 16-person cast's reach.
+ */
+export function pickGivenNameFor(
+  gender: "man" | "woman" | "nonbinary", rng: RandomnessSource, usedGiven: ReadonlySet<string>,
+): string {
+  const pool = gender === "man" ? UNAMBIGUOUS_MEN : gender === "woman" ? UNAMBIGUOUS_WOMEN : UNISEX;
+  const avail = pool.filter((n) => !usedGiven.has(n));
+  const from = avail.length ? avail : pool;
+  return from[rng.int(from.length)]!;
 }

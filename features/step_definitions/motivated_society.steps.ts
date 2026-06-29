@@ -124,6 +124,37 @@ function advanceToPhase(s: GameSessionAdapter, target: string, cap = 40): boolea
   return s.gameStatus().timeOfDay === target;
 }
 
+/**
+ * Advance (clock on) into the night until the house has actually THINNED — in the 24-hour model NPCs reach
+ * their character bedtimes through the night (the earliest larks ~21:00, deepening to the late-night
+ * trough), so thinning is not visible at the very first `night` hour. Returns whether ≥1 NPC has turned in.
+ */
+function advanceUntilThinned(s: GameSessionAdapter, cap = 40): boolean {
+  for (let i = 0; i < cap; i++) {
+    if (s.gameStatus().timeOfDay) {
+      const ids = s.livingIds().filter((id) => id !== PLAYER);
+      if (s.awakeAmong(ids).length < ids.length) return true;
+    }
+    const a = s.advanceGame();
+    const p = a.pending;
+    if (p) {
+      if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+      else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
+      else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+      else if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" });
+      else if (p.kind === "houseguests-choice") s.submitDecision({ kind: "houseguests-choice", vote: p.options[0]!.id });
+      else if (p.kind === "goodbye-message") s.submitDecision({ kind: "goodbye-message", vote: p.options[0]!.id });
+      else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
+      else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
+      else if (p.kind === "juror-vote") s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
+      else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id });
+    }
+    if (a.finished) break;
+  }
+  const ids = s.livingIds().filter((id) => id !== PLAYER);
+  return s.awakeAmong(ids).length < ids.length;
+}
+
 // --- Background ------------------------------------------------------------------------------------
 
 Given("a started season with the off-screen society running between turns", function (this: BbWorld) {
@@ -302,7 +333,7 @@ Given("the night has thinned the awake set", function (this: BbWorld) {
     const orch = new Orchestrator(reg, { now: () => seed }, { seed });
     const sandbox = reg.sandboxFor(user);
     sandbox.session.createCharacter({ playerName: "The Player", seed });
-    if (!advanceToPhase(sandbox.session, "night")) continue;
+    if (!advanceUntilThinned(sandbox.session)) continue;
     const npcs = sandbox.session.livingIds().filter((id) => id !== PLAYER);
     const awake = sandbox.session.awakeAmong(npcs);
     if (awake.length >= npcs.length) continue; // need ≥1 turned in for the bound to bite

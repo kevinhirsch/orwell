@@ -409,3 +409,67 @@ the shared session, not per device.
 **Remaining open question (minor):** should layout sync (F) be **always on** (spec default) or a
 per-user **toggle**? Recommend always-on for v1 (it's what "one game, every screen in sync" implies);
 add a toggle only if a player asks to keep devices independent.
+
+---
+
+## Amendment (2026-06-28) — instant HUD parity from the chat-turn path (F5 status/gadget half)
+
+**Status:** ✅ Built. **References:** ship-gate **F5** (`docs/audits/2026-06-27-ship-gate.md` — realtime
+two-window mirror parity, the #1 release blocker), ADR [0012](../decisions/0012-two-window-lockstep-mirror.md)
+(the Messenger mirror) and ADR [0015](../decisions/0015-collapse-duplicated-live-render-paths.md) (the
+chat-RENDER half — this amendment is its **status/gadget complement**). **Gate:** the harness HUD-parity
+gate `docs/audits/playtest-harness/mirror_hud_parity.mjs` (via `run_mirror_gate.sh MIRROR_HUD=1` — key-free,
+deterministic fake model, RED→GREEN) + the source-pin `frontend/tests/test_1130_hud_parity_instant.py`.
+
+### The gap (§3.B.3 was half-wired)
+
+§3.B.3 specced the `game-updated` instant-reconcile ping "after `/api/orwell/decision`, `/self-eviction/*`,
+and a committed `advanceGame`". The first two shipped (the three `_publish_game_updated` call sites in
+`routes/orwell_routes.py`); **the committed-`advanceGame` / chat-turn case did not** — the chat-turn path
+(`routes/chat_routes.py` / the agent loop) was the one mutation seam that **never published**. A game-framed
+chat turn whose agent-loop tools mutate engine state (`markHouseguestMet`, `advanceGame`,
+`recordInteraction`, the **0055 `_auto_record_scene` belt**) refreshed **only the SENDER's** HUD —
+client-side, via `chat.js → orwellGameChanged('tool:…')` (the g15 dispatcher). Peer windows got **no**
+push and stayed stale until their own 20–30s poll. Observed live (two windows, one game): window A "1 of
+15 met", window B "0 of 15".
+
+### The fix (server-side only; the FE reaction was already correct)
+
+The chat-turn DONE seam now fires the **same** 0064 push the decision/self-eviction routes do, gated on an
+**actual committed mutation** so a pure no-op / OOC / refused turn pushes nothing:
+
+- `routes/chat_helpers.py :: publish_game_updated_after_turn(user, beat_seq_before, tools_called)` —
+  publishes `game-updated` (via the shared, Vault-free `orwell_game_session.publish_game_updated`) **iff**
+  the turn mutated: a `GAME_ENGINE_WRITE_TOOLS` call ran this turn, **or** the user's `beatSeq` advanced
+  over the turn (which also catches the FE error-correction belts that mutate **without** the model naming
+  a write tool — the `markHouseguestMet` auto-belt, the forced `advanceGame`). Fail-soft.
+- `routes/chat_routes.py` (the `data: [DONE]` branch) snapshots `last_beat_seq(ctx.user)` **before** the
+  turn, calls the helper at settle, **and** chains a second push onto the E22/0055 `recordInteraction`
+  fallback task (`add_done_callback`) — that fallback mutates fire-and-forget **after** settle, so its push
+  rides its own completion (only when it actually recorded).
+
+**The FE reaction is unchanged.** The `game-updated` SSE still routes through the ONE g15 dispatcher:
+`sessionSync.js notifyGameUpdated() → window.orwellGameChanged('sync:game-updated')` → the debounced
+`orwell:gamechanged` → every HUD panel re-fetches its own Vault-free projection. No new dispatcher, no
+ad-hoc `new CustomEvent`. **Vault-free:** the push carries a session id + the bare change-type only (no
+state body); each window re-fetches its own owner-guarded projection.
+
+### The invariant (the gate's Given/When/Then)
+
+```gherkin
+Scenario: A chat turn that mutates engine state instantly updates every window's HUD
+  Given two windows are open on one started game (the same canonical session)
+    And both windows are bound + subscribed to the canonical SSE channel (ADR 0008/0012)
+  When a chat turn in window A mutates engine state
+  Then the server publishes `game-updated` to the user's windows
+    And window B's HUD reflects the new state within HUD_PARITY_BUDGET_MS (≤2000ms; target sub-second),
+        driven by the SERVER PUSH not the 20–30s poll
+    And no Vault data crosses (the push carries no state body; each window re-fetches its own
+        Vault-free projection)
+```
+
+Gate mapping: *B reflects the state off the push* ⇒ the harness measures B's `orwell:gamechanged` carrying
+the `sync:game-updated` reason — dispatched **only** by the 0064 SSE, never the poll — relative to A's
+settle (the A↔B parity lag), and confirms the turn actually mutated (engine `beatSeq` before/after) so a
+non-mutating turn can never produce a false green. RED on the base branch (B never receives a push from a
+chat turn → it would only converge on its poll); GREEN after the fix.

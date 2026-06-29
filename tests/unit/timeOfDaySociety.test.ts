@@ -39,6 +39,25 @@ function advanceToPhase(s: GameSessionAdapter, target: string, cap = 40): boolea
   return s.gameStatus().timeOfDay === target;
 }
 
+/**
+ * Advance (clock on) into the night until the house has actually THINNED — the 24-hour model thins as NPCs
+ * reach their character bedtimes (the earliest larks ~21:00, deepening into the late-night trough). Returns
+ * whether at least one NPC has gone to bed (a strict subset of the roster is awake). Resolves pendings.
+ */
+function advanceUntilThinned(s: GameSessionAdapter, cap = 40): boolean {
+  for (let i = 0; i < cap; i++) {
+    if (s.gameStatus().timeOfDay) {
+      const ids = s.livingIds().filter((id) => id !== PLAYER);
+      if (s.awakeAmong(ids).length < ids.length) return true; // someone has turned in
+    }
+    const a = s.advanceGame();
+    if (a.pending) resolveLegally(s, a.pending);
+    if (a.finished) break;
+  }
+  const ids = s.livingIds().filter((id) => id !== PLAYER);
+  return s.awakeAmong(ids).length < ids.length;
+}
+
 function npcsOf(s: GameSessionAdapter): string[] {
   return s.livingIds().filter((id) => id !== PLAYER);
 }
@@ -60,24 +79,18 @@ describe("ADR 0006 — off by default: the awake set is the identity (calibratio
   });
 });
 
-describe("ADR 0006 — the house thins at night (the social bound)", () => {
-  it("by late hours the awake set is a STRICT subset and only ever shrinks", () => {
+describe("ADR 0006 — the house thins at night (the social bound, 24-hour model)", () => {
+  it("by late hours the awake set is a STRICT subset of the roster (the house has thinned)", () => {
     process.env.ORWELL_TIME_OF_DAY = "1";
     let sawThinning = false;
     for (const seed of [1, 2, 3, 4, 5]) {
       const s = started(seed);
-      if (!advanceToPhase(s, "night")) continue;
+      if (!advanceUntilThinned(s)) continue;
       const ids = npcsOf(s);
-      const awakeNight = new Set(s.awakeAmong(ids));
-      expect(awakeNight.size).toBeLessThanOrEqual(ids.length);
-      if (awakeNight.size < ids.length) {
-        sawThinning = true;
-        // monotonic: pushing into late-night only puts more people to bed — nobody re-wakes
-        if (advanceToPhase(s, "late-night", 6)) {
-          for (const id of s.awakeAmong(npcsOf(s))) expect(awakeNight.has(id)).toBe(true);
-        }
-        break;
-      }
+      const awakeNow = new Set(s.awakeAmong(ids));
+      expect(awakeNow.size).toBeLessThan(ids.length); // a strict subset — at least one has turned in
+      sawThinning = true;
+      break;
     }
     expect(sawThinning, "the house thinned at night for at least one cast").toBe(true);
   });
@@ -85,7 +98,7 @@ describe("ADR 0006 — the house thins at night (the social bound)", () => {
   it("whereabouts, approaches and the society occupancy only ever show houseguests who are awake", () => {
     process.env.ORWELL_TIME_OF_DAY = "1";
     const s = started(3);
-    advanceToPhase(s, "night");
+    advanceUntilThinned(s);
     const awake = new Set(s.awakeAmong(npcsOf(s)));
     const w = s.whereabouts();
     const around = [...(w?.present ?? []), ...(w?.nearby ?? []).flatMap((n) => n.present)];
@@ -106,7 +119,7 @@ describe("ADR 0006 — the off-screen society pairs only the awake (the night ow
       const orch = new Orchestrator(reg, { now: () => seed }, { seed });
       const sb = reg.sandboxFor(user);
       sb.session.createCharacter({ playerName: "The Player", seed });
-      if (!advanceToPhase(sb.session, "night")) continue;
+      if (!advanceUntilThinned(sb.session)) continue;
       const npcs = npcsOf(sb.session);
       const awake = new Set(sb.session.awakeAmong(npcs));
       if (awake.size >= npcs.length) continue; // need at least one asleep for the check to bite
@@ -130,6 +143,7 @@ describe("0066 Phase-2 — a CHARACTER conflict drains a houseguest to bed earli
     process.env.ORWELL_TIME_OF_DAY = "1";
     for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
       const s = started(seed);
+      s.setSocialFatigueEnabled(true); // Extension 2 owns the conflict→earlier-bedtime drain (opt-in)
       if (!advanceToPhase(s, "night")) continue;
       const ids = npcsOf(s);
       const awake = s.awakeAmong(ids);

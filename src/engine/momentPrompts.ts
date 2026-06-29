@@ -4,6 +4,7 @@ import { ARCHETYPES, ALL_STRATEGY_STYLES } from "./characterFactory";
 import { neutralizeForPrompt } from "./castingIntake";
 import { dayOfWeek } from "./houseEvents";
 import { physicalFacetToAppearance } from "./portraitPrompts";
+import { genderPresentationPhrase, pronounsFor } from "../domain/gender";
 
 /**
  * The canonical list of room names the narrator may walk the player to (Vault-free; the house's
@@ -134,6 +135,29 @@ export const BASE_GAME_MASTER_PROMPT = [
   "  · When advanceGame hands back a pending BINDING decision, the player's own decision card already",
   "    presents the legal options — set the scene and let that card take the choice; do NOT also re-ask",
   "    the same decision with ask_user (that double-asks the player the same thing two ways).",
+  "",
+  // ── #1127 ANTI-MONTAGE / TIME DISCIPLINE (new section — the post-HOH fast-forward fix) ──────────
+  // The model reliably MONTAGES elapsed time ("a day passes…", "the house resets", "now it's day three")
+  // and narrates a ceremony as already-over ("noms have wrapped"), skipping the playable social runway
+  // AND the ceremony itself. This is persona/framing only (mandate #2) — it adds a discipline rule; it
+  // never authors an outcome or invents content. It complements (does not replace) the FINALITY / "A NEW
+  // WEEK DOES NOT EXIST" rules above: those forbid jumping AHEAD of the game's outcomes; this forbids
+  // jumping over LIVED TIME and pre-narrating a ceremony the player has not witnessed.
+  "TIME DISCIPLINE — NARRATE ONLY THE LIVE MOMENT, NEVER A MONTAGE (read this with FINALITY above). You",
+  "narrate the house in REAL TIME, beat by beat — the present, live moment ONLY. You may NOT fast-forward,",
+  "skip, or summarize elapsed time to get to the next beat: never write 'a day passes', 'the house resets',",
+  "'later that night', 'the next morning', 'now it's day three', or any time-skip that jumps the player over",
+  "hours or days they did not live. Time only moves when the GAME moves it (an advanceGame beat, the clock",
+  "the GAME CONTEXT reports) — not because your narration wants to reach the next ceremony faster. Honor the",
+  "IN-GAME TIME OF DAY the GAME CONTEXT reports: if it says evening, set the scene in the evening — never",
+  "open on a 'fresh morning' or any hour the GAME did not state. And you may NOT narrate a CEREMONY",
+  "(nominations, the veto ceremony, an eviction) as ALREADY HAVING HAPPENED: if the board shows nominees",
+  "(or a veto result, or an evictee) that you did NOT just witness being named in THIS live scene, do NOT",
+  "say it 'already wrapped' or recap it as done — you set the scene at the CURRENT beat and let the player",
+  "LIVE the lull and then the ceremony itself when the GAME brings it up. When power has just changed hands",
+  "(a new HOH is crowned) the very next thing is the LIVED AFTERMATH — the scramble, the reactions, the",
+  "campaigning — at the current hour, NOT a jump-cut to 'nominations are done'. A montage that skips the",
+  "social play or stages a ceremony as backstory steals the game the player came to live.",
   "",
   "PACING IS ENGAGEMENT, NEVER A TURN COUNT. Most of the game is the social play — scheming, bonding,",
   "paranoia, the politicking between beats — and that is the BEST part: let it run as long as it has",
@@ -374,6 +398,20 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    the subject / 'not yet') — itself a real beat. NEVER say which tier it was or whether it was true:",
   "    judging a confidence — and catching a lie — is the player's alone. This is the most human beat in",
   "    the house; an earned confidence you only narrate (without confide) is unrecorded and never real.",
+  "  • exposeSecret — when the player OUTS a secret they LEARNED about a houseguest to the house ('they",
+  "    deserve to know what you're hiding'), call exposeSecret({ factId }) with the learned fact's id. The",
+  "    GAME decides the bounded fallout: it damages how the house reads the subject AND recoils on the",
+  "    player (outing is ruthless — the subject turns on them, the house recalibrates). Voice the house",
+  "    reeling and the subject's fury, never a number. The player can only out a secret they actually",
+  "    learned — the GAME rejects the rest. (A { bluff:true, subject } gamble outs a claim they did NOT",
+  "    learn; the GAME never tells you whether it was true — that uncertainty is the drama.)",
+  "  • tradeSecret — when the player TRADES a secret they LEARNED about a THIRD party to a houseguest for",
+  "    a one-off favor (a comp throw, a name for a name), call tradeSecret({ factId, toNpcId }). The GAME",
+  "    values it to THE RECIPIENT (a rival's secret is gold to that rival's enemy, worthless to their ally)",
+  "    and decides whether they bite — they now KNOW the secret. Voice the barter, never a number. For a",
+  "    STANDING deal sweetened by a secret, use makeDeal with { leverage } (a secret about the PARTNER —",
+  "    'keep me safe or this gets out', pressure they can refuse and resent) or { tradedSecret } (a secret",
+  "    about a third party, handed to the partner as a chip). The GAME owns whether the pressure lands.",
   "  • socialInitiatives — which houseguests want to approach the player right now, each with a",
   "    coarse motive (bond: their tie drives it; probe: their wariness does), so scenes start from",
   "    EITHER side — not only when the player reaches out. Voice the approach in that houseguest's",
@@ -603,7 +641,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "GAME CONTEXT (the status block / the roster's nominee marks) — name THOSE EXACT two houseguests, " +
     "never invent, guess, or substitute a nominee. If no nominees are shown, the ceremony has not been " +
     "run yet: do NOT narrate any names — you do not know them. Once you have them, play the dread, the " +
-    "speeches, the table reactions, and record the ceremony with recordInteraction.",
+    "speeches, the table reactions, and record the ceremony with recordInteraction. " +
+    // #1127 — when an NPC is HOH the player is a SPECTATOR at this ceremony; the FE drives the noms for
+    // real only after the post-HOH social window, then frames THIS beat so the player WITNESSES the
+    // ceremony. The model must PLAY it live, at the current time of day, never recap it as already-over.
+    "PLAY THE CEREMONY AS A LIVE SET-PIECE THE PLAYER WITNESSES — never recap it as already-done. This is " +
+    "the moment itself, at the in-game time of day the GAME CONTEXT reports: the house gathers, the HOH " +
+    "speaks, the key turns, each nominee's name lands in the room. Do NOT skip elapsed time to reach it " +
+    "('a day passes', 'the next morning') and do NOT narrate it in the past as a thing that 'already " +
+    "wrapped' — the player lives this ceremony as it happens. When an NPC holds the power, voice their " +
+    "ceremony and the table's reactions; the player watches it unfold. Then move forward from the room the " +
+    "gathering left — never stitch it over as if it never happened.",
   "veto-competition":
     "MOMENT — Power of Veto competition. SIX houseguests play, and WHO plays is DECIDED BY THE " +
     "GAME — the drawn six are in gameStatus (veto.players: HOH + the two nominees + three by chip " +
@@ -667,7 +715,19 @@ export const MOMENT_PROMPTS: Record<string, string> = {
   social:
     "MOMENT — Social play. A quieter beat: conversations, bonding, paranoia, off-screen scheming the " +
     "player half-glimpses. Use recordInteraction for scenes; surfaceInformationTo when a houseguest " +
-    "lets the player in on something.",
+    "lets the player in on something. " +
+    // #1127 — the social runway after a power change is the playable window the FE deliberately HOLDS so
+    // the player is never fast-forwarded past their scheming. The model must PLAY this live moment, never
+    // montage past it to the next ceremony.
+    "THIS IS A LIVE, PRESENT-TENSE MOMENT — PLAY IT, DO NOT SKIP IT. Stay in the here-and-now at the " +
+    "in-game time of day the GAME CONTEXT reports (if it says evening, it is evening — never open on a " +
+    "'fresh morning' the GAME did not state). Do NOT fast-forward or summarize elapsed time to reach the " +
+    "next beat — no 'a day passes', 'the house resets', 'later that night', 'now it's day three'. If a new " +
+    "Head of Household was just crowned, THIS is the lived aftermath: the scramble, the side conversations, " +
+    "the player working the new HOH and reading the room — at the CURRENT hour. And do NOT narrate the next " +
+    "ceremony as already over: if the board shows nominees (or a veto result) you did not just witness being " +
+    "named, you have NOT reached that ceremony yet — never say it 'already wrapped'; set the scene now and " +
+    "let the player live the lull until the GAME brings the ceremony up as its own beat.",
   "diary-room":
     "MOMENT — Diary Room. A private, out-of-character producer aside. The player's own space — " +
     "nothing said here reaches any NPC, so do not let it change the house. Listen; read their game.",
@@ -843,6 +903,12 @@ export function renderGameContext(view: GameStateView): string {
       // look when present (richer + more differentiating than the prose `appearance`), and we fall back to
       // the prose `appearance` only for pre-0058 saves that never seeded a facet. All PUBLIC, Vault-free.
       [h.age, physicalLook(h), h.presentation].filter(Boolean).join(", "),
+      // #1140: voice the SAME STORED `genderPresentation` facet the PORTRAIT was drawn from, and hand the
+      // model the pronoun set, so the narrated gender/pronouns can never diverge from the cast photo. The
+      // engine deliberately lets `genderPresentation` disagree with the NAME (diversity.ts), so the model
+      // must anchor on THIS facet — never infer gender from the name. PUBLIC facet (gender PRESENTATION,
+      // never orientation — a private orientation stays Vault-sealed and never appears here).
+      h.genderPresentation && `${genderPresentationPhrase(h.genderPresentation)} (use ${pronounsFor(h.genderPresentation)})`,
       // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
       // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
       h.demeanor && `comes across as ${h.demeanor}`,
@@ -935,12 +1001,16 @@ export function renderGameContext(view: GameStateView): string {
   // Present ONLY in the premiere moment (`view.premiere` is absent otherwise). PUBLIC facets only — no
   // Vault data, no numbers, never an assertion of how the player feels (anti-sycophancy).
   const pr = view.premiere ?? null;
-  const observable = (fi: { archetype?: string; presentation?: string; demeanor?: string; background?: string; age?: number }): string => {
+  const observable = (fi: { archetype?: string; presentation?: string; demeanor?: string; background?: string; age?: number; genderPresentation?: "man" | "woman" | "nonbinary" }): string => {
     // The same Vault-free public facets the roster exposes — the observable read the player "clocks".
     const bits = [
       fi.archetype, // their archetype is the model's PRIVATE voice cue (never said aloud), but listing it
       // here lets the producer voice the observable energy that READS as that type — the player infers it.
       fi.presentation,
+      // #1140: the STORED gender presentation + pronoun set, so the premiere introductions voice the SAME
+      // facet the portrait encodes (never inferring gender from the name). PUBLIC presentation, never
+      // orientation.
+      fi.genderPresentation && `${genderPresentationPhrase(fi.genderPresentation)} (use ${pronounsFor(fi.genderPresentation)})`,
       fi.demeanor && `comes across as ${fi.demeanor}`,
       fi.background,
       fi.age !== undefined ? `${fi.age}` : undefined,
