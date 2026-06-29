@@ -314,7 +314,7 @@ function ensureCss() {
     /* #871: a NON-draggable window (modal:true centered dialogs, fixed/pinned panels — anything
        created with draggable:false) must NOT advertise the grab/move cursor on its titlebar: it
        lies, implying a drag that can't happen. The base .ow-titlebar carries cursor:move for the
-       common draggable case; the kit stamps `.ow-no-drag` on the root when draggable is off
+       common draggable case; the kit stamps .ow-no-drag on the root when draggable is off
        (mirroring how the "Drag to move" tooltip is already gated in _build), so the titlebar falls
        back to the default cursor. (The docked rule above + the ≤768px rule below cover the OTHER
        non-draggable cases — a window that IS draggable but where context disables drag.) */
