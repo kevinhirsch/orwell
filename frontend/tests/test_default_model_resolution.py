@@ -12,9 +12,9 @@ Two bugs/specs covered:
   selection clears the auto-pick marker, so the configured default never
   overrides a real choice (only the unset/auto case resolves to the default).
 
-  Image default: the OOB image model is gemini-2.5-flash-image. That lives in
+  Image default: the OOB image model is gemini-3.1-flash-image. That lives in
   DEFAULT_SETTINGS["image_model"]; when blank ("Auto-detect") it resolves via
-  IMAGE_AUTODETECT_CANDIDATES, which leads with gemini-2.5-flash-image. An
+  IMAGE_AUTODETECT_CANDIDATES, which leads with gemini-3.1-flash-image. An
   explicit image_model is honored as-is.
 
 Mechanism for "explicit choice still wins": the configured-default preference
@@ -54,17 +54,17 @@ def test_oob_default_chat_model_is_glm_4_7():
 
 def test_oob_default_image_model_is_gemini_flash_image():
     from src.settings import DEFAULT_SETTINGS
-    assert DEFAULT_SETTINGS["image_model"] == "google/gemini-2.5-flash-image", (
-        "the assumed default image model must be gemini-2.5-flash-image"
+    assert DEFAULT_SETTINGS["image_model"] == "google/gemini-3.1-flash-image", (
+        "the assumed default image model must be gemini-3.1-flash-image"
     )
 
 
 def test_image_autodetect_leads_with_gemini_flash_image():
     """When image_model is blank (Auto-detect), the first candidate tried is
-    gemini-2.5-flash-image — so the assumed default holds even unset."""
+    gemini-3.1-flash-image — so the assumed default holds even unset."""
     from src.ai_interaction import IMAGE_AUTODETECT_CANDIDATES
-    assert IMAGE_AUTODETECT_CANDIDATES[0] == "google/gemini-2.5-flash-image", (
-        "the image auto-detect default must lead with gemini-2.5-flash-image"
+    assert IMAGE_AUTODETECT_CANDIDATES[0] == "google/gemini-3.1-flash-image", (
+        "the image auto-detect default must lead with gemini-3.1-flash-image"
     )
 
 
@@ -200,7 +200,7 @@ def test_resolver_never_returns_image_model_even_when_default_is_image():
 # (sakana/fugu-ultra) the owner once had selected was faithfully re-kept across every reset — a
 # circular trap (Settings was locked, #870, so they couldn't change it either). The fix: a reset
 # keeps only the API key(s) + endpoint and RESETS the model selections, so they revert to the OOB
-# defaults (glm-4.7 narrator, gemini-2.5-flash-image portraits). A real served selection
+# defaults (glm-4.7 narrator, gemini-3.1-flash-image portraits). A real served selection
 # is also reset by design (owner ruling) — the defaults are what the owner wants post-reset.
 
 
@@ -218,7 +218,7 @@ def _load_oobe_helper(monkeypatch, tmp_path):
 def test_reset_drops_stale_model_selection_so_defaults_stand(monkeypatch, tmp_path):
     """A reset whose prior settings.json had a stale default_model=sakana/fugu-ultra (+ any
     portrait pick) must NOT carry those across — they reset, so the merge over DEFAULT_SETTINGS
-    restores glm-4.7 / gemini-2.5-flash-image."""
+    restores glm-4.7 / gemini-3.1-flash-image."""
     mod = _load_oobe_helper(monkeypatch, tmp_path)
     setp = tmp_path / "settings.json"
     setp.write_text(json.dumps({
@@ -243,7 +243,7 @@ def test_reset_drops_stale_model_selection_so_defaults_stand(monkeypatch, tmp_pa
     from src.settings import DEFAULT_SETTINGS
     effective = {**DEFAULT_SETTINGS, **preserved}
     assert effective["default_model"] == "z-ai/glm-4.7"
-    assert effective["image_model"] == "google/gemini-2.5-flash-image"
+    assert effective["image_model"] == "google/gemini-3.1-flash-image"
 
 
 def test_reset_resets_even_a_valid_served_selection_to_defaults(monkeypatch, tmp_path):
@@ -261,7 +261,7 @@ def test_reset_resets_even_a_valid_served_selection_to_defaults(monkeypatch, tmp
     from src.settings import DEFAULT_SETTINGS
     effective = {**DEFAULT_SETTINGS, **preserved}
     assert effective["default_model"] == "z-ai/glm-4.7"
-    assert effective["image_model"] == "google/gemini-2.5-flash-image"
+    assert effective["image_model"] == "google/gemini-3.1-flash-image"
 
 
 def test_no_sakana_fugu_seed_anywhere_in_frontend_source():

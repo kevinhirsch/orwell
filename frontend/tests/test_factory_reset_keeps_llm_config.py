@@ -2,7 +2,7 @@
 
 Per the product decision (issue #860), "factory reset" returns the box to first-run OOBE while
 preserving ONLY the operator's LLM CREDENTIALS — the API keys + the provider endpoint(s) — and
-RESETS the selected models to the OOB defaults (deepseek-v4-pro narrator, gemini-2.5-flash-image
+RESETS the selected models to the OOB defaults (glm-4.7 narrator, gemini-3.1-flash-image
 portraits). Everything else is wiped (accounts, sessions, uploads, AND every cast portrait /
 avatar / headshot, presets, …). The host script delegates to orwell-oobe-reset.sh so the two can
 never drift; this test runs the REAL factory-reset script over a sandboxed dev layout (no /opt, no
