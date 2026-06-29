@@ -2244,6 +2244,34 @@ body.bg-pattern-perlin-flow {
         transform: translateX(-102%); border: none; border-right: 1px solid var(--border); }
       body[data-gadget-side="left"] #gadget-rail.grail-open { transform: translateX(0); }
     }
+    /* #935: landscape ~844×390 — width exceeds 768 (desktop 3-column layout) but
+       height is short (< 500px). Collapse the persistent gadget rail into its
+       mobile-style slide-over drawer so the composer stays above the fold. */
+    @media (max-height: 500px) and (min-width: 769px) {
+      .gadget-rail {
+        position: fixed; top: var(--on-banner-inset, 0px); right: 0;
+        height: calc(100% - var(--on-banner-inset, 0px)); height: calc(100dvh - var(--on-banner-inset, 0px));
+        width: min(300px, 86vw); z-index: 60; flex-shrink: 0;
+        transform: translateX(102%); box-shadow: -6px 0 20px rgba(0,0,0,.35);
+        visibility: hidden;
+        transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s linear .25s;
+      }
+      .gadget-rail.grail-open { transform: translateX(0); visibility: visible;
+        transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s; }
+      .gadget-rail-resize-handle { display: none; }
+      .gadget-rail[data-collapsed="true"] { width: min(300px, 86vw); }
+      .gadget-rail[data-collapsed="true"] .gadget-rail-body { display: block; }
+      .gadget-rail[data-collapsed="true"] .gadget-rail-title,
+      .gadget-rail[data-collapsed="true"] .gadget-rail-close { display: inline; }
+      .gadget-rail[data-collapsed="true"] .gadget-rail-strip { display: none; }
+      .gadget-rail-toggle, .gadget-rail-swap { display: none; }
+      body[data-game-build] .gadget-rail-open { display: block; }
+      body.hamburger-right .hamburger-btn,
+      .hamburger-btn { left: 9px; right: auto; }
+      body[data-gadget-side="left"] #gadget-rail { left: 0; right: auto;
+        transform: translateX(-102%); border: none; border-right: 1px solid var(--border); }
+      body[data-gadget-side="left"] #gadget-rail.grail-open { transform: translateX(0); }
+    }
     .chat-meta { font-size:12px; color:color-mix(in srgb, var(--fg) 60%, transparent); margin-bottom:6px; }
     .chat-history {
       flex:1;
