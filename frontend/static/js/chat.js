@@ -4383,14 +4383,80 @@ import { isNarrow } from './platform.js';
   }
 
   /**
+   * R2 (refactor-roadmap / ADR 0012 §3.3): the SHARED incremental live-stream renderer that BOTH
+   * the sender (its `.live-reply-content` path) and the observer (resumeStream) feed, so two windows
+   * on one game render the LIVE stream through the SAME machinery — `createStreamRenderer` (freeze
+   * finalized blocks, re-render only the growing tail, token-fade) — not a per-delta full repaint.
+   * The observer used to `contentDiv.innerHTML = processWithThinking(_combined())` on EVERY delta
+   * (renderDelta) — a different live engine that unmounts+remounts the whole subtree per token, the
+   * two-window "scratch and grind". This unifies it.
+   *
+   * The reasoning CHANNEL SPLIT is sacred and preserved BY CONSTRUCTION: `replyText` (the public
+   * reply) feeds the incremental renderer into `.live-reply-content`; `reasoningText` lands ONLY in a
+   * default-collapsed `.thinking-section` accordion above it — reasoning can NEVER paint in the public
+   * reply container. (`stripToolBlocks` keeps not-yet-finalized tool syntax out of the reply, matching
+   * the sender's `_renderStream`.)
+   *
+   * `render` is the canonical reply renderer the CALLER supplies (the same `processWithThinking ∘
+   * squashOutsideCode` shape the sender's `_renderStream` feeds `createStreamRenderer`) — so this helper
+   * never invents its own markdown path; it shares the caller's. `state` is a per-stream scratch object
+   * the caller owns (`{}` initially); the helper hangs the accordion refs + the reply renderer off it
+   * across delta calls. Idempotent + self-contained: it only ever writes its own children of
+   * `contentDiv`.
+   */
+  function _renderLiveStream(contentDiv, replyText, reasoningText, render, state) {
+    if (!contentDiv) return;
+    const reasoning = (reasoningText || '').trim();
+    // 1) Reasoning → a default-COLLAPSED live accordion at the top of the content. Created lazily the
+    //    first time reasoning arrives; never placed in the reply container (the channel split).
+    if (reasoning) {
+      if (!state._thinkSection) {
+        const sec = document.createElement('div');
+        sec.className = 'thinking-section';
+        const domId = 'resume-think-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        sec.innerHTML =
+          '<div class="thinking-header" data-thinking-id="' + domId + '">' +
+            '<div class="thinking-header-left"><span class="live-think-header-text">View thinking process</span></div>' +
+            '<span class="thinking-toggle live-think-toggle" id="' + domId + '-toggle"></span>' +
+          '</div>' +
+          '<div class="thinking-content" id="' + domId + '"><div class="thinking-content-inner live-think-inner"></div></div>';
+        contentDiv.insertBefore(sec, contentDiv.firstChild);
+        state._thinkSection = sec;
+        state._thinkInner = sec.querySelector('.live-think-inner');
+      }
+      if (state._thinkInner) {
+        const t = reasoning.replace(/^\s*Thinking(?:\s+Process)?:\s*/i, '');
+        state._thinkInner.innerHTML = markdownModule.mdToHtml(t);
+      }
+    }
+    // 2) Reply → the SHARED incremental renderer into a dedicated `.live-reply-content` child (the same
+    //    container class the sender's post-thinking reply path mounts), so the gate sees both windows
+    //    mount the streaming container and stream through createStreamRenderer.
+    const replySrc = stripToolBlocks(replyText || '');
+    if (!replySrc.trim()) { uiModule.scrollHistory(); return; }
+    let replyEl = state._replyEl;
+    if (!replyEl || !replyEl.isConnected) {
+      replyEl = document.createElement('div');
+      replyEl.className = 'live-reply-content';
+      contentDiv.appendChild(replyEl);
+      state._replyEl = replyEl;
+      state._replyRenderer = createStreamRenderer(replyEl, { render, hljs: window.hljs });
+    }
+    state._replyRenderer.update(replySrc);
+    uiModule.scrollHistory();
+  }
+
+  /**
    * Live-resume a chat run still streaming detached on the server (#2539).
    *
    * On session re-entry, GET /api/chat/resume/{id} replays the run's buffer then
-   * streams live; reply tokens render as they arrive. On completion a plain text
-   * reply is finalized in place (canonical bubble via chatRenderer.addMessage, no
-   * reload); a "rich" reply (tool calls, sources, doc streaming, multi-round) is
-   * reloaded from the DB so its full render stays faithful. Returns true if it
-   * attached, false to let the caller fall back to spinner+poll.
+   * streams live; reply tokens render as they arrive (R2: through the SAME shared
+   * incremental renderer the sender uses — see `_renderLiveStream`). On completion
+   * a plain text reply is finalized in place (canonical bubble via
+   * chatRenderer.addMessage, no reload); a "rich" reply (tool calls, sources, doc
+   * streaming, multi-round) is reloaded from the DB so its full render stays
+   * faithful. Returns true if it attached, false to let the caller fall back to
+   * spinner+poll.
    */
   export async function resumeStream(sessionId) {
     if (!sessionId) return false;
@@ -4474,11 +4540,20 @@ import { isNarrow } from './platform.js';
         ? '<think>' + reasoningText + '</think>\n\n' + reply
         : reply;
     };
+    // R2 (ADR 0012 §3.3): render each live delta through the SHARED incremental renderer
+    // (_renderLiveStream → createStreamRenderer), the SAME machinery the sender feeds — NOT a
+    // per-delta `contentDiv.innerHTML = processWithThinking(...)` full repaint. The reasoning channel
+    // split is preserved by construction (reply → .live-reply-content via the incremental renderer;
+    // reasoning → a default-collapsed accordion, never the reply container). The settled finalize
+    // still rebuilds the canonical bubble from _combined() below (one render path at rest).
+    const _liveState = {};
+    // The canonical reply renderer — the SAME `processWithThinking ∘ squashOutsideCode` shape the
+    // sender's `_renderStream` feeds createStreamRenderer. Supplied to the shared `_renderLiveStream`
+    // so the observer never invents its own markdown path (it shares the sender's), and any inline
+    // <think>/operator-aside scrub the game build applies in processWithThinking runs here too.
+    const _liveRender = (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t));
     const renderDelta = () => {
-      contentDiv.innerHTML = markdownModule.processWithThinking(
-        markdownModule.squashOutsideCode(_combined())
-      );
-      uiModule.scrollHistory();
+      _renderLiveStream(contentDiv, replyText, reasoningText, _liveRender, _liveState);
     };
 
     try {

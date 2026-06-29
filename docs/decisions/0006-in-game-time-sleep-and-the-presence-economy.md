@@ -1,7 +1,9 @@
 # 0006 — In-game time, sleep, and the nightly presence economy
 
-> **Status:** **Proposed** (principle accepted on PO direction, 2026-06-20; mechanism to be built
-> BDD/TDD-first).
+> **Status:** **Accepted & built** — Phase-1 (the opt-in clock/sleep/presence economy) shipped as feature
+> 0066; the **24-hour model + Phase-2 extensions** were accepted by the owner (2026-06-28) and built as
+> #1125 (see the **Amendment** section at the end of this record). Originally *Proposed* on PO direction
+> 2026-06-20; mechanism built BDD/TDD-first.
 > **Source:** Product-owner direction, 2026-06-20 (the "in-game clock / sleep" thread): *"there
 > should be an element of in-game time… a cap on how much time exists between events… this should
 > not be functionally infinite… maybe a simple graphic for Morning, afternoon, evening, night, late
@@ -136,11 +138,11 @@ Calls baked into this record, flagged for easy adjustment:
 - **Bound:** ✅ *resolved by PO (2026-06-20)* — diegetic and **character-driven**: the house puts
   itself to sleep most nights, a few night owls may run late, every NPC has a latest bedtime (so the
   house always empties), and the **player always chooses their own bedtime** — no mechanical curfew.
-- **Sleep cost scope (first cut):** **comps only** (recommended) vs. also next-day social volatility
-  vs. a full compounding fatigue meter. The latter two are clean Phase-2 extensions and do not change
-  this record's architecture.
-- **Magnitudes:** the rest-penalty weight (~0.15, ≈¾ of the emotion weight) and the archetype bedtime
-  spread are tuning, not architecture.
+- **Sleep cost scope:** ✅ *resolved by PO (2026-06-28)* — **all three**: comps (Phase-1), **next-day
+  social fatigue**, and the **compounding multi-night fatigue meter** are built (#1125, the Amendment
+  below), each behind its own opt-in flag and byte-identical to the calibration spine when off.
+- **Magnitudes:** the rest-penalty weight and the archetype bedtime spread are tuning, not architecture;
+  they now live (with the rest of the time/sleep tunables) in `src/engine/sleepConstants.ts`.
 
 ## Traceability
 
@@ -148,5 +150,41 @@ Calls baked into this record, flagged for easy adjustment:
 - Builds on: 0049 (presence & lingering), 0041 (character evolution / hidden emotional modifier),
   0028 + 0006 (outcome resolution + temperature constants), 0001 (Vault Wall); ADR 0003 (the
   conversation is the game), ADR 0005 (split authority by openness).
-- Followed by: the feature spec that executes this record (next available number; see
-  `docs/features/`).
+- Followed by: feature **0066** executes this record; the 24-hour Amendment below was built as **#1125**.
+
+## Amendment — the 24-hour model (accepted by the owner, 2026-06-28; built as #1125)
+
+The principles above are unchanged; this firms the *mechanism* the original record left open (the phases
+were a coarse 5-band enum). The five phases are now real HOUR BANDS on a 24-hour day from the **8am forced
+wake**: morning 8–12 · afternoon 12–16 · evening 16–20 · night 20–24 · **late-night 24–32 (the 8-hour block
+from midnight to the next 8am)**. The principle bindings, restated on the model:
+
+1. **Time advances by play** — the clock (`hourOfDay` ∈ [8, 32), persisted in the legacy `nightDepth` field)
+   moves by substantive beats (~3h each) and by lingering turns (the type-bounded conversation duration), and
+   CLAMPS at the bitter end — a new day begins ONLY at the 8am forced wake. Replay under a fixed seed is
+   identical; off the opt-in flag it is dormant (byte-identical to the calibration spine).
+2. **The clock thins the room, never interrupts a scene** — the per-conversation advance presses time as the
+   player plays but never wraps the night without their own `turnIn` (the lull rule); an engaged scene is
+   never cut.
+3. **The bound is diegetic, character-driven, BIDIRECTIONAL** — bedtimes are derived hours (`social −
+   physical` + per-NPC jitter): the awake set SHRINKS evening→midnight (owls retiring) then GROWS
+   midnight→8am (pre-dawn larks rising). Two distinct late-night windows — post-midnight owls (costly) vs
+   pre-dawn larks (free). No curfew; the player is never auto-slept.
+4. **Sleep is symmetric & consequential** — an 8-hour need against the fixed 8am wake. Bed by midnight ⇒ 0
+   debt (a pre-midnight lark even wakes early, for free); bed after midnight ⇒ debt = hours past midnight,
+   GRADED into the hidden comp penalty + (Phase-2) next-day social fatigue + (Phase-2) the compounding
+   multi-night meter. Same math for player and NPC; a tired favorite can lose.
+5. **The Vault Wall stands** — NPC sleep is engine-only; the player's own tiredness is a qualitative cue
+   (rested / tired / running on empty), never a number, never an NPC's. Time of day is a Vault-free public
+   projection.
+
+Adds (all engine-internal, all on the `sleepConstants.ts` single tunable home): the weekly **5-cycle period
+placement** (HOH/noms/draw/ceremony in the morning, veto comp in the afternoon, eviction in the evening,
+next HOH the morning after — strict order, no rest days, the daily-event invariant); **event durations +
+seeded start-within-period** (comp ~3h / ceremony ~1h / eviction ~2h; a deterministic, no-shared-rng start
+offset within the period; spillover allowed; comps vary by type via the 0042 library); and **LOOSE
+conversation durations** (ADR 0005 for time — the LLM proposes the felt time, the engine commits it bounded
+to the type range, byte-identical to the type baseline when absent). The three Phase-2 sleep-cost extensions
+ride dedicated opt-in flags (`ORWELL_TIME_PER_CONVERSATION` / `ORWELL_SOCIAL_FATIGUE` /
+`ORWELL_MULTI_NIGHT_FATIGUE`), default OFF, each byte-identical to the calibration spine when off — proven
+per-extension. Full detail: `docs/features/0066-in-game-time-and-sleep.md` §9–§10.

@@ -1502,6 +1502,68 @@ FUNCTION_TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "formAlliance",
+            "description": "Feature 0107 — the MOMENT the player and a group NAME an alliance in the scene (\"let's call ourselves…\", \"you, me and them, locked in\"), call formAlliance({name, members}) so the alliance is REAL and the engine tracks it. The engine is bond-gated: members not close enough decline, and it returns who actually joined — voice the result, never assert everyone's in.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The alliance's name as spoken in the scene."},
+                    "members": {"type": "array", "items": {"type": "string"}, "description": "The houseguest ids the player names into the alliance (from the roster)."},
+                },
+                "required": ["name", "members"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "joinAlliance",
+            "description": "Feature 0107 — when an NPC has PITCHED the player into a named alliance and the player accepts in the scene, call joinAlliance({allianceId}) so they're enrolled. Only a live pitch the player is close enough to the founder for takes; a cold 'add me' is refused — voice the refusal. Pitches and their allianceId surface on gameStatus.alliancePitches.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "allianceId": {"type": "string", "description": "The id of the alliance the player was pitched (from gameStatus.alliancePitches)."},
+                },
+                "required": ["allianceId"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "exposeSecret",
+            "description": "Feature 0093 — when the player OUTS a secret they LEARNED about a houseguest to the house ('they deserve to know what you're hiding'), call exposeSecret({factId}) with the learned fact's id. The ENGINE decides the standing fold + backlash and whether it lands — voice the result, never assert the fallout. To BLUFF (out a secret the player does NOT actually hold), pass {bluff: true, subject} with the target houseguest id instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "factId": {"type": "string", "description": "The id of a secret the player has actually LEARNED (from their known facts). Omit only for a bluff."},
+                    "bluff": {"type": "boolean", "description": "Set true to out a secret the player does NOT hold (a gamble); then 'subject' is required."},
+                    "subject": {"type": "string", "description": "For a bluff: the houseguest id the invented secret is about."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tradeSecret",
+            "description": "Feature 0099 — when the player TRADES a secret they LEARNED about a THIRD party to a houseguest for a one-off favor (a comp throw, a name for a name), call tradeSecret({factId, toNpcId}). The ENGINE decides whether the recipient takes it and what the favor is — voice the result, never assert acceptance. To BLUFF (offer a secret the player does NOT hold), pass {bluff: true, subject, toNpcId}.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "toNpcId": {"type": "string", "description": "The recipient houseguest id the secret is traded to (from the roster)."},
+                    "factId": {"type": "string", "description": "The id of a secret the player has actually LEARNED about a THIRD party. Omit only for a bluff."},
+                    "bluff": {"type": "boolean", "description": "Set true to offer a secret the player does NOT hold; then 'subject' is required."},
+                    "subject": {"type": "string", "description": "For a bluff: the houseguest id the invented secret is about."},
+                },
+                "required": ["toNpcId"],
+            },
+        },
+    },
     # --- God Mode / admin (0016) — ADMIN-ONLY; still Vault-free (walled even for admin) ---
     {
         "type": "function",
@@ -1762,6 +1824,10 @@ ORWELL_GAME_TOOLS = frozenset({
     "socialInitiatives", "diaryRoom", "makeDeal",
     # 0075: the trust-gated confide lever (the engine decides the disclosure; the model voices it).
     "confide",
+    # 0107: named alliances (Phase A formAlliance + Phase B joinAlliance).
+    "formAlliance", "joinAlliance",
+    # 0093/0099: expose a learned secret to the house / trade it to a houseguest for a favor.
+    "exposeSecret", "tradeSecret",
     # B64/0049: the Vault-free presence read (who's here, who's one room over).
     "whereabouts",
     # L21/L24: the player directs their own movement (the engine never auto-relocates a person).

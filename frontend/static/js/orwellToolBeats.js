@@ -27,6 +27,12 @@ export const ORWELL_TOOL_BEATS = {
   'socialInitiatives': '🏠 Reading the house',
   'diaryRoom': '📔 Diary Room',
   'makeDeal': '🤝 Handshake',
+  // 0107: the player names a pact / accepts an NPC's pitch into a named alliance.
+  'formAlliance': '👥 Naming an alliance',
+  'joinAlliance': '👥 Joining an alliance',
+  // 0093/0099: out a learned secret to the house / trade it to a houseguest for a favor.
+  'exposeSecret': '🗣 Outing a secret',
+  'tradeSecret': '🔁 Trading a secret',
   // 0075: the player presses an ally to open up; the engine decides the disclosure.
   'confide': '🤫 Confiding',
   'askProducers': '🎙 Producers',

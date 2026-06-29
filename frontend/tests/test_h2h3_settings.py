@@ -176,12 +176,12 @@ def _boot(env):
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
         cwd=FRONTEND, env=env,
-        stdout=open(f"/tmp/fe-h2h3-{PORT}.log", "w"), stderr=subprocess.STDOUT,
+        stdout=open(f"/tmp/fe-h2h3-{PORT}-{os.getpid()}.log", "w"), stderr=subprocess.STDOUT,
     )
     base = f"http://127.0.0.1:{PORT}"
     for _ in range(60):
         if proc.poll() is not None:
-            pytest.fail(f"uvicorn exited early; see /tmp/fe-h2h3-{PORT}.log")
+            pytest.fail(f"uvicorn exited early; see /tmp/fe-h2h3-{PORT}-{os.getpid()}.log")
         try:
             urllib.request.urlopen(base + "/openapi.json", timeout=2)
             return proc, base

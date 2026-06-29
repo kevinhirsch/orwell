@@ -4,6 +4,7 @@ import { GameWatcher, type WatcherConfig } from "./gameWatcher";
 import { SystemClock } from "../adapters/time/SystemClock";
 import { FileSaveStore } from "../adapters/engine/FileSaveStore";
 import { SqliteSaveStore } from "../adapters/sqlite/SqliteSaveStore";
+import { FileUserNotorietyStore } from "../adapters/engine/FileUserNotorietyStore";
 import type { Clock, Scheduler } from "../ports/Clock";
 import type { UserSaveStore } from "../ports/UserSaveStore";
 
@@ -107,7 +108,14 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   const envResident = parseInt((process.env.ORWELL_MAX_RESIDENT_SANDBOXES ?? "").trim(), 10);
   const maxResident = opts.maxResidentSandboxes
     ?? (Number.isFinite(envResident) && envResident > 0 ? envResident : undefined);
-  const registry = new GameSessionRegistry(saveStore, maxResident !== undefined ? { maxResident } : {});
+  // 0104 — when the runtime is durable, persist account-level NOTORIETY to disk too (a SEPARATE subtree
+  // from the per-season saves, so the season-restart rotation never touches it — account reputation
+  // survives the cutover). In-memory otherwise (the registry defaults to an in-memory store).
+  const notorietyStore = saveStore ? new FileUserNotorietyStore() : undefined;
+  const registry = new GameSessionRegistry(saveStore, {
+    ...(maxResident !== undefined ? { maxResident } : {}),
+    ...(notorietyStore ? { notorietyStore } : {}),
+  });
   const cfg: WatcherConfig = { ...watcherConfigFromEnv(), ...opts.watcher };
   // Pure turn-driven mode (watcher disabled): the orchestrator fires one off-screen tick per player turn.
   const orchestrator = new Orchestrator(registry, clock, {
