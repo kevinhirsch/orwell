@@ -128,6 +128,31 @@ def test_loser_window_gets_a_canonical_session_adopt_signal():
     assert '{"type": "canonical_session", "id": run_key}' in src
 
 
+def test_casting_turn_is_single_flight_not_chained():
+    """F5 (#1148 / #1086 family): opening a SECOND session during CASTING must not re-run the producer
+    turn. Casting keys its run on the per-tab session (GAP-2-b1), but the FE binds that as the canonical
+    game session (0064 §C) and a 2nd window CONVERGES its view onto it — so a kickoff cue, a stream-drop
+    auto-recover, or the converged window's own send can POST a SECOND casting turn against the SAME
+    run_key WHILE the first is streaming. Under the game-turn QUEUE policy (queue=_framed) those
+    duplicates do not cancel — they CHAIN, each a FRESH producer generation reacting to the same input
+    (the reported "opened a 2nd session → the casting question re-ran ~4×"). The fix: a casting turn
+    (framed but NOT game_active) is SINGLE-FLIGHT — if a generation is already in flight for run_key, it
+    attaches the duplicate READ-ONLY (publish run-started + subscribe) instead of starting another. The
+    started-game two-window path (game_active=True) is untouched and still queue-chains DISTINCT turns."""
+    src = _read("routes", "chat_routes.py")
+    # casting = framed AND season not started; guarded on an already-in-flight run for the same key.
+    assert '_casting = _framed and not bool(getattr(ctx, "game_active", False))' in src
+    assert "if _casting and agent_runs.is_active(run_key):" in src
+    # The guard must SHORT-CIRCUIT (attach read-only) BEFORE the agent_runs.start below — so an
+    # in-flight casting run is MIRRORED, never chained into a second producer generation.
+    guard = src.split("_casting = _framed")[1].split("agent_runs.start(")[0]
+    assert 'session_events.publish(run_key, "run-started")' in guard
+    assert "agent_runs.subscribe(run_key)" in guard
+    assert "return StreamingResponse" in guard, (
+        "the casting single-flight guard must RETURN (attach read-only) before reaching agent_runs.start"
+    )
+
+
 def test_message_saved_carries_server_timestamp():
     """§2.2/§3.3: the message_saved completion event carries the SERVER-minted timestamp so every
     window renders the identical time string (the sender no longer keeps its own `new Date()`)."""
