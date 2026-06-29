@@ -299,16 +299,22 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
                     }"""
                 )
 
-            deadline = time.monotonic() + 30
+            # 60s (was 30): the onboarding→Settings convergence is multi-step and a loaded CI runner
+            # runs it ~2× slower than local — 30s was the residual flake (#925/#1148 family). The loop
+            # is idempotent (dismiss whatever's up, retry the gear); it just needed more patience.
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 if _settings_open():
                     break
                 if _overlay_present():
                     page.keyboard.press("Escape")
-                    # Wait for the scrim to detach rather than a fixed delay,
-                    # so a slow CI runner doesn't race the kit's ~190ms teardown.
+                    # Wait for the WHOLE overlay (window AND scrim) to detach before retrying — racing
+                    # the kit's teardown on a slow runner burned iterations against the budget.
                     try:
-                        page.wait_for_selector('[data-ow-scrim]', state='detached', timeout=3000)
+                        page.wait_for_function(
+                            "() => !document.getElementById('orwell-onboarding')"
+                            " && !document.querySelector('[data-ow-scrim]')",
+                            timeout=3000)
                     except Exception:
                         pass
                     continue
@@ -320,10 +326,25 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
                 except Exception:
                     pass
                 page.wait_for_timeout(150)
-            assert _settings_open(), (
-                "Settings never opened past the onboarding overlay — if a scrim outlived "
-                "its window it would block this forever (a kit teardown bug, not a race)"
-            )
+            if not _settings_open():
+                # Instrument the timeout so a future flake is diagnosable: what was still blocking —
+                # a holding card, the setup wizard, a lingering scrim (the orphan #925 sweeps), a
+                # half-open modal? Turns the next flake into a localized signal, not a bare mystery.
+                diag = page.evaluate(
+                    """() => {
+                      const ob = document.getElementById('orwell-onboarding');
+                      const m = document.getElementById('settings-modal');
+                      return {
+                        onboarding: ob ? (ob.getAttribute('data-ob-holding') !== null ? 'holding'
+                                          : ob.getAttribute('data-ob-setup') !== null ? 'setup' : 'other') : null,
+                        scrims: document.querySelectorAll('[data-ow-scrim]').length,
+                        settingsConnected: !!(m && m.isConnected),
+                        settingsDisplay: m ? getComputedStyle(m).display : null,
+                      };
+                    }"""
+                )
+                raise AssertionError(
+                    f"Settings never opened past the onboarding overlay — blocking state: {diag}")
             page.wait_for_function(
                 """() => {
                   const ep = document.getElementById('set-defaultEpSelect');
