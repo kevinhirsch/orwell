@@ -11,6 +11,7 @@ import {
   AGE_BANDS, AGE_ELIGIBILITY_FLOOR, ageBandOf,
 } from "../../src/engine/diversityConstants";
 import { buildPortraitPrompt } from "../../src/engine/portraitPrompts";
+import { nameGenderOf } from "../../src/engine/data/nameGender";
 
 /**
  * Feature 0063 — the casting diversity floor. Roles only (no names). The engine GUARANTEES the four
@@ -69,12 +70,25 @@ describe("0063 — the four floors hold across seeds", () => {
     expect(everNonbinary, "at least one seed in the set carries a nonbinary houseguest").toBe(true);
   });
 
-  it("name coheres with gender presentation (the rare balance flip is bounded ≤ 2/cast)", () => {
+  it("name coheres with gender presentation for EVERY houseguest (#1140 — 0 incoherent)", () => {
     for (const seed of SEEDS) {
-      const { layer } = layerForSeed(seed);
+      const { house, layer } = layerForSeed(seed);
+      // #1140 — the rename pass now GUARANTEES coherence: after the gender repairs are final, any draft
+      // whose name disagreed with the final presentation has its given name re-picked to match. So the old
+      // bounded "≤ 2/cast balance-flip exception" is gone — coherence is total.
       const incoherent = Object.values(layer.public).filter((p) => !p.nameCoheres).length;
-      // A byte-stable name draw can skew single-gender; the floor's last-resort flip is bounded & rare.
-      expect(incoherent, `seed ${seed}`).toBeLessThanOrEqual(2);
+      expect(incoherent, `seed ${seed}`).toBe(0);
+      // And the standing invariant the fix exists to hold: the FINAL name (the re-pick when present, else
+      // the drawn name) reads the SAME gender the facet encodes (the portrait + narration both anchor on
+      // the facet, so the name must agree). A nonbinary presentation keeps a unisex (any-presentation) name;
+      // a gendered one reads its own gender.
+      const drawnName = (id: string): string => house.npcs.find((n) => n.id === id)?.name ?? "";
+      for (const [id, pub] of Object.entries(layer.public)) {
+        const finalName = pub.name ?? drawnName(id);
+        const ng = nameGenderOf(finalName);
+        if (pub.genderPresentation === "nonbinary") expect(ng, `seed ${seed} ${id}`).toBe("unisex");
+        else expect(ng, `seed ${seed} ${id}`).toBe(pub.genderPresentation);
+      }
     }
   });
 
@@ -338,14 +352,32 @@ describe("0063 — RNG isolation: identity never bends a seeded outcome (the #33
     // (the ORWELL_DISABLE_DIVERSITY test seam), capturing the PUBLIC outcome stream (every beat's
     // public content + the eviction order + winner). Equal ⇒ the diversity sub-stream never perturbs
     // the competition/vote sequence — the descriptive attributes are non-mechanical by construction.
+    //
+    // #1140: the diversity layer now RE-PICKS houseguest NAMES to cohere with the final gender presentation
+    // (a descriptive change), so the ON run's beat prose carries DIFFERENT names than the OFF run's. That is
+    // by design and is NOT an outcome change — the mechanical truth is WHO (by id) wins/gets evicted in what
+    // order. So we NEUTRALIZE names to ids per run before comparing: each houseguest's name → their id in
+    // every beat's content. A real mechanical/content divergence (a different beat type, a different order)
+    // still shows; only the deliberate rename is tolerated. (`evictionOrder` is already id-based.)
     const capture = (seed: number): string => {
       const reg = new GameSessionRegistry();
       const sb = reg.sandboxFor(`golden-${seed}-${process.env.ORWELL_DISABLE_DIVERSITY ?? "on"}`);
       sb.session.createCharacter({ playerName: "The Player", seed });
+      // id↔name map from the initial roster (player + every houseguest), longest-name-first so a name that
+      // is a substring of another (rare) replaces correctly. Names → ids makes the stream name-independent.
+      const roster = [sb.session.getGameState().player, ...sb.session.getGameState().house]
+        .filter((h): h is NonNullable<typeof h> => !!h && typeof h.name === "string" && h.name.length > 0)
+        .map((h) => ({ id: h.id, name: h.name }))
+        .sort((a, b) => b.name.length - a.name.length);
+      const neutralize = (s: string): string => {
+        let out = s;
+        for (const { id, name } of roster) out = out.split(name).join(id);
+        return out;
+      };
       const beats: string[] = [];
       for (let i = 0; i < 5000; i++) {
         const adv = sb.session.advanceGame() as { finished: boolean; pending: { kind: string; options?: Array<{ id: string }> } | null; event?: { beat?: string; content?: string } | null };
-        if (adv.event?.content) beats.push(`${adv.event.beat}:${adv.event.content}`);
+        if (adv.event?.content) beats.push(`${adv.event.beat}:${neutralize(adv.event.content)}`);
         if (adv.pending) {
           // Deterministic passive answers (first legal option), enough to push the season to its end.
           const p = adv.pending; const o = p.options ?? [];
@@ -366,7 +398,7 @@ describe("0063 — RNG isolation: identity never bends a seeded outcome (the #33
             : p.kind === "juror-question" ? { kind: p.kind, statement: "x" }
             : { kind: p.kind };
           const sub = sb.session.submitDecision(ans as never) as { finished: boolean; event?: { beat?: string; content?: string } | null };
-          if (sub.event?.content) beats.push(`${sub.event.beat}:${sub.event.content}`);
+          if (sub.event?.content) beats.push(`${sub.event.beat}:${neutralize(sub.event.content)}`);
           if (sub.finished) break;
         }
         if (adv.finished) break;

@@ -201,11 +201,13 @@ def test_subscribe_replays_a_run_started_published_before_connect():
 
 
 def test_ring_replays_recent_invitations_but_not_unbounded():
-    """The ring is bounded and only carries invitation-class events (run-started / message-added) —
-    not every event type, and not an unbounded log."""
+    """The ring carries reconcile-invitation events (run-started / message-added / game-updated) —
+    NOT every event type, and not an unbounded log. `game-updated` is replayed (F5 first-turn edge):
+    a window opening mid-first-turn still gets the HUD-refetch ping it would otherwise miss."""
     async def main():
         sid = "adr0012-ring-bounded"
-        # A non-invitation event must NOT be ringed (it's not an attach signal).
+        # A non-invitation event (layout sync, 0064 §F) must NOT be ringed (it's not an attach/reconcile signal).
+        session_events.publish(sid, "layout-changed")
         session_events.publish(sid, "game-updated")
         session_events.publish(sid, "message-added", {"id": "x", "seq": 0})
         return await _drain_subscribe(sid)
@@ -213,7 +215,9 @@ def test_ring_replays_recent_invitations_but_not_unbounded():
     out = _run(main())
     replayed = [ev for ev in out if ev.startswith("event:") and "connected" not in ev]
     assert any("message-added" in ev for ev in replayed), "an invitation event is replayed"
-    assert not any("game-updated" in ev for ev in replayed), \
+    assert any("game-updated" in ev for ev in replayed), \
+        "game-updated is a reconcile invitation — replayed so a mid-first-turn joiner re-fetches its HUD (the F5 edge)"
+    assert not any("layout-changed" in ev for ev in replayed), \
         "a non-invitation event must NOT be ringed (avoid reconnect noise)"
 
 
@@ -325,6 +329,33 @@ def test_chat_client_shared_canonical_render_shape():
     assert chat.count("markdownModule.processWithThinking(") >= 2
     # the settled message is finalized through the one canonical bubble builder.
     assert "chatRenderer.addMessage('assistant', _combined(), model, meta_);" in chat
+
+
+def test_chat_client_mirror_does_not_full_repaint_per_delta():
+    """ADR 0012 §3.3 / refactor-roadmap R2 — the LIVE-streaming-render-parity gap (FAST tripwire).
+
+    test_chat_client_shared_canonical_render_shape pins the SETTLED shape (reasoning in a closed
+    <think> accordion) and that both paths CALL processWithThinking — but it is silent on the live
+    streaming MECHANISM, and that silence WAS the two-window 'scratch and grind'. The sender's primary
+    loop renders deltas through createStreamRenderer (freeze finalized blocks + token-fade incremental
+    tail); the observer's resumeStream path USED to full-innerHTML-repaint the whole bubble on EVERY
+    delta (renderDelta). Same shared token stream, two different live render engines → the windows
+    diverged visibly while streaming and only converged at settle when both rebuilt from /api/history.
+
+    R2 unified them: resumeStream now feeds the SHARED incremental renderer (`_renderLiveStream` →
+    createStreamRenderer) — reply into `.live-reply-content`, reasoning into a collapsed accordion (the
+    channel split) — so the observer streams through the same machinery the sender does. This is the
+    cheap source-pin tripwire (forbid the per-delta full-repaint in the mirror path); the behaviour-
+    true proof is the two-window harness docs/audits/playtest-harness/mirror_live_parity.mjs
+    (run_mirror_gate.sh), which measures that B renders DURING A's stream through the same incremental
+    renderer. GREEN once R2 unified the two live render paths."""
+    chat = _read("static", "js", "chat.js")
+    # the observer must NOT full-repaint the bubble on every delta (that is renderDelta today).
+    assert "contentDiv.innerHTML = markdownModule.processWithThinking(" not in chat, (
+        "resumeStream still full-innerHTML-repaints per delta instead of the shared incremental "
+        "createStreamRenderer — this IS the two-window live-render divergence (R2); see "
+        "docs/audits/playtest-harness/mirror_live_parity.mjs."
+    )
 
 
 def test_chat_client_adopts_canonical_session_after_stream():

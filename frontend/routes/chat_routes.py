@@ -42,6 +42,8 @@ from routes.chat_helpers import (
     _enforce_chat_privileges,
     auto_escalation_withhold,
     ensure_turn_recorded,
+    publish_game_updated_after_turn,
+    last_beat_seq,
     discard_last_user_message,
     unmark_session_framed,
     _last_message_ts,
@@ -1499,6 +1501,9 @@ def setup_chat_routes(
                 _agent_rounds = 0
                 _agent_tool_calls = 0
                 _agent_tools_called: List[str] = []  # E22: which tools actually ran this turn
+                # 0064 §B/D / F5: snapshot the user's last-seen engine beatSeq BEFORE the turn so the
+                # end-of-turn HUD-parity push can tell a committed mutation from a no-op/OOC turn.
+                _beat_seq_before = last_beat_seq(ctx.user)
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
                 _actual_model = None
@@ -1604,9 +1609,31 @@ def setup_chat_routes(
                             # narration and zero engine writes gets a bounded fallback
                             # recordInteraction so the beat has consequence and memory.
                             if ctx.game_active and full_response:
-                                asyncio.create_task(ensure_turn_recorded(
+                                # 0064 §B/D / ship-gate F5 (status/gadget half): when THIS turn already
+                                # committed a mutation (a game-engine write tool ran, or the beatSeq
+                                # advanced via the FE error-correction belts), push `game-updated` NOW
+                                # so peer windows reconcile their HUD instantly instead of polling. The
+                                # E22/0055 `recordInteraction` fallback fires fire-and-forget below and
+                                # mutates AFTER this point, so chain a second push onto its task — only
+                                # when it actually recorded (True). Both pushes are mutation-gated +
+                                # fail-soft + Vault-free (the SENDER's own HUD already refreshed
+                                # client-side; this is the PEER push the chat path was missing).
+                                publish_game_updated_after_turn(
+                                    ctx.user, _beat_seq_before, _agent_tools_called,
+                                )
+
+                                def _push_after_fallback(task, _u=ctx.user):
+                                    try:
+                                        if task.result():
+                                            from src import orwell_game_session
+                                            orwell_game_session.publish_game_updated(_u)
+                                    except Exception:
+                                        pass
+
+                                _rec_task = asyncio.create_task(ensure_turn_recorded(
                                     ctx.user, message, full_response, _agent_tools_called,
                                 ))
+                                _rec_task.add_done_callback(_push_after_fallback)
                             if full_response:
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
