@@ -61,10 +61,12 @@ DEFAULT_SETTINGS = {
     "login_particles_color": "",       # blank ⇒ default neutral white (client floor)
     "image_gen_enabled": True,
     # OOB default image model. OpenRouter is the default provider and serves Google's Gemini
-    # flash-image models via /chat/completions; gemini-2.5-flash-image is the out-of-box pick.
+    # flash-image models via /chat/completions; gemini-3.1-flash-image is the out-of-box pick —
+    # newest-generation Gemini photorealism at ~current-default cost (~1.2x gemini-2.5-flash-image,
+    # ~4x cheaper than gemini-3-pro-image), and it does reference-image identity-carry on the same key.
     # (Overridable in Settings → Image generation; the "Auto-detect" option resolves to the same
     # family — see IMAGE_AUTODETECT_CANDIDATES in src/ai_interaction.py.)
-    "image_model": "google/gemini-2.5-flash-image",
+    "image_model": "google/gemini-3.1-flash-image",
     "image_quality": "medium",
     "vision_model": "",
     "vision_enabled": True,

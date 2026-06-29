@@ -97,8 +97,8 @@ def test_preserves_providers_and_wipes_everything_else(monkeypatch, tmp_path):
     assert tables == {"model_endpoints"}, f"only the provider table may survive, got {tables}"
 
     # settings.json carries ONLY the operational flags; model SELECTIONS and user settings are
-    # gone (#860 — the selections revert to DEFAULT_SETTINGS on load: deepseek-v4-pro narrator,
-    # gemini-2.5-flash-image portraits). The stale sakana/fugu-ultra pick does NOT survive.
+    # gone (#860 — the selections revert to DEFAULT_SETTINGS on load: glm-4.7 narrator,
+    # gemini-3.1-flash-image portraits). The stale sakana/fugu-ultra pick does NOT survive.
     with open(settings, encoding="utf-8") as f:
         kept = json.load(f)
     assert kept == {

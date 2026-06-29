@@ -61,11 +61,12 @@ from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_
 # Auto-detect image-model candidates, tried in order when no image_model is configured (the
 # settings "Auto-detect"/"default" option, i.e. an empty image_model). OpenRouter is the default
 # provider and serves Google's Gemini flash-image models via /chat/completions, so the Gemini ids
-# LEAD — the OOB "default" therefore resolves to gemini-2.5-flash-image (the product default). The
+# LEAD — the OOB "default" therefore resolves to gemini-3.1-flash-image (the product default). The
 # OpenAI ids remain as fallbacks for an OpenAI/Azure-direct setup. The exact `google/`-prefixed id
 # leads each family so the catalog match (_resolve_model: exact-before-partial) can't partial-match
 # a non-image chat sibling such as `google/gemini-2.5-flash`.
 IMAGE_AUTODETECT_CANDIDATES = (
+    "google/gemini-3.1-flash-image", "gemini-3.1-flash-image",
     "google/gemini-2.5-flash-image", "gemini-2.5-flash-image",
     "google/gemini-3-flash-image", "gemini-3-flash-image",
     "gpt-image-1.5", "gpt-image-1", "dall-e-3",
