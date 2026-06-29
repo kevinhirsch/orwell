@@ -3,7 +3,7 @@ import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "./characterFactory";
 import type { Houseguest } from "./characterFactory";
-import { nameGenderOf } from "./data/nameGender";
+import { nameGenderOf, pickGivenNameFor } from "./data/nameGender";
 import type { NameGender } from "./data/nameGender";
 import {
   MIN_BIPOC, MIN_QUEER, MIN_PER_BINARY_GENDER, MIN_PER_AGE_BAND, MAX_PER_AGE_BAND,
@@ -47,12 +47,25 @@ export interface PublicDiversityFacets {
   /** How the houseguest presents — descriptive PUBLIC facet, never a competition input (§3.3). */
   genderPresentation: GenderPresentation;
   /**
+   * #1140 — the (possibly RE-PICKED) display name. The given-name TOKEN is swapped to one of the final
+   * `genderPresentation` (KEEPING the surname) whenever the drawn name disagreed with the final facet, so
+   * the NAME, the portrait, and the narration all read the same gender (no "Marlon, a woman" mismatch).
+   * PRESENT only when the name actually changed from the drawn one; ABSENT ⇒ the drawn name already cohered
+   * (the caller keeps the existing Character name). Descriptive-only — a public string, never a game input.
+   */
+  name?: string;
+  /**
    * The (possibly age-spread-REPAIRED) age — descriptive only (age is NOT a competition/vote input), so
    * the caller writes it back onto the public Character to satisfy the age-band floor. Equal to the
    * drawn age when no repair was needed. The ageLook (0058) then reads this so text+portrait agree.
    */
   age: number;
-  /** True when the gender presentation coheres with the NAME (name is unisex, or matches name-gender). */
+  /**
+   * #1140 — now ALWAYS true by construction: after the gender repairs are final, any draft whose name
+   * disagreed with the final presentation has its given name RE-PICKED to match (above). Retained as
+   * provenance (`coherenceFlipped` still records that the gender-balance repair flipped a draft), and as a
+   * standing invariant the tests assert: `nameGenderOf(name)` agrees with `genderPresentation` for everyone.
+   */
   nameCoheres: boolean;
   /** A PUBLICLY-OUT orientation (the house knows it) — a public facet; ABSENT when held privately. */
   outOrientation?: Orientation;
@@ -109,6 +122,9 @@ interface Draft {
   out: boolean;
   /** True when the balance repair had to flip a clearly-gendered name (a bounded, documented exception). */
   coherenceFlipped?: boolean;
+  /** #1140 — the RE-PICKED display name when the drawn name disagreed with the final gender presentation
+   * (given-name token swapped to the target gender, surname kept). Absent ⇒ the drawn name already cohered. */
+  renamed?: string;
 }
 
 const orientationSpec = (o: Orientation) => ORIENTATIONS.find((s) => s.orientation === o)!;
@@ -169,6 +185,11 @@ const isKnownOrientation = (v: unknown): v is Orientation =>
  * per NPC id; each recognized field SEEDS the initial deal in place of the seeded random pick (an
  * unrecognized/absent field falls back to the seeded pick), then the SAME repair pipeline below runs.
  * Absent `proposed` (the live-game path / no model) is byte-identical to the pre-#544 deal.
+ *
+ * #1140 — the gender-coherent RENAME pass (step 7.5) avoids collisions only with given names already in THIS
+ * cast. CROSS-SEASON name memory (NAME-1/#547) is applied SEPARATELY by the caller AFTER this layer (the
+ * `decollidePriorNames` post-pass in GameSessionAdapter), so the warm-cast and plain-restart paths — which
+ * adopt vs. re-seed — stay byte-identical here (this layer never sees prior-season names).
  */
 export function generateDiversityLayer(
   seed: number, npcs: readonly Houseguest[], proposed?: Record<EntityId, ProposedIdentityFacets>,
@@ -352,24 +373,67 @@ export function generateDiversityLayer(
     if (!queerByOrientation.some((d) => d.out)) queerByOrientation[0]!.out = true;
   }
 
+  // ── 7.5. #1140 — RE-PICK the given name to MATCH the final gender presentation ────────────────────
+  // Root cause: the NAME is drawn FIRST on the byte-stable MAIN house stream; the gender presentation is
+  // decided HERE, LATER, and can DISAGREE with the name (the gender-balance flip above, a unisex-overlap
+  // name like "Adrian"/"Marlon"/"Shawn" that reads gendered to an image model, or an AI-override via
+  // recordCastIdentity). The PORTRAIT reads the FACET but also puts the NAME in the prompt, so the image
+  // model renders the NAME's gender — the face contradicts the stored facet. Fix: now that every gender
+  // repair is FINAL, swap the given-name TOKEN to one of the target gender (KEEPING the surname) for any
+  // draft whose final presentation is a GENDERED value the name doesn't already read as. The name then
+  // reads the SAME gender the portrait + narration encode — coherence by construction.
+  //
+  // CALIBRATION-NEUTRALITY (load-bearing): this runs on a DEDICATED `:diversity:rename` sub-stream forked
+  // off the cast seed (NEVER the shared house/competition/vote stream, NOR any other diversity sub-stream),
+  // and mutates ONLY a descriptive `name` STRING — never an outcome input. So the seeded competition / vote
+  // / jury sequence is BYTE-IDENTICAL with the rename on vs. off (proven by the heavy jury + gradient gates
+  // and the ORWELL_DISABLE_DIVERSITY golden path).
+  //
+  // CAVEAT (why the re-pick is HERE, not earlier): the drawn name is the seed key for several SIDE streams
+  // (appearance / hidden / voice in characterFactory.ts), which run BEFORE this diversity layer. The re-pick
+  // is applied AFTER generation (here / at the fold), so it does NOT retroactively change those side draws —
+  // which is CORRECT for byte-stability. Do NOT move this earlier: re-picking the name on the MAIN stream
+  // would shift every downstream stat / volatility / age draw and break the calibration goldens.
+  const renRng = new SeededRandom(hashSeed(`${seed}:diversity:rename`));
+  // Track the given names in play so a re-pick keeps the cast's given names unique (the main-stream draw's
+  // own invariant) — seeded with every current first token, then updated as each draft is renamed. (Cross-
+  // season avoidance is a SEPARATE post-pass in the caller — see the doc-comment above.)
+  const usedGiven = new Set(drafts.map((d) => d.name.split(" ")[0]!));
+  for (const d of drafts) {
+    const g = d.genderPresentation;
+    if (g !== "man" && g !== "woman") continue; // nonbinary keeps its (unisex-coherent) name
+    if (nameGenderOf(d.name) === g) continue; // name already reads UNAMBIGUOUSLY as the final gender
+    const parts = d.name.split(" ");
+    const oldGiven = parts[0]!;
+    const surname = parts.slice(1).join(" "); // keep the whole surname (the corpus surname is one token)
+    usedGiven.delete(oldGiven); // free the old given name before picking the replacement
+    const newGiven = pickGivenNameFor(g, renRng, usedGiven);
+    usedGiven.add(newGiven);
+    d.renamed = surname ? `${newGiven} ${surname}` : newGiven;
+  }
+
   // ── 8. Split across the Vault Wall ───────────────────────────────────────────────────────────────
   const pub: Record<EntityId, PublicDiversityFacets> = {};
   const privateOrientations: Record<EntityId, Orientation> = {};
   for (const d of drafts) {
-    // Name coheres when it was never flipped against a clearly-gendered name: a unisex name presents any
-    // way, and a gendered name kept its name-gender. The bounded `coherenceFlipped` exception is false.
-    const nameCoheres = !d.coherenceFlipped
-      && (d.nameGender === "unisex"
-        || (d.nameGender === "man" && d.genderPresentation === "man")
-        || (d.nameGender === "woman" && d.genderPresentation === "woman")
-        // a unisex name flipped to nonbinary still coheres; a gendered name to nonbinary does too only if
-        // it was a unisex-origin draft — which `coherenceFlipped` already guards, so nonbinary here coheres.
-        || d.genderPresentation === "nonbinary");
+    // #1140 — the FINAL name (the re-pick when one happened, else the drawn name). Coherence is now a
+    // GUARANTEE the step-7.5 pass establishes, so we compute `nameCoheres` against the FINAL name as a
+    // standing self-check: a gendered presentation reads its own name-gender, and nonbinary keeps a unisex
+    // name. (The `coherenceFlipped` provenance is retained on the draft but no longer makes a name incohere.)
+    const finalName = d.renamed ?? d.name;
+    const finalNameGender = nameGenderOf(finalName);
+    const nameCoheres =
+      d.genderPresentation === "nonbinary"
+        ? finalNameGender === "unisex"
+        : finalNameGender === d.genderPresentation;
     pub[d.id] = {
       ethnicity: d.ethnicity.heritage,
       bipoc: d.ethnicity.bipoc,
       skinTone: d.ethnicity.skinTone,
       genderPresentation: d.genderPresentation,
+      // PRESENT only when the name actually changed (the caller writes it back onto the Character); ABSENT
+      // ⇒ the drawn name already cohered and the existing Character name stands.
+      ...(d.renamed !== undefined ? { name: d.renamed } : {}),
       age: d.age,
       nameCoheres,
       ...(d.out && isQueer(d.orientation) ? { outOrientation: d.orientation } : {}),

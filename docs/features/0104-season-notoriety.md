@@ -1,11 +1,23 @@
 # 0104 — Season-over-season notoriety (a reputation that precedes you into a new cast)
 
-> **Status:** 📝 **SPEC — drafted 2026-06-25, not yet built. PO-REVIEW required (see the rulings
-> section below — four owner decisions gate the build).** Tracks issue **#886**.
-> **Gate (planned):** engine (Vitest + a property/distribution gate + the dependency-cruiser Vault
-> boundary + BDD `0104-season-notoriety.feature`); the calibration spine stays the proof that it is
-> opt-in/byte-identical (`tests/property/juryReach.property.test.ts` + the UAT lane unchanged when the
-> flag is off).
+> **Status:** ✅ **BUILT (2026-06-27).** PO review resolved (owner, 2026-06-27 — R1 bounded open-set
+> `NotorietySummary`; R2 Day-1 bias + narrative reference with **per-NPC recognition** wiggle room; R3
+> per-user/per-character isolation; R4 **diegetic opt-in** — return as the same character vs. create a new
+> one — the character identity + notoriety persist at the account level across a season-reset). See
+> `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #886. Tracks issue **#886**. Seams:
+> `src/engine/notoriety.ts` (pure derive/accumulate/bias) +
+> `src/engine/notorietyConstants.ts` (the single `NOTORIETY` tunable) + `src/ports/UserNotorietyStore.ts`
+> (`FileUserNotorietyStore`/`InMemoryUserNotorietyStore`) + `registry.resetUser`/`setOnRestart` (derive at
+> the season-end terminal, fold on a `keepCharacter`→`carriesNotoriety` restart) + the one bias term in
+> `GameSessionAdapter.seedFirstImpressions`.
+> **Gate (met):** engine (Vitest) — `tests/unit/notoriety.test.ts` (derive/accumulate/bias/recognition +
+> the live day-one fold + the diegetic opt-in + cross-user isolation), `tests/unit/notorietyOutcomeNeutral.test.ts`
+> (the **dedicated calibration-neutrality proof**: SHA256 of the seeded outcome + move-in stream, byte-identical
+> off vs a fresh-character path; the NPC↔NPC layer byte-identical even WITH a notoriety), `tests/unit/notorietyVault.test.ts`
+> (the Vault sentinel sweep, player AND admin) + the dependency-cruiser Vault boundary + BDD
+> `0104-season-notoriety.feature` (wired in `cucumber.cjs`). The calibration spine stays the proof that it is
+> opt-in/byte-identical (`tests/property/juryReach.property.test.ts` + `calibrationGradient` re-run green with the
+> flag off).
 > **Builds directly on (does NOT duplicate):**
 > - **The seasons-as-levels / season-restart spine** — `registry.resetUser` (`src/composition/registry.ts`)
 >   is the *single* season-restart door (audit E1/D1/R1): it rotates the dead season's durable saves off

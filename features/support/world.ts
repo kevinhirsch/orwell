@@ -291,6 +291,19 @@ export class BbWorld extends World {
   dealThreatBefore?: number;
   dealVault?: VaultDatum;
 
+  // Negotiated deal duration (0109) scratch state.
+  ddLedger?: import("../../src/engine/deals").DealLedger;
+  ddLedgerB?: import("../../src/engine/deals").DealLedger;
+  ddRel?: RelationshipModel;
+  ddRelB?: RelationshipModel;
+  ddDeal?: import("../../src/domain/deal").Deal;
+  ddDealB?: import("../../src/domain/deal").Deal;
+  ddThreat0?: number;
+  ddThreat0B?: number;
+  ddTrust0?: number;
+  ddEdgeAfter?: import("../../src/engine/relationshipConstants").EdgeSignals;
+  ddEdgeRef?: import("../../src/engine/relationshipConstants").EdgeSignals;
+
   // NPC confessionals (0040) scratch state.
   confRel?: RelationshipModel;
   confessor?: EntityId;
@@ -589,6 +602,37 @@ export class BbWorld extends World {
     awake?: Eid[];
     asleep?: Eid[];
     seasonResult?: { seed: number; status: string; f2Win: boolean; playerCompWins: number };
+  };
+
+  // Feature 0066 — in-game time of day & the nightly sleep economy scratch state (one bag).
+  sleep?: {
+    clockEnabled?: boolean;
+    perConversation?: boolean;
+    socialFatigue?: boolean;
+    multiNight?: boolean;
+    session?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+    reg?: import("../../src/composition/registry").GameSessionRegistry;
+    orch?: import("../../src/composition/orchestrator").Orchestrator;
+    user?: string;
+    phasesSeen?: Set<string>;
+    restCue?: string;
+    timeOfDay?: string;
+    asleep?: string[];
+    bedHour?: number;
+    restedWinRate?: number;
+    tiredWinRate?: number;
+    favoriteCanLose?: boolean;
+    depthBefore?: number;
+    depthAfter?: number;
+    phaseBefore?: string;
+    phaseAfter?: string;
+    fatigueN1?: number;
+    fatigueN3?: number;
+    fatigueRecovered?: number;
+    seededOutcomeOff?: string;
+    seededOutcomeOn?: string;
+    swayOff?: number;
+    swayTired?: number;
   };
 
   // Feature 0100 — the jury grudge book scratch state (one bag).

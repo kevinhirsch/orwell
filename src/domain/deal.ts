@@ -43,6 +43,20 @@ export interface Deal {
    * Optional for pre-E43 saves (those never expire by week).
    */
   madeWeek?: number;
+  /**
+   * Feature 0109 — a NEGOTIATED term, in EXACTLY one of two forms (data only; the engine reads it).
+   * `expiresWeek` is the explicit week the parties named out loud (made week 3, "two weeks" →
+   * `expiresWeek: 5`) — it generalizes the kind-implied horizon, is the player's OWN knowledge (a
+   * term they negotiated), and an action breaking the deal at/after it is NOT a betrayal. Absent ⇒
+   * the kind-implied horizon (back-compat — pre-0109 saves load unchanged).
+   */
+  expiresWeek?: number;
+  /**
+   * Feature 0109 — the duration was left unspoken: the deal is simply LABELED `vague` (no numeric
+   * expiry, no per-party belief object — owner ruling "just labeled as vague is enough"). A broken
+   * `vague` deal folds a SOFTER betrayal-shock (built-in ambiguity). Absent ⇒ not vague.
+   */
+  vague?: boolean;
 }
 
 /** The binding horizon of a deal kind (audit E43): one HOH reign, or the whole season. */

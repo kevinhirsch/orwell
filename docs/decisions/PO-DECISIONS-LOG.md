@@ -9,6 +9,103 @@ live ledger of owner calls as they happen.
 
 ---
 
+## 2026-06-27
+
+**PO-review board cleared — all nine flagged specs resolved this session** (the "PO review / owner
+rulings needed" set). Companion decision notes posted on each GitHub issue; specs updated in place.
+
+- **Secrets-as-power = ONE build (0093 #862 + 0099 #880).** Build leverage / expose / **trade** as a
+  single mechanic — one ledger, one constants module, one `factId`-ownership check (do not split into
+  two "use a secret" systems). Rulings: **expose is a first-class `exposeSecret` lever** (engine-resolved
+  seeded standing fold + exposer backlash + recorded `surfaceInformationTo` pathway), **not** narrated-only
+  (0093 R2); **leverage is an optional descriptor on the existing `makeDeal`** — no separate deal kind; the
+  threat **persists while the deal is open**, **exposing spends** the secret (0093 R4); **ceiling =
+  real-but-recoverable** — bounded, seeded, felt, never deterministic, for leverage *and* expose/trade
+  (0093 R1 / 0099 R1 / 0099 R2 = build together); surfacing stays a modeled pathway, never a Vault read
+  (0093 R3 / 0099 R3); the player may only weaponize a `factId` they legitimately hold (0099 R4) — *except*
+  via the new bluff path below.
+
+- **Deception is first-class across the secrets layer (new owner direction).** Any use — leverage /
+  expose / trade — may be **truthful or fabricated**, and **both NPCs and the player can lie / bluff**
+  (generalizes the already-sanctioned 0075 NPC-lie primitive). Reuses the 0075 `truthful` flag + per-season
+  lie cap + the **passive lie-catch** (now pulled into this build): a lie is believed weighted by
+  trust-in-source + plausibility (0094), folds on *belief* not truth, and a later contradicting pathway
+  delivers a betrayal-grade, recoverable hit to the liar. **Vault-safety:** the `factId`-ownership guard
+  **stays** for *real* secrets (no Vault-minting); a **bluff** is a separate sanctioned path that invents a
+  claim, reads nothing from the Vault, and the engine never confirms whether a bluff happened to match a
+  real truth. *Open build-tuning:* whether the player's bluffs are capped per season like 0075 confide-lies.
+
+- **NEW — deal duration as a factor (amends 0039; new spec drafted, `docs/features/0109-deal-duration.md`).**
+  A deal gains an optional negotiated duration: either an **explicit** term-count ("safe for two weeks" →
+  `expiresWeek`) or simply labeled **`vague`**. Betrayal-shock (0026) **scales with remaining deal life** —
+  breaking a deal with two weeks left hurts more than breaking one about to lapse, so "when do you turn on
+  an ally?" becomes a weighted decision with real drama. A `vague` deal's break reads with built-in
+  ambiguity (a softer, fuzzier shock); **no per-party belief tracking** (owner: *"just labeled as vague is
+  enough"*). Definiteness splits along ADR 0005 — the fuzzy "how long" lives in the open-set `terms` prose,
+  the engine keeps the bounded interpretation for reconciliation.
+
+- **0097 suspicion ledger (#878) — FROZEN (parked, not deleted; closed *not planned*, reopenable).** Not
+  load-bearing; risks the game over-telling the player / paranoia-as-spreadsheet (against ADR 0003 and the
+  "the feeling is theirs" mandate, 0017/0020). If revived: DR-style OOC surface (R1), reveal-time-only
+  scoring (R2), player-authored player-knowledge with `NO_NPC_PATHWAY` (R3).
+
+- **0098 confidence-calibrated reads (#879) — FROZEN (parked, not deleted).** **Standing principle for all
+  future specs:** *a player input must never modulate a seeded outcome distribution — not the direction, and
+  not even the variance.* The certainty is the human's to feel; the game must not model "how sure you are"
+  and let it touch outcomes.
+
+- **0103 edit-bay foreshadowing (#885) — FROZEN (parked, not deleted).** Spoiler-adjacent in *feel* even
+  though structurally Vault-safe; the 0102 daily-recap forward-nod already covers bounded foreshadowing, and
+  this layer is the riskier of the two on the anti-spoiler mandate.
+
+- **0102 Day-1 experience (#875; sub #905–#909).** Casting **keeps strategy but at category level only** —
+  dispositions ("target the comp threats"), relationship goals ("a showmance"), alliance shapes ("all-women
+  alliance"), play-style — **no houseguest-specific kill-list**; player framing + mid-season-re-read fuel,
+  never an outcome lever (R1/#905/#909). Premiere = a **structured real-show sequence**: opening **mingle** →
+  **living-room champagne circle** (each houseguest introduces their public persona + an observable
+  vibe/body-language read, Vault-free conduct only) → second **mingle** → **first HOH** (a real seeded comp);
+  "no one invisible" is satisfied by the circle, replacing the meet-all-15 gate (R2/#906/#908). Three
+  sequenced PRs after the in-flight dedup/cast-gallery/responsive work (R3). Curiosity needle Vault-free
+  (R4/#909).
+
+- **0102 weekly recap → DAILY recap (#884) — redesigned.** A **daily "day in review" pop-up window** (built
+  on the window kit), fired at the player's in-game **bedtime** (0066), **replacing the weekly recap**.
+  Vault-safe (built only from the player's witnessed/known events); the "tomorrow…" forward-nod stays
+  non-committal and suppresses on a quiet day. The `0102-weekly-recap-cliffhanger.md` filename is now a
+  misnomer — rename to daily recap.
+
+- **0104 season notoriety (#886).** A bounded open-set **`NotorietySummary`** crosses the season door
+  (placement / vote record / relationship trajectory / comp wins / jury respect / short glosses — never
+  Vault/soul/hidden state) (R1). Influence = **both** a bounded seeded archetype-shaded **Day-1 bias** on the
+  new cast's reads of the player (direction only — never a comp/vote roll, never a number, never the player's
+  own edges) **and** **narrative reference**, **modulated per-NPC by a seeded recognition level** (not everyone
+  knows you; some hold a *distorted* version — 0094) so reputation matters but never rigidly overrides fresh
+  discovery (R2). Per-user / per-character isolation (R3). **Opt-in is diegetic:** at a new season the player
+  chooses to return as the **same character** (carry notoriety) or **create a new character** (clean slate ⇒
+  byte-identical, calibration untouched); the character identity + notoriety **persist at the account level**
+  across a season-reset (R4).
+
+- **0066 Phase-2 (#1125 opened) — build all three.** Per-conversation clock advance (*build first* — most
+  player-felt, pacing-only, no calibration risk), NPC next-day social fatigue, and the compounding
+  multi-night fatigue meter — all behind the opt-in byte-identical discipline. Engine `ORWELL_TIME_OF_DAY`
+  env default stays OFF for calibration; the FE session default stays ON for real play (ruling #583).
+
+**Soft-tunable sweep (non-blocking "Open / to confirm" knobs):**
+
+- **Relationship & temperature constants** (0001 / 0002 / 0017 §9 / 0006) — **leave at the current calibrated
+  values**; move them only via the UAT / heavy-sim band, never hand-tweak off the calibrated floor (goal met
+  2026-06-21; do not lower `gameRespect`). No change.
+- **Zeitgeist capture** (0062) — confirm the **one-time 7-day offset** (the rolling alternative breaks
+  sequestration), a small/bounded capture budget, and that flavor-divergence between two live captures of the
+  same seed is acceptable. No change.
+- **Engine double-buffer for occupancy** (ADR 0009/0011/0012) — **keep deferred** as a post-launch refactor;
+  the FE-side fix is shipped, green, and zero-risk.
+- **Edge auth gate** (ADR 0007) — *recommended:* add a Cloudflare Access email-OTP allow-list as
+  defense-in-depth. **Approved per recommendation; ships in its own implementation PR (a deployment/security
+  posture change), not this docs PR.**
+- **Session TTL** (ADR 0007 / #581) — *recommended:* shorten the 7-day FE session TTL + add server-side
+  revocation on logout. **Approved per recommendation; its own implementation PR.**
+
 ## 2026-06-23
 
 - **Live-LLM verification bar to CLEAR a model-behavior issue: ≥3 passes across DIFFERING scenarios.**

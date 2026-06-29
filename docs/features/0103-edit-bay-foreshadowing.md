@@ -1,6 +1,6 @@
 # 0103 — Edit-bay foreshadowing (the show is telling you something)
 
-> **Status:** 🟡 **PO-REVIEW SPEC — needs owner rulings before build (see § "PO review" below).**
+> **Status:** ❄️ **FROZEN — parked by owner (2026-06-27); preserved, not built. #885 closed *not planned* (reopenable).** Spoiler-adjacent in *feel* even though structurally Vault-safe; the 0102 daily-recap forward-nod already covers bounded foreshadowing. See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27). The original proposal follows unchanged.
 > Tracks **#885**. This is a *design proposal awaiting decisions*; nothing here is implemented. It is
 > the **anticipation companion** to **0092** (secret-pacing drip — the *payoff* arrives; 0103 plants
 > the *foreshadow* that makes the payoff land as "I knew it") and to the **weekly recap 0102** (its
