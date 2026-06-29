@@ -283,6 +283,31 @@ export const DEAL_IMPACTS = {
 } as const;
 
 /**
+ * Deal-DURATION betrayal scaling (feature 0109 — the single tunable home for "when do you turn?").
+ * A break's seeded betrayal-shock (BETRAYAL_SHOCK, applied by `DealLedger.applyBreak`) is multiplied
+ * by a bounded scale derived from how much NEGOTIATED life the deal had left — NEVER inlined at the
+ * call site (the B59 grep gate). Closed-set, engine-owned (mandate #3 / ADR 0005): the model proposes
+ * the open-set "how long" prose; these numbers are the engine's alone, so a proposal can never pump
+ * the size of a betrayal. The Vault Wall holds: the scale is a hidden magnitude, never crossed to the
+ * player or admin (the `expiresWeek` the player negotiated is a TERM, not this derived factor).
+ *
+ *   • `perWeekRemaining` — each whole week of remaining explicit term ADDS this much to the scale,
+ *     so stabbing a freshly-renewed (many-weeks-left) ally hurts more than one about to lapse.
+ *   • `maxScale` — the cap: remaining-life can amplify the shock at most this far (a bound, never a
+ *     runaway). 1 + perWeekRemaining·weeksLeft, clamped to this.
+ *   • `vagueSoften` — a `vague` (unspoken-term) deal's break folds a SOFTER shock by this factor
+ *     (< 1): built-in ambiguity discounts the betrayal — no clean named term was violated.
+ *
+ * Identity floor: a no-duration / no-label break scales by 1.0 (`breakSeverityScale` returns 1),
+ * so the pre-0109 fold is byte-identical (the calibration-neutrality proof).
+ */
+export const DEAL_DURATION = {
+  perWeekRemaining: 0.2,
+  maxScale: 1.6,
+  vagueSoften: 0.6,
+} as const;
+
+/**
  * Feature 0088 — a derived carriage word from the live NPC→player edge.
  * A sibling of `relationshipLabel`, oriented at the player and delta-aware
  * (drift = warming / cooling / steady since a per-week anchor). Pure read,

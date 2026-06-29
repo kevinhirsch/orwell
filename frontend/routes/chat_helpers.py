@@ -233,6 +233,18 @@ _CEREMONY_RESOLVE_PHASES = frozenset({"nominations", "veto-ceremony", "eviction"
 # beat of veto-competition and is driven the same way (the model then voices the real six).
 _COMP_DRIVE_PHASES = frozenset({"hoh-competition", "veto-competition"})
 
+# #1127 — the spectator-ceremony beats whose runway must be HELD the moment the player LANDS on them
+# (not only when the pre-resolve advances INTO them). The documented force-march is the HOH-crown →
+# NOMINATIONS gap: an NPC wins HOH, the staged HOH comp completes through the player's OWN per-round
+# decisions, so the engine transitions to phase=nominations via submitDecision (NOT via this
+# pre-resolve's advance), and the arm-on-advance path never armed a window for it — so the very first
+# spectator turn pre-resolved the NPC noms off-screen with ZERO playable time to work the new HOH.
+# Scoped to `nominations` ONLY and DELIBERATELY EXCLUDING `eviction`/`finale`: the eviction reveal is
+# the E12 staged secret-ballot drip (the player has already voted; holding it would wedge the reveal),
+# and the veto-ceremony / later beats already get their window via the arm-on-advance path. Surgical by
+# design — this closes the one evidence-backed gap without touching the staged-reveal cadence.
+_LANDED_RUNWAY_PHASES = frozenset({"nominations"})
+
 
 # ── The SOCIAL RUNWAY (critical — the "force-march through ceremonies" defect) ──────────── #
 #
@@ -266,6 +278,35 @@ _SOCIAL_RUNWAY_TURNS = 2  # spectator turns of guaranteed lingering after a cere
 _RUNWAY_LEFT: dict = {}
 _RUNWAY_SIG: dict = {}
 
+# #1127 — the (week:phase) signature a user has ALREADY spent a social runway on, so a SPENT runway is
+# not re-armed the instant it empties (which would loop the player in an endless lull and the ceremony
+# would never be driven). `_RUNWAY_SIG` only remembers the LAST armed sig and clears once spent; this
+# is the durable "we've lingered through this beat — drive it now" memory that lets a spectator-ceremony
+# beat the player LANDED ON via their OWN decision (the staged HOH comp completing to phase=nominations
+# when an NPC won — the crown→nominations gap, the original force-march) arm a runway WITHOUT re-arming a
+# beat we already held. One slot per user (the latest lingered sig); cleared per user by
+# `clear_social_runway`.
+_RUNWAY_LAST_DONE: dict = {}
+
+# #1127 hardening — the runway state above is keyed by `user`, but the FE-internal `user` is `None`
+# whenever auth is OFF (`AUTH_ENABLED=false`): the `x-orwell-user` header is ENGINE-isolation only,
+# not FE auth, so an unauthenticated request carries no FE user. Keying the runway directly on `None`
+# made the post-HOH hold go SILENTLY INERT under auth-off — the very posture the live-verify recipe
+# (SOUL lesson 17) runs in — so the montage returned (proven live: Run 1 montaged with user=None;
+# Runs 2-3 with a real cookie user PASSED). `_runway_key` collapses a `None` user onto a STABLE
+# sentinel so the hold arms + holds in EVERY posture; a PRESENT user keys exactly as before (no
+# behavior change for auth-on). Auth-off is single-user by nature (one FE-internal identity), so a
+# fixed sentinel is a correct, stable key across that session's turns.
+_ANON_RUNWAY_KEY = "_anon"
+
+
+def _runway_key(user):
+    """The dict key for this user's social-runway state. Falls back to a stable sentinel when the
+    FE-internal `user` is `None` (auth-off), so the post-HOH hold is never silently inert. A present
+    user keys exactly as today."""
+    return user if user is not None else _ANON_RUNWAY_KEY
+
+
 # The engine's own social beat (a real moment prompt, momentPrompts.ts `social`): a quieter beat of
 # conversations/bonding/scheming. Used as the moment OVERRIDE while a runway holds, so the GM plays
 # the lingering, never the not-yet-resolved ceremony.
@@ -296,19 +337,22 @@ def _player_signals_ready(player_msg) -> bool:
 
 def _arm_runway(user, sig: str) -> None:
     """Arm a fresh social runway for `user` keyed to the `(week:phase)` we just entered. Called when
-    the pre-resolve drives a ceremony and lands the player in a NEW spectator beat — the NEXT few
-    turns are theirs to socialize before the following ceremony is driven."""
-    if user is None:
-        return
-    _RUNWAY_LEFT[user] = _SOCIAL_RUNWAY_TURNS
-    _RUNWAY_SIG[user] = sig
+    the pre-resolve drives a ceremony and lands the player in a NEW spectator beat — OR when the
+    player LANDS on a fresh spectator-ceremony beat via their own decision (#1127, the crown→
+    nominations gap) — so the NEXT few turns are theirs to socialize before the ceremony is driven.
+    Keys via `_runway_key` so the hold also arms under auth-off (`user is None` ⇒ stable sentinel)."""
+    key = _runway_key(user)
+    _RUNWAY_LEFT[key] = _SOCIAL_RUNWAY_TURNS
+    _RUNWAY_SIG[key] = sig
 
 
 def clear_social_runway(user) -> None:
     """Drop any held runway for a user — the game reset/ended, so the next ceremony should not be
     held back by stale lingering state. Pacing only; safe to call when none is armed."""
-    _RUNWAY_LEFT.pop(user, None)
-    _RUNWAY_SIG.pop(user, None)
+    key = _runway_key(user)
+    _RUNWAY_LEFT.pop(key, None)
+    _RUNWAY_SIG.pop(key, None)
+    _RUNWAY_LAST_DONE.pop(key, None)  # #1127: forget the lingered-through marker on reset/end
 
 
 # ── The pending-decision BARRIER (a chat↔engine DESYNC class) ──────────── #
@@ -1943,8 +1987,17 @@ def _hold_for_social(game_state: dict) -> dict:
     """Return the state with its moment overridden to the engine's `social` beat, so the framing
     builds the social moment prompt (lingering/scheming) instead of the not-yet-resolved ceremony.
     A copy — never mutate the caller's dict (the original phase/week stay intact for the HUD)."""
+    return _with_moment(game_state, _SOCIAL_MOMENT)
+
+
+def _with_moment(game_state: dict, moment: str) -> dict:
+    """Return a COPY of the state with its `moment` overridden to `moment`, so `apply_game_framing`
+    builds THAT moment's prompt (e.g. the `nominations` ceremony framing) while the HUD's real
+    phase/week stay intact. Pacing/framing only — never mutates the caller's dict, never touches an
+    outcome (#1127: used to frame a just-resolved NPC nomination ceremony as a WITNESSED `nominations`
+    beat so the model PLAYS it, instead of the model being framed on the next beat ahead)."""
     held = dict(game_state)
-    held["moment"] = _SOCIAL_MOMENT
+    held["moment"] = moment
     return held
 
 
@@ -1989,16 +2042,50 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
 
         sig = _runway_sig(game_state)
         ready = _player_signals_ready(player_msg)
-        left = _RUNWAY_LEFT.get(user, 0)
+        # #1127 hardening — key runway state via `_runway_key` so a `None` user (auth-off) still arms
+        # and holds. The arm/hold/landed-arm paths below ALL key on `rkey`, never `user` directly, so
+        # the post-HOH hold works in every auth posture (an auth-on present user keys exactly as today).
+        rkey = _runway_key(user)
+        left = _RUNWAY_LEFT.get(rkey, 0)
         # HOLD the social runway: still counting down for THIS beat and the player hasn't asked to
         # move on. We give them the engine's `social` moment and do not advance — genuine social
         # opportunity before the next ceremony (the force-march fix). Readiness cuts it short.
-        if _RUNWAY_SIG.get(user) == sig and left > 0 and not ready:
-            if user is not None:
-                _RUNWAY_LEFT[user] = left - 1
+        if _RUNWAY_SIG.get(rkey) == sig and left > 0 and not ready:
+            _RUNWAY_LEFT[rkey] = left - 1
             logger.info("[orwell] social runway holding %s for user=%s (%d left) — lingering before "
                         "the next ceremony", phase, user, left - 1)
             return _hold_for_social(game_state)
+
+        # #1127 — the CROWN→NOMINATIONS gap (the original force-march, evidence-backed). When an NPC wins
+        # HOH, the staged HOH comp completes through the PLAYER'S OWN per-round decisions, so the engine
+        # transitions to phase=nominations via submitDecision — NOT via this pre-resolve's advance. The
+        # arm-on-new-sig block below only fires when the pre-resolve ITSELF drove the transition, so that
+        # path never armed a runway for the beat the player just LANDED on; the spectator would be fast-
+        # forwarded straight past the post-HOH scheming window AND the nomination ceremony (NPC noms
+        # pre-resolve off-screen on the very first spectator turn). So: when the player LANDS on a fresh
+        # `nominations` beat (`_LANDED_RUNWAY_PHASES` — deliberately NOT eviction/finale: the eviction
+        # reveal is the E12 staged ballot drip and must never be held) that we have NOT armed a runway for
+        # and have NOT already lingered through, ARM one HERE and HOLD for social FIRST — guaranteed
+        # playable turns to work the new HOH before noms are driven for real. Readiness ('let's see the
+        # noms') cuts it short and falls through to drive it now. We mark the beat done the moment its
+        # runway is spent (just below) so an emptied runway is never re-armed (which would loop the lull
+        # forever and never drive the ceremony).
+        if phase in _LANDED_RUNWAY_PHASES:
+            already_lingered = (_RUNWAY_LAST_DONE.get(rkey) == sig
+                                or (_RUNWAY_SIG.get(rkey) == sig and left == 0))
+            if already_lingered:
+                # The runway for THIS beat is spent — remember that so we don't re-arm it, and proceed to
+                # drive the ceremony for real (the original arm-on-advance flow continues below).
+                _RUNWAY_LAST_DONE[rkey] = sig
+            elif not ready and _RUNWAY_SIG.get(rkey) != sig:
+                # A genuinely fresh `nominations` beat we have never held: arm the runway and give the
+                # player their social window NOW, before the NPC noms are pre-resolved.
+                _arm_runway(user, sig)
+                _RUNWAY_LEFT[rkey] = _SOCIAL_RUNWAY_TURNS - 1  # this turn is the first of the runway
+                logger.info("[orwell] armed social runway for user=%s at landed %s (%d social turns) — "
+                            "holding the post-HOH window before the ceremony (#1127)",
+                            user, phase, _SOCIAL_RUNWAY_TURNS)
+                return _hold_for_social(game_state)
 
         # 0065 Part A/B: this is an FE-ISSUED progression call (the highest-value CAS point — exactly
         # the 0064 §3.C queued-turn case). Attach the current last-seen `beatSeq` as the compare-and-
@@ -2046,6 +2133,19 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
                     _arm_runway(user, new_sig)
                     logger.info("[orwell] armed social runway for user=%s at %s (%d social turns)",
                                 user, new_phase, _SOCIAL_RUNWAY_TURNS)
+                    # #1127 — the NPC NOMINATION CEREMONY is a WITNESSED beat. When the beat we JUST
+                    # resolved was the NPC nominations (the player landed at `nominations`, spent the
+                    # post-HOH window, and we drove the noms for real), the engine has now moved to
+                    # veto-competition — but the player must WITNESS the ceremony, not skip to the veto.
+                    # So frame THIS turn on the `nominations` moment (the nominees are now set in the
+                    # GAME CONTEXT) so the model PLAYS the ceremony — dread, speeches, table reactions —
+                    # as its own beat; the post-noms social runway we just armed then holds the NEXT
+                    # turns before the veto. This is a moment OVERRIDE only (the HUD's real phase stays
+                    # veto-competition); it never authors the nominees, which the engine already decided.
+                    if phase == "nominations":
+                        logger.info("[orwell] framing the NPC nomination ceremony as a witnessed beat "
+                                    "for user=%s (#1127)", user)
+                        return _with_moment(new_state, "nominations")
                     # Give the player the social beat THIS turn too — UNLESS they explicitly asked to
                     # move on: a "let's see the veto" wants the just-resolved beat NARRATED now, not
                     # another lull, so we return the real moment and let the NEXT turns linger (the

@@ -28,7 +28,10 @@ import { maybeFireTwist } from "./reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
 import { drawCompetition, competitionById } from "./competitionLibrary";
 import type { CompetitionDef, CompetitionPhase } from "./competitionLibrary";
-import { phaseForDepth, bedtimeDepthFor, restDeficitForDepth, DAY_START, type TimeOfDay } from "./timeOfDay";
+import {
+  phaseForHour, bedtimeDepthFor, restDeficitForDepth, DAY_START, WAKE_HOUR, DAY_END_HOUR, type TimeOfDay,
+} from "./timeOfDay";
+import { CLOCK } from "./sleepConstants";
 
 /**
  * The LIVE weekly loop (feature 0011, wired into the running game). Unlike
@@ -303,16 +306,18 @@ export interface LiveSeasonState {
   /**
    * Sleep bookkeeping (ADR 0006), ENGINE-ONLY (no number crosses the wall). `playerRetired` = the
    * player chose to turn in for the night (NEVER auto-set — §Principle 6), cleared at the new day.
-   * `lastSleepPhase` = the latest phase the player was effectively up to last night — it drives their
-   * OWN rest cue today and their hidden comp deficit (`restOf`). Persist with the season (0030).
+   * `lastSleepPhase` = (legacy field name; now the clock-HOUR the player was last awake to last night) —
+   * kept for save round-trip + the adapter's rest-cue read. Persist with the season (0030).
    */
   playerRetired?: boolean;
-  lastSleepPhase?: TimeOfDay;
+  lastSleepPhase?: number;
   /**
-   * Continuous "night depth" (0066 Phase-2, gated): the hidden 0..1 position the public `timeOfDay`
-   * is PROJECTED from (`phaseForDepth`). `nightDepth` advances by play; `lastSleepDepth` = how deep into
-   * last night the player was effectively up (drives the GRADED comp deficit + their rest cue). Absent ⇒
-   * the clock isn't running ⇒ 0 ⇒ byte-identical to the pre-feature model. Persist with the season (0030).
+   * The 24-hour clock (0066, the #1125 model; gated). `nightDepth` is the legacy field NAME but carries the
+   * clock-HOUR (8..32) the public `timeOfDay` is PROJECTED from (`phaseForHour`): 8 = the 8am wake, 32 = the
+   * next 8am. It advances by PLAY and clamps at the bitter end (never wraps without an 8am wake or `turnIn`).
+   * `lastSleepDepth` = the clock-HOUR the player was last awake to last night (drives the GRADED sleep
+   * deficit + their rest cue). Absent ⇒ the clock isn't running ⇒ byte-identical to the pre-feature model.
+   * Persist with the season (0030).
    */
   nightDepth?: number;
   lastSleepDepth?: number;
@@ -939,68 +944,89 @@ export function firstCeremonyBeatResolved(s: LiveSeasonState): boolean {
 // wall, and an absent `timeOfDay` keeps the seeded sims byte-identical.
 
 /**
- * Advance the clock one phase as the player lingers/plays. The day cycles morning → … → late-night,
- * and once at late-night a further advance WRAPS to a new morning — banking that the player was up to
- * the bitter end (their tiredness today). A new day also clears the retired flag, so the player is
- * awake again unless they choose to turn in. A no-op once the game is over. When the player has
- * already retired, time simply rolls them straight to the next morning (their night is done).
+ * Advance the clock by `hours`, projecting the public phase. Shared by the per-BEAT clock (substantive
+ * ceremony play) and the per-CONVERSATION clock (Extension 1 — lingering within a beat). The live field
+ * `nightDepth` carries the clock-HOUR (8..32) in the 24-hour model (the field name is legacy; the value is
+ * the hour-of-day). A fresh day initializes to the 8am wake.
+ *
+ * `wrapAtEnd` governs the bitter end:
+ *  - `true` (the per-BEAT path): crossing the next 8am WRAPS to a new day and banks "running on empty" —
+ *    the player outlasted the whole house without turning in (their tiredness today is a full night up).
+ *  - `false` (the per-CONVERSATION path): CLAMP just below the 8am wake, never auto-bank — a long engaged
+ *    scene can press time to the bitter pre-dawn edge but NEVER skips the player past their own bedtime
+ *    choice (ADR 0003 / the lull rule). The night ends only when the player turns in or a ceremony lands.
  */
-// One beat advances the hidden depth a fraction of a day (not a whole phase), so the public phase rolls
-// over several beats — a believable number of scenes fit each part of the day (a partial fix to the
-// "time races" lurch), and the depth grades the sleep trade. Tunable; ~14 beats fill a full day.
-const NIGHT_DEPTH_STEP = 0.07;
-
-export function advanceClock(s: LiveSeasonState): void {
+function advanceClockBy(s: LiveSeasonState, hours: number, wrapAtEnd: boolean): void {
   if (s.finished) return;
-  if (s.playerRetired) { s.nightDepth = 0; s.timeOfDay = DAY_START; s.playerRetired = false; return; }
-  if (s.nightDepth === undefined) { s.nightDepth = 0; s.timeOfDay = DAY_START; return; }
-  const next = s.nightDepth + NIGHT_DEPTH_STEP;
-  if (next >= 1) {
-    // A full night passed without the player turning in — they outlasted the whole house (Principle 6
-    // is theirs: nobody sent them to bed). They wake the next morning running on empty (depth 1).
-    s.lastSleepDepth = 1;
-    s.lastSleepPhase = "late-night";
-    s.nightDepth = 0;
-    s.timeOfDay = DAY_START;
+  if (s.playerRetired) { s.nightDepth = WAKE_HOUR; s.timeOfDay = DAY_START; s.playerRetired = false; return; }
+  if (s.nightDepth === undefined) { s.nightDepth = WAKE_HOUR; s.timeOfDay = DAY_START; return; }
+  const next = s.nightDepth + hours;
+  if (next >= DAY_END_HOUR) {
+    if (wrapAtEnd) {
+      // A full night passed without the player turning in — they were "up" to the 8am forced wake
+      // (Principle 6 is theirs: nobody sent them to bed). They wake the next morning running on empty:
+      // last awake to the bitter end ⇒ the maximum sleep debt.
+      s.lastSleepDepth = DAY_END_HOUR;
+      s.lastSleepPhase = DAY_END_HOUR;
+      s.nightDepth = WAKE_HOUR;
+      s.timeOfDay = DAY_START;
+      return;
+    }
+    // The per-conversation path holds at the bitter pre-dawn edge (no auto-bank): the player owns bedtime.
+    s.nightDepth = DAY_END_HOUR - 0.0001;
+    s.timeOfDay = phaseForHour(s.nightDepth);
     return;
   }
   s.nightDepth = next;
-  s.timeOfDay = phaseForDepth(next);
+  s.timeOfDay = phaseForHour(next);
+}
+
+export function advanceClock(s: LiveSeasonState): void {
+  advanceClockBy(s, CLOCK.perBeatHours, true);
 }
 
 /**
- * The player's bedtime lever (§Principle 6): the player CHOOSES to turn in. Captures the phase they
- * retired at as last night's bedtime (an early night ⇒ rested; outlasting the house into late-night ⇒
- * running on empty), then rolls to the next morning. Never auto-called — only the player's own action
- * fires it. A no-op once the game is over or the player has left.
+ * 0066 Phase-2 (Extension 1) — advance the clock as the player lingers/plays WITHIN a beat (one player
+ * social turn). `hours` is the scene's committed felt duration (Extension 5 — type-bounded; defaults to the
+ * small per-conversation floor). Pacing-only: it presses the day's finite scheming time turn-by-turn but
+ * NEVER rushes — it clamps just below the 8am wake and never wraps the night without the player's own
+ * `turnIn` (or a ceremony beat), so it can never skip the player past their bedtime decision. A no-op when
+ * the clock hasn't initialized (the very first beat starts the day; lingering only matters once running).
+ */
+export function advanceClockPerConversation(s: LiveSeasonState, hours: number = CLOCK.perConversationHours): void {
+  if (s.nightDepth === undefined) return; // the day hasn't started; the per-beat clock initializes it
+  advanceClockBy(s, hours, false);
+}
+
+/**
+ * The player's bedtime lever (§Principle 6): the player CHOOSES to turn in. Captures the clock-HOUR they
+ * retired at as last night's bedtime (an early night ⇒ rested, a pre-dawn riser even; outlasting the house
+ * past midnight ⇒ real debt), then rolls to the next 8am wake. Never auto-called — only the player's own
+ * action fires it. A no-op once the game is over or the player has left.
  */
 export function playerTurnIn(s: LiveSeasonState, player: EntityId): void {
   if (s.finished || playerHasLeft(s, player)) return;
-  const depth = s.nightDepth ?? 0;
-  s.lastSleepDepth = depth;
-  s.lastSleepPhase = phaseForDepth(depth); // keep the phase cue coherent (restStatus reads it)
+  const hour = s.nightDepth ?? WAKE_HOUR;
+  s.lastSleepDepth = hour;
+  s.lastSleepPhase = hour; // legacy field name; now the clock-hour the player was last awake to
   s.playerRetired = true;
-  s.nightDepth = 0;
+  s.nightDepth = WAKE_HOUR;
   s.timeOfDay = DAY_START;
 }
 
-/** The player's hidden rest deficit today (0..1) — graded by how deep into last night they were up. */
+/** The player's hidden sleep deficit today (0..1) — graded by the clock-hour they were last awake to. */
 export function playerRestDeficit(s: LiveSeasonState): number {
-  return restDeficitForDepth(s.lastSleepDepth ?? 0);
+  return restDeficitForDepth(s.lastSleepDepth ?? WAKE_HOUR);
 }
 
 /**
- * An NPC's hidden rest deficit (0..1) — ENG-NEW-1: keyed off the ACTUAL night, not static aptitude.
- *
- * The old model `restDeficitFor(bedtimeFor(stats))` was a pure function of `social − physical`, so a
- * mental/social-leaning houseguest (a night-owl bedtime) carried the MAX penalty in EVERY competition
- * — including the mental comps they should win — regardless of how the night actually went. That is a
- * structural aptitude tax (anti-sycophancy: the engine must not systematically disadvantage an
- * archetype). The deficit now reflects the LATEST DEPTH THE NPC WAS ACTUALLY AWAKE last night — the
- * EARLIER of their CHRONOTYPE bedtime depth and how far the night actually ran (`lastSleepDepth`, which
- * the player's OWN bedtime drives). So a night-owl only pays when the night genuinely ran late (the
- * player kept the house up); on a normal night everyone — owls included — carries little/none, and the
- * mental favorite wins their mental comp cleanly. Now GRADED + chronotype-aware, never a trait penalty.
+ * An NPC's hidden sleep deficit (0..1) — ENG-NEW-1: keyed off the ACTUAL night, not static aptitude, in
+ * the 24-hour model. An NPC is up to the EARLIER of their CHRONOTYPE bedtime HOUR and how late the night
+ * actually RAN (`lastSleepDepth` — the clock-hour the house stayed up to, driven by the player's bedtime).
+ * So a night-owl only pays when the night genuinely ran past midnight (the player kept the house up); a
+ * lark bedding before midnight carries none; on a normal night everyone — owls included — carries
+ * little/none, and the mental favorite wins their mental comp cleanly. GRADED + chronotype-aware, never a
+ * trait penalty. `bedDepthOverride` (a clock-hour) lets the adapter inject the conflict-drained bedtime.
  */
 export function npcRestDeficit(
   s: LiveSeasonState,
@@ -1008,9 +1034,9 @@ export function npcRestDeficit(
   id?: EntityId,
   bedDepthOverride?: number,
 ): number {
-  const bedDepth = bedDepthOverride ?? bedtimeDepthFor(stats, id);
-  const nightPeak = s.lastSleepDepth ?? 0;
-  return restDeficitForDepth(Math.min(bedDepth, nightPeak));
+  const bedHour = bedDepthOverride ?? bedtimeDepthFor(stats, id);
+  const nightRanTo = s.lastSleepDepth ?? WAKE_HOUR;
+  return restDeficitForDepth(Math.min(bedHour, nightRanTo));
 }
 
 /** Record the evictee as out (evictionOrder + remove from the live house). Does NOT roll the week. */
