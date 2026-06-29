@@ -1602,7 +1602,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                      tools: Optional[List[Dict]] = None, policy: Optional[Dict] = None,
                      session_id: Optional[str] = None, pin_provider: bool = False,
                      provider_opts: Optional[Dict] = None,
-                     response_format: Optional[Dict] = None):
+                     response_format: Optional[Dict] = None,
+                     tool_choice: Optional[object] = None):
     """Stream LLM responses with improved error handling.
 
     ``response_format`` (optional): an OpenAI/OpenRouter-style structured-output request
@@ -1610,6 +1611,16 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
     model that honours it returns strict JSON (used by the cast-authoring path, #1002). It is
     sent only on the OpenAI-compatible branch (not anthropic/ollama); a provider that ignores
     it is harmless, and absent ⇒ byte-identical to before.
+
+    ``tool_choice`` (optional, issue #1154 / ADR 0016 §D): an OpenAI/OpenRouter-style
+    tool-choice directive sent ALONGSIDE ``tools`` to FORCE a tool call at the closed-set
+    beats where a missed engine call is catastrophic (e.g. ``"required"`` or a named
+    ``{"type": "function", "function": {"name": ...}}`` choice). The agent loop computes it
+    only at those beats; spontaneous interleaved calling stays primary everywhere else.
+    Sent ONLY on the OpenAI-compatible branch and ONLY when ``tools`` are also present
+    (a tool_choice with no tools is a 400 on most providers). **Default ``None`` ⇒ the field
+    is never added ⇒ byte-identical to before** — the safety contract. Reasoning lives on its
+    own payload channel (``reasoning``/``reasoning_effort``), so this never perturbs it.
 
     Yields SSE chunks:
       - data: {"delta": "text"}           — text content
@@ -1691,6 +1702,14 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             payload["response_format"] = response_format
         if tools:
             payload["tools"] = tools
+            # #1154 / ADR 0016 §D — FORCE the tool call at a catastrophic-miss beat. Only meaningful
+            # when tools are also on the wire (a tool_choice with no tools 400s on most providers), so
+            # it is nested under `if tools`. Default None ⇒ never added ⇒ byte-identical (the safety
+            # contract; asserted in test_tool_choice_force.py). GLM-4.7 honors it (its tool-calling
+            # rides interleaved thinking); DeepSeek-V4 rejected `required` in always-thinking mode, so
+            # the agent loop only sends it under the GLM-class provider it's verified against.
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
         h = _provider_headers(provider, headers)
         if provider == "copilot":
             from src.copilot import apply_request_headers

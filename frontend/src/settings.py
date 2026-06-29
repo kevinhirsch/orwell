@@ -33,6 +33,15 @@ DEFAULT_SETTINGS = {
     # ADR 0006 - the in-game time-of-day clock + nightly sleep economy (the engine's ORWELL_TIME_OF_DAY).
     # ON by default; the settings switch flips it on the LIVE engine (admin setTimeOfDay) with no restart.
     "time_of_day_enabled": True,
+    # #1154 / ADR 0016 §D - FORCE the engine call (tool_choice) at the closed-set, ENGINE-OWNED beats
+    # where a missed call is catastrophic: runCompetition (read the comp winner) at a competition phase
+    # and advanceGame at a stalled ceremony/eviction advance-phase (incl. the goodbye-message/eviction
+    # drain). NEVER forces submitDecision (that carries the PLAYER's explicit pick) and is suppressed by
+    # any open player pending. ON by default; this is the runtime KILL-SWITCH so forcing can be disabled
+    # without a redeploy (read per-turn, no restart). OFF ⇒ the agent loop never sends tool_choice,
+    # falling back to the spontaneous call + the reactive belts (stall-nudge, forced advanceGame,
+    # _auto_record_scene) exactly as before this feature.
+    "force_tool_choice_at_beats": True,
     # #764 - the animated background SOURCE behind the (pre-auth) login glass panel.
     # Cosmetic-only enum; the login page reads it via the PUBLIC GET
     # /api/auth/login-background. One of: gradient (default) | photo | particles | bundled.
