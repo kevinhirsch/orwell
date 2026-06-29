@@ -2640,6 +2640,38 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
         _fallback_in_flight.discard(user)
 
 
+def publish_game_updated_after_turn(user, beat_seq_before, tools_called) -> bool:
+    """0064 §B/D / ship-gate F5 (the status/gadget half) — after a FRAMED game turn settles having
+    COMMITTED an engine mutation, push a server-side `game-updated` so EVERY OTHER device on the
+    user's canonical game session reconciles its HUD INSTANTLY (sub-second) instead of waiting up to
+    the panels' 20–30s poll. The chat-tool seam already refreshes the SENDER's own HUD client-side
+    (chat.js → the g15 dispatcher); peers got no push — observed live as window A "1 of 15 met" /
+    window B "0 of 15" until B's poll. This closes that peer-staleness gap from the chat-turn path,
+    mirroring `orwell_decision` / the self-eviction routes.
+
+    Gated on an ACTUAL mutation so a pure no-op / OOC / refused turn pushes nothing (no noise): the
+    model ran a game-engine write tool, OR the user's `beatSeq` advanced over the turn (which also
+    catches the FE error-correction belts — `markHouseguestMet`, the forced `advanceGame` — that
+    mutate without the model naming a write tool). Returns True iff it pushed.
+
+    Vault-free: a session id + the bare "game-updated" change-type only — no state body; each window
+    re-fetches its OWN Vault-free projection. Best-effort/fail-soft — a publish failure must never
+    break the turn (polling stays the correctness floor)."""
+    try:
+        beat_now = last_beat_seq(user)
+        mutated = any(t in GAME_ENGINE_WRITE_TOOLS for t in (tools_called or []))
+        if not mutated and isinstance(beat_now, int) and isinstance(beat_seq_before, int):
+            mutated = beat_now > beat_seq_before
+        if not mutated:
+            return False
+        from src import orwell_game_session
+        orwell_game_session.publish_game_updated(user)
+        return True
+    except Exception:
+        logger.debug("[orwell] post-turn game-updated push skipped", exc_info=True)
+        return False
+
+
 def mark_message_phase(message, phase: str) -> None:
     """Vault Wall (casting-leak fix): durably stamp a chat phase onto a persisted message.
 

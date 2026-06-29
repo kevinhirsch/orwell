@@ -1,2 +1,4 @@
+.secrets.env
+node_modules/
 shots/
 *.png
