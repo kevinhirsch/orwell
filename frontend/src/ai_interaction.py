@@ -115,10 +115,23 @@ def _resolve_model(spec: str, owner: Optional[str] = None) -> Tuple[str, str, Di
             raise ValueError("No enabled endpoints found" +
                              (f" matching '{target_endpoint_name}'" if target_endpoint_name else ""))
 
+        from src.endpoint_resolver import is_fal_url
+
         for ep in endpoints:
             base = _normalize_base(ep.base_url)
             provider = _detect_provider(base)
             headers = build_headers(ep.api_key, base)
+
+            # fal.ai (issue #1153 / ADR 0016 §C) has no OpenAI-style `/models` catalog to probe — its
+            # model is the slug itself (e.g. "fal-ai/bytedance/seedream/v5/lite/edit"). Accept the
+            # configured slug as-is for a fal endpoint (no network probe), so a Seedream image_model
+            # resolves to (fal-base, slug, Key-auth-headers). Only matches a fal slug to a fal endpoint.
+            if is_fal_url(base):
+                from src.orwell_fal_image import is_fal_model, FAL_SEEDREAM_EDIT_SLUG
+                if is_fal_model(model_name):
+                    slug = model_name if "/" in model_name else FAL_SEEDREAM_EDIT_SLUG
+                    return build_chat_url(base), slug, headers
+                continue  # a non-fal model spec never resolves against a fal endpoint
 
             if provider == "anthropic":
                 # Anthropic: match against hardcoded model list
