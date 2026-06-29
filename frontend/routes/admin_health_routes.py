@@ -231,6 +231,33 @@ async def _image_state(user: str | None) -> dict:
     return state
 
 
+async def _cast_authoring_state(user: str | None) -> dict | None:
+    """Deep cast-authoring completeness `{total, authored, missing, missingIds}` over the ACTIVE NPC
+    cast (the player is human-authored, excluded), so the operator can SEE whether the producer-LLM
+    actually enriched this cast or it all fell back to the thin deterministic floor (mandate #1). The
+    counts come from the SAME helper the backfill acts on (`orwell_cast_authoring.unauthored_ids`), so
+    the status page can never disagree with what a re-author lever would do. None pre-game / engine
+    down. Best-effort — any failure reads as None, never a 500."""
+    try:
+        from src import orwell_engine, orwell_cast_authoring
+    except Exception:
+        return None
+    try:
+        state = await orwell_engine.get_game_state(user=user)
+    except Exception:
+        return None
+    if not isinstance(state, dict) or state.get("started") is False:
+        return None
+    try:
+        from routes.orwell_routes import _roster_cards
+        cards = _roster_cards(state, user)
+        comp = orwell_cast_authoring.authoring_completeness(user, cards)
+        comp["missingIds"] = orwell_cast_authoring.unauthored_ids(user, cards)
+        return comp
+    except Exception:
+        return None
+
+
 # ── Debug-bundle enrichment (owner: "let's beef up that file") ────────────────
 # Every helper below is best-effort and Vault-free by construction: it returns ONLY
 # operational metadata (versions, counts, names, models, urls, phases, sizes) and
@@ -657,12 +684,20 @@ async def _health_snapshot(user: str | None) -> dict:
     if inspect.isawaitable(images):
         images = await images
 
+    # Deep cast-authoring completeness ("did GLM enrich this cast, or did it all fall back to the
+    # thin deterministic floor?"). Best-effort: a failure reads as None, never blocks the snapshot.
+    try:
+        cast_authoring = await _cast_authoring_state(user)
+    except Exception:
+        cast_authoring = None
+
     return {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "engine": engine,
         "frontend": frontend,
         "tiersAgree": tiers_agree,
         "images": images,
+        "castAuthoring": cast_authoring,
         # Build + version (PR) for one-glance triage on the status page. version is the
         # PR-derived "vX.XX"; build is the deployed checkout's short commit SHA.
         "versions": _versions(),
@@ -949,6 +984,36 @@ def setup_admin_health_routes() -> APIRouter:
         return {"regenerated": True, "discarded": discarded, "queued": len(missing),
                 "kicked": bool(kicked), "log": "portrait-log.jsonl"}
 
+    @router.post("/ops/reauthor-cast")
+    async def admin_reauthor_cast(request: Request):
+        """Debug lever (the status-page button, NEXT TO regenerate-portraits): re-author every NPC
+        still on the deterministic FLOOR for THIS admin's game — so a cast that started without a
+        utility model (or whose authoring failed) gets its rich deep profiles without a season restart.
+
+        Mirrors the portrait regenerate lever: an active game is verified FIRST (a refusal does
+        nothing), the kick is force=True (an explicit act, bypassing the auto-poll debounce), and
+        authoring follows in the background (a missing utility model is a silent no-op — the floor
+        stands). Vault-free by construction: it reads only the engine's public roster + writes back
+        via recordCastProfile (the engine validates / splits across the Vault Wall / re-seals)."""
+        require_admin(request)
+        user = None
+        try:
+            user = effective_user(request)
+        except Exception:
+            pass
+        from src import orwell_engine, orwell_cast_authoring
+        from routes.orwell_routes import _roster_cards
+        try:
+            state = await orwell_engine.get_game_state(user=user)
+        except Exception as e:
+            return {"reauthored": False, "reason": f"engine unreachable: {e}"}
+        if not isinstance(state, dict) or state.get("started") is False:
+            return {"reauthored": False, "reason": "no active game"}
+        missing = orwell_cast_authoring.unauthored_ids(user, _roster_cards(state, user))
+        kicked = orwell_cast_authoring.kickoff_authoring_backfill(missing, user, force=True)
+        logger.info("[ops] admin cast re-authoring: queued=%d kicked=%s", len(missing), kicked)
+        return {"reauthored": True, "queued": len(missing), "kicked": bool(kicked)}
+
     @router.post("/ops/advance-to-finale")
     async def admin_advance_to_finale(request: Request):
         """L38 debug lever (the status-page button, NEXT TO regenerate-portraits): fast-forward THIS
@@ -1205,6 +1270,7 @@ const up = s => { s = Math.max(0, +s || 0); const d = (s/86400)|0, h = ((s%86400
 const B = (ok, t) => '<span class="' + (ok ? "ok" : "bad") + '">' + esc(t) + "</span>";
 function render(d) {
   const eng = d.engine || {}, emb = eng.embeddings || null, img = d.images || {},
+        ca = d.castAuthoring || null,
         st = (d.frontend || {}).store || {}, tc = eng.toolCalls || {}, ver = d.versions || {};
   // The deployed build/PR version (vX.XX, X.XX = PR#/100) + short commit SHA — confirms WHICH
   // build is live and that an Update actually landed. (The payload already carries it; show it.)
@@ -1217,6 +1283,7 @@ function render(d) {
     ["Tiers agree", B(!!d.tiersAgree, d.tiersAgree ? "YES" : "NO")],
     ["Embeddings", emb ? esc(emb.provider || "?") + " " + B(!emb.degraded, emb.degraded ? "DEGRADED" : "OK") : B(false, "UNKNOWN")],
     ["Image generation", (img.available ? B(true, "AVAILABLE") : B(false, img.enabled ? "NO USABLE MODEL" : "DISABLED")) + (img.model ? " · " + esc(img.model) : "") + (img.portraits && img.portraits.total ? " · portraits " + (img.portraits.missing ? '<span class="warn">' : '<span class="ok">') + esc(img.portraits.present) + "/" + esc(img.portraits.total) + "</span>" : "")],
+    ["Cast authoring", (ca && ca.total ? (ca.missing ? '<span class="warn">' : '<span class="ok">') + esc(ca.authored) + "/" + esc(ca.total) + "</span> deep-authored" + (ca.missing ? " · " + esc(ca.missing) + " on floor" : "") : '<span class="sub">—</span>')],
     ["Tool calls", esc(tc.total ?? 0) + " total · " + esc(tc.failed ?? 0) + " failed"],
     ["Front-end store", (st.degraded ? B(false, "DEGRADED") + " · " : "") + esc(st.sessions ?? "?") + " session(s) · " + esc(st.messages ?? "?") + " message(s)" + (st.database_size_mb != null ? " · " + esc(st.database_size_mb) + " MB" : "")],
   ];

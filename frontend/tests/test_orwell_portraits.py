@@ -618,8 +618,10 @@ def test_roster_is_vault_free(tmp_portraits, client, monkeypatch):
     for forbidden in ("secretTrust", "threat", "soul", "affinity", "hiddenPlan"):
         assert forbidden not in text
     cards = r.json()["roster"]
-    # Only the whitelisted public keys are present per card.
-    allowed = {"id", "name", "status", "isPlayer", "portrait"}
+    # Only the whitelisted public keys are present per card. `authored` is the engine's
+    # Vault-free deep-profile boolean (true/false only — no secret content) that drives the
+    # cast-authoring backfill; it is a public projection field, not a Vault leak.
+    allowed = {"id", "name", "status", "isPlayer", "portrait", "authored"}
     for c in cards:
         assert set(c.keys()) <= allowed
 
