@@ -1489,10 +1489,42 @@ export class GameSessionAdapter implements GameSession {
       return { accepted: false, publicFields: [], hiddenFields: [], reason: "authored profile mirrors the player" };
     }
 
-    // Field NAMES only — never the values (a hidden value must never ride out on the result, §8).
+    // CROSS-CHARACTER guard (RCA hardening, mirrors `mentionsPlayer`): authored HIDDEN storyline prose
+    // (secrets / true goals / weakness / Day-1 read) may name an NPC's OWN ex / colleague / rival from
+    // BEFORE the house (a genuinely-external person the engine doesn't model) — that is legitimate and
+    // stays. What it must NOT do is name ANOTHER CURRENT houseguest: the engine models inter-houseguest
+    // dynamics through the relationship layer, not through one NPC's authored secret, so a cross-character
+    // claim baked into a sealed thread ("npc:5's secret is that they're plotting with <peer name>") would
+    // be an ungrounded board assertion the engine never produced (anti-sycophancy #3). We strip any
+    // storyline FIELD that names a peer (fall back to the seeded floor for that field — the profile stays
+    // complete) rather than failing the whole call. Word-boundary match on each OTHER houseguest's current
+    // display name (length floor like the player guard, to avoid false positives on a one-syllable name).
+    const peerNames = ctx.npcs
+      .filter((n) => n.id !== target.id)
+      .map((n) => (n.name ?? "").trim())
+      .filter((nm) => nm.length >= 3);
+    const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const mentionsOtherHouseguest = (text: string): boolean => {
+      if (!text) return false;
+      return peerNames.some((nm) => new RegExp(`\\b${escapeRe(nm)}\\b`, "i").test(text));
+    };
+    // Sanitize each authored HIDDEN storyline field: drop it (⇒ fall back to the seeded floor below) when it
+    // names another current houseguest. An ARRAY field is dropped wholesale if ANY element names a peer (a
+    // single cross-character line poisons the field; the seeded floor is coherent and complete). `undefined`
+    // means "the author supplied nothing" AND "the author supplied a peer-naming value we refuse" alike — the
+    // `next` merge already treats `undefined` as "keep the prior/floor value", so this is the natural fallback.
+    const safeSecrets = req.secrets !== undefined && !req.secrets.some(mentionsOtherHouseguest) ? req.secrets : undefined;
+    const safeGoals = req.trueGoals !== undefined && !req.trueGoals.some(mentionsOtherHouseguest) ? req.trueGoals : undefined;
+    const safeWeakness = req.weakness !== undefined && !mentionsOtherHouseguest(req.weakness) ? req.weakness : undefined;
+    const safePerception = req.dayOnePerception !== undefined && !mentionsOtherHouseguest(req.dayOnePerception)
+      ? req.dayOnePerception : undefined;
+
+    // Field NAMES only — never the values (a hidden value must never ride out on the result, §8). The hidden
+    // list reports what was actually SEALED, so a peer-naming field that was refused above is not listed.
     const publicFields = (["biography", "physicalCharacteristics"] as const).filter((f) => req[f] !== undefined) as string[];
-    const hiddenFields = (["secrets", "trueGoals", "weakness", "dayOnePerception"] as const)
-      .filter((f) => req[f] !== undefined);
+    const hiddenFields = ([
+      ["secrets", safeSecrets], ["trueGoals", safeGoals], ["weakness", safeWeakness], ["dayOnePerception", safePerception],
+    ] as const).filter(([, v]) => v !== undefined).map(([f]) => f);
 
     // (0) PUBLIC NAME — the LLM-authored, real-sounding replacement display name. Accept it ONLY if it is a
     // reasonable two-token human name AND it does not collide (case-insensitive) with any OTHER current
@@ -1580,11 +1612,11 @@ export class GameSessionAdapter implements GameSession {
       ? { ...seededFloor(), dayOnePerception: (prior ?? seededFloor()).dayOnePerception }
       : (prior ?? seededFloor());
     const next: DeepProfile = {
-      secrets: req.secrets ?? prev.secrets,
-      trueGoals: req.trueGoals ?? prev.trueGoals,
-      weakness: req.weakness ?? prev.weakness,
-      dayOnePerception: req.dayOnePerception !== undefined
-        ? { ...prev.dayOnePerception, read: req.dayOnePerception }
+      secrets: safeSecrets ?? prev.secrets,
+      trueGoals: safeGoals ?? prev.trueGoals,
+      weakness: safeWeakness ?? prev.weakness,
+      dayOnePerception: safePerception !== undefined
+        ? { ...prev.dayOnePerception, read: safePerception }
         : prev.dayOnePerception,
     };
     ctx.profiles[target.id] = next;
@@ -3686,6 +3718,10 @@ export class GameSessionAdapter implements GameSession {
       ...(n.character.ethnicity !== undefined ? { ethnicity: n.character.ethnicity } : {}),
       ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
       ...(n.character.outOrientation !== undefined ? { outOrientation: n.character.outOrientation } : {}),
+      // #1067: PUBLIC, Vault-free provenance — `true` once the FE deep-profile authoring landed for this
+      // houseguest, otherwise absent (still on the seeded floor). NOT secret content; lets the FE backfill
+      // target the still-floor cards.
+      ...(n.character.deepProfileAuthored === true ? { authored: true } : {}),
     } as HouseguestCard;
   }
 
@@ -6469,6 +6505,11 @@ export class GameSessionAdapter implements GameSession {
         recentEvents: selectRecentForConfessional(allEvents, npc, allEvents.length, { rng: recentRng }),
         ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
         ...(voice !== undefined ? { voice } : {}),
+        // #845 companion — bake the DISPLAY NAME into the confessional content. Without this, a
+        // confessional that targets the PLAYER would render the bare token "player" even in a named game
+        // (the retrospective scrubber resolves colon-bearing ids ONLY, leaving `player` as prose). `nameOf`
+        // yields the public roster name (player or NPC); it reads no Vault state.
+        nameOf: (id) => this.nameOf(id),
         rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional:${npc}:${s.week}:${ev.beat}`)),
       };
     };
@@ -7318,6 +7359,10 @@ export class GameSessionAdapter implements GameSession {
         ...(n.character.ethnicity !== undefined ? { ethnicity: n.character.ethnicity } : {}),
         ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
         ...(n.character.outOrientation !== undefined ? { outOrientation: n.character.outOrientation } : {}),
+        // #1067: PUBLIC, Vault-free provenance — `true` once the FE deep-profile authoring landed for this
+        // houseguest, otherwise absent (still on the seeded floor). NOT secret content; lets the FE backfill
+        // target the still-floor cards.
+        ...(n.character.deepProfileAuthored === true ? { authored: true } : {}),
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),

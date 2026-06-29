@@ -90,6 +90,17 @@ export interface ConfessionalContext {
    * (mandate #2): it is read only for PHRASING and never moves a closed-set value (ADR 0005).
    */
   voice?: VoiceProfile;
+  /**
+   * Optional id→display-name resolver (#845 companion). When supplied, the composed `content` bakes the
+   * DISPLAY NAME of the confessor + their target/ally (instead of the raw EntityId) into the line. This
+   * matters for the PLAYER: their id is the BARE word `player` (`ids.ts`), which `humanizeForRetrospective`
+   * deliberately leaves untranslated (the #845 common-noun guard resolves COLON-bearing ids only) — so a
+   * confessional that targets the player would otherwise render the literal token "player" even in a named
+   * game. Resolving here, at compose time, fixes that WITHOUT touching the bare-word exclusion downstream.
+   * ABSENT ⇒ the raw id is baked, BYTE-IDENTICAL to the role-only behavior (additive, back-compatible) —
+   * the role-only unit tests stay green. The resolver yields a PUBLIC display name only (no Vault read).
+   */
+  nameOf?: (id: EntityId) => string;
 }
 
 const MOOD_OF = (state: number): "rattled" | "steady" | "confident" =>
@@ -214,10 +225,18 @@ export function confessionalFor(
   const allyPool = style === "curt" ? CURT_ALLY_LINES : style === "expansive" ? EXPANSIVE_ALLY_LINES : ALLY_LINES;
   const filler =
     style === "expansive" && ctx.voice && ctx.voice.lexicon.length > 0 ? `${ctx.voice.lexicon[0]}, ` : "";
+  // #845 companion — bake the DISPLAY NAME (not the raw id) into the line when a resolver is supplied. This
+  // is the only thing that fixes a player-targeted confessional (the bare `player` id survives the
+  // retrospective scrubber); for an NPC subject it is the same name the scrubber would resolve anyway. No
+  // resolver ⇒ the raw id is substituted, BYTE-IDENTICAL to the role-only behavior.
+  const display = (id: EntityId): string => (ctx.nameOf ? ctx.nameOf(id) : id);
+  // `replaceAll`: the EXPANSIVE voice pool repeats {T} within one line, so a single-shot `.replace` left a
+  // literal `{T}`/`{A}` in the rendered confessional — replace EVERY occurrence (the measured/curt pools
+  // carry one each, so this is byte-identical for them).
   const targetStr = target
-    ? `${filler}${pick(targetPool).replace("{T}", target)}`
+    ? `${filler}${pick(targetPool).replaceAll("{T}", display(target))}`
     : "I'm still reading the room";
-  const allyStr = ally ? pick(allyPool).replace("{A}", ally) : "I'm not sure who to trust yet";
+  const allyStr = ally ? pick(allyPool).replaceAll("{A}", display(ally)) : "I'm not sure who to trust yet";
   const mood = ctx.emotionalState !== undefined ? MOOD_OF(ctx.emotionalState) : undefined;
   // Feature 0089 — when the caller hands over the confessor's OWN recent witnessed events, the line
   // OPENS with the concrete beat the engine selected (a real Diary Room reaction), then still names its
@@ -240,7 +259,7 @@ export function confessionalFor(
     npc,
     target,
     ally,
-    content: `[confessional ${npc}] ${opening}${targetStr}. ${allyStr}.${moodStr}`,
+    content: `[confessional ${display(npc)}] ${opening}${targetStr}. ${allyStr}.${moodStr}`,
     ...(ctx.trigger ? { trigger: ctx.trigger } : {}),
     ...(mood ? { mood } : {}),
   };
