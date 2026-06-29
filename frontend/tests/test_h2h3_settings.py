@@ -168,7 +168,12 @@ def test_appearance_card_order_css_no_longer_counts_a_theme_card():
 
 # ── runtime: boot + open settings — image options ⊆ chat options ──────────────
 
-PORT = int(os.environ.get("ORWELL_H2H3_PORT", "8967"))
+# #925: a DISTINCT default port from test_h2b_all_model_pools.py (which also defaults to 8967).
+# Run back-to-back, a lingering h2b uvicorn on 8967 that hasn't released the socket would let this
+# test's _boot() connect to the WRONG (h2b-seeded) app — so the convergence/select-population waits
+# below could never satisfy this test's assertions and time out (a flake that compounded the orphan-
+# scrim lockup these two gates were diagnosed under). A separate port removes the cross-test race.
+PORT = int(os.environ.get("ORWELL_H2H3_PORT", "8968"))
 
 
 def _boot(env):

@@ -99,6 +99,37 @@ const _modalStack = [];   // live modal OrwellWindow instances, bottom → top
 // ever released (a node that was already inert for another reason is left untouched).
 const _modalInerted = new Set();
 
+// ── #925: orphaned-scrim sweep (the modal scrim is the kit's exclusive node) ─
+// A modal mounts a full-viewport backdrop `.ow-scrim` ([data-ow-scrim="<id>"]) in
+// _mountModalChrome and removes it in _unmountModalChrome. The reported lockup (#925):
+// a scrim can be left behind — its window torn down by a path that bypassed the kit's
+// teardown, or a same-id modal collision desyncing the manager registry — and a lingering
+// full-viewport scrim intercepts ALL pointer events, so the Settings gear and other modals
+// become unclickable. The two flaky FE gates (test_h2b_all_model_pools /
+// test_h2h3_settings) hit this: their converging dismiss+click loop can never converge while
+// a scrim outlives its window.
+//
+// The kit creates scrims in EXACTLY one place (_mountModalChrome), one per modal instance, so
+// a scrim is LEGITIMATE only while its owning modal is still a live stack entry. This sweep
+// removes any `.ow-scrim` that is NOT the `_scrim` of a modal currently in _modalStack whose
+// window element is still connected to the DOM — i.e. a genuinely orphaned scrim, never a live
+// modal's. It is a no-op in the normal single-modal case (the one live scrim is kept). Called
+// from _recomputeModalStack (every push/pop/raise) AND at the top of dismissTop, so an orphan
+// is always swept on the next dismiss/recompute even if some teardown path missed it.
+function _sweepOrphanScrims() {
+  // The set of scrim nodes that genuinely belong to a live modal (on the stack + window connected).
+  const live = new Set();
+  for (const w of _modalStack) {
+    if (w && w._scrim && w.el && w.el.isConnected) live.add(w._scrim);
+  }
+  let scrims;
+  try { scrims = document.querySelectorAll('.ow-scrim, [data-ow-scrim]'); } catch (_) { return; }
+  scrims.forEach((s) => {
+    if (live.has(s)) return;                              // a live modal's scrim — never touch it
+    try { s.remove(); } catch (_) {}                      // orphan: window gone (or never tracked) — sweep it
+  });
+}
+
 // Recompute the inert + scrim/z layering for the WHOLE modal stack from its current order.
 // The TOP modal (its window + its own scrim) is the ONLY interactive surface; the rest of
 // the page AND every LOWER modal (window + scrim) go inert. Called on every push (open) and
@@ -108,6 +139,9 @@ const _modalInerted = new Set();
 // inerts exactly "every top-level body child except the window + its scrim" — byte-identical
 // to the old all-or-nothing `_inertBackground`.
 function _recomputeModalStack() {
+  // #925: drop any orphaned scrim FIRST so the inert/keep computation below never preserves a
+  // dead scrim (and so a missed teardown is corrected on the very next recompute).
+  _sweepOrphanScrims();
   const top = _modalStack[_modalStack.length - 1] || null;
   // 1. z/scrim layering: re-stamp every modal bottom → top so a later modal's window AND
   //    scrim sit strictly above an earlier one. raise() draws a fresh monotonic modal z and
@@ -879,6 +913,16 @@ export class OrwellWindow {
     if (this._closeTimer) { clearTimeout(this._closeTimer); this._closeTimer = null; }
     if (this.el) this.el.classList.remove('ow-anim-close');
     if (this.el && this.el.isConnected) { this.restore(); return this; }
+    // #925: same-id collision guard. modalManager._state and this kit's _byId/getElementById are
+    // ALL keyed by window id, so two DIFFERENT live instances sharing an id desync the registry:
+    // closing one unregisters the id for BOTH, stranding the other's window + scrim forever (the
+    // orphan-scrim lockup — a full-viewport scrim then eats every click). A new open() for an id a
+    // DIFFERENT instance still owns must therefore destroy that prior instance first (synchronous
+    // teardown removes its scrim + node + stack/registry entries) so this open is the sole owner.
+    // The onboarding flow's async re-mounts (route() re-firing on orwell:models-changed) are the
+    // real-world source of such a collision. (Same instance re-opening was handled just above.)
+    const _prior = _byId.get(this.o.id);
+    if (_prior && _prior !== this) { try { _prior.destroy(); } catch (_) {} }
     this.opener = opener || document.activeElement || null;
     // A prior _teardown() aborted this.ac; a fresh open (incl. the dock toggle's
     // re-open) needs a live controller so _build's listeners actually attach.
@@ -1171,6 +1215,11 @@ export class OrwellWindow {
 // foreground (it inerts the page + every lower modal), so it always outranks the non-modal
 // pass. This keeps the "one thing per press, top-down" contract for modal-over-modal.
 export function dismissTop() {
+  // #925: sweep any orphaned scrim BEFORE the dismiss pass. If a previous teardown left a scrim
+  // behind (window gone, scrim lingering and intercepting every click), this removes it on the
+  // next Escape/dismiss so the page becomes interactive again even if no live modal remains. It
+  // only ever removes a scrim whose owning modal is genuinely gone — a live modal's scrim stays.
+  _sweepOrphanScrims();
   for (let i = _modalStack.length - 1; i >= 0; i--) {
     const w = _modalStack[i];
     if (!w.el || !w.el.isConnected || w.el.style.display === 'none') { _modalStack.splice(i, 1); continue; }

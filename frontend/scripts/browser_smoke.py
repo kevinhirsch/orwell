@@ -504,10 +504,15 @@ def main() -> int:
             page.wait_for_timeout(200)
             escaped = page.evaluate("""() => ({
               gone: !document.getElementById('orwell-onboarding'),
-              inertLeft: document.querySelectorAll('[inert]').length
+              inertLeft: document.querySelectorAll('[inert]').length,
+              // #925: the modal's backdrop scrim must go with the window. A lingering
+              // [data-ow-scrim] is a full-viewport pointer-event sink that makes the
+              // gear/menus unclickable (the orphan-scrim lockup).
+              scrimsLeft: document.querySelectorAll('[data-ow-scrim]').length
             })""")
             check(escaped.get("gone") is True, "Escape dismisses the holding card")
             check(escaped.get("inertLeft") == 0, "dismissal un-inerts the page behind it")
+            check(escaped.get("scrimsLeft") == 0, "#925: dismissal leaves no orphaned modal scrim")
 
             # 0050: character creation lives in the CHAT — onboarding never mounts a
             # data-entry form (the holding card is the only modal, and it has no inputs).
