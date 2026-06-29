@@ -4189,12 +4189,18 @@ async def stream_agent_loop(
         # advanceGame, _auto_record_scene), which remain the other nets; this just guarantees the call
         # PROACTIVELY so the model can't narrate an outcome it never read.
         _forced_tool_choice = None
-        if (_is_live_game and all_tool_schemas and owner
+        # #1154 no-auth fix: under AUTH_ENABLED=false `owner` is None, but the live game lives under the
+        # engine's "default" sandbox (the FE↔engine anon→default mapping), and apply_game_framing now
+        # stashes the framed beat key under that same "default" fallback — so resolve to it. Previously
+        # `and owner` short-circuited the whole gate dead in the single-user / LAN posture. Auth-on
+        # multi-user passes a real username, so this is byte-identical there.
+        _force_owner = owner or "default"
+        if (_is_live_game and all_tool_schemas
                 and _model_honors_forced_tool_choice(model)
                 and bool(get_setting("force_tool_choice_at_beats", True))):
             try:
                 from routes import chat_helpers as _ch_force
-                _framed_key = _ch_force._LAST_FRAMED_BEAT_KEY.get(owner or "")
+                _framed_key = _ch_force._LAST_FRAMED_BEAT_KEY.get(_force_owner)
                 _framed_phase_force = (str(_framed_key[1]).lower()
                                        if isinstance(_framed_key, (tuple, list)) and len(_framed_key) >= 2
                                        else "")
@@ -4207,7 +4213,7 @@ async def stream_agent_loop(
                     # card; the model must surface it, not advance/run past it). Cheap status read,
                     # only on a force-candidate phase. Fail-open: any hiccup ⇒ no forcing this round.
                     from src import orwell_engine as _oe_force
-                    _force_status = await _oe_force.game_status(user=owner)
+                    _force_status = await _oe_force.game_status(user=_force_owner)
                     _pending_open = bool(
                         isinstance(_force_status, dict)
                         and isinstance(_force_status.get("pending"), dict)
@@ -4217,7 +4223,7 @@ async def stream_agent_loop(
                     if _forced_tool_choice is not None:
                         logger.info(
                             f"[orwell] #1154 forcing tool_choice={_forced_tool_choice} at "
-                            f"phase={_framed_phase_force} round={round_num} user={owner}")
+                            f"phase={_framed_phase_force} round={round_num} user={_force_owner}")
             except Exception as _force_err:
                 logger.warning(f"[orwell] #1154 tool_choice force skipped: {_force_err}")
                 _forced_tool_choice = None
