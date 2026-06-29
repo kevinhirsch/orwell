@@ -311,6 +311,14 @@ function ensureCss() {
       display: flex; flex-direction: column;
     }
     .ow-window.ow-docked > .ow-titlebar { cursor: default; }
+    /* #871: a NON-draggable window (modal:true centered dialogs, fixed/pinned panels — anything
+       created with draggable:false) must NOT advertise the grab/move cursor on its titlebar: it
+       lies, implying a drag that can't happen. The base .ow-titlebar carries cursor:move for the
+       common draggable case; the kit stamps .ow-no-drag on the root when draggable is off
+       (mirroring how the "Drag to move" tooltip is already gated in _build), so the titlebar falls
+       back to the default cursor. (The docked rule above + the ≤768px rule below cover the OTHER
+       non-draggable cases — a window that IS draggable but where context disables drag.) */
+    .ow-window.ow-no-drag > .ow-titlebar { cursor: default; }
     .ow-window.ow-docked > .ow-body { max-height: none; }
     /* R2 (audit resp-F4): on the mobile sheet tier the kit drag is disabled (windowDrag mobileSkip
        768), so the titlebar must NOT advertise cursor:move — a dead affordance that lies on touch.
@@ -525,7 +533,10 @@ export class OrwellWindow {
     const docked = this._docked;
     const el = document.createElement('div');
     el.id = this.o.id;
-    el.className = 'ow-window' + (docked ? ' ow-docked' : '');
+    // #871: a non-draggable, non-docked window (e.g. a centered modal:true dialog) carries
+    // .ow-no-drag so its titlebar drops the grab/move cursor (a docked window is already covered
+    // by .ow-docked). Gated on the same `draggable` flag that suppresses the "Drag to move" tooltip.
+    el.className = 'ow-window' + (docked ? ' ow-docked' : '') + (this.o.draggable ? '' : ' ow-no-drag');
     el.setAttribute('data-ow-window', '');
     if (docked) el.setAttribute('data-ow-docked', '');
     // J1-25: a modal window is a dialog whose background it PROMISES is inert (the

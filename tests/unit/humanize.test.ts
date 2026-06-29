@@ -61,6 +61,38 @@ describe("A8 — id humanization is whole-token, never a blind substring replace
     expect(humanizeIds("the vote is read: player", entities)).toBe("the vote is read: Hero");
     expect(humanizeIds("npc:1 evicts player", entities)).toBe("Ada evicts Hero"); // final-eviction beat shape
   });
+
+  // #927 — the PLAYER-FACING hot path (humanizeIds / makeForPlayerScrub) was hardened the SAME way the
+  // retrospective already was: a bare "player" used as the HEAD of a compound noun (a vocation/strategy
+  // phrase after an adjective/noun modifier — "poker player", "social player", "the strongest player")
+  // must NOT substitute (the live bug: "poker player" → "poker <PlayerName>"). The #845 guard only
+  // covered determiners; this widens it to any content modifier — while a genuine id after a beat
+  // verb/preposition/conjunction (or at a boundary) STILL resolves. Roles only — placeholder names.
+  it("never mangles a compound-noun 'player' after a modifier — 'poker player' stays a word (#927)", () => {
+    // The reported repro shape — a vocation noun voiced into player-facing prose.
+    expect(humanizeIds("a former professional poker player coasting on a front", entities))
+      .toBe("a former professional poker player coasting on a front");
+    expect(humanizeIds("reads as a harmless social player", entities)).toBe("reads as a harmless social player");
+    expect(humanizeIds("be the strongest player in the house", entities)).toBe("be the strongest player in the house");
+    for (const sentence of ["poker player", "social player", "the strongest player", "a casual player"]) {
+      expect(humanizeIds(sentence, entities)).not.toContain("Hero");
+    }
+    // The reusable player-facing scrub (the actual hot-path projection) is hardened identically.
+    const scrub = makeForPlayerScrub(entities);
+    expect(scrub("a professional poker player")).toBe("a professional poker player");
+    expect(scrub("a steady social player")).not.toContain("Hero");
+  });
+
+  it("STILL resolves a genuine bare `player` id after a beat verb / preposition / conjunction (#927)", () => {
+    // The #927 widening must not regress any genuine engine beat interpolation of the bare player id.
+    expect(humanizeIds("npc:1 evicts player", entities)).toBe("Ada evicts Hero");      // verb object
+    expect(humanizeIds("npc:15 nominates npc:1 and player", entities)).toBe("Bo nominates Ada and Hero"); // conjunction
+    expect(humanizeIds("npc:1 votes for player", entities)).toBe("Ada votes for Hero"); // preposition
+    expect(humanizeIds("npc:15 wins over player", entities)).toBe("Bo wins over player".replace("player", "Hero"));
+    expect(humanizeIds("player wins the veto", entities)).toBe("Hero wins the veto");    // clause start
+    // and the player-facing scrub resolves the same genuine references
+    expect(makeForPlayerScrub(entities)("npc:1 evicts player")).toBe("Ada evicts Hero");
+  });
 });
 
 /**
