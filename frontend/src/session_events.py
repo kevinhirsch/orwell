@@ -83,9 +83,13 @@ def _schedule_ring_evict(session_id: str) -> None:
         _RING.pop(session_id, None)
 
 # Only replay the event TYPES that are an "attach / reconcile" invitation an idle peer
-# could have missed. Anything else (heartbeats, future fire-and-forget pings) is not
-# worth re-delivering and would only add reconnect noise.
-_RING_REPLAY_EVENTS = ("run-started", "message-added")
+# could have missed. Anything else (heartbeats, layout pings) is not worth re-delivering and
+# would only add reconnect noise. `game-updated` IS a reconcile invitation (F5 / 0064): replaying
+# the last HUD-refetch ping closes the FIRST-TURN edge — a window that opens DURING another window's
+# first turn (which binds the canonical session mid-turn) would otherwise miss that turn's push and
+# sit stale until its 20–30s poll. The ring is bounded (maxlen 8) and the replayed ping is idempotent
+# (the joiner just re-fetches its own Vault-free projection; no state body crosses).
+_RING_REPLAY_EVENTS = ("run-started", "message-added", "game-updated")
 
 # Send an SSE comment heartbeat this often so idle connections (and any proxy in
 # front) stay open between real events.

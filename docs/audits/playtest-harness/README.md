@@ -228,6 +228,7 @@ messages with the repo's required trailers.
 | `coreScenes.mjs` / `gameScenes.mjs` / `state1.mjs` | scripted captures of login/home/settings/themes and the game windows (cast, finale, decision card, social, diary, status HUD). |
 | `gameLoopUI.mjs` | a *mechanical* through-the-UI driver (sends agent turns, answers cards/ask_user) — useful to confirm the engine integration works under explicit prompting, and to reach late states fast. **Not** a substitute for persona roleplay. |
 | `mirror_live_parity.mjs` + `run_mirror_gate.sh` | the **F5 two-window live-parity gate** (§10) — boots the stack + a deterministic streamed fake model and asserts window B mirrors window A's **LIVE** render (renders DURING A's stream, through the same incremental renderer), not just the settled transcript. Model-independent, no key. |
+| `mirror_hud_parity.mjs` (via `run_mirror_gate.sh MIRROR_HUD=1`) | the **F5 status/gadget-half gate** (§10a, 0064 §B/D) — same stack; after A sends a chat turn that **mutates** engine state (confirmed via engine `beatSeq` before/after), asserts window B's HUD reconciles off the **server push** (the `sync:game-updated` orwell:gamechanged event — never the poll) within `HUD_PARITY_BUDGET_MS`. Model-independent, no key. |
 
 All scripts read secrets from `.audit-telemetry/.secrets.env` (`ADMIN_USER/ADMIN_PW/OR_KEY/OR_BASE/OR_MODEL`) and
 write to `.audit-telemetry/shots/`. They are committed here **as reference tooling**; the runtime sandbox, browsers,
@@ -337,3 +338,42 @@ all three checks pass. Then promote it to a required CI gate (it already runs ke
 deterministic narrator, like `browser_smoke.py`/`deploy/smoke.sh`) and delete the `xfail` on
 `frontend/tests/test_0012_mirror.py::test_chat_client_mirror_does_not_full_repaint_per_delta` (the fast
 source-pin tripwire — it XPASSes the moment R2 lands).
+
+## 10a. The two-window HUD-parity gate (F5 status/gadget half · feature 0064 §B/D)
+
+`mirror_hud_parity.mjs` is the **status/gadget complement** to §10's chat-render gate: §10 proves the
+two windows mirror the live *narration*; this proves they mirror the *board / HUD* the moment a chat
+turn changes it. It targets the gap where the 0064 `game-updated` server-push fired from the
+decision/self-eviction routes but **never from the chat-turn path** — so a game turn refreshed only the
+sender's HUD and peers stayed stale until their 20–30s poll (observed live: window A "1 of 15 met" /
+window B "0 of 15").
+
+**Run (no API key — deterministic fake streamed model):**
+```bash
+MIRROR_HUD=1 bash docs/audits/playtest-harness/run_mirror_gate.sh
+```
+Same stack as §10 (engine + fake model + FE + a STARTED game, two windows on one canonical session). It
+first sends a **warm-up** framed turn from A so the canonical session binds and BOTH windows subscribe to
+its SSE channel (steady state — the real two-window scenario; without it the first framed turn binds the
+canonical id mid-turn and the end-of-turn push races ahead of the peers' not-yet-existing subscription,
+a first-turn artifact). Then A sends the **measured** mutating turn.
+
+**Mutation source (key-free):** the measured turn is a long player line with no model write tool, so the
+**0055 `_auto_record_scene` belt** (`ensure_turn_recorded` → `recordInteraction`) fires and commits an
+engine mutation (the `beatSeq` bumps). The gate **confirms** the mutation (engine `beatSeq` before/after)
+before asserting parity — a non-mutating turn can never yield a false green.
+
+**Measurement (push, not poll):** the 0064 SSE `game-updated` is the **only** thing that dispatches a
+`window.orwellGameChanged('sync:game-updated')` (via `sessionSync.js notifyGameUpdated`); the HUD's poll
+re-fetches **without** dispatching `orwell:gamechanged`. So the gate taps B's `orwell:gamechanged` carrying
+the `sync:game-updated` reason — by construction the push, never the poll — and times it relative to A's
+settle (the A↔B parity lag; A refreshes its OWN HUD client-side at settle). **What it asserts** (PASS only
+if all hold): `turnMutatedEngine` (the measured turn bumped `beatSeq`), `bReceivedPush` (B got the push),
+`parityWithinBudget` (B's reconcile lands within `HUD_PARITY_BUDGET_MS`, default 2000, of A's settle).
+
+**Verdict:** **RED on the base branch** (the chat turn publishes nothing → B never receives a push → it
+would only converge on its slow poll); **GREEN** once `chat_routes.py` fires `publish_game_updated_after_turn`
+from the DONE seam (gated on the mutation). Representative GREEN telemetry: measured turn beat 2→3, B push
+reason `sync:game-updated` at +2044ms while A settled at +4025ms → parity lag 0ms. The fast source-pin
+tripwire is `frontend/tests/test_1130_hud_parity_instant.py` (the helper's mutation-gating + the
+chat-route source-pin).

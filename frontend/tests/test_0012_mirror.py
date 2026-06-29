@@ -201,11 +201,13 @@ def test_subscribe_replays_a_run_started_published_before_connect():
 
 
 def test_ring_replays_recent_invitations_but_not_unbounded():
-    """The ring is bounded and only carries invitation-class events (run-started / message-added) —
-    not every event type, and not an unbounded log."""
+    """The ring carries reconcile-invitation events (run-started / message-added / game-updated) —
+    NOT every event type, and not an unbounded log. `game-updated` is replayed (F5 first-turn edge):
+    a window opening mid-first-turn still gets the HUD-refetch ping it would otherwise miss."""
     async def main():
         sid = "adr0012-ring-bounded"
-        # A non-invitation event must NOT be ringed (it's not an attach signal).
+        # A non-invitation event (layout sync, 0064 §F) must NOT be ringed (it's not an attach/reconcile signal).
+        session_events.publish(sid, "layout-changed")
         session_events.publish(sid, "game-updated")
         session_events.publish(sid, "message-added", {"id": "x", "seq": 0})
         return await _drain_subscribe(sid)
@@ -213,7 +215,9 @@ def test_ring_replays_recent_invitations_but_not_unbounded():
     out = _run(main())
     replayed = [ev for ev in out if ev.startswith("event:") and "connected" not in ev]
     assert any("message-added" in ev for ev in replayed), "an invitation event is replayed"
-    assert not any("game-updated" in ev for ev in replayed), \
+    assert any("game-updated" in ev for ev in replayed), \
+        "game-updated is a reconcile invitation — replayed so a mid-first-turn joiner re-fetches its HUD (the F5 edge)"
+    assert not any("layout-changed" in ev for ev in replayed), \
         "a non-invitation event must NOT be ringed (avoid reconnect noise)"
 
 
