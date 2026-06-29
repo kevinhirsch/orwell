@@ -75,47 +75,65 @@ class _Client:
         return self._get
 
 
-# ── the fal client: request shape ────────────────────────────────────────────────
+# ── the fal client: slug routing by reference presence (the #1153 fix) ─────────────
+# `/edit` REQUIRES image_urls (422s without), so a FIRST shoot (no reference) MUST route to
+# `/text-to-image` and only a re-shoot (reference present) to `/edit`.
 
-def test_fal_endpoint_url_appends_slug():
-    assert fal.fal_endpoint_url("https://fal.run", "fal-ai/bytedance/seedream/v5/lite/edit") \
-        == "https://fal.run/fal-ai/bytedance/seedream/v5/lite/edit"
+def test_fal_endpoint_url_first_shoot_routes_to_text_to_image():
+    # no reference ⇒ /text-to-image, regardless of how the model_id was configured
+    for slug in (fal.FAL_SEEDREAM_BASE_SLUG, fal.FAL_SEEDREAM_EDIT_SLUG, fal.FAL_SEEDREAM_T2I_SLUG):
+        assert fal.fal_endpoint_url("https://fal.run", slug, has_reference=False) \
+            == "https://fal.run/" + fal.FAL_SEEDREAM_T2I_SLUG
 
 
-def test_fal_endpoint_url_promotes_bare_slug_to_edit():
-    # a bare lite slug is promoted to the edit endpoint (reference conditioning)
-    assert fal.fal_endpoint_url("https://fal.run", "fal-ai/bytedance/seedream/v5/lite") \
-        == "https://fal.run/fal-ai/bytedance/seedream/v5/lite/edit"
+def test_fal_endpoint_url_reshoot_routes_to_edit():
+    # a reference present ⇒ /edit, regardless of how the model_id was configured
+    for slug in (fal.FAL_SEEDREAM_BASE_SLUG, fal.FAL_SEEDREAM_EDIT_SLUG, fal.FAL_SEEDREAM_T2I_SLUG):
+        assert fal.fal_endpoint_url("https://fal.run", slug, has_reference=True) \
+            == "https://fal.run/" + fal.FAL_SEEDREAM_EDIT_SLUG
+
+
+def test_fal_endpoint_url_defaults_to_first_shoot():
+    # default (no has_reference arg) is the first-shoot path — the common case
+    assert fal.fal_endpoint_url("https://fal.run", fal.FAL_SEEDREAM_EDIT_SLUG) \
+        == "https://fal.run/" + fal.FAL_SEEDREAM_T2I_SLUG
 
 
 def test_fal_endpoint_url_strips_stray_chat_suffix():
-    assert fal.fal_endpoint_url("https://fal.run/chat/completions", fal.FAL_SEEDREAM_EDIT_SLUG) \
+    assert fal.fal_endpoint_url("https://fal.run/chat/completions", fal.FAL_SEEDREAM_EDIT_SLUG,
+                                has_reference=True) \
         == "https://fal.run/" + fal.FAL_SEEDREAM_EDIT_SLUG
 
 
-def test_fal_request_carries_prompt_size_and_no_image_urls_without_ref():
+def test_fal_first_shoot_routes_text_to_image_with_no_image_urls():
+    # The bug this fixes: a reference-free first shoot must NOT hit /edit (which 422s "image_urls
+    # required") — it hits /text-to-image and sends NO image_urls.
     client = _Client(_Resp(200, {"images": [{"url": "https://cdn.fal/x.png"}]}), get=_Resp(200, content=b"PNG"))
     out, reason, _ = _run(fal.generate_via_fal(
         client, "https://fal.run", fal.FAL_SEEDREAM_EDIT_SLUG, "a portrait", {"Authorization": "Key K"}))
     assert out == b"PNG" and reason is None
     url, payload, headers = client.posts[0]
-    assert url.endswith(fal.FAL_SEEDREAM_EDIT_SLUG)
+    assert url.endswith(fal.FAL_SEEDREAM_T2I_SLUG)   # routed to text→image, NOT /edit
     assert payload["prompt"] == "a portrait"
     assert payload["image_size"] == fal.FAL_DEFAULT_IMAGE_SIZE
-    assert payload["num_images"] == 1 and payload["max_images"] == 1
-    assert "image_urls" not in payload          # no reference ⇒ text→image
-    assert headers["Authorization"] == "Key K"  # the fal Key auth rides through
+    assert payload["num_images"] == 1
+    assert "image_urls" not in payload              # no reference ⇒ text→image, no image_urls
+    assert "max_images" not in payload              # max_images is an /edit-only field
+    assert headers["Authorization"] == "Key K"      # the fal Key auth rides through
 
 
-def test_fal_request_includes_reference_as_data_uri():
+def test_fal_reshoot_routes_to_edit_with_reference_as_data_uri():
     client = _Client(_Resp(200, {"images": [{"url": "https://cdn.fal/x.png"}]}), get=_Resp(200, content=b"PNG"))
+    # configure the model as the bare slug to prove routing isn't carried on the model id
     out, _, _ = _run(fal.generate_via_fal(
-        client, "https://fal.run", fal.FAL_SEEDREAM_EDIT_SLUG, "p", {}, reference_pngs=[b"REFBYTES"]))
+        client, "https://fal.run", fal.FAL_SEEDREAM_BASE_SLUG, "p", {}, reference_pngs=[b"REFBYTES"]))
     assert out == b"PNG"
-    _, payload, _ = client.posts[0]
+    url, payload, _ = client.posts[0]
+    assert url.endswith(fal.FAL_SEEDREAM_EDIT_SLUG)  # a reference ⇒ /edit
     assert isinstance(payload["image_urls"], list) and len(payload["image_urls"]) == 1
     assert payload["image_urls"][0].startswith("data:image/png;base64,")
     assert base64.b64decode(payload["image_urls"][0].split(",", 1)[1]) == b"REFBYTES"
+    assert payload["max_images"] == 1               # /edit carries max_images
 
 
 def test_fal_caps_reference_images_at_ten():

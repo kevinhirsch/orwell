@@ -13,16 +13,21 @@ accepted in ADR 0016 §C). It is configured like any other provider — a `Model
 `EncryptedText` column; no new secret store). The fal auth header is ``Authorization: Key <FAL_KEY>``
 (NOT ``Bearer``), built by `endpoint_resolver.build_headers` for a fal base.
 
-Endpoint shape (verified against fal docs 2026-06-29 — see the OWED live-verify note in the PR):
-  POST  https://fal.run/<model-slug>            (the slug already ends in `.../edit` for the edit model)
+Endpoint shape (verified against a LIVE fal probe 2026-06-29 — the routing below is what the API
+actually accepts; the prior "promote to /edit always" was wrong and 422'd a first shoot):
+  text→image  POST https://fal.run/fal-ai/bytedance/seedream/v5/lite/text-to-image
+              Body {"prompt": str, "image_size": "auto_2K", "num_images": 1}
+  edit (ref)  POST https://fal.run/fal-ai/bytedance/seedream/v5/lite/edit
+              Body {"prompt": str, "image_urls": [<https-url>, ...],  # REQUIRED — /edit 422s without
+                    "image_size": "auto_2K", "num_images": 1, "max_images": 1}
   Auth  Authorization: Key <FAL_KEY>
-  Body  {"prompt": str,
-         "image_urls": [<url-or-data-uri>, ...],   # up to 10 reference images; omit/[] = text→image
-         "image_size": "auto_2K" | "auto_3K" | {"width","height"},
-         "num_images": 1,
-         "max_images": 1}
   Resp  {"images": [{"url": "https://...", "content_type": "image/...", ...}], "seed": int, ...}
   Cost  ~$0.035 / image.
+
+ROUTE BY REFERENCE PRESENCE (the #1153 fix): `/edit` REQUIRES `image_urls` (HTTP 422
+"Field required: image_urls" without them), so a FIRST shoot (no reference — the common case) MUST
+hit `/text-to-image`; only a re-shoot (a reference image in hand) hits `/edit`. The slug suffix is
+chosen from whether `image_urls` is non-empty, NOT hard-coded onto the model id.
 
 Discipline (mirrors the rest of the portrait pipeline):
   • Vault-free — this client receives only the engine's already-Vault-free portrait prompt + the
@@ -33,6 +38,7 @@ Discipline (mirrors the rest of the portrait pipeline):
 
 import base64
 import logging
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -41,10 +47,13 @@ logger = logging.getLogger(__name__)
 # (the prompt + a reference image carry the square-headshot framing; bounded cost).
 FAL_DEFAULT_IMAGE_SIZE = "auto_2K"
 
-# The Seedream v5 Lite "edit" (reference-image / Sequential) slug on fal. This is the canonical
-# model id; a user may also configure the bare slug and the resolver/caller normalize to the edit
-# endpoint. Kept here so the autodetect / default wiring has ONE source of truth.
-FAL_SEEDREAM_EDIT_SLUG = "fal-ai/bytedance/seedream/v5/lite/edit"
+# The Seedream v5 Lite base slug + its two operation suffixes on fal. The caller picks the suffix at
+# request time from whether a reference image is present (text→image vs. edit) — `/edit` REQUIRES
+# `image_urls` (422s without), so the suffix is NEVER hard-coded onto the model id. Kept here so the
+# autodetect / default wiring + the routing have ONE source of truth.
+FAL_SEEDREAM_BASE_SLUG = "fal-ai/bytedance/seedream/v5/lite"
+FAL_SEEDREAM_T2I_SLUG = FAL_SEEDREAM_BASE_SLUG + "/text-to-image"  # first shoot — no reference
+FAL_SEEDREAM_EDIT_SLUG = FAL_SEEDREAM_BASE_SLUG + "/edit"          # re-shoot — reference in image_urls
 
 
 def is_fal_model(model_id: Optional[str]) -> bool:
@@ -54,24 +63,37 @@ def is_fal_model(model_id: Optional[str]) -> bool:
     return "seedream" in lower or lower.startswith("fal-ai/")
 
 
-def fal_endpoint_url(base_url: str, model_id: str) -> str:
-    """Build the fal POST URL from the endpoint base + model slug.
+def _fal_seedream_slug(model_id: str, has_reference: bool) -> str:
+    """Resolve the operation slug for a Seedream request from whether a reference image is present.
+
+    The #1153 fix: `/edit` REQUIRES `image_urls` (it 422s without), so a first shoot (no reference)
+    MUST route to `/text-to-image` and only a re-shoot (reference in hand) to `/edit`. The incoming
+    `model_id` may be the base slug, `.../edit`, or `.../text-to-image` (whatever the operator
+    configured) — for a Seedream slug we IGNORE its suffix and pick by reference presence, so the
+    routing can never be wrong. A non-Seedream fal slug (a different model) is passed through as-is."""
+    slug = str(model_id or FAL_SEEDREAM_BASE_SLUG).strip().strip("/")
+    low = slug.lower()
+    if "seedream" not in low:
+        return slug  # some other fal model — caller knows its shape; don't rewrite it
+    # Strip any operation suffix the operator may have configured, then append the correct one.
+    base_slug = re.sub(r"/(edit|text-to-image|image-to-image)$", "", slug, flags=re.IGNORECASE)
+    return base_slug + ("/edit" if has_reference else "/text-to-image")
+
+
+def fal_endpoint_url(base_url: str, model_id: str, has_reference: bool = False) -> str:
+    """Build the fal POST URL from the endpoint base + model slug, routed by reference presence.
 
     `base_url` is the configured fal base (``https://fal.run`` — `endpoint_resolver.build_chat_url`
-    leaves a fal base unchanged, so it arrives WITHOUT a `/chat/completions` suffix). `model_id` is
-    the Seedream slug; we append it as the path. The edit (reference) endpoint slug already ends in
-    `/edit`; a bare `.../seedream/v5/lite` slug is promoted to the edit endpoint so reference
-    conditioning works (the whole point of moving to fal)."""
+    leaves a fal base unchanged, so it arrives WITHOUT a `/chat/completions` suffix). For a Seedream
+    slug the operation suffix is chosen from `has_reference` (the #1153 fix): no reference ⇒
+    `/text-to-image` (the first-shoot path; `/edit` would 422 without `image_urls`), a reference ⇒
+    `/edit` (reference-image conditioning). The bare/edit/text-to-image slug all normalize correctly."""
     base = (base_url or "https://fal.run").rstrip("/")
     # Strip a stray chat suffix if a caller passed a built chat URL (defensive — fal has no such path).
     for suffix in ("/chat/completions", "/v1/messages"):
         if base.endswith(suffix):
             base = base[: -len(suffix)].rstrip("/")
-    slug = str(model_id or FAL_SEEDREAM_EDIT_SLUG).strip().strip("/")
-    # Promote a bare lite slug to the edit endpoint (reference-image conditioning).
-    if "seedream" in slug.lower() and not slug.lower().endswith("/edit"):
-        slug = slug + "/edit"
-    return f"{base}/{slug}"
+    return f"{base}/{_fal_seedream_slug(model_id, has_reference)}"
 
 
 def _data_uri(png: bytes) -> str:
@@ -144,7 +166,9 @@ async def generate_via_fal(client, base_url: str, model_id: str, prompt: str, he
     if not prompt:
         return None, "empty-prompt", None
 
-    url = fal_endpoint_url(base_url, model_id)
+    # Build the reference set FIRST — it decides the routing. A first shoot (no reference) goes to
+    # `/text-to-image`; a re-shoot (reference present) goes to `/edit`, which REQUIRES `image_urls`
+    # (the #1153 fix — `/edit` 422s "Field required: image_urls" without them).
     image_urls = []
     for png in (reference_pngs or []):
         if png:
@@ -152,14 +176,17 @@ async def generate_via_fal(client, base_url: str, model_id: str, prompt: str, he
             if len(image_urls) >= 10:
                 break
 
+    url = fal_endpoint_url(base_url, model_id, has_reference=bool(image_urls))
+
     payload = {
         "prompt": prompt,
         "image_size": image_size,
         "num_images": 1,
-        "max_images": 1,
     }
     if image_urls:
+        # `/edit` only — carry the references and cap the output to one image.
         payload["image_urls"] = image_urls
+        payload["max_images"] = 1
 
     # fal wants application/json; the resolver-built headers carry the Key auth. Ensure content-type.
     h = dict(headers or {})
