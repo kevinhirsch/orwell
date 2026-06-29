@@ -199,6 +199,22 @@ many parallel agents, not typing every edit myself.
     but it's a latent footgun. EVERY worktree-agent brief must say: "Do NOT use `git stash` in this
     worktree; to compare against clean main use `git diff origin/main..HEAD` or a throwaway clone." And as
     overseer, ALWAYS verify a delegate branch with the committed-only diff before pushing.
+22. **ANYTHING that uses the live API key MUST capture the debug bundle + producer's-vault export at the
+    END of its operation — standing owner rule (2026-06-29), every live-model run, forever.** A live
+    playtest/verify/manual-real-model run builds up the richest evidence there is — the full hidden Vault
+    layer (off-screen scheming, NPC confessionals, hidden ties, sealed twists, true eviction votes) + the
+    turn-by-turn debug logs — and it ALL dematerializes when the ephemeral engine/FE/worktree is reclaimed.
+    So the FINAL step of any API-key-using operation is to grab it before teardown. The ONE call that
+    returns BOTH the debug logs AND the producerVault unseal:
+    `GET http://127.0.0.1:7000/api/admin/debug-bundle?vault=1` (admin cookie; `?vault=1`/`?include_vault=1`
+    crosses the sanctioned out-of-band producerVault — owner DEBUG override of mandate #2, admin-only, never
+    a player path). Save it to the **session scratchpad** (durable across the session), NOT the worktree/tmp
+    (dies with the agent). Belt-and-suspenders: ALSO snapshot the harness telemetry (`/tmp/play/turnlog.txt`,
+    `.audit-telemetry/{fe.log,engine.log,engine-data/}` — the on-disk save's latest `v0000NN.json` always
+    holds the final Vault even if the live engine is already down). EVERY live brief must end with this
+    capture as a REQUIRED step, and as overseer, if a delegate forgets, capture it yourself the instant the
+    delegate reports done (tell it to leave the stack up + dirs intact for exactly that). This sharpens #20:
+    not just "paste evidence inline" but "produce the bundle artifact."
 
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,
