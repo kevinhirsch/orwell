@@ -2304,10 +2304,16 @@ async def apply_game_framing(
         # play and the seeded gates are unchanged); the 4th element appears ONLY while a player pending
         # is open, where the engine is already BLOCKED on the player and the auto-advance must hold
         # anyway. `pending` is the Vault-free `PendingDecisionView`; we key on its stable `kind` scalar.
-        if user is not None and moment is not None:
+        if moment is not None:
             _pending = game_state.get("pending")
             _pending_kind = _pending.get("kind") if isinstance(_pending, dict) else None
-            _LAST_FRAMED_BEAT_KEY[user] = (
+            # #1154: key under the SAME "default" fallback the engine sandbox uses in a no-auth
+            # single-user posture (AUTH_ENABLED=false ⇒ `user` is None). Previously this stored nothing
+            # when `user` was None, so the forced-tool_choice gate (which reads this) was silently inert
+            # in the local/LAN posture. Auth-on multi-user passes a real username ⇒ byte-identical.
+            # (The legacy peer-advance / stall-nudge readers still key on `owner or ""` — a separate,
+            # pre-existing matter; this fix is scoped to the #1154 gate the owner approved.)
+            _LAST_FRAMED_BEAT_KEY[user or "default"] = (
                 (game_state.get("week"), game_state.get("phase"), moment, _pending_kind)
                 if _pending_kind is not None
                 else (game_state.get("week"), game_state.get("phase"), moment)

@@ -264,7 +264,7 @@ def test_kill_switch_defaults_on():
 # tool_choice through — not just the pure gate above.
 
 def _drive_loop_capture_tool_choice(monkeypatch, *, model, framed_key, pending=None,
-                                    force_setting=True, game_mode="game"):
+                                    force_setting=True, game_mode="game", owner="tester"):
     from src import agent_loop as al
     from routes import chat_helpers as ch
     from src import orwell_engine as oe
@@ -284,10 +284,13 @@ def _drive_loop_capture_tool_choice(monkeypatch, *, model, framed_key, pending=N
     monkeypatch.setattr(ti, "get_tool_index", lambda: None)
 
     # The framed beat the model is grounded on this turn (what apply_game_framing would have stashed).
+    # #1154 no-auth: the loop resolves owner→"default" when None, and the store keys under that same
+    # fallback — so mirror it here so an owner=None drive reads the key the gate will look for.
+    _fk_owner = owner or "default"
     if framed_key is None:
-        ch._LAST_FRAMED_BEAT_KEY.pop("tester", None)
+        ch._LAST_FRAMED_BEAT_KEY.pop(_fk_owner, None)
     else:
-        ch._LAST_FRAMED_BEAT_KEY["tester"] = framed_key
+        ch._LAST_FRAMED_BEAT_KEY[_fk_owner] = framed_key
 
     # The engine's open-pending check the force consults (None ⇒ no pending ⇒ forcing allowed).
     async def fake_status(user=None):
@@ -309,14 +312,14 @@ def _drive_loop_capture_tool_choice(monkeypatch, *, model, framed_key, pending=N
         async for _ in al.stream_agent_loop(
             OR_URL, model,
             [{"role": "system", "content": "narrator"}, {"role": "user", "content": "what happens"}],
-            max_rounds=1, game_mode=game_mode, owner="tester",
+            max_rounds=1, game_mode=game_mode, owner=owner,
         ):
             pass
 
     try:
         asyncio.get_event_loop().run_until_complete(drive())
     finally:
-        ch._LAST_FRAMED_BEAT_KEY.pop("tester", None)
+        ch._LAST_FRAMED_BEAT_KEY.pop(_fk_owner, None)
     return cap
 
 
@@ -331,6 +334,18 @@ def test_loop_forces_named_advance_at_a_ceremony_beat(monkeypatch):
     cap = _drive_loop_capture_tool_choice(
         monkeypatch, model="z-ai/glm-4.7", framed_key=("w1", "eviction", "eviction"))
     assert cap.get("tool_choice") == {"type": "function", "function": {"name": "advanceGame"}}, cap.get("tool_choice")
+
+
+def test_loop_forces_under_no_auth_owner_none(monkeypatch):
+    # #1154 no-auth fix: under AUTH_ENABLED=false the chat path has owner=None and the game lives under
+    # the engine "default" sandbox. The gate must STILL engage (it previously short-circuited on the
+    # `and owner` precondition, leaving forcing dead in the single-user / LAN posture). The framed beat
+    # is keyed under "default" (what the fixed apply_game_framing stores when user is None), and the loop
+    # resolves owner→"default" to read it.
+    cap = _drive_loop_capture_tool_choice(
+        monkeypatch, model="z-ai/glm-4.7",
+        framed_key=("w1", "hoh-competition", "hoh-competition"), owner=None)
+    assert cap.get("tool_choice") == "required", cap.get("tool_choice")
 
 
 def test_loop_does_not_force_on_an_ordinary_social_turn(monkeypatch):
