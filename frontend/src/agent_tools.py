@@ -61,6 +61,10 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              # calling these, then narrates the engine-decided results.
              "getGameState", "runCompetition", "recordInteraction", "surfaceInformationTo",
              "socialInitiatives", "diaryRoom", "makeDeal", "confide", "whereabouts", "moveTo",
+             # 0107: named alliances — the player names a pact / accepts an NPC's pitch.
+             "formAlliance", "joinAlliance",
+             # 0093/0099: out a learned secret to the house / trade it to a houseguest for a favor.
+             "exposeSecret", "tradeSecret",
              "premiereIntros", "markHouseguestMet",
              "seasonRecap", "seasonRetrospective", "npcVoice",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
@@ -98,6 +102,10 @@ GAME_TOOL_KEEP = frozenset({
     "socialInitiatives", "diaryRoom", "makeDeal",
     # 0075: the trust-gated confide lever (the engine decides the disclosure; the model voices it).
     "confide",
+    # 0107: named alliances (Phase A formAlliance + Phase B joinAlliance) — player-driven, Vault-free.
+    "formAlliance", "joinAlliance",
+    # 0093/0099: expose a learned secret to the house / trade it to a houseguest (player-driven, Vault-free).
+    "exposeSecret", "tradeSecret",
     # B64/0049: the Vault-free presence read (lingering play has engine ground truth).
     "whereabouts",
     # L21/L24: the player walks where they choose; the engine never auto-relocates a person.

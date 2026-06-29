@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
-import { renderGameContext, MOMENT_PROMPTS } from "../../src/engine/momentPrompts";
+import { renderGameContext, MOMENT_PROMPTS, BASE_GAME_MASTER_PROMPT, buildSystemPrompt } from "../../src/engine/momentPrompts";
+import type { GameStateView } from "../../src/ports/GameSession";
 
 /**
  * Narration-framing fixes from the 2026-06-26 BB-nerd auditor synthesis (Lane C).
@@ -129,5 +130,83 @@ describe("#1107 — eviction reveal forbids a fabricated full numeric vote tally
     // and it spells out WHY: 16 minus HOH minus the two nominees ⇒ far fewer actually vote
     expect(frag.toLowerCase()).toContain("minus the hoh and the two nominees");
     expect(frag.toLowerCase()).toContain("never state a number of votes that could not");
+  });
+});
+
+// ── #1127 — the post-HOH fast-forward (anti-montage grounding) ────────────────────────────────
+//
+// When an NPC wins HOH the player is a spectator who was getting MONTAGED past (a) the post-HOH
+// scheming window and (b) the nomination ceremony ("a day passes… noms already wrapped"). The
+// narration-side half of the fix is a hard time-discipline rule: narrate ONLY the live moment,
+// never skip elapsed time, honor the in-game time-of-day, and never narrate a ceremony as
+// already-happened. These are source-pinned convention checks (like the leverManifest / eviction
+// gates above) — they prove the grounding text + the timeOfDay surfacing are in the ASSEMBLED prompt,
+// since the montage itself is invisible to the stubbed-LLM gates.
+describe("#1127 — anti-montage time discipline in the base prompt", () => {
+  it("the base prompt forbids montaging / skipping elapsed time", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/TIME DISCIPLINE — NARRATE ONLY THE LIVE MOMENT/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never write 'a day passes'/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/now it's day three/i);
+    // time only moves when the GAME moves it (never to reach the next ceremony faster)
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Time only moves when the GAME moves it/);
+  });
+
+  it("the base prompt forbids narrating a ceremony as already-happened and honors the in-game hour", () => {
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/may NOT narrate a CEREMONY[\s\S]*ALREADY HAVING HAPPENED/);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Honor the\s*IN-GAME TIME OF DAY the GAME CONTEXT reports/);
+    // a new HOH ⇒ the LIVED aftermath at the current hour, never a jump-cut to "nominations are done"
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/LIVED AFTERMATH/);
+    // the new section never reintroduces the banned literal "the engine" prose (leverManifest invariant)
+    expect(/\bthe engine\b/i.test(BASE_GAME_MASTER_PROMPT)).toBe(false);
+  });
+});
+
+describe("#1127 — the social moment plays the live runway (no fast-forward past scheming)", () => {
+  it("the social fragment forbids montaging and grounds the new-HOH aftermath in the live moment", () => {
+    const frag = MOMENT_PROMPTS["social"]!;
+    expect(frag).toMatch(/LIVE, PRESENT-TENSE MOMENT — PLAY IT, DO NOT SKIP IT/);
+    expect(frag).toMatch(/in-game time of day the GAME CONTEXT reports/);
+    // the new-HOH aftermath is the lived scramble, not a jump to the ceremony
+    expect(frag.toLowerCase()).toContain("lived aftermath");
+    // and it must forbid narrating the next ceremony as already over
+    expect(frag.toLowerCase()).toContain("already wrapped");
+  });
+
+  it("the nominations fragment frames the ceremony as a LIVE witnessed set-piece, never a recap", () => {
+    const frag = MOMENT_PROMPTS["nominations"]!;
+    expect(frag).toMatch(/PLAY THE CEREMONY AS A LIVE SET-PIECE THE PLAYER WITNESSES/);
+    expect(frag.toLowerCase()).toContain("never recap it as already-done");
+    // the player witnesses an NPC HOH's ceremony live, at the current time of day
+    expect(frag).toMatch(/in-game time of day the GAME CONTEXT reports/);
+  });
+});
+
+describe("#1127 — the assembled prompt surfaces the in-game time of day for the social/nominations beats", () => {
+  // The narrator can only honor the in-game hour if it is in the assembled GAME CONTEXT. When the 0066
+  // clock is running, the view carries `timeOfDay`; the context must surface it for the social AND the
+  // nominations moment (the two beats the post-HOH montage skips), so the model cannot silently advance days.
+  const viewWithClock = (moment: string): GameStateView =>
+    ({
+      started: true, week: 2, phase: moment === "social" ? "social" : "nominations", moment,
+      timeOfDay: "evening",
+      player: { id: "player", name: "P", archetype: "a", strategyStyle: "s", status: "active" },
+      house: [{ id: "npc:1", name: "A", status: "active", archetype: "x", strategyStyle: "y" }],
+    }) as unknown as GameStateView;
+
+  for (const moment of ["social", "nominations"]) {
+    it(`the ${moment} moment's assembled prompt carries the engine's time of day when the clock runs`, () => {
+      const prompt = buildSystemPrompt(moment, viewWithClock(moment));
+      expect(prompt).toMatch(/Time of day: evening \(engine truth/);
+      expect(prompt).toMatch(/never narrate a different time of day than the engine reports/i);
+    });
+  }
+
+  it("a clock-dormant view emits NO time-of-day line (byte-identical opt-out preserved)", () => {
+    const view = {
+      started: true, week: 2, phase: "social", moment: "social",
+      player: { id: "player", name: "P", archetype: "a", strategyStyle: "s", status: "active" },
+      house: [{ id: "npc:1", name: "A", status: "active", archetype: "x", strategyStyle: "y" }],
+    } as unknown as GameStateView;
+    expect(buildSystemPrompt("social", view)).not.toMatch(/Time of day:/);
   });
 });

@@ -1,96 +1,99 @@
 import { describe, it, expect } from "vitest";
 import {
-  phaseForDepth, bedtimeDepthFor, restDeficitForDepth, socialSwayScale, SOCIAL_SWAY_FLOOR,
-  accrueFatigue, combinedRestDeficit, TIME_OF_DAY_ORDER,
+  phaseForHour, bedtimeHourFor, sleepDeficitForBedHour, socialSwayScale, SOCIAL_SWAY_FLOOR,
+  accrueFatigue, combinedRestDeficit, WAKE_HOUR, DAY_END_HOUR,
 } from "../../src/engine/timeOfDay";
+import { CLOCK } from "../../src/engine/sleepConstants";
 import { advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit } from "../../src/engine/liveSeason";
 import type { LiveSeasonState } from "../../src/engine/liveSeason";
 
 /**
- * 0066 Phase-2 — the hidden continuous "night depth" that grades the sleep trade + varies bedtimes by
- * chronotype, PROJECTED onto the public 5-phase enum. Everything here is gated: with no clock running
- * (no `nightDepth` / `lastSleepDepth`) every read is 0 ⇒ byte-identical to the pre-feature model. No rng:
- * a bedtime is DERIVED deterministically, never rolled. Roles only — no names, no fixed cast.
+ * 0066 — the 24-hour clock + the graded sleep economy (#1125). The hidden `nightDepth` field carries the
+ * clock-HOUR (8..32); the public `timeOfDay` is PROJECTED from it via `phaseForHour`. Everything is gated:
+ * with no clock running (no `nightDepth` / `lastSleepDepth`) every read is 0 ⇒ byte-identical to the
+ * pre-feature model. No rng: a bedtime is DERIVED deterministically, never rolled. Roles only.
  */
 
-describe("phaseForDepth — projects the hidden depth onto the public 5 phases (monotonic)", () => {
-  it("0 = morning, 1 = late-night, and the projection never goes backwards", () => {
-    expect(phaseForDepth(0)).toBe("morning");
-    expect(phaseForDepth(1)).toBe("late-night");
-    expect(phaseForDepth(-5)).toBe("morning"); // clamped
-    expect(phaseForDepth(5)).toBe("late-night");
+describe("phaseForHour — projects the clock-hour onto the public 5 phases (monotonic)", () => {
+  it("8 = morning, 24+ = late-night, and the projection never goes backwards through the day", () => {
+    expect(phaseForHour(WAKE_HOUR)).toBe("morning");
+    expect(phaseForHour(24)).toBe("late-night");
+    expect(phaseForHour(0)).toBe("morning");   // clamped below the wake
+    expect(phaseForHour(40)).toBe("late-night"); // clamped above the day
     let last = -1;
-    for (let d = 0; d <= 1.0001; d += 0.02) {
-      const idx = TIME_OF_DAY_ORDER.indexOf(phaseForDepth(d));
+    const order = ["morning", "afternoon", "evening", "night", "late-night"];
+    for (let h = WAKE_HOUR; h < DAY_END_HOUR; h += 0.25) {
+      const idx = order.indexOf(phaseForHour(h));
       expect(idx).toBeGreaterThanOrEqual(last);
       last = idx;
     }
   });
 });
 
-describe("bedtimeDepthFor — chronotype is its OWN axis, deterministic, byte-stable", () => {
-  it("is in range, and a social houseguest beds deeper than a comp-focused one", () => {
-    const owl = bedtimeDepthFor({ physical: 0.2, social: 0.9 });
-    const lark = bedtimeDepthFor({ physical: 0.9, social: 0.2 });
+describe("bedtimeHourFor — chronotype is its OWN axis, deterministic, byte-stable (clock-hours)", () => {
+  it("is in range, and a social houseguest beds LATER (post-midnight) than a comp-focused one", () => {
+    const owl = bedtimeHourFor({ physical: 0.2, social: 0.9 });
+    const lark = bedtimeHourFor({ physical: 0.9, social: 0.2 });
     expect(owl).toBeGreaterThan(lark);
+    expect(lark).toBeLessThan(CLOCK.midnightHour);   // a lark beds before midnight
+    expect(owl).toBeGreaterThan(CLOCK.midnightHour); // an owl beds after midnight
     for (const s of [{ physical: 0, social: 1 }, { physical: 1, social: 0 }, { physical: 0.5, social: 0.5 }]) {
-      const d = bedtimeDepthFor(s);
-      expect(d).toBeGreaterThanOrEqual(0.45);
-      expect(d).toBeLessThanOrEqual(0.95);
+      const h = bedtimeHourFor(s);
+      expect(h).toBeGreaterThanOrEqual(21);
+      expect(h).toBeLessThanOrEqual(26);
     }
   });
 
   it("the per-id variation is DETERMINISTIC (same id ⇒ same) and SPREADS similar-stat houseguests apart", () => {
     const stats = { physical: 0.5, social: 0.5 };
-    expect(bedtimeDepthFor(stats, "hg-A")).toBe(bedtimeDepthFor(stats, "hg-A")); // no rng — stable
-    const a = bedtimeDepthFor(stats, "hg-A");
-    const b = bedtimeDepthFor(stats, "hg-B");
+    expect(bedtimeHourFor(stats, "hg-A")).toBe(bedtimeHourFor(stats, "hg-A")); // no rng — stable
+    const a = bedtimeHourFor(stats, "hg-A");
+    const b = bedtimeHourFor(stats, "hg-B");
     expect(a).not.toBe(b); // two identical-stat houseguests still differ (its own axis)
-    // and omitting the id is the legacy pure-stats shape (no variation)
-    expect(bedtimeDepthFor(stats)).not.toBe(a);
+    expect(bedtimeHourFor(stats)).not.toBe(a); // omitting the id is the legacy pure-stats shape
   });
 });
 
-describe("restDeficitForDepth — graded, only within late-night (preserves the no-normal-night-tax invariant)", () => {
-  it("0 through `night` (≤0.8), then ramps to 1 at the bitter end, monotonically", () => {
-    expect(restDeficitForDepth(0.5)).toBe(0);
-    expect(restDeficitForDepth(0.8)).toBe(0); // a healthy night is free
-    expect(restDeficitForDepth(0.9)).toBeGreaterThan(0);
-    expect(restDeficitForDepth(1.0)).toBeCloseTo(1);
+describe("sleepDeficitForBedHour — graded, only past midnight (no normal-night tax)", () => {
+  it("0 through midnight (≤24), then ramps to 1 at the 8am wake, monotonically", () => {
+    expect(sleepDeficitForBedHour(20)).toBe(0);   // 8pm
+    expect(sleepDeficitForBedHour(CLOCK.midnightHour)).toBe(0); // midnight is free
+    expect(sleepDeficitForBedHour(26)).toBeGreaterThan(0);      // 2am
+    expect(sleepDeficitForBedHour(DAY_END_HOUR)).toBeCloseTo(1); // up to the bitter end
     let prev = -1;
-    for (let d = 0; d <= 1.0001; d += 0.05) {
-      const v = restDeficitForDepth(d);
+    for (let h = WAKE_HOUR; h <= DAY_END_HOUR; h += 0.5) {
+      const v = sleepDeficitForBedHour(h);
       expect(v).toBeGreaterThanOrEqual(prev);
       prev = v;
     }
   });
 });
 
-describe("advanceClock — advances the hidden depth, projects the phase, wraps at the bitter end", () => {
+describe("advanceClock — advances the clock-hour, projects the phase, wraps at the 8am wake", () => {
   it("rolls over several beats (no whole-phase lurch) and a full night banks the max deficit", () => {
     const s = {} as LiveSeasonState;
-    advanceClock(s); // first beat starts the morning
+    advanceClock(s); // first beat starts the morning wake
     expect(s.timeOfDay).toBe("morning");
-    expect(s.nightDepth).toBe(0);
+    expect(s.nightDepth).toBe(WAKE_HOUR);
     let beats = 0;
     while (s.timeOfDay !== "late-night" && beats < 50) { advanceClock(s); beats++; }
-    expect(beats).toBeGreaterThan(3); // a phase takes MORE than one beat now (the cadence fix)
-    // run out the night without the player turning in ⇒ wrap to morning, banked running-on-empty
-    for (let i = 0; i < 50 && s.nightDepth !== 0; i++) advanceClock(s);
+    expect(beats).toBeGreaterThan(3); // a phase takes MORE than one beat (the cadence: ~3h/beat over 4h phases)
+    // run out the night without the player turning in ⇒ wrap to the 8am wake, banked running-on-empty
+    for (let i = 0; i < 50 && s.nightDepth !== WAKE_HOUR; i++) advanceClock(s);
     expect(s.timeOfDay).toBe("morning");
-    expect(s.lastSleepDepth).toBe(1);
-    expect(playerRestDeficit(s)).toBeCloseTo(1); // outlasted the whole house ⇒ max deficit
+    expect(s.lastSleepDepth).toBe(DAY_END_HOUR);  // outlasted the whole house to the 8am wake
+    expect(playerRestDeficit(s)).toBeCloseTo(1);  // ⇒ max deficit
   });
 
-  it("the player's bedtime lever grades the deficit by how deep they were up", () => {
-    const early = { nightDepth: 0.5, evictionOrder: [] } as unknown as LiveSeasonState; // bedded by evening
+  it("the player's bedtime lever grades the deficit by the clock-hour they were up to", () => {
+    const early = { nightDepth: 22, evictionOrder: [] } as unknown as LiveSeasonState; // bedded 10pm
     playerTurnIn(early, "player");
     expect(early.timeOfDay).toBe("morning");
-    expect(playerRestDeficit(early)).toBe(0); // an early night ⇒ rested
+    expect(playerRestDeficit(early)).toBe(0); // before midnight ⇒ rested
 
-    const late = { nightDepth: 0.95, evictionOrder: [] } as unknown as LiveSeasonState; // ran deep into late-night
+    const late = { nightDepth: 27, evictionOrder: [] } as unknown as LiveSeasonState; // up to 3am
     playerTurnIn(late, "player");
-    expect(playerRestDeficit(late)).toBeGreaterThan(0); // a late night ⇒ a real cost
+    expect(playerRestDeficit(late)).toBeGreaterThan(0); // past midnight ⇒ a real cost
   });
 });
 
@@ -111,30 +114,29 @@ describe("socialSwayScale — a tired houseguest sways the house LESS (effective
 
 describe("multi-night fatigue — a STRING of late nights compounds; a rested night recovers", () => {
   it("accrueFatigue stacks consecutive late nights toward 1 and decays when rested (bounded)", () => {
-    // Moderate late nights (deficit 0.5 each) compound: a single one doesn't max you, but a string does.
     const n1 = accrueFatigue(0, 0.5);
     const n2 = accrueFatigue(n1, 0.5);
     const n3 = accrueFatigue(n2, 0.5);
-    expect(n2).toBeGreaterThan(n1); // the second late night compounds beyond the first
+    expect(n2).toBeGreaterThan(n1);
     expect(n3).toBeGreaterThan(n2);
-    expect(n3).toBeLessThanOrEqual(1); // bounded
-    expect(accrueFatigue(1, 1)).toBe(1); // saturates, never exceeds 1
-    const recovered = accrueFatigue(n3, 0); // a fully rested night
-    expect(recovered).toBeLessThan(n3); // recovers
+    expect(n3).toBeLessThanOrEqual(1);
+    expect(accrueFatigue(1, 1)).toBe(1); // saturates
+    const recovered = accrueFatigue(n3, 0);
+    expect(recovered).toBeLessThan(n3);
     expect(recovered).toBeGreaterThanOrEqual(0);
   });
 
   it("combinedRestDeficit adds the meter on top of the immediate deficit, bounded and monotonic", () => {
-    expect(combinedRestDeficit(0, 0)).toBe(0);          // rested + no history ⇒ nothing (byte-identical)
-    expect(combinedRestDeficit(0.3, 0)).toBe(0.3);      // no history ⇒ just the immediate
-    expect(combinedRestDeficit(0.3, 0.8)).toBeGreaterThan(0.3); // accumulated fatigue adds on top
-    expect(combinedRestDeficit(1, 1)).toBe(1);          // bounded
-    expect(combinedRestDeficit(0, 0.5)).toBeGreaterThan(combinedRestDeficit(0, 0.2)); // monotonic in the meter
+    expect(combinedRestDeficit(0, 0)).toBe(0);
+    expect(combinedRestDeficit(0.3, 0)).toBe(0.3);
+    expect(combinedRestDeficit(0.3, 0.8)).toBeGreaterThan(0.3);
+    expect(combinedRestDeficit(1, 1)).toBe(1);
+    expect(combinedRestDeficit(0, 0.5)).toBeGreaterThan(combinedRestDeficit(0, 0.2));
   });
 });
 
-describe("gated OFF ⇒ byte-identical: with no clock running every rest read is 0", () => {
-  it("an absent depth means zero deficit for the player and every NPC", () => {
+describe("gated OFF ⇒ byte-identical: with no clock running every sleep read is 0", () => {
+  it("an absent clock means zero deficit for the player and every NPC", () => {
     const dormant = {} as LiveSeasonState; // no nightDepth / lastSleepDepth — the calibration spine
     expect(playerRestDeficit(dormant)).toBe(0);
     expect(npcRestDeficit(dormant, { physical: 0.2, social: 0.9 }, "owl")).toBe(0);

@@ -4,6 +4,7 @@ import type {
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
   SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult,
+  ExposeSecretReq, ExposeResult, TradeSecretReq, TradeResult, SecretLeverDescriptor,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
   PreSeedNextSeasonReq, PreSeedNextSeasonView,
@@ -114,6 +115,8 @@ import {
   CEREMONY_IMPACTS, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
+import { notorietyBias, recognitionFor } from "../../engine/notoriety";
+import type { NotorietySummary, OpenSetSeasonOutcome } from "../../engine/notoriety";
 import {
   deriveTrajectory, decayTrajectory, STEADY,
   type Trajectory, type FoldSignal,
@@ -135,11 +138,11 @@ import {
   newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
-  advanceClock, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
+  advanceClock, advanceClockPerConversation, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, awakeSet, phaseForDepth, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists } from "../../engine/reserveTwists";
@@ -163,6 +166,7 @@ import {
   generateDiversityLayer, repairDiversityLayer, privateOrientationToVaultContent, showmancePlausible,
 } from "../../engine/diversity";
 import type { ProposedIdentityFacets } from "../../engine/diversity";
+import { nameGenderOf, pickGivenNameFor } from "../../engine/data/nameGender";
 import type { Orientation, GenderPresentation } from "../../engine/diversityConstants";
 import { ALL_ETHNICITIES } from "../../engine/diversityConstants";
 import { foldHiddenImpact } from "../../engine/consequence";
@@ -171,6 +175,12 @@ import {
   type ConfidenceSignals,
 } from "../../engine/confidence";
 import { CONFIDENCE, type DisclosureTier } from "../../engine/confidenceConstants";
+import {
+  severityOf, leverageStrength, leverageDealBoost, dealAcceptance, exposeOutcome,
+  tradeValue, tradeDealBoost, tradeOutcome, bluffBelieved,
+  type LeverageSignals, type TradeSignals,
+} from "../../engine/leverage";
+import { LEVERAGE, SECRET_TRADE } from "../../engine/leverageConstants";
 import {
   rankPlayerBoundThreads, dripBudget, recencyFromAge, relationshipReads,
   type PlayerBoundThread, type RankedThread,
@@ -380,6 +390,27 @@ const SECRET_PACING_ENABLED_DEFAULT = process.env.ORWELL_SECRET_PACING === "1";
 const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 
 /**
+ * 0066 Phase-2 (#1125) — the three sleep-economy EXTENSIONS, each behind its OWN dedicated opt-in flag
+ * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`/`ORWELL_JURY_HOUSE`), default OFF, so calibration
+ * neutrality is provable for EACH in isolation (the brief: "each behind its own opt-in flag, byte-identical
+ * when off"). All three only mean anything while the master clock is running (`ORWELL_TIME_OF_DAY`); each
+ * gates ON TOP of it, and when its own flag is off its effect is the identity (scale 1 / meter 0 / no extra
+ * advance) ⇒ every seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL. None adds a draw to ANY rng —
+ * the social-fatigue + multi-night terms are pure functions of already-decided state (no side-stream
+ * needed; the main competition/vote/jury stream is never re-phased). A test flips each per-session.
+ *
+ *  1. `ORWELL_TIME_PER_CONVERSATION` — the per-conversation clock advance (the day's finite scheming time,
+ *     felt turn-by-turn). Pacing-only; never rushes an engaged scene (clamps at late-night, never wraps).
+ *  2. `ORWELL_SOCIAL_FATIGUE` — a tired houseguest sways the house LESS next day + a conflict drains them
+ *     to an earlier bedtime (social, not just comps).
+ *  3. `ORWELL_MULTI_NIGHT_FATIGUE` — the compounding multi-night fatigue meter (consecutive late nights
+ *     stack a deeper deficit; rested nights recover).
+ */
+const PER_CONVERSATION_CLOCK_ENABLED_DEFAULT = process.env.ORWELL_TIME_PER_CONVERSATION === "1";
+const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE === "1";
+const MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_MULTI_NIGHT_FATIGUE === "1";
+
+/**
  * Engine-side implementation of the Vault-free game-session port. It runs the
  * OOBE (the one human-authored profile) and holds the active house, then projects
  * it to a Vault-free view: the player's own authored card plus a name-only house
@@ -481,6 +512,16 @@ export class GameSessionAdapter implements GameSession {
    * via `setJuryHouseEnabled`.
    */
   private juryHouseEnabled = JURY_HOUSE_ENABLED_DEFAULT;
+  /**
+   * 0066 Phase-2 (#1125) — the three sleep-economy extension flags, each DEFAULT OFF (its dedicated env
+   * default) and each self-gated: when off, its effect is the identity so the seeded calibration spine is
+   * BYTE-IDENTICAL (proven per-extension by the dedicated neutrality tests). All three also require the
+   * master clock (`timeOfDayEnabled`). A test flips each via its `set*Enabled` setter.
+   *   1. per-conversation clock advance · 2. NPC next-day social fatigue · 3. compounding multi-night meter.
+   */
+  private perConversationClockEnabled = PER_CONVERSATION_CLOCK_ENABLED_DEFAULT;
+  private socialFatigueEnabled = SOCIAL_FATIGUE_ENABLED_DEFAULT;
+  private multiNightFatigueEnabled = MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT;
   /** The DEDICATED jury-house rng tick counter — jury-house draws fork off the game seed + this, NEVER the
    * orchestrator's shared society/competition/vote stream, so even with the layer ON the main house's seeded
    * outcomes stay in phase (only the hidden finale lean changes). Persisted so the stream is restart-stable. */
@@ -952,6 +993,18 @@ export class GameSessionAdapter implements GameSession {
   private groundedSkinTones: Record<EntityId, string> = {};
 
   /**
+   * #1140 — RE-PICKED display names per NPC id (a given-name token swapped to match the final gender
+   * presentation; surname kept). Computed by `seedDiversity` but APPLIED to `n.character.name` only AFTER
+   * `seedDeepProfiles` (via `applyDiversityRenames`): the deep layer keys its sub-streams off `hg.name`
+   * (`deepProfile.ts`), so renaming the Character before it runs would shift the deep profile / Day-1
+   * perception / story threads — and therefore the seeded vote/jury outcomes. Deferring the write keeps the
+   * deep layer (and the whole outcome stream) byte-identical with the rename on vs. off. Transient
+   * (re-derivable from the diversity layer); not separately persisted — the renamed name lives on the
+   * byte-stable Character once applied.
+   */
+  private pendingRenames: Record<EntityId, string> = {};
+
+  /**
    * Seal hook for the HIDDEN private orientations (feature 0063) — the registry writes the Vault audit
    * copy + recall index, exactly like `onSealProfiles`. Engine-only: a private orientation is a secret
    * (off the player AND admin), so it rides this hook, never an outward projection.
@@ -1001,6 +1054,16 @@ export class GameSessionAdapter implements GameSession {
     this.onConfide = fn;
   }
 
+  /** 0093/0099 — wire the player's own knowledge reader (validate a wielded factId; resolve its subject). */
+  setPlayerKnowledgeReader(fn: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string }>): void {
+    this.playerKnowledgeReader = fn;
+  }
+
+  /** 0093/0099 — wire the in-game pathway that surfaces an exposed/traded secret into a houseguest's knowledge. */
+  setOnSurfaceToHouseguest(fn: (npcId: EntityId, content: string, subject: EntityId | undefined, pathway: string, confidence: number) => boolean): void {
+    this.onSurfaceToHouseguest = fn;
+  }
+
   /**
    * 0060 §3 (`nominated-twice`) — engine-only, hidden bookkeeping: the DISTINCT weeks each houseguest
    * has been on the block, accrued each schedule tick from the live ceremony nominees. Persisted in the
@@ -1010,6 +1073,16 @@ export class GameSessionAdapter implements GameSession {
   private nominationWeeks: Record<EntityId, number[]> = {};
   /** 0060 — the count of threads that have ever SURFACED this season (the hard restraint cap, §5). */
   private surfacedThreadCount = 0;
+  /**
+   * 0104 — the returning player's accumulated season-over-season NOTORIETY, set ONLY when the player
+   * chose to come back as the SAME character (the diegetic opt-in, R4 — the registry hands it in via
+   * `setNotoriety` on a `keepCharacter` restart). Null on a fresh / new-character / no-prior-season
+   * game ⇒ `seedFirstImpressions` folds NO bias and is BYTE-IDENTICAL (the calibration-neutrality
+   * guarantee). It is a bounded OPEN-SET summary — never a Vault read, never a number to the player.
+   * Folded ONCE at `seedFirstImpressions`; thereafter it is just the move-in edges. Not persisted on
+   * THIS session (it lives at the account level in the `UserNotorietyStore`); held only to seed day one.
+   */
+  private notoriety: NotorietySummary | null = null;
   /**
    * 0091 — whether the TRIGGER-ERUPTION layer RUNS. DEFAULT OFF (the dedicated `ORWELL_TRIGGERS` flag):
    * when off, the orchestrator never calls `runTriggerEruptions` ⇒ ZERO draws on any rng ⇒ every seeded
@@ -1062,6 +1135,41 @@ export class GameSessionAdapter implements GameSession {
    * player's knowledge, not Vault content. Returns whether the player came to hold the belief.
    */
   private onConfide?: (npcId: EntityId, content: string, confidence: number) => boolean;
+
+  /**
+   * Features 0093 + 0099 — secrets as power. Per learned `factId` the player has WIELDED, a monotonic
+   * `usedAs` marker (`leverage` | `exposed` | `traded`) so a secret can't be re-wielded after it's spent
+   * (exposing makes it public; trading widens who knows). Persisted (non-degradation, 0007/0030) so a
+   * restored game remembers exactly which secrets the player has spent. Engine-only — never projected.
+   */
+  private secretUsedAs: Record<string, "leverage" | "exposed" | "traded"> = {};
+  /** 0093 — the per-season count of exposes (the hard `LEVERAGE.maxExposesPerSeason` cap). Persisted. */
+  private exposeCount = 0;
+  /** 0099 — the per-season count of trades (the hard `SECRET_TRADE.maxTradesPerSeason` cap). Persisted. */
+  private tradeCount = 0;
+  /** deception — the per-season count of the PLAYER's bluffs (the `LEVERAGE.maxPlayerBluffsPerSeason` cap). Persisted. */
+  private playerBluffCount = 0;
+  /**
+   * deception — the PASSIVE LIE-CATCH ledger (owner direction): per NPC who BELIEVED a player BLUFF, the
+   * subject(s) the player lied about. When a genuine contradicting pathway later reaches that NPC (the
+   * REAL truth about the same subject — an honest expose/trade), the bluff is caught and the bluffer takes
+   * a betrayal-grade, recoverable hit from that NPC. Engine-only; persisted (non-degradation, 0007/0030).
+   */
+  private playerBluffBelief: Record<EntityId, EntityId[]> = {};
+  /**
+   * 0093/0099 — the player's own KNOWLEDGE reader (wired by the composition root, like the npc-knowledge
+   * providers): returns the player's learned facts so the lever can VALIDATE that a wielded `factId` is
+   * one the player legitimately holds (the Vault bright line — a non-learned secret is rejected, no
+   * Vault-minting) and resolve which houseguest it is about. Returns [] when unwired.
+   */
+  private playerKnowledgeReader?: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string }>;
+  /**
+   * 0093/0099 — surface a fact INTO another houseguest's (or the house's) knowledge through the in-game
+   * pathway (wired by the composition root, mirroring `onConfide`). The player is the teller for an
+   * expose/trade (`told-by:player` / `overheard`): the engine records the witnessed pathway event so the
+   * recipient correctly comes to KNOW the secret — never a Vault read. Returns whether it surfaced.
+   */
+  private onSurfaceToHouseguest?: (npcId: EntityId, content: string, subject: EntityId | undefined, pathway: string, confidence: number) => boolean;
   /** 0066 Phase-2: per-NIGHT conflict tally per houseguest (cleared at each new day). A character conflict
    *  drains the people in it ⇒ they turn in earlier tonight. In-memory + ephemeral (a mid-day reload simply
    *  resets it); only ever populated on the clock-ON path, so the calibration spine is unaffected. */
@@ -1610,6 +1718,13 @@ export class GameSessionAdapter implements GameSession {
       n.character.age = pub.age;
       ctx.setGrounded(n.id, pub.skinTone);
       if (n.character.physicalCharacteristics) n.character.physicalCharacteristics.skinTone = pub.skinTone;
+      // #1140 — apply the gender-coherent re-pick directly: a recordCastIdentity fold lands on an
+      // ALREADY-BUILT cast (the name-keyed deep layer is already seeded), so there's no re-seeding to defer —
+      // writing the name now closes the UNCAPPED, UNFLAGGED AI-override hole (a proposal could flip the facet
+      // off the name and leave the portrait rendering the name's gender). The given-name token is swapped to
+      // the final presentation, surname kept, so name + portrait + narration read the same gender. (The
+      // display name lives on the Houseguest wrapper — `n.name` — not on the static Character.)
+      if (pub.name !== undefined) n.name = pub.name;
       if (proposed[n.id]) applied++;
     }
 
@@ -2018,6 +2133,14 @@ export class GameSessionAdapter implements GameSession {
       // lie cap or re-tells a secret at a lower tier (non-degradation, 0007/0030).
       ...(Object.keys(this.confideState).length ? { confideState: cloneSession(this.confideState) } : {}),
       ...(this.lieCount > 0 ? { confideLieCount: this.lieCount } : {}),
+      // 0093/0099 — secrets as power: which learned secrets the player has SPENT (`usedAs`) + the per-
+      // season expose/trade/bluff counts. Persisted so a restored game remembers a spent secret can't be
+      // re-wielded and the season caps don't reopen (non-degradation, 0007/0030). Engine-only.
+      ...(Object.keys(this.secretUsedAs).length ? { secretUsedAs: cloneSession(this.secretUsedAs) } : {}),
+      ...(this.exposeCount > 0 ? { secretExposeCount: this.exposeCount } : {}),
+      ...(this.tradeCount > 0 ? { secretTradeCount: this.tradeCount } : {}),
+      ...(this.playerBluffCount > 0 ? { secretPlayerBluffCount: this.playerBluffCount } : {}),
+      ...(Object.keys(this.playerBluffBelief).length ? { secretPlayerBluffBelief: cloneSession(this.playerBluffBelief) } : {}),
       ...(this.seededRels.ties.length || this.seededRels.showmances.length
         ? { seededRelationships: cloneSession(this.seededRels) } : {}),
       // 0059 §5 — the tie-surfacing scheduler's hidden bookkeeping: the season player-surface cap counter,
@@ -2233,6 +2356,13 @@ export class GameSessionAdapter implements GameSession {
     // a secret the player already heard, the cap intact).
     this.confideState = core.confideState ? cloneSession(core.confideState) : {};
     this.lieCount = core.confideLieCount ?? 0;
+    // 0093/0099 — restore the secrets-as-power ledger (absent on pre-0093 saves ⇒ empty/zero): which
+    // secrets the player has spent + the per-season caps, so a spent secret stays spent across a restart.
+    this.secretUsedAs = core.secretUsedAs ? cloneSession(core.secretUsedAs) : {};
+    this.exposeCount = core.secretExposeCount ?? 0;
+    this.tradeCount = core.secretTradeCount ?? 0;
+    this.playerBluffCount = core.secretPlayerBluffCount ?? 0;
+    this.playerBluffBelief = core.secretPlayerBluffBelief ? cloneSession(core.secretPlayerBluffBelief) : {};
     // 0063 — restore the engine-only HIDDEN private orientations (a closeted orientation must never
     // silently reset) FIRST, so the 0059 showmance re-derive below can read them for its eligibility gate.
     // Persisted on 0063+ saves; on a pre-0063 (or legacy) save with a seed, re-derive deterministically —
@@ -2684,10 +2814,10 @@ export class GameSessionAdapter implements GameSession {
     return new Set(
       awakeSet({
         active: this.presenceActive(),
-        phase: this.live.timeOfDay,
+        hour: this.live.nightDepth ?? WAKE_HOUR, // the clock-HOUR (8..32) — the 24-hour model (#1125)
         player: this.house.player.id,
         playerRetired: this.live.playerRetired ?? false,
-        bedtimeOf: (id) => phaseForDepth(this.effectiveBedDepth(id)), // chronotype-aware + conflict-drained (0066 Phase-2)
+        bedtimeOf: (id) => this.effectiveBedDepth(id), // chronotype bedtime HOUR, conflict-drained (0066 Phase-2)
       }),
     );
   }
@@ -2704,32 +2834,40 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * 0066 Phase-2: the off-screen fold-magnitude scale (≤1) for a scene's INITIATOR — a tired houseguest
-   * sways the house LESS (reduced EFFECTIVENESS, never a personality change; the scene's nature is
-   * unchanged). Returns 1 (no scaling) when the clock is off ⇒ the hidden society + its seeded calibration
-   * spine are BYTE-IDENTICAL; reduced sway only on the live clock-ON path, keyed off the same hidden rest
-   * deficit the competition fold consumes. No number crosses the wall.
+   * 0066 Phase-2 (Extension 2 — NPC next-day social fatigue): the off-screen fold-magnitude scale (≤1) for
+   * a scene's INITIATOR — a tired houseguest sways the house LESS (reduced EFFECTIVENESS, never a
+   * personality change; the scene's nature is unchanged). Returns 1 (NO scaling) unless the dedicated
+   * social-fatigue flag is on (AND the clock is running) ⇒ the hidden society + its seeded calibration
+   * spine are BYTE-IDENTICAL; reduced sway only on that live path, keyed off the same hidden rest deficit
+   * the competition fold consumes. Pure — no rng. No number crosses the wall.
    */
   socialFoldScale(id: EntityId): number {
+    if (!this.socialFatigueEnabled) return 1; // Extension 2 off ⇒ the off-screen fold is byte-identical
     return socialSwayScale(this.restDeficitOf(id));
   }
 
   /** The hidden rest deficit (0..1) a houseguest carries TODAY: tonight's immediate deficit (graded by how
-   *  late they were up — conflict-drained) COMBINED with the compounding multi-night fatigue meter. 0 when
-   *  the clock is off ⇒ byte-identical to the calibration spine. Feeds both the comp fold and social sway. */
+   *  late they were up — conflict-drained when Extension 2 is on) plus, ONLY when Extension 3 is on, the
+   *  compounding multi-night fatigue meter. 0 when the clock is off ⇒ byte-identical to the calibration
+   *  spine. Feeds the comp fold (Phase-1) and the social sway (Extension 2). Pure — no rng. */
   private restDeficitOf(id: EntityId): number {
     if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
     const immediate = id === PLAYER
       ? playerRestDeficit(this.live)
       : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id));
+    // Extension 3 (compounding multi-night meter): only ADD the accumulated meter when its own flag is
+    // on; off ⇒ just the single-night immediate deficit (byte-identical to the Phase-1 comp term).
+    if (!this.multiNightFatigueEnabled) return immediate;
     const fatigue = id === PLAYER ? (this.live.playerFatigue ?? 0) : (this.live.npcFatigue?.[id] ?? 0);
     return combinedRestDeficit(immediate, fatigue);
   }
 
-  /** Roll every houseguest's multi-night fatigue meter at a genuine NIGHT-END (the player turned in, or the
-   *  house ran to the bitter end). EMA: decay the prior, add the night just ended. Fires once per night. */
+  /** 0066 Phase-2 (Extension 3): roll every houseguest's multi-night fatigue meter at a genuine NIGHT-END
+   *  (the player turned in, or the house ran to the bitter end). EMA: decay the prior, add the night just
+   *  ended. Fires once per night. A NO-OP unless Extension 3 is enabled ⇒ the meter stays absent ⇒ 0 ⇒
+   *  byte-identical. Pure — no rng. */
   private accrueNightFatigue(): void {
-    if (!this.live || !this.house) return;
+    if (!this.multiNightFatigueEnabled || !this.live || !this.house) return;
     const lastNight = (id: EntityId): number => id === PLAYER
       ? playerRestDeficit(this.live!)
       : npcRestDeficit(this.live!, this.statsOf(id), id, this.effectiveBedDepth(id));
@@ -2739,20 +2877,22 @@ export class GameSessionAdapter implements GameSession {
     this.live.npcFatigue = next;
   }
 
-  /** 0066 Phase-2: an NPC's effective turn-in DEPTH tonight = their chronotype bedtime pulled EARLIER by
-   *  any conflicts they were in this night (a fight drains you to bed). Floored. Drives both who is awake
-   *  late (`awakeNow`) and their next-day comp deficit, coherently. */
+  /** 0066 Phase-2: an NPC's effective turn-in HOUR tonight = their chronotype bedtime hour, pulled EARLIER
+   *  by any conflicts they were in this night (Extension 2 — a fight drains you to bed). Floored at the
+   *  early-evening hour. Drives both who is awake late (`awakeNow`) and their next-day sleep deficit,
+   *  coherently. With Extension 2 off the conflict tally is never populated, so this is just the base
+   *  chronotype bedtime hour ⇒ byte-identical. */
   private effectiveBedDepth(id: EntityId): number {
-    const base = bedtimeDepthFor(this.statsOf(id), id);
+    const base = bedtimeDepthFor(this.statsOf(id), id); // clock-HOUR (24-hour model)
     const conflicts = this.nightConflicts.get(id) ?? 0;
     return Math.max(BEDTIME_DEPTH_FLOOR, base - CONFLICT_BEDTIME_DRAIN * conflicts);
   }
 
-  /** Clear the per-night conflict tally at the moment the day rolls over (a fresh morning at depth 0) —
+  /** Clear the per-night conflict tally at the moment the day rolls over (a fresh morning at the 8am wake) —
    *  tonight's fights don't follow anyone into tomorrow. Called right after the clock advances / the player
    *  turns in; a no-op mid-day (still the same night) and harmless at game start (empty). */
   private rollNightConflicts(): void {
-    if (this.live?.timeOfDay === DAY_START && (this.live?.nightDepth ?? 0) === 0) this.nightConflicts.clear();
+    if (this.live?.timeOfDay === DAY_START && (this.live?.nightDepth ?? WAKE_HOUR) === WAKE_HOUR) this.nightConflicts.clear();
   }
 
   /**
@@ -3118,8 +3258,9 @@ export class GameSessionAdapter implements GameSession {
 
   /** The OBSERVABLE public read of one active houseguest (PUBLIC facets only — no Vault, no numbers). */
   private firstImpressionOf(n: GameHouse["npcs"][number]): FirstImpressionView {
-    // Exactly the Vault-free facets the roster card already exposes (B61/L28): archetype, strategy
-    // style, background, age, presentation, demeanor. NEVER the soul, hiddenElements, or a number.
+    // Exactly the Vault-free facets the roster card already exposes (B61/L28/#1140): archetype, strategy
+    // style, background, age, presentation, demeanor, genderPresentation. NEVER the soul, hiddenElements,
+    // or a number; gender PRESENTATION only (a private orientation stays Vault-sealed).
     return {
       houseguest: { id: n.id, name: n.name },
       met: this.premiereMet.has(n.id),
@@ -3129,6 +3270,7 @@ export class GameSessionAdapter implements GameSession {
       ...(n.character.age !== undefined ? { age: n.character.age } : {}),
       ...(n.character.presentation !== undefined ? { presentation: n.character.presentation } : {}),
       ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
     };
   }
 
@@ -3196,6 +3338,10 @@ export class GameSessionAdapter implements GameSession {
       ...req,
       ...(carried ? { keepCharacter: false } : {}),
       ...(priorCastNames && priorCastNames.length ? { priorCastNames } : {}),
+      // 0104 (R4) — signal a SAME-CHARACTER return so the registry folds this user's notoriety into the
+      // new cast's day-one reads. Derived from `keepCharacter` here because the line above strips it to
+      // false (the fresh session has no prior house to carry from, so the flag would otherwise be lost).
+      ...(carried ? { carriesNotoriety: true } : {}),
     };
     // Non-degradation at its single most destructive point (B36/audit A2): an already-started game is
     // NEVER silently wiped. Without an explicit `confirmRestart`, a second createCharacter (a stray GM
@@ -3355,6 +3501,7 @@ export class GameSessionAdapter implements GameSession {
       this.triggerTickCount = 0;
       this.confideState = {};
       this.lieCount = 0;
+      this.resetSecretPower(); // 0093/0099 — a fresh season has spent no secrets and an unspent cap
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.prewarm = null; // consumed
@@ -3372,9 +3519,17 @@ export class GameSessionAdapter implements GameSession {
       // story threads are sealed engine-side (into the Vault + the recall index) via `onSealProfiles`.
       // Done BEFORE seedFirstImpressions so the Day-1 perception can seed the NPC→player edge.
       this.seedDeepProfiles(seed);
+      // #1140 — NOW the name-keyed deep layer is fixed off the original names; apply the deferred gender-
+      // coherent renames onto the byte-stable Character (no-op when nothing was renamed).
+      this.applyDiversityRenames();
       // A stale warm whose seed didn't match an explicit one is discarded (the season is now started).
       this.prewarm = null;
     }
+    // #1140 ∩ NAME-1 (#547): cross-season de-collision of the gender-coherent re-pick — run for BOTH the
+    // adopt and plain branches with the SAME prior names, so a re-pick never reintroduces a prior-season
+    // given name AND the warm-cast/plain-restart casts stay byte-identical (the diversity-layer rename is
+    // prior-season-UNAWARE on purpose; this is where cross-season memory is restored). No-op without priors.
+    this.decollidePriorNames(seed, effReq.priorCastNames);
     // Seed first impressions so NPC decisions are differentiated from move-in (without this,
     // empty relationships make every HOH nominate the same first-in-roster houseguests). These
     // are starting beliefs; the consequence fold (0023) evolves them as the player acts.
@@ -3577,6 +3732,7 @@ export class GameSessionAdapter implements GameSession {
     this.house = { player: temp.player, npcs };
     this.seedDiversity(seed);    // folds public diversity facets + seals private orientations to the Vault
     this.seedDeepProfiles(seed); // folds the §3 deep layer + seals the hidden profile/threads to the Vault
+    this.applyDiversityRenames(); // #1140 — apply gender-coherent renames AFTER the name-keyed deep layer
     // Capture the finished cast into the holding store, then RESET back to a clean pre-game state (the
     // cast lives in `prewarm` from here; the live house does not exist until `createCharacter`).
     this.prewarm = {
@@ -3598,6 +3754,7 @@ export class GameSessionAdapter implements GameSession {
     this.triggerTickCount = 0;
     this.confideState = {};
     this.lieCount = 0;
+    this.resetSecretPower(); // 0093/0099 — a warmed/fresh cast has spent no secrets, the caps unspent
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.persist(); // a warmed cast is durable pre-game state (0030)
@@ -3778,6 +3935,27 @@ export class GameSessionAdapter implements GameSession {
       e.affinity = clamp01(e.affinity + MOVE_IN.spread * p.affinityLean);
       e.threat = clamp01(e.threat + MOVE_IN.spread * p.threatLean);
     }
+    // 0104 — a reputation that PRECEDES the player into a NEW cast. ONLY when the player returned as
+    // the SAME character (the diegetic opt-in, R4) is `this.notoriety` set; otherwise this whole block
+    // is skipped and the move-in edges are BYTE-IDENTICAL (the calibration-neutrality guarantee). The
+    // bias rides a DEDICATED `:notoriety` sub-rng forked off the seed — NEVER the shared `:relationships`
+    // stream above — so even with a notoriety folded, the move-in SCATTER of every edge is unchanged
+    // (the only edges that move are the NPC→player ones, and only their direction tilts). Each NPC draws
+    // ONE recognition level (R2: not everyone has heard about the player; some hold a distorted version),
+    // then the bounded, archetype-shaded, signed direction nudges the NPC→player edge INSIDE the existing
+    // `MOVE_IN.spread` envelope — never a number to the player, never a comp/vote roll, never the player's
+    // OWN edges. The engine still owns every outcome magnitude (mandate #3). Folded once, here.
+    if (this.notoriety) {
+      const nrng = new SeededRandom(hashSeed(`${seed}:notoriety`));
+      for (const n of this.house?.npcs ?? []) {
+        const archetype = n.character.archetype;
+        const recognition = recognitionFor(nrng); // ONE per-NPC awareness, applied across all signals
+        const e = this.rel.edge(n.id, PLAYER);
+        e.trust = clamp01(e.trust + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "trust", recognition));
+        e.affinity = clamp01(e.affinity + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "affinity", recognition));
+        e.threat = clamp01(e.threat + MOVE_IN.spread * notorietyBias(this.notoriety, archetype, "threat", recognition));
+      }
+    }
   }
 
   /**
@@ -3813,6 +3991,7 @@ export class GameSessionAdapter implements GameSession {
     if (process.env.ORWELL_DISABLE_DIVERSITY === "1") return;
     const layer = generateDiversityLayer(seed, this.house.npcs);
     // PUBLIC fold — onto the static Character (byte-stable from here on; superset-guarded).
+    this.pendingRenames = {};
     for (const n of this.house.npcs) {
       const pub = layer.public[n.id];
       if (!pub) continue;
@@ -3827,6 +4006,10 @@ export class GameSessionAdapter implements GameSession {
       // If the structured physical facet already exists (e.g. on a re-run path), ground its skin tone
       // now; otherwise seedDeepProfiles applies the grounding when it builds the facet.
       if (n.character.physicalCharacteristics) n.character.physicalCharacteristics.skinTone = pub.skinTone;
+      // #1140 — STASH the re-picked name (when the layer changed it to match the final gender presentation);
+      // DON'T write it to the Character yet — applyDiversityRenames does that AFTER seedDeepProfiles so the
+      // name-keyed deep layer (and the outcome stream it feeds) stays byte-identical. (See pendingRenames.)
+      if (pub.name !== undefined) this.pendingRenames[n.id] = pub.name;
     }
     // HIDDEN — engine-only, sealed off the player AND admin (a private orientation is a secret).
     this.privateOrientations = { ...layer.privateOrientations };
@@ -3842,6 +4025,59 @@ export class GameSessionAdapter implements GameSession {
     // Seal the private orientations into the Vault (engine-only audit copy, the §5 wall).
     const entries = Object.entries(layer.privateOrientations).map(([id, orientation]) => ({ id: id as EntityId, orientation }));
     if (entries.length) this.onSealPrivateOrientations?.(entries);
+  }
+
+  /**
+   * #1140 — apply the deferred diversity RENAMES onto the byte-stable Character. Called AFTER
+   * `seedDeepProfiles` so the name-keyed deep layer was seeded off the ORIGINAL drawn names (keeping the
+   * deep profile / Day-1 perception / story threads — and the seeded outcome stream they feed —
+   * byte-identical with the rename on vs. off). From here the renamed name is the houseguest's stable
+   * public name. A no-op when no draft was renamed (the common case). Mirrors at both seed sites.
+   */
+  private applyDiversityRenames(): void {
+    if (!this.house) return;
+    for (const n of this.house.npcs) {
+      const renamed = this.pendingRenames[n.id];
+      // The display name lives on the Houseguest wrapper (`n.name`), not on the static Character.
+      if (renamed) n.name = renamed;
+    }
+    this.pendingRenames = {};
+  }
+
+  /**
+   * #1140 ∩ NAME-1 (#547) — cross-season de-collision of the gender-coherent re-pick. The diversity rename
+   * (step 7.5 in `diversity.ts`) keeps given names unique WITHIN the cast but is prior-season-UNAWARE (so the
+   * advance-warm and plain-restart paths, which adopt vs. re-seed, stay byte-identical there). This pass —
+   * run in `createCharacter` for BOTH paths AFTER the cast is finalized, with the SAME `priorCastNames` — is
+   * where cross-season memory is restored: any houseguest whose GIVEN name collides with a prior-season name
+   * is re-picked to a SAME-GENDER name that avoids both the prior-season set AND the current cast. So a re-pick
+   * never reintroduces a prior name, AND warm == plain (identical inputs ⇒ identical output). Deterministic
+   * off a dedicated `:rename-decollide` sub-stream; a no-op when nothing collides (the common case).
+   */
+  private decollidePriorNames(seed: number, priorCastNames?: readonly string[]): void {
+    if (!this.house || !priorCastNames || priorCastNames.length === 0) return;
+    const priorGiven = new Set<string>();
+    for (const full of priorCastNames) { const g = (full ?? "").trim().split(" ")[0]; if (g) priorGiven.add(g); }
+    if (priorGiven.size === 0) return;
+    const rng = new SeededRandom(hashSeed(`${seed}:rename-decollide`));
+    // Avoid every given name currently in the cast AND every prior-season given name.
+    const used = new Set<string>(priorGiven);
+    for (const n of this.house.npcs) used.add(n.name.split(" ")[0]!);
+    for (const n of this.house.npcs) {
+      const parts = n.name.split(" ");
+      const given = parts[0]!;
+      if (!priorGiven.has(given)) continue; // no cross-season collision — keep the name
+      // Re-pick a SAME-GENDER name (gender coherence holds through the de-collision). The stored facet is
+      // always present after seedDiversity; the `nameGenderOf` fallback only covers a legacy missing facet
+      // (and a unisex/legacy read maps to a nonbinary-coherent unisex pick — never a wrong-gender name).
+      const facet = n.character.genderPresentation;
+      const g: "man" | "woman" | "nonbinary" =
+        facet ?? (nameGenderOf(given) === "man" ? "man" : nameGenderOf(given) === "woman" ? "woman" : "nonbinary");
+      used.delete(given); // free the colliding given before picking the replacement
+      const next = pickGivenNameFor(g, rng, used);
+      used.add(next);
+      n.name = parts.length > 1 ? `${next} ${parts.slice(1).join(" ")}` : next;
+    }
   }
 
   private seedDeepProfiles(seed: number): void {
@@ -3878,6 +4114,7 @@ export class GameSessionAdapter implements GameSession {
     // 0075 — a fresh season has heard no confidences and spent no lies.
     this.confideState = {};
     this.lieCount = 0;
+    this.resetSecretPower(); // 0093/0099 — a fresh season has spent no secrets, the caps unspent
     // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent, the stream at 0.
     this.resetTieSurfacing();
     // 0092 — a fresh season: the secret-pacing weekly cadence + anti-spam start clean.
@@ -3959,6 +4196,15 @@ export class GameSessionAdapter implements GameSession {
     this.playerTieSurfaceCount = 0;
     this.surfacedTieSubjects = new Set();
     this.tieScheduleTickCount = 0;
+  }
+
+  /** 0093/0099 — clear the secrets-as-power ledger (a fresh season: no secret spent, every cap unspent). */
+  private resetSecretPower(): void {
+    this.secretUsedAs = {};
+    this.exposeCount = 0;
+    this.tradeCount = 0;
+    this.playerBluffCount = 0;
+    this.playerBluffBelief = {};
   }
 
   /** 0092 — clear the secret-pacing drip bookkeeping (a fresh season: the weekly counter + the per-thread
@@ -4621,6 +4867,35 @@ export class GameSessionAdapter implements GameSession {
    *  ONLY when on (off ⇒ the off-screen call is byte-identical to the pre-feature stretch). */
   trajectoriesEnabledNow(): boolean { return this.trajectoriesEnabled; }
 
+  // --- 0066 Phase-2 (#1125): the three sleep-economy extension flags (each default OFF) --------------
+
+  /** Extension 1 — the per-conversation clock advance. Off by default — calibration leaves it off. */
+  setPerConversationClockEnabled(on: boolean): void { this.perConversationClockEnabled = on; }
+  /** Extension 2 — NPC next-day social fatigue (dampened sway + conflict-drained bedtime). Off by default. */
+  setSocialFatigueEnabled(on: boolean): void { this.socialFatigueEnabled = on; }
+  /** Extension 3 — the compounding multi-night fatigue meter. Off by default. */
+  setMultiNightFatigueEnabled(on: boolean): void { this.multiNightFatigueEnabled = on; }
+
+  /**
+   * 0066 Phase-2 (Extension 1) — advance the clock a SMALL step as the player lingers/plays WITHIN a beat.
+   * The orchestrator's per-turn off-screen tick calls this once per player TURN (debounced for aux tool
+   * calls, E57/R5), so the day's finite scheming time is felt turn-by-turn. SELF-GATED: a NO-OP unless the
+   * dedicated flag is on AND the master clock is running AND the clock has initialized (the first ceremony
+   * beat starts the day). Pacing-only — it clamps at late-night and NEVER wraps the night without the
+   * player's own `turnIn` (ADR 0003 / the lull rule), so it can never rush an engaged scene past their
+   * bedtime decision. Off ⇒ nothing advances ⇒ byte-identical. No rng. (Persisted via the snapshot like
+   * the per-beat clock.)
+   */
+  advanceClockPerConversation(opts?: { kind?: ConversationKind; proposedHours?: number }): void {
+    if (!this.perConversationClockEnabled || !this.timeOfDayEnabled) return;
+    if (!this.live || this.live.timeOfDay === undefined) return; // dormant until the per-beat clock starts the day
+    // Extension 5 (LOOSE conversation durations, ADR 0005 for time): the felt duration is the scene KIND's
+    // type-bounded commit of the LLM-proposed hours; absent a kind/proposal ⇒ the small per-conversation
+    // floor (byte-identical to "no proposal"). Never 0, never a day-skip; the clock still clamps + never wraps.
+    const hours = opts?.kind ? conversationHours(opts.kind, opts.proposedHours) : CLOCK.perConversationHours;
+    advanceClockPerConversation(this.live, hours);
+  }
+
   /**
    * The directed `a→b` arc's hidden TRAJECTORY (0087) — passed to the off-screen society's nature pick when
    * the layer is ON. Returns `STEADY` (no tilt) when the layer is off OR the pair has no momentum yet, so a
@@ -4682,6 +4957,73 @@ export class GameSessionAdapter implements GameSession {
     const imp = RELATIONSHIP_CONSTANTS.IMPACT[type];
     const bondDelta = ((imp.affinity ?? 0) + (imp.trust ?? 0)) / 2;
     return { bondDelta, threatDelta: imp.threat ?? 0, betrayal: type === "betrayal" };
+  }
+
+  // ─── 0104 — SEASON-OVER-SEASON NOTORIETY (a reputation that precedes the player) ─────────────────
+
+  /**
+   * 0104 — hand this session the returning player's accumulated NOTORIETY so `seedFirstImpressions`
+   * folds the day-one bias (the registry calls this on a `keepCharacter` restart — the diegetic
+   * opt-in, R4). A NEW character / no prior season passes `null` (or never calls this) ⇒ no bias ⇒
+   * byte-identical. MUST be set BEFORE `createCharacter` runs `seedFirstImpressions` (the registry's
+   * restart hook sets it on the fresh sandbox before delegating the create). Vault-free in: a bounded
+   * open-set summary, never a Vault read.
+   */
+  setNotoriety(summary: NotorietySummary | null): void { this.notoriety = summary; }
+
+  /**
+   * 0104 — the (Vault-free) notoriety the narrator may VOICE as a returning-cast callback (the
+   * `legendBeats` gist — "word is you're not someone to cross", ADR 0003: facts to voice, never a
+   * script, never the numbers). Returns null when the player did not return as the same character.
+   * Only the gist crosses; the reputation FACETS / the day-one biases never leave the engine.
+   */
+  notorietySummary(): NotorietySummary | null { return this.notoriety; }
+
+  /**
+   * 0104 — build the OPEN-SET season outcome record the registry derives notoriety from, at the
+   * season-end terminal. PURE projection of the live season's PUBLIC ceremony record (placement, the
+   * player's comp wins, how each evictee read the PLAYER's role in their eviction, jury reach + the
+   * finale vote share) — facts the player witnessed / the 0048 retrospective unseals. NO Vault handle,
+   * NO soul, NO hidden edge crosses (R1). Returns null until a season has actually FINISHED.
+   */
+  openSetOutcome(): OpenSetSeasonOutcome | null {
+    if (!this.house || !this.live?.finished) return null;
+    const me = this.house.player.id;
+    const castSize = 1 + this.house.npcs.length;
+    // Numeric placement: winner = 1, runner-up = 2; otherwise from the eviction order (the later you
+    // were evicted, the better the placement). The i-th (0-based) evictee placed `castSize - i`.
+    const order = this.live.evictionOrder ?? [];
+    let placement: number;
+    if (this.live.winner === me) placement = 1;
+    else if (this.live.finalTwo?.includes(me)) placement = 2;
+    else {
+      const idx = order.indexOf(me);
+      placement = idx >= 0 ? castSize - idx : castSize; // never-evicted-but-not-a-finalist guard ⇒ worst
+    }
+    // The player's comp wins — the public-facts `resume` tally (HOH reigns + veto wins).
+    const playerCompWins = this.live.resume?.[me] ?? 0;
+    // How each evictee read the PLAYER's role in their eviction (open-set: `mannerByEvictee[evictee][PLAYER]`;
+    // the player witnessed it / the retrospective unseals it). Only the categorical reads cross — never
+    // the hidden edge numbers behind them.
+    const manner = this.live.mannerByEvictee ?? {};
+    const playerEvictionRoles: OpenSetSeasonOutcome["playerEvictionRoles"] = [];
+    for (const evictee of Object.keys(manner)) {
+      const m = manner[evictee]?.[me];
+      if (m) playerEvictionRoles.push({ blindsided: m.blindsided, betrayed: m.betrayed, respected: m.respected });
+    }
+    const reachedFinalTwo = this.live.finalTwo?.includes(me) ?? false;
+    // Reached the jury = a juror seat (one of the last 9 evictees) OR a finalist (a deeper run still counts).
+    const jurors = new Set(order.slice(-9));
+    const reachedJury = reachedFinalTwo || jurors.has(me);
+    // The finale jury-vote share the player won (open-set ceremony fact) — only meaningful as a finalist.
+    let juryVoteShare = 0;
+    const votes = this.live.finale?.votes;
+    if (reachedFinalTwo && votes) {
+      const cast = Object.values(votes);
+      const forMe = cast.filter((v) => v === me).length;
+      juryVoteShare = cast.length > 0 ? forMe / cast.length : 0;
+    }
+    return { placement, castSize, playerCompWins, playerEvictionRoles, reachedJury, reachedFinalTwo, juryVoteShare };
   }
 
   // ─── 0091 — TRIGGER SECRETS & HOUSE-EVENT ERUPTIONS ─────────────────────────────────────────────
@@ -5134,9 +5476,10 @@ export class GameSessionAdapter implements GameSession {
   recordOffscreenScene(initiator: EntityId, partner: EntityId, type: InteractionType): void {
     this.inflect(initiator, offscreenEmotion(type, "initiator"));
     this.inflect(partner, offscreenEmotion(type, "partner"));
-    // 0066 Phase-2: a conflict drains BOTH ⇒ they turn in earlier tonight (clock-ON only — the tally is
-    // read by `effectiveBedDepth`; off ⇒ never populated ⇒ no effect, byte-identical).
-    if (this.timeOfDayEnabled && this.live?.timeOfDay && (type === "conflict" || type === "betrayal")) {
+    // 0066 Phase-2 (Extension 2): a conflict drains BOTH ⇒ they turn in earlier tonight. Gated on the
+    // dedicated social-fatigue flag (and the clock) — the tally is read by `effectiveBedDepth`; off ⇒
+    // never populated ⇒ no effect on who's awake or any deficit ⇒ byte-identical.
+    if (this.socialFatigueEnabled && this.timeOfDayEnabled && this.live?.timeOfDay && (type === "conflict" || type === "betrayal")) {
       this.nightConflicts.set(initiator, (this.nightConflicts.get(initiator) ?? 0) + 1);
       this.nightConflicts.set(partner, (this.nightConflicts.get(partner) ?? 0) + 1);
     }
@@ -5271,9 +5614,10 @@ export class GameSessionAdapter implements GameSession {
         if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
           const wasRetired = this.live!.playerRetired ?? false;
           advanceClock(this.live!);
-          // A genuine night-end is the WRAP (the house ran to the bitter end) — NOT the morning after a
-          // turnIn (that night already accrued). Detect: a fresh morning we did NOT reach via retirement.
-          if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? 0) === 0) this.accrueNightFatigue();
+          // A genuine night-end is the 8am-wake WRAP (the house ran to the bitter end) — NOT the morning
+          // after a turnIn (that night already accrued). Detect: a fresh morning (back at the wake hour) we
+          // did NOT reach via retirement.
+          if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? WAKE_HOUR) === WAKE_HOUR) this.accrueNightFatigue();
           this.rollNightConflicts();
         }
         this.commit(ev);
@@ -5414,8 +5758,208 @@ export class GameSessionAdapter implements GameSession {
     );
     // `madeWeek` (E43) anchors the horizon: a safety/vote promise binds through THIS week's eviction.
     const deal = this.deals.make([PLAYER, target], req.kind, terms, evId, this.live.week);
+    // 0093 — OPTIONAL leverage: a secret the player holds ABOUT the partner colors the deal's formation
+    // and folds the squeeze (a wary partner resents it / a persuadable one is bound tighter). The threat
+    // persists while the deal is open — it is NOT spent here (only `exposeSecret` spends it). Absent ⇒
+    // no extra rng, no fold — byte-identical to 0039.
+    if (req.leverage) this.applyDealLeverage(req.leverage, target, deal.id);
+    // 0099 — OPTIONAL traded secret: a secret about a THIRD party handed to the partner as consideration
+    // (valued to the PARTNER); colors formation, surfaces the secret to the partner, and warms/sours them.
+    if (req.tradedSecret) this.applyDealTrade(req.tradedSecret, target);
     this.persist();
     return this.dealView(deal);
+  }
+
+  /**
+   * 0093 — the secret-power per-moment seeded rng, keyed on (game seed, use, factId/subject, week, phase).
+   * Repeated presses within a beat reach the same decision; a later beat re-rolls. No raw rng leaks the
+   * outcome (anti-sycophancy). Sibling of the `confide` rng derivation.
+   */
+  private secretRng(use: string, key: string): SeededRandom {
+    return new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:secret:${use}:${key}:${this.week}:${this.phase}`));
+  }
+
+  /**
+   * 0093/0099 — resolve a wielded secret descriptor to its SUBJECT + a Vault-safe severity. For a REAL
+   * secret (a `factId`) it validates the player legitimately holds it (`knownTo(player)` — the bright
+   * line; a non-learned/spent fact is rejected) and reads the subject + the holding NPC's PUBLIC secret
+   * KIND for severity (never the sealed text). For a BLUFF it reads NOTHING from the Vault: severity is
+   * the default and the subject is the claimed `subject`. Returns `null` when invalid (rejected).
+   */
+  private resolveWieldedSecret(
+    d: { factId?: string; bluff?: boolean; subject?: EntityId },
+  ): { subject: EntityId; severity: number; factId?: string; bluff: boolean } | null {
+    if (d.bluff) {
+      // A bluff invents a claim — no Vault read. It needs a named subject to fold against.
+      if (!d.subject || !this.isActiveNpc(d.subject)) return null;
+      return { subject: d.subject, severity: LEVERAGE.defaultSeverity, bluff: true };
+    }
+    if (!d.factId) return null;
+    // The bright line: the player can only wield a fact they LEGITIMATELY HOLD. Reject anything else —
+    // a suspicion, a never-learned secret, another entity's knowledge. No Vault-minting.
+    const fact = (this.playerKnowledgeReader?.() ?? []).find((f) => (f.factId ?? f.id) === d.factId || f.id === d.factId);
+    if (!fact) return null;
+    if (this.secretUsedAs[d.factId] === "exposed") return null; // spent (public) — never re-wielded
+    // The subject is the houseguest the fact is about (the knowledge `subject`, or the descriptor's hint).
+    const subject = fact.subject ?? d.subject;
+    if (!subject || !this.isActiveNpc(subject)) return null;
+    // Severity from the subject's PUBLIC secret KIND (never the sealed text) — the 0075 gloss sibling.
+    const npc = this.house?.npcs.find((n) => n.id === subject);
+    const secret = npc ? this.headlineSecretOf(npc) : undefined;
+    return { subject, severity: severityOf(secret?.kind), factId: d.factId, bluff: false };
+  }
+
+  /** Whether an id is an active (non-evicted) NPC in the live house. */
+  private isActiveNpc(id: EntityId): boolean {
+    if (!this.house || !this.live || id === PLAYER) return false;
+    return this.house.npcs.some((n) => n.id === id) && !this.live.evictionOrder.includes(id);
+  }
+
+  /** 0093 — the player→partner SIGNED warmth ((trust+affinity)/2 − threat) the deal-acceptance read uses. */
+  private signedWarmthTowardPlayer(npcId: EntityId): number {
+    const e = this.rel.edge(npcId, PLAYER);
+    return (e.trust + e.affinity) / 2 - e.threat;
+  }
+
+  /**
+   * 0093 — fold the LEVERAGE of a held secret against the deal partner. Computes the bounded, seeded
+   * `leverageStrength`, then the acceptance read AFTER the boost: a persuadable partner is bound a little
+   * tighter (a `strategy`-grade warm fold — the pressure landed), a WARY partner (the read lands below the
+   * refusal floor) RESENTS the squeeze (the `squeezeBacklash` fold sours their read of the player). A
+   * BLUFF folds the same shape weighted by BELIEF (and never tells the player whether it matched a truth);
+   * a believed bluff is the same press, a disbelieved one bounces. The threat persists while the deal is
+   * open — the secret is NOT marked spent here. The player never sees a number (anti-sycophancy).
+   */
+  private applyDealLeverage(d: SecretLeverDescriptor, partner: EntityId, _dealId: string): void {
+    const resolved = this.resolveWieldedSecret({ ...d, subject: partner }); // leverage is ALWAYS about the partner
+    // Leverage presses the PARTNER, so the secret must be about the partner (or a bluff claiming so).
+    if (!resolved || (resolved.subject !== partner)) {
+      // An invalid/irrelevant leverage simply does nothing (the deal still forms) — no fold, no spend.
+      return;
+    }
+    const rng = this.secretRng("leverage", resolved.factId ?? `bluff:${partner}`);
+    if (resolved.bluff) {
+      this.playerBluffCount = Math.min(this.playerBluffCount + 1, LEVERAGE.maxPlayerBluffsPerSeason + 1);
+      const e = this.rel.edge(partner, PLAYER);
+      // Plausibility leans on the partner's own self-threat proxy — bluffing someone is dicey; if they
+      // DON'T believe it, the squeeze bounces (no fold). If they do, it presses like a real leverage.
+      if (!bluffBelieved(e.trust, e.threat, rng)) return;
+    }
+    const npc = this.house!.npcs.find((n) => n.id === partner)!;
+    const strength = leverageStrength(this.leverageSignalsFor(npc), rng);
+    const { accepts } = dealAcceptance(this.signedWarmthTowardPlayer(partner), leverageDealBoost(strength), LEVERAGE.refusalFloor);
+    if (accepts) {
+      // The pressure landed — the PARTNER is bound a little tighter: a strategy-grade fold on the
+      // partner→player edge (initiator PLAYER, toward [partner], so the PARTNER's read of the player moves).
+      foldHiddenImpact(this.rel, rng, PLAYER, [PLAYER, partner], "strategy", [partner]);
+    } else {
+      // A wary partner calls the squeeze and RESENTS it — their hidden read of the player sours (bounded).
+      this.rel.applyImpactDirected(partner, PLAYER, LEVERAGE.squeezeBacklash, rng);
+    }
+  }
+
+  /** 0093 — assemble the Vault-hidden leverageStrength signals (the subject's soul + their read of the player). */
+  private leverageSignalsFor(npc: { id: EntityId; soul?: { emotionalState?: number }; character: { hiddenElements?: HiddenElement[] } }): LeverageSignals {
+    const e = this.rel.edge(npc.id, PLAYER);
+    return {
+      severity: severityOf(this.headlineSecretOf(npc)?.kind),
+      subjectEmotionalState: npc.soul?.emotionalState ?? 0.5,
+      subjectTrust: e.trust, subjectAffinity: e.affinity, subjectThreat: e.threat,
+    };
+  }
+
+  /**
+   * 0099 — fold the TRADE of a held secret to the deal partner (the recipient). Values the secret TO THE
+   * RECIPIENT (their reads of the secret's SUBJECT — a rival's secret is gold to that rival's enemy,
+   * worthless to their ally), resolves whether they take it, warms them toward the giver (an accepted
+   * trade) or sours them (peddling a worthless secret), surfaces the secret into the recipient's
+   * knowledge (a recorded `told` pathway — never a Vault read), and marks the secret `traded`/caps it.
+   */
+  private applyDealTrade(d: SecretLeverDescriptor, recipient: EntityId): void {
+    this.resolveAndTrade(d, recipient, "deal");
+  }
+
+  /**
+   * 0099 — the shared trade resolution (used by `makeDeal`'s `tradedSecret` and the `tradeSecret` lever).
+   * Returns whether the recipient accepted (and the Vault-safe reason on a refusal). Validates ownership,
+   * values to the recipient, folds, surfaces the secret, marks used, caps. `null` on an invalid setup.
+   */
+  private resolveAndTrade(
+    d: SecretLeverDescriptor, recipient: EntityId, _via: "deal" | "swap",
+  ): { accepted: boolean; refused?: TradeResult["refused"]; narratable?: string } | null {
+    if (!this.isActiveNpc(recipient)) return { accepted: false, refused: "no-recipient" };
+    if (this.tradeCount >= SECRET_TRADE.maxTradesPerSeason) return { accepted: false, refused: "capped" };
+    const resolved = this.resolveWieldedSecret(d);
+    if (!resolved) return { accepted: false, refused: "not-learned" };
+    if (resolved.subject === recipient) return { accepted: false, refused: "not-learned" }; // can't trade a secret TO its own subject
+    const rng = this.secretRng("trade", `${resolved.factId ?? `bluff:${resolved.subject}`}:${recipient}`);
+    if (resolved.bluff) {
+      this.playerBluffCount = Math.min(this.playerBluffCount + 1, LEVERAGE.maxPlayerBluffsPerSeason + 1);
+      const re = this.rel.edge(recipient, PLAYER);
+      if (!bluffBelieved(re.trust, this.rel.edge(recipient, resolved.subject).threat, rng)) {
+        return { accepted: false, refused: "declined" }; // they don't buy the fabricated secret
+      }
+    }
+    const value = tradeValue(this.tradeSignalsFor(recipient, resolved.subject, resolved.severity), rng);
+    const folds = tradeOutcome(value, this.signedWarmthTowardPlayer(recipient), rng);
+    if (folds.accepted) {
+      if (folds.recipientFold) this.rel.applyImpactDirected(recipient, PLAYER, folds.recipientFold, rng);
+      if (resolved.bluff) {
+        // A BELIEVED bluff: record it so a later contradicting TRUTH about the same subject catches the
+        // player out (the passive lie-catch). A real trade DELIVERS the truth, so it also CATCHES any
+        // earlier bluff the player told THIS recipient about this subject.
+        this.recordPlayerBluffBelief(recipient, resolved.subject);
+      } else {
+        this.catchPlayerBluff(recipient, resolved.subject, rng); // a real truth contradicts a prior bluff
+        // The recipient now HOLDS the traded secret — a recorded `told-by:player` pathway (never a Vault read).
+        const content = this.factContentFor(resolved.factId!) ?? `${this.nameOf(PLAYER)} shared a secret about ${this.nameOf(resolved.subject)}`;
+        this.onSurfaceToHouseguest?.(recipient, content, resolved.subject, `told-by:${PLAYER}`, 0.8);
+      }
+      // Mark the REAL secret traded (monotonic — it has been spent into the economy); a bluff is not a real fact.
+      if (resolved.factId && this.secretUsedAs[resolved.factId] !== "exposed") this.secretUsedAs[resolved.factId] = "traded";
+      this.tradeCount++;
+      return { accepted: true, narratable: "they took the trade" };
+    }
+    // Refused — peddling a secret they don't want reads as untrustworthy (a bounded sour on their read).
+    if (folds.traderBacklash) this.rel.applyImpactDirected(recipient, PLAYER, folds.traderBacklash, rng);
+    return { accepted: false, refused: "declined", narratable: "they didn't bite" };
+  }
+
+  /** 0099 — assemble the Vault-hidden tradeValue signals (the RECIPIENT's reads of the secret's subject + the player). */
+  private tradeSignalsFor(recipient: EntityId, subject: EntityId, severity: number): TradeSignals {
+    const toSubject = this.rel.edge(recipient, subject);
+    const toPlayer = this.rel.edge(recipient, PLAYER);
+    return {
+      severity,
+      recipientThreatOfSubject: toSubject.threat,
+      recipientAffinityForSubject: toSubject.affinity,
+      recipientTrustOfPlayer: toPlayer.trust,
+    };
+  }
+
+  /** 0093/0099 — the player-facing CONTENT of a learned fact (so a trade surfaces the SAME content the player holds). */
+  private factContentFor(factId: string): string | undefined {
+    return (this.playerKnowledgeReader?.() ?? []).find((f) => (f.factId ?? f.id) === factId || f.id === factId)?.content;
+  }
+
+  /** deception — record that `npc` BELIEVED a player bluff about `subject` (the passive lie-catch ledger). */
+  private recordPlayerBluffBelief(npc: EntityId, subject: EntityId): void {
+    const subjects = (this.playerBluffBelief[npc] ??= []);
+    if (!subjects.includes(subject)) subjects.push(subject);
+  }
+
+  /**
+   * deception — the PASSIVE LIE-CATCH (owner direction): a genuine contradicting pathway about `subject`
+   * has just reached `npc`. If the player earlier BLUFFED this `npc` about this `subject`, the bluff is
+   * CAUGHT — the bluffer takes a betrayal-grade, recoverable hit on the npc→player edge (0026
+   * `IMPACT.betrayal`), and the caught bluff is cleared (it can't re-fire). The player never sees a number.
+   */
+  private catchPlayerBluff(npc: EntityId, subject: EntityId, rng: SeededRandom): void {
+    const subjects = this.playerBluffBelief[npc];
+    if (!subjects || !subjects.includes(subject)) return;
+    this.rel.applyDirected(npc, PLAYER, "betrayal", rng); // the npc realizes the player lied to them
+    this.playerBluffBelief[npc] = subjects.filter((s) => s !== subject);
+    recordDealBetrayal(this.live!, npc, PLAYER); // a jury-management demerit too (they remember the lie)
   }
 
   /**
@@ -5561,6 +6105,130 @@ export class GameSessionAdapter implements GameSession {
     this.confideState[npcId] = { tier: decision.tier, truthful: decision.truthful };
     this.persist();
     return { disclosed: true, tier: decision.tier, truthful: decision.truthful, content };
+  }
+
+  /**
+   * 0093 — OUT a learned secret to the house (the single engine authority). Validates the player
+   * legitimately holds the `factId` (a non-learned secret is REJECTED — the Vault bright line; no
+   * minting), caps per season, resolves the bounded, seeded standing hit on the subject (folded onto
+   * EVERY other active houseguest's read of them — the house re-reads them as a liability) + the
+   * betrayal-grade backlash on the exposer FROM the subject + the smaller house recoil + an optional
+   * jury mark, RECORDS the exposure as a witnessed pathway event so the house now KNOWS it (0002 —
+   * never a Vault read), and marks the secret SPENT (`usedAs: exposed` — never re-wielded). A `bluff`
+   * is a separate path: a public CLAIM with no Vault read, folded on belief; the engine never tells the
+   * player whether it matched a truth. No number ever crosses (anti-sycophancy). `null` pre-game.
+   */
+  exposeSecret(req: ExposeSecretReq): ExposeResult | null {
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) return null;
+    // A real secret already exposed (public) can't be exposed again — checked BEFORE resolution (the
+    // resolver rejects a spent fact as un-wieldable, which would otherwise read as `not-learned`).
+    if (req.factId && this.secretUsedAs[req.factId] === "exposed") return { exposed: false, refused: "already-spent" };
+    if (this.exposeCount >= LEVERAGE.maxExposesPerSeason) return { exposed: false, refused: "capped" };
+    const resolved = this.resolveWieldedSecret({ factId: req.factId, bluff: req.bluff, subject: req.subject });
+    if (!resolved) return { exposed: false, refused: req.bluff ? "no-subject" : "not-learned" };
+    const subject = resolved.subject;
+    const rng = this.secretRng("expose", resolved.factId ?? `bluff:${subject}`);
+    if (resolved.bluff) {
+      this.playerBluffCount = Math.min(this.playerBluffCount + 1, LEVERAGE.maxPlayerBluffsPerSeason + 1);
+      // A public bluff lands by the HOUSE's average willingness to believe a claim about the subject —
+      // plausibility on their collective threat read. If it bounces, the exposer just takes the recoil
+      // (crying wolf), no subject hit. The engine never reveals whether it matched a real truth.
+      const houseThreat = this.avgHouseThreatOf(subject);
+      if (!bluffBelieved(this.avgHouseTrustOfPlayer(), houseThreat, rng)) {
+        // Disbelieved — only the exposer recoil (a thin ruthlessness/credibility cost), no standing hit.
+        this.foldHouseRecoilOnExposer(subject, rng);
+        this.exposeCount++;
+        this.persist();
+        return { exposed: true, subjectImpactNarratable: "the house didn't seem to buy it" };
+      }
+    }
+    const folds = exposeOutcome(resolved.severity, rng);
+    // The standing hit: EVERY other active houseguest re-reads the subject as a liability (bounded fold).
+    const evicted = new Set(this.live.evictionOrder);
+    for (const other of this.house.npcs) {
+      if (other.id === subject || evicted.has(other.id)) continue;
+      this.rel.applyImpactDirected(other.id, subject, folds.subjectHit, rng);
+      if (resolved.bluff) {
+        // A believed BLUFF expose: record it against each houseguest so a later contradicting TRUTH catches it.
+        this.recordPlayerBluffBelief(other.id, subject);
+      } else {
+        // A REAL expose DELIVERS the truth to the house — it CATCHES any earlier bluff about this subject.
+        this.catchPlayerBluff(other.id, subject, rng);
+      }
+    }
+    // The exposer takes the betrayal-grade hit FROM the subject (the deepest wound — outing IS betrayal).
+    this.rel.applyImpactDirected(subject, PLAYER, folds.exposerBacklashFromSubject, rng);
+    // The rest of the house recoils a little from the exposer (ruthlessness read).
+    this.foldHouseRecoilOnExposer(subject, rng);
+    // The jury mark (0014): the subject's eventual jurors weigh the outing against the exposer.
+    if (folds.juryMark) recordDealBetrayal(this.live, subject, PLAYER);
+    // Surface the exposure to the house as a WITNESSED pathway event — the house now KNOWS it (0002).
+    const content = resolved.bluff ? `${this.nameOf(PLAYER)} outed something about ${this.nameOf(subject)} to the house`
+      : this.factContentFor(resolved.factId!) ?? `${this.nameOf(PLAYER)} exposed a secret about ${this.nameOf(subject)}`;
+    this.exposeToHouse(subject, content, resolved.bluff ? 0.6 : 0.85);
+    // Mark the REAL secret SPENT (public ⇒ never re-leveraged). A bluff is not a real fact to mark.
+    if (resolved.factId) this.secretUsedAs[resolved.factId] = "exposed";
+    this.exposeCount++;
+    this.persist();
+    return { exposed: true, subjectImpactNarratable: "the house is reeling from it" };
+  }
+
+  /**
+   * 0099 — TRADE a held secret to a THIRD-PARTY recipient for a one-off concession (a comp throw, a
+   * secret-for-secret swap). The single engine authority — see `resolveAndTrade` for the resolution; this
+   * is the public lever for a NON-deal trade (a standing deal uses `makeDeal`'s `tradedSecret`). `null`
+   * pre-game / for an unknown recipient.
+   */
+  tradeSecret(req: TradeSecretReq): TradeResult | null {
+    this.guardBeatSeq(req.expectedBeatSeq);
+    if (!this.house || !this.live) return null;
+    const out = this.resolveAndTrade(
+      { factId: req.factId, bluff: req.bluff, subject: req.subject }, req.toNpcId, "swap",
+    );
+    if (!out) return { accepted: false, refused: "no-recipient" };
+    this.persist();
+    return out;
+  }
+
+  /** 0093 — the rest of the house recoils a little from the EXPOSER (outing reads as ruthless). */
+  private foldHouseRecoilOnExposer(subject: EntityId, rng: SeededRandom): void {
+    if (!this.house || !this.live) return;
+    const evicted = new Set(this.live.evictionOrder);
+    for (const other of this.house.npcs) {
+      if (other.id === subject || evicted.has(other.id)) continue;
+      this.rel.applyImpactDirected(other.id, PLAYER, LEVERAGE.exposerBacklashFromHouse, rng);
+    }
+  }
+
+  /** 0093 — surface an exposed secret to EVERY other active houseguest as witnessed knowledge (0002). The
+   *  player is the teller (`told-by:player`): the house learns it BECAUSE the player outed it — a recorded
+   *  in-game pathway anchored on the player's own held content (E9), never a Vault read. */
+  private exposeToHouse(subject: EntityId, content: string, confidence: number): void {
+    if (!this.house || !this.live) return;
+    const evicted = new Set(this.live.evictionOrder);
+    for (const other of this.house.npcs) {
+      if (other.id === subject || evicted.has(other.id)) continue;
+      this.onSurfaceToHouseguest?.(other.id, content, subject, `told-by:${PLAYER}`, confidence);
+    }
+  }
+
+  /** 0093 — the house's average TRUST in the player (a bluff's believability proxy). */
+  private avgHouseTrustOfPlayer(): number {
+    if (!this.house || !this.live) return 0;
+    const evicted = new Set(this.live.evictionOrder);
+    const npcs = this.house.npcs.filter((n) => !evicted.has(n.id));
+    if (!npcs.length) return 0;
+    return npcs.reduce((s, n) => s + this.rel.edge(n.id, PLAYER).trust, 0) / npcs.length;
+  }
+
+  /** 0093 — the house's average THREAT read of a subject (a bluff's plausibility proxy). */
+  private avgHouseThreatOf(subject: EntityId): number {
+    if (!this.house || !this.live) return 0.5;
+    const evicted = new Set(this.live.evictionOrder);
+    const npcs = this.house.npcs.filter((n) => !evicted.has(n.id) && n.id !== subject);
+    if (!npcs.length) return 0.5;
+    return npcs.reduce((s, n) => s + this.rel.edge(n.id, subject).threat, 0) / npcs.length;
   }
 
   /** 0075 — the headline sealed secret a houseguest would confide (their first hidden element). */
@@ -6598,7 +7266,7 @@ export class GameSessionAdapter implements GameSession {
         status,
         // ADR 0006 §Principle 5: the player's OWN qualitative tiredness (their body is their knowledge) —
         // a cue, never a number, and never any NPC's sleep state. Present only once the clock is running.
-        ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { restStatus: restStatusFor(this.live.lastSleepPhase ?? DAY_START) } : {}),
+        ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { restStatus: restStatusFor(this.live.lastSleepPhase ?? WAKE_HOUR) } : {}),
         // The casting card (0050): the interview's payoff, re-showable all season. Tier WORDS are
         // derived from the hidden balanced stats here, engine-side — the numbers never serialize out.
         castingCard: {
