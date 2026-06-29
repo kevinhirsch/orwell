@@ -299,16 +299,23 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                     }"""
                 )
 
-            deadline = time.monotonic() + 30
+            # 60s (was 30): the onboarding→Settings convergence (holding-card → feed-recognized →
+            # setup wizard → dismiss → gear) is multi-step, and a loaded self-hosted CI runner runs
+            # this ~2× slower than local — 30s was the residual flake (#925/#1148 family). The loop is
+            # already idempotent (dismiss whatever's up, retry the gear); it just needed more patience.
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 if _settings_open():
                     break
                 if _overlay_present():
                     page.keyboard.press("Escape")
-                    # Wait for the scrim to detach rather than a fixed delay,
-                    # so a slow CI runner doesn't race the kit's ~190ms teardown.
+                    # Wait for the WHOLE overlay (window AND scrim) to detach before retrying — racing
+                    # the kit's teardown on a slow runner burned iterations against the budget.
                     try:
-                        page.wait_for_selector('[data-ow-scrim]', state='detached', timeout=3000)
+                        page.wait_for_function(
+                            "() => !document.getElementById('orwell-onboarding')"
+                            " && !document.querySelector('[data-ow-scrim]')",
+                            timeout=3000)
                     except Exception:
                         pass
                     continue
@@ -318,7 +325,23 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                     pass
                 page.wait_for_timeout(150)
             else:
-                raise AssertionError("Settings modal never opened past the onboarding overlay")
+                # Instrument the timeout so a future flake is diagnosable (not a bare mystery): what was
+                # still blocking — a holding card, the setup wizard, a lingering scrim, a half-open modal?
+                diag = page.evaluate(
+                    """() => {
+                      const ob = document.getElementById('orwell-onboarding');
+                      const m = document.getElementById('settings-modal');
+                      return {
+                        onboarding: ob ? (ob.getAttribute('data-ob-holding') !== null ? 'holding'
+                                          : ob.getAttribute('data-ob-setup') !== null ? 'setup' : 'other') : null,
+                        scrims: document.querySelectorAll('[data-ow-scrim]').length,
+                        settingsConnected: !!(m && m.isConnected),
+                        settingsDisplay: m ? getComputedStyle(m).display : null,
+                      };
+                    }"""
+                )
+                raise AssertionError(
+                    f"Settings modal never opened past the onboarding overlay — blocking state: {diag}")
             # Wait for EVERY endpoint-scoped card the pick below drives to be
             # populated by its OWN async init() — not just the three originally
             # gated here. Each init* is fire-and-forget (initAll() does not await
