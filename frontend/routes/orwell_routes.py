@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from core.middleware import require_admin
 from src import orwell_engine
 from src import orwell_portraits
+from src import orwell_cast_authoring
 from src.auth_helpers import effective_user
 from src.rate_limiter import RateLimiter
 
@@ -334,8 +335,13 @@ async def _capture_season_outcome(user: Optional[str]) -> bool:
 
 def _roster_cards(state: dict, user: Optional[str]) -> list:
     """The Vault-free roster cards (0051) from the engine's public projection: id, name,
-    status, isPlayer, and the persisted portrait ref (or null). Shared by /roster and the
-    G9 backfill lever so "what's missing" is computed the same way everywhere."""
+    status, isPlayer, the persisted portrait ref (or null), and the engine's deep-profile
+    `authored` flag. Shared by /roster, the G9 portrait backfill, AND the deep cast-authoring
+    backfill so "what's missing" (portrait or deep profile) is computed the same way everywhere.
+
+    `authored` is the engine's Vault-free per-houseguest boolean (true = deep-profile authored,
+    false/absent = still on the deterministic floor). It is carried through verbatim so
+    `orwell_cast_authoring.unauthored_ids` can flag the floor NPCs — the FE never derives it."""
     cards = []
     # The player's own card first (when present), then the house.
     player = state.get("player") if isinstance(state.get("player"), dict) else None
@@ -347,6 +353,7 @@ def _roster_cards(state: dict, user: Optional[str]) -> list:
             "status": player.get("status") or "active",
             "isPlayer": True,
             "portrait": orwell_portraits.portrait_ref(user, pid),
+            "authored": bool(player.get("authored")),
         })
     house = state.get("house") if isinstance(state.get("house"), list) else []
     for hg in house:
@@ -359,6 +366,7 @@ def _roster_cards(state: dict, user: Optional[str]) -> list:
             "status": hg.get("status") or "active",
             "isPlayer": False,
             "portrait": orwell_portraits.portrait_ref(user, hid),
+            "authored": bool(hg.get("authored")),
         })
     return cards
 
@@ -682,6 +690,17 @@ def setup_orwell_routes() -> APIRouter:
         except Exception as e:
             logger.info(f"[orwell] portrait backfill kick failed: {e}")
 
+        # Deep-authoring backfill: NPCs still on the deterministic floor (the LLM author never ran, or
+        # ran without a model) get re-authored in the background so no houseguest stays a thin template
+        # forever (mandate #1, anti-"sameness"). Debounced per user in orwell_cast_authoring;
+        # fire-and-forget, NEVER blocks this response. A missing utility model is a silent no-op.
+        try:
+            unauthored = orwell_cast_authoring.unauthored_ids(user, cards)
+            if unauthored:
+                orwell_cast_authoring.kickoff_authoring_backfill(unauthored, user)
+        except Exception as e:
+            logger.info(f"[orwell] cast-authoring backfill kick failed: {e}")
+
         return _roster_payload(user, cards, stale=False)
 
     @router.post("/portraits/backfill")
@@ -710,6 +729,32 @@ def setup_orwell_routes() -> APIRouter:
             # debounce (it still stamps the window so a roster poll can't pile on).
             kicked = orwell_portraits.kickoff_backfill(missing, user, force=True)
         return {"kicked": kicked, "missing": missing, "available": available}
+
+    @router.post("/cast-authoring/backfill")
+    async def orwell_cast_authoring_backfill(request: Request):
+        """The manual "re-author the cast" retry lever — mirrors /portraits/backfill (the
+        reliability spine for deep cast-authoring). Player-or-admin: authoring reads only the
+        engine's Vault-free public roster + writes back via recordCastProfile (which the engine
+        validates / walls), so the gate is the same as the roster's. Shares the per-user debounce
+        with the roster-driven backfill (a failing/absent utility model is never hammered). No
+        image-provider precondition — authoring needs a TEXT model, resolved inside the authoring
+        path (absent ⇒ a silent no-op, the deterministic floor stands). Returns {kicked, missing};
+        fail-open shapes, never a 5xx to the player."""
+        user = _current_user(request)
+        try:
+            state = await orwell_engine.get_game_state(user=user)
+        except Exception as e:
+            logger.warning(f"[orwell] cast-authoring/backfill failed: {e}")
+            return {"kicked": False, "missing": []}
+        if not isinstance(state, dict) or state.get("started") is False:
+            return {"kicked": False, "missing": []}
+        missing = orwell_cast_authoring.unauthored_ids(user, _roster_cards(state, user))
+        kicked = False
+        if missing:
+            # The MANUAL lever — a deliberate click runs now, bypassing the auto-poll debounce
+            # (it still stamps the window so a roster poll can't pile on).
+            kicked = orwell_cast_authoring.kickoff_authoring_backfill(missing, user, force=True)
+        return {"kicked": kicked, "missing": missing}
 
     # ── 0065: cast pre-warm — author the cast deeply BEFORE any portrait is generated ──────
     @router.post("/prewarm-cast")

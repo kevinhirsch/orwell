@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from typing import Awaitable, Callable, Optional
 
 try:  # the structured logger if present; a no-op stand-in keeps this importable in isolation
@@ -903,3 +904,165 @@ def kickoff_authoring(cast: list[dict], owner: Optional[str],
         except Exception:
             if then is not None:
                 then()
+
+
+# ── deep-authoring backfill: re-author NPCs still on the deterministic floor ───────────────
+# Authoring originally kicked off ONLY from the createCharacter / pre-warm path, fire-and-forget
+# with no retry, no backfill, and no observability — so when the utility model was absent/flaky at
+# game start, every houseguest stayed a thin deterministic-floor template FOREVER (the anti-"sameness"
+# mandate #1 fails silently). This is the SAME reliability spine the 0051 portrait backfill has
+# (`orwell_portraits.{missing_portrait_ids,completeness,portrait_completeness,kickoff_backfill}`):
+# when the roster is served (or the manual lever / admin lever is pulled) and active NPCs are still
+# on the floor, re-author just those NPCs through the existing authoring path and write them back via
+# recordCastProfile. No engine change — it reads the engine's own Vault-free `authored` flag.
+
+# A "still on the floor" NPC is one whose Vault-free roster card carries `authored` not-true. The
+# flag is the engine's (a parallel engine change adds it to every roster card); the FE only reads it.
+
+AUTHORING_BACKFILL_DEBOUNCE_S = 10 * 60  # one auto-attempt per user per process per window
+_LAST_AUTHORING_BACKFILL_AT: dict = {}
+
+
+def _safe_user(user: Optional[str]) -> str:
+    """The per-user debounce key (mirrors orwell_portraits._safe_user) — None ⇒ "default"."""
+    return str(user) if user else "default"
+
+
+def unauthored_ids(user: Optional[str], roster_cards: list) -> list:
+    """ACTIVE NPC ids on the roster still on the DETERMINISTIC FLOOR (deep profile not authored).
+
+    THE one definition of "still floor" — the roster's lazy backfill, the manual lever, the admin
+    lever, and the completeness counters all derive from this helper (mirrors
+    `orwell_portraits.missing_portrait_ids`). Cast-authoring is NPC-only: the PLAYER is human-authored
+    at OOBE, so the player's card is EXCLUDED (it has no deep-profile authoring path). Departed
+    houseguests keep whatever they had — no late authoring."""
+    out = []
+    for card in roster_cards or []:
+        if not isinstance(card, dict):
+            continue
+        if (card.get("status") or "active") != "active":
+            continue  # departed houseguests are not re-authored
+        if card.get("isPlayer") or card.get("id") == "player":
+            continue  # the player's profile is human-authored — NEVER deep-authored here
+        hid = card.get("id")
+        if hid and card.get("authored") is not True:
+            out.append(str(hid))
+    return out
+
+
+def authoring_completeness(user: Optional[str], roster_cards: list) -> dict:
+    """{total, authored, missing} over the ACTIVE NPC cast (the player is excluded) — operator visibility.
+
+    `missing` comes straight from `unauthored_ids` (the one definition), so the admin Health card,
+    the /admin/status page, and any counter can never disagree with what the backfill would act on
+    (mirrors `orwell_portraits.completeness`)."""
+    active_npcs = [
+        c for c in roster_cards or []
+        if isinstance(c, dict)
+        and (c.get("status") or "active") == "active"
+        and c.get("id")
+        and not (c.get("isPlayer") or c.get("id") == "player")
+    ]
+    missing = unauthored_ids(user, roster_cards)
+    return {"total": len(active_npcs), "authored": len(active_npcs) - len(missing), "missing": len(missing)}
+
+
+async def authoring_completeness_for(user: Optional[str]) -> Optional[dict]:
+    """{total, authored, missing} for this user's active NPC cast, or None pre-game / engine-down.
+
+    Fetches the SAME Vault-free public projection `orwell_portraits.portrait_completeness` uses and
+    derives the cards with the SAME helper (`routes.orwell_routes._roster_cards`, imported lazily —
+    routes import this module at load, so the cycle only resolves at call time). Used by the admin
+    health surface; best-effort — any failure reads as None, never a 500."""
+    from src import orwell_engine
+
+    try:
+        state = await orwell_engine.get_game_state(user=user)
+    except Exception:
+        return None
+    if not isinstance(state, dict) or state.get("started") is False:
+        return None
+    try:
+        from routes.orwell_routes import _roster_cards  # the one roster-card derivation (G9)
+        return authoring_completeness(user, _roster_cards(state, user))
+    except Exception:
+        return None
+
+
+def authoring_backfill_allowed(user: Optional[str]) -> bool:
+    """True when this user's process-local authoring-backfill debounce window has elapsed."""
+    last = _LAST_AUTHORING_BACKFILL_AT.get(_safe_user(user))
+    return last is None or (time.time() - last) >= AUTHORING_BACKFILL_DEBOUNCE_S
+
+
+async def backfill_unauthored(missing_ids: list, user: Optional[str]) -> int:
+    """Re-author ONLY the floor NPCs in `missing_ids` and write them back. Returns how many were authored.
+
+    Resolves the LIVE cast (the engine's Vault-free `house` projection — the rich skeleton the
+    authoring prompt reads: vocation / archetype / age / heritage), filters to `missing_ids`, and runs
+    the existing authoring path (`run_authoring` → `author_cast` → `record_cast_profile`) over that
+    subset. Best-effort throughout (never raises): no model / engine-down ⇒ the engine's deterministic
+    floor simply stands, exactly like authoring degrades at game start."""
+    wanted = {str(h) for h in (missing_ids or [])}
+    if not wanted:
+        return 0
+    from src import orwell_engine
+
+    try:
+        state = await orwell_engine.get_game_state(user=user)
+    except Exception as e:
+        logger.info("[cast-authoring] backfill state read failed for %s: %s", _safe_user(user), e)
+        return 0
+    if not isinstance(state, dict) or state.get("started") is False:
+        return 0
+    house = state.get("house") if isinstance(state.get("house"), list) else []
+    # Re-author ONLY the requested floor NPCs (never the player, never an already-authored NPC).
+    subset = [
+        hg for hg in house
+        if isinstance(hg, dict)
+        and (hg.get("id") or hg.get("name"))
+        and str(hg.get("id") or hg.get("name")) in wanted
+        and (hg.get("id") or hg.get("name")) != "player"
+    ]
+    if not subset:
+        return 0
+    written = await run_authoring(subset, user)
+    logger.info("[cast-authoring] backfill for %s: authored %d/%d requested",
+                _safe_user(user), written, len(subset))
+    return written
+
+
+def kickoff_authoring_backfill(missing_ids: list, user: Optional[str], force: bool = False) -> bool:
+    """Fire-and-forget deep-authoring backfill; returns True when a run was actually kicked.
+
+    The AUTOMATIC roster-poll path is debounced (at most one attempt per user per process per
+    AUTHORING_BACKFILL_DEBOUNCE_S — a failing/absent provider is never hammered). `force=True` is the
+    EXPLICIT manual/admin lever: a deliberate click means "run now", so it bypasses the debounce window
+    — but still STAMPS it, so an auto-poll seconds later can't pile on (mirrors
+    `orwell_portraits.kickoff_backfill`). Never blocks the caller, never raises into it."""
+    if not missing_ids:
+        return False
+    if not force and not authoring_backfill_allowed(user):
+        return False
+    _LAST_AUTHORING_BACKFILL_AT[_safe_user(user)] = time.time()
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None:
+        task = loop.create_task(backfill_unauthored(list(missing_ids), user))
+
+        def _done(t):
+            try:
+                t.result()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("[cast-authoring] background backfill error: %s", e)
+
+        task.add_done_callback(_done)
+    else:  # non-async callers (tests drive backfill_unauthored directly)
+        try:
+            asyncio.run(backfill_unauthored(list(missing_ids), user))
+        except Exception as e:
+            logger.warning("[cast-authoring] sync backfill error: %s", e)
+    return True
