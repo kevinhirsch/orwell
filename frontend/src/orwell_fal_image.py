@@ -16,10 +16,11 @@ accepted in ADR 0016 §C). It is configured like any other provider — a `Model
 Endpoint shape (verified against a LIVE fal probe 2026-06-29 — the routing below is what the API
 actually accepts; the prior "promote to /edit always" was wrong and 422'd a first shoot):
   text→image  POST https://fal.run/fal-ai/bytedance/seedream/v5/lite/text-to-image
-              Body {"prompt": str, "image_size": "auto_2K", "num_images": 1}
+              Body {"prompt": str, "image_size": {"width": 1024, "height": 1024}, "num_images": 1}
   edit (ref)  POST https://fal.run/fal-ai/bytedance/seedream/v5/lite/edit
               Body {"prompt": str, "image_urls": [<https-url>, ...],  # REQUIRED — /edit 422s without
-                    "image_size": "auto_2K", "num_images": 1, "max_images": 1}
+                    "image_size": {"width": 1024, "height": 1024}, "num_images": 1, "max_images": 1}
+              (image_size is a PINNED 1:1 aspect hint — fal honors the ratio, not the exact dims.)
   Auth  Authorization: Key <FAL_KEY>
   Resp  {"images": [{"url": "https://...", "content_type": "image/...", ...}], "seed": int, ...}
   Cost  ~$0.035 / image.
@@ -43,9 +44,14 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Default render size asked of fal. `auto_2K` keeps the long edge ~2K and lets fal pick the aspect
-# (the prompt + a reference image carry the square-headshot framing; bounded cost).
-FAL_DEFAULT_IMAGE_SIZE = "auto_2K"
+# Default render size asked of fal — a PINNED SQUARE (1:1), matching the rest of the portrait
+# pipeline's convention (`orwell_portraits.PORTRAIT_SIZE_DEFAULT` = 1024x1024: every provider path
+# requests square DETERMINISTICALLY rather than leaving the aspect to prompt inference). Seedream
+# honors the *aspect ratio* but picks its own resolution band — a 1024x1024 ask returns ~1920x1920
+# (the smallest square band; `auto_2K`≈2048², `square_hd`≈3072²), verified against a LIVE fal probe
+# 2026-06-29 — so this guarantees 1:1 AND keeps the payload the smallest of the square options. fal
+# also accepts a preset string (e.g. "square_hd", "auto_2K") here.
+FAL_DEFAULT_IMAGE_SIZE = {"width": 1024, "height": 1024}
 
 # The Seedream v5 Lite base slug + its two operation suffixes on fal. The caller picks the suffix at
 # request time from whether a reference image is present (text→image vs. edit) — `/edit` REQUIRES
@@ -154,7 +160,7 @@ def _error_reason(resp) -> Optional[str]:
 
 async def generate_via_fal(client, base_url: str, model_id: str, prompt: str, headers: dict,
                            reference_pngs: Optional[list] = None,
-                           image_size: str = FAL_DEFAULT_IMAGE_SIZE) -> tuple:
+                           image_size: "str | dict" = FAL_DEFAULT_IMAGE_SIZE) -> tuple:
     """Generate ONE portrait via fal Seedream and return ``(png_bytes_or_None, error, detail)``.
 
     `reference_pngs` (the identity-carry input — the canonical headshot, the player's upload, the
