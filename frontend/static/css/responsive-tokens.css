@@ -67,7 +67,8 @@ html {
   button:not(.tap-exempt),
   [role="button"]:not(.tap-exempt),
   select:not(.tap-exempt),
-  .settings-nav-item:not(.tap-exempt) {
+  .settings-nav-item:not(.tap-exempt),
+  .thinking-header {
     min-height: var(--tap-min);
     min-width: max(36px, 2.25rem);
   }
