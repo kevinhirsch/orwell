@@ -85,6 +85,42 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
         images_url = base_url + "/images/generations"
 
+        # fal.ai Seedream (issue #1153 / ADR 0016 §C) — a separate image-provider API surface with no
+        # OpenAI /images path. Route the generic generate_image tool through the fal client when the
+        # resolved endpoint is a fal one. Text→image here (the reference/identity-carry pipeline lives
+        # in orwell_portraits, which owns the persisted canonical headshots).
+        from src.endpoint_resolver import is_fal_url
+        if is_fal_url(url):
+            from src import orwell_fal_image
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
+            ) as client:
+                png, reason, detail = await orwell_fal_image.generate_via_fal(
+                    client, base_url, model_id, prompt, headers,
+                )
+            if not png:
+                msg = f"{reason}" + (f": {detail}" if detail else "")
+                return [TextContent(type="text", text=f"Error: Image generation failed ({msg})")]
+            img_dir = Path("data/generated_images")
+            img_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"{uuid.uuid4().hex[:12]}.png"
+            (img_dir / filename).write_bytes(png)
+            _pub_base = (get_setting("app_public_url", "") or "").rstrip("/")
+            image_url = f"{_pub_base}/api/generated-image/{filename}"
+            try:
+                from src.database import SessionLocal, GalleryImage
+                db = SessionLocal()
+                db.add(GalleryImage(id=str(uuid.uuid4()), filename=filename, prompt=prompt,
+                                    model=model_id, size="auto_2K", quality="auto"))
+                db.commit()
+                db.close()
+            except Exception:
+                pass
+            return [TextContent(type="text", text=(
+                f"Generated image for: {prompt[:100]}\n"
+                f"Direct link: {image_url}\nmodel: {model_id}\nsize: auto_2K"
+            ))]
+
         valid_gpt_sizes = {"1024x1024", "1024x1536", "1536x1024", "auto"}
         valid_dalle3_sizes = {"1024x1024", "1024x1792", "1792x1024"}
         if is_gpt_image and size not in valid_gpt_sizes:
