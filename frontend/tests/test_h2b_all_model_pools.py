@@ -305,7 +305,12 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
                     break
                 if _overlay_present():
                     page.keyboard.press("Escape")
-                    page.wait_for_timeout(250)  # cover the kit's ~190ms close fade + teardown
+                    # Wait for the scrim to detach rather than a fixed delay,
+                    # so a slow CI runner doesn't race the kit's ~190ms teardown.
+                    try:
+                        page.wait_for_selector('[data-ow-scrim]', state='detached', timeout=3000)
+                    except Exception:
+                        pass
                     continue
                 try:
                     page.click("#user-bar-settings", timeout=2000)  # open settings → initAll()
