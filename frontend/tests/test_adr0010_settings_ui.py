@@ -56,7 +56,9 @@ def test_init_reads_and_writes_every_token_economy_key():
 def test_keys_present_in_default_settings():
     from src.settings import DEFAULT_SETTINGS
     assert DEFAULT_SETTINGS["reasoning_budget"] == {
-        "narration": "medium", "utility-extraction": "off",  # "off" = genuine disable (reasoning:{enabled:false})
+        # narration "low" (was "medium"): ADR 0016 — GLM-4.7's interleaved thinking needs a small budget
+        # to decide its tool calls. "off" = genuine disable (reasoning:{enabled:false}).
+        "narration": "low", "utility-extraction": "off",
         # #1007: background-authoring is "off" — structured JSON extraction, not a reasoning task.
         "casting": "medium", "background-authoring": "off",
     }
@@ -64,3 +66,25 @@ def test_keys_present_in_default_settings():
     assert DEFAULT_SETTINGS["token_spend_alert_usd"] == 0.0
     assert DEFAULT_SETTINGS["token_pin_threshold_tokens"] == 0
     assert DEFAULT_SETTINGS["context_tiering_enabled"] is False
+
+
+def test_narrator_reasoning_control_surfaced_in_default_chat_model_card():
+    """ADR 0016 — the narrator's reasoning effort is editable in the Default Chat Model card (not
+    only buried in Token Economy). The control is the same setting (reasoning_budget.narration),
+    synced in lockstep with the Token Economy 'Narration' select."""
+    html = _read("static/index.html")
+    assert 'id="set-narratorReasoning"' in html, "the Default Chat Model card must expose a reasoning select"
+    # ordering: it sits in the Default Chat Model card (after the model select) and BEFORE the
+    # Token Economy 'Narration' select further down the page.
+    i_model = html.index('id="set-defaultModelSelect"')
+    i_reason = html.index('id="set-narratorReasoning"')
+    i_econ = html.index('id="set-reasoningNarration"')
+    assert i_model < i_reason < i_econ, "the narrator reasoning select must live in the Default Chat Model card"
+
+    js = _read("static/js/settings.js")
+    start = js.index("async function initTokenEconomySettings")
+    block = js[start:]
+    block = block[: block.index("/* ── Vision ── */")]
+    assert "set-narratorReasoning" in block, "settings.js must wire the narrator reasoning select"
+    # kept in sync with the canonical Token Economy 'Narration' select (mirrors into set-reasoningNarration)
+    assert "set-reasoningNarration" in block

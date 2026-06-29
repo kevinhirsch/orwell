@@ -1602,6 +1602,13 @@
                 <label class="settings-label">Model</label>
                 <select id="set-defaultModelSelect" class="settings-select"></select>
               </div>
+              <div class="settings-row">
+                <label class="settings-label">Reasoning</label>
+                <select id="set-narratorReasoning" class="settings-select" style="width:120px;">
+                  <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+                </select>
+              </div>
+              <div class="admin-toggle-sub" style="margin:-2px 0 6px">How hard the narrator thinks before it replies and calls engine tools. <b>Low</b> suits GLM-4.7 (its interleaved thinking is what decides tool calls); <b>off</b> is cheapest but can skip a needed call. Same setting as Token&nbsp;Economy &rarr; Narration.</div>
               <div id="set-defaultFallbacks" class="settings-fallbacks"></div>
               <button type="button" class="settings-fallback-add" id="set-defaultAddFallback" title="Add a model to try if the one above fails">+ Add fallback</button>
               <div id="set-defaultChatMsg" style="font-size:var(--fs-xs);color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>

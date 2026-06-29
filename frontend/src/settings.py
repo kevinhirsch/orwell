@@ -149,9 +149,10 @@ DEFAULT_SETTINGS = {
     "agent_stream_timeout_seconds": 300,
     # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
     # reasoning budget. Maps a call class to a reasoning effort. Defaults to the
-    # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1): narration &
-    # casting = medium (quality-sensitive, player-facing), background-authoring =
-    # low (background flavor), and **utility-extraction = off** — pure JSON
+    # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1), AMENDED by ADR 0016: casting =
+    # medium (quality-sensitive, player-facing), narration = **low** (GLM-4.7 narrator — see the
+    # inline note below), background-authoring = low (background flavor), and **utility-extraction =
+    # off** — pure JSON
     # extraction/classification whose prompts forbid thinking; the 2026-06-21 I/O
     # trace showed its reasoning tokens wasted.
     # Valid classes are exactly token_policy.CALL_CLASSES; valid efforts are
@@ -165,7 +166,12 @@ DEFAULT_SETTINGS = {
     # get_setting("reasoning_budget", {}) → token_policy.resolve_token_policy();
     # edit per class at runtime via the Token Economy settings card or POST /api/settings.
     "reasoning_budget": {
-        "narration": "medium",
+        # ADR 0016: "low" (was "medium") for the GLM-4.7 narrator. GLM-4.7's tool-calling rides on
+        # INTERLEAVED THINKING — it reasons before each tool call/action — so a small reasoning budget
+        # is what lets it DECIDE which engine tool to call ("off" would strip that mechanism and regress
+        # "call the tool when we need to"; "low" keeps it at modest cost/latency). Runtime-editable from
+        # the Default Chat Model settings card (and the Token Economy card) — both write this key.
+        "narration": "low",
         "utility-extraction": "off",
         "casting": "medium",
         # #1007: OFF, not "low". Cast authoring is structured JSON extraction, not a reasoning
@@ -240,7 +246,11 @@ DEFAULT_SETTINGS = {
     # dispatch retries the next entry in order.
     "default_model_fallbacks": [],
     "utility_endpoint_id": "",
-    "utility_model": "",
+    # OOB utility model (ADR 0016): GLM-4.7-Flash on OpenRouter — a cheap (free on Z.ai-direct), fast,
+    # NON-reasoning 30B-class model for background JSON work (cast authoring/prewarm/zeitgeist,
+    # summarization, naming). `utility_endpoint_id` stays "" so it binds to the first enabled endpoint
+    # (the OpenRouter one the setup wizard creates). Background classes already run reasoning "off".
+    "utility_model": "z-ai/glm-4.7-flash",
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
     "utility_model_fallbacks": [],
