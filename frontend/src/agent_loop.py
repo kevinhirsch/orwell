@@ -1460,6 +1460,92 @@ _MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptiv
 # (the lull gate); a lull only nudges once the night has genuinely stopped moving. Tunable.
 _ADVANCE_GRACE_TURNS = 2
 
+# ── #1154 / ADR 0016 §D — FORCE the engine call (tool_choice) at the catastrophic-miss beats. ────────
+# The reactive belts above (the stall-nudge ladder, the L39b forced advanceGame, _auto_record_scene)
+# error-correct a missed call AFTER the model has already finished its turn — at which point the model
+# may have NARRATED an outcome it never read from the engine (the #1 desync). Now that the OOB narrator
+# is GLM-4.7 (ADR 0016 / PR #1151), whose tool-calling rides interleaved thinking and which HONORS
+# `tool_choice` (DeepSeek-V4 rejected `required` in always-thinking mode — the structural root of the
+# old ~0% spontaneous-call rate), we can GUARANTEE the call PROACTIVELY at the closed-set beats where a
+# miss is catastrophic, by forcing it on the wire. This is ADDITIVE: spontaneous interleaved calling
+# stays primary on every ordinary turn (forcing every turn is wasteful and would flatten free narration),
+# the forced call is the guarantee at the few beats below, and the reactive belts remain the third net.
+#
+# The mandate guardrail (engine never speaks for the player): we force ONLY the ENGINE-OWNED,
+# deterministic beats whose result is the engine's to compute and the model's only to VOICE —
+# runCompetition (read the already-decided comp winner) and advanceGame (drip the next deterministic
+# ceremony/eviction beat). We NEVER force submitDecision: that tool carries the PLAYER's explicit pick
+# ("never infer a binding choice from prose"), so forcing it would make the model invent a binding
+# choice — the opposite of the mandate. An OPEN PLAYER PENDING therefore SUPPRESSES all forcing (the
+# model must surface the card and wait, which the pending-barrier framing already pins).
+#
+# Phases where runCompetition is the mandatory read (the comp winner is the engine's; the model must
+# read it before narrating). At these we force `"required"` (NOT a named function) because the model
+# may legitimately use EITHER runCompetition (preview) OR advanceGame (resolve) to read the winner —
+# both go to the engine — so we guarantee SOME engine call without over-constraining which.
+_FORCE_COMP_PHASES = {"hoh-competition", "veto-competition"}
+# Ceremony advance-phases the model reliably narrates as already-done WITHOUT advancing (so the engine
+# sits unmoved and the board contradicts the prose). At these we force a NAMED advanceGame — only
+# advanceGame drips these deterministic beats. (premiere/finale/twist-reveal are deliberately EXCLUDED:
+# they carry their own belts — premiere markHouseguestMet, the finale flow — and are more delicate.)
+_FORCE_ADVANCE_PHASES = {"nominations", "veto-ceremony", "eviction"}
+
+
+def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_open: bool):
+    """Return the OpenAI/OpenRouter `tool_choice` to FORCE this round at a catastrophic-miss beat, or
+    None to leave the call unconstrained (spontaneous interleaved calling — the default everywhere).
+
+    Pure + side-effect-free so it is unit-testable in isolation (the suite stubs the LLM). Inputs:
+      • framed_beat_key  — the beat the model is grounded on THIS turn (`_LAST_FRAMED_BEAT_KEY[owner]`,
+        a (week, phase, moment[, pendingKind]) tuple); phase at index 1.
+      • turn_tool_names  — the set of engine tool NAMES already fired THIS turn (from tool_events). The
+        beat's tool having ALREADY fired this turn ⇒ the guarantee is met ⇒ do NOT re-force (which would
+        fight the model on a later round of a multi-round turn).
+      • pending_open     — True iff the engine has an OPEN player pending. Any open pending SUPPRESSES
+        forcing: the engine waits on the PLAYER (a card), and the model must surface it, not advance or
+        run a comp past it. (We never force submitDecision — see the block comment above.)
+
+    Precedence: a comp phase wants the WINNER read first, so if no comp tool fired yet → force
+    `"required"`; if runCompetition already previewed but nothing committed → force a named advanceGame
+    to COMMIT it (mirrors the reactive _previewed_uncommitted nudge, proactively). A non-comp ceremony
+    advance-phase that hasn't advanced yet → force a named advanceGame.
+    """
+    if pending_open:
+        return None
+    phase = ""
+    if isinstance(framed_beat_key, (tuple, list)) and len(framed_beat_key) >= 2:
+        phase = str(framed_beat_key[1] or "").lower()
+    names = turn_tool_names or set()
+    if phase in _FORCE_COMP_PHASES:
+        # Read the winner first (either runCompetition or advanceGame is valid) …
+        if not (names & {"runCompetition", "advanceGame"}):
+            return "required"
+        # … then COMMIT a preview that never advanced (the #1 previewed-uncommitted desync).
+        if "runCompetition" in names and "advanceGame" not in names:
+            return {"type": "function", "function": {"name": "advanceGame"}}
+        return None
+    if phase in _FORCE_ADVANCE_PHASES:
+        if "advanceGame" not in names:
+            return {"type": "function", "function": {"name": "advanceGame"}}
+        return None
+    return None
+
+
+# DeepSeek-V4 (the prior OOB narrator) returned HTTP 400 on `tool_choice` in always-thinking mode (the
+# 2026-06-21 conformance audit) — so forcing must NEVER be sent to it. GLM-4.7 (the current OOB model)
+# honors it. We gate forcing to models NOT on this known-rejecter list rather than allow-listing one
+# family, so a future honoring model benefits and an admin who swaps to a rejecter is still protected
+# (belt + the runtime kill-switch). Substring match on the resolved model id (provider-prefixed).
+_TOOL_CHOICE_REJECTERS = ("deepseek-v4", "deepseek/deepseek-v4", "deepseek-reasoner", "deepseek-r1")
+
+
+def _model_honors_forced_tool_choice(model: str) -> bool:
+    """True unless the resolved model is a KNOWN `tool_choice` rejecter (always-thinking DeepSeek). The
+    issue's pin-the-provider requirement: forcing is only sent where it is honored (asserted live)."""
+    m = (model or "").lower()
+    return not any(bad in m for bad in _TOOL_CHOICE_REJECTERS)
+
+
 # P1 onboarding — the LIGHT-TOUCH guided FIRST WEEK. A brand-new player's premiere week should
 # move briskly through its first HOH → eviction so the loop "clicks" before the open-ended middle
 # game; the producers/narrator nudge a little more actively. This is PACING ONLY (no scripted rails,
@@ -4091,6 +4177,51 @@ async def stream_agent_loop(
         _tool_names_sent = [t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")]
         logger.info(f"[agent-debug] round={round_num} model={model} _is_api_model={_is_api_model} tools_sent={len(_tool_names_sent)} tool_names={_tool_names_sent[:15]} relevant_tools={sorted(_relevant_tools)[:15] if _relevant_tools else 'ALL'}")
 
+        # ── #1154 / ADR 0016 §D — FORCE the engine call (tool_choice) at a catastrophic-miss beat. ──
+        # Computed PER ROUND, right before the stream, and passed straight to the wire. Default None ⇒
+        # the field is never added ⇒ byte-identical (the safety contract, asserted in
+        # test_tool_choice_force.py). Gates (ALL must hold), cheapest first so an ordinary turn does NO
+        # extra work: forcing must be live-game, the kill-switch ON (runtime-tunable, no redeploy),
+        # tools actually on the wire (a tool_choice with no tools 400s), the model a non-rejecter (GLM
+        # honors it; DeepSeek-V4 400'd), and the framed phase must make a specific ENGINE-OWNED tool
+        # mandatory (with that beat's tool not already fired this turn, and NO open player pending —
+        # see _forced_tool_choice_for_beat). ADDITIVE to the reactive belts (stall-nudge, L39b forced
+        # advanceGame, _auto_record_scene), which remain the other nets; this just guarantees the call
+        # PROACTIVELY so the model can't narrate an outcome it never read.
+        _forced_tool_choice = None
+        if (_is_live_game and all_tool_schemas and owner
+                and _model_honors_forced_tool_choice(model)
+                and bool(get_setting("force_tool_choice_at_beats", True))):
+            try:
+                from routes import chat_helpers as _ch_force
+                _framed_key = _ch_force._LAST_FRAMED_BEAT_KEY.get(owner or "")
+                _framed_phase_force = (str(_framed_key[1]).lower()
+                                       if isinstance(_framed_key, (tuple, list)) and len(_framed_key) >= 2
+                                       else "")
+                # Only touch the engine when the framed phase is actually a force candidate (no
+                # per-turn cost on ordinary social/lull turns).
+                if _framed_phase_force in (_FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES):
+                    _turn_tool_names_force = {ev.get("tool") for ev in (tool_events or [])
+                                              if isinstance(ev, dict) and ev.get("tool")}
+                    # An OPEN player pending SUPPRESSES forcing (the player owns the decision via the
+                    # card; the model must surface it, not advance/run past it). Cheap status read,
+                    # only on a force-candidate phase. Fail-open: any hiccup ⇒ no forcing this round.
+                    from src import orwell_engine as _oe_force
+                    _force_status = await _oe_force.game_status(user=owner)
+                    _pending_open = bool(
+                        isinstance(_force_status, dict)
+                        and isinstance(_force_status.get("pending"), dict)
+                        and (_force_status["pending"].get("kind") or "").strip())
+                    _forced_tool_choice = _forced_tool_choice_for_beat(
+                        _framed_key, _turn_tool_names_force, pending_open=_pending_open)
+                    if _forced_tool_choice is not None:
+                        logger.info(
+                            f"[orwell] #1154 forcing tool_choice={_forced_tool_choice} at "
+                            f"phase={_framed_phase_force} round={round_num} user={owner}")
+            except Exception as _force_err:
+                logger.warning(f"[orwell] #1154 tool_choice force skipped: {_force_err}")
+                _forced_tool_choice = None
+
         # Primary target + any configured fallback models. stream_llm_with_fallback
         # only switches on a pre-content failure, so streamed output is never
         # duplicated; the dead-host cooldown keeps repeat primary attempts cheap.
@@ -4112,6 +4243,7 @@ async def stream_agent_loop(
             session_id=_canon_session_id,
             pin_provider=(_pin_threshold > 0 and last_round_input_tokens >= _pin_threshold),
             provider_opts=_provider_opts,
+            tool_choice=_forced_tool_choice,  # #1154: None on ordinary turns ⇒ byte-identical
         ):
             if time.time() > _round_deadline:
                 logger.warning(f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off")
