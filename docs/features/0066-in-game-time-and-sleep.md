@@ -1,12 +1,13 @@
 # 0066 — In-game time of day & the nightly sleep economy
 
-**Status:** ✅ Built · **gate: unit + integration** (a recorded deviation from the BDD-default, matching
-0033/0036/0055 — the `.feature` is the spec of record; the executable gate is the Vitest suite named
-under Definition of Done, because the behaviour is exercised end-to-end through the live adapter and
-the opt-in env flag rather than through a new Cucumber world).
+**Status:** ✅ Built · **gate: BDD (`cucumber.cjs`) + unit** — the Phase-2 / 24-hour-model build (#1125,
+2026-06-28) promoted 0066 into the Cucumber gate (`docs/features/0066-in-game-time-and-sleep.feature` +
+`features/step_definitions/in_game_time_sleep.steps.ts`), alongside the Vitest suites named under
+Definition of Done. Phase-1 (the original opt-in clock/sleep) shipped earlier.
 **Executable spec:** [`0066-in-game-time-and-sleep.feature`](./0066-in-game-time-and-sleep.feature)
 **Provenance:** ADR [`0006`](../decisions/0006-in-game-time-sleep-and-the-presence-economy.md) (in-game
-time, sleep & the nightly presence economy); PO direction 2026-06-20.
+time, sleep & the nightly presence economy); PO direction 2026-06-20; the **24-hour model amendment**
+(owner, 2026-06-28 — recorded in ADR 0006 and §10 below) built as #1125.
 
 ## 1. Summary
 
@@ -98,9 +99,21 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
 
 ## 8. Implementer-ready (built)
 
-- Pure: `src/engine/timeOfDay.ts`.
-- Engine: `src/engine/liveSeason.ts` (state + `advanceClock`/`playerTurnIn`/`restOf`),
+- Pure: `src/engine/timeOfDay.ts` (the 24-hour clock, bedtimes-in-hours, the bidirectional awake set, graded
+  debt, the event/conversation duration helpers) + **`src/engine/sleepConstants.ts`** (the single tunable
+  home — `CLOCK`/`SLEEP`/`SOCIAL_FATIGUE`/`FATIGUE`/`CONVERSATION_DURATION`/`EVENT_DURATION`/`WEEKLY_CADENCE`).
+- Engine: `src/engine/liveSeason.ts` (state + `advanceClock`/`advanceClockPerConversation`/`playerTurnIn`/
+  `playerRestDeficit`/`npcRestDeficit` — all hour-based),
   `src/domain/competitionOutcome.ts` + `src/domain/temperatureConstants.ts` (the sleep term).
+- The three Phase-2 flags (`ORWELL_TIME_PER_CONVERSATION` / `ORWELL_SOCIAL_FATIGUE` /
+  `ORWELL_MULTI_NIGHT_FATIGUE`) + per-instance `set*Enabled` setters live on `GameSessionAdapter`
+  (siblings of the `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES` pattern); the per-conversation advance rides the
+  orchestrator's once-per-turn debounced tick (`maybeTurnDrivenTick`).
+- Gates: BDD (`docs/features/0066-in-game-time-and-sleep.feature` + `features/step_definitions/
+  in_game_time_sleep.steps.ts`, in `cucumber.cjs`) + the Vitest suites: `tests/unit/{timeOfDay,nightDepth,
+  sleepEconomyFairness,sleepCompetition,timeOfDay{Session,Society,Toggle},conversationDurationLoose,
+  eventDuration,weeklyCadence}.test.ts` and the per-extension neutrality proofs `tests/unit/
+  {perConversationClock,socialFatigue,multiNightFatigue}Neutral.test.ts`.
 - Adapter: `src/adapters/engine/GameSessionAdapter.ts` (the opt-in clock advance, `restOf`, `turnIn`,
   the `timeOfDay`/`restStatus` projections, and the social economy — `awakeNow`/`awakeAmong` filtering
   `societyOccupancy`/`whereabouts`/`socialInitiatives`).
@@ -113,29 +126,72 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
   engine at runtime via the admin `setTimeOfDay` tool (no restart) — re-applied on FE boot. The
   `ORWELL_TIME_OF_DAY` env var is the boot default the switch overrides.
 
-## 9. Open decisions for the owner (Phase-2 extensions — deferred, on the PO review list)
+## 9. Phase-2 extensions — BUILT (#1125, 2026-06-28)
 
-> **RESOLVED (owner, 2026-06-27): build all three Phase-2 extensions** (#1125) — **per-conversation clock
-> advance first** (most player-felt, pacing-only, no calibration risk), then NPC next-day social fatigue,
-> then the compounding multi-night fatigue meter, each behind the opt-in byte-identical discipline. The
-> env-default split stays (engine `ORWELL_TIME_OF_DAY` OFF for calibration; FE session default ON, ruling
-> #583). See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27).
+> **RESOLVED + BUILT (owner, 2026-06-28): all three Phase-2 extensions, on the 24-hour model below.**
+> Each rides its OWN opt-in flag, default OFF, byte-identical to the seeded calibration spine when off
+> (a dedicated per-extension neutrality proof each), priority-ordered per the owner: per-conversation
+> clock advance first (pacing-only), then NPC next-day social fatigue, then the compounding multi-night
+> meter. The env-default split stays (engine `ORWELL_TIME_OF_DAY` OFF for calibration; the FE session
+> default ON for real play, ruling #583). See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27/28).
 
-Built and shipped: the clock, the sleep→competition penalty, the bedtime lever, the social economy
-(the house thins; night owls scheme on), the settings switch, and the Nightfall gadget. Deliberately
-deferred per ADR 0006 — **for owner review before scheduling**:
+1. **Per-conversation clock advance** — `ORWELL_TIME_PER_CONVERSATION`. The clock advances as the player
+   *lingers/plays* within a beat (the orchestrator's once-per-turn, debounced off-screen tick), so the
+   day's finite scheming time is felt turn-by-turn. Pacing-only; it clamps at the bitter pre-dawn edge and
+   never wraps the night without the player's own `turnIn` (ADR 0003 / the lull rule) — an engaged scene is
+   never cut. The felt per-turn duration is the LOOSE, type-bounded conversation duration (§10, Extension 5).
+2. **NPC next-day social fatigue** — `ORWELL_SOCIAL_FATIGUE`. A tired houseguest moves the needle LESS in
+   the next day's social scenes (`socialSwayScale` dampens the off-screen fold magnitude — effectiveness,
+   never a personality change), and a character conflict drains the houseguest in it to an earlier bedtime.
+3. **A compounding multi-night fatigue meter** — `ORWELL_MULTI_NIGHT_FATIGUE`. An EMA of nightly deficits
+   (`accrueFatigue`/`combinedRestDeficit`): consecutive late nights stack a deeper deficit; a rested night
+   recovers. It adds (bounded) to both the comp fold and the social sway.
 
-1. **NPC next-day social fatigue.** Today rest only bites in `resolveCompetition`. The extension: a
-   tired houseguest reads crankier / more volatile / more error-prone in the *next day's* social scenes
-   (not just comps). Calibration-sensitive — fold it on an isolated stream like the comp term.
-2. **A compounding multi-night fatigue meter.** Today rest is a single-night read (last night's latest
-   phase). The extension: consecutive late nights *accumulate* a deeper deficit (and recover on early
-   nights), so a sustained night-owl strategy costs more over a week. Most realistic; biggest surface.
-3. **Per-conversation clock advance.** Today the clock advances per `advanceGame` beat (~5/week). The
-   extension: advance it as the player *lingers/plays* within a beat, so "a day has finite scheming
-   time" is felt turn-by-turn (the PO's original "how long each conversation takes" ask). Pacing-only;
-   must never rush an engaging scene (ADR 0003 / the lull rule).
+All three are PURE (no rng — bedtimes are derived, the meter is a running average), so they add ZERO draws
+to the seeded competition/vote/jury stream; the per-extension proofs are `tests/unit/{perConversationClock,
+socialFatigue,multiNightFatigue}Neutral.test.ts`. Tunables live in the single `src/engine/sleepConstants.ts`.
 
-Open *tuning* (not new scope): the sleep-penalty magnitude (`outcome.sleepPenalty ~0.15`), the archetype
-bedtime spread (`SLEEP.earlySleeperBelow` / `nightOwlAbove`), and whether to flip the env default ON now
-that the settings switch ships.
+## 10. The 24-hour model (accepted amendment — owner, 2026-06-28; #1125)
+
+The five phases are now real HOUR BANDS on a 24-hour day measured from the **8am forced wake**:
+
+| phase | hours | span |
+|---|---|---|
+| morning | 8–12 | 4h |
+| afternoon | 12–16 | 4h |
+| evening | 16–20 | 4h |
+| night | 20–24 | 4h |
+| late-night | 24–32 | **8h** (midnight → the next 8am) |
+
+- **Clock.** The live field `nightDepth` carries the clock-HOUR (8..32; the field name is legacy). A new
+  day begins ONLY at the 8am wake (everyone up); the clock CLAMPS at the bitter end and never silently
+  wraps. Advances by play: `CLOCK.perBeatHours` (~3h) per substantive ceremony beat; `CLOCK.perConversationHours`
+  (the type-bounded felt duration) per lingering turn.
+- **Sleep / wake (symmetric, player + NPC).** An 8-hour need against the fixed 8am wake. Bed at midnight →
+  8h → 0 debt. Bed AFTER midnight → debt = hours past midnight (`sleepDebtHours`), graded into 0..1
+  (`sleepDeficitForBedHour`). Bed BEFORE midnight → the 8h sleep lands before 8am → wake in the **pre-dawn
+  window** (0 debt + bonus awake time). So the awake set SHRINKS evening→midnight (owls retiring) then GROWS
+  midnight→8am (larks rising) — the **bidirectional ramp** (`isAwakeAtHour`), two distinct late-night
+  windows: post-midnight owls (costly) vs pre-dawn larks (free). Bedtimes are character-driven HOURS
+  (`bedtimeHourFor` = `social − physical` + deterministic per-NPC jitter, ∈ [21, 26]). The graded debt is a
+  hidden comp penalty + (ext2) social fatigue + (ext3) the multi-night meter; the player sees only their own
+  qualitative cue (rested / tired / running on empty), never a number, never an NPC's.
+- **Weekly 5-cycle + period placement** (`WEEKLY_CADENCE`). One HOH reign, STRICT order, no default rest
+  days, the daily-event invariant: Day 1 HOH (morning) · Day 2 nominations (morning) · Day 3 veto player
+  draw (morning) + veto competition (afternoon) · Day 4 veto ceremony (morning) · Day 5 eviction (evening) ·
+  next HOH = Day 6 morning (the morning AFTER eviction, not eviction night — the eviction→HOH gap is the one
+  light "process the eviction" beat). HOH-in-the-morning maximizes the post-HOH playable window.
+- **Event durations + seeded start-within-period** (`EVENT_DURATION`, `eventSpanHours`/`eventStartHour`/
+  `eventSpillsPeriod`). A comp ~3h, ceremony ~1h, eviction ~2h; each starts at a DETERMINISTIC offset WITHIN
+  its 4-hour period (a hash of seed + beat-key — NOT pinned to the edge, NO shared-stream rng, so the seeded
+  spine is untouched), may SPILL into the next period, and comps vary BY TYPE (the 0042 library overrides the
+  default).
+- **Conversation durations (LOOSE — ADR 0005 for time)** (`CONVERSATION_DURATION`, `conversationHours`). A
+  scene's felt duration is open-set: the LLM proposes how long it took; the engine COMMITS it BOUNDED to the
+  type range (passing ~0.5h, casual ~1h, game ~1.5h, summit ~2h) — never 0, never a day-skip. Absent a
+  proposal ⇒ the type baseline, byte-identical (the `expressiveNonCollapse`-for-time floor:
+  `tests/unit/conversationDurationLoose.test.ts`).
+
+Open *tuning* (not new scope): the sleep-penalty magnitude (`temperatureConstants.outcome.sleepPenalty`), the
+archetype bedtime spread (`SLEEP.earliestBedHour`/`latestBedHour`), the per-beat / per-conversation hour
+steps, the conversation/event duration tables — all in `src/engine/sleepConstants.ts`.

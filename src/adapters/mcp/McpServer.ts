@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -127,6 +127,26 @@ function requireShape(name: string, args: Record<string, unknown>): void {
     case "confide":
       guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       if (!isStr(args["npcId"])) refuse("npcId", "a houseguest id (string)");
+      return;
+    case "exposeSecret":
+      // 0093 — out a learned secret. EITHER a real `factId` (a string) OR a `bluff` (a boolean) with a
+      // `subject`. The engine validates ownership / the season cap; this is the shape guard only.
+      guardSyncFields(false);
+      if (args["bluff"] === true) {
+        if (!isStr(args["subject"])) refuse("subject", "a houseguest id (string) for a bluff");
+      } else if (!isStr(args["factId"])) {
+        refuse("factId", "a learned fact id (string), or set bluff:true with a subject");
+      }
+      return;
+    case "tradeSecret":
+      // 0099 — trade a held secret to a recipient. `toNpcId` required; EITHER a real `factId` OR a `bluff`.
+      guardSyncFields(false);
+      if (!isStr(args["toNpcId"])) refuse("toNpcId", "a recipient houseguest id (string)");
+      if (args["bluff"] === true) {
+        if (!isStr(args["subject"])) refuse("subject", "a houseguest id (string) for a bluff");
+      } else if (!isStr(args["factId"])) {
+        refuse("factId", "a learned fact id (string), or set bluff:true with a subject");
+      }
       return;
     case "runCompetition":
       if (args["type"] !== undefined && typeof args["type"] !== "string") refuse("type", "a string when present");
@@ -303,6 +323,12 @@ export class McpServer {
       case "confide":
         // 0075 — the trust-gated confidence: the engine decides + records; the model voices the result.
         return this.deps.session.confide(args["npcId"] as EntityId, args["expectedBeatSeq"] as number | undefined);
+      case "exposeSecret":
+        // 0093 — out a learned secret: the engine validates ownership + resolves the bounded fallout + records the pathway.
+        return this.deps.session.exposeSecret(args as unknown as ExposeSecretReq);
+      case "tradeSecret":
+        // 0099 — trade a held secret to a third party: the engine values it to the recipient + resolves + records.
+        return this.deps.session.tradeSecret(args as unknown as TradeSecretReq);
       case "getVisibleStateFor":
         return this.deps.player.getVisibleState();
       case "renderScene":

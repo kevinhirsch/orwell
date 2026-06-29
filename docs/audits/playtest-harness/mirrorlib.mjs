@@ -104,10 +104,13 @@ export const MIRROR_TAP = `(() => {
 })()`;
 
 // ── window lifecycle ─────────────────────────────────────────────────────────────────────────
-// Open one window on the live game with the mirror tap installed BEFORE app scripts run.
-export async function openMirrorWindow(browser, tag, { device = 'desktop', user = null } = {}) {
+// Open one window on the live game with the mirror tap installed BEFORE app scripts run. `extraInit`
+// (an optional init-script source string) is installed alongside the mirror tap — used by the HUD
+// parity gate to add a `orwell:gamechanged` / HUD-fetch tap, before any app JS runs.
+export async function openMirrorWindow(browser, tag, { device = 'desktop', user = null, extraInit = null } = {}) {
   const ctx = await newCtx(browser, device, { auth: true, user });
   await ctx.addInitScript(MIRROR_TAP);
+  if (extraInit) await ctx.addInitScript(extraInit);
   const page = await ctx.newPage();
   const net = [];
   page.on('response', (r) => { const s = r.status(); if (s >= 400) net.push({ status: s, url: (r.url().split('7000')[1] || r.url()).slice(0, 80) }); });
