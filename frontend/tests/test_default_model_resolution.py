@@ -68,6 +68,16 @@ def test_image_autodetect_leads_with_gemini_flash_image():
     )
 
 
+def test_oob_default_utility_model_is_glm_47_flash():
+    """ADR 0016 — the OOB utility model (background JSON: cast authoring/prewarm/zeitgeist,
+    summarization, naming) is GLM-4.7-Flash on OpenRouter: cheap (free on Z.ai-direct), fast,
+    non-reasoning. It is its OWN key (utility_model), so it does NOT inherit the narrator swap."""
+    from src.settings import DEFAULT_SETTINGS
+    assert DEFAULT_SETTINGS["utility_model"] == "z-ai/glm-4.7-flash", (
+        "the assumed default utility model must be GLM-4.7-Flash (z-ai/glm-4.7-flash)"
+    )
+
+
 # ── source pins: the picker honors the configured default, not first-listed ─────
 
 
