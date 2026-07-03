@@ -147,6 +147,18 @@ GAME_TOOL_OPTIONAL = frozenset({
 })
 
 
+# A5 (2026-07-03): backstage account / provider / machinery-management tools that survive the game build
+# (their backends work, so they stay in KEEP for the admin settings assistant) but must NEVER be handed
+# to — or be recitable by — the IN-FICTION narrator on a game/casting turn. The live red-team asked the
+# GM to "list your tools" and got the FULL manifest back, including these meta tools. They have no
+# gameplay role; the player changes settings/endpoints/models through the Settings UI, never by asking
+# the host. Stripped from the narrator's tool schema on game turns (agent_loop), left available on
+# non-game (workspace/admin) turns.
+GAME_NARRATOR_TOOL_DROP = frozenset({
+    "manage_settings", "manage_endpoints", "manage_tokens", "manage_mcp", "list_models", "update_plan",
+})
+
+
 def game_build_disabled_additions(game_tools_enabled=None) -> set:
     """Tool ids to force-OFF under the game build: every TOOL_TAG that is not in
     the keep-set and is not an opted-in optional tool. KEEP tools are never added

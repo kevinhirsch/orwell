@@ -2898,6 +2898,12 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
     r"(?:" + "|".join(_GAME_TOOL_WORDS) + r")"
     # machinery NOUNS that never appear in in-character narration
     r"|\bthe (?:engine|system)\b"
+    # A5 (2026-07-03): the backstage-machinery nouns — defense in depth so even if the momentPrompts
+    # instruction regresses, "God Mode" / "the Vault" / an "admin panel/surface/console" never reach the
+    # player. NOT bare "admin" (a houseguest can be an "admin assistant"): only the machinery phrasings.
+    r"|\bgod[\s-]?mode\b|\bthe vault\b|\bproducer'?s? vault\b"
+    r"|\badmin(?:istrator)?[\s-]+(?:panel|surface|console|mode|controls?|tools?)\b"
+    r"|\bdeveloper (?:controls?|mode|console|tools?)\b"
     # the APPLICATION the player runs us on (fourth-wall meta-leak, audit 2026-06-26): "the front
     # end", "the app", "this app/website/site" never occur in in-character BB narration. Narrow
     # alternation (no bare "front"/"app"/"site") so ordinary scene prose is untouched.
@@ -3683,6 +3689,18 @@ async def stream_agent_loop(
         # MCP tools are namespaced dynamically, so hide all MCP schemas for
         # public/non-admin users rather than trying to enumerate every tool.
         mcp_mgr = None
+    # A5 (2026-07-03): on an in-fiction GAME/CASTING turn under the game build, strip the backstage
+    # account/provider/machinery-management tools from the narrator's schema — they survive the build for
+    # the settings assistant, but the in-character host must neither call nor RECITE them ("list your
+    # tools" leaked the full manifest to the player). Only game turns; a workspace/admin turn keeps them.
+    if game_mode:
+        try:
+            from src.settings import game_build_enabled as _gbe_tools
+            if _gbe_tools():
+                from src.agent_tools import GAME_NARRATOR_TOOL_DROP
+                disabled_tools.update(GAME_NARRATOR_TOOL_DROP)
+        except Exception:
+            pass
 
     if plan_mode:
         # Plan mode: investigate read-only, propose a plan, don't execute. The
