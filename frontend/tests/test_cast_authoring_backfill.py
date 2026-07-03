@@ -6,6 +6,16 @@ absent/flaky at game start, every houseguest stayed a thin deterministic-FLOOR t
 anti-"sameness" mandate #1 fails silently). This mirrors `orwell_portraits.{missing_portrait_ids,
 completeness,portrait_completeness,kickoff_backfill}` for authoring.
 
+A1 (ship-blocker, "the phantom-houseguest root") note: this backfill re-targets houseguests whose
+`authored` flag is not-true (`unauthored_ids`, below) — that flag flips true off the PUBLIC facets
+(biography/physicalCharacteristics/vocation), NOT off whether the name specifically landed. So a
+houseguest whose name was refused by the engine's introduced-houseguest name-lock (because the
+player already met them) but whose other authored facets DID land still flips `authored: true` and
+drops out of future backfill targeting — the backfill never hammers a locked name in a retry loop.
+The name-lock itself, and `author_cast`'s tolerance of a partial-field accept, are both covered in
+`test_l28b_cast_authoring.py::test_l28b_author_cast_tolerates_the_engine_dropping_the_name_field`;
+the engine-side invariant is `tests/unit/castNameRace.test.ts` (TS repo root).
+
 Roles only — no names. The engine client and the authoring path are monkeypatched (never a real model).
 Covers:
   • unauthored_ids: ACTIVE NPCs whose `authored` is not-true, EXCLUDING the player + departed

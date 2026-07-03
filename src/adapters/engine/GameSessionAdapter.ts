@@ -665,6 +665,20 @@ export class GameSessionAdapter implements GameSession {
    * premiere resumes; cleared once the premiere is over. PUBLIC ids only — no Vault data.
    */
   private premiereMet: Set<EntityId> = new Set();
+  /**
+   * A1 (ship-blocker, "the phantom-houseguest root") — the DURABLE, never-cleared superset of
+   * `premiereMet`: every houseguest id the player has EVER been introduced to (by name, in narration
+   * they witnessed) this season. Unlike `premiereMet` (vestigial-cleared once the premiere ends,
+   * §above), this set is the permanent name-lock signal: `recordCastProfile`'s PUBLIC NAME acceptance
+   * (below) refuses to rename any houseguest already in this set, no matter when or how many times an
+   * async authoring write-back later arrives. This closes the race where deep cast-authoring
+   * (`recordCastProfile`, an FE-driven write-back that can complete asynchronously — during the
+   * premiere, or even later via the authoring backfill) renamed a houseguest AFTER the player had
+   * already met them under the seeded floor name, so the GM appeared to "correct" the player about the
+   * game's own prior words. Populated in lockstep with `premiereMet` (the same structural
+   * introduction event); reset to empty at every season start alongside it. PUBLIC ids only.
+   */
+  private introducedNames: Set<EntityId> = new Set();
   // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -1543,7 +1557,21 @@ export class GameSessionAdapter implements GameSession {
     // reasonable two-token human name AND it does not collide (case-insensitive) with any OTHER current
     // houseguest or the player; otherwise the seeded corpus name (the deterministic floor) simply stands.
     // A rejected name NEVER fails the whole call — the rest of the authored profile still applies.
-    if (req.name !== undefined) {
+    //
+    // A1 (ship-blocker, "the phantom-houseguest root"): a PUBLIC name is structurally FROZEN the instant
+    // the player has been introduced to this houseguest (`introducedNames`, populated by
+    // `markHouseguestMet`) — never on the prewarm/pre-game path (that set is always empty pre-game).
+    // `recordCastProfile` is an FE-driven write-back that can complete ASYNCHRONOUSLY relative to
+    // premiere narration (deep cast-authoring kicked off in the background at season start, or an even
+    // later authoring backfill) — without this guard a late-arriving authored name silently RENAMES a
+    // houseguest the player already met and was told the name of, and the GM then reads as "correcting"
+    // the player about the game's own prior words. This is enforced HERE, structurally, not by timing
+    // the FE's background call — the smaller, surgical fix over trying to serialize an inherently
+    // best-effort background task ahead of narration.
+    if (req.name !== undefined && this.introducedNames.has(target.id)) {
+      // Silently drop — mirrors the cross-character guard's per-field drop above: the rest of the
+      // authored profile still applies, only the name is refused so the seeded/already-shown name stands.
+    } else if (req.name !== undefined) {
       const name = req.name.trim();
       const collides = name.toLowerCase() === ctx.playerName.toLowerCase()
         || ctx.npcs.some((n) => n.id !== target.id && (n.name ?? "").trim().toLowerCase() === name.toLowerCase());
@@ -2143,6 +2171,9 @@ export class GameSessionAdapter implements GameSession {
       // resumes after a restart (0030) — the producer never re-introduces someone or loses track of
       // who's still to meet. Public ids; absent once the premiere is over (the set is then empty).
       ...(this.premiereMet.size > 0 ? { premiereIntros: [...this.premiereMet] } : {}),
+      // A1: the DURABLE name-lock companion to `premiereIntros` above — never cleared once the premiere
+      // ends, so `recordCastProfile`'s name-race guard survives a restart. Public ids only.
+      ...(this.introducedNames.size > 0 ? { introducedNames: [...this.introducedNames] } : {}),
       // 0062 — the FROZEN move-in zeitgeist snapshot persists so it is RECALLED (never re-searched) all
       // season and survives a restart byte-identical (§3/§9). Outward-safe public flavor (§6).
       ...(this.worldSnapshot ? { worldSnapshot: cloneSession(this.worldSnapshot) } : {}),
@@ -2365,6 +2396,10 @@ export class GameSessionAdapter implements GameSession {
     // PREMIERE (feature #380 follow-on): restore who's been met so a half-done premiere resumes (0030).
     // Absent on a pre-feature save OR once the premiere is over ⇒ empty (no one outstanding to re-meet).
     this.premiereMet = new Set(core.premiereIntros ?? []);
+    // A1: restore the DURABLE name-lock companion set. Absent on a pre-A1 save ⇒ empty (a save made
+    // before this fix simply has no locked names yet; any houseguest introduced from here on locks
+    // going forward exactly as a fresh season does — no regression, no false lock on old saves).
+    this.introducedNames = new Set(core.introducedNames ?? []);
     // 0062 — restore the FROZEN move-in zeitgeist snapshot (recalled, never re-searched, §9). Persisted on
     // 0062+ saves; on a pre-0062 save WITH a seed, re-derive the deterministic `model-framed` snapshot off
     // the SAME seed hinge (seed-stable & player-independent, so it returns identically). Without a seed
@@ -3376,6 +3411,9 @@ export class GameSessionAdapter implements GameSession {
     const isActiveNpc = this.house.npcs.some((n) => n.id === id && this.seatOf(n.id) === "active");
     if (isActiveNpc && !this.premiereMet.has(id)) {
       this.premiereMet.add(id);
+      // A1: the DURABLE name-lock companion — never cleared (unlike `premiereMet`). From this moment
+      // the player has witnessed this houseguest's name; `recordCastProfile` must never change it.
+      this.introducedNames.add(id);
       this.persist();
     }
     return this.premiereIntros();
@@ -3536,6 +3574,8 @@ export class GameSessionAdapter implements GameSession {
     // introduced yet. The producer (driven by the premiere moment prompt's who's-left list) walks the
     // player through all 15 NPCs before the first HOH; `premiereMet` records who's been met. Persisted.
     this.premiereMet = new Set();
+    // A1: a fresh season starts with no locked names either — the new cast has not been introduced yet.
+    this.introducedNames = new Set();
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
     // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each, only
