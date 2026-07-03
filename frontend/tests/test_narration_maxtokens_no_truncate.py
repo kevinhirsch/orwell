@@ -115,3 +115,52 @@ def test_agent_loop_resolves_model_aware_default_for_the_no_override_case():
     # The flat-4096 narration default must NOT be reintroduced as the effective cap.
     assert not re.search(r"_effective_max_tokens\s*=\s*4096", src), \
         "the flat 4096 narration cap (the #572/#835 truncation vector) must not be back"
+
+
+# --- 4. A9: the LIVE settings.py SEED must not re-cap narration/casting -------------------------
+#
+# The bug (ship-blocker A9, 2026-07-03 audit): DEFAULT_SETTINGS["max_tokens_budget"] in
+# settings.py used to SEED "narration": 4096 / "casting": 2048. token_policy.resolve_token_policy
+# treats an in-band settings value as an EXPLICIT ADMIN OVERRIDE that always wins over the class
+# default — so that seed silently re-activated the exact #835/#620 NARR-5 truncation vector the
+# tests above prove is fixed at the token_policy layer: on a reasoning model (GLM-4.7, the ADR-0016
+# narrator) the reasoning tokens count against the cap, so a live narration/casting turn was capped
+# at 4096/2048 regardless of the model-aware default computed above. These tests exercise the
+# resolution through the REAL settings seed (not a hand-rolled one), the same pattern as
+# test_adr0010_token_policy.test_background_authoring_with_default_settings_seed_resolves_off_and_3000
+# used to catch the sibling #1007 masking bug for background-authoring.
+
+def test_narration_default_settings_seed_does_not_recap_at_4096():
+    from src.settings import DEFAULT_SETTINGS
+    token_policy = _load_token_policy()
+    seed = {
+        "reasoning_budget": DEFAULT_SETTINGS["reasoning_budget"],
+        "max_tokens_budget": DEFAULT_SETTINGS["max_tokens_budget"],
+    }
+    pol = token_policy.resolve_token_policy("narration", seed)
+    assert pol["max_tokens"] != 4096, \
+        "the settings.py seed must not re-activate the flat 4096 narration cap"
+    assert pol["max_tokens"] is None, \
+        "with no explicit admin override, narration must resolve to the model-aware cap"
+    eff = _effective_max_tokens("narration", _DEEPSEEK, settings=seed)
+    assert eff != 4096
+    assert eff == _import_model_max_output_tokens()(_DEEPSEEK)
+    assert eff > 4096
+
+
+def test_casting_default_settings_seed_does_not_recap_at_2048():
+    from src.settings import DEFAULT_SETTINGS
+    token_policy = _load_token_policy()
+    seed = {
+        "reasoning_budget": DEFAULT_SETTINGS["reasoning_budget"],
+        "max_tokens_budget": DEFAULT_SETTINGS["max_tokens_budget"],
+    }
+    pol = token_policy.resolve_token_policy("casting", seed)
+    assert pol["max_tokens"] != 2048, \
+        "the settings.py seed must not re-activate the flat 2048 casting cap"
+    assert pol["max_tokens"] is None, \
+        "with no explicit admin override, casting must resolve to the model-aware cap"
+    eff = _effective_max_tokens("casting", _DEEPSEEK, settings=seed)
+    assert eff != 2048
+    assert eff == _import_model_max_output_tokens()(_DEEPSEEK)
+    assert eff > 2048
