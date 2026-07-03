@@ -3030,6 +3030,23 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
     return "".join(out)
 
 
+async def _knowledge_wall_guard(text: str, owner) -> str:
+    """A0 — the PRE-EMISSION knowledge-wall scan, applied to already-leak-scrubbed + outcome-guarded
+    text just before it streams. Drops any sentence that puts the player's SEALED content (the always-
+    walled Diary-Room class) in a houseguest's mouth — a structural Vault-Wall leak with no in-game
+    pathway. Everything else streams verbatim. Delegates to `chat_helpers.screen_knowledge_wall`, which
+    holds the tight jurisdiction (Diary-Room class only, staged-houseguest attribution required) and is
+    fail-open by construction. Fires single-tenant too (`owner` None ⇒ the desync key falls back to the
+    canonical game-session id, NAR-1-safe). Any hiccup returns the text unchanged."""
+    if not text:
+        return text
+    try:
+        from routes import chat_helpers
+        return await chat_helpers.screen_knowledge_wall(owner, text)
+    except Exception:
+        return text
+
+
 def _record_sync_ledger_turn(owner, *, session_id, tool_events, beat_seq_before, stale_before,
                              nudges_fired, auto_backfills) -> None:
     """0065 Part D — emit ONE Vault-free sync-ledger entry for a finished live-game turn.
@@ -4390,6 +4407,10 @@ async def stream_agent_loop(
                                     _guarded = await _pre_emission_outcome_guard(_clean, owner)
                                     if not _guarded.strip() and _clean.strip() and not _emitted_visible:
                                         _guarded = _clean
+                                    # A0 knowledge wall runs LAST and is NEVER overridden by a blank-turn
+                                    # fallback: a houseguest voicing the player's sealed Diary-Room content
+                                    # is a Vault-Wall leak that must never reach the player.
+                                    _guarded = await _knowledge_wall_guard(_guarded, owner)
                                     if _guarded:
                                         full_response += _guarded
                                         if _guarded.strip():
@@ -4496,6 +4517,8 @@ async def stream_agent_loop(
                 _guarded = await _pre_emission_outcome_guard(_clean, owner)
                 if not _guarded.strip() and _clean.strip() and not _emitted_visible:
                     _guarded = _clean
+                # A0 knowledge wall runs LAST — a Vault-Wall leak is never re-admitted by a fallback.
+                _guarded = await _knowledge_wall_guard(_guarded, owner)
                 if _guarded:
                     full_response += _guarded
                     if _guarded.strip():

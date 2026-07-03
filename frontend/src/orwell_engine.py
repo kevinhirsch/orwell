@@ -698,6 +698,14 @@ async def npc_voice(npc_id: str, user: str | None = None):
     return await _call("npcVoice", {"id": npc_id}, user=user)
 
 
+async def sealed_from_house(user: str | None = None):
+    """A0 knowledge-wall manifest — the player's private disclosures sealed from the house (most
+    sharply the Diary-Room entries, `knownTo` empty). Vault-free (the player's OWN knowledge). The
+    narration guard reads it to strip any line that puts sealed content in a houseguest's mouth.
+    Returns a list of ``{content, knownTo}``; ``[]`` pre-game or when nothing is sealed."""
+    return await _call("sealedFromHouse", {}, user=user)
+
+
 async def whereabouts(user: str | None = None):
     """The Vault-free presence read (0049): the player's room, who is in it, and who is in each
     ADJACENT room — names only, never motives or non-adjacent rooms. ``None`` pre-game."""

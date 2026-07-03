@@ -1567,6 +1567,201 @@ async def record_post_turn_roster_check(user, narration: str) -> None:
         logger.warning("[orwell] post-turn roster check skipped for user=%s: %s", user, _exc_detail(e))
 
 
+# ── A0 — the model-level KNOWLEDGE WALL (per-NPC narration gate + post-hoc leak scan) ─────── #
+#
+# Ship-blocker A0: NPCs were narrated omniscient of the whole chat — one live playthrough had a
+# houseguest recite the player's Diary-Room plan VERBATIM, though the Vault proved NO in-game pathway
+# ever gave that houseguest the plan. The Diary Room is a player-level OOC channel with NO pathway to
+# ANY houseguest (CLAUDE.md, "event/visibility model"); that is a structural Vault-Wall violation, not
+# a narration-quality nit — while it holds, nothing the player says or plans is private and the social-
+# deduction game has no floor.
+#
+# The engine already computes the correct per-NPC manifest (`npcVoice.knows`) and the always-sealed
+# set (`sealedFromHouse` — the Diary-Room entries, `knownTo` empty). This is the DEFENSE-IN-DEPTH
+# post-hoc scan: before a line reaches the player, if a houseguest is STAGED voicing content sealed
+# from them (a speaker not in that fact's `knownTo`), the sentence is DROPPED — mirroring the 0065
+# pre-emission outcome guard's sentence-drop shape, never a new mechanism.
+#
+# Jurisdiction is TIGHT and zero-false-positive by construction: it fires only on the always-sealed
+# Diary-Room class (`knownTo` empty ⇒ no houseguest may EVER voice it), and only when a distinctive
+# multi-word shingle of the sealed content appears in a sentence where a houseguest is STAGED
+# (`_stages_in_scene`). The player restating their OWN plan (no houseguest staged) is never touched;
+# the diary-room BEAT itself (no houseguest present) is never touched. Non-diary player secrets are
+# deliberately OUT of scope here (they can diffuse NPC-to-NPC as legitimate gossip — enforced by the
+# per-NPC `npcVoice.knows` manifest, not a blunt content scrub). Fail-open: any hiccup emits verbatim.
+
+# Common words dropped when building distinctive shingles — a shingle of only stopwords is not distinctive.
+_KW_STOPWORDS = frozenset((
+    "the", "a", "an", "to", "of", "and", "or", "but", "is", "are", "was", "were", "be", "been",
+    "i", "im", "my", "me", "you", "your", "we", "our", "he", "she", "they", "them", "it", "its",
+    "this", "that", "these", "those", "in", "on", "at", "for", "with", "as", "so", "if", "then",
+    "want", "going", "gonna", "will", "have", "has", "had", "do", "does", "did", "just", "really",
+))
+# The shingle width — a run of this many distinctive (non-stopword) content words must match to flag a
+# leak. Wide enough that ordinary overlapping phrasing never trips it; narrow enough to catch a recital.
+_KW_SHINGLE = 4
+# A short wall-clock cache of the sealed manifest so a streaming turn (many chunks) makes ONE engine
+# read, refreshing next turn. Keyed by the desync key with a hard sentinel default (NAR-1: never a bare
+# `if user` — the write AND read use the same `_kw_key`, so it is never dead under AUTH_ENABLED=false).
+_KW_SEALED_CACHE: dict = {}
+_KW_CACHE_TTL = 5.0
+
+
+def _kw_key(user):
+    """The stable per-game key for the knowledge-wall cache — the shared desync key with a hard
+    sentinel default so a userless (single-tenant) turn is NOT silently inert (NAR-1)."""
+    return _desync_key(user) or "default"
+
+
+def _kw_norm_words(text: str) -> list:
+    """Lowercase alphanumeric word tokens from `text` (apostrophes stripped) — the shingle alphabet."""
+    return re.findall(r"[a-z0-9]+", (text or "").lower().replace("'", "").replace("’", ""))
+
+
+def _kw_content_norm(text: str) -> str:
+    """The distinctive-content projection of `text`: its non-stopword words (>2 chars) space-joined.
+    Signatures (built the same way) are matched as substrings of THIS — so intervening stopwords /
+    punctuation between the sealed content's words never defeat a recital ('secret plan is to backdoor'
+    still contains the 'secret plan backdoor' signature)."""
+    return " ".join(w for w in _kw_norm_words(text) if w not in _KW_STOPWORDS and len(w) > 2)
+
+
+def _sealed_signatures(content: str) -> list:
+    """Distinctive multi-word signatures of one sealed disclosure. Drops stopwords, then takes every
+    sliding window of `_KW_SHINGLE` content words as a space-joined signature. Short entries (fewer
+    than `_KW_SHINGLE` content words) yield ONE signature of all their content words, so a terse plan
+    ('backdoor the HOH') is still caught. Empty ⇒ nothing distinctive to match (never flags)."""
+    words = [w for w in _kw_norm_words(content) if w not in _KW_STOPWORDS and len(w) > 2]
+    if not words:
+        return []
+    if len(words) < _KW_SHINGLE:
+        return [" ".join(words)]
+    return [" ".join(words[i:i + _KW_SHINGLE]) for i in range(len(words) - _KW_SHINGLE + 1)]
+
+
+async def fetch_sealed_from_house(user) -> list:
+    """The sealed-from-house manifest for this game, TTL-cached for the streaming turn. Each entry:
+    ``{content, knownTo, signatures}``. Vault-free (the engine projection is the player's OWN
+    knowledge). Fail-open: any hiccup ⇒ ``[]`` (the guard then never holds anything)."""
+    import time
+    key = _kw_key(user)
+    now = time.monotonic()
+    cached = _KW_SEALED_CACHE.get(key)
+    if cached and (now - cached[0]) < _KW_CACHE_TTL:
+        return cached[1]
+    facts: list = []
+    try:
+        from src import orwell_engine
+        raw = await orwell_engine.sealed_from_house(user=user)
+        for f in (raw or []):
+            if not isinstance(f, dict):
+                continue
+            content = str(f.get("content") or "").strip()
+            if not content:
+                continue
+            known = [str(k).strip().lower() for k in (f.get("knownTo") or []) if str(k).strip()]
+            sigs = _sealed_signatures(content)
+            if sigs:
+                facts.append({"content": content, "knownTo": known, "signatures": sigs})
+    except Exception as e:
+        logger.debug("[orwell] knowledge-wall manifest fetch skipped for user=%s: %s", user, _exc_detail(e))
+        facts = cached[1] if cached else []
+    _KW_SEALED_CACHE[key] = (now, facts)
+    return facts
+
+
+def _kw_active_names(user) -> list:
+    """The active-roster display names for houseguest-staging detection — read from the cached turn-
+    start signature (no per-turn fetch). Empty pre-game / no baseline ⇒ the guard can't attribute a
+    speaker, so it never fires (conservative)."""
+    try:
+        sig = _LAST_BEAT_SIG.get(_desync_key(user))
+        if not sig:
+            return []
+        return [str(n).strip() for n in (sig.get("activeNames") or []) if str(n).strip()]
+    except Exception:
+        return []
+
+
+def _sentence_leaks_sealed(sentence: str, facts: list, active_names: list) -> bool:
+    """True when `sentence` puts SEALED content in a houseguest's mouth. A leak requires BOTH:
+      • a distinctive multi-word signature of a sealed disclosure appears in the sentence, AND
+      • a houseguest is STAGED speaking/acting in the sentence (`_stages_in_scene`) whose name is NOT
+        in that fact's `knownTo` (for a Diary-Room fact `knownTo` is empty ⇒ ANY staged houseguest).
+    A sentence with no staged houseguest (player narration, the diary-room beat, pure description) is
+    never a leak — the wall never touches the player voicing their OWN plan."""
+    staged = [n for n in active_names if _stages_in_scene(sentence, n)]
+    if not staged:
+        return False  # nobody is voiced here — not a houseguest putting sealed content in their mouth
+    norm = _kw_content_norm(sentence)
+    for fact in facts:
+        if not any(sig and sig in norm for sig in fact.get("signatures") or []):
+            continue
+        allowed = set(fact.get("knownTo") or [])
+        for name in staged:
+            nl = name.lower()
+            # A staged speaker outside the pathway-holder set is voicing what no pathway gave them.
+            if nl not in allowed and not any(nl in a or a in nl for a in allowed):
+                return True
+    return False
+
+
+def stash_knowledge_wall_reground(user) -> None:
+    """Stash a next-turn re-ground after a sealed-content leak was stripped — reminding the model the
+    Diary Room is OOC and no houseguest can EVER voice it. Combines with (never clobbers) any re-ground
+    already stashed this turn. Fail-open."""
+    try:
+        _dkey = _desync_key(user)
+        directive = (
+            "KNOWLEDGE WALL — last turn a houseguest voiced the player's PRIVATE Diary-Room content, "
+            "which was stripped. The Diary Room is an out-of-character channel with NO in-game pathway "
+            "to ANY houseguest: no NPC can ever know or repeat what the player said there. Before you "
+            "voice a houseguest, call npcVoice and speak ONLY from what THAT houseguest legitimately "
+            "knows — never the player's diary thoughts, never a secret no pathway gave them."
+        )
+        existing = _DESYNC_REGROUND.get(_dkey)
+        _DESYNC_REGROUND[_dkey] = (existing + "\n\n" + directive) if existing else directive
+    except Exception:
+        pass
+
+
+async def screen_knowledge_wall(user, text: str) -> str:
+    """A0 post-hoc knowledge-wall scan. Returns `text` with any sentence that puts SEALED content in a
+    houseguest's mouth DROPPED (delimiters preserved for the rest). Cheap hot path: no sealed facts, or
+    no signature present anywhere, ⇒ the text is returned verbatim without splitting. A Vault-Wall leak
+    is NEVER emitted — unlike the outcome guard there is no 'blank turn' fallback that would re-admit it
+    (the caller must not restore the raw text over this)."""
+    if not text or not text.strip():
+        return text
+    facts = await fetch_sealed_from_house(user)
+    if not facts:
+        return text  # nothing sealed this game — the overwhelmingly common path
+    norm = _kw_content_norm(text)
+    if not any(sig and sig in norm for f in facts for sig in f.get("signatures") or []):
+        return text  # no sealed signature anywhere — never split, never attribute
+    active_names = _kw_active_names(user)
+    if not active_names:
+        return text  # can't attribute a speaker → can't prove a houseguest voiced it (conservative)
+    parts = re.split(r"(?<=[.!?\n])", text)
+    out = []
+    leaked = False
+    for part in parts:
+        try:
+            if _sentence_leaks_sealed(part, facts, active_names):
+                leaked = True
+                continue  # DROP — a houseguest voicing sealed content never reaches the player
+        except Exception:
+            pass  # any hiccup falls through to emit (conservatism), except a proven leak above
+        out.append(part)
+    if leaked:
+        try:
+            stash_knowledge_wall_reground(user)
+            logger.warning("[orwell] knowledge-wall: stripped sealed content from a houseguest's mouth (user=%s)", user)
+        except Exception:
+            pass
+    return "".join(out)
+
+
 # ── 0065 Part C — the PRE-EMISSION outcome guard (same-turn, not next-turn) ──────────────── #
 #
 # `record_post_turn_desync_check` (above) catches a narrated-but-uncommitted outcome only AFTER the

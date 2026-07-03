@@ -287,7 +287,7 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // against what the player legitimately holds — the Vault bright line; a non-learned secret is rejected,
   // no minting). Returns the player's facts with id + content + subject + lineage factId.
   session.setPlayerKnowledgeReader(() =>
-    engine.knowledge.knownTo(PLAYER).map((f) => ({ id: f.id, content: f.content, subject: f.subject, factId: f.factId })),
+    engine.knowledge.knownTo(PLAYER).map((f) => ({ id: f.id, content: f.content, subject: f.subject, factId: f.factId, pathway: f.pathway })),
   );
   // 0093/0099 — surface an EXPOSED/TRADED secret INTO a houseguest's knowledge through the in-game
   // pathway (the player is the source). The recipient first HOLDS the content (a seeded origin belief so
