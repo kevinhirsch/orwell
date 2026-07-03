@@ -831,12 +831,25 @@ export class GameSessionAdapter implements GameSession {
 
   /** 0065 Part B — remember an `AdvanceView` under its idempotency key (bounded LRU; oldest evicts). */
   private rememberIdempotent(key: string, view: AdvanceView): AdvanceView {
+    const isNew = !this.idempotencyCache.has(key);
     this.idempotencyCache.delete(key); // re-insert at the tail (insertion-ordered = LRU)
     this.idempotencyCache.set(key, view);
     while (this.idempotencyCache.size > GameSessionAdapter.IDEMPOTENCY_CACHE_MAX) {
       const oldest = this.idempotencyCache.keys().next().value as string | undefined;
       if (oldest === undefined) break;
       this.idempotencyCache.delete(oldest);
+    }
+    // PERSIST-9 — the cache is populated AFTER the commit's persist already fired (the funnel defers the
+    // hook to `inOneCommit`'s tail, which runs before this remember), so the snapshot that just saved
+    // MISSED this entry. Durably re-persist NOW (only for a genuinely new entry, so a pure replay adds no
+    // I/O) so at-most-once survives a restart/LRU-unload that lands right after this progression. Best-
+    // effort + fail-soft: a persist hiccup must never turn an already-committed progression into an error.
+    if (isNew) {
+      try {
+        this.persist();
+      } catch {
+        /* the cache is a durability optimization; a persist failure must not break the committed view */
+      }
     }
     return view;
   }
@@ -2066,6 +2079,12 @@ export class GameSessionAdapter implements GameSession {
       // with the save). Conditional spread keeps a never-bumped (pre-game/legacy) snapshot byte-shaped
       // as before (absent ⇒ 0 on restore), so a pre-0065 save round-trips unchanged.
       ...(this.beatSeq > 0 ? { beatSeq: this.beatSeq } : {}),
+      // PERSIST-9 — persist the at-most-once cache (insertion-ordered) so at-most-once survives a
+      // restart AND the routine LRU unload/resume cycle. Conditional spread keeps an empty cache
+      // (pre-game / no progression yet) byte-shaped as before (absent ⇒ empty on restore).
+      ...(this.idempotencyCache.size > 0
+        ? { idempotency: [...this.idempotencyCache.entries()] as Array<[string, AdvanceView]> }
+        : {}),
       week: this.week,
       phase: this.phase,
       ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
@@ -2260,11 +2279,22 @@ export class GameSessionAdapter implements GameSession {
     // soul that happens to match a length, persisting the wrong history.
     this.soulCloneCache.clear();
     // 0065 Part A — resume the beat counter at the saved value (restart-safe CAS). Absent on a pre-0065
-    // save ⇒ 0 (the next commit bumps it). A resume replaces the houseguest objects wholesale, so the
-    // process-local idempotency cache (Part B) is for the dead in-memory life — drop it (best-effort;
-    // Part A's counter still guards a double-apply after the cache is gone).
+    // save ⇒ 0 (the next commit bumps it).
     this.beatSeq = core.beatSeq ?? 0;
+    // PERSIST-9 — RESTORE the at-most-once cache instead of clearing it. An `AdvanceView` is plain JSON
+    // (a player-witnessed progression view — no reference to a dead in-memory houseguest object, no Vault
+    // content), so it round-trips safely; restoring it keeps at-most-once intact across a restart AND the
+    // routine LRU sandbox-unload/resume cycle (both run through here). Before this, the clear defeated the
+    // exact retry Part B exists for whenever the retry straddled an unload (a re-applied vote/nomination).
+    // Absent (pre-fix / no progression yet) ⇒ empty, byte-identical to the old clear.
     this.idempotencyCache.clear();
+    if (Array.isArray(core.idempotency)) {
+      for (const entry of core.idempotency) {
+        if (Array.isArray(entry) && typeof entry[0] === "string" && entry[1]) {
+          this.idempotencyCache.set(entry[0], entry[1] as AdvanceView);
+        }
+      }
+    }
     // 0065 Part E — the delta ring is a process-local read accelerator (not persisted); a resume starts
     // it empty, so the FE's pre-restart token (which also resets across a restart) correctly full-
     // refreshes rather than slicing against a window that no longer holds its checkpoint.

@@ -27,7 +27,7 @@ def client():
 def test_decision_forwards_engine_direct(client, monkeypatch):
     seen = {}
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         seen.update(decision)
         return {"event": None, "pending": None, "status": {"week": 3}}
 
@@ -40,7 +40,7 @@ def test_decision_forwards_engine_direct(client, monkeypatch):
 def test_decision_rejects_unknown_kind(client, monkeypatch):
     called = []
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         called.append(decision)
         return {}
 
@@ -52,7 +52,7 @@ def test_decision_rejects_unknown_kind(client, monkeypatch):
 def test_decision_forwards_every_wire_field(client, monkeypatch):
     seen = {}
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         seen.update(decision)
         return {}
 

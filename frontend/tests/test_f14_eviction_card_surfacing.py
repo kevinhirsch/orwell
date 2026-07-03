@@ -47,7 +47,7 @@ def test_goodbye_message_triggers_a_follow_up_advance(monkeypatch):
     orwell_routes = importlib.import_module("routes.orwell_routes")
     calls = {"submit": 0, "advance": 0}
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         calls["submit"] += 1
         # submitDecision returns the goodbye beat and NO new player pending (the roll is owed to advance).
         return {"ok": True, "pending": None}
@@ -79,7 +79,7 @@ def test_goodbye_message_does_not_advance_when_a_new_player_pending_is_raised(mo
     orwell_routes = importlib.import_module("routes.orwell_routes")
     calls = {"advance": 0}
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         return {"ok": True, "pending": {"kind": "tie-break", "by": {"id": "player", "name": "P"}}}
 
     async def fake_advance(user=None, **kw):
@@ -108,7 +108,7 @@ def test_non_goodbye_decisions_do_not_get_the_follow_up_advance(monkeypatch):
     orwell_routes = importlib.import_module("routes.orwell_routes")
     calls = {"advance": 0}
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         return {"ok": True, "pending": None}
 
     async def fake_advance(user=None, **kw):

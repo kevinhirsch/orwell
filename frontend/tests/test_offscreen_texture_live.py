@@ -166,7 +166,7 @@ def test_run_enrich_empty_model_output_does_not_write(monkeypatch):
 def test_do_advance_game_kicks_off_enrichment(monkeypatch):
     from src import tool_implementations as TI
 
-    async def fake_advance(user=None):
+    async def fake_advance(user=None, **_kw):
         return {"phase": "nominations", "beatSeq": 5}
 
     monkeypatch.setattr("src.orwell_engine.advance_game", fake_advance)
@@ -188,7 +188,7 @@ def test_do_advance_game_advance_failure_does_not_kick_off(monkeypatch):
     """If the advance itself errors, there is no new tick to enrich — and enrichment must not run."""
     from src import tool_implementations as TI
 
-    async def boom(user=None):
+    async def boom(user=None, **_kw):
         raise RuntimeError("engine down")
 
     monkeypatch.setattr("src.orwell_engine.advance_game", boom)

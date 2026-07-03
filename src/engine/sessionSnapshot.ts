@@ -12,6 +12,7 @@ import type { KnowledgeSnapshot } from "../domain/knowledge";
 import type { EdgeRecord, GameState, PersistedCharacter, PersistedSoul } from "../domain/saveState";
 import type { Room, Zone } from "../domain/house";
 import type { HiddenRecord } from "../ports/VaultStore";
+import type { AdvanceView } from "../ports/GameSession";
 
 /**
  * The current durable-snapshot schema version (B40/audit C4). Bump when the shape changes; a save
@@ -69,6 +70,19 @@ export interface SessionCore {
    * the next commit bumps it — benign, since the FE's last-seen token resets across a restart too).
    */
   beatSeq?: number;
+  /**
+   * PERSIST-9 — the at-most-once idempotency cache (0065 Part B), persisted as insertion-ordered
+   * `[key, AdvanceView]` pairs so at-most-once survives a restart AND the routine LRU sandbox-unload/
+   * resume cycle (which both run `restore()`). Before this, `restore()` CLEARED the cache, so a retry
+   * whose `expectedBeatSeq` had legitimately advanced past the lost-response commit would MISS the cache
+   * and re-apply the mutation (a vote cast twice, a nomination confirmed twice). Bounded (already LRU-
+   * trimmed to `IDEMPOTENCY_CACHE_MAX`) and plain JSON (an `AdvanceView`), so the snapshot cost is small
+   * and precedented by the other small bookkeeping maps here. NOT secret (a replay of a player-witnessed
+   * progression view — no Vault content) and NOT a `counts()` dimension (it legitimately shrinks via LRU
+   * eviction, so it must never enter the non-degradation superset check). Absent ⇒ empty (byte-identical
+   * to a pre-fix load).
+   */
+  idempotency?: Array<[string, AdvanceView]>;
   week: number;
   phase: string;
   ceremony: CeremonyState;

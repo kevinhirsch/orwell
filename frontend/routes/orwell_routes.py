@@ -1025,6 +1025,11 @@ def setup_orwell_routes() -> APIRouter:
         intent: Optional[str] = None
         # 0061 — self-eviction: ONLY confirmed:true executes the irreversible walk-out.
         confirmed: Optional[bool] = None
+        # CON-4 / INTEGRATION2-1 — the 0065 at-most-once token. The client mints ONE stable key per
+        # card render (reused on a retry of THAT card) so a delayed-duplicate POST — a lost 200 the
+        # client retries, or a double-tap across two mirrored windows both showing the card — cannot
+        # apply twice / to the wrong staged round. Vault-free; not a decision field (popped off below).
+        idempotency_key: Optional[str] = None
 
     _DECISION_KINDS = {
         "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
@@ -1044,7 +1049,23 @@ def setup_orwell_routes() -> APIRouter:
         if body.kind not in _DECISION_KINDS:
             return JSONResponse(status_code=400, content={"error": f"unknown decision kind: {body.kind}"})
         decision = {k: v for k, v in body.model_dump().items() if v is not None}
+        # CON-4: the idempotency key is a SYNC-SPINE token, not a decision field — pull it out of the
+        # decision dict (the engine's SubmitDecisionReq would reject the unknown key otherwise).
+        _client_idem = decision.pop("idempotency_key", None)
         user = _current_user(request)
+        # CON-4 / INTEGRATION2-1 — wire this ENGINE-DIRECT commitment path into the 0065 sync spine
+        # (every OTHER mutating surface already is). `expected_beat_seq` refuses a decision computed
+        # against a board a concurrent window already moved (the wrong-staged-round race); the
+        # idempotency key (client-minted per card, reused on retry) makes a duplicate POST a verbatim
+        # replay. Fail-open: any hiccup resolving the token leaves the call byte-identical to before.
+        try:
+            from routes.chat_helpers import last_beat_seq as _last_beat_seq, _refresh_beat_seq, _mint_idempotency_key
+            _dec_ebs = _last_beat_seq(user)
+            _dec_ik = _client_idem if isinstance(_client_idem, str) and _client_idem.strip() else _mint_idempotency_key()
+        except Exception:
+            _last_beat_seq = _refresh_beat_seq = None  # type: ignore
+            _dec_ebs = None
+            _dec_ik = _client_idem if isinstance(_client_idem, str) and _client_idem.strip() else None
         # DB1/DB2 (#1025): if this EXACT decision just failed (within the debounce window), replay the
         # cached refusal WITHOUT re-hitting the engine or re-logging. Stops a buggy client from
         # storming the engine + log ring with the same invalid POST 60×/5s. An edited payload or a
@@ -1054,7 +1075,10 @@ def setup_orwell_routes() -> APIRouter:
             return JSONResponse(status_code=_dup["status"],
                                 content={"error": _dup["error"], "debounced": True})
         try:
-            res = await orwell_engine.submit_decision(decision, user=user)
+            res = await orwell_engine.submit_decision(
+                decision, expected_beat_seq=_dec_ebs, idempotency_key=_dec_ik, user=user)
+            if _refresh_beat_seq is not None:
+                _refresh_beat_seq(user, res if isinstance(res, dict) else {})  # CON-4: track new beatSeq
             # D3/E66 + F5: mirror the engine's `pending` into the FE cache. remember_pending now KEEPS
             # the cache when a view OMITS `pending` (the route's omit-fallback for an old engine). A
             # SUCCESSFUL submit, though, means the just-resolved card is gone — so if the engine's result
@@ -1072,7 +1096,14 @@ def setup_orwell_routes() -> APIRouter:
                         and not _pending_is_player(res.get("pending"), user))
             if _gb_done:
                 try:
-                    res = await orwell_engine.advance_game(user=user)
+                    # CON-16: guard the follow-up advance with an idempotency key derived from the
+                    # goodbye card's key, so a retried goodbye POST cannot double-roll the eviction
+                    # result. Refresh last-seen after so the FE tracks the new beat.
+                    _gb_ik = (_dec_ik + ":gb-adv") if isinstance(_dec_ik, str) else None
+                    res = await orwell_engine.advance_game(
+                        expected_beat_seq=None, idempotency_key=_gb_ik, user=user)
+                    if _refresh_beat_seq is not None:
+                        _refresh_beat_seq(user, res if isinstance(res, dict) else {})
                 except Exception as _adv_e:
                     logger.warning(f"[orwell] post-goodbye follow-up advance skipped: {_adv_e}")
             if isinstance(res, dict) and "pending" not in res:
@@ -1087,6 +1118,21 @@ def setup_orwell_routes() -> APIRouter:
             # because there is no active game. Benign 409, not a false "engine unreachable" 502.
             if e.no_game:
                 return JSONResponse(status_code=409, content={"started": False, "error": "no active game"})
+            # CON-4: a `stale-beat` CAS refusal means a concurrent window already moved the board under
+            # this decision (the wrong-staged-round race the token exists to catch). Reconcile silently
+            # and return the CURRENT state — the card the player saw is already resolved; surfacing a raw
+            # 409 error would be wrong. (A genuine duplicate of the SAME card is instead a verbatim replay
+            # via the shared idempotency key, so this path is only the truly-superseded case.)
+            try:
+                from routes.chat_helpers import _is_stale_beat_error, _handle_stale_beat
+                if _is_stale_beat_error(e):
+                    await _handle_stale_beat(user, e)
+                    _cur = await orwell_engine.get_game_state(user=user)
+                    orwell_engine.remember_pending(_cur, user=user)
+                    _publish_game_updated(user)
+                    return _cur
+            except Exception:
+                pass  # reconcile failed — fall through to the normal error handling below
             # DB1/DB2 (#1025): the engine ANSWERED with a structured error — it is reachable. Propagate
             # the engine's REAL status (e.g. a deliberate 400 client/validation refusal like "a legal
             # finale appeal is required", E31) instead of a hardcoded 502. 502 is in the client's
