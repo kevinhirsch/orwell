@@ -2616,13 +2616,12 @@ import { isNarrow } from './platform.js';
                   }
                   // G15: every game-MUTATING tool result nudges the panels through THE one
                   // debounced dispatcher (platform.js orwellGameChanged) — post-action UI
-                  // refreshes event-driven instead of waiting out a 20–30s poll. (E65's
-                  // inline dispatch was nested inside the advanceGame/submitDecision branch
-                  // above, so the lifecycle tools it keyed on could never reach it.)
+                  // refreshes event-driven instead of waiting out a 20–30s poll.
                   // runCompetition rides along: it is the single outcome authority, and a
                   // comp result moves exactly what the status HUD shows (HOH/veto/phase).
                   // FEJS-3: the trailing 8 also move public state the panels read — debounced.
-                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat'].includes(json.tool)) {
+                  // DRIFT-1: + the 0093/0099/0107 mutators (sync w/ chat_helpers.py).
+                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat', 'formAlliance', 'joinAlliance', 'exposeSecret', 'tradeSecret'].includes(json.tool)) {
                     if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool);
                     if (json.tool === 'createCharacter') {
                       // E65: a season RESTART opens a FRESH chat (armed only by reset-progress /
@@ -2986,6 +2985,17 @@ import { isNarrow } from './platform.js';
                 newWrap.appendChild(newBody);
                 box.appendChild(newWrap);
                 roundHolder = newWrap;
+                // F5/mirror-toolturn dedup fix: `currentHolder` MUST track the round holder in lockstep
+                // (like roundText/roundReplyText/roundReasoningText above). It was left pinned at the
+                // FIRST round's bubble (set once at stream start, chat.js ~1169), so on a multi-round
+                // tool-rich turn the `message_saved` handler (~2375) stamped `data-db-id` onto round 1's
+                // bubble instead of the LAST round's — the round that actually corresponds to what the
+                // server persisted. softReloadHistory's adopt pass (~4256) then matched the WRONG bubble
+                // by id, and every earlier-round bubble (never stamped) survived as a permanent
+                // dup/orphan the reconcile's id-order check couldn't see (only its separate
+                // `_visibleMsgCount` orphan guard could, and only on a later trigger) — the
+                // "duplicating messages" symptom on a tool-rich turn (mirror_toolturn_parity.mjs).
+                currentHolder = newWrap;
                 roundText = '';
                 roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
                 roundReasoningText = '';
@@ -3027,6 +3037,7 @@ import { isNarrow } from './platform.js';
                 chatBox.appendChild(banner);
                 // Reset round bubble state so the teacher's first text starts a new bubble
                 roundHolder = null;
+                currentHolder = null;       // keep in lockstep with roundHolder (see the agent_step fix)
                 roundText = '';
                 roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
                 roundReasoningText = '';
@@ -4211,6 +4222,36 @@ import { isNarrow } from './platform.js';
   }
 
   /**
+   * mirror-toolturn fix: ONE persisted agent message can legitimately render as MULTIPLE `.msg`
+   * bubbles — chatRenderer.addMessage's "Agent multi-bubble reconstruction" (chatRenderer.js
+   * ~1929) re-splits a message carrying `metadata.tool_events`/`round_texts` back into one bubble
+   * PER non-empty narration round, so a re-opened multi-round tool-rich turn reads exactly as it
+   * streamed live instead of collapsing into one blob (L6c). `_visibleMsgCount(box) ===
+   * visible.length` (the OLD orphan check) never accounted for this: a 2-narration-round turn is
+   * ALWAYS 2 bubbles for 1 server message, so the check NEVER converged for a tool-rich turn —
+   * softReloadHistory retried a full destructive rebuild on every single reconcile trigger
+   * forever. Each rebuild reproduced the identical correct render (chatRenderer.addMessage is
+   * deterministic from the same metadata), so this never showed as a literal duplicate, but it
+   * silently burned a `/api/history` fetch + full DOM wipe+rebuild on every peer ping — pure churn
+   * that widens the window for an unrelated concurrent mutation to interleave. Count bubbles the
+   * SAME way addMessage does so a fully-reconciled multi-round turn actually reads "converged".
+   */
+  export function _expectedVisibleBubbleCount(visible) {
+    let n = 0;
+    for (const msg of (visible || [])) {
+      const meta = msg && msg.metadata;
+      if (meta && Array.isArray(meta.tool_events) && meta.tool_events.length) {
+        const roundTexts = Array.isArray(meta.round_texts) ? meta.round_texts : [];
+        const textRounds = roundTexts.filter((t) => (t || '').trim()).length;
+        n += Math.max(1, textRounds);
+      } else {
+        n += 1;
+      }
+    }
+    return n;
+  }
+
+  /**
    * ADR 0008 — render-and-reconcile to the authoritative seq-ordered log.
    *
    * The chat conversation is a FE-replicated log; the audit (S3-RACE) proved two tabs diverge
@@ -4282,7 +4323,13 @@ import { isNarrow } from './platform.js';
     let _forced = _forceRebuild.delete(sessionId);
     const renderedCount = box.querySelectorAll('.msg').length;
     if (_forced && visible.length < renderedCount) _forced = false;
-    const renderedIds = Array.from(box.querySelectorAll('.msg[data-db-id]')).map((el) => el.dataset.dbId);
+    // A multi-round tool-rich message legitimately renders as SEVERAL contiguous bubbles sharing
+    // the same data-db-id (chatRenderer.addMessage's multi-bubble reconstruction — see
+    // _expectedVisibleBubbleCount above). Collapse consecutive duplicate ids before comparing to
+    // the server's one-id-per-message order, so such a turn can actually reach "converged" instead
+    // of id-order matching by coincidence while the orphan check below never converges.
+    const renderedIdsRaw = Array.from(box.querySelectorAll('.msg[data-db-id]')).map((el) => el.dataset.dbId);
+    const renderedIds = renderedIdsRaw.filter((v, i) => v !== renderedIdsRaw[i - 1]);
     const serverIds = visible.map(_serverMsgId).filter(Boolean);
     // F5 (dedup hardening): the id-order check alone is BLIND to a db-id-LESS ORPHAN bubble — a
     // continuation/round bubble (multi-round agent turn) or a resume finalize-in-place bubble that
@@ -4290,10 +4337,11 @@ import { isNarrow } from './platform.js';
     // `.msg[data-db-id]`), so the rendered id-order could equal the server seq-order ("converged")
     // WHILE an extra duplicate bubble sits on screen → the dup survived every reload (issue #873 / F5).
     // Count VISIBLE message bubbles (excluding the hidden tool-only / production-cue rows, which are
-    // display:none and have no server counterpart) and require it to equal the server's visible-message
-    // count. A mismatch means an orphan (or a missing bubble) is present → NOT converged → rebuild to
+    // display:none and have no server counterpart) and require it to equal the server's EXPECTED
+    // visible-bubble count (accounting for multi-round reconstruction, not a raw 1:1 message count).
+    // A mismatch means a genuine orphan (or a missing bubble) is present → NOT converged → rebuild to
     // the authoritative log, which collapses the orphan with ZERO net churn on the already-correct case.
-    const orphanFree = _visibleMsgCount(box) === visible.length;
+    const orphanFree = _visibleMsgCount(box) === _expectedVisibleBubbleCount(visible);
     const converged = orphanFree &&
       renderedIds.length === serverIds.length &&
       renderedIds.every((v, i) => v === serverIds[i]);
@@ -6198,6 +6246,7 @@ import { isNarrow } from './platform.js';
     deferPeerResume,
     flushPendingPeerResume,
     _visibleMsgCount,   // F5 (dedup hardening): exposed for the reconcile-orphan browser gate
+    _expectedVisibleBubbleCount, // mirror-toolturn fix: exposed for the reconcile-orphan browser gate
     _msgSeq,            // BUG 1 (ADR 0008 seq order): exposed for the render-order browser gate
     _insertBySeq,       // BUG 1: insert-by-seq choke point
     _reorderBySeq,      // BUG 1: non-destructive seq reorder (the reconcile corrector)

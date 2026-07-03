@@ -83,9 +83,13 @@ def test_selectsession_preserves_pending_on_canonical_swap():
 
 def test_assistant_orphan_dedup_not_relaxed():
     # The #920 convergence guard must remain intact (no reintroduction of the duplicate-assistant bug).
+    # (mirror-toolturn fix: the guard's oracle is now _expectedVisibleBubbleCount(visible) — a
+    # multi-round-aware count that degenerates to visible.length for plain messages, so the #920
+    # teeth are unchanged while a legitimately multi-bubble tool-rich turn stops reading as a
+    # permanent orphan.)
     js = _read("static/js/chat.js")
-    assert "const orphanFree = _visibleMsgCount(box) === visible.length;" in js, \
-        "the orphanFree convergence guard (#920) must remain"
+    assert "const orphanFree = _visibleMsgCount(box) === _expectedVisibleBubbleCount(visible);" in js, \
+        "the orphanFree convergence guard (#920, multi-round-aware) must remain"
     assert "const converged = orphanFree &&" in js
 
 
