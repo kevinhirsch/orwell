@@ -261,9 +261,15 @@ _SPY_HARNESS = r"""
     window.__a6_confirmCalls.push({ msg, opts });
     return Promise.resolve(window.__a6_confirmResolve);
   };
+  // A genuine detach shows up as EITHER setCurrentSessionId(null) (no model/session available —
+  // the fresh-welcome-screen path) OR createDirectChat(...) (a model IS available — the pending
+  // fresh-session path). Both are "the player left the current thread"; spy on both.
   window.__a6_setSessionCalls = 0;
-  const orig = window.sessionModule.setCurrentSessionId.bind(window.sessionModule);
-  window.sessionModule.setCurrentSessionId = (v) => { window.__a6_setSessionCalls++; return orig(v); };
+  const origSet = window.sessionModule.setCurrentSessionId.bind(window.sessionModule);
+  window.sessionModule.setCurrentSessionId = (v) => { window.__a6_setSessionCalls++; return origSet(v); };
+  window.__a6_createDirectChatCalls = 0;
+  const origCreate = window.sessionModule.createDirectChat.bind(window.sessionModule);
+  window.sessionModule.createDirectChat = (...a) => { window.__a6_createDirectChatCalls++; return origCreate(...a); };
   return true;
 }
 """
@@ -277,9 +283,14 @@ def _install_spies(page):
 def _reset_spies(page, resolve):
     page.evaluate(
         "(resolve) => { window.__a6_confirmResolve = resolve; window.__a6_confirmCalls = []; "
-        "window.__a6_setSessionCalls = 0; }",
+        "window.__a6_setSessionCalls = 0; window.__a6_createDirectChatCalls = 0; }",
         resolve,
     )
+
+
+def _detach_calls(page):
+    """Total count of either detach path the guarded handlers can take."""
+    return page.evaluate("window.__a6_setSessionCalls + window.__a6_createDirectChatCalls")
 
 
 def _wait_until(page, js_predicate, timeout_ms=8000, interval_ms=100):
@@ -306,10 +317,10 @@ def test_live_game_cancel_blocks_detach(_app, entry_id):
         page.evaluate("(id) => document.getElementById(id).click()", entry_id)
         _wait_until(page, "window.__a6_confirmCalls.length >= 1")
         calls = page.evaluate("window.__a6_confirmCalls.length")
-        set_calls = page.evaluate("window.__a6_setSessionCalls")
+        detach_calls = _detach_calls(page)
         browser.close()
     assert calls == 1, f"{entry_id}: a live game must raise exactly one confirm dialog, got {calls}"
-    assert set_calls == 0, f"{entry_id}: declining the confirm must NOT detach the session"
+    assert detach_calls == 0, f"{entry_id}: declining the confirm must NOT detach the session"
 
 
 @pytest.mark.parametrize("entry_id", ["rail-new-session", "sidebar-brand-btn"])
@@ -323,10 +334,10 @@ def test_live_game_confirm_allows_detach(_app, entry_id):
         _wait_until(page, "window.__a6_confirmCalls.length >= 1")
         page.wait_for_timeout(300)  # let the post-confirm detach logic settle
         calls = page.evaluate("window.__a6_confirmCalls.length")
-        set_calls = page.evaluate("window.__a6_setSessionCalls")
+        detach_calls = _detach_calls(page)
         browser.close()
     assert calls == 1, f"{entry_id}: a live game must raise exactly one confirm dialog, got {calls}"
-    assert set_calls > 0, f"{entry_id}: confirming must proceed with the detach"
+    assert detach_calls > 0, f"{entry_id}: confirming must proceed with the detach"
 
 
 def test_sidebar_new_chat_row_double_wire_still_shows_one_dialog(_app):
@@ -372,11 +383,11 @@ def test_empty_composer_send_is_a_no_op_under_live_game_never_a_silent_detach(_a
         page.evaluate("() => document.querySelector('.send-btn')?.click()")
         page.wait_for_timeout(1500)
         calls = page.evaluate("window.__a6_confirmCalls.length")
-        set_calls = page.evaluate("window.__a6_setSessionCalls")
+        detach_calls = _detach_calls(page)
         browser.close()
     assert mode != "newchat", f"the send button must never enter newchat mode in the game build, got {mode!r}"
     assert calls == 0, "an empty-composer Send must no-op silently, never raise the leave-game dialog"
-    assert set_calls == 0, "an empty-composer Send must never detach the session"
+    assert detach_calls == 0, "an empty-composer Send must never detach the session"
 
 
 def test_empty_composer_enter_is_a_no_op_under_live_game(_app):
@@ -389,7 +400,7 @@ def test_empty_composer_enter_is_a_no_op_under_live_game(_app):
         page.locator("#message").first.press("Enter")
         page.wait_for_timeout(1500)
         calls = page.evaluate("window.__a6_confirmCalls.length")
-        set_calls = page.evaluate("window.__a6_setSessionCalls")
+        detach_calls = _detach_calls(page)
         browser.close()
     assert calls == 0, "Enter on an empty composer must never raise the leave-game dialog"
-    assert set_calls == 0, "Enter on an empty composer must never detach the session"
+    assert detach_calls == 0, "Enter on an empty composer must never detach the session"
