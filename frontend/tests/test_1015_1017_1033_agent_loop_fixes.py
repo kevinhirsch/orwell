@@ -44,7 +44,7 @@ def test_true_empty_live_game_turn_emits_producer_line_and_retry_affordance():
     """A live-game turn with no body, no reasoning, no tools surfaces an in-character producer line
     (NOT the operator 'switch models' string) AND a retry affordance the player can tap. The body and
     the retry are SEPARATE frames (the callsite yields the retry) so each chunk stays parseable."""
-    final, chunk, retry = agent_loop._empty_response_fallback("", "", [], game_mode=True)
+    final, chunk, retry, _fr = agent_loop._empty_response_fallback("", "", [], game_mode=True)
     # In-character recovery — NOT the bare operator dead-end.
     assert final == agent_loop._EMPTY_PRODUCER_LINE
     assert "say that again" in final.lower()
@@ -58,7 +58,7 @@ def test_true_empty_live_game_turn_emits_producer_line_and_retry_affordance():
 
 def test_true_empty_casting_turn_also_gets_in_game_recourse():
     """Casting (a framed pre-game turn) is also game_mode-truthy — it must not dead-end either."""
-    final, chunk, retry = agent_loop._empty_response_fallback("", "", [], game_mode="casting")
+    final, chunk, retry, _fr = agent_loop._empty_response_fallback("", "", [], game_mode="casting")
     assert final == agent_loop._EMPTY_PRODUCER_LINE
     assert retry is True
 
@@ -66,7 +66,7 @@ def test_true_empty_casting_turn_also_gets_in_game_recourse():
 def test_true_empty_non_game_turn_keeps_the_operator_string():
     """A workspace (non-game) turn keeps the verbatim operator guidance for a power user — they CAN
     switch models. No game_mode ⇒ the old behaviour, byte-for-byte (and no retry chip)."""
-    final, chunk, retry = agent_loop._empty_response_fallback("", "", [])
+    final, chunk, retry, _fr = agent_loop._empty_response_fallback("", "", [])
     assert "empty response" in final
     assert "switch to a different model" in final.lower()
     assert _frame(chunk).get("delta") == final
@@ -77,8 +77,8 @@ def test_fepy2_reasoning_recovery_unchanged_even_in_game_mode():
     """The FEPY-2 branch (answer routed entirely to the reasoning channel) is load-bearing for Flash
     and must be untouched: an empty body WITH reasoning re-emits the reasoning as a body delta,
     regardless of game_mode — never the producer line, never a retry affordance."""
-    final, chunk, retry = agent_loop._empty_response_fallback("", "Here is the real answer.", [],
-                                                              game_mode=True)
+    final, chunk, retry, _fr = agent_loop._empty_response_fallback(
+        "", "Here is the real answer.", [], game_mode=True)  # no model ⇒ DeepSeek shape ⇒ re-emit
     assert final == "Here is the real answer."
     assert _frame(chunk)["delta"] == "Here is the real answer."
     assert retry is False
@@ -86,16 +86,17 @@ def test_fepy2_reasoning_recovery_unchanged_even_in_game_mode():
 
 
 def test_nonempty_body_unchanged_in_game_mode():
-    final, chunk, retry = agent_loop._empty_response_fallback("real body", "reasoning", [],
-                                                             game_mode=True)
+    final, chunk, retry, _fr = agent_loop._empty_response_fallback("real body", "reasoning", [],
+                                                                   game_mode=True)
     assert final == "real body" and chunk is None and retry is False
 
 
 def test_empty_fallback_callsite_passes_game_mode_and_yields_retry():
-    idx = AGENT_SRC.find("_fallback_chunk, _fallback_retry = _empty_response_fallback(")
-    assert idx != -1, "the callsite must unpack the retry flag"
-    window = AGENT_SRC[idx:idx + 900]
+    idx = AGENT_SRC.find("_fallback_retry, _from_reasoning = _empty_response_fallback(")
+    assert idx != -1, "the callsite must unpack the retry + from_reasoning flags"
+    window = AGENT_SRC[idx:idx + 2000]
     assert "game_mode=game_mode" in window, "the empty-response fallback must be game-aware"
+    assert "model=actual_model" in window, "the empty-response fallback must be model-aware (A4)"
     # the retry affordance is yielded as its OWN frame (a separate `truncated` chip)
     assert "if _fallback_retry:" in window
     assert '"type": "truncated"' in window
