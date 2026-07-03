@@ -129,7 +129,8 @@ def test_one_narration_invariant_blocks_a_second_scene_after_a_visible_one():
     # 0065 Part A/B: the FE-issued advance now threads the optional CAS token + idempotency key.
     assert "_oe3.advance_game(" in js
     assert "expected_beat_seq=_ch3.last_beat_seq(owner)" in js
-    assert "_TURNS_SINCE_PROGRESS[owner] = 0" in js
+    # NAR-1: keyed via `_belt_key` (was raw `owner`, gated `if owner:` — inert single-tenant).
+    assert "_TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0" in js
     # it ends the turn instead of continuing the loop (which is what re-narrated)
     assert "break  # one scene shown, state committed — done this turn" in js
 
