@@ -46,7 +46,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Response
 
-from core.middleware import require_admin
+from core.middleware import require_admin, require_vault_reveal
 from src import orwell_engine
 from src.auth_helpers import effective_user
 
@@ -1059,9 +1059,11 @@ def setup_admin_health_routes() -> APIRouter:
         UNSEALS THIS admin's LIVE hidden Vault layer for operator debugging. UNLIKE every other admin
         route, this one DELIBERATELY returns Vault content — it is the one sanctioned LIVE reveal,
         crossing the engine's out-of-band ``producerVault`` admin capability. It is gated three ways:
-        ``require_admin`` here, the engine's separate admin token, and the explicit FE "unseal" the
-        button demands. It NEVER touches a live game's integrity — it only READS the hidden layer."""
-        require_admin(request)
+        ``require_vault_reveal`` here (SEC-4: a genuine authenticated admin — NOT the blanket
+        ``AUTH_ENABLED=false`` bypass), the engine's separate admin token, and the explicit FE
+        "unseal" the button demands. It NEVER touches a live game's integrity — it only READS the
+        hidden layer."""
+        require_vault_reveal(request)
         user = None
         try:
             user = effective_user(request)
@@ -1125,7 +1127,14 @@ def setup_admin_health_routes() -> APIRouter:
         # player path, never always-on) via orwell_engine.producer_vault(). Fail-soft: a broken/
         # absent unseal degrades to an {"error": ...} section, never a 500. This is an addition
         # to the OPT-IN path ONLY; it never touches the default assembly above. DO NOT widen it.
+        #
+        # SEC-4: the Vault section demands the STRICT gate — a genuine authenticated admin, NOT the
+        # blanket AUTH_ENABLED=false bypass that require_admin (above) honors for the Vault-FREE
+        # bundle. On an auth-off, network-exposed box the old path let any unauthenticated caller
+        # dump the live Vault with ?vault=1 (a direct mandate #2 violation). require_vault_reveal
+        # refuses that regardless of AUTH_ENABLED; the default (Vault-free) bundle is unchanged.
         if vault or include_vault:
+            require_vault_reveal(request)
             bundle["_SPOILERS"] = (
                 "Producer's Vault — live secret state (off-screen scheming, NPC confessionals, "
                 "hidden ties, sealed twists, true eviction votes). Owner-ruled DEBUG override of "
