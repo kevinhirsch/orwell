@@ -61,8 +61,15 @@ def test_visible_msg_count_helper_exists_and_excludes_hidden_rows():
 def test_divergence_check_is_orphan_aware():
     js = _read("static/js/chat.js")
     # The convergence decision must fold in the visible-count guard — an id-order match is NOT enough.
-    assert "_visibleMsgCount(box) === visible.length" in js, \
-        "the divergence check must compare visible bubble count to the server message count"
+    # (mirror-toolturn fix: the oracle is _expectedVisibleBubbleCount(visible), NOT a raw
+    # `visible.length` — a multi-round tool-rich message legitimately renders as several bubbles
+    # (chatRenderer.addMessage's multi-bubble reconstruction), and the raw 1:1 count made every
+    # tool-rich turn read as a permanent orphan → a destructive rebuild on every reconcile forever.
+    # For plain messages the expected count degenerates to visible.length — same guard, same teeth.)
+    assert "_visibleMsgCount(box) === _expectedVisibleBubbleCount(visible)" in js, \
+        "the divergence check must compare visible bubble count to the server's EXPECTED bubble count"
+    assert "export function _expectedVisibleBubbleCount(visible)" in js, \
+        "the expected-count oracle (multi-round-aware) must exist"
     assert "const orphanFree =" in js and "const converged = orphanFree &&" in js, \
         "convergence must require orphanFree AND the id-order match"
 

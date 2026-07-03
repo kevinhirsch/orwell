@@ -2498,6 +2498,15 @@ def auto_escalation_withhold(game_escalated: bool, game_tools_enabled=None) -> s
 GAME_ENGINE_WRITE_TOOLS = frozenset({
     "recordInteraction", "advanceGame", "submitDecision", "diaryRoom", "makeDeal",
     "surfaceInformationTo", "createCharacter", "updateCasting",
+    # DRIFT-1 (consistency audit, 2026-07): 0093/0099/0107 real player-channel mutators
+    # (src/surfaces/tools/registry.ts) that had drifted out of this set — a turn whose ONLY
+    # mutation was one of these pushed NOTHING to a peer window (no publish_game_updated, no
+    # instant HUD dispatch), so the peer sat on the 20-30s poll instead of converging instantly.
+    # moveTo/markHouseguestMet/turnIn are real mutators too (player movement, premiere-met
+    # tracking, the bedtime/day-advance lever) — added for the same reason. runCompetition is
+    # deliberately EXCLUDED: it only PREVIEWS the already-decided winner, it never mutates.
+    "formAlliance", "joinAlliance", "exposeSecret", "tradeSecret",
+    "moveTo", "markHouseguestMet", "turnIn",
 })
 
 # E22: narration shorter than this is treated as trivial (a refusal, a one-liner) and not

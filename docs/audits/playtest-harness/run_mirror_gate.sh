@@ -16,6 +16,7 @@ ENGINE_PORT=8765; FE_PORT=7000; FAKE_PORT=8011
 ADMIN_USER=admin; ADMIN_PW="mirror-gate-pw"   # stable throwaway local admin (never committed)
 FE_DATA="$ROOT/frontend/data"                 # the dir the app actually reads (auth.json is hardcoded data/auth.json)
 LIVE="${MIRROR_LIVE:-}"                        # MIRROR_LIVE=1 → real OpenRouter model (env ORWELL_TEST_OPENROUTER_KEY); else the deterministic fake
+TOOLTURN="${MIRROR_TOOLTURN:-}"                 # MIRROR_TOOLTURN=1 → the tool-rich multi-round settled-parity gate (fake_model_server FAKE_SCRIPT=toolturn)
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export PW_CHROMIUM=/opt/pw-browsers/chromium
 export BASE_URL="http://127.0.0.1:$FE_PORT"; export ENGINE_URL="http://127.0.0.1:$ENGINE_PORT"
@@ -53,8 +54,8 @@ wait_http "$ENGINE_URL/health" engine || { tail -20 "$LOGS/engine.log"; exit 1; 
 
 # 2) model: the deterministic fake (default) OR a real provider for the live pre-merge pass
 if [ -z "$LIVE" ]; then
-  say "2) fake model :$FAKE_PORT"
-  ( FAKE_MODEL_PORT=$FAKE_PORT exec node "$HARNESS/fake_model_server.mjs" >"$LOGS/fake.log" 2>&1 ) & PIDS+=($!)
+  say "2) fake model :$FAKE_PORT${TOOLTURN:+ (FAKE_SCRIPT=toolturn)}"
+  ( FAKE_MODEL_PORT=$FAKE_PORT FAKE_SCRIPT="${TOOLTURN:+toolturn}" exec node "$HARNESS/fake_model_server.mjs" >"$LOGS/fake.log" 2>&1 ) & PIDS+=($!)
   wait_http "http://127.0.0.1:$FAKE_PORT/v1/models" fake-model || { tail "$LOGS/fake.log"; exit 1; }
 else
   say "2) LIVE model (real provider; fake skipped)"
@@ -100,12 +101,19 @@ echo "new-game: $(head -c 200 "$LOGS/new-game.json")"
 curl -s -b "$CK" "$BASE_URL/api/orwell/state" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log('started=',j.started,'house=',(j.house||[]).length,'beat=',j.beatSeq)}catch(e){console.log('state parse err')}})"
 
 # 6) run the gate — MIRROR_HUD=1 selects the HUD-parity gate (F5 status/gadget half, 0064 §B/D);
-#    default is the chat-render live-parity gate (F5 chat-render half, R2 / ADR 0015).
+#    MIRROR_TOOLTURN=1 selects the tool-rich multi-round settled-parity gate (H1/H2 — needs the
+#    fake model booted with FAKE_SCRIPT=toolturn, step 2 above); default is the chat-render
+#    live-parity gate (F5 chat-render half, R2 / ADR 0015).
 if [ -n "${MIRROR_HUD:-}" ]; then
   say "6) MIRROR HUD-PARITY GATE (F5 status/gadget half · 0064 §B/D)"
   cd "$ROOT" && node "$HARNESS/mirror_hud_parity.mjs"
   GATE=$?
   echo ""; echo "gate exit: $GATE  (0=PASS B's HUD mirrors A's mutation off the push · 1=FAIL stale-until-poll · 2=precondition unmet)"
+elif [ -n "$TOOLTURN" ]; then
+  say "6) MIRROR TOOL-TURN (multi-round) PARITY GATE (H1/H2 — dedup/orphan across a tool-rich turn)"
+  cd "$ROOT" && node "$HARNESS/mirror_toolturn_parity.mjs"
+  GATE=$?
+  echo ""; echo "gate exit: $GATE  (0=PASS no dup/orphan across two windows on a tool-rich turn · 1=FAIL · 2=precondition unmet)"
 else
   say "6) MIRROR LIVE-PARITY GATE"
   cd "$ROOT" && node "$HARNESS/mirror_live_parity.mjs"

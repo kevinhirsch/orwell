@@ -12,11 +12,24 @@
 //
 //   node docs/audits/playtest-harness/fake_model_server.mjs            # listens on :8011
 //   FAKE_MODEL_PORT=8011 FAKE_FINISH=length node ...fake_model_server.mjs   # force a truncation finish
+//
+// FAKE_SCRIPT=toolturn — a scripted MULTI-ROUND tool-call turn (mirror-gate H1/H2 extension). Real
+// game turns are almost always tool-rich (advanceGame/recordInteraction/whereabouts…), but the plain
+// echo mode above NEVER emits a tool_calls delta, so the agent-loop multi-round path and the
+// observer's resumeStream `rich=true` path (chat.js ~4607) were untested by the mirror gate. In this
+// mode: ROUND 1 streams a short reasoning + narration preamble, then an OpenAI-shape streamed
+// `delta.tool_calls` (function `whereabouts`, a real Vault-free read-only ORWELL_GAME_TOOLS member —
+// no args, safe against the live engine) and a terminal `finish_reason: "tool_calls"`. The FE agent
+// loop executes the tool and re-POSTs with the tool result appended (role:"tool") — detected here by
+// scanning `messages` for a trailing tool-result message — and ROUND 2 streams the final reply text
+// with `finish_reason: "stop"`, exactly like the plain echo path. Both rounds' text are DETERMINISTIC
+// and DERIVED from the prompt so two mirrored windows see identical bytes.
 import { createServer } from 'http';
 
 const PORT = parseInt(process.env.FAKE_MODEL_PORT || '8011', 10);
 const MODEL = process.env.FAKE_MODEL_ID || 'fake/echo-stream';
 const FINISH = process.env.FAKE_FINISH || 'stop'; // 'stop' | 'length' | 'tool_calls'
+const SCRIPT = process.env.FAKE_SCRIPT || 'echo'; // 'echo' | 'toolturn'
 
 const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
 
@@ -28,11 +41,56 @@ createServer((req, res) => {
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
-      let stream = false; let lastUser = '';
-      try { const j = JSON.parse(body); stream = !!j.stream; const msgs = j.messages || []; for (const m of msgs) if (m.role === 'user') lastUser = typeof m.content === 'string' ? m.content : JSON.stringify(m.content); } catch (_) {}
+      let stream = false; let lastUser = ''; let msgs = [];
+      try { const j = JSON.parse(body); stream = !!j.stream; msgs = j.messages || []; for (const m of msgs) if (m.role === 'user') lastUser = typeof m.content === 'string' ? m.content : JSON.stringify(m.content); } catch (_) {}
       // A deterministic reply DERIVED from the prompt so both windows on the same game get identical
       // text (the mirror invariant) but different turns get different text.
       const seed = (lastUser || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+
+      if (SCRIPT === 'toolturn') {
+        // ROUND 2: the agent loop re-POSTs with the executed tool's result appended (role:"tool").
+        // Detect it and stream the FINAL reply — same shape as plain echo mode (finish "stop").
+        const isRound2 = msgs.length && msgs[msgs.length - 1] && msgs[msgs.length - 1].role === 'tool';
+        if (isRound2) {
+          const reasoning2 = `Weighing what whereabouts just returned. (echo of: ${seed})`;
+          const reply2 = `The house settles for a moment. [stub-echo round2] ${seed}`;
+          if (!stream) {
+            return send(res, 200, { id: 'fake', object: 'chat.completion', model: MODEL, choices: [{ index: 0, message: { role: 'assistant', content: reply2 }, finish_reason: 'stop' }], usage: { prompt_tokens: 48, completion_tokens: 18, total_tokens: 66 } });
+          }
+          res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+          const chunk2 = (delta, extra = {}) => res.write(`data: ${JSON.stringify({ id: 'fake-r2', object: 'chat.completion.chunk', model: MODEL, choices: [{ index: 0, delta, finish_reason: null }], ...extra })}\n\n`);
+          for (const w of reasoning2.split(' ')) chunk2({ reasoning: w + ' ' });
+          for (const w of reply2.split(' ')) chunk2({ content: w + ' ' });
+          res.write(`data: ${JSON.stringify({ id: 'fake-r2', object: 'chat.completion.chunk', model: MODEL, choices: [], usage: { prompt_tokens: 48, completion_tokens: 18, total_tokens: 66 } })}\n\n`);
+          res.write(`data: ${JSON.stringify({ id: 'fake-r2', object: 'chat.completion.chunk', model: MODEL, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`);
+          res.write('data: [DONE]\n\n');
+          return res.end();
+        }
+        // ROUND 1: narrate briefly, then call the benign read-only `whereabouts` tool (no args) via a
+        // standard OpenAI streamed tool_calls delta, terminated with finish_reason "tool_calls".
+        const reasoning1 = `Considering the room and who is present. (echo of: ${seed})`;
+        const preamble1 = `I glance around to get my bearings. [stub-echo round1] ${seed}`;
+        if (!stream) {
+          return send(res, 200, {
+            id: 'fake-r1', object: 'chat.completion', model: MODEL,
+            choices: [{ index: 0, message: { role: 'assistant', content: preamble1, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'whereabouts', arguments: '{}' } }] }, finish_reason: 'tool_calls' }],
+            usage: { prompt_tokens: 40, completion_tokens: 16, total_tokens: 56 },
+          });
+        }
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+        const chunk1 = (delta, extra = {}) => res.write(`data: ${JSON.stringify({ id: 'fake-r1', object: 'chat.completion.chunk', model: MODEL, choices: [{ index: 0, delta, finish_reason: null }], ...extra })}\n\n`);
+        for (const w of reasoning1.split(' ')) chunk1({ reasoning: w + ' ' });
+        for (const w of preamble1.split(' ')) chunk1({ content: w + ' ' });
+        // streamed tool_calls delta: name in the first chunk, arguments in the second (matches how
+        // real providers split it — llm_core.py accumulates by index).
+        chunk1({ tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'whereabouts', arguments: '' } }] });
+        chunk1({ tool_calls: [{ index: 0, function: { arguments: '{}' } }] });
+        res.write(`data: ${JSON.stringify({ id: 'fake-r1', object: 'chat.completion.chunk', model: MODEL, choices: [], usage: { prompt_tokens: 40, completion_tokens: 16, total_tokens: 56 } })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: 'fake-r1', object: 'chat.completion.chunk', model: MODEL, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
+
       const reasoning = `Considering the room and who is present. (echo of: ${seed})`;
       const reply = `The house settles for a moment. [stub-echo] ${seed}`;
       if (!stream) {
@@ -54,4 +112,4 @@ createServer((req, res) => {
     return;
   }
   send(res, 404, { error: 'not found' });
-}).listen(PORT, '127.0.0.1', () => console.log(`fake model server on http://127.0.0.1:${PORT} (model ${MODEL}, finish=${FINISH})`));
+}).listen(PORT, '127.0.0.1', () => console.log(`fake model server on http://127.0.0.1:${PORT} (model ${MODEL}, finish=${FINISH}, script=${SCRIPT})`));
