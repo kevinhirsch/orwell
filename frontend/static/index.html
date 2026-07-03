@@ -2645,6 +2645,7 @@
 <script defer src="/static/js/sessionSync.js?v=20260608"></script>  <!-- cross-device live sync -->
 <script defer src="/static/js/orwellLayoutSync.js?v=20260620"></script>  <!-- 0064 Part F: cross-device window/HUD layout sync -->
 <script src="/static/js/orwellReport.js"></script>  <!-- BB failure ring (G11): fail-open catches report here — absence becomes observable. Plain script, BEFORE the panels -->
+<script src="/static/js/orwellSessionGuard.js"></script>  <!-- A6: the "New Chat hazard" guard — window._orwellConfirmLeaveGame() gates every session-detach entry point (logo/New Chat/rail +) behind a live-game confirm. Loaded early so app.js's deferred handlers can call it. -->
 <script src="/static/js/orwellChatGate.js"></script>  <!-- P1 OOBE: the "secure your cast photo first" HARD GATE — locks chat send pre-game until an image is secured (fails open) -->
 <script type="module" src="/static/js/orwellOnboarding.js"></script>  <!-- BB onboarding: one guided flow — model gate → welcome modal → image step → producers reach out first -->
 <script src="/static/js/orwellFinalizing.js"></script>  <!-- P1 OOBE: inline "Production is finalizing your casting…" indicator across the createCharacter → house-entry cutover (fails open) -->
