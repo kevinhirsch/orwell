@@ -4808,10 +4808,66 @@ async def do_update_casting(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+# CON-2/CON-3 — the model-driven progression tools (`advanceGame`/`submitDecision`) are the PRIMARY,
+# sanctioned progression path (ADR 0003 — the model drives its own levers), yet they carried NO sync-
+# spine tokens. Two consequences: (CON-2) a retried call after a socket timeout DOUBLE-ADVANCES the
+# season (skips a staged eviction ballot, double-crowns a finale beat) — the "duplicate LLM response"
+# symptom — because at-most-once (0065 Part B) was unused on the path that fires most; and (CON-3) the
+# FE never refreshed its last-seen `beatSeq` after the MODEL advanced the engine, so any later FE-issued
+# CAS call THE SAME TURN (the pre-resolve, `_auto_record_scene`) self-409'd against the moved board and
+# stashed a SPURIOUS RE-GROUND directive even though nothing diverged.
+#
+# Fix: mint a STABLE idempotency key derived from the FE's own last-seen beat + the action kind, so the
+# agent loop's retry of the SAME logical call (last-seen unchanged because its response was lost) reuses
+# the key and the engine replays the original result instead of re-applying; attach the last-seen token
+# as `expected_beat_seq`; and — critically — flow every response back through `_refresh_beat_seq`. A
+# stale-beat 409 (a concurrent peer already moved the board) reconciles via the existing desync spine and
+# returns the CURRENT board (never a second, unintended advance) — the two-window concurrency guard.
+def _model_progression_cas(owner, action: str):
+    """(expected_beat_seq, idempotency_key) for a model-driven progression call. The key is DETERMINISTIC
+    in (game-key, action, last-seen beat) so a lost-response retry (last-seen still N) reuses it and the
+    engine dedups; a genuine next advance (last-seen refreshed to N+1) mints a fresh key. Fail-open: any
+    hiccup ⇒ (None, None) — byte-identical to the pre-fix unguarded call."""
+    try:
+        from routes import chat_helpers as _ch
+        beat = _ch.last_beat_seq(owner)
+        gkey = _ch._beat_seq_key(owner)
+        key = f"m:{gkey}:{action}:{beat}"
+        return beat, key
+    except Exception:
+        return None, None
+
+
+async def _refresh_after_model_progression(owner, res) -> None:
+    """CON-3 — track the new `beatSeq` the MODEL just advanced the engine to, so a later FE-issued CAS
+    call the same turn never self-409s and never stashes a spurious RE-GROUND. Fail-open."""
+    try:
+        from routes import chat_helpers as _ch
+        _ch._refresh_beat_seq(owner, res if isinstance(res, dict) else {})
+    except Exception:
+        pass
+
+
 async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
-        res = await orwell_engine.advance_game(user=owner)
+        _ebs, _ik = _model_progression_cas(owner, "advanceGame")
+        try:
+            res = await orwell_engine.advance_game(
+                expected_beat_seq=_ebs, idempotency_key=_ik, user=owner)
+        except orwell_engine.EngineToolError as _e:
+            # CON-2/CON-3: a stale-beat 409 means a concurrent peer already moved the board — reconcile
+            # (refresh last-seen + stash the re-ground) and return the CURRENT state rather than forcing a
+            # second unintended advance (the two-window double-advance guard). Any other engine error
+            # falls through to the generic handler below.
+            from routes import chat_helpers as _ch
+            if _ch._is_stale_beat_error(_e):
+                await _ch._handle_stale_beat(owner, _e)
+                _cur = await orwell_engine.get_game_state(user=owner)
+                orwell_engine.remember_pending(_cur, user=owner)
+                return {"output": json.dumps(_cur, indent=2), "exit_code": 0}
+            raise
+        await _refresh_after_model_progression(owner, res)  # CON-3
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: the card survives a reload
         # 0070: an advance runs the bounded off-screen tick, which may record new HIDDEN NPC-to-NPC
         # scenes. Fire-and-forget their FE-driven prose enrichment — best-effort, never blocks the
@@ -4850,7 +4906,22 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
         if args.get(k) is not None:
             decision[k] = args[k]
     try:
-        res = await orwell_engine.submit_decision(decision, user=owner)
+        # CON-2/CON-3: attach the sync-spine tokens (stable idempotency key keyed on the DECISION KIND so
+        # sequential same-kind decisions — comp-round drips, per-juror votes — never collide) and refresh
+        # last-seen from the response. A stale-beat 409 reconciles and returns the current board.
+        _ebs, _ik = _model_progression_cas(owner, "submitDecision:" + kind)
+        try:
+            res = await orwell_engine.submit_decision(
+                decision, expected_beat_seq=_ebs, idempotency_key=_ik, user=owner)
+        except orwell_engine.EngineToolError as _e:
+            from routes import chat_helpers as _ch
+            if _ch._is_stale_beat_error(_e):
+                await _ch._handle_stale_beat(owner, _e)
+                _cur = await orwell_engine.get_game_state(user=owner)
+                orwell_engine.remember_pending(_cur, user=owner)
+                return {"output": json.dumps(_cur, indent=2), "exit_code": 0}
+            raise
+        await _refresh_after_model_progression(owner, res)  # CON-3
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: bound ⇒ the cache clears
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:

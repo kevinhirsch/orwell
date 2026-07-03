@@ -6087,7 +6087,13 @@ async def stream_agent_loop(
         _turn_narration_full = "\n".join(t for t in round_texts if t)
         try:
             from routes.chat_helpers import record_post_turn_desync_check
-            await record_post_turn_desync_check(owner, _turn_narration_full)
+            # CON-5: tell the desync check whether THIS turn actually progressed the board (fired a
+            # progression tool). If not — but the board moved anyway — a concurrent peer window advanced
+            # it, and the per-turn baseline is contaminated, so the check skips the spurious re-ground.
+            _desync_tool_names = {ev.get("tool") for ev in (tool_events or [])
+                                  if isinstance(ev, dict) and ev.get("tool")}
+            _desync_progressed = bool(_desync_tool_names & _PROGRESSION_TOOLS)
+            await record_post_turn_desync_check(owner, _turn_narration_full, _desync_progressed)
         except Exception as _desync_err:
             logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
 

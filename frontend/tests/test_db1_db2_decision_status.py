@@ -41,7 +41,7 @@ def client():
 def test_validation_400_propagates_not_502(client, monkeypatch):
     """The engine's DELIBERATE 400 (a missing required field) must reach the client AS a 400 —
     never the 502 that signals "retry me"."""
-    async def refuse(decision, user=None):
+    async def refuse(decision, user=None, **_kw):
         raise orwell_engine.EngineToolError("a legal finale appeal is required", status=400)
 
     monkeypatch.setattr(orwell_engine, "submit_decision", refuse)
@@ -54,7 +54,7 @@ def test_validation_400_propagates_not_502(client, monkeypatch):
 
 def test_engine_409_propagates(client, monkeypatch):
     """A structured engine 409 (e.g. a stale-beat or refused commit) propagates as 409, not 502."""
-    async def refuse(decision, user=None):
+    async def refuse(decision, user=None, **_kw):
         raise orwell_engine.EngineToolError("stale beat", status=409, code="stale-beat")
 
     monkeypatch.setattr(orwell_engine, "submit_decision", refuse)
@@ -64,7 +64,7 @@ def test_engine_409_propagates(client, monkeypatch):
 
 def test_502_reserved_for_unreachability(client, monkeypatch):
     """A genuine transport outage (no structured engine answer) is the ONLY 502 case."""
-    async def boom(decision, user=None):
+    async def boom(decision, user=None, **_kw):
         raise RuntimeError("connection refused")
 
     monkeypatch.setattr(orwell_engine, "submit_decision", boom)
@@ -76,7 +76,7 @@ def test_502_reserved_for_unreachability(client, monkeypatch):
 def test_engine_error_without_status_falls_back_to_502(client, monkeypatch):
     """An engine answer with no usable status is unclassifiable — fall back to 502 so it still reads
     as a problem (never a silent 200)."""
-    async def refuse(decision, user=None):
+    async def refuse(decision, user=None, **_kw):
         raise orwell_engine.EngineToolError("odd engine answer")  # status=None
 
     monkeypatch.setattr(orwell_engine, "submit_decision", refuse)
@@ -86,7 +86,7 @@ def test_engine_error_without_status_falls_back_to_502(client, monkeypatch):
 
 def test_no_game_still_409(client, monkeypatch):
     """The benign pre/post-game "no active game" refusal stays a clean 409 (unchanged)."""
-    async def refuse(decision, user=None):
+    async def refuse(decision, user=None, **_kw):
         raise orwell_engine.EngineToolError("no active game", status=400)
 
     monkeypatch.setattr(orwell_engine, "submit_decision", refuse)
@@ -100,7 +100,7 @@ def test_debounce_suppresses_identical_repeat(client, monkeypatch):
     replayed from the cached refusal — same status, never re-hitting the engine."""
     calls = {"n": 0}
 
-    async def refuse(decision, user=None):
+    async def refuse(decision, user=None, **_kw):
         calls["n"] += 1
         raise orwell_engine.EngineToolError("a legal finale appeal is required", status=400)
 
@@ -125,7 +125,7 @@ def test_debounce_does_not_suppress_a_different_decision(client, monkeypatch):
     the debounce keys on the exact decision, never a whole-route lockout."""
     seen = []
 
-    async def handler(decision, user=None):
+    async def handler(decision, user=None, **_kw):
         seen.append(dict(decision))
         if "appeal" not in decision:
             raise orwell_engine.EngineToolError("a legal finale appeal is required", status=400)
@@ -148,7 +148,7 @@ def test_success_clears_a_prior_failure_record(client, monkeypatch):
     fresh (not suppressed against an outcome that no longer holds)."""
     state = {"fail": True, "calls": 0}
 
-    async def handler(decision, user=None):
+    async def handler(decision, user=None, **_kw):
         state["calls"] += 1
         if state["fail"]:
             raise orwell_engine.EngineToolError("not yet", status=400)

@@ -36,7 +36,7 @@ def _read(*parts):
 def test_decision_publishes_game_updated(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         return {"ok": True}
 
     monkeypatch.setattr(orwell_engine, "submit_decision", fake_submit)
@@ -55,7 +55,7 @@ def test_game_updated_publish_is_best_effort(monkeypatch):
     """A publish failure must never break the decision route (polling is the correctness floor)."""
     monkeypatch.setenv("AUTH_ENABLED", "false")
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         return {"ok": True}
 
     monkeypatch.setattr(orwell_engine, "submit_decision", fake_submit)

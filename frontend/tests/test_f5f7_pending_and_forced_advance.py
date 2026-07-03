@@ -110,7 +110,7 @@ def test_f5_decision_route_clears_on_submit_omitting_pending(monkeypatch):
     orwell_routes = importlib.import_module("routes.orwell_routes")
     oe.remember_pending({"pending": {"kind": "nominations"}}, user=None)
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         return {"ok": True}  # NO `pending` key — the just-resolved card is gone
     monkeypatch.setattr(oe, "submit_decision", fake_submit)
     monkeypatch.setattr(orwell_routes, "_publish_game_updated", lambda *a, **k: None)
@@ -130,7 +130,7 @@ def test_f5_decision_route_rearms_next_pending(monkeypatch):
     oe = _fresh_engine()
     orwell_routes = importlib.import_module("routes.orwell_routes")
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         return {"pending": {"kind": "eviction-vote", "options": [{"id": "npc:3"}]}}
     monkeypatch.setattr(oe, "submit_decision", fake_submit)
     monkeypatch.setattr(orwell_routes, "_publish_game_updated", lambda *a, **k: None)

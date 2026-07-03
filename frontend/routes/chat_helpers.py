@@ -800,10 +800,25 @@ _STALE_BEAT_MARKER = "stale write refused"
 _STALE_BEAT_NOW_RE = re.compile(r"\(now\s+(\d+)\)")
 
 
+def _beat_seq_key(user):
+    """CON-1 — the stable key for the per-turn last-seen `beatSeq` store, mirroring `_desync_key`.
+
+    Under auth-off (`AUTH_ENABLED=false`) the FE-internal `user` is `None`, so keying `_LAST_BEAT_SEQ`
+    on the raw `user` collapsed the whole 0065 CAS spine to `.get(None)` — never populated, so every
+    progression call attached `expected_beat_seq=None` and NO compare-and-swap was ever sent (the spine
+    was fully INERT in exactly the posture the owner runs). The desync/runway stores already got this
+    `_anon`/canonical-session treatment (`_desync_key`, `_runway_key`); the beatSeq tracker was missed.
+    Route it through the SAME resolver: a real user keys on its own identity (unchanged — never the
+    session fallback, so cross-user isolation is unweakened); a `None` user keys on the canonical
+    game-session id, giving the shared closed-set board a stable per-game CAS baseline single-tenant."""
+    return _desync_key(user)
+
+
 def last_beat_seq(user):
     """The last-seen engine `beatSeq` for `user` (or None) — the compare-and-swap token the FE
-    attaches to its next progression call. Test/ops visibility."""
-    return _LAST_BEAT_SEQ.get(user)
+    attaches to its next progression call. Test/ops visibility. CON-1: keyed via `_beat_seq_key` so
+    the token tracks under a stable per-game key even when `user is None` (auth-off)."""
+    return _LAST_BEAT_SEQ.get(_beat_seq_key(user))
 
 
 def stale_beat_rejections() -> int:
@@ -822,15 +837,17 @@ def _refresh_beat_seq(user, *responses) -> None:
     that carries `beatSeq` (status/state reads and every mutation's response) flows through here so the
     next progression call attaches the freshest token (avoiding a self-inflicted 409). Fail-safe: a
     non-dict / a response without `beatSeq` is skipped; the LAST carrying response wins (a 0 token is
-    legitimate — a brand-new sandbox — so the guard is `isinstance(int)`, never truthiness)."""
-    if user is None:
-        return
+    legitimate — a brand-new sandbox — so the guard is `isinstance(int)`, never truthiness).
+
+    CON-1: no longer bails on `user is None` — keys via `_beat_seq_key` so the auth-off single-tenant
+    posture tracks under the canonical-session key (the 0065 spine was fully inert before this)."""
+    key = _beat_seq_key(user)
     for resp in responses:
         if not isinstance(resp, dict):
             continue
         seq = resp.get("beatSeq")
         if isinstance(seq, int) and not isinstance(seq, bool):
-            _LAST_BEAT_SEQ[user] = seq
+            _LAST_BEAT_SEQ[key] = seq
 
 
 def _mint_idempotency_key() -> str:
@@ -874,14 +891,17 @@ async def _handle_stale_beat(user, exc) -> None:
         # the 409 body's `beatSeq`); fall back to parsing the message marker "…(now N)…" only when it
         # is absent (older engine / test stub). Decoupling reconcile from prose closes the wording-
         # drift fail-closed across the whole concurrency path.
+        # CON-1: write under `_beat_seq_key` so reconcile tracks under the same (canonical-session)
+        # key the rest of the spine reads — the auth-off (`user is None`) path used to no-op here.
+        _bkey = _beat_seq_key(user)
         _structured_seq = getattr(exc, "beat_seq", None)
-        if isinstance(_structured_seq, int) and not isinstance(_structured_seq, bool) and user is not None:
-            _LAST_BEAT_SEQ[user] = _structured_seq
+        if isinstance(_structured_seq, int) and not isinstance(_structured_seq, bool):
+            _LAST_BEAT_SEQ[_bkey] = _structured_seq
         else:
             m = _STALE_BEAT_NOW_RE.search(str(exc) or "")
-            if m and user is not None:
+            if m:
                 try:
-                    _LAST_BEAT_SEQ[user] = int(m.group(1))
+                    _LAST_BEAT_SEQ[_bkey] = int(m.group(1))
                 except (TypeError, ValueError):
                     pass
         # Re-read the live board to reconcile precisely (also refreshes last-seen from the reads).
@@ -1259,16 +1279,32 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     )
 
 
-async def record_post_turn_desync_check(user, narration: str) -> None:
+async def record_post_turn_desync_check(user, narration: str, this_turn_progressed: bool = True) -> None:
     """Post-turn layer of the desync spine: capture the AFTER signature, diff it against the
     BEFORE signature stored at the start of this turn, and when the narration asserted an outcome
     the engine never committed, stash a re-ground directive for the next turn. Fail-open — never
-    raises, never blocks the turn that's finishing."""
+    raises, never blocks the turn that's finishing.
+
+    CON-5 (the tractable minimum): the per-turn BEFORE signature is keyed per-user/per-canonical-session,
+    so under TWO concurrent windows of one game a PEER window's framing can overwrite this window's
+    baseline — a bogus delta that stashes a SPURIOUS RE-GROUND. Guard it the same way the agent loop's
+    stall-nudge is guarded (`_peer_advanced_since_framing`): when THIS turn fired no progression tool yet
+    the board MOVED since framing (`before.week/phase != after.week/phase`), a peer advanced it — the
+    baseline is unreliable, so SKIP the stash. This can only REMOVE a false positive: the classic
+    narrated-but-uncommitted case (board unchanged, or this turn itself progressed) is untouched."""
     try:
         _dkey = _desync_key(user)  # #1045: stable key — functions single-tenant (user=None) too.
         after = await _capture_beat_signature(user)
         before = _LAST_BEAT_SIG.get(_dkey)
         if not before or not after:
+            return
+        # CON-5: a peer advanced the board mid-turn (this window progressed nothing, yet week/phase moved)
+        # ⇒ the baseline is a peer's, not ours — don't stash a spurious re-ground off a contaminated diff.
+        if not this_turn_progressed and (
+                before.get("week") != after.get("week") or before.get("phase") != after.get("phase")):
+            logger.info("[orwell] post-turn desync check: peer advanced the board (%s/%s -> %s/%s) with no "
+                        "progression this turn — skipping re-ground (CON-5) for user=%s",
+                        before.get("week"), before.get("phase"), after.get("week"), after.get("phase"), user)
             return
         directive = _narration_claims_outcome(narration or "", before, after)
         if directive:
@@ -2094,7 +2130,7 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         # turn continues against the moved board — never a crash, never a blind retry into a stomp.
         try:
             adv = await orwell_engine.advance_game(
-                expected_beat_seq=_LAST_BEAT_SEQ.get(user),
+                expected_beat_seq=last_beat_seq(user),  # CON-1: keyed read (tracks auth-off)
                 idempotency_key=_mint_idempotency_key(),
                 user=user,
             )  # advance ONE beat for real: surface the player's
@@ -2244,7 +2280,7 @@ async def apply_game_framing(
     # 0065 Part E2: the last-seen `beatSeq` from the PREVIOUS turn, captured BEFORE this turn's first
     # state read refreshes it — so we can fetch a "since your last turn" delta against it. None on a
     # fresh context (no prior turn) ⇒ no delta line, today's full context stands.
-    _prev_seen_beat_seq = _LAST_BEAT_SEQ.get(user)
+    _prev_seen_beat_seq = last_beat_seq(user)  # CON-1: keyed read (tracks auth-off)
     # 0076: the PREVIOUS turn's beat signature (room + present company), captured before this turn's
     # checkpoint overwrites `_LAST_BEAT_SIG` — so we can diff the room's company and voice NPC
     # arrivals/departures as beats. None on a fresh context ⇒ no movement cue (the full block stands).

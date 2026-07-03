@@ -30,7 +30,7 @@ def client():
 def test_decision_route_accepts_self_evict_kind_and_confirmed(client, monkeypatch):
     seen = {}
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         seen.update(decision)
         return {"event": {"beat": "self-eviction"}, "pending": None, "status": {"week": 2}}
 
@@ -44,7 +44,7 @@ def test_decision_route_accepts_self_evict_kind_and_confirmed(client, monkeypatc
 def test_decision_route_still_rejects_unknown_kind(client, monkeypatch):
     called = []
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         called.append(decision)
         return {}
 

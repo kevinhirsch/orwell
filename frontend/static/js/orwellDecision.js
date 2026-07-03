@@ -653,6 +653,12 @@
     confirm.addEventListener("click", async () => {
       const payload = buildPayload(kind, sel, textarea && textarea.value.trim(), useVeto);
       if (!payload) return;
+      // CON-4 / INTEGRATION2-1: a STABLE at-most-once key derived from this card's pending signature
+      // (distinct per pending, identical across a retry of THIS card). So a lost-200 retry, or a
+      // double-tap across two mirrored windows both showing the card, is a verbatim engine replay —
+      // never a double-apply / wrong-staged-round commit. The engine keys `submitDecision` on it (0065
+      // Part B); an older engine ignores the extra field (back-compatible).
+      try { payload.idempotency_key = "dec:" + _sig(pending); } catch (_) {}
       confirm.disabled = true;
       confirm.textContent = "Locking in…";
       try {
