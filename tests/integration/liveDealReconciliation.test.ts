@@ -77,7 +77,7 @@ function gameWithPlayerOnTheBlock(): { sb: Sandbox; reg: GameSessionRegistry } {
 }
 
 describe("T1/E42 — NPC binding votes reconcile deals on the live spine", () => {
-  it("an NPC with an open safety deal voting the player out ⇒ broken deal, betrayal manner, witnessed reveal, hidden fold", () => {
+  it("an NPC with an open safety deal voting the player out ⇒ broken deal (SEALED, A7), betrayal manner, unattributed reveal, hidden fold", () => {
     const { sb } = gameWithPlayerOnTheBlock();
     const session = sb.session as GameSessionAdapter;
 
@@ -90,6 +90,7 @@ describe("T1/E42 — NPC binding votes reconcile deals on the live spine", () =>
     const status = sb.session.gameStatus();
     const onBlock = new Set(status.nominees.map((n) => n.id));
     const voter = session.livingIds().find((id) => id !== PLAYER && id !== status.hoh!.id && !onBlock.has(id))!;
+    const voterName = session.getGameState().house.find((h) => h.id === voter)!.name;
     const deal = session.makeDeal({ with: voter, kind: "safety", terms: "I keep you off my lips, you keep me off the block" });
     expect(deal!.status).toBe("open");
 
@@ -103,17 +104,28 @@ describe("T1/E42 — NPC binding votes reconcile deals on the live spine", () =>
     const live = sb.session.snapshot().live!;
     expect(live.evictionOrder[0]).toBe(PLAYER); // the runaway threat went out the door
 
-    // 1. The ledger marked the deal BROKEN — from the NPC's vote, with no player action involved.
+    // 1. The ledger marked the deal BROKEN internally — but the OUTWARD projection stays "open" (A7/
+    // E12): this deal broke via the SEALED eviction ballot, and the raw status flip would itself be
+    // the deanonymizing signal (the player already knows exactly who they struck this deal with).
     const view = session.getGameState().deals!.find((d) => d.id === deal!.id)!;
-    expect(view.status).toBe("broken");
+    expect(view.status).toBe("open");
 
-    // 2. The jury demerit landed: the wronged player's manner toward the breaker reads betrayed.
+    // 2. The jury demerit landed: the wronged player's manner toward the breaker reads betrayed
+    // (the engine's hidden read is never softened by the seal — only what the player is TOLD is).
     expect(live.mannerByEvictee?.[PLAYER]?.[voter]?.betrayed).toBe(true);
 
-    // 3. The reveal is a WITNESSED event (the wronged party's knowledge, 0002 — never the Vault).
-    const reveal = sb.engine.events.query().find((e) => e.type === "betrayal" && e.witnessSet.includes(PLAYER) && e.witnessSet.includes(voter));
-    expect(reveal, "a witnessed betrayal reveal was recorded").toBeTruthy();
-    expect(reveal!.hidden).toBe(false);
+    // 3. A7/E12: no player-visible event names the specific breaker — that would deanonymize their
+    // sealed ballot before the 0048 retrospective. The player DOES learn the unattributed fact.
+    const visibleBetrayals = sb.engine.events.query({ witnessedBy: PLAYER }).filter((e) => e.type === "betrayal");
+    expect(visibleBetrayals.length, "an unattributed betrayal signal reached the player").toBeGreaterThan(0);
+    for (const e of visibleBetrayals) expect(e.content).not.toContain(voterName);
+
+    // ...while the FULL attribution is recorded Vault-side (hidden — no player witness) for later.
+    const attributed = sb.engine.events.query().find(
+      (e) => e.type === "betrayal" && e.content.includes(voterName) && !e.witnessSet.includes(PLAYER),
+    );
+    expect(attributed, "the full attribution was recorded Vault-side").toBeTruthy();
+    expect(attributed!.hidden).toBe(true);
 
     // 4. The hidden fold moved: the wronged party's computed edge took the betrayal-shock.
     expect(sb.engine.relationships.edge(PLAYER, voter).trust).toBeLessThan(trustBefore);
