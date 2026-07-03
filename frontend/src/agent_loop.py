@@ -3030,6 +3030,45 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
     return "".join(out)
 
 
+_GuardedScene = collections.namedtuple("_GuardedScene", ["text", "scene_broken", "cutaway_emitted"])
+
+
+async def _emit_guarded_scene(clean: str, owner, *, scene_broken: bool, emitted_visible: bool,
+                              cutaway_emitted: bool) -> "_GuardedScene":
+    """A2 (2026-07-03) — run one leak-scrubbed stream chunk through BOTH the whole-scene circuit-breaker
+    and the per-sentence pre-emission guard, returning (text_to_emit, scene_broken, cutaway_emitted).
+
+    Ordering matters:
+      1. The SCENE circuit-breaker runs first. When it fires (a phantom/unverifiable CLOSED-SET board
+         change — see `chat_helpers.screen_streamed_scene_break`), the WHOLE scene is rejected, not one
+         sentence: nothing more of the fabricated prose emits this chunk, and if the player has seen no
+         real narration yet, ONE diegetic feeds-cut line (`_SCENE_CUTAWAY_LINE`) is emitted in its place
+         — never the lie, never a raw error.
+      2. Only when the scene is NOT broken does the existing per-sentence outcome guard run (dropping a
+         lone stray phantom sentence while its neighbours stream, with the blank-turn raw-clean fallback).
+
+    Jurisdiction is closed-set board claims ONLY (ADR 0005 #1) — creative/social prose never trips the
+    breaker (the cheap pre-filter short-circuits before any engine read), so it streams untouched."""
+    try:
+        from routes import chat_helpers
+    except Exception:
+        chat_helpers = None
+    if not scene_broken and chat_helpers is not None:
+        try:
+            if await chat_helpers.screen_streamed_scene_break(owner, clean):
+                scene_broken = True
+        except Exception:
+            pass
+    if scene_broken:
+        if not emitted_visible and not cutaway_emitted:
+            return _GuardedScene(_SCENE_CUTAWAY_LINE, True, True)
+        return _GuardedScene("", True, cutaway_emitted)  # drop the fabricated prose
+    guarded = await _pre_emission_outcome_guard(clean, owner)
+    if not guarded.strip() and clean.strip() and not emitted_visible:
+        guarded = clean  # blank-turn fallback — better a real (if unverified) beat than an empty turn
+    return _GuardedScene(guarded, False, cutaway_emitted)
+
+
 def _record_sync_ledger_turn(owner, *, session_id, tool_events, beat_seq_before, stale_before,
                              nudges_fired, auto_backfills) -> None:
     """0065 Part D — emit ONE Vault-free sync-ledger entry for a finished live-game turn.
@@ -3447,6 +3486,15 @@ async def _run_verifier_subagent(
 # (that re-emits a real answer routed to the reasoning channel and stays untouched).
 _EMPTY_PRODUCER_LINE = (
     "Production's feed glitched for a second there — we lost what just came through. Say that again?"
+)
+# A2 (2026-07-03): the diegetic circuit-breaker line. When a scene claims a board change the engine
+# never committed (or can't confirm), the FE cuts the fabricated scene and — if the player has seen no
+# real narration yet — shows THIS in its place instead of the lie. In-fiction (a live-feed cutaway),
+# names no machinery, and reads as production handling a beat off-camera (the momentPrompts contract).
+_SCENE_CUTAWAY_LINE = (
+    "The live feeds cut away — a slow pan over the empty backyard, the low hum of the walls — the way "
+    "they do when the control room isn't ready to show you the next moment. Give it a beat and pick the "
+    "scene back up."
 )
 # The plain operator string for non-game (workspace) turns — kept verbatim so the existing
 # "empty response" / "switch to a different model" guidance still reaches a power user.
@@ -4045,6 +4093,7 @@ async def stream_agent_loop(
     _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
     _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
+    _cutaway_emitted = False  # A2 (2026-07-03): the diegetic feeds-cut line is emitted at most once/turn
     # Orwell #872 (item B): a per-turn flag set when an upstream provider error (e.g. deepseek-v4-pro
     # intermittently 400ing on a continuation/tool round) was surfaced this turn. A pure-error turn
     # produces NO visible narration (_emitted_visible stays False), which would otherwise look like a
@@ -4123,6 +4172,7 @@ async def stream_agent_loop(
         # this round — the raw markup must never reach the client. The actual tool call is still
         # parsed post-round from round_response; this only governs what the player SEES mid-stream.
         _visible_halted = False
+        _scene_broken = False  # A2: a phantom board change cut this round's scene (halts visible stream)
         _visible_emitted_len = 0  # length of round_response already streamed as visible content
         native_tool_calls = []  # populated if model uses function calling
         # Reset doc streaming state per round
@@ -4380,21 +4430,23 @@ async def stream_agent_loop(
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
                                 if _clean:
-                                    # 0065 Part C — the PRE-EMISSION outcome guard: drop any sentence
-                                    # that asserts a CLOSED-SET board outcome the live engine never
-                                    # committed (a phantom eviction/winner/HOH/tally), BEFORE it reaches
-                                    # the player; everything non-suspect (and all creative/social prose)
-                                    # streams through untouched (ADR 0005 #1). Fall back to the raw clean
-                                    # text if the guard would empty a turn the player hasn't seen any
-                                    # narration in yet — better the post-turn re-ground than a blank turn.
-                                    _guarded = await _pre_emission_outcome_guard(_clean, owner)
-                                    if not _guarded.strip() and _clean.strip() and not _emitted_visible:
-                                        _guarded = _clean
-                                    if _guarded:
-                                        full_response += _guarded
-                                        if _guarded.strip():
+                                    _guarded = await _emit_guarded_scene(
+                                        _clean, owner,
+                                        scene_broken=_scene_broken,
+                                        emitted_visible=_emitted_visible,
+                                        cutaway_emitted=_cutaway_emitted,
+                                    )
+                                    _scene_broken = _guarded.scene_broken
+                                    _cutaway_emitted = _guarded.cutaway_emitted
+                                    if _guarded.text:
+                                        full_response += _guarded.text
+                                        if _guarded.text.strip():
                                             _emitted_visible = True
-                                        yield f'data: {json.dumps({"delta": _guarded})}\n\n'
+                                        yield f'data: {json.dumps({"delta": _guarded.text})}\n\n'
+                                    if _scene_broken:
+                                        # A2: the scene is cut — halt the rest of the round's visible
+                                        # stream (reuse the tool-opener halt), and drop the buffered tail.
+                                        _visible_halted = True
                             if _visible_halted:
                                 _game_buf = ""  # don't carry the pre-opener tail past the halt
                             continue  # narration, not a document — skip the doc-fence path
@@ -4490,17 +4542,22 @@ async def stream_agent_loop(
             _clean = _scrub_game_leak(_game_buf)
             _game_buf = ""
             if _clean:
-                # 0065 Part C — pre-emission guard on the trailing sentence too (same jurisdiction:
-                # closed-set board claims only; creative prose streams untouched). Fall back to raw
-                # clean text if holding it would leave the player a blank turn.
-                _guarded = await _pre_emission_outcome_guard(_clean, owner)
-                if not _guarded.strip() and _clean.strip() and not _emitted_visible:
-                    _guarded = _clean
-                if _guarded:
-                    full_response += _guarded
-                    if _guarded.strip():
+                # 0065 Part C + A2 — the SAME scene circuit-breaker + per-sentence guard as the mid-loop
+                # emit (closed-set board claims only; creative prose streams untouched; blank-turn raw
+                # fallback). A phantom that appears ONLY in the trailing unterminated sentence is cut here.
+                _guarded = await _emit_guarded_scene(
+                    _clean, owner,
+                    scene_broken=_scene_broken,
+                    emitted_visible=_emitted_visible,
+                    cutaway_emitted=_cutaway_emitted,
+                )
+                _scene_broken = _guarded.scene_broken
+                _cutaway_emitted = _guarded.cutaway_emitted
+                if _guarded.text:
+                    full_response += _guarded.text
+                    if _guarded.text.strip():
                         _emitted_visible = True
-                    yield f'data: {json.dumps({"delta": _guarded})}\n\n'
+                    yield f'data: {json.dumps({"delta": _guarded.text})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 
