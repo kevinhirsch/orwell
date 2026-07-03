@@ -162,7 +162,15 @@ def is_public_blocked_tool(tool_name: Optional[str]) -> bool:
 
 
 def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
-    """Return True for admins, or when auth is not configured yet."""
+    """Return True for admins, or when auth is genuinely not configured yet (single-user build).
+
+    SEC-3 — FAIL CLOSED on a config gap. This gate ultimately decides whether a caller may run
+    the public-blocked tools (bash, python, file ops, …) via tool_execution. It grants admin to
+    the sole local user when auth is unconfigured, but must NOT do so when the user store FAILED
+    TO LOAD (corrupt/unreadable auth.json). Without this distinction a deployment that WAS
+    configured would, on a degraded boot, report ``is_configured == False`` and hand arbitrary
+    code execution to any unauthenticated caller. A genuine first-run (no file yet) is unaffected.
+    """
     try:
         # Reuse the process-level AuthManager singleton (issue #966) instead of
         # constructing a fresh one (which re-reads auth.json/sessions.json) per
@@ -170,6 +178,10 @@ def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
         from src.auth_helpers import shared_auth_manager
 
         auth = shared_auth_manager()
+        # A load failure is a config gap, not a single-user build: deny (never grant admin).
+        if getattr(auth, "load_failed", False):
+            logger.warning("Auth store failed to load — failing closed on admin evaluation")
+            return False
         if not auth.is_configured:
             return True
         return bool(owner and auth.is_admin(owner))
