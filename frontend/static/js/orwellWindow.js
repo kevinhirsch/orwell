@@ -359,6 +359,27 @@ function ensureCss() {
        The matching "Drag to move" tooltip is suppressed below the same threshold in JS (_build). */
     @media (max-width: 768px) {
       .ow-window:not(.ow-docked) > .ow-titlebar { cursor: default; }
+      /* ── A8 (ship-blocker) — the narrow SHEET HOST must not be clipped ─────────
+         orwellSlots.js's restackNarrowSheets() (audit F3: "the narrow tier is a SHEET
+         HOST, not a stand-down") already writes left:0 / right:0 on every top-slotted
+         kit window under this SAME breakpoint, stacking each one edge-to-edge full
+         width. But this file's base .ow-window rule (above) carries the DESKTOP
+         max-width: 64vw with no mobile override — CSS's abs-pos over-constraint
+         resolution (left+width+right all non-auto) then keeps left and DISCARDS
+         right, so every kit window rendered as a ~64vw sliver pinned to the left
+         edge (theme picker: zero visible swatches; every other window: the same
+         clipped sliver — a single root cause, audit 2026-06-11-dwe-window-audit.md).
+         Relaxing max-width here lets the slot engine's edge-to-edge stretch actually
+         resolve (no clamp, so no over-constraint: width becomes the full space
+         between the left:0/right:0 anchors, deterministically — no property gets
+         discarded). Docked windows are exempt (already max-width:none !important
+         above; no side-margin geometry applies to rail-flow content). This is a
+         KIT-level fix (orwellWindow.js ensureCss()) — every window composing
+         OrwellWindow gets it for free, per the F-3 anti-fragmentation ratchet (no
+         per-window CSS patches). Pinned: frontend/tests/test_a8_mobile_window_kit.py. */
+      .ow-window:not(.ow-docked) {
+        max-width: none; min-width: 0;
+      }
     }
     /* the dock/undock toggle reads as a quieter control than min/close */
     .ow-controls .ow-dock { font-size: .9rem; }
