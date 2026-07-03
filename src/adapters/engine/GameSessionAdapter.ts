@@ -6105,10 +6105,25 @@ export class GameSessionAdapter implements GameSession {
         e.threat = Math.min(1, e.threat + ALLIANCE.betrayalThreatBump);
         e.affinity = Math.max(0, e.affinity - ALLIANCE.betrayalThreatBump);
         recordDealBetrayal(this.live, target, action.actor);
-        this.onPlayerEvent?.(
-          `${this.nameOf(action.actor)} turned on the alliance "${al.name}", moving against ${this.nameOf(target)}`,
-          [target, action.actor], "betrayal",
-        );
+        // A7/E12: mirrors the deal-break seal below — a betrayal TRIGGERED by the SEALED eviction
+        // ballot must not name the betrayer to the wronged ally before the retrospective unseals it
+        // (nominate/replace are public ceremonies and reveal normally; the player's OWN vote is never
+        // sealed from themselves).
+        if (action.kind === "vote-evict" && action.actor !== PLAYER) {
+          this.onPlayerEvent?.(
+            `${this.nameOf(action.actor)} turned on the alliance "${al.name}", moving against ${this.nameOf(target)}`,
+            [action.actor], "betrayal", // no player witness ⇒ Vault-held until the 0048 unseal
+          );
+          this.onPlayerEvent?.(
+            `Someone turned on the alliance "${al.name}"`,
+            [target], "betrayal",
+          );
+        } else {
+          this.onPlayerEvent?.(
+            `${this.nameOf(action.actor)} turned on the alliance "${al.name}", moving against ${this.nameOf(target)}`,
+            [target, action.actor], "betrayal",
+          );
+        }
         this.alliances.removeMember(al.id, action.actor); // the betrayer is out — the alliance fractures
       }
     }
@@ -6386,11 +6401,30 @@ export class GameSessionAdapter implements GameSession {
       rng: this.beatRng(),
       // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
       juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
-      // 0002: the wronged party learns the break as a witnessed event (a public ceremony break).
-      reveal: (wronged, breaker, deal) => this.onPlayerEvent?.(
-        `${this.nameOf(breaker)} broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
-        [wronged, breaker], "betrayal",
-      ),
+      // 0002: the wronged party learns the break as a witnessed event (a public ceremony break) —
+      // UNLESS the triggering action is the SEALED eviction ballot (E12/A7). Naming the breaker there
+      // would deanonymize their vote before the same terminal gate the primary eviction reveal and the
+      // 0048 retrospective use: record the full attribution VAULT-SIDE (no player witness ⇒ hidden by
+      // the event-visibility invariant, `validateEvent`), and give the wronged party only a Vault-safe,
+      // unattributed signal now — they may suspect, never know, until the retrospective unseals it (the
+      // same hidden-event sweep, `buildVaultUnseal`, already surfaces it then). The player's OWN vote is
+      // never sealed from themselves, and a break from a PUBLIC action (nominate/replace) reveals as before.
+      reveal: (wronged, breaker, deal, actionKind) => {
+        if (actionKind === "vote-evict" && breaker !== PLAYER) {
+          this.onPlayerEvent?.(
+            `${this.nameOf(breaker)} broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
+            [breaker], "betrayal", // no player witness ⇒ Vault-held until the 0048 unseal
+          );
+          return this.onPlayerEvent?.(
+            `Someone broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
+            [wronged], "betrayal",
+          );
+        }
+        return this.onPlayerEvent?.(
+          `${this.nameOf(breaker)} broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
+          [wronged, breaker], "betrayal",
+        );
+      },
     });
     if (broken.length > 0) this.persist(); // deferred into the beat's ONE commit (E3)
   }
@@ -6590,14 +6624,23 @@ export class GameSessionAdapter implements GameSession {
     this.deals.make(best, kind, "a quiet pact sealed away from the cameras", evId, s.week);
   }
 
-  /** Vault-free projection of a player-party deal: parties (names) + kind + terms + status. No numbers. */
+  /**
+   * Vault-free projection of a player-party deal: parties (names) + kind + terms + status. No numbers.
+   * A7/E12: a deal `sealedBallot` marks broken — via the SEALED eviction ballot, not the player's own
+   * vote — projects as still "open" until the season finishes: the raw internal `d.status` ("broken")
+   * would otherwise deanonymize the breaker's vote on the very next HUD poll (the player already knows
+   * exactly who their deal partner is, so the status flip alone is the leak). The retrospective (0048)
+   * lifts the seal the same way it unseals everything else — the underlying `d.status` itself is never
+   * altered, only this outward render.
+   */
   private dealView(d: Deal): DealView {
+    const sealed = d.sealedBallot && !this.live?.finished;
     return {
       id: d.id,
       parties: d.parties.map((id) => ({ id, name: this.nameOf(id) })),
       kind: d.kind,
       terms: d.terms,
-      status: d.status,
+      status: sealed ? "open" : d.status,
     };
   }
 

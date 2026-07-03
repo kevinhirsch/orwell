@@ -4,6 +4,7 @@ import type { BindingAction } from "../../src/domain/deal";
 import { actionBreaks, actionHonors, conditionFor } from "../../src/domain/deal";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
+import { PLAYER } from "../../src/domain/ids";
 
 // Roles only (HARD rule): promisor, promisee/partner, wronged party — never names.
 const PROMISOR = "promisor";
@@ -127,6 +128,52 @@ describe("0039 — deal model & ledger (pure core)", () => {
     );
     expect(demerits).toEqual([[PARTNER, PROMISOR]]);
     expect(reveals).toEqual([[PARTNER, PROMISOR]]);
+  });
+
+  // A7/E12 — the sealed-ballot plumbing `reconcile` hands the sink so it can withhold ballot-tied
+  // attribution until the same terminal gate the primary eviction reveal (and the 0048 retrospective)
+  // use. Pure-domain proof that the mechanism threads correctly; the adapter-level seal itself (which
+  // event gets minted, and to whom) is proved in tests/unit/ballotAttributionSeal.test.ts.
+  describe("A7 — the triggering action's kind threads to the sink (sealed-ballot plumbing)", () => {
+    it("reveal/witnessed both receive the BindingAction.kind that caused the break", () => {
+      const ledger = new DealLedger();
+      ledger.make([PROMISOR, PARTNER], "safety", "safe");
+      const revealKinds: string[] = [];
+      const witnessedKinds: string[] = [];
+      ledger.reconcile(
+        { actor: PROMISOR, kind: "vote-evict", targets: [PARTNER] },
+        {
+          witnessed: (_w, _b, _d, actionKind) => { witnessedKinds.push(actionKind); return true; },
+          reveal: (_w, _b, _d, actionKind) => { revealKinds.push(actionKind); return "evt:1"; },
+        },
+      );
+      expect(witnessedKinds).toEqual(["vote-evict"]);
+      expect(revealKinds).toEqual(["vote-evict"]);
+    });
+
+    it("marks `sealedBallot` when a SEALED eviction vote (not the breaker's own) breaks the deal", () => {
+      const ledger = new DealLedger();
+      const d = ledger.make([PROMISOR, PARTNER], "vote", "vote with me");
+      ledger.reconcile({ actor: PROMISOR, kind: "vote-evict", targets: [PARTNER] });
+      expect(d.status).toBe("broken");
+      expect(d.sealedBallot).toBe(true);
+    });
+
+    it("does NOT seal a break triggered by a PUBLIC action (a nomination is never secret)", () => {
+      const ledger = new DealLedger();
+      const d = ledger.make([PROMISOR, PARTNER], "safety", "safe");
+      ledger.reconcile({ actor: PROMISOR, kind: "nominate", targets: [PARTNER] });
+      expect(d.status).toBe("broken");
+      expect(d.sealedBallot).toBeFalsy();
+    });
+
+    it("does NOT seal a break the PLAYER caused themselves (their own vote is never sealed from them)", () => {
+      const ledger = new DealLedger();
+      const d = ledger.make([PLAYER, PARTNER], "vote", "vote with me");
+      ledger.reconcile({ actor: PLAYER, kind: "vote-evict", targets: [PARTNER] });
+      expect(d.status).toBe("broken");
+      expect(d.sealedBallot).toBeFalsy();
+    });
   });
 
   it("no reveal when the wronged party does not witness/learn the break", () => {
