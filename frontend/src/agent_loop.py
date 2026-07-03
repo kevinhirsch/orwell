@@ -3503,50 +3503,75 @@ _EMPTY_OPERATOR_LINE = (
 )
 
 
+# A4 (2026-07-03): models whose EMPTY-body turn routes the ANSWER into the reasoning channel (so the
+# reasoning IS the reply and is safe to surface as the body) vs. models with a TRUE separate reasoning
+# channel whose `reasoning_content` is genuine chain-of-thought that must NEVER reach the player.
+# GLM-4.7 (ADR 0016, the current default narrator) is the latter — the live red-team found its empty-
+# body case re-emitting raw CoT as the visible reply. Unknown / DeepSeek-family ⇒ True (the historical
+# FEPY-2 shape, load-bearing for Flash). The carve-out is the SAFE direction: a false "separate channel"
+# only costs a lost answer (recovered by the in-character retry), never a CoT leak.
+_SEPARATE_REASONING_CHANNEL_MARKERS = (
+    "glm", "qwq", "qwen3", "-r1", "reasoner", "thinking", "-think", "minimax-m",
+)
+
+
+def _reasoning_carries_answer(model) -> bool:
+    """True when an empty-body turn's `reasoning_content` holds the ANSWER (safe to surface) rather
+    than raw chain-of-thought. See `_SEPARATE_REASONING_CHANNEL_MARKERS`. Default True (unknown model)."""
+    m = (model or "").lower()
+    if not m:
+        return True
+    return not any(k in m for k in _SEPARATE_REASONING_CHANNEL_MARKERS)
+
+
 def _empty_response_fallback(
     full_response: str,
     round_reasoning: str,
     tool_events: list,
     game_mode=False,
+    model=None,
 ) -> tuple:
-    """Return (final_response, sse_chunk_or_none) for the end-of-loop empty-response guard.
+    """Return (final_response, sse_chunk_or_none, retry, from_reasoning) for the end-of-loop
+    empty-response guard.
 
-    When a thinking model routes all tokens to reasoning_content (leaving
-    content=""), full_response is empty but round_reasoning has content.
+    When a thinking model routes all tokens to reasoning_content (leaving content=""), full_response
+    is empty but round_reasoning has content.
 
-    FEPY-2 (#621): previously this persisted the reasoning but yielded NOTHING to the body,
-    leaving a BLANK GM bubble next to a populated Thinking accordion (the answer was routed
-    entirely into the reasoning channel — likelier on Flash). The empty-body JS fallback only
-    recovers inline `<think>` content, not channel-routed reasoning, so nothing recovered it.
-    Now, on an empty body with reasoning present, we RE-EMIT the reasoning as a non-thinking
-    body delta so the player actually sees the answer.
+    FEPY-2 (#621): previously this persisted the reasoning but yielded NOTHING to the body, leaving a
+    BLANK GM bubble. On an empty body with reasoning present, we RE-EMIT the reasoning as a non-thinking
+    body delta so the player sees the answer — BUT only when the reasoning actually carries the answer.
 
-    F2 (#1017): the TRUE-empty branch (no body, no reasoning, no tools) was a dead-end for a
-    player mid-season — a bare "switch models" string they can't act on from chat. In a live
-    game / casting turn we now surface an in-character producer line; the callsite pairs it with
-    a `truncated`-type retry affordance (the existing `Continue ▸` pattern) so the player has a
-    one-tap recourse. The FEPY-2 reasoning-recovery branch is unchanged (load-bearing for Flash).
+    A4 (2026-07-03): on a model with a TRUE separate reasoning channel (GLM-4.7, ADR 0016) the reasoning
+    is raw chain-of-thought, and re-emitting it leaked CoT into the player-visible bubble AND bypassed
+    the leak-scrub + outcome guard. So the re-emit is now MODEL-AWARE (`_reasoning_carries_answer`): a
+    separate-channel model does NOT re-emit its CoT — it falls to the true-empty in-character recovery
+    instead — and when a re-emit does happen on a GAME turn, the callsite routes it through the SAME
+    scrub + outcome guard as normal content (signalled by the `from_reasoning` flag).
+
+    F2 (#1017): the TRUE-empty branch surfaces an in-character producer line + a retry affordance on a
+    live game / casting turn instead of the bare operator string.
 
     Returns:
-        (final_response: str, chunk: str | None, retry: bool)
-            chunk is the SSE BODY frame to yield (or None). `retry` is True only for the
-            true-empty live-game case — the callsite then yields a separate `truncated` retry
-            affordance frame (kept a SEPARATE yield so each chunk stays one parseable SSE frame).
+        (final_response: str, chunk: str | None, retry: bool, from_reasoning: bool)
+            `chunk` is the SSE BODY frame to yield (or None). `retry` is True only for the true-empty
+            live-game case. `from_reasoning` is True only for a reasoning-channel re-emit — the callsite
+            then scrubs + outcome-guards it before emission (A4).
     """
     if full_response.strip() or tool_events:
-        return full_response, None, False
-    if round_reasoning.strip():
-        # FEPY-2: surface the channel-routed answer in the body bubble (non-thinking delta) instead
-        # of leaving it blank. It was streamed to the accordion as {thinking:true}; this body copy is
-        # what the player reads as the GM's reply.
-        return round_reasoning, f'data: {json.dumps({"delta": round_reasoning})}\n\n', False
-    # True-empty: nothing came back at all. In a live game / casting turn, keep the player IN the
-    # world — an in-character producer line + a retry affordance — instead of the operator string.
+        return full_response, None, False, False
+    if round_reasoning.strip() and _reasoning_carries_answer(model):
+        # FEPY-2: surface the channel-routed ANSWER in the body bubble (non-thinking delta) instead of
+        # leaving it blank. A4: flagged `from_reasoning` so the callsite scrubs/guards it on game turns
+        # (the raw chunk here is used verbatim only on non-game workspace turns, which have no leak risk).
+        return (round_reasoning, f'data: {json.dumps({"delta": round_reasoning})}\n\n', False, True)
+    # True-empty OR a separate-reasoning-channel model whose CoT we must NOT surface: nothing usable
+    # came back. In a live game / casting turn, keep the player IN the world — an in-character producer
+    # line + a retry affordance — instead of the operator string (and instead of leaking raw reasoning).
     if game_mode:
         return (_EMPTY_PRODUCER_LINE,
                 f'data: {json.dumps({"delta": _EMPTY_PRODUCER_LINE})}\n\n',
-                True)
-    return _EMPTY_OPERATOR_LINE, f'data: {json.dumps({"delta": _EMPTY_OPERATOR_LINE})}\n\n', False
+                True, False)
+    return (_EMPTY_OPERATOR_LINE, f'data: {json.dumps({"delta": _EMPTY_OPERATOR_LINE})}\n\n', False, False)
 
 
 PLAN_MODE_DIRECTIVE = (
@@ -6397,9 +6422,26 @@ async def stream_agent_loop(
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.
-    full_response, _fallback_chunk, _fallback_retry = _empty_response_fallback(
-        full_response, round_reasoning, tool_events, game_mode=game_mode
+    full_response, _fallback_chunk, _fallback_retry, _from_reasoning = _empty_response_fallback(
+        full_response, round_reasoning, tool_events, game_mode=game_mode, model=actual_model
     )
+    # A4 (2026-07-03): an empty-body reasoning RE-EMIT on a game turn must NOT bypass the leak-scrub +
+    # the pre-emission outcome/scene guard (Fix 1) — otherwise it becomes a channel around every board
+    # guard. Route it through the SAME pipeline as normal streamed content (scrub → scene breaker →
+    # per-sentence guard); rebuild the SSE frame from the guarded text. If nothing survives, fall back
+    # to the in-character retry recovery rather than a blank turn. (Non-game workspace turns keep the
+    # raw re-emit — there is no game leak surface there.)
+    if _from_reasoning and game_mode and full_response.strip():
+        _fr = _scrub_game_leak(full_response)
+        if _fr.strip():
+            _fr_guarded = await _emit_guarded_scene(
+                _fr, owner, scene_broken=False, emitted_visible=False, cutaway_emitted=False)
+            full_response = _fr_guarded.text if _fr_guarded.text.strip() else _EMPTY_PRODUCER_LINE
+        else:
+            full_response = _EMPTY_PRODUCER_LINE
+        _fallback_chunk = f'data: {json.dumps({"delta": full_response})}\n\n'
+        if full_response == _EMPTY_PRODUCER_LINE:
+            _fallback_retry = True  # nothing survived the scrub/guard → the in-character retry recovery
     if _fallback_chunk:
         yield _fallback_chunk
     # F2 (#1017): a true-empty live-game turn pairs the in-character producer line with a one-tap
