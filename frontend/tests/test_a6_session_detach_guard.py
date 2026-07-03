@@ -332,7 +332,15 @@ def test_live_game_confirm_allows_detach(_app, entry_id):
         _reset_spies(page, True)  # simulate the player confirming "leave my season"
         page.evaluate("(id) => document.getElementById(id).click()", entry_id)
         _wait_until(page, "window.__a6_confirmCalls.length >= 1")
-        page.wait_for_timeout(300)  # let the post-confirm detach logic settle
+        # The post-confirm path (_createDirectChatFromPreferredModel) makes its own live
+        # /api/default-chat round trip before either detach spy fires — on a busy CI runner
+        # that request (like the guard's own /api/orwell/state fetch above) can take well
+        # over a fixed 300ms, which was flaking this assertion in CI even though the detach
+        # genuinely does land a moment later (confirmed via an injected-latency repro: at a
+        # simulated 600ms /api/default-chat delay, a flat 300ms sample reads 0 every time,
+        # but the same page reads 1 by 1500ms — the code path is correct, only the sample
+        # point was too early). Poll for the actual condition instead of guessing a sleep.
+        _wait_until(page, "(window.__a6_setSessionCalls + window.__a6_createDirectChatCalls) > 0")
         calls = page.evaluate("window.__a6_confirmCalls.length")
         detach_calls = _detach_calls(page)
         browser.close()
