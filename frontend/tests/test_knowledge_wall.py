@@ -196,3 +196,4 @@ def test_agent_loop_wrapper_strips_the_leak():
 
 def test_agent_loop_wrapper_is_fail_open_on_empty():
     assert _run(agent_loop._knowledge_wall_guard("", _USER)) == ""
+
