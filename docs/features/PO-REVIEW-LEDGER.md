@@ -28,7 +28,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0004 | Replayability & naming | ✅ Built | ✅ Approved (expanded) | 2026-06-28 | DONE+GREEN: wired the parked "public appearance fields for portraits" scenario into the live BDD suite (567 scenarios pass) |
 | 0005 | Competition eligibility | ✅ Built | ✅ Approved (expansion queued) | 2026-06-28 | Houseguest's Choice (veto draw) must pick strongest **strategic** choice, not merely strongest bond. Test written as PENDING-BUILD block in the .feature; build is opt-in + calibration-neutral (changes the veto field → seeded outcomes). See build queue below |
 | 0006 | Outcomes by stats + temperature | ✅ Built | ✅ Approved (expanded) | 2026-06-28 | **ALL THREE PARTS BUILT & GREEN.** (1) intent asked ONCE up front (removed cosmetic per-round prompts); (2) upset-band tuned down — temperature 0.36→0.40, clear favorite ~64%→~59% avg, juryReach EARNED-WINS re-verified; (3) every NPC carries a derived comp intent (compete/throw/play-safe), opt-in `ORWELL_COMP_INTENT`, byte-identical off. Single-roll model kept (Path B declined). Gates: `stagedCompetition` + `compIntent` + `npcCompIntent`. Full unit suite (1957) + juryReach green |
-| 0007 | Persistence non-degradation | ✅ Built | ⬜ Pending | — | — |
+| 0007 | Persistence non-degradation | ✅ Built | ✅ Approved | 2026-06-28 | Reviewed full BDD (.feature + step defs). Toothed non-degradation (deep-equality round-trip, soul grows >50 entries, character baseline frozen, Vault/Journal co-versioned). Crash-safety lives in 0031 |
 | 0008 | Daily-event invariant | ✅ Built | ⬜ Pending | — | — |
 | 0009 | MCP tool boundary | ✅ Built | ⬜ Pending | — | — |
 | 0010 | One-liner deployment & update | 🚧 Built (host smoke owed) | ⬜ Pending | — | — |
