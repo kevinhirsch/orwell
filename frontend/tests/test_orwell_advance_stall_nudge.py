@@ -43,7 +43,9 @@ def test_stall_nudge_fires_only_for_live_game_at_a_beat_with_no_progress():
     assert "_tool_names & _PROGRESSION_TOOLS" in js
     # the per-turn cap guards the loop; the persisted level sets message forcefulness
     assert "_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN" in js
-    assert "_ADVANCE_STALL_LEVEL.get(owner" in js
+    # NAR-1: the level is read/written under the SAME owner-keying resolver (`_belt_key`) so the
+    # ladder actually persists single-tenant (`AUTH_ENABLED=false`) — see test_nar1_belt_key.py.
+    assert "_ADVANCE_STALL_LEVEL.get(_sl_key, 0)" in js
     # nudging continues the loop (gives the model another step), it does not auto-advance
     assert "_ADVANCE_NUDGES[min(_level" in js
     assert '"content": _nudge' in js
@@ -51,9 +53,11 @@ def test_stall_nudge_fires_only_for_live_game_at_a_beat_with_no_progress():
 
 def test_stall_escalation_resets_when_the_game_advances():
     js = _read("src", "agent_loop.py")
-    # a fired progression tool clears the persisted escalation for that game
-    assert "block.tool_type in _PROGRESSION_TOOLS and owner:" in js
-    assert "_ADVANCE_STALL_LEVEL.pop(owner, None)" in js
+    # a fired progression tool clears the persisted escalation for that game. NAR-1: no longer
+    # gated on `and owner` (that gate meant the reset never fired single-tenant, so a resolved
+    # single-tenant stall left stale escalation for the NEXT lull check) — see test_nar1_belt_key.py.
+    assert "if _is_live_game and block.tool_type in _PROGRESSION_TOOLS:" in js
+    assert "_ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)" in js
 
 
 def test_nudge_only_seizes_a_lull_not_substantive_play():
