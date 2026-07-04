@@ -1,3 +1,11 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Per-test hang guard (pytest-timeout): a wedged test (a Playwright page that never settles, a stubbed
+# engine call that blocks) fails ITSELF after the timeout instead of hanging the whole job until the
+# runner kills it. 300s is far above any healthy test yet well under a fleet-drop window. Signal method
+# (default on Linux) so a blocked C-extension is still interrupted.
+timeout = 300
+markers = [
+    "browser: a headless-Chromium Playwright test (sync_playwright); runs in the serial fe-browser-tests CI lane, not xdist",
+]
