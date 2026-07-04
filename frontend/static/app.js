@@ -3195,6 +3195,9 @@ function initializeEventListeners() {
   const railNewSession = el('rail-new-session');
   if (railNewSession) {
     railNewSession.addEventListener('click', async () => {
+      // A6: detaching to a fresh chat abandons a live, in-progress season with no easy way
+      // back — confirm first (game-build only; a no-op fail-open everywhere else).
+      if (window._orwellConfirmLeaveGame && !(await window._orwellConfirmLeaveGame())) return;
       if (!sessionModule) return;
       if (_closeCompareIfActive()) return;
       _deactivateIncognito();
@@ -3224,7 +3227,9 @@ function initializeEventListeners() {
   // the default model attaches when they hit send.
   const mobileNewChat = el('mobile-new-chat-btn');
   if (mobileNewChat) {
-    mobileNewChat.addEventListener('click', () => {
+    mobileNewChat.addEventListener('click', async () => {
+      // A6: same live-season guard as the rail/logo (see above).
+      if (window._orwellConfirmLeaveGame && !(await window._orwellConfirmLeaveGame())) return;
       if (!sessionModule) return;
       if (_closeCompareIfActive()) return;
       _deactivateIncognito();
@@ -3242,6 +3247,9 @@ function initializeEventListeners() {
   const brandBtn = el('sidebar-brand-btn');
   if (brandBtn) {
     brandBtn.addEventListener('click', async () => {
+      // A6: same live-season guard as the rail button (see above) — the "New Chat" sidebar row
+      // forwards here too (brandBtn.click()), so this one check covers both entry points.
+      if (window._orwellConfirmLeaveGame && !(await window._orwellConfirmLeaveGame())) return;
       if (!sessionModule) return;
       if (_closeCompareIfActive()) return;
       _deactivateIncognito();
@@ -3750,6 +3758,17 @@ function startOrwellApp() {
         sendBtn.title = 'Send to group';
         newMode = 'idle';
         sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded');
+      } else if (document.body.hasAttribute('data-game-build')) {
+        // A6: the generic-chat-app dual-purpose Send-as-"+New" transform is a "New Chat hazard"
+        // in the game build — an empty composer can never become a session-detach affordance
+        // here. Always the plain muted send arrow; the click/Enter handlers below make an
+        // empty-composer Send an outright no-op (never a bare `#rail-new-session` fallback).
+        sendBtn.innerHTML = _sendIcon;
+        sendBtn.title = 'Send message';
+        newMode = 'idle';
+        sendBtn.classList.add('newchat-mode'); // muted gray style only — never functional newchat
+        sendBtn.classList.remove('mic-mode', 'newchat-expanded');
+        clearTimeout(sendBtn._expandTimer);
       } else {
       // Check if we're already on a fresh empty session (welcome screen visible)
       const isEmptySession = document.getElementById('chat-container')?.classList.contains('welcome-active');
@@ -3826,8 +3845,12 @@ function startOrwellApp() {
       const hasText = messageInput && messageInput.value.trim().length > 0;
       const hasFiles = _hasAttachments();
 
-      // New chat mode — empty input, no attachments, no STT
-      if (!hasText && !hasFiles && sendBtn.dataset.mode === 'newchat') {
+      // New chat mode — empty input, no attachments, no STT. A6: `_updateSendBtnIcon` never
+      // arms 'newchat' mode in the game build (see above) — the explicit build check here is a
+      // second, defense-in-depth belt so an empty-composer Send can NEVER silently detach the
+      // player from a live season even if `dataset.mode` is ever stale/forced to 'newchat'.
+      if (!hasText && !hasFiles && sendBtn.dataset.mode === 'newchat'
+          && !document.body.hasAttribute('data-game-build')) {
         if (sessionModule) {
           const sessions = sessionModule.getSessions();
           const currentId = sessionModule.getCurrentSessionId();
@@ -3882,7 +3905,13 @@ function startOrwellApp() {
         // text state. Without this, a fast type-and-Enter would still see the
         // stale 'newchat' mode and open a new chat instead of sending.
         try { _updateSendBtnIcon(); } catch {}
-        if (sendBtn && sendBtn.dataset.mode === 'newchat') {
+        // A6: same defense-in-depth belt as the click handler — Enter on an empty composer must
+        // never fall through to the rail "+" (a live-season detach with no confirmation at all,
+        // since it would skip the guard entirely). `_updateSendBtnIcon` never arms 'newchat'
+        // mode in the game build, so this branch is already unreachable there; the explicit
+        // check keeps it that way even if `dataset.mode` is ever stale.
+        if (sendBtn && sendBtn.dataset.mode === 'newchat'
+            && !document.body.hasAttribute('data-game-build')) {
           const railNew = el('rail-new-session');
           if (railNew) railNew.click();
           return;
