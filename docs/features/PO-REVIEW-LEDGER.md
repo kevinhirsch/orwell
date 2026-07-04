@@ -30,7 +30,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0006 | Outcomes by stats + temperature | ✅ Built | ✅ Approved (expanded) | 2026-06-28 | **ALL THREE PARTS BUILT & GREEN.** (1) intent asked ONCE up front (removed cosmetic per-round prompts); (2) upset-band tuned down — temperature 0.36→0.40, clear favorite ~64%→~59% avg, juryReach EARNED-WINS re-verified; (3) every NPC carries a derived comp intent (compete/throw/play-safe), opt-in `ORWELL_COMP_INTENT`, byte-identical off. Single-roll model kept (Path B declined). Gates: `stagedCompetition` + `compIntent` + `npcCompIntent`. Full unit suite (1957) + juryReach green |
 | 0007 | Persistence non-degradation | ✅ Built | ✅ Approved | 2026-06-28 | Reviewed full BDD (.feature + step defs). Toothed non-degradation (deep-equality round-trip, soul grows >50 entries, character baseline frozen, Vault/Journal co-versioned). Crash-safety lives in 0031 |
 | 0008 | Daily-event invariant | ✅ Built | ✅ Approved | 2026-06-28 | Reviewed full BDD (.feature + step defs). No empty days across a 16-week season (seeds 1/2/3); week = HOH reign (5–6 days, HOH-comp→eviction); ≤1 social day/week, minority of weeks, still carries a house event |
-| 0009 | MCP tool boundary | ✅ Built | ⬜ Pending | — | — |
+| 0009 | MCP tool boundary | ✅ Built | ✅ Approved | 2026-06-28 | Plumbing/enforcement feature — the locked door enforcing the Vault Wall (#2) + anti-sycophancy (#3) at the app's tool API. No new gameplay decision; upholds rules already approved in 0001. Trust-the-engineering approve |
 | 0010 | One-liner deployment & update | 🚧 Built (host smoke owed) | ⬜ Pending | — | — |
 | 0011 | Weekly loop orchestration | ✅ Built | ⬜ Pending | — | — |
 | 0012 | Conversation & scene system | ✅ Built | ⬜ Pending | — | — |
