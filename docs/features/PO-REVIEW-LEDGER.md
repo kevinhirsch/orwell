@@ -31,7 +31,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0007 | Persistence non-degradation | ✅ Built | ✅ Approved | 2026-06-28 | Reviewed full BDD (.feature + step defs). Toothed non-degradation (deep-equality round-trip, soul grows >50 entries, character baseline frozen, Vault/Journal co-versioned). Crash-safety lives in 0031 |
 | 0008 | Daily-event invariant | ✅ Built | ✅ Approved | 2026-06-28 | Reviewed full BDD (.feature + step defs). No empty days across a 16-week season (seeds 1/2/3); week = HOH reign (5–6 days, HOH-comp→eviction); ≤1 social day/week, minority of weeks, still carries a house event |
 | 0009 | MCP tool boundary | ✅ Built | ✅ Approved | 2026-06-28 | Plumbing/enforcement feature — the locked door enforcing the Vault Wall (#2) + anti-sycophancy (#3) at the app's tool API. No new gameplay decision; upholds rules already approved in 0001. Trust-the-engineering approve |
-| 0010 | One-liner deployment & update | 🚧 Built (host smoke owed) | ⬜ Pending | — | — |
+| 0010 | One-liner deployment & update | ✅ Built | ✅ Approved | 2026-06-28 | Plumbing feature (install/update one-liners; saves survive updates; no secrets in repo). **PO confirms it has been run on a real server** — the long-standing "real-Proxmox-host smoke owed" deferral is satisfied per PO |
 | 0011 | Weekly loop orchestration | ✅ Built | ⬜ Pending | — | — |
 | 0012 | Conversation & scene system | ✅ Built | ⬜ Pending | — | — |
 | 0013 | The Diary Room | ✅ Built | ⬜ Pending | — | — |
