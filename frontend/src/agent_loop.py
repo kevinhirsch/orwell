@@ -3036,6 +3036,23 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
     return "".join(out)
 
 
+async def _knowledge_wall_guard(text: str, owner) -> str:
+    """A0 — the PRE-EMISSION knowledge-wall scan, applied to already-leak-scrubbed + outcome-guarded
+    text just before it streams. Drops any sentence that puts the player's SEALED content (the always-
+    walled Diary-Room class) in a houseguest's mouth — a structural Vault-Wall leak with no in-game
+    pathway. Everything else streams verbatim. Delegates to `chat_helpers.screen_knowledge_wall`, which
+    holds the tight jurisdiction (Diary-Room class only, staged-houseguest attribution required) and is
+    fail-open by construction. Fires single-tenant too (`owner` None ⇒ the desync key falls back to the
+    canonical game-session id, NAR-1-safe). Any hiccup returns the text unchanged."""
+    if not text:
+        return text
+    try:
+        from routes import chat_helpers
+        return await chat_helpers.screen_knowledge_wall(owner, text)
+    except Exception:
+        return text
+
+
 _GuardedScene = collections.namedtuple("_GuardedScene", ["text", "scene_broken", "cutaway_emitted"])
 
 
@@ -4473,6 +4490,9 @@ async def stream_agent_loop(
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
                                 if _clean:
+                                    # A2: run the whole-scene circuit-breaker + 0065 Part C per-sentence
+                                    # pre-emission outcome guard (see `_emit_guarded_scene`'s docstring for
+                                    # ordering/jurisdiction).
                                     _guarded = await _emit_guarded_scene(
                                         _clean, owner,
                                         scene_broken=_scene_broken,
@@ -4481,11 +4501,15 @@ async def stream_agent_loop(
                                     )
                                     _scene_broken = _guarded.scene_broken
                                     _cutaway_emitted = _guarded.cutaway_emitted
-                                    if _guarded.text:
-                                        full_response += _guarded.text
-                                        if _guarded.text.strip():
+                                    # A0 knowledge wall runs LAST and is NEVER overridden by a blank-turn
+                                    # fallback: a houseguest voicing the player's sealed Diary-Room content
+                                    # is a Vault-Wall leak that must never reach the player.
+                                    _guarded_text = await _knowledge_wall_guard(_guarded.text, owner)
+                                    if _guarded_text:
+                                        full_response += _guarded_text
+                                        if _guarded_text.strip():
                                             _emitted_visible = True
-                                        yield f'data: {json.dumps({"delta": _guarded.text})}\n\n'
+                                        yield f'data: {json.dumps({"delta": _guarded_text})}\n\n'
                                     if _scene_broken:
                                         # A2: the scene is cut — halt the rest of the round's visible
                                         # stream (reuse the tool-opener halt), and drop the buffered tail.
@@ -4596,11 +4620,13 @@ async def stream_agent_loop(
                 )
                 _scene_broken = _guarded.scene_broken
                 _cutaway_emitted = _guarded.cutaway_emitted
-                if _guarded.text:
-                    full_response += _guarded.text
-                    if _guarded.text.strip():
+                # A0 knowledge wall runs LAST — a Vault-Wall leak is never re-admitted by a fallback.
+                _guarded_text = await _knowledge_wall_guard(_guarded.text, owner)
+                if _guarded_text:
+                    full_response += _guarded_text
+                    if _guarded_text.strip():
                         _emitted_visible = True
-                    yield f'data: {json.dumps({"delta": _guarded.text})}\n\n'
+                    yield f'data: {json.dumps({"delta": _guarded_text})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 

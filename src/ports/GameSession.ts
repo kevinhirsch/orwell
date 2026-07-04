@@ -1105,6 +1105,23 @@ export interface NpcVoiceView {
 }
 
 /**
+ * The knowledge-wall manifest for the narration guard (ship-blocker A0): one private disclosure the
+ * player holds, together with the ONLY houseguests who legitimately hold it too. Vault-free — it is
+ * the PLAYER's OWN knowledge (never a Vault read), handed outward so the front-end can prove, before a
+ * line reaches the player, that no houseguest voices content no in-game pathway ever gave them.
+ *
+ * `knownTo` is the complete pathway-holder set. For a Diary-Room entry it is EMPTY by construction —
+ * the Diary Room is an OOC channel with no pathway to ANY houseguest, so NO npc may ever voice it.
+ * A guard treats any houseguest speaker NOT in `knownTo` voicing this content as a leak.
+ */
+export interface SealedFact {
+  /** The private content the player disclosed / recorded (humanized — no raw ids/slugs). */
+  content: string;
+  /** The houseguests (if any) who legitimately hold this via a real in-game pathway. Empty ⇒ Diary Room / sealed from the whole house. */
+  knownTo: EntityId[];
+}
+
+/**
  * The season's PUBLIC arc, assembled from the event record (0048 — principle #7: stores, not
  * narrator memory). Vault-free at any time: it is exactly what the player lived through.
  */
@@ -1684,6 +1701,15 @@ export interface GameSession {
    * unknown or non-active houseguest (the departed are voiced from the public record only).
    */
   npcVoice(id: EntityId): NpcVoiceView | null;
+
+  /**
+   * The knowledge-wall manifest (ship-blocker A0) — the player's private disclosures that are sealed
+   * from some or all of the house, each with the houseguests who DO legitimately hold it. Vault-free
+   * (the player's OWN knowledge). The narration guard reads this to prove no houseguest voices content
+   * no in-game pathway gave them — most sharply the player's Diary-Room entries (`knownTo` empty: no
+   * pathway to ANY npc, ever). Empty array when no game is started or nothing is sealed.
+   */
+  sealedFromHouse(): SealedFact[];
 
   /** Return the portrait prompt for a specific houseguest by id (0051) — Vault-free; uses public appearance facets. Null if no game is started or the houseguest is unknown. */
   getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null;
