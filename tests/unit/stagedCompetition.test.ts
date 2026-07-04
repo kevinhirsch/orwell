@@ -105,7 +105,7 @@ describe("0006 staged-rounds — the favorite-win calibration HOLDS (the crown i
   });
 });
 
-describe("0006 staged-rounds — per-round approach is committed before, locked after (anti-sycophancy)", () => {
+describe("0006 staged-rounds — the up-front approach is committed before, locked after (anti-sycophancy)", () => {
   const ctxOf = (rel: RelationshipModel): SeasonCtx => ({ player: PLAYER, statsOf: () => flat(0.5), rel });
 
   it("the LIVE staged loop crowns the SAME houseguest the preview reported when the player competes", () => {
@@ -128,26 +128,27 @@ describe("0006 staged-rounds — per-round approach is committed before, locked 
     }
   });
 
-  it("the per-round approach re-asks as the field narrows while the player is still in (forward-only)", () => {
-    // A clear FAVORITE survives deep, so the per-round prompt re-issues round after round (a single-round
-    // comp would never exercise the narrowing). The crown is the single roll; the rounds are presentation.
+  it("the approach is asked ONCE, up front — later rounds do not re-prompt (PO review 2026-06-28)", () => {
+    // A clear FAVORITE survives deep, so under the OLD model the per-round prompt re-issued round after
+    // round. Now intent is a SINGLE up-front decision; the elimination rounds play out (the field still
+    // narrows as drama) without ever pausing the player again.
     const ctx: SeasonCtx = { player: PLAYER, statsOf: (id) => (id === PLAYER ? flat(0.95) : flat(0.4)), rel: new RelationshipModel(0.5) };
     const s = newLiveSeason([PLAYER, npc(1), npc(2), npc(3), npc(4), npc(5)]);
     const rng = new SeededRandom(4);
-    const seenRounds: number[] = [];
+    let prompts = 0;
     for (let g = 0; g < 40 && !s.hoh; g++) {
       if (s.pending?.kind === "comp-round") {
-        // The pending carries WHO IS STILL IN this round + the round number — the field narrows.
-        seenRounds.push(s.pending.round);
-        expect(s.pending.stillIn).toContain(PLAYER); // the player only chooses while still in
+        prompts++;
+        expect(s.pending.round).toBe(1);             // the ONLY prompt is round 1 (up front)
+        expect(s.pending.binding).toBe(true);        // and it BINDS (it is the intent the roll honors)
+        expect(s.pending.stillIn).toContain(PLAYER);
         applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
       } else {
         advance(s, ctx, rng);
       }
     }
-    expect(seenRounds.length).toBeGreaterThan(1); // a multi-round, narrowing comp (visible elimination rounds)
-    // Round numbers are strictly forward — adaptation is forward-only, never a re-label of a past round.
-    for (let i = 1; i < seenRounds.length; i++) expect(seenRounds[i]!).toBeGreaterThan(seenRounds[i - 1]!);
+    expect(s.hoh).toBeDefined(); // the comp still crowns — the drama played out
+    expect(prompts).toBe(1);     // asked exactly once — no per-round re-prompt
   });
 
   it("FEWER, BIGGER rounds (audit 2026-06-20): a large field resolves in ≤8 staged rounds, not one-per-houseguest", () => {
@@ -168,9 +169,10 @@ describe("0006 staged-rounds — per-round approach is committed before, locked 
     expect(maxRound, `staged rounds=${maxRound}`).toBeLessThanOrEqual(8);    // NOT the ~15-round slog
   });
 
-  it("only the FIRST round binds; later rounds are non-binding flavor (audit 2026-06-20)", () => {
-    // The single up-front roll honors round 1's approach; later per-round prompts are color over an
-    // already-decided result. The `binding` flag tells the surface to present them as flavor, not stakes.
+  it("intent is a SINGLE binding prompt — no later non-binding flavor prompts (PO review 2026-06-28)", () => {
+    // The single up-front roll honors round 1's approach; the later per-round flavor prompts were REMOVED
+    // (they were color over an already-decided result and only added clicks). The player is asked exactly
+    // once, and that one prompt binds.
     const ctx: SeasonCtx = { player: PLAYER, statsOf: (id) => (id === PLAYER ? flat(0.95) : flat(0.4)), rel: new RelationshipModel(0.5) };
     const s = newLiveSeason([PLAYER, ...Array.from({ length: 15 }, (_, i) => npc(i + 1))]);
     const rng = new SeededRandom(7);
@@ -181,9 +183,7 @@ describe("0006 staged-rounds — per-round approach is committed before, locked 
         applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
       } else advance(s, ctx, rng);
     }
-    expect(bindings.length).toBeGreaterThan(1);     // the favorite survives ⇒ multiple per-round prompts
-    expect(bindings[0]).toBe(true);                 // round 1 BINDS (the intent the roll honored)
-    for (let i = 1; i < bindings.length; i++) expect(bindings[i], `round ${i + 1}`).toBe(false); // later = flavor
+    expect(bindings).toEqual([true]); // exactly one prompt, and it binds — no per-round flavor prompts
   });
 
   it("a late comp-round approach (after the crown) is a no-op — the round is locked", () => {

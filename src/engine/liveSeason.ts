@@ -572,28 +572,23 @@ function batchedRevealContent(e: EvictionProgress, from: number, to: number): st
 
 /**
  * Advance the staged competition ONE step (0006 staged-rounds evolution) — PRESENTATION ONLY. The
- * outcome (winner + drop order) is already fixed; this reveals one elimination at a time, narrowing
- * the field, and pauses for the player's per-round approach (`comp-round`) when they are STILL IN. That
- * per-round approach is recorded as EXPRESSION (committed before each reveal, locked after, forward-
- * only); it can never change the already-decided outcome — anti-sycophancy preserved, and the engine
- * beat/RNG stream is byte-identical to the non-staged model (it consumes NO randomness here). When one
- * houseguest remains, crown them (HOH / veto holder) and transition the beat.
+ * outcome (winner + drop order) is already fixed; this reveals a batch of eliminations at a time,
+ * narrowing the field, WITHOUT pausing the player. The binding approach was declared ONCE up front
+ * (round 1, in resolveHohBeat/resolveVetoComp); the later reveals are drama over an already-decided
+ * result, so re-asking each round was removed (PO review 2026-06-28 — it was non-binding flavor). The
+ * engine beat/RNG stream is byte-identical to the non-staged model (it consumes NO randomness here).
+ * When one houseguest remains, crown them (HOH / veto holder) and transition the beat.
  */
 function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | null {
   const c = s.competition!;
   // The crowned winner stands alone — crown them.
   if (c.stillIn.length <= 1) return crownCompetition(s);
-  // The player commits an approach for THIS round before its reveal (expression; locked after). If
-  // they are still in and have not committed one, pause and surface the narrowed still-in field. Only
-  // the FIRST approach (round 1, asked in resolveHohBeat/resolveVetoComp) is the BINDING intent the
-  // single roll honored; these later rounds are non-binding FLAVOR (the outcome is already fixed), so
-  // they carry `binding: false` and the surface presents them as color, not a stakes decision (#380
-  // audit 2026-06-20).
-  if (c.stillIn.includes(ctx.player) && s.compIntent === undefined) {
-    s.pending = { kind: "comp-round", by: ctx.player, comp: c.comp, round: c.round, stillIn: [...c.stillIn], binding: false };
-    return null;
-  }
-  s.compIntent = undefined; // the round's approach is consumed + LOCKED — the next round re-asks
+  // Intent is asked ONCE, up front (round 1, in resolveHohBeat/resolveVetoComp) — that single binding
+  // approach is what the one calibrated roll honored. The later elimination rounds are PRESENTATION ONLY
+  // (the outcome is already fixed), so we no longer pause to re-ask the player each round (PO review
+  // 2026-06-28: the per-round ask was non-binding flavor that only added taps it could never change).
+  // The reveals now play out as drama without interrupting the player for a choice that cannot matter.
+  s.compIntent = undefined; // round 1's committed approach is consumed on the first reveal, then cleared
   // Reveal a BATCH of the scheduled drops this round — FEWER, BIGGER rounds (audit 2026-06-20 owner
   // ruling: ~4-8 rounds per comp, not one drop per round which made a 15-player HOH a ~14-round slog).
   // PRESENTATION ONLY: the winner and the full drop ORDER are unchanged (still the single up-front
