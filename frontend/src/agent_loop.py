@@ -1460,6 +1460,92 @@ _MAX_ADVANCE_NUDGES_PER_TURN = 1  # AT MOST one nudge per turn — non-disruptiv
 # (the lull gate); a lull only nudges once the night has genuinely stopped moving. Tunable.
 _ADVANCE_GRACE_TURNS = 2
 
+# ── #1154 / ADR 0016 §D — FORCE the engine call (tool_choice) at the catastrophic-miss beats. ────────
+# The reactive belts above (the stall-nudge ladder, the L39b forced advanceGame, _auto_record_scene)
+# error-correct a missed call AFTER the model has already finished its turn — at which point the model
+# may have NARRATED an outcome it never read from the engine (the #1 desync). Now that the OOB narrator
+# is GLM-4.7 (ADR 0016 / PR #1151), whose tool-calling rides interleaved thinking and which HONORS
+# `tool_choice` (DeepSeek-V4 rejected `required` in always-thinking mode — the structural root of the
+# old ~0% spontaneous-call rate), we can GUARANTEE the call PROACTIVELY at the closed-set beats where a
+# miss is catastrophic, by forcing it on the wire. This is ADDITIVE: spontaneous interleaved calling
+# stays primary on every ordinary turn (forcing every turn is wasteful and would flatten free narration),
+# the forced call is the guarantee at the few beats below, and the reactive belts remain the third net.
+#
+# The mandate guardrail (engine never speaks for the player): we force ONLY the ENGINE-OWNED,
+# deterministic beats whose result is the engine's to compute and the model's only to VOICE —
+# runCompetition (read the already-decided comp winner) and advanceGame (drip the next deterministic
+# ceremony/eviction beat). We NEVER force submitDecision: that tool carries the PLAYER's explicit pick
+# ("never infer a binding choice from prose"), so forcing it would make the model invent a binding
+# choice — the opposite of the mandate. An OPEN PLAYER PENDING therefore SUPPRESSES all forcing (the
+# model must surface the card and wait, which the pending-barrier framing already pins).
+#
+# Phases where runCompetition is the mandatory read (the comp winner is the engine's; the model must
+# read it before narrating). At these we force `"required"` (NOT a named function) because the model
+# may legitimately use EITHER runCompetition (preview) OR advanceGame (resolve) to read the winner —
+# both go to the engine — so we guarantee SOME engine call without over-constraining which.
+_FORCE_COMP_PHASES = {"hoh-competition", "veto-competition"}
+# Ceremony advance-phases the model reliably narrates as already-done WITHOUT advancing (so the engine
+# sits unmoved and the board contradicts the prose). At these we force a NAMED advanceGame — only
+# advanceGame drips these deterministic beats. (premiere/finale/twist-reveal are deliberately EXCLUDED:
+# they carry their own belts — premiere markHouseguestMet, the finale flow — and are more delicate.)
+_FORCE_ADVANCE_PHASES = {"nominations", "veto-ceremony", "eviction"}
+
+
+def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_open: bool):
+    """Return the OpenAI/OpenRouter `tool_choice` to FORCE this round at a catastrophic-miss beat, or
+    None to leave the call unconstrained (spontaneous interleaved calling — the default everywhere).
+
+    Pure + side-effect-free so it is unit-testable in isolation (the suite stubs the LLM). Inputs:
+      • framed_beat_key  — the beat the model is grounded on THIS turn (`_LAST_FRAMED_BEAT_KEY[owner]`,
+        a (week, phase, moment[, pendingKind]) tuple); phase at index 1.
+      • turn_tool_names  — the set of engine tool NAMES already fired THIS turn (from tool_events). The
+        beat's tool having ALREADY fired this turn ⇒ the guarantee is met ⇒ do NOT re-force (which would
+        fight the model on a later round of a multi-round turn).
+      • pending_open     — True iff the engine has an OPEN player pending. Any open pending SUPPRESSES
+        forcing: the engine waits on the PLAYER (a card), and the model must surface it, not advance or
+        run a comp past it. (We never force submitDecision — see the block comment above.)
+
+    Precedence: a comp phase wants the WINNER read first, so if no comp tool fired yet → force
+    `"required"`; if runCompetition already previewed but nothing committed → force a named advanceGame
+    to COMMIT it (mirrors the reactive _previewed_uncommitted nudge, proactively). A non-comp ceremony
+    advance-phase that hasn't advanced yet → force a named advanceGame.
+    """
+    if pending_open:
+        return None
+    phase = ""
+    if isinstance(framed_beat_key, (tuple, list)) and len(framed_beat_key) >= 2:
+        phase = str(framed_beat_key[1] or "").lower()
+    names = turn_tool_names or set()
+    if phase in _FORCE_COMP_PHASES:
+        # Read the winner first (either runCompetition or advanceGame is valid) …
+        if not (names & {"runCompetition", "advanceGame"}):
+            return "required"
+        # … then COMMIT a preview that never advanced (the #1 previewed-uncommitted desync).
+        if "runCompetition" in names and "advanceGame" not in names:
+            return {"type": "function", "function": {"name": "advanceGame"}}
+        return None
+    if phase in _FORCE_ADVANCE_PHASES:
+        if "advanceGame" not in names:
+            return {"type": "function", "function": {"name": "advanceGame"}}
+        return None
+    return None
+
+
+# DeepSeek-V4 (the prior OOB narrator) returned HTTP 400 on `tool_choice` in always-thinking mode (the
+# 2026-06-21 conformance audit) — so forcing must NEVER be sent to it. GLM-4.7 (the current OOB model)
+# honors it. We gate forcing to models NOT on this known-rejecter list rather than allow-listing one
+# family, so a future honoring model benefits and an admin who swaps to a rejecter is still protected
+# (belt + the runtime kill-switch). Substring match on the resolved model id (provider-prefixed).
+_TOOL_CHOICE_REJECTERS = ("deepseek-v4", "deepseek/deepseek-v4", "deepseek-reasoner", "deepseek-r1")
+
+
+def _model_honors_forced_tool_choice(model: str) -> bool:
+    """True unless the resolved model is a KNOWN `tool_choice` rejecter (always-thinking DeepSeek). The
+    issue's pin-the-provider requirement: forcing is only sent where it is honored (asserted live)."""
+    m = (model or "").lower()
+    return not any(bad in m for bad in _TOOL_CHOICE_REJECTERS)
+
+
 # P1 onboarding — the LIGHT-TOUCH guided FIRST WEEK. A brand-new player's premiere week should
 # move briskly through its first HOH → eviction so the loop "clicks" before the open-ended middle
 # game; the producers/narrator nudge a little more actively. This is PACING ONLY (no scripted rails,
@@ -2812,6 +2898,12 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
     r"(?:" + "|".join(_GAME_TOOL_WORDS) + r")"
     # machinery NOUNS that never appear in in-character narration
     r"|\bthe (?:engine|system)\b"
+    # A5 (2026-07-03): the backstage-machinery nouns — defense in depth so even if the momentPrompts
+    # instruction regresses, "God Mode" / "the Vault" / an "admin panel/surface/console" never reach the
+    # player. NOT bare "admin" (a houseguest can be an "admin assistant"): only the machinery phrasings.
+    r"|\bgod[\s-]?mode\b|\bthe vault\b|\bproducer'?s? vault\b"
+    r"|\badmin(?:istrator)?[\s-]+(?:panel|surface|console|mode|controls?|tools?)\b"
+    r"|\bdeveloper (?:controls?|mode|console|tools?)\b"
     # the APPLICATION the player runs us on (fourth-wall meta-leak, audit 2026-06-26): "the front
     # end", "the app", "this app/website/site" never occur in in-character BB narration. Narrow
     # alternation (no bare "front"/"app"/"site") so ordinary scene prose is untouched.
@@ -2942,6 +3034,45 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
             pass  # any screening hiccup falls through to emit (conservatism)
         out.append(part)
     return "".join(out)
+
+
+_GuardedScene = collections.namedtuple("_GuardedScene", ["text", "scene_broken", "cutaway_emitted"])
+
+
+async def _emit_guarded_scene(clean: str, owner, *, scene_broken: bool, emitted_visible: bool,
+                              cutaway_emitted: bool) -> "_GuardedScene":
+    """A2 (2026-07-03) — run one leak-scrubbed stream chunk through BOTH the whole-scene circuit-breaker
+    and the per-sentence pre-emission guard, returning (text_to_emit, scene_broken, cutaway_emitted).
+
+    Ordering matters:
+      1. The SCENE circuit-breaker runs first. When it fires (a phantom/unverifiable CLOSED-SET board
+         change — see `chat_helpers.screen_streamed_scene_break`), the WHOLE scene is rejected, not one
+         sentence: nothing more of the fabricated prose emits this chunk, and if the player has seen no
+         real narration yet, ONE diegetic feeds-cut line (`_SCENE_CUTAWAY_LINE`) is emitted in its place
+         — never the lie, never a raw error.
+      2. Only when the scene is NOT broken does the existing per-sentence outcome guard run (dropping a
+         lone stray phantom sentence while its neighbours stream, with the blank-turn raw-clean fallback).
+
+    Jurisdiction is closed-set board claims ONLY (ADR 0005 #1) — creative/social prose never trips the
+    breaker (the cheap pre-filter short-circuits before any engine read), so it streams untouched."""
+    try:
+        from routes import chat_helpers
+    except Exception:
+        chat_helpers = None
+    if not scene_broken and chat_helpers is not None:
+        try:
+            if await chat_helpers.screen_streamed_scene_break(owner, clean):
+                scene_broken = True
+        except Exception:
+            pass
+    if scene_broken:
+        if not emitted_visible and not cutaway_emitted:
+            return _GuardedScene(_SCENE_CUTAWAY_LINE, True, True)
+        return _GuardedScene("", True, cutaway_emitted)  # drop the fabricated prose
+    guarded = await _pre_emission_outcome_guard(clean, owner)
+    if not guarded.strip() and clean.strip() and not emitted_visible:
+        guarded = clean  # blank-turn fallback — better a real (if unverified) beat than an empty turn
+    return _GuardedScene(guarded, False, cutaway_emitted)
 
 
 def _record_sync_ledger_turn(owner, *, session_id, tool_events, beat_seq_before, stale_before,
@@ -3362,6 +3493,15 @@ async def _run_verifier_subagent(
 _EMPTY_PRODUCER_LINE = (
     "Production's feed glitched for a second there — we lost what just came through. Say that again?"
 )
+# A2 (2026-07-03): the diegetic circuit-breaker line. When a scene claims a board change the engine
+# never committed (or can't confirm), the FE cuts the fabricated scene and — if the player has seen no
+# real narration yet — shows THIS in its place instead of the lie. In-fiction (a live-feed cutaway),
+# names no machinery, and reads as production handling a beat off-camera (the momentPrompts contract).
+_SCENE_CUTAWAY_LINE = (
+    "The live feeds cut away — a slow pan over the empty backyard, the low hum of the walls — the way "
+    "they do when the control room isn't ready to show you the next moment. Give it a beat and pick the "
+    "scene back up."
+)
 # The plain operator string for non-game (workspace) turns — kept verbatim so the existing
 # "empty response" / "switch to a different model" guidance still reaches a power user.
 _EMPTY_OPERATOR_LINE = (
@@ -3369,50 +3509,75 @@ _EMPTY_OPERATOR_LINE = (
 )
 
 
+# A4 (2026-07-03): models whose EMPTY-body turn routes the ANSWER into the reasoning channel (so the
+# reasoning IS the reply and is safe to surface as the body) vs. models with a TRUE separate reasoning
+# channel whose `reasoning_content` is genuine chain-of-thought that must NEVER reach the player.
+# GLM-4.7 (ADR 0016, the current default narrator) is the latter — the live red-team found its empty-
+# body case re-emitting raw CoT as the visible reply. Unknown / DeepSeek-family ⇒ True (the historical
+# FEPY-2 shape, load-bearing for Flash). The carve-out is the SAFE direction: a false "separate channel"
+# only costs a lost answer (recovered by the in-character retry), never a CoT leak.
+_SEPARATE_REASONING_CHANNEL_MARKERS = (
+    "glm", "qwq", "qwen3", "-r1", "reasoner", "thinking", "-think", "minimax-m",
+)
+
+
+def _reasoning_carries_answer(model) -> bool:
+    """True when an empty-body turn's `reasoning_content` holds the ANSWER (safe to surface) rather
+    than raw chain-of-thought. See `_SEPARATE_REASONING_CHANNEL_MARKERS`. Default True (unknown model)."""
+    m = (model or "").lower()
+    if not m:
+        return True
+    return not any(k in m for k in _SEPARATE_REASONING_CHANNEL_MARKERS)
+
+
 def _empty_response_fallback(
     full_response: str,
     round_reasoning: str,
     tool_events: list,
     game_mode=False,
+    model=None,
 ) -> tuple:
-    """Return (final_response, sse_chunk_or_none) for the end-of-loop empty-response guard.
+    """Return (final_response, sse_chunk_or_none, retry, from_reasoning) for the end-of-loop
+    empty-response guard.
 
-    When a thinking model routes all tokens to reasoning_content (leaving
-    content=""), full_response is empty but round_reasoning has content.
+    When a thinking model routes all tokens to reasoning_content (leaving content=""), full_response
+    is empty but round_reasoning has content.
 
-    FEPY-2 (#621): previously this persisted the reasoning but yielded NOTHING to the body,
-    leaving a BLANK GM bubble next to a populated Thinking accordion (the answer was routed
-    entirely into the reasoning channel — likelier on Flash). The empty-body JS fallback only
-    recovers inline `<think>` content, not channel-routed reasoning, so nothing recovered it.
-    Now, on an empty body with reasoning present, we RE-EMIT the reasoning as a non-thinking
-    body delta so the player actually sees the answer.
+    FEPY-2 (#621): previously this persisted the reasoning but yielded NOTHING to the body, leaving a
+    BLANK GM bubble. On an empty body with reasoning present, we RE-EMIT the reasoning as a non-thinking
+    body delta so the player sees the answer — BUT only when the reasoning actually carries the answer.
 
-    F2 (#1017): the TRUE-empty branch (no body, no reasoning, no tools) was a dead-end for a
-    player mid-season — a bare "switch models" string they can't act on from chat. In a live
-    game / casting turn we now surface an in-character producer line; the callsite pairs it with
-    a `truncated`-type retry affordance (the existing `Continue ▸` pattern) so the player has a
-    one-tap recourse. The FEPY-2 reasoning-recovery branch is unchanged (load-bearing for Flash).
+    A4 (2026-07-03): on a model with a TRUE separate reasoning channel (GLM-4.7, ADR 0016) the reasoning
+    is raw chain-of-thought, and re-emitting it leaked CoT into the player-visible bubble AND bypassed
+    the leak-scrub + outcome guard. So the re-emit is now MODEL-AWARE (`_reasoning_carries_answer`): a
+    separate-channel model does NOT re-emit its CoT — it falls to the true-empty in-character recovery
+    instead — and when a re-emit does happen on a GAME turn, the callsite routes it through the SAME
+    scrub + outcome guard as normal content (signalled by the `from_reasoning` flag).
+
+    F2 (#1017): the TRUE-empty branch surfaces an in-character producer line + a retry affordance on a
+    live game / casting turn instead of the bare operator string.
 
     Returns:
-        (final_response: str, chunk: str | None, retry: bool)
-            chunk is the SSE BODY frame to yield (or None). `retry` is True only for the
-            true-empty live-game case — the callsite then yields a separate `truncated` retry
-            affordance frame (kept a SEPARATE yield so each chunk stays one parseable SSE frame).
+        (final_response: str, chunk: str | None, retry: bool, from_reasoning: bool)
+            `chunk` is the SSE BODY frame to yield (or None). `retry` is True only for the true-empty
+            live-game case. `from_reasoning` is True only for a reasoning-channel re-emit — the callsite
+            then scrubs + outcome-guards it before emission (A4).
     """
     if full_response.strip() or tool_events:
-        return full_response, None, False
-    if round_reasoning.strip():
-        # FEPY-2: surface the channel-routed answer in the body bubble (non-thinking delta) instead
-        # of leaving it blank. It was streamed to the accordion as {thinking:true}; this body copy is
-        # what the player reads as the GM's reply.
-        return round_reasoning, f'data: {json.dumps({"delta": round_reasoning})}\n\n', False
-    # True-empty: nothing came back at all. In a live game / casting turn, keep the player IN the
-    # world — an in-character producer line + a retry affordance — instead of the operator string.
+        return full_response, None, False, False
+    if round_reasoning.strip() and _reasoning_carries_answer(model):
+        # FEPY-2: surface the channel-routed ANSWER in the body bubble (non-thinking delta) instead of
+        # leaving it blank. A4: flagged `from_reasoning` so the callsite scrubs/guards it on game turns
+        # (the raw chunk here is used verbatim only on non-game workspace turns, which have no leak risk).
+        return (round_reasoning, f'data: {json.dumps({"delta": round_reasoning})}\n\n', False, True)
+    # True-empty OR a separate-reasoning-channel model whose CoT we must NOT surface: nothing usable
+    # came back. In a live game / casting turn, keep the player IN the world — an in-character producer
+    # line + a retry affordance — instead of the operator string (and instead of leaking raw reasoning).
     if game_mode:
         return (_EMPTY_PRODUCER_LINE,
                 f'data: {json.dumps({"delta": _EMPTY_PRODUCER_LINE})}\n\n',
-                True)
-    return _EMPTY_OPERATOR_LINE, f'data: {json.dumps({"delta": _EMPTY_OPERATOR_LINE})}\n\n', False
+                True, False)
+    return (_EMPTY_OPERATOR_LINE, f'data: {json.dumps({"delta": _EMPTY_OPERATOR_LINE})}\n\n', False, False)
 
 
 PLAN_MODE_DIRECTIVE = (
@@ -3524,6 +3689,18 @@ async def stream_agent_loop(
         # MCP tools are namespaced dynamically, so hide all MCP schemas for
         # public/non-admin users rather than trying to enumerate every tool.
         mcp_mgr = None
+    # A5 (2026-07-03): on an in-fiction GAME/CASTING turn under the game build, strip the backstage
+    # account/provider/machinery-management tools from the narrator's schema — they survive the build for
+    # the settings assistant, but the in-character host must neither call nor RECITE them ("list your
+    # tools" leaked the full manifest to the player). Only game turns; a workspace/admin turn keeps them.
+    if game_mode:
+        try:
+            from src.settings import game_build_enabled as _gbe_tools
+            if _gbe_tools():
+                from src.agent_tools import GAME_NARRATOR_TOOL_DROP
+                disabled_tools.update(GAME_NARRATOR_TOOL_DROP)
+        except Exception:
+            pass
 
     if plan_mode:
         # Plan mode: investigate read-only, propose a plan, don't execute. The
@@ -3959,6 +4136,7 @@ async def stream_agent_loop(
     _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
     _emitted_visible = False  # did the player see ANY narration this turn? (scrub can empty a
     _turn_narrate_nudges = 0  # planning-only round → blank turn; we re-prompt once for the scene)
+    _cutaway_emitted = False  # A2 (2026-07-03): the diegetic feeds-cut line is emitted at most once/turn
     # Orwell #872 (item B): a per-turn flag set when an upstream provider error (e.g. deepseek-v4-pro
     # intermittently 400ing on a continuation/tool round) was surfaced this turn. A pure-error turn
     # produces NO visible narration (_emitted_visible stays False), which would otherwise look like a
@@ -4037,6 +4215,7 @@ async def stream_agent_loop(
         # this round — the raw markup must never reach the client. The actual tool call is still
         # parsed post-round from round_response; this only governs what the player SEES mid-stream.
         _visible_halted = False
+        _scene_broken = False  # A2: a phantom board change cut this round's scene (halts visible stream)
         _visible_emitted_len = 0  # length of round_response already streamed as visible content
         native_tool_calls = []  # populated if model uses function calling
         # Reset doc streaming state per round
@@ -4091,6 +4270,57 @@ async def stream_agent_loop(
         _tool_names_sent = [t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")]
         logger.info(f"[agent-debug] round={round_num} model={model} _is_api_model={_is_api_model} tools_sent={len(_tool_names_sent)} tool_names={_tool_names_sent[:15]} relevant_tools={sorted(_relevant_tools)[:15] if _relevant_tools else 'ALL'}")
 
+        # ── #1154 / ADR 0016 §D — FORCE the engine call (tool_choice) at a catastrophic-miss beat. ──
+        # Computed PER ROUND, right before the stream, and passed straight to the wire. Default None ⇒
+        # the field is never added ⇒ byte-identical (the safety contract, asserted in
+        # test_tool_choice_force.py). Gates (ALL must hold), cheapest first so an ordinary turn does NO
+        # extra work: forcing must be live-game, the kill-switch ON (runtime-tunable, no redeploy),
+        # tools actually on the wire (a tool_choice with no tools 400s), the model a non-rejecter (GLM
+        # honors it; DeepSeek-V4 400'd), and the framed phase must make a specific ENGINE-OWNED tool
+        # mandatory (with that beat's tool not already fired this turn, and NO open player pending —
+        # see _forced_tool_choice_for_beat). ADDITIVE to the reactive belts (stall-nudge, L39b forced
+        # advanceGame, _auto_record_scene), which remain the other nets; this just guarantees the call
+        # PROACTIVELY so the model can't narrate an outcome it never read.
+        _forced_tool_choice = None
+        # #1154 no-auth fix: under AUTH_ENABLED=false `owner` is None, but the live game lives under the
+        # engine's "default" sandbox (the FE↔engine anon→default mapping), and apply_game_framing now
+        # stashes the framed beat key under that same "default" fallback — so resolve to it. Previously
+        # `and owner` short-circuited the whole gate dead in the single-user / LAN posture. Auth-on
+        # multi-user passes a real username, so this is byte-identical there.
+        _force_owner = owner or "default"
+        if (_is_live_game and all_tool_schemas
+                and _model_honors_forced_tool_choice(model)
+                and bool(get_setting("force_tool_choice_at_beats", True))):
+            try:
+                from routes import chat_helpers as _ch_force
+                _framed_key = _ch_force._LAST_FRAMED_BEAT_KEY.get(_force_owner)
+                _framed_phase_force = (str(_framed_key[1]).lower()
+                                       if isinstance(_framed_key, (tuple, list)) and len(_framed_key) >= 2
+                                       else "")
+                # Only touch the engine when the framed phase is actually a force candidate (no
+                # per-turn cost on ordinary social/lull turns).
+                if _framed_phase_force in (_FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES):
+                    _turn_tool_names_force = {ev.get("tool") for ev in (tool_events or [])
+                                              if isinstance(ev, dict) and ev.get("tool")}
+                    # An OPEN player pending SUPPRESSES forcing (the player owns the decision via the
+                    # card; the model must surface it, not advance/run past it). Cheap status read,
+                    # only on a force-candidate phase. Fail-open: any hiccup ⇒ no forcing this round.
+                    from src import orwell_engine as _oe_force
+                    _force_status = await _oe_force.game_status(user=_force_owner)
+                    _pending_open = bool(
+                        isinstance(_force_status, dict)
+                        and isinstance(_force_status.get("pending"), dict)
+                        and (_force_status["pending"].get("kind") or "").strip())
+                    _forced_tool_choice = _forced_tool_choice_for_beat(
+                        _framed_key, _turn_tool_names_force, pending_open=_pending_open)
+                    if _forced_tool_choice is not None:
+                        logger.info(
+                            f"[orwell] #1154 forcing tool_choice={_forced_tool_choice} at "
+                            f"phase={_framed_phase_force} round={round_num} user={_force_owner}")
+            except Exception as _force_err:
+                logger.warning(f"[orwell] #1154 tool_choice force skipped: {_force_err}")
+                _forced_tool_choice = None
+
         # Primary target + any configured fallback models. stream_llm_with_fallback
         # only switches on a pre-content failure, so streamed output is never
         # duplicated; the dead-host cooldown keeps repeat primary attempts cheap.
@@ -4112,6 +4342,7 @@ async def stream_agent_loop(
             session_id=_canon_session_id,
             pin_provider=(_pin_threshold > 0 and last_round_input_tokens >= _pin_threshold),
             provider_opts=_provider_opts,
+            tool_choice=_forced_tool_choice,  # #1154: None on ordinary turns ⇒ byte-identical
         ):
             if time.time() > _round_deadline:
                 logger.warning(f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off")
@@ -4242,21 +4473,23 @@ async def stream_agent_loop(
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
                                 if _clean:
-                                    # 0065 Part C — the PRE-EMISSION outcome guard: drop any sentence
-                                    # that asserts a CLOSED-SET board outcome the live engine never
-                                    # committed (a phantom eviction/winner/HOH/tally), BEFORE it reaches
-                                    # the player; everything non-suspect (and all creative/social prose)
-                                    # streams through untouched (ADR 0005 #1). Fall back to the raw clean
-                                    # text if the guard would empty a turn the player hasn't seen any
-                                    # narration in yet — better the post-turn re-ground than a blank turn.
-                                    _guarded = await _pre_emission_outcome_guard(_clean, owner)
-                                    if not _guarded.strip() and _clean.strip() and not _emitted_visible:
-                                        _guarded = _clean
-                                    if _guarded:
-                                        full_response += _guarded
-                                        if _guarded.strip():
+                                    _guarded = await _emit_guarded_scene(
+                                        _clean, owner,
+                                        scene_broken=_scene_broken,
+                                        emitted_visible=_emitted_visible,
+                                        cutaway_emitted=_cutaway_emitted,
+                                    )
+                                    _scene_broken = _guarded.scene_broken
+                                    _cutaway_emitted = _guarded.cutaway_emitted
+                                    if _guarded.text:
+                                        full_response += _guarded.text
+                                        if _guarded.text.strip():
                                             _emitted_visible = True
-                                        yield f'data: {json.dumps({"delta": _guarded})}\n\n'
+                                        yield f'data: {json.dumps({"delta": _guarded.text})}\n\n'
+                                    if _scene_broken:
+                                        # A2: the scene is cut — halt the rest of the round's visible
+                                        # stream (reuse the tool-opener halt), and drop the buffered tail.
+                                        _visible_halted = True
                             if _visible_halted:
                                 _game_buf = ""  # don't carry the pre-opener tail past the halt
                             continue  # narration, not a document — skip the doc-fence path
@@ -4352,17 +4585,22 @@ async def stream_agent_loop(
             _clean = _scrub_game_leak(_game_buf)
             _game_buf = ""
             if _clean:
-                # 0065 Part C — pre-emission guard on the trailing sentence too (same jurisdiction:
-                # closed-set board claims only; creative prose streams untouched). Fall back to raw
-                # clean text if holding it would leave the player a blank turn.
-                _guarded = await _pre_emission_outcome_guard(_clean, owner)
-                if not _guarded.strip() and _clean.strip() and not _emitted_visible:
-                    _guarded = _clean
-                if _guarded:
-                    full_response += _guarded
-                    if _guarded.strip():
+                # 0065 Part C + A2 — the SAME scene circuit-breaker + per-sentence guard as the mid-loop
+                # emit (closed-set board claims only; creative prose streams untouched; blank-turn raw
+                # fallback). A phantom that appears ONLY in the trailing unterminated sentence is cut here.
+                _guarded = await _emit_guarded_scene(
+                    _clean, owner,
+                    scene_broken=_scene_broken,
+                    emitted_visible=_emitted_visible,
+                    cutaway_emitted=_cutaway_emitted,
+                )
+                _scene_broken = _guarded.scene_broken
+                _cutaway_emitted = _guarded.cutaway_emitted
+                if _guarded.text:
+                    full_response += _guarded.text
+                    if _guarded.text.strip():
                         _emitted_visible = True
-                    yield f'data: {json.dumps({"delta": _guarded})}\n\n'
+                    yield f'data: {json.dumps({"delta": _guarded.text})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 
@@ -5949,7 +6187,13 @@ async def stream_agent_loop(
         _turn_narration_full = "\n".join(t for t in round_texts if t)
         try:
             from routes.chat_helpers import record_post_turn_desync_check
-            await record_post_turn_desync_check(owner, _turn_narration_full)
+            # CON-5: tell the desync check whether THIS turn actually progressed the board (fired a
+            # progression tool). If not — but the board moved anyway — a concurrent peer window advanced
+            # it, and the per-turn baseline is contaminated, so the check skips the spurious re-ground.
+            _desync_tool_names = {ev.get("tool") for ev in (tool_events or [])
+                                  if isinstance(ev, dict) and ev.get("tool")}
+            _desync_progressed = bool(_desync_tool_names & _PROGRESSION_TOOLS)
+            await record_post_turn_desync_check(owner, _turn_narration_full, _desync_progressed)
         except Exception as _desync_err:
             logger.warning(f"[orwell] post-turn desync check failed: {_desync_err}")
 
@@ -6196,9 +6440,26 @@ async def stream_agent_loop(
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.
-    full_response, _fallback_chunk, _fallback_retry = _empty_response_fallback(
-        full_response, round_reasoning, tool_events, game_mode=game_mode
+    full_response, _fallback_chunk, _fallback_retry, _from_reasoning = _empty_response_fallback(
+        full_response, round_reasoning, tool_events, game_mode=game_mode, model=actual_model
     )
+    # A4 (2026-07-03): an empty-body reasoning RE-EMIT on a game turn must NOT bypass the leak-scrub +
+    # the pre-emission outcome/scene guard (Fix 1) — otherwise it becomes a channel around every board
+    # guard. Route it through the SAME pipeline as normal streamed content (scrub → scene breaker →
+    # per-sentence guard); rebuild the SSE frame from the guarded text. If nothing survives, fall back
+    # to the in-character retry recovery rather than a blank turn. (Non-game workspace turns keep the
+    # raw re-emit — there is no game leak surface there.)
+    if _from_reasoning and game_mode and full_response.strip():
+        _fr = _scrub_game_leak(full_response)
+        if _fr.strip():
+            _fr_guarded = await _emit_guarded_scene(
+                _fr, owner, scene_broken=False, emitted_visible=False, cutaway_emitted=False)
+            full_response = _fr_guarded.text if _fr_guarded.text.strip() else _EMPTY_PRODUCER_LINE
+        else:
+            full_response = _EMPTY_PRODUCER_LINE
+        _fallback_chunk = f'data: {json.dumps({"delta": full_response})}\n\n'
+        if full_response == _EMPTY_PRODUCER_LINE:
+            _fallback_retry = True  # nothing survived the scrub/guard → the in-character retry recovery
     if _fallback_chunk:
         yield _fallback_chunk
     # F2 (#1017): a true-empty live-game turn pairs the in-character producer line with a one-tap

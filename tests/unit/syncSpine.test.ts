@@ -243,6 +243,26 @@ describe("0065 Part B — idempotency keys on progression tools", () => {
     expect(session.gameStatus().beatSeq).toBeGreaterThan(before); // the decision committed
   });
 
+  it("PERSIST-9 — the idempotency cache SURVIVES a snapshot restore (a retry across a restart/LRU-unload does not re-apply)", () => {
+    const { reg, session, dir } = startedRuntime();
+    const adv = driveToPending(session);
+    expect(adv.pending).toBeTruthy();
+    const after = resolveLegally(session, adv.pending!, { idempotencyKey: "restart-key" });
+    const seq = session.gameStatus().beatSeq;
+    reg.saveUser("u");
+
+    // A fresh registry over the same dir (a process restart / the routine LRU unload-then-resume that
+    // ALSO runs restore()). Before PERSIST-9 the cache was cleared here, so the retry below re-applied.
+    const resumed = new GameSessionRegistry(new FileSaveStore(dir)).sandboxFor("u").session;
+    const replay = resumed.submitDecision({ kind: adv.pending!.kind, ...(adv.pending!.kind === "nominations"
+      ? { choice: [adv.pending!.options[0]!.id, adv.pending!.options[1]!.id] }
+      : adv.pending!.kind === "veto-decision" ? { use: false }
+      : adv.pending!.kind === "comp-intent" || adv.pending!.kind === "comp-round" ? { intent: "compete" as const }
+      : { vote: adv.pending!.options[0]!.id }), idempotencyKey: "restart-key" });
+    expect(replay).toEqual(after);                       // verbatim replay from the restored cache
+    expect(resumed.gameStatus().beatSeq).toBe(seq);      // the decision did NOT re-apply across the restart
+  });
+
   it("a replayed advanceGame key WINS even if beatSeq has since moved (the cache is the authority)", () => {
     const { session } = startedRuntime();
     const first = session.advanceGame({ idempotencyKey: "k" });

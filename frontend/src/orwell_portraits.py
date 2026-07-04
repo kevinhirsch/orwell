@@ -20,9 +20,14 @@ Image config (the request SHAPE, all Vault-free — see the "Portrait image conf
     as a belt-and-suspenders backstop.
   • One pinned square resolution (default 1024x1024) is sent on every provider path so the
     roster grid stays uniform and per-image cost is bounded.
-  • Reference-image-on-regen — re-shooting an EXISTING portrait (the L17 look-alike re-roll)
-    feeds the current portrait back through the img2img edit path so the houseguest stays the
-    SAME person; first-generation stays text-to-image.
+  • Reference-image-on-regen — re-shooting an EXISTING portrait (the L17 look-alike re-roll, a
+    facet-change re-shoot) feeds the current portrait back through the img2img edit path so the
+    houseguest stays the SAME person; first-generation stays text-to-image.
+  • Provider routing (issue #1153 / ADR 0016 §C) — `_generate_one` dispatches by the resolved
+    endpoint: fal.ai Seedream (a reference-image model on a separate API surface; `image_urls`
+    identity-carry — the #1140 fix) → `orwell_fal_image`; OpenRouter → /chat/completions image
+    output; OpenAI/others → the Images API. fal is used only when explicitly configured as the
+    image model; absent ⇒ the current Gemini/OpenAI paths stand (graceful fallback).
 
 Storage: ``{frontend}/data/portraits/{user}/{houseguestId}.png`` plus a small
 ``manifest.json`` (houseguestId → filename + name). The whole tree lives under the
@@ -846,10 +851,13 @@ async def _generate_one(prompt: str, user: Optional[str],
         _note_gen_error("no-model")
         return None
 
-    # OpenRouter does NOT implement the OpenAI /images/generations endpoint — its image
-    # models emit images through /chat/completions (native image-output via `modalities`,
-    # or any model via the openrouter:image_generation server tool). POSTing /images/...
-    # there 400s on every model, so route OpenRouter to the chat-completions transport.
+    # fal.ai Seedream (issue #1153 / ADR 0016 §C) — a reference-image (img2img) image provider on a
+    # SEPARATE API surface. It has no OpenAI /images path and no chat path: POST the model slug
+    # directly with `image_urls` for identity-carry. Detected by the resolved URL's host so it routes
+    # to the fal client; everything else keeps its existing transport. When fal is NOT configured the
+    # selected/auto-detected model is never a fal one, so this branch never fires (graceful fallback
+    # to the current Gemini/OpenAI paths).
+    from src.endpoint_resolver import is_fal_url
     is_openrouter = "openrouter.ai" in (url or "").lower()
     is_gpt_image = "gpt-image" in model_id.lower()
     base_url = url.replace("/chat/completions", "").replace("/v1/messages", "").rstrip("/")
@@ -866,6 +874,19 @@ async def _generate_one(prompt: str, user: Optional[str],
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
         ) as client:
+            if is_fal_url(url):
+                # fal Seedream: reference-image identity-carry. The reference (the canonical headshot
+                # / the player's upload / the houseguest's current portrait on a re-shoot) rides in
+                # `image_urls`; absent ⇒ a first-shoot text→image generation. The identity-keep prompt
+                # prefix is already applied above when keep_identity is set.
+                from src import orwell_fal_image
+                png, reason, detail = await orwell_fal_image.generate_via_fal(
+                    client, base_url, model_id, prompt, headers,
+                    reference_pngs=[reference_png] if reference_png else None,
+                )
+                if not png:
+                    _note_gen_error(reason or "fal-generation-failed", detail)
+                return png
             if is_openrouter:
                 # OpenRouter does image-to-image natively via the chat image part (G26).
                 return await _generate_via_chat_completions(client, url, model_id, prompt,
@@ -1434,9 +1455,24 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 continue
 
         # G26: the PLAYER may have chosen 'reference' mode — image-to-image off their headshot
-        # (exact mode already landed in the pre-pass above). NPCs always text-to-image.
+        # (exact mode already landed in the pre-pass above). NPCs are text→image on FIRST shoot
+        # (that establishes the canonical headshot), then carry identity on a RE-SHOOT.
         is_player = _safe_id(str(hid)) == PLAYER_PORTRAIT_ID
         ref = _read_intake_source(user) if (is_player and intake and intake.get("mode") == "reference") else None
+        # #1153 identity-carry: if we reached here with a stored portrait on disk it's a RE-SHOOT
+        # (a facet change fell through the generate-once guard above). Feed the houseguest's CURRENT
+        # portrait back as the reference so a reference-image provider (fal Seedream) keeps the SAME
+        # face + gender across the re-shoot instead of re-rolling from text (#1140). _generate_one's
+        # default keep_identity=True reinforces it with the "minimal alteration" prompt prefix.
+        # Harmless on text→image providers (they degrade to text→image inside _generate_one). First
+        # shoots (no prior portrait) stay reference-free — that establishes the canonical headshot.
+        if not ref:
+            existing = portrait_file(user, str(hid))
+            if existing is not None:
+                try:
+                    ref = existing.read_bytes()
+                except OSError:
+                    ref = None
         source = "reference" if ref else "generated"
 
         _consume_gen_error(); _consume_gen_detail()  # clear any stale reason/detail

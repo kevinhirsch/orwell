@@ -32,23 +32,27 @@ def test_midstream_error_emits_typed_error_sse_not_body_delta():
 # ── FEPY-2: empty body + reasoning → re-emit reasoning as a body delta ───────── #
 
 def test_empty_body_with_reasoning_reemits_body_delta():
-    final, chunk, retry = agent_loop._empty_response_fallback("", "Here is the actual answer.", [])
+    # No model specified ⇒ historical DeepSeek shape (reasoning carries the answer) ⇒ re-emit.
+    final, chunk, retry, from_reasoning = agent_loop._empty_response_fallback(
+        "", "Here is the actual answer.", [])
     assert final == "Here is the actual answer."
-    assert chunk is not None and retry is False
+    assert chunk is not None and retry is False and from_reasoning is True
     payload = json.loads(chunk[len("data: "):].strip())
     assert payload.get("delta") == "Here is the actual answer."
     assert not payload.get("thinking")  # body channel, not the accordion
 
 
 def test_nonempty_body_unchanged():
-    final, chunk, retry = agent_loop._empty_response_fallback("real body", "some reasoning", [])
-    assert final == "real body" and chunk is None and retry is False
+    final, chunk, retry, from_reasoning = agent_loop._empty_response_fallback(
+        "real body", "some reasoning", [])
+    assert final == "real body" and chunk is None and retry is False and from_reasoning is False
 
 
 def test_fully_empty_round_yields_error_message():
-    final, chunk, retry = agent_loop._empty_response_fallback("", "", [])
+    final, chunk, retry, from_reasoning = agent_loop._empty_response_fallback("", "", [])
     assert "empty response" in final and chunk is not None
     assert retry is False  # the non-game workspace path keeps the operator string, no retry chip
+    assert from_reasoning is False
 
 
 # ── FEPY-5: a rejected cast-authoring write-back is LOGGED, not silent ───────── #

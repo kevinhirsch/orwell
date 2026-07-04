@@ -925,7 +925,22 @@
   function _reRouteAfterModelConfig() {
     const open = document.getElementById("orwell-onboarding");
     if (open && open.hasAttribute("data-ob-holding")) {
-      try { if (typeof open._obDismiss === "function") open._obDismiss(); else open.remove(); } catch (_) {}
+      // #925: prefer the holding card's own dismiss (it routes through win.destroy() → the kit
+      // teardown that removes BOTH the window AND its modal scrim). The bare `open.remove()`
+      // fallback dropped only the window NODE and stranded the [data-ow-scrim] backdrop — a
+      // full-viewport orphan that then intercepts every click (the gear becomes unclickable). So
+      // the fallback now also sweeps any matching scrim so no path here can orphan one.
+      try {
+        if (typeof open._obDismiss === "function") {
+          open._obDismiss();
+        } else {
+          open.remove();
+          try {
+            document.querySelectorAll('[data-ow-scrim="orwell-onboarding"]')
+              .forEach(function (s) { s.remove(); });
+          } catch (_) {}
+        }
+      } catch (_) {}
       try { uninertBackground(); } catch (_) {}
     }
     route();

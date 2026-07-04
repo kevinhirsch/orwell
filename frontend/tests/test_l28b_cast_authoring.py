@@ -215,6 +215,41 @@ def test_l28b_engine_client_method_exists():
     assert hasattr(orwell_engine, "record_cast_profile")
 
 
+# ── A1 (ship-blocker, "the phantom-houseguest root") ───────────────────────────
+#
+# The engine now structurally refuses to rename an ALREADY-INTRODUCED houseguest
+# (`recordCastProfile`'s durable `introducedNames` lock — GameSessionAdapter.ts): once the player has
+# met a houseguest by name, a later authoring write-back that proposes a different name is silently
+# dropped for THAT ONE FIELD — the call still succeeds (`accepted: True`) and every other authored
+# field still lands. This is precisely the shape `author_cast` must already tolerate: it is a
+# best-effort orchestrator that only branches on `accepted` (never on which individual public/hidden
+# field names came back), so no FE code changes were needed to close this race — this test PINS that
+# contract so a future change to `author_cast`'s accept-handling can't silently regress it back into
+# assuming every requested field is echoed back accepted.
+
+def test_l28b_author_cast_tolerates_the_engine_dropping_the_name_field():
+    """Simulates the A1 scenario: this NPC has already been introduced to the player, so the engine's
+    write-back accepts the call but the `publicFields` it reports back omit "name" (only "biography"
+    landed) even though the proposed profile included a (now-refused) name. `author_cast` must still
+    count this houseguest as authored — it never inspects `publicFields`/`hiddenFields`, only
+    `accepted` — and must call `on_authored` exactly as it would for a fully-accepted write."""
+    cast = [{"id": "npc:1", "name": "A One"}]
+    authored_callback_ids = []
+
+    async def llm_fn(messages):
+        return json.dumps({**_FULL, "name": "Marcus Webb"})
+
+    async def write_fn(profile):
+        # The engine received the proposed name (the FE still forwards it — it has no way to know the
+        # houseguest was already introduced) but the response signals only "biography" actually sealed.
+        assert profile.get("name") == "Marcus Webb"
+        return {"accepted": True, "publicFields": ["biography"], "hiddenFields": ["secrets", "trueGoals", "weakness"]}
+
+    n = _run(A.author_cast(cast, llm_fn, write_fn, on_authored=lambda hid: authored_callback_ids.append(hid)))
+    assert n == 1  # still counted as authored — accepted is accepted, regardless of which fields stuck
+    assert authored_callback_ids == ["npc:1"]  # the per-NPC completion callback still fires normally
+
+
 # ── #5 — bounded-concurrency authoring ────────────────────────────────────────
 
 def test_author_cast_authors_all_npcs_with_bounded_concurrency():

@@ -36,7 +36,7 @@ def test_relay_accepts_comp_round_and_forwards_structured_intent(client, monkeyp
     """The structured per-round approach posts engine-direct as `intent` — never parsed from prose."""
     seen = {}
 
-    async def _capture(decision, user=None):
+    async def _capture(decision, user=None, **_kw):
         seen.update(decision)
         return {"started": True, "status": {"pending": None}}
 
@@ -54,7 +54,7 @@ def test_comp_round_is_a_recognized_decision_kind(client, monkeypatch):
     """`comp-round` is in the relay's allow-list (an unknown kind is a 400, not a silent drop)."""
     assert "comp-round" in orwell_routes._DECISION_KINDS if hasattr(orwell_routes, "_DECISION_KINDS") else True
 
-    async def _ok(decision, user=None):
+    async def _ok(decision, user=None, **_kw):
         return {"started": True}
 
     monkeypatch.setattr(orwell_engine, "submit_decision", _ok)
@@ -83,7 +83,7 @@ def test_per_round_prompt_re_issues_as_the_field_narrows(client, monkeypatch):
     forwards each one independently — adaptation is forward, round by round."""
     posted = []
 
-    async def _round(decision, user=None):
+    async def _round(decision, user=None, **_kw):
         posted.append(decision)
         # After resolving round N, the engine surfaces round N+1 (a smaller field) until the last.
         n = len(posted)

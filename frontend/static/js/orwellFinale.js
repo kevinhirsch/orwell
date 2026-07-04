@@ -71,7 +71,12 @@ import * as modalManager from "./modalManager.js";
       <style>
         #orwell-finale {
           width: 240px; display: none;
-          font-family: var(--mono, monospace); font-size: .74rem;
+          /* #733: use the OrwellWindow kit TYPE (sans --ow-ui-font + the --ow-fs-body preset)
+             so the Finale window reads consistent with every other kit window (cast roster,
+             settings) — no bespoke mono/.74rem. The .ow-window root already supplies these, so
+             this just affirms the inheritance; the numeric vote TALLY keeps --mono below (a
+             tabular figure is the one place mono is intentional). */
+          font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem);
         }
         #orwell-finale .ofin-stage { opacity: .6; margin: 0 0 .4rem; letter-spacing: .03em; }
         #orwell-finale .ofin-final {
@@ -82,7 +87,9 @@ import * as modalManager from "./modalManager.js";
           border: 1px solid var(--border, #355a66); border-radius: 8px; padding: .3rem .25rem;
         }
         #orwell-finale .ofin-fin b { display: block; color: var(--fg, #9cdef2); }
-        #orwell-finale .ofin-fin .ofin-tally { font-size: 1.1rem; opacity: .9; }
+        /* #733: the numeric vote tally stays MONO (a tabular figure) — the one intentional
+           mono use; the rest of the window now rides the kit's --ow-ui-font (above). */
+        #orwell-finale .ofin-fin .ofin-tally { font-family: var(--mono, monospace); font-size: 1.1rem; opacity: .9; }
         #orwell-finale .ofin-hd { opacity: .6; margin: .5rem 0 .25rem; letter-spacing: .03em; }
         #orwell-finale .ofin-reveal { margin: .2rem 0; opacity: .9; }
         #orwell-finale .ofin-reveal b { color: var(--fg, #9cdef2); }

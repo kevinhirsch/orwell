@@ -160,6 +160,13 @@ orwell_engine = importlib.import_module("src.orwell_engine")
 # A recognizable off-screen secret — the kind of content that lives ONLY in the Vault.
 _VAULT_SENTINEL = "OFFSCREEN-VAULT-SENTINEL-do-not-leak"
 
+# SEC-4: the Vault-reveal path now requires a GENUINE admin channel, not the AUTH_ENABLED=false
+# bypass. In these unit apps (no auth middleware / no admin session) the loopback internal-tool
+# token is the legitimate authenticated-admin stand-in, so the tests below exercise the REAL
+# reveal path through it. Any request WITHOUT it under auth-off must be refused (the closed hole).
+from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN
+_ADMIN_HDRS = {INTERNAL_TOOL_HEADER: INTERNAL_TOOL_TOKEN}
+
 
 def _vault_app():
     app = FastAPI()
@@ -202,10 +209,12 @@ def test_debug_bundle_default_is_vault_free(monkeypatch, quiet_bundle):
 
 
 def test_debug_bundle_vault_optin_includes_the_vault(monkeypatch, quiet_bundle):
-    # (2) ?vault=1 (admin) — the Vault section is present, sentinel included, clearly marked.
+    # (2) ?vault=1 (authenticated admin) — the Vault section is present, sentinel included, marked.
+    # SEC-4: the reveal now requires a genuine admin channel even under auth-off; the loopback
+    # internal-tool token is the authenticated-admin stand-in in this middleware-less unit app.
     monkeypatch.setenv("AUTH_ENABLED", "false")
     client = TestClient(_vault_app(), raise_server_exceptions=False)
-    r = client.get("/api/admin/debug-bundle?vault=1")
+    r = client.get("/api/admin/debug-bundle?vault=1", headers=_ADMIN_HDRS)
     assert r.status_code == 200
     assert _VAULT_SENTINEL in r.text, "the opt-in bundle must carry the unsealed Vault"
     bundle = json.loads(r.content)
@@ -220,7 +229,7 @@ def test_debug_bundle_vault_optin_alias(monkeypatch, quiet_bundle):
     # The documented alias ?include_vault=1 behaves identically to ?vault=1.
     monkeypatch.setenv("AUTH_ENABLED", "false")
     client = TestClient(_vault_app(), raise_server_exceptions=False)
-    r = client.get("/api/admin/debug-bundle?include_vault=1")
+    r = client.get("/api/admin/debug-bundle?include_vault=1", headers=_ADMIN_HDRS)
     assert r.status_code == 200
     bundle = json.loads(r.content)
     assert "producerVault" in bundle and _VAULT_SENTINEL in r.text
@@ -233,6 +242,35 @@ def test_debug_bundle_vault_optin_is_admin_gated(monkeypatch, quiet_bundle):
     r = client.get("/api/admin/debug-bundle?vault=1")
     assert r.status_code == 403
     assert _VAULT_SENTINEL not in r.text  # refused BEFORE any Vault content is assembled
+
+
+def test_debug_bundle_vault_optin_zero_auth_refused_under_auth_off(monkeypatch, quiet_bundle):
+    # SEC-4 (the closed hole): AUTH_ENABLED=false must NOT let an UNAUTHENTICATED caller dump the
+    # Vault via ?vault=1. Before the fix this returned 200 with the sentinel (a mandate #2 breach
+    # on any network-exposed auth-off box). The Vault reveal must be an authenticated admin channel
+    # regardless of AUTH_ENABLED, so with no admin credential it is refused — nothing leaks.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle?vault=1")  # NO admin/loopback credential
+    assert r.status_code == 403
+    assert _VAULT_SENTINEL not in r.text  # refused BEFORE any Vault content is assembled
+    # The default (Vault-free) bundle is UNCHANGED under auth-off — it still assembles at 200.
+    r2 = client.get("/api/admin/debug-bundle")
+    assert r2.status_code == 200
+    assert _VAULT_SENTINEL not in r2.text
+
+
+def test_ops_producer_vault_zero_auth_refused_under_auth_off(monkeypatch, quiet_bundle):
+    # SEC-4: the sibling status-page "Unseal" endpoint gets the SAME strict gate.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.post("/api/admin/ops/producer-vault")  # unauthenticated
+    assert r.status_code == 403
+    assert _VAULT_SENTINEL not in r.text
+    # With the loopback admin credential the legitimate reveal still works.
+    r2 = client.post("/api/admin/ops/producer-vault", headers=_ADMIN_HDRS)
+    assert r2.status_code == 200
+    assert _VAULT_SENTINEL in r2.text
 
 
 def test_debug_bundle_vault_optin_fail_soft(monkeypatch):
@@ -254,7 +292,7 @@ def test_debug_bundle_vault_optin_fail_soft(monkeypatch):
     monkeypatch.setattr(orwell_engine, "producer_vault", boom)
 
     client = TestClient(_vault_app(), raise_server_exceptions=False)
-    r = client.get("/api/admin/debug-bundle?vault=1")
+    r = client.get("/api/admin/debug-bundle?vault=1", headers=_ADMIN_HDRS)
     assert r.status_code == 200  # never a 500 — the bundle is the operator's last resort
     bundle = json.loads(r.content)
     assert "error" in bundle["producerVault"]

@@ -45,6 +45,33 @@ const DETERMINERS: ReadonlySet<string> = new Set([
   "its", "our", "their", "no", "any", "some", "one", "another", "per", "which", "whichever", "many",
   "few", "several", "both", "either", "neither", "all",
 ]);
+/**
+ * #927 — the FUNCTION WORDS that legitimately INTRODUCE a person reference in engine beat prose: the
+ * small, closed set of verbs/prepositions/conjunctions the season loop interpolates a bare `${player}`
+ * directly after ("…evicts player", "…nominates A and player", "votes for player", "wins over player",
+ * "uses the veto on player"). A genuine engine-interpolated person id is preceded ONLY by a sentence
+ * boundary (nothing) or one of these; it is NEVER the HEAD of a compound noun. The dictionary word
+ * "player" in a vocation / strategy phrase ("poker player", "social player", "the strongest player")
+ * is preceded by a CONTENT modifier (an adjective/noun) — which is, by construction, NOT in this set.
+ * So a bare-word id whose preceding word is a real word that is NEITHER a boundary NOR an introducer is
+ * the common noun and is left alone (this widens the #845 determiner-only guard, which let "poker
+ * player" through). English's function-word vocabulary is finite and stable, so this set is durable;
+ * a NEW beat template that interpolates the bare player id after a novel verb must add that verb here
+ * (the humanize unit test, covering BOTH "evicts player" → resolves and "poker player" → not, is the
+ * guard). The whole-token boundary still protects the plural "players" independently.
+ */
+const ID_INTRODUCERS: ReadonlySet<string> = new Set([
+  // beat verbs that take a PERSON object (from src/engine/liveSeason.ts content templates:
+  // "evicts ${evictee}", "nominates ${a} and ${b}", "votes for ${voted}", "saves ${x}", …).
+  "evict", "evicts", "evicted", "evicting", "name", "names", "named", "nominate", "nominates",
+  "nominated", "nominating", "vote", "votes", "voted", "save", "saves", "saved", "beat", "beats",
+  "join", "joins", "tell", "tells", "told",
+  // prepositions / conjunctions that directly precede a person reference in beat prose
+  // ("votes for X", "uses the veto on X", "wins over X", "A and B", "X with/without/against Y").
+  "for", "on", "over", "to", "with", "without", "against", "and", "or", "nor",
+  // the staged-vote reading "the vote is read: player" — `precedingWord` lands on "read".
+  "read",
+]);
 /** Is this id a plain alphabetic word (no `:`), i.e. dictionary-collision-prone (the `player` case)? */
 function isBareWordId(id: string): boolean {
   return /^[a-z]+$/i.test(id);
@@ -54,6 +81,21 @@ function precedingWord(content: string, offset: number): string {
   const before = content.slice(0, offset);
   const m = /([A-Za-z]+)[^A-Za-z]*$/.exec(before);
   return m ? m[1]!.toLowerCase() : "";
+}
+/**
+ * #927/#845 — should a matched BARE-WORD id (the `player` collision) be left as the ordinary English
+ * word rather than resolved to a name? Yes when the preceding word marks it as a common noun:
+ *   - it directly follows an English DETERMINER ("every player", "a player", "this player" — #845); OR
+ *   - it follows ANY other real content word that is NOT a function-word introducer ("poker player",
+ *     "social player", "the strongest player" — #927: the head of a compound noun).
+ * It is resolved (a genuine person id) only at a clause boundary (no preceding word) or directly after
+ * a known ID_INTRODUCER (a beat verb / preposition / conjunction). Colon-bearing ids never reach here.
+ */
+function bareWordIdIsCommonNoun(content: string, offset: number): boolean {
+  const prev = precedingWord(content, offset);
+  if (prev === "") return false;            // clause/content start → a genuine interpolated person id
+  if (DETERMINERS.has(prev)) return true;   // "the/a/every player" → the ordinary word (#845)
+  return !ID_INTRODUCERS.has(prev);         // a content modifier ("poker player") → common noun (#927)
 }
 
 /**
@@ -68,11 +110,13 @@ function precedingWord(content: string, offset: number): string {
  *   - one left-to-right scan with non-overlapping matches reproduces the sequential `replace` result —
  *     names carry no id tokens, so an earlier substitution can never create a new match (same as before).
  *
- * #845: a bare-word id (the `player` collision) is ADDITIONALLY required to NOT directly follow an
- * English determiner ("every player" → the ordinary word, left alone), so a real id token
- * ("player wins…", "the vote is read: player") still resolves but a plain dictionary word never does.
- * Colon-bearing ids (`npc:3`) are unaffected — they never collide with a word — so common content is
- * byte-identical.
+ * #845/#927: a bare-word id (the `player` collision) is ADDITIONALLY required to read as a genuine
+ * person reference — at a clause boundary or directly after a known function-word introducer (a beat
+ * verb / preposition / conjunction). A bare id that follows a DETERMINER ("every player" — #845) or
+ * any other CONTENT modifier ("poker player" / "social player" — #927, the head of a compound noun) is
+ * the ordinary word and is left alone. So a real id token ("player wins…", "the vote is read: player",
+ * "npc:1 evicts player") still resolves while a dictionary phrase never does. Colon-bearing ids
+ * (`npc:3`) are unaffected — they never collide with a word — so common content is byte-identical.
  */
 export function makeIdHumanizer(
   entities: ReadonlyArray<{ id: string; name: string }>,
@@ -88,8 +132,9 @@ export function makeIdHumanizer(
   const re = new RegExp(`(?<![\\w:])(?:${alternation})(?![\\w:])`, "g");
   return (content) =>
     content.replace(re, (m, offset: number) => {
-      // A bare-word id that directly follows a determiner is the ordinary English word — skip it (#845).
-      if (isBareWordId(m) && DETERMINERS.has(precedingWord(content, offset))) return m;
+      // A bare-word id used as a common noun (after a determiner OR a content modifier) is the
+      // ordinary English word — skip it ("every player" #845; "poker player" #927).
+      if (isBareWordId(m) && bareWordIdIsCommonNoun(content, offset)) return m;
       return byId.get(m) ?? m;
     });
 }

@@ -168,7 +168,12 @@ def test_appearance_card_order_css_no_longer_counts_a_theme_card():
 
 # ── runtime: boot + open settings — image options ⊆ chat options ──────────────
 
-PORT = int(os.environ.get("ORWELL_H2H3_PORT", "8967"))
+# #925: a DISTINCT default port from test_h2b_all_model_pools.py (which also defaults to 8967).
+# Run back-to-back, a lingering h2b uvicorn on 8967 that hasn't released the socket would let this
+# test's _boot() connect to the WRONG (h2b-seeded) app — so the convergence/select-population waits
+# below could never satisfy this test's assertions and time out (a flake that compounded the orphan-
+# scrim lockup these two gates were diagnosed under). A separate port removes the cross-test race.
+PORT = int(os.environ.get("ORWELL_H2H3_PORT", "8968"))
 
 
 def _boot(env):
@@ -294,13 +299,24 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
                     }"""
                 )
 
-            deadline = time.monotonic() + 30
+            # 60s (was 30): the onboarding→Settings convergence is multi-step and a loaded CI runner
+            # runs it ~2× slower than local — 30s was the residual flake (#925/#1148 family). The loop
+            # is idempotent (dismiss whatever's up, retry the gear); it just needed more patience.
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 if _settings_open():
                     break
                 if _overlay_present():
                     page.keyboard.press("Escape")
-                    page.wait_for_timeout(250)  # cover the kit's ~190ms close fade + teardown
+                    # Wait for the WHOLE overlay (window AND scrim) to detach before retrying — racing
+                    # the kit's teardown on a slow runner burned iterations against the budget.
+                    try:
+                        page.wait_for_function(
+                            "() => !document.getElementById('orwell-onboarding')"
+                            " && !document.querySelector('[data-ow-scrim]')",
+                            timeout=3000)
+                    except Exception:
+                        pass
                     continue
                 # No overlay in the way — try to open Settings. Use a short per-attempt
                 # timeout so a wizard re-mounting onto the gear mid-click just loops back to
@@ -310,10 +326,25 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
                 except Exception:
                     pass
                 page.wait_for_timeout(150)
-            assert _settings_open(), (
-                "Settings never opened past the onboarding overlay — if a scrim outlived "
-                "its window it would block this forever (a kit teardown bug, not a race)"
-            )
+            if not _settings_open():
+                # Instrument the timeout so a future flake is diagnosable: what was still blocking —
+                # a holding card, the setup wizard, a lingering scrim (the orphan #925 sweeps), a
+                # half-open modal? Turns the next flake into a localized signal, not a bare mystery.
+                diag = page.evaluate(
+                    """() => {
+                      const ob = document.getElementById('orwell-onboarding');
+                      const m = document.getElementById('settings-modal');
+                      return {
+                        onboarding: ob ? (ob.getAttribute('data-ob-holding') !== null ? 'holding'
+                                          : ob.getAttribute('data-ob-setup') !== null ? 'setup' : 'other') : null,
+                        scrims: document.querySelectorAll('[data-ow-scrim]').length,
+                        settingsConnected: !!(m && m.isConnected),
+                        settingsDisplay: m ? getComputedStyle(m).display : null,
+                      };
+                    }"""
+                )
+                raise AssertionError(
+                    f"Settings never opened past the onboarding overlay — blocking state: {diag}")
             page.wait_for_function(
                 """() => {
                   const ep = document.getElementById('set-defaultEpSelect');

@@ -128,6 +128,31 @@ def test_loser_window_gets_a_canonical_session_adopt_signal():
     assert '{"type": "canonical_session", "id": run_key}' in src
 
 
+def test_casting_turn_is_single_flight_not_chained():
+    """F5 (#1148 / #1086 family): opening a SECOND session during CASTING must not re-run the producer
+    turn. Casting keys its run on the per-tab session (GAP-2-b1), but the FE binds that as the canonical
+    game session (0064 §C) and a 2nd window CONVERGES its view onto it — so a kickoff cue, a stream-drop
+    auto-recover, or the converged window's own send can POST a SECOND casting turn against the SAME
+    run_key WHILE the first is streaming. Under the game-turn QUEUE policy (queue=_framed) those
+    duplicates do not cancel — they CHAIN, each a FRESH producer generation reacting to the same input
+    (the reported "opened a 2nd session → the casting question re-ran ~4×"). The fix: a casting turn
+    (framed but NOT game_active) is SINGLE-FLIGHT — if a generation is already in flight for run_key, it
+    attaches the duplicate READ-ONLY (publish run-started + subscribe) instead of starting another. The
+    started-game two-window path (game_active=True) is untouched and still queue-chains DISTINCT turns."""
+    src = _read("routes", "chat_routes.py")
+    # casting = framed AND season not started; guarded on an already-in-flight run for the same key.
+    assert '_casting = _framed and not bool(getattr(ctx, "game_active", False))' in src
+    assert "if _casting and agent_runs.is_active(run_key):" in src
+    # The guard must SHORT-CIRCUIT (attach read-only) BEFORE the agent_runs.start below — so an
+    # in-flight casting run is MIRRORED, never chained into a second producer generation.
+    guard = src.split("_casting = _framed")[1].split("agent_runs.start(")[0]
+    assert 'session_events.publish(run_key, "run-started")' in guard
+    assert "agent_runs.subscribe(run_key)" in guard
+    assert "return StreamingResponse" in guard, (
+        "the casting single-flight guard must RETURN (attach read-only) before reaching agent_runs.start"
+    )
+
+
 def test_message_saved_carries_server_timestamp():
     """§2.2/§3.3: the message_saved completion event carries the SERVER-minted timestamp so every
     window renders the identical time string (the sender no longer keeps its own `new Date()`)."""
@@ -201,11 +226,13 @@ def test_subscribe_replays_a_run_started_published_before_connect():
 
 
 def test_ring_replays_recent_invitations_but_not_unbounded():
-    """The ring is bounded and only carries invitation-class events (run-started / message-added) —
-    not every event type, and not an unbounded log."""
+    """The ring carries reconcile-invitation events (run-started / message-added / game-updated) —
+    NOT every event type, and not an unbounded log. `game-updated` is replayed (F5 first-turn edge):
+    a window opening mid-first-turn still gets the HUD-refetch ping it would otherwise miss."""
     async def main():
         sid = "adr0012-ring-bounded"
-        # A non-invitation event must NOT be ringed (it's not an attach signal).
+        # A non-invitation event (layout sync, 0064 §F) must NOT be ringed (it's not an attach/reconcile signal).
+        session_events.publish(sid, "layout-changed")
         session_events.publish(sid, "game-updated")
         session_events.publish(sid, "message-added", {"id": "x", "seq": 0})
         return await _drain_subscribe(sid)
@@ -213,7 +240,9 @@ def test_ring_replays_recent_invitations_but_not_unbounded():
     out = _run(main())
     replayed = [ev for ev in out if ev.startswith("event:") and "connected" not in ev]
     assert any("message-added" in ev for ev in replayed), "an invitation event is replayed"
-    assert not any("game-updated" in ev for ev in replayed), \
+    assert any("game-updated" in ev for ev in replayed), \
+        "game-updated is a reconcile invitation — replayed so a mid-first-turn joiner re-fetches its HUD (the F5 edge)"
+    assert not any("layout-changed" in ev for ev in replayed), \
         "a non-invitation event must NOT be ringed (avoid reconnect noise)"
 
 
@@ -325,6 +354,33 @@ def test_chat_client_shared_canonical_render_shape():
     assert chat.count("markdownModule.processWithThinking(") >= 2
     # the settled message is finalized through the one canonical bubble builder.
     assert "chatRenderer.addMessage('assistant', _combined(), model, meta_);" in chat
+
+
+def test_chat_client_mirror_does_not_full_repaint_per_delta():
+    """ADR 0012 §3.3 / refactor-roadmap R2 — the LIVE-streaming-render-parity gap (FAST tripwire).
+
+    test_chat_client_shared_canonical_render_shape pins the SETTLED shape (reasoning in a closed
+    <think> accordion) and that both paths CALL processWithThinking — but it is silent on the live
+    streaming MECHANISM, and that silence WAS the two-window 'scratch and grind'. The sender's primary
+    loop renders deltas through createStreamRenderer (freeze finalized blocks + token-fade incremental
+    tail); the observer's resumeStream path USED to full-innerHTML-repaint the whole bubble on EVERY
+    delta (renderDelta). Same shared token stream, two different live render engines → the windows
+    diverged visibly while streaming and only converged at settle when both rebuilt from /api/history.
+
+    R2 unified them: resumeStream now feeds the SHARED incremental renderer (`_renderLiveStream` →
+    createStreamRenderer) — reply into `.live-reply-content`, reasoning into a collapsed accordion (the
+    channel split) — so the observer streams through the same machinery the sender does. This is the
+    cheap source-pin tripwire (forbid the per-delta full-repaint in the mirror path); the behaviour-
+    true proof is the two-window harness docs/audits/playtest-harness/mirror_live_parity.mjs
+    (run_mirror_gate.sh), which measures that B renders DURING A's stream through the same incremental
+    renderer. GREEN once R2 unified the two live render paths."""
+    chat = _read("static", "js", "chat.js")
+    # the observer must NOT full-repaint the bubble on every delta (that is renderDelta today).
+    assert "contentDiv.innerHTML = markdownModule.processWithThinking(" not in chat, (
+        "resumeStream still full-innerHTML-repaints per delta instead of the shared incremental "
+        "createStreamRenderer — this IS the two-window live-render divergence (R2); see "
+        "docs/audits/playtest-harness/mirror_live_parity.mjs."
+    )
 
 
 def test_chat_client_adopts_canonical_session_after_stream():
@@ -494,10 +550,10 @@ def test_pre_stream_provider_error_persists_friendly_fallback_not_raw_error():
     is the single string both windows must converge to. _empty_response_fallback is the source."""
     from src.agent_loop import _empty_response_fallback
     # empty content + no tools → the friendly fallback (yielded AND persisted as full_response).
-    final, chunk, _retry = _empty_response_fallback("", "", [])
+    final, chunk, _retry, _fr = _empty_response_fallback("", "", [])
     assert "empty response" in final.lower(), "the persisted/peer text is the friendly fallback"
     assert "Error 503" not in final, "the raw provider error is NEVER the persisted text"
     assert chunk and "delta" in chunk, "the fallback is also streamed as a delta (so a fresh window sees it)"
     # real content is untouched (no fallback) — the error path is the ONLY divergence source here.
-    final2, chunk2, _retry2 = _empty_response_fallback("real narration", "", [])
+    final2, chunk2, _retry2, _fr2 = _empty_response_fallback("real narration", "", [])
     assert final2 == "real narration" and chunk2 is None

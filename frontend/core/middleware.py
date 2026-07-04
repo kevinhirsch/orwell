@@ -55,6 +55,41 @@ def require_admin(request: Request):
         raise HTTPException(403, "Admin only")
 
 
+def require_vault_reveal(request: Request):
+    """SEC-4 — the STRICT gate for the ONE sanctioned Vault-unseal path (mandate #2's
+    ``producerVault`` DEBUG override): the ``/api/admin/ops/producer-vault`` unseal and the
+    ``/api/admin/debug-bundle?vault=1`` opt-in.
+
+    Unlike :func:`require_admin`, this does NOT honor the blanket ``AUTH_ENABLED=false`` bypass.
+    The Vault Wall (mandate #2) walls secret state from the player AND the admin/God-Mode human;
+    the sole debug reveal must be an *authenticated admin channel*, never the auth-off free-for-all
+    (on a network-exposed, auth-disabled box that bypass let ANY unauthenticated caller dump the
+    live Vault with a single URL — a direct Vault Wall violation). So: regardless of AUTH_ENABLED,
+    a genuine admin session (or the in-process loopback token) is required; anything else is 403.
+
+    On an auth-off single-player build there is no admin identity, so the web reveal is simply
+    unavailable — the correct posture (spoilers ruin the game above all else). Operator debugging
+    still has the loopback internal-tool token and the engine's own separate admin token."""
+    # In-process loopback bypass only (same two paths as require_admin) — a process secret, not
+    # attacker-reachable. Everything else must be a real authenticated admin.
+    try:
+        hdr = request.headers.get(INTERNAL_TOOL_HEADER)
+        if hdr and secrets.compare_digest(hdr, INTERNAL_TOOL_TOKEN):
+            return
+        if getattr(request.state, "current_user", None) == "internal-tool":
+            return
+    except Exception:
+        pass
+
+    # NOTE: deliberately NO ``AUTH_ENABLED=false`` short-circuit here.
+    auth_mgr = getattr(request.app.state, "auth_manager", None)
+    if not auth_mgr or not auth_mgr.is_configured:
+        raise HTTPException(403, "Vault unseal requires an authenticated admin")
+    user = getattr(request.state, "current_user", None)
+    if not user or not auth_mgr.is_admin(user):
+        raise HTTPException(403, "Vault unseal requires an authenticated admin")
+
+
 def require_entitlement(request: Request, entitlement: str):
     """Raise 403 unless the current user holds the named entitlement (feature 0029).
 

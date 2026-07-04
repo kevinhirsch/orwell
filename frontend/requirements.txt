@@ -52,3 +52,4 @@ croniter
 ddgs
 pytest
 pytest-asyncio
+playwright==1.56.0

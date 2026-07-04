@@ -69,10 +69,15 @@ export interface ReconcileSink {
   currentWeek?: number;
   /** Record a jury-management demerit: `wronged` will weigh `breaker`'s betrayal in their later lean. */
   juryDemerit?: (wronged: EntityId, breaker: EntityId, deal: Deal) => void;
-  /** Record the witnessed reveal of a break into the wronged party's knowledge (returns its event id). */
-  reveal?: (wronged: EntityId, breaker: EntityId, deal: Deal) => string | undefined;
+  /**
+   * Record the witnessed reveal of a break into the wronged party's knowledge (returns its event id).
+   * Receives the TRIGGERING action's `kind` (A7/E12) so the caller can seal ballot-tied attribution —
+   * a break caused by a `vote-evict` must not name the breaker before the same terminal gate the
+   * primary eviction reveal (E12) and the 0048 retrospective use, or it deanonymizes a sealed ballot.
+   */
+  reveal?: (wronged: EntityId, breaker: EntityId, deal: Deal, actionKind: BindingAction["kind"]) => string | undefined;
   /** Whether the wronged party witnesses/learns this break (default: true for a public ceremony break). */
-  witnessed?: (wronged: EntityId, breaker: EntityId, deal: Deal) => boolean;
+  witnessed?: (wronged: EntityId, breaker: EntityId, deal: Deal, actionKind: BindingAction["kind"]) => boolean;
 }
 
 export interface Reconciliation {
@@ -149,7 +154,12 @@ export class DealLedger {
         const wronged = wrongedParty(deal, action);
         deal.status = "broken";
         broken.push(deal);
-        if (wronged) this.applyBreak(deal, wronged, action.actor, sink);
+        // A7/E12: a break TRIGGERED by the SEALED eviction ballot (and not the player's own vote)
+        // must not surface via the deal's outward STATUS either — `dealView` reads this to hold the
+        // projection at "open" until the retrospective unseals it (mirrors the reveal-event seal in
+        // `applyBreak` below). A break from a PUBLIC action (nominate/replace) is never sealed.
+        if (action.kind === "vote-evict" && action.actor !== PLAYER) deal.sealedBallot = true;
+        if (wronged) this.applyBreak(deal, wronged, action.actor, action.kind, sink);
       } else if (actionHonors(deal, action)) {
         this.applyHonor(deal, action.actor, sink);
         // The horizon (E43): a safety/vote promise runs through ITS week's eviction; the vote is
@@ -197,7 +207,13 @@ export class DealLedger {
   }
 
   /** The betrayal-shock fold + jury demerit + (if witnessed) the reveal event. */
-  private applyBreak(deal: Deal, wronged: EntityId, breaker: EntityId, sink: ReconcileSink): void {
+  private applyBreak(
+    deal: Deal,
+    wronged: EntityId,
+    breaker: EntityId,
+    actionKind: BindingAction["kind"],
+    sink: ReconcileSink,
+  ): void {
     // 0026 + 0109: the wronged party's hidden read of the breaker takes the large, slow-decaying
     // betrayal hit — SCALED by how much negotiated life the deal had left (a near/at-end or vague break
     // hurts less; a freshly-renewed one more). No duration / no week ⇒ scale 1 ⇒ byte-identical to 0039.
@@ -206,10 +222,12 @@ export class DealLedger {
     }
     // 0014: a discrete jury-management demerit (weighs that juror's later lean against the breaker).
     sink.juryDemerit?.(wronged, breaker, deal);
-    // 0002: the wronged party learns it as a witnessed event when they see/learn the break.
-    const witnessed = sink.witnessed ? sink.witnessed(wronged, breaker, deal) : true;
+    // 0002: the wronged party learns it as a witnessed event when they see/learn the break. `actionKind`
+    // threads through so the sink can seal a `vote-evict`-triggered reveal (A7/E12) rather than name the
+    // breaker while the ballot that produced it is still sealed.
+    const witnessed = sink.witnessed ? sink.witnessed(wronged, breaker, deal, actionKind) : true;
     if (witnessed) {
-      const evId = sink.reveal?.(wronged, breaker, deal);
+      const evId = sink.reveal?.(wronged, breaker, deal, actionKind);
       if (evId) deal.resolvedEventId = evId;
     }
   }

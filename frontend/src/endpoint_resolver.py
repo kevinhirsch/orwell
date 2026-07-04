@@ -162,9 +162,24 @@ def _anthropic_api_root(base: str) -> str:
     return base
 
 
+def is_fal_url(url: str) -> bool:
+    """True for a fal.ai endpoint base (the Seedream image provider — issue #1153 / ADR 0016 §C).
+
+    fal is NOT an OpenAI-compatible chat provider: it has no `/chat/completions` and uses a
+    ``Authorization: Key <FAL_KEY>`` header (not ``Bearer``). Detection is hostname-based (so a path
+    or query that merely contains "fal.run" can't misclassify) and covers the run host + the queue
+    host fal also serves from."""
+    return _host_match(url, "fal.run", "fal.ai", "queue.fal.run")
+
+
 def build_chat_url(base: str) -> str:
     """Return the correct chat endpoint URL for a given base."""
     base = resolve_url(base)
+    # fal.ai is an IMAGE-only provider with no chat path — return the base unchanged so the
+    # portrait pipeline (which detects fal by the URL) appends the model slug itself. Appending
+    # `/chat/completions` here would build a non-existent fal URL.
+    if is_fal_url(base):
+        return base.rstrip("/")
     provider = _detect_provider(base)
     if provider == "anthropic":
         return _anthropic_api_root(base) + "/v1/messages"
@@ -186,6 +201,10 @@ def build_models_url(base: str) -> str:
 
 def build_headers(api_key: Optional[str], base: str) -> Dict[str, str]:
     """Build auth headers for an endpoint."""
+    # fal.ai authenticates with ``Authorization: Key <FAL_KEY>`` (NOT ``Bearer``) — issue #1153.
+    # Detected before the OpenAI-compatible default so a fal base never gets a Bearer header.
+    if is_fal_url(base):
+        return {"Authorization": f"Key {api_key}"} if api_key else {}
     provider = _detect_provider(base)
     headers: Dict[str, str] = {}
     if provider == "anthropic":

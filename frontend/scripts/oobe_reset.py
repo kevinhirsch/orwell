@@ -15,7 +15,7 @@ What "API-key / LLM-provider config" means here (and where it lives):
   * ``data/settings.json`` → the model/endpoint SELECTION keys are RESET to the OOB defaults
     (issue #860): a reset does NOT carry the previously-selected models — only operational flags
     (image_gen_enabled, image_quality, vision_enabled) survive. After the reset the defaults stand
-    (narrator deepseek/deepseek-v4-pro on OpenRouter, portrait gemini-2.5-flash-image), and the
+    (narrator z-ai/glm-4.7 on OpenRouter, portrait google/gemini-3.1-flash-image), and the
     preserved endpoint(s) + key(s) keep the provider usable (resolution binds the empty default
     endpoint to the first enabled endpoint — the preserved OpenRouter one).
   * ``data/.app_key`` → the Fernet key that decrypts ``model_endpoints.api_key`` (and the
@@ -52,7 +52,7 @@ import sys
 # Reset semantics (issue #860, owner ruling 2026-06-25): a factory/OOBE reset preserves ONLY the
 # API key(s) + the provider endpoint record(s) (the model_endpoints rows, carried separately) — it
 # does NOT preserve the SELECTED MODELS. After a reset the model selections revert to the OOB
-# defaults (narrator deepseek/deepseek-v4-pro on OpenRouter, portrait gemini-2.5-flash-image), so a
+# defaults (narrator z-ai/glm-4.7 on OpenRouter, portrait google/gemini-3.1-flash-image), so a
 # stale/placeholder pick (e.g. the "sakana/fugu-ultra" the owner was stuck on) can never ride across
 # a reset. The provider's API key stays usable because the endpoint record + its encrypted key are
 # preserved, and `default_endpoint_id`/`image_endpoint_id` reverting to "" binds resolution to the

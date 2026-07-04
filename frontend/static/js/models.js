@@ -587,7 +587,7 @@ export async function refreshModels(force = false) {
       // Set the static line first (fail-open: the hero never blocks on the engine), then replace it
       // with the engine's snarky, state-aware Big Brother tagline (0033) when it answers.
       if (welcomeSub) {
-        welcomeSub.textContent = 'The house is waiting.';
+        welcomeSub.textContent = 'The feeds are live. The house is waiting.';
         fetch('/api/orwell/tagline')
           .then((r) => (r.ok ? r.json() : null))
           .then((d) => { if (d && typeof d.text === 'string' && d.text.trim()) welcomeSub.textContent = d.text.trim(); })

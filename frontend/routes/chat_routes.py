@@ -42,6 +42,8 @@ from routes.chat_helpers import (
     _enforce_chat_privileges,
     auto_escalation_withhold,
     ensure_turn_recorded,
+    publish_game_updated_after_turn,
+    last_beat_seq,
     discard_last_user_message,
     unmark_session_framed,
     _last_message_ts,
@@ -1499,6 +1501,9 @@ def setup_chat_routes(
                 _agent_rounds = 0
                 _agent_tool_calls = 0
                 _agent_tools_called: List[str] = []  # E22: which tools actually ran this turn
+                # 0064 §B/D / F5: snapshot the user's last-seen engine beatSeq BEFORE the turn so the
+                # end-of-turn HUD-parity push can tell a committed mutation from a no-op/OOC turn.
+                _beat_seq_before = last_beat_seq(ctx.user)
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
                 _actual_model = None
@@ -1604,9 +1609,31 @@ def setup_chat_routes(
                             # narration and zero engine writes gets a bounded fallback
                             # recordInteraction so the beat has consequence and memory.
                             if ctx.game_active and full_response:
-                                asyncio.create_task(ensure_turn_recorded(
+                                # 0064 §B/D / ship-gate F5 (status/gadget half): when THIS turn already
+                                # committed a mutation (a game-engine write tool ran, or the beatSeq
+                                # advanced via the FE error-correction belts), push `game-updated` NOW
+                                # so peer windows reconcile their HUD instantly instead of polling. The
+                                # E22/0055 `recordInteraction` fallback fires fire-and-forget below and
+                                # mutates AFTER this point, so chain a second push onto its task — only
+                                # when it actually recorded (True). Both pushes are mutation-gated +
+                                # fail-soft + Vault-free (the SENDER's own HUD already refreshed
+                                # client-side; this is the PEER push the chat path was missing).
+                                publish_game_updated_after_turn(
+                                    ctx.user, _beat_seq_before, _agent_tools_called,
+                                )
+
+                                def _push_after_fallback(task, _u=ctx.user):
+                                    try:
+                                        if task.result():
+                                            from src import orwell_game_session
+                                            orwell_game_session.publish_game_updated(_u)
+                                    except Exception:
+                                        pass
+
+                                _rec_task = asyncio.create_task(ensure_turn_recorded(
                                     ctx.user, message, full_response, _agent_tools_called,
                                 ))
+                                _rec_task.add_done_callback(_push_after_fallback)
                             if full_response:
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
@@ -1740,6 +1767,31 @@ def setup_chat_routes(
         # defensive belt for the rare window that POSTed BEFORE it converged.
         _framed = bool(getattr(ctx, "framed", False))
         run_key = (getattr(ctx, "canonical_session", None) or session) if _framed else session
+
+        # F5 (casting second-session re-run / #1086 family): a CASTING turn (framed but the season is
+        # NOT started) must be SINGLE-FLIGHT per run_key — never chain. Casting keys its run on the
+        # per-tab `session` (GAP-2-b1), but the FE binds that session as canonical (0064 §C) and a
+        # second window CONVERGES its view onto it (sessions.js / onboarding) — so a kickoff cue,
+        # stream-drop auto-recover, or just the converged window's own send can POST a SECOND casting
+        # turn against the SAME run_key WHILE the first is still streaming. With the game-turn QUEUE
+        # policy below (`queue=_framed`) those duplicates do not cancel — they CHAIN, and each chained
+        # run is a FRESH producer generation reacting to the same input. The reported bug: opening a 2nd
+        # session mid-casting made the producer turn re-run ~4× (the original + the chained duplicates).
+        # At-most-once fix: if a casting generation is ALREADY in flight for this run_key, do NOT start
+        # another — publish the run-started invitation and SUBSCRIBE the duplicate to the existing run
+        # (read-only mirror). The started-game two-window path is untouched: a STARTED game still
+        # queue-chains DISTINCT turns (game_active=True skips this guard). Idempotent + fail-soft.
+        _casting = _framed and not bool(getattr(ctx, "game_active", False))
+        if _casting and agent_runs.is_active(run_key):
+            logger.info("[orwell] casting turn for %s already in flight — attaching read-only (at-most-once)", run_key)
+            session_events.publish(run_key, "run-started")
+            if run_key != session:
+                async def _adopt_then_mirror() -> AsyncGenerator[str, None]:
+                    yield f'data: {json.dumps({"type": "canonical_session", "id": run_key})}\n\n'
+                    async for ev in agent_runs.subscribe(run_key):
+                        yield ev
+                return StreamingResponse(_adopt_then_mirror(), media_type="text/event-stream")
+            return StreamingResponse(agent_runs.subscribe(run_key), media_type="text/event-stream")
 
         # 0064 Part C (Messenger model): a GAME-framed turn QUEUES behind any in-flight run for the
         # CANONICAL session instead of cancelling it — two devices on the one game chat serialize

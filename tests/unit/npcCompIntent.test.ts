@@ -6,7 +6,7 @@ import { RelationshipModel } from "../../src/engine/relationships";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { PLAYER, npc } from "../../src/domain/ids";
 import type { EntityId } from "../../src/domain/ids";
-import type { Stats } from "../../src/engine/characterFactory";
+import type { Stats } from "../../src/engine/season";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 
 /**

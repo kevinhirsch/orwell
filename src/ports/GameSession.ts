@@ -113,6 +113,14 @@ export interface HouseguestCard {
   ethnicity?: string;
   genderPresentation?: "man" | "woman" | "nonbinary";
   outOrientation?: string;
+  /**
+   * PUBLIC, Vault-FREE provenance flag (#1067): is this card's deep profile the model-AUTHORED one or the
+   * seeded deterministic floor? Mirrors the persisted `deepProfileAuthored` — `true` once `recordCastProfile`
+   * has authored a richer PUBLIC facet for this houseguest, otherwise absent (a floor character). It says
+   * NOTHING secret — only "has the FE cast-authoring write-back landed yet" — so the FE backfill can target
+   * the still-floor cards. It is NOT hidden content and is safe on the player-facing roster.
+   */
+  authored?: boolean;
 }
 
 /**

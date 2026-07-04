@@ -33,6 +33,15 @@ DEFAULT_SETTINGS = {
     # ADR 0006 - the in-game time-of-day clock + nightly sleep economy (the engine's ORWELL_TIME_OF_DAY).
     # ON by default; the settings switch flips it on the LIVE engine (admin setTimeOfDay) with no restart.
     "time_of_day_enabled": True,
+    # #1154 / ADR 0016 §D - FORCE the engine call (tool_choice) at the closed-set, ENGINE-OWNED beats
+    # where a missed call is catastrophic: runCompetition (read the comp winner) at a competition phase
+    # and advanceGame at a stalled ceremony/eviction advance-phase (incl. the goodbye-message/eviction
+    # drain). NEVER forces submitDecision (that carries the PLAYER's explicit pick) and is suppressed by
+    # any open player pending. ON by default; this is the runtime KILL-SWITCH so forcing can be disabled
+    # without a redeploy (read per-turn, no restart). OFF ⇒ the agent loop never sends tool_choice,
+    # falling back to the spontaneous call + the reactive belts (stall-nudge, forced advanceGame,
+    # _auto_record_scene) exactly as before this feature.
+    "force_tool_choice_at_beats": True,
     # #764 - the animated background SOURCE behind the (pre-auth) login glass panel.
     # Cosmetic-only enum; the login page reads it via the PUBLIC GET
     # /api/auth/login-background. One of: gradient (default) | photo | particles | bundled.
@@ -52,10 +61,12 @@ DEFAULT_SETTINGS = {
     "login_particles_color": "",       # blank ⇒ default neutral white (client floor)
     "image_gen_enabled": True,
     # OOB default image model. OpenRouter is the default provider and serves Google's Gemini
-    # flash-image models via /chat/completions; gemini-2.5-flash-image is the out-of-box pick.
+    # flash-image models via /chat/completions; gemini-3.1-flash-image is the out-of-box pick —
+    # newest-generation Gemini photorealism at ~current-default cost (~1.2x gemini-2.5-flash-image,
+    # ~4x cheaper than gemini-3-pro-image), and it does reference-image identity-carry on the same key.
     # (Overridable in Settings → Image generation; the "Auto-detect" option resolves to the same
     # family — see IMAGE_AUTODETECT_CANDIDATES in src/ai_interaction.py.)
-    "image_model": "google/gemini-2.5-flash-image",
+    "image_model": "google/gemini-3.1-flash-image",
     "image_quality": "medium",
     "vision_model": "",
     "vision_enabled": True,
@@ -140,9 +151,10 @@ DEFAULT_SETTINGS = {
     "agent_stream_timeout_seconds": 300,
     # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
     # reasoning budget. Maps a call class to a reasoning effort. Defaults to the
-    # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1): narration &
-    # casting = medium (quality-sensitive, player-facing), background-authoring =
-    # low (background flavor), and **utility-extraction = off** — pure JSON
+    # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1), AMENDED by ADR 0016: casting =
+    # medium (quality-sensitive, player-facing), narration = **low** (GLM-4.7 narrator — see the
+    # inline note below), background-authoring = low (background flavor), and **utility-extraction =
+    # off** — pure JSON
     # extraction/classification whose prompts forbid thinking; the 2026-06-21 I/O
     # trace showed its reasoning tokens wasted.
     # Valid classes are exactly token_policy.CALL_CLASSES; valid efforts are
@@ -156,7 +168,12 @@ DEFAULT_SETTINGS = {
     # get_setting("reasoning_budget", {}) → token_policy.resolve_token_policy();
     # edit per class at runtime via the Token Economy settings card or POST /api/settings.
     "reasoning_budget": {
-        "narration": "medium",
+        # ADR 0016: "low" (was "medium") for the GLM-4.7 narrator. GLM-4.7's tool-calling rides on
+        # INTERLEAVED THINKING — it reasons before each tool call/action — so a small reasoning budget
+        # is what lets it DECIDE which engine tool to call ("off" would strip that mechanism and regress
+        # "call the tool when we need to"; "low" keeps it at modest cost/latency). Runtime-editable from
+        # the Default Chat Model settings card (and the Token Economy card) — both write this key.
+        "narration": "low",
         "utility-extraction": "off",
         "casting": "medium",
         # #1007: OFF, not "low". Cast authoring is structured JSON extraction, not a reasoning
@@ -176,14 +193,26 @@ DEFAULT_SETTINGS = {
     # 0 or 10_000_000 can never become the live cap. A class absent from the map uses the code default.
     # Read via get_setting("max_tokens_budget", {}) → token_policy.resolve_token_policy(); edit per class
     # at runtime via the Token Economy settings card or POST /api/settings. Player never sees these.
+    #
+    # A9 (ship-blocker, 2026-07-03 audit, 6x corroborated): narration/casting are DELIBERATELY ABSENT
+    # here. token_policy.resolve_token_policy treats any in-band value under this key as an EXPLICIT
+    # ADMIN OVERRIDE that always wins over the class default — so seeding "narration": 4096 /
+    # "casting": 2048 silently re-activated the exact #835/#620 NARR-5 truncation vector token_policy's
+    # own _DEFAULT_MAX_TOKENS comment documents: on a reasoning model (GLM-4.7, the ADR-0016 narrator)
+    # reasoning tokens count against `max_tokens`, so a flat 4096/2048 ceiling produced empty response
+    # bodies or mid-sentence truncation. The class default for narration/casting is `None` ("use the
+    # model-aware cap computed at the call site from the concrete model") — leaving them OUT of this
+    # dict is what lets that default actually take effect; adding a literal int back here would
+    # reintroduce the bug. An admin who wants a real ceiling can still set one at runtime via the Token
+    # Economy settings card / POST /api/settings — that stays a genuine, in-band, intentional override.
     "max_tokens_budget": {
-        "narration": 4096,
         "utility-extraction": 1500,
-        "casting": 2048,
         # #1007: 1200 → 3000 to MATCH the token_policy class default (_DEFAULT_MAX_TOKENS). This
         # seed is an in-band override that WINS over that default, so the #1002/#1007 raise to 3000
         # was DEAD until this seed moved too — at 1200 a full authored JSON profile could not fit
         # alongside even a little reasoning. 3000 = the comfortable floor for the whole JSON object.
+        # (background-authoring is non-reasoning structured extraction, not a reasoning-headroom
+        # concern, so a literal cap here is safe — unlike narration/casting above.)
         "background-authoring": 3000,
     },
     # ADR 0010 / feature 0069 — the soft per-game spend-alert threshold in USD.
@@ -219,18 +248,23 @@ DEFAULT_SETTINGS = {
     "task_endpoint_id": "",
     "task_model": "",
     "default_endpoint_id": "",
-    # OOB default chat model. OpenRouter is the default provider (added at first-run setup);
-    # deepseek-v4-pro is the out-of-box selected chat model. `default_endpoint_id` stays empty so
-    # resolution binds it to the first enabled endpoint (the OpenRouter one the setup wizard
-    # creates); the setup wizard also writes the endpoint id explicitly once it exists.
-    "default_model": "deepseek/deepseek-v4-pro",
+    # OOB default chat/narration model. OpenRouter is the default provider (added at first-run
+    # setup); z-ai/glm-4.7 is the out-of-box selected model (chat box + narrator + onboarding all
+    # read this resolved default). `default_endpoint_id` stays empty so resolution binds it to the
+    # first enabled endpoint (the OpenRouter one the setup wizard creates); the setup wizard also
+    # writes the endpoint id explicitly once it exists.
+    "default_model": "z-ai/glm-4.7",
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat
     # dispatch retries the next entry in order.
     "default_model_fallbacks": [],
     "utility_endpoint_id": "",
-    "utility_model": "",
+    # OOB utility model (ADR 0016): GLM-4.7-Flash on OpenRouter — a cheap (free on Z.ai-direct), fast,
+    # NON-reasoning 30B-class model for background JSON work (cast authoring/prewarm/zeitgeist,
+    # summarization, naming). `utility_endpoint_id` stays "" so it binds to the first enabled endpoint
+    # (the OpenRouter one the setup wizard creates). Background classes already run reasoning "off".
+    "utility_model": "z-ai/glm-4.7-flash",
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
     "utility_model_fallbacks": [],

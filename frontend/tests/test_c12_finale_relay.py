@@ -89,7 +89,7 @@ ENGINE_KINDS = _engine_decision_kinds()
 def test_relay_accepts_every_engine_kind(monkeypatch, kind):
     seen = {}
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         seen.update(decision)
         return {"ok": True}
 
@@ -105,7 +105,7 @@ def test_relay_accepts_every_engine_kind(monkeypatch, kind):
 def test_relay_forwards_finale_fields(monkeypatch):
     seen = {}
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         seen.update(decision)
         return {"ok": True}
 
@@ -125,7 +125,7 @@ def test_relay_forwards_finale_fields(monkeypatch):
 def test_relay_rejects_unknown_kind(monkeypatch):
     called = []
 
-    async def fake_submit(decision, user=None):
+    async def fake_submit(decision, user=None, **_kw):
         called.append(decision)
         return {"ok": True}
 

@@ -866,6 +866,9 @@ async function initTokenEconomySettings() {
   const tieringToggle = el('set-contextTieringToggle');
   const providerJson = el('set-openrouterProvider');
   const msg = el('set-tokenEconomyMsg');
+  // ADR 0016: a synced mirror of the "Narration" reasoning select, surfaced in the Default Chat Model
+  // card so the narrator's reasoning effort is editable where you pick the narrator (not only here).
+  const narrReasoning = el('set-narratorReasoning');
 
   function setMsg(text, ok) {
     if (!msg) return;
@@ -889,6 +892,7 @@ async function initTokenEconomySettings() {
     const s = await res.json();
     const rb = (s.reasoning_budget && typeof s.reasoning_budget === 'object') ? s.reasoning_budget : {};
     reasoningEls.forEach(([elx, cls]) => { if (elx) elx.value = rb[cls] || ''; });
+    if (narrReasoning) narrReasoning.value = rb['narration'] || '';
     const mtb = (s.max_tokens_budget && typeof s.max_tokens_budget === 'object') ? s.max_tokens_budget : {};
     maxTokensEls.forEach(([elx, cls]) => { if (elx) elx.value = (mtb[cls] != null) ? String(mtb[cls]) : ''; });
     if (spendAlert) spendAlert.value = s.token_spend_alert_usd ? String(s.token_spend_alert_usd) : '';
@@ -905,9 +909,17 @@ async function initTokenEconomySettings() {
   function saveReasoning() {
     const rb = {};
     reasoningEls.forEach(([elx, cls]) => { if (elx && elx.value) rb[cls] = elx.value; });
+    // Keep the narrator-area mirror in lockstep with the Token Economy "Narration" select (one value).
+    if (narrReasoning) narrReasoning.value = rb['narration'] || '';
     post({ reasoning_budget: rb });
   }
   reasoningEls.forEach(([elx]) => { if (elx) elx.addEventListener('change', saveReasoning); });
+  // Changing the narrator-area select mirrors into the Token Economy "Narration" select, then saves.
+  if (narrReasoning) narrReasoning.addEventListener('change', () => {
+    const tn = el('set-reasoningNarration');
+    if (tn) tn.value = narrReasoning.value;
+    saveReasoning();
+  });
 
   // ADR 0010 #1: max_tokens_budget is a per-class dict rebuilt from the four inputs. A blank field ⇒
   // omit the class (use the engine default); an out-of-band value (must be 256..200000) is dropped with
