@@ -34,20 +34,12 @@ export function chooseNominations(hoh: EntityId, active: EntityId[], rel: Relati
 export const NOMINATION_PARANOIA_WEIGHT = DECISION.nomination.paranoiaWeight;
 
 /**
- * Mood-aware nominations (feature 0041): a CALM HOH (emotionalState ≥ baseline 0.5) ranks purely by
- * threat — byte-identical to `chooseNominations`. A RATTLED HOH (emotionalState < 0.5) adds a
- * bounded paranoia term that over-weights whoever they least trust, so the season's emotional arc
- * bends their decisions (they nominate more erratically). The hard rules still hold downstream
- * (the HOH is excluded; two distinct nominees) — emotion never overrides legality (0005).
+ * Mood-aware nominations: a CALM HOH ranks purely by threat; a RATTLED HOH (emotionalState < 0.5) adds a
+ * bounded paranoia term over-weighting whoever they least trust — see `nominationStrategy(…, { mood })`,
+ * the single live nomination function (0044). (The former standalone `chooseNominationsWithMood` was a
+ * test-only duplicate of that mood path and was removed in the 2026-06-28 PO cleanup; call
+ * `nominationStrategy` with a `mood` instead.)
  */
-export function chooseNominationsWithMood(
-  hoh: EntityId, active: EntityId[], rel: RelationshipModel, mood: number,
-): [EntityId, EntityId] {
-  if (Math.max(0, (0.5 - mood) * 2) === 0) return chooseNominations(hoh, active, rel);
-  const ranked = active.filter((h) => h !== hoh)
-    .sort((a, b) => nominationScore(hoh, b, rel, mood) - nominationScore(hoh, a, rel, mood));
-  return [ranked[0]!, ranked[1]!];
-}
 
 /**
  * The HOH's raw nomination leaning toward one target: threat + the rattled-paranoia term (0041).
