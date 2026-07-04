@@ -112,6 +112,13 @@ class AuthManager:
         # Guards the first-run setup check-and-write so concurrent requests
         # cannot both observe is_configured==False and both create admin accounts.
         self._setup_lock = threading.Lock()
+        # SEC-3: set True only when reading an EXISTING auth.json raised (corrupt JSON, IO
+        # error) — a genuine config gap, distinct from a first-run where the file simply does
+        # not exist yet. Security gates (tool_security.owner_is_admin_or_single_user) fail
+        # CLOSED on this: an unreadable user store must NEVER be treated as "single-user ⇒
+        # everyone is admin" (that granted bash/python to unauthenticated callers on a box that
+        # WAS configured). Genuine first-run (no file) keeps single-user behaviour.
+        self._load_failed = False
         self._load()
         self._load_sessions()
         self._migrate_single_user()
@@ -138,6 +145,15 @@ class AuthManager:
         except Exception as e:
             logger.error(f"Failed to load auth config: {e}")
             self._config = {}
+            # SEC-3: an EXISTING store failed to parse/read — a config gap, not a first run.
+            # Flag it so security gates fail closed instead of granting single-user admin.
+            self._load_failed = True
+
+    @property
+    def load_failed(self) -> bool:
+        """True when an existing auth.json could not be read (corrupt/IO error). Distinct from a
+        genuine first-run (no file). Security gates must fail CLOSED when this is True."""
+        return bool(getattr(self, "_load_failed", False))
 
     def _load_sessions(self):
         """Load persisted session tokens from disk, pruning expired ones."""

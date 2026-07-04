@@ -666,6 +666,20 @@ export class GameSessionAdapter implements GameSession {
    * premiere resumes; cleared once the premiere is over. PUBLIC ids only — no Vault data.
    */
   private premiereMet: Set<EntityId> = new Set();
+  /**
+   * A1 (ship-blocker, "the phantom-houseguest root") — the DURABLE, never-cleared superset of
+   * `premiereMet`: every houseguest id the player has EVER been introduced to (by name, in narration
+   * they witnessed) this season. Unlike `premiereMet` (vestigial-cleared once the premiere ends,
+   * §above), this set is the permanent name-lock signal: `recordCastProfile`'s PUBLIC NAME acceptance
+   * (below) refuses to rename any houseguest already in this set, no matter when or how many times an
+   * async authoring write-back later arrives. This closes the race where deep cast-authoring
+   * (`recordCastProfile`, an FE-driven write-back that can complete asynchronously — during the
+   * premiere, or even later via the authoring backfill) renamed a houseguest AFTER the player had
+   * already met them under the seeded floor name, so the GM appeared to "correct" the player about the
+   * game's own prior words. Populated in lockstep with `premiereMet` (the same structural
+   * introduction event); reset to empty at every season start alongside it. PUBLIC ids only.
+   */
+  private introducedNames: Set<EntityId> = new Set();
   // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -1569,7 +1583,21 @@ export class GameSessionAdapter implements GameSession {
     // reasonable two-token human name AND it does not collide (case-insensitive) with any OTHER current
     // houseguest or the player; otherwise the seeded corpus name (the deterministic floor) simply stands.
     // A rejected name NEVER fails the whole call — the rest of the authored profile still applies.
-    if (req.name !== undefined) {
+    //
+    // A1 (ship-blocker, "the phantom-houseguest root"): a PUBLIC name is structurally FROZEN the instant
+    // the player has been introduced to this houseguest (`introducedNames`, populated by
+    // `markHouseguestMet`) — never on the prewarm/pre-game path (that set is always empty pre-game).
+    // `recordCastProfile` is an FE-driven write-back that can complete ASYNCHRONOUSLY relative to
+    // premiere narration (deep cast-authoring kicked off in the background at season start, or an even
+    // later authoring backfill) — without this guard a late-arriving authored name silently RENAMES a
+    // houseguest the player already met and was told the name of, and the GM then reads as "correcting"
+    // the player about the game's own prior words. This is enforced HERE, structurally, not by timing
+    // the FE's background call — the smaller, surgical fix over trying to serialize an inherently
+    // best-effort background task ahead of narration.
+    if (req.name !== undefined && this.introducedNames.has(target.id)) {
+      // Silently drop — mirrors the cross-character guard's per-field drop above: the rest of the
+      // authored profile still applies, only the name is refused so the seeded/already-shown name stands.
+    } else if (req.name !== undefined) {
       const name = req.name.trim();
       const collides = name.toLowerCase() === ctx.playerName.toLowerCase()
         || ctx.npcs.some((n) => n.id !== target.id && (n.name ?? "").trim().toLowerCase() === name.toLowerCase());
@@ -2169,6 +2197,9 @@ export class GameSessionAdapter implements GameSession {
       // resumes after a restart (0030) — the producer never re-introduces someone or loses track of
       // who's still to meet. Public ids; absent once the premiere is over (the set is then empty).
       ...(this.premiereMet.size > 0 ? { premiereIntros: [...this.premiereMet] } : {}),
+      // A1: the DURABLE name-lock companion to `premiereIntros` above — never cleared once the premiere
+      // ends, so `recordCastProfile`'s name-race guard survives a restart. Public ids only.
+      ...(this.introducedNames.size > 0 ? { introducedNames: [...this.introducedNames] } : {}),
       // 0062 — the FROZEN move-in zeitgeist snapshot persists so it is RECALLED (never re-searched) all
       // season and survives a restart byte-identical (§3/§9). Outward-safe public flavor (§6).
       ...(this.worldSnapshot ? { worldSnapshot: cloneSession(this.worldSnapshot) } : {}),
@@ -2391,6 +2422,10 @@ export class GameSessionAdapter implements GameSession {
     // PREMIERE (feature #380 follow-on): restore who's been met so a half-done premiere resumes (0030).
     // Absent on a pre-feature save OR once the premiere is over ⇒ empty (no one outstanding to re-meet).
     this.premiereMet = new Set(core.premiereIntros ?? []);
+    // A1: restore the DURABLE name-lock companion set. Absent on a pre-A1 save ⇒ empty (a save made
+    // before this fix simply has no locked names yet; any houseguest introduced from here on locks
+    // going forward exactly as a fresh season does — no regression, no false lock on old saves).
+    this.introducedNames = new Set(core.introducedNames ?? []);
     // 0062 — restore the FROZEN move-in zeitgeist snapshot (recalled, never re-searched, §9). Persisted on
     // 0062+ saves; on a pre-0062 save WITH a seed, re-derive the deterministic `model-framed` snapshot off
     // the SAME seed hinge (seed-stable & player-independent, so it returns identically). Without a seed
@@ -3402,6 +3437,9 @@ export class GameSessionAdapter implements GameSession {
     const isActiveNpc = this.house.npcs.some((n) => n.id === id && this.seatOf(n.id) === "active");
     if (isActiveNpc && !this.premiereMet.has(id)) {
       this.premiereMet.add(id);
+      // A1: the DURABLE name-lock companion — never cleared (unlike `premiereMet`). From this moment
+      // the player has witnessed this houseguest's name; `recordCastProfile` must never change it.
+      this.introducedNames.add(id);
       this.persist();
     }
     return this.premiereIntros();
@@ -3562,6 +3600,8 @@ export class GameSessionAdapter implements GameSession {
     // introduced yet. The producer (driven by the premiere moment prompt's who's-left list) walks the
     // player through all 15 NPCs before the first HOH; `premiereMet` records who's been met. Persisted.
     this.premiereMet = new Set();
+    // A1: a fresh season starts with no locked names either — the new cast has not been introduced yet.
+    this.introducedNames = new Set();
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
     // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each, only
@@ -6131,10 +6171,25 @@ export class GameSessionAdapter implements GameSession {
         e.threat = Math.min(1, e.threat + ALLIANCE.betrayalThreatBump);
         e.affinity = Math.max(0, e.affinity - ALLIANCE.betrayalThreatBump);
         recordDealBetrayal(this.live, target, action.actor);
-        this.onPlayerEvent?.(
-          `${this.nameOf(action.actor)} turned on the alliance "${al.name}", moving against ${this.nameOf(target)}`,
-          [target, action.actor], "betrayal",
-        );
+        // A7/E12: mirrors the deal-break seal below — a betrayal TRIGGERED by the SEALED eviction
+        // ballot must not name the betrayer to the wronged ally before the retrospective unseals it
+        // (nominate/replace are public ceremonies and reveal normally; the player's OWN vote is never
+        // sealed from themselves).
+        if (action.kind === "vote-evict" && action.actor !== PLAYER) {
+          this.onPlayerEvent?.(
+            `${this.nameOf(action.actor)} turned on the alliance "${al.name}", moving against ${this.nameOf(target)}`,
+            [action.actor], "betrayal", // no player witness ⇒ Vault-held until the 0048 unseal
+          );
+          this.onPlayerEvent?.(
+            `Someone turned on the alliance "${al.name}"`,
+            [target], "betrayal",
+          );
+        } else {
+          this.onPlayerEvent?.(
+            `${this.nameOf(action.actor)} turned on the alliance "${al.name}", moving against ${this.nameOf(target)}`,
+            [target, action.actor], "betrayal",
+          );
+        }
         this.alliances.removeMember(al.id, action.actor); // the betrayer is out — the alliance fractures
       }
     }
@@ -6412,11 +6467,30 @@ export class GameSessionAdapter implements GameSession {
       rng: this.beatRng(),
       // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
       juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
-      // 0002: the wronged party learns the break as a witnessed event (a public ceremony break).
-      reveal: (wronged, breaker, deal) => this.onPlayerEvent?.(
-        `${this.nameOf(breaker)} broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
-        [wronged, breaker], "betrayal",
-      ),
+      // 0002: the wronged party learns the break as a witnessed event (a public ceremony break) —
+      // UNLESS the triggering action is the SEALED eviction ballot (E12/A7). Naming the breaker there
+      // would deanonymize their vote before the same terminal gate the primary eviction reveal and the
+      // 0048 retrospective use: record the full attribution VAULT-SIDE (no player witness ⇒ hidden by
+      // the event-visibility invariant, `validateEvent`), and give the wronged party only a Vault-safe,
+      // unattributed signal now — they may suspect, never know, until the retrospective unseals it (the
+      // same hidden-event sweep, `buildVaultUnseal`, already surfaces it then). The player's OWN vote is
+      // never sealed from themselves, and a break from a PUBLIC action (nominate/replace) reveals as before.
+      reveal: (wronged, breaker, deal, actionKind) => {
+        if (actionKind === "vote-evict" && breaker !== PLAYER) {
+          this.onPlayerEvent?.(
+            `${this.nameOf(breaker)} broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
+            [breaker], "betrayal", // no player witness ⇒ Vault-held until the 0048 unseal
+          );
+          return this.onPlayerEvent?.(
+            `Someone broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
+            [wronged], "betrayal",
+          );
+        }
+        return this.onPlayerEvent?.(
+          `${this.nameOf(breaker)} broke a ${deal.kind} deal with ${this.nameOf(wronged)}`,
+          [wronged, breaker], "betrayal",
+        );
+      },
     });
     if (broken.length > 0) this.persist(); // deferred into the beat's ONE commit (E3)
   }
@@ -6616,14 +6690,23 @@ export class GameSessionAdapter implements GameSession {
     this.deals.make(best, kind, "a quiet pact sealed away from the cameras", evId, s.week);
   }
 
-  /** Vault-free projection of a player-party deal: parties (names) + kind + terms + status. No numbers. */
+  /**
+   * Vault-free projection of a player-party deal: parties (names) + kind + terms + status. No numbers.
+   * A7/E12: a deal `sealedBallot` marks broken — via the SEALED eviction ballot, not the player's own
+   * vote — projects as still "open" until the season finishes: the raw internal `d.status` ("broken")
+   * would otherwise deanonymize the breaker's vote on the very next HUD poll (the player already knows
+   * exactly who their deal partner is, so the status flip alone is the leak). The retrospective (0048)
+   * lifts the seal the same way it unseals everything else — the underlying `d.status` itself is never
+   * altered, only this outward render.
+   */
   private dealView(d: Deal): DealView {
+    const sealed = d.sealedBallot && !this.live?.finished;
     return {
       id: d.id,
       parties: d.parties.map((id) => ({ id, name: this.nameOf(id) })),
       kind: d.kind,
       terms: d.terms,
-      status: d.status,
+      status: sealed ? "open" : d.status,
     };
   }
 

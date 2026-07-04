@@ -57,6 +57,17 @@ export interface Deal {
    * `vague` deal folds a SOFTER betrayal-shock (built-in ambiguity). Absent ⇒ not vague.
    */
   vague?: boolean;
+  /**
+   * Feature A7/E12 — set true when the action that broke this deal was a SEALED eviction ballot
+   * (`vote-evict`) cast by someone other than the player: the deal's own outward STATUS would
+   * otherwise deanonymize that vote (the player already knows their deal partner's identity, so
+   * "this deal just went from open → broken" IS the ballot). The projection (`dealView`) reads this
+   * to hold the outward status at "open" until the season's 0048 retrospective unseals it — the same
+   * terminal gate the primary eviction reveal already uses. Never set for a break the player caused
+   * themselves (their own vote is never sealed from them) or one triggered by a public action
+   * (a nomination/replacement — never secret). Absent ⇒ unsealed, byte-identical to pre-A7.
+   */
+  sealedBallot?: boolean;
 }
 
 /** The binding horizon of a deal kind (audit E43): one HOH reign, or the whole season. */

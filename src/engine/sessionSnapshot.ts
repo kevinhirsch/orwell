@@ -334,6 +334,17 @@ export interface SessionCore {
    */
   premiereIntros?: EntityId[];
   /**
+   * A1 (ship-blocker, "the phantom-houseguest root") — the DURABLE superset of `premiereIntros`: every
+   * houseguest id the player has EVER been introduced to (by name, in narration they witnessed) this
+   * season. Unlike `premiereIntros`, this is never cleared once the premiere ends — it is the permanent
+   * name-lock signal `recordCastProfile` consults so an async deep-authoring write-back (which can
+   * complete well after move-in, even via the later authoring backfill) can never rename a houseguest
+   * the player already knows by name. Persisted so the lock survives a restart (0030). Absent on a
+   * pre-A1 save ⇒ empty (no false lock on old saves; any houseguest introduced from here on locks going
+   * forward exactly as a fresh season does).
+   */
+  introducedNames?: EntityId[];
+  /**
    * 0070 — the additive prose texture layer: model-voiced content indexed by event id. Only
    * applied when the underlying event is already hidden (never creates events, never alters the
    * closed set). Persisted so enriched scenes survive a restart byte-identical (0030). Absent on

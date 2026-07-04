@@ -193,14 +193,26 @@ DEFAULT_SETTINGS = {
     # 0 or 10_000_000 can never become the live cap. A class absent from the map uses the code default.
     # Read via get_setting("max_tokens_budget", {}) → token_policy.resolve_token_policy(); edit per class
     # at runtime via the Token Economy settings card or POST /api/settings. Player never sees these.
+    #
+    # A9 (ship-blocker, 2026-07-03 audit, 6x corroborated): narration/casting are DELIBERATELY ABSENT
+    # here. token_policy.resolve_token_policy treats any in-band value under this key as an EXPLICIT
+    # ADMIN OVERRIDE that always wins over the class default — so seeding "narration": 4096 /
+    # "casting": 2048 silently re-activated the exact #835/#620 NARR-5 truncation vector token_policy's
+    # own _DEFAULT_MAX_TOKENS comment documents: on a reasoning model (GLM-4.7, the ADR-0016 narrator)
+    # reasoning tokens count against `max_tokens`, so a flat 4096/2048 ceiling produced empty response
+    # bodies or mid-sentence truncation. The class default for narration/casting is `None` ("use the
+    # model-aware cap computed at the call site from the concrete model") — leaving them OUT of this
+    # dict is what lets that default actually take effect; adding a literal int back here would
+    # reintroduce the bug. An admin who wants a real ceiling can still set one at runtime via the Token
+    # Economy settings card / POST /api/settings — that stays a genuine, in-band, intentional override.
     "max_tokens_budget": {
-        "narration": 4096,
         "utility-extraction": 1500,
-        "casting": 2048,
         # #1007: 1200 → 3000 to MATCH the token_policy class default (_DEFAULT_MAX_TOKENS). This
         # seed is an in-band override that WINS over that default, so the #1002/#1007 raise to 3000
         # was DEAD until this seed moved too — at 1200 a full authored JSON profile could not fit
         # alongside even a little reasoning. 3000 = the comfortable floor for the whole JSON object.
+        # (background-authoring is non-reasoning structured extraction, not a reasoning-headroom
+        # concern, so a literal cap here is safe — unlike narration/casting above.)
         "background-authoring": 3000,
     },
     # ADR 0010 / feature 0069 — the soft per-game spend-alert threshold in USD.

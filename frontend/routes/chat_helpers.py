@@ -977,16 +977,41 @@ def _beat_signature(status: dict, state: dict) -> dict:
         p.get("name") for p in (wa.get("present") or [])
         if isinstance(p, dict) and p.get("name")
     )
+    # A2 (2026-07-03): the HOH / veto-holder NAMES + whether the PLAYER holds either title. These let
+    # the outcome guard reject a WRONG-IDENTITY board claim (the model names the wrong new HOH, or tells
+    # the player THEY won a title the engine handed to someone else) — not just a no-move phantom. Public
+    # projection only (the same {id,name} the House Status gadget renders); never a hidden field. The
+    # player-title flags are None when the player's identity can't be resolved (pre-game / odd shape) so
+    # the guard never fires on uncertainty — an absent field reads as "unknown", not "false".
+    def _name(node):
+        n = node.get("name") if isinstance(node, dict) else None
+        return str(n).strip() if isinstance(n, str) and str(n).strip() else None
+
+    hoh_name = _name(status.get("hoh"))
+    veto_holder_name = _name(veto.get("holder"))
+    player = state.get("player") if isinstance(state.get("player"), dict) else {}
+    player_id = player.get("id") if isinstance(player, dict) else None
+    veto_holder_id = _id(veto.get("holder"))
+    if player_id is None:
+        player_is_hoh = None       # unknown player identity → the guard must not judge a self-win
+        player_has_veto = None
+    else:
+        player_is_hoh = (hoh is not None and hoh == player_id)
+        player_has_veto = (veto_holder_id is not None and veto_holder_id == player_id)
     return {
         "week": status.get("week"),
         "phase": (status.get("phase") or state.get("phase")),
         "pending": pending_kind,
         "hoh": hoh,
+        "hohName": hoh_name,
         "noms": noms,
         "nomNames": nom_names,
         "activeNames": active_names,
-        "vetoHolder": _id(veto.get("holder")),
+        "vetoHolder": veto_holder_id,
+        "vetoHolderName": veto_holder_name,
         "vetoUsed": bool(veto.get("used")),
+        "playerIsHoh": player_is_hoh,
+        "playerHasVeto": player_has_veto,
         "evicted": evicted,
         "evictedNames": evicted_names,
         "finished": bool(state.get("finished")),
@@ -1053,7 +1078,26 @@ _CLAIM_WINNER_RE = re.compile(
     re.IGNORECASE,
 )
 _CLAIM_NEW_HOH_RE = re.compile(
-    r"\bwins (?:the )?(?:head of household|hoh)\b|\bnew (?:head of household|hoh)\b",
+    # A2 (2026-07-03): also PAST tense ("won HOH") so a wrong-identity crown ("Maria won HOH") is seen.
+    # "wins"/"won" only (NOT bare "win"), so a present-tense hypothetical ("if you win HOH") never trips.
+    r"\b(?:wins|won)\s+(?:the )?(?:head of household|hoh)\b|\bnew (?:head of household|hoh)\b",
+    re.IGNORECASE,
+)
+# A2 (2026-07-03): the model tells the PLAYER they won HOH (the exact live-red-team failure — narrated
+# "you won HOH" three times with zero tool calls). Committed forms only (won / 've won / are the new)
+# so a hypothetical "if you win HOH" (present tense) is never caught. Paired with `playerIsHoh` — the
+# engine fact — so it fires ONLY when the board says the player is NOT the Head of Household.
+_CLAIM_SELF_HOH_WIN_RE = re.compile(
+    r"\byou(?:'|’)?(?:ve)?\s*(?:have\s+)?(?:just\s+|now\s+|officially\s+)?won\s+(?:the\s+)?(?:new\s+)?(?:head of household|hoh)\b"
+    r"|\byou(?:'|’)?re\s+(?:the\s+)?(?:new\s+)?(?:head of household|hoh)\b"
+    r"|\byou\s+are\s+(?:the\s+)?(?:new\s+)?(?:head of household|hoh)\b"
+    r"|\bi(?:'|’)?(?:ve)?\s*(?:have\s+)?(?:just\s+|now\s+)?won\s+(?:the\s+)?(?:new\s+)?(?:head of household|hoh)\b",
+    re.IGNORECASE,
+)
+_CLAIM_SELF_VETO_WIN_RE = re.compile(
+    r"\byou(?:'|’)?(?:ve)?\s*(?:have\s+)?(?:just\s+|now\s+|officially\s+)?won\s+(?:the\s+)?(?:power of veto|veto|pov)\b"
+    r"|\byou(?:'|’)?re\s+(?:the\s+)?(?:new\s+)?(?:power of veto|veto|pov)\s+(?:holder|winner)\b"
+    r"|\bi(?:'|’)?(?:ve)?\s*(?:have\s+)?(?:just\s+|now\s+)?won\s+(?:the\s+)?(?:power of veto|veto|pov)\b",
     re.IGNORECASE,
 )
 # A numeric OR spelled-out "N to M" vote tally. #1045: the live drive narrated a RUNNING tally in
@@ -1116,6 +1160,26 @@ _NOM_PHASES = ("nom", "nominat", "veto-ceremony", "veto_ceremony", "vetoceremony
 _VETO_PHASES = ("veto",)
 
 
+def _name_matches(claim_name: str, roster_name: str) -> bool:
+    """True when a name written in narration refers to a given roster name — whole-name OR a
+    first/last-token match (the model routinely uses a first name for a full-name houseguest). A
+    WHOLE-token match, so 'Trent' matches 'Trent Tucker' but never a partial-of-a-partial."""
+    cl = (claim_name or "").lower().strip()
+    rn = (roster_name or "").lower().strip()
+    if not cl or not rn:
+        return False
+    if cl == rn:
+        return True
+    return cl in rn.split() or rn in cl.split()
+
+
+def _name_matches_active(claim_name: str, after: dict) -> bool:
+    """True when `claim_name` matches SOME name on the engine's active roster — so a name the model
+    invented (matching no houseguest) is never treated as a wrong-identity claim (that is the roster
+    guard's separate job)."""
+    return any(_name_matches(claim_name, a) for a in (after.get("activeNames") or []) if a)
+
+
 def _named_evictee_in_claim(text: str) -> Optional[str]:
     """F16 (#1014): if an eviction RESULT/TALLY claim in `text` NAMES a houseguest as the one
     leaving, return that name (as written); else None. Whole-claim extraction over the canonical
@@ -1126,6 +1190,34 @@ def _named_evictee_in_claim(text: str) -> Optional[str]:
             name = (m.group(1) or "").strip()
             if name:
                 return name
+    return None
+
+
+# A2 (2026-07-03): extract a NAMED new-HOH / veto winner from a committed win claim, so the guard can
+# compare it to the engine's actual title-holder name (the wrong-identity case — the model crowns the
+# wrong person). Structured exactly like `_EVICTEE_NAME_RES`: the `(?i:...)` wraps only the fixed
+# prefix/suffix, so the captured Name group stays case-sensitive (a leading Capital is required).
+_HOH_NAME_RES = (
+    re.compile(r"\b([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2})(?i:\s+(?:wins|won|is\s+crowned|takes|"
+               r"took|clinch(?:es|ed)?|secur(?:es|ed)|grab(?:s|bed)?|claim(?:s|ed)?)\s+(?:the\s+)?"
+               r"(?:head of household|hoh))\b"),
+    re.compile(r"(?i:\b(?:the\s+)?new\s+(?:head of household|hoh)\s+(?:is\s+)?)"
+               r"([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2})"),
+)
+_VETO_NAME_RES = (
+    re.compile(r"\b([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2})(?i:\s+(?:wins|won|takes|took|"
+               r"clinch(?:es|ed)?|secur(?:es|ed)|grab(?:s|bed)?|claim(?:s|ed)?)\s+(?:the\s+)?"
+               r"(?:power of veto|veto|pov))\b"),
+    re.compile(r"(?i:\b(?:the\s+)?new\s+veto\s+(?:holder|winner)\s+(?:is\s+)?)"
+               r"([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2})"),
+)
+
+
+def _named_title_winner(text: str, res) -> Optional[str]:
+    for rx in res:
+        m = rx.search(text or "")
+        if m and (m.group(1) or "").strip():
+            return m.group(1).strip()
     return None
 
 
@@ -1148,21 +1240,12 @@ def _eviction_evictee_mismatch(text: str, before: dict, after: dict) -> bool:
     before_ev = {str(n).strip() for n in (before.get("evictedNames") or []) if str(n).strip()}
     after_ev = {str(n).strip() for n in (after.get("evictedNames") or []) if str(n).strip()}
     just_evicted = after_ev - before_ev
-    nl = named.lower()
-
-    def _matches(roster_name: str) -> bool:
-        rn = roster_name.lower()
-        # whole-name OR first/last token match (the model often uses a first name for a full-name HG).
-        if nl == rn:
-            return True
-        toks = rn.split()
-        return nl in toks or any(nl == t for t in (named.lower().split()))
 
     # The named person really just left ⇒ NOT a mismatch (the correct evictee, named — emit).
-    if any(_matches(e) for e in just_evicted):
+    if any(_name_matches(named, e) for e in just_evicted):
         return False
     # The named person is an ACTIVE houseguest the engine did NOT evict ⇒ a wrong/fabricated evictee.
-    return any(_matches(a) for a in active)
+    return any(_name_matches(named, a) for a in active)
 
 
 def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict) -> Optional[str]:
@@ -1179,6 +1262,10 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     desync = None  # the specific outcome the narration claimed that the board never moved on
 
     _phase_l = str(after.get("phase") or "").lower()
+    # A2 (2026-07-03): the NAMED new-HOH / veto winner in the claim (or None), computed once for the
+    # wrong-identity branches below.
+    _named_hoh = _named_title_winner(text, _HOH_NAME_RES)
+    _named_veto = _named_title_winner(text, _VETO_NAME_RES)
     # (1) An eviction RESULT was narrated. Three ways it can be a phantom the engine never committed:
     #   (1a) the evicted COUNT didn't move at all → no one actually left (the original check);
     #   (1b) F16 (#1014): the claim NAMES a houseguest who is still ACTIVE and was NOT just evicted →
@@ -1229,6 +1316,25 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
           and str(after.get("phase") or "").lower().startswith(_EVICTION_PHASES)
           and after.get("evicted") == before.get("evicted")):
         desync = "an EVICTION VOTE TALLY / RESULT (the count is sealed until the engine commits the eviction)"
+    # (4a) A2 (2026-07-03): the model tells the PLAYER they won HOH, but the engine shows the player is
+    #      NOT the Head of Household → a phantom self-crown. Verified DIRECTLY against `playerIsHoh` (an
+    #      engine fact), so it holds regardless of phase — a self-crown the board denies is ALWAYS a lie
+    #      (the exact live-red-team failure: "you won HOH" narrated with zero tool calls, an NPC actually
+    #      won). Fires only when the board KNOWS the player is not HOH (`playerIsHoh is False`, never on
+    #      the unknown/None case — an old-style signature without the field can't trip it).
+    elif _CLAIM_SELF_HOH_WIN_RE.search(text) and after.get("playerIsHoh") is False:
+        desync = "a phantom HEAD OF HOUSEHOLD win (the engine shows you are NOT the Head of Household)"
+    # (4b) A2: the model crowns a NAMED houseguest HOH who is NOT the one the engine crowned → the wrong
+    #      identity on the throne. Scoped to the HOH beat AND a crown that really committed THIS turn
+    #      (`hoh` moved) — so a hypothetical / prediction elsewhere ("if Nina wins HOH next week") is
+    #      never policed. Requires a concrete different HOH (`hohName`) and the named person to be a real
+    #      ACTIVE houseguest (a name the model invented is the roster guard's separate problem).
+    elif (_named_hoh and after.get("hohName")
+          and str(after.get("phase") or "").lower().startswith(_HOH_PHASES)
+          and after.get("hoh") != before.get("hoh")
+          and _name_matches_active(_named_hoh, after)
+          and not _name_matches(_named_hoh, after.get("hohName"))):
+        desync = "the WRONG houseguest crowned Head of Household (you named someone the engine did not crown)"
     # (4) A new HOH was narrated, but the HOH id didn't change → no new reign was committed.
     #     `after.hoh` must equal `before.hoh` AND not be a fresh crown (before was empty).
     #     Scoped to HOH phases (like the tally branch): outside the HOH beat, "the new HOH…" /
@@ -1246,6 +1352,18 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
           and str(after.get("phase") or "").lower().startswith(_NOM_PHASES)
           and (after.get("noms") or []) == (before.get("noms") or [])):
         desync = "a NOMINATION (a houseguest being put on the block)"
+    # (6a) A2 (2026-07-03): the model tells the PLAYER they won the veto, but the engine shows they do
+    #      NOT hold it → a phantom self-win (mirrors 4a). `playerHasVeto is False` only.
+    elif _CLAIM_SELF_VETO_WIN_RE.search(text) and after.get("playerHasVeto") is False:
+        desync = "a phantom POWER OF VETO win (the engine shows you do NOT hold the veto)"
+    # (6b) A2: the model hands the veto to a NAMED houseguest who is NOT the actual holder → wrong
+    #      identity (mirrors 4b). Scoped to the veto beat AND a holder that really committed this turn.
+    elif (_named_veto and after.get("vetoHolderName")
+          and str(after.get("phase") or "").lower().startswith(_VETO_PHASES)
+          and after.get("vetoHolder") != before.get("vetoHolder")
+          and _name_matches_active(_named_veto, after)
+          and not _name_matches(_named_veto, after.get("vetoHolderName"))):
+        desync = "the WRONG houseguest winning the Power of Veto (you named someone the engine did not)"
     # (6) NARR-8 (#574): a VETO WINNER was narrated, but the veto holder didn't change → no veto win
     #     committed. Scoped to the veto phase; the fresh-win guard mirrors the HOH branch.
     elif (_CLAIM_VETO_WINNER_RE.search(text)
@@ -1801,6 +1919,8 @@ def _sentence_has_closed_set_claim(text: str) -> bool:
         _CLAIM_EVICTED_RE.search(text)
         or _CLAIM_WINNER_RE.search(text)
         or _CLAIM_NEW_HOH_RE.search(text)
+        or _CLAIM_SELF_HOH_WIN_RE.search(text)   # A2: "you won HOH" — a self-crown the board can deny
+        or _CLAIM_SELF_VETO_WIN_RE.search(text)  # A2: "you won the veto" — same
         or _CLAIM_TALLY_RE.search(text)
         or _CLAIM_EVICT_RESULT_RE.search(text)  # LIVE-7 (#540): self-counted majority/short
         or _CLAIM_NOMINATED_RE.search(text)
@@ -1850,6 +1970,69 @@ async def screen_streamed_outcome(user, sentence: str) -> bool:
     except Exception as e:
         logger.warning("[orwell] pre-emission outcome guard skipped for user=%s: %s", user, _exc_detail(e))
         return True  # fail-open: never suppress on an error.
+
+
+# ── A2 (2026-07-03) — the SCENE-level circuit-breaker (fail-CLOSED on an unverifiable board change) ─ #
+#
+# `screen_streamed_outcome` (above) drops ONE phantom sentence and fails OPEN — it kept the surrounding
+# scene, so a fabricated HOH-win scene still shipped its setup + reaction with only the winner sentence
+# excised (the 2026-07-03 audit: the guard "deletes the one falsifiable tell and keeps the lie"). And on
+# an engine blip it emitted the board change anyway. This breaker is the harder line the anti-sycophancy
+# mandate (#3 — "the deterministic core decides outcomes, the LLM only narrates") demands at this seam:
+#
+#   • a CLOSED-SET board CHANGE (win / eviction / nomination / veto / tally) the engine never committed —
+#     a no-move phantom, a self-crown the board denies, or a wrong-identity win — cuts the WHOLE scene,
+#     not one sentence (`_narration_claims_outcome` is the same verifier the sentence guard uses); AND
+#   • a board change claimed while the engine is UNREACHABLE (the live read hiccups) ALSO cuts the scene
+#     — the ONE place the pre-emission path fails CLOSED, and ONLY for a board-change claim: an
+#     unverifiable outcome must never reach the player.
+#
+# Jurisdiction stays closed-set board claims ONLY (ADR 0005 #1): a sentence with no closed-set claim
+# never reaches the engine read, so creative/social prose is never cut. Fail-OPEN (None → no break) on
+# an internal bug — a broken breaker must not gag a healthy turn.
+_ENGINE_UNREACHABLE_REGROUND = (
+    "RE-GROUND ON THE BOARD — last turn a board-changing outcome (a win, eviction, nomination, or veto) "
+    "was narrated while the engine (the source of truth) could NOT be reached, so it could not be "
+    "confirmed. Do NOT treat any of that outcome as real — it may not have happened. Re-read the live "
+    "state and pick up from exactly where the game actually is."
+)
+
+
+async def screen_streamed_scene_break(user, text: str) -> Optional[str]:
+    """A2 — decide whether the WHOLE scene in `text` must be cut (a phantom/unverifiable board change).
+    Returns the re-ground directive (and stashes it as the next-turn backstop) when the scene must be
+    cut; None otherwise. See the block comment above for the exact jurisdiction + fail-closed rule."""
+    try:
+        if not text or not text.strip():
+            return None
+        # Cheap synchronous gate — no closed-set OUTCOME claim ⇒ never read the board, never cut prose.
+        if not _sentence_has_closed_set_claim(text):
+            return None
+        _dkey = _desync_key(user)  # #1045: stable single-tenant key too.
+        before = _LAST_BEAT_SIG.get(_dkey)
+        live = await _capture_beat_signature(user)
+        if not live:
+            # The engine is unreadable WHILE a board change is claimed → fail CLOSED (mandate #3). This
+            # is the deliberate divergence from the sentence guard's fail-open: an unverifiable outcome
+            # must not stream.
+            _DESYNC_REGROUND[_dkey] = _ENGINE_UNREACHABLE_REGROUND
+            logger.warning("[orwell] scene circuit-breaker: engine unreadable while a board change was "
+                           "narrated — cutting the scene for user=%s", user)
+            return _ENGINE_UNREACHABLE_REGROUND
+        if not before:
+            # No baseline this turn — we cannot tell phantom from real, so do NOT cut (the sentence
+            # guard + post-turn re-ground remain the backstop). Conservatism on the open set.
+            return None
+        directive = _narration_claims_outcome(text, before, live)
+        if directive:
+            _DESYNC_REGROUND[_dkey] = directive
+            logger.warning("[orwell] scene circuit-breaker HELD a phantom board change for user=%s — "
+                           "cutting the whole scene, re-grounding next turn", user)
+            return directive
+        return None
+    except Exception as e:
+        logger.warning("[orwell] scene circuit-breaker skipped for user=%s: %s", user, _exc_detail(e))
+        return None  # fail-OPEN on an internal error — never gag a healthy turn.
 
 
 # ── ADR 0009 (D3 Part B) — the PRE-EMISSION LOCATION guard (evicted-houseguest-in-a-room) ──────── #

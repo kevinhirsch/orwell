@@ -51,11 +51,15 @@ def test_beat_signature_shape_from_sample_dicts():
         "phase": "eviction",
         "pending": "eviction-vote",
         "hoh": "npc:3",
+        "hohName": "A",                # A2 — the HOH's public name (for the wrong-identity guard)
         "noms": ["npc:1", "npc:2"],   # sorted
         "nomNames": [],                # #561 — nominee names (none named in this sample)
         "activeNames": [],             # #561 — active roster names (none named in this sample)
         "vetoHolder": "npc:4",
+        "vetoHolderName": None,        # A2 — no name on the veto-holder node in this sample
         "vetoUsed": True,
+        "playerIsHoh": None,           # A2 — no player card in this sample → unknown, never judged
+        "playerHasVeto": None,
         "evicted": 1,                  # count of non-active house members
         "evictedNames": [],            # ADR 0009 D3 Part B — names of those out of the house (none named here)
         "finished": False,
