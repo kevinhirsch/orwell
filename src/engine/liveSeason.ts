@@ -6,6 +6,53 @@ import type { CompetitionType, Intent, Competitor, CompetitionResult } from "../
 
 /** The competition intents the player may declare (Bible: compete / throw / play-safe), 0006/0034. */
 export const COMP_INTENTS: readonly Intent[] = ["compete", "throw", "play-safe"];
+
+/**
+ * 0006b — the tunable thresholds for an NPC's derived competition intent (compete / throw / play-safe).
+ * Deliberately conservative so throwing/playing-safe stays OCCASIONAL and strategic (a nominee always
+ * fights; a high-aggression houseguest always competes). The magnitudes bracket the `ARCHETYPE_AGGRESSION`
+ * scale (floater 0.25 / peacemaker 0.3 are the natural throwers; villain/mastermind 0.8+ never lay low)
+ * and the `bondStrength` / edge-`threat` reads (baseline ~0.5).
+ */
+export const COMP_INTENT_THRESHOLDS = {
+  /** Below this archetype aggression, a houseguest is a candidate to THROW to a close ally. */
+  layLowAggression: 0.4,
+  /** …and only when a bond THIS strong to another competitor is in the field (hand THEM the power). */
+  throwToAllyBond: 0.72,
+  /** Below this aggression, a houseguest is a candidate to PLAY SAFE when read as a target. */
+  cautiousAggression: 0.55,
+  /** …and only when another competitor holds a threat read on them at least this high (avoid the heat). */
+  playSafeThreat: 0.62,
+} as const;
+
+/**
+ * 0006b — the PURE competition-intent decision for an NPC (compete / throw / play-safe). Kept pure +
+ * exported so it is unit-testable in isolation; the live adapter gathers the board/relationship inputs and
+ * calls it. OCCASIONAL and strategic by construction (a nominee always fights; a high-aggression houseguest
+ * always competes; throwing/playing-safe needs BOTH a lay-low/cautious archetype AND a real board reason).
+ */
+export function deriveNpcCompIntent(
+  p: {
+    /** Archetype aggression 0..1 (villain 0.85 ≫ floater 0.25). */
+    aggression: number;
+    /** On the block this week ⇒ always compete. */
+    nominee: boolean;
+    /** The strongest bond this NPC holds to ANOTHER competitor in the field. */
+    bestAllyBond: number;
+    /** The highest threat read ANOTHER competitor holds toward this NPC. */
+    maxThreatOnMe: number;
+    /** Whether the field holds any other competitor (a lone competitor just competes). */
+    hasOthers: boolean;
+  },
+  t: typeof COMP_INTENT_THRESHOLDS = COMP_INTENT_THRESHOLDS,
+): Intent {
+  if (p.nominee || !p.hasOthers) return "compete";
+  // THROW: a lay-low houseguest hands a very close ally the power and keeps their own head down.
+  if (p.aggression < t.layLowAggression && p.bestAllyBond > t.throwToAllyBond) return "throw";
+  // PLAY-SAFE: a cautious houseguest a competitor already reads as a real threat avoids painting a bigger target.
+  if (p.aggression < t.cautiousAggression && p.maxThreatOnMe > t.playSafeThreat) return "play-safe";
+  return "compete";
+}
 import {
   eligibleForHOH, vetoParticipants, selectableReplacements, evictionVoters,
 } from "../domain/eligibility";
@@ -383,6 +430,16 @@ export interface SeasonCtx {
    * campaigns never shift the baseline gates.
    */
   campaignTiltFor?: (target: EntityId, voter: EntityId) => number;
+  /**
+   * 0006b (PO review 2026-06-28) — the NPC's declared COMPETITION INTENT (compete / throw / play-safe)
+   * for a comp over `field`. Like the player, an NPC now has an intent, derived from their game (a nominee
+   * fights; a lay-low houseguest with a strong ally in the field may throw to hand them the power; a
+   * cautious houseguest reading a real threat may play safe). Optional: omitted ⇒ every NPC "compete"s
+   * (the pre-feature path), so the seeded competition — and the whole juryReach/UAT calibration spine — is
+   * BYTE-IDENTICAL. ENGINE-ONLY (never crosses the wall). Wired only by the LIVE adapter behind
+   * `ORWELL_COMP_INTENT`; the calibration/UAT harness leaves it unset.
+   */
+  compIntentOf?: (id: EntityId, field: readonly EntityId[]) => Intent;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -762,6 +819,15 @@ export function newLiveSeason(active: EntityId[]): LiveSeasonState {
 function roundIntents(field: readonly EntityId[], ctx: SeasonCtx, playerApproach: Intent): CompetitionIntents {
   const intents = new CompetitionIntents();
   intents.declare(ctx.player, playerApproach);
+  // 0006b: every NPC in the field gets a derived intent too, when the provider is wired (live only). With
+  // it absent (pure tests + the calibration/UAT harness), NPCs fall through to CompetitionIntents' own
+  // "compete" default ⇒ the roll is BYTE-IDENTICAL to the pre-feature model — the calibration spine holds.
+  if (ctx.compIntentOf) {
+    for (const id of field) {
+      if (id === ctx.player) continue;
+      intents.declare(id, ctx.compIntentOf(id, field));
+    }
+  }
   return intents;
 }
 

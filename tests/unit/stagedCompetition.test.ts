@@ -62,7 +62,11 @@ describe("0006 staged-rounds — the favorite-win calibration HOLDS (the crown i
   const stagedWinner = (field: Competitor[], seed: number): EntityId =>
     resolveCompetition(field, "endurance", new CompetitionIntents(), new SeededRandom(seed)).winner;
 
-  it("a clear stat favorite wins a STRONG MAJORITY across field sizes (the 0006 65–80% band)", () => {
+  it("a clear stat favorite wins a MAJORITY but upsets are common (PO review 2026-06-28: ~50–70% band)", () => {
+    // PO ruling: raw comp stats should not dominate now that emotions (0041) + sleep (0066) add depth.
+    // temperature 0.36→0.40 lowers a clear favorite (0.9 vs a 0.5 field) from the old 60–71% to ~55–66%
+    // across field sizes — still the strong favorite (many multiples of a fair 1/n share), but upsets a
+    // tad more common. The band widens to 0.50–0.72 (larger fields land lower — more challengers).
     const buildField = (n: number): Competitor[] => [
       { id: PLAYER, stats: flat(0.9) },
       ...Array.from({ length: n - 1 }, (_, i) => ({ id: npc(i + 1), stats: flat(0.5) })),
@@ -73,8 +77,10 @@ describe("0006 staged-rounds — the favorite-win calibration HOLDS (the crown i
       const RUNS = 1500;
       for (let seed = 1; seed <= RUNS; seed++) if (stagedWinner(field, seed) === PLAYER) favWins++;
       const rate = favWins / RUNS;
-      expect(rate, `n=${n}: favorite win rate ${rate.toFixed(3)}`).toBeGreaterThan(0.6);
-      expect(rate, `n=${n}: favorite win rate ${rate.toFixed(3)}`).toBeLessThan(0.85);
+      expect(rate, `n=${n}: favorite win rate ${rate.toFixed(3)}`).toBeGreaterThan(0.5);
+      expect(rate, `n=${n}: favorite win rate ${rate.toFixed(3)}`).toBeLessThan(0.72);
+      // Still clearly the favorite: many multiples of an even 1/n split.
+      expect(rate, `n=${n}: favorite dominance vs fair share`).toBeGreaterThan((1 / n) * 3);
     }
   });
 

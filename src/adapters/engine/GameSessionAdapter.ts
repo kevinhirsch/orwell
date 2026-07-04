@@ -135,7 +135,7 @@ import { EngineRefusal, StaleBeatError } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel, currentReadOf } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, GOODBYE_TONES,
+  newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, deriveNpcCompIntent, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   advanceClock, advanceClockPerConversation, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
@@ -380,6 +380,14 @@ const TRIGGERS_ENABLED_DEFAULT = process.env.ORWELL_TRIGGERS === "1";
  */
 const SECRET_PACING_ENABLED_DEFAULT = process.env.ORWELL_SECRET_PACING === "1";
 /**
+ * 0006b (PO review 2026-06-28) — whether NPCs carry a derived COMPETITION INTENT by DEFAULT. OFF unless
+ * `ORWELL_COMP_INTENT=1`. A DEDICATED flag (sibling to `ORWELL_CAMPAIGNS` etc.) so calibration neutrality
+ * is provable in isolation: with it unset, `ctx().compIntentOf` is absent, every NPC "compete"s (the
+ * pre-feature path), and every seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL. The calibration/UAT
+ * harness never sets it; the live deploy may. A test overrides per-session via `setCompIntentEnabled`.
+ */
+const COMP_INTENT_ENABLED_DEFAULT = process.env.ORWELL_COMP_INTENT === "1";
+/**
  * 0100 — whether the JURY-HOUSE grudge layer runs by DEFAULT. OFF unless `ORWELL_JURY_HOUSE=1`. A
  * DEDICATED flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is
  * provable in isolation: with it unset NO jury-house stretch runs, NO draw is taken (the dedicated
@@ -502,6 +510,12 @@ export class GameSessionAdapter implements GameSession {
    * no campaign forms/advances and `ctx().campaignTiltFor` is absent ⇒ the seeded vote is unchanged.
    */
   private campaignsEnabled = CAMPAIGNS_ENABLED_DEFAULT;
+  /**
+   * 0006b — whether NPCs carry a derived COMPETITION INTENT. DEFAULT OFF: the calibration/UAT harness
+   * never enables it, so `ctx().compIntentOf` is absent and every NPC "compete"s ⇒ every seeded gate is
+   * BYTE-IDENTICAL; the live deploy enables it via `ORWELL_COMP_INTENT=1` / `setCompIntentEnabled`.
+   */
+  private compIntentEnabled = COMP_INTENT_ENABLED_DEFAULT;
   /** The DEDICATED campaign rng tick counter — campaign draws fork off the game seed + this, never the
    * shared society/vote stream (the L21/L24 isolation), so even live campaigns don't re-phase calibration. */
   private campaignTickCount = 0;
@@ -4853,11 +4867,42 @@ export class GameSessionAdapter implements GameSession {
       // AWARE of (knownTo) pushes their vote, scaled by owner persuasiveness × voter susceptibility ×
       // trust × progress (the engine tallies; narration only voices). Bounded; never crosses the wall.
       ...(this.campaignsEnabled ? { campaignTiltFor: (target, voter) => this.campaignTiltFor(target, voter) } : {}),
+      // 0006b: NPCs carry a derived competition intent — present ONLY when enabled (off in the calibration
+      // harness ⇒ absent ⇒ every NPC competes ⇒ byte-identical). Live-only strategic throw/play-safe.
+      ...(this.compIntentEnabled ? { compIntentOf: (id: EntityId, field: readonly EntityId[]) => this.deriveCompIntent(id, field) } : {}),
     };
   }
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }
+
+  /** Turn the NPC competition-intent layer on/off (0006b). Off by default — the calibration harness leaves it off. */
+  setCompIntentEnabled(on: boolean): void { this.compIntentEnabled = on; }
+
+  /**
+   * 0006b — derive an NPC's competition intent (compete / throw / play-safe) for a comp over `field`.
+   * Strategic and OCCASIONAL by construction (see COMP_INTENT_THRESHOLDS):
+   *   • a NOMINEE always competes (fighting for their life);
+   *   • a LAY-LOW houseguest (low archetype aggression) with a strongly-trusted ally ALSO in the field
+   *     THROWS — hand the ally the power and keep their own head down;
+   *   • a CAUTIOUS houseguest another competitor already reads as a real threat PLAYS SAFE — don't win
+   *     the comp that paints a bigger target on you;
+   *   • otherwise COMPETE.
+   * Pure read of the live board + relationships (no rng, no Vault, no number crosses the wall).
+   */
+  private deriveCompIntent(id: EntityId, field: readonly EntityId[]): Intent {
+    if (id === PLAYER) return "compete"; // the player declares their own approach
+    const hg = this.house?.npcs.find((n) => n.id === id);
+    if (!hg) return "compete";
+    const others = field.filter((o) => o !== id);
+    return deriveNpcCompIntent({
+      aggression: ARCHETYPE_AGGRESSION[hg.character.archetype] ?? 0.5,
+      nominee: this.live?.nominees?.includes(id) ?? false,
+      hasOthers: others.length > 0,
+      bestAllyBond: others.length ? Math.max(...others.map((o) => this.rel.bondStrength(id, o))) : 0,
+      maxThreatOnMe: others.length ? Math.max(...others.map((o) => this.rel.edge(o, id).threat)) : 0,
+    });
+  }
 
   /** Turn the RELATIONSHIP-TRAJECTORY layer on/off (0087). Off by default — the calibration harness leaves
    *  it off (with it off the off-screen tick passes no `trajectoryOf` ⇒ the seeded spine is byte-identical). */

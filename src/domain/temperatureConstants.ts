@@ -68,8 +68,11 @@ export const TEMPERATURE_CONSTANTS: TemperatureConstants = {
   // Values preserve the long-standing live behavior at the moment of wiring (E53): the approach
   // band was 1 ± 0.1 (= initiative/2) and the bond-pick wobble was ±0.05 (= allianceShift/2).
   variableWeights: { initiative: 0.2, allianceShift: 0.1 },
-  // Calibrated so a clear stat favorite wins a strong majority but loses a real minority (0006).
-  outcome: { stat: 1.0, temperature: 0.36, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2, sleepPenalty: 0.15 },
+  // Calibrated so a clear stat favorite wins a majority but loses a real minority (0006). PO review
+  // 2026-06-28: temperature raised 0.36 → 0.40 so upsets are a TAD more common and raw comp stats are
+  // a bit less dominant now that character depth also lives in emotions (0041) + sleep (0066) — a clear
+  // favorite drops from ~64% to ~59% average across field sizes (juryReach EARNED-WINS re-verified).
+  outcome: { stat: 1.0, temperature: 0.40, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2, sleepPenalty: 0.15 },
   emotional: { baseline: 0.5, volatilityScale: 0.5, meanReversionRate: 0.3, swingTemperatureWeight: 0.25 },
   hiddenSurfacingRate: 0.05,
 };

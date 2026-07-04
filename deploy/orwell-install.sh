@@ -261,6 +261,11 @@ write_config() {
       # agendas that tilt nominations/votes — engine-tallied, Vault-sealed). DEFAULT OFF in code so
       # the seeded calibration gates stay byte-identical; the deploy opts in here.
       echo "ORWELL_CAMPAIGNS=1"
+      # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
+      # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
+      # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded
+      # calibration gates stay byte-identical; the deploy opts in here.
+      echo "ORWELL_COMP_INTENT=1"
       # Multi-user identity (audit E32): the FE ships with accounts ON by default, so the engine
       # must REQUIRE an asserted x-orwell-user — never silently collapse anonymous callers into a
       # shared "default" sandbox (cross-user isolation, feature 0021).
