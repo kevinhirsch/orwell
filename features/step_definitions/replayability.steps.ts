@@ -161,6 +161,51 @@ Then("no full name and persona pairing is fixed across seeds", function (this: B
   }
 });
 
+// --- Public appearance fields (0004 amendment, wired live per PO review 2026-06-28) ----------
+
+Then(
+  "each houseguest's Character carries public appearance and presentation fields",
+  function (this: BbWorld) {
+    for (const n of this.house!.npcs) {
+      assert.ok(
+        typeof n.character.appearance === "string" && n.character.appearance.length > 0,
+        "appearance must be a non-empty public string",
+      );
+      assert.ok(
+        typeof n.character.presentation === "string" && n.character.presentation.length > 0,
+        "presentation must be a non-empty public string",
+      );
+      assert.equal(typeof n.character.age, "number", "age must be a number");
+    }
+  },
+);
+
+Then(
+  "those appearance fields are well-formed and within plausible reality-TV bounds",
+  function (this: BbWorld) {
+    for (const n of this.house!.npcs) {
+      assert.ok(n.character.age >= 21 && n.character.age <= 60, `age ${n.character.age} out of band`);
+      assert.ok(n.character.appearance.includes(", "), "appearance carries multiple descriptive facets");
+      assert.ok(isPlausibleHouseguest(n), "the houseguest stays internally consistent");
+    }
+  },
+);
+
+Then(
+  "those public fields leak no competition aptitude or hidden attribute",
+  function (this: BbWorld) {
+    for (const n of this.house!.npcs) {
+      const blob = `${n.character.appearance} | ${n.character.presentation}`;
+      // A public appearance descriptor never carries a numeric aptitude (stat score).
+      assert.ok(!/\d/.test(blob), `appearance/presentation must carry no number: "${blob}"`);
+      // No hidden-element text bleeds into the public facets.
+      for (const h of n.character.hiddenElements) {
+        assert.ok(!blob.includes(h.detail), `hidden element "${h.detail}" must not appear in public fields`);
+      }
+    }
+  },
+);
+
 // --- No carryover across seeds ------------------------------------------------
 
 Then("the two houses share no houseguest identities", function (this: BbWorld) {

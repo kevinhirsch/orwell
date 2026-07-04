@@ -39,6 +39,33 @@ Feature: Competition eligibility & legality — the hard rules of the weekly loo
     And an NPC holder picks their strongest available bond per the relationship model
     And the veto field still totals six players
 
+  # ── PO EXPANSION (2026-06-28, PO-REVIEW-LEDGER) — PENDING BUILD ─────────────────────
+  # PO ruling: a "Houseguest's Choice" holder should pick the strongest STRATEGIC choice
+  # for their game this week — NOT merely their strongest bond. The two usually agree, but
+  # when they diverge, strategy wins (e.g. a trusted-enough STRONG competitor over a beloved
+  # weak ally, or a pick that keeps a target vulnerable). The current scenario above
+  # (strongest bond) reflects the CURRENT behavior and stays green until this ships.
+  #
+  # Kept as a pending block (NOT in the live gate) because changing the NPC's pick changes
+  # WHO plays the veto, which feeds the seeded competition outcomes — so this ships as an
+  # opt-in behavior change with a calibration-neutrality guard (the codebase pattern):
+  # default-off ⇒ byte-identical seeded sims; then these become live scenarios and, after a
+  # calibration re-baseline, the strategic pick can become the default.
+  #
+  #   Scenario: Houseguest's Choice coincides with the strongest bond when they agree
+  #     Given an NPC holds "Houseguest's Choice"
+  #     And the NPC's strongest bond is also their strongest strategic pick this week
+  #     When the NPC makes a selection
+  #     Then the NPC selects that houseguest
+  #
+  #   Scenario: Houseguest's Choice favors strategy when it diverges from the strongest bond
+  #     Given an NPC holds "Houseguest's Choice"
+  #     And the NPC's strongest strategic pick this week is not their strongest bond
+  #     When the NPC makes a selection
+  #     Then the NPC selects the houseguest who best serves their game this week
+  #     And that selection need not be their strongest bond
+  # ────────────────────────────────────────────────────────────────────────────────────
+
   Scenario: The eviction voting set excludes the HOH and the nominees
     Given an HOH and two nominees for the current week
     When the eviction vote is taken

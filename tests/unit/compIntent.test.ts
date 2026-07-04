@@ -34,7 +34,7 @@ function playerWinsOpeningHoh(seed: number, approach: "compete" | "throw" | "pla
 }
 
 describe("0006 staged-rounds — a declared throw measurably lowers the player's win rate", () => {
-  it("throwing EVERY round of the opening HOH wins far less often than competing, across seeds", () => {
+  it("throwing the up-front approach in the opening HOH wins far less often than competing, across seeds", () => {
     let competeWins = 0, throwWins = 0;
     for (let seed = 1; seed <= 150; seed++) {
       if (playerWinsOpeningHoh(seed, "compete")) competeWins++;
@@ -74,50 +74,53 @@ describe("0006 staged-rounds — a declared throw measurably lowers the player's
   });
 });
 
-describe("0006 staged-rounds — the field NARROWS and re-prompts each round (adaptation forward)", () => {
-  /** Play a comp-beast's opening HOH competing every round; return the still-in field size at each prompt. */
-  function promptFields(seed: number): number[] {
+describe("0006 staged-rounds — intent is asked ONCE up front; the field still narrows in presentation", () => {
+  /** Play a comp-beast's opening HOH; count how many times the player was prompted + the max prompt round. */
+  function promptStats(seed: number): { prompts: number; maxRound: number } {
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "P", archetype: "comp-beast", seed });
-    const fields: number[] = [];
+    let prompts = 0;
+    let maxRound = 0;
     for (let g = 0; g < 200; g++) {
       if (s.gameStatus().hoh) break;
       const adv = s.advanceGame();
       if (adv.pending?.kind === "comp-round") {
-        fields.push(adv.pending.stillIn!.length);
+        prompts++;
+        maxRound = Math.max(maxRound, adv.pending.round ?? 1);
         s.submitDecision({ kind: "comp-round", intent: "compete" });
       } else if (adv.pending) break;
     }
-    return fields;
+    return { prompts, maxRound };
   }
 
-  it("re-prompts with a SMALLER still-in field on a later round (the player keeps competing)", () => {
-    // Find the first seed where the player survives ≥2 rounds (they exist; the player isn't always the
-    // first drop). Whichever seed lands, the re-prompted field must narrow strictly each round.
-    let fields: number[] = [];
-    for (let seed = 1; seed <= 50 && fields.length < 2; seed++) fields = promptFields(seed);
-    expect(fields.length).toBeGreaterThanOrEqual(2);
-    for (let i = 1; i < fields.length; i++) expect(fields[i]).toBeLessThan(fields[i - 1]!);
+  it("prompts the player AT MOST once (up front), never re-asking as the field narrows (PO review 2026-06-28)", () => {
+    let everPrompted = false;
+    for (let seed = 1; seed <= 50; seed++) {
+      const { prompts, maxRound } = promptStats(seed);
+      expect(prompts, `seed ${seed}`).toBeLessThanOrEqual(1);   // asked once at most — never re-prompted
+      if (prompts === 1) {
+        everPrompted = true;
+        expect(maxRound, `seed ${seed}`).toBe(1);                // and that one prompt is round 1 (up front)
+      }
+    }
+    expect(everPrompted).toBe(true); // the single up-front prompt still fires (intent wasn't removed entirely)
   });
 });
 
-describe("0006 staged-rounds — each round's approach is immutable once the round is given (anti-sycophancy)", () => {
-  it("declaring an approach AFTER the round resolves is refused (the structured selection locks per round)", () => {
+describe("0006 staged-rounds — the up-front approach is immutable once given (anti-sycophancy)", () => {
+  it("after the single up-front approach resolves, no further comp-round is offered (one decision)", () => {
     const ctx: SeasonCtx = { player: PLAYER, statsOf: () => ({ physical: 0.5, mental: 0.5, social: 0.5 }), rel: new RelationshipModel(0.5) };
     const s = newLiveSeason([PLAYER, npc(1), npc(2), npc(3), npc(4)]);
     const rng = new SeededRandom(3);
 
-    advance(s, ctx, rng); // pauses for the round-1 approach (the player plays the opening HOH)
+    advance(s, ctx, rng); // pauses for the up-front approach (the player plays the opening HOH)
     expect(s.pending?.kind).toBe("comp-round");
-    applyDecision(s, { kind: "comp-round", intent: "throw" }, ctx, rng); // round 1 resolves with it (locked)
-    // The round 1 drop is locked. There may be a NEXT round pending — but the PAST round's approach can
-    // never be re-submitted: only the CURRENT round's pending accepts an approach, and once it resolves
-    // it is gone. Drain to confirm no stale approach is ever accepted into a resolved round.
-    if (s.pending?.kind === "comp-round") {
-      // a fresh round pending = a NEW round (forward adaptation); resolving it does not touch round 1.
-      const beforeField = (s.pending as { stillIn: unknown[] }).stillIn.length;
-      applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
-      expect(beforeField).toBeGreaterThan(0);
+    expect((s.pending as { round: number }).round).toBe(1);
+    applyDecision(s, { kind: "comp-round", intent: "throw" }, ctx, rng); // the single roll resolves with it (locked)
+    // The player is NEVER prompted for another comp-round — the elimination reveals play out untouched.
+    for (let g = 0; g < 40 && !s.hoh; g++) {
+      expect(s.pending?.kind, `step ${g}`).not.toBe("comp-round");
+      advance(s, ctx, rng);
     }
   });
 

@@ -52,3 +52,37 @@ Feature: Outcomes by stats and temperature — earned results, never story conve
       | 1    |
       | 2    |
       | 3    |
+
+  # ── PO EXPANSION (2026-06-28, PO-REVIEW-LEDGER) — BUILT ─────────────────────────────
+  # Both PO rulings shipped. These are property-style behaviors gated by the calibration/unit
+  # suite (not Gherkin, which asserts properties not numbers) — the gate files are named below.
+  #
+  #  (1) UPSETS A TAD MORE COMMON — BUILT. temperature weight 0.36 → 0.40 in
+  #      `temperatureConstants.ts` lowers a clear favorite from ~64% to ~59% average across field
+  #      sizes, so raw comp stats are less dominant now that emotions (0041) + sleep (0066) add
+  #      depth. A DELIBERATE calibration retune (not byte-identical) — the juryReach EARNED-WINS
+  #      guard was re-verified green (playing the game still converts). Gate:
+  #      `tests/unit/stagedCompetition.test.ts` (the ~50–70% favorite-win band).
+  #
+  #      Scenario: A clear favorite wins a majority, but upsets are common
+  #        Given a clear favorite by stats in a competition
+  #        When outcomes are computed across many seeded runs
+  #        Then the favorite wins more often than not
+  #        And the favorite loses often enough that upsets are a regular occurrence
+  #
+  #  (2) EVERY NPC CARRIES A COMPETITION INTENT — BUILT (opt-in `ORWELL_COMP_INTENT`;
+  #      byte-identical when off). A nominee fights; a lay-low houseguest with a strongly-trusted
+  #      ally in the field throws to hand them the power; a cautious houseguest a rival reads as a
+  #      real threat plays safe; otherwise competes. The intent reaches the same seeded roll the
+  #      player's does. Gate: `tests/unit/npcCompIntent.test.ts`.
+  #
+  #      NOTE (single-roll model kept — Path B declined): intent is declared ONCE, up front. The
+  #      earlier idea of an NPC (or the player) CHANGING intent mid-comp per round was dropped —
+  #      the comp is one calibrated roll, so a mid-comp change can't affect the result (see the
+  #      "intent asked once" amendment). Per-round re-resolution would be a separate rebuild.
+  #
+  #      Scenario: Every competitor carries an intent, not just the player
+  #        Given a competition with the player and NPCs competing
+  #        Then each competing NPC holds an intent of compete, throw, or play safe
+  #        And each NPC's intent affects their outcome computation like the player's
+  # ────────────────────────────────────────────────────────────────────────────────────

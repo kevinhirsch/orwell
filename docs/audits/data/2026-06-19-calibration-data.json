@@ -7,35 +7,35 @@
       "arm": "passive",
       "seasons": 30,
       "reachedJury": 30,
-      "reachedF5": 26,
-      "reachedF4": 22,
-      "reachedF3": 15,
-      "reachedF2": 15,
-      "wins": 2,
-      "reachedF2AndLost": 13,
-      "f2Wins": 2,
-      "f2Losses": 13,
+      "reachedF5": 29,
+      "reachedF4": 28,
+      "reachedF3": 23,
+      "reachedF2": 23,
+      "wins": 0,
+      "reachedF2AndLost": 23,
+      "f2Wins": 0,
+      "f2Losses": 23,
       "meanCompWins": 1.2333333333333334,
-      "meanCompWinsAtF2": 1.1333333333333333,
-      "meanDecidedWeek": 12.266666666666667,
-      "meanLossMargin": 5.153846153846154
+      "meanCompWinsAtF2": 1.1304347826086956,
+      "meanDecidedWeek": 13.3,
+      "meanLossMargin": 7.3478260869565215
     },
     "active": {
       "arm": "active",
       "seasons": 30,
-      "reachedJury": 29,
-      "reachedF5": 27,
-      "reachedF4": 24,
-      "reachedF3": 20,
+      "reachedJury": 30,
+      "reachedF5": 26,
+      "reachedF4": 25,
+      "reachedF3": 21,
       "reachedF2": 20,
       "wins": 2,
       "reachedF2AndLost": 18,
       "f2Wins": 2,
       "f2Losses": 18,
-      "meanCompWins": 1.0666666666666667,
-      "meanCompWinsAtF2": 1,
-      "meanDecidedWeek": 12.633333333333333,
-      "meanLossMargin": 5.888888888888889
+      "meanCompWins": 1.2333333333333334,
+      "meanCompWinsAtF2": 1.2,
+      "meanDecidedWeek": 12.666666666666666,
+      "meanLossMargin": 6.555555555555555
     }
   },
   "seasons": {
@@ -50,18 +50,38 @@
         "reachedF3": true,
         "reachedF2": true,
         "won": false,
-        "playerCompWins": 0,
+        "playerCompWins": 1,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
         "finale": {
-          "playerVotes": 3,
-          "rivalVotes": 6,
+          "playerVotes": 1,
+          "rivalVotes": 8,
           "jurors": 9
         },
         "reachedF2AndLost": true
       },
       {
         "seed": 2,
+        "arm": "passive",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 0,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 0,
+          "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 3,
         "arm": "passive",
         "status": "jury",
         "reachedJury": true,
@@ -77,7 +97,7 @@
         "reachedF2AndLost": false
       },
       {
-        "seed": 3,
+        "seed": 4,
         "arm": "passive",
         "status": "active",
         "reachedJury": true,
@@ -90,43 +110,31 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 3,
-          "rivalVotes": 6,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
       },
       {
-        "seed": 4,
-        "arm": "passive",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 0,
-        "houseSizeWhenPlayerLeft": 4,
-        "decidedWeek": 13,
-        "finale": null,
-        "reachedF2AndLost": false
-      },
-      {
         "seed": 5,
         "arm": "passive",
-        "status": "jury",
+        "status": "active",
         "reachedJury": true,
         "reachedF5": true,
         "reachedF4": true,
-        "reachedF3": false,
-        "reachedF2": false,
+        "reachedF3": true,
+        "reachedF2": true,
         "won": false,
-        "playerCompWins": 3,
-        "houseSizeWhenPlayerLeft": 4,
-        "decidedWeek": 13,
-        "finale": null,
-        "reachedF2AndLost": false
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 3,
+          "rivalVotes": 6,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
       },
       {
         "seed": 6,
@@ -151,22 +159,18 @@
       {
         "seed": 7,
         "arm": "passive",
-        "status": "active",
+        "status": "jury",
         "reachedJury": true,
         "reachedF5": true,
         "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
+        "reachedF3": false,
+        "reachedF2": false,
         "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 12,
-        "finale": {
-          "playerVotes": 2,
-          "rivalVotes": 7,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": 4,
+        "decidedWeek": 11,
+        "finale": null,
+        "reachedF2AndLost": false
       },
       {
         "seed": 8,
@@ -178,7 +182,27 @@
         "reachedF3": true,
         "reachedF2": true,
         "won": false,
-        "playerCompWins": 0,
+        "playerCompWins": 1,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 0,
+          "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 9,
+        "arm": "passive",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 1,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
@@ -189,52 +213,44 @@
         "reachedF2AndLost": true
       },
       {
-        "seed": 9,
+        "seed": 10,
         "arm": "passive",
-        "status": "jury",
+        "status": "active",
         "reachedJury": true,
         "reachedF5": true,
         "reachedF4": true,
-        "reachedF3": false,
-        "reachedF2": false,
+        "reachedF3": true,
+        "reachedF2": true,
         "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": 4,
+        "playerCompWins": 0,
+        "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
-        "finale": null,
-        "reachedF2AndLost": false
-      },
-      {
-        "seed": 10,
-        "arm": "passive",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": 5,
-        "decidedWeek": 11,
-        "finale": null,
-        "reachedF2AndLost": false
+        "finale": {
+          "playerVotes": 0,
+          "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
       },
       {
         "seed": 11,
         "arm": "passive",
-        "status": "jury",
+        "status": "active",
         "reachedJury": true,
-        "reachedF5": false,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
         "won": false,
-        "playerCompWins": 0,
-        "houseSizeWhenPlayerLeft": 10,
-        "decidedWeek": 7,
-        "finale": null,
-        "reachedF2AndLost": false
+        "playerCompWins": 4,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 3,
+          "rivalVotes": 6,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
       },
       {
         "seed": 12,
@@ -255,18 +271,22 @@
       {
         "seed": 13,
         "arm": "passive",
-        "status": "jury",
+        "status": "active",
         "reachedJury": true,
         "reachedF5": true,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
         "won": false,
         "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": 5,
-        "decidedWeek": 12,
-        "finale": null,
-        "reachedF2AndLost": false
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 1,
+          "rivalVotes": 8,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
       },
       {
         "seed": 14,
@@ -277,16 +297,16 @@
         "reachedF4": true,
         "reachedF3": true,
         "reachedF2": true,
-        "won": true,
-        "playerCompWins": 4,
+        "won": false,
+        "playerCompWins": 1,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 8,
-          "rivalVotes": 1,
+          "playerVotes": 2,
+          "rivalVotes": 7,
           "jurors": 9
         },
-        "reachedF2AndLost": false
+        "reachedF2AndLost": true
       },
       {
         "seed": 15,
@@ -297,16 +317,16 @@
         "reachedF4": true,
         "reachedF3": true,
         "reachedF2": true,
-        "won": true,
-        "playerCompWins": 3,
+        "won": false,
+        "playerCompWins": 0,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
         "finale": {
-          "playerVotes": 5,
-          "rivalVotes": 4,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
-        "reachedF2AndLost": false
+        "reachedF2AndLost": true
       },
       {
         "seed": 16,
@@ -338,12 +358,12 @@
         "reachedF3": true,
         "reachedF2": true,
         "won": false,
-        "playerCompWins": 1,
+        "playerCompWins": 2,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
         "finale": {
-          "playerVotes": 1,
-          "rivalVotes": 8,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -351,50 +371,58 @@
       {
         "seed": 18,
         "arm": "passive",
-        "status": "jury",
+        "status": "active",
         "reachedJury": true,
-        "reachedF5": false,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
         "won": false,
         "playerCompWins": 0,
-        "houseSizeWhenPlayerLeft": 10,
-        "decidedWeek": 7,
-        "finale": null,
-        "reachedF2AndLost": false
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 0,
+          "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
       },
       {
         "seed": 19,
         "arm": "passive",
         "status": "jury",
         "reachedJury": true,
-        "reachedF5": false,
-        "reachedF4": false,
+        "reachedF5": true,
+        "reachedF4": true,
         "reachedF3": false,
         "reachedF2": false,
         "won": false,
         "playerCompWins": 2,
-        "houseSizeWhenPlayerLeft": 11,
-        "decidedWeek": 6,
+        "houseSizeWhenPlayerLeft": 4,
+        "decidedWeek": 13,
         "finale": null,
         "reachedF2AndLost": false
       },
       {
         "seed": 20,
         "arm": "passive",
-        "status": "jury",
+        "status": "active",
         "reachedJury": true,
-        "reachedF5": false,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
         "won": false,
         "playerCompWins": 2,
-        "houseSizeWhenPlayerLeft": 7,
-        "decidedWeek": 10,
-        "finale": null,
-        "reachedF2AndLost": false
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 0,
+          "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
       },
       {
         "seed": 21,
@@ -410,50 +438,14 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
         "finale": {
-          "playerVotes": 1,
-          "rivalVotes": 8,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
       },
       {
         "seed": 22,
-        "arm": "passive",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 3,
-        "houseSizeWhenPlayerLeft": 5,
-        "decidedWeek": 12,
-        "finale": null,
-        "reachedF2AndLost": false
-      },
-      {
-        "seed": 23,
-        "arm": "passive",
-        "status": "active",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
-        "won": false,
-        "playerCompWins": 0,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 1,
-          "rivalVotes": 8,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
-      },
-      {
-        "seed": 24,
         "arm": "passive",
         "status": "active",
         "reachedJury": true,
@@ -473,27 +465,7 @@
         "reachedF2AndLost": true
       },
       {
-        "seed": 25,
-        "arm": "passive",
-        "status": "active",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
-        "won": false,
-        "playerCompWins": 3,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 4,
-          "rivalVotes": 5,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
-      },
-      {
-        "seed": 26,
+        "seed": 23,
         "arm": "passive",
         "status": "jury",
         "reachedJury": true,
@@ -504,12 +476,32 @@
         "won": false,
         "playerCompWins": 0,
         "houseSizeWhenPlayerLeft": 4,
-        "decidedWeek": 12,
+        "decidedWeek": 13,
         "finale": null,
         "reachedF2AndLost": false
       },
       {
-        "seed": 27,
+        "seed": 24,
+        "arm": "passive",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 4,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 4,
+          "rivalVotes": 5,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 25,
         "arm": "passive",
         "status": "jury",
         "reachedJury": true,
@@ -518,27 +510,67 @@
         "reachedF3": false,
         "reachedF2": false,
         "won": false,
-        "playerCompWins": 2,
+        "playerCompWins": 3,
         "houseSizeWhenPlayerLeft": 4,
         "decidedWeek": 13,
         "finale": null,
         "reachedF2AndLost": false
       },
       {
-        "seed": 28,
+        "seed": 26,
         "arm": "passive",
         "status": "jury",
         "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
+        "reachedF5": false,
+        "reachedF4": false,
         "reachedF3": false,
         "reachedF2": false,
         "won": false,
-        "playerCompWins": 2,
-        "houseSizeWhenPlayerLeft": 4,
-        "decidedWeek": 11,
+        "playerCompWins": 1,
+        "houseSizeWhenPlayerLeft": 6,
+        "decidedWeek": 10,
         "finale": null,
         "reachedF2AndLost": false
+      },
+      {
+        "seed": 27,
+        "arm": "passive",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 0,
+          "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 28,
+        "arm": "passive",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 0,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 12,
+        "finale": {
+          "playerVotes": 0,
+          "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
       },
       {
         "seed": 29,
@@ -554,8 +586,8 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 3,
-          "rivalVotes": 6,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -574,8 +606,8 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 2,
-          "rivalVotes": 7,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -596,8 +628,8 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
         "finale": {
-          "playerVotes": 4,
-          "rivalVotes": 5,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -608,75 +640,63 @@
         "status": "jury",
         "reachedJury": true,
         "reachedF5": true,
-        "reachedF4": false,
+        "reachedF4": true,
         "reachedF3": false,
         "reachedF2": false,
         "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": 5,
-        "decidedWeek": 12,
+        "playerCompWins": 0,
+        "houseSizeWhenPlayerLeft": 4,
+        "decidedWeek": 13,
         "finale": null,
         "reachedF2AndLost": false
       },
       {
         "seed": 3,
         "arm": "active",
-        "status": "active",
+        "status": "jury",
         "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
+        "reachedF5": false,
+        "reachedF4": false,
+        "reachedF3": false,
+        "reachedF2": false,
         "won": false,
         "playerCompWins": 0,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 0,
-          "rivalVotes": 9,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
+        "houseSizeWhenPlayerLeft": 8,
+        "decidedWeek": 9,
+        "finale": null,
+        "reachedF2AndLost": false
       },
       {
         "seed": 4,
         "arm": "active",
-        "status": "active",
+        "status": "jury",
         "reachedJury": true,
         "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
+        "reachedF4": false,
+        "reachedF3": false,
+        "reachedF2": false,
         "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 2,
-          "rivalVotes": 7,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
+        "playerCompWins": 0,
+        "houseSizeWhenPlayerLeft": 5,
+        "decidedWeek": 12,
+        "finale": null,
+        "reachedF2AndLost": false
       },
       {
         "seed": 5,
         "arm": "active",
-        "status": "active",
+        "status": "jury",
         "reachedJury": true,
         "reachedF5": true,
         "reachedF4": true,
         "reachedF3": true,
-        "reachedF2": true,
+        "reachedF2": false,
         "won": false,
-        "playerCompWins": 2,
-        "houseSizeWhenPlayerLeft": null,
+        "playerCompWins": 3,
+        "houseSizeWhenPlayerLeft": 3,
         "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 2,
-          "rivalVotes": 7,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
+        "finale": null,
+        "reachedF2AndLost": false
       },
       {
         "seed": 6,
@@ -687,16 +707,16 @@
         "reachedF4": true,
         "reachedF3": true,
         "reachedF2": true,
-        "won": true,
-        "playerCompWins": 2,
+        "won": false,
+        "playerCompWins": 1,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
         "finale": {
-          "playerVotes": 5,
-          "rivalVotes": 4,
+          "playerVotes": 1,
+          "rivalVotes": 8,
           "jurors": 9
         },
-        "reachedF2AndLost": false
+        "reachedF2AndLost": true
       },
       {
         "seed": 7,
@@ -707,36 +727,32 @@
         "reachedF4": true,
         "reachedF3": true,
         "reachedF2": true,
-        "won": true,
-        "playerCompWins": 2,
+        "won": false,
+        "playerCompWins": 1,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 12,
         "finale": {
-          "playerVotes": 7,
-          "rivalVotes": 2,
+          "playerVotes": 1,
+          "rivalVotes": 8,
           "jurors": 9
         },
-        "reachedF2AndLost": false
+        "reachedF2AndLost": true
       },
       {
         "seed": 8,
         "arm": "active",
-        "status": "active",
+        "status": "jury",
         "reachedJury": true,
         "reachedF5": true,
         "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
+        "reachedF3": false,
+        "reachedF2": false,
         "won": false,
         "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 2,
-          "rivalVotes": 7,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
+        "houseSizeWhenPlayerLeft": 4,
+        "decidedWeek": 13,
+        "finale": null,
+        "reachedF2AndLost": false
       },
       {
         "seed": 9,
@@ -752,30 +768,14 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 4,
-          "rivalVotes": 5,
+          "playerVotes": 3,
+          "rivalVotes": 6,
           "jurors": 9
         },
         "reachedF2AndLost": true
       },
       {
         "seed": 10,
-        "arm": "active",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 0,
-        "houseSizeWhenPlayerLeft": 5,
-        "decidedWeek": 11,
-        "finale": null,
-        "reachedF2AndLost": false
-      },
-      {
-        "seed": 11,
         "arm": "active",
         "status": "active",
         "reachedJury": true,
@@ -786,28 +786,48 @@
         "won": false,
         "playerCompWins": 1,
         "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
+        "decidedWeek": 13,
         "finale": {
-          "playerVotes": 0,
-          "rivalVotes": 9,
+          "playerVotes": 2,
+          "rivalVotes": 7,
           "jurors": 9
         },
         "reachedF2AndLost": true
       },
       {
-        "seed": 12,
+        "seed": 11,
         "arm": "active",
-        "status": "evicted",
-        "reachedJury": false,
+        "status": "jury",
+        "reachedJury": true,
         "reachedF5": false,
         "reachedF4": false,
         "reachedF3": false,
         "reachedF2": false,
         "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": 14,
-        "decidedWeek": 3,
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": 11,
+        "decidedWeek": 6,
         "finale": null,
+        "reachedF2AndLost": false
+      },
+      {
+        "seed": 12,
+        "arm": "active",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": true,
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 6,
+          "rivalVotes": 3,
+          "jurors": 9
+        },
         "reachedF2AndLost": false
       },
       {
@@ -824,8 +844,8 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 2,
-          "rivalVotes": 7,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -840,12 +860,12 @@
         "reachedF3": true,
         "reachedF2": true,
         "won": false,
-        "playerCompWins": 3,
+        "playerCompWins": 2,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 2,
-          "rivalVotes": 7,
+          "playerVotes": 4,
+          "rivalVotes": 5,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -860,6 +880,42 @@
         "reachedF3": true,
         "reachedF2": true,
         "won": false,
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 13,
+        "finale": {
+          "playerVotes": 3,
+          "rivalVotes": 6,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 16,
+        "arm": "active",
+        "status": "jury",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": false,
+        "reachedF2": false,
+        "won": false,
+        "playerCompWins": 0,
+        "houseSizeWhenPlayerLeft": 4,
+        "decidedWeek": 13,
+        "finale": null,
+        "reachedF2AndLost": false
+      },
+      {
+        "seed": 17,
+        "arm": "active",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
         "playerCompWins": 0,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
@@ -871,38 +927,6 @@
         "reachedF2AndLost": true
       },
       {
-        "seed": 16,
-        "arm": "active",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": 5,
-        "decidedWeek": 12,
-        "finale": null,
-        "reachedF2AndLost": false
-      },
-      {
-        "seed": 17,
-        "arm": "active",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 4,
-        "houseSizeWhenPlayerLeft": 4,
-        "decidedWeek": 12,
-        "finale": null,
-        "reachedF2AndLost": false
-      },
-      {
         "seed": 18,
         "arm": "active",
         "status": "active",
@@ -912,12 +936,12 @@
         "reachedF3": true,
         "reachedF2": true,
         "won": false,
-        "playerCompWins": 0,
+        "playerCompWins": 1,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 1,
-          "rivalVotes": 8,
+          "playerVotes": 2,
+          "rivalVotes": 7,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -932,7 +956,7 @@
         "reachedF3": false,
         "reachedF2": false,
         "won": false,
-        "playerCompWins": 1,
+        "playerCompWins": 3,
         "houseSizeWhenPlayerLeft": 4,
         "decidedWeek": 13,
         "finale": null,
@@ -940,98 +964,6 @@
       },
       {
         "seed": 20,
-        "arm": "active",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": false,
-        "reachedF4": false,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 2,
-        "houseSizeWhenPlayerLeft": 10,
-        "decidedWeek": 7,
-        "finale": null,
-        "reachedF2AndLost": false
-      },
-      {
-        "seed": 21,
-        "arm": "active",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 0,
-        "houseSizeWhenPlayerLeft": 4,
-        "decidedWeek": 12,
-        "finale": null,
-        "reachedF2AndLost": false
-      },
-      {
-        "seed": 22,
-        "arm": "active",
-        "status": "active",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
-        "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 1,
-          "rivalVotes": 8,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
-      },
-      {
-        "seed": 23,
-        "arm": "active",
-        "status": "active",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
-        "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 1,
-          "rivalVotes": 8,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
-      },
-      {
-        "seed": 24,
-        "arm": "active",
-        "status": "active",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": true,
-        "reachedF2": true,
-        "won": false,
-        "playerCompWins": 1,
-        "houseSizeWhenPlayerLeft": null,
-        "decidedWeek": 14,
-        "finale": {
-          "playerVotes": 3,
-          "rivalVotes": 6,
-          "jurors": 9
-        },
-        "reachedF2AndLost": true
-      },
-      {
-        "seed": 25,
         "arm": "active",
         "status": "active",
         "reachedJury": true,
@@ -1051,7 +983,7 @@
         "reachedF2AndLost": true
       },
       {
-        "seed": 26,
+        "seed": 21,
         "arm": "active",
         "status": "active",
         "reachedJury": true,
@@ -1064,8 +996,108 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 13,
         "finale": {
+          "playerVotes": 1,
+          "rivalVotes": 8,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 22,
+        "arm": "active",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
           "playerVotes": 0,
           "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 23,
+        "arm": "active",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 0,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 0,
+          "rivalVotes": 9,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 24,
+        "arm": "active",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 2,
+          "rivalVotes": 7,
+          "jurors": 9
+        },
+        "reachedF2AndLost": true
+      },
+      {
+        "seed": 25,
+        "arm": "active",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": true,
+        "playerCompWins": 3,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 14,
+        "finale": {
+          "playerVotes": 8,
+          "rivalVotes": 1,
+          "jurors": 9
+        },
+        "reachedF2AndLost": false
+      },
+      {
+        "seed": 26,
+        "arm": "active",
+        "status": "active",
+        "reachedJury": true,
+        "reachedF5": true,
+        "reachedF4": true,
+        "reachedF3": true,
+        "reachedF2": true,
+        "won": false,
+        "playerCompWins": 1,
+        "houseSizeWhenPlayerLeft": null,
+        "decidedWeek": 13,
+        "finale": {
+          "playerVotes": 1,
+          "rivalVotes": 8,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -1080,12 +1112,12 @@
         "reachedF3": true,
         "reachedF2": true,
         "won": false,
-        "playerCompWins": 0,
+        "playerCompWins": 1,
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 1,
-          "rivalVotes": 8,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
@@ -1101,13 +1133,29 @@
         "reachedF2": false,
         "won": false,
         "playerCompWins": 2,
-        "houseSizeWhenPlayerLeft": 6,
-        "decidedWeek": 10,
+        "houseSizeWhenPlayerLeft": 11,
+        "decidedWeek": 5,
         "finale": null,
         "reachedF2AndLost": false
       },
       {
         "seed": 29,
+        "arm": "active",
+        "status": "jury",
+        "reachedJury": true,
+        "reachedF5": false,
+        "reachedF4": false,
+        "reachedF3": false,
+        "reachedF2": false,
+        "won": false,
+        "playerCompWins": 2,
+        "houseSizeWhenPlayerLeft": 6,
+        "decidedWeek": 11,
+        "finale": null,
+        "reachedF2AndLost": false
+      },
+      {
+        "seed": 30,
         "arm": "active",
         "status": "active",
         "reachedJury": true,
@@ -1120,27 +1168,11 @@
         "houseSizeWhenPlayerLeft": null,
         "decidedWeek": 14,
         "finale": {
-          "playerVotes": 1,
-          "rivalVotes": 8,
+          "playerVotes": 0,
+          "rivalVotes": 9,
           "jurors": 9
         },
         "reachedF2AndLost": true
-      },
-      {
-        "seed": 30,
-        "arm": "active",
-        "status": "jury",
-        "reachedJury": true,
-        "reachedF5": true,
-        "reachedF4": true,
-        "reachedF3": false,
-        "reachedF2": false,
-        "won": false,
-        "playerCompWins": 0,
-        "houseSizeWhenPlayerLeft": 4,
-        "decidedWeek": 13,
-        "finale": null,
-        "reachedF2AndLost": false
       }
     ]
   }
