@@ -27,7 +27,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0003 | Behavioral fidelity | ✅ Built | ✅ Approved | 2026-06-28 | — |
 | 0004 | Replayability & naming | ✅ Built | ✅ Approved (expanded) | 2026-06-28 | DONE+GREEN: wired the parked "public appearance fields for portraits" scenario into the live BDD suite (567 scenarios pass) |
 | 0005 | Competition eligibility | ✅ Built | ✅ Approved (expansion queued) | 2026-06-28 | Houseguest's Choice (veto draw) must pick strongest **strategic** choice, not merely strongest bond. Test written as PENDING-BUILD block in the .feature; build is opt-in + calibration-neutral (changes the veto field → seeded outcomes). See build queue below |
-| 0006 | Outcomes by stats + temperature | ✅ Built | ⬜ Pending | — | — |
+| 0006 | Outcomes by stats + temperature | ✅ Built | ✏️ Expand | 2026-06-28 | (1) Tune favorite-win band DOWN toward ~60–70% (from ~73%) so upsets are more common — comp stats shouldn't dominate now that emotions/sleep add depth; tunable. (2) NPCs carry per-comp intent (compete/throw/play-safe), changeable per staged round as the field narrows, like the player. Tests written as PENDING-BUILD block; both are calibration-load-bearing. See build queue |
 | 0007 | Persistence non-degradation | ✅ Built | ⬜ Pending | — | — |
 | 0008 | Daily-event invariant | ✅ Built | ⬜ Pending | — | — |
 | 0009 | MCP tool boundary | ✅ Built | ⬜ Pending | — | — |
@@ -137,6 +137,8 @@ Scenarios written/agreed during review that still need implementation to go gree
 | # | What to build | Notes |
 |---|---|---|
 | 0005 | Strategic "Houseguest's Choice" veto pick (replace pure strongest-bond) | Add a strategic-ally selection in the relationship engine; wire `liveSeason` HC pick to it; un-comment the two pending scenarios + add step defs. Ship **opt-in, default-off** with a calibration-neutrality guard (the HC pick changes the veto field → seeded competition outcomes; default-off must stay byte-identical). After a calibration re-baseline, strategic can become default. |
+| 0006a | Retune favorite-win band DOWN to ~60–70% (comp stats less dominant) | Adjust the stat-vs-temperature/emotion weighting in `temperatureConstants.ts` / `competitionOutcome.ts`. This is a **deliberate re-baseline** (not byte-identical): re-measure the heavy sims (`stagedCompetition`/`juryReach`/gradient), update the favorite-win band gate, and KEEP the juryReach EARNED-WINS guard green (playing the game must still convert). Band is tunable — bring the PO the measured number to confirm. |
+| 0006b | NPC per-competition intent (compete/throw/play-safe), adaptive per staged round | Give every NPC competitor an engine-derived intent (from soul/drive/board), applied in `competitionOutcome`/`liveSeason` like the player's; allow re-choice each staged round as the field narrows, locked once the round resolves. Calibration-load-bearing (changes seeded outcomes) → ship with a neutrality flag + re-measured band. Coordinate with 0085/0086 (throwing already exists as a campaign move). |
 
 ## Numbering housekeeping (flagged during the comb-through)
 
