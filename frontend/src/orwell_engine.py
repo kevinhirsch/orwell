@@ -681,6 +681,49 @@ async def confide(npc_id: str, expected_beat_seq: int | None = None, user: str |
     return await _call("confide", args, user=user)
 
 
+async def expose_secret(fact_id: str | None = None, bluff: bool = False, subject: str | None = None,
+                        expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """Feature 0093 — the player OUTS a secret they LEARNED to the house. The engine is the single
+    authority: it validates the player actually holds `fact_id` (I3/Vault Wall — a non-learned fact is
+    REJECTED, never invented here), resolves the bounded standing fold + exposer backlash, and records
+    the exposure as a witnessed pathway event. A `bluff` (outing a secret the player does NOT hold, with
+    `subject` naming who it's about) never reads the Vault — it's a pure gamble the engine adjudicates.
+    0065 Part A — the optional `expected_beat_seq` CAS token threads in only when provided."""
+    args: dict = {}
+    if bluff:
+        args["bluff"] = True
+        if subject is not None:
+            args["subject"] = subject
+    elif fact_id is not None:
+        args["factId"] = fact_id
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("exposeSecret", args, user=user)
+
+
+async def trade_secret(to_npc_id: str, fact_id: str | None = None, bluff: bool = False,
+                       subject: str | None = None, ask_kind: str | None = None,
+                       expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """Feature 0099 — the player TRADES a secret they LEARNED about a THIRD party to a recipient for a
+    one-off concession. The engine is the single authority: it validates the player actually holds
+    `fact_id` (I3/Vault Wall — a non-learned fact is REJECTED), values the secret TO THE RECIPIENT, and
+    decides whether they bite. A `bluff` (offering a fabricated secret, `subject` naming who it's about)
+    never reads the Vault. 0065 Part A — the optional `expected_beat_seq` CAS token threads in only when
+    provided."""
+    args: dict = {"toNpcId": to_npc_id}
+    if bluff:
+        args["bluff"] = True
+        if subject is not None:
+            args["subject"] = subject
+    elif fact_id is not None:
+        args["factId"] = fact_id
+    if ask_kind is not None:
+        args["askKind"] = ask_kind
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("tradeSecret", args, user=user)
+
+
 async def season_recap(user: str | None = None) -> dict:
     """The season's public arc from the event record (0048) — Vault-free, any time."""
     return await _call("seasonRecap", {}, user=user)
