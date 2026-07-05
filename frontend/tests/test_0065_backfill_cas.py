@@ -40,11 +40,13 @@ def _clean_state():
     chat_helpers._LAST_BEAT_SEQ.clear()
     chat_helpers._LAST_BEAT_SIG.clear()
     chat_helpers._DESYNC_REGROUND.clear()
+    chat_helpers._DEFERRED_FOLDS.clear()
     chat_helpers.reset_stale_beat_rejections()
     yield
     chat_helpers._LAST_BEAT_SEQ.clear()
     chat_helpers._LAST_BEAT_SIG.clear()
     chat_helpers._DESYNC_REGROUND.clear()
+    chat_helpers._DEFERRED_FOLDS.clear()
     chat_helpers.reset_stale_beat_rejections()
 
 
@@ -292,9 +294,11 @@ def test_record_backfill_stale_409_is_reattempted_and_lands(monkeypatch):
     assert chat_helpers.last_beat_seq("owner") == 10       # refreshed off the successful retry's response
 
 
-def test_record_backfill_stale_twice_gives_up_no_stomp(monkeypatch):
-    """If the board moves AGAIN under the retry (a second consecutive stale 409), the belt reconciles
-    and gives up — it returns False (re-derives next turn), never blind-loops into a stomp."""
+def test_record_backfill_stale_twice_defers_instead_of_dropping(monkeypatch):
+    """CON-11 (audit A-S3 residual): if the board moves AGAIN under the retry (a second consecutive
+    stale 409), a fold-bearing back-fill like recordInteraction no longer silently DROPS the scene's
+    only consequence fold — it is DEFERRED for opportunistic retry. `_auto_record_scene` still returns
+    False THIS call (nothing landed yet), but the fold is now queued, not gone."""
     chat_helpers._LAST_BEAT_SEQ["owner"] = 4
     record_calls = {"n": 0}
 
@@ -318,10 +322,119 @@ def test_record_backfill_stale_twice_gives_up_no_stomp(monkeypatch):
     monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
 
     out = _run(al._auto_record_scene("a bond", "talk", HOUSE, "url", "m", {}, "owner"))
-    assert out is False, "a second consecutive stale 409 gives up (re-derives next turn)"
-    assert record_calls["n"] == 2, "tried once + re-attempted once, then stopped (no blind loop)"
+    assert out is False, "nothing landed on THIS call (no blind loop into a stomp)"
+    assert record_calls["n"] == 2, "tried once + re-attempted once, then deferred (not looped)"
     assert chat_helpers.stale_beat_rejections() == 2       # both 409s reconciled/counted
     assert "owner" in chat_helpers._DESYNC_REGROUND        # next turn re-grounds to the moved board
+    # CON-11: the fold is DEFERRED, not dropped — it must land on a later opportunity, never evaporate.
+    assert chat_helpers.deferred_fold_count("owner") == 1
+
+
+def test_move_backfill_stale_twice_still_drops_no_defer(monkeypatch):
+    """A moveTo back-fill (no `defer_fold=True` — a positional belt, not a consequence fold) keeps the
+    PRE-CON-11 reconcile-and-skip behavior on a double stale-409: nothing is queued, since re-applying a
+    much-later stale location would be actively wrong, not merely late."""
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 4
+    calls = {"n": 0}
+
+    async def fake_llm(*a, **k):
+        return '{"room":"kitchen"}'
+
+    async def fake_move_to(room, expected_beat_seq=None, user=None):
+        calls["n"] += 1
+        raise _stale_409(9 + calls["n"])
+
+    async def fake_status(user=None):
+        return {"week": 3, "phase": "veto", "pending": None, "veto": {}, "beatSeq": 99}
+
+    async def fake_state(user=None, **kw):
+        return {"week": 3, "phase": "veto", "finished": False, "house": [], "beatSeq": 99}
+
+    monkeypatch.setattr(llm_core, "llm_call_async", fake_llm)
+    monkeypatch.setattr(orwell_engine, "move_to", fake_move_to)
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+    out = _run(al._auto_move_player("You drift into the kitchen.", "I head to the kitchen", "url", "m", {}, "owner"))
+    assert out is False
+    assert calls["n"] == 2
+    assert chat_helpers.deferred_fold_count("owner") == 0, "moveTo is never deferred, only re-derived"
+
+
+# ── 3b. CON-11 — a deferred fold LANDS on the next back-fill opportunity, never lost, never doubled ── #
+
+def test_deferred_fold_lands_on_next_backfill_opportunity(monkeypatch):
+    """The CON-11 core claim: a fold deferred after a double stale-409 is opportunistically retried the
+    VERY NEXT time this owner issues ANY back-fill call, and lands exactly once — bounded LATENCY, not
+    lost DATA."""
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 4
+    record_calls = {"n": 0}
+    deal_calls = {"n": 0}
+
+    async def fake_llm_record(*a, **k):
+        return '{"withIds":["npc:3"],"kind":"bonding","content":"a bond"}'
+
+    # ONE persistent fake — behavior keyed on the token it's called with. In production
+    # `_oe.record_interaction` is a single stable module function for the whole process, so a deferred
+    # entry's captured `fn` reference is always the live implementation; this single-fake pattern
+    # mirrors that (swapping the monkeypatched attribute mid-test would NOT affect an already-deferred
+    # closure's captured reference, since `_backfill_with_cas` receives `fn` by value at call time).
+    async def fake_record(content, with_ids=None, kind=None, consequence=None,
+                          expected_beat_seq=None, user=None):
+        record_calls["n"] += 1
+        if expected_beat_seq == 11:
+            return {"recorded": True, "beatSeq": 12}  # the board has since settled at 11 — it lands
+        raise _stale_409(9 if record_calls["n"] == 1 else 10)  # still contested — board keeps moving
+
+    async def fake_status(user=None):
+        return {"week": 3, "phase": "veto", "pending": None, "veto": {}, "beatSeq": 99}
+
+    async def fake_state(user=None, **kw):
+        return {"week": 3, "phase": "veto", "finished": False, "house": [], "beatSeq": 99}
+
+    monkeypatch.setattr(llm_core, "llm_call_async", fake_llm_record)
+    monkeypatch.setattr(orwell_engine, "record_interaction", fake_record)
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+    out = _run(al._auto_record_scene("a bond", "talk", HOUSE, "url", "m", {}, "owner"))
+    assert out is False
+    assert record_calls["n"] == 2
+    assert chat_helpers.deferred_fold_count("owner") == 1
+
+    # Now the board settles at 11 and this owner issues a NEW back-fill (a struck deal) — the drain at
+    # the top of `_backfill_with_cas` must retry the deferred record BEFORE issuing the new deal call.
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 11
+
+    async def fake_llm_deal(*a, **k):
+        return '{"struck":true,"withId":"npc:7","kind":"safety","terms":"x"}'
+
+    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, user=None):
+        deal_calls["n"] += 1
+        return {"deal": True, "beatSeq": 13}
+
+    monkeypatch.setattr(llm_core, "llm_call_async", fake_llm_deal)
+    monkeypatch.setattr(orwell_engine, "make_deal", fake_make_deal)
+
+    out2 = _run(al._auto_record_deal("we shake on it", "deal", HOUSE, "url", "m", {}, "owner"))
+    assert out2 is True, "the NEW deal call itself still succeeds"
+    assert record_calls["n"] == 3, "the deferred record was drained (retried) exactly once, and landed"
+    assert deal_calls["n"] == 1, "the new deal call landed too — the drain never blocks the new call"
+    assert chat_helpers.deferred_fold_count("owner") == 0, "the queue is empty once the fold lands"
+
+
+def test_deferred_fold_queue_overflow_drops_oldest_loudly(monkeypatch, caplog):
+    """CON-11's bound: a per-owner deferred-fold queue is capped; overflow drops the OLDEST entry with a
+    loud log rather than growing without bound (a pathologically stuck queue must be visible)."""
+    for i in range(chat_helpers._DEFERRED_FOLDS_MAX + 2):
+        async def _fn(**kw):
+            return {}
+        chat_helpers._defer_fold("owner", _fn, (), {}, desc=f"scene-{i}")
+    assert chat_helpers.deferred_fold_count("owner") == chat_helpers._DEFERRED_FOLDS_MAX
+    # the OLDEST (scene-0, scene-1) were dropped, not the newest
+    kept = [e["desc"] for e in chat_helpers._DEFERRED_FOLDS[chat_helpers._beat_seq_key("owner")]]
+    assert "scene-0" not in kept
+    assert f"scene-{chat_helpers._DEFERRED_FOLDS_MAX + 1}" in kept
 
 
 def test_make_deal_backfill_stale_409_is_reattempted(monkeypatch):

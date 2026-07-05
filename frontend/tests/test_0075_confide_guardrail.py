@@ -209,7 +209,7 @@ def test_confide_belt_is_wired_into_the_finishing_block():
                            "src", "agent_loop.py"), encoding="utf-8").read()
     assert "async def _auto_confide" in js
     # 0065: routed through the CAS helper so the back-fill carries the compare-and-swap beatSeq token.
-    assert "_backfill_with_cas(owner, _oe.confide, npc_id, user=owner)" in js
+    assert "_backfill_with_cas(owner, _oe.confide, npc_id, user=owner, defer_fold=True)" in js
     # gated on: model didn't confide (per-turn cap) + the cheap press pre-filter over the player's OWN line
     assert "_want_confide = (_turn_confide_nudges < 1" in js
     assert "_CONFIDE_PRESS_RE.search(_last_user_for_confide)" in js
