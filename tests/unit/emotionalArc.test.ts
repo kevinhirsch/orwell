@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { evolveEmotion, arcNote, offscreenEmotion, type EmotionalEvent } from "../../src/engine/emotionalArc";
-import { chooseNominations, chooseNominationsWithMood } from "../../src/engine/season";
+import { chooseNominations, nominationStrategy } from "../../src/engine/season";
 import { RelationshipModel } from "../../src/engine/relationships";
 import type { Soul } from "../../src/engine/characterFactory";
 import { npc } from "../../src/domain/ids";
@@ -88,14 +88,14 @@ describe("0041 — mood-aware nominations (decision leaning)", () => {
 
   it("a calm HOH ranks purely by threat — identical to the threat-only read", () => {
     const r = rel();
-    const calm = chooseNominationsWithMood(hoh, active, r, 0.5);
+    const calm = nominationStrategy(hoh, active, r, { mood: 0.5 });
     expect(calm).toEqual(chooseNominations(hoh, active, r)); // byte-identical at the baseline
     expect(calm).toEqual([top, trusted]);
   });
 
   it("a rattled HOH nominates measurably differently — paranoia surfaces the distrusted one", () => {
     const r = rel();
-    const rattled = chooseNominationsWithMood(hoh, active, r, 0.0);
+    const rattled = nominationStrategy(hoh, active, r, { mood: 0.0 });
     expect(rattled).not.toEqual(chooseNominations(hoh, active, r));
     expect(rattled).toEqual([top, distrusted]);   // the trusted 2nd is displaced by the distrusted one
     // Hard rule still holds: two distinct nominees, the HOH never on their own block.

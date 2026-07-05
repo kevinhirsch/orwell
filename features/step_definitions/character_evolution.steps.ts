@@ -2,7 +2,7 @@ import { Given, When, Then } from "@cucumber/cucumber";
 import assert from "node:assert/strict";
 import type { BbWorld } from "../support/world";
 import { evolveEmotion, arcNote } from "../../src/engine/emotionalArc";
-import { chooseNominations, chooseNominationsWithMood } from "../../src/engine/season";
+import { nominationStrategy } from "../../src/engine/season";
 import { resolveCompetition, CompetitionIntents } from "../../src/domain/competitionOutcome";
 import type { Competitor } from "../../src/domain/competitionOutcome";
 import { RelationshipModel } from "../../src/engine/relationships";
@@ -73,8 +73,8 @@ Given("the same houseguest rattled versus calm", function (this: BbWorld) {
   set(top, 0.9, 0.5); set(trusted, 0.6, 0.9); set(distrusted, 0.5, 0.0);
   this.dealRel = rel; // reuse a RelationshipModel slot
   const active = [hoh, top, trusted, distrusted];
-  this.evoNomsCalm = chooseNominationsWithMood(hoh, active, rel, 0.5);
-  this.evoNomsRattled = chooseNominationsWithMood(hoh, active, rel, 0.0);
+  this.evoNomsCalm = nominationStrategy(hoh, active, rel, { mood: 0.5 });
+  this.evoNomsRattled = nominationStrategy(hoh, active, rel, { mood: 0.0 });
 
   // A competition setup: the same field resolved with the focal houseguest calm vs rattled — the ONLY
   // difference is mood, so the score delta is purely the emotional modifier (anti-sycophancy holds).
@@ -222,6 +222,4 @@ Then("no emotional number or hidden state appears", function (this: BbWorld) {
   for (const field of ["emotionalState", "emotionalHistory", "emotionalBaseline", "volatility"]) {
     assert.ok(!this.lastOutput.includes(field), `the hidden soul field ${field} leaked onto a player surface`);
   }
-  // Keep the threat-only nomination read referenced (it backs the calm path above).
-  void chooseNominations;
 });

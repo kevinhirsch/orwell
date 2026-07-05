@@ -28,17 +28,17 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0004 | Replayability & naming | ✅ Built | ✅ Approved (expanded) | 2026-06-28 | DONE+GREEN: wired the parked "public appearance fields for portraits" scenario into the live BDD suite (567 scenarios pass) |
 | 0005 | Competition eligibility | ✅ Built | ✅ Approved (expansion queued) | 2026-06-28 | Houseguest's Choice (veto draw) must pick strongest **strategic** choice, not merely strongest bond. Test written as PENDING-BUILD block in the .feature; build is opt-in + calibration-neutral (changes the veto field → seeded outcomes). See build queue below |
 | 0006 | Outcomes by stats + temperature | ✅ Built | ✅ Approved (expanded) | 2026-06-28 | **ALL THREE PARTS BUILT & GREEN.** (1) intent asked ONCE up front (removed cosmetic per-round prompts); (2) upset-band tuned down — temperature 0.36→0.40, clear favorite ~64%→~59% avg, juryReach EARNED-WINS re-verified; (3) every NPC carries a derived comp intent (compete/throw/play-safe), opt-in `ORWELL_COMP_INTENT`, byte-identical off. Single-roll model kept (Path B declined). Gates: `stagedCompetition` + `compIntent` + `npcCompIntent`. Full unit suite (1957) + juryReach green |
-| 0007 | Persistence non-degradation | ✅ Built | ⬜ Pending | — | — |
-| 0008 | Daily-event invariant | ✅ Built | ⬜ Pending | — | — |
-| 0009 | MCP tool boundary | ✅ Built | ⬜ Pending | — | — |
-| 0010 | One-liner deployment & update | 🚧 Built (host smoke owed) | ⬜ Pending | — | — |
-| 0011 | Weekly loop orchestration | ✅ Built | ⬜ Pending | — | — |
-| 0012 | Conversation & scene system | ✅ Built | ⬜ Pending | — | — |
-| 0013 | The Diary Room | ✅ Built | ⬜ Pending | — | — |
-| 0014 | Jury & endgame | ✅ Built | ⬜ Pending | — | — |
-| 0015 | Character creation (OOBE) | ✅ Built | ⬜ Pending | — | — |
-| 0016 | God Mode (admin port) | ✅ Built | ⬜ Pending | — | — |
-| 0017 | Relationship model | ✅ Built | ⬜ Pending | — | — |
+| 0007 | Persistence non-degradation | ✅ Built | ✅ Approved | 2026-06-28 | Reviewed full BDD (.feature + step defs). Toothed non-degradation (deep-equality round-trip, soul grows >50 entries, character baseline frozen, Vault/Journal co-versioned). Crash-safety lives in 0031 |
+| 0008 | Daily-event invariant | ✅ Built | ✅ Approved | 2026-06-28 | Reviewed full BDD (.feature + step defs). No empty days across a 16-week season (seeds 1/2/3); week = HOH reign (5–6 days, HOH-comp→eviction); ≤1 social day/week, minority of weeks, still carries a house event |
+| 0009 | MCP tool boundary | ✅ Built | ✅ Approved | 2026-06-28 | Plumbing/enforcement feature — the locked door enforcing the Vault Wall (#2) + anti-sycophancy (#3) at the app's tool API. No new gameplay decision; upholds rules already approved in 0001. Trust-the-engineering approve |
+| 0010 | One-liner deployment & update | ✅ Built | ✅ Approved | 2026-06-28 | Plumbing feature (install/update one-liners; saves survive updates; no secrets in repo). **PO confirms it has been run on a real server** — the long-standing "real-Proxmox-host smoke owed" deferral is satisfied per PO |
+| 0011 | Weekly loop orchestration | ✅ Built | ✅ Approved (expanded + cleanup) | 2026-06-28 | Core gameplay spine — faithful, deterministic, rule-enforcing. Light-expand: cross-reference note that this tests the BASELINE nomination read; the live game refines it via 0044/0043/0085/0086/0107/0039. **Cleanup:** removed the redundant test-only `chooseNominationsWithMood` (duplicated `nominationStrategy`'s mood path), retargeted its 2 tests + dropped a dead `void` ref. Green. **PR: deferred — combine with next edited feature** |
+| 0012 | Conversation & scene system | ✅ Built | ✅ Approved | 2026-06-28 | "The conversation is the game" (ADR 0003) with the anti-sycophancy guardrail proven byte-identical: free-text lobbying CANNOT move a binding decision; NPCs never voice a fact they have no pathway to; reads hint but never name off-screen events; all surfaces Vault-swept |
+| 0013 | The Diary Room | ✅ Built | ✅ Approved (expanded + cleanup) | 2026-06-28 | Two walls solid (player-DR→no-NPC; NPC-confessional→Vault-only). **Clarified purpose:** the DR is an EXPRESSIVE channel (journal + duplicity enabler + retrospective payoff), no live mechanical effect by design (anti-sycophancy). **Cleanup:** removed the dead/unwired `playerStrategyRead` identity-stub + its 2 tests; unified the magic-number NPC sweeps into a documented `SEEDED_NPCS` (real guarantee is the structural `deriveNpcKnowledge` strip). A purposeful engine read → future feature FB-1. Green. **PR: deferred — combine with next** |
+| 0014 | Jury & endgame | ✅ Built | ✅ Approved | 2026-06-28 | Faithful endgame — jury management has real teeth (blindside/disrespect lowers a juror's vote), relationships dominate while the finale sways close jurors, 18-Q&A ceremony, engine decides the vote (narration can't move it). Mechanics solid. **PO flags: the finale *feel/logistics in practice* to expand later → backlog FB-2 (see 0037)** |
+| 0015 | Character creation (OOBE) | ✅ Built | ✅ Approved | 2026-06-28 | Nails "author WHO you are, not HOW the game treats you" — no stat max-out, bounded like NPCs, player can lose, private strategy walled, OOC. This is the engine primitive; the player-facing layer is the casting interview (0050). **PO raised: how the interview determines player stats → DEFERRED to the 0050 review (options A/B/C; player currently gets a FLAT archetype bias while NPCs get seeded jitter)** |
+| 0016 | God Mode (admin port) | ✅ Built | ✅ Approved | 2026-06-28 | PO considered DELETING it (feels pointless — invisible to players, dated "dev cheat" framing). Investigated: **load-bearing, kept.** It's the operational surface behind the live admin panel — `setTimeOfDay` (the Settings clock toggle), `sandboxHealth` (status page), `manageSandbox` (reset/save/load), `configure`, `advanceToFinale` (debug), all live-wired in `frontend/src/orwell_engine.py`. Also the 2nd surface the Vault Wall is proven against (0001/0009) + tied to the admin-token security (E27/SEC5) that 0029/0053/0068/0074 depend on. Deleting would break the time-of-day switch, health page, sandbox ops. Optional scope-clarification expand declined |
+| 0017 | Relationship model | ✅ Built | ✅ Approved | 2026-06-28 | The calculated heart (decision 0002) — graded directed signals (trust/affinity/threat), never stored ally/enemy flags; labels derived on the spot & disposition-colored (same history → "enemy" for paranoid, "ally" for trusting); asymmetric; betrayal-shock + neglect-decay; earns confidence. NOTE: the "Houseguest's Choice = strongest bond" scenario evolves with the queued 0005 strategic-pick expand |
 | 0018 | Narrative & moment orchestration | ✅ Built | ⬜ Pending | — | — |
 | 0019 | Agent-driven play loop | ✅ Built | ⬜ Pending | — | — |
 | 0020 | Player experience (status, decisions, portraits) | ✅ Built | ⬜ Pending | — | — |
@@ -71,7 +71,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0047 | Eviction night live (reveal + goodbyes) | ✅ Built | ⬜ Pending | — | — |
 | 0048 | Season retrospective & Vault unsealing | ✅ Built | ⬜ Pending | — | — |
 | 0049 | House presence & lingering | ✅ Built | ⬜ Pending | — | — |
-| 0050 | The casting interview | ✅ Built | ⬜ Pending | — | — |
+| 0050 | The casting interview | ✅ Built | ⬜ Pending | — | ⚠️ PENDING PO EXPAND (raised at 0015 review): pin/enrich **how the interview determines the player's stats**. Today = coarse (interview → 1 of 12 archetypes → that archetype's FLAT bias; NPCs get seeded jitter, player does not; no-archetype → neutral). Options: (A) document+test current, (B) give the player NPC-style jitter, (C) LLM proposes stat lean from self-description, engine validates/bounds (0063 pattern). Anti-sycophancy floor must hold (no max-out, bounded, engine owns magnitude, no numbers shown). PO leaned C, B as fallback |
 | 0051 | In-character images (portraits/headshots) | ✅ Built | ⬜ Pending | — | — |
 | 0052 | House themes (five seasons) | ✅ Built | ⬜ Pending | — | — |
 | 0053 | Admin transcript retrieval | ✅ Built | ⬜ Pending | — | — |
@@ -139,6 +139,16 @@ Scenarios written/agreed during review that still need implementation to go gree
 | 0005 | Strategic "Houseguest's Choice" veto pick (replace pure strongest-bond) | Add a strategic-ally selection in the relationship engine; wire `liveSeason` HC pick to it; un-comment the two pending scenarios + add step defs. Ship **opt-in, default-off** with a calibration-neutrality guard (the HC pick changes the veto field → seeded competition outcomes; default-off must stay byte-identical). After a calibration re-baseline, strategic can become default. |
 | ~~0006a~~ | ✅ **DONE** — favorite-win band tuned down (temperature 0.36→0.40; clear favorite ~64%→~59% avg). juryReach EARNED-WINS re-verified green; full unit suite green. Gate: `stagedCompetition.test.ts`. |
 | ~~0006b~~ | ✅ **DONE** — every NPC carries a derived comp intent (compete/throw/play-safe), opt-in `ORWELL_COMP_INTENT`, byte-identical when off. Single-roll model kept (no per-round adaptivity — Path B declined). Gate: `npcCompIntent.test.ts`. |
+
+## Future feature backlog (PO-parked ideas — develop later)
+
+Ideas surfaced during the comb-through that the PO wants to build later as their own spec/feature.
+Not yet scheduled; captured here so they aren't lost.
+
+| ID | Idea | Origin | Notes |
+|---|---|---|---|
+| FB-1 | **Diary Room with purpose** | 0013 review (2026-06-28) | Give the player DR a real, **Vault-safe** role: the engine *reads* the player's stated strategy to do something that never drives NPCs — e.g. shape which producer prompts / story beats fire, or feed a richer 0048 retrospective, or acknowledge the player's reflections. Must not cross the anti-sycophancy line (never puppeteer an NPC, never change an outcome). Would re-introduce a purposeful consumer where the removed `playerStrategyRead` stub used to sit. Coordinate with the frozen 0097 (suspicion ledger) — same "don't over-tell the player" tension. |
+| FB-2 | **Finale experience / logistics in practice** | 0014 review (2026-06-28) | The endgame *mechanics* (0014) are solid; expand how the finale actually FEELS to play — pacing of the statement → 18-Q&A → one-at-a-time vote reveal, the drama/tension of the crowning, the player-as-finalist and player-as-juror beats. Builds on the live choreography (0037, review pending) — revisit after 0037 is reviewed so the "feel" work targets the real live seam. |
 
 ## Numbering housekeeping (flagged during the comb-through)
 

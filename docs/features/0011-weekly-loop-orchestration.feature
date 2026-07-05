@@ -38,6 +38,12 @@ Feature: Weekly loop orchestration — the playable week and season
     Then the finalist with the most votes wins
     And a tied jury vote is broken by the last-evicted juror
 
+  # NOTE (PO review 2026-06-28): this scenario pins the BASELINE nomination read — the bare
+  # threat-primary `chooseNominations`. The LIVE game refines it via `nominationStrategy`, layered
+  # on in later features (each with its own tests): 0044 personality tactics (direct / backdoor /
+  # pawn) + rattled-HOH paranoia + runaway-threat override; 0043 bloc/0107 alliance protection
+  # (mates kept off the block); 0039 deals + 0085 campaigns + 0086 drives tilt who gets nominated.
+  # This spine test is the floor, not the whole story.
   Scenario: NPC decisions are relationship-driven, not random
     Given an NPC holds power at a decision point
     When it nominates or votes across many seeded runs
