@@ -173,6 +173,15 @@ def setup_admin_public_deployment_routes() -> APIRouter:
         allowed_origins = body.get("allowedOrigins")
         tunnel_token = body.get("tunnelToken")
 
+        # DEPLOY-2 (B15): validate the box's REAL current ORWELL_BIND_HOST, not an absent key.
+        # `proposed` never carried this key before, so assert_public_profile_safe's own
+        # `env.get("ORWELL_BIND_HOST") or "127.0.0.1"` fallback always won regardless of what the
+        # box was actually bound to — a pre-existing LAN-direct install (the installer's own
+        # default is ORWELL_BIND_HOST=0.0.0.0) always validated "safe" here and stayed reachable
+        # in plaintext on the public/wildcard interface after "going public". Sample the box's
+        # actual current value the same way the status route above does.
+        current_bind_host = os.environ.get("ORWELL_BIND_HOST") or "127.0.0.1"
+
         # The proposed public-profile env (the 0067 floor). ALLOWED_ORIGINS defaults to the first
         # domain's https origin when not given. An empty domains list yields ALLOWED_HOSTS="" → the
         # validator flags the unpinned host and we 400 before writing anything.
@@ -184,6 +193,7 @@ def setup_admin_public_deployment_routes() -> APIRouter:
             "ALLOWED_ORIGINS": (str(allowed_origins).strip() if allowed_origins
                                 else (f"https://{domains[0]}" if domains else "")),
             "SECURE_COOKIES": "true",
+            "ORWELL_BIND_HOST": current_bind_host,
         }
 
         # FAIL CLOSED at request time — never persist an unsafe combo. assert_public_profile_safe
