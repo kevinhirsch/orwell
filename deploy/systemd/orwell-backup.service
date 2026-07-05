@@ -1,0 +1,38 @@
+[Unit]
+Description=orwell scheduled backup (DEPLOY-9)
+# Started by orwell-backup.timer (daily) — never `WantedBy=` a target directly; the timer owns
+# scheduling. Also invokable manually (systemctl start orwell-backup.service) or from the
+# control panel, which is why retention pruning lives in orwell-backup.sh itself, not just here.
+After=network.target
+
+[Service]
+Type=oneshot
+# Same least-privilege posture as the app units (audit E85): a dedicated system user, no new
+# privileges, filesystem locked down except the one directory this actually writes to.
+User=orwell
+Group=orwell
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Only the backups/ dir needs write access — data/ and frontend/data/ are read (tar'd), not
+# written, so they stay covered by ProtectSystem=strict's default read-only.
+ReadWritePaths=/opt/orwell/backups
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+UMask=0077
+WorkingDirectory=/opt/orwell
+EnvironmentFile=-/opt/orwell/data/.env
+ExecStart=/usr/bin/env bash /opt/orwell/deploy/orwell-backup.sh

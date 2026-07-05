@@ -1,0 +1,27 @@
+# deploy/logrotate/orwell — DEPLOY-13 (2026-07-05 ops-hygiene close-out)
+#
+# The five G19b ops-trigger units (orwell-ops-update, -factory-reset, -update-reset,
+# -public-deployment, -tls) each `StandardOutput=append:`/`StandardError=append:` their own
+# data/ops-*.log forever — that's the intended design (the admin status page tails a run live),
+# but nothing ever rotated or capped them. Every action is meant to be re-run over a deployment's
+# multi-year lifetime, so unrotated these grow unbounded on the same disk flagged by DEPLOY-9/10/14.
+#
+# Installed by orwell-install.sh into /etc/logrotate.d/orwell (Debian's logrotate runs daily via
+# systemd's logrotate.timer / cron.daily — no extra unit needed here).
+/opt/orwell/data/ops-update.log
+/opt/orwell/data/ops-factory-reset.log
+/opt/orwell/data/ops-update-reset.log
+/opt/orwell/data/ops-public-deployment.log
+/opt/orwell/data/ops-tls.log
+{
+  weekly
+  rotate 4
+  compress
+  delaycompress
+  missingok
+  notifempty
+  # These are ROOT-run, one-shot G19b trigger units (Type=oneshot, no long-lived process holding
+  # the fd open between runs) — a plain rename+recreate is safe; the next trigger just opens a
+  # fresh file. Owner matches the ops-*.log files as created by orwell-install.sh's ownership().
+  create 644 root root
+}
