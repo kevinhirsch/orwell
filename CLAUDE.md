@@ -44,10 +44,10 @@ the window audit (`docs/audits/2026-06-11-dwe-window-audit.md`), the `OrwellWind
 MUST compose the kit.)* The game is **folded into the main chat**: the player-facing tier is the vendored
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
-`docs/features/` (through **0109**; the 0067–0074 launch band is 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
+`docs/features/` (through **0110**; the 0067–0074 launch band is 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
 0070 off-screen texture enrichment, 0071 defensive hardening (redaction + URL/path guards), 0072 the
 multi-platform gateway, 0073 the structural anti-sycophancy game-build wall (a CI gate), and 0074 local &
-tunable HTTPS (ADR 0014); past the launch band, **0075–0093, 0099–0100, 0104–0107, 0109** are built and **0094–0098, 0101–0103** remain spec-only/frozen (Producer's-Vault/PO-review batch) with **0108** spec-only;
+tunable HTTPS (ADR 0014); past the launch band, **0075–0093, 0099–0100, 0104–0107, 0109, 0110** are built and **0094–0098, 0101–0103** remain spec-only/frozen (Producer's-Vault/PO-review batch) with **0108** spec-only;
 0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
@@ -69,7 +69,7 @@ are authoritative and reference each other as companions.
 |---|---|
 | `docs/CLAUDE_CODE_INSTRUCTIONS.md` | **Build brief & decision log** — start here. Architecture directives, workflow, hard "do-nots", milestones, open decisions (§15). |
 | `docs/bb-sim-spec.md` | **v3 domain spec** — concept, persistence model, Vault Wall, behavioral-fidelity mandate, the BDD invariants (§12), open decisions (§16). |
-| `docs/decisions/` | **Decision records (ADRs 0001–0014)** — accepted refinements to the canonical mechanics. 0001 competition stats / Character-Soul split / veto "Houseguest's Choice" · 0002 organic relationship model · 0003 the conversation is the game · 0004 embedding provider (fastembed/ONNX) · 0005 split authority by openness · 0006 in-game time/sleep/presence economy · 0007 public-internet exposure · 0008 cross-tab/-device chat consistency · 0009 location/movement single source of truth · 0010 token-economy architecture · 0011 concurrent engine-drive beat-aware guardrails · 0012 two-window lockstep "Messenger mirror" · 0013 cast photos require a model-authored identity · 0014 local & tunable HTTPS (LAN-trusted, with or without a domain). (`README.md` there indexes them.) |
+| `docs/decisions/` | **Decision records (ADRs 0001–0016)** — accepted refinements to the canonical mechanics. 0001 competition stats / Character-Soul split / veto "Houseguest's Choice" · 0002 organic relationship model · 0003 the conversation is the game · 0004 embedding provider (fastembed/ONNX) · 0005 split authority by openness · 0006 in-game time/sleep/presence economy · 0007 public-internet exposure · 0008 cross-tab/-device chat consistency · 0009 location/movement single source of truth · 0010 token-economy architecture · 0011 concurrent engine-drive beat-aware guardrails · 0012 two-window lockstep "Messenger mirror" · 0013 cast photos require a model-authored identity · 0014 local & tunable HTTPS (LAN-trusted, with or without a domain) · 0015 collapse the duplicated live-vs-mirror chat render paths (ship-gate F5's root cause) · 0016 LLM model selection (GLM-4.7 narrator/utility, Seedream portraits — the currently-live default). (`README.md` there indexes them.) |
 | `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. `README.md` there holds the live per-feature **status index** and the **Amendments to shipped specs** table (implementers must pick those up). |
 | `docs/IMPLEMENTATION_QUEUE.md` | **Live work queue** — per-item implementation prompts (B/C/D/U/L-numbered lanes), dispatch order + dependencies, and the truest prose snapshot of what's done vs. remaining. |
 | `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). The 2026-06-11 **house-audit pattern** (real FE + real engine driven headless under Playwright, DOC-ONLY) produced `2026-06-11-dwe-window-audit.md` (windowing), `2026-06-11-refresh-persistence-audit.md` (every transient UI state × reload), and `2026-06-11-settings-wiring-audit.md` (every settings control × {wired, persisted, applied}). The **`2026-06-27-ship-gate.md`** is the **launch-acceptance bar** — the authoritative "what blocks ship": the FE-airtight standard **F1–F5** (no missing messages, right status, smart queueing, multi-window concurrency, realtime two-window mirror parity — the #1 release blocker) and the casting→eviction golden path **G1–G9**, each with the real-model gate that proves it, plus the launch-blocker / post-launch / parked triage of every open issue. |
@@ -548,7 +548,9 @@ the UI, and its goals were delivered chat-forward via 0020/0051/0054, so the sta
 - `cucumber.cjs` `paths` — the live list of BDD-gated features.
 - `docs/audits/2026-06-10-full-product-audit.md` (the close-out ledger) — the authoritative open-items
   list going forward, and `docs/audits/2026-06-21-open-items-verification.md` — the source-verified,
-  tier-organized snapshot of every open item (which tracker rows are stale; no launch-blockers remain).
+  tier-organized snapshot of every open item as of **2026-06-21** (which tracker rows were stale then;
+  no launch-blockers remain). It predates the entire 0075–0112 batch — for anything after 2026-06-21,
+  `docs/features/README.md` is the source of truth, not this snapshot.
 - `git log --oneline` for what last merged green; `npm test` for the authoritative pass/fail.
 
 **A few load-bearing invariants worth knowing up front** (enforced in code; easy to violate by accident):
