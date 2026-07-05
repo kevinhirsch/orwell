@@ -17,9 +17,10 @@ game state into **external, permissioned stores** behind a **hexagonal architect
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
 **Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-23).** Specs now run
-through **0107**, and the originally-drafted set is built and **green** — but the spec ceiling now runs ahead of the
-*built* one: **0075–0086** + **0105/0106** are built, while **0087–0104** and **0107** are a recently-drafted, mostly
-**spec-only** batch (the Producer's-Vault audit + PO-review specs, opt-in/default-off social texture). The lone
+through **0109**, and the originally-drafted set is built and **green** — but the spec ceiling now runs ahead of the
+*built* one: **0075–0093, 0099–0100, 0104–0107, 0109** are built, while **0094–0098, 0101–0103** remain
+**spec-only/frozen** (the Producer's-Vault audit + PO-review batch — some parked, some awaiting a build
+slot) and **0108** is spec-only (the real-model golden-path gate). The lone
 deliberate *deferral* remains **0022 (MVP-2)**, and the
 reconciled per-feature index in `docs/features/README.md` is authoritative for built vs. spec-only — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
@@ -42,10 +43,10 @@ the window audit (`docs/audits/2026-06-11-dwe-window-audit.md`), the `OrwellWind
 MUST compose the kit.)* The game is **folded into the main chat**: the player-facing tier is the vendored
 **Orwell** front-end (`frontend/`, Python) talking to the TS engine over MCP (see
 [Architecture](#architecture-hexagonal)). Priority-ordered feature specs live in
-`docs/features/` (through **0107**; the 0067–0074 launch band is 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
+`docs/features/` (through **0109**; the 0067–0074 launch band is 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
 0070 off-screen texture enrichment, 0071 defensive hardening (redaction + URL/path guards), 0072 the
 multi-platform gateway, 0073 the structural anti-sycophancy game-build wall (a CI gate), and 0074 local &
-tunable HTTPS (ADR 0014); past the launch band, **0075–0086** + **0105/0106** are built and **0087–0104**/**0107** are a mostly **spec-only** Producer's-Vault/PO-review batch;
+tunable HTTPS (ADR 0014); past the launch band, **0075–0093, 0099–0100, 0104–0107, 0109** are built and **0094–0098, 0101–0103** remain spec-only/frozen (Producer's-Vault/PO-review batch) with **0108** spec-only;
 0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
@@ -530,10 +531,13 @@ deep character profiles (0058), seasons-as-levels, multi-device sync (0064), the
 (0065), in-game time + the sleep economy (0066 / ADR 0006), public-internet exposure (0067/0068 / ADR
 0007), the token economy + usage envelope (0069), off-screen texture enrichment (0070), defensive
 hardening (0071), the multi-platform gateway (0072), the structural anti-sycophancy game-build wall as
-a CI gate (0073), and local & tunable HTTPS (0074 / ADR 0014) are all in. **Past 0074 the spec set runs to 0107**:
-**0075–0086** + **0105/0106** are built (trust-gated confidences, presence/eyeshot & motivated movement, the runtime
-overseer 0079–0081, character voice/campaigns/drives), while **0087–0104** and **0107** are a recently-drafted, mostly
-**spec-only** batch (the Producer's-Vault audit + PO-review specs — opt-in/default-off social texture, not yet built).
+a CI gate (0073), and local & tunable HTTPS (0074 / ADR 0014) are all in. **Past 0074 the spec set runs to 0109**:
+**0075–0093, 0099–0100, 0104–0107, 0109** are built (trust-gated confidences, presence/eyeshot & motivated
+movement, the runtime overseer 0079–0081, character voice/campaigns/drives, secrets-as-power,
+jury grudge book, season notoriety, named alliances, deal duration), while **0094–0098, 0101–0103**
+remain **spec-only/frozen** (the Producer's-Vault audit + PO-review batch — opt-in/default-off social
+texture, some parked, some awaiting a build slot) and **0108** is spec-only (the real-model
+golden-path gate).
 The **one deliberate deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the UI).
 
 **Trust the code over this prose — it drifts.** The authoritative sources, in order:

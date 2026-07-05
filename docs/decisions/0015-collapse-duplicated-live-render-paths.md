@@ -131,10 +131,12 @@ diff is blind). PASS requires **all** of:
   `createStreamRenderer` incremental path), **not** a full-`innerHTML`-repaint reconcile (`renderDelta`).
 - `lagWithinBudget` — B converges within `MIRROR_LAG_BUDGET_MS` (default 2500 ms) of A's settle.
 
-**The fast tripwire** — `frontend/tests/test_0012_mirror.py` (the `xfail` source-pin
-`test_chat_client_mirror_does_not_full_repaint_per_delta`): a source-level assertion that the mirror's
-`resumeStream` no longer full-`innerHTML`-repaints per delta. It **XPASSes the moment R2 lands**; flip the
-`xfail` then, and promote the harness gate to a required CI gate.
+**The fast tripwire** — `frontend/tests/test_0012_mirror.py`
+(`test_chat_client_mirror_does_not_full_repaint_per_delta`): a source-level assertion that the mirror's
+`resumeStream` no longer full-`innerHTML`-repaints per delta. **R2 landed 2026-06-27** (`bb2c3076`/
+`14d071c1`) and the `xfail` marker has been removed — the tripwire now passes outright. The harness
+gate itself is still run manually (`run_mirror_gate.sh`); promoting it to a required CI gate remains
+an owed follow-on.
 
 > The executable BDD lives in the **harness gate + the pytest tripwire** referenced above — **not** in a
 > Cucumber `.feature` / `cucumber.cjs`. That lane is the **TS engine** and cannot run an FE-render
@@ -184,8 +186,9 @@ gates (ADR 0008's `seq`/reconcile contract, the `_Run` replay-then-tail behaviou
   single window already renders; the channel split keeps reasoning out of the public bubble.
 - **Single-window play is byte-identical** — the sender already renders through `createStreamRenderer`; with
   one subscriber nothing about its render changes.
-- The harness gate flips **RED → green** when R2 lands; then it becomes a **required CI gate** and the
-  `frontend/tests/test_0012_mirror.py` `xfail` is removed (it XPASSes).
+- **R2 landed 2026-06-27** (`bb2c3076`/`14d071c1`) and the harness gate is **green**; the
+  `frontend/tests/test_0012_mirror.py` `xfail` has been removed (it now passes outright). Promoting
+  the harness to a **required CI gate** remains an owed follow-on.
 
 ## Traceability
 
@@ -199,5 +202,5 @@ gates (ADR 0008's `seq`/reconcile contract, the `_Run` replay-then-tail behaviou
 - Bounded by: the Vault Wall (mandate #2) and cross-user isolation (0021) — both unchanged; ADR 0003; the
   reasoning-scrub render contract (the `roundReplyText`/`roundReasoningText` channel split).
 - Executable backing: `docs/audits/playtest-harness/mirror_live_parity.mjs` (+ `run_mirror_gate.sh`) and
-  `frontend/tests/test_0012_mirror.py` (the `xfail` tripwire); harness §10 of
+  `frontend/tests/test_0012_mirror.py` (the former `xfail` tripwire, now passing outright); harness §10 of
   `docs/audits/playtest-harness/README.md`.
