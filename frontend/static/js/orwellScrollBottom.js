@@ -173,6 +173,21 @@
     setBadge(0);
   }
 
+  // rAF-coalesced update: the two MutationObservers below fire on EVERY streamed-token DOM
+  // mutation (the body node is rebuilt per delta), and update() forces synchronous layout via
+  // getBoundingClientRect (reposition + decisionCardVisible) + scrollHeight reads. Left uncoalesced
+  // that is layout-thrash-during-streaming (FEDEEP-10 / TRANS-9: ~100+ badge/layout passes per
+  // reply). Collapse a mutation burst to at most one layout pass per animation frame. Direct
+  // user-driven calls (scroll/resize/click) still run update() immediately — they are not hot.
+  var _rafPending = false;
+  function scheduleUpdate() {
+    if (_rafPending) return;
+    _rafPending = true;
+    var run = function () { _rafPending = false; update(); };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    else setTimeout(run, 16);
+  }
+
   function update() {
     var box = chatBox();
     var btn = ensureBtn();
@@ -203,7 +218,7 @@
         setBadge(_unread);
       }
       _lastMsgCount = count;
-      update();
+      scheduleUpdate();
     });
     mo.observe(box, { childList: true, subtree: true });
   }
@@ -215,7 +230,7 @@
   function watchDecisionCard() {
     if (typeof MutationObserver === "undefined") return;
     try {
-      var mo = new MutationObserver(function () { update(); });
+      var mo = new MutationObserver(function () { scheduleUpdate(); });
       mo.observe(document.body, { childList: true, subtree: true });
     } catch (_) {}
     try { window.addEventListener("orwell:pending", update); } catch (_) {}
