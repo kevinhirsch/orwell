@@ -59,7 +59,9 @@ describe("onboarding — the Vault-free projection (no hidden houseguest detail 
       // closeted orientation) never appears. L29: the prose `appearance` is NOT on a 0058 card — the
       // structured `physicalCharacteristics` is the single physical descriptor (the prose is the pre-0058
       // fallback only), so the picture and the narrated body can never contradict.
-      ["age", "archetype", "background", "biography", "demeanor", "ethnicity", "genderPresentation", "hometown", "id", "name", "outOrientation", "physicalCharacteristics", "presentation", "status", "strategyStyle", "vocation"].sort());
+      // I6 distinct-voices fix (2026-07-05): `voice` (the 0084 fingerprint) now rides the roster card too
+      // — PUBLIC, byte-stable, Vault-free, the same facet npcVoice exposes.
+      ["age", "archetype", "background", "biography", "demeanor", "ethnicity", "genderPresentation", "hometown", "id", "name", "outOrientation", "physicalCharacteristics", "presentation", "status", "strategyStyle", "vocation", "voice"].sort());
   });
 });
 

@@ -19,7 +19,7 @@ import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
-import { moodWord } from "../../engine/voice";
+import { moodWord, voiceFingerprint } from "../../engine/voice";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt } from "../../engine/diaryRoom";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
@@ -3847,6 +3847,11 @@ export class GameSessionAdapter implements GameSession {
       // houseguest, otherwise absent (still on the seeded floor). NOT secret content; lets the FE backfill
       // target the still-floor cards.
       ...(n.character.deepProfileAuthored === true ? { authored: true } : {}),
+      // I6 distinct-voices fix: the SAFE rendered voice-fingerprint clause (0084) the live `view()`
+      // mapping now carries — keeps this pre-warm/portrait shape in sync with the live roster card
+      // (this docstring's own "same shape" contract). A player-surface-safe STRING (dial vocab only),
+      // never the raw VoiceProfile object.
+      ...(n.character.voice !== undefined ? { voice: voiceFingerprint(n.character.voice) } : {}),
     } as HouseguestCard;
   }
 
@@ -7601,6 +7606,13 @@ export class GameSessionAdapter implements GameSession {
         // houseguest, otherwise absent (still on the seeded floor). NOT secret content; lets the FE backfill
         // target the still-floor cards.
         ...(n.character.deepProfileAuthored === true ? { authored: true } : {}),
+        // I6 distinct-voices fix (NARR-15/PROMPT-2): a COMPACT, player-surface-SAFE voice-fingerprint
+        // clause (0084), rendered from the controlled voice DIAL vocab only (register/rhythm/energy/
+        // directness/humor/stress-tell) via `voiceFingerprint` — so distinct cadence reaches the narrator
+        // every turn without a per-NPC `npcVoice` call it reliably under-calls. A rendered STRING, never the
+        // raw VoiceProfile object (whose free-text signature/lexicon can carry "threat"/"100%" and would
+        // trip the Vault-Wall player-surface scan). Public, Vault-free; absent only on a pre-0084 save.
+        ...(n.character.voice !== undefined ? { voice: voiceFingerprint(n.character.voice) } : {}),
       })),
       // Deals the player is party to (0039) — fact + status only; NPC↔NPC deals never appear here.
       deals: this.deals.forParty(PLAYER).map((d) => this.dealView(d)),
