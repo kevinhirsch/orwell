@@ -48,7 +48,11 @@ describe("B38 — ceremony acts fold hidden consequence", () => {
       s.session.createCharacter({ playerName: "P", archetype: "comp-beast", seed });
       if (s.session.runCompetition({}).winner!.id !== PLAYER) continue; // player must win HOH
       crownHoh(s.session); // 0006 staged-rounds: drive the comp to the crown (player wins)
-      const adv = s.session.advanceGame();           // reach the player's nomination decision
+      // BB-14: a presentation-only HOH-room-reveal beat now rides between the crown and nominations
+      // (inert — no rng, no fold) — step past it (and any future presentation-only beat) to reach
+      // the player's real decision.
+      let adv = s.session.advanceGame();
+      for (let g = 0; g < 5 && !adv.pending && !adv.finished; g++) adv = s.session.advanceGame();
       if (adv.pending?.kind !== "nominations") continue;
       // Pick a nominee whose hidden edge toward the player still has headroom (the HOH-win fold already
       // nudged the whole house), so the nomination's adverse move is clearly observable, not pre-clamped.

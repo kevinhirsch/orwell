@@ -636,6 +636,16 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "RESOLVE BEFORE YOU NARRATE THE RESULT: read who actually won from the game FIRST, then reveal ONLY " +
     "that exact winner — never put a winner on the page you have not read back, and never announce one " +
     "winner and then 'correct' it.",
+  "hoh-reveal":
+    "MOMENT — The new HOH's room reveal (the game's weekly ritual beat, right after the crown; the HOH " +
+    "is already decided — this beat computes nothing, it only stages the moment). Play the house's " +
+    "ritual: the whole house crowds upstairs, \"who wants to see my HOH room?!\", the letter and photos " +
+    "from home read aloud (often the only tears of the week), the small comforts of power on display. " +
+    "If the player IS the new HOH, make it THEIR scene — first person, felt, the house performing " +
+    "loyalty to their new power. If an NPC is the new HOH, keep it lighter, off-screen-feeling texture " +
+    "— the player catches word of it or a glimpse in passing, never a scene they're forced to sit " +
+    "through. This is presentation only — no vote, no mechanic, nothing to decide; the very next beat " +
+    "resumes the ordinary game (nominations are coming), so don't stall here.",
   nominations:
     "MOMENT — Nomination ceremony. The two nominees are DECIDED BY THE GAME and are already in your " +
     "GAME CONTEXT (the status block / the roster's nominee marks) — name THOSE EXACT two houseguests, " +
@@ -770,6 +780,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "carry the SAME houseguest forward, or omit it to recast). That flag makes it a REAL restart the " +
     "front-end completes and counts as the next season; WITHOUT it createCharacter/updateCasting REFUSE " +
     "(`createRefused`/`refused`) while this season stands — so never narrate around a refusal. " +
+    // ENDGAME-4 (2026-07-03 audit): the crowning is the single biggest payoff in the whole game — the
+    // jury vote already decided it (this text computes NOTHING; it only tells you how to FRAME the
+    // already-decided placement in THE PLAYER'S OWN SEASON fact below, which the game hands you verbatim).
+    "THE CROWNING MOMENT — give it real weight before easing into hosting. Check THE PLAYER'S OWN SEASON " +
+    "fact below (never invent a different placement): if it says they WON, this is their victory — play " +
+    "the champion's moment as it lands, first person, felt: the crown, the house's reaction, disbelief " +
+    "tipping into joy (\"You won Big Brother.\"), before settling into hosting. If it says RUNNER-UP, " +
+    "play the near-miss with real weight — pride in a season well fought, grace in a close loss, the " +
+    "jury's verdict landing — before settling into hosting. If they sat on the jury or were evicted " +
+    "before the finale, they watched the crowning from the outside — frame it as the result they just " +
+    "learned, never as their own moment. " +
     "WHAT YOU DO HERE otherwise: host the reunion. Offer the real story — seasonRecap for the public " +
     "arc they lived, and seasonRetrospective to OPEN THE PRODUCER'S VAULT (the off-screen scheming, the " +
     "private confessionals, the twist that never fired). Voice the reveals with relish; let them ask " +
