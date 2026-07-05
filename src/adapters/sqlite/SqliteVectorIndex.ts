@@ -3,7 +3,7 @@ import type { Database as DatabaseType } from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { VectorIndex, VectorMatch } from "../../ports/VectorIndex";
+import { VectorDimMismatchError, type VectorIndex, type VectorMatch } from "../../ports/VectorIndex";
 
 /**
  * ENGINE-ONLY sqlite-vec vector index (E63 — the relational analogue of `InMemoryVectorIndex`, the
@@ -20,8 +20,12 @@ import type { VectorIndex, VectorMatch } from "../../ports/VectorIndex";
  *
  * The vector DIMENSION is fixed at table creation and is not known until the first `upsert`, so the
  * `vec0` table is created LAZILY on the first inserted vector (its length). A later vector of a
- * different length is rejected by sqlite-vec — which is correct: mixing dimensions in one index is a
- * bug (one embedder, one space; ADR 0004 / engineRoot's space invariant).
+ * different length is rejected — which is correct: mixing dimensions in one index is a bug (one
+ * embedder, one space; ADR 0004 / engineRoot's space invariant) — PERSIST-1: rejected with an
+ * explicit `VectorDimMismatchError` BEFORE it ever reaches sqlite-vec's own native reject, so the
+ * failure signal is the same typed error `InMemoryVectorIndex` throws and `SoulStore` can catch and
+ * self-heal on (rebuild the houseguest's index in the new space) rather than an opaque native
+ * exception silently swallowed by an empty catch (the ORIGINAL PERSIST-1/PERSIST-6 finding).
  *
  * SCORE semantics MATCH `InMemoryVectorIndex`: the table uses `distance_metric=cosine`, and
  * `score = 1 - cosine_distance` is exactly cosine similarity (1 identical, 0 orthogonal, -1 opposite),
@@ -52,6 +56,7 @@ export class SqliteVectorIndex implements VectorIndex {
 
   upsert(id: string, vector: readonly number[], meta?: Record<string, unknown>): void {
     this.ensureTable(vector.length);
+    if (vector.length !== this.dim) throw new VectorDimMismatchError(this.dim!, vector.length, this.table);
     const buf = Buffer.from(new Float32Array(vector).buffer);
     const metaJson = meta ? JSON.stringify(meta) : null;
     // vec0 PRIMARY KEY rejects INSERT OR REPLACE, so upsert is delete-then-insert under one txn.
@@ -64,6 +69,7 @@ export class SqliteVectorIndex implements VectorIndex {
 
   query(vector: readonly number[], k: number): VectorMatch[] {
     if (this.dim === null || k <= 0) return [];
+    if (vector.length !== this.dim) return []; // fail safe: not a comparable space (PERSIST-1)
     const buf = Buffer.from(new Float32Array(vector).buffer);
     const rows = this.db
       .prepare(
