@@ -90,7 +90,7 @@ apt_deps() {
   # One retry: a transient mirror/DNS hiccup at the very first step shouldn't kill an install.
   apt-get update -qq || { echo "apt update failed — retrying in 5s"; sleep 5; apt-get update -qq; }
   apt-get install -y -qq curl git gnupg build-essential ca-certificates \
-    python3 python3-venv python3-pip qemu-guest-agent whiptail
+    python3 python3-venv python3-pip qemu-guest-agent whiptail logrotate
 }
 
 git_credential() {
@@ -323,6 +323,10 @@ ownership() {
   step "least-privilege user (B72/ops A5)"
   id -u orwell >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /opt/orwell orwell
   mkdir -p "${DATA_DIR}/saves" "${APP_DIR}/frontend/data"
+  # DEPLOY-9: the backup DIR must exist and be orwell-writable before orwell-backup.timer's first
+  # scheduled run (orwell-backup.service runs as User=orwell) — created here so the chown -R below
+  # covers it, same as every other app-owned directory.
+  mkdir -p "${APP_DIR}/backups"
   # DATA_DIR is chowned explicitly: it defaults inside APP_DIR but is overridable to a path
   # outside it — and the engine (running as `orwell`) must always be able to write saves/models.
   chown -R orwell:orwell "${APP_DIR}" "${DATA_DIR}"
@@ -391,6 +395,11 @@ systemd_services() {
   # DNS-token shred), output appended live to data/ops-tls.log.
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-tls.path"    /etc/systemd/system/orwell-ops-tls.path
   install -m 644 "${APP_DIR}/deploy/systemd/orwell-ops-tls.service" /etc/systemd/system/orwell-ops-tls.service
+  # DEPLOY-9: a daily backup + retention prune (orwell-backup.sh already handles the pruning; the
+  # timer just supplies the schedule). No [Install] on the .service — same pattern as the ops
+  # triggers above — only the .timer is ever enabled directly.
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-backup.service" /etc/systemd/system/orwell-backup.service
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-backup.timer"   /etc/systemd/system/orwell-backup.timer
 
   # Privileged UI port (<1024, e.g. 80): the hardened unit (E85) runs uvicorn as the non-root
   # `orwell` user with ALL capabilities dropped — it structurally cannot bind a port below 1024
@@ -438,9 +447,41 @@ EOF
   systemctl enable --now orwell-engine orwell-frontend
   # The ops TRIGGERS are path units (their services are started by the watcher, never enabled).
   systemctl enable --now orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path orwell-ops-public-deployment.path orwell-ops-tls.path
+  # DEPLOY-9: enable the backup TIMER (never the .service directly — no [Install] section, same
+  # as the ops path units above).
+  systemctl enable --now orwell-backup.timer
   # `enable --now` is a no-op on already-running units — a re-run must pick up the fresh build
   # and any unit/drop-in change, so restart explicitly (cheap on first install: just started).
   systemctl restart orwell-engine orwell-frontend orwell-ops-update.path orwell-ops-factory-reset.path orwell-ops-update-reset.path orwell-ops-public-deployment.path orwell-ops-tls.path
+  # Restarting the timer just resets its next-fire countdown (harmless) — it does NOT run a
+  # backup immediately, so a re-run/update never triggers an out-of-schedule snapshot.
+  systemctl restart orwell-backup.timer
+}
+
+log_management() {
+  # DEPLOY-13 (2026-07-05 ops-hygiene close-out): the five G19b ops-*.log files
+  # (data/ops-update.log, ops-factory-reset.log, ops-update-reset.log, ops-public-deployment.log,
+  # ops-tls.log) are appended forever with no rotation. Install the shipped logrotate config
+  # verbatim (idempotent — logrotate.d configs are just files, safe to overwrite on a re-run).
+  step "log rotation (DEPLOY-13)"
+  install -m 644 "${APP_DIR}/deploy/logrotate/orwell" /etc/logrotate.d/orwell
+
+  # DEPLOY-14 (2026-07-05 ops-hygiene close-out): journald has no size cap for the two
+  # long-running services on the same disk — Debian ships persistent journal storage on by
+  # default with only journald's own (often multi-GB) default as the ceiling. A conservative
+  # cap sized to the LXC's disk; SIZE is overridable (e.g. a bigger custom DISK_GB deploy).
+  # `journalctl --vacuum-size` is applied by `systemctl restart systemd-journald` picking up the
+  # new SystemMaxUse= at next rotation — no immediate destructive vacuum here.
+  local journal_cap="${ORWELL_JOURNAL_MAX_USE:-300M}"
+  mkdir -p /etc/systemd/journald.conf.d
+  cat > /etc/systemd/journald.conf.d/orwell.conf <<EOF
+# Written by orwell-install.sh (DEPLOY-14): cap persistent journal storage so orwell-engine /
+# orwell-frontend's continuous logging can't slow-burn toward disk exhaustion on a small LXC
+# disk. Override by editing this file and running: systemctl restart systemd-journald
+[Journal]
+SystemMaxUse=${journal_cap}
+EOF
+  systemctl restart systemd-journald 2>/dev/null || true
 }
 
 login_panel() {
@@ -516,6 +557,7 @@ main() {
   write_config
   ownership
   systemd_services
+  log_management
   login_panel
   verify_install
 
