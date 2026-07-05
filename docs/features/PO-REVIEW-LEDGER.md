@@ -33,7 +33,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0009 | MCP tool boundary | ✅ Built | ✅ Approved | 2026-06-28 | Plumbing/enforcement feature — the locked door enforcing the Vault Wall (#2) + anti-sycophancy (#3) at the app's tool API. No new gameplay decision; upholds rules already approved in 0001. Trust-the-engineering approve |
 | 0010 | One-liner deployment & update | ✅ Built | ✅ Approved | 2026-06-28 | Plumbing feature (install/update one-liners; saves survive updates; no secrets in repo). **PO confirms it has been run on a real server** — the long-standing "real-Proxmox-host smoke owed" deferral is satisfied per PO |
 | 0011 | Weekly loop orchestration | ✅ Built | ✅ Approved (expanded + cleanup) | 2026-06-28 | Core gameplay spine — faithful, deterministic, rule-enforcing. Light-expand: cross-reference note that this tests the BASELINE nomination read; the live game refines it via 0044/0043/0085/0086/0107/0039. **Cleanup:** removed the redundant test-only `chooseNominationsWithMood` (duplicated `nominationStrategy`'s mood path), retargeted its 2 tests + dropped a dead `void` ref. Green. **PR: deferred — combine with next edited feature** |
-| 0012 | Conversation & scene system | ✅ Built | ⬜ Pending | — | — |
+| 0012 | Conversation & scene system | ✅ Built | ✅ Approved | 2026-06-28 | "The conversation is the game" (ADR 0003) with the anti-sycophancy guardrail proven byte-identical: free-text lobbying CANNOT move a binding decision; NPCs never voice a fact they have no pathway to; reads hint but never name off-screen events; all surfaces Vault-swept |
 | 0013 | The Diary Room | ✅ Built | ⬜ Pending | — | — |
 | 0014 | Jury & endgame | ✅ Built | ⬜ Pending | — | — |
 | 0015 | Character creation (OOBE) | ✅ Built | ⬜ Pending | — | — |
