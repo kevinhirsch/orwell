@@ -36,7 +36,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0012 | Conversation & scene system | ✅ Built | ✅ Approved | 2026-06-28 | "The conversation is the game" (ADR 0003) with the anti-sycophancy guardrail proven byte-identical: free-text lobbying CANNOT move a binding decision; NPCs never voice a fact they have no pathway to; reads hint but never name off-screen events; all surfaces Vault-swept |
 | 0013 | The Diary Room | ✅ Built | ✅ Approved (expanded + cleanup) | 2026-06-28 | Two walls solid (player-DR→no-NPC; NPC-confessional→Vault-only). **Clarified purpose:** the DR is an EXPRESSIVE channel (journal + duplicity enabler + retrospective payoff), no live mechanical effect by design (anti-sycophancy). **Cleanup:** removed the dead/unwired `playerStrategyRead` identity-stub + its 2 tests; unified the magic-number NPC sweeps into a documented `SEEDED_NPCS` (real guarantee is the structural `deriveNpcKnowledge` strip). A purposeful engine read → future feature FB-1. Green. **PR: deferred — combine with next** |
 | 0014 | Jury & endgame | ✅ Built | ✅ Approved | 2026-06-28 | Faithful endgame — jury management has real teeth (blindside/disrespect lowers a juror's vote), relationships dominate while the finale sways close jurors, 18-Q&A ceremony, engine decides the vote (narration can't move it). Mechanics solid. **PO flags: the finale *feel/logistics in practice* to expand later → backlog FB-2 (see 0037)** |
-| 0015 | Character creation (OOBE) | ✅ Built | ⬜ Pending | — | — |
+| 0015 | Character creation (OOBE) | ✅ Built | ✅ Approved | 2026-06-28 | Nails "author WHO you are, not HOW the game treats you" — no stat max-out, bounded like NPCs, player can lose, private strategy walled, OOC. This is the engine primitive; the player-facing layer is the casting interview (0050). **PO raised: how the interview determines player stats → DEFERRED to the 0050 review (options A/B/C; player currently gets a FLAT archetype bias while NPCs get seeded jitter)** |
 | 0016 | God Mode (admin port) | ✅ Built | ⬜ Pending | — | — |
 | 0017 | Relationship model | ✅ Built | ⬜ Pending | — | — |
 | 0018 | Narrative & moment orchestration | ✅ Built | ⬜ Pending | — | — |
@@ -71,7 +71,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0047 | Eviction night live (reveal + goodbyes) | ✅ Built | ⬜ Pending | — | — |
 | 0048 | Season retrospective & Vault unsealing | ✅ Built | ⬜ Pending | — | — |
 | 0049 | House presence & lingering | ✅ Built | ⬜ Pending | — | — |
-| 0050 | The casting interview | ✅ Built | ⬜ Pending | — | — |
+| 0050 | The casting interview | ✅ Built | ⬜ Pending | — | ⚠️ PENDING PO EXPAND (raised at 0015 review): pin/enrich **how the interview determines the player's stats**. Today = coarse (interview → 1 of 12 archetypes → that archetype's FLAT bias; NPCs get seeded jitter, player does not; no-archetype → neutral). Options: (A) document+test current, (B) give the player NPC-style jitter, (C) LLM proposes stat lean from self-description, engine validates/bounds (0063 pattern). Anti-sycophancy floor must hold (no max-out, bounded, engine owns magnitude, no numbers shown). PO leaned C, B as fallback |
 | 0051 | In-character images (portraits/headshots) | ✅ Built | ⬜ Pending | — | — |
 | 0052 | House themes (five seasons) | ✅ Built | ⬜ Pending | — | — |
 | 0053 | Admin transcript retrieval | ✅ Built | ⬜ Pending | — | — |
