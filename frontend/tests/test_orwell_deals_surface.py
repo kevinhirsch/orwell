@@ -5,9 +5,29 @@ Play-through gap (2026-06-18): the engine projects the player's OWN deals Vault-
 in chat and had nowhere to glance at what they were on the hook for. orwellDeals.js is that glance:
 read-only, content-driven, game-build gated, Vault-free, mounted in the control-room gadget rail.
 
-Source-pins (the live behavior runs against the real engine in the play-through harness)."""
+Source-pins (the live behavior runs against the real engine in the play-through harness).
 
+B12 (audit 2026-07-03, RANKED_MASTER "Deals gadget 'A houseguest' fallback"): the gadget was
+flagged as always rendering the generic "A houseguest" placeholder instead of the real name.
+Root-caused: the ENGINE projection is correct — `GameSessionAdapter.dealView` resolves each
+party's name via `nameOf()`, so a real `DealView` off `/api/orwell/state` always carries
+`parties: [{id, name}, ...]` with the true display name (proven by the engine-side unit test
+`tests/unit/dealsLive.test.ts`, and reproduced live: a fresh `makeDeal` call returns a populated
+`name` for every party). The placeholder screenshot the audit captured came from ITS OWN capture
+script driving `_orwellDealsDrive` with a payload shaped `{with:{name}, kind, status, note}` —
+not the real `DealView` shape (`{parties:[{id,name}], kind, terms, status}`) — so `otherParty`'s
+`deal.parties` read correctly saw nothing and fell back. No production code path ever builds a
+deal object in that shape. `otherParty` was never exercised end-to-end against a REAL-shaped
+payload by any test, though, so this file closes that gap: given a correctly-shaped `DealView`
+(the one the engine actually emits), the real name renders — not the placeholder."""
+
+import json
 import os
+import shutil
+import subprocess
+import tempfile
+
+import pytest
 
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,6 +38,59 @@ def _read(*rel):
 
 
 JS = lambda: _read("static", "js", "orwellDeals.js")
+
+
+def _extract_other_party():
+    """Pull the REAL `otherParty(deal)` function body straight out of the shipped source (no
+    DOM needed — it's pure array/string logic) so the behavioral check below runs the actual
+    shipped code, not a reimplementation."""
+    js = JS()
+    start = js.index("function otherParty(deal) {")
+    end = js.index("\n  }\n", start) + len("\n  }")
+    return js[start:end]
+
+
+def _run_other_party(deal_json):
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    harness = (
+        f"{_extract_other_party()}\n"
+        f"console.log(JSON.stringify(otherParty({deal_json})));\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(harness)
+        path = f.name
+    try:
+        res = subprocess.run(["node", path], capture_output=True, text=True, timeout=20)
+    finally:
+        os.unlink(path)
+    assert res.returncode == 0, res.stderr
+    return json.loads(res.stdout.strip().splitlines()[-1])
+
+
+def test_other_party_renders_the_real_name_for_a_real_deal_view():
+    """The exact shape the engine emits (`src/ports/GameSession.ts` DealView.parties: NamedRef[],
+    built by `GameSessionAdapter.dealView`) — the player's own row plus one houseguest, both with
+    a resolved `name`. This must render the houseguest's real name, never the "A houseguest"
+    placeholder (roles only — a generic placeholder name, never a hard-coded cast persona)."""
+    real_deal = {
+        "id": "deal:1",
+        "parties": [
+            {"id": "player", "name": "The Player"},
+            {"id": "npc:1", "name": "Houseguest One"},
+        ],
+        "kind": "safety",
+        "terms": "I won't put you up",
+        "status": "open",
+    }
+    assert _run_other_party(json.dumps(real_deal)) == "Houseguest One"
+
+
+def test_other_party_still_falls_back_for_a_genuinely_malformed_deal():
+    """The placeholder is a real, intentional fallback for malformed/incomplete input (never a
+    Vault-knowledge withhold — deals are always struck directly with a known houseguest) — pin
+    that it still fires when `parties` is absent, so the fallback path itself stays covered."""
+    assert _run_other_party(json.dumps({"id": "deal:2", "kind": "vote", "status": "open"})) == "A houseguest"
 
 
 def test_panel_is_mounted_in_the_index():
