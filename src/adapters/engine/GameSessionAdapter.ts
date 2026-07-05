@@ -123,7 +123,7 @@ import {
   type Trajectory, type FoldSignal,
 } from "../../engine/trajectory";
 import { TRAJECTORY_CONSTANTS } from "../../engine/trajectoryConstants";
-import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engine/momentPrompts";
+import { buildSystemPrompt, momentForPhase, renderStoryFacts, renderSurfacedFacts } from "../../engine/momentPrompts";
 import { producerForSeed, renderProducerVoice, type Producer } from "../../engine/producerPersona";
 import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
@@ -7129,6 +7129,7 @@ export class GameSessionAdapter implements GameSession {
       moment,
       systemPrompt: buildSystemPrompt(
         moment, view, this.storyFacts(moment), this.worldContext(moment), this.producerVoice(moment),
+        this.freshSurfacedFacts(),
       ),
     };
   }
@@ -7346,6 +7347,32 @@ export class GameSessionAdapter implements GameSession {
       winner ? { winner: winner.name, week: this.week, ...(tally ? { tally } : {}) } : null,
       playerSeason,
     );
+  }
+
+  /** How many of the player's own surfaced facts ride along on EVERY turn (SOC-1/4). Bounded so the
+   *  block stays tight, mirroring `STORY_FACT_EVENTS` — this is a per-turn addition, not a full recap. */
+  private static readonly SURFACED_FACTS_WINDOW = 5;
+
+  /**
+   * SOC-1/4 — the player's own recently-surfaced KNOWLEDGE (an NPC confiding, a seeded-tie belief,
+   * gossip that diffused all the way to them): computed by the `KnowledgeService` (`surfaceInformationTo`
+   * / `transmitGossip`, wired in `registry.ts`) but, before this fix, NEVER handed to the narrator on an
+   * ordinary turn. The provenance EVENT those calls also record (`"surfaced to player via told-by:npc:3"`,
+   * `"gossip … reaches player"`) deliberately carries no real content — a shared verbatim string would trip
+   * the orchestrator's vault-leak checkpoint substring sweep against another entity's hidden copy (see the
+   * comment on `InMemoryKnowledgeService.surfaceInformationTo`) — so the ACTUAL fact text lives only in the
+   * `KnowledgeFact.content` this reads back, via the SAME `playerKnowledgeReader` the secrets-as-power
+   * levers already trust as the player's own, Vault-free knowledge (0093/0099). Excludes the Diary Room
+   * (`NO_NPC_PATHWAY`) — an OOC channel with no in-game pathway to anyone, never something "the house told
+   * you". Bounded to the most recent few so the block stays tight (ADR 0003 §1); `undefined` when there is
+   * nothing fresh (byte-identical prompt to before this fix).
+   */
+  private freshSurfacedFacts(): string | undefined {
+    const facts = (this.playerKnowledgeReader?.() ?? [])
+      .filter((f) => f.pathway !== NO_NPC_PATHWAY)
+      .slice(-GameSessionAdapter.SURFACED_FACTS_WINDOW)
+      .map((f) => ({ content: this.humanize(f.content) }));
+    return renderSurfacedFacts(facts);
   }
 
   /** The exact, public jury vote margin (anti-confabulation grounding for the recap). Counts the
