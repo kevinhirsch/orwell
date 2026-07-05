@@ -129,6 +129,7 @@ import * as modalManager from "./modalManager.js";
         }
       </style>
       <div class="ofin-stage" id="ofin-stage"></div>
+      <div class="ofin-hd" id="ofin-asking" hidden></div>
       <div class="ofin-final" id="ofin-final"></div>
       <div class="ofin-hd" id="ofin-reveal-hd" style="display:none">The votes</div>
       <div id="ofin-reveals"></div>
@@ -164,7 +165,30 @@ import * as modalManager from "./modalManager.js";
     box.focus();
   }
 
-  function nameOf(ref) { return (ref && ref.name) || "A houseguest"; }
+  // GADGET-15: mirror orwellDeals.js's `nameMapFrom`/`otherParty` pattern — resolve a NamedRef's
+  // id against the roster (the SAME /state payload refresh() already fetches) before falling
+  // back to the generic "A houseguest", instead of showing the fallback on every row whenever a
+  // ref's own `name` wasn't populated at write time (finalist cards, vote reveals, vote buttons).
+  function nameMapFrom(st) {
+    const m = Object.create(null);
+    if (!st || typeof st !== "object") return m;
+    const p = st.player;
+    if (p && typeof p === "object" && p.id != null && p.name) m[String(p.id)] = String(p.name);
+    const house = Array.isArray(st.house) ? st.house : [];
+    for (const hg of house) {
+      if (hg && typeof hg === "object" && hg.id != null && hg.name) m[String(hg.id)] = String(hg.name);
+    }
+    return m;
+  }
+  // The roster map from the LAST /state fetch (refresh() refreshes it every poll, alongside the
+  // finale fetch) — nameOf() reads it directly so render()'s own signature/call sites stay
+  // untouched (a source-pinned convention gate matches `function render(finale) {` verbatim).
+  let _nameById = Object.create(null);
+  function nameOf(ref) {
+    if (ref && ref.name) return ref.name;
+    if (ref && ref.id != null && _nameById[String(ref.id)]) return _nameById[String(ref.id)];
+    return "A houseguest";
+  }
   // -1 = not yet rendered this page load. The FIRST render (live OR after a refresh) syncs
   // the count WITHOUT announcing — otherwise a reload mid-finale re-announced every vote
   // already on screen through the aria-live region (reload-persistence audit). Only reveals
@@ -200,6 +224,16 @@ import * as modalManager from "./modalManager.js";
     const reveals = Array.isArray(finale.reveals) ? finale.reveals : [];
     const stageLabel = STAGE_LABEL[finale.stage] || "The finale";
     document.getElementById("ofin-stage").textContent = stageLabel;
+    // GADGET-9: name WHICH juror is asking during the "questions" stage — the engine already
+    // projects it (`GameSession.ts` `asking: NamedRef | null`), but nothing in this panel ever
+    // read it, so the per-juror mechanic CLAUDE.md calls out ("takes one question per juror") had
+    // no visible progress readout at all.
+    const askingEl = document.getElementById("ofin-asking");
+    if (askingEl) {
+      const askingName = finale.asking ? nameOf(finale.asking) : "";
+      if (askingName) { askingEl.textContent = "Asking: " + askingName; askingEl.hidden = false; }
+      else { askingEl.hidden = true; }
+    }
     // A11Y-3: announce a stage TRANSITION (not the unchanged stage on every poll) through the one
     // hidden #ofin-announce region, alongside any fresh vote reveals below. Skip the very first
     // sync of this page session (mirrors _lastRevealCount) so a reload mid-finale never re-announces.
@@ -276,8 +310,9 @@ import * as modalManager from "./modalManager.js";
     // Issue 2: GATE the finale poll on a STARTED game. Pre-game there is no finale to stage, and
     // hitting /finale before casting only logged `[orwell] finale failed: no active game` every
     // poll. /state is the cheap, always-available game-active read every panel shares.
+    let st;
     try {
-      const st = await getJSON("/api/orwell/state");
+      st = await getJSON("/api/orwell/state");
       if (!st || st.started === false) { _staging = false; _failures = 0; hidePanel(); return; }
     } catch (_) {
       // /state itself failed (an engine blip): don't escalate to a finale fetch — back off and hide.
@@ -308,6 +343,9 @@ import * as modalManager from "./modalManager.js";
       _warmNextSeason();
     }
     if (!finale) { hidePanel(); return; }
+    // GADGET-15: resolve names against the SAME /state roster already fetched above (public
+    // NamedRef-shaped facts — no extra call, no Vault data).
+    _nameById = nameMapFrom(st);
     render(finale);
   }
 

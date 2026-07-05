@@ -173,7 +173,10 @@
     const here = present.length ? join(present) : "alone";
     const roomName = roomLabel(w.room) + (w.zone ? " · " + String(w.zone).replace(/-/g, " ") : "");
     const headLine = roomName + " — " + here;
-    el.querySelector("[data-role='head']").textContent = headLine;
+    // TRANS-26: guard the write — the head text was wholesale-replaced on EVERY ~25s poll even
+    // when nothing changed, a pure DOM-churn/flicker-risk mutation under concurrent updates.
+    const headEl = el.querySelector("[data-role='head']");
+    if (headEl && headEl.textContent !== headLine) headEl.textContent = headLine;
     // A11Y-1: announce ONLY when the line actually changed (not on every poll).
     if (headLine !== _lastAnnounced) {
       const ann = el.querySelector("[data-role='announce']");
@@ -215,7 +218,11 @@
         .map((c) => '<span class="opres-conspicuous">' + esc(c) + "</span>")
         .join(""));
     }
-    body.innerHTML = parts.join("");
+    // TRANS-26: same guard for the nearby-rooms body — a full node-swap on every poll regardless
+    // of whether presence actually changed (desktop-18-streaming.dom.json: `opres-here`/
+    // `opres-nearby` both `+1 -1` mid-stream). A cheap string compare skips the identical rebuild.
+    const html = parts.join("");
+    if (body.innerHTML !== html) body.innerHTML = html;
     _gadget.show();
   }
 
