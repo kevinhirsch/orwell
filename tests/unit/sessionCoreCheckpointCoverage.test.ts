@@ -39,7 +39,7 @@ function baseSnap(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
 
 describe("PERSIST-8 — sessionCoreCounts (the newer monotonic per-season counters)", () => {
   const fields: Array<keyof SessionCoreCounts> = [
-    "campaignTickCount", "juryHouseTickCount", "eruptionCount", "triggerTickCount",
+    "campaignTickCount", "playerCampaignMoveCount", "juryHouseTickCount", "eruptionCount", "triggerTickCount",
     "pacingTickCount", "confideLieCount", "secretExposeCount", "secretTradeCount",
     "secretPlayerBluffCount", "playerTieSurfaceCount", "tieScheduleTickCount", "surfacedThreadCount",
   ];

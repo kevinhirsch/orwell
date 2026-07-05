@@ -24,7 +24,7 @@ import { moodWord, voiceFingerprint } from "../../engine/voice";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt } from "../../engine/diaryRoom";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
-  formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN,
+  formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, advancePlayerCampaign,
   deriveDrive, ownBallotLean, ARCHETYPE_AGGRESSION,
   type Campaign, type CampaignActor, type Influence, type Drive,
 } from "../../engine/campaigns";
@@ -536,6 +536,19 @@ export class GameSessionAdapter implements GameSession {
   /** The DEDICATED campaign rng tick counter — campaign draws fork off the game seed + this, never the
    * shared society/vote stream (the L21/L24 isolation), so even live campaigns don't re-phase calibration. */
   private campaignTickCount = 0;
+  /**
+   * Phase 2 of "the player can play offense" (0085 follow-on) — the DEDICATED rng draw counter for the
+   * player's OWN campaign moves (`foldPlayerCampaignMove`), forked off the game seed exactly like
+   * `campaignTickCount` — never the shared society/vote stream, so the player's offense never re-phases
+   * calibration. Monotonic (++ only); tracked in `SessionCoreCounts` for the non-degradation checkpoint.
+   */
+  private playerCampaignMoveCount = 0;
+  /**
+   * Phase 2 — the BEAT the player's own campaign last earned progress (throttle: at most one
+   * progress-earning pitch per beat, the SAME cadence an NPC's own campaign advances at — listing many
+   * holders in one scene grows `knownTo` for each but earns no extra speed). `null` before any pitch.
+   */
+  private playerCampaignProgressBeat: number | null = null;
   /**
    * 0100 — whether the JURY-HOUSE grudge layer RUNS. DEFAULT OFF: the calibration/UAT harness leaves it
    * off, so with it unset NO jury-house stretch runs, NO draw is taken, and NO grudge is applied ⇒ every
@@ -2186,6 +2199,11 @@ export class GameSessionAdapter implements GameSession {
       ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
       ...(this.drives.size ? { drives: Object.fromEntries([...this.drives].map(([k, v]) => [k, { ...v }])) as Record<EntityId, Drive> } : {}),
       ...(this.campaignTickCount > 0 ? { campaignTickCount: this.campaignTickCount } : {}),
+      // Phase 2 ("the player can play offense") — the player's OWN dedicated campaign-rng draw counter
+      // + its per-beat progress throttle, persisted so both stay reproducible/consistent across a
+      // restart (absent ⇒ 0 / null, byte-shaped as a pre-Phase-2 save).
+      ...(this.playerCampaignMoveCount > 0 ? { playerCampaignMoveCount: this.playerCampaignMoveCount } : {}),
+      ...(this.playerCampaignProgressBeat !== null ? { playerCampaignProgressBeat: this.playerCampaignProgressBeat } : {}),
       // 0100 — the DEDICATED jury-house rng tick counter, persisted so the isolated grudge stream stays
       // reproducible across a restart (the accumulated grudge itself rides on `live.juryGrudge`). Absent ⇒
       // 0 on restore (byte-shaped as a pre-0100 save).
@@ -2397,6 +2415,10 @@ export class GameSessionAdapter implements GameSession {
     // 0085: restore live campaigns (absent on pre-0085 saves ⇒ none).
     this.campaigns = (core.campaigns ?? []).map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] }));
     this.campaignTickCount = core.campaignTickCount ?? 0;
+    // Phase 2 ("the player can play offense") — restore the player's own dedicated campaign-rng counter
+    // + its per-beat progress throttle (absent on pre-Phase-2 saves ⇒ 0 / null).
+    this.playerCampaignMoveCount = core.playerCampaignMoveCount ?? 0;
+    this.playerCampaignProgressBeat = core.playerCampaignProgressBeat ?? null;
     // 0100: restore the dedicated jury-house rng tick counter (absent on pre-0100 saves ⇒ 0). The
     // accumulated grudge itself rides on `live.juryGrudge`, restored with the live state above.
     this.juryHouseTickCount = core.juryHouseTickCount ?? 0;
@@ -5383,6 +5405,33 @@ export class GameSessionAdapter implements GameSession {
   /** Read back the player's declared campaign target (player-knowledge only; never an NPC pathway). */
   playerCampaignRead(): EntityId | null { return this.playerCampaignTarget; }
 
+  /**
+   * Phase 2 of "the player can play offense" (0085 follow-on) — fold ONE of the player's OWN LANDED
+   * pitches (`recordInteraction`'s `aboutEdges`, Phase 1) into a real, bounded, persistent campaign the
+   * PLAYER owns, so sustained lobbying can tilt the eventual vote through the SAME `campaignTiltFor`
+   * mechanism an NPC's own campaign uses. Called ONLY by `EngineCommandsAdapter` for a `more-threatened`
+   * pitch that actually landed (never a backfired one). Self-gated: a no-op (ZERO draws, no campaign)
+   * unless the campaign layer is enabled, so the calibration harness stays byte-identical. Uses its OWN
+   * dedicated rng stream (never the shared society/vote stream) and throttles progress to at most one
+   * earning move per beat — the SAME cadence an NPC's own campaign advances at, so pitching many
+   * holders in one scene spreads awareness (`knownTo`) but earns no speed advantage.
+   *
+   * `campaignActors()`/`formCampaigns()` still exclude the player (below) — nothing here EVER
+   * autonomously seeds a campaign FOR the player; only their own actual recorded move does.
+   */
+  foldPlayerCampaignMove(target: EntityId, holder: EntityId): void {
+    if (!this.campaignsEnabled) return;
+    const beat = this.beatSeqNow();
+    const existing = this.campaigns.find((c) => c.owners[0] === PLAYER && c.status === "active");
+    const fresh = !existing || existing.target !== target || beat >= existing.deadlineBeat;
+    const awardProgress = fresh || this.playerCampaignProgressBeat !== beat;
+    this.playerCampaignMoveCount += 1;
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:playerCampaign:${this.playerCampaignMoveCount}`));
+    const next = advancePlayerCampaign(existing, PLAYER, target, holder, beat, rng, awardProgress);
+    this.campaigns = [...this.campaigns.filter((c) => c.owners[0] !== PLAYER), next];
+    if (awardProgress) this.playerCampaignProgressBeat = beat;
+  }
+
   private influenceOf(id: EntityId): Influence {
     const hg = this.house ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id)) : undefined;
     return hg?.character.influence ?? { persuasiveness: 0.5, susceptibility: 0.5 };
@@ -5461,8 +5510,16 @@ export class GameSessionAdapter implements GameSession {
       }
     }
     // Advance each active campaign one move (progress + knownTo diffusion), then drop the resolved.
+    // EXCLUDES the player's own campaign (Phase 2 of "the player can play offense"): `advanceCampaign`
+    // is the AUTONOMOUS off-screen-tick mover — applying it to a player-owned entry would silently
+    // grant free progress + knownTo diffusion every tick regardless of whether the player pitched
+    // anyone, defeating the per-beat-throttled, pitch-earned design (`foldPlayerCampaignMove`) and the
+    // spec's own rule ("no NPC acts on the campaign except in response to the player's actual recorded
+    // moves" — this guards the mirror case: nothing autonomously acts FOR the player either).
     this.campaigns = this.campaigns
-      .map((c) => c.status === "active" ? advanceCampaign(c, { rng, beat, alliesOf: (id) => this.allyReadsOf(id).map((a) => a.toward) }) : c)
+      .map((c) => c.status === "active" && c.owners[0] !== PLAYER
+        ? advanceCampaign(c, { rng, beat, alliesOf: (id) => this.allyReadsOf(id).map((a) => a.toward) })
+        : c)
       .filter((c) => c.status === "active");
     // 0086: derive EVERY active houseguest's drive this tick (sticky from the prior tick) — the whole house
     // is motivated; only the loudest are campaigns above, the quiet `target` ones add the own-ballot lean.

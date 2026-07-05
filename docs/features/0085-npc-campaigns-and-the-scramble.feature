@@ -100,3 +100,9 @@ Feature: 0085 — NPC campaigns & the scramble
       Given the player declares a campaign to evict the target
       Then the player's campaign is the player's own knowledge with no pathway to any NPC
       And no NPC acts on the campaign except in response to the player's actual recorded moves
+
+    Scenario: The player's actual recorded pitches earn a real campaign that tilts the vote like an NPC's
+      Given the player pitches a houseguest against the target across several real, witnessed scenes
+      Then the player's own campaign accrues progress exactly as an NPC's campaign would
+      And the pitched houseguest's vote is tilted toward the target, bounded to the same ceiling an NPC's campaign uses
+      And a houseguest the player never pitched is unmoved
