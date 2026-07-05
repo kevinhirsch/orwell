@@ -32,6 +32,8 @@ import urllib.request
 
 import pytest
 
+from _settings_open import open_settings_deterministically
+
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -256,124 +258,10 @@ def test_runtime_image_options_are_a_subset_of_chat_options():
             page = browser.new_page()
             page.goto(base + "/", wait_until="load", timeout=30000)
             page.wait_for_timeout(4000)  # module graph + async init
-            # Open Settings past the pre-game onboarding overlay. The overlay (the setup
-            # wizard) inerts the page behind it AND lays a backdrop scrim ([data-ow-scrim])
-            # that intercepts pointer events, so the gear click is swallowed while either
-            # is present.
-            #
-            # This converges on purpose (the prior fixed 4000ms + 3×Escape loop was flaky
-            # on a slow CI runner): the pre-game route() that mounts the wizard is ASYNC and
-            # is fired twice — once on DOMContentLoaded, once on the in-browser model scan's
-            # `orwell:models-changed` (none→some) — so the wizard can mount LATE (after a
-            # fixed dismiss loop already ran and missed it) and can RE-mount in the gap
-            # between a dismiss and the click, racing it. A dismiss-then-click sequence can
-            # therefore never be race-free against an app that re-mounts asynchronously.
-            #
-            # So: dismiss + click in ONE converging loop. Each pass dismisses whatever
-            # overlay is up (Escape → the kit's single arbiter → synchronous teardown that
-            # removes BOTH the window and its scrim — NOT a force-click that would mask a
-            # real scrim), then attempts the gear click once the overlay is clear; we win
-            # the moment the Settings kit modal is actually open on screen. A
-            # genuinely orphaned scrim (window gone, scrim lingering for good) would keep
-            # this from ever clearing and the loop would time out loudly — the app-bug
-            # signal we want, never masked.
-            def _overlay_present() -> bool:
-                return page.evaluate(
-                    """() => !!document.getElementById('orwell-onboarding')
-                              || !!document.querySelector('[data-ow-scrim]')"""
-                )
-
-            # "Settings is open" = the kit window #settings-modal is built, connected, and
-            # visible. NOT "#set-defaultEpSelect exists" — that select lives in the hidden
-            # #settings-host template at all times, so it would read true before the gear is
-            # ever clicked and the loop would break without opening Settings (then initAll()
-            # never runs and the selects never populate).
-            def _settings_open() -> bool:
-                return page.evaluate(
-                    """() => {
-                      const m = document.getElementById('settings-modal');
-                      if (!m || !m.isConnected) return false;
-                      const s = getComputedStyle(m);
-                      return s.display !== 'none' && s.visibility !== 'hidden'
-                             && m.getClientRects().length > 0;
-                    }"""
-                )
-
-            # Dismiss whatever overlay is up via ITS OWN explicit control, not the global
-            # Escape key. Root-cause note (this suite has no TS engine process running, so
-            # `fetchState()` in orwellOnboarding.js's route() always 502s): the overlay this
-            # test actually hits is the F5 "Big Brother engine unavailable" holding card, not
-            # the model-config wizard the comments above describe — confirmed by instrumenting
-            # a MutationObserver + fetch hook over this exact boot (no engine ⇒ the holding
-            # card mounts almost immediately and never self-clears). That card always renders a
-            # `[data-ob-dismiss]` ("Go in anyway") button whose click handler is `win.destroy()`
-            # — the kit's SYNCHRONOUS teardown (removes the scrim + un-inerts + drops the node
-            # immediately, per orwellWindow.js). Escape instead threads ui.js's single page-wide
-            # arbiter (menu stack → hovered-window/thinking-block check → "no OTHER legacy
-            # .modal is on top" gate → sheet kit → the settings-specific branch → …) before it
-            # ever reaches `OrwellWindowKit.dismissTop()`, and even then that path calls the
-            # ANIMATED `close()` (a ~190ms `setTimeout` before teardown actually runs) rather
-            # than `destroy()`. Clicking the button is a strictly more direct, faster, and less
-            # contended signal than a global keydown many unrelated subsystems get first refusal
-            # on — prefer it, and keep Escape only as a fallback for an overlay variant (e.g.
-            # the setup wizard, when a real engine IS reachable) that renders no such button.
-            def _dismiss_overlay() -> None:
-                clicked = page.evaluate(
-                    """() => {
-                      const btn = document.querySelector('#orwell-onboarding [data-ob-dismiss]');
-                      if (btn) { btn.click(); return true; }
-                      return false;
-                    }"""
-                )
-                if not clicked:
-                    page.keyboard.press("Escape")
-
-            # 60s (was 30): the onboarding→Settings convergence is multi-step and a loaded CI runner
-            # runs it ~2× slower than local — 30s was the residual flake (#925/#1148 family). The loop
-            # is idempotent (dismiss whatever's up, retry the gear); it just needed more patience.
-            deadline = time.monotonic() + 60
-            while time.monotonic() < deadline:
-                if _settings_open():
-                    break
-                if _overlay_present():
-                    _dismiss_overlay()
-                    # Wait for the WHOLE overlay (window AND scrim) to detach before retrying — racing
-                    # the kit's teardown on a slow runner burned iterations against the budget.
-                    try:
-                        page.wait_for_function(
-                            "() => !document.getElementById('orwell-onboarding')"
-                            " && !document.querySelector('[data-ow-scrim]')",
-                            timeout=3000)
-                    except Exception:
-                        pass
-                    continue
-                # No overlay in the way — try to open Settings. Use a short per-attempt
-                # timeout so a wizard re-mounting onto the gear mid-click just loops back to
-                # dismiss it rather than failing the whole test.
-                try:
-                    page.click("#user-bar-settings", timeout=2000)
-                except Exception:
-                    pass
-                page.wait_for_timeout(150)
-            if not _settings_open():
-                # Instrument the timeout so a future flake is diagnosable: what was still blocking —
-                # a holding card, the setup wizard, a lingering scrim (the orphan #925 sweeps), a
-                # half-open modal? Turns the next flake into a localized signal, not a bare mystery.
-                diag = page.evaluate(
-                    """() => {
-                      const ob = document.getElementById('orwell-onboarding');
-                      const m = document.getElementById('settings-modal');
-                      return {
-                        onboarding: ob ? (ob.getAttribute('data-ob-holding') !== null ? 'holding'
-                                          : ob.getAttribute('data-ob-setup') !== null ? 'setup' : 'other') : null,
-                        scrims: document.querySelectorAll('[data-ow-scrim]').length,
-                        settingsConnected: !!(m && m.isConnected),
-                        settingsDisplay: m ? getComputedStyle(m).display : null,
-                      };
-                    }"""
-                )
-                raise AssertionError(
-                    f"Settings never opened past the onboarding overlay — blocking state: {diag}")
+            # Open Settings past the boot loader (#app-loader) + the no-engine
+            # onboarding holding card — the deterministic recipe that ends the
+            # #925/#1148/#930 flake (see _settings_open.py for the full root cause).
+            open_settings_deterministically(page)
             page.wait_for_function(
                 """() => {
                   const ep = document.getElementById('set-defaultEpSelect');
