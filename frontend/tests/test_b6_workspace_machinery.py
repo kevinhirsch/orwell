@@ -17,15 +17,18 @@ that workspace's own chrome bled through the fiction, ungated by the game build
     directly mid-scene, ungated even though the sibling stream-error branch a few hundred lines
     up already has the isGameBuild() diegetic-copy treatment (#872 item A).
   - the reasoning "Thinking" accordion (`markdown.js` `processWithThinking`) rendered each
-    `<think>` block completely UNSCRUBBED — a live real-model run confirmed it named backstage
-    machinery ("the engine shows…", "the game is WAITING on a PLAYER DECISION") verbatim, even
-    though the reply channel a few lines above gets `redactRawIds` + `scrubMachineryAsides`
-    before it ever reaches the public bubble.
+    `<think>` block with a raw `npc:<id>` engine token showing verbatim. The accordion is the
+    model's PRIVATE chain-of-thought, already walled from the fiction body (the public reply
+    gets the full reasoning/machinery scrub) — the P1 owner ruling keeps it and it is ALLOWED
+    to discuss mechanics/levers (browser_smoke's reasoning/public split proves lever talk stays
+    OUT of the bubble but IS held here). So the only safe cleanup is a SURGICAL npc:<id> token
+    redaction — running the line/sentence-dropping body scrubs would empty a mechanics-heavy
+    reasoning block and vanish the accordion.
 
 Fixes gate/remove each tell under the game build, reusing the existing gating mechanisms
 (`body[data-game-build]` CSS, the shared `isGameBuild()` / `_inGameBuild()` JS helpers, and —
-for the accordion — the SAME scrub functions the body already runs through, not a new regex
-family). Source-pinned; no browser required.
+for the accordion — only the pure `_RAW_NPC_ID_GLOBAL_RE` token redaction). Source-pinned; no
+browser required.
 """
 
 import os
@@ -167,25 +170,36 @@ class TestReasoningAccordionScrub:
         gated = pwt[pwt.index("if (gameBuildShowsThinkingAccordion())"):]
         return gated[: gated.index("if (leadingAsideText)")]
 
-    def test_accordion_content_is_scrubbed_before_render(self):
+    def test_accordion_redacts_only_the_raw_npc_id_token(self):
+        # The reasoning accordion is the model's PRIVATE chain-of-thought, already walled from
+        # the fiction body — the P1 owner ruling keeps it, and it is ALLOWED to discuss
+        # mechanics/levers (that's exactly what browser_smoke's reasoning/public split proves).
+        # So the accordion must NOT run the line-dropping / sentence-dropping body scrubs
+        # (redactRawIds / scrubMachineryAsides) — those would empty a mechanics-heavy block and
+        # vanish the accordion. The ONE surgical cleanup is a pure npc:<id> TOKEN redaction.
         branch = self._accordion_branch()
-        # reuses the SAME body-scrub functions — no bespoke accordion regex family
-        assert "scrubMachineryAsides(redactRawIds(block))" in branch
-        assert "createThinkingSection(scrubbedBlock" in branch
-        # a block that scrubs to nothing renders no accordion shell
-        assert "if (scrubbedBlock)" in branch
+        assert "block.replace(_RAW_NPC_ID_GLOBAL_RE, '')" in branch
+        assert "createThinkingSection(cleanedBlock" in branch
 
-    def test_machinery_word_list_covers_the_confirmed_live_leak(self):
-        # deepplay DEEP-25 / the confirmed live-run leak: "the game is WAITING on a PLAYER
-        # DECISION" echoes momentPrompts.ts's own "pending decision" prompt vocabulary.
-        assert "pending decision" in JS_MARKDOWN
-        assert "player(?:'s)? decision" in JS_MARKDOWN
+    def test_accordion_does_not_run_the_body_line_or_sentence_scrubs(self):
+        branch = self._accordion_branch()
+        # neither line-dropping (redactRawIds) nor sentence-dropping (scrubMachineryAsides) may
+        # run on the accordion — they would over-scrub a mechanics-heavy reasoning block.
+        assert "redactRawIds(" not in branch
+        assert "scrubMachineryAsides(" not in branch
+
+    def test_machinery_aside_regex_not_extended_for_the_accordion(self):
+        # The accordion fix does NOT touch the public-body scrub regex — the "pending decision"
+        # / "player decision" additions (an earlier over-scrubbing approach) are reverted, so
+        # the public-reply scrub keeps its original high-precision surface.
+        assert "pending decision" not in JS_MARKDOWN
+        assert "player(?:'s)? decision" not in JS_MARKDOWN
 
 
 @pytest.mark.skipif(_NODE is None, reason="node not available")
-def _run_accordion_scrub(cases):
-    """Node round-trip: extract the pure redactRawIds + scrubMachineryAsides helpers (no DOM)
-    and prove they strip the confirmed accordion leak phrases the same way the body scrub does."""
+def _run_accordion_redact(cases):
+    """Node round-trip: extract the pure npc:<id> token redaction the accordion applies and
+    prove it strips the raw id WITHOUT emptying mechanics-heavy reasoning (never line-drops)."""
     md_path = os.path.join(FRONTEND, "static", "js", "markdown.js")
     program = r"""
     const fs = require('fs');
@@ -195,19 +209,12 @@ def _run_accordion_scrub(cases):
       const j = src.indexOf(end, i);
       return src.slice(i, j);
     }
-    const words = grab('const _GAME_TOOL_WORDS = [', '];') + '];';
-    const re = grab('const _MACHINERY_ASIDE_RE = new RegExp(', ');') + ');';
-    const reasonLineRe = grab('const _REASONING_LINE_RE =', ';') + ';';
     const rawNpcIdGlobalRe = grab('const _RAW_NPC_ID_GLOBAL_RE =', ';') + ';';
-    let fnRedact = src.slice(src.indexOf('export function redactRawIds'));
-    fnRedact = fnRedact.slice(0, fnRedact.indexOf('\n}\n') + 2).replace('export function', 'function');
-    let fnMachinery = src.slice(src.indexOf('export function scrubMachineryAsides'));
-    fnMachinery = fnMachinery.slice(0, fnMachinery.indexOf('\n}\n') + 2).replace('export function', 'function');
     const cases = JSON.parse(process.argv[2]);
-    const run = new Function('cases', words + '\n' + re + '\n' + reasonLineRe + '\n' +
-      rawNpcIdGlobalRe + '\n' + fnRedact + '\n' + fnMachinery + '\n' +
+    const run = new Function('cases', rawNpcIdGlobalRe + '\n' +
+      "const redact = (b) => b.replace(_RAW_NPC_ID_GLOBAL_RE, '');" +
       "let ok = true;" +
-      "for (const [inp, exp] of cases) { const got = scrubMachineryAsides(redactRawIds(inp));" +
+      "for (const [inp, exp] of cases) { const got = redact(inp);" +
       "  if (got.trim() !== exp.trim()) { ok = false;" +
       "    console.error('MISMATCH', JSON.stringify(inp), '=>', JSON.stringify(got), 'WANT', JSON.stringify(exp)); } }" +
       "return ok;");
@@ -221,25 +228,22 @@ def _run_accordion_scrub(cases):
 
 
 @pytest.mark.skipif(_NODE is None, reason="node not available")
-def test_accordion_scrub_strips_the_confirmed_live_leak_phrases():
+def test_accordion_redacts_raw_npc_ids_but_keeps_the_mechanics_reasoning():
+    # The browser_smoke reasoning fixture is deliberately mechanics-heavy (lever names, a
+    # "rewind") to PROVE that content is held in the accordion (not the bubble). The accordion
+    # treatment must keep every bit of it — only a bare npc:<id> token is redacted.
     cases = [
-        ["The engine shows the game is WAITING on a PLAYER DECISION. My read on the room: "
-         "wildcard energy, a hook in the question.",
-         "My read on the room: wildcard energy, a hook in the question."],
+        # the exact browser_smoke reasoning block: levers + "Let me rewind" all survive
+        ["Let me rewind that. I should call whereabouts and npcVoice, then a social read via "
+         "getGameState before narrating.",
+         "Let me rewind that. I should call whereabouts and npcVoice, then a social read via "
+         "getGameState before narrating."],
+        # a bare npc:<id> engine token is redacted; the trailing name survives
         ["npc:7 leans in and whispers a plan. She smiles warmly at you.",
          "leans in and whispers a plan. She smiles warmly at you."],
-        ["The pending decision is which nominee to save. The room falls quiet.",
-         "The room falls quiet."],
-    ]
-    res = _run_accordion_scrub(cases)
-    assert "OK" in res.stdout, f"stdout={res.stdout!r} stderr={res.stderr!r}"
-
-
-@pytest.mark.skipif(_NODE is None, reason="node not available")
-def test_accordion_scrub_does_not_over_scrub_ordinary_reasoning_prose():
-    cases = [
+        # ordinary reasoning prose is byte-identical
         ["I think she's bluffing about the alliance. Her tone shifted when I mentioned the vote.",
          "I think she's bluffing about the alliance. Her tone shifted when I mentioned the vote."],
     ]
-    res = _run_accordion_scrub(cases)
+    res = _run_accordion_redact(cases)
     assert "OK" in res.stdout, f"stdout={res.stdout!r} stderr={res.stderr!r}"

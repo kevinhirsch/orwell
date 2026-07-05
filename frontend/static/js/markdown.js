@@ -303,11 +303,6 @@ const _MACHINERY_ASIDE_RE = new RegExp(
   // player runs us on ("the front end", "the app", "this app/website/site"). Defense-in-depth so
   // the JS body scrub catches a mid-paragraph fourth-wall leak the line/preamble passes can miss.
   + '|\\bthe (?:engine|system|model|front[\\s-]?end)\\b|\\bthe app\\b|\\bthis (?:app|website|site)\\b'
-  // B6 (deepplay DEEP-25 / live-run evidence): the reasoning accordion echoed the ENGINE'S OWN
-  // prompt vocabulary verbatim ("the game is WAITING on a PLAYER DECISION") — terms lifted
-  // straight from momentPrompts.ts's "pending decision" framing that never belong in BB
-  // narration or its accordion.
-  + "|\\bpending decision\\b|\\bplayer(?:'s)? decision\\b|\\bgame state\\b"
   + '|\\blet me\\s+(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
     + '(?:call|advance|run|check|record|log|note|resolve|use|pull|fetch|see what|'
     + 'walk through|re-?read|re-?check|reconsider)\\b'
@@ -729,23 +724,23 @@ export function processWithThinking(text) {
     // Prepend the reasoning accordion (collapsed by default), then the clean
     // reply. The accordion is debug-only chrome; it never touches the reply text.
     //
-    // B6: a live real-model run confirmed the accordion is NOT a safe dumping ground for raw
-    // reasoning — expanded, it named backstage machinery ("the engine shows…", "the game is
-    // WAITING on a PLAYER DECISION") and restated operator-aside / raw npc:<id> content, the
-    // exact leak classes the reply channel already gets scrubbed of a few lines above. This is
-    // not a Vault leak (the model only ever reasons over Vault-free context) but it is I9
-    // ("the machinery is invisible") — the accordion is opt-in chrome, not a second unscrubbed
-    // channel. Reuse the SAME body-scrub passes (no new regex family): redactRawIds strips a
-    // raw npc:<id> / standalone operator-aside line, scrubMachineryAsides drops any sentence
-    // that names an engine tool or machinery noun ("the engine", "pending decision", …). A
-    // block that scrubs to nothing (pure machinery talk) renders no accordion at all rather
-    // than an empty shell.
+    // B6: the accordion holds the model's PRIVATE chain-of-thought, already walled from the
+    // fiction body (the public reply above is what gets the full reasoning/machinery scrub).
+    // It is opt-in, default-collapsed debug chrome and is deliberately ALLOWED to discuss
+    // mechanics — the P1 owner ruling keeps it, and the reasoning/public split (browser_smoke)
+    // is what proves lever/'rewind' talk stays OUT of the bubble but IS held here. So we must
+    // NOT run the line-dropping / sentence-dropping body scrubs (redactRawIds /
+    // scrubMachineryAsides) on it — those would empty a mechanics-heavy reasoning block and
+    // vanish the accordion entirely. The ONE surgical cleanup that is safe (never empties
+    // content) is redacting a bare `npc:<id>` engine token to nothing so the raw id doesn't
+    // show; the human-readable name the engine usually appends survives. Pure token replace —
+    // no line/sentence dropping.
     let gbHtml = '';
     if (gameBuildShowsThinkingAccordion()) {
       thinkingBlocks.forEach((block, index) => {
         if (!block || !block.trim()) return;
-        const scrubbedBlock = scrubMachineryAsides(redactRawIds(block)).trim();
-        if (scrubbedBlock) gbHtml += createThinkingSection(scrubbedBlock, index, thinkingTime);
+        const cleanedBlock = block.replace(_RAW_NPC_ID_GLOBAL_RE, '');
+        if (cleanedBlock.trim()) gbHtml += createThinkingSection(cleanedBlock, index, thinkingTime);
       });
     }
     // #970: emit the leading OOC block as its OWN styled aside bubble, THEN the in-character prose
