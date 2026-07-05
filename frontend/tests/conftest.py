@@ -7,7 +7,9 @@ app-admin logic, though, lives entirely in the self-contained `core.auth` and
 heavy `__init__` never runs.
 """
 
+import functools
 import os
+import pathlib
 import sys
 import tempfile
 import types
@@ -38,3 +40,26 @@ if _existing is None or not getattr(_existing, "_orwell_test_stub", False):
     pkg.__path__ = [CORE_DIR]
     pkg._orwell_test_stub = True
     sys.modules["core"] = pkg
+
+
+# ── CI lane split: auto-mark the real headless-browser tests as `browser` ────────────
+#
+# The FE suite's ~11 Playwright tests (they call `sync_playwright`) dominate wall-clock and carry the
+# known environmental onboarding-scrim flake (#925/#1148/#930). CI runs them in a SEPARATE serial lane
+# (`fe-browser-tests`, with a retry) while the ~340 non-browser tests run PARALLEL under xdist
+# (`fe-unit`). Rather than hand-mark every browser file, detect them structurally: any test whose module
+# source calls `sync_playwright` is the `browser` lane. Everything else is xdist-safe (verified: the only
+# real fixed-port server binds in the whole suite live in `sync_playwright` files; every other port
+# reference is a monkeypatched stub string). Select with `-m browser` / `-m "not browser"`.
+@functools.lru_cache(maxsize=None)
+def _module_launches_browser(path: str) -> bool:
+    try:
+        return "sync_playwright" in pathlib.Path(path).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if _module_launches_browser(str(item.fspath)):
+            item.add_marker("browser")

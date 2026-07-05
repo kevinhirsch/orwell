@@ -35,6 +35,7 @@ jobs:
   # CANCELLED (a SKIP counts as a pass). Point branch protection at `ci-gate`, not the individual jobs.
   changes:
     runs-on: self-hosted
+    timeout-minutes: 5
     outputs:
       engine: ${{ steps.filter.outputs.engine }}
       frontend: ${{ steps.filter.outputs.frontend }}
@@ -109,6 +110,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
     runs-on: self-hosted
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -151,6 +153,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     runs-on: self-hosted
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -172,6 +175,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
     runs-on: self-hosted
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -191,6 +195,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.deploy == 'true'
     runs-on: self-hosted
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -221,10 +226,17 @@ jobs:
   # The vendored Python app is outside the TS tooling. It used to be ONE ~7-min job (the CI long
   # pole). Split into pytest / browser-smoke / responsive-matrix so a multi-runner pool runs them
   # in PARALLEL. All three are PATH-GATED on `changes.frontend`; an engine-only PR skips them.
-  fe-pytest:
+  # The Python pytest lane, split by the `browser` marker (auto-applied in frontend/tests/conftest.py to
+  # every `sync_playwright` test). The ~3750 non-browser tests run PARALLEL under xdist here (~1.5 min vs
+  # the old ~12.5-min serial run); the ~100 headless-Chromium tests run in their own serial lane below.
+  # Shorter jobs are the whole point: a job that finishes in ~2 min survives a self-hosted-runner fleet
+  # blip that would guillotine a 12-min one. `-n 4` (not `auto`) bounds worker memory to a fixed cost so a
+  # bigger runner can't spawn N workers × the FastAPI app and OOM the box.
+  fe-unit:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: self-hosted
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -242,8 +254,8 @@ jobs:
           done
       - name: install front-end deps
         run: pip install -r frontend/requirements.txt
-      - name: pytest (app-admin 0029, game build 0032)
-        run: cd frontend && python3 -m pytest tests/ -q
+      - name: pytest — non-browser suite, parallel (app-admin 0029, game build 0032)
+        run: cd frontend && python3 -m pytest tests/ -m "not browser" -n 4 -q
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -252,10 +264,45 @@ jobs:
           node --check frontend/static/js/orwellOnboarding.js
           node --check frontend/static/js/orwellStatusPanel.js
 
+  # The headless-Chromium pytest tests (the `browser` marker). Serial (they bind fixed ports / drive a
+  # real page) with `--reruns 1` so the known environmental onboarding-scrim flake (#925/#1148/#930)
+  # self-recovers within the job instead of reddening the whole run. Needs the chromium binary, installed
+  # the same way as the `fe-browser` job (no `--with-deps`: the self-hosted box has the system libs baked
+  # in; a sudo apt install is not granted).
+  fe-browser-tests:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Self-hosted runner: don't leave the job GITHUB_TOKEN in .git/config for later steps.
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install front-end deps
+        run: pip install -r frontend/requirements.txt
+      - name: resolve playwright version (cache key)
+        id: pw
+        run: echo "version=$(pip show playwright | awk '/^Version:/ {print $2}')" >> "$GITHUB_OUTPUT"
+      - name: cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - name: install playwright chromium
+        run: python3 -m playwright install chromium
+      - name: pytest — headless-browser suite, serial + retry-once
+        run: cd frontend && python3 -m pytest tests/ -m browser --reruns 1 -q
+
   fe-browser:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: self-hosted
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -292,6 +339,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: self-hosted
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -329,12 +377,14 @@ jobs:
   # `skipped`; `ci-gate` still runs (always()); each `needs.*.result` is `skipped`; the loop below
   # treats `skipped`/`success` as OK and exits 0. No required check is ever left "expected / pending".
   ci-gate:
+    timeout-minutes: 5
     needs:
       - changes
       - test
       - coverage
       - smoke
-      - fe-pytest
+      - fe-unit
+      - fe-browser-tests
       - fe-browser
       - fe-responsive
       - heavy-sims
@@ -348,7 +398,8 @@ jobs:
             test=${{ needs.test.result }}
             coverage=${{ needs.coverage.result }}
             smoke=${{ needs.smoke.result }}
-            fe-pytest=${{ needs.fe-pytest.result }}
+            fe-unit=${{ needs.fe-unit.result }}
+            fe-browser-tests=${{ needs.fe-browser-tests.result }}
             fe-browser=${{ needs.fe-browser.result }}
             fe-responsive=${{ needs.fe-responsive.result }}
             heavy-sims=${{ needs.heavy-sims.result }}
