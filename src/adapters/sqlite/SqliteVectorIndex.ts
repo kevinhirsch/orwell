@@ -30,6 +30,22 @@ import { VectorDimMismatchError, type VectorIndex, type VectorMatch } from "../.
  * SCORE semantics MATCH `InMemoryVectorIndex`: the table uses `distance_metric=cosine`, and
  * `score = 1 - cosine_distance` is exactly cosine similarity (1 identical, 0 orthogonal, -1 opposite),
  * sorted descending — identical to the in-memory cosine sort, so recall results are equivalent.
+ *
+ * PERSIST-7: `ORWELL_STORE=sqlite` opts into this adapter specifically so semantic recall survives a
+ * process restart WITHOUT the (correct, but expensive) O(events) full re-embed replay `SoulStore`'s
+ * `rebuildSoulIndex` falls back to. That requires two things beyond just "a real db file on disk"
+ * (`engineRoot.ts` now threads a real `dbPath` instead of the prior always-`:memory:` default):
+ *
+ *   1. A STABLE table name per logical index, so a fresh instance opened against the SAME db file
+ *      after a restart lands on the SAME table instead of a brand-new empty one. `makeIndex` now
+ *      passes the houseguest id through as `name`; `tableNameFor` derives a deterministic, sanitized
+ *      table identifier from it. Omitting `name` (standalone/ad-hoc use, e.g. direct unit tests)
+ *      keeps the prior ephemeral per-process-sequence naming — unchanged.
+ *   2. Recovering the pinned DIMENSION on construction — a fresh instance doesn't know its own `dim`
+ *      until an `upsert` happens, so without help `query` would read as empty even though the table
+ *      already holds rows from a prior life. A small `vec_meta` bookkeeping table
+ *      (`table_name → dim`) records the dimension at first `upsert`; the constructor looks itself up
+ *      there when given a `name`, so `query` works immediately post-restart.
  */
 export class SqliteVectorIndex implements VectorIndex {
   private readonly table: string;
@@ -40,10 +56,15 @@ export class SqliteVectorIndex implements VectorIndex {
   private static seq = 0;
 
   /**
-   * @param db   A shared sqlite-vec-loaded database (the `makeIndex` factory passes one). When omitted,
-   *             the index owns a private in-memory database (handy for a standalone index / tests).
+   * @param db    A shared sqlite-vec-loaded database (the `makeIndex` factory passes one). When
+   *              omitted, the index owns a private in-memory database (handy for a standalone
+   *              index / tests).
+   * @param name  A stable identity for this index (e.g. a houseguest id). When given, the table
+   *              name is deterministic and any dimension already pinned for it is recovered from
+   *              `vec_meta` — so `query` works before this instance's own first `upsert` (PERSIST-7).
+   *              Omitted ⇒ the prior ephemeral per-process-sequence table name (ad-hoc/test use).
    */
-  constructor(db?: DatabaseType) {
+  constructor(db?: DatabaseType, name?: string) {
     if (db) {
       this.db = db;
       this.ownsDb = false;
@@ -51,7 +72,13 @@ export class SqliteVectorIndex implements VectorIndex {
       this.db = openVecDatabase(":memory:");
       this.ownsDb = true;
     }
-    this.table = `vec_soul_${++SqliteVectorIndex.seq}`;
+    this.table = name !== undefined ? tableNameFor(name) : `vec_soul_${++SqliteVectorIndex.seq}`;
+    if (name !== undefined) {
+      const row = this.db.prepare("SELECT dim FROM vec_meta WHERE table_name = ?").get(this.table) as
+        | { dim: number }
+        | undefined;
+      if (row) this.dim = row.dim;
+    }
   }
 
   upsert(id: string, vector: readonly number[], meta?: Record<string, unknown>): void {
@@ -88,33 +115,62 @@ export class SqliteVectorIndex implements VectorIndex {
   private ensureTable(dim: number): void {
     if (this.dim !== null) return;
     this.dim = dim;
+    // IF NOT EXISTS: on a genuine restart against a persisted db, `vec_meta` recovery above already
+    // set `this.dim` and this method returns before reaching here — but a belt-and-suspenders guard
+    // costs nothing and protects against a meta row that predates a table (e.g. an interrupted write).
     this.db.exec(
-      `CREATE VIRTUAL TABLE ${this.table} USING vec0(` +
+      `CREATE VIRTUAL TABLE IF NOT EXISTS ${this.table} USING vec0(` +
         `mem_id TEXT PRIMARY KEY, ` +
         `+meta TEXT, ` +
         `embedding float[${dim}] distance_metric=cosine` +
         `)`,
     );
+    this.db.prepare("INSERT OR REPLACE INTO vec_meta (table_name, dim) VALUES (?, ?)").run(this.table, dim);
   }
+}
+
+/** A valid, collision-safe SQLite identifier derived from an arbitrary stable name (e.g. an
+ *  `EntityId` like `npc:3` or `player`) — every non-alphanumeric character becomes `_`. */
+function tableNameFor(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9_]/g, "_");
+  return `vec_soul_${cleaned || "anon"}`;
 }
 
 /**
  * Open a `better-sqlite3` database with the sqlite-vec extension loaded — the one place the native
  * extension is wired. A shared instance from here is passed to every per-houseguest `SqliteVectorIndex`.
+ * Also ensures the `vec_meta` bookkeeping table PERSIST-7 relies on to recover a named index's pinned
+ * dimension across a restart.
  */
 export function openVecDatabase(dbPath = ":memory:"): DatabaseType {
   if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   sqliteVec.load(db);
+  db.exec("CREATE TABLE IF NOT EXISTS vec_meta (table_name TEXT PRIMARY KEY, dim INTEGER NOT NULL)");
   return db;
 }
 
 /**
- * A `makeIndex` factory for `SoulStore` (`() => VectorIndex`) backed by ONE shared sqlite-vec database
- * — each call returns a fresh per-houseguest `SqliteVectorIndex` (its own table) over that db, so the
- * whole house's recall lives in a single (in-memory by default) vector store. ENGINE-ONLY.
+ * A `makeIndex` factory for `SoulStore` backed by ONE shared sqlite-vec database — each call returns
+ * a `SqliteVectorIndex` over that db, keyed by the optional stable `name` (`SoulStore` passes the
+ * houseguest id) so the whole house's recall lives in a single vector store, persisted to `dbPath`
+ * when one is given (PERSIST-7 — default `:memory:` preserves the prior ephemeral behavior for
+ * callers/tests that don't opt into a real path). ENGINE-ONLY.
+ *
+ * @param freshStart  When true (SoulStore's dimension-mismatch self-heal, PERSIST-1/PERSIST-4), any
+ *                     existing on-disk table + `vec_meta` row for `name` is dropped FIRST, so the
+ *                     replacement index starts genuinely empty in the new embedding space instead of
+ *                     recovering the old (now-incompatible) pinned dimension and looping on
+ *                     `VectorDimMismatchError` for every re-embedded memory.
  */
-export function sqliteVectorIndexFactory(dbPath = ":memory:"): () => VectorIndex {
+export function sqliteVectorIndexFactory(dbPath = ":memory:"): (name?: string, freshStart?: boolean) => VectorIndex {
   const db = openVecDatabase(dbPath);
-  return () => new SqliteVectorIndex(db);
+  return (name?: string, freshStart?: boolean) => {
+    if (freshStart && name !== undefined) {
+      const table = tableNameFor(name);
+      db.exec(`DROP TABLE IF EXISTS ${table}`);
+      db.prepare("DELETE FROM vec_meta WHERE table_name = ?").run(table);
+    }
+    return new SqliteVectorIndex(db, name);
+  };
 }

@@ -10,6 +10,7 @@ import type { VaultStore } from "../ports/VaultStore";
 import type { KnowledgeService } from "../ports/KnowledgeService";
 import type { SoulProvider } from "../ports/SoulProvider";
 import type { VectorIndex } from "../ports/VectorIndex";
+import type { EntityId } from "../domain/ids";
 
 /**
  * Engine composition root. This is the ONLY place the Vault is wired. Outward
@@ -80,10 +81,26 @@ export function buildEngineCore(): EngineCore {
   const relationships = new RelationshipModel(0.5);
   // E63: `ORWELL_STORE=sqlite` backs each houseguest's recall index with sqlite-vec (SYNCHRONOUS, so
   // the SoulStore seam stays sync — the fastembed bridge + G8/G12 breathing lane are unaffected). One
-  // shared in-process vector db PER SANDBOX (each `buildEngineCore` call), so cross-user isolation
-  // holds. DEFAULT unset ⇒ the in-memory cosine index (today's behavior — unchanged).
-  const makeIndex: (() => VectorIndex) | undefined =
-    (process.env.ORWELL_STORE ?? "").trim().toLowerCase() === "sqlite" ? sqliteVectorIndexFactory() : undefined;
+  // shared vector db PER SANDBOX (each `buildEngineCore` call), so cross-user isolation holds. DEFAULT
+  // unset ⇒ the in-memory cosine index (today's behavior — byte-identical, no sqlite import touched).
+  //
+  // PERSIST-7: the durable tier now persists the vector store to disk (`<ORWELL_DATA_DIR>/orwell-vec.sqlite`)
+  // and keys each houseguest's table on their stable id, so semantic recall SURVIVES a process restart —
+  // the whole point of opting into sqlite-vec (avoiding the O(events) re-embed replay the in-memory tier
+  // pays on every resume, per I5 non-degradation). Previously the factory was called with NO path, so the
+  // "durable" index was silently `:memory:` and every restart lost it.
+  const makeIndex: ((hg?: EntityId, freshStart?: boolean) => VectorIndex) | undefined =
+    (process.env.ORWELL_STORE ?? "").trim().toLowerCase() === "sqlite"
+      ? sqliteVectorIndexFactory(vectorDbPath())
+      : undefined;
   const soul = makeIndex ? new SoulStore(currentEmbedding, makeIndex) : new SoulStore(currentEmbedding);
   return { events, vault, knowledge, relationships, soul };
+}
+
+/** The on-disk path for the durable (sqlite-vec) recall store, derived from `ORWELL_DATA_DIR` exactly
+ *  like `SqliteSaveStore`'s save file — a sibling `orwell-vec.sqlite`. Falls back to `./.orwell-data`,
+ *  mirroring the save store's own default. Only consulted under `ORWELL_STORE=sqlite` (PERSIST-7). */
+function vectorDbPath(): string {
+  const dataDir = (process.env.ORWELL_DATA_DIR ?? process.env.BBAI_DATA_DIR ?? "./.orwell-data").replace(/\/+$/, "");
+  return `${dataDir}/orwell-vec.sqlite`;
 }
