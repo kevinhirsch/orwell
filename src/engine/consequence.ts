@@ -6,8 +6,8 @@ import type { GameEvent } from "../domain/event";
 import { RelationshipModel } from "./relationships";
 import type { InteractionType, EdgeSignals } from "./relationships";
 import {
-  CONSEQUENCE_DIRECTION_IMPACTS, CONSEQUENCE_EMPHASIS, THIRD_PARTY_CONSEQUENCE, clamp01, scaleImpact,
-  type ConsequenceDirection,
+  CONSEQUENCE_DIRECTION_IMPACTS, CONSEQUENCE_EMPHASIS, THIRD_PARTY_CONSEQUENCE, RELATIONSHIP_CONSTANTS,
+  clamp01, scaleImpact, type ConsequenceDirection, type RelationshipConstants,
 } from "./relationshipConstants";
 import { InMemoryEventStore } from "../adapters/inmemory/InMemoryEventStore";
 import { SeededRandom } from "../adapters/random/SeededRandom";
@@ -123,6 +123,49 @@ export function foldHiddenImpact(
       if (b === initiator || seen.has(b)) continue;
       rel.applyObservation(b, initiator, partners, kind, rng);
     }
+  }
+}
+
+/**
+ * Phase 3 of "the player can play offense" (audit finding SG-2, 2026-07-03 final-pre-ship audit) —
+ * the PLAYER-CHANNEL RECIPROCAL fold. `foldHiddenImpact` above moves ONLY the partner's opinion OF
+ * the initiator (`partner→initiator`); the initiator's OWN edge toward the people they just engaged
+ * never budges. That is correct for the engine's off-screen society (an NPC bystander's belief
+ * moving is enough) — but on the PLAYER channel it left `player→NPC` frozen at its move-in scatter
+ * forever, under every mutual-bond gate `formAlliance`/`joinAlliance` (0107) and bloc detection
+ * (0043) read, making them ~unreachable however much the player genuinely engaged.
+ *
+ * ADR 0002 holds the engine computes BOTH `NPC→player` and `player→NPC` from history (never a
+ * number the player sees) — so when the PLAYER is the initiator of a `kind`-tagged scene, this
+ * reciprocates a BOUNDED SHARE (`RECIPROCAL_SHARE`, always < 1 — the player's own read should firm
+ * up more slowly than a houseguest's memorable read of the player) of the SAME engine-owned `kind`
+ * impact onto `initiator→partner`, through the identical proven update rule (disposition × jitter ×
+ * clamp). It spends NO new budget: `partners` is the list the caller ALREADY metered against the
+ * per-beat-per-edge fold budget (E21) for the other direction, so this can never become a second,
+ * unbounded pump lever.
+ *
+ * Scoped to PLAYER-initiated scenes only — a no-op for any other initiator. An NPC-initiated scene
+ * reaching this channel already folds the reverse via `foldHiddenImpact`'s own partner pass (the
+ * "other witness" IS the player in that case); live NPC-initiated calls don't happen today anyway
+ * (`frontend/src/tool_implementations.py`'s `do_record_interaction` always sends `initiator: player`).
+ * Draws its OWN rng — the isolated player-channel `commands:` stream `EngineCommandsAdapter` already
+ * uses for overhears, never the main season/competition/vote stream, so this cannot perturb the
+ * seeded calibration spine (`tests/property/juryReach.property.test.ts` never calls
+ * `recordInteraction`, and the gradient gate's only exposure is its own isolated stream too).
+ */
+export function foldPlayerReciprocal(
+  rel: RelationshipModel,
+  rng: RandomnessSource,
+  initiator: EntityId,
+  partners: readonly EntityId[],
+  kind: InteractionType,
+  constants: RelationshipConstants = RELATIONSHIP_CONSTANTS,
+): void {
+  if (initiator !== PLAYER || partners.length === 0) return;
+  const impact = scaleImpact(constants.IMPACT[kind], constants.RECIPROCAL_SHARE);
+  for (const partner of partners) {
+    if (partner === initiator) continue;
+    rel.applyImpactDirected(initiator, partner, impact, rng);
   }
 }
 

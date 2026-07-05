@@ -8,7 +8,9 @@ import type { EntityId } from "../../domain/ids";
 import { PLAYER } from "../../domain/ids";
 import { SeededRandom } from "../random/SeededRandom";
 import type { RelationshipModel, InteractionType } from "../../engine/relationships";
-import { foldHiddenImpact, foldGenerativeConsequence, foldThirdPartyConsequence } from "../../engine/consequence";
+import {
+  foldHiddenImpact, foldGenerativeConsequence, foldThirdPartyConsequence, foldPlayerReciprocal,
+} from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
 import { PRESENCE } from "../../engine/presenceConstants";
 import { isPrivateRoom, zonesSameEarshot, type Occupancy, type Zone } from "../../domain/house";
@@ -243,7 +245,10 @@ export class EngineCommandsAdapter implements EngineCommands {
       let named: Set<EntityId>;
       if (genEdges?.length) {
         // The descriptor drives the partner folds — each named edge spends one unit of the per-beat
-        // per-edge budget (E21) exactly as a `kind` partner would.
+        // per-edge budget (E21) exactly as a `kind` partner would. (Phase 3/SG-2 scope note: the
+        // reciprocal player-channel fold below is wired only onto the `kind`-only floor branch's
+        // partners — a per-EDGE `direction` here has no single engine `kind` to reciprocate with,
+        // so a generative descriptor's own edges are left for a future pass.)
         named = foldGenerativeConsequence(
           this.rel, this.rng, req.initiator, genEdges,
           (toward) => toward !== req.initiator && this.spendFoldBudget(toward, req.initiator),
@@ -271,6 +276,11 @@ export class EngineCommandsAdapter implements EngineCommands {
         );
         foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
           partners, MAX_FOLDS_PER_INTERACTION, bystanders);
+        // Phase 3 (SG-2, the closed-set relationship layer): a PLAYER-initiated scene ALSO
+        // reciprocates a bounded share of this SAME kind impact onto the player's OWN edge toward
+        // each partner they just engaged — see `foldPlayerReciprocal`. No-op for any other
+        // initiator, and spends no new budget (`partners` is already budget-cleared above).
+        foldPlayerReciprocal(this.rel, this.rng, req.initiator, partners, req.kind as InteractionType);
       }
     }
     // THIRD-PARTY consequence (Phase 1 of "the player can play offense" — layered on ADR 0005): a
