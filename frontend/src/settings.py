@@ -11,7 +11,7 @@ import time
 import logging
 from typing import Any
 
-from src.constants import SETTINGS_FILE, FEATURES_FILE
+from src.constants import SETTINGS_FILE, FEATURES_FILE, known_theme_names_ordered
 
 logger = logging.getLogger(__name__)
 
@@ -414,12 +414,19 @@ GAME_UI_CONTROL_SAFE_ACTIONS = frozenset({
 # or flip modes/models on game turns — levers that are refused anyway (W1).
 # Format matters: the "- ```name``` — ..." one-liner shape is what the prompt
 # assembler classifies as a tool section.
+#
+# SET-4 (2026-07-03 audit): the preset list is read from `known_theme_names_ordered()`
+# (src/constants.py, parsed live from static/js/theme.js) instead of being hand-copied
+# here — this previously omitted `glass` + the 5 house themes (feature 0052's flagship
+# identity themes, ruling #13), so the narrator's own sanctioned in-fiction lever could
+# never select the game's OWN look. Reading from the single source of truth means this
+# can't drift again.
 GAME_UI_CONTROL_SECTION = (
     "- ```ui_control``` — Camera direction only: visually direct the player's screen. "
     "Commands: `highlight <css-selector> [label]` (call out something on screen), "
-    "`clear_highlight`, `set_theme <preset>` (presets: dark, light, midnight, paper, "
-    "cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, "
-    "claude, cute), `create_theme <name> <bg> <fg> <panel> <border> <accent>` (custom hex "
+    "`clear_highlight`, `set_theme <preset>` (presets: "
+    + ", ".join(known_theme_names_ordered())
+    + "), `create_theme <name> <bg> <fg> <panel> <border> <accent>` (custom hex "
     "theme; auto-applies). No other UI action exists here — do not try to switch modes, "
     "models, toggles, or open panels."
 )

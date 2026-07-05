@@ -14,8 +14,17 @@ from typing import Optional
 
 from src.agent_tools import ToolBlock, TOOL_TAGS
 from src.tool_parsing import _TOOL_NAME_MAP
+from src.constants import known_theme_names_ordered
 
 logger = logging.getLogger(__name__)
+
+# SET-4/SET-5 (2026-07-03 audit): the set_theme preset list advertised in the
+# native tool description, read from the same single source of truth
+# (static/js/theme.js) that do_ui_control's set_theme validation uses — this
+# previously hardcoded six fictional names ("nord", "monokai", "gruvbox",
+# "dracula", "vaporwave", "coffee") that don't exist anywhere and always 400'd,
+# while separately omitting `glass` + the 5 house themes (feature 0052).
+_SET_THEME_PRESETS_STR = ", ".join(known_theme_names_ordered())
 
 # ---------------------------------------------------------------------------
 # OpenAI-compatible function tool schemas
@@ -406,7 +415,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ui_control",
-            "description": "Control the user interface. Actions: toggle (turn tools on/off), open_panel (open a modal: documents/library, gallery, email, sessions, notes, memories/brain, skills, settings, cookbook), open_email_reply (open an email reply draft document; does NOT send), set_mode, switch_model, set_theme (presets: dark, light, midnight, paper, nord, monokai, gruvbox, dracula, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, vaporwave, lavender, gpt, coffee, claude), create_theme (CREATE any custom theme with a name + colors object — pick distinctive, evocative hex colors that match the requested aesthetic, NOT generic defaults. The theme auto-applies after creation). When a user asks for ANY theme not in the preset list, ALWAYS use create_theme.",
+            "description": f"Control the user interface. Actions: toggle (turn tools on/off), open_panel (open a modal: documents/library, gallery, email, sessions, notes, memories/brain, skills, settings, cookbook), open_email_reply (open an email reply draft document; does NOT send), set_mode, switch_model, set_theme (presets: {_SET_THEME_PRESETS_STR}), create_theme (CREATE any custom theme with a name + colors object — pick distinctive, evocative hex colors that match the requested aesthetic, NOT generic defaults. The theme auto-applies after creation). When a user asks for ANY theme not in the preset list, ALWAYS use create_theme.",
             "parameters": {
                 "type": "object",
                 "properties": {
