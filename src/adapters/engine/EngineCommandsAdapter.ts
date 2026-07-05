@@ -165,12 +165,20 @@ export class EngineCommandsAdapter implements EngineCommands {
     this.guardBeatSeq(req.expectedBeatSeq);
     // Validated references (B39/audit A4): an interaction may only name LIVING houseguests — never an
     // evicted or invented one. The player is always living. Skipped when no roster is wired (standalone).
-    if (this.livingProvider) {
-      const living = new Set<EntityId>([PLAYER, ...this.livingProvider()]);
+    // BE-102: `living` is also reused BELOW to filter `toward` / the consequence descriptor's targets —
+    // those fields used to bypass this check entirely, letting a caller fold a relationship move onto an
+    // evicted juror (or an invented id) with no scene, no witness, no in-game pathway. Since jurors'
+    // relationship-derived reads feed the deterministic jury vote (I2/I4), that was a real side-channel
+    // for tilting jury sentiment. Unlike `initiator`/`witnessSet` (refused outright, before anything is
+    // recorded), a bad `toward`/edge target is silently DROPPED rather than thrown — the event itself may
+    // already be a legitimate scene; only the out-of-bounds fold target is refused.
+    const living = this.livingProvider ? new Set<EntityId>([PLAYER, ...this.livingProvider()]) : null;
+    if (living) {
       for (const id of [req.initiator, ...req.witnessSet]) {
         if (!living.has(id)) throw new Error(`recordInteraction names a non-living houseguest: ${id}`);
       }
     }
+    const isLiving = (id: EntityId): boolean => !living || living.has(id);
     // E21: this is the PLAYER channel's recording seam — it may only record scenes the player is
     // part of. The player initiating counts (they are in the scene; their seat is made explicit).
     // A witness set excluding the player would mint an off-screen "ground truth" indistinguishable
@@ -239,7 +247,10 @@ export class EngineCommandsAdapter implements EngineCommands {
     //    never evaporate (ADR 0005 principle #4). Any `kind` then runs the bystander pass over the
     //    witnesses the descriptor did NOT name, so the 7-way tag stays the FLOOR, never the ceiling.
     //  • The `kind`-only floor: with NO descriptor, this is BYTE-IDENTICAL to the prior behavior.
-    const genEdges = req.consequence?.edges;
+    // BE-102: drop any edge naming a non-living `toward` BEFORE it ever reaches the fold — a caller
+    // could otherwise move an evicted juror's (or an invented id's) hidden opinion of the initiator
+    // with no scene, no witness, no in-game pathway, silently tilting the deterministic jury read.
+    const genEdges = req.consequence?.edges?.filter((e) => isLiving(e.toward));
     if (this.rel && (genEdges?.length || (req.kind && INTERACTION_KINDS.has(req.kind)))) {
       this.rollBeatWindow();
       let named: Set<EntityId>;
@@ -268,7 +279,9 @@ export class EngineCommandsAdapter implements EngineCommands {
         // explicit `toward`) take the full directed fold. Presence-grounding adds co-present
         // bystanders to the witness set, but a private bond must never bond the whole room (audit
         // 2026-06-18): bystanders only OBSERVE, reacting by their own beliefs (foldHiddenImpact).
-        const partnerNames = req.toward ?? req.witnessSet.filter((w) => w !== req.initiator);
+        // BE-102: same living-only guard for the flat `toward` field — it named a target directly,
+        // bypassing the witnessSet/presence liveness that grounds every other targeting mechanism.
+        const partnerNames = (req.toward ? req.toward.filter(isLiving) : req.witnessSet.filter((w) => w !== req.initiator));
         const namedSet = new Set(partnerNames);
         const partners = partnerNames.filter((o) => o !== req.initiator && this.spendFoldBudget(o, req.initiator));
         const bystanders = witnessSet.filter(
@@ -292,7 +305,11 @@ export class EngineCommandsAdapter implements EngineCommands {
     // move from the player channel. Engine-owned magnitude + a real backfire path (anti-sycophancy
     // #3/I2) live in `foldThirdPartyConsequence` itself. Rides the SAME per-beat-per-edge anti-pump
     // budget (E21), keyed `holder->about` instead of `holder->initiator`.
-    const aboutEdges = req.consequence?.aboutEdges;
+    // BE-102: `holder` is already witness-gated below (foldThirdPartyConsequence), and every witness
+    // is living by construction — but `about` (the third party being pitched against) is NOT
+    // witness-gated, so an invented/evicted id there was a second, unguarded way to plant a hidden
+    // opinion on a juror. Drop any entry naming a non-living `about` (or, defense-in-depth, `holder`).
+    const aboutEdges = req.consequence?.aboutEdges?.filter((e) => isLiving(e.holder) && isLiving(e.about));
     if (this.rel && aboutEdges?.length) {
       this.rollBeatWindow();
       foldThirdPartyConsequence(
