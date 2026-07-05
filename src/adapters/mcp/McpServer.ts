@@ -77,6 +77,20 @@ function requireShape(name: string, args: Record<string, unknown>): void {
             if (edge["emphasis"] !== undefined && typeof edge["emphasis"] !== "string") refuse("consequence.edges[].emphasis", "a string when present");
           }
         }
+        // Phase 1 (player-offense) — the THIRD-PARTY sibling of `edges`: `holder`'s opinion of
+        // `about` moves. Same shape-guard-only discipline (parity with `edges` above); the witness
+        // gate + engine-owned magnitude live in `foldThirdPartyConsequence`, not here.
+        if (cons["aboutEdges"] !== undefined) {
+          if (!Array.isArray(cons["aboutEdges"])) refuse("consequence.aboutEdges", "an array when present");
+          for (const e of cons["aboutEdges"] as unknown[]) {
+            if (typeof e !== "object" || e === null || Array.isArray(e)) refuse("consequence.aboutEdges[]", "objects with a holder + about + direction");
+            const edge = e as Record<string, unknown>;
+            if (!isStr(edge["holder"])) refuse("consequence.aboutEdges[].holder", "a houseguest id (string)");
+            if (!isStr(edge["about"])) refuse("consequence.aboutEdges[].about", "a houseguest id (string)");
+            if (!isStr(edge["direction"])) refuse("consequence.aboutEdges[].direction", "a direction (string)");
+            if (edge["emphasis"] !== undefined && typeof edge["emphasis"] !== "string") refuse("consequence.aboutEdges[].emphasis", "a string when present");
+          }
+        }
         if (cons["rationale"] !== undefined && typeof cons["rationale"] !== "string") refuse("consequence.rationale", "a string when present");
       }
       return;

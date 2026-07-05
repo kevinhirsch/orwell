@@ -1947,8 +1947,14 @@ def _validate_consequence(raw, valid_ids) -> dict | None:
     """ADR 0005 — defensively validate a model-proposed consequence descriptor against the active
     roster. Keep only edges whose `toward` is a living houseguest id AND whose `direction` is one of
     the 8; carry `emphasis` only when it is one of the 3 (else drop the field — it is optional). Carry
-    `rationale` only when it is a string. Return the cleaned descriptor, or None when nothing valid
-    remains — so a None return means the call falls back to exactly the kind-only path (no regression)."""
+    `rationale` only when it is a string.
+
+    Phase 1 (player-offense) — ALSO validate `aboutEdges`: the THIRD-PARTY sibling of `edges`
+    ("I told Lorenzo that Maeve is the real threat" ⇒ holder=Lorenzo, about=Maeve). Both ids must
+    be living roster ids and DISTINCT from each other (the engine's own witness/self-pitch guards
+    are the real backstop; this is defense-in-depth so an obviously-malformed entry never even
+    reaches the wire). Return the cleaned descriptor, or None when nothing valid remains at ALL — so
+    a None return means the call falls back to exactly the kind-only path (no regression)."""
     if not isinstance(raw, dict):
         return None
     edges = []
@@ -1963,9 +1969,28 @@ def _validate_consequence(raw, valid_ids) -> dict | None:
         if e.get("emphasis") in _CONSEQUENCE_EMPHASES:
             edge["emphasis"] = e.get("emphasis")
         edges.append(edge)
-    if not edges:
+    about_edges = []
+    for e in (raw.get("aboutEdges") or []):
+        if not isinstance(e, dict):
+            continue
+        holder = e.get("holder")
+        about = e.get("about")
+        direction = e.get("direction")
+        if holder not in valid_ids or about not in valid_ids or holder == about:
+            continue
+        if direction not in _CONSEQUENCE_DIRECTIONS:
+            continue
+        about_edge: dict = {"holder": holder, "about": about, "direction": direction}
+        if e.get("emphasis") in _CONSEQUENCE_EMPHASES:
+            about_edge["emphasis"] = e.get("emphasis")
+        about_edges.append(about_edge)
+    if not edges and not about_edges:
         return None
-    out: dict = {"edges": edges}
+    out: dict = {}
+    if edges:
+        out["edges"] = edges
+    if about_edges:
+        out["aboutEdges"] = about_edges
     rationale = raw.get("rationale")
     if isinstance(rationale, str) and rationale.strip():
         out["rationale"] = rationale.strip()[:400]
@@ -2323,6 +2348,15 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
     engine keeps the magnitude. When the model proposes no (or no valid) descriptor, the call is
     exactly today's kind-only behavior — the 0055 guarantee is unchanged.
 
+    Phase 1 of "the player can play offense" (layered on ADR 0005) — the descriptor MAY ALSO propose
+    `aboutEdges`: a THIRD-PARTY pitch, the classic "I told Lorenzo that Maeve is the real threat"
+    move that `edges` alone cannot express (edges only move a houseguest's opinion of the INITIATOR).
+    Still model-proposed shape only (holder/about/direction/emphasis) — the engine decides whether the
+    pitch actually lands, softens, or backfires depending on how much the holder trusts the player,
+    and refuses it outright if the named holder never witnessed the scene. Never engine-authored
+    content: this only fires when the model's OWN narration already implied the pitch and the model
+    skipped recording it.
+
     Fail-closed: any hiccup just skips (the prompt nudge + E22 fallback still apply). The recording
     is invisible to the player (hidden consequence), exactly as the Vault Wall requires."""
     try:
@@ -2343,12 +2377,18 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 '"consequence":{"edges":[{"toward":"<houseguest id>",'
                 '"direction":"<one of: warmer, cooler, more-trust, less-trust, more-threatened, '
                 'less-threatened, more-aligned, less-aligned>","emphasis":"<slight|notable|strong>"}],'
+                '"aboutEdges":[{"holder":"<houseguest id the player was actually talking to>",'
+                '"about":"<a DIFFERENT third houseguest, never the player>",'
+                '"direction":"<same 8 options as above>","emphasis":"<slight|notable|strong>"}],'
                 '"rationale":"<why, grounded in the scene>"}}\n'
                 "Pick the kind matching the emotional/strategic direction. Add `consequence` ONLY when "
                 "the scene moves different houseguests DIFFERENTLY (e.g. it warms one and threatens "
-                "another); otherwise omit it. Propose only direction and relative emphasis — NEVER any "
-                "number or magnitude (the engine decides how far). If no houseguest was genuinely "
-                'engaged (a solo/internal beat), reply {"withIds":[]}.'},
+                "another); otherwise omit it. Use `aboutEdges` SPECIFICALLY when the player pitched one "
+                "houseguest's opinion of a THIRD houseguest — 'I told holder that about is the real "
+                "threat/an ally/lying to them' — never for the player's own standing (use `edges` for "
+                "that). Propose only direction and relative emphasis — NEVER any number or magnitude "
+                "(the engine decides how far, and whether it lands at all). If no houseguest was "
+                'genuinely engaged (a solo/internal beat), reply {"withIds":[]}.'},
             {"role": "user", "content":
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
@@ -2397,15 +2437,17 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                                     with_ids=ids, kind=kind, consequence=consequence,
                                     user=owner) is None:
             return False
+        n_edges = len(consequence["edges"]) if consequence and "edges" in consequence else 0
+        n_about = len(consequence["aboutEdges"]) if consequence and "aboutEdges" in consequence else 0
         logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
-                    f"edges={len(consequence['edges']) if consequence else 0}) user={owner}")
+                    f"edges={n_edges}, aboutEdges={n_about}) user={owner}")
         try:  # 0079: surface this gap-repair on the overseer diagnostic log
             from src import log_rings as _lr
             _lr.record_overseer(
                 "action", "gap-repair",
                 f"recorded a missed player↔house scene (kind={kind}, "
                 f"with={len(ids)} houseguest(s), "
-                f"edges={len(consequence['edges']) if consequence else 0})",
+                f"edges={n_edges}, aboutEdges={n_about})",
                 lever="propose-record", ok=True, user=owner)
         except Exception:
             pass

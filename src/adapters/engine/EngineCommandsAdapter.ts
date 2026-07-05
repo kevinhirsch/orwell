@@ -8,7 +8,7 @@ import type { EntityId } from "../../domain/ids";
 import { PLAYER } from "../../domain/ids";
 import { SeededRandom } from "../random/SeededRandom";
 import type { RelationshipModel, InteractionType } from "../../engine/relationships";
-import { foldHiddenImpact, foldGenerativeConsequence } from "../../engine/consequence";
+import { foldHiddenImpact, foldGenerativeConsequence, foldThirdPartyConsequence } from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
 import { PRESENCE } from "../../engine/presenceConstants";
 import { isPrivateRoom, zonesSameEarshot, type Occupancy, type Zone } from "../../domain/house";
@@ -272,6 +272,23 @@ export class EngineCommandsAdapter implements EngineCommands {
         foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
           partners, MAX_FOLDS_PER_INTERACTION, bystanders);
       }
+    }
+    // THIRD-PARTY consequence (Phase 1 of "the player can play offense" — layered on ADR 0005): a
+    // scene can ALSO propose that a WITNESSED houseguest's opinion of a THIRD PARTY moves — "I pulled
+    // Lorenzo aside and floated that Maeve is the real threat." Independent of the `genEdges`/`kind`
+    // block above (a scene may carry both a self-edge and a third-party pitch). Witness-gated (I3):
+    // `foldThirdPartyConsequence` silently drops any entry naming a holder NOT in `witnessSet` — a
+    // read can only form from what was actually witnessed, so this can never mint an off-screen edge
+    // move from the player channel. Engine-owned magnitude + a real backfire path (anti-sycophancy
+    // #3/I2) live in `foldThirdPartyConsequence` itself. Rides the SAME per-beat-per-edge anti-pump
+    // budget (E21), keyed `holder->about` instead of `holder->initiator`.
+    const aboutEdges = req.consequence?.aboutEdges;
+    if (this.rel && aboutEdges?.length) {
+      this.rollBeatWindow();
+      foldThirdPartyConsequence(
+        this.rel, this.rng, req.initiator, witnessSet, aboutEdges,
+        (holder, about) => this.spendFoldBudget(holder, about),
+      );
     }
     // L27: index the scene's SUMMARY into each houseguest's semantic recall memory (0024) — every
     // houseguest who was in it remembers it, so later story/narrative is built from the STORE recalled
