@@ -76,6 +76,19 @@
 body[data-game-build] #model-select { display: none; }
 body[data-game-build].is-admin #model-select { display: initial; }
 
+/* ── B6: the composer's OWN model switcher (a separate "model pill" node from
+      #model-select above — it lives inline in the chatbox and shows the current
+      model/provider name on every turn, e.g. "deepseek-v4-pro") is the SAME E72
+      leak the settings dropdown already gets. Same admin-only treatment. ── */
+body[data-game-build] #model-picker-wrap { display: none; }
+body[data-game-build].is-admin #model-picker-wrap { display: initial; }
+
+/* ── B6: the "· N msgs" counter next to the chat title names the transcript as
+      a workspace "chat" with a message count — a generic productivity-app tell
+      that has no Big Brother meaning. The title itself stays (it carries the
+      season/session name); only the count suffix goes. ── */
+body[data-game-build] #current-meta-count { display: none !important; }
+
 /* ── E96 (ruling #11): "Save to Documents" points at a vertical the game
       build doesn't surface. (chat.js also removes the node outright.) ── */
 body[data-game-build] #export-doc-btn { display: none !important; }

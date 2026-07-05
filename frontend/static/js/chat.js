@@ -2223,12 +2223,17 @@ import { isNarrow } from './platform.js';
                   note.className = 'stopped-indicator rounds-exhausted';
                   const label = document.createElement('span');
                   label.className = 'rounds-exhausted-label';
-                  label.textContent = `Reached the ${json.rounds || ''}-step limit — not finished.`;
+                  // B6/MICRO-3: "Reached the N-step limit" names the agent loop's tool-call
+                  // budget directly — a workspace concept with no place mid-scene. Same
+                  // isGameBuild() treatment the sibling error/fallback branches already get.
+                  label.textContent = isGameBuild()
+                    ? 'Big Brother pauses the tape for a beat — pick up where we left off.'
+                    : `Reached the ${json.rounds || ''}-step limit — not finished.`;
                   note.appendChild(label);
                   const contBtn = document.createElement('button');
                   contBtn.className = 'continue-btn';
-                  contBtn.title = 'Continue the task';
-                  contBtn.textContent = 'Continue ▸';
+                  contBtn.title = isGameBuild() ? 'Keep the scene going' : 'Continue the task';
+                  contBtn.textContent = isGameBuild() ? 'Keep going ▸' : 'Continue ▸';
                   const _holder = currentHolder;
                   contBtn.addEventListener('click', () => {
                     note.remove();

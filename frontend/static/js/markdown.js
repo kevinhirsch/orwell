@@ -303,6 +303,11 @@ const _MACHINERY_ASIDE_RE = new RegExp(
   // player runs us on ("the front end", "the app", "this app/website/site"). Defense-in-depth so
   // the JS body scrub catches a mid-paragraph fourth-wall leak the line/preamble passes can miss.
   + '|\\bthe (?:engine|system|model|front[\\s-]?end)\\b|\\bthe app\\b|\\bthis (?:app|website|site)\\b'
+  // B6 (deepplay DEEP-25 / live-run evidence): the reasoning accordion echoed the ENGINE'S OWN
+  // prompt vocabulary verbatim ("the game is WAITING on a PLAYER DECISION") — terms lifted
+  // straight from momentPrompts.ts's "pending decision" framing that never belong in BB
+  // narration or its accordion.
+  + "|\\bpending decision\\b|\\bplayer(?:'s)? decision\\b|\\bgame state\\b"
   + '|\\blet me\\s+(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
     + '(?:call|advance|run|check|record|log|note|resolve|use|pull|fetch|see what|'
     + 'walk through|re-?read|re-?check|reconsider)\\b'
@@ -723,10 +728,24 @@ export function processWithThinking(text) {
     }
     // Prepend the reasoning accordion (collapsed by default), then the clean
     // reply. The accordion is debug-only chrome; it never touches the reply text.
+    //
+    // B6: a live real-model run confirmed the accordion is NOT a safe dumping ground for raw
+    // reasoning — expanded, it named backstage machinery ("the engine shows…", "the game is
+    // WAITING on a PLAYER DECISION") and restated operator-aside / raw npc:<id> content, the
+    // exact leak classes the reply channel already gets scrubbed of a few lines above. This is
+    // not a Vault leak (the model only ever reasons over Vault-free context) but it is I9
+    // ("the machinery is invisible") — the accordion is opt-in chrome, not a second unscrubbed
+    // channel. Reuse the SAME body-scrub passes (no new regex family): redactRawIds strips a
+    // raw npc:<id> / standalone operator-aside line, scrubMachineryAsides drops any sentence
+    // that names an engine tool or machinery noun ("the engine", "pending decision", …). A
+    // block that scrubs to nothing (pure machinery talk) renders no accordion at all rather
+    // than an empty shell.
     let gbHtml = '';
     if (gameBuildShowsThinkingAccordion()) {
       thinkingBlocks.forEach((block, index) => {
-        if (block && block.trim()) gbHtml += createThinkingSection(block, index, thinkingTime);
+        if (!block || !block.trim()) return;
+        const scrubbedBlock = scrubMachineryAsides(redactRawIds(block)).trim();
+        if (scrubbedBlock) gbHtml += createThinkingSection(scrubbedBlock, index, thinkingTime);
       });
     }
     // #970: emit the leading OOC block as its OWN styled aside bubble, THEN the in-character prose
@@ -792,10 +811,17 @@ export function mdToHtml(src, opts) {
 
     const langClass = lang ? ` class="language-${lang}"` : '';
     const runnableLangs = ['python','py','javascript','js','html','bash','sh','shell','zsh'];
-    const runBtn = (lang && runnableLangs.includes(lang.toLowerCase()))
+    // B6: "Run code" (a live Pyodide/server-shell executor) and "Edit code" are inherited
+    // workspace tooling — Big Brother never runs your Python for you. Neither belongs on
+    // ANY fenced code block a player might see (their own pasted snippet, a quoted aside,
+    // narration text with a fence), so both are dropped outright in the game build; only
+    // the harmless copy-code affordance below stays.
+    const runBtn = (!_inGameBuild() && lang && runnableLangs.includes(lang.toLowerCase()))
       ? `<button type="button" class="run-code" data-code="${escapeHtml(escaped)}" data-lang="${lang}" title="Run code"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>`
       : '';
-    const editBtn = `<button type="button" class="edit-code" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
+    const editBtn = _inGameBuild()
+      ? ''
+      : `<button type="button" class="edit-code" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
     codeBlocks.push(`<pre><code${langClass} data-lang="${lang || ''}">${escapeHtml(escaped)}</code>${runBtn}${editBtn}<button type="button" class="copy-code" data-code="${escapeHtml(escaped)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></pre>`);
 
     return placeholder;
