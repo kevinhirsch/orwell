@@ -54,8 +54,8 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 `FE` (front-end pytest) · `engine` (Vitest, no `.feature`) · `scripts` (deploy) · `—` (none yet).
 
 > **Audit (2026-06-20).** Every feature **0001–0063** was cross-checked against its source artifact
-> (not its prose). **No orphaned or untracked unbuilt specs.** Not-built specs: **0022**
-> (⏸ deferred). **0064** (live multi-device game sync) shipped its **stopgap** (the canonical game
+> (not its prose). **No orphaned or untracked unbuilt specs.** *(0022 was **removed** in the 2026-06-28 PO
+> review — see the index row; its goals were superseded by 0020/0051/0054 under ADR 0003.)* **0064** (live multi-device game sync) shipped its **stopgap** (the canonical game
 > session — every device on one chat) 2026-06-20; the Messenger-style sync + window/HUD layout sync
 > are the owed follow-on. **0062** (the move-in zeitgeist snapshot) **shipped 2026-06-20** —
 > BDD-gated, frozen +
@@ -87,7 +87,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0019 | [Agent-driven play loop](./0019-agent-driven-play-loop.md) | BDD | ✅ Built |
 | 0020 | [Player experience (status, decisions, portraits)](./0020-player-experience.md) | BDD | ✅ Built |
 | 0021 | [Game session & save lifecycle (per-user sandboxes)](./0021-game-session-and-save-lifecycle.md) | BDD | ✅ Built |
-| 0022 | [Player experience MVP-2 (rich game UI)](./0022-player-experience-mvp2.md) | — | ⏸ Deferred |
+| 0022 | Player experience MVP-2 (rich game UI) | — | 🗑️ **Removed** (PO review 2026-06-28) — superseded by 0020/0051/0054 under ADR 0003; the dashboard direction was deliberately not taken |
 | 0023 | [Consequence & memory (the MVP-1 backbone)](./0023-consequence-and-memory.md) | BDD | ✅ Built |
 | 0024 | [Soul storage & memory recall (md + vector)](./0024-soul-storage-and-memory-recall.md) | BDD | ✅ Built |
 | 0025 | [Reserve twists (Vault-sealed, engine-timed)](./0025-reserve-twists.md) | BDD | ✅ Built · amended B53 (fires live) |
