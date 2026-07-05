@@ -119,16 +119,16 @@
       if (!d || !d.engine) {
         if (busy) { showHolding(); return; } // a probe timeout DURING creation is not an outage
         if (reconnecting) { showReconnecting(); return; } // a momentary blip — recovering, not down
-        // MICRO-15: the raw reason/engineUrl is operator detail, never player copy — log it, show voice.
-        const rawReason = (d && d.error ? "Reason: " + d.error + " " : "") + (d && d.engineUrl ? "(" + d.engineUrl + ") " : "");
-        if (rawReason && window.OrwellReport) window.OrwellReport.fail("engine-status", "engine-unreachable", rawReason);
+        // MICRO-14/15: one production-voiced outage line — never the raw d.error/engineUrl in the
+        // player banner. The operator's actionable detail already rides the engine's own /admin/status
+        // health payload (this banner just mirrors that health poll), so it is not re-beaconed here —
+        // and the g11 failure ring is reserved for the fail-open CATCH below, per its contract.
         show("down", _OUTAGE_TITLE, _OUTAGE_BODY);
       } else if (d.lastError && d.lastError.error) {
         if (busy) { showHolding(); return; } // mid-creation hiccups hold in-fiction too
-        // Engine reachable, but a recent call failed — an honest signal, but the raw tool name + backend
-        // error string (MICRO-15) go to the OPERATOR ring, never into the player-visible banner body.
-        const le = d.lastError;
-        if (window.OrwellReport) window.OrwellReport.fail("engine-status", le.tool || "engine-tool", le.error);
+        // Engine reachable, but a recent call failed — an honest signal in one production voice; the raw
+        // tool name + backend error string (MICRO-15) never reach the player banner (they remain on the
+        // engine health payload / /admin/status for the operator).
         show("degraded", _DEGRADED_TITLE, _DEGRADED_BODY);
       } else {
         hide();
