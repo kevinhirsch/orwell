@@ -53,7 +53,9 @@ export interface FoldSignal {
   betrayal: boolean;
 }
 
-const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+// PERSIST-2/BE-101: guard NaN → 0 — this clamp gates the persisted `Trajectory.momentum` (kept beside
+// the relationship edges, recalled across restarts). Finite inputs clamp exactly as before.
+const clamp01 = (x: number): number => (Number.isNaN(x) ? 0 : x < 0 ? 0 : x > 1 ? 1 : x);
 
 /**
  * Derive a directed relationship's TRAJECTORY (PURE, no rng) from its recent folded history + its prior

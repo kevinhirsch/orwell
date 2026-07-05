@@ -80,7 +80,9 @@ export function offscreenEmotion(type: InteractionType, role: SceneRole = "initi
   return OFFSCREEN_EMOTION[role][type];
 }
 
-const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+// PERSIST-2/BE-101: guard NaN → 0 before it reaches `soul.emotionalState`/`soul.volatility` — a
+// persisted layer that must never degrade (I5). Finite inputs clamp exactly as before.
+const clamp01 = (v: number): number => (Number.isNaN(v) ? 0 : Math.max(0, Math.min(1, v)));
 
 /**
  * Evolve a soul's `emotionalState` + `volatility` from one live event, in place. Bounded,

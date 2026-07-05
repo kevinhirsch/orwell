@@ -77,7 +77,11 @@ export const TEMPERATURE_CONSTANTS: TemperatureConstants = {
   hiddenSurfacingRate: 0.05,
 };
 
-const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+// PERSIST-2/BE-101: guard NaN → 0 — `emotionalModifier` below is the ONE live soul-swing formula
+// (audit E52); its result flows into the persisted `soul.emotionalState` via `emotionalArc.evolveEmotion`.
+// A NaN circumstance/temperature input must never propagate. Finite inputs clamp exactly as before.
+// (Kept as a local mirror, not an import, so `src/domain` stays engine-free per the hexagonal layering.)
+const clamp01 = (v: number): number => (Number.isNaN(v) ? 0 : Math.max(0, Math.min(1, v)));
 
 /** One bounded, seeded temperature value (the per-moment roll). */
 export function temperatureRoll(rng: RandomnessSource, c: TemperatureConstants = TEMPERATURE_CONSTANTS): number {

@@ -138,7 +138,12 @@ export const RELATIONSHIP_CONSTANTS: RelationshipConstants = {
   },
 };
 
-export const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+// PERSIST-2/BE-101: `Math.min`/`Math.max` pass NaN straight through (`Math.min(1, NaN)` is `NaN`, and
+// `NaN < 0` / `NaN > 1` are both false) — a NaN produced upstream (a divide-by-zero, an undefined
+// signal) would otherwise clamp to NaN and get written into the PERMANENT relationship/soul layer,
+// corrupting non-degradation (I5) forever. Guard NaN → 0 (a neutral-safe default); every finite input
+// (in range or out) clamps EXACTLY as before — only the NaN path changes.
+export const clamp01 = (v: number): number => (Number.isNaN(v) ? 0 : Math.max(0, Math.min(1, v)));
 
 /** Scale every component of a named impact (manner-scaled folds E48, confidence-scaled gossip E44). */
 export function scaleImpact(impact: Partial<EdgeSignals>, factor: number): Partial<EdgeSignals> {
