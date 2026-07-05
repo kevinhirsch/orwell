@@ -44,7 +44,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0020 | Player experience (status, decisions, portraits) | ✅ Built | ✅ Approved (as-is) | 2026-06-28 | Live scenarios solid (public-only status, legal-option decisions, validated path, Vault-free portraits). Has a "PENDING" block (no numbers/badges · public-only options · confirm-before-binding) — reviewed: the *behavior* exists (confirm-before-binding is built + FE-tested C20; numberless is a core mandate), just not wired into THIS feature's BDD. **PO chose NOT to expand (no UI work here); left as-is deliberately** |
 | 0021 | Game session & save lifecycle | ✅ Built | ✅ Approved | 2026-06-28 | Multi-tenancy backbone — cross-user isolation STRUCTURAL (distinct object graphs, no cross-sandbox handle): nothing of user A's game (secret OR visible) ever reaches B; one game/user (new game resets only yours); 8 concurrent distinct; resume byte-identical; Vault Wall holds per-sandbox; admin can't browse across users. First-class guarantee beside the Vault Wall |
 | 0022 | Player experience MVP-2 (rich game UI) | 🗑️ Removed | 🗑️ Deleted | 2026-06-28 | PO cut it. The one deferred spec — a full dashboard UI that ADR 0003 ("chat IS the UI") deliberately never took, and whose goals were already delivered chat-forward (0020 status panel, 0051 portraits, 0054 gadget rail). Deleted both files + fixed all live references (README index, root README, CLAUDE.md, 0020.md); historical audit logs left as point-in-time record |
-| 0023 | Consequence & memory (the backbone) | ✅ Built | ⬜ Pending | — | — |
+| 0023 | Consequence & memory (the backbone) | ✅ Built | ✅ Approved | 2026-06-28 | "The point of the game" — act→hidden fold→persist→recall, invisible-but-consequential, deterministic, lossless (survives a process restart), drives later behavior. The reviewed scenario is fine (voter's OWN shift). PO flagged the secret-vote→jury-grudge issue (a DIFFERENT fold, 0037/0047): **ruled option B**, realized as the new **feature 0110 (vote deduction / process of elimination)** — spec written 2026-06-28 |
 | 0024 | Soul storage & memory recall | ✅ Built | ⬜ Pending | — | — |
 | 0025 | Reserve twists | ✅ Built | ⬜ Pending | — | — |
 | 0026 | Relationship math | ✅ Built | ⬜ Pending | — | — |
@@ -129,6 +129,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0107 | Named alliances | ✅ Built | ⬜ Pending | — | NOTE: number collides w/ 0107-llm-call-observability draft |
 | 0108 | Real-model golden-path CI gate | 📝 Spec only | ⬜ Pending | — | — |
 | 0109 | Negotiated deal duration | 🟢 Build-ready | ⬜ Pending | — | Amends 0039 |
+| 0110 | Vote deduction (process of elimination) | 📝 Spec (new) | ✅ Approved (spec) | 2026-06-28 | **NEW feature drafted this session** from the PO's process-of-elimination idea (0023 review, option B). Spec + `.feature` written. Secret-ballot jury grudge folds on a DEDUCED belief (public count + reads, can be wrong), not the true vote list. Opt-in, calibration-load-bearing → build is a careful jury-sim re-baseline. See build queue |
 
 ## Build queue (PO ✏️ Expand decisions awaiting engine work)
 
@@ -139,6 +140,7 @@ Scenarios written/agreed during review that still need implementation to go gree
 | 0005 | Strategic "Houseguest's Choice" veto pick (replace pure strongest-bond) | Add a strategic-ally selection in the relationship engine; wire `liveSeason` HC pick to it; un-comment the two pending scenarios + add step defs. Ship **opt-in, default-off** with a calibration-neutrality guard (the HC pick changes the veto field → seeded competition outcomes; default-off must stay byte-identical). After a calibration re-baseline, strategic can become default. |
 | ~~0006a~~ | ✅ **DONE** — favorite-win band tuned down (temperature 0.36→0.40; clear favorite ~64%→~59% avg). juryReach EARNED-WINS re-verified green; full unit suite green. Gate: `stagedCompetition.test.ts`. |
 | ~~0006b~~ | ✅ **DONE** — every NPC carries a derived comp intent (compete/throw/play-safe), opt-in `ORWELL_COMP_INTENT`, byte-identical when off. Single-roll model kept (no per-round adaptivity — Path B declined). Gate: `npcCompIntent.test.ts`. |
+| 0110 | Build **vote deduction** (spec drafted): route the secret-vote half of `recordEvictionManner` through process-of-elimination in `liveSeason.ts` — deduce defectors from the public count + eligible pool + the evictee's reads (0002 belief+confidence), fold the grudge on the belief (not `votesToEvict`). Opt-in `ORWELL_VOTE_DEDUCTION`, default off, dedicated sub-rng ⇒ byte-identical when off. On ⇒ re-run the jury heavy sims (juryReach EARNED-WINS must hold). Keep `voteRecord`/0048 unseal unchanged. Vault-sealed (player + admin). |
 
 ## Future feature backlog (PO-parked ideas — develop later)
 
