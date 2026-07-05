@@ -6,7 +6,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from core.models import ChatMessage
 from core.database import SessionLocal
@@ -1220,6 +1220,58 @@ _VETO_NAME_RES = (
     re.compile(r"(?i:\b(?:the\s+)?new\s+veto\s+(?:holder|winner)\s+(?:is\s+)?)"
                r"([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2})"),
 )
+# NAR-3 (product-review, 2026-07): extract the NAMED houseguest(s) staged as a nominee, so the guard
+# can compare them to the engine's actual `nomNames` (the wrong-identity case for nominations — mirrors
+# _HOH_NAME_RES/_VETO_NAME_RES, but nominations name TWO people, so the captured group optionally
+# includes a coordinated second name ("X and Y" / "X, Y") that `_split_named_people` below splits back
+# into individual claims). `nomNames` was added by #561 specifically for this comparison but was never
+# wired into a mismatch check — the guard caught only the COUNT not moving, never a moved set naming
+# the WRONG person (the live "Harrison" vs "Mario" bug).
+_NAME_TOKEN = r"[A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2}"
+_COORD_NAMES = rf"({_NAME_TOKEN}(?:\s*(?:,|(?i:and))\s*{_NAME_TOKEN})?)"
+_NOMINEE_NAME_RES = (
+    re.compile(rf"(?i:\bnominat(?:e[sd]?|ing)\s+)" + _COORD_NAMES),
+    re.compile(_COORD_NAMES + r"(?i:\s+(?:is|are|has been|have been|was|were)\s+"
+               r"(?:being\s+)?nominated)\b"),
+    re.compile(rf"(?i:\bput(?:s|ting)?\s+)" + _COORD_NAMES + r"(?i:\s+on\s+the\s+block)"),
+    re.compile(_COORD_NAMES + r"(?i:\s+(?:is|are|goes|go|lands|land)\s+on\s+the\s+block)\b"),
+)
+
+
+def _split_named_people(raw: str) -> List[str]:
+    """Split a captured "X and Y" / "X, Y" / "X" claim into individual names, discarding empties."""
+    parts = re.split(r"\s*(?:,|(?i:\band\b))\s*", (raw or "").strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _named_nominees_in_claim(text: str) -> List[str]:
+    """The houseguest name(s) narration stages as a nominee (as written), from the FIRST matching
+    phrasing — never a fuzzy guess. Returns an empty list when nothing matches."""
+    for rx in _NOMINEE_NAME_RES:
+        m = rx.search(text or "")
+        if m and (m.group(1) or "").strip():
+            return _split_named_people(m.group(1))
+    return []
+
+
+def _nomination_mismatch(text: str, before: dict, after: dict) -> bool:
+    """NAR-3: True when the narration NAMES a houseguest as a nominee who is an ACTIVE houseguest the
+    engine's just-committed nominee set does NOT include. Mirrors `_eviction_evictee_mismatch`:
+
+      • only when at least one name is actually extracted (no name ⇒ the caller's count-only branch);
+      • each named person must be on the ACTIVE roster (an invented name is the roster guard's job), AND
+      • that named person must NOT be in the engine's CURRENT `nomNames` (this turn's committed set).
+
+    A turn narrating one correct nominee and one wrong one still trips (either name alone qualifies) —
+    exactly the shape of the live bug (one of the two named nominees didn't match the board)."""
+    named = _named_nominees_in_claim(text)
+    if not named:
+        return False
+    current_noms = {str(n).strip() for n in (after.get("nomNames") or []) if str(n).strip()}
+    for n in named:
+        if _name_matches_active(n, after) and not any(_name_matches(n, nm) for nm in current_noms):
+            return True
+    return False
 
 
 def _named_title_winner(text: str, res) -> Optional[str]:
@@ -1354,6 +1406,16 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
           and after.get("hoh") == before.get("hoh")
           and not (before.get("hoh") is None and after.get("hoh") is not None)):
         desync = "a NEW HEAD OF HOUSEHOLD being crowned"
+    # (5b) NAR-3 (product-review, 2026-07): a nomination REALLY committed this turn (`noms` moved),
+    #      but the narration NAMES a houseguest as a nominee who is NOT in the engine's new nominee
+    #      set → the wrong identity (mirrors 4b/6b, for a 2-person set instead of a singleton). Scoped
+    #      to the nomination beat AND a set that actually changed, so this and the count-based branch
+    #      below are mutually exclusive by construction (moved vs unmoved). The live bug this closes:
+    #      the engine nominated the real pair but the model named a DIFFERENT houseguest as one of them.
+    elif (str(after.get("phase") or "").lower().startswith(_NOM_PHASES)
+          and (after.get("noms") or []) != (before.get("noms") or [])
+          and _nomination_mismatch(text, before, after)):
+        desync = "the WRONG houseguest staged as a nominee (you named someone the engine did not nominate)"
     # (5) NARR-8 (#574): a NOMINATION was narrated, but the nominee set didn't move → no nomination
     #     was committed. Scoped to the nomination / veto-ceremony phases (like the HOH branch),
     #     so plan/speculation language outside the beat ("I might nominate you") is never policed.

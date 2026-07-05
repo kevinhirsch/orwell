@@ -4,8 +4,9 @@
 > narration (0018/0019) **plus** a light always-visible **status panel**, **inline quick-button**
 > binding decisions over the engine's legal set, and **generated photo-style portraits** for the
 > houseguests. **MVP-2 — the rich game UI** (house view, houseguest cards, a browsable journal,
-> competition visuals) is **[0022](./0022-player-experience-mvp2.md) — deferred** while MVP-1 is
-> refined (§8). One principle governs every MVP-1 surface: **show facts & behavior, never the
+> competition visuals) was tracked as **0022 — since removed** (PO review 2026-06-28: its goals were
+> delivered the chat-forward way via 0020/0051/0054, so the standalone dashboard spec was cut under
+> ADR 0003). One principle governs every MVP-1 surface: **show facts & behavior, never the
 > player's feelings** — the player forms their own reads.
 > **Executable spec:** [`0020-player-experience.feature`](./0020-player-experience.feature)
 
@@ -39,7 +40,7 @@ over the engine's legal option set; houseguest portrait generation + display; th
 layout that hosts them.
 
 **Out:** the narration/agent mechanics (**0018/0019**); the engine rules/outcomes (**0005/0006/
-0011**); the image-gen *provider* (reuse Orwell's pipeline); **MVP-2** rich UI (**0022**, deferred);
+0011**); the image-gen *provider* (reuse Orwell's pipeline); **MVP-2** rich UI (**0022**, removed 2026-06-28);
 any **read on the player's standing** — no HUD chip *and* no narrated readout; the player infers it
 (§7 / the guiding principle).
 
@@ -133,10 +134,12 @@ and are consistent per save.
 - **Portrait provider (flag):** reuse **Orwell's image-gen pipeline** (default) with a
   deterministic placeholder for seeded/offline tests.
 
-## 8. MVP-2 — the rich game UI (deferred)
+## 8. MVP-2 — the rich game UI (removed)
 
-The rich game UI — house view, houseguest cards, browsable journal, competition visuals — is
-**[feature 0022](./0022-player-experience-mvp2.md), currently deferred** while MVP-1 is refined.
+The rich game UI — house view, houseguest cards, browsable journal, competition visuals — was
+tracked as **feature 0022, since removed** (PO review 2026-06-28). Its goals were delivered the
+chat-forward way (0020 status panel, 0051 portraits, 0054 gadget rail); the standalone dashboard
+spec was cut under ADR 0003 ("the conversation is the game").
 **When it resumes**, the houseguest-card "player read" must be reworked to the guiding principle
 above (show *facts + observable behavior*; the player forms their own read — never a system-
 asserted "you trust them"). It holds the same Vault-free guarantee throughout.

@@ -21,8 +21,9 @@ deliberately out of the model's way (see
 > eight priority invariants, the full gameplay loop, per-user sandboxes, durable persistence,
 > the live off-screen society, the interactive finale, the character-evolution linchpin,
 > deep character profiles, seasons-as-levels, in-game time & the nightly sleep economy,
-> multi-device sync, public-internet exposure, and the metered token economy — with **0022**
-> (the rich-UI MVP-2) the one deliberate deferral. Specs **0070–0073** (the Hermes-integration
+> multi-device sync, public-internet exposure, and the metered token economy. *(The former rich-UI
+> MVP-2 spec, **0022**, was removed in the 2026-06-28 PO review — superseded by 0020/0051/0054 under
+> ADR 0003.)* Specs **0070–0073** (the Hermes-integration
 > wave: off-screen texture, defensive hardening, the multi-platform gateway, and the structural
 > game-build CI wall) and **0074** (local & tunable HTTPS, ADR 0014) are **built and green**. The reconciled per-feature
 > index in [`docs/features/README.md`](docs/features/README.md) is authoritative for
@@ -518,8 +519,8 @@ off-screen society, the endgame and interactive finale, the character-evolution 
 evolve live and bend behavior), the born-deep deep-character profiles, the seasons-as-levels lane,
 the casting diversity floor, multi-device sync, the LLM↔engine sync spine, in-game time & the
 nightly sleep economy, public-internet exposure, and the metered token economy. **0022** (the rich
-game UI / MVP-2) is the **one deliberate deferral** (by [ADR 0003](docs/decisions/0003-conversation-is-the-game.md),
-the chat *is* the UI). The newest specs **0070–0073** — the Hermes-integration wave (off-screen
+game UI / MVP-2) was **removed** in the 2026-06-28 PO review — by [ADR 0003](docs/decisions/0003-conversation-is-the-game.md)
+the chat *is* the UI, and its goals shipped chat-forward via 0020/0051/0054. The newest specs **0070–0073** — the Hermes-integration wave (off-screen
 texture enrichment, defensive hardening, the multi-platform messaging gateway, and a structural
 game-build CI wall) — and **0074** (local & tunable HTTPS, [ADR 0014](docs/decisions/0014-local-and-tunable-https.md))
 are **built and green**.
@@ -539,8 +540,9 @@ Live status is deliberately **not** duplicated in prose here (it drifts):
   wins ~20% vs passive ~7%); **do not lower it further** (it would over-correct a solved problem).
   Only an optional, low-priority reach-side lever remains
   ([`docs/audits/2026-06-21-session-observations.md`](docs/audits/2026-06-21-session-observations.md)).
-- **The one deliberate deferral:** feature **0022** (the rich game UI / MVP-2) — by design,
-  per [ADR 0003](docs/decisions/0003-conversation-is-the-game.md), the chat *is* the UI.
+- **Removed spec:** feature **0022** (the rich game UI / MVP-2) was cut in the 2026-06-28 PO review —
+  per [ADR 0003](docs/decisions/0003-conversation-is-the-game.md) the chat *is* the UI, and its goals
+  shipped chat-forward via 0020/0051/0054. There is no longer a deferred/parked MVP feature.
 
 ---
 
