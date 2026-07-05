@@ -1,7 +1,7 @@
 import type { GameSessionRegistry, UserSandbox } from "./registry";
 import type { Clock } from "../ports/Clock";
 import type { SessionSnapshot } from "../engine/sessionSnapshot";
-import { toGameState } from "../engine/sessionSnapshot";
+import { toGameState, sessionCoreCounts, sessionCoreCountsNonDecreasing, sessionCoreIsSuperset } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
 import { scaleImpact, natureFoldImpact } from "../engine/relationshipConstants";
@@ -405,8 +405,15 @@ export class Orchestrator {
     // Non-degradation (0007): nothing previously persisted may be dropped. R3 — the append-only event
     // PREFIX may be trusted on the fast path (the orchestrator runs a FULL re-verification periodically);
     // every other dimension is fully verified, and a net DROP is always caught by countsNonDecreasing.
+    // PERSIST-8: the 0007 GameState projection predates features 0058–0107, so it never covered the
+    // newer SessionCore dimensions (deals, deepProfiles, confideState, secrets-as-power, nomination
+    // history, texture overrides, …) — a regression there was invisible to this gate. `sessionCore*`
+    // (src/engine/sessionSnapshot.ts) is the engine-layer companion check, same discipline, always
+    // fully verified (these maps are small — no fast-path relaxation needed).
     if (!isSuperset(gsCand, gsBase, { trustEventPrefix: opts.trustEventPrefix === true })
-        || !countsNonDecreasing(counts(gsCand), counts(gsBase))) {
+        || !countsNonDecreasing(counts(gsCand), counts(gsBase))
+        || !sessionCoreIsSuperset(candidate, baseline)
+        || !sessionCoreCountsNonDecreasing(sessionCoreCounts(candidate), sessionCoreCounts(baseline))) {
       faults.push({ when, kind: "degradation" });
     }
     // Daily-event (0008): a progression advance must produce ≥1 new event. A player-turn COMMIT
