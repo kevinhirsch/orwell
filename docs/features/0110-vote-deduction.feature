@@ -1,4 +1,4 @@
-# DRAFT executable spec — NOT YET BUILT (not in cucumber.cjs). Drafted 2026-06-28 (PO review sweep).
+# Executable spec — BUILT & green; BDD-gated in cucumber.cjs (2026-06-28). Opt-in ORWELL_VOTE_DEDUCTION.
 # Feature 0110 — Vote deduction (process of elimination): the jury grudge folds on a DEDUCED belief,
 # never on the true secret ballot. Realizes option B of the 0023 secret-vote-grudge ruling.
 # HARD rule: roles only (evictee, voter, loyalist, HOH, nominee, the-player). No names.
@@ -85,7 +85,7 @@ Feature: Vote deduction — a secret ballot becomes a deduced belief, by process
 
     Scenario: No deduction, belief, or confidence crosses to any surface
       Given the evictee has deduced a belief about who voted against them
-      When the player-facing and admin-facing projections are assembled
+      When the deduced game's player and admin projections are assembled
       Then no surface shows who the evictee believes voted
       And no surface shows a confidence or a grudge magnitude
       And no Vault sentinel value appears

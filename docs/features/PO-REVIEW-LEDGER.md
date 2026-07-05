@@ -129,7 +129,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0107 | Named alliances | ✅ Built | ⬜ Pending | — | NOTE: number collides w/ 0107-llm-call-observability draft |
 | 0108 | Real-model golden-path CI gate | 📝 Spec only | ⬜ Pending | — | — |
 | 0109 | Negotiated deal duration | 🟢 Build-ready | ⬜ Pending | — | Amends 0039 |
-| 0110 | Vote deduction (process of elimination) | 📝 Spec (new) | ✅ Approved (spec) | 2026-06-28 | **NEW feature drafted this session** from the PO's process-of-elimination idea (0023 review, option B). Spec + `.feature` written. Secret-ballot jury grudge folds on a DEDUCED belief (public count + reads, can be wrong), not the true vote list. Opt-in, calibration-load-bearing → build is a careful jury-sim re-baseline. See build queue |
+| 0110 | Vote deduction (process of elimination) | ✅ Built | ✅ Approved (built) | 2026-06-28 | **NEW feature specced AND built this session** from the PO's process-of-elimination idea (0023 review, option B). The secret-ballot jury grudge folds on a DEDUCED belief (public count + eligible pool + the evictee's reads, `deduceEvictionVoters`), not the true vote list: deducible → grudge, undeducible → none (secrecy honored), wrong → misattribution (dramatic irony). Opt-in `ORWELL_VOTE_DEDUCTION` (byte-identical off; juryReach unmoved). Gates: `voteDeduction.test.ts` + BDD `0110` (11 scenarios, in `cucumber.cjs`). True tally still unsealed at 0048 |
 
 ## Build queue (PO ✏️ Expand decisions awaiting engine work)
 
@@ -140,7 +140,7 @@ Scenarios written/agreed during review that still need implementation to go gree
 | 0005 | Strategic "Houseguest's Choice" veto pick (replace pure strongest-bond) | Add a strategic-ally selection in the relationship engine; wire `liveSeason` HC pick to it; un-comment the two pending scenarios + add step defs. Ship **opt-in, default-off** with a calibration-neutrality guard (the HC pick changes the veto field → seeded competition outcomes; default-off must stay byte-identical). After a calibration re-baseline, strategic can become default. |
 | ~~0006a~~ | ✅ **DONE** — favorite-win band tuned down (temperature 0.36→0.40; clear favorite ~64%→~59% avg). juryReach EARNED-WINS re-verified green; full unit suite green. Gate: `stagedCompetition.test.ts`. |
 | ~~0006b~~ | ✅ **DONE** — every NPC carries a derived comp intent (compete/throw/play-safe), opt-in `ORWELL_COMP_INTENT`, byte-identical when off. Single-roll model kept (no per-round adaptivity — Path B declined). Gate: `npcCompIntent.test.ts`. |
-| 0110 | Build **vote deduction** (spec drafted): route the secret-vote half of `recordEvictionManner` through process-of-elimination in `liveSeason.ts` — deduce defectors from the public count + eligible pool + the evictee's reads (0002 belief+confidence), fold the grudge on the belief (not `votesToEvict`). Opt-in `ORWELL_VOTE_DEDUCTION`, default off, dedicated sub-rng ⇒ byte-identical when off. On ⇒ re-run the jury heavy sims (juryReach EARNED-WINS must hold). Keep `voteRecord`/0048 unseal unchanged. Vault-sealed (player + admin). |
+| ~~0110~~ | ✅ **DONE** — vote deduction built: `src/engine/voteDeduction.ts` (`deduceEvictionVoters`) + `liveSeason.ts` `commitStagedEviction` folds the grudge on the deduced belief behind `ctx.voteDeduction`; `GameSessionAdapter` flag `ORWELL_VOTE_DEDUCTION` (default off ⇒ byte-identical; juryReach re-confirmed green). Gates: `voteDeduction.test.ts` + BDD `0110`. |
 
 ## Future feature backlog (PO-parked ideas — develop later)
 

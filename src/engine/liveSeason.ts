@@ -2,6 +2,7 @@ import type { EntityId } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { resolveCompetition, eliminationOrder, CompetitionIntents } from "../domain/competitionOutcome";
+import { deduceEvictionVoters, deductionSeed } from "./voteDeduction";
 import type { CompetitionType, Intent, Competitor, CompetitionResult } from "../domain/competitionOutcome";
 
 /** The competition intents the player may declare (Bible: compete / throw / play-safe), 0006/0034. */
@@ -440,6 +441,14 @@ export interface SeasonCtx {
    * `ORWELL_COMP_INTENT`; the calibration/UAT harness leaves it unset.
    */
   compIntentOf?: (id: EntityId, field: readonly EntityId[]) => Intent;
+  /**
+   * 0110 (PO review 2026-06-28) — when true, the eviction jury grudge folds on WHO THE EVICTEE DEDUCES
+   * voted against them (process of elimination over the public count + their reads), not the true secret
+   * ballot. Absent/false ⇒ the grudge folds the true `votesToEvict` exactly as before ⇒ BYTE-IDENTICAL
+   * (no deduction runs, no sub-rng is drawn) — the seeded jury spine is unmoved. Wired live behind
+   * `ORWELL_VOTE_DEDUCTION`; the calibration/UAT harness leaves it off.
+   */
+  voteDeduction?: boolean;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -1345,7 +1354,18 @@ function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: Entit
   // secret votes become tellable only once the season is over.
   (s.voteRecord ??= []).push({ week: s.week, evictee, voteOf: { ...e.voteOf } });
   const votesToEvict = Object.entries(e.voteOf).filter(([, t]) => t === evictee).map(([v]) => v);
-  recordEvictionManner(s, evictee, [s.hoh!, ...votesToEvict], ctx);
+  // 0110 — the jury grudge folds on WHO THE EVICTEE BELIEVES moved against them, not the true secret
+  // ballot. When deduction is on, the evictee deduces the defectors by process of elimination from the
+  // PUBLIC count + eligible pool + their own reads (a belief that CAN be wrong); when off, we fold the
+  // true `votesToEvict` exactly as before ⇒ byte-identical (no deduction runs, no sub-rng is drawn). The
+  // HOH (public) is always responsible directly. `voteRecord` above keeps the TRUE tally for the 0048 unseal.
+  const believedVoters = ctx.voteDeduction
+    ? deduceEvictionVoters(
+        evictee, Object.keys(e.voteOf), votesToEvict.length,
+        ctx.rel, new SeededRandom(deductionSeed(evictee, s.week)),
+      ).believed
+    : votesToEvict;
+  recordEvictionManner(s, evictee, [s.hoh!, ...believedVoters], ctx);
   removeEvictee(s, evictee);          // out now — the last vote landed; the result is public
   e.goodbyeFrom = selectGoodbyeSenders(s, evictee, ctx.player, rng);
   // E34: a SURVIVING player always gets jury management's signature lever — their own goodbye
