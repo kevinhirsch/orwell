@@ -80,15 +80,19 @@
       .catch(function () { return null; });
   }
 
-  // The first week is the premiere window: week 1 and not yet post-season / finished.
+  // The premiere window is the engine's own "premiere" moment (move-in, before the meet-everyone
+  // gate lets the first HOH begin) — NOT "week 1". A week stays 1 all the way through the HOH comp,
+  // nominations, veto, veto ceremony, and eviction, so gating on `week === 1` left the card mounted
+  // through the entire week-1 ceremony chain after the meet-gate had long completed (the corroborated
+  // "stale premiere welcome card" finding). `moment` flips off "premiere" the instant the gate
+  // completes and the first HOH begins (`momentForPhase`/`GameSessionAdapter.view()`), so keying off
+  // it retires the card exactly on gate-complete instead of at the week-2 boundary.
   function isPremiereWeek(status, state) {
     const started = (status && status.started !== false && typeof status.week === "number" && status.week >= 1) ||
                     (state && state.started === true);
     if (!started) return false;
-    const week = (status && status.week) || (state && state.week) || 0;
     const moment = (state && state.moment) || "";
-    if (moment === "post-season") return false;
-    return week === 1;
+    return moment === "premiere";
   }
 
   function ensureCss() {
