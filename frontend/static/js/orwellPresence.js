@@ -187,7 +187,11 @@
     const body = el.querySelector("[data-role='body']");
     const parts = [];
     if (!rooms.length) {
-      parts.push('<span class="opres-quiet">No one nearby.</span>');
+      // FLOW-9/VM-18/CA-18: the header lists who's in YOUR room; this body line is scoped to the
+      // ADJACENT rooms. The old "No one nearby." read as a flat contradiction directly beneath a
+      // populated room roster ("15 people here / no one nearby"). Name the scope so the two lines
+      // read as different questions (who's with you vs. who's in the next rooms).
+      parts.push('<span class="opres-quiet">The nearby rooms are quiet.</span>');
     } else {
       parts.push(rooms
         .map((n) =>

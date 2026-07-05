@@ -1139,15 +1139,29 @@ export class OrwellWindow {
     this.el.classList.toggle('ow-loading', !!on);
     const title = this.titlebar && this.titlebar.querySelector('.ow-title');
     if (!title) return;
-    let hint = title.querySelector('.ow-load-hint');
-    if (on && !hint) {
-      hint = document.createElement('span');
-      hint.className = 'ow-load-hint';
-      hint.textContent = '· refreshing';
-      hint.setAttribute('aria-live', 'polite');
-      title.appendChild(hint);
-    } else if (!on && hint) {
-      hint.remove();
+    const dropHint = () => {
+      const h = title.querySelector('.ow-load-hint');
+      if (h) h.remove();
+    };
+    // TRANS-10: a fast (deterministic/local ~20-40ms) poll mounted+removed "· refreshing" within a
+    // single frame — a visible micro-flash AND a repeated aria-live announcement every poll cycle.
+    // Only reveal the hint if the refresh is still in flight after a short threshold, so ordinary
+    // fast polls never flash or announce; a genuinely slow fill still surfaces it.
+    if (on) {
+      if (title.querySelector('.ow-load-hint') || this._loadHintTimer) return;
+      this._loadHintTimer = setTimeout(() => {
+        this._loadHintTimer = null;
+        if (!this.el || !this.el.classList.contains('ow-loading')) return;
+        if (title.querySelector('.ow-load-hint')) return;
+        const hint = document.createElement('span');
+        hint.className = 'ow-load-hint';
+        hint.textContent = '· refreshing';
+        hint.setAttribute('aria-live', 'polite');
+        title.appendChild(hint);
+      }, 200);
+    } else {
+      if (this._loadHintTimer) { clearTimeout(this._loadHintTimer); this._loadHintTimer = null; }
+      dropHint();
     }
   }
 

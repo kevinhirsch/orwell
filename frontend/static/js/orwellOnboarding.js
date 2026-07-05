@@ -174,7 +174,12 @@
       try { win.destroy(); } catch (_) {}
     };
     const { el, card, win } = buildOverlay({
-      title,
+      // Audit dedupe (TRANS-4/RESP-14/IA-22): the holding card rendered `title` TWICE — once in the
+      // kit titlebar and again as the card's own <h1> hero ("The house is dark" appeared as both a
+      // small titlebar label and the big heading). The <h1> is the intended styled hero, so let the
+      // titlebar fall through to buildOverlay's generic framing ("Big Brother production notice")
+      // instead — matching the setup wizard's framing-title + specific-H1 pattern, with no dupe.
+      // (aria-label still names the dialog via the kit's framing title.)
       // Escape routes through the kit (ui.js arbiter → dismissTop → close → onClose). Converge it on
       // our dismiss so the poller stops + cleanup runs once (the _down guard makes re-entry a no-op).
       onClose: () => { if (!_down) { _down = true; if (timer) clearInterval(timer); uninertBackground(); } },
@@ -833,6 +838,33 @@
     } catch (_) {}
   };
 
+  // Audit welcome-splash bleed-through: a started season is authoritative — the "Type /setup …"
+  // splash must never ghost through behind the live game. Hide it (independent of history length)
+  // and mark the shared flag so models.js won't rewrite the "/setup" copy back into welcome-sub.
+  function _hideWelcomeForStartedGame() {
+    try { window._orwellGameStarted = true; } catch (_) {}
+    try {
+      if (window.chatModule && typeof window.chatModule.hideWelcomeScreen === "function") {
+        window.chatModule.hideWelcomeScreen();
+      } else {
+        const ws = document.getElementById("welcome-screen");
+        const cc = document.getElementById("chat-container");
+        if (ws) ws.classList.add("hidden");
+        if (cc) cc.classList.remove("welcome-active");
+      }
+    } catch (_) {}
+  }
+
+  // Mid-session the season can flip started (casting → game). Re-check on the debounced
+  // game-change signal (g15 single dispatcher — we only LISTEN, never dispatch) so a window
+  // that was pre-game when it loaded still clears the splash the moment its season begins.
+  async function _hideWelcomeIfStarted() {
+    try {
+      const st = await fetchState();
+      if (st && st.started !== false) _hideWelcomeForStartedGame();
+    } catch (_) {}
+  }
+
   async function route() {
     const gameBuild = document.body && document.body.hasAttribute("data-game-build");
     // A STALE per-user welcome marker — one left by a prior game that a BACKEND/host factory reset
@@ -847,6 +879,14 @@
         // A season is running (or the state is unreadable): the NEXT reset begins a new
         // interview, so clear the seat marker.
         try { sessionStorage.removeItem(SEAT_TAKEN_KEY); } catch (_) {}
+        // Audit FLOW/TRANS/IA (welcome-splash bleed-through): the "Type /setup … Production
+        // needs a feed source" welcome splash is gated only on chat-history length
+        // (chatRenderer.hideWelcomeScreen fires on first bubble render). A started season that
+        // hasn't rendered a bubble yet in THIS window (fresh tab, second device, cross-device
+        // reconnect) left the splash mounted and ghosting through behind the live game/decision
+        // cards. A season being started is authoritative: hide the splash regardless of history
+        // length. Set a shared flag so models.js won't repopulate the "/setup" copy either.
+        try { if (st && st.started !== false) _hideWelcomeForStartedGame(); } catch (_) {}
         // ADR 0012 §3.3 — generalize the casting-only convergence to every IN-GAME load: a window
         // opened fresh mid-game (new tab, second device, cleared storage) must JOIN the one bound
         // game chat, not sit on its own per-tab session and fork a parallel game (the live two-window
@@ -946,6 +986,8 @@
     route();
   }
   window.addEventListener("orwell:models-changed", _reRouteAfterModelConfig);
+  // Clear the welcome splash the moment a season begins mid-session (casting → game), not only at boot.
+  window.addEventListener("orwell:gamechanged", _hideWelcomeIfStarted);
 
   ready(route);
 })();
