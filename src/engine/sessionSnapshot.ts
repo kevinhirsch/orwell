@@ -527,3 +527,132 @@ export function toGameState(snap: SessionSnapshot): GameState {
   _gameStateCache.set(snap, gs);
   return gs;
 }
+
+/**
+ * PERSIST-8 — the 0031 checkpoint's `GameState` projection (above) is deliberately engine-agnostic
+ * (0007 predates 0058+), so it never carried the newer `SessionCore` dimensions features 0058–0107
+ * added. That left a real coverage gap: a regression in any of them was invisible to the fail-closed
+ * non-degradation gate. These two functions are the engine-layer companion to `saveState.ts`'s
+ * `counts`/`isSuperset` — SAME discipline (append-only ⇒ id/subset presence, monotonic accumulators ⇒
+ * non-decreasing counts), applied directly to the `SessionSnapshot` (never routed through `GameState`,
+ * so `src/domain` stays engine-type-free).
+ *
+ * ONLY dimensions with a verified append-only/monotonic contract in `GameSessionAdapter` are covered.
+ * Deliberately EXCLUDED (checked against the source, not guessed) because they are legitimately
+ * mutable CURRENT state — the mandate's "never thins" promise was never made for them, and guarding
+ * them would fault on ordinary play:
+ *   - `campaigns` / `drives` — pruned/rebuilt wholesale every `campaignTick` (finished or owner-evicted
+ *     campaigns are filtered OUT; `drives` is fully replaced each tick).
+ *   - `trajectories` / `trajectoryFolds` — an arc that decays to `steady` is deliberately DELETED
+ *     ("dropped … and forgotten", `decayUntouchedTrajectories`); the fold ring buffer is capped to
+ *     `recencyWindow` (oldest entries shifted out).
+ *   - `alliances` — dissolves (removed from the list) the moment membership drops below two.
+ *   - `storyThreads` — an authored profile update REPLACES a source's whole thread set (filter-then-
+ *     concat), so thread ids do not persist stably.
+ *   - `secretPlayerBluffBelief` — a resolved bluff removes the caught subject from the belief list.
+ *   - `presence` / `presenceBase` / `presenceTenure` / `presenceZone` / `trackedSightings` /
+ *     `readAnchors` — current-position / per-week snapshot state, overwritten by design every tick/week
+ *     (like `ceremony`/`live`, already outside the checkpoint).
+ *   - `pacingDripCount` (resets every new week by design; `pacingDripWeek` moves with it).
+ * Season boundaries (a brand-new game or the one sanctioned restart door) are exempt structurally: the
+ * orchestrator only ever diffs a baseline against a LATER candidate of the SAME season — a season's
+ * first commit has no baseline at all (`Orchestrator.commitPlayerTurn`), so a reset-to-empty at season
+ * start is never seen as a "later" snapshot thinning an "earlier" one.
+ */
+export interface SessionCoreCounts {
+  campaignTickCount: number;
+  juryHouseTickCount: number;
+  eruptionCount: number;
+  triggerTickCount: number;
+  pacingTickCount: number;
+  confideLieCount: number;
+  secretExposeCount: number;
+  secretTradeCount: number;
+  secretPlayerBluffCount: number;
+  playerTieSurfaceCount: number;
+  tieScheduleTickCount: number;
+  surfacedThreadCount: number;
+}
+
+/** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100) — each is
+ *  verified `++`-only in `GameSessionAdapter`, reset only at a season boundary (never mid-season). */
+export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
+  return {
+    campaignTickCount: snap.campaignTickCount ?? 0,
+    juryHouseTickCount: snap.juryHouseTickCount ?? 0,
+    eruptionCount: snap.eruptionCount ?? 0,
+    triggerTickCount: snap.triggerTickCount ?? 0,
+    pacingTickCount: snap.pacingTickCount ?? 0,
+    confideLieCount: snap.confideLieCount ?? 0,
+    secretExposeCount: snap.secretExposeCount ?? 0,
+    secretTradeCount: snap.secretTradeCount ?? 0,
+    secretPlayerBluffCount: snap.secretPlayerBluffCount ?? 0,
+    playerTieSurfaceCount: snap.playerTieSurfaceCount ?? 0,
+    tieScheduleTickCount: snap.tieScheduleTickCount ?? 0,
+    surfacedThreadCount: snap.surfacedThreadCount ?? 0,
+  };
+}
+
+/** Mirrors `saveState.ts`'s `countsNonDecreasing` for the counters above. */
+export function sessionCoreCountsNonDecreasing(later: SessionCoreCounts, earlier: SessionCoreCounts): boolean {
+  return (Object.keys(earlier) as Array<keyof SessionCoreCounts>).every((k) => later[k] >= earlier[k]);
+}
+
+/**
+ * Mirrors `saveState.ts`'s `isSuperset` for the newer append-only `SessionCore` maps/sets — presence
+ * (and, where the contract guarantees it, per-key non-regression) only. A field's VALUE may still
+ * legitimately mutate in place (a deal's status resolves, a confided tier is caught out as a lie and
+ * corrected) — only outright loss of an already-persisted key/entry is flagged, exactly like the
+ * relationship-edge / Vault-id presence checks above.
+ */
+export function sessionCoreIsSuperset(later: SessionSnapshot, earlier: SessionSnapshot): boolean {
+  // deals (0039): append-only by id — `DealTracker` only ever `.push()`s; `expireWeekScoped` flips
+  // `status` in place and never removes an entry (src/engine/deals.ts).
+  const laterDealIds = new Set((later.deals ?? []).map((d) => d.id));
+  for (const d of earlier.deals ?? []) if (!laterDealIds.has(d.id)) return false;
+
+  // deepProfiles (0058): the hidden §3 layer never loses a houseguest's entry once generated — an
+  // authoring upgrade REPLACES a profile's content in place, never deletes the key.
+  const laterProfiles = later.deepProfiles ?? {};
+  for (const id of Object.keys(earlier.deepProfiles ?? {})) if (!(id in laterProfiles)) return false;
+
+  // confideState (0075): the trust-gated confidence ledger never forgets a houseguest it has already
+  // confided in. The {tier,truthful} VALUE may legitimately change (a caught lie flips to the truth,
+  // `GameSessionAdapter.confide`), so only presence is guarded — not tier-rank monotonicity.
+  const laterConfide = later.confideState ?? {};
+  for (const id of Object.keys(earlier.confideState ?? {})) if (!(id in laterConfide)) return false;
+
+  // secretUsedAs (0093/0099): once a wielded secret is recorded, the record is never lost. Its value can
+  // still transition traded→exposed, so only presence is guarded, not value stability.
+  const laterUsedAs = later.secretUsedAs ?? {};
+  for (const id of Object.keys(earlier.secretUsedAs ?? {})) if (!(id in laterUsedAs)) return false;
+
+  // privateOrientations (0063): a closeted orientation is never silently dropped.
+  const laterOrientations = later.privateOrientations ?? {};
+  for (const id of Object.keys(earlier.privateOrientations ?? {})) if (!(id in laterOrientations)) return false;
+
+  // textureOverrides (0070): once an off-screen event gets model-voiced prose, it is never un-textured.
+  const laterTexture = later.textureOverrides ?? {};
+  for (const id of Object.keys(earlier.textureOverrides ?? {})) if (!(id in laterTexture)) return false;
+
+  // nominationWeeks (0060 §3): the distinct weeks a houseguest has been nominated only ever grow
+  // (`GameSessionAdapter.recordNominationWeeks`: `??= []` then push-if-absent, never a removal).
+  for (const [id, weeks] of Object.entries(earlier.nominationWeeks ?? {})) {
+    const laterWeeks = new Set(later.nominationWeeks?.[id] ?? []);
+    for (const w of weeks) if (!laterWeeks.has(w)) return false;
+  }
+
+  // surfacedTieSubjects (0059 §5): a discovered pre-game tie subject is never un-surfaced (Set, add-only).
+  const laterTieSubjects = new Set(later.surfacedTieSubjects ?? []);
+  for (const s of earlier.surfacedTieSubjects ?? []) if (!laterTieSubjects.has(s)) return false;
+
+  // pacingLastDrippedWeek (0092): once a thread edges toward the player, the week it did so is recorded
+  // and can only move FORWARD (it is always set to the current, monotonically-increasing season week).
+  const laterDripped = later.pacingLastDrippedWeek ?? {};
+  for (const [id, week] of Object.entries(earlier.pacingLastDrippedWeek ?? {})) {
+    const laterWeek = laterDripped[id];
+    if (laterWeek === undefined || laterWeek < week) return false;
+  }
+
+  return true;
+}
