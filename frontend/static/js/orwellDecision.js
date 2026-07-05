@@ -378,7 +378,6 @@
     // J4-02: role="form" makes this a named form landmark (AT users can reach it
     // via landmark navigation and know a binding decision is required).
     card.setAttribute("role", "form");
-    card.setAttribute("aria-label", titleFor(kind, pending.binding));
     // J4-12: link the card to the instruction note so SR users hear the decision
     // context + the "your selection only" / irreversibility instruction before
     // they Tab into options.
@@ -392,6 +391,12 @@
     // (set via the card's existing aria-label + the visible badge) so colorblind + SR users get
     // the same weight signal sighted users get from the tint.
     const risk = isHighStakes(kind);
+    // CA-14 (a11y fix): `risk` must be known BEFORE the aria-label is built — the label now
+    // actually concatenates the badge text ("— Irreversible, binding"), so a landmark-navigation
+    // SR user (role="form") hears the stakes signal from the landmark's own name, not only by
+    // reading the card's body content linearly (the code comment above previously asserted this
+    // but no code did it — the badge's `role="note"` text was reachable only by linear reading).
+    card.setAttribute("aria-label", titleFor(kind, pending.binding) + (risk ? " — Irreversible, binding" : ""));
     if (risk) card.classList.add("odec-risk");
     // J4-04: expose the binding state as a data attribute so a non-binding staged comp-round
     // (flavor over an already-decided result) is inspectable/testable — not only distinguishable

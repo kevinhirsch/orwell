@@ -729,6 +729,25 @@ import { isNarrow } from './platform.js';
         _userMsgEl.classList.remove('msg-pending');
         _userMsgEl.classList.add('msg-unsent');
         _userMsgEl.dataset.unsent = '1';
+        // CA-2 / CA-26 (a11y): the "not sent" signal used to live ONLY in a CSS ::after
+        // pseudo-element's `content` string — invisible to assistive tech (WCAG 4.1.3, Status
+        // Messages requires it be "programmatically determined... without receiving focus"). Add a
+        // REAL text node (styled identically via `.unsent-tag` in style.css) so it's always in the
+        // accessibility tree, plus a one-time toast announcement (the app's existing
+        // `role="status" aria-live="polite"` region, `uiModule.showToast`) that also gives the
+        // screen-reader user an explicit remedy, not just a silent composer restore.
+        try {
+          const _roleEl = _userMsgEl.querySelector('.role');
+          if (_roleEl && !_roleEl.querySelector('.unsent-tag')) {
+            const _tag = document.createElement('span');
+            _tag.className = 'unsent-tag';
+            _tag.textContent = 'not sent';
+            _roleEl.appendChild(_tag);
+          }
+        } catch (_) {}
+        if (!_headless && uiModule && uiModule.showToast) {
+          try { uiModule.showToast("Message not sent — it's back in your composer, ready to resend."); } catch (_) {}
+        }
       }
       // Restore the composer text (it was never cleared on this path, but be explicit/idempotent so
       // a future reordering can't strand the words) — the message is preserved, never eaten.

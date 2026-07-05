@@ -70,8 +70,10 @@ def test_no_model_and_error_branches_do_not_clear_the_composer():
 
 def test_abort_keep_message_preserves_bubble_and_restores_text():
     # The abort helper must (a) settle the bubble to an UNSENT state and (b) restore the composer text.
+    # (Window widened for the CA-2/CA-26 a11y fix: a real `.unsent-tag` text node + a toast
+    # announcement now live inside this same helper, ahead of the composer-restore code.)
     h_idx = SRC.index("_abortSendKeepMessage = (")
-    helper = SRC[h_idx:h_idx + 900]
+    helper = SRC[h_idx:h_idx + 2200]
     assert "msg-unsent" in helper, "the aborted bubble must be marked unsent (kept on screen)"
     assert "_mi.value = msg" in helper, "the helper must restore the composer text — never eat it"
     assert "_releaseSendFlag()" in helper, "the helper must release the send flag so the next send works"
