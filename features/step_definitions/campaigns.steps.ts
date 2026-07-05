@@ -352,3 +352,35 @@ Then("no NPC acts on the campaign except in response to the player's actual reco
   assert.equal(JSON.stringify(campsOf(s)).includes(`"owners":["${PLAYER}"]`), false);
   void before;
 });
+
+// Phase 2 of "the player can play offense" (0085 follow-on) — the player's ACTUAL RECORDED pitches (as
+// opposed to the bare OOC declaration above) earn a real, bounded campaign mirroring an NPC's own.
+
+Given("the player pitches a houseguest against the target across several real, witnessed scenes", function (this: BbWorld) {
+  const { cwSession: s, cwRel: rel, cwIds: ids } = cw(this);
+  const holder = ids![2]!, target = ids![1]!;
+  rel!.edge(PLAYER, holder).trust = 0.9; // real rapport — `campaignTiltFor` reads the owner->voter edge
+  for (let i = 0; i < 3; i++) {
+    s!.foldPlayerCampaignMove(target, holder); // one landed pitch, mirroring recordInteraction's aboutEdges
+    s!.bumpBeatSeq(); // a new beat each time — never more than one progress-move per beat
+  }
+});
+
+Then("the player's own campaign accrues progress exactly as an NPC's campaign would", function (this: BbWorld) {
+  const c = campsOf(cw(this).cwSession!).find((x) => x.owners[0] === PLAYER);
+  assert.ok(c && c.status === "active" && c.goal === "evict" && c.progress > 0, "the player's own campaign accrued real progress");
+});
+
+Then("the pitched houseguest's vote is tilted toward the target, bounded to the same ceiling an NPC's campaign uses", function (this: BbWorld) {
+  const { cwSession: s, cwIds: ids } = cw(this);
+  const holder = ids![2]!, target = ids![1]!;
+  const t = tiltOf(s!, target, holder);
+  assert.ok(t > 0, "an aware, well-trusted pitch tilts the vote");
+  assert.ok(t <= campaignTilt(1, 1, 1, 1) + 1e-9, "never exceeds the same ceiling an NPC's campaign is bounded to");
+});
+
+Then("a houseguest the player never pitched is unmoved", function (this: BbWorld) {
+  const { cwSession: s, cwIds: ids } = cw(this);
+  const bystander = ids![4]!, target = ids![1]!;
+  assert.equal(tiltOf(s!, target, bystander), 0);
+});

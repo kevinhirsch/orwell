@@ -106,6 +106,19 @@ export interface SessionCore {
   /** The DEDICATED campaign-rng tick counter (0085 B2) — persisted so the campaign trajectory stays
    * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream). */
   campaignTickCount?: number;
+  /**
+   * Phase 2 of "the player can play offense" (0085 follow-on) — the player's OWN dedicated
+   * campaign-move-rng draw counter, persisted so the player's own campaign stays reproducible across a
+   * restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream, mirroring
+   * `campaignTickCount`'s isolation). Monotonic (++ only) — tracked in `SessionCoreCounts` below.
+   */
+  playerCampaignMoveCount?: number;
+  /**
+   * Phase 2 — the BEAT the player's own campaign last earned progress (the per-beat throttle), so a
+   * restart mid-beat doesn't grant an extra progress-earning pitch; absent ⇒ null (no pitch yet). Current
+   * state, not a monotonic count (mirrors `campaigns`/`drives`'s own exclusion from the checkpoint).
+   */
+  playerCampaignProgressBeat?: number | null;
   /** The DEDICATED jury-house-rng tick counter (0100) — persisted so the isolated grudge stream stays
    * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream).
    * The accumulated grudge itself rides on `live.juryGrudge` (engine-only; restored with the live state). */
@@ -561,6 +574,7 @@ export function toGameState(snap: SessionSnapshot): GameState {
  */
 export interface SessionCoreCounts {
   campaignTickCount: number;
+  playerCampaignMoveCount: number;
   juryHouseTickCount: number;
   eruptionCount: number;
   triggerTickCount: number;
@@ -579,6 +593,7 @@ export interface SessionCoreCounts {
 export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
   return {
     campaignTickCount: snap.campaignTickCount ?? 0,
+    playerCampaignMoveCount: snap.playerCampaignMoveCount ?? 0,
     juryHouseTickCount: snap.juryHouseTickCount ?? 0,
     eruptionCount: snap.eruptionCount ?? 0,
     triggerTickCount: snap.triggerTickCount ?? 0,
