@@ -74,6 +74,28 @@ def test_schema_description_steers_kind_vs_consequence():
     assert "magnitude" in desc
 
 
+# --- 1b. Phase 1 (player-offense) — the THIRD-PARTY `aboutEdges` sibling ---------------------------
+
+def test_schema_exposes_about_edges_with_holder_about_direction_emphasis():
+    fn = _record_tool_schema()
+    props = fn["parameters"]["properties"]["consequence"]["properties"]
+    assert "aboutEdges" in props, "recordInteraction must expose the third-party aboutEdges shape"
+    about = props["aboutEdges"]["items"]["properties"]
+    assert about["holder"]["type"] == "string"
+    assert about["about"]["type"] == "string"
+    assert set(about["direction"]["enum"]) == _DIRECTIONS
+    assert set(about["emphasis"]["enum"]) == _EMPHASES
+    assert set(props["aboutEdges"]["items"]["required"]) == {"holder", "about", "direction"}
+
+
+def test_schema_about_edges_is_not_required():
+    fn = _record_tool_schema()
+    # aboutEdges (like edges/kind) stays optional — only content is required (byte-identical floor).
+    assert fn["parameters"]["required"] == ["content"]
+    cons = fn["parameters"]["properties"]["consequence"]
+    assert cons.get("required") in (None, [])
+
+
 # --- 2. record_interaction forwards / omits the descriptor in the engine request ------------------
 
 def _capture_req(monkeypatch):
@@ -190,6 +212,58 @@ def test_validate_consequence_returns_none_when_nothing_valid_remains():
     assert al._validate_consequence({"edges": [{"toward": "npc:3", "direction": "nope"}]}, roster) is None
 
 
+# --- 4c. _validate_consequence — the THIRD-PARTY aboutEdges gate (Phase 1, player-offense) ---------
+
+def test_validate_consequence_keeps_a_valid_third_party_pitch():
+    roster = {"npc:3", "npc:7"}
+    raw = {"aboutEdges": [{"holder": "npc:3", "about": "npc:7", "direction": "more-threatened", "emphasis": "strong"}]}
+    out = al._validate_consequence(raw, roster)
+    assert out is not None
+    assert out["aboutEdges"] == [{"holder": "npc:3", "about": "npc:7", "direction": "more-threatened", "emphasis": "strong"}]
+    assert "edges" not in out  # none proposed — only the third-party key is present
+
+
+def test_validate_consequence_drops_self_pitch_and_off_roster_holder_or_about():
+    roster = {"npc:3", "npc:7"}
+    raw = {"aboutEdges": [
+        {"holder": "npc:3", "about": "npc:3", "direction": "warmer"},        # holder == about → drop
+        {"holder": "npc:99", "about": "npc:7", "direction": "warmer"},       # off-roster holder → drop
+        {"holder": "npc:3", "about": "npc:99", "direction": "warmer"},       # off-roster about → drop
+        {"holder": "npc:3", "about": "npc:7", "direction": "not-a-direction"},  # bad direction → drop
+        {"holder": "npc:7", "about": "npc:3", "direction": "less-trust"},    # the one valid entry
+    ]}
+    out = al._validate_consequence(raw, roster)
+    assert out is not None
+    assert out["aboutEdges"] == [{"holder": "npc:7", "about": "npc:3", "direction": "less-trust"}]
+
+
+def test_validate_consequence_drops_bad_emphasis_but_keeps_the_about_edge():
+    roster = {"npc:3", "npc:7"}
+    raw = {"aboutEdges": [{"holder": "npc:3", "about": "npc:7", "direction": "warmer", "emphasis": "deafening"}]}
+    out = al._validate_consequence(raw, roster)
+    assert out is not None
+    edge = out["aboutEdges"][0]
+    assert edge["holder"] == "npc:3" and edge["about"] == "npc:7"
+    assert "emphasis" not in edge
+
+
+def test_validate_consequence_combines_edges_and_about_edges():
+    roster = {"npc:3", "npc:7"}
+    raw = {"edges": [{"toward": "npc:3", "direction": "warmer"}],
+           "aboutEdges": [{"holder": "npc:3", "about": "npc:7", "direction": "more-threatened"}],
+           "rationale": "a pitch while also warming to the holder"}
+    out = al._validate_consequence(raw, roster)
+    assert out["edges"] == [{"toward": "npc:3", "direction": "warmer"}]
+    assert out["aboutEdges"] == [{"holder": "npc:3", "about": "npc:7", "direction": "more-threatened"}]
+    assert out["rationale"] == "a pitch while also warming to the holder"
+
+
+def test_validate_consequence_all_about_edges_invalid_falls_back_to_none():
+    roster = {"npc:3"}
+    raw = {"aboutEdges": [{"holder": "npc:3", "about": "npc:3", "direction": "warmer"}]}
+    assert al._validate_consequence(raw, roster) is None
+
+
 # --- 4b. _auto_record_scene requests, validates, forwards — and falls back kind-only --------------
 
 def _wire_scene(monkeypatch, extraction_json, recorded):
@@ -228,6 +302,44 @@ def test_auto_record_scene_validates_and_forwards_a_descriptor(monkeypatch):
     assert pairs == {("npc:3", "warmer"), ("npc:7", "more-threatened")}, "bad/off-roster edges dropped"
     assert recorded[0]["kind"] == "strategy"
     assert recorded[0]["with_ids"] == ["npc:3", "npc:7"]
+
+
+def test_auto_record_scene_proposes_an_about_edges_third_party_pitch(monkeypatch):
+    """Phase 1 (player-offense): a scene reading as 'player pitches holder about a third party'
+    proposes aboutEdges — the extraction's `_validate_consequence` call already validates it, so this
+    just proves the FULL round trip (extraction JSON → validation → the forwarded engine call)."""
+    recorded = []
+    extraction = (
+        '{"withIds":["npc:3"],"kind":"strategy",'
+        '"content":"The player told npc:3 that npc:7 is the real threat.",'
+        '"consequence":{"aboutEdges":['
+        '{"holder":"npc:3","about":"npc:7","direction":"more-threatened","emphasis":"notable"},'
+        '{"holder":"npc:3","about":"npc:3","direction":"warmer"},'     # self-pitch → dropped
+        '{"holder":"npc:99","about":"npc:7","direction":"warmer"}],'   # off-roster holder → dropped
+        '"rationale":"floated npc:7 as the bigger threat"}}'
+    )
+    _wire_scene(monkeypatch, extraction, recorded)
+    out = _run(al._auto_record_scene("I told npc:3 that npc:7 is the real threat", "talk", HOUSE, "url", "m", {}, "owner"))
+    assert out is True
+    assert len(recorded) == 1
+    cq = recorded[0]["consequence"]
+    assert cq is not None
+    assert cq["aboutEdges"] == [{"holder": "npc:3", "about": "npc:7", "direction": "more-threatened", "emphasis": "notable"}]
+    assert "edges" not in cq  # none proposed in this scene
+    assert recorded[0]["kind"] == "strategy"
+
+
+def test_auto_record_scene_falls_back_when_only_about_edges_are_all_invalid(monkeypatch):
+    recorded = []
+    # the only aboutEdges entry is a self-pitch → dropped → nothing valid remains → consequence=None.
+    _wire_scene(monkeypatch,
+                '{"withIds":["npc:3"],"kind":"gossip","content":"x",'
+                '"consequence":{"aboutEdges":[{"holder":"npc:3","about":"npc:3","direction":"warmer"}]}}',
+                recorded)
+    out = _run(al._auto_record_scene("x", "talk", HOUSE, "url", "m", {}, "owner"))
+    assert out is True
+    assert recorded[0]["consequence"] is None, "no valid aboutEdges entry → kind-only path preserved"
+    assert recorded[0]["kind"] == "gossip"
 
 
 def test_auto_record_scene_falls_back_to_kind_only_when_no_descriptor(monkeypatch):
