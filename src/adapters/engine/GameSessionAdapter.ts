@@ -389,6 +389,15 @@ const SECRET_PACING_ENABLED_DEFAULT = process.env.ORWELL_SECRET_PACING === "1";
  */
 const COMP_INTENT_ENABLED_DEFAULT = process.env.ORWELL_COMP_INTENT === "1";
 /**
+ * 0110 (PO review 2026-06-28) — whether the eviction jury grudge folds on the evictee's DEDUCED belief
+ * (process of elimination) instead of the true secret ballot. OFF unless `ORWELL_VOTE_DEDUCTION=1`. A
+ * DEDICATED flag (sibling of the others) so calibration neutrality is provable in isolation: with it
+ * unset, `ctx().voteDeduction` is false, the grudge folds the true `votesToEvict` exactly as before, no
+ * deduction sub-rng is drawn, and every seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL. The
+ * calibration/UAT harness never sets it; the live deploy may. A test overrides via `setVoteDeductionEnabled`.
+ */
+const VOTE_DEDUCTION_ENABLED_DEFAULT = process.env.ORWELL_VOTE_DEDUCTION === "1";
+/**
  * 0100 — whether the JURY-HOUSE grudge layer runs by DEFAULT. OFF unless `ORWELL_JURY_HOUSE=1`. A
  * DEDICATED flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is
  * provable in isolation: with it unset NO jury-house stretch runs, NO draw is taken (the dedicated
@@ -517,6 +526,12 @@ export class GameSessionAdapter implements GameSession {
    * BYTE-IDENTICAL; the live deploy enables it via `ORWELL_COMP_INTENT=1` / `setCompIntentEnabled`.
    */
   private compIntentEnabled = COMP_INTENT_ENABLED_DEFAULT;
+  /**
+   * 0110 — whether the eviction jury grudge folds on the evictee's DEDUCED belief. DEFAULT OFF: the
+   * calibration/UAT harness never enables it, so `ctx().voteDeduction` is false and the true `votesToEvict`
+   * is folded ⇒ every seeded gate is BYTE-IDENTICAL; the live deploy enables it via `ORWELL_VOTE_DEDUCTION=1`.
+   */
+  private voteDeductionEnabled = VOTE_DEDUCTION_ENABLED_DEFAULT;
   /** The DEDICATED campaign rng tick counter — campaign draws fork off the game seed + this, never the
    * shared society/vote stream (the L21/L24 isolation), so even live campaigns don't re-phase calibration. */
   private campaignTickCount = 0;
@@ -5002,8 +5017,14 @@ export class GameSessionAdapter implements GameSession {
       // 0006b: NPCs carry a derived competition intent — present ONLY when enabled (off in the calibration
       // harness ⇒ absent ⇒ every NPC competes ⇒ byte-identical). Live-only strategic throw/play-safe.
       ...(this.compIntentEnabled ? { compIntentOf: (id: EntityId, field: readonly EntityId[]) => this.deriveCompIntent(id, field) } : {}),
+      // 0110: fold the eviction jury grudge on the evictee's DEDUCED belief (process of elimination) —
+      // present ONLY when enabled (off in the calibration harness ⇒ absent ⇒ true ballot folded ⇒ byte-identical).
+      ...(this.voteDeductionEnabled ? { voteDeduction: true as const } : {}),
     };
   }
+
+  /** Turn 0110 vote deduction on/off. Off by default — the calibration harness leaves it off. */
+  setVoteDeductionEnabled(on: boolean): void { this.voteDeductionEnabled = on; }
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }

@@ -81,6 +81,7 @@ module.exports = {
       "docs/features/0104-season-notoriety.feature",
       "docs/features/0105-suspicion-and-mood-anchoring.feature",
       "docs/features/0109-deal-duration.feature",
+      "docs/features/0110-vote-deduction.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
