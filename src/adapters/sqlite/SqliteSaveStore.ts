@@ -157,10 +157,13 @@ export class SqliteSaveStore implements UserSaveStore {
   private prune(user: string, latest: number): void {
     const keep = new Set<number>();
     for (let v = latest; v > latest - SqliteSaveStore.RETAIN_RECENT && v > 0; v--) keep.add(v);
+    // PERSIST-11 (mirrors the same fix in FileSaveStore.prune): don't spend a `RETAIN_CHECKPOINTS`
+    // slot on a candidate that's already covered by the recent-retention window above.
     let checkpoints = 0;
     for (let v = latest - (latest % SqliteSaveStore.CHECKPOINT_EVERY);
       v > 0 && checkpoints < SqliteSaveStore.RETAIN_CHECKPOINTS;
       v -= SqliteSaveStore.CHECKPOINT_EVERY) {
+      if (keep.has(v)) continue;
       keep.add(v);
       checkpoints++;
     }

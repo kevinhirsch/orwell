@@ -46,8 +46,19 @@ export class FileUserNotorietyStore implements UserNotorietyStore {
     if (!existsSync(file)) return null;
     try {
       return JSON.parse(readFileSync(file, "utf8")) as NotorietySummary;
-    } catch {
-      return null; // a corrupt notoriety file is non-fatal — the user simply reads as un-known this season
+    } catch (e) {
+      // PERSIST-10: unlike `FileSaveStore.loadLatest` (which quarantines a corrupt file to `.corrupt`
+      // and steps down to an older version before ever losing data), this store has no version
+      // history — a corrupt read had nowhere to step down to, and the very next `accumulate()` call
+      // would silently OVERWRITE the bad file with just the current season's summary, permanently
+      // discarding the user's whole cross-season reputation with zero operator signal. Quarantine the
+      // bad bytes first (recoverable for forensic repair) and log loudly, mirroring `FileSaveStore`'s
+      // discipline, before falling back to "read as un-known this season."
+      try { renameSync(file, `${file}.corrupt-${Date.now()}`); } catch { /* best-effort quarantine */ }
+      console.error(
+        `[orwell] notoriety file for a user was corrupt and has been quarantined (${e instanceof Error ? e.message : String(e)}); that user reads as un-known this season`,
+      );
+      return null;
     }
   }
 

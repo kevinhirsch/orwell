@@ -2470,17 +2470,18 @@ export class GameSessionAdapter implements GameSession {
     // deterministically from the seed + cast below — seed-stable & player-independent, so the floor
     // returns identically. The PUBLIC facets ride on the persisted Character (byte-stable), so they
     // are NOT re-derived here; only the hidden half + thread status are rehydrated.
-    if (core.deepProfiles || core.storyThreads) {
-      this.deepProfiles = core.deepProfiles ? cloneSession(core.deepProfiles) : {};
-      this.storyThreads = core.storyThreads ? cloneSession(core.storyThreads) : [];
-    } else if (core.house && core.seed !== undefined) {
-      const layer = generateCastDeepLayer(core.seed, core.house.npcs);
-      this.deepProfiles = layer.hidden;
-      this.storyThreads = layer.threads;
-    } else {
-      this.deepProfiles = {};
-      this.storyThreads = [];
-    }
+    // PERSIST-13: the two fields used to be gated by a single OR — "either is present ⇒ trust BOTH
+    // as persisted, re-deriving neither." A save where `storyThreads` survived but `deepProfiles`
+    // was absent/empty (a partial write, an interrupted re-seal, a future migration bug that clears
+    // one but not the other) took the "trust the persisted layer" branch and set `deepProfiles = {}`
+    // — silently discarding every houseguest's secrets/goals/weakness/day-one-perception for the
+    // rest of the game, with no re-derivation and no error. Each field is now independently either
+    // trusted (present) or re-derived from the seed (absent) — a partial/inconsistent save
+    // self-heals deterministically instead of silently going empty.
+    const needsRederive = (!core.deepProfiles || !core.storyThreads) && core.house && core.seed !== undefined;
+    const layer = needsRederive ? generateCastDeepLayer(core.seed!, core.house!.npcs) : null;
+    this.deepProfiles = core.deepProfiles ? cloneSession(core.deepProfiles) : (layer ? layer.hidden : {});
+    this.storyThreads = core.storyThreads ? cloneSession(core.storyThreads) : (layer ? layer.threads : []);
     // 0060 §3 back-compat: a thread restored from a pre-0060 save carries no structured `triggerCondition`
     // / `lifecycleWeek` — default them by source class / the live week (idempotent), so the scheduler has
     // a gate and the windows have a base. This is a NON-mutating re-derive (the byte-stable PUBLIC facets
