@@ -150,7 +150,9 @@ def test_banner_never_shows_red_for_failures_while_busy():
     )
     unreachable_branch = js.index("if (!d || !d.engine)")
     busy_guard = js.index("if (busy) { showHolding(); return; }")
-    red = js.index('show("down", "Big Brother engine unavailable.", reason')  # #764: de-glyphed title
+    # MICRO-14/15: the red banner now shows an in-fiction outage line (constants), never the raw
+    # "engine unavailable"/tool-error copy — the busy guard must still precede it.
+    red = js.index('show("down", _OUTAGE_TITLE, _OUTAGE_BODY);', unreachable_branch)
     assert unreachable_branch < busy_guard < red, (
         "the busy guard must run before the red banner inside the unreachable branch"
     )

@@ -4,7 +4,9 @@
 // is that signal: a top-of-viewport banner driven by /api/orwell/health with two severities:
 //   • RED   — the engine is unreachable (connection refused / timeout / wrong URL);
 //   • AMBER — the engine is up but a recent tool call FAILED (`lastError`: a technical problem like a
-//     corrupt-save 500 or a failing action), naming the tool + reason so it's actionable.
+//     corrupt-save 500 or a failing action). The player sees ONE production-voiced line either way;
+//     the raw tool name + backend error (the actionable operator detail) goes to console + OrwellReport
+//     (the /admin/status failure ring), never into the player-visible banner body (MICRO-14/15).
 // Fail-open (if its own fetch fails, it shows the warning), no deps beyond the notice kit.
 //
 // #642 (owner add-on): the banner is a first-class OrwellNotice kit consumer — a "system-notice"
@@ -51,6 +53,17 @@
   }
 
   let _lastReason = "";
+
+  // MICRO-14/15/16 — the outage copy stays an HONEST signal but in ONE production voice: no bare
+  // "engine"/"app"/"game service" nouns (register break, I9), and NEVER a raw tool name or backend
+  // error string in the player-visible body (the sharpest leak — a `recordInteraction: <stack>` in a
+  // top-of-viewport banner). The raw detail still reaches the OPERATOR via console + OrwellReport (the
+  // G11 failure ring / /admin/status), just never the player's screen. One shared line so the two
+  // widgets that voice an outage (this banner + the House Status gadget) can't drift.
+  const _OUTAGE_TITLE = "Big Brother is off the air.";
+  const _OUTAGE_BODY = "We've lost the live feeds — the show comes back the moment the connection does.";
+  const _DEGRADED_TITLE = "Big Brother's having a technical moment.";
+  const _DEGRADED_BODY = "Production's on it — hang tight.";
 
   function show(kind, title, reason) {
     if (dismissedKey && dismissedKey === reason) return; // already waved off this exact problem
@@ -99,27 +112,31 @@
   async function refresh() {
     try {
       const r = await fetch("/api/orwell/health", { credentials: "same-origin" });
-      if (!r.ok) { show("down", "Big Brother engine unavailable.", "The app couldn't reach the game service. The show can't load until it's back."); return; }
+      if (!r.ok) { show("down", _OUTAGE_TITLE, _OUTAGE_BODY); return; }
       const d = await r.json();
       const busy = !!(d && d.busy === "creating"); // G8: createCharacter in flight
       const reconnecting = !!(d && d.reconnecting); // Issue 1: transient outage being retried
       if (!d || !d.engine) {
         if (busy) { showHolding(); return; } // a probe timeout DURING creation is not an outage
         if (reconnecting) { showReconnecting(); return; } // a momentary blip — recovering, not down
-        const reason = (d && d.error ? "Reason: " + d.error + " " : "") + (d && d.engineUrl ? "(" + d.engineUrl + ") " : "");
-        show("down", "Big Brother engine unavailable.", reason + "The show can't load until it's back.");
+        // MICRO-14/15: one production-voiced outage line — never the raw d.error/engineUrl in the
+        // player banner. The operator's actionable detail already rides the engine's own /admin/status
+        // health payload (this banner just mirrors that health poll), so it is not re-beaconed here —
+        // and the g11 failure ring is reserved for the fail-open CATCH below, per its contract.
+        show("down", _OUTAGE_TITLE, _OUTAGE_BODY);
       } else if (d.lastError && d.lastError.error) {
         if (busy) { showHolding(); return; } // mid-creation hiccups hold in-fiction too
-        // Engine reachable, but a recent call failed — a technical problem worth reporting honestly.
-        const le = d.lastError;
-        show("degraded", "Big Brother engine reported a problem.", (le.tool ? le.tool + ": " : "") + le.error);
+        // Engine reachable, but a recent call failed — an honest signal in one production voice; the raw
+        // tool name + backend error string (MICRO-15) never reach the player banner (they remain on the
+        // engine health payload / /admin/status for the operator).
+        show("degraded", _DEGRADED_TITLE, _DEGRADED_BODY);
       } else {
         hide();
       }
     } catch (_) {
       // The FE route itself failed — surface the most likely truth rather than going silent.
       if (window.OrwellReport) window.OrwellReport.fail("engine-status", "health-fetch", _); // G11: fail open, never silent
-      show("down", "Big Brother engine unavailable.", "The app couldn't reach the game service.");
+      show("down", _OUTAGE_TITLE, _OUTAGE_BODY);
     }
   }
 
