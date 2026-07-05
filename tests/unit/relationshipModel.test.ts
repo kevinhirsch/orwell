@@ -63,6 +63,19 @@ describe("0017 — relationship model (decision 0002)", () => {
     expect(relationshipLabel(s, "bond")).toBe("ally");
   });
 
+  it("PERSIST-3: load() sanitizes an already-corrupted null/NaN field to baseline instead of propagating it", () => {
+    const rel = new RelationshipModel(0.6);
+    // Simulates a save from before the PERSIST-2 clamp01 NaN guard (or any future bug that slips
+    // past it): JSON round-trips a NaN to `null`. A bare pass-through would let `null` silently
+    // coerce to `0` on the next arithmetic read — an undocumented reset to the edge's floor value.
+    rel.load([
+      { from: A, to: B, trust: null as unknown as number, affinity: 0.4, threat: 0.2, alignment: 0.1, confidence: 0.3 },
+    ]);
+    const edge = rel.edge(A, B);
+    for (const v of Object.values(edge)) expect(Number.isFinite(v)).toBe(true);
+    expect(edge.affinity).toBe(0.4); // untouched fields pass through exactly
+  });
+
   it("chooseStrongestBond picks the strongest bond and bounded variance never flips a clear lead", () => {
     const rel = new RelationshipModel(0.6);
     const rng = new SeededRandom(7);

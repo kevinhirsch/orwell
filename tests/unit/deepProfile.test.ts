@@ -314,6 +314,37 @@ describe("0058 non-degradation + full recall (L27b)", () => {
     expect(activated).toBeTruthy();
     expect(typeof seed).toBe("number");
   });
+
+  it("PERSIST-13: a PARTIAL save (storyThreads present, deepProfiles missing) re-derives the missing field instead of going empty", () => {
+    // A save with storyThreads intact but deepProfiles absent/empty (a partial write, an
+    // interrupted re-seal) used to take the "trust the persisted layer" branch on the single OR
+    // gate and silently set deepProfiles = {} — discarding every houseguest's secrets/goals/
+    // weakness for the rest of the game. Each field must now be independently re-derived when
+    // missing, regardless of whether its SIBLING field survived.
+    const { sb } = liveGame("dp-partial", 13);
+    const core = sb.session.snapshot();
+    expect(Object.keys(core.deepProfiles ?? {}).length).toBeGreaterThan(0);
+    expect((core.storyThreads ?? []).length).toBeGreaterThan(0);
+    delete core.deepProfiles; // simulate the partial-write corruption — threads survive, profiles don't
+    sb.session.restore(core);
+    const restored = sb.session.snapshot();
+    // The hidden layer is NOT empty — it was re-derived deterministically from the seed.
+    expect(Object.keys(restored.deepProfiles ?? {}).length).toBeGreaterThan(0);
+    // The genuinely-persisted storyThreads are untouched (still trusted, not re-derived over).
+    expect((restored.storyThreads ?? []).length).toBe((core.storyThreads ?? []).length);
+  });
+
+  it("PERSIST-13: the mirror partial case (deepProfiles present, storyThreads missing) also self-heals", () => {
+    const { sb } = liveGame("dp-partial-2", 14);
+    const core = sb.session.snapshot();
+    expect(Object.keys(core.deepProfiles ?? {}).length).toBeGreaterThan(0);
+    const savedProfiles = JSON.stringify(core.deepProfiles);
+    delete core.storyThreads;
+    sb.session.restore(core);
+    const restored = sb.session.snapshot();
+    expect((restored.storyThreads ?? []).length).toBeGreaterThan(0); // re-derived, not left empty
+    expect(JSON.stringify(restored.deepProfiles)).toBe(savedProfiles); // untouched (still trusted)
+  });
 });
 
 describe("0058 / L28b write-back seam — LIVE, airtight, split-safe", () => {

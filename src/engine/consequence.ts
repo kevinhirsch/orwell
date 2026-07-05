@@ -159,6 +159,13 @@ export function foldGenerativeConsequence(
     if (!spend(e.toward)) continue; // the per-beat-per-edge budget (E21) gates the descriptor too
     const base = CONSEQUENCE_DIRECTION_IMPACTS[e.direction];
     const factor = CONSEQUENCE_EMPHASIS[e.emphasis ?? "notable"]; // RELATIVE weight → engine multiplier
+    // BE-101: `direction`/`emphasis` are caller-proposed open-set values (ADR 0005) — the MCP boundary
+    // only shape-guards them as strings, never enum membership. An unrecognized value used to index
+    // these lookup tables with no fallback: `base` came back `undefined` and `scaleImpact(undefined,…)`
+    // threw (`Object.entries(undefined)`), or `factor` came back `undefined` and `v * undefined` wrote
+    // a silent `NaN` into the PERMANENT relationship layer. Skip the edge instead — a proposal the
+    // engine doesn't recognize folds nothing rather than crashing the call or corrupting state.
+    if (!base || factor === undefined) continue;
     rel.applyImpactDirected(e.toward, initiator, scaleImpact(base, factor), rng);
     moved.add(e.toward);
   }
@@ -223,6 +230,9 @@ export function foldThirdPartyConsequence(
     }
     const base = CONSEQUENCE_DIRECTION_IMPACTS[e.direction];
     const factor = CONSEQUENCE_EMPHASIS[e.emphasis ?? "notable"]; // RELATIVE weight → engine multiplier
+    // BE-101: same open-set/closed-magnitude guard as `foldGenerativeConsequence` — an unrecognized
+    // `direction`/`emphasis` must fold nothing, never crash or write NaN into the third-party edge.
+    if (!base || factor === undefined) continue;
     const trustMult = B.trustFloor + (1 - B.trustFloor) * clamp01(trustOfInitiator);
     rel.applyImpactDirected(e.holder, e.about, scaleImpact(base, factor * trustMult), rng);
     moved.add(e.holder);
