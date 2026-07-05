@@ -1,5 +1,6 @@
 import { composeRuntime } from "./composition/runtime";
 import { startHttpMcp } from "./adapters/mcp/HttpMcpServer";
+import { createEmbeddingsStatusTracker } from "./adapters/embedding/embeddingsStatus";
 
 /**
  * target). Brings up the permissioned MCP server over HTTP; the Orwell
@@ -41,8 +42,16 @@ const embedMode = (process.env["ORWELL_EMBEDDINGS"] ?? "").trim().toLowerCase();
 // state, so the warm-up — which now runs AFTER the server binds (prod incident 2026-06-19), so a
 // cold/blocked model can NEVER delay /health — updates what /health reports without re-wiring
 // startHttpMcp. The actual warm-up is at the very bottom, after the listen.
-let embeddingsState: { provider: string; degraded: boolean } = { provider: "deterministic", degraded: false };
-const embeddingsStatus = (): { provider: string; degraded: boolean } => embeddingsState;
+//
+// PERSIST-5: a boot-time-only snapshot is assigned once, immediately after a successful warm-up, at
+// which point the fresh provider's `degraded` is definitionally false (degrade only ever happens on a
+// LATER failed `embed()` call, mid-process — a worker crash/timeout, see FastembedEmbedding.degraded).
+// A snapshot alone never re-reads that flag, so a mid-process degrade (PERSIST-1's trigger condition)
+// was invisible to `/health` forever — an operator would see "fastembed: healthy" even after recall
+// had silently fallen back. `createEmbeddingsStatusTracker` (`adapters/embedding/embeddingsStatus.ts`)
+// retains the live provider reference so `status()` re-checks its CURRENT `.degraded` flag every call.
+const embeddingsTracker = createEmbeddingsStatusTracker();
+const embeddingsStatus = embeddingsTracker.status;
 
 // deferResume: bind the HTTP server + warm the embedder FIRST, then resume saved games (at the
 // bottom) — so a cold/blocked embedding model can never delay /health, and resumed souls still
@@ -99,13 +108,20 @@ if (embedMode === "fastembed") {
     ]);
     const { setRuntimeEmbedding } = await import("./composition/engineRoot");
     setRuntimeEmbedding(provider);
-    embeddingsState = provider.degraded
-      ? { provider: "deterministic", degraded: true } // worker died mid-process — permanent for this run
-      : { provider: "fastembed", degraded: false };
+    // PERSIST-5: wire the live provider so `embeddingsStatus` can re-check `.degraded` on every
+    // `/health` call — a warm-up-time crash is caught below (a boot-time snapshot is enough there,
+    // since it can never recover), but THIS reference is what catches a degrade that happens LATER,
+    // mid-process (a worker timeout/crash while the game is already live).
+    embeddingsTracker.setLiveProvider(provider);
+    embeddingsTracker.setBootState(
+      provider.degraded
+        ? { provider: "deterministic", degraded: true } // worker died mid-process — permanent for this run
+        : { provider: "fastembed", degraded: false },
+    );
     // eslint-disable-next-line no-console
     console.log(`[orwell] semantic recall: fastembed (local ONNX, dim=${provider.dim}, cache=${cacheDir})`);
   } catch (e) {
-    embeddingsState = { provider: "deterministic", degraded: true };
+    embeddingsTracker.setBootState({ provider: "deterministic", degraded: true });
     console.error(
       `[orwell] fastembed warm-up failed (${e instanceof Error ? e.message : String(e)}); ` +
         `semantic recall uses deterministic embeddings this run. ` +

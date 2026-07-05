@@ -80,14 +80,15 @@ module.exports = {
       severity: "error",
       comment:
         "The process entrypoint may compose the runtime (which wires the Vault internally), the " +
-        "outward root, the engine root (E86a: setRuntimeEmbedding), and the fastembed embedding " +
-        "adapter it warms up at boot — but nothing else in the engine layer (audit E18).",
+        "outward root, the engine root (E86a: setRuntimeEmbedding), the fastembed embedding " +
+        "adapter it warms up at boot, and the dependency-free /health embeddings-status tracker " +
+        "(PERSIST-5) — but nothing else in the engine layer (audit E18).",
       from: { path: "^src/main\\.ts$" },
       to: {
         path: ENGINE_LAYER,
         pathNot:
           "^src/composition/(runtime|outwardRoot|engineRoot)\\.ts$" +
-          "|^src/adapters/embedding/FastembedEmbedding\\.ts$",
+          "|^src/adapters/embedding/(FastembedEmbedding|embeddingsStatus)\\.ts$",
       },
     },
     {
