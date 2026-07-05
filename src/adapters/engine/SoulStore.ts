@@ -1,6 +1,6 @@
 import type { EntityId } from "../../domain/ids";
 import type { SoulProvider, Soul, Memory } from "../../ports/SoulProvider";
-import type { VectorIndex } from "../../ports/VectorIndex";
+import { VectorDimMismatchError, type VectorIndex } from "../../ports/VectorIndex";
 import { InMemoryVectorIndex } from "../inmemory/InMemoryVectorIndex";
 
 /**
@@ -51,6 +51,19 @@ import { InMemoryVectorIndex } from "../inmemory/InMemoryVectorIndex";
  * memories for that houseguest (this store only) synchronously first, so a recall is
  * always complete — callers observe exactly the old semantics, just without the loop
  * pinned.
+ *
+ * PERSIST-1 / PERSIST-4 self-heal: `embed` may change WHICH provider it delegates to across the
+ * life of one `SoulStore` (`engineRoot`'s embed closure now reads the live process-wide provider
+ * on every call, so a sandbox built during the fastembed boot warm-up upgrades the moment warm-up
+ * finishes, instead of being pinned to the deterministic fallback forever — the PERSIST-4 race). A
+ * provider change means a houseguest's index can suddenly see a vector of a different dimension
+ * than the one already indexed; `VectorIndex.upsert` is contractually required to THROW
+ * `VectorDimMismatchError` rather than silently mix spaces (PERSIST-1). `indexOne` catches exactly
+ * that error and self-heals: it discards the stale index and re-embeds the houseguest's WHOLE
+ * memory history through the CURRENT embed function before retrying, so the index converges back
+ * to one consistent space instead of ever holding two. This is a rare, one-time-per-transition
+ * event (at most a couple of times per game), so the synchronous re-embed burst is an accepted
+ * trade against the alternative — a permanently corrupted or permanently frozen index.
  */
 export class SoulStore implements SoulProvider {
   // ── The ONE shared breathing lane (G8 spacing; G12 hoisted process-wide) ──────
@@ -131,9 +144,55 @@ export class SoulStore implements SoulProvider {
   private indexOne(hg: EntityId, mem: Memory): void {
     try {
       this.indexFor(hg).upsert(mem.id, this.embed(mem.content), { content: mem.content });
-    } catch {
-      // Vectors are derived state: a failed embed only degrades recall for this memory
-      // (a restart re-derives every index); it must never crash the drain loop.
+    } catch (e) {
+      if (e instanceof VectorDimMismatchError) {
+        // PERSIST-1/PERSIST-4: the embed provider changed space mid-life for this houseguest
+        // (a fastembed warm-up upgrade or a mid-process degrade). Rebuild THIS houseguest's
+        // index from the authoritative narrative memories in the NEW space, then retry once —
+        // self-healing back to one consistent space instead of ever comparing across two.
+        console.error(
+          `[orwell] soul index for ${hg} hit a vector-space change (${e.message}); rebuilding this houseguest's index in the current space so recall never mixes dimensions`,
+        );
+        this.rebuildIndexFor(hg);
+        try {
+          this.indexFor(hg).upsert(mem.id, this.embed(mem.content), { content: mem.content });
+        } catch (e2) {
+          console.error(
+            `[orwell] soul index upsert failed for ${hg} even after a rebuild: ${e2 instanceof Error ? e2.message : String(e2)}`,
+          );
+        }
+      } else {
+        // Vectors are derived state: a failed embed only degrades recall for this memory
+        // (a restart re-derives every index); it must never crash the drain loop. Still
+        // surfaced loudly (PERSIST-6) so an operator can see recall silently degrading.
+        console.error(
+          `[orwell] soul index upsert failed for ${hg}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Rebuild `hg`'s per-houseguest index from scratch, re-embedding every memory in the
+   * AUTHORITATIVE `soul.memories` list (never touched by this — 0007) through the CURRENT embed
+   * function. Used to self-heal a vector-space transition (PERSIST-1/PERSIST-4): mirrors what a
+   * full restart already does process-wide (`rebuildSoulIndex` in `GameSessionAdapter.restore`),
+   * scoped to just the one houseguest that actually hit a dimension mismatch.
+   */
+  private rebuildIndexFor(hg: EntityId): void {
+    this.indexes.delete(hg);
+    const soul = this.souls.get(hg);
+    if (!soul) return;
+    const fresh = this.makeIndex();
+    this.indexes.set(hg, fresh);
+    for (const m of soul.memories) {
+      try {
+        fresh.upsert(m.id, this.embed(m.content), { content: m.content });
+      } catch (e) {
+        console.error(
+          `[orwell] soul index rebuild failed for ${hg}/${m.id}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
     }
   }
 

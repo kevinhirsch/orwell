@@ -45,8 +45,36 @@ export interface ConsequenceDescriptor {
     /** RELATIVE weight only (NOT a magnitude) → a bounded, clamped multiplier on the engine's base. */
     emphasis?: ConsequenceEmphasis;
   }>;
+  /**
+   * THIRD-PARTY proposals (Phase 1 of "the player can play offense"): `holder`'s hidden opinion of
+   * `about` moves — the classic "I pulled Lorenzo aside and floated that Maeve is the bigger threat."
+   * Honored ONLY when `holder` actually WITNESSED this scene (I3/Vault Wall — a belief can only form
+   * from what was witnessed; an absent holder's entry is silently dropped, never minting an off-screen
+   * read). The engine still owns the amount (anti-sycophancy #3): it trust-gates the fold against
+   * `holder`'s read of the initiator and may FAIL or BACKFIRE (I2 — never an auto-success lever). See
+   * `ThirdPartyConsequence` + `src/engine/consequence.ts`'s `foldThirdPartyConsequence`.
+   */
+  aboutEdges?: ThirdPartyConsequence[];
   /** Why, grounded in the scene — RECORDED (open-set content), NEVER scored into the magnitude. */
   rationale?: string;
+}
+
+/**
+ * A per-edge THIRD-PARTY consequence PROPOSAL (Phase 1 of the player-offense work, layered on ADR
+ * 0005). Unlike `edges` (whose opinion of the INITIATOR moves), this names a completely separate
+ * directed edge: `holder`'s hidden opinion of `about`. The caller/LLM proposes WHICH edge moves, in
+ * WHICH direction, with what RELATIVE emphasis — the engine still owns the amount, gates it on
+ * `holder` having actually witnessed the scene, and may fail/backfire rather than auto-succeed.
+ */
+export interface ThirdPartyConsequence {
+  /** Who the player/initiator is actually talking to — MUST be a witness of this scene (I3). */
+  holder: EntityId;
+  /** The third party whose standing with `holder` is being pitched (must differ from holder/initiator). */
+  about: EntityId;
+  /** Which signal(s) move and their sign — the SAME closed `EdgeSignals` space as `edges`. */
+  direction: ConsequenceDirection;
+  /** RELATIVE weight only (NOT a magnitude) → a bounded, clamped multiplier on the engine's base. */
+  emphasis?: ConsequenceEmphasis;
 }
 
 /**
