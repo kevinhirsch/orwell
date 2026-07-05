@@ -13,6 +13,7 @@ import type {
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView,
   StateDeltaView, DeltaEventView,
+  BehavioralFlags,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
@@ -5033,6 +5034,40 @@ export class GameSessionAdapter implements GameSession {
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }
+
+  /**
+   * B2 (2026-07-05 activation lane) — the single God-Mode dial for every "living house" behavioral-
+   * fidelity layer that ships opt-in behind its own `ORWELL_*` env flag. Mirrors `setTimeOfDay` (ADR
+   * 0006): each named field flips ONE layer at runtime — no engine restart — and an absent field
+   * leaves that layer's current setting (env default or a prior override) untouched. Three of the six
+   * are per-session instance state (campaigns/trajectories/juryHouse — the composition layer wires one
+   * delegate per sandbox); the other two ride the SAME process-global override pattern `setTimeOfDay`
+   * and `setSeededTieSurfacingEnabled` already use (secretPacing/seededTieSurfacing), so this method
+   * fans out to whichever mechanism each flag actually uses — the caller never needs to know which.
+   * Vault-free by construction (every layer is calibration-proven-neutral-when-off; no Vault handle,
+   * no hidden value crosses).
+   */
+  setBehavioralFlags(flags: BehavioralFlags): void {
+    if (flags.campaigns !== undefined) this.campaignsEnabled = flags.campaigns;
+    if (flags.trajectories !== undefined) this.trajectoriesEnabled = flags.trajectories;
+    if (flags.triggers !== undefined) this.triggersEnabled = flags.triggers;
+    if (flags.juryHouse !== undefined) this.juryHouseEnabled = flags.juryHouse;
+    if (flags.secretPacing !== undefined) GameSessionAdapter.secretPacingOverride = flags.secretPacing;
+    if (flags.seededTieSurfacing !== undefined) GameSessionAdapter.seededTieSurfacingOverride = flags.seededTieSurfacing;
+  }
+
+  /** The CURRENT resolved state of every B2 behavioral flag (env default or override) — Vault-free,
+   *  admin-visible read-side of `setBehavioralFlags` so the FE dial can render on/off correctly. */
+  behavioralFlagsSnapshot(): Required<BehavioralFlags> {
+    return {
+      campaigns: this.campaignsEnabled,
+      trajectories: this.trajectoriesEnabled,
+      triggers: this.triggersEnabled,
+      secretPacing: this.secretPacingEnabled,
+      juryHouse: this.juryHouseEnabled,
+      seededTieSurfacing: this.seededTieSurfacingEnabled,
+    };
+  }
 
   /** Turn the NPC competition-intent layer on/off (0006b). Off by default — the calibration harness leaves it off. */
   setCompIntentEnabled(on: boolean): void { this.compIntentEnabled = on; }

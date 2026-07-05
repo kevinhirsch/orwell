@@ -468,6 +468,19 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 | `GIT_TOKEN` | — | the deploy PAT (private repo; → `data/.env`, never committed) |
 | `ANTHROPIC_API_KEY` / `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |
 
+**Behavioral-fidelity flags (the "living house" layers).** The installer writes these into `data/.env`
+so a stock box runs the full social texture — each is an opt-in, calibration-neutral-when-off engine
+layer, and all five + campaigns were heavy-sim'd ON together (juryReach band + calibrationGradient
+active≥passive both hold): `ORWELL_CAMPAIGNS` (0085 NPC campaigns/scramble), `ORWELL_COMP_INTENT` (0006b
+compete/throw/play-safe), `ORWELL_TRAJECTORIES` (0087 warming/cooling arcs), `ORWELL_TRIGGERS` (0091
+secret→house-event eruptions), `ORWELL_SECRET_PACING` (0092 paced secret drip), `ORWELL_JURY_HOUSE`
+(0100 jury grudge book), `ORWELL_SEEDED_TIE_SURFACING` (0059 §5 pre-show ties surfacing). Each defaults
+**OFF in code** (so the seeded calibration gates stay byte-identical) and **ON in the deploy**. The
+engine's `GET /health` reports the live set in a `flags` block, and `orwell doctor` prints an
+`info — behavioral flags ON: …` line. Admins can flip any layer at runtime — no restart — from the
+God-Mode **setBehavioralFlags** dial (overrides the env default per-sandbox). ADR 0006's
+`ORWELL_TIME_OF_DAY` clock stays its own separate opt-in.
+
 ```bash
 # fully non-interactive example (the 4 vCPU / 8 GB baseline is the default — shown here explicitly)
 export GIT_TOKEN=github_pat_xxx

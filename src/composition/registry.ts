@@ -594,6 +594,13 @@ export class GameSessionRegistry {
     // — a process-global override on the engine adapter (no restart). The composition layer is the legal
     // seam to reach the adapter (the OUTWARD admin surface never imports it; dependency-cruiser holds).
     sb.admin.setTimeOfDayDelegate((enabled) => GameSessionAdapter.setTimeOfDayEnabled(enabled));
+    // B2 (2026-07-05 activation lane): the God-Mode dial for the "living house" behavioral-fidelity
+    // layers — a per-sandbox delegate reaching THIS user's session, exactly like `setFastForwardProvider`
+    // above (never the static/process-global pattern `setTimeOfDay` uses, since campaigns/trajectories/
+    // juryHouse are per-session instance state — `setBehavioralFlags` itself owns the fan-out to whichever
+    // mechanism each individual flag actually uses).
+    sb.admin.setBehavioralFlagsDelegate((flags) => sb.session.setBehavioralFlags(flags));
+    sb.admin.setBehavioralFlagsProvider(() => sb.session.behavioralFlagsSnapshot());
     sb.syncAdmin();
   }
 
