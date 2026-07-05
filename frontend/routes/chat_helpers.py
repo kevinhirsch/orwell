@@ -53,6 +53,18 @@ _GAME_WAS_ACTIVE: set = set()
 # in the SAME session plays as the premiere, not as a return.
 _SESSION_GAME_FRAMED: set = set()
 
+# 0013 §5 / PG-14 / PS-4 — the producer's Diary-Room INVITATION dedup. The engine's
+# `producerPrompt` (now live-wired: `GameStateView.diaryRoomInvite`) marks a dramatic beat
+# (nomination / veto ceremony / eviction) where the producers may pull the player aside. A
+# dramatic beat spans MANY player turns (an eviction reveal is ~10), so we invite ONCE per
+# (game, beat) and never again for that same beat — an invitation, not a per-turn nag. Keyed by
+# the game key → the set of already-invited beat keys; cleared whenever the game goes inactive
+# (reset / new season) so a fresh season invites cleanly. Process-local; a restart just re-invites
+# once. The invitation NEVER opens a pathway to any NPC — DR content stays player-OOC (the wall in
+# `src/engine/diaryRoom.ts` is structural and untouched by this framing).
+_DR_INVITED_BEATS: dict = {}
+
+
 # ADR 0006: time-of-day is a PROCESS-GLOBAL engine flag (setTimeOfDay flips a static). The boot
 # re-apply (app.py) cannot run in multiuser mode — a userless admin call is refused, and setTimeOfDay
 # is not a sandbox-creating tool, so at boot there is no user/sandbox to route it through. Instead we
@@ -561,6 +573,35 @@ def _premiere_progress_directive(premiere) -> Optional[str]:
         "If the player reaches for a ceremony beat, redirect them WARMLY back to meeting the house and "
         "ALWAYS name how many are left (and who) so they have a concrete next step — never gate them "
         "with a vague 'not yet'."
+    )
+
+
+def _diary_room_invite_directive(invite) -> Optional[str]:
+    """0013 §5 / PG-14 / PS-4 — the producer's Diary-Room INVITATION at a dramatic beat.
+
+    The engine's `producerPrompt` was built to have the producers "gently pull the player aside" at
+    natural dramatic beats (a nomination, a veto ceremony, an eviction) — and it had ZERO live callers,
+    so that signature Big Brother backstage ritual never fired. `GameSessionAdapter.view()` now wires it
+    into `GameStateView.diaryRoomInvite`; this turns that flag into a one-shot producer aside the model
+    voices, so the player is proactively invited into the Diary Room to reflect.
+
+    Returns None when the engine sent no invite (every routine beat), leaving the turn framed exactly
+    as before. The invite is an INVITATION, never a forced stop, and — the load-bearing guarantee —
+    it opens NO pathway to any NPC: the Diary Room is a player-level, OUT-OF-CHARACTER channel whose
+    content is the player's own knowledge and reaches no houseguest (the wall is structural in the
+    engine — this text must never instruct otherwise). It is explicitly NOT a decision/vote prompt, so
+    it never reopens or re-collects a ceremony the engine already staged."""
+    if not isinstance(invite, dict) or not invite.get("invite"):
+        return None
+    return (
+        "DIARY-ROOM INVITATION (offer this ONCE, lightly, then let it go): the story has just turned, "
+        "and — quietly, from OUTSIDE the fiction, in the producers' own voice — invite the player to "
+        "step into the Diary Room to talk it through, if they want to. This is a soft, optional aside, "
+        "NOT an interruption and NOT a decision or a vote: do not stop the scene, do not require it, and "
+        "do not reopen any ceremony the game has already staged. If the player declines or ignores it, "
+        "move on without pressing. The Diary Room is the player's PRIVATE, out-of-character space — "
+        "nothing said there ever reaches any houseguest, so never treat a Diary-Room confession as "
+        "something the house could learn or react to."
     )
 
 
@@ -2851,6 +2892,22 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _prem
         except Exception as e:
             logger.warning("[orwell] premiere progress framing skipped for user=%s: %s", _gkey, e)
+        # 0013 §5 / PG-14 / PS-4 — the producer's Diary-Room INVITATION. The engine marks a dramatic
+        # beat via `diaryRoomInvite`; invite the player in ONCE per (game, beat) — a dramatic beat spans
+        # many turns, so we dedup on (week, moment) so it's an invitation, not a per-turn nag. Vault-free
+        # and OOC-preserving (the directive never opens a DR→NPC pathway). Best-effort / fail-open.
+        try:
+            _dr_invite = game_state.get("diaryRoomInvite")
+            if isinstance(_dr_invite, dict) and _dr_invite.get("invite"):
+                _dr_beat_key = (game_state.get("week"), game_state.get("moment"))
+                _invited = _DR_INVITED_BEATS.setdefault(_gkey, set())
+                if _dr_beat_key not in _invited:
+                    _dr_dir = _diary_room_invite_directive(_dr_invite)
+                    if _dr_dir:
+                        gm_prompt = gm_prompt + "\n\n" + _dr_dir
+                        _invited.add(_dr_beat_key)
+        except Exception as e:
+            logger.warning("[orwell] diary-room invite framing skipped for user=%s: %s", _gkey, e)
         # The BEAT-SIGNATURE CHECKPOINT (layer 2 of the desync spine): FIRST consume any
         # re-ground directive the previous turn's post-turn check stashed for this user (the
         # model narrated an outcome the engine never committed — pin it back to the board), then
@@ -2901,6 +2958,7 @@ async def apply_game_framing(
     else:
         _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
         clear_social_runway(user)  # no live season — drop any held runway so a new one starts clean
+        _DR_INVITED_BEATS.pop(_gkey, None)  # 0013 §5: a fresh season re-invites cleanly
         if game_build:
             # The game IS the product but this sandbox has no season: pre-game, the chat IS
             # the producer's casting interview (0050). Fetch the engine's interview moment
