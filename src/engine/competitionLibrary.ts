@@ -151,7 +151,19 @@ export const COMPETITION_LIBRARY: CompetitionDef[] = [
   },
 ];
 
-/** How many most-recent draws (per phase) the next draw must avoid — no immediate repeats. */
+/**
+ * How many most-recent draws (per phase) the next draw must avoid — no immediate repeats.
+ *
+ * NOTE (COMP-4/BB-8, audit 2026-07-03): widening this (e.g. to 3) would meaningfully cut short-
+ * interval verbatim repeats over an 11-week season, but it changes WHICH def a fixed seed draws each
+ * week — and because the drawn def's `type` selects the resolution stat, that can flip an HOH/veto
+ * winner for a fixed seed, cascading into a different nomination/eviction trajectory. Confirmed live:
+ * bumping this to 3 broke the single-fixed-seed `emergent_blocs` BDD scenario (0043) by changing which
+ * seed held HOH. Deferred — needs either a seed-tolerant rewrite of the affected fixed-seed tests or a
+ * dedicated calibration re-measurement pass, not a one-line bump. See docs/audits/2026-07-03-final-
+ * pre-ship-audit/lanes/comp-variety.md COMP-4 for the fuller variety options (growing the pool is
+ * lower-risk than narrowing the repeat window).
+ */
 export const NO_REPEAT_WINDOW = 1;
 
 /** Library lookup by id (e.g. a deferred veto resuming the comp it already drew). */
