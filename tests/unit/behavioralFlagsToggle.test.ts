@@ -22,7 +22,7 @@ describe("B2 — GameSessionAdapter.setBehavioralFlags / behavioralFlagsSnapshot
     const s = new GameSessionAdapter();
     expect(s.behavioralFlagsSnapshot()).toEqual({
       campaigns: false, trajectories: false, triggers: false,
-      secretPacing: false, juryHouse: false, seededTieSurfacing: false,
+      secretPacing: false, juryHouse: false, seededTieSurfacing: false, mythMaking: false,
     });
   });
 
@@ -31,13 +31,13 @@ describe("B2 — GameSessionAdapter.setBehavioralFlags / behavioralFlagsSnapshot
     s.setBehavioralFlags({ campaigns: true, juryHouse: true });
     expect(s.behavioralFlagsSnapshot()).toEqual({
       campaigns: true, trajectories: false, triggers: false,
-      secretPacing: false, juryHouse: true, seededTieSurfacing: false,
+      secretPacing: false, juryHouse: true, seededTieSurfacing: false, mythMaking: false,
     });
     // A second, disjoint patch doesn't clobber the first patch's flags.
     s.setBehavioralFlags({ trajectories: true });
     expect(s.behavioralFlagsSnapshot()).toEqual({
       campaigns: true, trajectories: true, triggers: false,
-      secretPacing: false, juryHouse: true, seededTieSurfacing: false,
+      secretPacing: false, juryHouse: true, seededTieSurfacing: false, mythMaking: false,
     });
   });
 
@@ -45,11 +45,11 @@ describe("B2 — GameSessionAdapter.setBehavioralFlags / behavioralFlagsSnapshot
     const s = new GameSessionAdapter();
     s.setBehavioralFlags({
       campaigns: true, trajectories: true, triggers: true,
-      secretPacing: true, juryHouse: true, seededTieSurfacing: true,
+      secretPacing: true, juryHouse: true, seededTieSurfacing: true, mythMaking: true,
     });
     expect(s.behavioralFlagsSnapshot()).toEqual({
       campaigns: true, trajectories: true, triggers: true,
-      secretPacing: true, juryHouse: true, seededTieSurfacing: true,
+      secretPacing: true, juryHouse: true, seededTieSurfacing: true, mythMaking: true,
     });
   });
 });
@@ -64,13 +64,13 @@ describe("B2 — the admin setBehavioralFlags/getBehavioralFlags tools (composit
     sb.admin.setBehavioralFlags({ campaigns: true, trajectories: true });
     expect(sb.admin.behavioralFlags()).toEqual({
       campaigns: true, trajectories: true, triggers: false,
-      secretPacing: false, juryHouse: false, seededTieSurfacing: false,
+      secretPacing: false, juryHouse: false, seededTieSurfacing: false, mythMaking: false,
     });
     // An absent field on a later call leaves the earlier flip in place.
     sb.admin.setBehavioralFlags({ juryHouse: true });
     expect(sb.admin.behavioralFlags()).toEqual({
       campaigns: true, trajectories: true, triggers: false,
-      secretPacing: false, juryHouse: true, seededTieSurfacing: false,
+      secretPacing: false, juryHouse: true, seededTieSurfacing: false, mythMaking: false,
     });
   });
 
@@ -101,7 +101,7 @@ describe("B2 — the admin setBehavioralFlags/getBehavioralFlags tools (composit
     const sb = reg.sandboxFor("behavioral-flags-fresh-user");
     expect(sb.admin.behavioralFlags()).toEqual({
       campaigns: false, trajectories: false, triggers: false,
-      secretPacing: false, juryHouse: false, seededTieSurfacing: false,
+      secretPacing: false, juryHouse: false, seededTieSurfacing: false, mythMaking: false,
     });
   });
 });

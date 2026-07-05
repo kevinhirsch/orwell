@@ -53,6 +53,7 @@ function bootFlags(): Record<string, boolean> {
     secretPacing: strict(process.env.ORWELL_SECRET_PACING),
     juryHouse: strict(process.env.ORWELL_JURY_HOUSE),
     seededTieSurfacing: loose(process.env.ORWELL_SEEDED_TIE_SURFACING),
+    mythMaking: strict(process.env.ORWELL_MYTH_MAKING),
     compIntent: strict(process.env.ORWELL_COMP_INTENT),
     voteDeduction: strict(process.env.ORWELL_VOTE_DEDUCTION),
     timeOfDay: loose(process.env.ORWELL_TIME_OF_DAY),

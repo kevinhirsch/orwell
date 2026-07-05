@@ -1243,6 +1243,8 @@ export interface BehavioralFlags {
   juryHouse?: boolean;
   /** 0059 §5 — organic surfacing of seeded pre-game ties as the pair's live bond genuinely warms. */
   seededTieSurfacing?: boolean;
+  /** 0101 — NPC myth-making (the house turns a rare, notable player act into a spreading legend). */
+  mythMaking?: boolean;
 }
 
 /** A player's answer to the current `PendingDecisionView`. */
