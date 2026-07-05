@@ -34,17 +34,43 @@ export interface EngineCore {
 
 /**
  * Process-wide runtime embedding override (ADR 0004 / E86a). The fastembed provider is a
- * process SINGLETON (one ONNX worker serves every sandbox), warmed up once at boot by
- * main.ts and injected here BEFORE any sandbox is built — so every index in the process
- * lives in one vector space (mixing spaces inside an index breaks cosine recall; restarts
- * re-derive all indexes via rebuildSoulIndex, so the space may differ per process, never
- * within one). Tests and any environment without the model never set it and compose the
- * deterministic fake — exactly the ADR's fallback semantics. Must be a SYNC embedder
- * (the SoulStore seam is synchronous by design).
+ * process SINGLETON (one ONNX worker serves every sandbox), warmed up once at boot by main.ts.
+ * Tests and any environment without the model never set it and compose the deterministic fake
+ * — exactly the ADR's fallback semantics. Must be a SYNC embedder (the SoulStore seam is
+ * synchronous by design).
+ *
+ * PERSIST-4 (boot-time pin race): main.ts binds the HTTP server and starts answering requests
+ * BEFORE `setRuntimeEmbedding` ever runs — the warm-up is deliberately deferred past `/health`
+ * coming up (prod incident 2026-06-19: a cold/blocked model must never delay boot). That means a
+ * sandbox CAN be built during the up-to-45s warm-up window. `buildEngineCore` used to resolve
+ * `runtimeEmbedding ?? new DeterministicEmbedding()` ONCE, at build time, and close over that
+ * value forever — so an early sandbox was pinned to the deterministic fallback for its entire
+ * in-memory life, even after fastembed finished warming up moments later, while a sandbox built
+ * a moment after warm-up got the real provider: two sandboxes in the SAME process, silently
+ * disagreeing about which space they embed into, purely by timing.
+ *
+ * The fix: every `SoulStore` reads `runtimeEmbedding` LIVE, on every embed call, via the
+ * `currentEmbedding` helper below — there is exactly one process-wide answer to "what's the
+ * provider right now," consulted uniformly by every sandbox regardless of when it was built, so
+ * the fastembed upgrade (and any later mid-process degrade) applies uniformly instead of forking
+ * per-sandbox. A provider change can still mean a given houseguest's index sees a new vector
+ * dimension mid-life; `SoulStore` closes that gap (PERSIST-1) by treating a `VectorDimMismatchError`
+ * from `VectorIndex.upsert` as a signal to rebuild that houseguest's index in the new space
+ * rather than ever comparing across two.
  */
 let runtimeEmbedding: { embed(text: string): number[] } | null = null;
 export function setRuntimeEmbedding(provider: { embed(text: string): number[] } | null): void {
   runtimeEmbedding = provider;
+}
+
+/** The sanctioned whole-process fallback (ADR 0004). `DeterministicEmbedding` is a pure function
+ *  of its input text with no instance state, so any number of instances behave identically —
+ *  kept as one constant purely so "the fallback" is provably a single, stable value. */
+const FALLBACK_EMBEDDING: { embed(text: string): number[] } = new DeterministicEmbedding();
+
+/** The live, current process-wide embedding provider — read fresh on every call (PERSIST-4). */
+function currentEmbedding(text: string): number[] {
+  return (runtimeEmbedding ?? FALLBACK_EMBEDDING).embed(text);
 }
 
 export function buildEngineCore(): EngineCore {
@@ -52,18 +78,12 @@ export function buildEngineCore(): EngineCore {
   const vault = new InMemoryVaultStore();
   const knowledge = new InMemoryKnowledgeService(events);
   const relationships = new RelationshipModel(0.5);
-  // The injected runtime provider (fastembed, ADR 0004) when main.ts warmed one up at boot;
-  // otherwise the deterministic offline embedding (0024) — reproducible seeded recall, and
-  // the sanctioned whole-process fallback when the real model is unavailable.
-  const embedding = runtimeEmbedding ?? new DeterministicEmbedding();
   // E63: `ORWELL_STORE=sqlite` backs each houseguest's recall index with sqlite-vec (SYNCHRONOUS, so
   // the SoulStore seam stays sync — the fastembed bridge + G8/G12 breathing lane are unaffected). One
   // shared in-process vector db PER SANDBOX (each `buildEngineCore` call), so cross-user isolation
   // holds. DEFAULT unset ⇒ the in-memory cosine index (today's behavior — unchanged).
   const makeIndex: (() => VectorIndex) | undefined =
     (process.env.ORWELL_STORE ?? "").trim().toLowerCase() === "sqlite" ? sqliteVectorIndexFactory() : undefined;
-  const soul = makeIndex
-    ? new SoulStore((text) => embedding.embed(text), makeIndex)
-    : new SoulStore((text) => embedding.embed(text));
+  const soul = makeIndex ? new SoulStore(currentEmbedding, makeIndex) : new SoulStore(currentEmbedding);
   return { events, vault, knowledge, relationships, soul };
 }
