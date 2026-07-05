@@ -75,7 +75,7 @@ import { RELATIONSHIP_CONSTANTS } from "./relationshipConstants";
 import { maybeFireTwist } from "./reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
 import { drawCompetition, competitionById } from "./competitionLibrary";
-import type { CompetitionDef, CompetitionPhase } from "./competitionLibrary";
+import type { CompetitionDef, CompetitionFormat, CompetitionPhase } from "./competitionLibrary";
 import {
   phaseForHour, bedtimeDepthFor, restDeficitForDepth, DAY_START, WAKE_HOUR, DAY_END_HOUR, type TimeOfDay,
 } from "./timeOfDay";
@@ -617,23 +617,19 @@ function stagedEvictionBatchSize(voteCount: number): number {
 
 /**
  * The anonymized summary of the ballots read in ONE batched reveal round (E12: names the nominee a
- * ballot evicts, NEVER the voter, and never a cumulative tally or the evictee). One ballot reads as the
- * familiar "a vote to evict X"; a batch reads "N votes to evict X" per nominee touched this round.
+ * ballot evicts, NEVER the voter, and never a cumulative tally or the evictee). Each ballot in the
+ * batch reads individually, IN REVEAL ORDER — "a vote to evict X. a vote to evict Y. a vote to evict
+ * X." — rather than pre-summed into "N votes to evict X" (BB-11, audit 2026-07-03): a live vote reveal
+ * is read one card at a time, building suspense as the count grows; a pre-aggregated clump reads like
+ * a raffle result and invited the narrator to just recap the total instead of playing the reveal.
  */
 function batchedRevealContent(e: EvictionProgress, from: number, to: number): string {
-  const counts: Record<EntityId, number> = {};
+  const parts: string[] = [];
   for (let i = from; i < to; i++) {
     const votedFor = e.voteOf[e.revealOrder[i]!]!;
-    counts[votedFor] = (counts[votedFor] ?? 0) + 1;
+    parts.push(`a vote to evict ${votedFor}.`);
   }
-  // Preserve the nominee order for a stable, deterministic phrasing.
-  const parts: string[] = [];
-  for (const nominee of e.nominees) {
-    const n = counts[nominee];
-    if (!n) continue;
-    parts.push(n === 1 ? `a vote to evict ${nominee}` : `${n} votes to evict ${nominee}`);
-  }
-  return parts.join(", ");
+  return parts.join(" ");
 }
 
 /**
@@ -645,6 +641,37 @@ function batchedRevealContent(e: EvictionProgress, from: number, to: number): st
  * engine beat/RNG stream is byte-identical to the non-staged model (it consumes NO randomness here).
  * When one houseguest remains, crown them (HOH / veto holder) and transition the beat.
  */
+/**
+ * Format-appropriate elimination-round vocabulary (COMP-3/BB-9, audit 2026-07-03): every staged comp
+ * previously described its drops with the SAME wall-endurance grammar ("X is eliminated") regardless
+ * of the drawn def's format — a race, a scavenger hunt, and a trivia buzzer all read identically even
+ * though `CompetitionFormat` was already carried on every def. PRESENTATION ONLY: only the verb
+ * changes; the drop order, the winner, and the rng stream are byte-identical (the
+ * `stagedTrajectoryNeutral` guard still holds — this never touches `dropOrder`/`eliminated`/rng).
+ */
+const ELIMINATION_VERB: Record<CompetitionFormat, { one: string; many: string }> = {
+  endurance: { one: "drops", many: "drop" },
+  skill: { one: "falls behind and is out", many: "fall behind and are out" },
+  quiz: { one: "answers wrong and is out", many: "answer wrong and are out" },
+  puzzle: { one: "comes up short and is out", many: "come up short and are out" },
+  crapshoot: { one: "comes up empty-handed and is out", many: "come up empty-handed and are out" },
+  social: { one: "misreads the room and is out", many: "misread the room and are out" },
+};
+
+/** The per-round drop content, format-varied when the drawn def is known (falls back to the original
+ *  "is/are eliminated" phrasing when it isn't — e.g. an older persisted save with no compHistory entry). */
+function eliminationContent(dropped: readonly EntityId[], stillInCount: number, format?: CompetitionFormat): string {
+  const verb = format ? ELIMINATION_VERB[format] : undefined;
+  if (!verb) {
+    return dropped.length === 1
+      ? `${dropped[0]} is eliminated; ${stillInCount} remain`
+      : `${dropped.join(", ")} are eliminated; ${stillInCount} remain`;
+  }
+  return dropped.length === 1
+    ? `${dropped[0]} ${verb.one}; ${stillInCount} remain`
+    : `${dropped.join(", ")} ${verb.many}; ${stillInCount} remain`;
+}
+
 function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | null {
   const c = s.competition!;
   // The crowned winner stands alone — crown them.
@@ -676,9 +703,7 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
     // `comp-elimination` falls through every commit side-effect switch (no fold, no soul inflection, no
     // confessional, no rng) — so a reveal is inert to the game state, keeping the trajectory unchanged.
     beat: "comp-elimination",
-    content: droppedThisRound.length === 1
-      ? `${droppedThisRound[0]} is eliminated; ${c.stillIn.length} remain`
-      : `${droppedThisRound.join(", ")} are eliminated; ${c.stillIn.length} remain`,
+    content: eliminationContent(droppedThisRound, c.stillIn.length, competitionDefFor(s, c)?.format),
     participants: [...droppedThisRound, ...c.stillIn],
   };
 }
@@ -692,6 +717,13 @@ function crownCompetition(s: LiveSeasonState): BeatEvent {
   s.competition = undefined;
   s.compIntent = undefined;
   creditResume(s, winner); // a broadcast win — the jury's gameRespect read counts it (2026-06-11)
+  // NOTE (COMP-13, audit 2026-07-03): we deliberately do NOT append the drawn def's name to this
+  // beat's content — `hoh-competition`/`veto-competition` are TRAJECTORY_BEATS in
+  // tests/unit/stagedTrajectoryNeutral.test.ts, which asserts byte-identical ceremony CONTENT against
+  // a frozen pre-#395 baseline fixture (tests/unit/fixtures/liveSeasonBaseline.ts) that never carries
+  // the name. The comp's name already reaches the model via `runCompetition`/`peekCompetition`
+  // (CompetitionPeek.def.name) earlier in the same turn; the `veto-draw` beat (below, not a
+  // TRAJECTORY_BEAT) and the per-round `comp-elimination` verb DO carry the drawn def's flavor.
   if (c.comp === "hoh-competition") {
     const finalThree = s.active.length === 3;
     s.hoh = winner;
@@ -735,8 +767,10 @@ function resolveVetoDraw(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
     // to name the sixth. The candidates were snapshotted AFTER the full draw (C1).
     s.pending = { kind: "houseguests-choice", by: ctx.player, options: hc.candidates };
     return {
+      // COMP-13 (audit 2026-07-03): name the drawn comp in its own ground-truth content — `veto-draw`
+      // is not a `TRAJECTORY_BEATS` member (stagedTrajectoryNeutral.test.ts), so this is content-safe.
       beat: "veto-draw",
-      content: `the veto players are drawn: ${draw.participants.join(", ")} — ${hc.holder} draws Houseguest's Choice and will name the sixth houseguest to play`,
+      content: `the veto players are drawn for ${def.name}: ${draw.participants.join(", ")} — ${hc.holder} draws Houseguest's Choice and will name the sixth houseguest to play`,
       participants: [...draw.participants],
     };
   }
@@ -745,7 +779,7 @@ function resolveVetoDraw(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
     : "";
   return {
     beat: "veto-draw",
-    content: `the veto players are drawn: ${draw.participants.join(", ")}${hcNote}`,
+    content: `the veto players are drawn for ${def.name}: ${draw.participants.join(", ")}${hcNote}`,
     participants: [...draw.participants],
   };
 }
