@@ -661,7 +661,14 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "('a day passes', 'the next morning') and do NOT narrate it in the past as a thing that 'already " +
     "wrapped' — the player lives this ceremony as it happens. When an NPC holds the power, voice their " +
     "ceremony and the table's reactions; the player watches it unfold. Then move forward from the room the " +
-    "gathering left — never stitch it over as if it never happened.",
+    "gathering left — never stitch it over as if it never happened. " +
+    "HIT THE SHOW'S OWN RITUAL CADENCE, IN THE HOH'S VOICE — never a memorized script, always the ACTUAL " +
+    "two names the game gave you: the house sits together, the HOH turns a key for each safe houseguest in " +
+    "turn, and only when the two without keys remain does the HOH say their names aloud, in this format — " +
+    "'I've nominated you, and you, for eviction' — followed by the HOH's own reason, however brief. Real " +
+    "HOHs almost always add some version of 'this is purely strategic, nothing personal' to soften the " +
+    "blow; let THIS HOH reach for that same beat in their own words, not a copy of anyone else's. Close on " +
+    "the two nominees sitting with the news landing.",
   "veto-competition":
     "MOMENT — Power of Veto competition. SIX houseguests play, and WHO plays is DECIDED BY THE " +
     "GAME — the drawn six are in gameStatus (veto.players: HOH + the two nominees + three by chip " +
@@ -682,7 +689,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "so there is nothing to take back. Let the drama of who is and isn't playing breathe.",
   "veto-ceremony":
     "MOMENT — Veto ceremony. The veto holder uses it or not; if used, the HOH names a replacement " +
-    "from the game's legal options. Maximize the suspense of the chess move; you voice the result.",
+    "from the game's legal options. Maximize the suspense of the chess move; you voice the result. " +
+    "PLAY THE SHOW'S OWN VETO-MEETING GRAMMAR, IN EACH VOICE'S OWN WORDS — never a recited script, " +
+    "always the ACTUAL houseguests and the ACTUAL decision the game recorded: gather the house around " +
+    "the veto, let each nominee make their case in their own voice (however brief), then have the veto " +
+    "holder deliver the decision in the classic ceremony phrasing — something in the shape of 'I have " +
+    "decided to use the Power of Veto' or 'I have decided NOT to use the Power of Veto' — before you " +
+    "know which way it went, the holder is asked some version of 'do you wish to use the Power of Veto?' " +
+    "If the veto is used, the HOH then names the replacement nominee ONLY from the game's recorded pick — " +
+    "never invent or guess who — and voice that naming with its own beat of dread. Close the ritual with " +
+    "the ceremony's own sign-off, some version of 'this veto meeting is adjourned,' then let the room's " +
+    "reactions land before moving on.",
   eviction:
     "MOMENT — Eviction. The house votes by SECRET BALLOT and someone walks; the GAME decides the vote " +
     "(HOH breaks ties). The reveal is STAGED: each advanceGame hands you ONE anonymized ballot (\"a " +
@@ -695,6 +712,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "cast it (per-voter attribution unseals only in the post-season retrospective). Play the goodbyes; " +
     "record them with recordInteraction. The HOST is production / the Big Brother voice — NEVER name a " +
     "real-world host or any real person at the door. " +
+    "CLOSE THE REVEAL IN THE SHOW'S OWN GRAMMAR — never a recited script, always the ACTUAL count and " +
+    "name the game just handed you: once the `eviction-result` beat names the evictee, deliver it in the " +
+    "classic host cadence — 'by a vote of <the game's real count>, <the evictee>, you are evicted from " +
+    "the Big Brother house' — using ONLY the tally you actually read out. Before the walk, give the " +
+    "evictee their own beat to say goodbye to the room (some version of 'you have a few seconds to say " +
+    "your goodbyes'), then the door, the hug line, and the house watching them go. " +
     "THE VOTE IS ALREADY IN — THIS IS THE REVEAL, NOT THE BALLOT. By the time you are reading ballots, " +
     "the player's OWN eviction vote has already been cast and recorded; the house has finished voting " +
     "and the game is now WALKING THE REVEAL one ballot per turn. Your only job here is to NARRATE that " +
@@ -753,7 +776,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "vote hasn't happened or that you haven't reached it yet — it is happening now, beat by beat, and the " +
     "game decides the result. When nothing new seems to be coming, call advanceGame: the next jury vote " +
     "(or the crowning) is waiting on the game, never on the player. Voice ONLY the tally and winner the " +
-    "game announces — never invent a margin or a winner.",
+    "game announces — never invent a margin or a winner. " +
+    "CROWN IN THE SHOW'S OWN VOICE — never a recited script, always the ACTUAL name and tally the game " +
+    "just gave you: read each vote one juror at a time, building the count out loud as each one lands, " +
+    "and deliver the crowning in the classic host cadence — 'by a vote of <the game's real tally>, " +
+    "<the winner>, you are the winner of Big Brother' — using ONLY the votes you actually read out, " +
+    "never a number you have not tallied yourself from this reveal.",
   evicted:
     "MOMENT — Evicted (pre-jury). The player has been voted out before the jury formed; their season is " +
     "over. Play the eviction with warmth and finality — the walk-out, the host's send-off, what their " +
