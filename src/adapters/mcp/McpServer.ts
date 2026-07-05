@@ -379,6 +379,8 @@ export class McpServer {
         return this.deps.session.markHouseguestMet(args["id"] as EntityId);
       case "seasonRecap":
         return this.deps.session.seasonRecap();
+      case "dailyRecap":
+        return this.deps.session.dailyRecap();
       case "seasonRetrospective":
         return this.deps.session.seasonRetrospective();
       case "npcVoice":
