@@ -27,6 +27,16 @@ import { isNarrow } from './platform.js';
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
+  // B11 (2026-07-05): the ONE canonical diegetic "production interruption" line for a raw
+  // engine/backend failure the player must never see rendered as machinery text (I9). Originally
+  // authored for the HTTP-error branch below (Orwell #872); now reused verbatim everywhere a hard
+  // failure would otherwise dump `/help`/`[Error: ...]`/"step limit" copy into the narrator's own
+  // message, so every "something broke" moment reads as ONE consistent in-universe interruption —
+  // mirroring the pre-game holding card's voice (`orwellOnboarding.js`, "Big Brother will return…")
+  // and the A2 scene-cutaway line (`frontend/src/agent_loop.py` `_SCENE_CUTAWAY_LINE`) — never a
+  // scattered new string per call site.
+  const _ENGINE_INTERRUPT_LINE =
+    "Big Brother cuts to a brief technical interlude… hang tight, we'll be right back.";
 
   let API_BASE = '';
   let currentAbort = null;
@@ -731,11 +741,20 @@ import { isNarrow } from './platform.js';
       if (assistantNote) addMessage('assistant', assistantNote);
       _releaseSendFlag();
     };
-    const _NO_SESSION_NOTE =
-      'No chat session active. You can:\n\n' +
-      '- Open the model picker in the chat box and pick a model\n' +
-      '- Use the `+` button in the model picker to add a model endpoint\n' +
-      '- Use `/help` to see all available commands';
+    // B11 (2026-07-05) / CA-1, FLOW-1 (Blocker): this fired when the player clicked the engine-down
+    // holding card's OWN "Go in anyway" affordance and then sent a message with no session ever
+    // materializing — previously a raw vendored-chatbot string ("Use `/help`...", "the model
+    // picker", "the `+` button") rendered via `addMessage('assistant', ...)`, i.e. attributed to the
+    // narrator persona itself. In the game build that's the single most damaging possible immersion
+    // break (a first-timer is taught mid-conversation that "Orwell" is a generic chat app). Gate on
+    // isGameBuild(): the game build gets the same canonical diegetic interruption line used for every
+    // other engine-down/error fallback; the general workspace keeps the real, actionable guidance.
+    const _NO_SESSION_NOTE = isGameBuild()
+      ? _ENGINE_INTERRUPT_LINE
+      : ('No chat session active. You can:\n\n' +
+         '- Open the model picker in the chat box and pick a model\n' +
+         '- Use the `+` button in the model picker to add a model endpoint\n' +
+         '- Use `/help` to see all available commands');
 
     // Materialize pending session (deferred from model click) on first message
     if (sessionModule.hasPendingChat && sessionModule.hasPendingChat()) {
@@ -1688,7 +1707,7 @@ import { isNarrow } from './platform.js';
                 // fallback (the agent loop saves a friendly message). Outside the game build (the general
                 // assistant) keep the informative error so misconfig stays debuggable.
                 const errMsg = isGameBuild()
-                  ? "Big Brother cuts to a brief technical interlude… hang tight, we'll be right back."
+                  ? _ENGINE_INTERRUPT_LINE
                   : rawErrMsg;
                 typewriterInto(roundHolder.querySelector('.body'), errMsg);
                 // ADR 0012 (GAP 2): keep the immediate live feedback, but mark the turn so the finally
@@ -2223,9 +2242,11 @@ import { isNarrow } from './platform.js';
                   note.className = 'stopped-indicator rounds-exhausted';
                   const label = document.createElement('span');
                   label.className = 'rounds-exhausted-label';
-                  // B6/MICRO-3: "Reached the N-step limit" names the agent loop's tool-call
-                  // budget directly — a workspace concept with no place mid-scene. Same
-                  // isGameBuild() treatment the sibling error/fallback branches already get.
+                  // B6/B11 / MICRO-3: "Reached the N-step limit" names the agent loop's tool-call
+                  // budget directly — a workspace concept that must never surface while the game build
+                  // is active (it fires mid-ceremony/marquee-scene, exactly when I9 matters most). Gate
+                  // on isGameBuild() — the same treatment the sibling error/fallback branches get; the
+                  // non-game workspace keeps the precise diagnostic.
                   label.textContent = isGameBuild()
                     ? 'Big Brother pauses the tape for a beat — pick up where we left off.'
                     : `Reached the ${json.rounds || ''}-step limit — not finished.`;
@@ -3077,9 +3098,18 @@ import { isNarrow } from './platform.js';
                 if (_isBg) continue;
                 _producedVisibleOutput = true;  // BUG 2: a surfaced error IS visible recourse already
                 if (spinner && spinner.element) spinner.destroy();
+                // B11 (2026-07-05): this is the FEPY-1 (#621) typed mid-stream `error` SSE — a bare
+                // `data: {"error": ...}` frame (no `event: error`, no `status`), so it never reaches
+                // the diegetic-line branch above and previously fell straight through to a raw
+                // `[Error: <upstream message>]` string appended into THIS message's own `.body` —
+                // i.e. rendered as if the narrator itself said it (exactly the I9 violation this fix
+                // closes). Game build: the same canonical interruption line, same treatment
+                // (`.body`, not a separate note) as the sibling branch above. Outside the game build
+                // (the general assistant) keep the raw, informative text for debuggability.
+                const errText = isGameBuild() ? _ENGINE_INTERRUPT_LINE : `[Error: ${json.error}]`;
                 const errDiv = document.createElement('div');
                 errDiv.style.cssText = 'color: var(--color-error); font-style: italic; padding: 4px 0;';
-                errDiv.textContent = `[Error: ${json.error}]`;
+                errDiv.textContent = errText;
                 roundHolder.querySelector('.body').appendChild(errDiv);
                 uiModule.scrollHistory();
               }
