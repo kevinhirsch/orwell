@@ -95,7 +95,11 @@ export class SoulStore implements SoulProvider {
 
   constructor(
     private readonly embed: (text: string) => number[],
-    private readonly makeIndex: () => VectorIndex = () => new InMemoryVectorIndex(),
+    // PERSIST-7: `hg` is threaded through so a sqlite-backed factory can key its table on the
+    // houseguest's stable id (durable across a restart); `freshStart` tells that same factory to
+    // drop any stale on-disk state first when this is a dimension-mismatch self-heal rebuild rather
+    // than an ordinary lazy-create/resume. The in-memory default ignores both — no behavior change.
+    private readonly makeIndex: (hg?: EntityId, freshStart?: boolean) => VectorIndex = () => new InMemoryVectorIndex(),
   ) {}
 
   soulOf(hg: EntityId): Soul {
@@ -106,7 +110,7 @@ export class SoulStore implements SoulProvider {
 
   private indexFor(hg: EntityId): VectorIndex {
     let idx = this.indexes.get(hg);
-    if (!idx) { idx = this.makeIndex(); this.indexes.set(hg, idx); }
+    if (!idx) { idx = this.makeIndex(hg); this.indexes.set(hg, idx); }
     return idx;
   }
 
@@ -177,13 +181,16 @@ export class SoulStore implements SoulProvider {
    * AUTHORITATIVE `soul.memories` list (never touched by this — 0007) through the CURRENT embed
    * function. Used to self-heal a vector-space transition (PERSIST-1/PERSIST-4): mirrors what a
    * full restart already does process-wide (`rebuildSoulIndex` in `GameSessionAdapter.restore`),
-   * scoped to just the one houseguest that actually hit a dimension mismatch.
+   * scoped to just the one houseguest that actually hit a dimension mismatch. `freshStart: true`
+   * tells a name-keyed factory (PERSIST-7's sqlite adapter) to drop this houseguest's stale on-disk
+   * table first — otherwise a durable index would recover the OLD (now-incompatible) dimension from
+   * its persisted metadata and immediately re-throw `VectorDimMismatchError` on every re-embed.
    */
   private rebuildIndexFor(hg: EntityId): void {
     this.indexes.delete(hg);
     const soul = this.souls.get(hg);
     if (!soul) return;
-    const fresh = this.makeIndex();
+    const fresh = this.makeIndex(hg, true);
     this.indexes.set(hg, fresh);
     for (const m of soul.memories) {
       try {

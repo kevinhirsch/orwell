@@ -1489,6 +1489,10 @@ _FORCE_COMP_PHASES = {"hoh-competition", "veto-competition"}
 # advanceGame drips these deterministic beats. (premiere/finale/twist-reveal are deliberately EXCLUDED:
 # they carry their own belts — premiere markHouseguestMet, the finale flow — and are more delicate.)
 _FORCE_ADVANCE_PHASES = {"nominations", "veto-ceremony", "eviction"}
+# J-3 fix — mirrors chat_helpers._SOCIAL_MOMENT (kept as a local literal to avoid an import cycle: this
+# module is imported BY chat_helpers). The framed moment `apply_game_framing` stashes while a social
+# runway holds; see _forced_tool_choice_for_beat's docstring.
+_SOCIAL_HOLD_MOMENT = "social"
 
 
 def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_open: bool):
@@ -1497,7 +1501,7 @@ def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_op
 
     Pure + side-effect-free so it is unit-testable in isolation (the suite stubs the LLM). Inputs:
       • framed_beat_key  — the beat the model is grounded on THIS turn (`_LAST_FRAMED_BEAT_KEY[owner]`,
-        a (week, phase, moment[, pendingKind]) tuple); phase at index 1.
+        a (week, phase, moment[, pendingKind]) tuple); phase at index 1, moment at index 2.
       • turn_tool_names  — the set of engine tool NAMES already fired THIS turn (from tool_events). The
         beat's tool having ALREADY fired this turn ⇒ the guarantee is met ⇒ do NOT re-force (which would
         fight the model on a later round of a multi-round turn).
@@ -1509,12 +1513,31 @@ def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_op
     `"required"`; if runCompetition already previewed but nothing committed → force a named advanceGame
     to COMMIT it (mirrors the reactive _previewed_uncommitted nudge, proactively). A non-comp ceremony
     advance-phase that hasn't advanced yet → force a named advanceGame.
+
+    J-3 fix (ceremony one-beat-per-turn guard, root (a)): `chat_helpers` overrides the framed MOMENT
+    away from the raw `phase` in exactly two cases — the social-runway HOLD (`_hold_for_social`, moment
+    → "social" while `phase` stays whatever unresolved ceremony is next) and the witnessed-ceremony
+    override (`_with_moment(new_state, "nominations")`, moment → "nominations" after the engine has
+    already self-advanced `phase` to the NEXT beat, e.g. "veto-competition" — NARR-7). Forcing off the
+    raw `phase` in either case is phase-blind to the override and re-opens the exact force-march those
+    overrides exist to prevent: a held social beat gets force-advanced past the player's lingering, or a
+    just-witnessed ceremony gets force-dragged toward the NEXT phase's requirement instead of being
+    narrated. So: a "social" moment always suppresses forcing, and a moment that is itself one of the
+    ceremony-advance beats but does NOT match the (already-rolled) phase also suppresses — the model
+    already has everything it needs to narrate that beat; forcing would only chase the phase ahead of it.
     """
     if pending_open:
         return None
     phase = ""
+    moment = ""
     if isinstance(framed_beat_key, (tuple, list)) and len(framed_beat_key) >= 2:
         phase = str(framed_beat_key[1] or "").lower()
+    if isinstance(framed_beat_key, (tuple, list)) and len(framed_beat_key) >= 3:
+        moment = str(framed_beat_key[2] or "").lower()
+    if moment == _SOCIAL_HOLD_MOMENT:
+        return None
+    if moment in _FORCE_ADVANCE_PHASES and moment != phase:
+        return None
     names = turn_tool_names or set()
     if phase in _FORCE_COMP_PHASES:
         # Read the winner first (either runCompetition or advanceGame is valid) …
@@ -1792,11 +1815,20 @@ def _join_casting_labels(items: list) -> str:
 # as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
 # closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
 # A rich, substantive player message is engagement — never nudged.
+#
+# J-3 fix (root c — runway-regex false-positives): this pattern is UNAMBIGUOUS "move the night
+# along" intent ONLY. Bare tokens that recur inside substantive BB strategy talk — "continue"
+# (continue bonding), "proceed" (proceed carefully), "come on", a bare "next" ("nominate me next
+# week") — were false-firing the advance-nudge mid-scheme and montaging the runway. They are gone:
+# a SHORT lull reply is still caught by the `_LULL_SHORT_CHARS` length gate in `_player_turn_is_lull`,
+# so dropping the ambiguous tokens only stops LONG substantive messages from being misread as lulls
+# (the safe direction — a missed readiness cue costs at most one extra social turn, never a montage).
+# `next` now REQUIRES a ceremony noun so board speculation ("next week", "next HOH") never matches.
 _LULL_READY_RE = re.compile(
-    r"\b(what'?s next|let'?s (go|move|do this|see it|get|roll)|move (on|it along|ahead)|"
-    r"i'?m (ready|done|good)|bring it on|get on with it|run it|start it|let'?s start|kick it off|"
-    r"continue|proceed|come on|on with it|skip ahead|fast.?forward|next (one|round|comp|beat)?|"
-    r"that'?s? (it|all)|nothing else|no more|wrap (it )?up|enough( of)? (this|that)?)\b",
+    r"\b(what'?s next|let'?s (go|move on|do this|see it|roll)|move (on|it along|ahead)|"
+    r"i'?m (ready|done|good)|bring it on|get on with it|run it|kick it off|on with it|"
+    r"skip ahead|fast.?forward|next (round|comp|competition|beat|ceremony|eviction)|"
+    r"that'?s? (it|all)|nothing else|no more|wrap (it )?up|enough( of)? (this|that))\b",
     re.IGNORECASE,
 )
 _LULL_SHORT_CHARS = 70  # a brief reply with no substance reads as a lull

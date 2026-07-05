@@ -77,6 +77,14 @@ html {
     min-height: 1.5rem;
     min-width: 1.5rem;
   }
+  /* Icon-only buttons carry no text to widen them, so the generic 36px width
+     floor above leaves them ~41px — under the 44px WCAG 2.5.5 target the
+     responsive matrix asserts (RESP-4/#625). The section-collapse chevron
+     (`all: unset` + a 10px SVG) is the one such control the matrix reaches in
+     the chrome-only run; floor its width to the full tap target too. */
+  .section-collapse-btn:not(.tap-exempt) {
+    min-width: var(--tap-min);
+  }
 }
 
 /* --- Installed-app tier (S8): when running standalone, fixed top chrome must

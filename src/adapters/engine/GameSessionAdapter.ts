@@ -20,7 +20,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord, voiceFingerprint } from "../../engine/voice";
-import { NO_NPC_PATHWAY } from "../../engine/diaryRoom";
+import { NO_NPC_PATHWAY, beatForMoment, producerPrompt } from "../../engine/diaryRoom";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN,
@@ -123,7 +123,7 @@ import {
   type Trajectory, type FoldSignal,
 } from "../../engine/trajectory";
 import { TRAJECTORY_CONSTANTS } from "../../engine/trajectoryConstants";
-import { buildSystemPrompt, momentForPhase, renderStoryFacts } from "../../engine/momentPrompts";
+import { buildSystemPrompt, momentForPhase, renderStoryFacts, renderSurfacedFacts } from "../../engine/momentPrompts";
 import { producerForSeed, renderProducerVoice, type Producer } from "../../engine/producerPersona";
 import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
@@ -7134,6 +7134,7 @@ export class GameSessionAdapter implements GameSession {
       moment,
       systemPrompt: buildSystemPrompt(
         moment, view, this.storyFacts(moment), this.worldContext(moment), this.producerVoice(moment),
+        this.freshSurfacedFacts(),
       ),
     };
   }
@@ -7353,6 +7354,32 @@ export class GameSessionAdapter implements GameSession {
     );
   }
 
+  /** How many of the player's own surfaced facts ride along on EVERY turn (SOC-1/4). Bounded so the
+   *  block stays tight, mirroring `STORY_FACT_EVENTS` — this is a per-turn addition, not a full recap. */
+  private static readonly SURFACED_FACTS_WINDOW = 5;
+
+  /**
+   * SOC-1/4 — the player's own recently-surfaced KNOWLEDGE (an NPC confiding, a seeded-tie belief,
+   * gossip that diffused all the way to them): computed by the `KnowledgeService` (`surfaceInformationTo`
+   * / `transmitGossip`, wired in `registry.ts`) but, before this fix, NEVER handed to the narrator on an
+   * ordinary turn. The provenance EVENT those calls also record (`"surfaced to player via told-by:npc:3"`,
+   * `"gossip … reaches player"`) deliberately carries no real content — a shared verbatim string would trip
+   * the orchestrator's vault-leak checkpoint substring sweep against another entity's hidden copy (see the
+   * comment on `InMemoryKnowledgeService.surfaceInformationTo`) — so the ACTUAL fact text lives only in the
+   * `KnowledgeFact.content` this reads back, via the SAME `playerKnowledgeReader` the secrets-as-power
+   * levers already trust as the player's own, Vault-free knowledge (0093/0099). Excludes the Diary Room
+   * (`NO_NPC_PATHWAY`) — an OOC channel with no in-game pathway to anyone, never something "the house told
+   * you". Bounded to the most recent few so the block stays tight (ADR 0003 §1); `undefined` when there is
+   * nothing fresh (byte-identical prompt to before this fix).
+   */
+  private freshSurfacedFacts(): string | undefined {
+    const facts = (this.playerKnowledgeReader?.() ?? [])
+      .filter((f) => f.pathway !== NO_NPC_PATHWAY)
+      .slice(-GameSessionAdapter.SURFACED_FACTS_WINDOW)
+      .map((f) => ({ content: this.humanize(f.content) }));
+    return renderSurfacedFacts(facts);
+  }
+
   /** The exact, public jury vote margin (anti-confabulation grounding for the recap). Counts the
    *  persisted finale ballots per finalist; null until a winner + Final 2 + ballots exist. */
   private finaleTally(): { winnerVotes: number; runnerUpVotes: number; runnerUp: string } | null {
@@ -7485,6 +7512,12 @@ export class GameSessionAdapter implements GameSession {
       : this.live?.finished
       ? "post-season"
       : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
+    // 0013 §5 (PS-4/PG-14 fix): the producer's Diary-Room invitation — wires the previously-uncalled
+    // `producerPrompt` into the live view every turn already reads. `undefined` at every routine beat
+    // (no field ⇒ the FE sees nothing, byte-identical to before this fix); present only at the
+    // dramatic beats `beatForMoment` recognizes (nomination/veto-ceremony/eviction). An INVITATION
+    // only — it changes no game state and is never forced.
+    const drPrompt = producerPrompt(beatForMoment(moment));
     return {
       started: true,
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
@@ -7590,6 +7623,8 @@ export class GameSessionAdapter implements GameSession {
       // introduce + their OBSERVABLE persona — woven into the premiere moment prompt so the producer
       // never loses track. Present ONLY during the premiere (null otherwise). Vault-free public facets.
       ...(this.premiereIntros() ? { premiere: this.premiereIntros()! } : {}),
+      // 0013 §5 / PG-14 / PS-4: the producer's Diary-Room invitation at the current dramatic beat.
+      ...(drPrompt.invite ? { diaryRoomInvite: drPrompt as { invite: true; reason?: string } } : {}),
     };
   }
 }

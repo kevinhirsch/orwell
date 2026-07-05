@@ -1128,6 +1128,30 @@ export function renderStoryFacts(
 }
 
 /**
+ * SOC-1/4 — the player's OWN recently-surfaced knowledge: a houseguest confiding in them, a rumor
+ * that diffused all the way to them, an overheard fragment — anything that reached them through a
+ * real in-game pathway (0002). This is NOT the witnessed-event record (`renderStoryFacts` above);
+ * it is the separate `KnowledgeFact` layer the engine already anchors (`KnowledgeService`), which
+ * previously computed these facts but never handed their CONTENT to the narrator on an ordinary
+ * turn — so the model had nothing to voice and would either drop the beat or invent one. Every
+ * entry here is Vault-free by construction: the caller (the engine adapter) selects ONLY the
+ * player's own already-anchored facts (never a Vault read), bounded to a small recent window so
+ * the block stays tight (ADR 0003 §1 — prefer removing context to adding it). `undefined` when
+ * there is nothing fresh to voice (the prompt is then byte-identical to before this fix).
+ */
+export function renderSurfacedFacts(facts: ReadonlyArray<{ content: string }>): string | undefined {
+  if (facts.length === 0) return undefined;
+  const lines: string[] = [
+    "WHAT YOU'VE LEARNED (the player's own knowledge, reached through a real in-game pathway — told",
+    "  by a houseguest, overheard, or word that made its way around the house). Voice these naturally",
+    "  when the scene calls for it — the player already holds them, so never contradict or un-know",
+    "  them — but never invent extra detail beyond what's stated here:",
+  ];
+  for (const f of facts) lines.push(`  - ${f.content}`);
+  return lines.join("\n");
+}
+
+/**
  * Compose the full system prompt to inject for a moment: base persona + beat fragment + Vault-free
  * context. `worldContext` (feature 0062) is the OPTIONAL "the world you all moved in with" block — the
  * frozen, shared real-world flavor (built Vault-free by the engine adapter from the persisted snapshot,
@@ -1140,6 +1164,7 @@ export function buildSystemPrompt(
   storyFacts?: string,
   worldContext?: string,
   producerVoice?: string,
+  surfacedFacts?: string,
 ): string {
   return [
     BASE_GAME_MASTER_PROMPT,
@@ -1150,5 +1175,9 @@ export function buildSystemPrompt(
     renderGameContext(view),
     ...(worldContext ? [worldContext] : []),
     ...(storyFacts ? [storyFacts] : []),
+    // SOC-1/4: the player's own freshly-surfaced knowledge, EVERY moment (unlike `storyFacts`, which
+    // is gated to the re-entry/post-season lifecycle beats) — a confide/overhear/gossip surfacing is
+    // a live-turn happening, not a resume recap, so it must ride the ordinary per-turn prompt too.
+    ...(surfacedFacts ? [surfacedFacts] : []),
   ].join("\n\n");
 }

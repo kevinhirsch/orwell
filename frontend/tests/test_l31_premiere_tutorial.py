@@ -1,14 +1,23 @@
 """L31 (FE half) — the premiere is a light, one-time, dismissible tutorial.
 
 The engine drives the structured premiere (introductions round + gentler first-week cadence);
-this is the FE framing: a quiet card shown in WEEK 1 that sets the weekly-rhythm expectation so
-a brand-new player never has to prompt for it. It never replaces the chat.
+this is the FE framing: a quiet card shown during the engine's "premiere" moment (move-in, before
+the meet-everyone gate lets the first HOH begin) that sets the weekly-rhythm expectation so a
+brand-new player never has to prompt for it. It retires the instant that gate completes — NOT at
+the week-2 boundary, since week 1 spans the whole HOH/noms/veto/eviction chain. It never replaces
+the chat.
 
 Source-pinned (the FE pytest lane has no DOM runtime; browser-smoke covers the live DOM). We pin
 the gates (game-build, per-user dismiss, premiere-week), the module load, and the theme-token CSS.
 """
+import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
+
+import pytest
 
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -45,16 +54,69 @@ def test_l31_per_user_dismiss_persists_once():
 
 
 def test_l31_shows_only_in_premiere_week():
+    """The card is gated on the engine's `moment === "premiere"`, not `week === 1`.
+
+    A week stays 1 through the entire HOH -> nominations -> veto -> veto ceremony -> eviction
+    chain, so gating on the week left the card mounted long after the meet-everyone gate had
+    completed and the first HOH had begun (the corroborated "stale premiere welcome card"
+    finding, 2026-07-03 pre-ship audit — 4x hit across lanes). `moment` flips off "premiere" the
+    instant that gate completes, so keying off it retires the card exactly on gate-complete
+    instead of at the week-2 boundary.
+    """
     js = _read("static", "js", "orwellPremiereTutorial.js")
     m = re.search(r"function isPremiereWeek\([^)]*\)\s*\{(.*?)\n  \}", js, re.S)
     assert m, "isPremiereWeek gate not found"
     body = m.group(1)
-    # week 1 only, and never post-season; requires a started season
-    assert "week === 1" in body
-    assert '"post-season"' in body
+    # gate-complete signal: the engine's own "premiere" moment, not the week number
+    assert 'moment === "premiere"' in body
+    assert "week === 1" not in body, "must not regress to the week-based stale-card gate"
     assert "started" in body
     # it reads the same Vault-free projections the season HUD uses
     assert "/api/orwell/status" in js and "/api/orwell/state" in js
+
+
+def _extract_is_premiere_week(js):
+    m = re.search(r"function isPremiereWeek\([^)]*\)\s*\{.*?\n  \}", js, re.S)
+    assert m, "isPremiereWeek gate not found"
+    return m.group(0)
+
+
+def _run_is_premiere_week(status, state):
+    src = _extract_is_premiere_week(_read("static", "js", "orwellPremiereTutorial.js"))
+    harness = (
+        src
+        + "\nconsole.log(JSON.stringify(isPremiereWeek(" + json.dumps(status) + ", " + json.dumps(state) + ")));\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(harness)
+        path = f.name
+    try:
+        out = subprocess.run(["node", path], capture_output=True, text=True, timeout=20)
+    finally:
+        os.unlink(path)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_l31_card_retires_the_instant_the_meet_gate_completes():
+    """Regression pin (the actual bug): once `moment` leaves "premiere" — the first HOH has begun —
+    the card must retire even while `week` is still 1. This is the behavior the stale-card audit
+    finding demanded; asserting it against the real, unmodified source (not a source-string pin)
+    proves the fix rather than just the wording."""
+    status = {"started": True, "week": 1}
+    # Still week 1, still the premiere: the card should show.
+    assert _run_is_premiere_week(status, {"started": True, "week": 1, "moment": "premiere"}) is True
+    # Gate complete: the first HOH has begun. Still week 1 — this is exactly where the card used to
+    # linger (DEEP-23: "persists into Week-1 veto ceremony").
+    for moment in ("hoh-competition", "nominations", "veto-competition", "veto-ceremony", "eviction"):
+        assert _run_is_premiere_week(status, {"started": True, "week": 1, "moment": moment}) is False, moment
+    # Week has actually advanced — also not the premiere.
+    assert _run_is_premiere_week(
+        {"started": True, "week": 2}, {"started": True, "week": 2, "moment": "hoh-competition"}
+    ) is False
+    # Never during post-season.
+    assert _run_is_premiere_week(status, {"started": True, "week": 1, "moment": "post-season"}) is False
 
 
 def test_l31_walks_the_weekly_rhythm_without_prompting():
