@@ -9652,6 +9652,24 @@ body.hide-thinking .thinking-section { display: none !important; }
 .agent-thread-node.error .agent-thread-dot {
   background: var(--color-error);
 }
+/* TRANS-12/VM-5 (2026-07 pre-ship audit): the ceremony-beat outcome swap (HOH crown,
+   nomination reveal, veto result, eviction vote reveal — anything carrying an
+   orwellBeatOutcome() line) previously replaced the row's innerHTML with zero motion —
+   the show's biggest beats read as an instant, silent state flip. Give the header a
+   brief staged reveal (fade + settle) instead of a hard pop; reduced-motion strips it
+   back to the original instant swap. Shares the kit's standard entrance easing
+   (cubic-bezier(0.22, 0.61, 0.36, 1), see orwellSheet.js/orwellGadgetRail.js). */
+.agent-thread-node.ow-ceremony-reveal .agent-thread-header {
+  animation: ow-ceremony-reveal-in .38s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes ow-ceremony-reveal-in {
+  0%   { opacity: 0; transform: translateY(3px) scale(.985); }
+  55%  { opacity: 1; transform: none; }
+  100% { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-thread-node.ow-ceremony-reveal .agent-thread-header { animation: none !important; }
+}
 .agent-thread-header {
   display: flex;
   align-items: center;

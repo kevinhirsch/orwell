@@ -2695,13 +2695,24 @@ import { isNarrow } from './platform.js';
                   // click again. Click handling is delegated (see init at
                   // bottom of file) so no per-node listener needed.
                   const _wasOpen = _hasExpand && currentToolBubble.classList.contains('open');
-                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_hasExpand ? '' : ' agent-thread-node--flat') + (_wasOpen ? ' open' : '');
                   // L42: in the game build, show the beat's PUBLIC OUTCOME (Vault-free, from the tool
                   // result) instead of a generic "done" \u2014 "\ud83d\uddf3\ufe0f Troy is evicted (7-1)", "\ud83c\udfc6 Maya wins HOH".
                   const _outcome = (_beatOut && ok) ? orwellBeatOutcome(json.tool, json.output) : null;
                   const _toolText = _outcome || _beatOut || json.tool;
                   const _statusHtml = _outcome ? '' : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+                  // TRANS-12/VM-5 (2026-07 pre-ship audit): a ceremony beat's outcome (HOH crown,
+                  // nomination reveal, veto result, eviction vote reveal) used to swap in via this
+                  // innerHTML replace with zero motion \u2014 the show's biggest beats landed as a
+                  // silent state flip. `ow-ceremony-reveal` (style.css) gives the header a brief
+                  // staged entrance; reduced-motion strips it to the same instant swap as before.
+                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_hasExpand ? '' : ' agent-thread-node--flat') + (_wasOpen ? ' open' : '') + (_outcome ? ' ow-ceremony-reveal' : '');
                   currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_toolText)}</span>${_statusHtml}${_chevron2}</div>${_contentDiv2}`;
+                  if (_outcome) {
+                    const _revealHeader = currentToolBubble.querySelector('.agent-thread-header');
+                    const _clearReveal = () => currentToolBubble.classList.remove('ow-ceremony-reveal');
+                    if (_revealHeader) _revealHeader.addEventListener('animationend', _clearReveal, { once: true });
+                    setTimeout(_clearReveal, 500); // belt: reduced-motion/no animationend still clears the marker
+                  }
                   // Reset so thinking spinner between tools says "Thinking" not the old tool's label
                   _lastToolName = '';
                   uiModule.scrollHistory();
