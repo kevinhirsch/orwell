@@ -62,11 +62,23 @@ describe("0065 Part E — the beatSeq-keyed delta returns exactly what changed s
     const delta = session.stateDelta(since);
     expect(delta.fullRefresh).toBeFalsy();
     expect(delta.beatSeq).toBe(session.gameStatus().beatSeq);
-    // Exactly the two new player-visible events, in order, and nothing from before `since`.
+    // The two new player-visible mutations both appear, in order. The turn-driven off-screen tick
+    // (pure turn-driven default) may ALSO surface at most one ambient, once-per-day house-event headline
+    // ("Week N[, day D]: …") in this window — it is legitimate new player-visible texture, so we assert
+    // the two mutations are present rather than pinning a brittle exact count. Every delta event stays
+    // player-visible (Vault-free): the delta is a player-facing projection.
     const contents = delta.events.map((e) => e.content);
     expect(contents.some((c) => c.includes("ALPHA"))).toBe(true);
     expect(contents.some((c) => c.includes("BETA"))).toBe(true);
-    expect(delta.events.length).toBe(2);
+    // ALPHA precedes BETA (append order preserved).
+    const iAlpha = contents.findIndex((c) => c.includes("ALPHA"));
+    const iBeta = contents.findIndex((c) => c.includes("BETA"));
+    expect(iAlpha).toBeGreaterThanOrEqual(0);
+    expect(iBeta).toBeGreaterThan(iAlpha);
+    // Nothing but the two mutations and (optionally) a single ambient day headline — no unrelated leakage.
+    const extras = contents.filter((c) => !c.includes("ALPHA") && !c.includes("BETA"));
+    expect(extras.length).toBeLessThanOrEqual(1);
+    for (const c of extras) expect(c).toMatch(/^Week \d+(, day \d+)?: /);
   });
 
   it("surfaces ceremony field transitions (HOH/noms/veto/phase/week) since the prior beatSeq", () => {
