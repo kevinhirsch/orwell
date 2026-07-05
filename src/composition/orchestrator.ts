@@ -685,9 +685,28 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
     // (the selection draws no rng at all unless two of the confessor's events fully tie).
     const recentRng = new SeededRandom(hashSeed(`${core.seed ?? ""}:confessional-recent:${confessor}:${clockNow}:${before}`));
     const recentEvents = selectRecentForConfessional(sandbox.engine.events.query(), confessor, clockNow, { rng: recentRng });
+    // BB-2/SG-8 — without these three, EVERY confessional all season rendered the identical first
+    // template (`pick()` falls back to `lines[0]` with no rng) and named the player with the bare
+    // `player` id (no resolver), killing the 0048 retrospective payoff (41/41 identical lines). A
+    // DEDICATED seeded rng (never the shared society/vote stream `rng` — the same isolation the
+    // `recentRng` above already uses) drives 0090's phrasing variety; the confessor's own PUBLIC
+    // 0084 voice colors which pool it draws from (never a fact, only texture); `nameOf` bakes the
+    // confessor's actual read/display name for their target/ally — including the player's real name
+    // in place of the literal "player" token.
+    const phrasingRng = new SeededRandom(hashSeed(`${core.seed ?? ""}:confessional-phrasing:${confessor}:${clockNow}:${before}`));
+    const houseguests = core.house?.npcs ?? [];
+    const voice = houseguests.find((n) => n.id === confessor)?.character.voice;
+    const nameOf = (id: EntityId): string =>
+      core.house && id === core.house.player.id ? core.house.player.name : (houseguests.find((n) => n.id === id)?.name ?? id);
     recordConfessional(
       sandbox.engine.events,
-      confessionalFor(confessor, ids, sandbox.engine.relationships, { player: PLAYER, recentEvents }),
+      confessionalFor(confessor, ids, sandbox.engine.relationships, {
+        player: PLAYER,
+        recentEvents,
+        rng: phrasingRng,
+        voice,
+        nameOf,
+      }),
       rng,
       clockNow,
     );
