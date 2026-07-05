@@ -2,10 +2,15 @@ import { Given, When, Then } from "@cucumber/cucumber";
 import assert from "node:assert/strict";
 import type { BbWorld } from "../support/world";
 import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsAdapter";
-import { deriveNpcKnowledge, playerStrategyRead, producerPrompt } from "../../src/engine/diaryRoom";
+import { deriveNpcKnowledge, producerPrompt } from "../../src/engine/diaryRoom";
 import type { Beat } from "../../src/engine/diaryRoom";
 import { npcExpress } from "../../src/engine/conversation";
 import { PLAYER, npc } from "../../src/domain/ids";
+
+// The NPCs the test sandbox seeds any state for — npc(1..8). The DR→NPC guarantee itself is
+// structural (`deriveNpcKnowledge`) and cast-size-independent; this list only bounds the redundant
+// per-NPC belt-and-suspenders sweeps (so BOTH sweeps below iterate the SAME set, not 8 vs 4).
+const SEEDED_NPCS = Array.from({ length: 8 }, (_, i) => npc(i + 1));
 
 // Reused steps (defined elsewhere, matched by text regardless of keyword):
 //  - Background "a running game sandbox with a fully populated Producer's Vault" (mcp_boundary)
@@ -19,29 +24,29 @@ import { PLAYER, npc } from "../../src/domain/ids";
 Then("that content is part of the player's knowledge", function (this: BbWorld) {
   const known = this.sandbox!.engine.knowledge.knownTo(PLAYER);
   assert.ok(known.some((k) => k.content === this.factContent), "DR content is player knowledge");
-  // The engine's player-strategy read MAY consume it.
-  assert.ok(playerStrategyRead(known).some((k) => k.content === this.factContent));
 });
 
 // --- Player DR content reaches no NPC -----------------------------------------
 
 Then("no NPC's knowledge state gains that content", function (this: BbWorld) {
-  for (let i = 1; i <= 8; i++) {
-    const known = this.sandbox!.engine.knowledge.knownTo(npc(i));
-    assert.ok(!known.some((k) => k.content === this.factContent), `npc:${i} must not know DR content`);
-  }
-  // Even if player knowledge were fed to NPC derivation, the DR → NPC wall strips it.
+  // The REAL, cast-size-independent guarantee: the DR → NPC wall strips DR content even if player
+  // knowledge were fed to NPC derivation.
   const derived = deriveNpcKnowledge(this.sandbox!.engine.knowledge.knownTo(PLAYER));
   assert.ok(!derived.some((k) => k.content === this.factContent), "deriveNpcKnowledge excludes DR content");
+  // Belt-and-suspenders: no seeded NPC's knowledge contains it.
+  for (const id of SEEDED_NPCS) {
+    const known = this.sandbox!.engine.knowledge.knownTo(id);
+    assert.ok(!known.some((k) => k.content === this.factContent), `${id} must not know DR content`);
+  }
 });
 
 Then("no NPC decision changes because of it", function (this: BbWorld) {
   // An NPC cannot assert or even suspect a DR-only fact — it has no pathway to it,
   // so it can play no part in the NPC's reasoning.
-  for (let i = 1; i <= 4; i++) {
+  for (const id of SEEDED_NPCS) {
     const k = this.sandbox!.engine.knowledge;
-    const expr = npcExpress({ content: this.factContent! }, k.knownTo(npc(i)), k.suspicionsOf(npc(i)));
-    assert.equal(expr.mode, "silent", `npc:${i} reasoning is untouched by DR content`);
+    const expr = npcExpress({ content: this.factContent! }, k.knownTo(id), k.suspicionsOf(id));
+    assert.equal(expr.mode, "silent", `${id} reasoning is untouched by DR content`);
   }
 });
 

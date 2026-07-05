@@ -6,9 +6,13 @@ import type { KnowledgeFact } from "../domain/knowledge";
  *
  *  - **Player DR → no NPC.** Player Diary-Room content is the player's OWN
  *    knowledge (recorded by `KnowledgeService.recordDiaryRoom`, pathway
- *    "diary-room"), but it has NO in-game pathway to any NPC. The engine's
- *    player-strategy read MAY consume it; NPC-knowledge derivation MUST exclude
- *    it. This module owns that wall.
+ *    "diary-room"), but it has NO in-game pathway to any NPC — NPC-knowledge
+ *    derivation MUST exclude it. This module owns that wall. The DR is an
+ *    EXPRESSIVE, out-of-character channel: a private journal + the public/private
+ *    duplicity enabler + a season-retrospective payoff (0048). It deliberately has
+ *    NO live mechanical effect (anti-sycophancy — it can never puppeteer an NPC or
+ *    change an outcome). A purposeful engine read of the player's stated strategy is
+ *    a DEFERRED future feature (PO backlog: "Diary Room with purpose"), not wired here.
  *  - **NPC confessionals → Vault-only** are handled by the Vault Wall (0001):
  *    recorded with a witness set excluding the player, they never surface.
  *
@@ -30,15 +34,6 @@ export function isNpcReachable(fact: { pathway: string }): boolean {
  */
 export function deriveNpcKnowledge(candidate: readonly KnowledgeFact[]): KnowledgeFact[] {
   return candidate.filter(isNpcReachable);
-}
-
-/**
- * The player-strategy read (engine-internal, never NPC-facing): the engine MAY
- * consume Diary-Room content to deepen its understanding of the player's
- * strategy. Returns the player's full knowledge, DR included.
- */
-export function playerStrategyRead(playerKnowledge: readonly KnowledgeFact[]): readonly KnowledgeFact[] {
-  return playerKnowledge;
 }
 
 /** Beats the game can be at; only the dramatic ones warrant a producer DR prompt. */

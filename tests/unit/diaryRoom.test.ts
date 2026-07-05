@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { deriveNpcKnowledge, playerStrategyRead, producerPrompt, isNpcReachable, NO_NPC_PATHWAY } from "../../src/engine/diaryRoom";
+import { deriveNpcKnowledge, producerPrompt, isNpcReachable, NO_NPC_PATHWAY } from "../../src/engine/diaryRoom";
 import { buildSandbox } from "../support/sandbox";
 import { PLAYER, npc } from "../../src/domain/ids";
+
+// The NPCs `buildSandbox` seeds any state for (Vault attrs / confessionals / off-screen) — npc(1..8).
+// The DR→NPC guarantee itself is structural (`deriveNpcKnowledge`) and cast-size-independent; this
+// list only bounds the redundant per-NPC belt-and-suspenders sweeps below.
+const SEEDED_NPCS = Array.from({ length: 8 }, (_, i) => npc(i + 1));
 
 describe("0013 — Diary Room → no NPC wall", () => {
   it("DR content is the player's knowledge, tagged no-NPC-pathway, and reaches no NPC", () => {
@@ -15,13 +20,14 @@ describe("0013 — Diary Room → no NPC wall", () => {
     expect(dr!.pathway).toBe(NO_NPC_PATHWAY);
     expect(isNpcReachable(dr!)).toBe(false);
 
-    // No NPC's knowledge ever contains it.
-    for (let i = 1; i <= 8; i++) {
-      expect(sb.engine.knowledge.knownTo(npc(i)).some((k) => k.content === content)).toBe(false);
-    }
-    // The engine's player-strategy read MAY consume it; NPC derivation MUST NOT.
-    expect(playerStrategyRead(playerKnown).some((k) => k.content === content)).toBe(true);
+    // The REAL, cast-size-independent guarantee: the DR→NPC strip removes it no matter how many
+    // houseguests exist. (The per-NPC sweep below is a belt-and-suspenders sample over the fixture's
+    // seeded NPCs; it is redundant with this structural check.)
     expect(deriveNpcKnowledge(playerKnown).some((k) => k.content === content)).toBe(false);
+    // No seeded NPC's knowledge ever contains it.
+    for (const id of SEEDED_NPCS) {
+      expect(sb.engine.knowledge.knownTo(id).some((k) => k.content === content)).toBe(false);
+    }
   });
 
   it("deriveNpcKnowledge keeps NPC-reachable facts but strips DR-tagged ones", () => {

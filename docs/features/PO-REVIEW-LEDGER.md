@@ -34,7 +34,7 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0010 | One-liner deployment & update | ✅ Built | ✅ Approved | 2026-06-28 | Plumbing feature (install/update one-liners; saves survive updates; no secrets in repo). **PO confirms it has been run on a real server** — the long-standing "real-Proxmox-host smoke owed" deferral is satisfied per PO |
 | 0011 | Weekly loop orchestration | ✅ Built | ✅ Approved (expanded + cleanup) | 2026-06-28 | Core gameplay spine — faithful, deterministic, rule-enforcing. Light-expand: cross-reference note that this tests the BASELINE nomination read; the live game refines it via 0044/0043/0085/0086/0107/0039. **Cleanup:** removed the redundant test-only `chooseNominationsWithMood` (duplicated `nominationStrategy`'s mood path), retargeted its 2 tests + dropped a dead `void` ref. Green. **PR: deferred — combine with next edited feature** |
 | 0012 | Conversation & scene system | ✅ Built | ✅ Approved | 2026-06-28 | "The conversation is the game" (ADR 0003) with the anti-sycophancy guardrail proven byte-identical: free-text lobbying CANNOT move a binding decision; NPCs never voice a fact they have no pathway to; reads hint but never name off-screen events; all surfaces Vault-swept |
-| 0013 | The Diary Room | ✅ Built | ⬜ Pending | — | — |
+| 0013 | The Diary Room | ✅ Built | ✅ Approved (expanded + cleanup) | 2026-06-28 | Two walls solid (player-DR→no-NPC; NPC-confessional→Vault-only). **Clarified purpose:** the DR is an EXPRESSIVE channel (journal + duplicity enabler + retrospective payoff), no live mechanical effect by design (anti-sycophancy). **Cleanup:** removed the dead/unwired `playerStrategyRead` identity-stub + its 2 tests; unified the magic-number NPC sweeps into a documented `SEEDED_NPCS` (real guarantee is the structural `deriveNpcKnowledge` strip). A purposeful engine read → future feature FB-1. Green. **PR: deferred — combine with next** |
 | 0014 | Jury & endgame | ✅ Built | ⬜ Pending | — | — |
 | 0015 | Character creation (OOBE) | ✅ Built | ⬜ Pending | — | — |
 | 0016 | God Mode (admin port) | ✅ Built | ⬜ Pending | — | — |
@@ -139,6 +139,15 @@ Scenarios written/agreed during review that still need implementation to go gree
 | 0005 | Strategic "Houseguest's Choice" veto pick (replace pure strongest-bond) | Add a strategic-ally selection in the relationship engine; wire `liveSeason` HC pick to it; un-comment the two pending scenarios + add step defs. Ship **opt-in, default-off** with a calibration-neutrality guard (the HC pick changes the veto field → seeded competition outcomes; default-off must stay byte-identical). After a calibration re-baseline, strategic can become default. |
 | ~~0006a~~ | ✅ **DONE** — favorite-win band tuned down (temperature 0.36→0.40; clear favorite ~64%→~59% avg). juryReach EARNED-WINS re-verified green; full unit suite green. Gate: `stagedCompetition.test.ts`. |
 | ~~0006b~~ | ✅ **DONE** — every NPC carries a derived comp intent (compete/throw/play-safe), opt-in `ORWELL_COMP_INTENT`, byte-identical when off. Single-roll model kept (no per-round adaptivity — Path B declined). Gate: `npcCompIntent.test.ts`. |
+
+## Future feature backlog (PO-parked ideas — develop later)
+
+Ideas surfaced during the comb-through that the PO wants to build later as their own spec/feature.
+Not yet scheduled; captured here so they aren't lost.
+
+| ID | Idea | Origin | Notes |
+|---|---|---|---|
+| FB-1 | **Diary Room with purpose** | 0013 review (2026-06-28) | Give the player DR a real, **Vault-safe** role: the engine *reads* the player's stated strategy to do something that never drives NPCs — e.g. shape which producer prompts / story beats fire, or feed a richer 0048 retrospective, or acknowledge the player's reflections. Must not cross the anti-sycophancy line (never puppeteer an NPC, never change an outcome). Would re-introduce a purposeful consumer where the removed `playerStrategyRead` stub used to sit. Coordinate with the frozen 0097 (suspicion ledger) — same "don't over-tell the player" tension. |
 
 ## Numbering housekeeping (flagged during the comb-through)
 
