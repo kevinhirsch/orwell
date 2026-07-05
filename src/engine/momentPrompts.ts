@@ -170,6 +170,10 @@ export const BASE_GAME_MASTER_PROMPT = [
   "counter. The whole art is pacing so smooth it feels like life, not a game on a timer: never force a",
   "beat the player is still living in, and never strand them in a dead scene waiting for the show to",
   "move. When in doubt during a lull, tee up the next beat and call advanceGame.",
+  "GUARD (anti-sycophancy): engagement pacing governs ONLY *when* you seize a lull — never *whether* an",
+  "adverse beat lands. Riding a scene the player is enjoying may never become a reason to delay their own",
+  "nomination, a comp they are about to lose, or a betrayal that is due — a beat the game is ready to",
+  "deliver is never held back because the player is having a good time in the one before it.",
   "",
   "WANDERING THE HOUSE — ONE GROUPING AT A TIME. When the player explores, mills around, or asks who's",
   "around, lingering IS play: give a brief orienting SURVEY of the clusters and their vibes (who is",
@@ -319,8 +323,10 @@ export const BASE_GAME_MASTER_PROMPT = [
   "YOUR LEVERS — call the one that fits the moment, let the GAME decide, then narrate what it",
   "returns. Never skip them; never reveal stats or scores. Levers are SILENT production",
   "machinery: never ask the player's permission to pull one, never mention a lever by name in the",
-  "fiction — just pull it and voice what comes back. ask_user is ONLY for presenting the game's",
-  "pending BINDING decision options — never to ask whether to call a lever.",
+  "fiction — just pull it and voice what comes back. ask_user is NEVER for the game's pending",
+  "BINDING decision options (the player's own decision card already presents those — re-asking",
+  "with ask_user double-asks the same choice two ways); reserve it for a genuine non-binding",
+  "clarification the scene needs, never to ask whether to call a lever.",
   "  • updateCasting — during the pre-game casting interview only: record the player's answers as",
   "    they land (any subset of fields; notes accumulate). The game tracks what's captured and",
   "    returns the interview's next step — a half-done interview resumes where it left off.",
@@ -1072,9 +1078,11 @@ export function renderGameContext(view: GameStateView): string {
   const pr = view.premiere ?? null;
   const observable = (fi: { archetype?: string; presentation?: string; demeanor?: string; background?: string; age?: number; genderPresentation?: "man" | "woman" | "nonbinary" }): string => {
     // The same Vault-free public facets the roster exposes — the observable read the player "clocks".
+    // F3 (#1016) / NARR-26/PROMPT2-12: the archetype is the MOST spoiler-y token (the exact label the
+    // premiere rules forbid saying aloud) — it is DEMOTED to a fenced private cue at the TAIL, mirroring
+    // the roster line's own fix, instead of leading the bits array unfenced (which re-tempts the model
+    // into narrating the scouting report on the highest-stakes introduction beat).
     const bits = [
-      fi.archetype, // their archetype is the model's PRIVATE voice cue (never said aloud), but listing it
-      // here lets the producer voice the observable energy that READS as that type — the player infers it.
       fi.presentation,
       // #1140: the STORED gender presentation + pronoun set, so the premiere introductions voice the SAME
       // facet the portrait encodes (never inferring gender from the name). PUBLIC presentation, never
@@ -1083,6 +1091,7 @@ export function renderGameContext(view: GameStateView): string {
       fi.demeanor && `comes across as ${fi.demeanor}`,
       fi.background,
       fi.age !== undefined ? `${fi.age}` : undefined,
+      fi.archetype && `(private cue, never said aloud: ${fi.archetype})`,
     ].filter(Boolean);
     return bits.length ? ` — ${bits.join(", ")}` : "";
   };

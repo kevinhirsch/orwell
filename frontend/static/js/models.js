@@ -576,11 +576,17 @@ export async function refreshModels(force = false) {
           + '<span class="muted-sm">Ask an admin to configure model endpoints</span>';
       }
       box.appendChild(noModels);
-      // No endpoints yet: keep the welcome screen focused on first setup.
-      const welcomeSub = document.getElementById('welcome-sub');
-      if (welcomeSub) welcomeSub.innerHTML = 'Type <button type="button" class="setup-trigger-link tap-exempt" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;margin:0;font:inherit;" title="Click to launch setup">/setup</button> to get started.';
-      const welcomeTip = document.getElementById('welcome-tip');
-      if (welcomeTip) welcomeTip.textContent = 'Type /setup, then choose Local models or API.';
+      // No endpoints yet: keep the welcome screen focused on first setup — UNLESS a season is
+      // already running (audit welcome-splash bleed-through): a started game must never have the
+      // "Type /setup" onboarding copy written back into its (hidden) welcome splash, where it could
+      // ghost through behind the live board if the splash is ever momentarily visible. The started
+      // flag is set by orwellOnboarding's started-season route; skip the clobber when it's set.
+      if (!window._orwellGameStarted) {
+        const welcomeSub = document.getElementById('welcome-sub');
+        if (welcomeSub) welcomeSub.innerHTML = 'Type <button type="button" class="setup-trigger-link tap-exempt" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;margin:0;font:inherit;" title="Click to launch setup">/setup</button> to get started.';
+        const welcomeTip = document.getElementById('welcome-tip');
+        if (welcomeTip) welcomeTip.textContent = 'Type /setup, then choose Local models or API.';
+      }
     } else {
       // Configured installs should feel ready, not stuck in onboarding.
       const welcomeSub = document.getElementById('welcome-sub');

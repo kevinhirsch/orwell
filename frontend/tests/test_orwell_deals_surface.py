@@ -41,21 +41,21 @@ JS = lambda: _read("static", "js", "orwellDeals.js")
 
 
 def _extract_other_party():
-    """Pull the REAL `otherParty(deal)` function body straight out of the shipped source (no
-    DOM needed — it's pure array/string logic) so the behavioral check below runs the actual
+    """Pull the REAL `otherParty(deal, nameById)` function body straight out of the shipped source
+    (no DOM needed — it's pure array/string logic) so the behavioral check below runs the actual
     shipped code, not a reimplementation."""
     js = JS()
-    start = js.index("function otherParty(deal) {")
+    start = js.index("function otherParty(deal, nameById) {")
     end = js.index("\n  }\n", start) + len("\n  }")
     return js[start:end]
 
 
-def _run_other_party(deal_json):
+def _run_other_party(deal_json, name_by_id_json="undefined"):
     if shutil.which("node") is None:
         pytest.skip("node not available")
     harness = (
         f"{_extract_other_party()}\n"
-        f"console.log(JSON.stringify(otherParty({deal_json})));\n"
+        f"console.log(JSON.stringify(otherParty({deal_json}, {name_by_id_json})));\n"
     )
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
         f.write(harness)
@@ -86,10 +86,26 @@ def test_other_party_renders_the_real_name_for_a_real_deal_view():
     assert _run_other_party(json.dumps(real_deal)) == "Houseguest One"
 
 
+def test_other_party_resolves_via_roster_when_the_party_name_is_missing():
+    """Audit CA-9/IA-11/INT-4/FLOW-8 defensive floor: if a deal party's own `name` wasn't
+    populated at write time, the gadget must resolve the party id against the roster carried on
+    the SAME /state payload (state.player + state.house) before falling back to the generic
+    placeholder — so the tracker never degrades to indistinguishable "A houseguest" rows."""
+    deal_missing_name = {
+        "id": "deal:3",
+        "parties": [{"id": "player"}, {"id": "npc:2"}],
+        "kind": "final-two",
+        "status": "open",
+    }
+    name_by_id = {"npc:2": "Houseguest Two"}
+    assert _run_other_party(json.dumps(deal_missing_name), json.dumps(name_by_id)) == "Houseguest Two"
+
+
 def test_other_party_still_falls_back_for_a_genuinely_malformed_deal():
     """The placeholder is a real, intentional fallback for malformed/incomplete input (never a
     Vault-knowledge withhold — deals are always struck directly with a known houseguest) — pin
-    that it still fires when `parties` is absent, so the fallback path itself stays covered."""
+    that it still fires when `parties` is absent AND the roster can't resolve it, so the fallback
+    path itself stays covered."""
     assert _run_other_party(json.dumps({"id": "deal:2", "kind": "vote", "status": "open"})) == "A houseguest"
 
 

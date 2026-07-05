@@ -1,9 +1,10 @@
 """Lane 5 (audit 2026-06-10) — FE-side pins for the prompt-integrity findings.
 
 P4: game levers are silent production machinery — the generic `ask_user` description used
-to invite "Record this interaction?" permission prompts; it is now explicitly scoped to the
-engine's pending BINDING decisions on game turns (mirrored engine-side in
-`BASE_GAME_MASTER_PROMPT`, pinned in `tests/unit/leverManifest.test.ts`).
+to invite "Record this interaction?" permission prompts; it is now explicitly carved AWAY from
+the engine's pending BINDING decisions on game turns (the player's own decision card is the
+single authority there — PROMPT-9/PROMPT2-1 audit fix, mirrored engine-side in
+`BASE_GAME_MASTER_PROMPT` + `GAME_AGENT_PREAMBLE`, pinned in `tests/unit/leverManifest.test.ts`).
 
 P6: `runCompetition` PREVIEWS the weekly loop's already-decided winner; only `advanceGame`
 commits the beat. The FE schema must say so, or a prompt-obedient model can announce a
@@ -29,7 +30,8 @@ def test_p4_ask_user_is_scoped_away_from_lever_permission_prompts():
     desc = _schema("ask_user")["description"]
     assert "silent production machinery" in desc
     assert "NEVER use ask_user to ask permission to call a game tool" in desc
-    assert "pending BINDING decision" in desc
+    assert "NEVER use it to present the engine's pending" in desc
+    assert "decision card already presents those" in desc
 
 
 def test_p6_run_competition_schema_states_preview_semantics():

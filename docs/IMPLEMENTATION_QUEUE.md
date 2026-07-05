@@ -3,7 +3,10 @@
 Dispatch these to implementer agents **in order** (respecting `depends on`). Items on different
 tracks can run **in parallel** once their deps are met.
 
-> 🎯 **CURRENT DISPATCH POINT: the [UI & runtime audit batch (D1–D11)](#ui--runtime-audit-batch-d1d11--2026-06-10-round-4--open) at the bottom — everything before it is ✅ DONE.**
+> 🎯 *(Stale — kept for the record; superseded by the "GitHub issue tracking" note below and the
+> D1–D11 section header fix further down, which corrects this line's own self-contradiction —
+> doc-drift audit, 2026-07-05: D1–D11 are DONE, not the dispatch point.)* **CURRENT DISPATCH
+> POINT: the UI & runtime audit batch (D1–D11) at the bottom — everything before it is ✅ DONE.**
 > *(Previous note, kept for the record:)* **The queue was drained (2026-06-10).** Every item in this file — through the product-audit
 > batch (B34–B60 / C12–C18), the front-end & experience batch (B61–B66 / C19–C28), the
 > operations/security/test-integrity batch (B67–B72 / C29–C33), the casting interview (B73), and
@@ -2493,7 +2496,14 @@ PR per item).
 > the C13-style enum drift tests now covering both casting tools. 4 new BDD scenarios (11 total) +
 > 8 new unit (20) + FE pytest green.
 
-## UI & runtime audit batch (D1–D11) · 2026-06-10 (round 4) — OPEN
+## UI & runtime audit batch (D1–D11) · 2026-06-10 (round 4) — ✅ DONE
+
+> **Corrected 2026-07-05 (doc-drift audit-closure):** this header read "OPEN" while the file's own
+> top banner and CLAUDE.md's architecture section both describe this batch as shipped — spot-verified
+> D1 (`src/composition/orchestrator.ts` `forgetUser` + `src/composition/registry.ts` `resetUser` — the
+> "ONE sanctioned season-restart door" CLAUDE.md's own architecture section names as built) and D9
+> (portraits are live on roster/status/decision surfaces per 0051). No item in D1–D11 was found open
+> in this pass; if a specific one resurfaces, flag it explicitly rather than reverting this header.
 
 > Source: `docs/audits/2026-06-10-ui-runtime-audit.md` (full UI runtime audit: tool→display map,
 > 121-claim verification, live Playwright across mobile/tablet/desktop and staged game states).
