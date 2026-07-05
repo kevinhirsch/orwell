@@ -2242,10 +2242,11 @@ import { isNarrow } from './platform.js';
                   note.className = 'stopped-indicator rounds-exhausted';
                   const label = document.createElement('span');
                   label.className = 'rounds-exhausted-label';
-                  // B11 (2026-07-05) / MICRO-3: "Reached the N-step limit" names the agent loop's
-                  // tool-call budget directly — a workspace concept that must never surface while the
-                  // game build is active (it fires mid-ceremony/marquee-scene, exactly when I9 matters
-                  // most). Gate on isGameBuild(); the non-game workspace keeps the precise diagnostic.
+                  // B6/B11 / MICRO-3: "Reached the N-step limit" names the agent loop's tool-call
+                  // budget directly — a workspace concept that must never surface while the game build
+                  // is active (it fires mid-ceremony/marquee-scene, exactly when I9 matters most). Gate
+                  // on isGameBuild() — the same treatment the sibling error/fallback branches get; the
+                  // non-game workspace keeps the precise diagnostic.
                   label.textContent = isGameBuild()
                     ? 'Big Brother pauses the tape for a beat — pick up where we left off.'
                     : `Reached the ${json.rounds || ''}-step limit — not finished.`;
