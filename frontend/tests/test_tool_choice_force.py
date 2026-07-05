@@ -212,6 +212,43 @@ def test_ordinary_social_phase_never_forces():
     assert _gate(("w1", "twist-reveal", "twist-reveal"), []) is None
 
 
+# ── J-3 (root a): a moment OVERRIDE (social hold / witnessed ceremony) suppresses phase-blind forcing ─
+# chat_helpers overrides the framed MOMENT away from the raw phase in two cases the force gate must
+# respect, or it re-opens the exact force-march the overrides exist to prevent:
+#   • the social-runway HOLD  → moment="social" while phase is the next unresolved ceremony/comp;
+#   • the witnessed-ceremony  → moment="nominations" AFTER the engine self-advanced phase to the NEXT
+#     beat (e.g. "veto-competition", NARR-7) so the player WITNESSES the just-resolved noms.
+# Forcing off the raw phase in either case force-advances the held/witnessed beat past the runway.
+
+def test_social_hold_moment_suppresses_forcing_even_on_a_ceremony_phase():
+    # The runway is HOLDING: moment="social", but phase is still the unresolved next ceremony/comp.
+    # Forcing here would drag the player past their protected lingering window → suppress.
+    assert _gate(("w1", "nominations", "social"), []) is None
+    assert _gate(("w1", "veto-ceremony", "social"), []) is None
+    assert _gate(("w1", "eviction", "social"), []) is None
+    assert _gate(("w1", "hoh-competition", "social"), []) is None
+    assert _gate(("w1", "veto-competition", "social"), []) is None
+
+
+def test_witnessed_ceremony_moment_mismatch_suppresses_forcing():
+    # The engine self-advanced phase past the ceremony (NARR-7); the FE re-frames the moment on the
+    # just-resolved beat so the player witnesses it. The moment is a force-advance beat but does NOT
+    # match the (already-rolled) phase → the model already has the beat to narrate; forcing would only
+    # chase the NEXT phase's requirement → suppress.
+    assert _gate(("w2", "veto-competition", "nominations"), []) is None
+    assert _gate(("w2", "eviction", "veto-ceremony"), []) is None
+
+
+def test_matching_ceremony_moment_still_forces():
+    # The genuine, un-overridden case (moment == phase) is unchanged — forcing still fires.
+    assert _gate(("w1", "nominations", "nominations"), []) == _ADV
+    assert _gate(("w1", "eviction", "eviction"), []) == _ADV
+    assert _gate(("w1", "hoh-competition", "hoh-competition"), []) == "required"
+    # And the 3-tuple back-compat shape (no moment element) still forces — an empty moment is neither
+    # the social hold nor a mismatched ceremony override.
+    assert _gate(("w1", "eviction"), []) == _ADV
+
+
 def test_open_player_pending_suppresses_all_forcing():
     # An open player pending ⇒ the engine waits on the PLAYER (a card). The model must surface it, not
     # advance/run a comp past it — and we NEVER force submitDecision (that infers a binding choice).

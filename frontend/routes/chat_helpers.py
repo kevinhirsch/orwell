@@ -316,11 +316,20 @@ _SOCIAL_MOMENT = "social"
 # lingering and drive the next ceremony now). Mirrors the agent-loop lull/ready cue; kept local so
 # chat_helpers has no import cycle into the agent loop. Substantive play never matches (it is the
 # opposite of a "skip ahead").
+#
+# J-3 fix (root c — runway-regex false-positives): this HOLD-cutting cue must be UNAMBIGUOUS. The
+# old pattern cut the protective social runway on tokens that saturate real BB scheming — "nominate"
+# / "noms" (the player constantly discusses who's on the block), "start the" (start the conversation),
+# "begin the" (begin the process), "hold the" (hold the door), a bare "next" ("nominate me next
+# week") — so a scheming player was force-marched straight into the ceremony they were working to
+# shape. Those are gone. `next` now REQUIRES a ceremony noun, and the explicit "let's see the noms /
+# veto / ceremony" remains (a genuine "show me the ceremony now" cue). Removing tokens only makes the
+# cut STRICTER — the safe direction (more lingering, never less); this path has no length fallback.
 _RUNWAY_READY_RE = re.compile(
-    r"\b(what'?s next|let'?s (go|move|do this|see it|get on|roll)|move (on|it along|ahead)|"
-    r"i'?m ready|bring it on|get on with it|run it|skip ahead|fast.?forward|next (comp|round|beat|"
-    r"ceremony|one)|nominate|noms?|start the|begin the|hold the|let'?s see (the )?(noms|nominations|"
-    r"veto|comp|competition))\b",
+    r"\b(what'?s next|let'?s (go|move on|do this|see it|roll)|move (on|it along|ahead)|"
+    r"i'?m ready|bring it on|get on with it|run it|skip ahead|fast.?forward|"
+    r"next (comp|competition|round|beat|ceremony|eviction)|"
+    r"let'?s see (the )?(noms|nominations|veto|comp|competition|ceremony))\b",
     re.IGNORECASE,
 )
 
