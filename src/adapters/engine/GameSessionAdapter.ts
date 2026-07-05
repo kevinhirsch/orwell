@@ -20,7 +20,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord } from "../../engine/voice";
-import { NO_NPC_PATHWAY } from "../../engine/diaryRoom";
+import { NO_NPC_PATHWAY, beatForMoment, producerPrompt } from "../../engine/diaryRoom";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN,
@@ -7480,6 +7480,12 @@ export class GameSessionAdapter implements GameSession {
       : this.live?.finished
       ? "post-season"
       : status === "evicted" ? "evicted" : status === "jury" ? "jury" : momentForPhase(this.phase);
+    // 0013 §5 (PS-4/PG-14 fix): the producer's Diary-Room invitation — wires the previously-uncalled
+    // `producerPrompt` into the live view every turn already reads. `undefined` at every routine beat
+    // (no field ⇒ the FE sees nothing, byte-identical to before this fix); present only at the
+    // dramatic beats `beatForMoment` recognizes (nomination/veto-ceremony/eviction). An INVITATION
+    // only — it changes no game state and is never forced.
+    const drPrompt = producerPrompt(beatForMoment(moment));
     return {
       started: true,
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
@@ -7578,6 +7584,8 @@ export class GameSessionAdapter implements GameSession {
       // introduce + their OBSERVABLE persona — woven into the premiere moment prompt so the producer
       // never loses track. Present ONLY during the premiere (null otherwise). Vault-free public facets.
       ...(this.premiereIntros() ? { premiere: this.premiereIntros()! } : {}),
+      // 0013 §5 / PG-14 / PS-4: the producer's Diary-Room invitation at the current dramatic beat.
+      ...(drPrompt.invite ? { diaryRoomInvite: drPrompt as { invite: true; reason?: string } } : {}),
     };
   }
 }

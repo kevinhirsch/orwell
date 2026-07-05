@@ -56,3 +56,24 @@ export function isDramatic(beat: Beat): boolean {
 export function producerPrompt(beat: Beat): { invite: boolean; reason?: string } {
   return isDramatic(beat) ? { invite: true, reason: `dramatic beat: ${beat}` } : { invite: false };
 }
+
+/**
+ * Maps the live season's current `moment` key (`momentForPhase` in `momentPrompts.ts` — the same
+ * string the FE already reads every turn off `GameStateView.moment`) onto a `producerPrompt` `Beat`.
+ * This is the seam that makes `producerPrompt` a real, live-wired function instead of a hook nobody
+ * calls: `GameSessionAdapter.view()` calls `producerPrompt(beatForMoment(moment))` to compute
+ * `diaryRoomInvite`. Any moment not named here reads as routine (no invite) — conservative by
+ * default, so a new moment key never accidentally starts inviting the player.
+ */
+export function beatForMoment(moment: string): Beat {
+  switch (moment) {
+    case "nominations":
+      return "nomination";
+    case "veto-ceremony":
+      return "veto-ceremony";
+    case "eviction":
+      return "eviction";
+    default:
+      return "routine-chat";
+  }
+}

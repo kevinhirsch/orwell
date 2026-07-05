@@ -274,6 +274,15 @@ export interface GameStateView {
   /** Portrait prompts returned at season start (0051) — present only on the createCharacter response. The FE calls the image API with these and stores the results. */
   portraitPrompts?: PortraitPromptEntry[];
   /**
+   * The producer's Diary-Room invitation (feature 0013 §5): present, with `invite: true`, when the
+   * CURRENT beat is dramatic enough for the producers to gently pull the player aside (nomination,
+   * veto ceremony, eviction — `src/engine/diaryRoom.ts` `producerPrompt`/`isDramatic`). Absent at every
+   * routine beat. Vault-free by construction — `reason` is a short, non-numeric label naming which
+   * beat triggered it, never a secret or a number; this is an INVITATION the front-end may voice, never
+   * a forced interruption, and it carries no obligation — declining changes nothing.
+   */
+  diaryRoomInvite?: { invite: true; reason?: string };
+  /**
    * A `createCharacter` that was REFUSED rather than honored (audit R4-05): a game already exists
    * and no `confirmRestart` was given, so the prior season is intact and untouched (this view IS
    * that prior season, not a new one). `in-progress` (a season is live) or `over` (a winner is
