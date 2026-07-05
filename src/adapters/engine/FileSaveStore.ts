@@ -110,10 +110,16 @@ export class FileSaveStore implements UserSaveStore {
   private prune(dir: string, latest: number): void {
     const keep = new Set<number>();
     for (let v = latest; v > latest - FileSaveStore.RETAIN_RECENT && v > 0; v--) keep.add(v);
+    // PERSIST-11: whenever `latest % CHECKPOINT_EVERY` is small, the FIRST checkpoint candidate
+    // (`latest - (latest % CHECKPOINT_EVERY)`) can land INSIDE the recent-retention window already
+    // added above — a redundant hit that used to still consume one of the `RETAIN_CHECKPOINTS`
+    // slots, leaving the long-tail archive with fewer genuinely-older checkpoints than intended for
+    // roughly one save in ten. Skip an already-kept candidate without spending a slot.
     let checkpoints = 0;
     for (let v = latest - (latest % FileSaveStore.CHECKPOINT_EVERY);
       v > 0 && checkpoints < FileSaveStore.RETAIN_CHECKPOINTS;
       v -= FileSaveStore.CHECKPOINT_EVERY) {
+      if (keep.has(v)) continue;
       keep.add(v);
       checkpoints++;
     }

@@ -37,6 +37,27 @@ describe("E4 — bounded save retention (no O(n²) disk)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("PERSIST-11: a checkpoint boundary near `latest` doesn't waste a retained-checkpoint slot", () => {
+    // RETAIN_RECENT=5, CHECKPOINT_EVERY=50, RETAIN_CHECKPOINTS=3. At latest=201 the FIRST checkpoint
+    // candidate (201 - 201%50 = 200) falls INSIDE the already-kept recent window (197..201) — a
+    // redundant hit. Before the fix, that redundant hit still consumed one of the 3 checkpoint
+    // slots, leaving only 2 genuinely-older checkpoints (150, 100) instead of the intended 3
+    // (150, 100, 50) — the long-tail archive one save shallower than designed.
+    const dir = mkdtempSync(join(tmpdir(), "orwell-prune-boundary-"));
+    try {
+      const store = new FileSaveStore(dir);
+      for (let i = 1; i <= 201; i++) store.saveFor("boundary-user", tinySnapshot(i));
+      const userDir = readdirSync(dir)[0]!;
+      const files = readdirSync(join(dir, userDir)).filter((f) => /^v\d+\.json$/.test(f));
+      const versions = files.map((f) => Number(f.match(/\d+/)![0])).sort((a, b) => a - b);
+      // Recent window: 197..201. The genuinely-older checkpoint archive must reach all 3 slots
+      // (150, 100, 50) — not stop early at 2 (150, 100) because 200 wastefully double-counted.
+      expect(versions).toEqual([50, 100, 150, 197, 198, 199, 200, 201]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("E5 — the admin surface is live, not decorative", () => {

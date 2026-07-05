@@ -1377,6 +1377,15 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     #        engine is NOT in an eviction phase (and not in the finale) is a phantom by construction
     #        (no eviction commits outside the eviction beat). The original count check missed this
     #        because mid-comp/ceremony the count legitimately equals before, so (1a) never tripped.
+    # BE-202: these used to be one long if/elif chain, so a sentence matching an EARLIER category's
+    # regex (most commonly the eviction claim) skipped every LATER category's check outright — even
+    # when the earlier branch itself concluded "no problem" (a real, correctly-narrated eviction).
+    # That let a narrated sentence which both correctly reports an eviction AND fabricates a vote
+    # tally in the same breath ("the house votes to evict Alex, nine to one") slip a phantom tally
+    # past the guard, because the tally branch was never even reached. Each category below is now
+    # gated on `if not desync` — independently evaluated, first genuine problem found still wins
+    # (matching the prior priority order), but a clean verdict from an earlier category never
+    # suppresses a LATER category's own check.
     if _CLAIM_EVICTED_RE.search(text):
         _count_unmoved = after.get("evicted") == before.get("evicted")
         if (_count_unmoved
@@ -1398,25 +1407,31 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     #     Scoped to FINALE phases: mid-season "crowned the winner" language is necessarily
     #     hypothetical flavor ("you could be crowned the winner someday"), never a committed
     #     outcome — policing it elsewhere would rail-correct creative prose (ADR 0005 principle #1).
-    elif (_CLAIM_WINNER_RE.search(text)
+    if not desync and (_CLAIM_WINNER_RE.search(text)
           and str(after.get("phase") or "").lower().startswith(_FINALE_PHASES)
           and not after.get("finished")):
         desync = "the SEASON WINNER being crowned"
     # (3) A finale vote TALLY was narrated, but the game isn't finished → narrated the count
     #     before the engine revealed all the jury votes.
-    elif (_CLAIM_TALLY_RE.search(text)
+    if not desync and (_CLAIM_TALLY_RE.search(text)
           and str(after.get("phase") or "").lower().startswith(_FINALE_PHASES)
           and not after.get("finished")):
         desync = "a FINAL VOTE TALLY (the jury count)"
-    # (3b) LIVE-7 (#540): a vote TALLY or a self-counted "majority"/"short" conclusion narrated during
-    #      the EVICTION phase while the eviction has NOT committed (the `evicted` count didn't move).
-    #      The engine's staged reveal hands over anonymized ballots only — it never gives a tally and
-    #      never lets the player count to a result; the outcome lands only on the commit beat. So a
-    #      tally/majority here is a phantom the model invented ahead of the engine. Scoped to the
-    #      eviction phase (creative "the votes are close" flavor outside the beat is never policed).
-    elif ((_CLAIM_TALLY_RE.search(text) or _CLAIM_EVICT_RESULT_RE.search(text))
-          and str(after.get("phase") or "").lower().startswith(_EVICTION_PHASES)
-          and after.get("evicted") == before.get("evicted")):
+    # (3b) LIVE-7 (#540) / BE-202: a vote TALLY or a self-counted "majority"/"short" conclusion
+    #      narrated during the EVICTION phase. The engine's staged reveal hands over anonymized
+    #      ballots only — it never gives a numeric count and never lets the player count to a
+    #      result. BE-202: a genuine numeric/spelled N-to-M tally ("nine to one", "9-1") is a
+    #      fabrication regardless of whether the eviction has already committed this same beat (a
+    #      very natural place for a model to say "by a vote of 9 to 1…") — the engine NEVER reveals
+    #      an exact count, commit or not, so this half is UNGATED on the evicted-count check.
+    #      `_CLAIM_EVICT_RESULT_RE`'s vaguer "the majority" / "one vote short" language is different:
+    #      once the eviction has genuinely committed, "the majority voted to evict X" is ordinary,
+    #      accurate flavor describing what just happened (tautologically true of any evictee) — so
+    #      that half stays gated to BEFORE the commit, as before (an eviction genuinely landing this
+    #      turn keeps its result-language narration unpoliced).
+    if not desync and str(after.get("phase") or "").lower().startswith(_EVICTION_PHASES) and (
+          _CLAIM_TALLY_RE.search(text)
+          or (_CLAIM_EVICT_RESULT_RE.search(text) and after.get("evicted") == before.get("evicted"))):
         desync = "an EVICTION VOTE TALLY / RESULT (the count is sealed until the engine commits the eviction)"
     # (4a) A2 (2026-07-03): the model tells the PLAYER they won HOH, but the engine shows the player is
     #      NOT the Head of Household → a phantom self-crown. Verified DIRECTLY against `playerIsHoh` (an
@@ -1424,14 +1439,14 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     #      (the exact live-red-team failure: "you won HOH" narrated with zero tool calls, an NPC actually
     #      won). Fires only when the board KNOWS the player is not HOH (`playerIsHoh is False`, never on
     #      the unknown/None case — an old-style signature without the field can't trip it).
-    elif _CLAIM_SELF_HOH_WIN_RE.search(text) and after.get("playerIsHoh") is False:
+    if not desync and _CLAIM_SELF_HOH_WIN_RE.search(text) and after.get("playerIsHoh") is False:
         desync = "a phantom HEAD OF HOUSEHOLD win (the engine shows you are NOT the Head of Household)"
     # (4b) A2: the model crowns a NAMED houseguest HOH who is NOT the one the engine crowned → the wrong
     #      identity on the throne. Scoped to the HOH beat AND a crown that really committed THIS turn
     #      (`hoh` moved) — so a hypothetical / prediction elsewhere ("if Nina wins HOH next week") is
     #      never policed. Requires a concrete different HOH (`hohName`) and the named person to be a real
     #      ACTIVE houseguest (a name the model invented is the roster guard's separate problem).
-    elif (_named_hoh and after.get("hohName")
+    if not desync and (_named_hoh and after.get("hohName")
           and str(after.get("phase") or "").lower().startswith(_HOH_PHASES)
           and after.get("hoh") != before.get("hoh")
           and _name_matches_active(_named_hoh, after)
@@ -1442,7 +1457,7 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     #     Scoped to HOH phases (like the tally branch): outside the HOH beat, "the new HOH…" /
     #     "wins HOH" reads as reflection or flavor, not a committed crown — policing it elsewhere
     #     would rail-correct creative prose (ADR 0005 principle #1).
-    elif (_CLAIM_NEW_HOH_RE.search(text)
+    if not desync and (_CLAIM_NEW_HOH_RE.search(text)
           and str(after.get("phase") or "").lower().startswith(_HOH_PHASES)
           and after.get("hoh") == before.get("hoh")
           and not (before.get("hoh") is None and after.get("hoh") is not None)):
@@ -1453,24 +1468,24 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     #      to the nomination beat AND a set that actually changed, so this and the count-based branch
     #      below are mutually exclusive by construction (moved vs unmoved). The live bug this closes:
     #      the engine nominated the real pair but the model named a DIFFERENT houseguest as one of them.
-    elif (str(after.get("phase") or "").lower().startswith(_NOM_PHASES)
+    if not desync and (str(after.get("phase") or "").lower().startswith(_NOM_PHASES)
           and (after.get("noms") or []) != (before.get("noms") or [])
           and _nomination_mismatch(text, before, after)):
         desync = "the WRONG houseguest staged as a nominee (you named someone the engine did not nominate)"
     # (5) NARR-8 (#574): a NOMINATION was narrated, but the nominee set didn't move → no nomination
     #     was committed. Scoped to the nomination / veto-ceremony phases (like the HOH branch),
     #     so plan/speculation language outside the beat ("I might nominate you") is never policed.
-    elif (_CLAIM_NOMINATED_RE.search(text)
+    if not desync and (_CLAIM_NOMINATED_RE.search(text)
           and str(after.get("phase") or "").lower().startswith(_NOM_PHASES)
           and (after.get("noms") or []) == (before.get("noms") or [])):
         desync = "a NOMINATION (a houseguest being put on the block)"
     # (6a) A2 (2026-07-03): the model tells the PLAYER they won the veto, but the engine shows they do
     #      NOT hold it → a phantom self-win (mirrors 4a). `playerHasVeto is False` only.
-    elif _CLAIM_SELF_VETO_WIN_RE.search(text) and after.get("playerHasVeto") is False:
+    if not desync and _CLAIM_SELF_VETO_WIN_RE.search(text) and after.get("playerHasVeto") is False:
         desync = "a phantom POWER OF VETO win (the engine shows you do NOT hold the veto)"
     # (6b) A2: the model hands the veto to a NAMED houseguest who is NOT the actual holder → wrong
     #      identity (mirrors 4b). Scoped to the veto beat AND a holder that really committed this turn.
-    elif (_named_veto and after.get("vetoHolderName")
+    if not desync and (_named_veto and after.get("vetoHolderName")
           and str(after.get("phase") or "").lower().startswith(_VETO_PHASES)
           and after.get("vetoHolder") != before.get("vetoHolder")
           and _name_matches_active(_named_veto, after)
@@ -1478,7 +1493,7 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
         desync = "the WRONG houseguest winning the Power of Veto (you named someone the engine did not)"
     # (6) NARR-8 (#574): a VETO WINNER was narrated, but the veto holder didn't change → no veto win
     #     committed. Scoped to the veto phase; the fresh-win guard mirrors the HOH branch.
-    elif (_CLAIM_VETO_WINNER_RE.search(text)
+    if not desync and (_CLAIM_VETO_WINNER_RE.search(text)
           and str(after.get("phase") or "").lower().startswith(_VETO_PHASES)
           and after.get("vetoHolder") == before.get("vetoHolder")
           and not (before.get("vetoHolder") is None and after.get("vetoHolder") is not None)):

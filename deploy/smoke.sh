@@ -33,8 +33,14 @@ refute() { # label  haystack  needle-that-must-be-absent
 # simulated update, and the smoke never pollutes the checkout's default ./.orwell-data.
 SMOKE_DATA_DIR="$(mktemp -d /tmp/orwell-smoke-data-XXXXXX)"
 
+# B2 (DEPLOY-8): boot the engine in the SAME behavioral-flag configuration the installer ships, so
+# the one true end-to-end gate actually exercises the shipped runtime (a regression reachable only
+# when a living-house layer is active would otherwise stay invisible). Matches orwell-install.sh's
+# write_config(); every layer is calibration-neutral-when-off and heavy-sim'd ON.
+SHIPPED_FLAGS=(ORWELL_CAMPAIGNS=1 ORWELL_COMP_INTENT=1 ORWELL_TRAJECTORIES=1 ORWELL_TRIGGERS=1 ORWELL_SECRET_PACING=1 ORWELL_JURY_HOUSE=1 ORWELL_SEEDED_TIE_SURFACING=1)
+
 start_engine() { # optional $1 = a shared token to enforce (B67/B71)
-  env ORWELL_ENGINE_PORT="$PORT" ORWELL_DATA_DIR="$SMOKE_DATA_DIR" ${1:+ORWELL_ENGINE_TOKEN="$1"} node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
+  env ORWELL_ENGINE_PORT="$PORT" ORWELL_DATA_DIR="$SMOKE_DATA_DIR" "${SHIPPED_FLAGS[@]}" ${1:+ORWELL_ENGINE_TOKEN="$1"} node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
   ENGINE_PID=$!
   for _ in $(seq 1 30); do
     if curl -fsS "${BASE}/health" >/dev/null 2>&1; then return 0; fi

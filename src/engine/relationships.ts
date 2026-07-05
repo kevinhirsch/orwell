@@ -293,13 +293,31 @@ export class RelationshipModel {
   }
 
   /** Replace all edges from a serialized snapshot — recall after leaving/restart (0023/0007).
-   *  Pre-E54 saves carry no `reliability`: those edges resume at the unproven baseline. */
+   *  Pre-E54 saves carry no `reliability`: those edges resume at the unproven baseline.
+   *  PERSIST-3: `clamp01` (PERSIST-2) stops NEW NaN writes, but a save made BEFORE that fix (or any
+   *  future bug that slips past it) can already carry a `null`/NaN numeric field on disk — JSON
+   *  round-trips a NaN to `null`. A bare pass-through would let a `null` silently coerce to `0` on
+   *  every downstream arithmetic read (`null + delta`), an undocumented, unannounced reset of that
+   *  edge's value to its floor with no operator signal. Sanitize each field to the edge baseline
+   *  (mirroring the existing `reliability ?? baseline.reliability` pattern) and log once per
+   *  repaired field so a corrupted save is visible instead of silently self-healing to a wrong
+   *  value. */
   load(edges: ReadonlyArray<{ from: EntityId; to: EntityId } & Omit<EdgeSignals, "reliability"> & { reliability?: number }>): void {
     this.edges.clear();
+    const b = this.constants.baseline;
+    const sanitize = (from: EntityId, to: EntityId, field: keyof EdgeSignals, v: number): number => {
+      if (Number.isFinite(v)) return v;
+      console.error(`[orwell] relationship edge ${from}->${to} had a non-finite "${field}" on load; repaired to baseline`);
+      return b[field];
+    };
     for (const e of edges) {
       this.edges.set(this.key(e.from, e.to), {
-        trust: e.trust, affinity: e.affinity, threat: e.threat, alignment: e.alignment, confidence: e.confidence,
-        reliability: e.reliability ?? this.constants.baseline.reliability,
+        trust: sanitize(e.from, e.to, "trust", e.trust),
+        affinity: sanitize(e.from, e.to, "affinity", e.affinity),
+        threat: sanitize(e.from, e.to, "threat", e.threat),
+        alignment: sanitize(e.from, e.to, "alignment", e.alignment),
+        confidence: sanitize(e.from, e.to, "confidence", e.confidence),
+        reliability: sanitize(e.from, e.to, "reliability", e.reliability ?? this.constants.baseline.reliability),
       });
     }
   }

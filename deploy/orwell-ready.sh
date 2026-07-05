@@ -7,8 +7,23 @@
 # Exit 0 = ready · 1 = not ready (each failing check is named).
 set -uo pipefail
 
+# Pick up ORWELL_PORT/ORWELL_ENGINE_PORT/ORWELL_ENGINE_MCP_URL from data/.env when the caller
+# hasn't already exported them (orwell-menu.sh invokes this script bare, with no env sourcing —
+# DEPLOY-7: a stock install was reported "NOT READY" for a fully healthy front-end because this
+# script's bare fallback (8000) never matched the real default (8080) and nothing read .env).
+if [[ -z "${ORWELL_PORT:-}" || -z "${ORWELL_ENGINE_PORT:-}" || -z "${ORWELL_ENGINE_MCP_URL:-}" ]]; then
+  ENV_FILE="${ORWELL_HOME:-/opt/orwell}/data/.env"
+  [[ -f "$ENV_FILE" ]] || ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/data/.env"
+  if [[ -f "$ENV_FILE" ]]; then
+    env_get() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2-; }
+    : "${ORWELL_PORT:=$(env_get ORWELL_PORT)}"
+    : "${ORWELL_ENGINE_PORT:=$(env_get ORWELL_ENGINE_PORT)}"
+    : "${ORWELL_ENGINE_MCP_URL:=$(env_get ORWELL_ENGINE_MCP_URL)}"
+  fi
+fi
+
 ENGINE="${ORWELL_ENGINE_MCP_URL:-http://127.0.0.1:${ORWELL_ENGINE_PORT:-8765}}"
-FE="http://127.0.0.1:${ORWELL_PORT:-8000}"
+FE="http://127.0.0.1:${ORWELL_PORT:-8080}"
 # Colour auto-disables off a TTY / under NO_COLOR / TERM=dumb (the verdict words READY / NOT READY
 # are never wrapped — only the leading glyph carries colour — so anything reading them stays safe).
 if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then

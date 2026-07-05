@@ -13,6 +13,7 @@ import type {
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView,
   StateDeltaView, DeltaEventView,
+  BehavioralFlags,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
@@ -2491,17 +2492,18 @@ export class GameSessionAdapter implements GameSession {
     // deterministically from the seed + cast below — seed-stable & player-independent, so the floor
     // returns identically. The PUBLIC facets ride on the persisted Character (byte-stable), so they
     // are NOT re-derived here; only the hidden half + thread status are rehydrated.
-    if (core.deepProfiles || core.storyThreads) {
-      this.deepProfiles = core.deepProfiles ? cloneSession(core.deepProfiles) : {};
-      this.storyThreads = core.storyThreads ? cloneSession(core.storyThreads) : [];
-    } else if (core.house && core.seed !== undefined) {
-      const layer = generateCastDeepLayer(core.seed, core.house.npcs);
-      this.deepProfiles = layer.hidden;
-      this.storyThreads = layer.threads;
-    } else {
-      this.deepProfiles = {};
-      this.storyThreads = [];
-    }
+    // PERSIST-13: the two fields used to be gated by a single OR — "either is present ⇒ trust BOTH
+    // as persisted, re-deriving neither." A save where `storyThreads` survived but `deepProfiles`
+    // was absent/empty (a partial write, an interrupted re-seal, a future migration bug that clears
+    // one but not the other) took the "trust the persisted layer" branch and set `deepProfiles = {}`
+    // — silently discarding every houseguest's secrets/goals/weakness/day-one-perception for the
+    // rest of the game, with no re-derivation and no error. Each field is now independently either
+    // trusted (present) or re-derived from the seed (absent) — a partial/inconsistent save
+    // self-heals deterministically instead of silently going empty.
+    const needsRederive = (!core.deepProfiles || !core.storyThreads) && core.house && core.seed !== undefined;
+    const layer = needsRederive ? generateCastDeepLayer(core.seed!, core.house!.npcs) : null;
+    this.deepProfiles = core.deepProfiles ? cloneSession(core.deepProfiles) : (layer ? layer.hidden : {});
+    this.storyThreads = core.storyThreads ? cloneSession(core.storyThreads) : (layer ? layer.threads : []);
     // 0060 §3 back-compat: a thread restored from a pre-0060 save carries no structured `triggerCondition`
     // / `lifecycleWeek` — default them by source class / the live week (idempotent), so the scheduler has
     // a gate and the windows have a base. This is a NON-mutating re-derive (the byte-stable PUBLIC facets
@@ -5055,6 +5057,40 @@ export class GameSessionAdapter implements GameSession {
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }
+
+  /**
+   * B2 (2026-07-05 activation lane) — the single God-Mode dial for every "living house" behavioral-
+   * fidelity layer that ships opt-in behind its own `ORWELL_*` env flag. Mirrors `setTimeOfDay` (ADR
+   * 0006): each named field flips ONE layer at runtime — no engine restart — and an absent field
+   * leaves that layer's current setting (env default or a prior override) untouched. Three of the six
+   * are per-session instance state (campaigns/trajectories/juryHouse — the composition layer wires one
+   * delegate per sandbox); the other two ride the SAME process-global override pattern `setTimeOfDay`
+   * and `setSeededTieSurfacingEnabled` already use (secretPacing/seededTieSurfacing), so this method
+   * fans out to whichever mechanism each flag actually uses — the caller never needs to know which.
+   * Vault-free by construction (every layer is calibration-proven-neutral-when-off; no Vault handle,
+   * no hidden value crosses).
+   */
+  setBehavioralFlags(flags: BehavioralFlags): void {
+    if (flags.campaigns !== undefined) this.campaignsEnabled = flags.campaigns;
+    if (flags.trajectories !== undefined) this.trajectoriesEnabled = flags.trajectories;
+    if (flags.triggers !== undefined) this.triggersEnabled = flags.triggers;
+    if (flags.juryHouse !== undefined) this.juryHouseEnabled = flags.juryHouse;
+    if (flags.secretPacing !== undefined) GameSessionAdapter.secretPacingOverride = flags.secretPacing;
+    if (flags.seededTieSurfacing !== undefined) GameSessionAdapter.seededTieSurfacingOverride = flags.seededTieSurfacing;
+  }
+
+  /** The CURRENT resolved state of every B2 behavioral flag (env default or override) — Vault-free,
+   *  admin-visible read-side of `setBehavioralFlags` so the FE dial can render on/off correctly. */
+  behavioralFlagsSnapshot(): Required<BehavioralFlags> {
+    return {
+      campaigns: this.campaignsEnabled,
+      trajectories: this.trajectoriesEnabled,
+      triggers: this.triggersEnabled,
+      secretPacing: this.secretPacingEnabled,
+      juryHouse: this.juryHouseEnabled,
+      seededTieSurfacing: this.seededTieSurfacingEnabled,
+    };
+  }
 
   /** Turn the NPC competition-intent layer on/off (0006b). Off by default — the calibration harness leaves it off. */
   setCompIntentEnabled(on: boolean): void { this.compIntentEnabled = on; }

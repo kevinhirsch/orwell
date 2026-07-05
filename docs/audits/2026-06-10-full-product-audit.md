@@ -1,6 +1,6 @@
 # 2026-06-10 — Full product audit (round 5): architecture, wiring, FE/UI, game design & player experience
 
-> 📋 **Audit record** · 2026-06-10 · Full product audit (round 5) · **Status:** **ACTIVE — authoritative open-items ledger** (product-owner rulings #1–#21 + the campaign close-out + the 2026-06-19 reconciliation)
+> 📋 **Audit record** · 2026-06-10 · Full product audit (round 5) · **Status:** **ACTIVE — authoritative open-items ledger** (product-owner rulings #1–#21 + the campaign close-out + the 2026-06-19 reconciliation + the 2026-07-05 audit-closure fan-out)
 
 **Scope.** A complete sweep of the repo at `main` (87687c0): the engine's ports/composition/
 adapters/surfaces, the pure core and every `src/engine` system against the canonical mechanics
@@ -1970,3 +1970,169 @@ below (fixed + open + minor), no matter how small. Most are rooted in the docume
 - **LW11** → **moved to the PO list as PO-1** (eviction-night length — a product-owner judgment call: batch/trim
   the staged secret-ballot reveal like the comps, or keep the core drama). See "Product-owner decisions PENDING
   (PO list)" near the top of this ledger.
+
+## 2026-07-05 — audit-closure fan-out (the 2026-07-03 final-pre-ship audit): 18 fixes MERGED
+
+The `docs/audits/2026-07-03-final-pre-ship-audit/` campaign (per-lane findings across deploy-ops,
+doc-drift, test-gaps, settings-admin, security, plus the deep-play/UX/social/narration/consistency
+lanes) fanned out a ×10 parallel dispatch plus eight earlier same-day merges. Every item below is
+**DONE** on `main`, with its verifying artifact — recorded here per this ledger's own convention (a
+merged fix is closed out with a citation, not left as a dangling PR number).
+
+**The ×10 fan-out:**
+- **#1198** [fe-unit flake] — isolate the per-worker pytest DB so `pytest-xdist` workers stop
+  silently converging on one shared sqlite file (the `DATABASE_URL` `setdefault` was a no-op in
+  every worker subprocess, since the controller sets it before workers fork). Root cause of the
+  intermittent `fe-unit` red on `test_null_owner_endpoint_*`/reaper siblings. **DONE** —
+  `frontend/tests/conftest.py`.
+- **#1199** [welcome-card] — the premiere "Welcome to the house" guide card gated on `week === 1`,
+  so it kept rendering through the ENTIRE week-1 chain (HOH → noms → veto → ceremony → eviction),
+  not just the meet-everyone gate — corroborated 4× in the source audit (DEEP-23, TRANS-1,
+  RESP-2/7/23, FLOW-10). Now gates on the engine's own `moment === "premiere"`, which flips off the
+  instant the gate completes. **DONE** — `frontend/static/js/orwellPremiereTutorial.js`,
+  `frontend/tests/test_l31_premiere_tutorial.py`. Amends feature 0050.
+- **#1200** [ceremony-runway, J-3] — the FE pacing belts were fighting the social-runway holds they
+  exist to protect: the forced-`tool_choice` gate read the raw engine phase and force-advanced
+  straight past the social-runway HOLD and the witnessed-ceremony re-frame; separately, the
+  runway/stall-nudge regexes false-positived on ordinary BB scheming language ("nominate"/"noms", a
+  bare "next", "continue", "proceed"). Both tightened FE-side only — no engine advance logic
+  touched. **DONE** — `frontend/routes/chat_helpers.py`, `frontend/src/agent_loop.py`,
+  `frontend/tests/test_tool_choice_force.py`.
+- **#1201** [ceremony-anim, TRANS-12/VM-5] — ceremony-beat outcome rows (HOH crown, nomination
+  reveal, veto result, eviction vote) swapped in via a raw `innerHTML` replace with zero motion —
+  the show's biggest set-piece beats landed as a silent instant flip. Now tagged
+  `ow-ceremony-reveal` with a staged fade/settle entrance on the shared kit easing;
+  `prefers-reduced-motion` strips back to the original instant swap. **DONE** —
+  `frontend/static/js/chat.js`, `frontend/static/style.css`,
+  `frontend/tests/test_transient_ceremony_reveal.py`.
+- **#1202** [diary-invite] — activated the dead 0013 §5 producer Diary-Room invite trigger (PG-14 /
+  PS-4). **DONE** — `frontend/routes/chat_helpers.py`, `src/engine/diaryRoom.ts`,
+  `src/adapters/engine/GameSessionAdapter.ts`, `src/ports/GameSession.ts`,
+  `frontend/tests/test_diary_room_producer_invite.py`, `tests/unit/diaryRoom.test.ts`. Amends
+  feature 0013.
+- **#1203** [storyFacts, SOC-1/4] — the player's pathway-surfaced facts (0002 knowledge propagation)
+  weren't being delivered to the narrator every turn, so the model could contradict what the
+  engine had already surfaced to the player. **DONE** — `src/adapters/engine/GameSessionAdapter.ts`,
+  `src/engine/momentPrompts.ts`, `tests/unit/surfacedFactsDelivery.test.ts`.
+- **#1204** [sqlite-vec, PERSIST-7] — the `ORWELL_STORE=sqlite` opt-in tier's vector recall index
+  was never persisted/reloaded across an engine restart, silently resetting semantic recall to cold
+  on every reboot — a mandate-4 (non-degradation) violation on the one tier meant for a real
+  multi-user deploy. **DONE** — `src/adapters/engine/SoulStore.ts`,
+  `src/adapters/sqlite/SqliteVectorIndex.ts`, `src/composition/engineRoot.ts`,
+  `tests/unit/sqliteVectorIndex.test.ts`.
+- **#1205** [npc-voice, I6 distinct-voices] — the per-NPC 0084/0090 voice fingerprint wasn't
+  reaching the per-turn roster the narrator reads, so voices sounded flatter/more uniform in
+  practice than the built voice system intended. **DONE** —
+  `src/adapters/engine/GameSessionAdapter.ts`, `src/engine/momentPrompts.ts`, `src/engine/voice.ts`,
+  `src/ports/GameSession.ts`, `tests/unit/rosterVoiceFingerprint.test.ts`.
+- **#1206** [ritual-language, BB-nerd audit] — added ceremony ritual-language cues (the genre's
+  formal phrasing conventions at HOH/nomination/veto/eviction beats) to the moment-prompt layer.
+  **DONE** — `src/engine/momentPrompts.ts`, `tests/unit/ceremonyRitualLanguage.test.ts`.
+- **#1207** [responsive tap-target, RESP-4] — the icon-only settings-sidebar collapse chevron
+  rendered ~41.5px wide at the tablet-820 coarse-pointer tier, under the WCAG 2.5.5 44px floor the
+  responsive matrix enforces (the existing coarse-pointer rule floored button HEIGHT but not
+  icon-only WIDTH). **DONE** — `frontend/static/css/responsive-tokens.css` (verified clean by
+  `frontend/scripts/responsive_matrix.py`).
+
+**Six earlier same-day merges (also from the 2026-07-03 audit):**
+- **#1186** [checkpoint, PERSIST-8] — the 0031 fail-closed non-degradation checkpoint's
+  `toGameState` projection predated features 0058–0107 and never verified ~a dozen newer,
+  genuinely-accumulating `SessionCore` dimensions (deals, deep profiles, confidences,
+  secrets-as-power, nomination history, texture overrides, seeded-tie surfacing…) — exactly where
+  mandate #4 is supposed to be strongest. Adds `sessionCoreCounts`/`sessionCoreCountsNonDecreasing`/
+  `sessionCoreIsSuperset` (append-only ⇒ id/subset presence; monotonic accumulators ⇒
+  non-decreasing), wired into `Orchestrator.checkpoint` beside the existing 0007 check. **DONE** —
+  `src/composition/orchestrator.ts`, `src/engine/sessionSnapshot.ts`,
+  `tests/unit/sessionCoreCheckpointCoverage.test.ts`. Amends feature 0031/0007.
+- **#1188** [offense P1, about-edges consequence] — extends the ADR 0005 generative-consequence
+  descriptor (feature 0023/0055 — the model proposes shape, the engine keeps the bounded seeded
+  magnitude) to **third-party edges**: the player can now pitch a consequence that lands on an
+  edge *between two NPCs*, not just their own — a first playable-offense lever (turning the house
+  against a rival by proxy) rather than only reactive/self-facing folds. **DONE** —
+  `frontend/src/agent_loop.py`, `frontend/src/tool_schemas.py`,
+  `frontend/tests/test_0005_generative_consequence.py`,
+  `src/adapters/engine/EngineCommandsAdapter.ts`, `src/adapters/mcp/McpServer.ts`,
+  `src/engine/consequence.ts`, `src/engine/relationshipConstants.ts`,
+  `src/ports/EngineCommands.ts`, `src/surfaces/tools/registry.ts`,
+  `tests/unit/thirdPartyConsequence.test.ts`. Amends feature 0023/0055 (ADR 0005).
+- **#1189** [gossip distortion, SG-6] — 0002/0038's gossip diffusion previously only decayed
+  *confidence* on each retelling; the belief's *content* itself never actually distorted, so a
+  rumor a player heard third-hand was suspiciously as accurate as the original — undermining the
+  "distorted belief with a source + confidence" model CLAUDE.md's event/visibility section
+  describes. Diffusion now genuinely mutates the propagated belief (not just its confidence).
+  **DONE** — `src/engine/gossip.ts`, `tests/unit/gossipDistortion.test.ts`. Amends feature
+  0002/0038.
+- **#1190** [embedding guard, PERSIST-1/PERSIST-4] — a fail-safe dimension guard + a live provider
+  pin for the embedding/vector layer (ADR 0004): guards against a silent dimension mismatch (e.g. a
+  provider/model swap mid-season corrupting recall) and pins the provider actually used per save so
+  a later provider change can't silently misinterpret old vectors. **DONE** —
+  `src/adapters/engine/SoulStore.ts`, `src/adapters/inmemory/InMemoryVectorIndex.ts`,
+  `src/adapters/sqlite/SqliteVectorIndex.ts`, `src/composition/engineRoot.ts`,
+  `src/ports/VectorIndex.ts`, `tests/unit/embeddingPinAndDimGuard.test.ts`. Amends ADR 0004 /
+  feature 0024.
+- **#1191** [endgame reveal, ENDGAME-4/BB-14] — two missing BB set-piece PRESENTATION beats (pure
+  staging over already-decided outcomes — no roll/vote/calibration touched): the post-season prompt
+  framed a champion and runner-up identically (no distinct WINNER moment); the weekly HOH-room
+  reveal (a recurring BB staple — the house watching who wins the coveted suite) was missing.
+  **DONE** — `src/engine/momentPrompts.ts`, `tests/unit/endgameWinnerMomentNeutral.test.ts`,
+  `tests/unit/hohRoomReveal.test.ts`. Amends feature 0045/0049.
+- **#1195** [house-events] — the ambient house-event pool (the daily-event invariant's
+  between-ceremony texture) was **dead code for every real game**: its record-gate checked
+  `trigger === "player-turn"`, a value the real commit path never sends (the R5/E57 debounce
+  refactor renamed it to `"offscreen-tick"` without updating this gate) — so 100% of the
+  `house-event` texture a live player ever saw was ceremony boilerplate. Re-gated on
+  `trigger !== "audit"` (fires on the real production trigger) and deepened the pool. **DONE** —
+  `src/composition/orchestrator.ts`, `src/engine/houseEvents.ts`, `tests/unit/houseEvents.test.ts`,
+  `tests/unit/orchestrator.test.ts`, `tests/unit/stateDelta.test.ts`. Amends feature 0008/0070.
+
+**Two additional Wave-C merges (same campaign, UX/a11y lanes):**
+- **#1192** [a11y, Wave-C] — fixed the measured WCAG contrast failures (decision-card risk badge
+  ~2.25:1 → ~5.2:1; the disabled "Confirm — this is binding" button ~1.74:1 → ~4.95:1, now opaque
+  rather than opacity-based) and keyboard/focus/AT gaps (a decision card's `aria-label` didn't
+  actually include the risk-badge text despite its own comment claiming it did; a non-interactive
+  `<span>` welcome-screen trigger) found by the ux-content-a11y / ux-visual-motion / ux-interaction
+  lanes. **DONE** — `frontend/static/index.html`, `frontend/static/js/{chat,models,orwellDecision,
+  orwellHeadshot}.js`, `frontend/static/style.css`, `frontend/tests/test_wavec_a11y_contrast_focus.py`.
+- **#1193** [offense P4] — `confide`/`exposeSecret`/`tradeSecret` (features 0075/0093/0099) were
+  fully built, wired engine tools but fired **near-never in real play**: `exposeSecret`/`tradeSecret`
+  were advertised in the model-facing schema and game-build allow-list, but `tool_execution.py`'s
+  dispatcher had no branch for either name — every model-driven call fell through to "Unknown tool
+  type" (a dead wire, not just a discoverability gap). Added the FE wrappers/dispatch cases
+  mirroring the working `confide` path end to end, plus the model-facing schema's missing
+  `askKind` field on `tradeSecret`. **DONE** — `frontend/src/agent_loop.py`,
+  `frontend/src/orwell_engine.py`, `frontend/src/tool_execution.py`,
+  `frontend/src/tool_implementations.py`, `frontend/src/tool_schemas.py`,
+  `frontend/tests/test_0093_0099_secret_verbs_onramp.py`. Closes the FE half of features
+  0075/0093/0099.
+
+**Still-OPEN tail (not this session's job to close; tracked here so nothing falls off the map):**
+- **h2b/h2h3 CI real-fix** — in progress; the underlying test-harness/CI wiring work is not yet
+  landed as of this entry. Do not mark done until its own verifying artifact lands.
+- **Offense P2/P3 + the B2 dark-feature-activation flags** — owner-decision, in build. Offense
+  P2/P3 extend the P1 (#1188, third-party edges) / P4 (#1193, FE on-ramp) work further; B2 is the
+  `deploy-ops` lane's DEPLOY-1/DEPLOY-12 dark-flag-activation plan (five calibration-proven
+  behavioral flags — `ORWELL_TRAJECTORIES`/`ORWELL_TRIGGERS`/`ORWELL_SECRET_PACING`/
+  `ORWELL_JURY_HOUSE`/`ORWELL_SEEDED_TIE_SURFACING` — ship permanently dark; see
+  `docs/audits/2026-07-03-final-pre-ship-audit/lanes/deploy-ops.md` DEPLOY-1/DEPLOY-12). Both are
+  explicitly owner judgment calls, not agent work — do not auto-activate.
+- **0010 Proxmox container smoke** — still needs a real host; owner action, unchanged from every
+  prior ledger entry.
+- **0108 (real-model golden-path gate)** — still spec-only; the structurally-right fix for the
+  "every gate stubs the LLM" class of gap the `test-gaps` lane re-confirmed (TCG-1…TCG-31). Not
+  started this session.
+
+**Doc-reconciliation done alongside this fan-out (2026-07-05, doc-drift lane closure):** fixed the
+0102/0107 spec-number collisions (the day-1-experience and LLM-call-observability drafts renamed to
+**0111**/**0112**; content unchanged, see `docs/features/README.md`), corrected `CLAUDE.md`'s stale
+"ADRs 0001–0014" table (now 0001–0016) and its last two "through 0109" mentions (now 0110),
+corrected ADR 0012's status field (was bare "Proposed" while every downstream doc relied on it as
+shipped), fixed the ship-gate's PARKED-bucket description of #905–909 (they have owner rulings, per
+`PO-DECISIONS-LOG.md`'s 2026-06-27 entry — they're build-ready, not undecided), fixed
+`docs/IMPLEMENTATION_QUEUE.md`'s self-contradiction (top banner said the D1–D11 batch was done, the
+D1–D11 section header itself still said "OPEN"), and closed the README's stale 0075/0076 amendment
+notes (the confide guardrail fast-follow shipped in PR #1088; the 0077 floor-plan 0076 was waiting
+on has landed). `deploy/orwell-ready.sh`'s wrong front-end port fallback (8000, should be 8080 —
+DEPLOY-7 in the deploy-ops lane) was also fixed, since a stock install was reliably reporting
+"NOT READY" for a fully healthy front-end. GitHub issues **#862** and **#880** (0093/0099's
+tracking issues, DOC-10) were **closed** — both were still `open` despite the underlying mechanics
+being fully merged and BDD-gated since 2026-06-27.

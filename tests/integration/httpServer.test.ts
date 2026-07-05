@@ -28,6 +28,14 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
     expect(Array.isArray(body["recentFailures"])).toBe(true);
     // no embeddingsStatus wired in this test ⇒ the deterministic, non-degraded default
     expect(body["embeddings"]).toEqual({ provider: "deterministic", degraded: false });
+    // B2 (DEPLOY-12): the boot-time behavioral-flags block is present with every known layer as a
+    // boolean — a pure env read (no game data / no Vault), so an operator can see what's live.
+    const flags = body["flags"] as Record<string, unknown>;
+    expect(flags, "the /health flags block is present").toBeTruthy();
+    for (const k of ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse",
+      "seededTieSurfacing", "compIntent", "voteDeduction", "timeOfDay"]) {
+      expect(typeof flags[k], `flags.${k} is a boolean`).toBe("boolean");
+    }
   });
 
   it("records a failed tool call in the /health ring — tool name + error class + timing, never args (G1)", async () => {
