@@ -935,7 +935,10 @@ function countEvictionVotes(s: LiveSeasonState, ctx: SeasonCtx, playerVote?: Ent
  */
 function mannerToward(evictee: EntityId, responsible: EntityId, ctx: SeasonCtx): EvictionManner {
   const e = ctx.rel.edge(evictee, responsible);
-  const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
+  // PERSIST-2/BE-101: guard NaN → 0 — `intensity` below is written into the persisted
+  // `LiveSeasonState.mannerByEvictee`, which the finale jury read consumes. Finite inputs
+  // clamp exactly as before.
+  const clamp01 = (x: number): number => (Number.isNaN(x) ? 0 : Math.max(0, Math.min(1, x)));
   // SOC-NEW-1/5: the read is GRADED off the actual edge — its severity tracks the relationship.
   const graded = (t: number): number => MANNER_GRADING.grievanceFloor + (1 - MANNER_GRADING.grievanceFloor) * clamp01(t);
   const { trustBetrayal, threatBlindside } = MANNER_THRESHOLDS;

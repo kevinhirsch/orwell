@@ -81,7 +81,10 @@ export const CAMPAIGN: CampaignConstants = {
   progressJitter: 0.4,
 };
 
-const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+// PERSIST-2/BE-101: guard NaN → 0 — this clamp gates persisted fields (`Campaign.progress`/
+// `.confidence`, `Drive.intensity`, `Character.influence`), so a NaN input must never write through.
+// Finite inputs clamp exactly as before.
+const clamp01 = (x: number): number => (Number.isNaN(x) ? 0 : x < 0 ? 0 : x > 1 ? 1 : x);
 
 /**
  * The two static CHARACTER aptitudes campaigns turn on (owner ruling 2026-06-25 — the tilt is a
