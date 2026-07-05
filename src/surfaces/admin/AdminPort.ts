@@ -1,7 +1,7 @@
 import type {
   GameStateRepository, AdminVisibleState, OverrideChange, SandboxOp,
 } from "../../ports/GameStateRepository";
-import type { FinaleFastForwardView } from "../../ports/GameSession";
+import type { FinaleFastForwardView, BehavioralFlags } from "../../ports/GameSession";
 
 /**
  * Administrator / God Mode (0016). Inspects, overrides non-Vault mechanics,
@@ -95,6 +95,44 @@ export class AdminPort {
   setTimeOfDay(enabled: boolean): AdminVisibleState {
     this.timeOfDayDelegate?.(enabled);
     return this.state.getAdminVisibleState();
+  }
+
+  /**
+   * B2 (2026-07-05 activation lane) — the God-Mode dial for the "living house" behavioral-fidelity
+   * layers (0085 campaigns / 0087 trajectories / 0091 triggers / 0092 secret pacing / 0100 jury house /
+   * 0059 §5 seeded-tie surfacing) that ship OPT-IN behind their own `ORWELL_*` deploy env flag. Same
+   * delegate shape as `setTimeOfDayDelegate` above (a Vault-free void closure the composition layer
+   * wires per sandbox) — this OUTWARD surface never imports the engine adapter. Each field is optional;
+   * an absent field leaves that layer's current setting untouched.
+   */
+  private behavioralFlagsDelegate?: (flags: BehavioralFlags) => void;
+
+  setBehavioralFlagsDelegate(fn: (flags: BehavioralFlags) => void): void {
+    this.behavioralFlagsDelegate = fn;
+  }
+
+  /** Flip one or more behavioral-fidelity layers at runtime (the FE settings switch → no restart). */
+  setBehavioralFlags(flags: BehavioralFlags): AdminVisibleState {
+    this.behavioralFlagsDelegate?.(flags);
+    return this.state.getAdminVisibleState();
+  }
+
+  /**
+   * The read-side companion (DEPLOY-12): the CURRENT resolved on/off state of every B2 flag, so an
+   * operator/FE dial can render truthfully instead of only being able to write blind. Returns all-false
+   * when no sandbox/session is composed (never throws; never a Vault handle).
+   */
+  private behavioralFlagsProvider?: () => Required<BehavioralFlags>;
+
+  setBehavioralFlagsProvider(fn: () => Required<BehavioralFlags>): void {
+    this.behavioralFlagsProvider = fn;
+  }
+
+  behavioralFlags(): Required<BehavioralFlags> {
+    return this.behavioralFlagsProvider?.() ?? {
+      campaigns: false, trajectories: false, triggers: false,
+      secretPacing: false, juryHouse: false, seededTieSurfacing: false,
+    };
   }
 
   /** Manage this sandbox only (create | reset | save | load). A reset re-onboards the REAL game. */

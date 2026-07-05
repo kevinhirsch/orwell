@@ -1,4 +1,4 @@
-Feature: 0102 — The Day-1 experience (the first session is the first move of the social game)
+Feature: 0111 — The Day-1 experience (the first session is the first move of the social game)
   Day 1's job is to make the player believe the whole season's depth before they've seen it
   and get them into the conversation fast. Five pillars: casting probes the self (not a
   declared kill-list); the producer plants one Vault-free curiosity needle that the hidden

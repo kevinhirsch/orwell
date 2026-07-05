@@ -261,6 +261,20 @@ write_config() {
       # agendas that tilt nominations/votes — engine-tallied, Vault-sealed). DEFAULT OFF in code so
       # the seeded calibration gates stay byte-identical; the deploy opts in here.
       echo "ORWELL_CAMPAIGNS=1"
+      # B2 (2026-07-05 activation): the rest of the built "living house" behavioral-fidelity layers
+      # that shipped OPT-IN behind their own env flag but were never wired into the deploy — so on a
+      # stock box no relationship arcs curdled (0087), no trigger secrets erupted (0091), no dormant
+      # secret drip-fed on a paced cadence (0092), no jury grudges accumulated (0100), and no seeded
+      # pre-show ties ever surfaced (0059 §5). Each ships its OWN calibration-neutral-when-off gate,
+      # and all five + campaigns were heavy-sim'd ON together (juryReach band + calibrationGradient
+      # active≥passive both hold). DEFAULT OFF in code so the seeded gates stay byte-identical; the
+      # deploy opts in here. The God-Mode "Living house" dial (setBehavioralFlags) overrides any of
+      # these per-sandbox at runtime; /health's `flags` block reports the boot state.
+      echo "ORWELL_TRAJECTORIES=1"
+      echo "ORWELL_TRIGGERS=1"
+      echo "ORWELL_SECRET_PACING=1"
+      echo "ORWELL_JURY_HOUSE=1"
+      echo "ORWELL_SEEDED_TIE_SURFACING=1"
       # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
       # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
       # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded

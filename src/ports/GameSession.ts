@@ -1221,6 +1221,30 @@ export interface FinaleFastForwardView {
   started: boolean;
 }
 
+/**
+ * B2 (2026-07-05 activation lane) — the God-Mode runtime dial for the "living house" behavioral-
+ * fidelity layers that ship OPT-IN behind their own `ORWELL_*` env flag (0085 campaigns, 0087
+ * trajectories, 0091 triggers, 0092 secret pacing, 0100 jury house, 0059 §5 seeded-tie surfacing).
+ * Every field is OPTIONAL — an admin `setBehavioralFlags` call only touches the flags it names,
+ * exactly like `setTimeOfDay` (ADR 0006). `undefined` ⇒ unchanged (leaves the env-derived default
+ * or a prior override in place). Vault-free by construction: these are engine-tallied, calibration-
+ * proven-neutral-when-off switches, never a Vault handle or a hidden value.
+ */
+export interface BehavioralFlags {
+  /** 0085 — NPC campaigns & the scramble (hidden, adaptive agendas that tilt noms/votes). */
+  campaigns?: boolean;
+  /** 0087 — relationship trajectories (warming/cooling arcs bending off-screen scene selection). */
+  trajectories?: boolean;
+  /** 0091 — trigger secrets erupting into public house events under accumulated strain. */
+  triggers?: boolean;
+  /** 0092 — the secret-pacing drip (a paced ~1-2/week cadence for dormant secrets to surface). */
+  secretPacing?: boolean;
+  /** 0100 — the jury grudge book (the sequestered jury house as a hidden second society). */
+  juryHouse?: boolean;
+  /** 0059 §5 — organic surfacing of seeded pre-game ties as the pair's live bond genuinely warms. */
+  seededTieSurfacing?: boolean;
+}
+
 /** A player's answer to the current `PendingDecisionView`. */
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"

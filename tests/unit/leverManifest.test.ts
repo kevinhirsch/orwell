@@ -56,11 +56,14 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
   });
 
   // P4: levers are silent production machinery — the model must never ask permission to pull
-  // one, and ask_user is scoped to the game's pending BINDING decisions only.
-  it("P4: declares levers silent and scopes ask_user to pending binding decisions", () => {
+  // one, and ask_user is carved AWAY from the game's pending BINDING decisions (the player's own
+  // decision card is the single authority there — PROMPT-9/PROMPT2-1: the old wording told the
+  // model to use ask_user for pendings in one place while forbidding it in another).
+  it("P4: declares levers silent and carves ask_user away from pending binding decisions", () => {
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/SILENT production\s*machinery/i);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/never ask the player's permission/i);
-    expect(BASE_GAME_MASTER_PROMPT).toMatch(/ask_user is ONLY for presenting the game's\s*pending BINDING decision options/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/ask_user is NEVER for the game's pending\s*BINDING decision options/i);
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/decision card already presents those/i);
   });
 
   // LLM-discipline cluster (audit 2026-06-18 hand-off): the model raced past decision cards, invented

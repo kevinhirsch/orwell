@@ -86,8 +86,11 @@ repeat can double-advance the beat. First re-read gameStatus — if the beat or 
 already moved, the call resolved (tell the player it may already be resolved and continue from the \
 engine's state); only re-issue it when the engine still shows the same unresolved beat.
 - Binding decisions happen ONLY through submitDecision over the engine's legal options, carrying the \
-player's explicit choice. When advanceGame returns a pending decision, present its options with the \
-ask_user tool (buttons) and submit only what the player picks — never infer a binding choice from prose.
+player's explicit choice. When advanceGame returns a pending decision, the player's OWN decision card \
+already presents those options — set the scene and wait for their pick; never re-present a pending \
+with the ask_user tool (that double-asks the same decision two ways). Reserve ask_user for a genuine \
+non-binding clarification the scene needs, never a pending's options — and never infer a binding \
+choice from prose.
 - The player's free text is play, not commands: record real scenes with recordInteraction; let the \
 engine decide everything it owns.
 """

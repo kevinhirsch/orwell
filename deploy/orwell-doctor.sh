@@ -111,6 +111,7 @@ fails=0
 pass() { echo "  ok   — $*"; }
 warn() { echo "  warn — $*"; }
 fail() { echo "  FAIL — $*"; fails=$((fails + 1)); }
+info() { echo "  info — $*"; }
 
 # ---- service names (legacy-aware): detect by unit-file EXISTENCE (`systemctl cat`), not by
 # parsing `list-unit-files` output — the grep form missed legacy bbai-* units in the field and
@@ -164,6 +165,20 @@ fi
 unit_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
 
 engine_http_ok() { curl -fsS -m 3 "${ENGINE_BASE}/health" 2>/dev/null | grep -q '"ok":true'; }
+
+# DEPLOY-12 (B2): print a one-line summary of the live behavioral-fidelity flags off /health's `flags`
+# block (grep/sed only — no jq dependency). Prints an `info` line naming the ON layers, or "(engine
+# predates the flags field)" on an older build. Never fails the run — diagnostics only.
+behavioral_flags_line() {
+  local body on
+  body="$(curl -fsS -m 3 "${ENGINE_BASE}/health" 2>/dev/null)" || return 0
+  # Isolate the "flags":{…} object, then list the keys whose value is true.
+  local flags; flags="$(printf '%s' "$body" | sed -n 's/.*"flags":{\([^}]*\)}.*/\1/p')"
+  [[ -z "$flags" ]] && { info "behavioral flags: (engine predates the /health flags field)"; return 0; }
+  on="$(printf '%s' "$flags" | tr ',' '\n' | sed -n 's/"\([a-zA-Z]*\)":true/\1/p' | paste -sd' ' -)"
+  [[ -z "$on" ]] && on="(none — all default OFF)"
+  info "behavioral flags ON: ${on}"
+}
 
 # A reachable engine must SERVE tools. For a probe user the healthy reply is the structured
 # "no active game" refusal (404) — connection-refused/timeouts mean down.
@@ -240,6 +255,10 @@ diagnose() {
   fi
   [[ -f "${APP_DIR}/dist/main.js" ]] && pass "build artifact: dist/main.js" || fail "build artifact missing — run: bash ${APP_DIR}/deploy/orwell-update.sh"
   engine_http_ok       && pass "engine /health answers"        || fail "engine /health answers (${ENGINE_BASE}/health)"
+  # DEPLOY-12 (B2): report which opt-in "living house" behavioral-fidelity layers are live, so an
+  # operator can answer "is the house actually alive on my box?" without grepping data/.env. Best-effort
+  # info line off the /health `flags` block; a build predating the field simply prints nothing.
+  behavioral_flags_line
   engine_serves_tools  && pass "engine serves player tools"    || fail "engine serves player tools"
   # An engine that ANSWERS while its unit is inactive/missing is running OUTSIDE systemd (a stray
   # manual process). Restarting the unit would fight it for the port — name the situation instead.

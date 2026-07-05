@@ -117,6 +117,8 @@ describe("ADM-NEW-3 (#589) — admin/God-Mode is partitioned from player-private
       await sb.mcp.admin.callTool("configure", {}),
       await sb.mcp.admin.callTool("setTimeOfDay", { enabled: false }),
       await sb.mcp.admin.callTool("overrideMechanic", { mechanic: "noop", value: 1 }),
+      await sb.mcp.admin.callTool("setBehavioralFlags", { campaigns: true }),
+      await sb.mcp.admin.callTool("getBehavioralFlags", {}),
     ];
     for (const out of outputs) {
       const json = JSON.stringify(out) ?? "";

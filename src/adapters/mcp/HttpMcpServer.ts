@@ -33,6 +33,33 @@ export interface HttpMcpResolver {
 }
 
 /**
+ * B2 (DEPLOY-12) — the BOOT-TIME state of every opt-in behavioral-fidelity + sleep-economy env flag,
+ * so an operator can answer "which living-house layers is this box running?" from `/health` alone
+ * (they were previously undiscoverable without grepping `data/.env` for exact spellings). A pure read
+ * of `process.env` — no Vault, no game data, no engine import. NOTE: this reflects the process's BOOT
+ * env; the God-Mode `setBehavioralFlags` dial can override a layer per-sandbox at runtime, so this is
+ * the deploy default, not necessarily a given live sandbox's current setting.
+ */
+function bootFlags(): Record<string, boolean> {
+  // Match each flag's ACTUAL parser so /health never reports a value the engine treats differently:
+  // most default from a strict `=== "1"` (GameSessionAdapter module consts); seededTieSurfacing and
+  // timeOfDay also accept "true"/"on" (their runtime getters). Mirror both exactly.
+  const strict = (v: string | undefined): boolean => v === "1";
+  const loose = (v: string | undefined): boolean => v === "1" || v === "true" || v === "on";
+  return {
+    campaigns: strict(process.env.ORWELL_CAMPAIGNS),
+    trajectories: strict(process.env.ORWELL_TRAJECTORIES),
+    triggers: strict(process.env.ORWELL_TRIGGERS),
+    secretPacing: strict(process.env.ORWELL_SECRET_PACING),
+    juryHouse: strict(process.env.ORWELL_JURY_HOUSE),
+    seededTieSurfacing: loose(process.env.ORWELL_SEEDED_TIE_SURFACING),
+    compIntent: strict(process.env.ORWELL_COMP_INTENT),
+    voteDeduction: strict(process.env.ORWELL_VOTE_DEDUCTION),
+    timeOfDay: loose(process.env.ORWELL_TIME_OF_DAY),
+  };
+}
+
+/**
  * Network-edge guardrails (audit E1 / B34). The in-process Vault Wall + per-user isolation (0021)
  * already hold; these close the *network* edge so the loopback-trusted contract is actually enforced:
  *
@@ -183,7 +210,7 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
         } catch {
           /* a broken status probe must never fail the liveness answer */
         }
-        return send(200, { ok: true, ...metrics.snapshot(), embeddings });
+        return send(200, { ok: true, ...metrics.snapshot(), embeddings, flags: bootFlags() });
       }
 
       const match = url.pathname.match(/^\/(player|admin)\/(tools|call|rpc)$/);

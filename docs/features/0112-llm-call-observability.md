@@ -1,6 +1,10 @@
-# 0107 — LLM-call observability (Vault-free trace tagging + opt-in external forwarding)
+# 0112 — LLM-call observability (Vault-free trace tagging + opt-in external forwarding)
 
-> Companion: `0107-llm-call-observability.feature`. Builds on **0069** (the token economy / `orwell_token_ledger`),
+> **Renumbered from 0107** (doc-drift audit, 2026-07-05): `0107` collided with the already-built,
+> load-bearing `0107-named-alliances`; this still-unbuilt spec moved to the next free slot. No
+> content change.
+>
+> Companion: `0112-llm-call-observability.feature`. Builds on **0069** (the token economy / `orwell_token_ledger`),
 > **0065** (the `beatSeq`/`phase` sync spine — the correlation key), and **0079** (the internal runtime
 > diagnostic log). This is the *external, queryable* counterpart to 0079's *internal* log.
 

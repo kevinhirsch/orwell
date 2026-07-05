@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -242,6 +242,16 @@ function requireShape(name: string, args: Record<string, unknown>): void {
         refuse("relationship*", "not accepted — texture write-back is content-only");
       }
       return;
+    case "setBehavioralFlags": {
+      // B2: every field is an OPTIONAL boolean (a malformed present value is the R6 class that would
+      // otherwise cast blindly into the adapter's setters) — an absent field is fine (that layer stays
+      // untouched), a present non-boolean is refused by name.
+      const boolFields = ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse", "seededTieSurfacing"];
+      for (const f of boolFields) {
+        if (args[f] !== undefined && typeof args[f] !== "boolean") refuse(f, "a boolean when present");
+      }
+      return;
+    }
     default:
       return; // read tools and free-text tools take no required structure
   }
@@ -417,6 +427,13 @@ export class McpServer {
         return this.deps.admin.setTimeOfDay(
           args["enabled"] === true || args["enabled"] === "true" || args["enabled"] === 1 || args["enabled"] === "on",
         );
+      case "setBehavioralFlags":
+        // B2 (admin/God-Mode only): the FE settings dial flips the living-house layers at runtime.
+        // `requireShape` above already refused any present-but-non-boolean field.
+        return this.deps.admin.setBehavioralFlags(args as unknown as BehavioralFlags);
+      case "getBehavioralFlags":
+        // B2: the read-side companion — the CURRENT resolved on/off state of every flag.
+        return this.deps.admin.behavioralFlags();
       default:
         throw new Error(`unhandled tool "${name}"`);
     }

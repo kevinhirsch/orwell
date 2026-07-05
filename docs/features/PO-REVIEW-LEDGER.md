@@ -121,12 +121,12 @@ built but not yet PO-reviewed, or PO-approved but not yet built.
 | 0099 | Secrets as currency | 🟢 Build-ready (PO resolved) | ⬜ Pending | — | Index notes PO-resolved 2026-06-27 (build w/ 0093) — confirm here |
 | 0100 | Jury grudge book | ✅ Built | ⬜ Pending | — | — |
 | 0101 | NPC myth-making | 📝 Spec only | ⬜ Pending | — | — |
-| 0102 | Weekly recap → daily bedtime recap | 🟢 Build-ready (PO resolved) | ⬜ Pending | — | Redesigned 2026-06-27; filename rename pending. NOTE: number collides w/ 0102-day-1-experience |
+| 0102 | Weekly recap → daily bedtime recap | 🟢 Build-ready (PO resolved) | ⬜ Pending | — | Redesigned 2026-06-27; filename rename pending. (Collision resolved 2026-07-05: the premiere spec moved to **0111**.) |
 | 0103 | Edit-bay foreshadowing | ❄️ Frozen/parked | ⬜ Pending | — | Index notes parked 2026-06-27 (spoiler-adjacent) — confirm Defer |
 | 0104 | Season-over-season notoriety | ✅ Built | ⬜ Pending | — | — |
 | 0105 | Drive-anchored suspicion | ✅ Built | ⬜ Pending | — | — |
 | 0106 | Whole-house events are exclusive set-pieces | ✅ Built | ⬜ Pending | — | — |
-| 0107 | Named alliances | ✅ Built | ⬜ Pending | — | NOTE: number collides w/ 0107-llm-call-observability draft |
+| 0107 | Named alliances | ✅ Built | ⬜ Pending | — | (Collision resolved 2026-07-05: the observability draft moved to **0112**.) |
 | 0108 | Real-model golden-path CI gate | 📝 Spec only | ⬜ Pending | — | — |
 | 0109 | Negotiated deal duration | 🟢 Build-ready | ⬜ Pending | — | Amends 0039 |
 | 0110 | Vote deduction (process of elimination) | ✅ Built | ✅ Approved (built) | 2026-06-28 | **NEW feature specced AND built this session** from the PO's process-of-elimination idea (0023 review, option B). The secret-ballot jury grudge folds on a DEDUCED belief (public count + eligible pool + the evictee's reads, `deduceEvictionVoters`), not the true vote list: deducible → grudge, undeducible → none (secrecy honored), wrong → misattribution (dramatic irony). Opt-in `ORWELL_VOTE_DEDUCTION` (byte-identical off; juryReach unmoved). Gates: `voteDeduction.test.ts` + BDD `0110` (11 scenarios, in `cucumber.cjs`). True tally still unsealed at 0048 |
@@ -159,7 +159,6 @@ game bugs.
 
 | Issue | Detail |
 |---|---|
-| Duplicate `0102` | `0102-weekly-recap-cliffhanger` (tracked in the index) **and** `0102-day-1-experience` (the premiere spec) share the number. |
-| Duplicate `0107` | `0107-named-alliances` (tracked, built) **and** a separate `0107-llm-call-observability` draft share the number. |
+| ~~Duplicate `0102`~~ | ✅ **RESOLVED 2026-07-05** — `0102-weekly-recap-cliffhanger` keeps the number (tracked, built-ready); the premiere spec was renamed `0111-day-1-experience` (content unchanged) and now has its own README row. |
+| ~~Duplicate `0107`~~ | ✅ **RESOLVED 2026-07-05** — `0107-named-alliances` keeps the number (tracked, built); the observability draft was renamed `0112-llm-call-observability` (content unchanged) and now has its own README row. |
 | Unused numbers | `0082` and `0083` have no feature. |
-| Untracked premiere spec | `0102-day-1-experience` is not a row in the README index; needs its own number + ledger row. |

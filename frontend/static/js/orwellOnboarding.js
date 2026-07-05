@@ -427,7 +427,7 @@
   // Seam for the headless browser gate: mount the dark-house holding card on demand.
   window._orwellOnboardingMount = function () {
     mountHolding("The house is dark",
-      "Big Brother will return. The game engine isn't reachable right now — this screen will clear the moment the feeds come back.",
+      "Big Brother will return. The live feeds are down for a moment — this screen will clear the instant they're back.",
       async () => { try { return !!(await fetchState()); } catch (_) { return false; } });
   };
 
@@ -901,9 +901,9 @@
         // be operable from the card; the page behind it is inert). Re-probe and continue.
         const admin = await isAdmin();
         mountHolding("No feed connected yet",
-          "No chat model is configured yet, so the house can't speak. " +
-          (admin ? "Open Settings → Add Models (or type /setup) to connect one — casting begins the moment a feed is live."
-                 : "Ask your administrator to connect a model — casting begins the moment a feed is live."),
+          "The house can't speak until a feed is live. " +
+          (admin ? "Open Settings → Add Models to connect one — casting begins the moment the feed is up."
+                 : "Ask your administrator to connect one — casting begins the moment the feed is up."),
           anyModelConfigured,
           admin ? [{ label: "Open Settings", primary: true, onClick: openSettings }] : []);
         return;
