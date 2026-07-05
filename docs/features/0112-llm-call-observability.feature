@@ -1,4 +1,4 @@
-Feature: 0107 — LLM-call observability (Vault-free trace tagging + opt-in external forwarding)
+Feature: 0112 — LLM-call observability (Vault-free trace tagging + opt-in external forwarding)
   Every LLM call emits a Vault-free trace record (the token-ledger facts PLUS the 0065 beatSeq/phase
   correlation keys) and, when enabled, tags the provider request with the same keys so OpenRouter Broadcast —
   or an opt-in OTLP/Langfuse sink — can forward correlatable traces off-box. The engine keeps the entire

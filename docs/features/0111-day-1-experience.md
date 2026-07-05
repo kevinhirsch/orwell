@@ -1,5 +1,9 @@
-# 0102 — The Day-1 experience (the first session is the first move of the social game)
+# 0111 — The Day-1 experience (the first session is the first move of the social game)
 
+> **Renumbered from 0102** (doc-drift audit, 2026-07-05): `0102` collided with the already-indexed
+> `0102-weekly-recap-cliffhanger`; this is the newer, still-unbuilt spec, so it moved to the next
+> free slot. No content change.
+>
 > **Status:** 🟢 **PO REVIEW RESOLVED (owner, 2026-06-27) — BUILD-READY.** Category-level casting strategy (no kill-list); **champagne-circle premiere** (mingle → circle → mingle → first HOH); three sequenced PRs; Vault-free needle. See § "PO review" + `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #875.
 > Tracks the first-run → end-of-day-1 audit (`docs/audits` / `scratchpad/audit_day1/AUDIT_REPORT.md`) and
 > its umbrella **#875**. This is the **coherent design** over five already-filed sub-issues — it does not
