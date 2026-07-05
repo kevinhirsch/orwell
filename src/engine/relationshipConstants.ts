@@ -278,6 +278,31 @@ export const CONSEQUENCE_EMPHASIS: Record<"slight" | "notable" | "strong", numbe
 };
 
 /**
+ * THIRD-PARTY pitch constants (Phase 1 of "the player can play offense" — layered on ADR 0005). A
+ * `holder`'s hidden opinion of an `about` third party can be moved by a scene the player pitches
+ * them — the classic "I told Lorenzo that Maeve is the real threat." The engine still owns the
+ * amount (anti-sycophancy #3): the trust gate mirrors the PROVEN shape `campaignTilt` already uses
+ * (`src/engine/campaigns.ts`) — a `trustFloor` so even a lightly-trusted pitch lands a LITTLE, scaled
+ * up toward 1 as `holder` trusts the initiator more — and the pitch can BACKFIRE (I2/anti-sycophancy:
+ * a social move must be able to fail, never auto-succeed) when `holder` doesn't trust the initiator
+ * AND already has a STRONGER bond with the very person being pitched against: the pitch reads as
+ * transparent manipulation and lands a small, bounded hit on holder→initiator instead of moving
+ * holder→about at all.
+ */
+export const THIRD_PARTY_CONSEQUENCE = {
+  /** Mirrors `CAMPAIGN.trustFloor` (0085) — even a barely-trusted pitch lands a little. */
+  trustFloor: 0.4,
+  backfire: {
+    /** Below this trust in the initiator, a pitch is AT RISK of reading as manipulative. */
+    trustCeiling: 0.35,
+    /** Chance (per roll, only drawn when the risk gate above is open) the pitch actually backfires. */
+    chance: 0.35,
+    /** The bounded fold on holder→initiator when a pitch backfires — "that felt like being worked." */
+    impact: { trust: -0.08, affinity: -0.05, threat: +0.06 } as Partial<EdgeSignals>,
+  },
+} as const;
+
+/**
  * Deal consequences (0039 + audit E43/E54): HONORING a promise is a real, bounded positive fold —
  * the protected party registers the kept word (trust/alignment up, plus the evidence signal).
  * Applied once per honoring binding action by `DealLedger.reconcile`; breaking already lands

@@ -190,11 +190,15 @@ do_apply() {
       upsert_env "$k" "$v"
     done <<< "$pairs"
   fi
-  # The 0067 floor is non-negotiable on the public profile: force auth ON and the localhost bypass
-  # OFF regardless of what the config carried — a public box must never run open or with the dev
-  # bypass live. Idempotent upserts.
+  # The 0067 floor is non-negotiable on the public profile: force auth ON, the localhost bypass
+  # OFF, and the bind host to loopback — regardless of what the config carried. A public box must
+  # never run open, with the dev bypass live, or listening in the clear on a public/wildcard
+  # interface (DEPLOY-2 — the route-layer validator now checks the box's real current
+  # ORWELL_BIND_HOST too, but this is the belt-and-suspenders floor that can't drift out of sync
+  # with it). Idempotent upserts.
   upsert_env "AUTH_ENABLED" "true"
   upsert_env "LOCALHOST_BYPASS" "false"
+  upsert_env "ORWELL_BIND_HOST" "127.0.0.1"
 
   # The connector token (if the wizard pasted one): install + run cloudflared, then SHRED it.
   if [[ -f "$TOKEN_FILE" ]]; then

@@ -1947,8 +1947,14 @@ def _validate_consequence(raw, valid_ids) -> dict | None:
     """ADR 0005 — defensively validate a model-proposed consequence descriptor against the active
     roster. Keep only edges whose `toward` is a living houseguest id AND whose `direction` is one of
     the 8; carry `emphasis` only when it is one of the 3 (else drop the field — it is optional). Carry
-    `rationale` only when it is a string. Return the cleaned descriptor, or None when nothing valid
-    remains — so a None return means the call falls back to exactly the kind-only path (no regression)."""
+    `rationale` only when it is a string.
+
+    Phase 1 (player-offense) — ALSO validate `aboutEdges`: the THIRD-PARTY sibling of `edges`
+    ("I told Lorenzo that Maeve is the real threat" ⇒ holder=Lorenzo, about=Maeve). Both ids must
+    be living roster ids and DISTINCT from each other (the engine's own witness/self-pitch guards
+    are the real backstop; this is defense-in-depth so an obviously-malformed entry never even
+    reaches the wire). Return the cleaned descriptor, or None when nothing valid remains at ALL — so
+    a None return means the call falls back to exactly the kind-only path (no regression)."""
     if not isinstance(raw, dict):
         return None
     edges = []
@@ -1963,9 +1969,28 @@ def _validate_consequence(raw, valid_ids) -> dict | None:
         if e.get("emphasis") in _CONSEQUENCE_EMPHASES:
             edge["emphasis"] = e.get("emphasis")
         edges.append(edge)
-    if not edges:
+    about_edges = []
+    for e in (raw.get("aboutEdges") or []):
+        if not isinstance(e, dict):
+            continue
+        holder = e.get("holder")
+        about = e.get("about")
+        direction = e.get("direction")
+        if holder not in valid_ids or about not in valid_ids or holder == about:
+            continue
+        if direction not in _CONSEQUENCE_DIRECTIONS:
+            continue
+        about_edge: dict = {"holder": holder, "about": about, "direction": direction}
+        if e.get("emphasis") in _CONSEQUENCE_EMPHASES:
+            about_edge["emphasis"] = e.get("emphasis")
+        about_edges.append(about_edge)
+    if not edges and not about_edges:
         return None
-    out: dict = {"edges": edges}
+    out: dict = {}
+    if edges:
+        out["edges"] = edges
+    if about_edges:
+        out["aboutEdges"] = about_edges
     rationale = raw.get("rationale")
     if isinstance(rationale, str) and rationale.strip():
         out["rationale"] = rationale.strip()[:400]
@@ -2323,6 +2348,15 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
     engine keeps the magnitude. When the model proposes no (or no valid) descriptor, the call is
     exactly today's kind-only behavior — the 0055 guarantee is unchanged.
 
+    Phase 1 of "the player can play offense" (layered on ADR 0005) — the descriptor MAY ALSO propose
+    `aboutEdges`: a THIRD-PARTY pitch, the classic "I told Lorenzo that Maeve is the real threat"
+    move that `edges` alone cannot express (edges only move a houseguest's opinion of the INITIATOR).
+    Still model-proposed shape only (holder/about/direction/emphasis) — the engine decides whether the
+    pitch actually lands, softens, or backfires depending on how much the holder trusts the player,
+    and refuses it outright if the named holder never witnessed the scene. Never engine-authored
+    content: this only fires when the model's OWN narration already implied the pitch and the model
+    skipped recording it.
+
     Fail-closed: any hiccup just skips (the prompt nudge + E22 fallback still apply). The recording
     is invisible to the player (hidden consequence), exactly as the Vault Wall requires."""
     try:
@@ -2343,12 +2377,18 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 '"consequence":{"edges":[{"toward":"<houseguest id>",'
                 '"direction":"<one of: warmer, cooler, more-trust, less-trust, more-threatened, '
                 'less-threatened, more-aligned, less-aligned>","emphasis":"<slight|notable|strong>"}],'
+                '"aboutEdges":[{"holder":"<houseguest id the player was actually talking to>",'
+                '"about":"<a DIFFERENT third houseguest, never the player>",'
+                '"direction":"<same 8 options as above>","emphasis":"<slight|notable|strong>"}],'
                 '"rationale":"<why, grounded in the scene>"}}\n'
                 "Pick the kind matching the emotional/strategic direction. Add `consequence` ONLY when "
                 "the scene moves different houseguests DIFFERENTLY (e.g. it warms one and threatens "
-                "another); otherwise omit it. Propose only direction and relative emphasis — NEVER any "
-                "number or magnitude (the engine decides how far). If no houseguest was genuinely "
-                'engaged (a solo/internal beat), reply {"withIds":[]}.'},
+                "another); otherwise omit it. Use `aboutEdges` SPECIFICALLY when the player pitched one "
+                "houseguest's opinion of a THIRD houseguest — 'I told holder that about is the real "
+                "threat/an ally/lying to them' — never for the player's own standing (use `edges` for "
+                "that). Propose only direction and relative emphasis — NEVER any number or magnitude "
+                "(the engine decides how far, and whether it lands at all). If no houseguest was "
+                'genuinely engaged (a solo/internal beat), reply {"withIds":[]}.'},
             {"role": "user", "content":
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
@@ -2397,15 +2437,17 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                                     with_ids=ids, kind=kind, consequence=consequence,
                                     user=owner) is None:
             return False
+        n_edges = len(consequence["edges"]) if consequence and "edges" in consequence else 0
+        n_about = len(consequence["aboutEdges"]) if consequence and "aboutEdges" in consequence else 0
         logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
-                    f"edges={len(consequence['edges']) if consequence else 0}) user={owner}")
+                    f"edges={n_edges}, aboutEdges={n_about}) user={owner}")
         try:  # 0079: surface this gap-repair on the overseer diagnostic log
             from src import log_rings as _lr
             _lr.record_overseer(
                 "action", "gap-repair",
                 f"recorded a missed player↔house scene (kind={kind}, "
                 f"with={len(ids)} houseguest(s), "
-                f"edges={len(consequence['edges']) if consequence else 0})",
+                f"edges={n_edges}, aboutEdges={n_about})",
                 lever="propose-record", ok=True, user=owner)
         except Exception:
             pass
@@ -2894,6 +2936,229 @@ async def _auto_confide(narration, last_user, house, endpoint_url, model, header
         return True
     except Exception as _e:
         logger.warning(f"[orwell] auto-confide failed: {_e}")
+        return False
+
+
+# ── 0093/0099 — the EXPOSE / TRADE secret under-call belts (the _auto_confide sibling) ──────────
+#
+# `exposeSecret`/`tradeSecret` are ALREADY fully built, wired engine tools (registry → McpServer →
+# GameSessionAdapter) — but the narration model reliably UNDER-calls them: it voices the player
+# outing a rival's secret to the house, or bartering a secret for a favor, without ever calling the
+# lever, so the marquee offense move NEVER FIRES (no standing fold, no exposer backlash, no `told-by`
+# pathway record). The engine is fine; the model just skips the call (exactly the 0055/0075 class).
+# So when the player's OWN line clearly reads as outing or trading a secret and the model did NOT
+# call the lever, the FE calls it itself — and the ENGINE adjudicates (whether it lands, whether the
+# recipient bites; anti-sycophancy/I2, mirroring how `exposeSecret`/`confide` already work).
+#
+# I3/Vault Wall: we NEVER invent a secret. The candidate `factId` is drawn ONLY from the player's OWN
+# CURRENTLY-KNOWN facts (`getVisibleStateFor`'s `knowledge` — Vault-free by construction, the same
+# projection the player already reads), and the constrained extraction may ONLY pick an id from that
+# list or reply null. The engine's own `resolveWieldedSecret` bright line re-validates ownership
+# regardless (a non-learned/spent fact is REJECTED) — this is defense-in-depth, not the only guard.
+# Model-driven `exposeSecret`/`tradeSecret` always take precedence; this only fills a genuine gap.
+
+_EXPOSE_SIGNAL_RE = re.compile(
+    r"\b("
+    r"expos(?:e|es|ing|ed)|"
+    r"out(?:s|ing|ed)?\s+(?:them|him|her|it)\b|"
+    r"tell(?:s|ing)?\s+(?:the\s+house|everyone|the\s+whole\s+house)\b|"
+    r"let(?:s|ting)?\s+(?:the\s+house|everyone)\s+know|"
+    r"everyone\s+(?:should|needs?\s+to|deserves?\s+to)\s+know|"
+    r"reveal(?:s|ing|ed)?\s+(?:to\s+the\s+house|to\s+everyone|what\s+(?:i|she|he|they)\s+(?:know|found\s+out|learned))|"
+    r"spill(?:s|ing|ed)?\s+(?:the\s+beans|it|the\s+secret)|"
+    r"blow(?:s|ing)?\s+(?:the\s+whistle|it|this)\s+(?:up|open)|"
+    r"call(?:s|ing|ed)?\s+(?:them|him|her)\s+out\b|"
+    r"drop(?:s|ping|ped)?\s+(?:the|a)\s+bomb(?:shell)?|"
+    r"announc(?:e|es|ing|ed)\s+(?:to\s+the\s+house|in\s+(?:the|front))|"
+    r"put(?:s|ting)?\s+(?:them|him|her)\s+on\s+blast|"
+    r"air(?:s|ing|ed)?\s+(?:it|this|their\s+(?:business|dirt))\s+out"
+    r")\b", re.I)
+
+_TRADE_SIGNAL_RE = re.compile(
+    r"\b("
+    r"trade(?:s|d|ing)?\s+(?:you\s+)?(?:the\s+)?(?:secret|intel|info|dirt)|"
+    r"swap(?:s|ping|ped)?\s+(?:a\s+)?secret|"
+    r"in\s+exchange\s+for|in\s+return\s+for|"
+    r"i'?ll\s+(?:tell|give)\s+you\b.*\bif\b|"
+    r"offer(?:s|ing|ed)?\s+(?:you\s+|him\s+|her\s+|them\s+)?(?:the\s+)?(?:intel|secret|dirt|info)\s+(?:on|about)|"
+    r"barter(?:s|ing|ed)?"
+    r")\b", re.I)
+
+
+def _known_player_fact_index(vis: dict) -> dict:
+    """Extract {factId: {"content": str, "subject": str|None}} from a `getVisibleStateFor` response's
+    `knowledge` list — the player's OWN currently-known facts (Vault-free; this IS the player's
+    knowledge). The `id` (or gossip-lineage `factId` when present) is what `exposeSecret`/`tradeSecret`
+    accept as `factId`. Never fabricated — only what the engine already told the player it knows."""
+    out: dict = {}
+    for f in (vis or {}).get("knowledge") or []:
+        if not isinstance(f, dict):
+            continue
+        fid = f.get("factId") or f.get("id")
+        content = f.get("content")
+        if not isinstance(fid, str) or not isinstance(content, str) or not content.strip():
+            continue
+        out[fid] = {"content": content.strip()[:200], "subject": f.get("subject")}
+    return out
+
+
+async def _auto_expose_secret(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
+    """GUARANTEE an outed secret FIRES (0093 FE follow-on — the 0055/0075 sibling). When the player's
+    turn clearly OUTS a secret they already know but the model skipped `exposeSecret`, a constrained
+    extraction picks WHICH of the player's own known facts is being exposed — never invents one — and
+    we call `exposeSecret(factId)` ourselves. The ENGINE is the single authority: it re-validates
+    ownership (I3), resolves the bounded standing fold + exposer backlash, and decides whether a bluff
+    lands (I2) — we only guarantee the lever fires. Model-driven `exposeSecret` always takes
+    precedence. Fail-closed: any hiccup just skips. Never proposes a BLUFF (an invented secret) — that
+    stays a deliberate, model-only call, since a back-fill can only ground itself in what the player
+    genuinely knows."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        roster = {h.get("id"): h.get("name") for h in house if h.get("id") and h.get("name")}
+        if not roster:
+            return False
+        vis = await _oe.get_visible_state(user=owner)
+        facts = _known_player_fact_index(vis if isinstance(vis, dict) else {})
+        if not facts:
+            return False  # nothing the player legitimately knows — never invent a secret to expose
+        fact_lines = "\n".join(
+            f'{fid} = "{f["content"]}" (about: {roster.get(f["subject"], f["subject"] or "unknown")})'
+            for fid, f in facts.items())
+        _m = _EXPOSE_SIGNAL_RE.search(last_user or "")
+        press = (last_user[max(0, _m.start() - 200): _m.start() + 400] if _m else (last_user or "")[:800])
+        msgs = [
+            {"role": "system", "content":
+                "Decide whether the PLAYER is deliberately OUTING/EXPOSING a secret they ALREADY KNOW "
+                "about a houseguest — declaring it to damage that person's standing (not privately "
+                "confiding, not idle small talk) — in this Big Brother scene. Below is the list of "
+                "secrets the player currently knows. Reply IMMEDIATELY with ONLY a JSON object — no "
+                'analysis, no prose, no code fence:\n{"factId":"<one id from the list below, or null>"}\n'
+                "Pick an id ONLY when the player's own words clearly declare or reveal THAT SPECIFIC "
+                "known fact to hurt/undermine its subject. If the player is not exposing anything, or "
+                "none of the listed known facts match what they're revealing, reply "
+                '{"factId":null}. NEVER invent a factId that is not in the list.'},
+            {"role": "user", "content":
+                f"THE PLAYER'S KNOWN SECRETS (factId = content):\n{fact_lines}\n\n"
+                f"THE PLAYER'S MOVE:\n{press}\n\nWHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
+        ]
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.1, max_tokens=1200, timeout=45,
+                                   call_class="utility-extraction", user=owner) or ""
+        obj = _last_json_object_with_key(raw, "factId")
+        if obj is None:
+            logger.info(f"[orwell] auto-expose: no parseable JSON (len={len(raw)}) user={owner}")
+            return False
+        fact_id = obj.get("factId")
+        if not isinstance(fact_id, str):
+            return False  # null / nothing exposed
+        if fact_id not in facts:
+            logger.info(f"[orwell] auto-expose: factId {fact_id!r} not a known fact — skipped user={owner}")
+            return False
+        res = await _backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner)
+        if res is None:
+            return False
+        _exposed = bool(res.get("exposed")) if isinstance(res, dict) else False
+        logger.info(f"[orwell] auto-exposed secret (factId={fact_id}, exposed={_exposed}) user={owner}")
+        try:  # 0079: surface this gap-repair on the overseer diagnostic log
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "gap-repair",
+                f"outed a known secret (exposeSecret) the model narrated but never called — "
+                f"engine adjudicated (exposed={_exposed})",
+                lever="exposeSecret", ok=True, user=owner)
+        except Exception:
+            pass
+        return True
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-expose failed: {_e}")
+        return False
+
+
+async def _auto_trade_secret(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
+    """GUARANTEE a bartered secret FIRES (0099 FE follow-on — the `_auto_expose_secret` sibling). When
+    the player's turn clearly TRADES a known secret about a THIRD party to a specific houseguest for a
+    concession but the model skipped `tradeSecret`, a constrained extraction picks WHICH known fact and
+    WHICH recipient — never invents either — and we call `tradeSecret(factId, toNpcId)` ourselves. The
+    ENGINE is the single authority: it re-validates ownership (I3), values the secret to the recipient,
+    and decides whether they bite (I2). Model-driven `tradeSecret` always takes precedence. Fail-closed.
+    Never proposes a BLUFF — same rationale as `_auto_expose_secret`."""
+    try:
+        from src.llm_core import llm_call_async
+        from src import orwell_engine as _oe
+        roster = {h.get("id"): h.get("name") for h in house if h.get("id") and h.get("name")}
+        if not roster:
+            return False
+        vis = await _oe.get_visible_state(user=owner)
+        facts = _known_player_fact_index(vis if isinstance(vis, dict) else {})
+        if not facts:
+            return False  # nothing the player legitimately knows — never invent a secret to trade
+        fact_lines = "\n".join(
+            f'{fid} = "{f["content"]}" (about: {roster.get(f["subject"], f["subject"] or "unknown")})'
+            for fid, f in facts.items())
+        roster_lines = "\n".join(f"{hid} = {name}" for hid, name in roster.items())
+        _m = _TRADE_SIGNAL_RE.search(last_user or "")
+        press = (last_user[max(0, _m.start() - 200): _m.start() + 400] if _m else (last_user or "")[:800])
+        msgs = [
+            {"role": "system", "content":
+                "Decide whether the PLAYER is TRADING a secret they ALREADY KNOW about a THIRD "
+                "houseguest to ONE specific houseguest for a one-off concession (a comp throw, a "
+                "vote, a name for a name) in this Big Brother scene. Reply IMMEDIATELY with ONLY a "
+                'JSON object — no analysis, no prose, no code fence:\n'
+                '{"factId":"<one id from the KNOWN SECRETS list, or null>",'
+                '"toNpcId":"<the recipient houseguest id from the ROSTER, or null>",'
+                '"askKind":"<a short label for what was asked in return, or empty string>"}\n'
+                "Pick a factId+toNpcId ONLY when the player clearly hands over THAT SPECIFIC known "
+                "secret to THAT SPECIFIC houseguest in exchange for something. If the player is not "
+                "trading anything, or nothing in the lists matches, reply with both null. NEVER "
+                "invent a factId or houseguest id not in the lists provided."},
+            {"role": "user", "content":
+                f"THE PLAYER'S KNOWN SECRETS (factId = content):\n{fact_lines}\n\n"
+                f"ROSTER (id = name):\n{roster_lines}\n\n"
+                f"THE PLAYER'S MOVE:\n{press}\n\nWHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
+        ]
+        raw = await llm_call_async(url=endpoint_url, model=model, messages=msgs, headers=headers,
+                                   temperature=0.1, max_tokens=1200, timeout=45,
+                                   call_class="utility-extraction", user=owner) or ""
+        obj = _last_json_object_with_key(raw, "factId")
+        if obj is None:
+            logger.info(f"[orwell] auto-trade: no parseable JSON (len={len(raw)}) user={owner}")
+            return False
+        fact_id = obj.get("factId")
+        to_npc_id = obj.get("toNpcId")
+        if not isinstance(fact_id, str) or not isinstance(to_npc_id, str):
+            return False  # null / nothing traded
+        if fact_id not in facts:
+            logger.info(f"[orwell] auto-trade: factId {fact_id!r} not a known fact — skipped user={owner}")
+            return False
+        if to_npc_id not in roster:
+            logger.info(f"[orwell] auto-trade: toNpcId {to_npc_id!r} not on roster — skipped user={owner}")
+            return False
+        if facts[fact_id].get("subject") == to_npc_id:
+            # Defense-in-depth mirror of the engine's own rule: can't trade a secret TO its own subject.
+            logger.info(f"[orwell] auto-trade: factId {fact_id!r} is ABOUT the recipient — skipped user={owner}")
+            return False
+        ask_kind = obj.get("askKind")
+        ask_kind = ask_kind.strip()[:80] if isinstance(ask_kind, str) and ask_kind.strip() else None
+        res = await _backfill_with_cas(owner, _oe.trade_secret, to_npc_id, fact_id=fact_id,
+                                       ask_kind=ask_kind, user=owner)
+        if res is None:
+            return False
+        _accepted = bool(res.get("accepted")) if isinstance(res, dict) else False
+        logger.info(f"[orwell] auto-traded secret (factId={fact_id}, to={to_npc_id}, "
+                    f"accepted={_accepted}) user={owner}")
+        try:  # 0079: surface this gap-repair on the overseer diagnostic log
+            from src import log_rings as _lr
+            _lr.record_overseer(
+                "action", "gap-repair",
+                f"traded a known secret (tradeSecret) the model narrated but never called — "
+                f"engine adjudicated (accepted={_accepted})",
+                lever="tradeSecret", ok=True, user=owner)
+        except Exception:
+            pass
+        return True
+    except Exception as _e:
+        logger.warning(f"[orwell] auto-trade failed: {_e}")
         return False
 
 
@@ -4165,6 +4430,8 @@ async def stream_agent_loop(
     _turn_record_nudges = 0
     _turn_deal_nudges = 0  # 0039 deal back-fill: at most one auto-makeDeal per finishing turn
     _turn_confide_nudges = 0  # 0075 confide belt: at most one auto-confide per finishing turn
+    _turn_expose_nudges = 0  # 0093 expose belt: at most one auto-exposeSecret per finishing turn
+    _turn_trade_nudges = 0  # 0099 trade belt: at most one auto-tradeSecret per finishing turn
     _turn_move_nudges = 0  # L21/L24 auto-move belt: at most one auto-move per finishing turn
     _turn_npc_move_nudges = 0  # ADR 0009 NPC auto-move belt: at most one per finishing turn
     _turn_approach_nudges = 0  # 0036/0049: at most one NPC-approach nudge per finishing turn
@@ -4971,6 +5238,16 @@ async def stream_agent_loop(
                 _last_user_for_confide = _extract_last_user_message(messages) or ""
                 _want_confide = (_turn_confide_nudges < 1
                                  and bool(_CONFIDE_PRESS_RE.search(_last_user_for_confide)))
+                # 0093/0099: the player OUTED or TRADED a secret they already know but the model never
+                # called exposeSecret/tradeSecret, so the marquee offense move never fired. Same shape
+                # as the confide belt: a cheap signal pre-filter over the player's OWN last message +
+                # the per-turn cap (set to 1 when the model calls the lever itself, so model-driven
+                # calls always win). The constrained extraction (grounded ONLY in the player's actually-
+                # known facts — never an invented secret) is the real gatekeeper, not this pre-filter.
+                _want_expose = (_turn_expose_nudges < 1
+                                and bool(_EXPOSE_SIGNAL_RE.search(_last_user_for_confide)))
+                _want_trade = (_turn_trade_nudges < 1
+                               and bool(_TRADE_SIGNAL_RE.search(_last_user_for_confide)))
                 # L21/L24 auto-move belt: the player walked somewhere this turn but the model never
                 # called moveTo, so the engine still has them in the OLD room and next turn's
                 # whereabouts will snap back. Gated on a cheap movement-language pre-filter over the
@@ -5020,7 +5297,7 @@ async def stream_agent_loop(
                 # state, not a tool gap), so we always need the game state to know if the season is
                 # over — fetch it whenever any nudge MIGHT fire.
                 _want_reapproach = _turn_reapproach_nudges < _MAX_REAPPROACH_NUDGES_PER_TURN
-                if _want_confide or _want_advance or _want_record or _want_deal or _want_move or _want_npc_move or _want_approach or _want_reapproach:
+                if _want_confide or _want_expose or _want_trade or _want_advance or _want_record or _want_deal or _want_move or _want_npc_move or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     _beat_key_at_read = None  # F7: the beat we OBSERVED stalled, to detect a race before forcing
                     try:
@@ -5590,6 +5867,23 @@ async def stream_agent_loop(
                         _turn_confide_nudges += 1  # once per turn
                         await _auto_confide(_turn_narration, _last_user_for_confide,
                                             _house, endpoint_url, model, headers, owner)
+                    # 0093: the player outed a secret they already know but the model never called
+                    # exposeSecret. Back-fill it — the ENGINE adjudicates (the standing fold + exposer
+                    # backlash, or a bluff's belief roll); the extraction is grounded ONLY in the
+                    # player's own currently-known facts, so a miss just means no back-fill (never an
+                    # invented secret). Model-driven exposeSecret always wins (precedence set on tool use).
+                    if _want_expose and _touched_deal:
+                        _turn_expose_nudges += 1  # once per turn
+                        await _auto_expose_secret(_turn_narration, _last_user_for_confide,
+                                                  _house, endpoint_url, model, headers, owner)
+                    # 0099: the player traded a secret they already know to a specific houseguest but the
+                    # model never called tradeSecret. Same shape — the ENGINE decides whether the
+                    # recipient bites; the extraction is grounded in the player's known facts + the live
+                    # roster only. Model-driven tradeSecret always wins.
+                    if _want_trade and _touched_deal:
+                        _turn_trade_nudges += 1  # once per turn
+                        await _auto_trade_secret(_turn_narration, _last_user_for_confide,
+                                                 _house, endpoint_url, model, headers, owner)
                     if _want_record and _touched and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN:
                         _turn_record_nudges += 1  # once per turn
                         await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
@@ -6167,6 +6461,10 @@ async def stream_agent_loop(
                 _turn_deal_nudges = 1  # model struck the deal itself — don't also back-fill one
             if _is_live_game and block.tool_type == "confide":
                 _turn_confide_nudges = 1  # model called confide itself — don't also back-fill one (0075)
+            if _is_live_game and block.tool_type == "exposeSecret":
+                _turn_expose_nudges = 1  # model called exposeSecret itself — don't also back-fill one (0093)
+            if _is_live_game and block.tool_type == "tradeSecret":
+                _turn_trade_nudges = 1  # model called tradeSecret itself — don't also back-fill one (0099)
 
             formatted = format_tool_result(desc, result)
             # LIVE-4 (#541): an advanceGame that returned an eviction-STAGE beat gets a focused steer

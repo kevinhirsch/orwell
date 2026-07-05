@@ -91,6 +91,43 @@ def test_apply_unsafe_profile_400_and_writes_nothing(monkeypatch, tmp_path):
     assert not (ops / "cloudflared-token").exists()
 
 
+def test_apply_rejects_plaintext_public_bind_host(monkeypatch, tmp_path):
+    # DEPLOY-2 (B15): an otherwise-safe payload (domains pinned, etc.) must still fail closed when
+    # the BOX'S REAL current ORWELL_BIND_HOST is a public/wildcard interface — e.g. the installer's
+    # own LAN-direct default of 0.0.0.0 — because the app would keep serving in the clear on that
+    # interface even after "going public" behind a tunnel/proxy.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("ORWELL_BIND_HOST", "0.0.0.0")
+    ops = _wire_ops(monkeypatch, tmp_path, watcher_installed=True)
+    client = _client()
+
+    r = client.post("/api/admin/public-deployment/apply",
+                    json={"domains": ["hiorwell.com"], "tunnelToken": "secret-token-xyz"})
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "ORWELL_BIND_HOST" in detail  # the named reason (plaintext-reachable public bind)
+
+    # NOTHING was written: no flag, no config, no token — fail closed before any write.
+    assert not (ops / "public-deployment-requested").exists()
+    assert not (ops / "public-deployment.json").exists()
+    assert not (ops / "cloudflared-token").exists()
+
+
+@pytest.mark.parametrize("bind", ["127.0.0.1", "::1", "localhost"])
+def test_apply_allows_loopback_bind_host(monkeypatch, tmp_path, bind):
+    # The counterpart to the rejection above: a loopback bind host (the default, or an operator who
+    # already pinned it correctly) is fine and applies normally.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("ORWELL_BIND_HOST", bind)
+    _wire_ops(monkeypatch, tmp_path, watcher_installed=True)
+    client = _client()
+
+    r = client.post("/api/admin/public-deployment/apply",
+                    json={"domains": ["hiorwell.com"]})
+    assert r.status_code == 200
+    assert r.json()["started"] is True
+
+
 # ---------------------------------------------------------------------------------------------
 # apply — safe payload writes flag + config + token (mode 0600)
 # ---------------------------------------------------------------------------------------------

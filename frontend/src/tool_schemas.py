@@ -1214,7 +1214,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "recordInteraction",
-            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it. Set `kind` for the simple case — one coarse direction for the whole scene. Use `consequence` when one scene affects specific houseguests DIFFERENTLY (e.g. it warms one and threatens another): you propose the shape per houseguest, the engine still owns the magnitude (you never see the numbers).",
+            "description": "Record a scene the PLAYER is present for as a game event (becomes the player's knowledge). Use after a meaningful in-character exchange so the engine remembers it. Set `kind` for the simple case — one coarse direction for the whole scene. Use `consequence.edges` when one scene affects specific houseguests DIFFERENTLY (e.g. it warms one and threatens another), or `consequence.aboutEdges` for a THIRD-PARTY pitch — 'I told Lorenzo that Maeve is the real threat' floats holder=Lorenzo's opinion of about=Maeve, honored only if holder actually witnessed the scene. You propose the shape per houseguest; the engine still owns the magnitude and whether a pitch lands, softens, or backfires (you never see the numbers).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1248,6 +1248,28 @@ FUNCTION_TOOL_SCHEMAS = [
                                         },
                                     },
                                     "required": ["toward", "direction"],
+                                },
+                            },
+                            "aboutEdges": {
+                                "type": "array",
+                                "description": "THIRD-PARTY pitches: a houseguest's opinion of a DIFFERENT houseguest moves (never the initiator's own standing — use `edges` for that). Only honored when `holder` actually witnessed this scene.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "holder": {"type": "string", "description": "The houseguest you were actually talking to (must be present in this scene)."},
+                                        "about": {"type": "string", "description": "The THIRD houseguest whose standing with holder is being pitched — must differ from holder and from the player."},
+                                        "direction": {
+                                            "type": "string",
+                                            "enum": ["warmer", "cooler", "more-trust", "less-trust", "more-threatened", "less-threatened", "more-aligned", "less-aligned"],
+                                            "description": "Which way holder's feeling about about moves.",
+                                        },
+                                        "emphasis": {
+                                            "type": "string",
+                                            "enum": ["slight", "notable", "strong"],
+                                            "description": "Optional RELATIVE weight only — never an absolute amount; the engine sets the magnitude and may make the pitch fail or backfire.",
+                                        },
+                                    },
+                                    "required": ["holder", "about", "direction"],
                                 },
                             },
                             "rationale": {"type": "string", "description": "Optional free text — why these shifts, grounded in the scene."},
@@ -1568,6 +1590,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "factId": {"type": "string", "description": "The id of a secret the player has actually LEARNED about a THIRD party. Omit only for a bluff."},
                     "bluff": {"type": "boolean", "description": "Set true to offer a secret the player does NOT hold; then 'subject' is required."},
                     "subject": {"type": "string", "description": "For a bluff: the houseguest id the invented secret is about."},
+                    "askKind": {"type": "string", "description": "A short label for what the player asked for in return, as spoken in the scene (e.g. 'safety this week', 'a comp throw'). Never an outcome lever — the engine still decides whether the recipient bites."},
                 },
                 "required": ["toNpcId"],
             },

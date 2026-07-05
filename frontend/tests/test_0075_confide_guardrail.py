@@ -220,7 +220,9 @@ def test_confide_belt_is_wired_into_the_finishing_block():
     # `_want_deal or _want_move`, ADR0009's `_want_move or _want_npc_move`, and approach-nudge's
     # `_want_approach or _want_reapproach:`). The call site fires inside it (1:1-ish: the turn's scene
     # touched a houseguest — reuses `_touched_deal`, computed over the whole turn).
-    assert "if _want_confide or _want_advance or _want_record or _want_deal" in js
+    # Phase 4 (0093/0099) inserted the expose/trade secret belts right after confide in this same
+    # fetch-guard chain (same rationale: they need the fetched `_house` roster too).
+    assert "if _want_confide or _want_expose or _want_trade or _want_advance or _want_record or _want_deal" in js
     assert "if _want_confide and _touched_deal:" in js
     assert "await _auto_confide(_turn_narration, _last_user_for_confide" in js
     # per-turn counter is initialized once per turn

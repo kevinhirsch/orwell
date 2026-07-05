@@ -63,7 +63,24 @@
       .ow-headshot-studio .hs-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
       .ow-headshot-studio .hs-btn { font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
         background: var(--brand-color, var(--accent, #4a9)); color: var(--on-accent, #fff); border: 1px solid transparent; font-weight: 600; }
-      .ow-headshot-studio .hs-btn[disabled] { opacity: .5; cursor: default; }
+      /* INT-6 (a11y fix): opacity-only was the SOLE cue distinguishing disabled from enabled —
+         all three buttons in the row (the enabled file-choose label + the two disabled actions)
+         share the same shape/fill/hue, differing only by a 50% dim. Drop the fill entirely
+         (matches the decision-card convention: cursor:not-allowed at full opacity, never a bare
+         dim) so shape/fill recognition alone signals "not yet available," independent of contrast
+         perception. NOTE: no backticks in this comment block — it lives inside this file's own
+         template-literal CSS string, and a literal backtick here would terminate it early. */
+      .ow-headshot-studio .hs-btn[disabled] {
+        opacity: 1; cursor: not-allowed;
+        background: transparent;
+        color: color-mix(in srgb, var(--fg, #cfd8e3) 55%, transparent);
+        border-color: color-mix(in srgb, var(--fg, #cfd8e3) 30%, transparent);
+      }
+      /* INT-5 (a11y fix, WCAG 3.3.2): the disabled-hint line explaining WHY the two action
+         buttons are inert — orwellDecision.js's disabledHintFor() already solved this exact
+         problem for decision cards; this reuses the same quiet-caption + aria-describedby pattern. */
+      .ow-headshot-studio .hs-hint { opacity: .75; font-size: 11.5px; font-style: italic; flex-basis: 100%; margin-top: 2px; }
+      .ow-headshot-studio .hs-hint[hidden] { display: none; }
       .ow-headshot-studio .hs-btn-ghost { background: transparent; color: var(--fg, #cfd8e3); border-color: var(--border, #355a66); font-weight: 400; }
       .ow-headshot-studio .hs-preview { width: 92px; height: 92px; border-radius: 8px; flex: none;
         border: 1px solid var(--border, #355a66); background: #0d0f14 center/cover no-repeat;
@@ -401,9 +418,10 @@
             <label class="hs-btn hs-btn-ghost hs-filebtn" for="hs-file">${st.file ? "Choose a different photo" : "Choose a photo of yourself"}</label>
             <input type="file" id="hs-file" class="hs-file-native" accept="image/*" aria-label="Choose a photo of yourself">
             <div class="hs-actions">
-              <button type="button" class="hs-btn" id="hs-studio" ${st.file ? "" : "disabled"}>Make AI studio portraits</button>
-              <button type="button" class="hs-btn hs-btn-ghost" id="hs-exact" ${st.file ? "" : "disabled"}>Use photo as-is</button>
+              <button type="button" class="hs-btn" id="hs-studio" ${st.file ? "" : "disabled"} aria-describedby="hs-hint">Make AI studio portraits</button>
+              <button type="button" class="hs-btn hs-btn-ghost" id="hs-exact" ${st.file ? "" : "disabled"} aria-describedby="hs-hint">Use photo as-is</button>
               ${canSkip ? `<button type="button" class="hs-btn hs-btn-ghost" id="hs-skip">Skip for now</button>` : ""}
+              <div class="hs-hint" id="hs-hint" ${st.file ? "hidden" : ""}>Choose a photo above to enable these.</div>
             </div>
             <div class="hs-msg" id="hs-msg2">${esc(_msg)}</div>
           </div></div>`;

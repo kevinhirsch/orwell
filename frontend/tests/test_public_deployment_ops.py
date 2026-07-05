@@ -110,3 +110,16 @@ def test_engine_port_appears_in_no_ops_artifact():
     for rel in (SCRIPT, PATH_UNIT, SERVICE_UNIT):
         text = _read(rel)
         assert ENGINE_PORT not in text, f"engine port {ENGINE_PORT} leaked into {rel}"
+
+
+def test_apply_forces_loopback_bind_host_regardless_of_config():
+    # DEPLOY-2 (B15): the 0067 floor's non-negotiable upserts (auth ON, localhost bypass OFF) must
+    # include pinning the bind host to loopback too — belt-and-suspenders alongside the route-layer
+    # validator fix, so the two code paths (validate vs. apply) can't drift out of sync again.
+    script = _read(SCRIPT)
+    assert 'upsert_env "ORWELL_BIND_HOST" "127.0.0.1"' in script
+    # it sits with the other two non-negotiable, config-independent floor upserts
+    idx_auth = script.index('upsert_env "AUTH_ENABLED" "true"')
+    idx_bypass = script.index('upsert_env "LOCALHOST_BYPASS" "false"')
+    idx_bind = script.index('upsert_env "ORWELL_BIND_HOST" "127.0.0.1"')
+    assert idx_auth < idx_bypass < idx_bind

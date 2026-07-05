@@ -6,7 +6,7 @@ import type { GameEvent } from "../domain/event";
 import { RelationshipModel } from "./relationships";
 import type { InteractionType, EdgeSignals } from "./relationships";
 import {
-  CONSEQUENCE_DIRECTION_IMPACTS, CONSEQUENCE_EMPHASIS, scaleImpact,
+  CONSEQUENCE_DIRECTION_IMPACTS, CONSEQUENCE_EMPHASIS, THIRD_PARTY_CONSEQUENCE, clamp01, scaleImpact,
   type ConsequenceDirection,
 } from "./relationshipConstants";
 import { InMemoryEventStore } from "../adapters/inmemory/InMemoryEventStore";
@@ -41,12 +41,33 @@ export interface EdgeConsequence {
 }
 
 /**
+ * A per-edge THIRD-PARTY consequence PROPOSAL (Phase 1 of "the player can play offense" — layered
+ * on ADR 0005). Unlike `EdgeConsequence` (whose opinion of the INITIATOR moves), this names a
+ * SEPARATE directed edge: `holder`'s hidden opinion of `about`. The caller/LLM proposes the shape
+ * (which edge, which direction, relative emphasis); the engine owns the amount, gates the fold on
+ * `holder` having actually witnessed the scene (I3), and may fail/backfire (I2) rather than
+ * auto-succeed. See `foldThirdPartyConsequence` below.
+ */
+export interface ThirdPartyConsequence {
+  /** Who the initiator is actually talking to — MUST be a witness of this scene (I3/Vault Wall). */
+  holder: EntityId;
+  /** The third party whose standing with `holder` is being pitched (must differ from holder/initiator). */
+  about: EntityId;
+  /** Which signal(s) move and their sign — the SAME closed `EdgeSignals` space as `EdgeConsequence`. */
+  direction: ConsequenceDirection;
+  /** RELATIVE weight only (NOT a magnitude). */
+  emphasis?: "slight" | "notable" | "strong";
+}
+
+/**
  * The generative-consequence descriptor (ADR 0005). Open-set interpretation (which edge, which
  * direction, why) rides here + the free-text `content`; the magnitude stays engine-owned. The
  * `rationale` is RECORDED (open-set content) but NEVER scored into any magnitude.
  */
 export interface ConsequenceDescriptor {
   edges?: EdgeConsequence[];
+  /** THIRD-PARTY proposals (Phase 1) — see `ThirdPartyConsequence` + `foldThirdPartyConsequence`. */
+  aboutEdges?: ThirdPartyConsequence[];
   rationale?: string;
 }
 
@@ -144,6 +165,71 @@ export function foldGenerativeConsequence(
   return moved;
 }
 
+/**
+ * The THIRD-PARTY consequence fold (Phase 1 of "the player can play offense" — layered on ADR
+ * 0005). Where `foldGenerativeConsequence` only lets a scene move how someone feels about the
+ * INITIATOR, this lets the caller/LLM propose a completely separate directed edge: `holder`'s
+ * hidden opinion of a THIRD PARTY (`about`) — the classic "I pulled Lorenzo aside and floated that
+ * Maeve is the bigger threat." Three invariants hold this to the same discipline as every other
+ * fold:
+ *
+ *  • I3 / Vault Wall (witness-gated): `holder` must be in `witnessSet` — a belief can only form
+ *    from what was actually witnessed. An entry naming an absent holder is SILENTLY DROPPED, never
+ *    minting an off-screen read from the player channel (off-screen life is the engine's alone to
+ *    mint, `EngineCommandsAdapter`'s own player-witness invariant).
+ *  • Anti-sycophancy #3 (engine owns the amount): `direction`/`emphasis` pick a member of the SAME
+ *    closed sets `foldGenerativeConsequence` uses; the actual delta is the engine's own base scaled
+ *    by a bounded, seeded TRUST GATE (the proven shape `campaignTilt` already uses, 0085) — a holder
+ *    who barely trusts the initiator moves near the `trustFloor`, a trusted initiator's pitch lands
+ *    closer to the full bounded amount. No raw number ever crosses from the caller.
+ *  • I2 / anti-sycophancy (can fail or backfire): when `holder` doesn't trust the initiator AND
+ *    already has a STRONGER bond with `about` than with the initiator, the pitch is at risk of
+ *    reading as transparent manipulation — a seeded roll may BACKFIRE it: instead of moving
+ *    holder→about at all, a small bounded hit lands on holder→initiator ("that felt like being
+ *    worked"). A social move is never an auto-success lever.
+ *
+ * Rides the caller-supplied `spend(holder, about)` budget (the SAME per-beat-per-edge anti-pump
+ * spend `EngineCommandsAdapter` already uses, keyed `holder->about` instead of `holder->initiator`)
+ * so a scene can't spam a huge third-party swing. Pure aside from the injected `rng`; never mutates
+ * its inputs beyond the relationship model's own proven update rule.
+ */
+export function foldThirdPartyConsequence(
+  rel: RelationshipModel,
+  rng: RandomnessSource,
+  initiator: EntityId,
+  witnessSet: ReadonlySet<EntityId> | readonly EntityId[],
+  edges: readonly ThirdPartyConsequence[],
+  spend: (holder: EntityId, about: EntityId) => boolean = () => true,
+): Set<EntityId> {
+  const witnesses = witnessSet instanceof Set ? witnessSet : new Set(witnessSet);
+  const moved = new Set<EntityId>();
+  for (const e of edges) {
+    // Never a self-pitch, never pitching someone's opinion of themselves or of the initiator (that
+    // is what `edges`/`EdgeConsequence` is for — this channel is strictly third-party).
+    if (e.holder === e.about || e.holder === initiator || e.about === initiator) continue;
+    if (!witnesses.has(e.holder)) continue; // I3: only an ACTUAL witness can form this read
+    if (!spend(e.holder, e.about)) continue; // the per-beat-per-edge budget (E21) gates this channel too
+    const B = THIRD_PARTY_CONSEQUENCE;
+    const trustOfInitiator = rel.read(e.holder, initiator).signals.trust;
+    const bondWithAbout = rel.bondStrength(e.holder, e.about);
+    const bondWithInitiator = rel.bondStrength(e.holder, initiator);
+    // I2 — the backfire gate: only at risk when the holder doesn't (yet) trust the initiator AND
+    // already leans more toward the very person being pitched against. The roll is drawn ONLY when
+    // the gate is open, so the common (trusted) case never spends an extra rng draw.
+    if (trustOfInitiator < B.backfire.trustCeiling && bondWithAbout > bondWithInitiator
+      && rng.next() < B.backfire.chance) {
+      rel.applyImpactDirected(e.holder, initiator, B.backfire.impact, rng);
+      continue; // the pitch backfired — holder->about is untouched
+    }
+    const base = CONSEQUENCE_DIRECTION_IMPACTS[e.direction];
+    const factor = CONSEQUENCE_EMPHASIS[e.emphasis ?? "notable"]; // RELATIVE weight → engine multiplier
+    const trustMult = B.trustFloor + (1 - B.trustFloor) * clamp01(trustOfInitiator);
+    rel.applyImpactDirected(e.holder, e.about, scaleImpact(base, factor * trustMult), rng);
+    moved.add(e.holder);
+  }
+  return moved;
+}
+
 export class ConsequenceEngine {
   private seq = 0;
   private tick = 0;
@@ -182,6 +268,11 @@ export class ConsequenceEngine {
       } else {
         foldHiddenImpact(this.rel, this.rng, h.initiator, h.witnessSet, h.kind, h.toward);
       }
+    }
+    // Phase 1 (player-offense) — the SAME third-party channel the live `recordInteraction` seam
+    // uses, witness-gated against this happening's own witness set (I3).
+    if (h.consequence?.aboutEdges?.length) {
+      foldThirdPartyConsequence(this.rel, this.rng, h.initiator, h.witnessSet, h.consequence.aboutEdges);
     }
     return { eventId };
   }
