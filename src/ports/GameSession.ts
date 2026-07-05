@@ -121,6 +121,20 @@ export interface HouseguestCard {
    * the still-floor cards. It is NOT hidden content and is safe on the player-facing roster.
    */
   authored?: boolean;
+  /**
+   * I6 distinct-voices fix (NARR-15/PROMPT-2, 2026-07-05): a COMPACT, PLAYER-SURFACE-SAFE text clause
+   * for HOW this houseguest talks (feature 0084) — the narrator reads it EVERY turn so the cast sounds
+   * like sixteen people, not one, WITHOUT depending on the per-NPC `npcVoice` call it reliably under-calls.
+   *
+   * It is a pre-rendered STRING built ONLY from the controlled voice DIAL vocabulary (register/rhythm/
+   * energy/directness/humor/stress-tell) via `voiceFingerprint()` — deliberately NOT the raw `VoiceProfile`
+   * object: the free-text `signature`/`lexicon` fields are legitimate public persona but uncontrolled prose
+   * (e.g. a villain signature "makes a threat sound like small talk", a "100%" filler), which would trip the
+   * coarse Vault-Wall player-surface scan. The dial vocab is a closed, audited set — no hidden-layer word,
+   * no number — so this is provably safe to ride the Vault-free projection. PUBLIC, byte-stable; the FULL
+   * fingerprint stays on `npcVoice` (not a scanned surface) for a deep scene. Absent only on a pre-0084 save.
+   */
+  voice?: string;
 }
 
 /**

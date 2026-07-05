@@ -933,6 +933,11 @@ export function renderGameContext(view: GameStateView): string {
       // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
       // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
       h.demeanor && `comes across as ${h.demeanor}`,
+      // I6 distinct-voices fix (NARR-15/PROMPT-2): the pre-rendered, player-surface-SAFE voice-fingerprint
+      // clause (0084) — rides every turn's roster so cadence differs person-to-person WITHOUT depending on a
+      // per-NPC npcVoice call the narrator reliably under-calls. A dial-vocab-only STRING (no hidden-layer
+      // word, no number), built engine-side by `voiceFingerprint`. PUBLIC, Vault-free, byte-stable.
+      h.voice,
       // L28: the STORED concrete backstory facets — voice THESE (a real, diverse cast), never invent
       // or mirror the player's job/hometown. Origin colors who they ARE; the game still happens in LA.
       [h.vocation, h.hometown && `from ${h.hometown}`].filter(Boolean).join(", "),

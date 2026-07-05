@@ -140,6 +140,26 @@ export function generateVoice(rng: RandomnessSource, archetype: string): VoicePr
   return { register, rhythm, energy, directness, humor, stressTell, signature, lexicon };
 }
 
+/**
+ * I6 distinct-voices fix (NARR-15 / PROMPT-2, 2026-07-05): a COMPACT, PLAYER-SURFACE-SAFE text clause
+ * describing HOW a houseguest talks, for the always-present roster the narrator reads every turn.
+ *
+ * DELIBERATELY built ONLY from the controlled DIAL vocabulary (register/rhythm/energy/directness/humor
+ * + the stress tell) — never the free-text `signature` or `lexicon`. Those free fields are legitimate
+ * PUBLIC persona, but they are UNCONTROLLED prose: the archetype signature pool contains e.g. "makes a
+ * threat sound like small talk" and the lexicon pool contains "100%", so putting the raw `VoiceProfile`
+ * object on the Vault-free `GameStateView` tripped the coarse Vault-Wall scan (`/trust|threat|affinity|
+ * soul/` + digits). The dial vocab is a closed, audited set with none of those substrings and no digit,
+ * so this clause is provably safe to serialize onto a player-facing projection while still giving the
+ * narrator a distinct cadence per houseguest without an `npcVoice` call. `npcVoice` still carries the
+ * FULL fingerprint (signature + lexicon) for a deep scene — it is not a player-scanned surface.
+ *
+ * Pure, deterministic, no I/O — a plain projection of already-public dial words.
+ */
+export function voiceFingerprint(voice: VoiceProfile): string {
+  return `talks in a ${voice.register}, ${voice.rhythm}, ${voice.directness} voice — ${voice.energy}, ${voice.humor} humor; under pressure ${voice.stressTell}`;
+}
+
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 const mean = (xs: readonly number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0.5);
 
