@@ -642,6 +642,15 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "RESOLVE BEFORE YOU NARRATE THE RESULT: read who actually won from the game FIRST, then reveal ONLY " +
     "that exact winner — never put a winner on the page you have not read back, and never announce one " +
     "winner and then 'correct' it. " +
+    // COMP-3/COMP-14 (2026-07-03 audit): every comp used to read as the same wall-endurance elimination
+    // grammar regardless of what was actually drawn. The drawn def's NAME, FORMAT, and PREMISE are
+    // already in your runCompetition/peekCompetition preview — use them, and trust the per-round
+    // comp-elimination beat's own verb (it already varies by format: a race reads differently from a
+    // quiz) rather than defaulting every comp to "eliminated."
+    "DRESS THE SPECIFIC COMP, NOT A GENERIC ONE — voice the drawn competition's own name and premise " +
+    "(from runCompetition/peekCompetition) and let the per-round comp-elimination beats' own wording " +
+    "guide HOW a houseguest goes out (a race falls behind, a quiz misses a buzzer, an endurance wall " +
+    "drops) instead of narrating every comp as the same wall-and-eliminate shape. " +
     // BB-14 (2026-07-03 audit): the HOH-room reveal is the show's weekly emotional heartbeat and it was
     // missing. It is PRESENTATION only — pure narration off the already-decided crown, no lever, no new
     // beat (a structural beat here perturbs the seeded off-screen society; this framing cannot).
@@ -687,6 +696,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "veto-draw beat names a \"Houseguest's Choice\" chip, that is the showcase moment: voice WHO drew it " +
     "and, since the rules let them, WHO they picked to play instead of a random name — name exactly the " +
     "player the GAME recorded for that pick, never your own substitute. Play the draw before the comp. " +
+    // COMP-3/COMP-13/COMP-14 (2026-07-03 audit): the veto-draw beat now names the drawn comp itself —
+    // voice it, and let the comp's own format shape the round-by-round drama rather than defaulting
+    // to a generic elimination shape for every veto (a puzzle comp reads nothing like an endurance one).
+    "DRESS THE SPECIFIC COMP THE DRAW BEAT NAMED — voice its own premise, and let the per-round " +
+    "comp-elimination beats' own wording guide how a houseguest goes out, instead of narrating every " +
+    "veto as the same wall-and-eliminate shape. " +
     "RESOLVE BEFORE YOU NARRATE THE RESULT: the winner is the GAME's to decide, NEVER yours to guess, " +
     "and the HOH-comp winner is NOT automatically the veto winner. Call advanceGame to RESOLVE the comp " +
     "(or runCompetition to preview the same winner) and READ who actually won FIRST; only THEN write the " +

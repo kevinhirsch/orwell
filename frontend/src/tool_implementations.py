@@ -5153,6 +5153,48 @@ async def do_confide(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_form_alliance(content: str, owner: Optional[str] = None) -> Dict:
+    """Feature 0107 Phase A — the player NAMES an alliance with a set of houseguests. The ENGINE is
+    the single authority: membership is bond-gated (a proposed member joins only if their mutual bond
+    with the player clears the floor), so it returns who ACTUALLY joined, never a fiat. We only
+    forward {name, members}."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    name = (args.get("name") or "").strip()
+    members = args.get("members")
+    if not isinstance(members, list) or not members:
+        return {"error": "members (a non-empty list of houseguest ids) is required", "exit_code": 1}
+    if not name:
+        return {"error": "name (the alliance's name as spoken in the scene) is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.form_alliance(name, members, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_join_alliance(content: str, owner: Optional[str] = None) -> Dict:
+    """Feature 0107 Phase B — the player ACCEPTS an NPC's pitch and joins their named alliance. The
+    ENGINE is the single authority: only a live pitch the player is close enough to the founder for
+    takes. We only forward {allianceId}."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    alliance_id = (args.get("allianceId") or args.get("alliance_id") or "").strip()
+    if not alliance_id:
+        return {"error": "allianceId (from gameStatus.alliancePitches) is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.join_alliance(alliance_id, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_expose_secret(content: str, owner: Optional[str] = None) -> Dict:
     """Feature 0093 — the player OUTS a secret they LEARNED to the house. The ENGINE is the single
     authority: it validates the player actually holds `factId` (I3/Vault Wall — a non-learned fact is

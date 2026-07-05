@@ -97,6 +97,19 @@ export interface RelationshipConstants {
     /** Interaction kinds that move bystanders directly (a witnessed shock) — the human exception. */
     universal: InteractionType[];
   };
+  /**
+   * Phase 3 of "the player can play offense" (audit finding SG-2, the closed-set relationship
+   * layer). Every `kind` fold above moves ONLY a partner's opinion OF the initiator — the
+   * initiator's OWN edge toward the people they just engaged never budges. That is the right
+   * shape for the off-screen society (a bystander's belief moving is enough), but on the PLAYER
+   * channel it left `player→NPC` frozen at its move-in scatter forever, under every mutual-bond
+   * gate (`formAlliance`/`joinAlliance` 0107, blocs 0043). ADR 0002 holds the engine computes BOTH
+   * directions from history (never a number the player sees), so a PLAYER-initiated
+   * `recordInteraction` also reciprocates this FRACTION of the same engine-owned `kind` impact
+   * onto `player→partner`. Kept < 1 so the player's own read firms up more slowly than a
+   * houseguest's memorable read of the player (0 would be the pre-Phase-3 freeze).
+   */
+  RECIPROCAL_SHARE: number;
 }
 
 // Betrayal-shock: a LARGE single step — the competitive, realistic core, and the single biggest
@@ -136,6 +149,7 @@ export const RELATIONSHIP_CONSTANTS: RelationshipConstants = {
     suspicionWeight: 0.6,
     universal: ["betrayal"],
   },
+  RECIPROCAL_SHARE: 0.5,
 };
 
 // PERSIST-2/BE-101: `Math.min`/`Math.max` pass NaN straight through (`Math.min(1, NaN)` is `NaN`, and

@@ -681,6 +681,29 @@ async def confide(npc_id: str, expected_beat_seq: int | None = None, user: str |
     return await _call("confide", args, user=user)
 
 
+async def form_alliance(name: str, members: list, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """Feature 0107 Phase A — the player NAMES an alliance with a set of houseguests. The engine is
+    the single authority: membership is bond-gated (a proposed member joins only if their mutual bond
+    with the player clears the floor; the unbonded decline), so this reports who ACTUALLY joined, not
+    who was asked. 0065 Part A — the optional `expected_beat_seq` CAS token threads in only when
+    provided (absent ⇒ identical to today)."""
+    args: dict = {"name": name, "members": members}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("formAlliance", args, user=user)
+
+
+async def join_alliance(alliance_id: str, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+    """Feature 0107 Phase B — the player ACCEPTS an NPC's pitch and joins their named alliance. The
+    engine is the single authority: only a live pitch (the player is `knownTo` but not yet a member)
+    AND a close-enough bond with the founder lets them in — a cold "add me" is refused. 0065 Part A —
+    the optional `expected_beat_seq` CAS token threads in only when provided."""
+    args: dict = {"allianceId": alliance_id}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("joinAlliance", args, user=user)
+
+
 async def expose_secret(fact_id: str | None = None, bluff: bool = False, subject: str | None = None,
                         expected_beat_seq: int | None = None, user: str | None = None) -> dict:
     """Feature 0093 — the player OUTS a secret they LEARNED to the house. The engine is the single

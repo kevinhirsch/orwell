@@ -42,6 +42,8 @@ import urllib.request
 
 import pytest
 
+from _settings_open import open_settings_deterministically
+
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -274,104 +276,10 @@ def test_runtime_every_model_select_offers_a_subset_of_the_chat_pool():
             page = browser.new_page()
             page.goto(base + "/", wait_until="load", timeout=30000)
             page.wait_for_timeout(4000)  # module graph + async init
-            # Open Settings past the pre-game onboarding overlay. The wizard inerts the page
-            # AND lays a backdrop scrim ([data-ow-scrim]) that intercepts the gear click while
-            # either is present; the wizard mounts ASYNC and can re-mount in the gap between a
-            # dismiss and the click, so a fixed dismiss-then-click loop is racy (the old
-            # 3xEscape idiom flaked on slow CI — it only checked #orwell-onboarding, never the
-            # lingering scrim). Converge: dismiss whatever overlay is up, then try the gear
-            # click, until the Settings kit modal is actually open. (Mirrors the hardened loop
-            # in test_h2h3_settings.py.)
-            def _overlay_present() -> bool:
-                return page.evaluate(
-                    """() => !!document.getElementById('orwell-onboarding')
-                              || !!document.querySelector('[data-ow-scrim]')"""
-                )
-
-            def _settings_open() -> bool:
-                return page.evaluate(
-                    """() => {
-                      const m = document.getElementById('settings-modal');
-                      if (!m || !m.isConnected) return false;
-                      const s = getComputedStyle(m);
-                      return s.display !== 'none' && s.visibility !== 'hidden'
-                             && m.getClientRects().length > 0;
-                    }"""
-                )
-
-            # Dismiss whatever overlay is up via ITS OWN explicit control, not the global
-            # Escape key. Root-cause note (this suite has no TS engine process running, so
-            # `fetchState()` in orwellOnboarding.js's route() always 502s): the overlay this
-            # test actually hits is the F5 "Big Brother engine unavailable" holding card, not
-            # the model-config wizard the old comments here described — confirmed by
-            # instrumenting a MutationObserver + fetch hook over this exact boot (no engine ⇒
-            # the holding card mounts almost immediately and never self-clears). That card
-            # always renders a `[data-ob-dismiss]` ("Go in anyway") button whose click handler
-            # is `win.destroy()` — the kit's SYNCHRONOUS teardown (removes the scrim + un-inerts
-            # + drops the node immediately, per orwellWindow.js). Escape instead threads ui.js's
-            # single page-wide arbiter (menu stack → hovered-window/thinking-block check → "no
-            # OTHER legacy .modal is on top" gate → sheet kit → the settings-specific branch →
-            # …) before it ever reaches `OrwellWindowKit.dismissTop()`, and even then that path
-            # calls the ANIMATED `close()` (a ~190ms `setTimeout` before teardown actually runs)
-            # rather than `destroy()`. Clicking the button is a strictly more direct, faster,
-            # and less contended signal than a global keydown that many unrelated subsystems get
-            # first refusal on — prefer it, and keep Escape only as a fallback for an overlay
-            # variant (e.g. the setup wizard, when a real engine IS reachable) that renders no
-            # such button.
-            def _dismiss_overlay() -> None:
-                clicked = page.evaluate(
-                    """() => {
-                      const btn = document.querySelector('#orwell-onboarding [data-ob-dismiss]');
-                      if (btn) { btn.click(); return true; }
-                      return false;
-                    }"""
-                )
-                if not clicked:
-                    page.keyboard.press("Escape")
-
-            # 60s (was 30): the onboarding→Settings convergence (holding-card → feed-recognized →
-            # setup wizard → dismiss → gear) is multi-step, and a loaded self-hosted CI runner runs
-            # this ~2× slower than local — 30s was the residual flake (#925/#1148 family). The loop is
-            # already idempotent (dismiss whatever's up, retry the gear); it just needed more patience.
-            deadline = time.monotonic() + 60
-            while time.monotonic() < deadline:
-                if _settings_open():
-                    break
-                if _overlay_present():
-                    _dismiss_overlay()
-                    # Wait for the WHOLE overlay (window AND scrim) to detach before retrying — racing
-                    # the kit's teardown on a slow runner burned iterations against the budget.
-                    try:
-                        page.wait_for_function(
-                            "() => !document.getElementById('orwell-onboarding')"
-                            " && !document.querySelector('[data-ow-scrim]')",
-                            timeout=3000)
-                    except Exception:
-                        pass
-                    continue
-                try:
-                    page.click("#user-bar-settings", timeout=2000)  # open settings → initAll()
-                except Exception:
-                    pass
-                page.wait_for_timeout(150)
-            else:
-                # Instrument the timeout so a future flake is diagnosable (not a bare mystery): what was
-                # still blocking — a holding card, the setup wizard, a lingering scrim, a half-open modal?
-                diag = page.evaluate(
-                    """() => {
-                      const ob = document.getElementById('orwell-onboarding');
-                      const m = document.getElementById('settings-modal');
-                      return {
-                        onboarding: ob ? (ob.getAttribute('data-ob-holding') !== null ? 'holding'
-                                          : ob.getAttribute('data-ob-setup') !== null ? 'setup' : 'other') : null,
-                        scrims: document.querySelectorAll('[data-ow-scrim]').length,
-                        settingsConnected: !!(m && m.isConnected),
-                        settingsDisplay: m ? getComputedStyle(m).display : null,
-                      };
-                    }"""
-                )
-                raise AssertionError(
-                    f"Settings modal never opened past the onboarding overlay — blocking state: {diag}")
+            # Open Settings past the boot loader (#app-loader) + the no-engine
+            # onboarding holding card — the deterministic recipe that ends the
+            # #925/#1148/#930 flake (see _settings_open.py for the full root cause).
+            open_settings_deterministically(page)
             # Wait for EVERY endpoint-scoped card the pick below drives to be
             # populated by its OWN async init() — not just the three originally
             # gated here. Each init* is fire-and-forget (initAll() does not await
