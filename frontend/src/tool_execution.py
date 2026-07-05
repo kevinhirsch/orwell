@@ -1169,6 +1169,7 @@ async def execute_tool_block(
         do_create_character, do_update_casting, do_advance_game, do_submit_decision,
         do_request_self_eviction,
         do_social_initiatives, do_diary_room, do_make_deal, do_confide, do_whereabouts, do_move_to,
+        do_form_alliance, do_join_alliance,
         do_expose_secret, do_trade_secret,
         do_premiere_intros, do_mark_houseguest_met,
         do_season_recap, do_season_retrospective, do_npc_voice,
@@ -1558,6 +1559,12 @@ async def execute_tool_block(
     elif tool == "confide":
         desc = "confide"
         result = await do_confide(content, owner=owner)
+    elif tool == "formAlliance":
+        desc = "formAlliance"
+        result = await do_form_alliance(content, owner=owner)
+    elif tool == "joinAlliance":
+        desc = "joinAlliance"
+        result = await do_join_alliance(content, owner=owner)
     elif tool == "exposeSecret":
         desc = "exposeSecret"
         result = await do_expose_secret(content, owner=owner)
