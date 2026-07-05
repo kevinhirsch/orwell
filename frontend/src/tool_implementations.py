@@ -5153,6 +5153,61 @@ async def do_confide(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_expose_secret(content: str, owner: Optional[str] = None) -> Dict:
+    """Feature 0093 — the player OUTS a secret they LEARNED to the house. The ENGINE is the single
+    authority: it validates the player actually holds `factId` (I3/Vault Wall — a non-learned fact is
+    REJECTED, never fabricated here), resolves the bounded standing fold + exposer backlash, and
+    records the exposure. We only forward {factId} or {bluff, subject} and return the engine's result."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    bluff = bool(args.get("bluff"))
+    subject = (args.get("subject") or "").strip() or None
+    fact_id = (args.get("factId") or args.get("fact_id") or "").strip() or None
+    if bluff:
+        if not subject:
+            return {"error": "subject (the houseguest the invented secret is about) is required for a bluff", "exit_code": 1}
+    elif not fact_id:
+        return {"error": "factId (a secret the player has actually learned) is required, or set bluff:true with a subject", "exit_code": 1}
+    try:
+        res = await orwell_engine.expose_secret(fact_id=fact_id, bluff=bluff, subject=subject, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_trade_secret(content: str, owner: Optional[str] = None) -> Dict:
+    """Feature 0099 — the player TRADES a secret they LEARNED about a THIRD party to a recipient for a
+    one-off concession. The ENGINE is the single authority: it validates the player actually holds
+    `factId` (I3/Vault Wall — a non-learned fact is REJECTED), values the secret TO THE RECIPIENT, and
+    decides whether they bite. We only forward {toNpcId, factId|bluff+subject, askKind}."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    to_npc_id = (args.get("toNpcId") or args.get("to_npc_id") or "").strip()
+    if not to_npc_id:
+        return {"error": "toNpcId (the recipient houseguest) is required", "exit_code": 1}
+    bluff = bool(args.get("bluff"))
+    subject = (args.get("subject") or "").strip() or None
+    fact_id = (args.get("factId") or args.get("fact_id") or "").strip() or None
+    ask_kind = (args.get("askKind") or args.get("ask_kind") or "").strip() or None
+    if bluff:
+        if not subject:
+            return {"error": "subject (the houseguest the invented secret is about) is required for a bluff", "exit_code": 1}
+    elif not fact_id:
+        return {"error": "factId (a secret the player has actually learned about a third party) is required, or set bluff:true with a subject", "exit_code": 1}
+    try:
+        res = await orwell_engine.trade_secret(to_npc_id, fact_id=fact_id, bluff=bluff, subject=subject,
+                                               ask_kind=ask_kind, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_manage_sandbox(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

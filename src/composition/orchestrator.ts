@@ -8,7 +8,7 @@ import { scaleImpact, natureFoldImpact } from "../engine/relationshipConstants";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, gossipEdgeAffinity, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional, selectRecentForConfessional } from "../engine/confessionals";
-import { nextHouseEvent } from "../engine/houseEvents";
+import { nextHouseEvent, dayOfWeek } from "../engine/houseEvents";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
 import { PLAYER } from "../domain/ids";
@@ -739,17 +739,53 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
     sandbox.session.runTriggerEruptions(sandbox.engine.events, precipitants);
   }
 
-  if (trigger === "player-turn" && ids.length > 0) {
-    // A meaningful, player-witnessed day event (daily-event invariant, 0008).
-    sandbox.engine.events.record({
-      id: `orch:day:${clockNow}:${rng.int(1_000_000_000)}`,
-      ts: clockNow,
-      type: "house-event",
-      initiator: ids[0]!,
-      witnessSet: [PLAYER, ids[0]!],
-      hidden: false,
-      content: nextHouseEvent(sandbox.engine.events, rng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
-    });
+  // A meaningful, player-witnessed day event (daily-event invariant, 0008; E58 ambient variety).
+  // BUGFIX: this used to gate on `trigger === "player-turn"`, a value `advance()` never actually
+  // passes to `applyFn`/`defaultApply` in real play — `commitPlayerTurn` never calls `advance()`
+  // directly, and the turn-driven tick it DOES fire always carries `"offscreen-tick"` (the R5/E57
+  // debounce refactor renamed the calling convention without updating this gate). The result: the
+  // entire ambient house-event pool was dead code for every real game, satisfying the daily-event
+  // invariant with ceremony beats alone and none of this module's "the house lives between
+  // ceremonies" texture. Gate on "any real tick, not an audit dry run" instead — `defaultApply` is
+  // only ever invoked with `trigger !== "audit"` in the first place (see `advance()` above), so this
+  // now fires for both the real production trigger and the legacy test-driven "player-turn" calls.
+  //
+  // CALIBRATION-NEUTRALITY: the ambient pick draws on a DEDICATED, isolated rng keyed off the game
+  // seed + moment (the same pattern as the confessional phrasing/recent rngs above), NEVER the shared
+  // `rng` stream this function threads through the seeded society / gossip / story-thread spine. Pure
+  // texture — it records one player-witnessed house-event but consumes ZERO draws from the shared
+  // stream, so the downstream `scheduleStoryThreads(rng)` (and every seeded competition/vote/jury roll)
+  // stays byte-identical whether or not this block fires. Firing it on the real tick is what finally
+  // lets the pool reach a live player; the dedicated rng is what keeps that texture-only.
+  //
+  // ONCE-PER-DAY cadence (audit COMP-7): the turn-driven tick fires on every progressed beat AND, once
+  // per turn, on the debounced aux commits (a recorded scene, a deal). Recording a fresh ambient day
+  // headline on each would FLOOD the record ("several a week" was already too many) and mislabel a
+  // mid-day side-conversation as a new day event. So we dedupe on the in-game DAY: the ambient headline
+  // is stamped `Week W[, day D]:` by `nextHouseEvent`, and we record at most one per distinct stamp —
+  // it fires when the player first arrives at a new (week, day) and then stays quiet until the day turns
+  // over, no matter how many aux ticks the turn produces. (Ceremony house-events carry no such stamp, so
+  // this never suppresses a real HOH/nomination/eviction beat.)
+  if (trigger !== "audit" && ids.length > 0) {
+    const day = dayOfWeek(core.phase);
+    const stamp = day === null ? `Week ${core.week}` : `Week ${core.week}, day ${day}`;
+    const alreadyToday = sandbox.engine.events
+      .query({ type: "house-event" })
+      .some((e) => e.content.startsWith(`${stamp}:`));
+    if (!alreadyToday) {
+      const ambientRng = new SeededRandom(
+        hashSeed(`${core.seed ?? ""}:house-event:${core.week}:${core.phase}:${before}`),
+      );
+      sandbox.engine.events.record({
+        id: `orch:day:${clockNow}:${before}`,
+        ts: clockNow,
+        type: "house-event",
+        initiator: ids[0]!,
+        witnessSet: [PLAYER, ids[0]!],
+        hidden: false,
+        content: nextHouseEvent(sandbox.engine.events, ambientRng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
+      });
+    }
   }
   // 0059/L40 — advance the seeded showmances on the affinity the scenes just moved. A showmance that
   // crosses into `visible` becomes a PUBLIC house fact; the adapter's onShowmanceSurfaced hook (wired

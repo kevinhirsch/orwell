@@ -25,11 +25,28 @@ if FRONTEND_DIR not in sys.path:
 # init_db(), which opens the app's DB. The default URL is the RELATIVE ./data/app.db,
 # and CI's fresh checkout has no frontend/data/ dir → "unable to open database file".
 # Point the ORM at a throwaway temp DB before that first import (conftest loads ahead of
-# the test modules). setdefault so an explicit DATABASE_URL still wins.
-os.environ.setdefault(
-    "DATABASE_URL",
-    "sqlite:///" + os.path.join(tempfile.mkdtemp(prefix="orwell-test-db-"), "app.db"),
-)
+# the test modules).
+#
+# Must be a FRESH temp DB PER PROCESS, not merely "per invocation" — under
+# `pytest-xdist -n N` the controller process imports this conftest too (for
+# collection), assigns its own tempdir via plain `setdefault`, and each worker
+# subprocess then INHERITS that already-set `DATABASE_URL` from the controller's
+# environment (subprocess env inheritance, independent of pytest/xdist's own
+# machinery). A bare `setdefault` is therefore a no-op in every worker, and all N
+# workers plus the controller silently converge on ONE shared sqlite file —
+# concurrent test processes then race each other's inserts/deletes/table-clears
+# against that single file (the exact intermittent
+# `test_null_owner_endpoint_is_not_orphaned_and_is_adopted`-style cross-worker
+# flake this guards against). Detect "the current value is one WE minted" (it
+# carries our own tempdir marker, or is simply unset) and mint a brand new
+# per-process tempdir in that case; a genuinely different, deliberately-configured
+# `DATABASE_URL` (not carrying the marker) is still left untouched.
+_AUTO_TEST_DB_MARKER = "orwell-test-db-"
+_current_db_url = os.environ.get("DATABASE_URL", "")
+if not _current_db_url or _AUTO_TEST_DB_MARKER in _current_db_url:
+    os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(
+        tempfile.mkdtemp(prefix=_AUTO_TEST_DB_MARKER), "app.db"
+    )
 
 # Replace `core` with a lightweight package stub pointing at the real core/ dir, so
 # `import core.auth` / `import core.middleware` load those files WITHOUT executing

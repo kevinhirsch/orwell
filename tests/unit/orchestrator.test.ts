@@ -42,6 +42,27 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     expect(new FileSaveStore(dir).loadLatest(U)!.events.length).toBeGreaterThan(savedBefore);
   });
 
+  it("REGRESSION (comp-variety audit): the ambient house-event fires on the REAL production trigger, not only the test-only 'player-turn'", () => {
+    // Every real production path (the turn-driven tick fired from `commitPlayerTurn`, and the
+    // opt-in wall-clock watcher) calls `advance()`/`defaultApply` with trigger "offscreen-tick" —
+    // NEVER "player-turn" (that value is only ever passed directly by tests). The ambient
+    // house-event block used to gate on `trigger === "player-turn"`, so it was dead code for
+    // every real game: the entire curated variety pool never reached a live player. This proves
+    // the fix — the SAME trigger value real gameplay uses now records the ambient day event too.
+    const registry = new GameSessionRegistry();
+    const orch = new Orchestrator(registry, new FakeClock(), { seed: 41 });
+    registry.sandboxFor(U).session.createCharacter({ playerName: "Tick", seed: 41 });
+
+    const res = orch.advance(U, "offscreen-tick");
+    expect(res.integrity).toBe("ok");
+
+    const sb = registry.sandboxFor(U);
+    const dayEvents = sb.engine.events.query({ witnessedBy: PLAYER })
+      .filter((e) => e.type === "house-event" && e.content.includes("Week"));
+    expect(dayEvents.length).toBeGreaterThanOrEqual(1); // the ambient E58 pick, not just a ceremony beat
+    expect(dayEvents[0]!.hidden).toBe(false); // player-witnessed = not secret
+  });
+
   it("the house lives between turns: idle off-screen ticks, no numbers shown", () => {
     const registry = new GameSessionRegistry(new FileSaveStore(freshDir()));
     const clock = new FakeClock();

@@ -17,11 +17,12 @@ game state into **external, permissioned stores** behind a **hexagonal architect
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
 **Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-23).** Specs now run
-through **0109**, and the originally-drafted set is built and **green** — but the spec ceiling now runs ahead of the
-*built* one: **0075–0093, 0099–0100, 0104–0107, 0109** are built, while **0094–0098, 0101–0103** remain
+through **0110**, and the originally-drafted set is built and **green** — but the spec ceiling now runs ahead of the
+*built* one: **0075–0093, 0099–0100, 0104–0107, 0109, 0110** are built, while **0094–0098, 0101–0103** remain
 **spec-only/frozen** (the Producer's-Vault audit + PO-review batch — some parked, some awaiting a build
-slot) and **0108** is spec-only (the real-model golden-path gate). The lone
-deliberate *deferral* remains **0022 (MVP-2)**, and the
+slot) and **0108** is spec-only (the real-model golden-path gate). *(The former lone deferral, **0022
+(MVP-2, the rich game UI)**, was **removed** in the 2026-06-28 PO review — superseded by 0020/0051/0054
+under ADR 0003.)* The
 reconciled per-feature index in `docs/features/README.md` is authoritative for built vs. spec-only — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
 priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
@@ -531,14 +532,15 @@ deep character profiles (0058), seasons-as-levels, multi-device sync (0064), the
 (0065), in-game time + the sleep economy (0066 / ADR 0006), public-internet exposure (0067/0068 / ADR
 0007), the token economy + usage envelope (0069), off-screen texture enrichment (0070), defensive
 hardening (0071), the multi-platform gateway (0072), the structural anti-sycophancy game-build wall as
-a CI gate (0073), and local & tunable HTTPS (0074 / ADR 0014) are all in. **Past 0074 the spec set runs to 0109**:
-**0075–0093, 0099–0100, 0104–0107, 0109** are built (trust-gated confidences, presence/eyeshot & motivated
+a CI gate (0073), and local & tunable HTTPS (0074 / ADR 0014) are all in. **Past 0074 the spec set runs to 0110**:
+**0075–0093, 0099–0100, 0104–0107, 0109, 0110** are built (trust-gated confidences, presence/eyeshot & motivated
 movement, the runtime overseer 0079–0081, character voice/campaigns/drives, secrets-as-power,
-jury grudge book, season notoriety, named alliances, deal duration), while **0094–0098, 0101–0103**
+jury grudge book, season notoriety, named alliances, deal duration, vote deduction), while **0094–0098, 0101–0103**
 remain **spec-only/frozen** (the Producer's-Vault audit + PO-review batch — opt-in/default-off social
 texture, some parked, some awaiting a build slot) and **0108** is spec-only (the real-model
 golden-path gate).
-The **one deliberate deferral is 0022** (the rich game UI / MVP-2 — by ADR 0003, the chat *is* the UI).
+**0022** (the rich game UI / MVP-2) was **removed** in the 2026-06-28 PO review — by ADR 0003 the chat *is*
+the UI, and its goals were delivered chat-forward via 0020/0051/0054, so the standalone dashboard spec was cut.
 
 **Trust the code over this prose — it drifts.** The authoritative sources, in order:
 - `docs/features/README.md` — the per-feature status index, reconciled against the source (built /
@@ -571,9 +573,10 @@ The **one deliberate deferral is 0022** (the rich game UI / MVP-2 — by ADR 000
 - **ADR 0006 / 0066 Phase-2 — on the PO review list.** Deferred time/sleep extensions: NPC *next-day*
   social fatigue, a compounding multi-night fatigue meter, and per-conversation clock advance (vs. the
   current per-beat) — owner decisions in `docs/features/0066-in-game-time-and-sleep.md` §9.
-- **0022** (MVP-2, deferred) is the **only** unbuilt spec. *(0059 hidden seeded relationships is **built** —
-  `src/engine/seededRelationships.ts` + `seededRelationships.test.ts`, orientation-aware via 0063; this line
-  previously mis-listed it as spec-only. Reconciled 2026-06-21.)*
+- **0022** (MVP-2, the rich game UI) was **removed** in the 2026-06-28 PO review (superseded by
+  0020/0051/0054 under ADR 0003) — there is no longer a deferred/parked MVP feature. *(0059 hidden seeded
+  relationships is **built** — `src/engine/seededRelationships.ts` + `seededRelationships.test.ts`,
+  orientation-aware via 0063; this line previously mis-listed it as spec-only. Reconciled 2026-06-21.)*
 - **0010** container smoke on a real Proxmox host (also the A4 single-PAT deploy verification — do it
   during the private-repo flip).
 - **Postgres + pgvector** relational tier — MVP-002 post-launch scale-out (SQLite + sqlite-vec shipped

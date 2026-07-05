@@ -12,9 +12,13 @@ import type { RandomnessSource } from "../ports/RandomnessSource";
  *  1. `dayOfWeek(phase)` — the canonical beat→day mapping (HOH=1 … eviction=5), so the
  *     live game finally has an in-game day index derived from the ceremony cadence.
  *  2. `nextHouseEvent(...)` — a seeded pick from a curated pool of meaningful house
- *     events, grounded in the current week/day and guaranteed to never repeat the
- *     immediately preceding house-event's content (the store is consulted, so the
- *     guarantee survives restarts — the store recalled, never module state remembered).
+ *     events, grounded in the current week/day and guaranteed to never repeat any of
+ *     the last `RECENT_WINDOW` recorded house-events' content (the store is consulted,
+ *     so the guarantee survives restarts — the store recalled, never module state
+ *     remembered). A follow-up audit found the real call cadence lands several ambient
+ *     picks per week (well above once/day), so a window of 1 (only the immediately
+ *     preceding pick) let the pool cycle into visibly-repeating content within the
+ *     first few weeks of a season — the window and the pool are both widened here.
  *
  * Pure and Vault-free: the lines are public, player-witnessed happenings (facts the
  * narrator may dress in its own voice); no name, stat, or hidden state is baked in.
@@ -51,6 +55,26 @@ export const HOUSE_EVENT_POOL: ReadonlyArray<string> = [
   "A pantry shortage sparks an argument about who has been hoarding snacks.",
   "A hammock conversation runs long and the patio empties around it.",
   "A house-wide hide-and-seek of a missing personal item ends in an awkward discovery.",
+  "A group workout in the yard turns into an impromptu strategy huddle.",
+  "A surprise lockdown announcement scrambles everyone back inside mid-conversation.",
+  "A broken air conditioner turns the living room into a shared complaint session.",
+  "A themed wardrobe delivery for the week's competition sparks a costume-closet scramble.",
+  "A spontaneous dance party in the kitchen pulls in half the house before curfew.",
+  "A game night collapses into good-natured trash talk that lingers past midnight.",
+  "A loud diary-room rehearsal through the wall draws snickers from the hallway.",
+  "A laundry mix-up over borrowed clothes turns tense before cooler heads prevail.",
+  "A surprise care-package photo stirs a wave of homesickness across the house.",
+  "A thermostat standoff between hot and cold sleepers boils over at breakfast.",
+  "A yard-game tournament gets unexpectedly competitive and a little personal.",
+  "A journaling circle on the patio turns into an unplanned confession session.",
+  "An early wake-up call for a surprise photo shoot leaves half the house grumbling.",
+  "A shared photo album from home sparks a wave of nostalgia in the living room.",
+  "A gardening chore assignment pairs up two unlikely houseguests for an afternoon.",
+  "A missing snack stash reignites the never-ending kitchen-hoarding feud.",
+  "A late-night round of confessions in the have-not room gets more honest than planned.",
+  "A pool-pump breakdown cancels the afternoon swim and tempers rise in the heat.",
+  "A surprise cleaning inspection sends the house scrambling before a live show.",
+  "A birthday toast with makeshift decorations turns into a rare all-house gathering.",
 ];
 
 export interface HouseEventOpts {
@@ -59,18 +83,32 @@ export interface HouseEventOpts {
 }
 
 /**
+ * How many of the most-recently recorded house-events to check before picking a line, so a
+ * busy week (several ambient picks) doesn't visibly repeat a line within a short stretch — a
+ * window of 1 (only the immediately preceding pick) let a shallow pool cycle back into the
+ * SAME line every ~12 picks, which reads as repetitive well inside an 11-week season (audit
+ * finding). Scales with pool size so a deliberately small pool (e.g. in a focused test) never
+ * empties the candidate set outright.
+ */
+const RECENT_WINDOW = Math.max(1, Math.min(10, HOUSE_EVENT_POOL.length - 1));
+
+/**
  * The next meaningful, player-witnessed house event. Seeded (the rng decides), grounded
- * (week + day index prefix the content), and never a verbatim repeat of the previous
- * house-event — the store is queried for the last recorded `house-event`, and the pick
- * excludes its line, so two consecutive house events can never share content (E58).
+ * (week + day index prefix the content), and never a verbatim repeat of any of the last
+ * `RECENT_WINDOW` recorded house-events — the store is queried for that recent stretch, and
+ * the pick excludes any line already used in it (E58, widened by a follow-up audit).
  */
 export function nextHouseEvent(events: EventStore, rng: RandomnessSource, opts: HouseEventOpts): string {
   const prior = events.query({ type: "house-event" });
-  const lastContent = prior.length > 0 ? prior[prior.length - 1]!.content : null;
-  const pool = HOUSE_EVENT_POOL.filter((line) => lastContent === null || !lastContent.includes(line));
-  // ENG-3 (#628): rng.next() ∈ [0,1), so `Math.floor(rng.next() * pool.length)` is already in
-  // [0, pool.length) — the old trailing `% pool.length` was an unreachable dead branch. Removed.
-  const line = pool[Math.floor(rng.next() * pool.length)]!;
+  const recentContents = prior.slice(-RECENT_WINDOW).map((e) => e.content);
+  const pool = HOUSE_EVENT_POOL.filter((line) => !recentContents.some((content) => content.includes(line)));
+  // If the recency window ever exhausts the whole pool (only possible with an unusually
+  // shallow custom pool, e.g. in a narrow test), fall back to the full pool rather than
+  // indexing into an empty array — variety degrades gracefully, it never throws.
+  const candidates = pool.length > 0 ? pool : HOUSE_EVENT_POOL;
+  // ENG-3 (#628): rng.next() ∈ [0,1), so `Math.floor(rng.next() * candidates.length)` is
+  // already in [0, candidates.length) — no trailing `% length` needed.
+  const line = candidates[Math.floor(rng.next() * candidates.length)]!;
   const day = dayOfWeek(opts.phase);
   const stamp = day === null ? `Week ${opts.week}` : `Week ${opts.week}, day ${day}`;
   return `${stamp}: ${line}`;
