@@ -100,10 +100,6 @@ export type Beat =
   // structural beat stays `hoh-competition`/`veto-competition`. The CROWN event keeps the comp beat key
   // (so the HOH/veto win still folds its consequence); only the per-round drops carry this distinct key.
   | "comp-elimination"
-  // BB-14 (2026-07-03 audit): the weekly HOH-room reveal — a genuine STRUCTURAL beat (unlike the two
-  // above) that fires exactly once, immediately after a NON-Final-3 HOH crown, before nominations
-  // begin. Presentation only: INERT (see `INERT_BEATS`), so it can never perturb the seeded trajectory.
-  | "hoh-reveal"
   // a sealed reserve twist firing (0025/B53): the production reveal that opens a twist night.
   | "twist-reveal"
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
@@ -115,15 +111,14 @@ export type Beat =
   | "self-eviction";
 
 /**
- * The INERT, presentation-only beats (0006 staged-rounds): a per-round staged-competition DROP, plus
- * the BB-14 HOH-room reveal. Each carries NO rng, NO consequence fold, NO soul inflection (it falls
- * through every commit side-effect switch) — pure re-telling of an already-fixed outcome (see
- * `advanceCompetition` / `stagedTrajectoryNeutral`, and `hohRoomRevealNeutral` for the reveal). The
- * crown keeps its comp beat key (so its consequence still folds) and is NOT inert. Callers that gate
- * substantive side-effects (e.g. the ADR-0006 clock, #537) consult this so an inert beat can never
- * perturb game state the same way it can never perturb the seeded stream.
+ * The INERT, presentation-only beats (0006 staged-rounds): a per-round staged-competition DROP. It
+ * carries NO rng, NO consequence fold, NO soul inflection (it falls through every commit side-effect
+ * switch) — pure re-telling of an already-fixed outcome (see `advanceCompetition` /
+ * `stagedTrajectoryNeutral`). The crown keeps its comp beat key (so its consequence still folds) and
+ * is NOT inert. Callers that gate substantive side-effects (e.g. the ADR-0006 clock, #537) consult this
+ * so an inert reveal can never perturb game state the same way it can never perturb the seeded stream.
  */
-const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination", "hoh-reveal"]);
+const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination"]);
 
 /** Whether a beat is an inert, presentation-only staged reveal (no rng / no fold / no clock advance). */
 export function isInertBeat(beat: Beat): boolean {
@@ -691,10 +686,7 @@ function crownCompetition(s: LiveSeasonState): BeatEvent {
   if (c.comp === "hoh-competition") {
     const finalThree = s.active.length === 3;
     s.hoh = winner;
-    // BB-14: the weekly HOH-room reveal precedes nominations — presentation only, mirroring how the
-    // veto chip draw (E35) precedes the veto comp. Final 3 (0045) skips straight to final-eviction
-    // (no noms/veto to lead into, and no room to crow about before immediately evicting a friend).
-    s.beat = finalThree ? "final-eviction" : "hoh-reveal";
+    s.beat = finalThree ? "final-eviction" : "nominations"; // Final 3 (0045) skips noms/veto
     return {
       beat: "hoh-competition",
       content: `${winner} wins ${finalThree ? "the final Head of Household" : "Head of Household"}`,
@@ -1623,19 +1615,6 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       // The player is HOH or a nominee: NPC votes are decided; stage the one-at-a-time reveal (0047).
       beginEviction(s, ctx, rng, undefined);
       return advanceEviction(s, ctx, rng);
-    }
-    case "hoh-reveal": {
-      // BB-14 (2026-07-03 audit): the show's weekly emotional heartbeat — the whole house crowding in,
-      // the letter and photos from home, the small comforts of power. Presentation only: INERT (no
-      // rng, no consequence fold, no soul inflection — see INERT_BEATS/isInertBeat), so it can never
-      // perturb the seeded trajectory (proof: `tests/unit/hohRoomRevealNeutral.test.ts`). Fires exactly
-      // once per (non-Final-3) HOH reign, then hands straight off to nominations.
-      s.beat = "nominations";
-      return {
-        beat: "hoh-reveal",
-        content: `${s.hoh} shows the house the new HOH room — the letters and photos from home, the small comforts of power`,
-        participants: [s.hoh!],
-      };
     }
     case "twist-reveal": {
       // The sealed twist FIRES (0025): a dramatic, witnessed production reveal — only now is it

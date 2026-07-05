@@ -635,17 +635,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "authority on who wins; runCompetition merely PREVIEWS that same winner, it never decides a second.) " +
     "RESOLVE BEFORE YOU NARRATE THE RESULT: read who actually won from the game FIRST, then reveal ONLY " +
     "that exact winner — never put a winner on the page you have not read back, and never announce one " +
-    "winner and then 'correct' it.",
-  "hoh-reveal":
-    "MOMENT — The new HOH's room reveal (the game's weekly ritual beat, right after the crown; the HOH " +
-    "is already decided — this beat computes nothing, it only stages the moment). Play the house's " +
-    "ritual: the whole house crowds upstairs, \"who wants to see my HOH room?!\", the letter and photos " +
-    "from home read aloud (often the only tears of the week), the small comforts of power on display. " +
-    "If the player IS the new HOH, make it THEIR scene — first person, felt, the house performing " +
-    "loyalty to their new power. If an NPC is the new HOH, keep it lighter, off-screen-feeling texture " +
-    "— the player catches word of it or a glimpse in passing, never a scene they're forced to sit " +
-    "through. This is presentation only — no vote, no mechanic, nothing to decide; the very next beat " +
-    "resumes the ordinary game (nominations are coming), so don't stall here.",
+    "winner and then 'correct' it. " +
+    // BB-14 (2026-07-03 audit): the HOH-room reveal is the show's weekly emotional heartbeat and it was
+    // missing. It is PRESENTATION only — pure narration off the already-decided crown, no lever, no new
+    // beat (a structural beat here perturbs the seeded off-screen society; this framing cannot).
+    "THE HOH-ROOM REVEAL — once the new HOH is crowned, play the house's weekly ritual before the game " +
+    "turns to nominations: the whole house crowding upstairs, \"who wants to see my HOH room?!\", the " +
+    "letter and photos from home read aloud (often the only tears of the week), the small comforts of " +
+    "power. If the PLAYER is the new HOH make it THEIR scene — first person, felt, the house performing " +
+    "loyalty to new power; if an NPC won, keep it lighter texture the player catches in passing. This is " +
+    "pure color off the crown the game already decided — invent no mechanic, change no outcome, and do " +
+    "not stall the game on it (nominations are still coming as their own beat).",
   nominations:
     "MOMENT — Nomination ceremony. The two nominees are DECIDED BY THE GAME and are already in your " +
     "GAME CONTEXT (the status block / the roster's nominee marks) — name THOSE EXACT two houseguests, " +
