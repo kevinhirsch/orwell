@@ -152,10 +152,32 @@ def test_j5_unseal_button_contrast_and_tap_target():
 def test_j5_vote_reveal_ordered_before_hidden_story():
     js = _read("static", "js", "orwellRetrospective.js")
     votes_idx = js.find("How the votes really fell")
-    story_idx = js.find("(unsealed.hiddenStory || []).slice(-40)")
+    story_idx = js.find("(unsealed.hiddenStory || [])")
     assert votes_idx != -1 and story_idx != -1, "both vault sections must be present"
     assert votes_idx < story_idx, \
-        "the per-voter eviction reveal (the signature payoff) must render before the 40-line hidden-story dump"
+        "the per-voter eviction reveal (the signature payoff) must render before the hidden-story dump"
+
+
+# ── ENDGAME-1: the retrospective must un-truncate the hidden story ──
+
+def test_j5_hidden_story_is_not_truncated():
+    # The old `.slice(-40)` silently dropped everything but the last 40 rows — for a completed
+    # 16-cast season with off-screen sim, gossip diffusion, confessionals, threads, and seeded
+    # ties that's easily hundreds of rows, so the entire early/mid season was thrown away right
+    # at the season's #1 narrative payoff (a non-degradation violation, ENDGAME-1). The panel
+    # already scrolls (`.ow-body` in orwellWindow.js), so nothing needs to be capped.
+    js = _read("static", "js", "orwellRetrospective.js")
+    assert "hiddenStory || []).slice(" not in js, \
+        "the unsealed hidden story must render in full, not a capped slice"
+
+
+# ── ENDGAME-3: the finale jury vote must render, not just eviction votes ──
+
+def test_j5_jury_votes_render():
+    js = _read("static", "js", "orwellRetrospective.js")
+    assert "unsealed.juryVotes" in js
+    assert "How the jury voted" in js
+    assert "v.juror" in js and "v.votedFor" in js  # names, resolved via the same NamedRef shape
 
 
 def test_j5_winner_line_has_apex_weight():
