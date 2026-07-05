@@ -108,14 +108,36 @@
     return _gadget.el;
   }
 
-  // The other party (deals are always player + one houseguest); never render the player's own row.
-  function otherParty(deal) {
-    const ps = Array.isArray(deal.parties) ? deal.parties : [];
-    const them = ps.find((p) => p && p.id !== "player");
-    return (them && them.name) || "A houseguest";
+  // Build an id → name map from the SAME /state payload the deals ride on (state.player +
+  // state.house, both public NamedRef-shaped). Audit CA-9/IA-11/INT-4/FLOW-8: a deal party whose
+  // own `name` wasn't populated at write time rendered as the generic "A houseguest" for EVERY row,
+  // making the whole tracker useless. The roster is already in-hand here, so resolve the party id
+  // against it before falling back — no extra fetch, no Vault data (names are public roster facts).
+  function nameMapFrom(st) {
+    const m = Object.create(null);
+    if (!st || typeof st !== "object") return m;
+    const p = st.player;
+    if (p && typeof p === "object" && p.id != null && p.name) m[String(p.id)] = String(p.name);
+    const house = Array.isArray(st.house) ? st.house : [];
+    for (const hg of house) {
+      if (hg && typeof hg === "object" && hg.id != null && hg.name) m[String(hg.id)] = String(hg.name);
+    }
+    return m;
   }
 
-  function render(deals) {
+  // The other party (deals are always player + one houseguest); never render the player's own row.
+  function otherParty(deal, nameById) {
+    const ps = Array.isArray(deal.parties) ? deal.parties : [];
+    const them = ps.find((p) => p && p.id !== "player");
+    if (them) {
+      if (them.name) return them.name;
+      // Resolve against the roster carried on the same /state payload before the generic fallback.
+      if (nameById && them.id != null && nameById[String(them.id)]) return nameById[String(them.id)];
+    }
+    return "A houseguest";
+  }
+
+  function render(deals, nameById) {
     ensureSection();
     const list = Array.isArray(deals) ? deals : [];
     const wrap = document.getElementById("odl-list");
@@ -132,7 +154,7 @@
       const body = document.createElement("div");
       body.className = "odl-body";
       const who = document.createElement("span");
-      who.className = "odl-who"; who.textContent = otherParty(d);
+      who.className = "odl-who"; who.textContent = otherParty(d, nameById);
       const kind = document.createElement("span");
       kind.className = "odl-kind"; kind.textContent = " · " + (KIND_LABEL[d.kind] || d.kind || "Deal");
       const terms = document.createElement("div");
@@ -149,7 +171,7 @@
 
   // Test/headless seam: drive the panel without a live engine (mirrors _orwellSocialDrive…).
   window._orwellDealsEnsure = () => { ensureSection(); return true; };
-  window._orwellDealsDrive = (deals) => { render(deals || []); const w = document.getElementById("odl-list"); return w ? w.querySelectorAll(".odl-row").length : 0; };
+  window._orwellDealsDrive = (deals, st) => { render(deals || [], nameMapFrom(st)); const w = document.getElementById("odl-list"); return w ? w.querySelectorAll(".odl-row").length : 0; };
 
   async function refresh() {
     let st;
@@ -164,7 +186,7 @@
     _failures = 0;
     if (!(st && st.started)) { _shown = false; hidePanel(); return; }
     _shown = true;
-    render(st.deals);
+    render(st.deals, nameMapFrom(st));
   }
 
   function start() {

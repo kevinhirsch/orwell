@@ -53,10 +53,12 @@ def test_helper_is_self_contained():
 
 def test_gadget_renders_header_body_and_refreshes_on_gamechanged():
     js = _read("static/js/orwellPresence.js")
-    # HEADER = room + present (or "alone"); BODY = nearby rooms or "No one nearby."
+    # HEADER = room + present (or "alone"); BODY = nearby rooms or the scoped-empty line.
     assert '" — " + here' in js
     assert '"alone"' in js
-    assert "No one nearby." in js
+    # FLOW-9/VM-18/CA-18: the empty-body line names its scope (adjacent rooms) so it never reads as
+    # a contradiction beneath a populated room roster.
+    assert "The nearby rooms are quiet." in js
     # nearby rooms are filtered to those that HAVE people (empty/out-of-view omitted)
     assert "n.present && n.present.length" in js
     # refreshes on the shared game-changed signal AND polls
