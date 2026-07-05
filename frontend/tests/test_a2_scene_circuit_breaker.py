@@ -137,6 +137,78 @@ def test_wrong_named_veto_flagged():
     assert d and "WRONG houseguest winning the Power of Veto" in d
 
 
+# ── (b2) NAR-3 (product-review, 2026-07): wrong-identity for NOMINATIONS ───── #
+# nomNames was added by #561 for exactly this comparison but was never wired into a mismatch
+# check — only the count-based branch existed, so a moved nominee set naming the WRONG person
+# (the live "Harrison" vs "Mario" bug) slipped through untouched. These mirror the HOH/veto suite
+# above, adapted for a 2-person set instead of a singleton.
+
+def test_wrong_named_nominee_flagged_even_when_set_moved():
+    """A nomination really committed this turn (Sofia + Mario), but the model names a THIRD active
+    houseguest (Nina) as one of the nominees — the live #561 bug shape."""
+    before = _sig(phase="nominations", noms=[], nomNames=[])
+    after = _sig(phase="nominations", noms=["npc:2", "npc:3"], nomNames=["Sofia", "Mario"])
+    d = chat_helpers._narration_claims_outcome(
+        "Sofia and Nina are nominated for eviction this week.", before, after)
+    assert d and "WRONG houseguest staged as a nominee" in d
+
+
+def test_correct_named_nominees_emit():
+    before = _sig(phase="nominations", noms=[], nomNames=[])
+    after = _sig(phase="nominations", noms=["npc:2", "npc:3"], nomNames=["Sofia", "Mario"])
+    d = chat_helpers._narration_claims_outcome(
+        "Sofia and Mario are nominated for eviction this week.", before, after)
+    assert d is None
+
+
+def test_wrong_named_nominee_flagged_via_nominates_verb():
+    before = _sig(phase="nominations", noms=[], nomNames=[])
+    after = _sig(phase="nominations", noms=["npc:2", "npc:3"], nomNames=["Sofia", "Mario"])
+    d = chat_helpers._narration_claims_outcome(
+        "Marcus nominates Nina and Mario for eviction.", before, after)
+    assert d and "WRONG houseguest staged as a nominee" in d
+
+
+def test_invented_name_nominee_not_flagged_here():
+    """A name matching NO active houseguest is the roster guard's problem, not a wrong-identity nom."""
+    before = _sig(phase="nominations", noms=[], nomNames=[])
+    after = _sig(phase="nominations", noms=["npc:2", "npc:3"], nomNames=["Sofia", "Mario"])
+    d = chat_helpers._narration_claims_outcome(
+        "Zephyrina and Mario are nominated for eviction.", before, after)
+    assert d is None
+
+
+def test_nominee_mismatch_not_flagged_when_noms_unchanged():
+    """Speculation/strategy talk ("I might nominate Nina") outside a real commit must never trip the
+    wrong-identity branch — only a nominee set that ACTUALLY moved this turn is policed. An unchanged
+    set falls through to the existing count-based phantom branch instead (a different desync label)."""
+    before = _sig(phase="nominations", noms=["npc:2", "npc:3"], nomNames=["Sofia", "Mario"])
+    after = _sig(phase="nominations", noms=["npc:2", "npc:3"], nomNames=["Sofia", "Mario"])
+    d = chat_helpers._narration_claims_outcome(
+        "Nina and Mario are nominated for eviction.", before, after)
+    assert d is not None and "WRONG houseguest staged as a nominee" not in d
+
+
+def test_nominee_mismatch_scoped_to_nomination_phase():
+    """Outside the nomination/veto-ceremony phases, the same phrasing is never policed (mirrors the
+    HOH/veto phase-scoping — ADR 0005: never rail-correct creative prose off-beat)."""
+    before = _sig(phase="social", noms=[], nomNames=[])
+    after = _sig(phase="social", noms=["npc:2", "npc:3"], nomNames=["Sofia", "Mario"])
+    d = chat_helpers._narration_claims_outcome(
+        "Looking back, Nina and Mario ended up nominated that week.", before, after)
+    assert d is None
+
+
+def test_single_wrong_nominee_named_alone_still_flagged():
+    """Only ONE nominee named in the sentence (not a coordinated pair) still trips when that one name
+    is wrong — the model doesn't have to name both to fabricate an identity."""
+    before = _sig(phase="nominations", noms=[], nomNames=[])
+    after = _sig(phase="nominations", noms=["npc:2", "npc:3"], nomNames=["Sofia", "Mario"])
+    d = chat_helpers._narration_claims_outcome(
+        "Nina is nominated for eviction this week.", before, after)
+    assert d and "WRONG houseguest staged as a nominee" in d
+
+
 # ── (a) the whole-scene circuit-breaker ────────────────────────────────────── #
 
 def _board(monkeypatch, sig):
