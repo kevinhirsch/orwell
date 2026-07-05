@@ -3,7 +3,7 @@ import type {
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
-  SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult,
+  SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult, SealedFact,
   ExposeSecretReq, ExposeResult, TradeSecretReq, TradeResult, SecretLeverDescriptor,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
@@ -20,6 +20,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord } from "../../engine/voice";
+import { NO_NPC_PATHWAY } from "../../engine/diaryRoom";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN,
@@ -1095,8 +1096,10 @@ export class GameSessionAdapter implements GameSession {
     this.onConfide = fn;
   }
 
-  /** 0093/0099 — wire the player's own knowledge reader (validate a wielded factId; resolve its subject). */
-  setPlayerKnowledgeReader(fn: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string }>): void {
+  /** 0093/0099 — wire the player's own knowledge reader (validate a wielded factId; resolve its subject).
+   *  A0: `pathway` rides along (additive) so the knowledge-wall manifest can select the Diary-Room-tagged
+   *  facts — the class provably sealed from the whole house. */
+  setPlayerKnowledgeReader(fn: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string; pathway?: string }>): void {
     this.playerKnowledgeReader = fn;
   }
 
@@ -1203,7 +1206,7 @@ export class GameSessionAdapter implements GameSession {
    * one the player legitimately holds (the Vault bright line — a non-learned secret is rejected, no
    * Vault-minting) and resolve which houseguest it is about. Returns [] when unwired.
    */
-  private playerKnowledgeReader?: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string }>;
+  private playerKnowledgeReader?: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string; pathway?: string }>;
   /**
    * 0093/0099 — surface a fact INTO another houseguest's (or the house's) knowledge through the in-game
    * pathway (wired by the composition root, mirroring `onConfide`). The player is the teller for an
@@ -1435,6 +1438,29 @@ export class GameSessionAdapter implements GameSession {
         return { currentRead: read };
       })() : {}),
     };
+  }
+
+  /**
+   * A0 — the knowledge-wall manifest: the player's private disclosures that are sealed from the house,
+   * for the front-end narration guard to enforce (no houseguest may voice what no pathway ever gave
+   * them). Vault-free by construction — it reads the PLAYER's OWN knowledge (never a Vault read, never
+   * an NPC's hidden layer). It surfaces ONLY the Diary-Room-tagged facts: the class provably sealed
+   * from the WHOLE house (`NO_NPC_PATHWAY` — an OOC channel with no in-game pathway to ANY npc, ever),
+   * so `knownTo` is empty and the guard's rule is absolute with zero false positives. Non-diary player
+   * knowledge is deliberately NOT surfaced here: a player-witnessed secret can legitimately diffuse
+   * NPC-to-NPC as gossip, so a blunt content scrub would fight the very pathway model that makes it
+   * legal — that class is enforced through the per-NPC `npcVoice.knows` manifest instead.
+   */
+  sealedFromHouse(): SealedFact[] {
+    if (!this.house) return [];
+    const facts = this.playerKnowledgeReader?.() ?? [];
+    const out: SealedFact[] = [];
+    for (const f of facts) {
+      if (f.pathway !== NO_NPC_PATHWAY) continue;
+      const content = this.humanize(f.content).trim();
+      if (content) out.push({ content, knownTo: [] });
+    }
+    return out;
   }
 
   /**

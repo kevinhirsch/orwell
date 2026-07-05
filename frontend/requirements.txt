@@ -52,4 +52,13 @@ croniter
 ddgs
 pytest
 pytest-asyncio
+# CI test-lane tooling (see .github/workflows/ci.yml fe-unit / fe-browser-tests + frontend/pyproject.toml):
+#   xdist         — parallelize the non-browser lane (`-n auto`); cuts the ~340-test unit run several-fold.
+#   rerunfailures — auto-retry the browser lane once, so the known environmental onboarding-scrim flake
+#                   (#925/#1148/#930) self-recovers within the job instead of reddening the whole run.
+#   timeout       — per-test hang guard (frontend/pyproject.toml `timeout = 300`); a wedged test fails
+#                   itself instead of hanging the job until the runner kills it.
+pytest-xdist
+pytest-rerunfailures
+pytest-timeout
 playwright==1.56.0

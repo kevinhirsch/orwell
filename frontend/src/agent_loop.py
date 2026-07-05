@@ -1559,10 +1559,27 @@ _FIRST_WEEK_GRACE_TURNS = 1
 _FIRST_WEEK_HINT: Dict[str, bool] = {}
 
 
+def _belt_key(owner) -> str:
+    """NAR-1 (product-review, 2026-07): the ONE stable key for every stall/pacing belt store in
+    this module (`_FIRST_WEEK_HINT`, `_TURNS_SINCE_PROGRESS`, `_ADVANCE_STALL_LEVEL`). These dicts
+    used to write under `owner` raw — several gated the write on `if owner:` / `if owner is not
+    None:` — while every READ fell back to `owner or ""`. A real owner keys identically either
+    way, but under `AUTH_ENABLED=false` (`owner=None`, the posture the owner actually runs) the
+    write silently never landed (or landed under a key `""` never reads) and the read always saw
+    the empty-string default — so the stall-nudge ladder, L39b forced advance, and the ADR-0011
+    peer-advance reset could never engage single-tenant. This mirrors the SAME `"default"`
+    sentinel `apply_game_framing`/`_LAST_FRAMED_BEAT_KEY` already use for exactly this reason
+    (#1154's comment: under auth-off the live game lives under the engine's one "default" sandbox,
+    so a single shared bucket is the CORRECT single-tenant behavior, not a workaround). A real
+    owner is untouched — cross-user isolation is unweakened: two real users always key on their
+    own distinct identity, never on the shared sentinel."""
+    return owner or "default"
+
+
 def _effective_advance_grace(owner) -> int:
     """The staleness grace before the lull advance-nudge — shorter in the guided first week (P1),
     the standard grace otherwise. Pure pacing; never changes WHAT gets nudged, only the latency."""
-    return _FIRST_WEEK_GRACE_TURNS if _FIRST_WEEK_HINT.get(owner or "") else _ADVANCE_GRACE_TURNS
+    return _FIRST_WEEK_GRACE_TURNS if _FIRST_WEEK_HINT.get(_belt_key(owner)) else _ADVANCE_GRACE_TURNS
 
 # L39(b) — the SAFETY NET for a model that ignores every escalating nudge. The graduated text nudges
 # above rely entirely on the model eventually calling advanceGame; the 2026-06-19 God-Mode transcript
@@ -3036,6 +3053,23 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
     return "".join(out)
 
 
+async def _knowledge_wall_guard(text: str, owner) -> str:
+    """A0 — the PRE-EMISSION knowledge-wall scan, applied to already-leak-scrubbed + outcome-guarded
+    text just before it streams. Drops any sentence that puts the player's SEALED content (the always-
+    walled Diary-Room class) in a houseguest's mouth — a structural Vault-Wall leak with no in-game
+    pathway. Everything else streams verbatim. Delegates to `chat_helpers.screen_knowledge_wall`, which
+    holds the tight jurisdiction (Diary-Room class only, staged-houseguest attribution required) and is
+    fail-open by construction. Fires single-tenant too (`owner` None ⇒ the desync key falls back to the
+    canonical game-session id, NAR-1-safe). Any hiccup returns the text unchanged."""
+    if not text:
+        return text
+    try:
+        from routes import chat_helpers
+        return await chat_helpers.screen_knowledge_wall(owner, text)
+    except Exception:
+        return text
+
+
 _GuardedScene = collections.namedtuple("_GuardedScene", ["text", "scene_broken", "cutaway_emitted"])
 
 
@@ -4473,6 +4507,9 @@ async def stream_agent_loop(
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
                                 if _clean:
+                                    # A2: run the whole-scene circuit-breaker + 0065 Part C per-sentence
+                                    # pre-emission outcome guard (see `_emit_guarded_scene`'s docstring for
+                                    # ordering/jurisdiction).
                                     _guarded = await _emit_guarded_scene(
                                         _clean, owner,
                                         scene_broken=_scene_broken,
@@ -4481,11 +4518,15 @@ async def stream_agent_loop(
                                     )
                                     _scene_broken = _guarded.scene_broken
                                     _cutaway_emitted = _guarded.cutaway_emitted
-                                    if _guarded.text:
-                                        full_response += _guarded.text
-                                        if _guarded.text.strip():
+                                    # A0 knowledge wall runs LAST and is NEVER overridden by a blank-turn
+                                    # fallback: a houseguest voicing the player's sealed Diary-Room content
+                                    # is a Vault-Wall leak that must never reach the player.
+                                    _guarded_text = await _knowledge_wall_guard(_guarded.text, owner)
+                                    if _guarded_text:
+                                        full_response += _guarded_text
+                                        if _guarded_text.strip():
                                             _emitted_visible = True
-                                        yield f'data: {json.dumps({"delta": _guarded.text})}\n\n'
+                                        yield f'data: {json.dumps({"delta": _guarded_text})}\n\n'
                                     if _scene_broken:
                                         # A2: the scene is cut — halt the rest of the round's visible
                                         # stream (reuse the tool-opener halt), and drop the buffered tail.
@@ -4596,11 +4637,13 @@ async def stream_agent_loop(
                 )
                 _scene_broken = _guarded.scene_broken
                 _cutaway_emitted = _guarded.cutaway_emitted
-                if _guarded.text:
-                    full_response += _guarded.text
-                    if _guarded.text.strip():
+                # A0 knowledge wall runs LAST — a Vault-Wall leak is never re-admitted by a fallback.
+                _guarded_text = await _knowledge_wall_guard(_guarded.text, owner)
+                if _guarded_text:
+                    full_response += _guarded_text
+                    if _guarded_text.strip():
                         _emitted_visible = True
-                    yield f'data: {json.dumps({"delta": _guarded.text})}\n\n'
+                    yield f'data: {json.dumps({"delta": _guarded_text})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 
@@ -4841,13 +4884,17 @@ async def stream_agent_loop(
                 # lull-nudge waits until the night has genuinely
                 # stopped moving (>= grace), so engaging play, a just-started beat, AND a deliberately
                 # held social runway are never shoved (owner ruling 2026-06-18 + the runway fix).
-                if owner:
-                    _TURNS_SINCE_PROGRESS[owner] = (
-                        0 if (_progressed or _runway_holding or _pre_resolved)
-                        else _TURNS_SINCE_PROGRESS.get(owner, 0) + 1)
+                # NAR-1: keyed via _belt_key (unconditional — was `if owner:`, which meant this
+                # never wrote single-tenant while the read below fell back to a DIFFERENT empty
+                # key, so `_stale` could never go true and the lull advance-nudge never fired
+                # under `AUTH_ENABLED=false`).
+                _bk = _belt_key(owner)
+                _TURNS_SINCE_PROGRESS[_bk] = (
+                    0 if (_progressed or _runway_holding or _pre_resolved)
+                    else _TURNS_SINCE_PROGRESS.get(_bk, 0) + 1)
                 # P1: the effective grace is SHORTER in the guided first week (pacing only) and the
                 # standard grace otherwise (the hint lags a turn, defaulting safe to the standard).
-                _stale = _TURNS_SINCE_PROGRESS.get(owner or "", 0) >= _effective_advance_grace(owner)
+                _stale = _TURNS_SINCE_PROGRESS.get(_bk, 0) >= _effective_advance_grace(owner)
                 _is_lull = _player_turn_is_lull(messages)
                 # The ORDER of the turn's beat-tools decides whether it left an uncommitted/undelivered
                 # OUTCOME the model may have narrated ahead of the engine (#1 + 1b). The LAST beat-tool:
@@ -4882,7 +4929,10 @@ async def stream_agent_loop(
                 _framed_phase = None
                 try:
                     from routes import chat_helpers as _ch_fp
-                    _fk = _ch_fp._LAST_FRAMED_BEAT_KEY.get(owner or "")
+                    # NAR-1: `_belt_key` — was `owner or ""`, which never matched the "default"
+                    # sentinel apply_game_framing actually stashes under (chat_helpers.py's
+                    # `user or "default"`), so this read was always empty single-tenant.
+                    _fk = _ch_fp._LAST_FRAMED_BEAT_KEY.get(_belt_key(owner))
                     if isinstance(_fk, (tuple, list)) and len(_fk) >= 2:
                         _framed_phase = _fk[1]
                 except Exception:
@@ -4985,9 +5035,11 @@ async def stream_agent_loop(
                         # P1: refresh the first-week pacing hint from the same read (no extra fetch).
                         # The guided premiere window = week 1 of a live season, NOT post-season; this
                         # feeds _effective_advance_grace on the NEXT turn (a one-turn lag is fine).
-                        if owner is not None:
-                            _wk = (_gs or {}).get("week")
-                            _FIRST_WEEK_HINT[owner] = (_wk == 1 and _moment != "post-season")
+                        # NAR-1: keyed via _belt_key (unconditional — was `if owner is not None:`,
+                        # which meant this never wrote single-tenant while the read at
+                        # _effective_advance_grace fell back to a DIFFERENT empty key).
+                        _wk = (_gs or {}).get("week")
+                        _FIRST_WEEK_HINT[_belt_key(owner)] = (_wk == 1 and _moment != "post-season")
                         _house = [{"id": h.get("id"), "name": h.get("name")}
                                   for h in ((_gs or {}).get("house") or [])
                                   if isinstance(h, dict) and h.get("name") and h.get("id")
@@ -5013,12 +5065,15 @@ async def stream_agent_loop(
                     _peer_advanced = False
                     try:
                         from routes import chat_helpers as _ch_peer
-                        _framed_beat_key = _ch_peer._LAST_FRAMED_BEAT_KEY.get(owner or "")
+                        # NAR-1: _belt_key (was `owner or ""` — the same "default"-sentinel
+                        # mismatch as the first read above).
+                        _framed_beat_key = _ch_peer._LAST_FRAMED_BEAT_KEY.get(_belt_key(owner))
                         if _peer_advanced_since_framing(_progressed, _framed_beat_key, _beat_key_at_read):
                             _peer_advanced = True
-                            if owner:
-                                _TURNS_SINCE_PROGRESS[owner] = 0
-                                _ADVANCE_STALL_LEVEL.pop(owner, None)
+                            # NAR-1: unconditional (was `if owner:`) — a single-tenant peer advance
+                            # must reset the SAME belt state the single-tenant write path uses.
+                            _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0
+                            _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
                             logger.info(
                                 f"[orwell] ADR0011 peer-advance: beat moved {_framed_beat_key} -> "
                                 f"{_beat_key_at_read} with no progression this turn — suppressing "
@@ -5101,10 +5156,13 @@ async def stream_agent_loop(
                     # single fresh narration is exactly what's wanted. The per-turn cap and the persisted
                     # `_ADVANCE_STALL_LEVEL` escalation are unchanged.
                     if _want_advance and _phase in _ADVANCE_PHASES and not _peer_advanced and not _pre_resolved:
-                        _level = _ADVANCE_STALL_LEVEL.get(owner or "", 0)
+                        # NAR-1: _belt_key on both the read and the write (was `owner or ""` read
+                        # vs a raw-`owner`-gated write — L39b's forced-advance escalation could
+                        # never climb single-tenant: every read saw the empty-key default).
+                        _sl_key = _belt_key(owner)
+                        _level = _ADVANCE_STALL_LEVEL.get(_sl_key, 0)
                         _turn_advance_nudges += 1
-                        if owner:
-                            _ADVANCE_STALL_LEVEL[owner] = _level + 1
+                        _ADVANCE_STALL_LEVEL[_sl_key] = _level + 1
 
                         async def _commit_advance_silently(_why: str) -> bool:
                             """Progress the beat in the engine WITHOUT re-prompting the model — so a
@@ -5133,12 +5191,13 @@ async def stream_agent_loop(
                                         return False  # board moved — reconciled, do not blind-retry
                                     raise
                                 _ch3._refresh_beat_seq(owner, _adv)  # track the new beatSeq
-                                if owner:
-                                    # The beat moved — reset the staleness clock AND clear the
-                                    # persisted escalation so the next stall (if any) starts gentle,
-                                    # mirroring the model-driven progression cleanup below.
-                                    _TURNS_SINCE_PROGRESS[owner] = 0
-                                    _ADVANCE_STALL_LEVEL.pop(owner, None)
+                                # The beat moved — reset the staleness clock AND clear the
+                                # persisted escalation so the next stall (if any) starts gentle,
+                                # mirroring the model-driven progression cleanup below. NAR-1:
+                                # unconditional + _belt_key (was `if owner:` raw-keyed, so this
+                                # never reset the belt state that single-tenant reads actually see).
+                                _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0
+                                _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
                                 logger.info(f"[orwell] committed advanceGame silently ({_why}, "
                                             f"phase={_phase}) round {round_num} user={owner}")
                                 return True
@@ -6094,10 +6153,13 @@ async def stream_agent_loop(
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
             # The game advanced: clear any persisted stall escalation for this game so the
-            # next stall (if any) starts gentle again.
-            if _is_live_game and block.tool_type in _PROGRESSION_TOOLS and owner:
-                _ADVANCE_STALL_LEVEL.pop(owner, None)
-                _TURNS_SINCE_PROGRESS[owner] = 0  # movement happened — restart the staleness clock
+            # next stall (if any) starts gentle again. NAR-1: dropped the `and owner` gate + keyed
+            # via _belt_key — this reset never fired single-tenant before (raw `owner=None` is a
+            # falsy guard), so a single-tenant game's belt state accreted staleness it had already
+            # resolved, feeding stale reads on the NEXT lull check.
+            if _is_live_game and block.tool_type in _PROGRESSION_TOOLS:
+                _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
+                _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0  # movement happened — restart the staleness clock
                 _turn_advance_nudges = 0
             if _is_live_game and block.tool_type in _RECORD_TOOLS:
                 _turn_record_nudges = 1  # model recorded organically — don't also auto-record
@@ -6208,7 +6270,16 @@ async def stream_agent_loop(
         except Exception as _pres_err:
             logger.warning(f"[orwell] post-turn presence check failed: {_pres_err}")
 
-    if _is_live_game and owner:
+    # NAR-1 (product-review, 2026-07): dropped `and owner` — this block guards two CORRECTNESS
+    # belts (surface-the-pending / F14, and the NARR-3 invented-houseguest backstop), not
+    # per-user observability like the token-ledger/sync-ledger blocks elsewhere that stay
+    # owner-gated on purpose. Both callees are already `user=None`-safe: `game_status(user=owner)`
+    # reads the live single-tenant board (the F16/#1014 fix proved this), and
+    # `record_post_turn_roster_check` keys via `_desync_key` (chat_helpers.py), which resolves a
+    # `None` owner to the canonical game-session id. Gating on `owner` truthiness stood these two
+    # belts down entirely under `AUTH_ENABLED=false` — the exact posture the owner runs — leaving
+    # an eviction wedge with NO reactive net and an invented houseguest with NO structural check.
+    if _is_live_game:
         # F14 (#1013) — the SURFACE-THE-PENDING belt. The eviction sub-loop wedges because the model
         # narrates "X has been evicted" with NO mutating tool call: it never calls submitDecision (so
         # the per-tool `orwell:pending` seam in chat.js never fires) and never advanceGame's (so the

@@ -34,6 +34,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "seasonRecap", channel: "player", readsVault: false, description: "The season's public arc from the event record (0048): reigns, ceremonies, evictions, deals — Vault-free, stores not memory." },
   { name: "seasonRetrospective", channel: "player", readsVault: false, description: "POST-SEASON ONLY (0048): the finished season's unsealed hidden story — off-screen scheming, confessionals, the twists. Returns null while a season is live (gated on the terminal state in code)." },
   { name: "npcVoice", channel: "player", readsVault: false, description: "The knowledge-bounded voicing projection for ONE active houseguest (B65): persona + room/co-presence + what THEY legitimately know + hunches + organic stances (labels, never numbers). The model cannot voice what they never learned." },
+  { name: "sealedFromHouse", channel: "player", readsVault: false, description: "A0 knowledge-wall manifest (FE guard support): the player's private disclosures sealed from the house — most sharply the Diary-Room entries (no in-game pathway to ANY houseguest). Vault-free (the player's OWN knowledge). The front-end reads it to strip any narration that puts sealed content in a houseguest's mouth." },
   { name: "getPortraitPrompt", channel: "player", readsVault: false, description: "The Vault-free image-generation prompt for ONE houseguest's portrait (0051): built from PUBLIC appearance facets + the per-season photorealistic style anchor. Null pre-game or for an unknown id. No stat/soul/hidden element ever reaches the prompt." },
   { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
   { name: "endOfSessionSummary", channel: "player", readsVault: false, description: "Confirms only that updated save(s) exist." },
@@ -163,7 +164,11 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // 0070: off-screen society texture enrichment. Both tools are FE-driven (the hermes subagent voices prose
   // then writes it back); neither is a game-driving lever the GM model pulls — so they stay OUT of the base
   // prompt's lever manifest (the manifest↔registry drift test stays green).
-  "getOffscreenSceneSkeletons", "recordOffscreenSceneTexture"]);
+  "getOffscreenSceneSkeletons", "recordOffscreenSceneTexture",
+  // A0 knowledge-wall: `sealedFromHouse` is FE-guard support (the narration guard reads it to strip a
+  // houseguest voicing the player's Diary-Room content), NOT a game-driving lever the GM model pulls —
+  // so it stays OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).
+  "sealedFromHouse"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the

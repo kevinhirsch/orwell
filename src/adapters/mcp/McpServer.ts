@@ -359,6 +359,8 @@ export class McpServer {
         return this.deps.session.seasonRetrospective();
       case "npcVoice":
         return this.deps.session.npcVoice(args["id"] as EntityId);
+      case "sealedFromHouse":
+        return this.deps.session.sealedFromHouse();
       case "getPortraitPrompt":
         return this.deps.session.getPortraitPrompt(args["id"] as EntityId);
       case "askProducers":

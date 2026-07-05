@@ -173,7 +173,7 @@
       };
       // J5-09 (SOCIAL-3): the per-voter "who really voted against you" reveal is the signature
       // secret-ballot payoff — render it FIRST (right under the twists), not buried beneath the
-      // up-to-40-line confessional dump.
+      // hidden-story dump below.
       // E12: eviction ballots were anonymous all season ("a vote to evict …"); the retrospective is
       // the ONE place per-voter attribution unseals. Names only (the data pairs id+name; a raw id is never rendered).
       if (unsealed.evictionVotes && unsealed.evictionVotes.length) {
@@ -191,8 +191,30 @@
         }
         vaultWrap.appendChild(votes);
       }
+      // ENDGAME-3: the finale jury vote unseals here too (SG7/#1030) — mirrors evictionVotes above,
+      // right beneath it, same styling. Engine builds this only once the finale's votes are tallied
+      // (`GameSessionAdapter.buildVaultUnseal`); absent on a pre-finale-vote season, so guarded.
+      if (unsealed.juryVotes && unsealed.juryVotes.votes && unsealed.juryVotes.votes.length) {
+        const _juryHd = el("h3", "display:block;margin:12px 0 4px;font-size:inherit", "🗳 How the jury voted");
+        _juryHd.setAttribute("aria-label", "How the jury voted");  // UX-4: decorative emoji
+        vaultWrap.appendChild(_juryHd);
+        const juryList = el("ul", "margin:6px 0;padding-left:18px;opacity:0.85;font-size:12.5px");
+        for (const v of unsealed.juryVotes.votes) {
+          const juror = v.juror && v.juror.name;
+          const votedFor = v.votedFor && v.votedFor.name;
+          if (!juror || !votedFor) continue;
+          juryList.appendChild(el("li", "", `${juror} voted for ${votedFor}.`));
+        }
+        vaultWrap.appendChild(juryList);
+      }
+      // ENDGAME-1: the full hidden story, not just the latest 40 — a completed season with off-screen
+      // sim, gossip diffusion, confessionals, threads, and seeded ties easily runs to hundreds of rows,
+      // and dropping the early/mid season silently guts the "you were blindsided, and it was real all
+      // along" payoff (a non-degradation violation at the ONE surface whose job is the full receipts).
+      // The panel scrolls (`.ow-body { overflow:auto; max-height:… }` in orwellWindow.js), so nothing
+      // needs to be dropped to keep the window a sane size.
       const story = el("ul", "margin:6px 0;padding-left:18px;opacity:0.85;font-size:12.5px");
-      for (const h of (unsealed.hiddenStory || []).slice(-40)) {
+      for (const h of (unsealed.hiddenStory || [])) {
         // J5-11: prose annotation, not "[bracketed]" metadata that reads as a debug log.
         const lbl = humanizeStoryType(h.type);
         story.appendChild(el("li", "", lbl.charAt(0).toUpperCase() + lbl.slice(1) + " — " + h.content));
