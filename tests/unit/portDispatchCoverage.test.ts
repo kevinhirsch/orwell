@@ -25,7 +25,8 @@ import { PLAYER_TOOLS, ADMIN_TOOLS, DEBUG_VAULT_TOOL_NAMES } from "../../src/sur
 
 // Every current GameSession port method, exhaustively — TS errors if this drifts from the interface.
 const GAME_SESSION_METHODS: Record<keyof GameSession, true> = {
-  advanceGame: true, cancelSelfEviction: true, confide: true, createCharacter: true, dailyRecap: true,
+  accuseTie: true, advanceGame: true, cancelSelfEviction: true, confide: true, confront: true,
+  createCharacter: true, dailyRecap: true,
   exposeSecret: true, finaleView: true, formAlliance: true, gameStatus: true, getGameState: true,
   getMomentPrompt: true, getOffscreenSceneSkeletons: true, getPortraitPrompt: true, joinAlliance: true,
   makeDeal: true, markHouseguestMet: true, movePlayer: true, npcVoice: true, playerTagline: true,

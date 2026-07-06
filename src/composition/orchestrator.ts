@@ -837,6 +837,14 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   // When on, it surfaces a warmed seeded tie through a DEDICATED rng (never this shared stream) + 0002
   // pathways and folds the discovery via 0023 — texture, never the calibration spine.
   sandbox.session.advanceSeededTies(sandbox.engine.knowledge);
+  // Feature 0095 — the pre-show-TIE REVEAL pathway (the OVERHEAR route; a SEPARATE, distinct pathway from
+  // 0059 §5 above, with its own flag/gate/rng — turning one on does not turn on the other). Runs LAST,
+  // like the whisper/§5 above, and is STRICTLY OPT-IN (default-OFF `ORWELL_TIE_REVEAL`): when off — the
+  // default, and the state the seeded juryReach/gradient/UAT sims run in — it returns immediately and
+  // touches nothing, so this tick is byte-identical to the pre-feature build. When on, a conspicuous
+  // sealed tie can come OUT for real (the actual pre-show connection, not §5's vague "seem close"),
+  // diffusing as a genuine confidence-scaled betrayal-grade belief on its OWN dedicated rng stream.
+  sandbox.session.advanceTieReveal(sandbox.engine.knowledge);
   // Every recorded scene (+ the player-turn day) counts toward the advance.
   return sandbox.engine.events.count() - before;
 }

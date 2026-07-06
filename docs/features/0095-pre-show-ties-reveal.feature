@@ -77,12 +77,12 @@ Feature: 0095 — Pre-show ties as time-bombs (a sealed pre-alliance detonates w
 
     Scenario: The exposure state persists and is monotonic across a restart
       Given the tie has been exposed and is now public
-      When the game is saved and restored
+      When the tie-reveal game is saved and restored
       Then the restored game still records the tie as exposed
       And the exposure never regresses to a less-exposed state
 
     Scenario: Lies-free exposures are capped across a season
-      Given a full season is played
+      Given a full season of tie reveals is played
       Then the number of exposed pre-show ties never exceeds the season cap
 
     Scenario: With the feature off, the seeded outcomes are byte-identical

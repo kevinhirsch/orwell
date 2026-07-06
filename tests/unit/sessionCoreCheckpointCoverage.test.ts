@@ -42,6 +42,7 @@ describe("PERSIST-8 — sessionCoreCounts (the newer monotonic per-season counte
     "campaignTickCount", "playerCampaignMoveCount", "juryHouseTickCount", "eruptionCount", "triggerTickCount",
     "pacingTickCount", "confideLieCount", "secretExposeCount", "secretTradeCount",
     "secretPlayerBluffCount", "playerTieSurfaceCount", "tieScheduleTickCount", "surfacedThreadCount",
+    "tieExposureCount", "tieRevealTickCount",
     "legendTickCount", "legendCount", "legendLastActTick",
   ];
 
@@ -150,6 +151,18 @@ describe("PERSIST-8 — sessionCoreIsSuperset (the newer append-only maps/sets)"
     const dropped = baseSnap({ surfacedTieSubjects: [] });
 
     expect(sessionCoreIsSuperset(grown, earlier)).toBe(true);
+    expect(sessionCoreIsSuperset(dropped, earlier)).toBe(false);
+  });
+
+  it("seededRelationships ties (0095): a regressed exposure is caught; growth passes; unordered pair matches", () => {
+    const tie = (exposure?: "sealed" | "surfaced-to-house" | "public") => ({ a: npc(1), b: npc(2), nature: "old-acquaintance" as const, ...(exposure ? { exposure } : {}) });
+    const earlier = baseSnap({ seededRelationships: { ties: [tie("surfaced-to-house")], showmances: [] } });
+    const grown = baseSnap({ seededRelationships: { ties: [{ ...tie("public"), a: npc(2), b: npc(1) }], showmances: [] } });
+    const regressed = baseSnap({ seededRelationships: { ties: [tie("sealed")], showmances: [] } });
+    const dropped = baseSnap({ seededRelationships: { ties: [], showmances: [] } });
+
+    expect(sessionCoreIsSuperset(grown, earlier)).toBe(true);
+    expect(sessionCoreIsSuperset(regressed, earlier)).toBe(false);
     expect(sessionCoreIsSuperset(dropped, earlier)).toBe(false);
   });
 

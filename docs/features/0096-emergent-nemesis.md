@@ -1,6 +1,9 @@
 # 0096 — Emergent nemesis (a personal villain to outlast)
 
-> **Status:** 🟕 **SPEC (drafted 2026-06-25)** — design note + executable `.feature`. Not yet built.
+> **Status:** ✅ **BUILT (2026-07-06).** `selectNemesis`/`NEMESIS` in `src/engine/campaigns.ts` (pure, no
+> rng of its own), wired into `GameSessionAdapter.campaignTick` (selection + drive/campaign escalation)
+> and `npcVoice` (the Vault-safe `rivalry` tone hint). Opt-in behind the existing `ORWELL_CAMPAIGNS`.
+> Wired in `cucumber.cjs`.
 > **Builds on (does NOT duplicate):** 0085 (NPC campaigns — `src/engine/campaigns.ts`,
 > `GameSessionAdapter.campaignTick` / `campaignTiltFor`), 0086 (houseguest drives — the **`target`**
 > motivation, `deriveDrive` / `ownBallotLean`, `sessionSnapshot.drives`), and the relationship model's

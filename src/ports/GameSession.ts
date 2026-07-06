@@ -531,6 +531,28 @@ export interface TradeResult {
 }
 
 /**
+ * Feature 0095 — the Vault-safe result of `accuseTie`. The engine alone checked the SEALED pre-game-tie
+ * layer (0059) and decided whether the pair really has one: `landed` is whether a real tie exists and
+ * the accusation exposed it (the tie jumps to `public`, a betrayal-grade fallout folds); a `false` means
+ * either no such tie exists OR the season exposure cap is already spent. NO number crosses and there is
+ * NO tell distinguishing a miss from a hit beyond the fiction — the player infers a hit only from how
+ * the accused pair and the house react, exactly as 0075 gives no "they're lying" marker.
+ */
+export interface AccuseTieResult {
+  landed: boolean;
+}
+
+/**
+ * Feature 0094 — the Vault-safe result of `confront`. `landed: true` means the cited belief was
+ * faithful and the confrontation plays out as expected; `landed: false` means it was materially
+ * distorted and the move misfired against reality — the engine NEVER states this is because the belief
+ * was wrong, and NO confidence/distortion number ever crosses either way.
+ */
+export interface ConfrontResult {
+  landed: boolean;
+}
+
+/**
  * The result of a `confide` (feature 0075). The engine decided WHETHER the houseguest opened up,
  * WHICH tier (how much), and whether it was a real confidence or a fabricated one (a lie). The
  * `content` is the text the model is handed to VOICE — already redacted/fabricated to the tier, so
@@ -1132,6 +1154,16 @@ export interface NpcVoiceView {
    * Sibling of `mood` (0084) — mood is how they feel; this is how they feel ABOUT YOU.
    */
   currentRead?: { toward: string; drift: "warming" | "cooling" | "steady" };
+  /**
+   * Feature 0096 — the Vault-SAFE `rivalry` tone hint: present ONLY for the houseguest currently held
+   * as the player's emergent NEMESIS (a sustained, not spiked, threat-toward-player elevation of the
+   * existing 0085 campaign + 0086 drive layer), and ONLY inside a live scene with them (no cold-open
+   * arc announcement — the 0075 sibling guarantee). A coarse HEAT WORD only — NEVER a number, NEVER a
+   * stated motivation ("they are your nemesis" is forbidden hand-holding), NEVER the threat edge. The
+   * model may lean into needling/adversarial positioning; it never authors the rivalry's existence.
+   * Absent for everyone else, and absent whenever the campaign layer hasn't elevated anyone this season.
+   */
+  rivalry?: { tone: "simmering" | "open" };
 }
 
 /**
@@ -1671,6 +1703,38 @@ export interface GameSession {
    * 0065 Part A: optional `expectedBeatSeq` compare-and-swap (stale ⇒ 409, no disclosure).
    */
   confide(npcId: EntityId, expectedBeatSeq?: number): ConfideResult | null;
+
+  /**
+   * Feature 0095 — press a suspicion that two houseguests knew each other before the show. The SINGLE
+   * authority, like `confide`: the model previews/voices the accusation, the ENGINE checks the SEALED
+   * 0059 pre-game-tie layer and decides whether it LANDS (a real tie exists ⇒ it jumps to `public`, a
+   * betrayal-grade fallout folds on the accuser's read of both members, recorded as the player's own
+   * knowledge through an in-game pathway) or MISSES (no such tie ⇒ no Vault read, no fold — an ordinary
+   * wrong guess). Rare and capped per season (`TIE_REVEAL.maxExposuresPerSeason`, shared with the
+   * off-screen overhear pathway). Returns a Vault-safe `{ landed }` — no number, no tell on a miss.
+   * 0065 Part A: optional `expectedBeatSeq` compare-and-swap (stale ⇒ 409, no accusation resolved).
+   * `null` pre-game.
+   */
+  accuseTie(aId: EntityId, bId: EntityId, expectedBeatSeq?: number): AccuseTieResult | null;
+
+  /**
+   * Feature 0094 — CONFRONT a houseguest over a belief the player holds about them (a scheme, a
+   * betrayal-in-progress, anything the player learned via a pathway) — the single closed-set authority
+   * a confrontation resolves through, like `confide`/`accuseTie`: the model previews/voices the
+   * confrontation, the ENGINE checks whether the CITED belief (`factId`, validated against what the
+   * player legitimately holds — the Vault bright line, a non-learned fact is refused) is a materially
+   * DISTORTED / low-confidence rumor (`isMateriallyDistorted`, reading only the belief's own already-
+   * existing `distortion`/`confidence` fields — no new belief model) or a faithful one. A faithful
+   * belief LANDS (no divergence — the move plays out as the player expects). A materially distorted
+   * belief MISFIRES: the outcome resolves against REALITY, not the belief — the wrongly-confronted
+   * houseguest's own read of the player takes the SAME betrayal-grade blow a real betrayal folds (0026),
+   * seeded and deterministic. The engine NEVER states that a misfire happened BECAUSE the belief was
+   * wrong — only the divergent outcome ever crosses; the truth surfaces later, if it does, through the
+   * EXISTING gossip/pathway machinery (the same `factId` lineage already carries `originalContent`).
+   * Returns a Vault-safe `{ landed }` — no number, no confidence/distortion value, no "this is false"
+   * marker. `null` pre-game / for an unknown or non-active houseguest / an unrecognized `factId`.
+   */
+  confront(npcId: EntityId, factId: string, expectedBeatSeq?: number): ConfrontResult | null;
 
   /**
    * 0093 — OUT a learned secret to the house. The single engine authority (like `runCompetition` /
