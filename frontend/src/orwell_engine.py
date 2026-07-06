@@ -758,6 +758,13 @@ async def season_retrospective(user: str | None = None):
     return await _call("seasonRetrospective", {}, user=user)
 
 
+async def daily_recap(user: str | None = None):
+    """The most recently CLOSED in-game day's 'day in review' digest (0102) — Vault-free,
+    reproducible. Usually delivered inline on ``turnIn``'s result; this re-fetches the same
+    day's digest. Returns ``None`` before any day has closed."""
+    return await _call("dailyRecap", {}, user=user)
+
+
 async def npc_voice(npc_id: str, user: str | None = None):
     """The knowledge-bounded voicing projection for one active houseguest (B65) — persona,
     room/co-presence, what THEY know/suspect, organic stances. ``None`` for unknown/departed."""

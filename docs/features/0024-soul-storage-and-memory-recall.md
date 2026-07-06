@@ -116,8 +116,13 @@ EmbeddingProvider:
 
 - **Embedding model at runtime** (open decision #4): which model backs `EmbeddingProvider` live; a
   **deterministic fake** covers seeded tests. Flag.
-- **`soul.md` structure:** free-form narrative (default — richest, most human) vs lightly-sectioned
-  (memories / leanings / emotional log). Flag.
+- **`soul.md` structure:** ✅ **RESOLVED — Option B (lightly-sectioned)** (PO ruling 2026-07-06). The
+  inner diary renders under three headings — **Memories** (happenings), **Leanings** (trust / alliance
+  / target drift), **Feelings** (the emotional log) — instead of one flat stream. Each memory's section
+  is DERIVED from its content by a deterministic classifier (`classifySoulSection`, engine-only), with
+  an optional explicit override on `recordToSoul`; the authoritative `memories[]` list is unchanged
+  (flat, append-only, monotonic), so nothing thins and sections re-derive identically on restore. Built
+  & gated (`tests/unit/soul.test.ts`, the "inner diary is organised into sections" `.feature` scenario).
 - **Recall `k` + relevance threshold:** tunable config (like the temperature/relationship numbers,
   0006/0017); the *shape* (semantic, relevance-ranked) is fixed.
 

@@ -104,6 +104,43 @@ Then("the houseguest's behavior may still reflect it", function (this: BbWorld) 
   assert.ok(this.recalled!.some((m) => m.content === this.hiddenMemory), "recall fed the behavior layer");
 });
 
+// --- Option B: the inner diary is organised into sections ---------------------
+
+Given("a houseguest whose soul holds a plain happening, a strategic lean, and an emotional beat", function (this: BbWorld) {
+  this.soul = new SoulStore(embed);
+  this.npc = HG;
+  this.soul.recordToSoul(HG, "won the HOH competition in the backyard"); // memory
+  this.soul.recordToSoul(HG, "leaning toward an alliance with the cook"); // leaning
+  this.soul.recordToSoul(HG, "felt crushed after the blindside"); // feeling
+});
+
+When("the soul's inner diary is rendered", function (this: BbWorld) {
+  this.soulNarrative = this.soul!.soulOf(this.npc!).narrative;
+});
+
+Then("the diary groups memories under a Memories, a Leanings, and a Feelings section", function (this: BbWorld) {
+  const nar = this.soulNarrative!;
+  assert.match(nar, /## Memories/);
+  assert.match(nar, /## Leanings/);
+  assert.match(nar, /## Feelings/);
+  assert.ok(nar.indexOf("## Memories") < nar.indexOf("## Leanings"), "sections render in a fixed order");
+  assert.ok(nar.indexOf("## Leanings") < nar.indexOf("## Feelings"), "sections render in a fixed order");
+});
+
+Then("a section with no memories shows no heading", function (this: BbWorld) {
+  // A fresh houseguest with only a plain happening surfaces Memories, never the empty buckets.
+  const s = new SoulStore(embed);
+  s.recordToSoul(npc(2), "played chess in the lounge");
+  const nar = s.soulOf(npc(2)).narrative;
+  assert.match(nar, /## Memories/);
+  assert.ok(!/## Leanings/.test(nar) && !/## Feelings/.test(nar), "empty sections render no heading");
+});
+
+Then("the sectioning never thins the authoritative memory record", function (this: BbWorld) {
+  // The organisation is a projection of the memory list — every recorded memory is still present.
+  assert.equal(this.soul!.soulOf(this.npc!).memories.length, 3);
+});
+
 // --- The soul deepens; the character does not ---------------------------------
 
 Given("a houseguest at premiere", function (this: BbWorld) {
