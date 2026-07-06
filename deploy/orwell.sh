@@ -115,15 +115,21 @@ wt_pick_template() {  # advanced-mode OS template chooser (newest highlighted)
 }
 
 wt_pick_llm() {  # writes the LLM provider into the container's data/.env (never committed)
+  # DEPLOY-6 (2026-07-05 ops-hygiene close-out): this menu used to also offer "Anthropic API
+  # key", but `orwell-install.sh`'s write_config() never consumed ANTHROPIC_API_KEY — the value
+  # was captured here, exposed on the pct-exec command line (the DEPLOY-5 bug), and then silently
+  # discarded, so the operator's install stayed unconfigured with no signal why. Anthropic-native
+  # endpoints ARE supported by the front-end (`frontend/src/llm_core.py` `_detect_provider`), just
+  # not via this env-var bootstrap path — configure one after first boot via the admin Settings ->
+  # Services/AI panel (`POST /api/model-endpoints`) instead. Only offer providers this installer
+  # can actually wire end-to-end.
   local choice
   choice="$(whiptail --title "$TITLE" --default-item none --menu \
-    "LLM provider (stored only in the container's data/.env)" 14 72 3 \
-    none      "Configure later" \
-    anthropic "Anthropic API key" \
-    ollama    "Ollama host URL" 3>&1 1>&2 2>&3)" || die "cancelled."
+    "LLM provider (stored only in the container's data/.env)" 13 72 2 \
+    none   "Configure later (incl. Anthropic, via Settings -> Services/AI)" \
+    ollama "Ollama host URL" 3>&1 1>&2 2>&3)" || die "cancelled."
   case "$choice" in
-    anthropic) wt_input ANTHROPIC_API_KEY "Anthropic API key" "${ANTHROPIC_API_KEY:-}" ;;
-    ollama)    wt_input OLLAMA_HOST       "Ollama host URL"    "${OLLAMA_HOST:-http://127.0.0.1:11434}" ;;
+    ollama) wt_input OLLAMA_HOST "Ollama host URL" "${OLLAMA_HOST:-http://127.0.0.1:11434}" ;;
   esac
 }
 
@@ -160,7 +166,6 @@ ORWELL_BIND_HOST="${ORWELL_BIND_HOST:-0.0.0.0}"
 # Optional container root password (console login). pct enter from the host never needs one;
 # without it the LXC console rejects every login (pct create sets no password by default).
 CT_ROOT_PASSWORD="${CT_ROOT_PASSWORD:-}"
-ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 OLLAMA_HOST="${OLLAMA_HOST:-}"
 
 # An explicit TEMPLATE=storage:vztmpl/name override splits into storage + name; otherwise the
@@ -297,10 +302,26 @@ pct exec "$CTID" -- bash -c "set -e; mkdir -p '${APP_DIR}'; cd '${APP_DIR}'; \
 
 # ── In-container install (LLM config, if any, is passed through and lands in data/.env) ─────────
 msg "running in-container install (the checked-out deploy/orwell-install.sh)"
+# DEPLOY-5 (2026-07-05 ops-hygiene close-out): don't interpolate the install env into a `pct exec
+# … bash -c "…"` argv — it's visible in host/container `ps auxww` / `/proc/<pid>/cmdline` for the
+# life of the process (and possibly longer under process accounting / an EDR agent). Same fix
+# already applied to GIT_TOKEN above: push a temp file instead and `source` it in-container.
+# (OLLAMA_HOST is not itself a secret, but is included here too for consistency — one mechanism,
+# no argv passthrough at all.)
+TMP_INSTALL_ENV="$(mktemp /tmp/orwell-install-env-XXXXXX)"
+chmod 600 "$TMP_INSTALL_ENV"
+{
+  printf 'REPO=%q\n' "$REPO"
+  printf 'BRANCH=%q\n' "$BRANCH"
+  printf 'APP_DIR=%q\n' "$APP_DIR"
+  printf 'ORWELL_PORT=%q\n' "$ORWELL_PORT"
+  printf 'ORWELL_BIND_HOST=%q\n' "$ORWELL_BIND_HOST"
+  [[ -n "$OLLAMA_HOST" ]] && printf 'OLLAMA_HOST=%q\n' "$OLLAMA_HOST"
+} > "$TMP_INSTALL_ENV"
+pct push "$CTID" "$TMP_INSTALL_ENV" /tmp/orwell-install-env --perms 0600
+rm -f "$TMP_INSTALL_ENV"
 pct exec "$CTID" -- bash -c \
-  "export REPO='${REPO}' BRANCH='${BRANCH}' APP_DIR='${APP_DIR}' ORWELL_PORT='${ORWELL_PORT}' \
-          ORWELL_BIND_HOST='${ORWELL_BIND_HOST}' \
-          ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY}' OLLAMA_HOST='${OLLAMA_HOST}'; \
+  "set -a; source /tmp/orwell-install-env; set +a; rm -f /tmp/orwell-install-env; \
    bash '${APP_DIR}/deploy/orwell-install.sh'"
 
 echo

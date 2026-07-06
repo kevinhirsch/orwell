@@ -5,6 +5,7 @@ import { PLAYER } from "../domain/ids";
 import { scaleImpact } from "./relationshipConstants";
 import type { EdgeSignals } from "./relationshipConstants";
 import type { RelationshipModel } from "./relationships";
+import type { NotableActClass } from "./legends";
 
 /**
  * The social graph gossip travels along. Minimal here (undirected adjacency); the
@@ -100,6 +101,36 @@ export const RUMOR_GLOSS: Record<string, string> = {
  */
 export function rumorFrom(initiator: EntityId, partner: EntityId, type: string): string {
   return `word around the house is that ${initiator} and ${partner} are ${RUMOR_GLOSS[type] ?? "up to something"}`;
+}
+
+/**
+ * Feature 0101 — NPC myth-making tunables (the `THREAD`/`GOSSIP` single-tunable-home pattern). A
+ * player-subject LEGEND is the outward complement to the NPC↔NPC rumor above: seeded rarely from a
+ * genuinely notable player act (`src/engine/legends.ts`'s `notablePlayerActs`), then spread through the
+ * SAME `diffuseGossip` machinery — with NO `rel`/`subjects` fold (see `GameSessionAdapter.legendTick`),
+ * so the seeded calibration spine stays byte-identical whether the layer is on or off.
+ */
+export const LEGEND = {
+  /** Chance per off-screen tick — once at least one unclaimed notable act exists — that the house mints
+   *  a legend about the player. Kept low: folklore is rare and earned, not constant chatter. */
+  seedProb: 0.35,
+  /** Per-season legend cap (sibling of `THREAD.maxSurfacedPerSeason`) — folklore stays scarce and legible. */
+  maxPerSeason: 4,
+} as const;
+
+/** The vague, PUBLIC-facing gloss a notable player act becomes as a legend — never the verbatim act,
+ *  never a hidden cause (the sibling of `RUMOR_GLOSS`, keyed by `NotableActClass` instead of scene type). */
+export const LEGEND_GLOSS: Record<NotableActClass, string> = {
+  "hoh-win": "the new HOH is running this house",
+  "veto-win": "won that veto out of nowhere",
+  "veto-save": "not as harmless as they look",
+  "nominations": "not afraid to make a big move",
+  "finale-win": "the one who won the whole game",
+};
+
+/** The legend a notable player act gives rise to — a vague PARAPHRASE, never the verbatim act. */
+export function legendFrom(actClass: NotableActClass): string {
+  return LEGEND_GLOSS[actClass] ?? "become the talk of the house";
 }
 
 /** Each retelling appends a hedge — a cosmetic "how sure are they" marker (stripped at display by

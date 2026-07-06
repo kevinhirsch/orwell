@@ -374,6 +374,35 @@ export interface LiveSeasonState {
    *  non-degradation); absent ⇒ 0 ⇒ byte-identical when the clock is off. `npcFatigue` is keyed by id. */
   playerFatigue?: number;
   npcFatigue?: Record<EntityId, number>;
+  /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — the daily "day in review" bookkeeping, dormant unless
+   * the clock (`timeOfDay`) is running. `dayNumber` is the 1-based in-game day counter (bumped each
+   * `turnIn`, ADR 0006's bedtime lever). `dailyRecapEventCursor`/`dailyRecapKnowledgeCursor` are the
+   * event-log / player-knowledge array LENGTHS already folded into a materialized recap, so the next
+   * `turnIn` slices only the tail that closed TODAY (never re-scans, never double-counts). `lastDailyRecap`
+   * is the MATERIALIZED digest for the day that most recently closed — computed once, at `turnIn`, and
+   * served back verbatim by `dailyRecap()`/`AdvanceView.dailyRecap` so a re-read (a fresh context, a
+   * restore) reproduces the exact same recap for that day (determinism/non-degradation). Absent on a
+   * pre-0102 save or whenever the clock has never rolled a day ⇒ no recap, byte-identical to today.
+   */
+  dayNumber?: number;
+  dailyRecapEventCursor?: number;
+  dailyRecapKnowledgeCursor?: number;
+  lastDailyRecap?: DailyRecapEntry;
+}
+
+/** 0102 — the non-committal cliffhanger a `DailyRecapEntry` may carry (see `DailyRecapHook` in the port). */
+export interface DailyRecapHook {
+  thread: string;
+  framing: string;
+}
+
+/** 0102 — the pure-data shape of a materialized daily recap (mirrors the port's `DailyRecapView`). */
+export interface DailyRecapEntry {
+  day: number;
+  highlights: string[];
+  surfaced: string[];
+  hook?: DailyRecapHook;
 }
 
 /** What the live loop reads about the house — kept narrow so the core stays pure/testable. */

@@ -1,4 +1,13 @@
-Feature: 0102 — Weekly recap + cliffhanger (each HOH-week is an episode)
+# BUILT 2026-07-05 as the REDESIGNED daily recap (#884, PO ruling 2026-06-27) — the WEEKLY mechanic
+# below was superseded before it shipped and was never wired into cucumber.cjs. The shipped daily
+# analog fires at the player's own bedtime (`turnIn`) rather than the week-roll: same two Vault-free
+# sources (witnessed ceremony/scene/deal events + already-surfaced gossip), same non-committal-hook
+# rule, same reproducibility guarantee — scoped to the day that just closed instead of the week. The
+# scenarios below are RETAINED for historical/design context (the mechanics they assert are the same
+# ones the daily version honors) but describe the never-built week-roll trigger, not the shipped
+# turnIn trigger. The executable gate for the shipped mechanic is the Vitest suite
+# `tests/unit/dailyRecap0102.test.ts` (13 cases), not this file — it stays unwired from cucumber.cjs.
+Feature: 0102 — Weekly recap + cliffhanger (each HOH-week is an episode) [SUPERSEDED DESIGN — see note above]
   When an HOH-week closes, the game stitches a short, Vault-safe digest of the week the player
   just lived — from their WITNESSED events plus gossip that has ALREADY surfaced to them — and
   ends it on a cliffhanger hook anchored to a thread already in motion. The recap is the record

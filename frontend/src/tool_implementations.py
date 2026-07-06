@@ -5021,6 +5021,17 @@ async def do_season_retrospective(content: str, owner: Optional[str] = None) -> 
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_daily_recap(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.daily_recap(user=owner)
+        if res is None:
+            return {"output": "No day has closed yet — there is no recap to re-fetch.", "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_npc_voice(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

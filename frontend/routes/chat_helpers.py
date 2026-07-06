@@ -974,6 +974,86 @@ async def _handle_stale_beat(user, exc) -> None:
         logger.warning("[orwell] stale-beat reconcile skipped for user=%s: %s", user, _exc_detail(e))
 
 
+# ── R1c / audit A-S3 / CON-11 — durable retry for a fold that survives a DOUBLE stale-409 ────────── #
+#
+# `_backfill_with_cas` (agent_loop.py) already reconciles a SINGLE stale-409 by re-attempting the same
+# call once against the refreshed beatSeq (issue #591) — safe because the engine refuses BEFORE
+# folding, so a retry can never double-apply. But under SUSTAINED two-window concurrency the board can
+# move a SECOND time under that very retry (audit CON-11, corroborating the standing R-A-S3 latent):
+# the old behavior reconciled-and-GAVE UP, dropping the fold. For `recordInteraction`/`makeDeal`/the
+# trust belts (confide/exposeSecret/tradeSecret) this back-fill is frequently the SCENE'S ONLY RECORD
+# of a hidden relationship impact — dropping it silently evaporates real, already-happened play
+# (mandate #4 / I4: "a novel move must never evaporate"). Rather than retry in a tight loop (a
+# sustained two-window race could in principle keep moving the board every attempt — busy-retrying
+# risks livelock), a second consecutive stale-409 on a fold-bearing call is DEFERRED into a tiny,
+# bounded, per-owner queue and opportunistically retried the next time this owner issues ANY back-fill
+# call — typically within the same turn or the very next one. The loss is bounded to LATENCY, not
+# DATA: the fold still lands, just slightly late, and it can never double-apply (every drain attempt
+# is itself CAS-guarded against the freshest `last_beat_seq` — a fresh stale-409 on the retry just
+# re-queues it, never applies twice). In-process only (never persisted to disk — a restart re-derives
+# from the next turn's live play, same as any other in-flight request), Vault-free (the payload is the
+# same public scene content/ids the call would have carried anyway), and bounded (a small per-owner
+# cap with drop-oldest + a loud log so a pathologically stuck queue is visible, not silently unbounded).
+_DEFERRED_FOLDS: dict = {}
+_DEFERRED_FOLDS_MAX = 4
+
+
+def _defer_fold(user, fn, args: tuple, kwargs: dict, desc: str) -> None:
+    """Queue a fold-bearing back-fill call that hit a SECOND consecutive stale-409, for opportunistic
+    retry (CON-11). Bounded per owner; the OLDEST entry is dropped (loudly) on overflow rather than
+    growing without bound. Keyed via `_beat_seq_key` so auth-off single-tenant deploys get the same
+    protection as a real per-user identity (mirrors CON-1's fix for the CAS spine itself)."""
+    key = _beat_seq_key(user)
+    q = _DEFERRED_FOLDS.setdefault(key, [])
+    q.append({"fn": fn, "args": args, "kwargs": kwargs, "desc": desc})
+    if len(q) > _DEFERRED_FOLDS_MAX:
+        dropped = q.pop(0)
+        logger.error(
+            "[orwell] deferred-fold queue overflow for user=%s -- dropped the OLDEST queued fold "
+            "(%s); sustained contention is outrunning retry capacity", user, dropped.get("desc"))
+    else:
+        logger.info("[orwell] deferred a fold-bearing back-fill after a double stale-409 (%s) for "
+                    "later retry user=%s", desc, user)
+
+
+async def _drain_deferred_folds(user) -> None:
+    """Opportunistically retry any fold-bearing back-fills this owner deferred after a double
+    stale-409 (CON-11). Called at the top of every `_backfill_with_cas` invocation so a deferred fold
+    lands the very next time this owner issues ANY back-fill call — bounded latency, never lost. Each
+    attempt is itself CAS-guarded (the freshest `last_beat_seq`), so a fold can never double-apply; one
+    that hits ANOTHER stale-409 simply stays queued for the next opportunity. Fail-open: never raises
+    — a genuine NON-stale failure on a retry is logged (with the scene's description, for forensic
+    recovery) and the entry is dropped, since that class of failure cannot be resolved by retrying."""
+    key = _beat_seq_key(user)
+    pending = _DEFERRED_FOLDS.get(key)
+    if not pending:
+        return
+    remaining = []
+    for entry in pending:
+        try:
+            result = await entry["fn"](*entry["args"], expected_beat_seq=last_beat_seq(user), **entry["kwargs"])
+        except Exception as e:
+            if _is_stale_beat_error(e):
+                await _handle_stale_beat(user, e)
+                remaining.append(entry)  # still contested -- leave queued for the next opportunity
+                continue
+            logger.warning("[orwell] deferred fold retry (%s) failed non-stale, dropping: %s user=%s",
+                            entry.get("desc"), _exc_detail(e), user)
+            continue
+        _refresh_beat_seq(user, result if isinstance(result, dict) else {})
+        logger.info("[orwell] deferred fold (%s) landed on retry user=%s", entry.get("desc"), user)
+    if remaining:
+        _DEFERRED_FOLDS[key] = remaining
+    else:
+        _DEFERRED_FOLDS.pop(key, None)
+
+
+def deferred_fold_count(user) -> int:
+    """How many fold-bearing back-fills are currently queued for `user` after a double stale-409
+    (CON-11 test/ops visibility)."""
+    return len(_DEFERRED_FOLDS.get(_beat_seq_key(user), []))
+
+
 def _beat_signature(status: dict, state: dict) -> dict:
     """A compact, comparable snapshot of the engine board — the fields whose MOVEMENT (or lack
     of it) tells us whether a narrated outcome actually happened. Built from gameStatus (week/

@@ -123,6 +123,18 @@ export interface SessionCore {
    * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream).
    * The accumulated grudge itself rides on `live.juryGrudge` (engine-only; restored with the live state). */
   juryHouseTickCount?: number;
+  /**
+   * Feature 0101 — NPC myth-making. `legendTickCount` is the DEDICATED legend-rng tick counter (forked
+   * off the game seed, never the shared society/competition/vote stream — see
+   * `GameSessionAdapter.legendTick`), persisted so the isolated stream stays reproducible across a
+   * restart. `legendCount` is the per-season HARD CAP on legends minted (monotonic, ++ only — tracked
+   * in `SessionCoreCounts` below, sibling of `surfacedThreadCount`). `legendLastActTick` is the
+   * watermark (the highest consumed notable-act's `GameEvent.ts`) so a used act is never re-picked into
+   * a second legend. All three absent ⇒ 0 (byte-shaped as a pre-0101 save / the layer off).
+   */
+  legendTickCount?: number;
+  legendCount?: number;
+  legendLastActTick?: number;
   /** Every active houseguest's current DRIVE (0086) — sticky motivation+intensity, so an agenda survives a
    * restart instead of re-rolling. ENGINE-ONLY (hidden strategy). Absent on pre-0086 saves / when the
    * campaign layer is off. */
@@ -586,10 +598,14 @@ export interface SessionCoreCounts {
   playerTieSurfaceCount: number;
   tieScheduleTickCount: number;
   surfacedThreadCount: number;
+  legendTickCount: number;
+  legendCount: number;
+  legendLastActTick: number;
 }
 
-/** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100) — each is
- *  verified `++`-only in `GameSessionAdapter`, reset only at a season boundary (never mid-season). */
+/** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100/0101) — each is
+ *  verified `++`-only (or, for `legendLastActTick`, non-decreasing) in `GameSessionAdapter`, reset only at
+ *  a season boundary (never mid-season). */
 export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
   return {
     campaignTickCount: snap.campaignTickCount ?? 0,
@@ -603,6 +619,9 @@ export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
     secretTradeCount: snap.secretTradeCount ?? 0,
     secretPlayerBluffCount: snap.secretPlayerBluffCount ?? 0,
     playerTieSurfaceCount: snap.playerTieSurfaceCount ?? 0,
+    legendTickCount: snap.legendTickCount ?? 0,
+    legendCount: snap.legendCount ?? 0,
+    legendLastActTick: snap.legendLastActTick ?? 0,
     tieScheduleTickCount: snap.tieScheduleTickCount ?? 0,
     surfacedThreadCount: snap.surfacedThreadCount ?? 0,
   };

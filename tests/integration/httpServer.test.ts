@@ -33,7 +33,7 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
     const flags = body["flags"] as Record<string, unknown>;
     expect(flags, "the /health flags block is present").toBeTruthy();
     for (const k of ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse",
-      "seededTieSurfacing", "compIntent", "voteDeduction", "timeOfDay"]) {
+      "seededTieSurfacing", "mythMaking", "compIntent", "voteDeduction", "timeOfDay"]) {
       expect(typeof flags[k], `flags.${k} is a boolean`).toBe("boolean");
     }
   });

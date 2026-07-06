@@ -1,10 +1,33 @@
 # 0102 — Weekly recap + cliffhanger (each HOH-week is an episode)
 
-> **Status:** 🟢 **PO REVIEW RESOLVED (owner, 2026-06-27) — REDESIGNED.** Now a **daily "day in review"
-> pop-up window** (window kit) fired at the player's in-game **bedtime** (0066), **replacing the weekly
-> recap**; Vault-safe (the player's witnessed/known events only); the "tomorrow…" forward-nod stays
-> non-committal and suppresses on a quiet day. **This filename is now a misnomer — rename to daily recap.**
-> See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #884. **Tracks #884.**
+> **Status:** ✅ **BUILT (engine side), 2026-07-05 — the REDESIGNED daily recap (#884).** Per the owner's
+> 2026-06-27 redesign below, this shipped as a **daily "day in review" digest** fired at the player's own
+> in-game **bedtime** (`turnIn`, ADR 0006) — REPLACING the weekly-recap mechanic this file originally
+> proposed (the scenarios further down describe that superseded weekly design; treat the summary here as
+> authoritative). Engine seams: `src/ports/GameSession.ts` (`DailyRecapView`/`DailyRecapHook`,
+> `AdvanceView.dailyRecap`, the `dailyRecap()` read), `src/engine/liveSeason.ts` (`LiveSeasonState`'s
+> `dayNumber`/`dailyRecapEventCursor`/`dailyRecapKnowledgeCursor`/`lastDailyRecap`), and
+> `src/adapters/engine/GameSessionAdapter.ts` (`materializeDailyRecap`/`buildDailyRecapHook`, wired into
+> `turnIn()`; `dailyRecap` is also a player MCP tool for re-fetching the same day's digest). A
+> `momentPrompts.ts` glossary bullet frames the narration rules (facts to voice; the hook is a
+> possibility, never a committed outcome). Vault-free by construction (reads only the same
+> witnessed-event + `playerKnowledgeReader` projections `seasonRecap()`/`freshSurfacedFacts()` already
+> serve — no `VaultStore` import); the hook rides a DEDICATED `daily-recap:<day>` side rng (never the
+> season/vote/jury stream) so it perturbs no seeded outcome. Gate: `tests/unit/dailyRecap0102.test.ts`
+> (13 cases — dormancy, witnessed+surfaced-only, the Vault sweep, the non-committal hook, reproducibility,
+> the MCP boundary dispatch). **Not built:** a literal FE **pop-up window** surface (the "window kit" the
+> PO note below imagines) — the digest is delivered as an **in-fiction narrator beat in the chat** per the
+> original design's own R1 recommendation (ADR 0003: augment, never a dashboard the player must dismiss);
+> a dedicated FE window remains optional future follow-on if the owner still wants one. This filename
+> remains a misnomer (kept as-is to avoid colliding with the numbering-collision cleanup already
+> in flight — see 0111's renumbering note in `docs/features/README.md`); do not re-file this as a
+> weekly mechanic.
+>
+> **Original PO ruling (2026-06-27), preserved for context:** 🟢 **PO REVIEW RESOLVED — REDESIGNED.** Now a
+> **daily "day in review" pop-up window** (window kit) fired at the player's in-game **bedtime** (0066),
+> **replacing the weekly recap**; Vault-safe (the player's witnessed/known events only); the "tomorrow…"
+> forward-nod stays non-committal and suppresses on a quiet day. See `docs/decisions/PO-DECISIONS-LOG.md`
+> (2026-06-27) + #884. **Tracks #884.**
 > **Depends on:** 0001 (Vault Wall — the whole safety argument), 0002 (event visibility & the
 > `surfaceInformationTo` pathway model — what counts as the player's knowledge), 0048 (the
 > post-season recap precedent — `seasonRecap()` is the structural template this generalizes to a
