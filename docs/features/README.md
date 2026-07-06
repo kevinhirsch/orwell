@@ -63,9 +63,13 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 > sync + window/HUD layout sync are the owed follow-on. **0062** (the move-in zeitgeist snapshot)
 > **shipped 2026-06-20** — BDD-gated, frozen + seed-reproducible + flavor-only (outcome-invariant).
 > **0064–0112 (added since 2026-06-20) have had spot reconciliation passes (most recently the
-> 2026-07-05 doc-drift audit-closure — see [the doc-drift lane](../audits/2026-07-03-final-pre-ship-audit/lanes/doc-drift.md))
+> 2026-07-06 closure session, which built the last three spec-only files — 0094 scoped/0095/0096 —
+> and shipped 0101/0102, following the 2026-07-05 doc-drift audit-closure — see
+> [the doc-drift lane](../audits/2026-07-03-final-pre-ship-audit/lanes/doc-drift.md) and
+> [the 2026-07-06 closure-session summary](../audits/2026-07-06-closure-session.md))
 > but not this same exhaustive per-row sweep** — the individual row prose is the source of truth for
-> that range. Tracked here and in the authoritative
+> that range (0094–0096/0097/0098/0101/0102/0103/0108's own rows are current as of 2026-07-06).
+> Tracked here and in the authoritative
 > [open-items ledger](../audits/2026-06-10-full-product-audit.md).
 
 ## Index

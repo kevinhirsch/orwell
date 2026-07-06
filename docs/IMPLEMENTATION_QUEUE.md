@@ -20,6 +20,15 @@ tracks can run **in parallel** once their deps are met.
 > lanes are ✅ DONE). New and remaining open work is now tracked as **GitHub issues** (labelled
 > `type:*` / `area:*`), not appended here — e.g. the Proxmox host smoke → [#577](https://github.com/kevinhirsch/orwell/issues/577).
 > The finding-code → issue map for the audit ledgers lives at the top of `ROAST-LOG.md`.
+>
+> **2026-07-06 closure session (18 PRs, not tracked in this file):** per the note above, this
+> session's work — the last three spec-only builds (0094 scoped/0095/0096), 0101/0102, and a
+> security/a11y/machinery-leak/engine-mandate-safety/deploy-ops sweep from the
+> `docs/audits/2026-07-03-final-pre-ship-audit/` lanes — is recorded in
+> `docs/audits/2026-06-10-full-product-audit.md`'s 2026-07-06 ledger entry and
+> `docs/audits/2026-07-06-closure-session.md`, not appended here (this file's own convention, per
+> the note above, is GitHub issues + the audit ledger for anything after 2026-06-23). No item
+> below references any of that session's PR numbers.
 
 **Agent split (suggested, not strict):**
 - **Claude Code → the TypeScript engine** (`src/`) — it has built the hexagonal core.
