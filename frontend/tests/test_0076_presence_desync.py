@@ -44,6 +44,19 @@ def test_staging_detects_action_and_speech_verbs():
     assert chat_helpers._stages_in_scene('Lena: "I called this one."', "Lena")               # quoted line
 
 
+def test_staging_masks_a_possessive_inanimate_object_narr4():
+    # NARR-4 (2026-07-05): a photo/portrait/shadow BEARING a person's name that then "watches"/"leans"
+    # must NOT stage the PERSON — the subject of the verb is the object, not the houseguest. The verbs
+    # themselves stay in the shared list (a real "leaned in and whispered" is a Vault-wall leak that
+    # must still be caught); only the possessive-inanimate construction is masked before staging.
+    assert not chat_helpers._stages_in_scene(
+        "Marcus Webb's old photo watches over the room from the mantel.", "Marcus Webb")
+    assert not chat_helpers._stages_in_scene("Rik's shadow leans against the far wall.", "Rik")
+    assert not chat_helpers._stages_in_scene("Nia's portrait looks down from the memory wall.", "Nia")
+    # a possessive that owns a real body part / action still stages the PERSON (not masked)
+    assert chat_helpers._stages_in_scene("Rik's leaning against the window frame.", "Rik")
+
+
 def test_staging_ignores_a_bare_mention():
     # A name mentioned without staging them in the present scene must NOT match (else clean turns nag).
     assert not chat_helpers._stages_in_scene("I heard Mara won HOH last week.", "Mara")

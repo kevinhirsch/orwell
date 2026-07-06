@@ -57,6 +57,44 @@ def test_bare_mention_of_invented_name_is_not_flagged():
         _KNOWN_FIRST, _KNOWN_FULL) is None
 
 
+# ── NARR-4 (2026-07-05) — copula/existential SINGLE-token phantom names ──────────────────────
+#
+# The two-token guard above deliberately never matches a bare single capitalized token (far too
+# common in ordinary prose). But that left a real gap: a model that invents a single-token phantom
+# name never tripped anything. An explicit "named/is/was a houseguest/contestant/player" frame is
+# precise enough to make a single token safe to flag.
+
+def test_single_token_existential_phantom_name_is_flagged():
+    who = chat_helpers._sentence_names_invented(
+        "There's a new houseguest named Zephyr moving into the spare room.",
+        _KNOWN_FIRST, _KNOWN_FULL)
+    assert who == "Zephyr"
+
+
+def test_single_token_copula_phantom_name_is_flagged():
+    who = chat_helpers._sentence_names_invented(
+        "Zephyr is a new contestant who just walked through the door.",
+        _KNOWN_FIRST, _KNOWN_FULL)
+    assert who == "Zephyr"
+
+
+def test_single_token_copula_real_roster_name_is_not_flagged():
+    # "Marcus" is a known first name on the roster — a copula frame naming him is legitimate.
+    assert chat_helpers._sentence_names_invented(
+        "Marcus is a new player in this week's veto.", _KNOWN_FIRST, _KNOWN_FULL) is None
+
+
+def test_single_token_frame_does_not_over_match_ordinary_prose():
+    # Ordinary "is/was a new X" sentences that are NOT naming a houseguest/contestant/player never
+    # match — the frame requires that specific noun, not just any "is a new ..." construction.
+    for line in [
+        "There's a new couch in the living room.",
+        "The kitchen is a mess after the party.",
+        "This is a new twist for the season.",
+    ]:
+        assert chat_helpers._sentence_names_invented(line, _KNOWN_FIRST, _KNOWN_FULL) is None, line
+
+
 def test_post_turn_roster_check_stashes_reground(monkeypatch):
     user = "rhino"
     chat_helpers._DESYNC_REGROUND.pop(user, None)
