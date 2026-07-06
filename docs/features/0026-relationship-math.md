@@ -144,7 +144,31 @@ layers), **0004/0015** (the `Character` disposition), **0024** (recall-weighted 
 read), **0020** (the player infers, never sees the numbers). Builds on the existing
 `src/engine/relationships.ts` `IMPACT` table.
 
-## 14. Traceability
+## 14. Downstream effects — what has expanded this since (PO note, 2026-07-06)
+
+0026 is the **base layer**: the raw per-interaction update, betrayal-shock, decay, confidence, and the
+disposition × temperature modulation. A large ecosystem of *built* features now layers effects on top of
+it — this cross-reference keeps the picture honest (the relationship math became the spine of the social
+game). None of them redraw the §4 rule; they consume, arc, gate, or derive-structure-from the edges it
+produces, and every one still keeps the numbers Vault-side (0020 — the player only feels them):
+
+- **Layering the feel over a season:** **0028** (temperature / emotional-modifier constants), **0041**
+  (character evolution — souls evolve and bend the competition modifier + reads across the game).
+- **Arcs on top of the raw numbers:** **0087** (warming/cooling relationship *trajectories* — the most
+  direct expansion), **0024** (recall-weighted history keeps the *relevant* past sharp, not just recent).
+- **Structures derived from the relationship graph:** **0043** (emergent blocs), **0107** (named
+  alliances), **0059** (hidden pre-seeded edges), **0095** (pre-show ties → time-bombs).
+- **Trust/confidence-gated behavior:** **0075** (what an NPC will confide is gated by trust), **0098**
+  (confidence-calibrated reads).
+- **Deals & leverage acting on trust:** **0039** (promises/deals), **0109** (deal duration), **0093** /
+  **0099** (secrets as levers / currency).
+- **Beliefs that can be wrong (the 0002 hidden layer):** **0038** (gossip diffusion), **0094** (distorted
+  gossip has real consequences).
+- **Grudges at the endgame:** **0100** (jury grudge book — the sequestered jury-house hardening on top of
+  the eviction-manner grudge), **0110** (the jury grudge folds on a *deduced* belief, not the true ballot).
+- **The consumer of the fold:** **0023** (the live consequence loop applies this rule every recorded scene).
+
+## 15. Traceability
 
 `docs/decisions/0002-relationship-model.md` ("the math — update rule, recency/decay, betrayal-shock,
 thresholds — are tunable config… a dedicated feature spec can follow once the math firms up"); this

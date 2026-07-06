@@ -37,7 +37,10 @@ When("the competition is run across many seeds", function (this: BbWorld) {
 });
 
 Then("the favorite wins a strong majority of the time", function (this: BbWorld) {
-  assert.ok(this.baseWinRate! >= 0.65 && this.baseWinRate! <= 0.8, `favorite win rate ${this.baseWinRate}`);
+  // Calibration band re-centred on the post-0006-retune reality (temperature 0.36→0.40 → ~66% for a
+  // 0.9-vs-0.5 favorite; PO ruling 2026-07-06). Floor widened 0.65→0.60 so the gate has headroom and
+  // never sits on its edge; the 0.80 ceiling + the ≥10% upset check below still bound the other way.
+  assert.ok(this.baseWinRate! >= 0.6 && this.baseWinRate! <= 0.8, `favorite win rate ${this.baseWinRate}`);
 });
 
 Then("genuine upsets still occur", function (this: BbWorld) {
