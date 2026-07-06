@@ -547,9 +547,12 @@ import { isNarrow } from './platform.js';
       if (currentHolder && currentAccumulated) {
         // Store accumulated in a closure variable before it gets cleared
         const stoppedContent = currentAccumulated;
-        
-        // Store raw content in dataset for consistency with other messages
-        currentHolder.dataset.raw = stoppedContent;
+
+        // Store raw content in dataset for consistency with other messages. FEDEEP-2: scrub any
+        // reasoning/machinery that bled into plain content before caching the raw copy (same chain
+        // processWithThinking's public-reply branch runs on the rendered body below) — a leak must
+        // not survive into the copy/regen/TTS cache just because the stream was user-stopped.
+        currentHolder.dataset.raw = markdownModule.scrubMachineryForPersistence(stoppedContent);
         
         currentHolder.querySelector('.body').innerHTML = markdownModule.processWithThinking(
           markdownModule.squashOutsideCode(stoppedContent)
@@ -591,7 +594,7 @@ import { isNarrow } from './platform.js';
 
         // Add footer with copy/regen if not already present
         if (!currentHolder.querySelector('.msg-footer')) {
-          currentHolder.dataset.raw = stoppedContent;
+          currentHolder.dataset.raw = markdownModule.scrubMachineryForPersistence(stoppedContent);
           currentHolder.appendChild(createMsgFooter(currentHolder));
         }
 
@@ -3178,7 +3181,11 @@ import { isNarrow } from './platform.js';
             characterName: _charNameFinal || holder._characterName,
           });
         }
-        holder.dataset.raw = accumulated;
+        // FEDEEP-2: scrub any reasoning/machinery that bled into plain content out of the cached
+        // raw copy — `accumulated` is the MERGED stream buffer (reply + reasoning deltas) and this
+        // cache feeds copy/regen/TTS, so a leak that never reached the rendered bubble must not
+        // survive into it. Same chain processWithThinking's public-reply branch already runs.
+        holder.dataset.raw = markdownModule.scrubMachineryForPersistence(accumulated);
 
         // Anti-stall: a turn that ran tools but ended with essentially no
         // final prose usually means the model stopped mid-task (the case
@@ -3368,10 +3375,15 @@ import { isNarrow } from './platform.js';
         if (_researchingStreamIds.has(streamSessionId)) {
           _appendViewReportLink(footerTarget, streamSessionId);
         }
+        // FEDEEP-2: the copy-cache and every TTS read-aloud path below consume the MERGED stream
+        // buffer (`accumulated`), not the already-scrubbed rendered bubble — scrub it once here so
+        // neither the cache nor anything spoken aloud can leak reasoning/machinery that bled into
+        // plain content. No-op outside the game build (see scrubMachineryForPersistence).
+        const _accumulatedForPersistence = markdownModule.scrubMachineryForPersistence(accumulated);
         // Also store raw on the footer target so copy/TTS work
-        if (footerTarget !== holder) footerTarget.dataset.raw = accumulated;
+        if (footerTarget !== holder) footerTarget.dataset.raw = _accumulatedForPersistence;
         if (addAITTSButton && accumulated && window.aiTTSManager?._provider !== 'disabled' && window.aiTTSManager?.available) {
-          addAITTSButton(footerTarget, accumulated);
+          addAITTSButton(footerTarget, _accumulatedForPersistence);
         }
         // TTS auto-play: streaming mode flushes remaining text, non-streaming enqueues full message
         if (accumulated && window.aiTTSManager && window.aiTTSManager.autoPlay) {
@@ -3387,7 +3399,7 @@ import { isNarrow } from './platform.js';
             };
             if (streamingTTS) {
               // Flush remaining partial sentence and attach the real button
-              window.aiTTSManager.streamingEnd(accumulated);
+              window.aiTTSManager.streamingEnd(_accumulatedForPersistence);
               window.aiTTSManager.streamingAttachButton(ttsBtn, resetFn);
               // If still playing sentences from the stream, show stop icon
               if (window.aiTTSManager.isPlaying || window.aiTTSManager._processing) {
@@ -3398,7 +3410,7 @@ import { isNarrow } from './platform.js';
               }
             } else {
               // Non-streaming fallback (autoPlay toggled mid-stream, etc.)
-              window.aiTTSManager.enqueue(accumulated, ttsBtn, resetFn);
+              window.aiTTSManager.enqueue(_accumulatedForPersistence, ttsBtn, resetFn);
             }
           }
         }
@@ -3564,7 +3576,8 @@ import { isNarrow } from './platform.js';
 
           // But just in case the stop button didn't render it, render it here
           if (holder && accumulated && !currentHolder) {
-            holder.dataset.raw = accumulated;
+            // FEDEEP-2: scrub the cached raw copy the same way as the natural-completion path.
+            holder.dataset.raw = markdownModule.scrubMachineryForPersistence(accumulated);
             holder.querySelector('.body').innerHTML = markdownModule.processWithThinking(
               markdownModule.squashOutsideCode(accumulated)
             );
@@ -3971,7 +3984,8 @@ import { isNarrow } from './platform.js';
     if (_autoNudges >= _AUTO_NUDGE_CAP) return false;
     _autoNudges++;
     if (holder) {
-      holder.dataset.raw = accumulated;
+      // FEDEEP-2: same raw-copy scrub as the natural-completion/user-stop paths.
+      holder.dataset.raw = markdownModule.scrubMachineryForPersistence(accumulated);
       try {
         holder.querySelector('.body').innerHTML =
           markdownModule.processWithThinking(markdownModule.squashOutsideCode(accumulated));
