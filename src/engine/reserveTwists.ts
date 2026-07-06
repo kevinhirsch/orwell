@@ -11,15 +11,16 @@ import type { RandomnessSource } from "../ports/RandomnessSource";
  * PURE + seed-deterministic. The chosen twists are Vault content (engine-only);
  * this module only computes them — it never surfaces them.
  */
-// BE-15: named "wildcard-power" (never "secret-power") — the unrelated, fully-built 0093 feature
-// ("secrets as leverage/currency") already owns "secret power" vocabulary; a reserve-twist kind sharing
-// that name risked a future maintainer wiring the wrong system or assuming 0093 implements this twist.
-export type TwistKind = "wildcard-power" | "double-eviction" | "battle-back";
+// BE-15 / PO ruling 2026-07-06: this one-time SAFETY twist is named "secret-veto" — descriptive of the
+// mechanic (a hidden veto that pulls the holder off the block) and deliberately NOT "secret-power": the
+// unrelated, fully-built 0093 feature ("secrets as leverage/currency") owns the "secret power" /
+// `secretPower` vocabulary, and a twist kind sharing that name risked a maintainer wiring the wrong system.
+export type TwistKind = "secret-veto" | "double-eviction" | "battle-back";
 
 /** Curated, format-preserving pool. May hold more kinds than the live loop currently implements — see
  *  `IMPLEMENTED_TWISTS`/`DOCUMENTED_UNIMPLEMENTED_TWISTS` below, which together must account for every
  *  kind here (BE-14's same-file guard). */
-export const RESERVE_POOL: readonly TwistKind[] = ["wildcard-power", "double-eviction", "battle-back"];
+export const RESERVE_POOL: readonly TwistKind[] = ["secret-veto", "double-eviction", "battle-back"];
 
 /**
  * BE-3/BE-14 — the twist kinds the LIVE loop actually implements a firing handler for. Single source of
@@ -34,7 +35,7 @@ export const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["d
  * later wave), documented here so a future addition to the pool can't silently go unaccounted for. Every
  * kind in `RESERVE_POOL` must be in `IMPLEMENTED_TWISTS` or here — the assertion below enforces it.
  */
-const DOCUMENTED_UNIMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["wildcard-power", "battle-back"]);
+const DOCUMENTED_UNIMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["secret-veto", "battle-back"]);
 
 // BE-14 — a same-file structural guard, checked once at module load: if a future kind is added to
 // `RESERVE_POOL` without being wired into `IMPLEMENTED_TWISTS` OR explicitly documented above as a
@@ -112,4 +113,99 @@ export function firedTwists(reserve: readonly ReserveTwist[], totalBeats = 14): 
     if (ev) out.push(ev);
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REACTIVE model (feature 0025 redesign, PO ruling 2026-07-06). The whole pool stands
+// armed from game start; each twist WATCHES the live house and fires when the house
+// reaches a state that EARNS it — not a week pre-picked at setup. The trigger THRESHOLDS
+// are re-rolled per season (the "dynamic triggers"), so the same conditions do not recur
+// season to season; and even an earned trigger can be HELD BACK by a seeded per-season
+// arming roll, so some seasons stay quiet. Everything here is PURE + seed-deterministic;
+// the plan is Vault content (engine-only), sealed until a twist fires.
+//
+// Gated live behind ORWELL_REACTIVE_TWISTS — flag off keeps the legacy pre-scheduled path
+// above (byte-identical), so the calibration baseline is untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The sealed per-season plan: the seeded thresholds that decide WHEN each twist becomes
+ * eligible, plus whether each is armed at all this season (the hold-back). Re-rolled fresh
+ * every season, so no two playthroughs share the same trigger conditions.
+ */
+export interface TwistPlan {
+  /** Fire the double eviction the first week the active house is at or below this size. */
+  doubleEvictionAtActive: number;
+  doubleEvictionArmed: boolean;
+  /** Fire the secret veto once the lopsided-eviction streak reaches this length. */
+  secretVetoStreak: number;
+  secretVetoArmed: boolean;
+  /** Fire the battle-back once this many jurors have been seated (early-jury window). */
+  battleBackAtJury: number;
+  battleBackArmed: boolean;
+}
+
+/** The compact live-house snapshot the triggers read (roles/counts only — no identities). */
+export interface TwistSignals {
+  /** Houseguests still in the game. */
+  activeCount: number;
+  /** Jurors seated so far (0 before the jury phase). */
+  juryCount: number;
+  /** Consecutive near-unanimous ("the house steamrolled") evictions — the lopsided-house signal. */
+  lopsidedStreak: number;
+}
+
+/** The seeded threshold bands (the "dynamic" ranges the per-season pick is drawn from). */
+export const DOUBLE_EVICTION_ACTIVE_BAND: readonly [number, number] = [6, 9];
+export const SECRET_VETO_STREAK_BAND: readonly [number, number] = [2, 3];
+export const BATTLE_BACK_JURY_BAND: readonly [number, number] = [1, 3];
+/** Chance an enabled twist is actually armed this season (else it is held back — some seasons stay quiet). */
+export const TWIST_ARM_PROB = 0.6;
+/** Below this many active houseguests, no NEW twist arms — too little game left to stay format-preserving. */
+export const TWIST_MIN_ACTIVE = 5;
+
+function pickInBand(rng: RandomnessSource, [lo, hi]: readonly [number, number]): number {
+  return lo + rng.int(hi - lo + 1);
+}
+
+/**
+ * Roll the sealed per-season twist plan (the dynamic thresholds + the hold-back arming). Drawn in a
+ * FIXED field order off the given (dedicated, per-season) rng, so the same seed reproduces the same
+ * plan and a different seed yields different trigger conditions.
+ */
+export function planReserveTwists(rng: RandomnessSource): TwistPlan {
+  return {
+    doubleEvictionAtActive: pickInBand(rng, DOUBLE_EVICTION_ACTIVE_BAND),
+    doubleEvictionArmed: rng.next() < TWIST_ARM_PROB,
+    secretVetoStreak: pickInBand(rng, SECRET_VETO_STREAK_BAND),
+    secretVetoArmed: rng.next() < TWIST_ARM_PROB,
+    battleBackAtJury: pickInBand(rng, BATTLE_BACK_JURY_BAND),
+    battleBackArmed: rng.next() < TWIST_ARM_PROB,
+  };
+}
+
+/**
+ * Which twist (if any) is triggered by the live house RIGHT NOW, given the sealed plan, the current
+ * signals, and what has already fired (each fires at most once). Returns at most one — so the caller,
+ * evaluating once per week roll, naturally spaces twists across different weeks (the cooldown). The
+ * order below is the priority when two are eligible the same roll; the deferred one persists (its
+ * threshold is monotonic) and fires the next roll.
+ */
+export function triggeredTwist(
+  plan: TwistPlan,
+  sig: TwistSignals,
+  fired: readonly TwistKind[],
+): TwistKind | null {
+  const done = new Set(fired);
+  if (sig.activeCount < TWIST_MIN_ACTIVE) return null; // too little game left to stay format-preserving
+  // Battle-back first: its early-jury window is the narrowest and closes as the jury fills.
+  if (plan.battleBackArmed && !done.has("battle-back") && sig.juryCount >= plan.battleBackAtJury && sig.juryCount <= plan.battleBackAtJury + 1)
+    return "battle-back";
+  // Double eviction: the first week the house has shrunk to the seeded target size.
+  if (plan.doubleEvictionArmed && !done.has("double-eviction") && sig.activeCount <= plan.doubleEvictionAtActive)
+    return "double-eviction";
+  // Secret veto: the house has gone lopsided (a run of steamroll evictions).
+  if (plan.secretVetoArmed && !done.has("secret-veto") && sig.lopsidedStreak >= plan.secretVetoStreak)
+    return "secret-veto";
+  return null;
 }
