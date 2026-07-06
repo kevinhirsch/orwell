@@ -1232,6 +1232,29 @@ if (!window._odyEscExpandGuard) {
     );
   };
 
+  // AXE-8 (WCAG 2.1.2 No Keyboard Trap / 2.4.3 Focus Order): the legacy `.modal` family
+  // (Brain/memory, Cookbook, custom-preset — anything that never migrated onto the
+  // OrwellWindow kit) had no Tab-cycling trap, unlike `orwellWindow.js`'s own
+  // `_trapFocus()` (settings-modal). Generalized here into the ONE shared `.modal`
+  // observer so every member of the family gets it at once, matching the kit's pattern:
+  // Tab/Shift+Tab cycles within the topmost visible modal instead of escaping into the
+  // (visually-behind, but not actually inert) page content.
+  const _focusableIn = (container) => Array.prototype.filter.call(
+    container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+    (n) => !n.disabled && (n.offsetParent !== null || n === document.activeElement)
+  );
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || e.defaultPrevented) return;
+    const top = pickTopModal();
+    if (!top || !top.contains(document.activeElement)) return;
+    const focusable = _focusableIn(top);
+    if (!focusable.length) { e.preventDefault(); return; }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
 

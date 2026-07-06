@@ -1193,6 +1193,51 @@ function syncAdvancedPickers(colors) {
   }
 }
 
+// AXE-1 (WCAG 2.1.1 Keyboard): roving-tabindex/listbox helpers for the theme-swatch grids
+// (mirrors the same pattern used for the model picker's rows in models.js). Each grid
+// (`#themeGrid`, `#themeUserGrid`) keeps exactly one visible `.theme-swatch` at
+// tabindex="0"; Arrow keys move the roving tab stop within that same grid, Enter/Space
+// activates the focused swatch.
+function _visibleSwatches(gridEl) {
+  return Array.prototype.filter.call(
+    gridEl.querySelectorAll('.theme-swatch'),
+    (el) => el.offsetParent !== null
+  );
+}
+function _ensureSwatchTabindex(gridEl) {
+  if (!gridEl) return;
+  const items = _visibleSwatches(gridEl);
+  if (!items.length) return;
+  if (!items.some((el) => el.tabIndex === 0)) {
+    items.forEach((el) => { el.tabIndex = -1; });
+    items[0].tabIndex = 0;
+  }
+}
+function _onSwatchKeydown(e) {
+  const sw = e.currentTarget;
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+    e.preventDefault();
+    sw.click();
+    return;
+  }
+  const NAV_KEYS = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End'];
+  if (NAV_KEYS.indexOf(e.key) === -1) return;
+  const gridEl = sw.closest('.theme-grid');
+  if (!gridEl) return;
+  const items = _visibleSwatches(gridEl);
+  if (!items.length) return;
+  e.preventDefault();
+  const cur = items.indexOf(sw);
+  let next;
+  if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = items.length - 1;
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = cur < 0 ? 0 : (cur + 1) % items.length;
+  else next = cur < 0 ? items.length - 1 : (cur - 1 + items.length) % items.length;
+  items.forEach((el) => { el.tabIndex = -1; });
+  items[next].tabIndex = 0;
+  items[next].focus();
+}
+
 export function initThemeUI() {
   // The Theme window's drag/geometry is now owned by the OrwellWindow kit
   // (initThemeKitWindow / togglePopup) — no bespoke makeDraggable wiring here.
@@ -1331,17 +1376,24 @@ export function initThemeUI() {
   // tile itself in the theme's OWN bg + fg so the swatch is a mini-preview (you
   // see the real surface + text colour), with the accent dots as a secondary
   // signal. The dual-ring dot CSS keeps each dot legible on any tile.
-  const _swatch = ([name, c]) => `
+  // AXE-1 (WCAG 2.1.1 Keyboard): role="option" + roving tabindex so the swatch grid is fully
+  // keyboard-operable (Tab reaches the grid once via the one tabindex="0" swatch, Arrow keys move
+  // between swatches, Enter/Space picks) — see _ensureSwatchTabindex / _onSwatchKeydown below.
+  const _swatch = ([name, c]) => {
+    const label = name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name.replace(/-/g, ' '));
+    return `
     <div class="theme-swatch theme-swatch--preview${name === activeName ? ' active' : ''}" data-theme="${name}"
-         style="background:${c.bg};color:${c.fg};border-color:${c.panel};">
+         style="background:${c.bg};color:${c.fg};border-color:${c.panel};"
+         role="option" tabindex="-1" aria-selected="${name === activeName}" aria-label="${label} theme">
       <div class="theme-swatch-colors">
         <span style="background:${c.bg}"></span>
         <span style="background:${c.panel}"></span>
         <span style="background:${c.fg}"></span>
         <span style="background:${c.red}"></span>
       </div>
-      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name.replace(/-/g, ' '))}
+      ${label}
     </div>`;
+  };
   const _gameBuild = !!(document.body && document.body.hasAttribute('data-game-build'));
   const _entries = Object.entries(THEMES);
   if (_gameBuild) {
@@ -1379,7 +1431,8 @@ export function initThemeUI() {
   if (customEntries.length > 0 && userGrid && userCard) {
     userCard.style.display = '';
     userGrid.innerHTML = customEntries.map(([name, c]) => `
-      <div class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}" data-custom="1">
+      <div class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}" data-custom="1"
+           role="option" tabindex="-1" aria-selected="${name === activeName}" aria-label="${name} theme">
         <div class="theme-swatch-colors">
           <span style="background:${c.bg}"></span>
           <span style="background:${c.panel}"></span>
@@ -1423,9 +1476,18 @@ export function initThemeUI() {
 
   // Click handlers for all swatches (preset + custom) across both grids
   const allGrids = [grid, userGrid].filter(Boolean);
-  function clearAllActive() { allGrids.forEach(g => g.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'))); }
+  function clearAllActive() {
+    allGrids.forEach(g => g.querySelectorAll('.theme-swatch').forEach(s => {
+      s.classList.remove('active');
+      s.setAttribute('aria-selected', 'false');
+    }));
+  }
   allGrids.forEach(g => {
+    // AXE-1: land the roving tabindex once per grid so Tab reaches it; keydown below
+    // (Arrow/Home/End/Enter/Space) is wired per-swatch alongside the existing click handler.
+    _ensureSwatchTabindex(g);
     g.querySelectorAll('.theme-swatch').forEach(sw => {
+      sw.addEventListener('keydown', _onSwatchKeydown);
       sw.addEventListener('click', (e) => {
         if (e.target.closest('.theme-delete-btn')) return;
         const name = sw.dataset.theme;
@@ -1434,6 +1496,7 @@ export function initThemeUI() {
         applyColors(colors);
         clearAllActive();
         sw.classList.add('active');
+        sw.setAttribute('aria-selected', 'true');
         syncPickers(colors);
         const ct = sw.dataset.custom ? customThemes[name] : null;
         const f = ct && ct.font ? ct.font : DEFAULT_FONT;

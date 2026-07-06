@@ -136,7 +136,11 @@
   --color-danger: #c0392b;
   --color-recording: #ff3b30;
   --color-recording-hover: #d63031;
-  --color-muted: #888;
+  /* AXE-7 (WCAG 1.4.3, AA text contrast): #888 measured 3.96:1 against the dark
+     --bg (#282c34) — fails the 4.5:1 normal-text minimum. Lightened toward
+     #9aa0a8 (5.31:1 vs --bg, 7.16:1 vs --panel) so the 16+ timestamp/meta
+     use-sites clear AA without a visible shift in the "muted" role. */
+  --color-muted: #9aa0a8;
   --color-muted-alt: #6b7280;
   --color-accent: #00aaff;
   --color-agent-active: #00ff00;
@@ -201,6 +205,11 @@
   /* J4-10: #e06c75 on #fff is ~3.0:1 (WCAG 1.4.3 FAIL for normal text). Use a
      darker rose that passes 4.5:1 on white (~5.8:1). */
   --color-error: #b83245;
+  /* AXE-7 (WCAG 1.4.3, AA text contrast): the dark-theme #888 default was never
+     overridden here, so it inherited unchanged and measured 3.54:1 against
+     --panel (#fff) / 3.25:1 against --bg (#f5f5f5) — both fail. #667080 clears
+     AA against both light-theme backgrounds (4.59:1 vs --bg, 5.01:1 vs --panel). */
+  --color-muted: #667080;
 }
 
 /* ── Reset & Base ── */
