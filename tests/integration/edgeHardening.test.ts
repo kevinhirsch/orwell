@@ -60,15 +60,46 @@ describe("E27 — the player token must not grant God Mode", () => {
     });
   });
 
-  it("back-compat: with only the single shared token configured, it still opens both channels", async () => {
+  it("SEC-5 fail-closed: with only the single shared token configured, the admin channel is DISABLED (503) — no fallback to the player token", async () => {
     await withServer({ resolve: new GameSessionRegistry().resolver() }, { token: "only-secret" }, async (base) => {
+      const player = await fetch(`${base}/player/call`, {
+        method: "POST", headers: auth("only-secret"), body: JSON.stringify({ name: "gameStatus" }),
+      });
+      expect(player.status).toBe(200); // the player channel is unaffected
+
+      const admin = await fetch(`${base}/admin/call`, {
+        method: "POST", headers: auth("only-secret"), body: JSON.stringify({ name: "sandboxHealth" }),
+      });
+      expect(admin.status).toBe(503); // refused BEFORE any secret comparison — never a 200
+
+      // Every admin-channel envelope is refused identically, not just /call.
+      const tools = await fetch(`${base}/admin/tools`, { headers: auth("only-secret") });
+      expect(tools.status).toBe(503);
+      const rpc = await fetch(`${base}/admin/rpc`, {
+        method: "POST", headers: auth("only-secret"),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      expect(rpc.status).toBe(503);
+
+      // /health surfaces the misconfiguration so a doctor script / monitoring can catch it.
+      const health = await fetch(`${base}/health`);
+      const body = (await health.json()) as { security?: { adminTokenMissing?: boolean } };
+      expect(body.security?.adminTokenMissing).toBe(true);
+    });
+  });
+
+  it("fully open (neither token set) is unaffected: both channels work with no secret", async () => {
+    await withServer({ resolve: new GameSessionRegistry().resolver() }, {}, async (base) => {
       for (const channel of ["player", "admin"]) {
         const res = await fetch(`${base}/${channel}/call`, {
-          method: "POST", headers: auth("only-secret"),
+          method: "POST",
           body: JSON.stringify({ name: channel === "player" ? "gameStatus" : "sandboxHealth" }),
         });
         expect(res.status).toBe(200);
       }
+      const health = await fetch(`${base}/health`);
+      const body = (await health.json()) as { security?: { adminTokenMissing?: boolean } };
+      expect(body.security?.adminTokenMissing).toBe(false);
     });
   });
 });
