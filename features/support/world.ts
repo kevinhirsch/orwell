@@ -192,6 +192,8 @@ export class BbWorld extends World {
   // T4: a real generated houseguest's static Character captured at premiere for byte-stability.
   premiereCharacter?: import("../../src/engine/characterFactory").Character;
   premiereCharacterBytes?: string;
+  // 0024 Option B: the rendered inner-diary narrative under test.
+  soulNarrative?: string;
 
   // Reserve twists (0025) scratch state.
   reserve?: import("../../src/engine/reserveTwists").ReserveTwist[];

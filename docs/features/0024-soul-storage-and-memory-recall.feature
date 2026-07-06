@@ -35,6 +35,13 @@ Feature: Soul storage & memory recall — the house remembers the RIGHT moment
     And no Vault sentinel value appears
     But the houseguest's behavior may still reflect it
 
+  Scenario: The inner diary is organised into sections (memories / leanings / feelings)
+    Given a houseguest whose soul holds a plain happening, a strategic lean, and an emotional beat
+    When the soul's inner diary is rendered
+    Then the diary groups memories under a Memories, a Leanings, and a Feelings section
+    And a section with no memories shows no heading
+    And the sectioning never thins the authoritative memory record
+
   Scenario: The soul deepens over a game; the character does not
     Given a houseguest at premiere
     When many events accumulate over the season

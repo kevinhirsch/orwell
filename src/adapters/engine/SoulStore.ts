@@ -1,7 +1,51 @@
 import type { EntityId } from "../../domain/ids";
-import type { SoulProvider, Soul, Memory } from "../../ports/SoulProvider";
+import type { SoulProvider, Soul, Memory, SoulSection } from "../../ports/SoulProvider";
 import { VectorDimMismatchError, type VectorIndex } from "../../ports/VectorIndex";
 import { InMemoryVectorIndex } from "../inmemory/InMemoryVectorIndex";
+
+/**
+ * The inner-diary section classifier (feature 0024 Option B, PO ruling 2026-07-06). A pure,
+ * deterministic function of the memory's own text, so a memory files under the SAME section every
+ * time — including when a restore re-derives the whole soul from the persisted `soul.memory` mirror
+ * (`rebuildSoulIndex`). Engine-only; never touches an outcome or crosses to the player.
+ *
+ * Order matters: an EMOTION reading wins over a strategic one ("betrayed — wary" is a feeling; "I'll
+ * betray them at the vote" is a leaning), so the feeling probe runs first. Anything that is neither a
+ * felt state nor a strategic lean is a plain remembered happening — the default, and the bulk.
+ */
+const FEELING_RE =
+  /\b(feel|feels|felt|feeling|rattled|hurt|angry|furious|happy|glad|guarded|wary|betrayed|shaken|calm|anxious|relieved|relief|proud|bitter|numb|elated|crushed|excited|nervous|devastated|scared|afraid|hopeful|heartbroken|resentful|exposed|paranoid|comfortable|uneasy)\b/;
+const LEANING_RE =
+  /\b(trust|distrust|ally|allies|alliance|aligned|align|target|targets|threat|loyal|loyalty|vote|votes|voting|betray|betrays|side with|sides with|working with|work with|turn on|turning on|closer to|drifting|drift|lean|leans|leaning toward|against them|final two|f2|deal|deals|pact)\b/;
+
+export function classifySoulSection(content: string): SoulSection {
+  const t = content.toLowerCase();
+  if (FEELING_RE.test(t)) return "feeling";
+  if (LEANING_RE.test(t)) return "leaning";
+  return "memory";
+}
+
+/** The fixed render order + human heading for each inner-diary section (0024 Option B). */
+const SECTION_ORDER: ReadonlyArray<{ section: SoulSection; heading: string }> = [
+  { section: "memory", heading: "## Memories" },
+  { section: "leaning", heading: "## Leanings" },
+  { section: "feeling", heading: "## Feelings" },
+];
+
+/**
+ * Render the lightly-sectioned inner-diary markdown from the authoritative memory list (0024 Option
+ * B). Memories keep their append order WITHIN each section; a section with no memories renders no
+ * heading. Recomposed from `memories` on every write, so it is always a faithful projection of the
+ * authoritative record — never a lossy running buffer.
+ */
+export function composeSectionedNarrative(memories: ReadonlyArray<Memory>): string {
+  const blocks: string[] = [];
+  for (const { section, heading } of SECTION_ORDER) {
+    const lines = memories.filter((m) => m.section === section).map((m) => m.content);
+    if (lines.length > 0) blocks.push([heading, ...lines].join("\n"));
+  }
+  return blocks.join("\n\n");
+}
 
 /**
  * ENGINE-ONLY soul store (feature 0024): per-houseguest dynamic Soul = a growing
@@ -110,11 +154,20 @@ export class SoulStore implements SoulProvider {
     return idx;
   }
 
-  recordToSoul(hg: EntityId, content: string): Memory {
+  recordToSoul(hg: EntityId, content: string, section?: SoulSection): Memory {
     const soul = this.soulOf(hg);
-    const mem: Memory = { id: `mem:${hg}:${++this.seq}`, content, ts: this.seq };
+    const mem: Memory = {
+      id: `mem:${hg}:${++this.seq}`,
+      content,
+      ts: this.seq,
+      // 0024 Option B: file under the caller's explicit bucket, else classify from content.
+      section: section ?? classifySoulSection(content),
+    };
     soul.memories.push(mem);
-    soul.narrative += (soul.narrative ? "\n" : "") + content; // append; never overwrite (0007)
+    // Recompose the lightly-sectioned inner diary from the authoritative (append-only, never
+    // thinned — 0007) memory list. Length grows monotonically with every record: each memory adds
+    // its own line (and, for a section's first memory, a heading) — never removes one.
+    soul.narrative = composeSectionedNarrative(soul.memories);
     // G8/G12: queue the (derived) vector indexing on the shared lane instead of embedding
     // inline — no soul-write burst, from any sandbox, ever pins the event loop.
     SoulStore.pending.push({ store: this, hg, mem });
