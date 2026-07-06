@@ -39,7 +39,7 @@ function liveSession(seed: number): { session: GameSessionAdapter; sb: ReturnTyp
     })),
   );
   session.setRecordProviders({
-    events: () => sb.engine.events.query(),
+    events: () => sb.engine.events.queryAll(),
     hidden: () => sb.engine.vault.readHidden(),
   });
   session.setOnEvent((ev) => sb.engine.events.record({
