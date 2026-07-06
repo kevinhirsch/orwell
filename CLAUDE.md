@@ -182,6 +182,34 @@ via `_resolve_llm_fn`, optionally `web_search`, synthesize JSON, write back; **n
 engine's deterministic floor simply stands**). Kicked from `do_create_character`
 (`tool_implementations.py`); never blocks game start.
 
+### The mirror gotcha: a prompt-advertised MODEL lever needs FE tool-wiring too (the lever-drift trap)
+
+The four-place rule above is for FE-driven **write-backs** (they go in `INFRA_LEVERS`, kept OUT of the
+model's manifest). The **mirror case** is a tool the **narration model calls** — a read like
+`dailyRecap`/`seasonRecap`, or any player lever **named in the narrator prompt**
+(`BASE_GAME_MASTER_PROMPT` glossary in `src/engine/momentPrompts.ts`). If the prompt *advertises* a
+lever, it MUST be **agent-callable through the FE tool layer** — a **five-place FE wiring**, mirroring a
+sibling read tool (`seasonRecap`) end to end:
+
+1. `frontend/src/tool_schemas.py` — the tool schema **+** add it to `ORWELL_GAME_TOOLS`.
+2. `frontend/src/agent_tools.py` — `TOOL_TAGS` **+** `GAME_TOOL_KEEP` (so the game build keeps it).
+3. `frontend/src/orwell_engine.py` — the MCP-call wrapper.
+4. `frontend/src/tool_execution.py` — the dispatch branch.
+5. `frontend/src/tool_implementations.py` — the `do_*` impl (null-safe if the read can be empty).
+
+(+ `frontend/static/js/orwellToolBeats.js` — a diegetic beat label / `ORWELL_SILENT_BEATS` entry, or the
+D5/W6 keep-set-label gate fails once the tool joins `GAME_TOOL_KEEP`.)
+
+The gate is **`frontend/tests/test_c13_lever_drift.py::test_every_prompt_advertised_lever_is_agent_callable`**
+("prompt advertises a lever the agent cannot call"). **The trap: it runs in `fe-unit`, which an
+engine-only PR SKIPS** (CI path-filtering) — so an engine PR that adds the tool to the prompt +
+`registry.ts` + `McpServer.ts` (all engine-side, all green, FE lanes skipped) lands a **latent** break
+that only erupts on the *next* FE-touching PR, echoing as an identical `fe-unit` red across **every**
+open FE PR until it's fixed. 0102's `dailyRecap` shipped exactly this way (advertised + engine-wired in
+#1217, but the FE wiring was missing; it surfaced simultaneously on #1222/#1223/#1224 and was fixed in
+#1226). **If you add a model-callable tool to the narrator prompt, do the FE wiring in the SAME change**
+(or don't name it in the prompt).
+
 ## The event / visibility model (build this carefully — it caused real bugs before)
 
 There is **one `EventStore`** holding every interaction. **Visibility is per-event metadata —
