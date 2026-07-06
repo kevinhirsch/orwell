@@ -4,7 +4,7 @@ import type { OutwardChannel, ToolDescriptor } from "../../surfaces/tools/regist
 import type { PlayerSurface } from "../../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
-import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
+import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, RecordImageBeatReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
 import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
 
@@ -184,6 +184,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
       return;
     case "recordImageBeat":
+      guardSyncFields(false); // BE-5 — optional expectedBeatSeq (0065 Part A parity with the other write-backs)
       if (!isStr(args["houseguestId"])) refuse("houseguestId", "a houseguest id (string)");
       if (!isStr(args["imageRef"])) refuse("imageRef", "a non-empty string");
       return;
@@ -256,7 +257,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       // B2: every field is an OPTIONAL boolean (a malformed present value is the R6 class that would
       // otherwise cast blindly into the adapter's setters) — an absent field is fine (that layer stays
       // untouched), a present non-boolean is refused by name.
-      const boolFields = ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse", "seededTieSurfacing"];
+      const boolFields = ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse", "seededTieSurfacing", "mythMaking"];
       for (const f of boolFields) {
         if (args[f] !== undefined && typeof args[f] !== "boolean") refuse(f, "a boolean when present");
       }
@@ -310,6 +311,11 @@ export class McpServer {
       case "recordWorldSnapshot":
         // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
         return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);
+      case "worldSnapshotView":
+        // BE-103/TCG-16: the read counterpart of recordWorldSnapshot — was fully implemented in the
+        // port + adapter but never wired here, so it was a dead endpoint (no registry entry, no dispatch
+        // case). No args; null pre-game or when no snapshot was ever captured.
+        return this.deps.session.worldSnapshotView();
       case "getOffscreenSceneSkeletons":
         // 0070: return the Vault-free skeletons of the most-recent tick's off-screen scenes (ids + nature; no hidden content).
         return this.deps.session.getOffscreenSceneSkeletons();
@@ -401,6 +407,8 @@ export class McpServer {
         return this.deps.session.markHouseguestMet(args["id"] as EntityId);
       case "seasonRecap":
         return this.deps.session.seasonRecap();
+      case "dailyRecap":
+        return this.deps.session.dailyRecap();
       case "seasonRetrospective":
         return this.deps.session.seasonRetrospective();
       case "npcVoice":
@@ -422,9 +430,9 @@ export class McpServer {
       case "diaryRoom":
         return this.deps.commands.diaryRoom(args as unknown as DiaryRoomReq);
       case "recordImageBeat":
-        return this.deps.commands.recordImageBeat(
-          args as unknown as { houseguestId: string; imageRef: string },
-        );
+        // BE-5 — `args` may carry the optional `expectedBeatSeq` CAS token (guarded above); the cast
+        // through `RecordImageBeatReq` (not a bare `{houseguestId,imageRef}` shape) lets it flow through.
+        return this.deps.commands.recordImageBeat(args as unknown as RecordImageBeatReq);
       case "inspectNonVaultState":
         return this.deps.admin.inspect();
       case "overrideMechanic":

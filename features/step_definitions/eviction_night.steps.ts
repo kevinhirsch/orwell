@@ -232,7 +232,7 @@ Then("an evictee goodbye beat occurs", function (this: BbWorld) {
 });
 
 Then("goodbye messages from the house are recorded", function (this: BbWorld) {
-  const goodbyes = this.enSandbox!.engine.events.query().filter((e) => /goodbye message/.test(e.content));
+  const goodbyes = this.enSandbox!.engine.events.queryAll().filter((e) => /goodbye message/.test(e.content));
   assert.ok(goodbyes.length > 0, "goodbye messages are recorded as events");
 });
 

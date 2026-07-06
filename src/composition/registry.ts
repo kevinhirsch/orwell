@@ -88,6 +88,10 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // 0077 Phase 2: the live sub-zone reader, so co-presence witnessing in a big room (the backyard, the
   // lounge) is earshot-scoped — the far end of the yard is not auto-witnessed. Unwired ⇒ pre-0077 behavior.
   commands.setZoneProvider((id) => session.currentZone(id));
+  // Phase 2 of "the player can play offense" (0085 follow-on): a LANDED evict-shaped pitch the player
+  // makes (recordInteraction's aboutEdges, Phase 1) folds into the player's OWN persistent campaign,
+  // mirroring formCampaigns/advanceCampaign/campaignTilt — self-gated by the session's own campaign flag.
+  commands.setPlayerCampaignFold((target, holder) => session.foldPlayerCampaignMove(target, holder));
   // L27/L27b/0024: every recorded social scene is indexed into each houseguest's SEMANTIC recall
   // memory, so later story/narrative is built from the store recalled (ADR 0003), never the chat
   // window. Routed through the session's `recordSceneMemory` — NOT engine.soul.recordToSoul directly —
@@ -105,7 +109,7 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // The season record (0048/B56): the recap reads the PUBLIC record; the retrospective reads the
   // hidden side THROUGH the session's finished-state gate (the one sanctioned Vault seam).
   session.setRecordProviders({
-    events: () => engine.events.query(),
+    events: () => engine.events.queryAll(),
     hidden: () => engine.vault.readHidden(),
   });
   // 0065 Part E — the delta feed's O(Δ) providers. `count` anchors each beat checkpoint at commit time
@@ -363,7 +367,7 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
   return {
     ...sb.session.snapshot(),
     snapshotVersion: SNAPSHOT_VERSION,
-    events: sb.engine.events.query(),
+    events: sb.engine.events.queryAll(),
     relationships: sb.engine.relationships.serialize().edges,
     // The whole knowledge layer (B40) — facts + suspicions + counters — so a restart resumes it.
     // Through the port seam (E63): `serialize`/`load` are on `KnowledgeService`, no concrete cast.

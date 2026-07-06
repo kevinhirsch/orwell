@@ -48,7 +48,7 @@ describe("E1/D1/R1 — the one sanctioned restart door (player channel → regis
 
     await mcp.callTool("createCharacter", { playerName: "The Player", seed: 11 });
     playBeats(runtime.registry.sandboxFor(user).session, 8); // season 1 accrues real history
-    const season1Events = runtime.registry.sandboxFor(user).engine.events.query().length;
+    const season1Events = runtime.registry.sandboxFor(user).engine.events.queryAll().length;
     expect(season1Events).toBeGreaterThan(4);
 
     // The FE's reset path: createCharacter + confirmRestart on the PLAYER channel (D1/R1 step 1).
@@ -60,7 +60,7 @@ describe("E1/D1/R1 — the one sanctioned restart door (player channel → regis
     // The registry now serves a CLEAN season-2 sandbox — not the old one restarted in place.
     const fresh = runtime.registry.sandboxFor(user);
     expect(fresh.session.snapshot().seed).toBe(22);
-    expect(fresh.engine.events.query().length).toBeLessThan(season1Events);
+    expect(fresh.engine.events.queryAll().length).toBeLessThan(season1Events);
 
     // THE BUG: every post-restart commit used to fault as a count regression vs. the dead season.
     playBeats(fresh.session, 4); // would throw TurnRefusedError before the fix

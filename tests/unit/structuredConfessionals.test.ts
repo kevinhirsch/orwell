@@ -105,7 +105,7 @@ describe("E55/C12 — live ceremony confessionals reach the record AND the soul"
       if (adv.event?.beat === "eviction-result" || adv.finished) break;
     }
 
-    const confs = sb.engine.events.query().filter((e) => e.type === "confessional");
+    const confs = sb.engine.events.queryAll().filter((e) => e.type === "confessional");
     expect(confs.length).toBeGreaterThan(0);
     // Vault-only: the player never witnesses an NPC confessional (0002).
     for (const c of confs) {

@@ -906,6 +906,13 @@ export interface AdvanceView {
   finale?: FinaleView | null;
   /** The in-progress eviction projection (0047); present only while a weekly eviction is staging. */
   eviction?: EvictionView | null;
+  /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — present ONLY on the `turnIn` result that closes an
+   * in-game day: the Vault-free "day in review" digest + its optional non-committal cliffhanger. Absent
+   * on every other advance/decision result, and absent on `turnIn` itself when the clock isn't running
+   * or nothing closed (a quiet/no-op turn-in) — the narrator voices it only when present, never invents one.
+   */
+  dailyRecap?: DailyRecapView;
 }
 
 /**
@@ -1196,6 +1203,38 @@ export interface SeasonRecapView {
 }
 
 /**
+ * 0102 (PO review 2026-06-27 redesign, #884) — the non-committal cliffhanger a `DailyRecapView` may
+ * carry. `thread` is an ENGINE-INTERNAL id (never shown; it exists only for a future payoff to link
+ * back to), `framing` is the Vault-free, non-committal tease text for the narrator to voice AS A
+ * POSSIBILITY — it names nothing the player hasn't already witnessed or been told, and it never
+ * asserts a future result (ADR 0005: the seed still decides).
+ */
+export interface DailyRecapHook {
+  thread: string;
+  framing: string;
+}
+
+/**
+ * 0102 (PO review 2026-06-27 redesign, #884) — the DAILY "day in review" digest, fired at the
+ * player's own in-game bedtime (`turnIn`, ADR 0006), REPLACING the originally-drafted weekly recap.
+ * Stitched from exactly two Vault-free sources (same discipline as `SeasonRecapView`, scoped to the
+ * day that just closed): the player's witnessed ceremony/scene/deal events, plus gossip that has
+ * ALREADY surfaced to the player through a real pathway (0002). A rumor still diffusing in the hidden
+ * layer never appears. `hook` is present only when an in-motion, player-perceivable thread is
+ * eligible (a quiet day closes with none — never a manufactured cliffhanger).
+ */
+export interface DailyRecapView {
+  /** The 1-based in-game day this recap closes (ADR 0006's clock; not a calendar day). */
+  day: number;
+  /** The player's witnessed ceremony/scene/deal highlights for the day, straight from the record. */
+  highlights: string[];
+  /** Gossip that reached the player's own knowledge today via a real in-game pathway (0002). */
+  surfaced: string[];
+  /** The non-committal forward tease, when an eligible in-motion thread exists; absent on a quiet day. */
+  hook?: DailyRecapHook;
+}
+
+/**
  * The unsealed hidden story (0048) — the Wall's ONE sanctioned, structurally-gated exception.
  * Returned ONLY for a finished season (the gate lives in code, on the terminal state): the
  * off-screen scheming, the confessionals, and the producer's sealed twists. While a season is
@@ -1275,6 +1314,8 @@ export interface BehavioralFlags {
   juryHouse?: boolean;
   /** 0059 §5 — organic surfacing of seeded pre-game ties as the pair's live bond genuinely warms. */
   seededTieSurfacing?: boolean;
+  /** 0101 — NPC myth-making (the house turns a rare, notable player act into a spreading legend). */
+  mythMaking?: boolean;
 }
 
 /** A player's answer to the current `PendingDecisionView`. */
@@ -1789,6 +1830,15 @@ export interface GameSession {
 
   /** The season's public arc from the event record (0048) — Vault-free, reproducible, any time. */
   seasonRecap(): SeasonRecapView;
+
+  /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — the most recently CLOSED day's "day in review"
+   * digest (materialized once, at the `turnIn` that closed it — see `AdvanceView.dailyRecap`), so a
+   * caller can re-fetch the same day's recap without re-triggering it. `null` before any day has
+   * closed (pre-game, the clock isn't running, or the player hasn't turned in yet). Vault-free,
+   * reproducible: re-reading returns the exact same materialized view every time.
+   */
+  dailyRecap(): DailyRecapView | null;
 
   /**
    * The Vault unsealing (0048 §1): the hidden story of THIS user's FINISHED season. Returns `null`

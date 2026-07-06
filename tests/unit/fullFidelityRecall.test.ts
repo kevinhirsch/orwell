@@ -80,7 +80,7 @@ describe("L27b — full-fidelity recall N turns later (across records + a real r
     expect(restoredText).toContain("failed food truck");
     expect(restoredText).toContain("never put their name in your mouth");
     // and the event record still holds it (the player's own witnessed knowledge — survives the restart).
-    expect(sb2.engine.events.query().some((e) => e.content === RICH_DETAIL)).toBe(true);
+    expect(sb2.engine.events.queryAll().some((e) => e.content === RICH_DETAIL)).toBe(true);
   });
 
   it("(c) a weight-bearing scene folds a HIDDEN relationship impact that the player never sees and that persists across a restart", () => {

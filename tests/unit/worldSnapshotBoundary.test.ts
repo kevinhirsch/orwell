@@ -59,3 +59,36 @@ describe("0062 — the world-snapshot write-back reaches the engine over the MCP
     ).rejects.toThrow(/slices/);
   });
 });
+
+// BE-103/TCG-16 — worldSnapshotView (the READ counterpart) was fully implemented in the port + adapter
+// but had NO registry entry and NO McpServer dispatch case at all — a dead endpoint nothing could ever
+// call, found only by manual review. Same boundary-test template as recordWorldSnapshot above.
+describe("BE-103 — the world-snapshot READ (worldSnapshotView) reaches the engine over the MCP boundary", () => {
+  function playerServer(): { server: McpServer; session: GameSessionAdapter } {
+    const sb = buildSandbox(1);
+    const session = new GameSessionAdapter();
+    const commands = new EngineCommandsAdapter(sb.engine.events, sb.engine.knowledge);
+    const server = new McpServer("player", { player: sb.player, admin: sb.admin, summary: sb.summary, commands, session });
+    return { server, session };
+  }
+
+  it("worldSnapshotView is on the player channel (the boundary bug)", () => {
+    const names = PLAYER_TOOLS.map((t) => t.name);
+    expect(names).toContain("worldSnapshotView");
+  });
+
+  it("dispatches worldSnapshotView — it is not rejected as 'not available' or 'unhandled tool'", async () => {
+    const { server, session } = playerServer();
+    session.createCharacter({ playerName: "The Player", seed: 5 });
+    await server.callTool("recordWorldSnapshot", { slices: { mood: "a buzzing, online summer" } });
+    const view = (await server.callTool("worldSnapshotView", {})) as { slices: Record<string, unknown> } | null;
+    expect(view).not.toBeNull();
+    expect(view!.slices.mood).toBe("a buzzing, online summer");
+  });
+
+  it("null before a game starts or when nothing was ever captured (still a clean dispatch, not a throw)", async () => {
+    const { server } = playerServer();
+    const view = await server.callTool("worldSnapshotView", {});
+    expect(view).toBeNull();
+  });
+});

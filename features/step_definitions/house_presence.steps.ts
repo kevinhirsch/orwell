@@ -187,12 +187,12 @@ When("the scene is recorded", function (this: BbWorld) {
 });
 
 Then("the other NPC is in the event's witness set", function (this: BbWorld) {
-  const ev = this.hpSandbox!.engine.events.query().find((e) => e.id === this.hpEventId)!;
+  const ev = this.hpSandbox!.engine.events.queryAll().find((e) => e.id === this.hpEventId)!;
   assert.ok(ev.witnessSet.includes(npc(2)), "the co-present NPC witnessed the scene");
 });
 
 Then("the event is not secret to any houseguest in the room", function (this: BbWorld) {
-  const ev = this.hpSandbox!.engine.events.query().find((e) => e.id === this.hpEventId)!;
+  const ev = this.hpSandbox!.engine.events.queryAll().find((e) => e.id === this.hpEventId)!;
   assert.equal(ev.hidden, false, "a player-witnessed scene is never secret (0002)");
 });
 
@@ -225,7 +225,7 @@ Then("the schemer gains knowledge of the scene via an overheard pathway", functi
 
 Then("the pathway is traceable to the recorded event", function (this: BbWorld) {
   assert.equal(this.hpOverheardFact!.pathway, `overheard:${this.hpEventId}`);
-  assert.ok(this.hpSandbox!.engine.events.query().some((e) => e.id === this.hpEventId), "the overheard event exists");
+  assert.ok(this.hpSandbox!.engine.events.queryAll().some((e) => e.id === this.hpEventId), "the overheard event exists");
   assert.ok(this.hpOverheardFact!.sourceEventId, "the surfacing itself was recorded");
 });
 
@@ -261,14 +261,14 @@ Then("the player gains knowledge of the scheme via an overheard pathway", functi
 
 Then("the surfacing is recorded as an explicit propagation event", function (this: BbWorld) {
   const srcId = this.hpOverheardFact!.sourceEventId!;
-  const surfacing = this.hpSandbox!.engine.events.query().find((e) => e.id === srcId);
+  const surfacing = this.hpSandbox!.engine.events.queryAll().find((e) => e.id === srcId);
   assert.ok(surfacing, "the surfacing is its own recorded event");
   assert.equal(surfacing!.hidden, false, "the player's own surfacing is player-witnessed");
 });
 
 Then("no Vault content beyond the overheard scene itself reaches the player", function (this: BbWorld) {
   // The fragment never carries a hidden event's FULL content, and nothing else hidden crosses.
-  const hidden = this.hpSandbox!.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+  const hidden = this.hpSandbox!.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
   for (const f of this.hpSandbox!.engine.knowledge.knownTo(PLAYER)) {
     for (const h of hidden) assert.ok(!f.content.includes(h), "a verbatim hidden content crossed the wall");
   }

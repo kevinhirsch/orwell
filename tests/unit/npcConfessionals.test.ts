@@ -31,7 +31,7 @@ describe("0040 — NPC confessionals", () => {
 
   it("confessionals are recorded Vault-only — hidden, witnessed by the NPC alone", () => {
     const sb = startedConfessing("u1", 7, 5);
-    const conf = sb.engine.events.query().filter((e) => e.type === "confessional");
+    const conf = sb.engine.events.queryAll().filter((e) => e.type === "confessional");
     expect(conf.length).toBeGreaterThan(0);
     for (const e of conf) {
       expect(e.hidden).toBe(true);
@@ -43,7 +43,7 @@ describe("0040 — NPC confessionals", () => {
   it("confessionals never reach the player", () => {
     const sb = startedConfessing("u2", 3, 6);
     const view = JSON.stringify(sb.player.getVisibleState()) + "\n" + sb.player.produce("player-visible log");
-    for (const e of sb.engine.events.query().filter((x) => x.type === "confessional")) {
+    for (const e of sb.engine.events.queryAll().filter((x) => x.type === "confessional")) {
       expect(view.includes(e.content)).toBe(false);
     }
   });
@@ -51,15 +51,15 @@ describe("0040 — NPC confessionals", () => {
   it("confessionals never reach the admin / God Mode either", () => {
     const sb = startedConfessing("u3", 5, 6);
     const adminView = JSON.stringify(sb.admin.inspect());
-    for (const e of sb.engine.events.query().filter((x) => x.type === "confessional")) {
+    for (const e of sb.engine.events.queryAll().filter((x) => x.type === "confessional")) {
       expect(adminView.includes(e.content)).toBe(false);
     }
     expect(adminView).not.toContain("confessional"); // the admin surface reads no events at all
   });
 
   it("is seed-deterministic for the same user", () => {
-    const a = startedConfessing("u", 4, 5).engine.events.query().filter((e) => e.type === "confessional").map((e) => e.content).join("|");
-    const b = startedConfessing("u", 4, 5).engine.events.query().filter((e) => e.type === "confessional").map((e) => e.content).join("|");
+    const a = startedConfessing("u", 4, 5).engine.events.queryAll().filter((e) => e.type === "confessional").map((e) => e.content).join("|");
+    const b = startedConfessing("u", 4, 5).engine.events.queryAll().filter((e) => e.type === "confessional").map((e) => e.content).join("|");
     expect(a).toBe(b);
     expect(a.length).toBeGreaterThan(0);
   });

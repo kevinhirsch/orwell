@@ -106,10 +106,35 @@ export interface SessionCore {
   /** The DEDICATED campaign-rng tick counter (0085 B2) — persisted so the campaign trajectory stays
    * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream). */
   campaignTickCount?: number;
+  /**
+   * Phase 2 of "the player can play offense" (0085 follow-on) — the player's OWN dedicated
+   * campaign-move-rng draw counter, persisted so the player's own campaign stays reproducible across a
+   * restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream, mirroring
+   * `campaignTickCount`'s isolation). Monotonic (++ only) — tracked in `SessionCoreCounts` below.
+   */
+  playerCampaignMoveCount?: number;
+  /**
+   * Phase 2 — the BEAT the player's own campaign last earned progress (the per-beat throttle), so a
+   * restart mid-beat doesn't grant an extra progress-earning pitch; absent ⇒ null (no pitch yet). Current
+   * state, not a monotonic count (mirrors `campaigns`/`drives`'s own exclusion from the checkpoint).
+   */
+  playerCampaignProgressBeat?: number | null;
   /** The DEDICATED jury-house-rng tick counter (0100) — persisted so the isolated grudge stream stays
    * reproducible across a restart; absent ⇒ 0. Never a calibration-spine input (its own forked stream).
    * The accumulated grudge itself rides on `live.juryGrudge` (engine-only; restored with the live state). */
   juryHouseTickCount?: number;
+  /**
+   * Feature 0101 — NPC myth-making. `legendTickCount` is the DEDICATED legend-rng tick counter (forked
+   * off the game seed, never the shared society/competition/vote stream — see
+   * `GameSessionAdapter.legendTick`), persisted so the isolated stream stays reproducible across a
+   * restart. `legendCount` is the per-season HARD CAP on legends minted (monotonic, ++ only — tracked
+   * in `SessionCoreCounts` below, sibling of `surfacedThreadCount`). `legendLastActTick` is the
+   * watermark (the highest consumed notable-act's `GameEvent.ts`) so a used act is never re-picked into
+   * a second legend. All three absent ⇒ 0 (byte-shaped as a pre-0101 save / the layer off).
+   */
+  legendTickCount?: number;
+  legendCount?: number;
+  legendLastActTick?: number;
   /** Every active houseguest's current DRIVE (0086) — sticky motivation+intensity, so an agenda survives a
    * restart instead of re-rolling. ENGINE-ONLY (hidden strategy). Absent on pre-0086 saves / when the
    * campaign layer is off. */
@@ -581,6 +606,7 @@ export function toGameState(snap: SessionSnapshot): GameState {
  */
 export interface SessionCoreCounts {
   campaignTickCount: number;
+  playerCampaignMoveCount: number;
   juryHouseTickCount: number;
   eruptionCount: number;
   triggerTickCount: number;
@@ -594,13 +620,18 @@ export interface SessionCoreCounts {
   surfacedThreadCount: number;
   tieExposureCount: number;
   tieRevealTickCount: number;
+  legendTickCount: number;
+  legendCount: number;
+  legendLastActTick: number;
 }
 
-/** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100) — each is
- *  verified `++`-only in `GameSessionAdapter`, reset only at a season boundary (never mid-season). */
+/** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100/0101) — each is
+ *  verified `++`-only (or, for `legendLastActTick`, non-decreasing) in `GameSessionAdapter`, reset only at
+ *  a season boundary (never mid-season). */
 export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
   return {
     campaignTickCount: snap.campaignTickCount ?? 0,
+    playerCampaignMoveCount: snap.playerCampaignMoveCount ?? 0,
     juryHouseTickCount: snap.juryHouseTickCount ?? 0,
     eruptionCount: snap.eruptionCount ?? 0,
     triggerTickCount: snap.triggerTickCount ?? 0,
@@ -610,6 +641,9 @@ export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
     secretTradeCount: snap.secretTradeCount ?? 0,
     secretPlayerBluffCount: snap.secretPlayerBluffCount ?? 0,
     playerTieSurfaceCount: snap.playerTieSurfaceCount ?? 0,
+    legendTickCount: snap.legendTickCount ?? 0,
+    legendCount: snap.legendCount ?? 0,
+    legendLastActTick: snap.legendLastActTick ?? 0,
     tieScheduleTickCount: snap.tieScheduleTickCount ?? 0,
     surfacedThreadCount: snap.surfacedThreadCount ?? 0,
     tieExposureCount: snap.tieExposureCount ?? 0,

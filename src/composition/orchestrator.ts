@@ -637,6 +637,15 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   // ADDITIVE second society whose only downstream effect is the (hidden) jury lean, read at the finale.
   sandbox.session.juryHouseTick(sandbox.engine.events, sandbox.engine.knowledge);
 
+  // 0101 — NPC MYTH-MAKING: at most once per off-screen tick, mint a LEGEND about a rare, notable player
+  // act (a comp win, a veto save, a bold ceremony move) and let it diffuse NPC-to-NPC exactly like the
+  // ordinary rumor below — the player's own reputation becoming house folklore. SELF-GATED: a no-op (ZERO
+  // draws, no legend) unless the layer is enabled (ORWELL_MYTH_MAKING=1), so the calibration harness —
+  // which never enables it — is byte-identical. Uses its OWN dedicated, isolated rng and folds NO
+  // relationship edge (never the player's own, never any NPC's read of the player) — only the hidden
+  // knowledge layer changes, so the seeded competition/vote spine is untouched even while ON.
+  sandbox.session.legendTick(sandbox.engine.events, sandbox.engine.knowledge);
+
   // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
   // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
   // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at
@@ -691,7 +700,7 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
     // size), never the shared society/vote stream `rng`, so the seeded calibration spine is untouched
     // (the selection draws no rng at all unless two of the confessor's events fully tie).
     const recentRng = new SeededRandom(hashSeed(`${core.seed ?? ""}:confessional-recent:${confessor}:${clockNow}:${before}`));
-    const recentEvents = selectRecentForConfessional(sandbox.engine.events.query(), confessor, clockNow, { rng: recentRng });
+    const recentEvents = selectRecentForConfessional(sandbox.engine.events.queryAll(), confessor, clockNow, { rng: recentRng });
     // BB-2/SG-8 — without these three, EVERY confessional all season rendered the identical first
     // template (`pick()` falls back to `lines[0]` with no rng) and named the player with the bare
     // `player` id (no resolver), killing the 0048 retrospective payoff (41/41 identical lines). A
@@ -781,7 +790,13 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
         ts: clockNow,
         type: "house-event",
         initiator: ids[0]!,
-        witnessSet: [PLAYER, ids[0]!],
+        // BE-DEEP2-3/COMP-6: the pool's content reads whole-house ("A house meeting...", "the house
+        // calls to order"), so the witness set must be the true co-present house, not just one
+        // hardcoded NPC — otherwise every other houseguest is permanently unable to recall/confessional
+        // an event their own flavor text says they were in. `awakeIds` (computed above, ADR 0006) is
+        // IDENTITY to `ids` when the sleep clock is off (the default + the calibration spine's state),
+        // so this is byte-identical there and only narrows on the opt-in live-time path.
+        witnessSet: [PLAYER, ...awakeIds],
         hidden: false,
         content: nextHouseEvent(sandbox.engine.events, ambientRng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
       });

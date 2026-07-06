@@ -50,7 +50,7 @@ function runAndHash(triggersOn: boolean): { sharedStream: string; fullStream: st
     if (!finished) orch.advance(user, "offscreen-tick");
   }
 
-  const events = sb.engine.events.query();
+  const events = sb.engine.events.queryAll();
   const eruptions = events.filter((e) => e.id.startsWith("trigger:erupt:"));
   // The id carries a wall-clock / rng nonce irrelevant to calibration; hash the SEEDED content of each event.
   const sig = (e: (typeof events)[number]): string =>
@@ -90,7 +90,7 @@ function oneTickSharedEvents(triggersOn: boolean): string {
   sb.session.setTriggersEnabled(triggersOn);
   const orch = new Orchestrator(reg, new FakeClock(), { seed: SEED });
   orch.advance("one", "offscreen-tick");
-  return sb.engine.events.query()
+  return sb.engine.events.queryAll()
     .filter((e) => !e.id.startsWith("trigger:erupt:"))
     .map((e) => `${e.type}|${e.initiator}|${e.hidden ? 1 : 0}|${e.content}`)
     .join("\n");

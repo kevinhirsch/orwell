@@ -20,7 +20,7 @@ import { PLAYER, npc } from "../../src/domain/ids";
 const newDir = (): string => mkdtempSync(join(tmpdir(), "orwell-0031-"));
 const U = "user-a";
 
-const hiddenOf = (sb: UserSandbox): string[] => sb.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+const hiddenOf = (sb: UserSandbox): string[] => sb.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
 const playerSweep = (sb: UserSandbox): string =>
   [sb.player.produce("player-visible log"), sb.player.produce("scene narration"), JSON.stringify(sb.player.getVisibleState())].join("\n");
 
@@ -160,12 +160,12 @@ When("the same sequence of clock ticks is applied to each", function (this: BbWo
   // the watcher's off-screen advances (and audits) are what the ticks trigger.
   const ticks = [1000, 1000, 500, 1500, 1000, 3000];
   const apply = (run: TickedRun): string => {
-    const before = run.reg.sandboxFor(U).engine.events.query().length;
+    const before = run.reg.sandboxFor(U).engine.events.queryAll().length;
     run.watcher.start();
     for (const ms of ticks) run.clock.advance(ms);
     run.watcher.stop();
     // The ticks genuinely advanced the game — the comparison below is not vacuous.
-    assert.ok(run.reg.sandboxFor(U).engine.events.query().length > before, "the clock ticks advanced the game");
+    assert.ok(run.reg.sandboxFor(U).engine.events.queryAll().length > before, "the clock ticks advanced the game");
     const s = run.reg.snapshot(U);
     return JSON.stringify({ events: s.events, relationships: s.relationships });
   };
@@ -185,10 +185,10 @@ Then("disabling the watcher leaves games that never advance on their own", funct
     tickEveryMs: 0, idleTickAfterMs: 1, maxOffscreenTicksPerWake: 5, auditEveryMs: 0,
   });
   reg.sandboxFor(U).session.createCharacter({ playerName: "Still", seed: 1 });
-  const before = reg.sandboxFor(U).engine.events.query().length;
+  const before = reg.sandboxFor(U).engine.events.queryAll().length;
   watcher.start();
   clock.advance(100_000);
-  assert.equal(reg.sandboxFor(U).engine.events.query().length, before, "a disabled watcher never self-advances");
+  assert.equal(reg.sandboxFor(U).engine.events.queryAll().length, before, "a disabled watcher never self-advances");
 });
 
 // --- S5: isolation holds while the watcher audits many sandboxes --------------
@@ -207,8 +207,8 @@ When("the watcher ticks and audits across all sandboxes", function (this: BbWorl
 });
 
 Then("no advance or audit carries one user's content into the other's game", function (this: BbWorld) {
-  const a = JSON.stringify(this.registry!.sandboxFor("user-a").engine.events.query());
-  const b = JSON.stringify(this.registry!.sandboxFor("user-b").engine.events.query());
+  const a = JSON.stringify(this.registry!.sandboxFor("user-a").engine.events.queryAll());
+  const b = JSON.stringify(this.registry!.sandboxFor("user-b").engine.events.queryAll());
   assert.ok(a.includes("MARKER-A-7f3") && !a.includes("MARKER-B-9k2"), "user A keeps only its own content");
   assert.ok(b.includes("MARKER-B-9k2") && !b.includes("MARKER-A-7f3"), "user B keeps only its own content");
 });

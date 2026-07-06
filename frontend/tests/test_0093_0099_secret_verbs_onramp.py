@@ -485,7 +485,7 @@ def test_expose_and_trade_belts_are_wired_into_the_finishing_block():
     assert "async def _auto_expose_secret" in js
     assert "async def _auto_trade_secret" in js
     # routed through the CAS helper (0065 beatSeq compare-and-swap)
-    assert "_backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner)" in js
+    assert "_backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner, defer_fold=True)" in js
     assert "_backfill_with_cas(owner, _oe.trade_secret, to_npc_id, fact_id=fact_id," in js
     # gated on: model didn't call it itself (per-turn cap) + the cheap signal pre-filter
     assert "_want_expose = (_turn_expose_nudges < 1" in js

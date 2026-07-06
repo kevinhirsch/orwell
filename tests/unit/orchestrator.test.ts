@@ -14,7 +14,7 @@ const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-0031-"));
 const U = "user-a";
 
 function hidden(sb: UserSandbox): string[] {
-  return sb.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+  return sb.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
 }
 function playerSweep(sb: UserSandbox): string {
   const p = sb.player;
@@ -108,7 +108,7 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     expect(savedAfter.events.length).toBe(savedBefore.events.length);
     expect(JSON.stringify(savedAfter.events).includes(LEAK)).toBe(false);
     // ...and the live sandbox was rolled back (clean — no aborted events).
-    expect(registry.sandboxFor(U).engine.events.query().some((e) => e.content.includes(LEAK))).toBe(false);
+    expect(registry.sandboxFor(U).engine.events.queryAll().some((e) => e.content.includes(LEAK))).toBe(false);
     // A fault is recorded on the sandbox's health.
     const health = orch.sandboxHealth(U) as { lastIntegrity: string; faults: unknown[] };
     expect(health.lastIntegrity).toBe("fault");
@@ -127,13 +127,13 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     snap.live!.evictionOrder = npcs.slice(0, npcs.length - 1);
     snap.live!.active = [PLAYER, npcs[npcs.length - 1]!];
     registry.restore(U, snap);
-    const before = registry.sandboxFor(U).engine.events.query().length;
+    const before = registry.sandboxFor(U).engine.events.queryAll().length;
 
     const res = orch.advance(U, "offscreen-tick");
     expect(res.integrity).toBe("ok");
     expect(res.faults).toEqual([]);
     expect(res.events).toBe(0);
-    expect(registry.sandboxFor(U).engine.events.query().length).toBe(before);
+    expect(registry.sandboxFor(U).engine.events.queryAll().length).toBe(before);
     expect((orch.sandboxHealth(U) as { lastIntegrity: string }).lastIntegrity).not.toBe("fault");
   });
 
@@ -168,10 +168,10 @@ describe("0031 — game orchestrator & integrity watcher", () => {
       tickEveryMs: 0, idleTickAfterMs: 1, maxOffscreenTicksPerWake: 5, auditEveryMs: 0,
     });
     registry.sandboxFor(U).session.createCharacter({ playerName: "Still", seed: 1 });
-    const before = registry.sandboxFor(U).engine.events.query().length;
+    const before = registry.sandboxFor(U).engine.events.queryAll().length;
     watcher.start();
     clock.advance(100_000);
-    expect(registry.sandboxFor(U).engine.events.query().length).toBe(before);
+    expect(registry.sandboxFor(U).engine.events.queryAll().length).toBe(before);
   });
 
   it("isolation holds while the watcher audits many sandboxes", () => {
@@ -190,8 +190,8 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     watcher.start();
     clock.advance(3000); // ticks + audits across both sandboxes
 
-    const aEvents = JSON.stringify(registry.sandboxFor("A").engine.events.query());
-    const bEvents = JSON.stringify(registry.sandboxFor("B").engine.events.query());
+    const aEvents = JSON.stringify(registry.sandboxFor("A").engine.events.queryAll());
+    const bEvents = JSON.stringify(registry.sandboxFor("B").engine.events.queryAll());
     expect(aEvents.includes("MARKER-A-7f3")).toBe(true);
     expect(bEvents.includes("MARKER-B-9k2")).toBe(true);
     expect(aEvents.includes("MARKER-B-9k2")).toBe(false); // no cross-user content

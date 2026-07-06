@@ -127,10 +127,15 @@
 
   function faceHtml(hg) {
     var evicted = hg && hg.status === "evicted"; // L16
+    var name = hg && hg.name;
     var inner = (hg && hg.portrait)
-      ? '<img loading="lazy" alt="' + esc(hg.name) + '" src="' + esc(hg.portrait) + '">'
+      ? '<img loading="lazy" alt="' + esc(name) + '" src="' + esc(hg.portrait) + '">'
       : OCP_SILHOUETTE;
-    return '<div class="ocp-face' + (evicted ? " ocp-evicted" : "") + '">' + inner + "</div>";
+    // GADGET-4: a hover title + aria-label on the FACE wrapper — `alt` only helps screen readers
+    // (and only once the image has loaded), so a sighted mouse user had zero way to identify a
+    // ~40px tile (or an unloaded/placeholder one) without reopening the full cast window.
+    var name_attrs = name ? ' title="' + esc(name) + '" aria-label="' + esc(name) + '"' : "";
+    return '<div class="ocp-face' + (evicted ? " ocp-evicted" : "") + '"' + name_attrs + ">" + inner + "</div>";
   }
 
   function esc(s) {

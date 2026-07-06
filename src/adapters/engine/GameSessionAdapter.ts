@@ -4,6 +4,7 @@ import type {
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
   SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult, SealedFact, AccuseTieResult, ConfrontResult,
+  DailyRecapView,
   ExposeSecretReq, ExposeResult, TradeSecretReq, TradeResult, SecretLeverDescriptor,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
@@ -24,7 +25,7 @@ import { moodWord, voiceFingerprint } from "../../engine/voice";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt } from "../../engine/diaryRoom";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
-  formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, PLAN_FOR,
+  formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, PLAN_FOR, advancePlayerCampaign,
   deriveDrive, ownBallotLean, ARCHETYPE_AGGRESSION,
   selectNemesis, NEMESIS, NO_NEMESIS,
   type Campaign, type CampaignActor, type Influence, type Drive, type NemesisTrack, type NemesisCandidate,
@@ -143,12 +144,12 @@ import {
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   advanceClock, advanceClockPerConversation, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
-  type FinaleProgress, type EvictionProgress,
+  type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
 import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
-import { loadReserveTwists } from "../../engine/reserveTwists";
+import { loadReserveTwists, IMPLEMENTED_TWISTS } from "../../engine/reserveTwists";
 import {
   generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads,
   defaultTriggerConditionFor, triggerMet, sourceWindowClosed, threadRumor,
@@ -198,6 +199,8 @@ import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore, TrackedSighting } from "../../engine/sessionSnapshot";
 import { cloneSession, fastClone } from "../../engine/sessionSnapshot";
+import { diffuseGossip, makeSocialGraph, gossipEdgeAffinity, GOSSIP, LEGEND, legendFrom } from "../../engine/gossip";
+import { notablePlayerActs } from "../../engine/legends";
 
 const COMP_TYPES: ReadonlySet<string> = new Set<CompetitionType>([
   "endurance", "physical", "puzzle", "quiz", "memory", "mental", "social",
@@ -346,9 +349,6 @@ function sanitizeFlavor(s: string, max = 160): string {
   return s.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-/** The twist kinds the LIVE loop can actually run (0025/B53). The pool may hold more; only these load. */
-const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-eviction"]);
-
 /**
  * 0085 B2 — whether the live campaign layer runs by DEFAULT. OFF unless `ORWELL_CAMPAIGNS=1` (the deploy
  * sets it; the calibration/UAT harness never does ⇒ every seeded gate is byte-identical). Read once at
@@ -413,6 +413,16 @@ const VOTE_DEDUCTION_ENABLED_DEFAULT = process.env.ORWELL_VOTE_DEDUCTION === "1"
  * (like the campaign/trajectory flags); a test overrides per-session via `setJuryHouseEnabled`.
  */
 const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
+
+/**
+ * 0101 — whether NPC MYTH-MAKING runs by DEFAULT. OFF unless `ORWELL_MYTH_MAKING=1`. A DEDICATED flag
+ * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_JURY_HOUSE`) so calibration neutrality is provable in isolation:
+ * with it unset, `legendTick` no-ops before drawing anything (the dedicated legend-rng stream never
+ * advances) and no legend is ever seeded ⇒ the seeded `juryReach`/gradient/UAT spine is byte-identical to
+ * today. The calibration/UAT harness never sets it; the live deploy may. Read once at module load (like
+ * the sibling flags); a test overrides per-session via `setMythMakingEnabled`.
+ */
+const MYTH_MAKING_ENABLED_DEFAULT = process.env.ORWELL_MYTH_MAKING === "1";
 
 /**
  * 0066 Phase-2 (#1125) — the three sleep-economy EXTENSIONS, each behind its OWN dedicated opt-in flag
@@ -543,6 +553,19 @@ export class GameSessionAdapter implements GameSession {
    * shared society/vote stream (the L21/L24 isolation), so even live campaigns don't re-phase calibration. */
   private campaignTickCount = 0;
   /**
+   * Phase 2 of "the player can play offense" (0085 follow-on) — the DEDICATED rng draw counter for the
+   * player's OWN campaign moves (`foldPlayerCampaignMove`), forked off the game seed exactly like
+   * `campaignTickCount` — never the shared society/vote stream, so the player's offense never re-phases
+   * calibration. Monotonic (++ only); tracked in `SessionCoreCounts` for the non-degradation checkpoint.
+   */
+  private playerCampaignMoveCount = 0;
+  /**
+   * Phase 2 — the BEAT the player's own campaign last earned progress (throttle: at most one
+   * progress-earning pitch per beat, the SAME cadence an NPC's own campaign advances at — listing many
+   * holders in one scene grows `knownTo` for each but earns no extra speed). `null` before any pitch.
+   */
+  private playerCampaignProgressBeat: number | null = null;
+  /**
    * 0100 — whether the JURY-HOUSE grudge layer RUNS. DEFAULT OFF: the calibration/UAT harness leaves it
    * off, so with it unset NO jury-house stretch runs, NO draw is taken, and NO grudge is applied ⇒ every
    * seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL; the live deploy enables it. A test flips it
@@ -563,6 +586,22 @@ export class GameSessionAdapter implements GameSession {
    * orchestrator's shared society/competition/vote stream, so even with the layer ON the main house's seeded
    * outcomes stay in phase (only the hidden finale lean changes). Persisted so the stream is restart-stable. */
   private juryHouseTickCount = 0;
+  /**
+   * 0101 — whether NPC MYTH-MAKING runs. DEFAULT OFF: the calibration/UAT harness never enables it, so
+   * with it unset `legendTick` draws nothing and mints no legend ⇒ every seeded gate (juryReach/gradient/
+   * UAT) is BYTE-IDENTICAL; the live deploy may enable it. A test flips it via `setMythMakingEnabled`.
+   */
+  private mythMakingEnabled = MYTH_MAKING_ENABLED_DEFAULT;
+  /** The DEDICATED legend-rng tick counter — legend draws fork off the game seed + this, NEVER the
+   *  orchestrator's shared society/competition/vote stream (the same isolation `juryHouseTickCount`
+   *  uses), so even with the layer ON the main house's seeded outcomes stay in phase. Persisted so the
+   *  stream is restart-stable. */
+  private legendTickCount = 0;
+  /** The per-season HARD CAP on legends minted (0101, sibling of `surfacedThreadCount`) — monotonic. */
+  private legendCount = 0;
+  /** The watermark — the highest consumed notable-act's `GameEvent.ts` — so a used act is never
+   *  re-selected into a second legend (0101). Monotonic (non-decreasing). */
+  private legendLastActTick = 0;
   /**
    * 0086 — every active houseguest's current DRIVE (motivation + intensity), keyed by id. Computed each
    * campaignTick (sticky — carried from the prior tick), engine-only + Vault-sealed, never projected. The
@@ -2226,10 +2265,21 @@ export class GameSessionAdapter implements GameSession {
       // accumulates (never re-guessed). Absent ⇒ byte-shaped as a pre-0096 save.
       ...(this.nemesisTrack.current !== undefined ? { nemesis: this.nemesisTrack.current } : {}),
       ...(Object.keys(this.nemesisTrack.streak).length ? { nemesisStreak: { ...this.nemesisTrack.streak } } : {}),
+      // Phase 2 ("the player can play offense") — the player's OWN dedicated campaign-rng draw counter
+      // + its per-beat progress throttle, persisted so both stay reproducible/consistent across a
+      // restart (absent ⇒ 0 / null, byte-shaped as a pre-Phase-2 save).
+      ...(this.playerCampaignMoveCount > 0 ? { playerCampaignMoveCount: this.playerCampaignMoveCount } : {}),
+      ...(this.playerCampaignProgressBeat !== null ? { playerCampaignProgressBeat: this.playerCampaignProgressBeat } : {}),
       // 0100 — the DEDICATED jury-house rng tick counter, persisted so the isolated grudge stream stays
       // reproducible across a restart (the accumulated grudge itself rides on `live.juryGrudge`). Absent ⇒
       // 0 on restore (byte-shaped as a pre-0100 save).
       ...(this.juryHouseTickCount > 0 ? { juryHouseTickCount: this.juryHouseTickCount } : {}),
+      // 0101 — the DEDICATED legend-rng tick counter, the per-season legend cap, and the notable-act
+      // watermark, persisted so the isolated myth-making stream + its cap + its no-repeat guard survive a
+      // restart (0007/0030). Absent ⇒ 0 on restore (byte-shaped as a pre-0101 save / the layer off).
+      ...(this.legendTickCount > 0 ? { legendTickCount: this.legendTickCount } : {}),
+      ...(this.legendCount > 0 ? { legendCount: this.legendCount } : {}),
+      ...(this.legendLastActTick > 0 ? { legendLastActTick: this.legendLastActTick } : {}),
       // 0087: persist the hidden relationship-trajectory momentum + its recent-fold ring buffers, so a
       // multi-week arc RESUMES mid-curdle (0007/0030) and ACCUMULATES, never thins. Vault-class hidden state
       // (no player/admin-visible number) — already inside the never-outward snapshot. Absent ⇒ byte-shaped
@@ -2443,9 +2493,18 @@ export class GameSessionAdapter implements GameSession {
     // 0085: restore live campaigns (absent on pre-0085 saves ⇒ none).
     this.campaigns = (core.campaigns ?? []).map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] }));
     this.campaignTickCount = core.campaignTickCount ?? 0;
+    // Phase 2 ("the player can play offense") — restore the player's own dedicated campaign-rng counter
+    // + its per-beat progress throttle (absent on pre-Phase-2 saves ⇒ 0 / null).
+    this.playerCampaignMoveCount = core.playerCampaignMoveCount ?? 0;
+    this.playerCampaignProgressBeat = core.playerCampaignProgressBeat ?? null;
     // 0100: restore the dedicated jury-house rng tick counter (absent on pre-0100 saves ⇒ 0). The
     // accumulated grudge itself rides on `live.juryGrudge`, restored with the live state above.
     this.juryHouseTickCount = core.juryHouseTickCount ?? 0;
+    // 0101: restore the dedicated legend-rng tick counter, the per-season legend cap, and the notable-act
+    // watermark (absent on pre-0101 saves ⇒ 0).
+    this.legendTickCount = core.legendTickCount ?? 0;
+    this.legendCount = core.legendCount ?? 0;
+    this.legendLastActTick = core.legendLastActTick ?? 0;
     // 0086: restore live drives (absent on pre-0086 saves ⇒ none ⇒ re-derived on the next campaign tick).
     this.drives = core.drives ? new Map(Object.entries(core.drives) as [EntityId, Drive][]) : new Map();
     // 0096: restore the emergent-nemesis arc + its sustain history (absent on a pre-0096 save / when the
@@ -3688,11 +3747,12 @@ export class GameSessionAdapter implements GameSession {
     this.introducedNames = new Set();
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
-    // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each, only
-    // kinds the live loop implements. Engine-only: the schedule rides in the loop state (persisted,
-    // 0030) and the registry writes the Vault audit copy. Invisible to player AND admin until fired.
+    // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each. BE-3:
+    // `loadReserveTwists` now draws the KIND only from `IMPLEMENTED_TWISTS` itself (never the full
+    // curated pool) — no post-hoc filter needed here, and no wasted slot ever silently loads a twist
+    // that can't fire. Engine-only: the schedule rides in the loop state (persisted, 0030) and the
+    // registry writes the Vault audit copy. Invisible to player AND admin until fired.
     const reserve = loadReserveTwists(this.twistCount, new SeededRandom(hashSeed(`${seed}:twists`)))
-      .filter((t) => IMPLEMENTED_TWISTS.has(t.kind))
       .filter((t, i, all) => all.findIndex((o) => o.fireAtBeat === t.fireAtBeat) === i); // one twist per week
     if (reserve.length > 0) {
       this.live.reserve = reserve;
@@ -3716,6 +3776,7 @@ export class GameSessionAdapter implements GameSession {
       this.resetSecretPower(); // 0093/0099 — a fresh season has spent no secrets and an unspent cap
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
+      this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -3978,6 +4039,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetSecretPower(); // 0093/0099 — a warmed/fresh cast has spent no secrets, the caps unspent
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
+    this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -4340,6 +4402,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetTieSurfacing();
     // 0092 — a fresh season: the secret-pacing weekly cadence + anti-spam start clean.
     this.resetSecretPacing();
+    this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
     // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
@@ -4435,6 +4498,14 @@ export class GameSessionAdapter implements GameSession {
     this.pacingDripCount = 0;
     this.pacingTickCount = 0;
     this.pacingLastDrippedWeek = {};
+  }
+
+  /** 0101 — clear the myth-making bookkeeping (a fresh season: no legend minted, the cap unspent, no
+   *  notable act yet consumed). */
+  private resetLegends(): void {
+    this.legendTickCount = 0;
+    this.legendCount = 0;
+    this.legendLastActTick = 0;
   }
 
   private seedSeededRelationships(seed: number): void {
@@ -5268,6 +5339,7 @@ export class GameSessionAdapter implements GameSession {
     if (flags.juryHouse !== undefined) this.juryHouseEnabled = flags.juryHouse;
     if (flags.secretPacing !== undefined) GameSessionAdapter.secretPacingOverride = flags.secretPacing;
     if (flags.seededTieSurfacing !== undefined) GameSessionAdapter.seededTieSurfacingOverride = flags.seededTieSurfacing;
+    if (flags.mythMaking !== undefined) this.mythMakingEnabled = flags.mythMaking;
   }
 
   /** The CURRENT resolved state of every B2 behavioral flag (env default or override) — Vault-free,
@@ -5280,6 +5352,7 @@ export class GameSessionAdapter implements GameSession {
       secretPacing: this.secretPacingEnabled,
       juryHouse: this.juryHouseEnabled,
       seededTieSurfacing: this.seededTieSurfacingEnabled,
+      mythMaking: this.mythMakingEnabled,
     };
   }
 
@@ -5543,9 +5616,18 @@ export class GameSessionAdapter implements GameSession {
       const strainNow = triggerStrain(n.soul);
       const precipitant = Math.min(1, Math.max(0, precipitants.get(n.id) ?? 0));
       if (!shouldFire({ volatility: trig.volatility, kind: eruptionKind }, strainNow, precipitant, rng)) continue;
-      // FIRE — a Vault-safe PUBLIC eruption the player witnesses. The recorded content is a GENERIC pool line
-      // (no name, no sealed wording, no number); the connection trigger → event stays Vault-side.
+      // FIRE — a Vault-safe PUBLIC eruption. The recorded content is a GENERIC pool line (no name, no
+      // sealed wording, no number); the connection trigger → event stays Vault-side.
       const content = eruptionEvent(eruptionKind, events, rng, { week: this.week, phase: this.phase });
+      // BE-DEEP2-3/COMP-6: compute the TRUE co-present witness set ONCE and reuse it for both the
+      // recorded event's `witnessSet` and the relationship fold below, so the two can never drift apart
+      // again. Previously the event hardcoded `[PLAYER, n.id]` regardless of how many OTHER houseguests
+      // were actually in the room — starving every other co-present houseguest of a legitimate
+      // witnessed-event recall (they couldn't reference "that blow-up" in a confessional even though the
+      // fiction says they were standing right there). The player stays unconditionally in the set: this
+      // is a headline house-wide announcement (a public eruption, `hidden: false`), and `validateEvent`
+      // (src/domain/event.ts) HARD-requires the player be a witness of any non-hidden event.
+      const witnesses = this.coPresentWitnessesOf(n.id);
       events.record({
         id: `trigger:erupt:${this.gameSeed ?? 0}:${this.triggerTickCount}:${n.id}`,
         // The EventStore is the monotonic tick authority (B60/E12): any non-advancing ts is normalized to
@@ -5553,14 +5635,15 @@ export class GameSessionAdapter implements GameSession {
         ts: 0,
         type: "house-event",
         initiator: n.id,
-        witnessSet: [PLAYER, n.id], // player-witnessed ⇒ ordinary player knowledge (0002), never secret
+        // PLAYER always (see above) + the erupter + every OTHER houseguest actually co-present — never secret.
+        witnessSet: [PLAYER, n.id, ...witnesses.filter((id) => id !== PLAYER)],
         hidden: false,
         content,
       });
       // Durable consequence (0023/0041): the erupter's soul folds (charge spent or volatility raised), and
       // co-present witnesses' reads of them shift along the existing pathway (0026) — a real fold, no number.
       this.inflect(n.id, GameSessionAdapter.eruptionEmotion(eruptionKind));
-      this.foldEruptionWitnesses(n.id, rng);
+      this.foldEruptionWitnesses(n.id, witnesses, rng);
       // Mark the fuse spent (monotonic, persisted on the byte-stable house) + bump the season cap counter.
       trig.fired = true;
       trig.lastFiredWeek = this.week;
@@ -5568,16 +5651,23 @@ export class GameSessionAdapter implements GameSession {
     }
   }
 
+  /** 0091/BE-DEEP2-3 — the erupter's TRUE co-present witness set: every living houseguest (including the
+   *  player) sharing their room (when presence is tracked) and awake (when the sleep clock is on). Shared
+   *  by the recorded event's `witnessSet` and the relationship fold so the two never drift apart. */
+  private coPresentWitnessesOf(erupter: EntityId): EntityId[] {
+    const room = this.presence?.get(erupter);
+    const awake = this.awakeNow();
+    return this.livingIds().filter(
+      (id) => id !== erupter && (!this.presence || !room || this.presence.get(id) === room) && (!awake || awake.has(id)),
+    );
+  }
+
   /** 0091 — a public eruption shifts how the co-present house (and the player) reads the erupter: a small
    *  THREAT/CONFLICT fold along the existing relationship pathway (0026), drawn on the DEDICATED trigger rng
    *  (never the shared spine). The player is a witness like anyone — their read of the erupter moves, never a
-   *  number shown. No-op if no one else is on the floor. */
-  private foldEruptionWitnesses(erupter: EntityId, rng: SeededRandom): void {
-    const room = this.presence?.get(erupter);
-    const awake = this.awakeNow();
-    const witnesses = this.livingIds().filter(
-      (id) => id !== erupter && (!this.presence || !room || this.presence.get(id) === room) && (!awake || awake.has(id)),
-    );
+   *  number shown. No-op if no one else is on the floor. `witnesses` is the SAME set the caller just used
+   *  for the recorded event's `witnessSet` (BE-DEEP2-3) — never recomputed separately. */
+  private foldEruptionWitnesses(erupter: EntityId, witnesses: readonly EntityId[], rng: SeededRandom): void {
     for (const w of witnesses) {
       // Seeing someone blow up reads as conflict toward them (threat ▲, warmth ▼) — the society's own
       // `conflict` impact, directed witness → erupter. Drawn on the dedicated trigger rng only.
@@ -5595,6 +5685,33 @@ export class GameSessionAdapter implements GameSession {
   declarePlayerCampaign(target: EntityId): void { this.playerCampaignTarget = target; }
   /** Read back the player's declared campaign target (player-knowledge only; never an NPC pathway). */
   playerCampaignRead(): EntityId | null { return this.playerCampaignTarget; }
+
+  /**
+   * Phase 2 of "the player can play offense" (0085 follow-on) — fold ONE of the player's OWN LANDED
+   * pitches (`recordInteraction`'s `aboutEdges`, Phase 1) into a real, bounded, persistent campaign the
+   * PLAYER owns, so sustained lobbying can tilt the eventual vote through the SAME `campaignTiltFor`
+   * mechanism an NPC's own campaign uses. Called ONLY by `EngineCommandsAdapter` for a `more-threatened`
+   * pitch that actually landed (never a backfired one). Self-gated: a no-op (ZERO draws, no campaign)
+   * unless the campaign layer is enabled, so the calibration harness stays byte-identical. Uses its OWN
+   * dedicated rng stream (never the shared society/vote stream) and throttles progress to at most one
+   * earning move per beat — the SAME cadence an NPC's own campaign advances at, so pitching many
+   * holders in one scene spreads awareness (`knownTo`) but earns no speed advantage.
+   *
+   * `campaignActors()`/`formCampaigns()` still exclude the player (below) — nothing here EVER
+   * autonomously seeds a campaign FOR the player; only their own actual recorded move does.
+   */
+  foldPlayerCampaignMove(target: EntityId, holder: EntityId): void {
+    if (!this.campaignsEnabled) return;
+    const beat = this.beatSeqNow();
+    const existing = this.campaigns.find((c) => c.owners[0] === PLAYER && c.status === "active");
+    const fresh = !existing || existing.target !== target || beat >= existing.deadlineBeat;
+    const awardProgress = fresh || this.playerCampaignProgressBeat !== beat;
+    this.playerCampaignMoveCount += 1;
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:playerCampaign:${this.playerCampaignMoveCount}`));
+    const next = advancePlayerCampaign(existing, PLAYER, target, holder, beat, rng, awardProgress);
+    this.campaigns = [...this.campaigns.filter((c) => c.owners[0] !== PLAYER), next];
+    if (awardProgress) this.playerCampaignProgressBeat = beat;
+  }
 
   private influenceOf(id: EntityId): Influence {
     const hg = this.house ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id)) : undefined;
@@ -5674,8 +5791,16 @@ export class GameSessionAdapter implements GameSession {
       }
     }
     // Advance each active campaign one move (progress + knownTo diffusion), then drop the resolved.
+    // EXCLUDES the player's own campaign (Phase 2 of "the player can play offense"): `advanceCampaign`
+    // is the AUTONOMOUS off-screen-tick mover — applying it to a player-owned entry would silently
+    // grant free progress + knownTo diffusion every tick regardless of whether the player pitched
+    // anyone, defeating the per-beat-throttled, pitch-earned design (`foldPlayerCampaignMove`) and the
+    // spec's own rule ("no NPC acts on the campaign except in response to the player's actual recorded
+    // moves" — this guards the mirror case: nothing autonomously acts FOR the player either).
     this.campaigns = this.campaigns
-      .map((c) => c.status === "active" ? advanceCampaign(c, { rng, beat, alliesOf: (id) => this.allyReadsOf(id).map((a) => a.toward) }) : c)
+      .map((c) => c.status === "active" && c.owners[0] !== PLAYER
+        ? advanceCampaign(c, { rng, beat, alliesOf: (id) => this.allyReadsOf(id).map((a) => a.toward) })
+        : c)
       .filter((c) => c.status === "active");
     // 0086: derive EVERY active houseguest's drive this tick (sticky from the prior tick) — the whole house
     // is motivated; only the loudest are campaigns above, the quiet `target` ones add the own-ballot lean.
@@ -5838,6 +5963,68 @@ export class GameSessionAdapter implements GameSession {
 
   /** Whether the jury-house layer is live (0100) — exposed for the orchestrator's wiring symmetry/tests. */
   juryHouseEnabledNow(): boolean { return this.juryHouseEnabled; }
+
+  /**
+   * 0101 — NPC MYTH-MAKING: at most once per off-screen tick, mint a LEGEND about a rare, notable player
+   * act and let it diffuse NPC-to-NPC exactly like an ordinary rumor (0002/B27b) — see
+   * `docs/features/0101-npc-myth-making.md`. Called once per off-screen tick by the orchestrator, AFTER
+   * the main-house gossip pass, passing the live `events`/`knowledge`.
+   *
+   * SELF-GATED (the `campaignTick`/`juryHouseTick` discipline): a no-op (ZERO draws) unless the layer is
+   * enabled, so the calibration/UAT harness — which never enables it — is byte-identical. Runs on a
+   * DEDICATED, isolated rng (forked off the game seed + this tick's OWN counter, never the orchestrator's
+   * shared society/competition/vote stream). Applies NO relationship fold — `diffuseGossip` is called with
+   * neither `rel` nor `subjects` — so a legend never moves any NPC's read of the player and never folds the
+   * player's own edges (mandate #3 / ADR 0003 — the human forms their own read); this also makes the pass
+   * calibration-neutral BY CONSTRUCTION even while ON (only the hidden knowledge layer changes, never a
+   * relationship edge). The per-season cap (`LEGEND.maxPerSeason`) and the notable-act watermark
+   * (`legendLastActTick`, so a used act is never re-picked) are enforced here.
+   */
+  legendTick(events: EventStore, knowledge: KnowledgeService): void {
+    if (!this.mythMakingEnabled || !this.house) return;
+    if (this.legendCount >= LEGEND.maxPerSeason) return;
+    this.legendTickCount += 1;
+    const rng = new SeededRandom(hashSeed(`legend:${this.gameSeed ?? ""}:${this.legendTickCount}`));
+    if (rng.next() >= LEGEND.seedProb) return; // rare — most ticks mint nothing
+    const playerName = this.house.player.name;
+    const acts = notablePlayerActs(events.query({ witnessedBy: PLAYER }), playerName, this.legendLastActTick);
+    if (acts.length === 0) return;
+    const act = rng.pick(acts);
+    this.legendLastActTick = act.ts; // never re-pick an act already turned into a legend
+    const living = this.livingIds().filter((id) => id !== PLAYER);
+    if (living.length === 0) return;
+    // The origin earwitness (0101 open question #4): a houseguest CURRENTLY co-present with the player if
+    // one exists (a real first source), else a seeded pick from the living house — never invented content.
+    const occ = this.societyOccupancy();
+    const room = occ?.get(PLAYER);
+    const coPresent = room ? living.filter((id) => occ!.get(id) === room) : [];
+    const origin = coPresent.length > 0 ? rng.pick(coPresent) : rng.pick(living);
+    const everyone: EntityId[] = [PLAYER, ...living];
+    const edges: Array<readonly [EntityId, EntityId]> = [];
+    for (let i = 0; i < everyone.length; i++) {
+      for (let j = i + 1; j < everyone.length; j++) {
+        if (gossipEdgeAffinity(this.rel, everyone[i]!, everyone[j]!) > GOSSIP.affinityEdge) {
+          edges.push([everyone[i]!, everyone[j]!] as const);
+        }
+      }
+    }
+    if (edges.length === 0) return;
+    // NO `rel` / `subjects` passed (0101 open question #3, v1): a legend never folds ANY edge — not the
+    // player's own reads, not any NPC's read of the player — only the belief itself diffuses/distorts.
+    diffuseGossip({
+      knowledge, graph: makeSocialGraph(edges), rng, origin,
+      fact: { content: legendFrom(act.actClass) },
+      rounds: GOSSIP.rounds, transmitProb: GOSSIP.transmitProb, decay: GOSSIP.decay,
+    });
+    this.legendCount += 1;
+  }
+
+  /** Turn NPC myth-making on/off (0101). Off by default — the calibration harness leaves it off (with it
+   *  off `legendTick` draws nothing and mints no legend ⇒ the seeded spine is byte-identical). */
+  setMythMakingEnabled(on: boolean): void { this.mythMakingEnabled = on; }
+
+  /** Whether the myth-making layer is live (0101) — exposed for the orchestrator's wiring symmetry/tests. */
+  mythMakingEnabledNow(): boolean { return this.mythMakingEnabled; }
 
   private archetypeOf(id: EntityId): string {
     return this.house?.npcs.find((n) => n.id === id)?.character.archetype ?? "floater";
@@ -6173,22 +6360,114 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — build the non-committal cliffhanger a daily recap
+   * MAY carry, from exactly two Vault-free, already-in-motion signals (never the Vault, never a future
+   * roll): (a) a deal the player holds that is `vague` or nearing its negotiated expiry (0109) — a
+   * strained understanding the player can already feel; (b) that something surfaced to the player
+   * TODAY (the freshly-computed `surfacedToday` slice) that "isn't finished playing out". With more
+   * than one eligible candidate, the pick rides a DEDICATED per-day side rng (`daily-recap:<day>`,
+   * forked off the game seed) — never the shared season/vote/jury stream, so this can never perturb a
+   * seeded outcome. No eligible thread ⇒ `undefined` (a quiet day closes with no manufactured hook).
+   */
+  private buildDailyRecapHook(day: number, surfacedToday: readonly string[]): DailyRecapHook | undefined {
+    if (!this.house || !this.live) return undefined;
+    const week = this.live.week;
+    const candidates: DailyRecapHook[] = [];
+    for (const d of this.deals.forParty(PLAYER)) {
+      if (d.status !== "open") continue;
+      const other = d.parties.find((p) => p !== PLAYER);
+      if (!other) continue;
+      const nearingExpiry = d.expiresWeek !== undefined && d.expiresWeek - week <= 1;
+      if (d.vague || nearingExpiry) {
+        candidates.push({
+          thread: `deal:${d.id}`,
+          framing: `what you and ${this.nameOf(other)} agreed to feels like it's on borrowed time`,
+        });
+      }
+    }
+    if (surfacedToday.length > 0) {
+      candidates.push({
+        thread: `surfaced:${day}`,
+        framing: "what you heard today doesn't feel finished playing out",
+      });
+    }
+    if (candidates.length === 0) return undefined;
+    if (candidates.length === 1) return candidates[0];
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:daily-recap:${day}`));
+    return rng.pick(candidates);
+  }
+
+  /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — materialize the "day in review" digest for the day
+   * that just closed, called from `turnIn` BEFORE the clock rolls to the next morning (the player's
+   * own bedtime lever, ADR 0006 — never a free-floating scheduler). Stitched from exactly the two
+   * Vault-free sources the weekly-recap design specified, scoped to the tail since the persisted
+   * cursors (never re-scans, never double-counts, never a Vault read):
+   *   - the player's witnessed ceremony/scene/deal highlights — the SAME structural filter
+   *     `seasonRecap()` already uses, sliced to events recorded since the last materialized day;
+   *   - gossip that reached the player's OWN knowledge today via a real in-game pathway (0002) —
+   *     `playerKnowledgeReader` (the same source `freshSurfacedFacts` trusts), excluding the OOC
+   *     Diary Room (`NO_NPC_PATHWAY`) — a rumor still diffusing in the hidden layer never appears.
+   * Persists the result on `this.live.lastDailyRecap` so a later re-read (`dailyRecap()`, a fresh
+   * context, a restore) reproduces the EXACT same digest for that day — determinism/non-degradation.
+   * Folds nothing, advances no thread, perturbs no seeded outcome — a pure presentation snapshot.
+   */
+  private materializeDailyRecap(): DailyRecapView | undefined {
+    const s = this.live;
+    if (!s) return undefined;
+    const day = s.dayNumber ?? 1;
+    const allEvents = this.record?.events() ?? [];
+    const evFrom = Math.min(s.dailyRecapEventCursor ?? 0, allEvents.length);
+    const highlights = allEvents.slice(evFrom)
+      .filter((e) => !e.hidden && (e.id.startsWith("season:") || e.type === "deal" || e.type === "betrayal"))
+      .map((e) => e.content);
+    const knownAll = this.playerKnowledgeReader?.() ?? [];
+    const knFrom = Math.min(s.dailyRecapKnowledgeCursor ?? 0, knownAll.length);
+    const surfaced = knownAll.slice(knFrom)
+      .filter((f) => f.pathway !== NO_NPC_PATHWAY)
+      .map((f) => this.humanize(f.content));
+    const hook = this.buildDailyRecapHook(day, surfaced);
+    const recap: DailyRecapView = { day, highlights, surfaced, ...(hook ? { hook } : {}) };
+    s.lastDailyRecap = recap;
+    s.dailyRecapEventCursor = allEvents.length;
+    s.dailyRecapKnowledgeCursor = knownAll.length;
+    s.dayNumber = day + 1;
+    return recap;
+  }
+
+  /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — re-fetch the most recently CLOSED day's digest
+   * (materialized once, at the `turnIn` that closed it). `null` before any day has closed. Vault-free,
+   * reproducible: re-reading returns the exact same materialized view every time (no re-computation).
+   */
+  dailyRecap(): DailyRecapView | null {
+    return this.live?.lastDailyRecap ?? null;
+  }
+
+  /**
    * The player's bedtime lever (ADR 0006 §Principle 6): the player CHOOSES to turn in for the night.
    * Ends their night where it stands (an early night ⇒ rested for tomorrow; outlasting the house into
    * late-night ⇒ running on empty) and rolls the house to the next morning. Never auto-called — only
    * the player's own action fires it. A no-op when the clock isn't running, the game is over, or the
    * player has left. Durable (0030): the new morning + banked rest survive a reload.
+   *
+   * 0102 (redesign #884): BEFORE the night rolls, materializes the day-that-just-closed's Vault-free
+   * "day in review" digest and carries it on the result as `dailyRecap` (present only when it exists —
+   * `materializeDailyRecap` always returns one once the clock is running, so this is present on every
+   * turn-in that actually fires; absent only when the whole call was a dormant no-op above).
    */
   turnIn(): AdvanceView {
     if (!this.house || !this.live) return this.advanceView(null);
     if (!this.timeOfDayEnabled) return this.advanceView(null); // dormant unless the clock is running
     if (this.live.finished || playerHasLeft(this.live, PLAYER)) return this.advanceView(null);
     return this.inOneCommit(() => {
+      const recap = this.materializeDailyRecap();
       playerTurnIn(this.live!, PLAYER);
       this.accrueNightFatigue(); // the player chose bed — a genuine night-end; accrue before clearing conflicts
       this.rollNightConflicts();
       this.persist();
-      return this.advanceView(null);
+      const view = this.advanceView(null);
+      return recap ? { ...view, dailyRecap: recap } : view;
     });
   }
 

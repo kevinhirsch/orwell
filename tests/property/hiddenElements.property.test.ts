@@ -47,7 +47,7 @@ describe("0050/B50 — live NPCs carry seeded hidden elements that surface rarel
     for (let i = 0; i < 60; i++) orch.advance(user, "offscreen-tick");
 
     const sb = reg.sandboxFor(user);
-    const offScenes = sb.engine.events.query().filter((e) => e.id.startsWith("offscreen:"));
+    const offScenes = sb.engine.events.queryAll().filter((e) => e.id.startsWith("offscreen:"));
     const surfaced = offScenes.filter((e) => e.content.includes(" — ")); // the surfacing marker
     expect(offScenes.length).toBeGreaterThan(20);
     // RARE: bounded well above the configured rate to absorb variance, but far from common.

@@ -67,6 +67,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "exposeSecret", "tradeSecret",
              "premiereIntros", "markHouseguestMet",
              "seasonRecap", "seasonRetrospective", "npcVoice",
+             # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
+             "dailyRecap",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
              "renderScene", "endOfSessionSummary",
              # God Mode (0016): admin-gated non-Vault levers (gated by _ADMIN_TOOLS).
@@ -115,6 +117,8 @@ GAME_TOOL_KEEP = frozenset({
     "premiereIntros", "markHouseguestMet",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
+    # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
+    "dailyRecap",
     # B65: the knowledge-bounded per-NPC voicing projection.
     "npcVoice",
     "renderScene", "endOfSessionSummary",

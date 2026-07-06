@@ -1,10 +1,13 @@
 # 0101 — NPC myth-making (you become house folklore)
 
-> **Status:** 📝 **SPEC — drafted 2026-06-25, not yet built.** Tracks issue **#883**.
-> **Gate (planned):** engine (Vitest + a property/distribution gate + the dependency-cruiser Vault
-> boundary + BDD `0101-npc-myth-making.feature`) and front-end (the voicing path consumes the
-> Vault-safe legend belief through the existing rumor surfacing — the player hears "people are saying
-> you…" — pytest-gated where the FE voices it).
+> **Status:** ✅ **BUILT 2026-07-05.** Tracks issue **#883**.
+> **Gate:** engine (`tests/unit/legends0101.test.ts` — the pure selector + adapter/calibration-neutrality
+> gate; `test:arch`'s dependency-cruiser Vault boundary; BDD `0101-npc-myth-making.feature`, wired into
+> `cucumber.cjs`, step defs `npc_myth_making.steps.ts`). Opt-in behind `ORWELL_MYTH_MAKING=1` (also a
+> `setBehavioralFlags({ mythMaking })` God-Mode runtime dial) — default OFF, byte-identical to the
+> pre-feature build when off. The front-end voicing path (the model repeating "people are saying you…"
+> from the existing surfaced belief) rides the SAME rumor-surfacing pathway 0002/B27b already uses —
+> no new front-end wiring was needed.
 > **Builds directly on (does NOT duplicate):** the 0002 gossip-diffusion model already in
 > `src/engine/gossip.ts` — beliefs carry `factId` lineage + `source` + `confidence` (decaying per hop)
 > + `distortion` (growing per hop), diffuse NPC-to-NPC along the affinity graph, and reach the player
@@ -231,6 +234,25 @@ play into a closed bucket that changes what can be narrated next.
    the house mythologizes the player's big moments, not every line (a property test over a full season).
 8. **Non-degradation:** legends are ordinary durable beliefs — they round-trip a save and accumulate over a
    season; the per-season legend count persists so a restart does not re-mint the budget.
+
+## Build-time resolutions (2026-07-05)
+
+The five open questions below were resolved exactly along their documented "Start:" defaults, with no
+owner deviation needed — recorded here for traceability:
+
+1. **Notable-act set** — a small, curated five: `hoh-win`, `veto-win`, `veto-save` (excludes a self-save),
+   `nominations`, `finale-win` (`src/engine/legends.ts`'s `classifyNotableAct`). A player-orchestrated
+   blindside and a public conflict were left OUT of v1 (no reliable structured signal exists yet to
+   attribute an eviction to the player's own campaigning without over-reaching) — a natural v2 extension
+   once 0085/0086's campaign/drive layer exposes that attribution directly.
+2. **Seed rate + cap** — `LEGEND.seedProb = 0.35` per eligible off-screen tick, `LEGEND.maxPerSeason = 4`
+   (`src/engine/gossip.ts`).
+3. **NPC→player fold** — v1 ships with **no fold at all**: `legendTick` passes neither `rel` nor `subjects`
+   to `diffuseGossip`, so a legend moves no edge whatsoever (stricter than "no player edges" — no NPC edges
+   either), keeping the pass calibration-neutral by construction even while enabled.
+4. **Origin earwitness** — a houseguest currently co-present with the player (`societyOccupancy()`) when one
+   exists, else a seeded pick from the living house.
+5. **Decay tuning** — reuses `GOSSIP`'s `rounds`/`transmitProb`/`decay` wholesale (no legend-specific curve).
 
 ## Open questions / defaults (resolve at build)
 

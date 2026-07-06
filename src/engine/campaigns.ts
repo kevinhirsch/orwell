@@ -287,6 +287,68 @@ export function replan(campaign: Campaign, board: CampaignBoard, c: CampaignCons
   return campaign;
 }
 
+// --- Phase 2 of "the player can play offense" (0085 follow-on): the PLAYER'S OWN campaign -------------
+//
+// `campaignActors()`/`formCampaigns()` deliberately never include the player (GameSessionAdapter) — the
+// engine must never autonomously hand the player a scheme they didn't choose (mandate: "the player
+// forms their own reads, human-driven"). Per the spec's own rule ("the player can run their own
+// campaign — as player knowledge, never mind control"), a bare declaration of intent moves nothing;
+// only the player's ACTUAL RECORDED MOVES do. `advancePlayerCampaign` is that mechanism: it turns one
+// successfully-landed third-party pitch (`recordInteraction`'s `aboutEdges`, Phase 1) into a real,
+// bounded, persistent `Campaign` the player owns — mirroring `formCampaigns`/`advanceCampaign` exactly
+// (same shape, same constants, same `campaignTilt` consumer at the vote) so the player's offense reads
+// on equal footing with an NPC's, never a stronger or weaker channel.
+
+/**
+ * Fold ONE player-authored campaign move (PURE). `owner` pitched `holder` (a scene witness) against
+ * `target` and the pitch actually LANDED (never a backfired one — I2: a social move that failed moves
+ * nothing, campaign progress included; the caller only invokes this for a successful fold). Creates the
+ * campaign on the first landed pitch (owners=[owner], knownTo=[owner] until a pitch reaches someone),
+ * or continues the existing one when it's still active, aimed at the SAME target, and hasn't lapsed past
+ * its deadline — a new target, or a lapsed deadline, starts a fresh campaign at zero progress (the
+ * player re-aims by choosing who they lobby against, exactly as they would in play; nothing lingers
+ * indefinitely). Adds `holder` — the scene's actual listener — to `knownTo` (the pathway: aware ONLY
+ * because they were actually pitched, never omnisciently) regardless of `awardProgress`. Progress
+ * accrues (bounded `progressPerMove` ± jitter, exactly like an NPC's `advanceCampaign` tick) ONLY when
+ * `awardProgress` is true — the caller throttles this to at most once per beat (the SAME cadence an
+ * NPC's own campaign advances at), so listing many holders in one scene earns no speed advantage over
+ * the off-screen society. Draws exactly one rng value, and only when `awardProgress` — never mutates.
+ */
+export function advancePlayerCampaign(
+  existing: Campaign | undefined,
+  owner: EntityId,
+  target: EntityId,
+  holder: EntityId,
+  beat: number,
+  rng: RandomnessSource,
+  awardProgress: boolean,
+  c: CampaignConstants = CAMPAIGN,
+): Campaign {
+  const reusable = existing && existing.status === "active" && existing.owners[0] === owner
+    && existing.target === target && beat < existing.deadlineBeat;
+  const base: Campaign = reusable
+    ? existing!
+    : {
+        id: `campaign:${owner}:${beat}`,
+        owners: [owner],
+        goal: "evict",
+        target,
+        plan: [...PLAN_FOR.evict],
+        progress: 0,
+        horizon: "week",
+        status: "active",
+        startedBeat: beat,
+        deadlineBeat: beat + c.weekBeats,
+        confidence: 0.5,
+        knownTo: [owner],
+      };
+  const knownTo = base.knownTo.includes(holder) ? base.knownTo : [...base.knownTo, holder];
+  if (!awardProgress) return { ...base, knownTo };
+  const jitter = 1 + (rng.next() * 2 - 1) * c.progressJitter;
+  const progress = clampUp(base.progress + c.progressPerMove * jitter);
+  return { ...base, progress, knownTo };
+}
+
 // --- 0086: HOUSEGUEST DRIVES (everyone always plays; intensity varies) -------------------------------
 //
 // A Drive is the substrate the Campaign is the top gear of. Every active houseguest always carries one;

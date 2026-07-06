@@ -95,11 +95,65 @@ function _startChat(url, mid, endpointId) {
   }
 }
 
+// AXE-1 (WCAG 2.1.1 Keyboard): roving-tabindex/listbox pattern for the model grid.
+// Each non-offline row is `role="option"` and normally `tabindex="-1"`; exactly one
+// row at a time holds `tabindex="0"` (managed by `_ensureRovingTabindex`) so Tab
+// reaches the grid once, then Arrow Up/Down/Home/End move focus between rows and
+// Enter/Space activates the focused row — the same shape as the gadget-rail's own
+// keyboard reorder (orwellGadgetRail.js).
+function _rovingRows(container) {
+  return Array.prototype.filter.call(
+    container.querySelectorAll('.models-row:not(.models-row-offline)'),
+    (r) => r.offsetParent !== null
+  );
+}
+function _ensureRovingTabindex(container) {
+  const rows = _rovingRows(container);
+  if (!rows.length) return;
+  if (!rows.some((r) => r.tabIndex === 0)) {
+    rows.forEach((r) => { r.tabIndex = -1; });
+    rows[0].tabIndex = 0;
+  }
+}
+function _onModelRowKeydown(e) {
+  const row = e.currentTarget;
+  if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+    e.preventDefault();
+    row.click();
+    return;
+  }
+  const NAV_KEYS = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+  if (NAV_KEYS.indexOf(e.key) === -1) return;
+  const box = document.getElementById('models');
+  if (!box) return;
+  const rows = _rovingRows(box);
+  if (!rows.length) return;
+  e.preventDefault();
+  const cur = rows.indexOf(row);
+  let next;
+  if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = rows.length - 1;
+  else if (e.key === 'ArrowDown') next = cur < 0 ? 0 : (cur + 1) % rows.length;
+  else next = cur < 0 ? rows.length - 1 : (cur - 1 + rows.length) % rows.length;
+  rows.forEach((r) => { r.tabIndex = -1; });
+  rows[next].tabIndex = 0;
+  rows[next].focus();
+}
+
 function _buildModelRow(mid, url, displayName, endpointId, offline, modelType) {
   const row = document.createElement('div');
   row.className = 'models-row' + (offline ? ' models-row-offline' : '');
   row.setAttribute('data-model-id', mid);
   if (modelType === 'image') row.setAttribute('data-model-type', 'image');
+  row.setAttribute('role', 'option');
+  if (offline) {
+    row.setAttribute('aria-disabled', 'true');
+  } else {
+    row.tabIndex = -1;
+    row.setAttribute('aria-selected', 'false');
+    row.setAttribute('aria-label', displayName.split('/').pop());
+    row.addEventListener('keydown', _onModelRowKeydown);
+  }
 
   const handle = document.createElement('span');
   handle.className = 'item-drag-handle';
@@ -175,6 +229,10 @@ function _buildModelRow(mid, url, displayName, endpointId, offline, modelType) {
 export async function refreshModels(force = false) {
   const box = document.getElementById('models');
   if (!box) return;
+  // AXE-1: listbox semantics for the roving-tabindex model grid (idempotent — set once,
+  // survives the box.innerHTML rebuild below since it lives on the box itself, not its children).
+  box.setAttribute('role', 'listbox');
+  box.setAttribute('aria-label', 'Available models');
 
   // Skip network fetch if cache is fresh and not forced — still re-render UI
   const now = Date.now();
@@ -448,9 +506,13 @@ export async function refreshModels(force = false) {
         });
 
         if (allHidden.length > 0) {
-          const showMoreBtn = document.createElement('div');
+          // AXE-1: a real <button> (not a click-only <div>) so the reveal — the only path to
+          // the overflowed rows — is itself keyboard-operable; without this, a keyboard user
+          // could reach the roving-tabindex grid above but still not reach these rows.
+          const showMoreBtn = document.createElement('button');
+          showMoreBtn.type = 'button';
           showMoreBtn.className = 'models-show-all-btn';
-          showMoreBtn.style.cssText = 'text-align:center;padding:6px;opacity:0.5;cursor:pointer;font-size:0.82em;';
+          showMoreBtn.style.cssText = 'display:block;width:100%;text-align:center;padding:6px;opacity:0.5;cursor:pointer;font-size:0.82em;background:none;border:none;color:inherit;font-family:inherit;';
           showMoreBtn.textContent = `Show ${allHidden.length} more model${allHidden.length === 1 ? '' : 's'}`;
           showMoreBtn._target = target;
           showMoreBtn.addEventListener('click', () => {
@@ -458,6 +520,7 @@ export async function refreshModels(force = false) {
             allHidden.forEach(({ mid, url, displayName, endpointId, offline, modelType }) => {
               target.appendChild(_buildModelRow(mid, url, displayName, endpointId, offline, modelType));
             });
+            _ensureRovingTabindex(box);
           });
           target.appendChild(showMoreBtn);
         }
@@ -533,6 +596,7 @@ export async function refreshModels(force = false) {
           for (const ch of box.children) {
             if (ch !== searchBox && ch !== searchResults) ch.style.display = '';
           }
+          _ensureRovingTabindex(box);
           return;
         }
         // Hide all normal groups/headers, show flat search results
@@ -556,10 +620,13 @@ export async function refreshModels(force = false) {
         });
         if (searchResults.children.length === 0) {
           const empty = document.createElement('div');
-          empty.style.cssText = 'text-align:center;padding:12px;opacity:0.4;';
+          // AXE-11: opacity:0.4 over --fg measured ~2.3-2.8:1 (WCAG 1.4.3 fail) in both
+          // themes — use the contrast-checked --color-muted token instead (AXE-7 fix).
+          empty.style.cssText = 'text-align:center;padding:12px;color:var(--color-muted);';
           empty.textContent = 'No models match "' + searchBox.value.trim() + '"';
           searchResults.appendChild(empty);
         }
+        _ensureRovingTabindex(box);
       });
       box.insertBefore(searchBox, box.firstChild);
     }
@@ -626,6 +693,9 @@ export async function refreshModels(force = false) {
         welcomeTip.textContent = tips[Math.floor(Math.random() * tips.length)];
       }
     }
+    // AXE-1: land exactly one row at tabindex="0" after every full rebuild so Tab
+    // reaches the grid; Arrow Up/Down/Home/End (wired per-row above) do the rest.
+    _ensureRovingTabindex(box);
   } catch (e) {
     console.error(e);
     box.textContent = '(render failed: ' + e.message + ')';

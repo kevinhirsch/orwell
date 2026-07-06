@@ -443,7 +443,10 @@ On a TTY the installer shows a **whiptail menu** with every field pre-populated:
 - **Advanced** — step through CTID, hostname, cores/RAM/disk, **rootfs & template storage**
   (auto-listed from `pvesm`), bridge, IP (`dhcp` or a static CIDR + gateway), UI port, branch,
   **OS template** (auto-listed from `pveam available`, newest highlighted), and the **LLM
-  provider** (Anthropic key or Ollama host — written only into the container's `data/.env`).
+  provider** (an Ollama host URL — written only into the container's `data/.env` — or "configure
+  later"; Anthropic and every other provider `frontend/src/llm_core.py` supports are configured
+  post-install via the admin **Settings -> Services/AI** panel, not this installer menu — see
+  `ANTHROPIC_API_KEY` below).
 
 **The OS template is resolved and downloaded automatically** (`pveam update` → newest
 `debian-12-standard` → `pveam download`, with an offline fallback to one already on disk). This
@@ -466,7 +469,14 @@ defaults. **Every setting is also an env override**, so the same run is fully sc
 | `CT_ROOT_PASSWORD` | — | optional container **root password for console login** (≥5 chars; fed via stdin, never on a command line). Without it the LXC console rejects every login — use `pct enter <CTID>` from the host, or set one later with `pct exec <CTID> -- passwd` |
 | `BRANCH` / `REPO` | `main` / this repo | source to install |
 | `GIT_TOKEN` | — | the deploy PAT (private repo; → `data/.env`, never committed) |
-| `ANTHROPIC_API_KEY` / `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |
+| `OLLAMA_HOST` | — | LLM provider (→ `data/.env`, never committed) |
+
+`ANTHROPIC_API_KEY` is **not** an `orwell.sh`/`orwell-install.sh` env var — `write_config()` never
+reads it. Configure Anthropic (or any other provider) after first boot via the admin **Settings ->
+Services/AI** panel (`POST /api/model-endpoints`), which the front-end supports natively
+(`frontend/src/llm_core.py` `_detect_provider`). An earlier revision of the installer's whiptail
+menu offered an "Anthropic API key" option that silently discarded whatever was typed in — it was
+removed rather than fixed, since wiring it up is a front-end change, not a deploy-script one.
 
 **Behavioral-fidelity flags (the "living house" layers).** The installer writes these into `data/.env`
 so a stock box runs the full social texture — each is an opt-in, calibration-neutral-when-off engine
@@ -508,6 +518,12 @@ CTID=104 CORES=4 RAM_MB=8192 DISK_GB=12 NET=dhcp ORWELL_PORT=8080 \
 | `systemd/orwell-ops-factory-reset.service` | Oneshot **root** runner: removes the flag first, takes a `flock`, runs **only** `deploy/orwell-oobe-reset.sh --yes` (the browser already confirmed `RESET`), output appended to `data/ops-factory-reset.log`. |
 | `systemd/orwell-ops-update-reset.path` | Root-side watcher for the admin **Update + Reset** button: `PathExists=` on `data/ops/update-reset-requested` → starts the combined runner. Existence-only, same contract as the other watchers. |
 | `systemd/orwell-ops-update-reset.service` | Oneshot **root** runner: removes the flag first, takes a `flock`, runs **only** `deploy/orwell-update-reset.sh --yes` (update with restart suppressed, then OOBE reset with the single final restart; fail-closed), output appended to `data/ops-update-reset.log`. |
+| `orwell-backup.sh` | Snapshot `data/` (engine `.env` + saves) + `frontend/data/` (FE SQLite + uploads) to `<app>/backups/orwell-backup-<timestamp>.tar.gz`. Also prunes backups older than `ORWELL_BACKUP_RETENTION_DAYS` (default `30`; `0` disables pruning) every time it runs — manual (`orwell backup`) or scheduled. |
+| `orwell-restore.sh` | Restore a snapshot written by `orwell-backup.sh` (stops services, extracts, restarts). |
+| `systemd/orwell-backup.timer` | **DEPLOY-9 (2026-07-05):** runs `orwell-backup.service` daily (`RandomizedDelaySec=30m`, `Persistent=true` — a box that was off at the scheduled time catches up at next boot). This is the ONLY automated backup trigger; before this, backups were 100% manual. |
+| `systemd/orwell-backup.service` | Oneshot, runs as the unprivileged `orwell` user (same E85 posture as the app units): `bash deploy/orwell-backup.sh` with no arguments (default dest + retention). No `[Install]` section — only the `.timer` is ever enabled directly, same pattern as the ops path units above. |
+| `logrotate/orwell` | **DEPLOY-13 (2026-07-05):** installed verbatim to `/etc/logrotate.d/orwell` — weekly rotation, keep 4, compress, of the five `data/ops-*.log` files (the G19b trigger units append to these forever otherwise). |
+| journald cap | **DEPLOY-14 (2026-07-05):** `orwell-install.sh`'s `log_management()` writes `/etc/systemd/journald.conf.d/orwell.conf` with `SystemMaxUse=${ORWELL_JOURNAL_MAX_USE:-300M}` so the two long-running services' journal entries can't slow-burn toward disk exhaustion on a small LXC disk. |
 
 ## Proxmox guest tools
 

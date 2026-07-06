@@ -344,7 +344,7 @@ export class ConsequenceEngine {
 
   /** Persist: every event detail + the derived hidden state (0007 — lossless, accumulating). */
   snapshot(): MemorySnapshot {
-    return { events: this.events.query(), relationships: this.rel.serialize(), seq: this.seq, tick: this.tick };
+    return { events: this.events.queryAll(), relationships: this.rel.serialize(), seq: this.seq, tick: this.tick };
   }
 }
 

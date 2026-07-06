@@ -1,5 +1,5 @@
 import type {
-  EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq,
+  EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, RecordImageBeatReq,
 } from "../../ports/EngineCommands";
 import type { EventStore } from "../../ports/EventStore";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
@@ -65,6 +65,12 @@ export class EngineCommandsAdapter implements EngineCommands {
    * recalled (ADR 0003), never the chat window. Unset = standalone (no recall index — prior behavior).
    */
   private soulMemo?: (hg: EntityId, content: string) => void;
+  /**
+   * Phase 2 of "the player can play offense" (0085 follow-on) — invoked with (target, holder) for each
+   * LANDED evict-shaped third-party pitch the PLAYER makes, so the session can fold it into the
+   * player's own persistent campaign. Unset = standalone (no campaign effect — prior behavior).
+   */
+  private playerCampaignFold?: (target: EntityId, holder: EntityId) => void;
   /**
    * 0065 Part A — the compare-and-swap stale-write guard for this command port. The authoritative
    * monotonic `beatSeq` lives on the session adapter (it owns the snapshot it is persisted in); the
@@ -133,6 +139,17 @@ export class EngineCommandsAdapter implements EngineCommands {
   /** Wire the semantic-recall index (L27/0024) so a recorded social scene becomes recallable later. */
   setSoulMemo(fn: (hg: EntityId, content: string) => void): void {
     this.soulMemo = fn;
+  }
+
+  /**
+   * Phase 2 of "the player can play offense" (0085 follow-on) — wire the session's own campaign fold
+   * so a LANDED player pitch (never a backfired one) can grow the player's own persistent campaign,
+   * mirroring `formCampaigns`/`advanceCampaign`/`campaignTilt`. Engine-owned magnitude + self-gated by
+   * the campaign layer's own flag (see `GameSessionAdapter.foldPlayerCampaignMove`). Unwired ⇒ no-op
+   * (byte-identical to before this phase).
+   */
+  setPlayerCampaignFold(fn: (target: EntityId, holder: EntityId) => void): void {
+    this.playerCampaignFold = fn;
   }
 
   /**
@@ -312,10 +329,21 @@ export class EngineCommandsAdapter implements EngineCommands {
     const aboutEdges = req.consequence?.aboutEdges?.filter((e) => isLiving(e.holder) && isLiving(e.about));
     if (this.rel && aboutEdges?.length) {
       this.rollBeatWindow();
-      foldThirdPartyConsequence(
+      const moved = foldThirdPartyConsequence(
         this.rel, this.rng, req.initiator, witnessSet, aboutEdges,
         (holder, about) => this.spendFoldBudget(holder, about),
       );
+      // Phase 2 of "the player can play offense" (0085 follow-on): an evict-shaped pitch ("more-
+      // threatened") FROM THE PLAYER that actually LANDED (never a backfired one — `moved` only
+      // contains holders whose edge really moved) feeds the player's own persistent campaign, so
+      // sustained lobbying can tilt the eventual vote exactly as a sustained NPC campaign does. Never
+      // fires for an NPC-initiated scene (this channel is the player's own offense, not a proxy for
+      // one). Self-gated downstream by the campaign layer's own on/off flag.
+      if (this.playerCampaignFold && req.initiator === PLAYER) {
+        for (const e of aboutEdges) {
+          if (e.direction === "more-threatened" && moved.has(e.holder)) this.playerCampaignFold(e.about, e.holder);
+        }
+      }
     }
     // L27: index the scene's SUMMARY into each houseguest's semantic recall memory (0024) — every
     // houseguest who was in it remembers it, so later story/narrative is built from the STORE recalled
@@ -408,7 +436,10 @@ export class EngineCommandsAdapter implements EngineCommands {
     return { recorded: true };
   }
 
-  recordImageBeat(req: { houseguestId: EntityId; imageRef: string }): { eventId: string } {
+  recordImageBeat(req: RecordImageBeatReq): { eventId: string } {
+    // BE-5: refuse an image beat computed against a superseded board BEFORE anything is recorded or the
+    // budget is spent — the same guard every other mutating tool on this port already has.
+    this.guardBeatSeq(req.expectedBeatSeq);
     // 0051: an image shown to the player in-character is a BEAT — recorded like any scene, so it
     // has consequence and memory ("recorded or it didn't happen"). Player-witnessed by construction
     // (the witness set is the player — they saw it); never hidden. No hidden-layer write: the image

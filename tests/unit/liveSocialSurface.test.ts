@@ -109,7 +109,7 @@ describe("0036 — diaryRoom (the player's OOC channel, walled from NPCs)", () =
     await sb.mcp.player.callTool("diaryRoom", { entry: SECRET });
 
     // 1) The recorded DR event witnesses the PLAYER alone — no NPC was present.
-    const drEvent = sb.engine.events.query().find((e) => e.type === "diary-room");
+    const drEvent = sb.engine.events.queryAll().find((e) => e.type === "diary-room");
     expect(drEvent).toBeDefined();
     expect(drEvent!.witnessSet).toEqual([PLAYER]);
 

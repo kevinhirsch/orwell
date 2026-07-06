@@ -288,21 +288,46 @@ const _GAME_TOOL_WORDS = [
   'resolveCompetition', 'getGameState', 'gameStatus', 'markHouseguestMet',
   'updateCasting', 'createCharacter', 'surfaceInformationTo', 'npcVoice',
   'whereabouts', 'socialRead', 'makeDeal', 'getVisibleStateFor', 'moveTo',
+  // ADV2-3 — the quarantined DEBUG-only Vault-unseal tool (mandate #2 / CLAUDE.md): it must
+  // never even be NAMED to the player, so it gets the same raw-identifier treatment as every
+  // other engine tool above.
+  'producerVault',
 ];
+// FEDEEP-3 — a machinery NOUN ("the engine/system/model/front end") only reads as an operator
+// aside when it is the SUBJECT of an operator/status verb ("the engine will…", "the model
+// decided…", "the system tallies…", "the front end ate…"). A bare noun match over-fired on
+// ordinary in-fiction prose that merely contains the substring — "gaming the system" (the noun is
+// the OBJECT of "gaming", not the subject of a following verb) and "the model houseguest" (a
+// contestant archetype; "model" is followed by a noun, not a verb) both read as real leaks under
+// the old bare-noun match but are legitimate narration. Requiring an operator verb immediately
+// after the noun phrase keeps the real leak patterns (below) while sparing that prose.
+const _MACHINERY_NOUN_VERBS = 'decided|decides|deciding|says?|said|thinks?|thought|knows?|knew|'
+  + 'handles?|handled|tracks?|tracked|manages?|managed|controls?|controlled|determines?|determined|'
+  + 'calculates?|calculated|tallies|tallied|is|was|were|will|would|has|had|does|did|can|could|'
+  + 'ate|froze|crashed|glitche[ds]?|broke|breaks|hung|stalled|lagged|failed|fails|choked|reset|acts?|acted';
 // A sentence is a machinery aside when it mentions a raw engine tool name
-// ANYWHERE, OR carries a first-person operator/tool-process clause. The operator
-// clause requires an operator VERB after the opener (so legitimate in-character
-// first-person prose — "Let me show you the bedroom", "I can see the kitchen" —
-// is never matched): "let me (call|advance|run|check|record|walk through|…)…",
+// ANYWHERE, OR names backstage machinery (Vault/God-Mode/admin/developer-console — ADV2-3, word
+// parity with the Python _GAME_LEAK_SENTENCE_RE in src/agent_loop.py), OR carries a first-person
+// operator/tool-process clause. The operator clause requires an operator VERB after the opener
+// (so legitimate in-character first-person prose — "Let me show you the bedroom", "I can see the
+// kitchen" — is never matched): "let me (call|advance|run|check|record|walk through|…)…",
 // "I'll/I should/I need to … (record|advance|call|…)", "advance/move/push the
 // game". "walk through it/this" is included (the #1047 "let me walk through it").
 const _MACHINERY_ASIDE_RE = new RegExp(
   '\\b(?:' + _GAME_TOOL_WORDS.join('|') + ')\\b'
-  // #1109(a) — machinery NOUNS that never appear in in-character BB narration (parity with the
-  // Python _GAME_LEAK_SENTENCE_RE in src/agent_loop.py): "the engine/system/model" + the app the
-  // player runs us on ("the front end", "the app", "this app/website/site"). Defense-in-depth so
-  // the JS body scrub catches a mid-paragraph fourth-wall leak the line/preamble passes can miss.
-  + '|\\bthe (?:engine|system|model|front[\\s-]?end)\\b|\\bthe app\\b|\\bthis (?:app|website|site)\\b'
+  // #1109(a)/FEDEEP-3 — machinery NOUNS that never appear in in-character BB narration (parity
+  // with the Python _GAME_LEAK_SENTENCE_RE in src/agent_loop.py): "the engine/system/model" + the
+  // app the player runs us on ("the front end", "the app", "this app/website/site"). Narrowed to
+  // require an operator-verb context (see _MACHINERY_NOUN_VERBS above) so the JS body scrub
+  // catches a mid-paragraph fourth-wall leak without over-matching ordinary prose.
+  + '|\\bthe (?:engine|system|model|front[\\s-]?end)\\b\\s+(?:' + _MACHINERY_NOUN_VERBS + ')\\b'
+  + '|\\bthe app\\b|\\bthis (?:app|website|site)\\b'
+  // ADV2-3 — Vault/God-Mode/admin/developer-console word parity with the Python scrub: these
+  // backstage-machinery nouns must never reach the player, defense-in-depth alongside the
+  // momentPrompts refusal instruction and the Python-side _GAME_LEAK_SENTENCE_RE.
+  + '|\\bgod[\\s-]?mode\\b|\\bthe vault\\b|\\bproducer\'?s? vault\\b'
+  + '|\\badmin(?:istrator)?[\\s-]+(?:panel|surface|console|mode|controls?|tools?)\\b'
+  + '|\\bdeveloper (?:controls?|mode|console|tools?)\\b'
   + '|\\blet me\\s+(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
     + '(?:call|advance|run|check|record|log|note|resolve|use|pull|fetch|see what|'
     + 'walk through|re-?read|re-?check|reconsider)\\b'
@@ -312,6 +337,20 @@ const _MACHINERY_ASIDE_RE = new RegExp(
   + '|\\b(?:advance|move|push) the game\\b',
   'i',
 );
+
+// ADV2-4 — a dropped mid-run sentence can leave an orphaned `((`/`))` producer-aside delimiter
+// behind (the OPEN and its CLOSE landed in different sentences, and only one of the two sentences
+// was scrubbed as a machinery aside). scrubMachineryAsides is a pure sentence filter+join with no
+// paren-awareness, so the stray marker would otherwise render literally in the public bubble. When
+// the `((` / `))` counts disagree after the scrub, strip every literal delimiter rather than guess
+// which one orphaned — the enclosed prose (if any) survives, just without the aside markup.
+function _rebalanceParenAsides(text) {
+  if (!text) return text;
+  const opens = (text.match(/\(\(/g) || []).length;
+  const closes = (text.match(/\)\)/g) || []).length;
+  if (opens === closes) return text;
+  return text.replace(/\(\(|\)\)/g, '');
+}
 
 export function scrubMachineryAsides(text) {
   if (!text) return text;
@@ -327,7 +366,8 @@ export function scrubMachineryAsides(text) {
   });
   // Collapse any double-space / stray blank-run left by a dropped mid-paragraph
   // sentence so the surrounding prose reads clean (never merges across lines).
-  return kept.join('').replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n');
+  const joined = kept.join('').replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n');
+  return _rebalanceParenAsides(joined);
 }
 
 export function normalizeThinkingMarkup(text) {
@@ -656,6 +696,27 @@ export function gameBuildShowsThinkingAccordion() {
   } catch (_) {
     return false;
   }
+}
+
+// FEDEEP-2 — chat.js caches the MERGED stream buffer (`accumulated`, deltas from BOTH the reply
+// and reasoning channels) into `holder.dataset.raw` and hands it to `addAITTSButton` for read-
+// aloud, so a reasoning/machinery leak that bled into plain content (the exact L6b/NARR-10/#1047
+// leaks `processWithThinking`'s public-reply branch already scrubs) would otherwise be persisted
+// verbatim into the DOM cache and be read aloud — even though the rendered bubble stays clean.
+// Runs the SAME reply-side scrub chain `processWithThinking` applies to the public bubble
+// (scrubReasoningPreamble → redactRawIds → scrubMachineryAsides). Game build only: outside it,
+// `processWithThinking` never scrubs the reply either, so `dataset.raw`/TTS legitimately keep the
+// full merged text (debug/general-assistant builds), and a well-formed `<think>` block's own
+// content is untouched by these line/sentence-level passes (they only match operator-phrase
+// lines/sentences, never the tag markers themselves).
+export function scrubMachineryForPersistence(text) {
+  if (!text) return text;
+  if (!gameBuildSuppressesThinking()) return text;
+  let cleaned = String(text);
+  cleaned = (scrubReasoningPreamble(cleaned) || '').trim();
+  cleaned = (redactRawIds(cleaned) || '').trim();
+  cleaned = (scrubMachineryAsides(cleaned) || '').trim();
+  return cleaned;
 }
 
 export function processWithThinking(text) {
@@ -1141,6 +1202,7 @@ const markdownModule = {
   scrubReasoningPreamble,
   redactRawIds,
   scrubMachineryAsides,
+  scrubMachineryForPersistence,
   renderMermaid
 };
 

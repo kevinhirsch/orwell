@@ -105,13 +105,13 @@ When("time passes between turns", function (this: BbWorld) {
 });
 
 Then("the jurors produce hidden scenes among themselves in the jury house", function (this: BbWorld) {
-  const events = this.jh!.sandbox!.engine.events.query();
+  const events = this.jh!.sandbox!.engine.events.queryAll();
   const juryHouseScenes = events.filter((e) => e.hidden && e.witnessSet.every((w) => JURORS.includes(w)));
   assert.ok(juryHouseScenes.length > 0, "the jury house produced hidden juror↔juror scenes");
 });
 
 Then("those scenes carry more than one interaction nature, not a single canned verb", function (this: BbWorld) {
-  const natures = new Set(this.jh!.sandbox!.engine.events.query().map((e) => e.type));
+  const natures = new Set(this.jh!.sandbox!.engine.events.queryAll().map((e) => e.type));
   assert.ok(natures.size > 1, `more than one scene nature (saw: ${[...natures].join(", ")})`);
 });
 
@@ -122,7 +122,7 @@ Then("the living main house still excludes every evicted houseguest", function (
   const live = this.jh!.sandbox!.session.snapshot().live as LiveSeasonState;
   const evicted = new Set(live.evictionOrder ?? []);
   const juryHouseActors = new Set(
-    this.jh!.sandbox!.engine.events.query()
+    this.jh!.sandbox!.engine.events.queryAll()
       .filter((e) => e.hidden && e.witnessSet.every((w) => JURORS.includes(w)))
       .flatMap((e) => e.witnessSet),
   );
@@ -132,7 +132,7 @@ Then("the living main house still excludes every evicted houseguest", function (
 });
 
 Then("no jury-house scene is witnessed by the player", function (this: BbWorld) {
-  const events = this.jh!.sandbox!.engine.events.query();
+  const events = this.jh!.sandbox!.engine.events.queryAll();
   const juryHouseScenes = events.filter((e) => e.hidden && e.witnessSet.every((w) => JURORS.includes(w)));
   for (const ev of juryHouseScenes) {
     assert.ok(!ev.witnessSet.includes(PLAYER), "the player NEVER witnesses a jury-house scene");
@@ -167,7 +167,7 @@ Given("a pre-jury-evictee who was cut before the jury formed", function (this: B
 Then("the pre-jury-evictee takes part in no jury-house society", function (this: BbWorld) {
   tickJuryHouse(this, 8);
   const pre = this.jh!.preJurorEvictee!;
-  const scenes = this.jh!.sandbox!.engine.events.query().filter((e) => e.hidden);
+  const scenes = this.jh!.sandbox!.engine.events.queryAll().filter((e) => e.hidden);
   for (const ev of scenes) {
     assert.ok(!ev.witnessSet.includes(pre), "a pre-jury evictee never appears in a jury-house scene");
   }
@@ -510,7 +510,7 @@ When("the same seed and the same player choices are played twice", function (thi
     startJuryPhase(this, `jh-det-${Math.random()}`, 21, true, juryPhaseLive({ grievanceAgainst: FINALIST }), juryEdges());
     tickJuryHouse(this, 12);
     const live = this.jh!.sandbox!.session.snapshot().live as LiveSeasonState;
-    const events = this.jh!.sandbox!.engine.events.query().filter((e) => e.hidden).map((e) => `${e.type}|${[...e.witnessSet].sort().join(",")}`);
+    const events = this.jh!.sandbox!.engine.events.queryAll().filter((e) => e.hidden).map((e) => `${e.type}|${[...e.witnessSet].sort().join(",")}`);
     return createHash("sha256").update(JSON.stringify({ grudge: live.juryGrudge, events })).digest("hex");
   };
   this.jh!.seededHashA = hash();

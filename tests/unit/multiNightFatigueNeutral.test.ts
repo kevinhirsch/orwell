@@ -118,7 +118,7 @@ describe("0066 Phase-2 Ext 3 — ZERO extra draws: the shared off-screen rng str
       for (let i = 0; i < 10; i++) { const a = sb.session.advanceGame(); if (a.pending) resolveLegally(sb.session, a.pending); if (a.finished) break; }
       const before = sb.engine.events.count();
       orch.advance("z", "offscreen-tick");
-      return sb.engine.events.query().slice(before)
+      return sb.engine.events.queryAll().slice(before)
         .map((e) => `${e.type}|${e.initiator}|${[...e.witnessSet].sort().join(",")}|${e.hidden ? 1 : 0}|${e.content}`)
         .join("\n");
     };

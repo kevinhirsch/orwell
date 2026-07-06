@@ -40,7 +40,7 @@ describe("B27b — a rumor can reach the player, legally", () => {
           expect(rumor.hops ?? 0).toBeGreaterThanOrEqual(1);
           // A vague paraphrase, never the verbatim hidden scene.
           expect(rumor.content).toContain("word around the house");
-          const hidden = sb.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+          const hidden = sb.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
           for (const h of hidden) expect(rumor.content.includes(h)).toBe(false);
           break;
         }
@@ -63,7 +63,7 @@ describe("B27b — a rumor can reach the player, legally", () => {
     const sb = reg.sandboxFor(user);
     sb.session.createCharacter({ playerName: "The Player", seed: 9 });
     for (let t = 0; t < 40; t++) orch.advance(user, "offscreen-tick");
-    const npcBeliefs = sb.engine.events.query().filter((e) => e.type === "gossip" && e.hidden).length;
+    const npcBeliefs = sb.engine.events.queryAll().filter((e) => e.type === "gossip" && e.hidden).length;
     const playerRumors = sb.engine.knowledge.knownTo(PLAYER).filter((f) => f.pathway.startsWith("told-by:")).length;
     // The NPC-to-NPC grapevine is busier than what reaches the player — the house talks ABOUT
     // the player more than TO them (when nothing diffuses at this seed, both stay tiny).

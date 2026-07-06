@@ -33,9 +33,9 @@ describe("0025 — reserve twists (Vault-sealed, engine-timed)", () => {
   });
 
   it("a fired twist is identifiable at exactly its sealed beat", () => {
-    const reserve = [{ kind: "secret-power" as const, fireAtBeat: 5 }];
+    const reserve = [{ kind: "wildcard-power" as const, fireAtBeat: 5 }];
     expect(maybeFireTwist(4, reserve)).toBeNull();
-    expect(maybeFireTwist(5, reserve)).toEqual({ kind: "secret-power", beat: 5 });
+    expect(maybeFireTwist(5, reserve)).toEqual({ kind: "wildcard-power", beat: 5 });
   });
 
   it("format-preserving: 0005 invariants hold and the season still reaches jury-9 → final-2", () => {

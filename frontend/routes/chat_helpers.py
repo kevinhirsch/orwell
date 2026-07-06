@@ -974,6 +974,86 @@ async def _handle_stale_beat(user, exc) -> None:
         logger.warning("[orwell] stale-beat reconcile skipped for user=%s: %s", user, _exc_detail(e))
 
 
+# ── R1c / audit A-S3 / CON-11 — durable retry for a fold that survives a DOUBLE stale-409 ────────── #
+#
+# `_backfill_with_cas` (agent_loop.py) already reconciles a SINGLE stale-409 by re-attempting the same
+# call once against the refreshed beatSeq (issue #591) — safe because the engine refuses BEFORE
+# folding, so a retry can never double-apply. But under SUSTAINED two-window concurrency the board can
+# move a SECOND time under that very retry (audit CON-11, corroborating the standing R-A-S3 latent):
+# the old behavior reconciled-and-GAVE UP, dropping the fold. For `recordInteraction`/`makeDeal`/the
+# trust belts (confide/exposeSecret/tradeSecret) this back-fill is frequently the SCENE'S ONLY RECORD
+# of a hidden relationship impact — dropping it silently evaporates real, already-happened play
+# (mandate #4 / I4: "a novel move must never evaporate"). Rather than retry in a tight loop (a
+# sustained two-window race could in principle keep moving the board every attempt — busy-retrying
+# risks livelock), a second consecutive stale-409 on a fold-bearing call is DEFERRED into a tiny,
+# bounded, per-owner queue and opportunistically retried the next time this owner issues ANY back-fill
+# call — typically within the same turn or the very next one. The loss is bounded to LATENCY, not
+# DATA: the fold still lands, just slightly late, and it can never double-apply (every drain attempt
+# is itself CAS-guarded against the freshest `last_beat_seq` — a fresh stale-409 on the retry just
+# re-queues it, never applies twice). In-process only (never persisted to disk — a restart re-derives
+# from the next turn's live play, same as any other in-flight request), Vault-free (the payload is the
+# same public scene content/ids the call would have carried anyway), and bounded (a small per-owner
+# cap with drop-oldest + a loud log so a pathologically stuck queue is visible, not silently unbounded).
+_DEFERRED_FOLDS: dict = {}
+_DEFERRED_FOLDS_MAX = 4
+
+
+def _defer_fold(user, fn, args: tuple, kwargs: dict, desc: str) -> None:
+    """Queue a fold-bearing back-fill call that hit a SECOND consecutive stale-409, for opportunistic
+    retry (CON-11). Bounded per owner; the OLDEST entry is dropped (loudly) on overflow rather than
+    growing without bound. Keyed via `_beat_seq_key` so auth-off single-tenant deploys get the same
+    protection as a real per-user identity (mirrors CON-1's fix for the CAS spine itself)."""
+    key = _beat_seq_key(user)
+    q = _DEFERRED_FOLDS.setdefault(key, [])
+    q.append({"fn": fn, "args": args, "kwargs": kwargs, "desc": desc})
+    if len(q) > _DEFERRED_FOLDS_MAX:
+        dropped = q.pop(0)
+        logger.error(
+            "[orwell] deferred-fold queue overflow for user=%s -- dropped the OLDEST queued fold "
+            "(%s); sustained contention is outrunning retry capacity", user, dropped.get("desc"))
+    else:
+        logger.info("[orwell] deferred a fold-bearing back-fill after a double stale-409 (%s) for "
+                    "later retry user=%s", desc, user)
+
+
+async def _drain_deferred_folds(user) -> None:
+    """Opportunistically retry any fold-bearing back-fills this owner deferred after a double
+    stale-409 (CON-11). Called at the top of every `_backfill_with_cas` invocation so a deferred fold
+    lands the very next time this owner issues ANY back-fill call — bounded latency, never lost. Each
+    attempt is itself CAS-guarded (the freshest `last_beat_seq`), so a fold can never double-apply; one
+    that hits ANOTHER stale-409 simply stays queued for the next opportunity. Fail-open: never raises
+    — a genuine NON-stale failure on a retry is logged (with the scene's description, for forensic
+    recovery) and the entry is dropped, since that class of failure cannot be resolved by retrying."""
+    key = _beat_seq_key(user)
+    pending = _DEFERRED_FOLDS.get(key)
+    if not pending:
+        return
+    remaining = []
+    for entry in pending:
+        try:
+            result = await entry["fn"](*entry["args"], expected_beat_seq=last_beat_seq(user), **entry["kwargs"])
+        except Exception as e:
+            if _is_stale_beat_error(e):
+                await _handle_stale_beat(user, e)
+                remaining.append(entry)  # still contested -- leave queued for the next opportunity
+                continue
+            logger.warning("[orwell] deferred fold retry (%s) failed non-stale, dropping: %s user=%s",
+                            entry.get("desc"), _exc_detail(e), user)
+            continue
+        _refresh_beat_seq(user, result if isinstance(result, dict) else {})
+        logger.info("[orwell] deferred fold (%s) landed on retry user=%s", entry.get("desc"), user)
+    if remaining:
+        _DEFERRED_FOLDS[key] = remaining
+    else:
+        _DEFERRED_FOLDS.pop(key, None)
+
+
+def deferred_fold_count(user) -> int:
+    """How many fold-bearing back-fills are currently queued for `user` after a double stale-409
+    (CON-11 test/ops visibility)."""
+    return len(_DEFERRED_FOLDS.get(_beat_seq_key(user), []))
+
+
 def _beat_signature(status: dict, state: dict) -> dict:
     """A compact, comparable snapshot of the engine board — the fields whose MOVEMENT (or lack
     of it) tells us whether a narrated outcome actually happened. Built from gameStatus (week/
@@ -1581,6 +1661,16 @@ async def record_post_turn_desync_check(user, narration: str, this_turn_progress
 
 # In-scene staging verbs (present/past/progressive). Movement-OUT verbs (left/leaves/exits) are
 # deliberately excluded — "Connor left the house weeks ago" is a legitimate past mention, not staging.
+#
+# NARR-4 note (2026-07-05): the audit suggested DROPPING the "weak" verbs (leans/watches) here to cut
+# a photo/portrait over-match ("Marcus Webb's photo watches over the room"). We deliberately did NOT —
+# `_stages_in_scene` is SHARED with the knowledge-wall Vault-leak guard (`_sentence_leaks_sealed`),
+# where a houseguest who "leaned in and whispered" a sealed disclosure is a REAL leak that MUST still
+# be caught (mandate #2 — a sealed-content false-negative is far worse than the roster/presence
+# guards' benign, ignorable next-turn nudge on a photo). The over-match is instead handled WITHOUT
+# weakening these verbs: `_stages_in_scene` masks a "possessive-name-owns-an-inanimate-object"
+# construction before testing for staging (see `_INANIMATE_OWNED_NOUNS` below), so "Marcus Webb's
+# photo watches" no longer stages Marcus while "the Nominee leaned in and whispered" still does.
 _SCENE_VERBS = (
     "says", "say", "said", "asks", "ask", "asked", "replies", "reply", "replied", "mutters",
     "mutter", "muttered", "adds", "add", "added", "whispers", "whisper", "whispered", "grins",
@@ -1594,6 +1684,37 @@ _SCENE_VERBS = (
 )
 _VERB_ALT = "|".join(_SCENE_VERBS)
 
+# NARR-4 — inanimate objects that commonly bear a person's name in figurative prose and can "own" a
+# staging verb ("<Name>'s photo watches over the room", "<Name>'s shadow leans against the wall").
+# When the name is in POSSESSIVE form immediately followed by one of these, the SUBJECT of the verb
+# is the object, not the person — so `_stages_in_scene` masks that span before testing for staging.
+# Narrow on purpose: only nouns that plausibly take leans/watches/looks etc. AND read as a stand-in
+# for an absent person, so a real "<Name>'s <bodypart/action>" ("Ana's hand trembles") is untouched.
+_INANIMATE_OWNED_NOUNS = (
+    "photo", "photos", "photograph", "photographs", "picture", "pictures", "portrait", "portraits",
+    "image", "images", "shadow", "shadows", "silhouette", "reflection", "memory", "ghost", "absence",
+    "legacy", "presence", "empty",
+)
+_INANIMATE_OWNED_ALT = "|".join(_INANIMATE_OWNED_NOUNS)
+
+# NARR-4 — copula/existential single-token phantom names ("There's a new houseguest named Zephyr",
+# "Zephyr is a new contestant"). `_sentence_names_invented` below only ever looked for a Capitalized
+# TWO-token name bound to a `_SCENE_VERBS` staging verb — deliberately, since a bare single
+# capitalized token is far too common in ordinary prose to flag on its own. But that leaves a real
+# gap: a model that invents a SINGLE-token phantom name never trips the two-token guard at all. These
+# two patterns are narrow enough to make a single token safe to flag WITHOUT the generic scene-verb
+# binding: they require an explicit existential/copula frame that NAMES someone as a
+# houseguest/contestant/player, a construction that essentially never occurs in ordinary scene prose
+# for anything BUT introducing a person. The surrounding scaffolding words are case-insensitive; the
+# captured name itself must still be Capitalized (a real proper-noun shape).
+_EXISTENTIAL_NAME_RE = re.compile(
+    r"(?i:there(?:'s|\s+is|\s+was)\s+(?:a|an)\s+(?:new\s+)?(?:houseguest|contestant|player)\s+"
+    r"(?:named|called))\s+([A-Z][a-z]+)\b"
+)
+_COPULA_NAME_RE = re.compile(
+    r"\b([A-Z][a-z]+)(?:['’]s)?\s+(?i:is|was)\s+(?i:a|an)\s+(?i:new\s+)?(?i:houseguest|contestant|player)\b"
+)
+
 
 def _stages_in_scene(narration: str, name: str) -> bool:
     """True if `name` is STAGED as acting in the scene — their name (optionally possessive), then
@@ -1601,13 +1722,20 @@ def _stages_in_scene(narration: str, name: str) -> bool:
     token match, so a name is never caught as a substring. Conservative: a bare MENTION ("I heard
     Maria won") never matches (no staging verb / no adjacent quote)."""
     n = re.escape(name)
+    # NARR-4 — mask a "<Name>'s <inanimate-object>" span first so a photo/shadow/portrait bearing the
+    # name (which then "watches"/"leans"/etc.) can't satisfy the staging match below. Only the
+    # possessive-inanimate span is removed; a real "<Name>'s hand trembles" or a separate staging of
+    # the same name elsewhere in the sentence is untouched (the name token itself is only consumed
+    # where it directly precedes an inanimate-object noun).
+    inanimate_pat = rf"\b{n}(?:['’]s)\s+(?:\w+\s+)?(?:{_INANIMATE_OWNED_ALT})\b"
+    scanned = re.sub(inanimate_pat, " ", narration, flags=re.IGNORECASE)
     # "Nia perched", "Kendall pauses", "Ana's leaning", "Connor's been leaning" (≤2 filler words).
     verb_pat = rf"\b{n}(?:['’]s)?\b(?:\s+\w+){{0,2}}\s+(?:{_VERB_ALT})\b"
-    if re.search(verb_pat, narration, re.IGNORECASE):
+    if re.search(verb_pat, scanned, re.IGNORECASE):
         return True
     # "Nia: 'I called this.'" / 'Ana "what is this?"' — a quoted line right after the name.
     quote_pat = rf"\b{n}(?:['’]s)?\b\s*[:—-]?\s*[\"“]"
-    return bool(re.search(quote_pat, narration, re.IGNORECASE))
+    return bool(re.search(quote_pat, scanned, re.IGNORECASE))
 
 
 def _presence_facts(state: dict) -> Optional[dict]:
@@ -1740,11 +1868,14 @@ _NAME_STOPWORDS_FIRST = {
 
 
 def _sentence_names_invented(sentence: str, known_first: set, known_full: set) -> Optional[str]:
-    """Return a Capitalized two-token name this sentence STAGES as acting in the scene that is NOT any
-    known roster name (active or out-of-house), or None. `known_first` = lowercase first tokens of every
-    roster name; `known_full` = lowercase full roster names. High-precision: requires `_stages_in_scene`
-    binding (an in-scene verb/quote right after the name) and excludes the BB game lexicon, so a place
-    name, a bare mention, or a real houseguest never matches."""
+    """Return a Capitalized name this sentence STAGES as acting in the scene (two-token) or explicitly
+    INTRODUCES via a copula/existential frame (single-token — NARR-4) that is NOT any known roster
+    name (active or out-of-house), or None. `known_first` = lowercase first tokens of every roster
+    name; `known_full` = lowercase full roster names. High-precision: the two-token path requires
+    `_stages_in_scene` binding (an in-scene verb/quote right after the name) and excludes the BB game
+    lexicon, so a place name, a bare mention, or a real houseguest never matches; the single-token
+    path requires an explicit "named a houseguest/contestant/player" construction, which is precise
+    enough to flag a bare capitalized token on its own."""
     if not sentence or not sentence.strip():
         return None
     for m in _TWO_TOKEN_NAME_RE.finditer(sentence):
@@ -1761,6 +1892,18 @@ def _sentence_names_invented(sentence: str, known_first: set, known_full: set) -
         # An out-of-roster two-token Name — only flag if it is STAGED as acting in THIS sentence.
         if _stages_in_scene(sentence, full):
             return full
+    # NARR-4 — a single-token name explicitly introduced as a houseguest/contestant/player via a
+    # copula or existential frame. No _stages_in_scene binding needed: the frame itself is the
+    # high-precision signal.
+    for pat in (_EXISTENTIAL_NAME_RE, _COPULA_NAME_RE):
+        for m in pat.finditer(sentence):
+            cand = m.group(1)
+            cand_l = cand.lower()
+            if cand_l in _NAME_STOPWORDS_FIRST or cand_l in _GAME_LEXICON_FIRST:
+                continue  # a stray article/pronoun or game-lexicon word, not a name
+            if cand_l in known_first or cand_l in known_full:
+                continue  # matches a real roster name — legitimate
+            return cand
     return None
 
 

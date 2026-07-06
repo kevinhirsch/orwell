@@ -53,6 +53,7 @@ function bootFlags(): Record<string, boolean> {
     secretPacing: strict(process.env.ORWELL_SECRET_PACING),
     juryHouse: strict(process.env.ORWELL_JURY_HOUSE),
     seededTieSurfacing: loose(process.env.ORWELL_SEEDED_TIE_SURFACING),
+    mythMaking: strict(process.env.ORWELL_MYTH_MAKING),
     compIntent: strict(process.env.ORWELL_COMP_INTENT),
     voteDeduction: strict(process.env.ORWELL_VOTE_DEDUCTION),
     timeOfDay: loose(process.env.ORWELL_TIME_OF_DAY),
@@ -81,8 +82,13 @@ export interface HttpMcpOptions {
    * Audit E27: a SEPARATE secret for the admin/God-Mode channel. With only the shared `token`,
    * one bearer granted any-user impersonation AND God Mode. When `adminToken` is set, `/admin/*`
    * requires it specifically — the player token is refused there (401). Player routes accept
-   * either (admin is strictly more privileged). Unset ⇒ the single-token behavior is unchanged
-   * (single-tenant trusted-loopback back-compat).
+   * either (admin is strictly more privileged).
+   *
+   * SEC-5 (fail-closed): when `token` IS configured but `adminToken` is NOT, the admin channel is
+   * DISABLED (503) rather than silently falling back to accepting the player token — that fallback
+   * was the exact collapse the admin/player split exists to prevent (the player token is inherently
+   * more exposed; it transits every ordinary game request). Neither token set (fully open dev/test)
+   * is unaffected — there is no secret asymmetry to collapse.
    */
   adminToken?: string;
   requireUser?: boolean;
@@ -152,6 +158,14 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
   const pick = (channel: "player" | "admin", user: string): McpServer =>
     isResolver(deps) ? deps.resolve(channel, user) : (channel === "player" ? deps.player : deps.admin);
 
+  // SEC-5 — computed once: true exactly when the player-channel secret is configured but no
+  // DISTINCT admin secret is. This is the collapse the admin/player token split (audit E27)
+  // exists to prevent: the player token is inherently more exposed (it transits every ordinary
+  // game request), so silently accepting it for /admin/* hands out producerVault + every
+  // God-Mode lever to anyone who holds it. Fully open (neither token set — dev/test) is
+  // unaffected: there is no secret asymmetry to collapse.
+  const adminTokenCollapseRisk = Boolean(options.token) && !options.adminToken;
+
   // Lane G1: per-process health metrics — uptime, call counters, and the capped ring of
   // recent tool FAILURES (tool name + sanitized error class + duration ONLY — the Vault
   // rule; see healthMetrics.ts). Surfaced on /health for the admin Health & Logs card.
@@ -210,12 +224,31 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
         } catch {
           /* a broken status probe must never fail the liveness answer */
         }
-        return send(200, { ok: true, ...metrics.snapshot(), embeddings, flags: bootFlags() });
+        return send(200, {
+          ok: true,
+          ...metrics.snapshot(),
+          embeddings,
+          flags: bootFlags(),
+          // SEC-5: lets a doctor script / monitoring catch this misconfiguration on a live box
+          // without shelling in — never a secret, just a boolean.
+          security: { adminTokenMissing: adminTokenCollapseRisk },
+        });
       }
 
       const match = url.pathname.match(/^\/(player|admin)\/(tools|call|rpc)$/);
       if (!match) return send(404, { error: "not found" });
       const channel = match[1] as "player" | "admin";
+
+      // (1.5) SEC-5 fail-closed: refuse the ENTIRE admin channel while the collapse risk stands,
+      // before any secret comparison — a 503 (service disabled), never a 401 that could read as
+      // "just present the right secret" when no secret can ever satisfy this route.
+      if (channel === "admin" && adminTokenCollapseRisk) {
+        return send(503, {
+          error:
+            "admin channel disabled: ORWELL_ENGINE_ADMIN_TOKEN is not set (refusing to accept the " +
+            "player token for admin/God-Mode access — set a distinct ORWELL_ENGINE_ADMIN_TOKEN)",
+        });
+      }
 
       // (2) Secret auth on every tool route, when configured — constant-time compares (E27).
       // The admin channel demands its OWN secret when one is set: the player token must not
@@ -400,6 +433,26 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
   });
   // E9: a wedged request must release its socket (the default Node timeout is far too generous).
   server.requestTimeout = REQUEST_TIMEOUT_MS;
+
+  // SEC-5: loud + REPEATED startup warning for the token-collapse misconfiguration (see above) —
+  // a live-deployment misconfiguration, not a one-off boot note, so it must not scroll off the top
+  // of a long-running log. Unref'd so it never keeps the process alive on its own; cleared on
+  // server close so a test creating many short-lived servers in one process never leaves a stray
+  // timer firing after its server is gone.
+  if (adminTokenCollapseRisk) {
+    const warnAdminTokenCollapse = (): void => {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[orwell-engine] SECURITY (SEC-5): ORWELL_ENGINE_TOKEN is set but ORWELL_ENGINE_ADMIN_TOKEN " +
+          "is NOT — the admin/God-Mode channel is DISABLED (refusing to fall back to the player " +
+          "token). Set a distinct ORWELL_ENGINE_ADMIN_TOKEN to restore admin access.",
+      );
+    };
+    warnAdminTokenCollapse();
+    const collapseWarnTimer = setInterval(warnAdminTokenCollapse, 5 * 60_000).unref();
+    server.on("close", () => clearInterval(collapseWarnTimer));
+  }
+
   return server;
 }
 

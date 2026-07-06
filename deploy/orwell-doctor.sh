@@ -147,8 +147,13 @@ if [[ -f "$ENV_FILE" ]]; then
   # demands it on every tool route (only /health is exempt). The tool probe below
   # MUST present it or a perfectly healthy engine answers 401 — a false FAIL. Fall
   # back to the admin token (admin ⊇ player privilege) when only that is set.
-  ENGINE_TOKEN="$(env_get ORWELL_ENGINE_TOKEN BBAI_ENGINE_TOKEN)"
-  [[ -z "$ENGINE_TOKEN" ]] && ENGINE_TOKEN="$(env_get ORWELL_ENGINE_ADMIN_TOKEN BBAI_ENGINE_ADMIN_TOKEN)"
+  # SEC-21: keep the RAW per-key values too (before the fallback merge below) so
+  # token_security_check can tell "admin unset" / "admin == player" apart from a
+  # merely-successful probe.
+  ENGINE_TOKEN_RAW="$(env_get ORWELL_ENGINE_TOKEN BBAI_ENGINE_TOKEN)"
+  ENGINE_ADMIN_TOKEN_RAW="$(env_get ORWELL_ENGINE_ADMIN_TOKEN BBAI_ENGINE_ADMIN_TOKEN)"
+  ENGINE_TOKEN="$ENGINE_TOKEN_RAW"
+  [[ -z "$ENGINE_TOKEN" ]] && ENGINE_TOKEN="$ENGINE_ADMIN_TOKEN_RAW"
   ENGINE_PORT="${ENGINE_PORT:-8765}"
 else
   warn "config: ${ENV_FILE} not found (using defaults; set ORWELL_HOME if installed elsewhere)"
@@ -180,6 +185,70 @@ behavioral_flags_line() {
   info "behavioral flags ON: ${on}"
 }
 
+# DEPLOY-11: /health already reports `embeddings: { provider, degraded }` (fastembed vs. the
+# deterministic fallback) — the engine "logs loudly" on a cold-boot fallback, but nothing
+# surfaced it to an operator who isn't tailing stdout at that exact moment. Same isolate-the-
+# object-then-grep-a-key style as behavioral_flags_line above (no jq dependency). Never fails
+# the run — a degraded embedder means "recall got dumber," not "the game is broken."
+embeddings_check() {
+  local body emb_obj provider degraded configured
+  body="$(curl -fsS -m 3 "${ENGINE_BASE}/health" 2>/dev/null)" || return 0
+  emb_obj="$(printf '%s' "$body" | sed -n 's/.*"embeddings":{\([^}]*\)}.*/\1/p')"
+  [[ -z "$emb_obj" ]] && { info "embeddings: (engine predates the /health embeddings field)"; return 0; }
+  provider="$(printf '%s' "$emb_obj" | sed -n 's/.*"provider":"\([^"]*\)".*/\1/p')"
+  degraded="$(printf '%s' "$emb_obj" | sed -n 's/.*"degraded":\(true\|false\).*/\1/p')"
+  configured="$(env_get ORWELL_EMBEDDINGS)"
+  if [[ "$degraded" == "true" ]]; then
+    warn "embeddings DEGRADED (provider=${provider:-unknown}) — semantic recall silently fell back to the deterministic fake; check the engine's boot log for a fastembed/ONNX load failure"
+  elif [[ "$configured" == "fastembed" && -n "$provider" && "$provider" != "fastembed" ]]; then
+    warn "ORWELL_EMBEDDINGS=fastembed is set but the running engine reports provider=${provider} — check the engine boot log"
+  else
+    pass "embeddings: provider=${provider:-unknown}, degraded=${degraded:-false}"
+  fi
+}
+
+# DEPLOY-10: nothing anywhere warned about disk pressure on the (12 GB default) LXC disk — it
+# accumulates saves, generated portraits, the fastembed model cache, and (per DEPLOY-9/13/14)
+# backups/logs. A plain `df`-based threshold check, same pass/warn idiom as everything else here.
+DISK_WARN_PCT="${ORWELL_DISK_WARN_PCT:-85}"
+disk_space_check() {
+  local pct
+  pct="$(df -P "$APP_DIR" 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+  if [[ -z "$pct" ]]; then
+    info "disk usage: could not stat ${APP_DIR} (df unavailable?)"
+    return 0
+  fi
+  if [[ "$pct" -ge "$DISK_WARN_PCT" ]] 2>/dev/null; then
+    warn "disk usage ${pct}% at ${APP_DIR} (warn threshold ${DISK_WARN_PCT}%) — saves, portraits, the fastembed cache, backups, and logs all live here; free space or grow the disk"
+  else
+    pass "disk usage ${pct}% at ${APP_DIR} (warn threshold ${DISK_WARN_PCT}%)"
+  fi
+}
+
+# DEPLOY-17: the deploy PAT (A4/ruling #17) is a fine-grained token capped at ONE YEAR — its
+# expiry is mentioned once, in orwell-update.sh's rotation echo, and never re-checked. An expired
+# token breaks the web-triggered auto-update path (orwell-ops-update.service) silently — it just
+# appends an auth error to data/ops-update.log with no other signal. Reuse the git credential
+# helper orwell.sh already installed (`git config --system credential.helper`) via a lightweight
+# `git ls-remote`; only meaningful when a token-based (private-repo) install is in play.
+git_remote_check() {
+  command -v git >/dev/null 2>&1 || return 0
+  # `-e`, not `-d`: a plain checkout's .git is a directory, but a git WORKTREE's .git is a file
+  # (a gitdir pointer) — either is a valid repo for `git ls-remote`.
+  [[ -e "${APP_DIR}/.git" ]] || return 0
+  grep -qs '^GIT_TOKEN=' "$ENV_FILE" 2>/dev/null || { info "git remote auth: no GIT_TOKEN configured — skipping (public/local checkout)"; return 0; }
+  local out rc
+  out="$(cd "${APP_DIR}" 2>/dev/null && timeout 10 git ls-remote --exit-code origin HEAD 2>&1)"
+  rc=$?
+  if [[ $rc -eq 0 ]]; then
+    pass "git remote auth (deploy PAT still valid)"
+  elif grep -Eiq 'authentication|401|403|invalid[- ]?(credentials|token)|could not read (username|password)|terminal prompts disabled|access denied' <<<"$out"; then
+    warn "git remote auth FAILED (PAT-expiry-shaped error) — the web-triggered auto-update path is likely broken; rotate with: bash ${APP_DIR}/deploy/orwell-update.sh --set-token"
+  else
+    info "git remote check: could not reach origin (network issue, not necessarily auth) — $(printf '%s' "$out" | head -1)"
+  fi
+}
+
 # A reachable engine must SERVE tools. For a probe user the healthy reply is the structured
 # "no active game" refusal (404) — connection-refused/timeouts mean down.
 engine_serves_tools() {
@@ -195,6 +264,25 @@ engine_serves_tools() {
     return 1
   fi
   grep -Eq '"result"|no active game' <<<"$out"
+}
+
+# SEC-21: the engine's admin/God-Mode channel (audit E27, SEC-5 in the security lane) MUST use a
+# secret DISTINCT from the player token — since the SEC-5 fix, an engine started with the player
+# token set but no admin token now DISABLES the admin channel outright (503) rather than falling
+# back to the player token, so this is a "will admin access work at all" check, not just a
+# best-practice nag. The official installer (orwell-install.sh) mints both correctly; this catches
+# a hand-deployed box (copied .env, docker run, etc.) that never got the memo.
+token_security_check() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  if [[ -n "$ENGINE_TOKEN_RAW" && -z "$ENGINE_ADMIN_TOKEN_RAW" ]]; then
+    warn "ORWELL_ENGINE_ADMIN_TOKEN is not set while ORWELL_ENGINE_TOKEN is — the engine DISABLES the admin/God-Mode channel entirely (SEC-5 fail-closed) until you set a distinct ORWELL_ENGINE_ADMIN_TOKEN in ${ENV_FILE}"
+  elif [[ -n "$ENGINE_TOKEN_RAW" && -n "$ENGINE_ADMIN_TOKEN_RAW" && "$ENGINE_TOKEN_RAW" == "$ENGINE_ADMIN_TOKEN_RAW" ]]; then
+    warn "ORWELL_ENGINE_ADMIN_TOKEN equals ORWELL_ENGINE_TOKEN in ${ENV_FILE} — mint a DISTINCT admin secret so the player token can't reach producerVault / God Mode"
+  elif [[ -n "$ENGINE_TOKEN_RAW" && -n "$ENGINE_ADMIN_TOKEN_RAW" ]]; then
+    pass "engine admin/player tokens are set and distinct"
+  else
+    info "engine tokens not set (ORWELL_ENGINE_TOKEN/ORWELL_ENGINE_ADMIN_TOKEN) — trusted-loopback-only posture"
+  fi
 }
 
 # The HTTP status of the FE health probe ("000" = no answer at all). Any real status — even a
@@ -254,11 +342,14 @@ diagnose() {
     unit_active "$FRONTEND_SVC" && pass "unit active: ${FRONTEND_SVC}" || fail "unit active: ${FRONTEND_SVC}"
   fi
   [[ -f "${APP_DIR}/dist/main.js" ]] && pass "build artifact: dist/main.js" || fail "build artifact missing — run: bash ${APP_DIR}/deploy/orwell-update.sh"
+  token_security_check
   engine_http_ok       && pass "engine /health answers"        || fail "engine /health answers (${ENGINE_BASE}/health)"
   # DEPLOY-12 (B2): report which opt-in "living house" behavioral-fidelity layers are live, so an
   # operator can answer "is the house actually alive on my box?" without grepping data/.env. Best-effort
   # info line off the /health `flags` block; a build predating the field simply prints nothing.
   behavioral_flags_line
+  # DEPLOY-11: surface a silent fastembed→deterministic degradation.
+  embeddings_check
   engine_serves_tools  && pass "engine serves player tools"    || fail "engine serves player tools"
   # An engine that ANSWERS while its unit is inactive/missing is running OUTSIDE systemd (a stray
   # manual process). Restarting the unit would fight it for the port — name the situation instead.
@@ -277,6 +368,10 @@ diagnose() {
   else
     warn "ORWELL_PORT/BBAI_PORT not set in ${ENV_FILE} — skipping front-end probes"
   fi
+  # DEPLOY-10: disk pressure on the (often 12 GB default) LXC disk.
+  disk_space_check
+  # DEPLOY-17: catch a PAT-expiry-shaped auth failure before the update path breaks silently.
+  git_remote_check
   systemd_security_floor
 }
 

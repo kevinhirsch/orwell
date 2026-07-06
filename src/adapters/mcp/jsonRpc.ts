@@ -10,7 +10,12 @@
  * per-user routing, the anti-spray gate, body read, serialization, metrics) and hands a gateway
  * in, so the JSON-RPC path reuses the exact same guardrails the REST path uses and cannot drift.
  * Keeping it free of any engine-only import is what dependency-cruiser proves about the Vault Wall.
+ * `StaleBeatError` (below) is a plain, dependency-free `src/domain/` type — not an engine/Vault
+ * import — so importing it here is the same class of edge `HttpMcpServer.ts`'s REST `/call` path
+ * already takes; it does not weaken the Vault-Wall proof.
  */
+
+import { StaleBeatError } from "../../domain/errors";
 
 /** A current MCP protocol-revision string (the negotiated version in `initialize`). */
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -141,6 +146,16 @@ export async function dispatchJsonRpc(gateway: ToolGateway, message: unknown): P
         // no active game) is protocol-success with `isError:true` content — so the model can read
         // the failure text. JSON-RPC errors are reserved for PROTOCOL faults (above).
         const msg = e instanceof Error ? e.message : String(e);
+        // CON-6 — a stale compare-and-swap write (0065 Part A) previously flattened into the SAME
+        // opaque `{error: msg}` text as every other failure, losing the machine `code`, the CURRENT
+        // `beatSeq`, and the Vault-free `board` a caller needs to reconcile immediately — the exact
+        // structured shape the REST `/call` 409 mapping already carries (`HttpMcpServer.ts`). Stays
+        // inside the MCP `isError:true` content (never a JSON-RPC-level `error`) — a stale write is a
+        // tool-level refusal, not a protocol fault, so it keeps the SAME envelope as every other tool
+        // failure; only the payload now carries the extra reconcile fields a plain message could not.
+        if (e instanceof StaleBeatError) {
+          return reply(ok(id, toolContent({ error: msg, code: e.code, beatSeq: e.beatSeq, board: e.board }, true)));
+        }
         return reply(ok(id, toolContent({ error: msg }, true)));
       }
     }

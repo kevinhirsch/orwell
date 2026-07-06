@@ -2050,27 +2050,44 @@ def _validate_consequence(raw, valid_ids) -> dict | None:
 #     frequently the SOLE record of a player↔NPC scene, so SKIPPING it on a 409 silently EVAPORATES that
 #     scene's only consequence fold (mandate #4 / ADR-0005 #4 — "a novel move must never evaporate").
 #     So we now RE-ATTEMPT once against the reconciled token rather than skip. A second consecutive 409
-#     (the board moved AGAIN under the retry) reconciles-and-skips as before — re-derivable next turn —
-#     so we never blind-loop into a stomp and never let the exception escape.
-async def _backfill_with_cas(owner, fn, *args, **kwargs):
-    """Issue an FE back-fill mutating engine call (`record_interaction`/`make_deal`/`move_to`) with the
-    0065 Part A compare-and-swap token attached, refreshing last-seen from its response.
+#     (the board moved AGAIN under the retry) used to reconcile-and-skip — audit CON-11 (corroborating
+#     the standing R-A-S3 latent) found that under SUSTAINED two-window concurrency this still silently
+#     evaporates a fold-bearing scene, so a fold-bearing call (`defer_fold=True`) now DEFERS to a tiny
+#     bounded per-owner retry queue (`chat_helpers._defer_fold`/`_drain_deferred_folds`) instead of
+#     dropping it — the loss is bounded to LATENCY (it lands on the next opportunity), never DATA. A
+#     non-fold-bearing call (the default — e.g. `moveTo`, a purely positional belt with no hidden
+#     relationship impact to lose) keeps the prior reconcile-and-skip behavior: re-deriving a stale
+#     LOCATION from a much-later board would be actively wrong in a way a late-landing memory fold is not.
+async def _backfill_with_cas(owner, fn, *args, defer_fold: bool = False, **kwargs):
+    """Issue an FE back-fill mutating engine call (`record_interaction`/`make_deal`/`move_to`/`confide`/
+    `expose_secret`/`trade_secret`) with the 0065 Part A compare-and-swap token attached, refreshing
+    last-seen from its response.
 
     On a stale 409 the engine refused the write BEFORE folding (fail-closed), so we reconcile to the
     fresh `beatSeq` (`_handle_stale_beat`) and RE-ATTEMPT the same mutation ONCE against it — issue #591:
     a `recordInteraction` back-fill is often a scene's only consequence fold and must not evaporate, and
-    the pre-write throw makes a single retry double-apply-safe. A second consecutive stale 409 is
-    reconciled-and-skipped (the move re-derives next turn).
+    the pre-write throw makes a single retry double-apply-safe.
 
-    Returns the engine response dict on success, or None when the write could not land (a second stale
-    409, or a None retry result). Re-raises any NON-stale error so the caller's own fail-closed `except`
-    handles it exactly as today.
+    A second consecutive stale 409 (the board moved AGAIN under the retry — audit CON-11, a genuine
+    risk under sustained two-window concurrency): when `defer_fold=True` (the call carries a hidden
+    relationship impact that must never evaporate — mandate #4), the call is QUEUED for opportunistic
+    retry (`chat_helpers._defer_fold`) rather than dropped — it lands late, not never, and can never
+    double-apply (each retry re-attaches the freshest CAS token). When `defer_fold=False` (the default —
+    a purely positional/physical belt like `moveTo` with no fold to lose), it reconciles-and-skips as
+    before (re-derivable next turn).
+
+    Returns the engine response dict on success, or None when the write could not land THIS call (a
+    second stale 409 — deferred for later if `defer_fold`, dropped otherwise — or a None retry result).
+    Re-raises any NON-stale error so the caller's own fail-closed `except` handles it exactly as today.
 
     Why this is safe (the no-self-409 contract): last-seen is refreshed from EVERY engine response this
     turn (reads AND mutations), so the token attached here is the freshest the FE has seen — a normal
     turn never 409s itself. A stale 409 means a genuine concurrent move (another device / the 0064
-    queued-turn case), which we reconcile and re-attempt once before giving up."""
+    queued-turn case), which we reconcile and re-attempt once before deferring/giving up."""
     from routes import chat_helpers as _ch
+    # Opportunistically flush any earlier fold this owner deferred after a double stale-409 (CON-11) —
+    # bounded, best-effort; a failure here never blocks the NEW call below.
+    await _ch._drain_deferred_folds(owner)
     try:
         result = await fn(*args, expected_beat_seq=_ch.last_beat_seq(owner), **kwargs)
     except Exception as _e:
@@ -2083,8 +2100,12 @@ async def _backfill_with_cas(owner, fn, *args, **kwargs):
                 result = await fn(*args, expected_beat_seq=_ch.last_beat_seq(owner), **kwargs)
             except Exception as _e2:
                 if _ch._is_stale_beat_error(_e2):
-                    # Board moved AGAIN under the retry — reconcile and give up (re-derivable next turn).
+                    # Board moved AGAIN under the retry — reconcile, then either DEFER (fold-bearing —
+                    # CON-11: never let the scene's only consequence evaporate) or skip (a re-derivable
+                    # positional belt, unchanged from before).
                     await _ch._handle_stale_beat(owner, _e2)
+                    if defer_fold:
+                        _ch._defer_fold(owner, fn, args, kwargs, desc=getattr(fn, "__name__", "backfill"))
                     return None
                 raise  # a non-stale error on the retry → caller's fail-closed handler deals with it
             _ch._refresh_beat_seq(owner, result if isinstance(result, dict) else {})
@@ -2189,6 +2210,9 @@ async def _auto_move_player(narration, last_user, endpoint_url, model, headers, 
             return False  # null / no move / unknown room → nothing to do
         # 0065 Part A: attach the CAS token + refresh last-seen from the response; a stale 409 (the
         # board moved under us) is reconciled-and-skipped (None) — the move re-derives next turn.
+        # Deliberately NOT `defer_fold=True`: a move is a positional/physical belt, not a hidden-impact
+        # fold (CON-11) — applying a much-later, stale location after further turns have moved on could
+        # actively contradict what's since been narrated, so skip-and-rederive stays correct here.
         if await _backfill_with_cas(owner, _oe.move_to, room, user=owner) is None:
             return False
         logger.info(f"[orwell] auto-moved player → {room} user={owner}")
@@ -2465,12 +2489,13 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         # ADR 0005: validate the proposed descriptor against the SAME roster id-set used for withIds;
         # a None result (nothing valid) means we forward NOTHING — exactly the kind-only path.
         consequence = _validate_consequence(obj.get("consequence"), valid)
-        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A stale 409 (the
-        # board moved under us mid-turn) is reconciled-and-skipped (None) — the scene re-derives next
-        # turn against the moved board; never a stomp, never an exception escapes.
+        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A single stale 409
+        # (the board moved under us mid-turn) is reconciled-and-RETRIED (#591); a SECOND consecutive one
+        # is DEFERRED (CON-11, `defer_fold=True`) rather than dropped — this is frequently the scene's
+        # ONLY consequence fold, so it must land eventually, never evaporate (mandate #4).
         if await _backfill_with_cas(owner, _oe.record_interaction, content[:400],
                                     with_ids=ids, kind=kind, consequence=consequence,
-                                    user=owner) is None:
+                                    user=owner, defer_fold=True) is None:
             return False
         n_edges = len(consequence["edges"]) if consequence and "edges" in consequence else 0
         n_about = len(consequence["aboutEdges"]) if consequence and "aboutEdges" in consequence else 0
@@ -2846,10 +2871,12 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
             return False
         kind = obj.get("kind") if obj.get("kind") in _DEAL_KINDS else "safety"
         terms = (obj.get("terms") or "").strip()[:200] or "a mutual protection deal"
-        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A stale 409 (the
-        # board moved under us mid-turn) is reconciled-and-skipped (None) — the deal re-derives next
-        # turn; never a stomp, never an exception escapes.
-        if await _backfill_with_cas(owner, _oe.make_deal, with_id, kind, terms, user=owner) is None:
+        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A single stale 409
+        # (the board moved under us mid-turn) is reconciled-and-RETRIED (#591); a SECOND consecutive one
+        # is DEFERRED (CON-11, `defer_fold=True`) rather than dropped — a struck deal is the scene's
+        # only record and must land eventually, never evaporate (mandate #4).
+        if await _backfill_with_cas(owner, _oe.make_deal, with_id, kind, terms,
+                                    user=owner, defer_fold=True) is None:
             return False
         logger.info(f"[orwell] auto-recorded deal (kind={kind}, with={with_id}) user={owner}")
         return True
@@ -2950,11 +2977,12 @@ async def _auto_confide(narration, last_user, house, endpoint_url, model, header
         if npc_id not in valid:
             logger.info(f"[orwell] auto-confide: npcId {npc_id!r} not on roster — skipped user={owner}")
             return False
-        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A stale 409 (the board
-        # moved under us mid-turn) is reconciled-and-skipped (None) — the press re-derives next turn; never
-        # a stomp, never an exception escapes. The ENGINE decides the disclosure; a `{disclosed:false}` is
-        # a perfectly good (and common) result — we only guarantee the lever FIRES.
-        res = await _backfill_with_cas(owner, _oe.confide, npc_id, user=owner)
+        # 0065 Part A: attach the CAS token + refresh last-seen from the response. A single stale 409 (the
+        # board moved under us mid-turn) is reconciled-and-RETRIED (#591); a SECOND consecutive one is
+        # DEFERRED (CON-11, `defer_fold=True`) rather than dropped — the press is the scene's only record
+        # and must land eventually, never evaporate (mandate #4). The ENGINE decides the disclosure; a
+        # `{disclosed:false}` is a perfectly good (and common) result — we only guarantee the lever FIRES.
+        res = await _backfill_with_cas(owner, _oe.confide, npc_id, user=owner, defer_fold=True)
         if res is None:
             return False
         _disclosed = bool(res.get("disclosed")) if isinstance(res, dict) else False
@@ -3090,7 +3118,9 @@ async def _auto_expose_secret(narration, last_user, house, endpoint_url, model, 
         if fact_id not in facts:
             logger.info(f"[orwell] auto-expose: factId {fact_id!r} not a known fact — skipped user={owner}")
             return False
-        res = await _backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner)
+        # CON-11: defer (never drop) a double-stale-409 -- exposing a secret is a one-shot, consequence-
+        # bearing action (mandate #4).
+        res = await _backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner, defer_fold=True)
         if res is None:
             return False
         _exposed = bool(res.get("exposed")) if isinstance(res, dict) else False
@@ -3175,8 +3205,10 @@ async def _auto_trade_secret(narration, last_user, house, endpoint_url, model, h
             return False
         ask_kind = obj.get("askKind")
         ask_kind = ask_kind.strip()[:80] if isinstance(ask_kind, str) and ask_kind.strip() else None
+        # CON-11: defer (never drop) a double-stale-409 -- a struck secret trade is a one-shot,
+        # consequence-bearing action (mandate #4).
         res = await _backfill_with_cas(owner, _oe.trade_secret, to_npc_id, fact_id=fact_id,
-                                       ask_kind=ask_kind, user=owner)
+                                       ask_kind=ask_kind, user=owner, defer_fold=True)
         if res is None:
             return False
         _accepted = bool(res.get("accepted")) if isinstance(res, dict) else False

@@ -27,6 +27,34 @@ def is_cors_preflight(method: str, headers) -> bool:
     return method == "OPTIONS" and "access-control-request-method" in headers
 
 
+# Headers that prove a request was forwarded by a proxy/tunnel (cloudflared, nginx, Caddy,
+# Tailscale Funnel, …). cloudflared connects to the app FROM 127.0.0.1, so without this check
+# every tunneled request would look like loopback and could bypass auth. Shared by app.py's
+# AuthMiddleware and any route (e.g. the first-run setup race, SEC-1) that needs the same
+# direct-loopback-only guarantee.
+PROXY_FWD_HEADERS = (
+    "cf-connecting-ip", "cf-ray", "cf-visitor",
+    "x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded",
+)
+
+
+def is_trusted_loopback(request: Request) -> bool:
+    """True ONLY for a DIRECT loopback connection with no proxy/tunnel forwarding headers.
+
+    A bare ``client.host in ('127.0.0.1', '::1')`` check is unsafe behind a Cloudflare tunnel /
+    reverse proxy: those connect from loopback, so a remote visitor would otherwise inherit
+    local trust. Orwell's own in-process loopback calls carry none of these headers, so they
+    still qualify. Pure (no app/db import) so it unit-tests without standing up the app."""
+    client = getattr(request, "client", None)
+    host = client.host if client else None
+    if host not in ("127.0.0.1", "::1"):
+        return False
+    for _h in PROXY_FWD_HEADERS:
+        if request.headers.get(_h):
+            return False
+    return True
+
+
 def require_admin(request: Request):
     """Raise 403 if the current user isn't an admin.
     Allows access when auth is explicitly disabled, or when the request carries
@@ -295,6 +323,41 @@ def assert_public_profile_safe(env=None) -> None:
             "ORWELL_PUBLIC for a trusted-LAN deployment. "
             "See docs/INSTALL.md -> Public deployment."
         )
+
+
+def assert_auth_off_requires_loopback(env=None) -> None:
+    """SEC-3 — fail closed when authentication is off AND the process is reachable beyond loopback.
+
+    When ``AUTH_ENABLED=false`` the operator has explicitly turned off authentication (a reasonable
+    choice for a genuinely single-operator, loopback-only install) — but ``tool_security``'s
+    ``owner_is_admin_or_single_user`` fail-open ALSO grants every caller admin-equivalent tool access
+    while unconfigured, including ``bash``/``python`` (arbitrary code execution). That is only safe
+    while the process is unreachable beyond loopback. ``assert_public_profile_safe`` only fires when
+    ``ORWELL_PUBLIC`` is explicitly set, so it does NOT catch "AUTH_ENABLED=false and reachable but the
+    operator never set ORWELL_PUBLIC" — a forgotten port-forward, a LAN believed private, or a
+    Tailscale/VPN misconfiguration.
+
+    This raises RuntimeError — naming the offending setting — whenever ``AUTH_ENABLED=false`` AND
+    ``ORWELL_BIND_HOST`` names a non-loopback interface, regardless of ``ORWELL_PUBLIC``. It is a
+    no-op (byte-identical startup) for every other posture: ``AUTH_ENABLED=true`` (the default), or
+    ``AUTH_ENABLED=false`` with the default loopback bind. app.py calls it unconditionally at module
+    load, alongside ``assert_public_profile_safe``, so an unsafe auth-off-and-reachable posture means
+    the process exits non-zero instead of granting silent unauthenticated shell access.
+    """
+    env = os.environ if env is None else env
+    if (env.get("AUTH_ENABLED", "true") or "").strip().lower() != "false":
+        return
+    bind_host = (env.get("ORWELL_BIND_HOST") or "127.0.0.1").strip()
+    if bind_host.lower() in ("127.0.0.1", "::1", "localhost"):
+        return
+    raise RuntimeError(
+        "Refusing to start with AUTH_ENABLED=false and a non-loopback ORWELL_BIND_HOST "
+        f"({bind_host}). With authentication disabled, every network caller gets full tool access "
+        "(including bash/python — see tool_security.owner_is_admin_or_single_user's unconfigured-mode "
+        "fail-open), so a reachable bind is unauthenticated remote code execution. Fix: set "
+        "AUTH_ENABLED=true, or bind to loopback (ORWELL_BIND_HOST=127.0.0.1) and put a reverse "
+        "proxy/tunnel with its own authentication in front. See docs/INSTALL.md -> Public deployment."
+    )
 
 
 # ========= LOCAL HTTPS (feature 0074 / ADR 0014) =========

@@ -218,7 +218,7 @@ Then("no NPC's knowledge state gains a pathway to it", function (this: BbWorld) 
   }
   // No event carrying the DR content has any non-player witness.
   const leaked = this.sandbox.engine.events
-    .query()
+    .queryAll()
     .filter((e) => e.content.includes(this.factContent!) && e.witnessSet.some((w) => w !== PLAYER));
   assert.equal(leaked.length, 0, "DR content must not reach any NPC via an event");
 });

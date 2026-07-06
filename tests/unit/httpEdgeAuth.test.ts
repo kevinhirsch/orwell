@@ -62,6 +62,48 @@ describe("E32 — shared-secret auth (constant-time compare)", () => {
   });
 });
 
+describe("SEC-5 — admin channel fails closed when ORWELL_ENGINE_ADMIN_TOKEN is unset", () => {
+  it("token set, adminToken unset ⇒ /admin/* is 503 (never falls back to the player token)", async () => {
+    await withServer({ token: "player-secret" }, [], async (base) => {
+      // Sanity: the player channel still works fine with its own token.
+      expect((await call(base, { authorization: "Bearer player-secret" })).status).toBe(200);
+
+      const adminAttempt = await fetch(`${base}/admin/call`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer player-secret" },
+        body: JSON.stringify({ name: "sandboxHealth", args: {} }),
+      });
+      expect(adminAttempt.status).toBe(503); // refused before any secret comparison — never a 200
+
+      // The refusal covers every admin-channel envelope, not just /call.
+      const tools = await fetch(`${base}/admin/tools`, { headers: { authorization: "Bearer player-secret" } });
+      expect(tools.status).toBe(503);
+      const rpc = await fetch(`${base}/admin/rpc`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer player-secret" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      expect(rpc.status).toBe(503);
+    });
+  });
+
+  it("/health reports adminTokenMissing:true only in the collapse-risk configuration", async () => {
+    await withServer({ token: "player-secret" }, [], async (base) => {
+      const body = (await (await fetch(`${base}/health`)).json()) as { security?: { adminTokenMissing?: boolean } };
+      expect(body.security?.adminTokenMissing).toBe(true);
+    });
+    await withServer({ token: "player-secret", adminToken: "admin-secret" }, [], async (base) => {
+      const body = (await (await fetch(`${base}/health`)).json()) as { security?: { adminTokenMissing?: boolean } };
+      expect(body.security?.adminTokenMissing).toBe(false);
+    });
+    await withServer({}, [], async (base) => {
+      // Neither token set (fully open dev/test) — no asymmetry to collapse.
+      const body = (await (await fetch(`${base}/health`)).json()) as { security?: { adminTokenMissing?: boolean } };
+      expect(body.security?.adminTokenMissing).toBe(false);
+    });
+  });
+});
+
 describe("E8 — asserted-user-id cap at the edge", () => {
   it("a >64-char user id is a deliberate 400 and never resolves a sandbox", async () => {
     const resolved: string[] = [];

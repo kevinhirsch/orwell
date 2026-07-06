@@ -51,6 +51,13 @@ EnvironmentFile=-/opt/orwell/data/.env
 # --proxy-headers + --forwarded-allow-ips: trust X-Forwarded-* ONLY from the local connector
 # (127.0.0.1) so the app sees the real client scheme/IP behind the tunnel/proxy. For a VPS that
 # proxies in over WireGuard, override the trusted IP to the proxy's address in the unit/.env.
+# DEPLOY-15 (2026-07-05 ops-hygiene close-out): DO NOT add `--workers N` here. This process keeps
+# several process-local module-level globals (_GAME_WAS_ACTIVE, _SESSION_GAME_FRAMED,
+# _TIME_OF_DAY_APPLIED — see frontend/routes/chat_helpers.py's own comment block) that a
+# multi-worker uvicorn would silently fragment: each worker gets its own independent copy, so a
+# session framed by worker 1 looks unframed to worker 2, and each worker races to latch its own
+# time-of-day re-apply. Single-process only — scale via more RAM/CPU for embeddings/portraits,
+# never via `--workers`.
 ExecStart=/opt/orwell/frontend/.venv/bin/uvicorn app:app --host ${ORWELL_BIND_HOST} --port ${ORWELL_PORT} --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3

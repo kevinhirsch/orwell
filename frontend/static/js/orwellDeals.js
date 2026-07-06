@@ -31,11 +31,15 @@
 
   // The engine's deal kinds (src/ports/GameSession.ts MakeDealReq.kind) → player-facing label.
   // No number, no lean — just what KIND of promise it is.
+  // SG-12: "target-other" is a ONE-WAY spare-the-partner promise (`src/domain/deal.ts`
+  // `conditionFor("target-other")` — no commitment to target anyone jointly). "Shared target"
+  // read as a promise of joint offense the mechanics can't represent; "Protection pact" names
+  // what the deal actually is.
   const KIND_LABEL = {
     "safety": "Safety",
     "vote": "Vote",
     "final-two": "Final 2",
-    "target-other": "Shared target",
+    "target-other": "Protection pact",
   };
   // The status carries the whole drama: a promise still live, one honored, one betrayed.
   // F-NEW-12: each status carries a non-color GLYPH alongside its label, so open-vs-kept
@@ -125,6 +129,17 @@
     return m;
   }
 
+  // GADGET-11: DealView.kind is a looser `string` than the write-side MakeDealReq union
+  // (`src/ports/GameSession.ts`), so a legacy/cross-version save or a future kind outside the
+  // four known values has no type-system guarantee. Mirror orwellRetrospective.js's own
+  // `humanizeStoryType` precedent — never let a raw kebab-case machinery string reach the
+  // player-facing "Your Deals" gadget verbatim.
+  function humanizeKind(kind) {
+    const words = String(kind || "").split(/[-_:/]+/).filter(Boolean);
+    if (!words.length) return "Deal";
+    return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  }
+
   // The other party (deals are always player + one houseguest); never render the player's own row.
   function otherParty(deal, nameById) {
     const ps = Array.isArray(deal.parties) ? deal.parties : [];
@@ -156,7 +171,7 @@
       const who = document.createElement("span");
       who.className = "odl-who"; who.textContent = otherParty(d, nameById);
       const kind = document.createElement("span");
-      kind.className = "odl-kind"; kind.textContent = " · " + (KIND_LABEL[d.kind] || d.kind || "Deal");
+      kind.className = "odl-kind"; kind.textContent = " · " + (KIND_LABEL[d.kind] || humanizeKind(d.kind));
       const terms = document.createElement("div");
       terms.className = "odl-terms"; terms.textContent = d.terms || "";
       body.appendChild(who); body.appendChild(kind);

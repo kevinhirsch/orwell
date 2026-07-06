@@ -47,15 +47,16 @@ export class InMemoryEventStore implements EventStore {
     this.fullQueryCache = null; // a restored append invalidates the cached immutable copy
   }
 
-  query(filter: EventQuery = {}): GameEvent[] {
-    // Fast path for the dominant call: no filter ⇒ an IMMUTABLE shared copy, rebuilt only when the log
-    // grew (R3). Append-only means the frozen copy is byte-identical to the live log between appends, so
-    // the snapshot export reuses it by reference instead of re-`.slice()`ing the whole history every commit.
+  query(filter: EventQuery): GameEvent[] {
+    // BE-6: `query()` fails CLOSED, not open — at least one filter field must be set, or this throws.
+    // The old bare-`query()`-returns-everything default made the SAFE call (an explicit filter) opt-in
+    // effort and the UNSAFE call (no filter) the path of least resistance for a future outward-reachable
+    // caller to accidentally leak the full Vault-inclusive log. A genuinely-unfiltered read is now an
+    // explicit, differently-named call (`queryAll()`) so it can never happen by omission.
     if (filter.witnessedBy === undefined && filter.hidden === undefined && filter.type === undefined) {
-      if (this.fullQueryCache === null || this.fullQueryCache.length !== this.events.length) {
-        this.fullQueryCache = Object.freeze(this.events.slice());
-      }
-      return this.fullQueryCache as GameEvent[];
+      throw new Error(
+        "EventStore.query() requires an explicit filter (witnessedBy/hidden/type) — use queryAll() for an intentional full, Vault-inclusive read.",
+      );
     }
     return this.events.filter((e) => {
       if (filter.witnessedBy !== undefined && classify(e, filter.witnessedBy) !== "VISIBLE") return false;
@@ -63,6 +64,18 @@ export class InMemoryEventStore implements EventStore {
       if (filter.type !== undefined && e.type !== filter.type) return false;
       return true;
     });
+  }
+
+  /** BE-6 — the FULL unfiltered log (Vault-hidden content included), the explicit escape hatch for the
+   *  small set of genuinely engine-internal callers that need everything (gossip pathway search, snapshot
+   *  export, confessional/richness scans). Fast path: an IMMUTABLE shared copy, rebuilt only when the log
+   *  grew (R3). Append-only means the frozen copy is byte-identical to the live log between appends, so
+   *  the snapshot export reuses it by reference instead of re-`.slice()`ing the whole history every commit. */
+  queryAll(): GameEvent[] {
+    if (this.fullQueryCache === null || this.fullQueryCache.length !== this.events.length) {
+      this.fullQueryCache = Object.freeze(this.events.slice());
+    }
+    return this.fullQueryCache as GameEvent[];
   }
 
   /** O(1) count of the unfiltered log — no array allocation (the hot-path id/ts/count seam). */
