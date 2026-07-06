@@ -4,10 +4,16 @@
 > per-moment temperature + a soul-sourced emotional modifier) into a **single tunable constants
 > module** — the distributions, per-variable weighting, bounds, the emotional modifier's
 > volatility/mean-reversion, and the **hidden-element surfacing rate**. Defaults match 0006's
-> calibration (favorite wins a **strong ~72% majority** but loses real upsets; the player is
-> **never protected**). **The shape is fixed; every number is config** — the sibling to the
-> relationship constants (0026).
+> calibration (a clear favorite wins a **strong majority — ~66%** on a 0.9-vs-0.5 field — but loses
+> **real upsets**; the player is **never protected**). **The shape is fixed; every number is config** —
+> the sibling to the relationship constants (0026).
 > **Executable spec:** [`0028-temperature-and-emotional-constants.feature`](./0028-temperature-and-emotional-constants.feature)
+>
+> **Calibration note (PO ruling 2026-07-06):** the headline was **~72%** at first draft; the **0006 PO
+> retune** (competition temperature weight **0.36 → 0.40**, to make upsets a touch more common) lowered a
+> 0.9-vs-0.5 favorite to a measured **~66%**. The spec + the calibration gate are re-centred on that
+> reality: the win-rate band is **0.60–0.80** (floor widened from 0.65 for headroom), the **≥10% upset**
+> and **no-player-protection** invariants unchanged. Retune the number, not the shape — this and 0006 move together.
 
 ## 1. Summary
 
@@ -18,7 +24,7 @@ them in one place so the game's "swing" can be retuned without touching logic:
 
 - **Bounded variance** — temperature shifts outcomes within bounds; it **never** overrides hard
   rules (eligibility, the Vault Wall) or archetype-grounded weighting.
-- **Calibrated** — the favorite wins a **strong majority (~72%)** but genuine upsets happen; the
+- **Calibrated** — the favorite wins a **strong majority (~66%)** but genuine upsets happen; the
   engine **never protects the player**.
 - **Soul-sourced emotional modifier** — a baseline (from `Character`/`Soul`) that grows more or less
   volatile with circumstances + temperature, and **mean-reverts** when things calm.
@@ -39,7 +45,7 @@ numbers); the **relationship** constants (**0026** — sibling module); the **wh
 
 A per-moment roll through the seeded `RandomnessSource`, **bounded** so it adds surprise without
 breaking determinism-by-seed or hard rules. Default calibrated to 0006: stat-vs-type weighting +
-the bounded roll yields the **~72% favorite win** with real upsets. The bound is config.
+the bounded roll yields the **~66% favorite win** with real upsets. The bound is config.
 
 ## 4. Per-variable weighting
 
@@ -81,14 +87,14 @@ temperatureRoll(moment, rng) -> number              # bounded; seeded
 emotionalModifier(character, soul, circumstances, temperature) -> number   # §5; mean-reverts when calm
 ```
 
-**Invariants:** the favorite wins a **calibrated strong majority (~72%)** with real upsets; the
+**Invariants:** the favorite wins a **calibrated strong majority (~66%)** with real upsets; the
 player is **never protected**; temperature is **bounded** and **never** overrides hard rules; the
 emotional modifier **mean-reverts**; hidden elements surface **rarely** (bounded rate); **all
 numbers are config** (changing one changes the behavior); seed-reproducible.
 
 ## 9. Test strategy
 
-- **Calibration holds:** over many seeds the favorite wins ~72% (the 0006 property), upsets are real
+- **Calibration holds:** over many seeds the favorite wins ~66% (the 0006 property), upsets are real
   but uncommon, and the player loses when the dice say so (unprotected).
 - **Bounded + rule-safe:** temperature never produces an illegal outcome or leaks the Vault.
 - **Mean-reversion:** after a spike, the emotional modifier settles toward baseline over calm
@@ -102,7 +108,7 @@ numbers are config** (changing one changes the behavior); seed-reproducible.
 
 - [ ] Temperature, per-variable weights, the emotional modifier, and the surfacing rate come from
       **one tunable constants module**.
-- [ ] Default calibration matches 0006 (~72% favorite; real upsets; player unprotected; bounded).
+- [ ] Default calibration matches 0006 (~66% favorite; real upsets; player unprotected; bounded).
 - [ ] The emotional modifier mean-reverts; hidden elements surface rarely (bounded).
 - [ ] No number is hard-coded outside the module; the shape stays fixed (0006).
 - [ ] All checks seed-reproducible.
