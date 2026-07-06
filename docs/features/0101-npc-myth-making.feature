@@ -71,7 +71,7 @@ Feature: 0101 — NPC myth-making (you become house folklore)
       And the engine never tells the player whether the legend is true
 
     Scenario: The myth layer is calibration-neutral
-      Given two seasons played from the same seed and the same history
+      Given two myth-making seasons played from the same seed and the same history
       When one season has myth-making enabled and the other has it disabled
       Then the seeded competition and eviction outcomes are byte-identical between them
       And the legends seeded are identical given the same seed and history

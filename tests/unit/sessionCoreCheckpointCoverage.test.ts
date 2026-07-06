@@ -42,6 +42,7 @@ describe("PERSIST-8 — sessionCoreCounts (the newer monotonic per-season counte
     "campaignTickCount", "playerCampaignMoveCount", "juryHouseTickCount", "eruptionCount", "triggerTickCount",
     "pacingTickCount", "confideLieCount", "secretExposeCount", "secretTradeCount",
     "secretPlayerBluffCount", "playerTieSurfaceCount", "tieScheduleTickCount", "surfacedThreadCount",
+    "legendTickCount", "legendCount", "legendLastActTick",
   ];
 
   for (const field of fields) {

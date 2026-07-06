@@ -660,6 +660,24 @@ export class BbWorld extends World {
     finaleBlob?: string;
   };
 
+  // Feature 0101 — NPC myth-making scratch state (one bag).
+  myth?: {
+    reg?: import("../../src/composition/registry").GameSessionRegistry;
+    user?: string;
+    sandbox?: import("../../src/composition/registry").UserSandbox;
+    origin?: Eid;
+    chain?: Eid[];
+    factId?: string;
+    actClass?: string;
+    minted?: boolean;
+    beforeEdgesJson?: string;
+    playerEdgesBeforeJson?: string;
+    seededOutcomeA?: string;
+    seededOutcomeB?: string;
+    legendsA?: string[];
+    legendsB?: string[];
+  };
+
   constructor(options: IWorldOptions) {
     super(options);
   }
