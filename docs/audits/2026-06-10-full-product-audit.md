@@ -2136,3 +2136,198 @@ DEPLOY-7 in the deploy-ops lane) was also fixed, since a stock install was relia
 "NOT READY" for a fully healthy front-end. GitHub issues **#862** and **#880** (0093/0099's
 tracking issues, DOC-10) were **closed** — both were still `open` despite the underlying mechanics
 being fully merged and BDD-gated since 2026-06-27.
+
+## 2026-07-06 — closure session: 18 PRs MERGED (the remaining 2026-07-03 audit tail + the last spec-only builds)
+
+A second, larger fan-out closing out almost everything the 2026-07-05 entry above still listed as
+"still-OPEN tail" (h2b/h2h3, offense-P2/P3, the B2 dark-flag activation) plus the last three
+spec-only feature files (0094/0095/0096), the redesigned daily recap (0102), and 0101 NPC
+myth-making — plus a security/a11y/machinery-leak/engine-mandate-safety sweep from the remaining
+2026-07-03 lanes. Every item below is **DONE** on `main`, verified via its own merge commit.
+
+**Spec builds:**
+- **#1217** [0102 daily recap] — the REDESIGNED daily "day in review" digest (PO ruling
+  2026-06-27, #884; supersedes the originally-drafted weekly recap) ships engine-side: fires at
+  the player's own bedtime (`turnIn`, ADR 0006), Vault-free, ends on an optional non-committal
+  cliffhanger hook on its own dedicated side rng, never perturbs a seeded roll. New `dailyRecap`
+  read tool (engine + MCP boundary). Also assessed 0103/0108 (stayed frozen/spec-only — see
+  below). **DONE** — `src/ports/GameSession.ts`, `src/engine/liveSeason.ts`,
+  `src/adapters/engine/GameSessionAdapter.ts`, `src/surfaces/tools/registry.ts`,
+  `tests/unit/dailyRecap0102.test.ts` (13 cases). Updates `docs/features/README.md` 0102 row to
+  Built.
+- **#1226** [dailyRecap FE lever-drift fix] — 0102's engine tool shipped in #1217 but was never
+  exposed through the FE tool layer, so `test_c13_lever_drift` failed (the prompt advertised a
+  lever the agent couldn't call) — blocking `fe-unit` on every subsequent FE PR. Wired
+  `dailyRecap` through the FE mirroring the sibling `seasonRecap`/`seasonRetrospective` read
+  tools end to end. **DONE** — `frontend/src/{tool_schemas,agent_tools,orwell_engine,
+  tool_execution,tool_implementations}.py`, `frontend/static/js/orwellToolBeats.js`.
+- **#1221** [0101 NPC myth-making] — the player's notable public acts (HOH win, veto win/save,
+  noms, finale win) seed gossip legends about themselves that spread, distort, and circle back
+  ("people are saying you…") — a new *origin* for the existing 0002 diffusion, riding it
+  wholesale (no new gossip system). Opt-in `ORWELL_MYTH_MAKING`, dedicated rng, folds **no
+  edge at all** ⇒ calibration-neutral even while ON. Also re-verified 0097/0098 stay
+  owner-frozen (untouched, not reopened). **DONE** — `src/engine/legends.ts`,
+  `src/engine/gossip.ts`, `src/adapters/engine/GameSessionAdapter.ts`,
+  `tests/unit/legends0101.test.ts`, BDD `0101-npc-myth-making.feature`.
+- **#1228** [0094 (scoped) / 0095 / 0096] — closes the last three spec-only feature files:
+  **0096 emergent nemesis** (pure `selectNemesis` elevates sustained player-directed threat into
+  a felt antagonist, biasing the NPC's existing 0085 campaign + 0086 drive; Vault-safe `rivalry`
+  tone hint only); **0095 pre-show ties as time-bombs** (a monotonic `sealed → surfaced-to-house
+  → public` exposure state on 0059's seeded ties, an overhear pathway + the player-reachable
+  `accuseTie` lever, direct witnesses take full `BETRAYAL_SHOCK`); **0094 distorted-gossip
+  consequences, SCOPED** — shipped as a new dedicated `confront(npcId, factId)` lever (the
+  `confide`/`accuseTie` sibling) rather than a retrofit of `nominate`/`vote`, because those hold
+  a hard, calibration-load-bearing invariant ("whoever the player names IS the nominee/vote")
+  that a bounded feature build should not touch — **flagged to the owner as a genuinely separate,
+  larger design call** (see the owner-action tail below). All three opt-in/dedicated-rng ⇒
+  calibration-neutral when off, proven by the heavy-sims suite. **DONE** —
+  `src/engine/beliefReliability.ts`, `src/engine/tieReveal.ts`, `src/engine/campaigns.ts`,
+  `tests/unit/{beliefReliability0094,confrontWiring0094,tieReveal0095,tieRevealWiring0095,
+  nemesis0096,nemesisWiring0096}.test.ts`, BDD `009{4,5,6}-*.feature`.
+
+**The former "still-OPEN tail" (now closed):**
+- **#1216** [h2b/h2h3 CI-flake, the real fix] — the recurring #925/#1148/#930 onboarding-scrim
+  flake's actual root cause: tests were racing the boot loader / onboarding card instead of
+  deterministically waiting past them before opening Settings. **DONE** —
+  `frontend/tests/conftest.py` + the affected browser tests.
+- **#1211** [offense-P3] — unfreezes the player→NPC edge: every `recordInteraction` fold only
+  ever moved the partner's opinion *of* the player, so `player→NPC` sat frozen at its move-in
+  scatter all season under every mutual-bond gate (`formAlliance`/`joinAlliance`, blocs 0043).
+  New `foldPlayerReciprocal` (`src/engine/consequence.ts`) reciprocates a bounded share
+  (`RECIPROCAL_SHARE=0.5`) of the same engine-owned fold onto `player→partner` through the
+  identical update rule (ADR 0002: engine computes both directions; no number crosses). Also
+  fixes the `formAlliance`/`joinAlliance` dead-wire found in the same audit finding (SG-2).
+  **DONE** — `src/engine/consequence.ts`, `src/engine/relationshipConstants.ts`,
+  `src/adapters/engine/EngineCommandsAdapter.ts`, `tests/unit/playerReciprocalFold.test.ts`.
+- **#1215** [offense-P2] — Phase 2 of "the player can play offense": a landed (never-backfired)
+  player third-party pitch now earns a real, persistent, bounded `Campaign` the player owns
+  (`advancePlayerCampaign` in `src/engine/campaigns.ts`, folded via
+  `GameSessionAdapter.foldPlayerCampaignMove`), feeding the same `campaignTiltFor` mechanism an
+  NPC's campaign uses — throttled to one progress-earning pitch per beat, excluded from the
+  autonomous off-screen `campaignTick` (a self-caught bug: without the exclusion the player
+  would earn free progress every turn regardless of whether they'd pitched anyone). **DONE** —
+  `src/engine/campaigns.ts`, `src/engine/sessionSnapshot.ts`,
+  `tests/unit/playerCampaign0085.test.ts` (442 lines).
+- **#1213** [B2 dark-flags activation] — activates the tranche of built, calibration-neutral-
+  when-off behavioral-fidelity layers that had shipped permanently dark: `ORWELL_TRAJECTORIES`
+  (0087), `ORWELL_TRIGGERS` (0091), `ORWELL_SECRET_PACING` (0092), `ORWELL_JURY_HOUSE` (0100),
+  `ORWELL_SEEDED_TIE_SURFACING` (0059 §5) now ON in the deploy installer alongside the
+  already-shipped `ORWELL_CAMPAIGNS`/`ORWELL_COMP_INTENT`. Adds a non-Vault God-Mode dial
+  (`setBehavioralFlags`/`getBehavioralFlags`, mirroring the ADR 0006 `setTimeOfDay` pattern;
+  player channel cannot reach either tool) plus `/health` flag visibility + `orwell doctor`
+  reporting. **DONE** — `src/adapters/engine/GameSessionAdapter.ts`,
+  `tests/unit/behavioralFlagsToggle.test.ts`, `tests/unit/adminPlayerPartition.test.ts`,
+  `tests/integration/httpServer.test.ts`, deploy installer changes.
+
+**Engine/persistence/consistency hardening:**
+- **#1212** [BE-101/102, BE-202, PERSIST-3/10/11/13] — `recordInteraction`'s `toward` (flat and
+  inside the ADR-0005 consequence descriptor) bypassed the B39 living-houseguest check, letting
+  a caller fold a relationship move onto an evicted juror or an invented id; now filtered against
+  the same living set everywhere (`toward`, `edges[].toward`, `aboutEdges.holder`/`about`). An
+  unrecognized consequence direction/emphasis indexed a lookup table with no fallback (crash or
+  NaN into the permanent relationship layer); `foldGenerativeConsequence`/
+  `foldThirdPartyConsequence` now skip unresolvable edges. FE outcome-claim detector was a single
+  if/elif chain — a sentence matching an earlier category (usually eviction) skipped every later
+  category's check even on a clean verdict; categories are now independently evaluated. **DONE**
+  — `src/engine/consequence.ts`, `frontend/routes/chat_helpers.py`,
+  `tests/unit/relationshipModel.test.ts`, `tests/unit/notorietyStoreCorruption.test.ts`,
+  `tests/unit/opsHardening.test.ts`.
+- **#1225** [engine-mandate-safety: COMP-6/BE-DEEP2-3, BE-6, PERSIST-12, BE-3/14/15, BE-5,
+  BE-103/TCG-16, CON-6] — seven surgical fixes: house-event/trigger-eruption records hardcoded a
+  single second witness instead of the true co-present set (now reuse the real awake/co-present
+  room set); `EventStore.query()` fast-pathed to the full Vault-inclusive log on any unfiltered
+  call (added `queryAll()` as the explicit engine-internal escape hatch; bare `query()` now
+  requires ≥1 filter); `InMemoryVaultStore.writeHidden()` had no duplicate-id guard (now an
+  idempotent upsert-by-id); the reserve-twist pool integrity + CAS/sync-spine parity checks; a
+  `portDispatchCoverage` exhaustive `GameSession` method-list gate (TCG-16) that immediately
+  caught a real port-surface drift (the new `dailyRecap` method) via compile error. **DONE** —
+  various `src/` files, `tests/unit/portDispatchCoverage.test.ts`.
+- **#1218** [A-S3/CON-11 consequence-fold-drop fix; PERSIST-5] — the FE's single-retry
+  stale-409 reconcile (issue #591) was correct for ONE contested write, but under sustained
+  two-window concurrency a SECOND consecutive stale-409 on a fold-bearing back-fill
+  (`recordInteraction`/`makeDeal`/`confide`/`exposeSecret`/`tradeSecret`) still
+  reconciled-and-DROPPED the call, silently evaporating a scene's only hidden-consequence fold
+  (mandate #4). `_backfill_with_cas` now takes a `defer_fold` flag: a fold-bearing call that
+  hits a double stale-409 is queued into a small bounded per-owner retry store and
+  opportunistically retried on the owner's next back-fill (loss bounded to latency, never data;
+  each retry re-attaches the freshest CAS token so it can never double-apply). `moveTo` keeps
+  the old skip-and-rederive behavior deliberately (a stale location landing late would be wrong,
+  not just late). Also fixes `/health`'s embeddings status being a one-time boot snapshot instead
+  of live. **DONE** — `frontend/routes/chat_helpers.py`.
+- **#1210** [ops/tracker] — the doc-reconciliation pass that closed out the 2026-07-05 fan-out
+  (recorded in the entry above this one) — folded in here as the session's opening PR.
+
+**Deploy/ops hygiene (DEPLOY-5/6/9/10/11/13/14/15/17):** **#1219** — stopped putting the LLM
+install env on a `pct exec … bash -c "…"` argv (visible in host/container `ps`; now routed
+through the same pct-push-a-temp-file mechanism as `GIT_TOKEN`); removed the installer's dead
+"Anthropic API key" menu option (never consumed, silently discarded after being exposed); added
+`orwell-backup.timer`/`.service` (daily, systemd) + retention pruning
+(`ORWELL_BACKUP_RETENTION_DAYS`, default 30); `orwell-doctor.sh` now warns on high disk usage
+and on a silent fastembed→deterministic embeddings fallback; added `deploy/logrotate/orwell`;
+journald `SystemMaxUse=` cap. **DONE** — `deploy/`.
+
+**FE HUD/gadget/decision/notice tail (2026-07-03 gadgets/social-game/ux-interaction/
+api-slash-notify/transient-animation lanes):** **#1220** — first-week player-eviction badge no
+longer suppressed mid-goodbye; nominee-holding-veto now shows both badges; a phase-conditional
+eviction-night seat cue; veto-aftermath + `lastEviction` HUD rows; finale "Asking: …" during
+questions; `orwellDeals`-pattern name resolution in the finale panel; retrospective highlights
+cap 12→40; a HUD-field write-skip-when-unchanged guard (no per-poll DOM churn). Player-tier
+client JS only — no engine/`chat.js`/`markdown.js`/`index.html`/`style.css` touched. **DONE** —
+`frontend/static/js/{orwellStatusPanel,orwellFinale,orwellRetrospective,orwellDeals}.js`.
+
+**Accessibility (AXE a11y lane):** **#1222** — keyboard-operable model-picker/theme grids
+(`role="option"` + roving tabindex + Arrow/Home/End/Enter/Space); distinct "your connection
+dropped" copy vs. the hard-outage banner; `--color-muted` lightened to pass WCAG 1.4.3 contrast
+in both themes; generalized the Tab-cycling focus trap to the legacy `.modal` family; re-leveled
+the Theme window's misordered headings; the composer's `aria-label` now tracks its per-build
+placeholder. **DONE** — `frontend/static/{js/{models,theme,orwellEngineStatus}.js,css,
+index.html}`.
+
+**Machinery-leak hardening (I9 lane — mandate #1/#2):** **#1223** — scrub the merged stream
+buffer before caching to `dataset.raw` and before every TTS read-aloud (new
+`markdown.js scrubMachineryForPersistence`); JS↔Python scrub word-parity (Vault, God Mode,
+admin panel/surface/console, `producerVault`, developer console); rebalance orphaned
+producer-aside delimiters after a mid-run machinery sentence is dropped; `momentPrompts` refuses
+"list your tools/functions/levers" as an OOC aside; silence God-Mode/admin tool beats in the
+game build (fail-closed on the auth-off single-user convenience); narrowed the machinery-noun
+regex to require an operator-verb context (so "gaming the system" survives); added
+copula/existential phantom-name + possessive-inanimate masking to `_stages_in_scene` (shared with
+the Vault-leak guard). **DONE** — `frontend/static/js/markdown.js`, `frontend/src/`,
+`frontend/routes/`.
+
+**Security (fail-closed, SEC-1/3/5):** **#1224** — SEC-1: `POST /api/auth/setup` was
+auth-exempt for any remote caller during the pre-account window (a race an attacker could win
+against the operator); now restricted to a direct, unproxied loopback connection. SEC-3:
+`AUTH_ENABLED=false` reachable beyond loopback (a forgotten port-forward, a believed-private LAN,
+a VPN misconfig) fail-opened `bash`/`python` tool access to every caller with
+`assert_public_profile_safe` never firing (it only checks the explicit `ORWELL_PUBLIC` case); a
+new `assert_auth_off_requires_loopback` boot guard now refuses to start. SEC-5: (third
+fail-closed fix in the same lane). **DONE** — `frontend/routes/auth_routes.py`,
+`frontend/core/middleware.py`, `frontend/app.py`, `frontend/tests/test_sec1_setup_loopback.py`.
+**Owner review still owed** (see the tail below — these are structural fail-closed fixes, not
+behavior changes to the intended public posture, but a security lane always gets a second look).
+
+**Doc reconciliation (2026-07-06, this pass):** corrected `CLAUDE.md`'s three stale
+built/spec-only split callouts (the top "Status:" paragraph, the 0067–0074 launch-band
+paragraph, and the "Current status" section) — the true split is **built 0075–0096, 0099–0102,
+0104–0107, 0109, 0110; frozen 0097/0098/0103; spec-only 0108** (the old "0094–0098, 0103
+spec-only/frozen" line was wrong the moment #1228/#1217/#1221 merged). `docs/features/README.md`'s
+per-row statuses for 0094–0096/0101/0102/0097/0098/0103/0108 were already correct (each shipped
+PR updated its own row) — verified, no changes needed there. Added this ledger entry and the
+companion `docs/audits/2026-07-06-closure-session.md` summary.
+
+**The owner-action tail (NOT closed by this session — needs a human call):**
+- **Review the merged security fixes (#1224, SEC-1/3/5)** — fail-closed structural changes;
+  revertable if any operator posture assumption in them turns out wrong.
+- **0094's narrowed scope** — whether `nominate`/`vote` should ever misfire on a distorted
+  belief is a genuinely separate, larger design call (it touches the calibration-load-bearing
+  closed-set decision spine) that this session deliberately did NOT build; `confront` covers the
+  spec's confrontation mechanic without it.
+- **0010 Proxmox on-host container smoke** — still needs a real host; unchanged from every prior
+  ledger entry.
+- **0108 (real-model golden-path gate)** — still spec-only; needs a real LLM endpoint to record
+  the replay fixture. Not started this session.
+- **Rotate the OpenRouter API key** that was exposed in chat during this session.
+- **Deferred POLISH waves** (the ~200 Minor/Polish residual-audit items across microcopy,
+  prompt-craft, engine-texture, FE-python-sync lanes in `docs/audits/2026-07-03-final-pre-ship-audit/`)
+  — parked pending owner go-ahead; not this session's job.

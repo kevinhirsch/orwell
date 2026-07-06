@@ -16,14 +16,17 @@ houseguest. A prior version ran entirely inside one LLM chat context; this rebui
 game state into **external, permissioned stores** behind a **hexagonal architecture** so
 that the deterministic rules, the secret state, and the narration are cleanly separated.
 
-**Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-23).** Specs now run
-through **0110**, and the originally-drafted set is built and **green** — but the spec ceiling now runs ahead of the
-*built* one: **0075–0093, 0099–0102, 0104–0107, 0109, 0110** are built, while **0094–0098, 0103** remain
-**spec-only/frozen** (the Producer's-Vault audit + PO-review batch — some parked, some awaiting a build
-slot; 0101 shipped 2026-07-06 as NPC myth-making, 0102 shipped 2026-07-05 as the redesigned daily recap
-#884) and **0108** is spec-only (the real-model golden-path gate). *(The former lone deferral, **0022
-(MVP-2, the rich game UI)**, was **removed** in the 2026-06-28 PO review — superseded by 0020/0051/0054
-under ADR 0003.)* The
+**Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-07-06).** Specs now run
+through **0110**, and the originally-drafted set is built and **green** — the spec ceiling and the
+*built* one are now nearly flush: **0075–0096, 0099–0102, 0104–0107, 0109, 0110** are built, while
+**0097/0098/0103** remain **frozen** (owner-parked "not planned," preserved not deleted, reopenable)
+and **0108** is spec-only (the real-model golden-path gate). The 2026-07-06 closure session shipped
+the last three spec-only files — 0094 (distorted-gossip consequences, shipped SCOPED as a new
+`confront(npcId, factId)` lever; deliberately did not retrofit nominate/vote, an owner-flagged design
+call), 0095 (pre-show ties as time-bombs), and 0096 (emergent nemesis) — alongside 0101 (NPC
+myth-making, 2026-07-05) and 0102 (the redesigned daily recap, 2026-07-05, #884). *(The former lone
+deferral, **0022 (MVP-2, the rich game UI)**, was **removed** in the 2026-06-28 PO review — superseded
+by 0020/0051/0054 under ADR 0003.)* The
 reconciled per-feature index in `docs/features/README.md` is authoritative for built vs. spec-only — plus **0053**
 (admin transcripts, FE-side) — covering: the eight
 priority invariants, the MCP seam, the one-liner deploy, the gameplay loop, the MVP-1 batch —
@@ -48,7 +51,7 @@ MUST compose the kit.)* The game is **folded into the main chat**: the player-fa
 `docs/features/` (through **0110**; the 0067–0074 launch band is 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
 0070 off-screen texture enrichment, 0071 defensive hardening (redaction + URL/path guards), 0072 the
 multi-platform gateway, 0073 the structural anti-sycophancy game-build wall (a CI gate), and 0074 local &
-tunable HTTPS (ADR 0014); past the launch band, **0075–0093, 0099–0102, 0104–0107, 0109, 0110** are built and **0094–0098, 0103** remain spec-only/frozen (Producer's-Vault/PO-review batch) with **0108** spec-only;
+tunable HTTPS (ADR 0014); past the launch band, **0075–0096, 0099–0102, 0104–0107, 0109, 0110** are built and **0097/0098/0103** remain frozen (owner-parked, preserved not deleted) with **0108** spec-only;
 0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
@@ -534,13 +537,14 @@ deep character profiles (0058), seasons-as-levels, multi-device sync (0064), the
 0007), the token economy + usage envelope (0069), off-screen texture enrichment (0070), defensive
 hardening (0071), the multi-platform gateway (0072), the structural anti-sycophancy game-build wall as
 a CI gate (0073), and local & tunable HTTPS (0074 / ADR 0014) are all in. **Past 0074 the spec set runs to 0110**:
-**0075–0093, 0099–0102, 0104–0107, 0109, 0110** are built (trust-gated confidences, presence/eyeshot & motivated
+**0075–0096, 0099–0102, 0104–0107, 0109, 0110** are built (trust-gated confidences, presence/eyeshot & motivated
 movement, the runtime overseer 0079–0081, character voice/campaigns/drives, secrets-as-power,
 jury grudge book, season notoriety, named alliances, deal duration, vote deduction, NPC myth-making 0101,
-the daily recap 0102/#884), while **0094–0098, 0103**
-remain **spec-only/frozen** (the Producer's-Vault audit + PO-review batch — opt-in/default-off social
-texture, some parked, some awaiting a build slot) and **0108** is spec-only (the real-model
-golden-path gate).
+the daily recap 0102/#884, and — shipped in the 2026-07-06 closure session — distorted-gossip
+consequences 0094 (scoped: a new `confront` lever, not a nominate/vote retrofit — an owner-flagged
+design call), pre-show ties as time-bombs 0095, and emergent nemesis 0096), while **0097/0098/0103**
+remain **frozen** (owner-parked "not planned" 2026-06-27, preserved not deleted, reopenable) and
+**0108** is spec-only (the real-model golden-path gate).
 **0022** (the rich game UI / MVP-2) was **removed** in the 2026-06-28 PO review — by ADR 0003 the chat *is*
 the UI, and its goals were delivered chat-forward via 0020/0051/0054, so the standalone dashboard spec was cut.
 
