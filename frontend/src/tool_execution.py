@@ -1172,7 +1172,7 @@ async def execute_tool_block(
         do_form_alliance, do_join_alliance,
         do_expose_secret, do_trade_secret,
         do_premiere_intros, do_mark_houseguest_met,
-        do_season_recap, do_season_retrospective, do_npc_voice,
+        do_season_recap, do_season_retrospective, do_daily_recap, do_npc_voice,
         do_app_api,
     )
 
@@ -1547,6 +1547,9 @@ async def execute_tool_block(
     elif tool == "seasonRetrospective":
         desc = "seasonRetrospective"
         result = await do_season_retrospective(content, owner=owner)
+    elif tool == "dailyRecap":
+        desc = "dailyRecap"
+        result = await do_daily_recap(content, owner=owner)
     elif tool == "npcVoice":
         desc = "npcVoice"
         result = await do_npc_voice(content, owner=owner)
