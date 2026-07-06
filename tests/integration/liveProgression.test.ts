@@ -65,7 +65,7 @@ describe("live weekly-loop progression (0011) over the MCP boundary", () => {
 
     // The beats were recorded as player-witnessed events in this user's sandbox.
     const sb = reg.sandboxFor("u1");
-    const events = sb.engine.events.query();
+    const events = sb.engine.events.queryAll();
     expect(events.length).toBeGreaterThan(10);
     // The BEATS (house-events) are never hidden; NPC confessionals (0040) ride alongside as Vault-only
     // interiority and are legitimately hidden, so the player-witnessed invariant is asserted on the beats.

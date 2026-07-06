@@ -157,7 +157,7 @@ describe("0059 live wiring — Vault-sealed, never projected, folds a behavioral
     expect(prompt).toContain(`${visible[0]!.a} & ${visible[0]!.b}`);
     // and the surfacing fact reached the PLAYER's knowledge as a witnessed (non-hidden) event
     const surfacedName = surfaced[0]!.aName;
-    const witnessed = sb.engine.events.query().filter((e) => !e.hidden && e.witnessSet.includes(PLAYER));
+    const witnessed = sb.engine.events.queryAll().filter((e) => !e.hidden && e.witnessSet.includes(PLAYER));
     expect(witnessed.some((e) => e.content.includes(surfacedName) && /showmance|grown close/.test(e.content))).toBe(true);
   });
 

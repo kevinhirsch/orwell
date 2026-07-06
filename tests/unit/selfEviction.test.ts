@@ -127,7 +127,7 @@ describe("0061 — player self-eviction", () => {
   describe("the confirmation gate holds (unconfirmed / ambiguous never evicts)", () => {
     it("a raised intent surfaces a self-evict confirmation but changes NO state", () => {
       const sb = activeMidGame();
-      const eventsBefore = sb.engine.events.query().length;
+      const eventsBefore = sb.engine.events.queryAll().length;
       const v = sb.session.requestSelfEviction();
       // The confirmation is surfaced (when the loop is not blocked on a ceremony decision).
       const status = sb.session.gameStatus();
@@ -136,7 +136,7 @@ describe("0061 — player self-eviction", () => {
       // NO eviction, NO new event, the player is still ACTIVE in the house.
       expect(playerLeft(sb.session)).toBe(false);
       expect(sb.session.getGameState().player?.status).toBe("active");
-      expect(sb.engine.events.query().length).toBe(eventsBefore);
+      expect(sb.engine.events.queryAll().length).toBe(eventsBefore);
     });
 
     it("an unconfirmed submit (confirmed:false / absent) is a safe no-op — no fabricated exit", () => {

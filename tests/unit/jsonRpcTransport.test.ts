@@ -90,6 +90,38 @@ describe("MCP / JSON-RPC 2.0 envelope", () => {
     });
   });
 
+  // CON-6 — a stale compare-and-swap write (0065 Part A) used to flatten into the SAME opaque
+  // `{error: msg}` text as every other tool failure over JSON-RPC, losing the machine `code`, the
+  // CURRENT `beatSeq`, and the Vault-free `board` the REST `/call` 409 mapping already carries — so a
+  // JSON-RPC caller had nothing to reconcile against but a human-readable sentence.
+  it("a stale expectedBeatSeq over JSON-RPC carries {code, beatSeq, board} in the isError content (CON-6)", async () => {
+    await withServer(liveResolver(), {}, async (base) => {
+      const user = "u-rpc-stale";
+      const created = await readJson(await rpc(
+        base, "player",
+        { jsonrpc: "2.0", id: 20, method: "tools/call", params: { name: "createCharacter", arguments: { playerName: "P", seed: 3 } } },
+        { "x-orwell-user": user },
+      ));
+      expect(created.result.isError).toBe(false);
+      const current = (JSON.parse(created.result.content[0].text) as { beatSeq: number }).beatSeq;
+
+      const stale = await readJson(await rpc(
+        base, "player",
+        { jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "advanceGame", arguments: { expectedBeatSeq: current - 1 } } },
+        { "x-orwell-user": user },
+      ));
+      // Protocol-success envelope (never a JSON-RPC-level error — a stale write is a tool refusal, not
+      // a protocol fault), but the content payload now carries the SAME structured shape REST does.
+      expect(stale.error).toBeUndefined();
+      expect(stale.result.isError).toBe(true);
+      const body = JSON.parse(stale.result.content[0].text) as { error: string; code: string; beatSeq: number; board: unknown };
+      expect(body.code).toBe("stale-beat");
+      expect(body.beatSeq).toBe(current); // the CURRENT counter, so the caller can re-ground immediately
+      expect(body.board).toBeTruthy(); // the Vault-free board, same as the REST mapping
+      expect(body.error).toMatch(/stale/i);
+    });
+  });
+
   it("protocol faults: unknown method ⇒ -32601, parse error ⇒ -32700 (id null), bad params ⇒ -32602", async () => {
     await withServer(liveResolver(), {}, async (base) => {
       const nf = await readJson(await rpc(base, "player", { jsonrpc: "2.0", id: 6, method: "no/such" }));

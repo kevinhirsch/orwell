@@ -29,7 +29,7 @@ function confessingSandbox(user: string, seed: number, ticks: number) {
 }
 
 function confessionals(sb: ReturnType<typeof confessingSandbox>) {
-  return sb.engine.events.query().filter((e) => e.type === "confessional");
+  return sb.engine.events.queryAll().filter((e) => e.type === "confessional");
 }
 
 // --- Scenario: houseguests confess at dramatic beats (live nomination ceremony) ---
@@ -59,7 +59,7 @@ When("the beat resolves", function () {
 
 Then("the directly-involved houseguests each record a private confessional", function (this: BbWorld) {
   const sb = this.registry!.sandboxFor(this.liveUser!);
-  const confs = sb.engine.events.query().filter((e) => e.type === "confessional");
+  const confs = sb.engine.events.queryAll().filter((e) => e.type === "confessional");
   assert.ok(confs.length > 0, "at least one houseguest confessed at the ceremony");
   for (const e of confs) {
     assert.equal(e.hidden, true);
@@ -111,7 +111,7 @@ Then("it is not an invented stance improvised by the narrator", function (this: 
 // sentinel value appears" reuses the god_mode step, which reads this.lastView + this.sandbox.sentinels.)
 
 const sandboxConfessionals = (w: BbWorld) =>
-  w.sandbox.engine.events.query().filter((e) => e.type === "confessional");
+  w.sandbox.engine.events.queryAll().filter((e) => e.type === "confessional");
 
 Given("a started game in which houseguests have confessed", function (this: BbWorld) {
   this.sandbox = buildSandbox(3);

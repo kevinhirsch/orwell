@@ -123,10 +123,10 @@ describe("ADR 0006 — the off-screen society pairs only the awake (the night ow
       const npcs = npcsOf(sb.session);
       const awake = new Set(sb.session.awakeAmong(npcs));
       if (awake.size >= npcs.length) continue; // need at least one asleep for the check to bite
-      const beforeIds = new Set(sb.engine.events.query().map((e) => e.id));
+      const beforeIds = new Set(sb.engine.events.queryAll().map((e) => e.id));
       for (let t = 0; t < 8; t++) orch.advance(user, "offscreen-tick");
       // The off-screen SOCIETY scenes are hidden pairwise events (witnessSet excludes the player).
-      const scenes = sb.engine.events.query().filter((e) => !beforeIds.has(e.id) && e.hidden && e.witnessSet.length === 2);
+      const scenes = sb.engine.events.queryAll().filter((e) => !beforeIds.has(e.id) && e.hidden && e.witnessSet.length === 2);
       for (const e of scenes) {
         for (const id of e.witnessSet) {
           if (id !== PLAYER) expect(awake.has(id), "an asleep houseguest schemed off-screen at night").toBe(true);

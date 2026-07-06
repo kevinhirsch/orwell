@@ -131,7 +131,7 @@ Given("the house schemes off-screen and records confessionals the player did not
     id: "hidden:0046-bdd", ts: 10_000_001, type: "conversation",
     initiator: npcs[0]!.id, witnessSet: [npcs[0]!.id, npcs[1]!.id], hidden: true, content: this.peSentinel,
   });
-  const hidden = sb.engine.events.query().filter((e) => e.hidden);
+  const hidden = sb.engine.events.queryAll().filter((e) => e.hidden);
   assert.ok(hidden.length > 0, "the house has a hidden life");
   assert.ok(hidden.every((e) => !e.witnessSet.includes(PLAYER)), "no hidden event lists the player as a witness");
 });

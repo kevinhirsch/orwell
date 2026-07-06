@@ -69,7 +69,7 @@ describe("A7 — the sealed eviction ballot must not deanonymize through a deal-
     expect(sealedSignal!.witnessSet).toEqual([PLAYER]); // no breaker id riding along in the witness set either
 
     // 4. The full attribution IS recorded — Vault-side (hidden, no player witness) — for the retrospective.
-    const attributed = sb.engine.events.query().find(
+    const attributed = sb.engine.events.queryAll().find(
       (e) => e.type === "betrayal" && e.content.includes(npcName) && e.content.includes("broke"),
     );
     expect(attributed, "the full attribution was recorded Vault-side").toBeTruthy();
@@ -149,7 +149,7 @@ describe("A7 — the same seal applies to a named-alliance betrayal (0107 Phase 
     for (const e of visibleToPlayer) expect(e.content).not.toContain(npcName);
     expect(visibleToPlayer.some((e) => e.type === "betrayal")).toBe(true); // the unattributed signal lands
 
-    const attributed = sb.engine.events.query().find(
+    const attributed = sb.engine.events.queryAll().find(
       (e) => e.type === "betrayal" && e.content.includes(npcName) && e.content.includes("turned on the alliance"),
     );
     expect(attributed, "the full attribution was recorded Vault-side").toBeTruthy();

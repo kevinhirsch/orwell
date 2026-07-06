@@ -49,11 +49,11 @@ describe("B52 — an evictee leaves the off-screen society", () => {
     const sb = reg.sandboxFor(user);
 
     // Everything recorded from here on must exclude the evictees.
-    const cut = sb.engine.events.query().length;
+    const cut = sb.engine.events.queryAll().length;
     const orch = new Orchestrator(reg, new FakeClock(), { seed: 2 });
     for (let i = 0; i < 12; i++) orch.advance(user, "offscreen-tick");
 
-    const fresh = sb.engine.events.query().slice(cut);
+    const fresh = sb.engine.events.queryAll().slice(cut);
     const offscreen = fresh.filter((e) => e.id.startsWith("offscreen:") || e.type === "confessional");
     expect(offscreen.length).toBeGreaterThan(0); // the living house DID keep scheming (not a vacuous pass)
     for (const e of offscreen) {

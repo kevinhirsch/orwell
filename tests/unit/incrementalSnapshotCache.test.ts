@@ -14,7 +14,7 @@ import type { SessionSnapshot } from "../../src/engine/sessionSnapshot";
 /**
  * R3 (incremental snapshot) — the registry-level export cache + the EventStore query cache. The headline
  * late-game latency bug: every player turn re-serialized the FULL, ever-growing snapshot (an O(events)
- * `events.query().slice()` plus a re-serialize of relationships/knowledge/vault), and the integrity spine
+ * `events.queryAll().slice()` plus a re-serialize of relationships/knowledge/vault), and the integrity spine
  * exports it MULTIPLE times per turn (candidate, next baseline, off-screen-tick baseline, plus every
  * `getGameState` poll) — so a single slow synchronous commit blocked the Node event loop and every
  * concurrent poll (state/deals/recap/health) 502'd. The fix caches the export per user, keyed on a
@@ -56,7 +56,7 @@ describe("R3 cache — the cached export equals a full recompute (correctness)",
     const fullRecompute = (): SessionSnapshot => ({
       ...sb.session.snapshot(),
       snapshotVersion: (reg.snapshot(U)).snapshotVersion,
-      events: sb.engine.events.query(),
+      events: sb.engine.events.queryAll(),
       relationships: sb.engine.relationships.serialize().edges,
       knowledge: sb.engine.knowledge.serialize(),
       vault: sb.engine.vault.readHidden(),
@@ -168,15 +168,15 @@ describe("R3 cache — read cost is bounded, not O(events) per call (structural,
 
     // The orchestrator's last tick already exported + cached the candidate at the current rev. So a read
     // RIGHT NOW (no mutation since) must be a pure cache hit: it touches NONE of the per-export cost — not
-    // the O(events) `events.query()`, not the relationship/knowledge/vault serialize. This is the exact
+    // the O(events) `events.queryAll()`, not the relationship/knowledge/vault serialize. This is the exact
     // win: a `/state` poll between turns pays nothing, so it can't block the event loop or 502.
-    const querySpy = vi.spyOn(sb.engine.events, "query");
+    const queryAllSpy = vi.spyOn(sb.engine.events, "queryAll");
     const relSpy = vi.spyOn(sb.engine.relationships, "serialize");
     const knowSpy = vi.spyOn(sb.engine.knowledge, "serialize");
 
     for (let i = 0; i < 50; i++) reg.snapshot(U); // 50 reads, NO mutation between any of them
 
-    expect(querySpy.mock.calls.length).toBe(0); // not re-sliced once
+    expect(queryAllSpy.mock.calls.length).toBe(0); // not re-sliced once
     expect(relSpy.mock.calls.length).toBe(0);
     expect(knowSpy.mock.calls.length).toBe(0);
   });
@@ -185,18 +185,16 @@ describe("R3 cache — read cost is bounded, not O(events) per call (structural,
     const { reg, clock, orch, U } = liveRig(45);
     tick(orch, clock, U, 25);
     const sb = reg.sandboxFor(U);
-    const querySpy = vi.spyOn(sb.engine.events, "query");
+    // BE-6: the snapshot export's genuinely-unfiltered read is now the explicit `queryAll()` escape
+    // hatch (bare, filterless `query()` throws) — spy on THAT, not `query`.
+    const queryAllSpy = vi.spyOn(sb.engine.events, "queryAll");
 
     // A direct append bumps the O(1) event-count key → the next read misses and re-exports ONCE.
     sb.engine.events.record({ id: "mut:x", ts: 1, type: "house-event", initiator: npc(1), witnessSet: [npc(1)], hidden: true, content: "a mutation" });
     for (let i = 0; i < 40; i++) reg.snapshot(U); // 40 reads after the single mutation
 
-    // Exactly one export's worth of unfiltered query() — not 40. (The export reads the unfiltered log once.)
-    const unfiltered = querySpy.mock.calls.filter((c) => {
-      const f = c[0];
-      return f === undefined || (f.witnessedBy === undefined && f.hidden === undefined && f.type === undefined);
-    }).length;
-    expect(unfiltered).toBe(1);
+    // Exactly one export's worth of unfiltered queryAll() — not 40. (The export reads the unfiltered log once.)
+    expect(queryAllSpy.mock.calls.length).toBe(1);
   });
 
   it("per-export work does NOT grow with history length: a read at 6 weeks and at 40 weeks does one export each", () => {
@@ -207,8 +205,8 @@ describe("R3 cache — read cost is bounded, not O(events) per call (structural,
       const { reg, clock, orch, U } = liveRig(2);
       tick(orch, clock, U, weeks);
       const sb = reg.sandboxFor(U);
-      const spy = vi.spyOn(sb.engine.events, "query");
-      // 30 reads with no mutation between → exactly one export's worth of query() calls.
+      const spy = vi.spyOn(sb.engine.events, "queryAll");
+      // 30 reads with no mutation between → exactly one export's worth of queryAll() calls.
       for (let i = 0; i < 30; i++) reg.snapshot(U);
       const calls = spy.mock.calls.length;
       spy.mockRestore();
@@ -227,15 +225,15 @@ describe("R3 cache — the EventStore query cache (append-only, immutable copy)"
     for (let i = 0; i < 50; i++) {
       store.record({ id: `e:${i}`, ts: i, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: `event ${i}` });
     }
-    const a = store.query();
-    const b = store.query();
+    const a = store.queryAll();
+    const b = store.queryAll();
     expect(b).toBe(a); // no append between ⇒ the SAME frozen copy by reference (zero re-slice)
     expect(Object.isFrozen(a)).toBe(true);
     expect(a.length).toBe(50);
     expect(a[49]!.id).toBe("e:49");
 
     store.record({ id: "e:50", ts: 50, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: "event 50" });
-    const c = store.query();
+    const c = store.queryAll();
     expect(c).not.toBe(a); // an append rebuilt the cache
     expect(c.length).toBe(51);
     // The prior copy is still intact (a point-in-time snapshot must never grow under its holder).
@@ -251,7 +249,7 @@ describe("R3 cache — the EventStore query cache (append-only, immutable copy)"
     for (let i = 0; i < 20; i++) {
       store.record({ id: `e:${i}`, ts: i, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: `${i}` });
       // 5 reads after each append — only the first should be a fresh slice; the next 4 reuse it.
-      for (let r = 0; r < 5; r++) refs.add(store.query());
+      for (let r = 0; r < 5; r++) refs.add(store.queryAll());
     }
     // 20 appends → at most 20 distinct frozen copies handed out (one per append), never 100 (one per read).
     expect(refs.size).toBeLessThanOrEqual(20);
@@ -265,6 +263,6 @@ describe("R3 cache — the EventStore query cache (append-only, immutable copy)"
     expect(visible.map((e) => e.id)).toEqual(["v"]);
     expect(Object.isFrozen(visible)).toBe(false); // filtered results stay caller-mutable
     visible.push({ id: "z", ts: 9, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: "z" });
-    expect(store.query().length).toBe(2); // the store is untouched by mutating the filtered result
+    expect(store.queryAll().length).toBe(2); // the store is untouched by mutating the filtered result
   });
 });

@@ -121,7 +121,7 @@ When("the player records an interaction they initiated", async function (this: B
 });
 
 Then("the event is stored with the player in its witness set", function (this: BbWorld) {
-  const ev = this.sandbox!.engine.events.query().find((e) => e.id === this.ack!.eventId);
+  const ev = this.sandbox!.engine.events.queryAll().find((e) => e.id === this.ack!.eventId);
   assert.ok(ev && ev.witnessSet.includes(PLAYER));
 });
 

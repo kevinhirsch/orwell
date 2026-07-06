@@ -101,18 +101,18 @@ Given("a live game advanced to the player's first binding decision", async funct
 });
 
 When("the player submits a legal choice through the seam", async function (this: BbWorld) {
-  this.beatsBeforeStop = this.registry!.sandboxFor("u1").engine.events.query().length;
+  this.beatsBeforeStop = this.registry!.sandboxFor("u1").engine.events.queryAll().length;
   await resolveLegally(this.livePlayer!, this.lastAdvance!.pending!);
   this.lastAdvance = await adv(this.livePlayer!);
 });
 
 Then("the choice is applied and the loop continues", function (this: BbWorld) {
-  const now = this.registry!.sandboxFor("u1").engine.events.query().length;
+  const now = this.registry!.sandboxFor("u1").engine.events.queryAll().length;
   assert.ok(now > (this.beatsBeforeStop ?? 0), "the resolved beat advanced the loop (new events)");
 });
 
 Then("the beats are recorded as player-witnessed events", function (this: BbWorld) {
-  const events = this.registry!.sandboxFor("u1").engine.events.query();
+  const events = this.registry!.sandboxFor("u1").engine.events.queryAll();
   // The BEATS (house-events) the player lived are never hidden. NPC confessionals (0040) are recorded
   // alongside them but are Vault-only interiority — legitimately hidden — so we assert on the beats.
   const beats = events.filter((e) => e.type === "house-event");
@@ -236,7 +236,7 @@ When("the same advances and decisions are applied to each", async function (this
     }
     // The full recorded event trail (kind + day-counter + visibility + content) — every event
     // the run committed to its store, hidden off-screen life included.
-    const events = reg.sandboxFor(user).engine.events.query()
+    const events = reg.sandboxFor(user).engine.events.queryAll()
       .map((e) => `${e.type}:${e.ts}:${e.hidden}:${e.initiator}:${e.content}`);
     return { status: (await p.callTool("gameStatus", {})) as { week: number; phase: string }, trail, events };
   };

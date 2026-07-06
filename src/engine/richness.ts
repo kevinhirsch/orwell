@@ -73,7 +73,7 @@ export interface RichnessMetrics {
 export function richnessMetrics(result: SeasonResult): RichnessMetrics {
   // Off-screen share + type diversity read from the EventStore via the real
   // visibility model (feature 0002) — off-screen = the player is not a witness.
-  const events = result.events.query();
+  const events = result.events.queryAll();
   const offscreen = events.filter((e) => classify(e, PLAYER) === "HIDDEN").length;
   const types = [...new Set(events.map((e) => e.type))];
 

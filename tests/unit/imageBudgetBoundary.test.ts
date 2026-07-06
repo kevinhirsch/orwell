@@ -63,3 +63,26 @@ describe("IMG-NEW-1 — recordImageBeat enforces the generation budget over the 
     expect(allowed).toBe(IMAGE_BUDGET.perTurnCap); // exactly perTurnCap metered re-generations land, the rest refused
   });
 });
+
+// BE-5 — recordImageBeat now carries the same optional sync-spine `expectedBeatSeq` field every other
+// mutating write-back on this port has (0065 Part A parity). The behavioral CAS guard itself is covered
+// end to end (adapter + registry-wired beatSeqProvider) in tests/unit/syncSpine.test.ts; this proves the
+// MCP boundary's own arg-shape guard (`McpServer.requireShape`'s `recordImageBeat` case) is wired for the
+// new field too — the four-place write-back gotcha (CLAUDE.md) means step 1-2 (port+adapter) can ship
+// while step 4 (this shape guard) silently stays unwired.
+describe("BE-5 — recordImageBeat's expectedBeatSeq is shape-guarded at the MCP boundary", () => {
+  it("a malformed (non-number) expectedBeatSeq is refused before it ever reaches the adapter", async () => {
+    const { server } = playerServer();
+    await expect(
+      server.callTool("recordImageBeat", { houseguestId: "npc:1", imageRef: "move-in", expectedBeatSeq: "not-a-number" }),
+    ).rejects.toThrow(/expectedBeatSeq/);
+  });
+
+  it("a well-typed numeric expectedBeatSeq is accepted (shape-valid; unwired provider here ⇒ no-op CAS)", async () => {
+    const { server } = playerServer();
+    const res = (await server.callTool("recordImageBeat", {
+      houseguestId: "npc:1", imageRef: "move-in", expectedBeatSeq: 0,
+    })) as { eventId: string };
+    expect(res.eventId).toBeTruthy();
+  });
+});

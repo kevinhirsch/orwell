@@ -121,7 +121,7 @@ describe("T1/E42 — NPC binding votes reconcile deals on the live spine", () =>
     for (const e of visibleBetrayals) expect(e.content).not.toContain(voterName);
 
     // ...while the FULL attribution is recorded Vault-side (hidden — no player witness) for later.
-    const attributed = sb.engine.events.query().find(
+    const attributed = sb.engine.events.queryAll().find(
       (e) => e.type === "betrayal" && e.content.includes(voterName) && !e.witnessSet.includes(PLAYER),
     );
     expect(attributed, "the full attribution was recorded Vault-side").toBeTruthy();
@@ -202,7 +202,7 @@ describe("T1/E42 — NPC binding votes reconcile deals on the live spine", () =>
     expect(npcDeal, "the off-screen society sealed at least one NPC↔NPC pact").toBeTruthy();
 
     // The pact's made-event is HIDDEN (no player witness ⇒ the Vault layer, 0002)...
-    const made = sb.engine.events.query().find((e) => e.type === "deal" && !e.witnessSet.includes(PLAYER));
+    const made = sb.engine.events.queryAll().find((e) => e.type === "deal" && !e.witnessSet.includes(PLAYER));
     expect(made).toBeTruthy();
     expect(made!.hidden).toBe(true);
 

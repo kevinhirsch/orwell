@@ -109,13 +109,13 @@ describe("0048/B56 — the recap is the record, not memory", () => {
     expect(recap.winner).toBeTruthy();
     expect(recap.evicted.length).toBe(14); // a 16-cast season's full eviction order
     // Every highlight IS a recorded event's content — nothing invented.
-    const recorded = new Set(sb.engine.events.query().filter((e) => !e.hidden).map((e) => e.content));
+    const recorded = new Set(sb.engine.events.queryAll().filter((e) => !e.hidden).map((e) => e.content));
     expect(recap.highlights.length).toBeGreaterThan(10);
     for (const h of recap.highlights) expect(recorded.has(h), `recorded: ${h}`).toBe(true);
     // Reproducible: the record does not drift between reads.
     expect(sb.session.seasonRecap()).toEqual(recap);
     // Vault-free: no hidden content rides along.
-    const hidden = sb.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+    const hidden = sb.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
     const blob = JSON.stringify(recap);
     for (const c of hidden) expect(blob.includes(c)).toBe(false);
   });

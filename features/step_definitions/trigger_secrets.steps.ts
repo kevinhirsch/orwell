@@ -163,7 +163,7 @@ Then("no trigger fires", function (this: BbWorld) {
 
 Then("the house carries on with no eruption", function (this: BbWorld) {
   const events = (tg(this) as unknown as { tgEvents: EventStore }).tgEvents;
-  assert.equal(events.query().filter((e) => e.id.startsWith("trigger:erupt:")).length, 0, "no eruption event exists");
+  assert.equal(events.queryAll().filter((e) => e.id.startsWith("trigger:erupt:")).length, 0, "no eruption event exists");
 });
 
 Given("a strained volatile houseguest whose trigger would otherwise be primed", function (this: BbWorld) {
@@ -188,7 +188,7 @@ Given("no precipitating scene occurs this tick", function (this: BbWorld) {
 Then("no off-screen process starts an eruption on its own", function (this: BbWorld) {
   const events = (tg(this) as unknown as { tgEvents: EventStore }).tgEvents;
   assert.equal(tg(this).tgContent, null, "with no spark, the primed trigger never fires (the no-cold-open guarantee)");
-  assert.equal(events.query().filter((e) => e.id.startsWith("trigger:erupt:")).length, 0, "no free-floating eruption");
+  assert.equal(events.queryAll().filter((e) => e.id.startsWith("trigger:erupt:")).length, 0, "no free-floating eruption");
 });
 
 // === Rule: the Vault Wall holds — the eruption is witnessed, the trigger never leaks =====================
@@ -305,7 +305,7 @@ Given("the same season is played with the trigger mechanism enabled", function (
   const { session, target } = seasonWithArmedTrigger(2026, false);
   const events = new InMemoryEventStore();
   for (let i = 0; i < 6000; i++) session.runTriggerEruptions(events, new Map([[target, 1]]));
-  tg(this).tgEruptions = events.query().filter((e) => e.id.startsWith("trigger:erupt:")).length;
+  tg(this).tgEruptions = events.queryAll().filter((e) => e.id.startsWith("trigger:erupt:")).length;
 });
 
 Then("every seeded competition, vote, and jury outcome is byte-identical across the two runs", function (this: BbWorld) {
@@ -331,7 +331,7 @@ function oneTickSocietyOutput(triggersOn: boolean): string {
   sb.session.setTriggersEnabled(triggersOn);
   const orch = new Orchestrator(reg, new FakeClock(), { seed: 7 });
   orch.advance("bdd-trig", "offscreen-tick");
-  return sb.engine.events.query()
+  return sb.engine.events.queryAll()
     .filter((e) => !e.id.startsWith("trigger:erupt:"))
     .map((e) => `${e.type}|${e.initiator}|${e.hidden ? 1 : 0}|${e.content}`)
     .join("\n");

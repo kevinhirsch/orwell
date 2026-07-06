@@ -54,7 +54,7 @@ describe("B39 — anchored surfacing (anti-sycophancy)", () => {
 
     const facts = core.knowledge.knownTo(PLAYER);
     expect(facts.length).toBeGreaterThan(0);
-    const ids = new Set(core.events.query().map((e) => e.id));
+    const ids = new Set(core.events.queryAll().map((e) => e.id));
     for (const f of facts) {
       expect(f.sourceEventId, `fact "${f.content}" must cite a source`).toBeDefined();
       expect(ids.has(f.sourceEventId!)).toBe(true); // the cited source is a recorded event

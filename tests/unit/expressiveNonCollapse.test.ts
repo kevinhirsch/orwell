@@ -41,7 +41,7 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
       initiator: PLAYER, witnessSet: [PLAYER, partner], kind: "strategy", content: WEIRD_UTTERANCE,
     });
 
-    const stored = sb.engine.events.query().find((e) => e.content === WEIRD_UTTERANCE);
+    const stored = sb.engine.events.queryAll().find((e) => e.content === WEIRD_UTTERANCE);
     expect(stored).toBeDefined();
     // Byte-equal: the exact string, every glyph (em-dash, accents, emoji, smart quotes) intact.
     expect(stored!.content).toBe(WEIRD_UTTERANCE);
@@ -68,7 +68,7 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
   it("(2b) NEVER DROPPED — a scene with NO `kind` and NO descriptor is still RECORDED (not silently discarded for want of an enum)", () => {
     const sb = freshSandbox("adr0005-norail", 503);
     const partner = sb.session.livingIds().find((id) => id !== PLAYER)!;
-    const eventsBefore = sb.engine.events.query().length;
+    const eventsBefore = sb.engine.events.queryAll().length;
 
     // A novel move that fits NO existing lever — no `kind`, no descriptor. ADR 0005 principle #4:
     // a creative action that fits no lever is a RECORDING gap, not a non-event. It must still land.
@@ -77,8 +77,8 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
     });
 
     expect(eventId).toBeTruthy();
-    expect(sb.engine.events.query().length).toBeGreaterThan(eventsBefore);
-    expect(sb.engine.events.query().some((e) => e.content === WEIRD_UTTERANCE)).toBe(true);
+    expect(sb.engine.events.queryAll().length).toBeGreaterThan(eventsBefore);
+    expect(sb.engine.events.queryAll().some((e) => e.content === WEIRD_UTTERANCE)).toBe(true);
   });
 
   it("(3) RECALLED IN FULL — the prose is retrievable later via semantic recall, not just its tag", () => {
@@ -118,7 +118,7 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
     expect(recallB).toContain(sceneB);
     expect(sceneA).not.toBe(sceneB);
     // Both are in the record as DISTINCT events (not collapsed into one tagged row).
-    const contents = sb.engine.events.query().map((e) => e.content);
+    const contents = sb.engine.events.queryAll().map((e) => e.content);
     expect(contents).toContain(sceneA);
     expect(contents).toContain(sceneB);
   });
@@ -213,7 +213,7 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
 
       expect(sb.engine.relationships.edge(partner, PLAYER).trust).toBeGreaterThan(before.trust);
       // …and it was recorded (never dropped).
-      expect(sb.engine.events.query().some((e) => e.content.includes("secret handshake"))).toBe(true);
+      expect(sb.engine.events.queryAll().some((e) => e.content.includes("secret handshake"))).toBe(true);
     });
 
     it("the descriptor's `rationale` is RECORDED (open-set content) but NEVER scored — it moves no hidden number", () => {
@@ -236,8 +236,8 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
       });
 
       // RECORDED: the rationale lands in the record as its own open-set content…
-      expect(withRationale.engine.events.query().some((e) => e.content === RATIONALE)).toBe(true);
-      expect(withoutRationale.engine.events.query().some((e) => e.content === RATIONALE)).toBe(false);
+      expect(withRationale.engine.events.queryAll().some((e) => e.content === RATIONALE)).toBe(true);
+      expect(withoutRationale.engine.events.queryAll().some((e) => e.content === RATIONALE)).toBe(false);
       // …yet it NEVER influences the magnitude — the trust delta is byte-identical with vs. without it.
       expect(withRationale.engine.relationships.edge(pA, PLAYER).trust)
         .toBeCloseTo(withoutRationale.engine.relationships.edge(pB, PLAYER).trust, 9);

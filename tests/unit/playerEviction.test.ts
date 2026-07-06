@@ -137,7 +137,7 @@ describe("0046 — player eviction & the juror's seat", () => {
     }
 
     const witnessed = sb.engine.events.query({ witnessedBy: PLAYER });
-    const hidden = sb.engine.events.query().filter((e) => e.hidden);
+    const hidden = sb.engine.events.queryAll().filter((e) => e.hidden);
 
     // They are not cut off: the broadcasts keep coming (their witnessed set grew while spectating).
     expect(witnessed.length).toBeGreaterThan(witnessedAtEviction);

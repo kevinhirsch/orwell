@@ -103,7 +103,7 @@ describe("L38 — the Vault Wall holds: the fast-forward summary leaks NO hidden
     expect(summary.finished).toBe(true);
     expect(summary.winnerName).toBeTruthy();
     // Every hidden event/vault record content stays out of the summary.
-    const hidden = sb.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+    const hidden = sb.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
     for (const c of hidden) expect(blob.includes(c)).toBe(false);
   });
 

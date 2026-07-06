@@ -153,7 +153,7 @@ Then("character creation produces no witnessed event", function () {
   // OOBE is pure producer-intake: it takes no EventStore, so it cannot record an event.
   const events = new InMemoryEventStore();
   startNewGame({ seed: 5, playerName: "The Author" });
-  assert.equal(events.query().length, 0);
+  assert.equal(events.queryAll().length, 0);
 });
 
 Then("nothing from it is narrated to any houseguest", function (this: BbWorld) {

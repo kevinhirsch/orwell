@@ -71,7 +71,7 @@ describe("0100 — the jury house lives (hidden juror↔juror society)", () => {
     const rel = juryRel([npc(1), npc(2)], npc(6));
     const events = new InMemoryEventStore();
     runStretch(rel, { [npc(1)]: { [FINALIST]: { betrayed: true } } }, 7, events);
-    const recorded = events.query();
+    const recorded = events.queryAll();
     expect(recorded.length, "the jury house produced scenes").toBeGreaterThan(0);
     for (const ev of recorded) {
       expect(ev.hidden, "every jury-house scene is hidden").toBe(true);
@@ -90,9 +90,9 @@ describe("0100 — the jury house lives (hidden juror↔juror society)", () => {
     for (let seed = 1; seed <= 8; seed++) {
       runStretch(rel, { [npc(1)]: { [FINALIST]: { betrayed: true } } }, seed, events, knowledge);
     }
-    const natures = new Set(events.query().filter((e) => e.type !== "conversation").map((e) => e.type));
+    const natures = new Set(events.queryAll().filter((e) => e.type !== "conversation").map((e) => e.type));
     // richOffscreenStretch tags each scene with its real interaction nature; expect variety.
-    const sceneTypes = new Set(events.query().map((e) => e.type));
+    const sceneTypes = new Set(events.queryAll().map((e) => e.type));
     expect(sceneTypes.size, `more than one scene nature (saw: ${[...sceneTypes].join(", ")})`).toBeGreaterThan(1);
     void natures;
   });
@@ -149,7 +149,7 @@ describe("0100 — bitterness is contagious, bounded, and only travels by pathwa
     for (let seed = 1; seed <= 12; seed++) runStretch(rel, manner, seed, events, knowledge);
     expect(knowledge.knownTo(PLAYER), "the player learns NOTHING from the jury house").toHaveLength(0);
     // Nor does any jury-house event (scene or telling) ever list the player in its witness set.
-    for (const ev of events.query()) {
+    for (const ev of events.queryAll()) {
       expect(ev.witnessSet, "no jury-house event ever witnesses the player").not.toContain(PLAYER);
     }
   });
@@ -195,6 +195,6 @@ describe("0100 — the jury house is deterministic", () => {
     });
     expect(res.scenes).toHaveLength(0);
     expect(res.grudges).toHaveLength(0);
-    expect(events.query()).toHaveLength(0);
+    expect(events.queryAll()).toHaveLength(0);
   });
 });

@@ -32,7 +32,7 @@ describe("E2 — the pre-game interview fabricates NO hidden history", () => {
     const sb = runtime.registry.sandboxFor(user);
     // The old synthetic npc pool fabricated hidden scenes + confessionals BEFORE the season existed
     // (later humanized into the real cast's names — scheming dated before move-in).
-    expect(sb.engine.events.query().length).toBe(0);
+    expect(sb.engine.events.queryAll().length).toBe(0);
     expect(sb.engine.vault.readHidden().length).toBe(0);
   });
 });
@@ -108,7 +108,7 @@ describe("E7 — persist failures are their own fault class, fail-closed, saniti
     const user = "disk-full";
     const sb = reg.sandboxFor(user);
     sb.session.createCharacter({ playerName: "The Player", seed: 2 });
-    const eventsBefore = reg.sandboxFor(user).engine.events.query().length;
+    const eventsBefore = reg.sandboxFor(user).engine.events.queryAll().length;
 
     store.failing = true;
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -124,7 +124,7 @@ describe("E7 — persist failures are their own fault class, fail-closed, saniti
       // …and sanitized: no data-dir path leaks in the message.
       expect((thrown as Error).message).not.toMatch(/orwell-data|\/var\//);
       // Fail-closed: the unsaved turn was rolled back, not silently kept (fail-open).
-      expect(reg.sandboxFor(user).engine.events.query().length).toBe(eventsBefore);
+      expect(reg.sandboxFor(user).engine.events.queryAll().length).toBe(eventsBefore);
       const health = orch.sandboxHealth(user) as HealthRecord;
       expect(health.lastIntegrity).toBe("fault");
       expect(health.faults.some((f) => f.kind === "persist-failure")).toBe(true);
@@ -189,7 +189,7 @@ describe("R4 — idle sandboxes unload (LRU) and provably rebuild from disk", ()
     const store = new FileSaveStore(freshDir());
     const reg = new GameSessionRegistry(store, { maxResident: 2 });
     reg.sandboxFor("u1").session.createCharacter({ playerName: "The Player", seed: 1 });
-    const u1Events = reg.sandboxFor("u1").session.advanceGame() && reg.sandboxFor("u1").engine.events.query().length;
+    const u1Events = reg.sandboxFor("u1").session.advanceGame() && reg.sandboxFor("u1").engine.events.queryAll().length;
     reg.sandboxFor("u2").session.createCharacter({ playerName: "The Player", seed: 2 });
     reg.sandboxFor("u3").session.createCharacter({ playerName: "The Player", seed: 3 });
 
@@ -200,7 +200,7 @@ describe("R4 — idle sandboxes unload (LRU) and provably rebuild from disk", ()
     const resumed = reg.sandboxFor("u1");
     expect(resumed.session.getGameState().started).toBe(true);
     expect(resumed.session.snapshot().seed).toBe(1);
-    expect(resumed.engine.events.query().length).toBe(u1Events);
+    expect(resumed.engine.events.queryAll().length).toBe(u1Events);
   });
 
   it("without a durable store nothing unloads (an in-memory game has no disk to come back from)", () => {

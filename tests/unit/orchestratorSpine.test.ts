@@ -17,8 +17,8 @@ import { PLAYER, npc } from "../../src/domain/ids";
  * bounded off-screen tick per turn. HARD rule: roles only — no names.
  */
 const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-b41-"));
-const hidden = (sb: { engine: { events: { query(): { hidden: boolean }[] } } }): number =>
-  sb.engine.events.query().filter((e) => e.hidden).length;
+const hidden = (sb: { engine: { events: { queryAll(): { hidden: boolean }[] } } }): number =>
+  sb.engine.events.queryAll().filter((e) => e.hidden).length;
 
 function resolveLegally(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>): void {
   if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
@@ -47,7 +47,7 @@ describe("B41 — every player turn commits through the fail-closed checkpoint",
     expect(() => runtime.orchestrator.commitPlayerTurn("u")).toThrowError(/turn refused/);
 
     // Rolled back in memory…
-    expect(runtime.registry.sandboxFor("u").engine.events.query().some((e) => e.content.includes(SECRET))).toBe(false);
+    expect(runtime.registry.sandboxFor("u").engine.events.queryAll().some((e) => e.content.includes(SECRET))).toBe(false);
     // …and never persisted (the prior good save is intact).
     expect(JSON.stringify(new FileSaveStore(dir).loadLatest("u")!).includes(SECRET)).toBe(false);
     expect((runtime.orchestrator.sandboxHealth("u") as HealthRecord).lastIntegrity).toBe("fault");

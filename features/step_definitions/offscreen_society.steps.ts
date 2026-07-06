@@ -54,12 +54,12 @@ When("the off-screen watcher runs several ticks", function (this: BbWorld) {
 });
 
 Then("more than one kind of NPC-to-NPC interaction occurs off-screen", function (this: BbWorld) {
-  const kinds = new Set(this.osSandbox!.engine.events.query().filter((e) => e.hidden && TYPED.has(e.type)).map((e) => e.type));
+  const kinds = new Set(this.osSandbox!.engine.events.queryAll().filter((e) => e.hidden && TYPED.has(e.type)).map((e) => e.type));
   assert.ok(kinds.size > 1, `varied off-screen life (saw: ${[...kinds].join(",")})`);
 });
 
 Then("none of it is witnessed by the player", function (this: BbWorld) {
-  const scenes = this.osSandbox!.engine.events.query().filter((e) => TYPED.has(e.type) && e.id.startsWith("offscreen:"));
+  const scenes = this.osSandbox!.engine.events.queryAll().filter((e) => TYPED.has(e.type) && e.id.startsWith("offscreen:"));
   assert.ok(scenes.length > 0);
   for (const s of scenes) assert.ok(!s.witnessSet.includes(PLAYER), "the player witnesses no off-screen scene");
 });
@@ -142,7 +142,7 @@ Then("the player's knowledge gains the belief with its source and confidence", f
 Then("the player is shown no opinion number or hidden state", function (this: BbWorld) {
   const view = JSON.stringify(this.osSandbox!.session.getGameState()) + JSON.stringify(this.osSandbox!.player.getVisibleState());
   assert.ok(!/trust|threat|affinity|soul|hiddenElement/i.test(view), "no hidden-layer key on the player surface");
-  const hidden = this.osSandbox!.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+  const hidden = this.osSandbox!.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
   for (const h of hidden) assert.ok(!this.osPlayerRumor!.content.includes(h), "the rumor is a paraphrase, never the verbatim scene");
 });
 
@@ -201,8 +201,8 @@ When("the same number of off-screen ticks is applied to each", function (this: B
 });
 
 Then("their resulting societies are identical", function (this: BbWorld) {
-  const a = this.osSandboxA!.engine.events.query().filter((e) => e.hidden).map((e) => `${e.type}:${e.content}`);
-  const b = this.osSandbox!.engine.events.query().filter((e) => e.hidden).map((e) => `${e.type}:${e.content}`);
+  const a = this.osSandboxA!.engine.events.queryAll().filter((e) => e.hidden).map((e) => `${e.type}:${e.content}`);
+  const b = this.osSandbox!.engine.events.queryAll().filter((e) => e.hidden).map((e) => `${e.type}:${e.content}`);
   assert.deepEqual(a, b, "same seed ⇒ the same hidden society");
 });
 
@@ -267,7 +267,7 @@ When("the off-screen society runs across both", function (this: BbWorld) {
 Then("no player surface reveals a hidden scene or an opinion number", function (this: BbWorld) {
   for (const sb of [this.osSandboxA!, this.osSandbox!]) {
     const view = JSON.stringify(sb.session.getGameState()) + "\n" + JSON.stringify(sb.player.getVisibleState());
-    const hidden = sb.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+    const hidden = sb.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
     for (const h of hidden) assert.ok(!view.includes(h), "no verbatim hidden scene on a player surface");
     assert.ok(!/trust|threat|affinity|soul/i.test(view), "no opinion number");
   }
@@ -287,7 +287,7 @@ Then("no off-screen activity carries one user's content into the other's game", 
     const core = sb.session.snapshot();
     const ids = [core.house!.player.id, ...core.house!.npcs.map((n) => n.id)];
     const known = ids.flatMap((id) => sb.engine.knowledge.knownTo(id).map((k) => `${k.content}|${k.originalContent ?? ""}`));
-    return JSON.stringify(sb.engine.events.query()) + "\n" + known.join("\n");
+    return JSON.stringify(sb.engine.events.queryAll()) + "\n" + known.join("\n");
   };
   const surfaceOf = (sb: typeof a): string =>
     JSON.stringify(sb.session.getGameState()) + "\n" + JSON.stringify(sb.player.getVisibleState());
@@ -368,7 +368,7 @@ Given("a started game left idle for a long stretch", function (this: BbWorld) {
 });
 
 When("the watcher wakes", function (this: BbWorld) {
-  this.osHiddenBefore = this.osRuntime2!.registry.sandboxFor("os-long").engine.events.query().filter((e) => e.hidden).length;
+  this.osHiddenBefore = this.osRuntime2!.registry.sandboxFor("os-long").engine.events.queryAll().filter((e) => e.hidden).length;
   this.osRuntime2!.start();
   this.osClock!.advance(1000); // ONE wake — however long the absence was
   this.osRuntime2!.stop();
@@ -379,7 +379,7 @@ Then("it advances the game at most the configured number of off-screen ticks", f
   // off-screen ticks — the per-wake cap, proven on the count, never on a padded event total.
   assert.equal(this.osTickCount!.n, 3, `one wake fires exactly maxOffscreenTicksPerWake ticks (was ${this.osTickCount!.n})`);
   // And the souls genuinely deepened across those bounded ticks (the ticks did real work).
-  const grown = this.osRuntime2!.registry.sandboxFor("os-long").engine.events.query().filter((e) => e.hidden).length - this.osHiddenBefore!;
+  const grown = this.osRuntime2!.registry.sandboxFor("os-long").engine.events.queryAll().filter((e) => e.hidden).length - this.osHiddenBefore!;
   assert.ok(grown > 0, "the bounded ticks produced real off-screen life");
 });
 
@@ -412,7 +412,7 @@ Then("no off-screen advance carries one user's content into the other's game", f
     const core = sb.session.snapshot();
     const ids = [core.house!.player.id, ...core.house!.npcs.map((n) => n.id)];
     const known = ids.flatMap((id) => sb.engine.knowledge.knownTo(id).map((k) => k.content));
-    return JSON.stringify(sb.engine.events.query()) + "\n" + known.join("\n");
+    return JSON.stringify(sb.engine.events.queryAll()) + "\n" + known.join("\n");
   };
   const aRecord = recordOf(a); const bRecord = recordOf(b);
 
@@ -435,20 +435,20 @@ Given("the watcher cadence is configured to zero", function (this: BbWorld) {
 });
 
 When("time passes with the player idle", function (this: BbWorld) {
-  this.osHiddenBefore = this.osRuntime2!.registry.sandboxFor("os-zero").engine.events.query().length;
+  this.osHiddenBefore = this.osRuntime2!.registry.sandboxFor("os-zero").engine.events.queryAll().length;
   this.osRuntime2!.start();
   this.osClock!.advance(1_000_000);
   this.osRuntime2!.stop();
 });
 
 Then("no game advances on its own", function (this: BbWorld) {
-  const now = this.osRuntime2!.registry.sandboxFor("os-zero").engine.events.query().length;
+  const now = this.osRuntime2!.registry.sandboxFor("os-zero").engine.events.queryAll().length;
   assert.equal(now, this.osHiddenBefore, "pure turn-driven: the house does not exist while the player is away");
 });
 
 Then("the game advances only when the player takes a turn", function (this: BbWorld) {
   const sb = this.osRuntime2!.registry.sandboxFor("os-zero");
-  const before = sb.engine.events.query().length;
+  const before = sb.engine.events.queryAll().length;
   sb.session.advanceGame(); // a player turn
-  assert.ok(sb.engine.events.query().length > before, "the player's own turn moves the game");
+  assert.ok(sb.engine.events.queryAll().length > before, "the player's own turn moves the game");
 });

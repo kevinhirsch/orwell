@@ -12,7 +12,7 @@ import { FileSaveStore } from "../../src/adapters/engine/FileSaveStore";
 
 const U = "user-a";
 const hidden = (rt: ReturnType<typeof composeRuntime>, u: string): number =>
-  rt.registry.sandboxFor(u).engine.events.query().filter((e) => e.hidden).length;
+  rt.registry.sandboxFor(u).engine.events.queryAll().filter((e) => e.hidden).length;
 
 const startGame = (rt: ReturnType<typeof composeRuntime>, u: string): void => {
   rt.registry.sandboxFor(u).session.createCharacter({ playerName: "P", seed: 7 });
@@ -76,8 +76,8 @@ describe("composeRuntime (feature 0035 — start the watcher in the runtime)", (
     rt.start();
     clock.advance(2000);
 
-    const aContent = rt.registry.sandboxFor("user-a").engine.events.query().map((e) => e.content).join("|");
-    const bIds = rt.registry.sandboxFor("user-b").engine.events.query().map((e) => e.id);
+    const aContent = rt.registry.sandboxFor("user-a").engine.events.queryAll().map((e) => e.content).join("|");
+    const bIds = rt.registry.sandboxFor("user-b").engine.events.queryAll().map((e) => e.id);
     expect(bIds.every((id) => !aContent.includes(id))).toBe(true);
     rt.stop();
   });

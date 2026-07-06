@@ -128,6 +128,19 @@ export interface DiaryRoomReq {
   entry: string;
 }
 
+export interface RecordImageBeatReq {
+  houseguestId: string;
+  imageRef: string;
+  /**
+   * Optional compare-and-swap token (0065 Part A / BE-5): the `beatSeq` the caller computed this image
+   * beat against. When present and `!== current`, it is REFUSED with a typed `stale-beat` conflict
+   * (HTTP 409, no event recorded, no budget spent). Absent ⇒ byte-identical to the pre-BE-5 path — this
+   * write-back was the one FE-driven mutating call on this port with no beatSeq guard at all, unlike
+   * every other mutating tool (`recordInteraction`/`surfaceInformationTo`).
+   */
+  expectedBeatSeq?: number;
+}
+
 export interface EngineCommands {
   /**
    * Records the interaction + folds its hidden impact. Throws if it names a non-living houseguest
@@ -148,5 +161,5 @@ export interface EngineCommands {
   diaryRoom(req: DiaryRoomReq): { recorded: true };
 
   /** Record that an image was shown to the player in-character (0051) — a player-witnessed image-shown event. */
-  recordImageBeat(req: { houseguestId: string; imageRef: string }): { eventId: string };
+  recordImageBeat(req: RecordImageBeatReq): { eventId: string };
 }

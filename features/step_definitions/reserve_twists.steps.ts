@@ -28,7 +28,7 @@ Given(
     // The engine generates + seals the twist in the Vault (sentinel-bearing, engine-only)...
     this.twist = this.sandbox.addReservedTwist();
     // ...and loads it for play (what + when) — knowledge that lives ONLY in the engine.
-    this.reserve = [{ kind: "secret-power", fireAtBeat: 5 }];
+    this.reserve = [{ kind: "wildcard-power", fireAtBeat: 5 }];
   },
 );
 

@@ -41,7 +41,7 @@ function playOneWeek(reg: GameSessionRegistry, user: string): void {
 }
 
 function confessionals(sb: ReturnType<GameSessionRegistry["sandboxFor"]>): GameEvent[] {
-  return sb.engine.events.query().filter((e) => e.type === "confessional");
+  return sb.engine.events.queryAll().filter((e) => e.type === "confessional");
 }
 
 // --- Background -----------------------------------------------------------------
@@ -98,7 +98,7 @@ Then("it still names their engine-grounded biggest threat and most-trusted ally"
 Then("the recent event it reacts to comes from that houseguest's own witnessed events", function (this: BbWorld) {
   // Structural proof: the selector returns ONLY events whose witness set includes the confessor.
   const sb = this.rcSandbox!;
-  const allEvents = sb.engine.events.query();
+  const allEvents = sb.engine.events.queryAll();
   // Pick a confessor that actually confessed this season.
   const confessorId = confessionals(sb)[0]!.initiator;
   const facts = selectRecentForConfessional(allEvents, confessorId, allEvents.length, { rng: new SeededRandom(1) });

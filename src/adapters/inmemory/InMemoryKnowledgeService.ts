@@ -155,13 +155,15 @@ export class InMemoryKnowledgeService implements KnowledgeService {
           (k.originalContent !== undefined && contentDerivedFrom(fact.content, k.originalContent)),
       );
       if (holds) return true;
+      // BE-6: a genuinely engine-internal full scan (any event the teller witnessed, of any type/
+      // visibility) — the explicit `queryAll()` escape hatch, never bare `query()`.
       return this.events
-        .query()
+        .queryAll()
         .some((e) => e.witnessSet.includes(teller) && contentDerivedFrom(fact.content, e.content));
     }
     const heard = /^overheard:(.+)$/.exec(pathway);
     if (heard) {
-      const source = this.events.query().find((e) => e.id === heard[1]);
+      const source = this.events.queryAll().find((e) => e.id === heard[1]);
       return source !== undefined && contentDerivedFrom(fact.content, source.content);
     }
     return false;
