@@ -4,6 +4,7 @@ import type {
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
   SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult, SealedFact,
+  DailyRecapView,
   ExposeSecretReq, ExposeResult, TradeSecretReq, TradeResult, SecretLeverDescriptor,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
   PreSeedCastReq, PreSeedCastView,
@@ -142,7 +143,7 @@ import {
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   advanceClock, advanceClockPerConversation, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
-  type FinaleProgress, type EvictionProgress,
+  type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
 import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
@@ -6080,22 +6081,114 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — build the non-committal cliffhanger a daily recap
+   * MAY carry, from exactly two Vault-free, already-in-motion signals (never the Vault, never a future
+   * roll): (a) a deal the player holds that is `vague` or nearing its negotiated expiry (0109) — a
+   * strained understanding the player can already feel; (b) that something surfaced to the player
+   * TODAY (the freshly-computed `surfacedToday` slice) that "isn't finished playing out". With more
+   * than one eligible candidate, the pick rides a DEDICATED per-day side rng (`daily-recap:<day>`,
+   * forked off the game seed) — never the shared season/vote/jury stream, so this can never perturb a
+   * seeded outcome. No eligible thread ⇒ `undefined` (a quiet day closes with no manufactured hook).
+   */
+  private buildDailyRecapHook(day: number, surfacedToday: readonly string[]): DailyRecapHook | undefined {
+    if (!this.house || !this.live) return undefined;
+    const week = this.live.week;
+    const candidates: DailyRecapHook[] = [];
+    for (const d of this.deals.forParty(PLAYER)) {
+      if (d.status !== "open") continue;
+      const other = d.parties.find((p) => p !== PLAYER);
+      if (!other) continue;
+      const nearingExpiry = d.expiresWeek !== undefined && d.expiresWeek - week <= 1;
+      if (d.vague || nearingExpiry) {
+        candidates.push({
+          thread: `deal:${d.id}`,
+          framing: `what you and ${this.nameOf(other)} agreed to feels like it's on borrowed time`,
+        });
+      }
+    }
+    if (surfacedToday.length > 0) {
+      candidates.push({
+        thread: `surfaced:${day}`,
+        framing: "what you heard today doesn't feel finished playing out",
+      });
+    }
+    if (candidates.length === 0) return undefined;
+    if (candidates.length === 1) return candidates[0];
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:daily-recap:${day}`));
+    return rng.pick(candidates);
+  }
+
+  /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — materialize the "day in review" digest for the day
+   * that just closed, called from `turnIn` BEFORE the clock rolls to the next morning (the player's
+   * own bedtime lever, ADR 0006 — never a free-floating scheduler). Stitched from exactly the two
+   * Vault-free sources the weekly-recap design specified, scoped to the tail since the persisted
+   * cursors (never re-scans, never double-counts, never a Vault read):
+   *   - the player's witnessed ceremony/scene/deal highlights — the SAME structural filter
+   *     `seasonRecap()` already uses, sliced to events recorded since the last materialized day;
+   *   - gossip that reached the player's OWN knowledge today via a real in-game pathway (0002) —
+   *     `playerKnowledgeReader` (the same source `freshSurfacedFacts` trusts), excluding the OOC
+   *     Diary Room (`NO_NPC_PATHWAY`) — a rumor still diffusing in the hidden layer never appears.
+   * Persists the result on `this.live.lastDailyRecap` so a later re-read (`dailyRecap()`, a fresh
+   * context, a restore) reproduces the EXACT same digest for that day — determinism/non-degradation.
+   * Folds nothing, advances no thread, perturbs no seeded outcome — a pure presentation snapshot.
+   */
+  private materializeDailyRecap(): DailyRecapView | undefined {
+    const s = this.live;
+    if (!s) return undefined;
+    const day = s.dayNumber ?? 1;
+    const allEvents = this.record?.events() ?? [];
+    const evFrom = Math.min(s.dailyRecapEventCursor ?? 0, allEvents.length);
+    const highlights = allEvents.slice(evFrom)
+      .filter((e) => !e.hidden && (e.id.startsWith("season:") || e.type === "deal" || e.type === "betrayal"))
+      .map((e) => e.content);
+    const knownAll = this.playerKnowledgeReader?.() ?? [];
+    const knFrom = Math.min(s.dailyRecapKnowledgeCursor ?? 0, knownAll.length);
+    const surfaced = knownAll.slice(knFrom)
+      .filter((f) => f.pathway !== NO_NPC_PATHWAY)
+      .map((f) => this.humanize(f.content));
+    const hook = this.buildDailyRecapHook(day, surfaced);
+    const recap: DailyRecapView = { day, highlights, surfaced, ...(hook ? { hook } : {}) };
+    s.lastDailyRecap = recap;
+    s.dailyRecapEventCursor = allEvents.length;
+    s.dailyRecapKnowledgeCursor = knownAll.length;
+    s.dayNumber = day + 1;
+    return recap;
+  }
+
+  /**
+   * 0102 (PO review 2026-06-27 redesign, #884) — re-fetch the most recently CLOSED day's digest
+   * (materialized once, at the `turnIn` that closed it). `null` before any day has closed. Vault-free,
+   * reproducible: re-reading returns the exact same materialized view every time (no re-computation).
+   */
+  dailyRecap(): DailyRecapView | null {
+    return this.live?.lastDailyRecap ?? null;
+  }
+
+  /**
    * The player's bedtime lever (ADR 0006 §Principle 6): the player CHOOSES to turn in for the night.
    * Ends their night where it stands (an early night ⇒ rested for tomorrow; outlasting the house into
    * late-night ⇒ running on empty) and rolls the house to the next morning. Never auto-called — only
    * the player's own action fires it. A no-op when the clock isn't running, the game is over, or the
    * player has left. Durable (0030): the new morning + banked rest survive a reload.
+   *
+   * 0102 (redesign #884): BEFORE the night rolls, materializes the day-that-just-closed's Vault-free
+   * "day in review" digest and carries it on the result as `dailyRecap` (present only when it exists —
+   * `materializeDailyRecap` always returns one once the clock is running, so this is present on every
+   * turn-in that actually fires; absent only when the whole call was a dormant no-op above).
    */
   turnIn(): AdvanceView {
     if (!this.house || !this.live) return this.advanceView(null);
     if (!this.timeOfDayEnabled) return this.advanceView(null); // dormant unless the clock is running
     if (this.live.finished || playerHasLeft(this.live, PLAYER)) return this.advanceView(null);
     return this.inOneCommit(() => {
+      const recap = this.materializeDailyRecap();
       playerTurnIn(this.live!, PLAYER);
       this.accrueNightFatigue(); // the player chose bed — a genuine night-end; accrue before clearing conflicts
       this.rollNightConflicts();
       this.persist();
-      return this.advanceView(null);
+      const view = this.advanceView(null);
+      return recap ? { ...view, dailyRecap: recap } : view;
     });
   }
 

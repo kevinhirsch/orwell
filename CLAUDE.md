@@ -18,9 +18,10 @@ that the deterministic rules, the secret state, and the narration are cleanly se
 
 **Status: feature-complete through the drafted spec set (BDD/TDD-first; reconciled 2026-06-23).** Specs now run
 through **0110**, and the originally-drafted set is built and **green** — but the spec ceiling now runs ahead of the
-*built* one: **0075–0093, 0099–0101, 0104–0107, 0109, 0110** are built, while **0094–0098, 0102–0103** remain
+*built* one: **0075–0093, 0099–0102, 0104–0107, 0109, 0110** are built, while **0094–0098, 0103** remain
 **spec-only/frozen** (the Producer's-Vault audit + PO-review batch — some parked, some awaiting a build
-slot) and **0108** is spec-only (the real-model golden-path gate). *(The former lone deferral, **0022
+slot; 0101 shipped 2026-07-06 as NPC myth-making, 0102 shipped 2026-07-05 as the redesigned daily recap
+#884) and **0108** is spec-only (the real-model golden-path gate). *(The former lone deferral, **0022
 (MVP-2, the rich game UI)**, was **removed** in the 2026-06-28 PO review — superseded by 0020/0051/0054
 under ADR 0003.)* The
 reconciled per-feature index in `docs/features/README.md` is authoritative for built vs. spec-only — plus **0053**
@@ -47,7 +48,7 @@ MUST compose the kit.)* The game is **folded into the main chat**: the player-fa
 `docs/features/` (through **0110**; the 0067–0074 launch band is 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
 0070 off-screen texture enrichment, 0071 defensive hardening (redaction + URL/path guards), 0072 the
 multi-platform gateway, 0073 the structural anti-sycophancy game-build wall (a CI gate), and 0074 local &
-tunable HTTPS (ADR 0014); past the launch band, **0075–0093, 0099–0101, 0104–0107, 0109, 0110** are built and **0094–0098, 0102–0103** remain spec-only/frozen (Producer's-Vault/PO-review batch) with **0108** spec-only;
+tunable HTTPS (ADR 0014); past the launch band, **0075–0093, 0099–0102, 0104–0107, 0109, 0110** are built and **0094–0098, 0103** remain spec-only/frozen (Producer's-Vault/PO-review batch) with **0108** spec-only;
 0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
@@ -533,9 +534,10 @@ deep character profiles (0058), seasons-as-levels, multi-device sync (0064), the
 0007), the token economy + usage envelope (0069), off-screen texture enrichment (0070), defensive
 hardening (0071), the multi-platform gateway (0072), the structural anti-sycophancy game-build wall as
 a CI gate (0073), and local & tunable HTTPS (0074 / ADR 0014) are all in. **Past 0074 the spec set runs to 0110**:
-**0075–0093, 0099–0101, 0104–0107, 0109, 0110** are built (trust-gated confidences, presence/eyeshot & motivated
+**0075–0093, 0099–0102, 0104–0107, 0109, 0110** are built (trust-gated confidences, presence/eyeshot & motivated
 movement, the runtime overseer 0079–0081, character voice/campaigns/drives, secrets-as-power,
-jury grudge book, season notoriety, named alliances, deal duration, vote deduction), while **0094–0098, 0102–0103**
+jury grudge book, season notoriety, named alliances, deal duration, vote deduction, NPC myth-making 0101,
+the daily recap 0102/#884), while **0094–0098, 0103**
 remain **spec-only/frozen** (the Producer's-Vault audit + PO-review batch — opt-in/default-off social
 texture, some parked, some awaiting a build slot) and **0108** is spec-only (the real-model
 golden-path gate).
