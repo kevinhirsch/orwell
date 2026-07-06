@@ -64,6 +64,11 @@
   const _OUTAGE_BODY = "We've lost the live feeds — the show comes back the moment the connection does.";
   const _DEGRADED_TITLE = "Big Brother's having a technical moment.";
   const _DEGRADED_BODY = "Production's on it — hang tight.";
+  // AXE-6: a browser-offline event is NOT a production-side outage — reusing the
+  // _OUTAGE_* copy told the player "the show is down" when the real, actionable fact is
+  // "your own connection dropped." Distinct, correctly-scoped copy for that case.
+  const _OFFLINE_TITLE = "Your connection dropped.";
+  const _OFFLINE_BODY = "That one's on your end, not the show's — we'll reconnect the moment you're back online.";
 
   function show(kind, title, reason) {
     if (dismissedKey && dismissedKey === reason) return; // already waved off this exact problem
@@ -109,7 +114,16 @@
     show("degraded", "Reconnecting to Big Brother…", "The live feeds blinked — restoring the connection.");
   }
 
+  // AXE-6: true when the BROWSER itself reports no network, distinct from the engine being
+  // unreachable while the player's own connection is fine. Checked defensively (some
+  // embedders / very old browsers don't expose navigator.onLine) — absence never blocks
+  // the existing outage path.
+  function _isOffline() {
+    return typeof navigator !== "undefined" && navigator.onLine === false;
+  }
+
   async function refresh() {
+    if (_isOffline()) { show("down", _OFFLINE_TITLE, _OFFLINE_BODY); return; }
     try {
       const r = await fetch("/api/orwell/health", { credentials: "same-origin" });
       if (!r.ok) { show("down", _OUTAGE_TITLE, _OUTAGE_BODY); return; }
@@ -134,6 +148,8 @@
         hide();
       }
     } catch (_) {
+      // AXE-6: connectivity can drop mid-request — re-check here, not just up front.
+      if (_isOffline()) { show("down", _OFFLINE_TITLE, _OFFLINE_BODY); return; }
       // The FE route itself failed — surface the most likely truth rather than going silent.
       if (window.OrwellReport) window.OrwellReport.fail("engine-status", "health-fetch", _); // G11: fail open, never silent
       show("down", _OUTAGE_TITLE, _OUTAGE_BODY);
@@ -148,5 +164,10 @@
 
   window.orwellRefreshEngineStatus = refresh;
   window.addEventListener("orwell:gamechanged", refresh);
+  // AXE-6: react immediately to the browser's own connectivity signal rather than waiting
+  // for the next 15s poll — 'offline' shows the correctly-scoped banner right away, 'online'
+  // re-probes so a real recovery (or a genuine engine outage underneath) is caught fast.
+  window.addEventListener("offline", () => show("down", _OFFLINE_TITLE, _OFFLINE_BODY));
+  window.addEventListener("online", refresh);
   ready(start);
 })();

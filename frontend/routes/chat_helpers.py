@@ -1661,6 +1661,16 @@ async def record_post_turn_desync_check(user, narration: str, this_turn_progress
 
 # In-scene staging verbs (present/past/progressive). Movement-OUT verbs (left/leaves/exits) are
 # deliberately excluded — "Connor left the house weeks ago" is a legitimate past mention, not staging.
+#
+# NARR-4 note (2026-07-05): the audit suggested DROPPING the "weak" verbs (leans/watches) here to cut
+# a photo/portrait over-match ("Marcus Webb's photo watches over the room"). We deliberately did NOT —
+# `_stages_in_scene` is SHARED with the knowledge-wall Vault-leak guard (`_sentence_leaks_sealed`),
+# where a houseguest who "leaned in and whispered" a sealed disclosure is a REAL leak that MUST still
+# be caught (mandate #2 — a sealed-content false-negative is far worse than the roster/presence
+# guards' benign, ignorable next-turn nudge on a photo). The over-match is instead handled WITHOUT
+# weakening these verbs: `_stages_in_scene` masks a "possessive-name-owns-an-inanimate-object"
+# construction before testing for staging (see `_INANIMATE_OWNED_NOUNS` below), so "Marcus Webb's
+# photo watches" no longer stages Marcus while "the Nominee leaned in and whispered" still does.
 _SCENE_VERBS = (
     "says", "say", "said", "asks", "ask", "asked", "replies", "reply", "replied", "mutters",
     "mutter", "muttered", "adds", "add", "added", "whispers", "whisper", "whispered", "grins",
@@ -1674,6 +1684,37 @@ _SCENE_VERBS = (
 )
 _VERB_ALT = "|".join(_SCENE_VERBS)
 
+# NARR-4 — inanimate objects that commonly bear a person's name in figurative prose and can "own" a
+# staging verb ("<Name>'s photo watches over the room", "<Name>'s shadow leans against the wall").
+# When the name is in POSSESSIVE form immediately followed by one of these, the SUBJECT of the verb
+# is the object, not the person — so `_stages_in_scene` masks that span before testing for staging.
+# Narrow on purpose: only nouns that plausibly take leans/watches/looks etc. AND read as a stand-in
+# for an absent person, so a real "<Name>'s <bodypart/action>" ("Ana's hand trembles") is untouched.
+_INANIMATE_OWNED_NOUNS = (
+    "photo", "photos", "photograph", "photographs", "picture", "pictures", "portrait", "portraits",
+    "image", "images", "shadow", "shadows", "silhouette", "reflection", "memory", "ghost", "absence",
+    "legacy", "presence", "empty",
+)
+_INANIMATE_OWNED_ALT = "|".join(_INANIMATE_OWNED_NOUNS)
+
+# NARR-4 — copula/existential single-token phantom names ("There's a new houseguest named Zephyr",
+# "Zephyr is a new contestant"). `_sentence_names_invented` below only ever looked for a Capitalized
+# TWO-token name bound to a `_SCENE_VERBS` staging verb — deliberately, since a bare single
+# capitalized token is far too common in ordinary prose to flag on its own. But that leaves a real
+# gap: a model that invents a SINGLE-token phantom name never trips the two-token guard at all. These
+# two patterns are narrow enough to make a single token safe to flag WITHOUT the generic scene-verb
+# binding: they require an explicit existential/copula frame that NAMES someone as a
+# houseguest/contestant/player, a construction that essentially never occurs in ordinary scene prose
+# for anything BUT introducing a person. The surrounding scaffolding words are case-insensitive; the
+# captured name itself must still be Capitalized (a real proper-noun shape).
+_EXISTENTIAL_NAME_RE = re.compile(
+    r"(?i:there(?:'s|\s+is|\s+was)\s+(?:a|an)\s+(?:new\s+)?(?:houseguest|contestant|player)\s+"
+    r"(?:named|called))\s+([A-Z][a-z]+)\b"
+)
+_COPULA_NAME_RE = re.compile(
+    r"\b([A-Z][a-z]+)(?:['’]s)?\s+(?i:is|was)\s+(?i:a|an)\s+(?i:new\s+)?(?i:houseguest|contestant|player)\b"
+)
+
 
 def _stages_in_scene(narration: str, name: str) -> bool:
     """True if `name` is STAGED as acting in the scene — their name (optionally possessive), then
@@ -1681,13 +1722,20 @@ def _stages_in_scene(narration: str, name: str) -> bool:
     token match, so a name is never caught as a substring. Conservative: a bare MENTION ("I heard
     Maria won") never matches (no staging verb / no adjacent quote)."""
     n = re.escape(name)
+    # NARR-4 — mask a "<Name>'s <inanimate-object>" span first so a photo/shadow/portrait bearing the
+    # name (which then "watches"/"leans"/etc.) can't satisfy the staging match below. Only the
+    # possessive-inanimate span is removed; a real "<Name>'s hand trembles" or a separate staging of
+    # the same name elsewhere in the sentence is untouched (the name token itself is only consumed
+    # where it directly precedes an inanimate-object noun).
+    inanimate_pat = rf"\b{n}(?:['’]s)\s+(?:\w+\s+)?(?:{_INANIMATE_OWNED_ALT})\b"
+    scanned = re.sub(inanimate_pat, " ", narration, flags=re.IGNORECASE)
     # "Nia perched", "Kendall pauses", "Ana's leaning", "Connor's been leaning" (≤2 filler words).
     verb_pat = rf"\b{n}(?:['’]s)?\b(?:\s+\w+){{0,2}}\s+(?:{_VERB_ALT})\b"
-    if re.search(verb_pat, narration, re.IGNORECASE):
+    if re.search(verb_pat, scanned, re.IGNORECASE):
         return True
     # "Nia: 'I called this.'" / 'Ana "what is this?"' — a quoted line right after the name.
     quote_pat = rf"\b{n}(?:['’]s)?\b\s*[:—-]?\s*[\"“]"
-    return bool(re.search(quote_pat, narration, re.IGNORECASE))
+    return bool(re.search(quote_pat, scanned, re.IGNORECASE))
 
 
 def _presence_facts(state: dict) -> Optional[dict]:
@@ -1820,11 +1868,14 @@ _NAME_STOPWORDS_FIRST = {
 
 
 def _sentence_names_invented(sentence: str, known_first: set, known_full: set) -> Optional[str]:
-    """Return a Capitalized two-token name this sentence STAGES as acting in the scene that is NOT any
-    known roster name (active or out-of-house), or None. `known_first` = lowercase first tokens of every
-    roster name; `known_full` = lowercase full roster names. High-precision: requires `_stages_in_scene`
-    binding (an in-scene verb/quote right after the name) and excludes the BB game lexicon, so a place
-    name, a bare mention, or a real houseguest never matches."""
+    """Return a Capitalized name this sentence STAGES as acting in the scene (two-token) or explicitly
+    INTRODUCES via a copula/existential frame (single-token — NARR-4) that is NOT any known roster
+    name (active or out-of-house), or None. `known_first` = lowercase first tokens of every roster
+    name; `known_full` = lowercase full roster names. High-precision: the two-token path requires
+    `_stages_in_scene` binding (an in-scene verb/quote right after the name) and excludes the BB game
+    lexicon, so a place name, a bare mention, or a real houseguest never matches; the single-token
+    path requires an explicit "named a houseguest/contestant/player" construction, which is precise
+    enough to flag a bare capitalized token on its own."""
     if not sentence or not sentence.strip():
         return None
     for m in _TWO_TOKEN_NAME_RE.finditer(sentence):
@@ -1841,6 +1892,18 @@ def _sentence_names_invented(sentence: str, known_first: set, known_full: set) -
         # An out-of-roster two-token Name — only flag if it is STAGED as acting in THIS sentence.
         if _stages_in_scene(sentence, full):
             return full
+    # NARR-4 — a single-token name explicitly introduced as a houseguest/contestant/player via a
+    # copula or existential frame. No _stages_in_scene binding needed: the frame itself is the
+    # high-precision signal.
+    for pat in (_EXISTENTIAL_NAME_RE, _COPULA_NAME_RE):
+        for m in pat.finditer(sentence):
+            cand = m.group(1)
+            cand_l = cand.lower()
+            if cand_l in _NAME_STOPWORDS_FIRST or cand_l in _GAME_LEXICON_FIRST:
+                continue  # a stray article/pronoun or game-lexicon word, not a name
+            if cand_l in known_first or cand_l in known_full:
+                continue  # matches a real roster name — legitimate
+            return cand
     return None
 
 

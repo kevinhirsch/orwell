@@ -160,7 +160,7 @@ export interface FormCampaignDeps {
   c?: CampaignConstants;
 }
 
-const PLAN_FOR: Record<CampaignGoal, CampaignMove[]> = {
+export const PLAN_FOR: Record<CampaignGoal, CampaignMove[]> = {
   evict: ["lobby", "plant", "lobby"],
   protect: ["deal", "lobby"],
   "build-alliance": ["deal", "position"],
@@ -447,4 +447,100 @@ export function deriveDrive(actor: CampaignActor, ctx: DriveContext, prior: Driv
 export function ownBallotLean(drive: Drive, nominee: EntityId, c: DriveConstants = DRIVE): number {
   if (drive.motivation !== "target" || drive.target !== nominee) return 0;
   return c.lowLeanWeight * clamp01(drive.intensity);
+}
+
+// --- 0096: EMERGENT NEMESIS (a personal villain to outlast) ----------------------------------------
+//
+// NOT a new targeting system — the SUSTAINED elevation of an existing high-threat `target` drive (0086,
+// above) into a coherent, felt through-line. Reads ONLY the threat-toward-player edge (0002/0026) + the
+// sticky `target` drive; mints no new hidden attribute per NPC. Pure + engine-only (Vault-sealed, the
+// same wall as the rest of this module — dependency-cruiser proves no outward import). Selection draws
+// NO rng of its own — it is a deterministic read of already-seeded threat/drive signals, so it can never
+// perturb the campaign rng's draw sequence.
+
+export interface NemesisConstants {
+  /** The threat-toward-player floor a candidate must clear — stricter than a plain campaign target, so a
+   *  nemesis is rarer than an ordinary evict campaign. */
+  threatThreshold: number;
+  /** Consecutive ticks a candidate must clear the bar (targeting the player + at/above the threshold)
+   *  before they qualify — a one-week spike is not a nemesis; a held, re-committed grudge is. */
+  sustainTicks: number;
+  /** Margin below `threatThreshold` a HELD nemesis may drift to before lapsing (stickiness, sibling of
+   *  `DRIVE.hysteresis`) — keeps the arc from flip-flopping on a single soft tick. */
+  hysteresis: number;
+  /** How much a challenger's threat-toward-player must clear the incumbent's before taking over the arc
+   *  (hand-off hysteresis — a hand-off is a genuine overtake, never a coin flip). */
+  handoffMargin: number;
+  /** The escalation intensity floor the nemesis's `target` drive is held at — WITHIN the existing [0,1]
+   *  intensity band (never past it): the upper of the band, not a new ceiling. */
+  escalationIntensity: number;
+}
+
+export const NEMESIS: NemesisConstants = {
+  threatThreshold: CAMPAIGN.threatThreshold + 0.1,
+  sustainTicks: 3,
+  hysteresis: 0.12,
+  handoffMargin: 0.1,
+  escalationIntensity: 0.95,
+};
+
+/** One candidate's read for nemesis selection THIS tick — perspective-bound, already-derived signals only. */
+export interface NemesisCandidate {
+  id: EntityId;
+  /** This candidate's OWN threat-toward-player edge (their read of the player, not the player's of them). */
+  threatTowardPlayer: number;
+  /** Whether their JUST-DERIVED (0086) drive is `target`, aimed at the player, this tick. */
+  targetsPlayer: boolean;
+}
+
+/** The persisted nemesis bookkeeping: who (if anyone) holds the arc + each candidate's consecutive-tick streak. */
+export interface NemesisTrack {
+  current: EntityId | undefined;
+  streak: Record<EntityId, number>;
+}
+
+/** The empty track — no nemesis, no history (a fresh/legacy/disabled session). */
+export const NO_NEMESIS: NemesisTrack = { current: undefined, streak: {} };
+
+/**
+ * Select (or hold, or hand off) the player's nemesis for this tick — PURE, no rng (a deterministic read
+ * of the already-seeded threat + drive signals, so two identical boards derive the same nemesis). At
+ * MOST one. A candidate qualifies only after `sustainTicks` CONSECUTIVE ticks clearing `threatThreshold`
+ * while their drive targets the player; a held incumbent stays (hysteresis) until their own read
+ * genuinely drops below `threatThreshold - hysteresis` or their drive re-aims off the player, or a clear
+ * successor overtakes them by `handoffMargin`. No qualifying candidate ⇒ no nemesis — a legitimate,
+ * common (not a defect) outcome; a whole season can pass with none.
+ */
+export function selectNemesis(
+  candidates: readonly NemesisCandidate[],
+  prior: NemesisTrack,
+  c: NemesisConstants = NEMESIS,
+): NemesisTrack {
+  const streak: Record<EntityId, number> = {};
+  for (const cand of candidates) {
+    const clearing = cand.targetsPlayer && cand.threatTowardPlayer >= c.threatThreshold;
+    streak[cand.id] = clearing ? (prior.streak[cand.id] ?? 0) + 1 : 0;
+  }
+
+  const incumbent = prior.current;
+  const incumbentCand = incumbent !== undefined ? candidates.find((cand) => cand.id === incumbent) : undefined;
+  const incumbentHolds = incumbentCand !== undefined
+    && incumbentCand.targetsPlayer
+    && incumbentCand.threatTowardPlayer >= c.threatThreshold - c.hysteresis;
+
+  const qualified = candidates.filter((cand) => streak[cand.id]! >= c.sustainTicks);
+
+  if (incumbentHolds && incumbent !== undefined) {
+    const challenger = qualified
+      .filter((cand) => cand.id !== incumbent)
+      .sort((a, b) => b.threatTowardPlayer - a.threatTowardPlayer)[0];
+    const current = challenger !== undefined
+      && challenger.threatTowardPlayer >= incumbentCand!.threatTowardPlayer + c.handoffMargin
+      ? challenger.id
+      : incumbent;
+    return { current, streak };
+  }
+
+  const top = [...qualified].sort((a, b) => b.threatTowardPlayer - a.threatTowardPlayer)[0];
+  return { current: top?.id, streak };
 }

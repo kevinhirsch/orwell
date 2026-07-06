@@ -48,7 +48,7 @@ function resolveLive(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"
     case "comp-round": return submit({ kind: "comp-round", intent: "compete" });
     case "houseguests-choice": return submit({ kind: "houseguests-choice", vote: p.options[0]!.id });
     case "replacement": return submit({ kind: "replacement", replacement: p.options[0]!.id });
-    case "secret-power": return submit({ kind: "secret-power", use: true });
+    case "secret-veto": return submit({ kind: "secret-veto", use: true });
     case "goodbye-message": return submit({ kind: "goodbye-message", vote: (p as { options: { id: string }[] }).options[0]!.id });
     case "finale-statement": return submit({ kind: "finale-statement", statement: "x" });
     case "finale-answer": return submit({ kind: "finale-answer", appeal: (p as { appeals: string[] }).appeals![0]! });
@@ -68,7 +68,7 @@ function playFull(s: GameSessionAdapter): void {
 
 const allArmed = (over: Partial<TwistPlan> = {}): TwistPlan => ({
   doubleEvictionAtActive: 8, doubleEvictionArmed: true,
-  secretPowerStreak: 2, secretPowerArmed: true,
+  secretVetoStreak: 2, secretVetoArmed: true,
   battleBackAtJury: 1, battleBackArmed: true,
   ...over,
 });
@@ -86,11 +86,11 @@ Given("a new season with the reactive pool armed", function (this: BbWorld) {
   this.twistPlan = planReserveTwists(new SeededRandom(42));
 });
 
-Then("the double eviction, the secret power, and the battle-back are each watchable in the plan", function (this: BbWorld) {
+Then("the double eviction, the secret veto, and the battle-back are each watchable in the plan", function (this: BbWorld) {
   const p = this.twistPlan!;
   // Each twist has a seeded trigger threshold in the plan — the whole pool stands armed, not one pre-pick.
   assert.ok(Number.isFinite(p.doubleEvictionAtActive));
-  assert.ok(Number.isFinite(p.secretPowerStreak));
+  assert.ok(Number.isFinite(p.secretVetoStreak));
   assert.ok(Number.isFinite(p.battleBackAtJury));
 });
 
@@ -102,7 +102,7 @@ Then("none has a pre-decided fire week", function (this: BbWorld) {
 Then("no player-facing or admin-facing surface reveals the pool", function (this: BbWorld) {
   const sb = freshReactiveSandbox(7);
   const surfaces = JSON.stringify(sb.player.getVisibleState()) + JSON.stringify(sb.session.gameStatus()) + JSON.stringify(sb.admin.inspect());
-  for (const kind of ["double-eviction", "secret-power", "battle-back"]) {
+  for (const kind of ["double-eviction", "secret-veto", "battle-back"]) {
     assert.ok(!surfaces.includes(kind), `the armed pool leaked to a surface: ${kind}`);
   }
   assert.ok(!surfaces.includes("twistPlan"));
@@ -112,7 +112,7 @@ Then("no player-facing or admin-facing surface reveals the pool", function (this
 
 Given("a season whose house never reaches the double-eviction trigger", function (this: BbWorld) {
   // The double eviction is HELD BACK this season (armed=false) — its threshold is never acted on.
-  this.twistFiredKinds = playFullKinds(allArmed({ doubleEvictionArmed: false, secretPowerArmed: false, battleBackArmed: false }));
+  this.twistFiredKinds = playFullKinds(allArmed({ doubleEvictionArmed: false, secretVetoArmed: false, battleBackArmed: false }));
 });
 
 Then("the double eviction never fires", function (this: BbWorld) {
@@ -144,18 +144,18 @@ Then("the double eviction targets a different house size across the two seasons"
 
 // --- Hold-back ----------------------------------------------------------------
 
-Given("many seasons that each reach the secret-power trigger", function (this: BbWorld) {
-  this.twistArmedFlags = Array.from({ length: 40 }, (_, i) => planReserveTwists(new SeededRandom(i + 1)).secretPowerArmed);
+Given("many seasons that each reach the secret-veto trigger", function (this: BbWorld) {
+  this.twistArmedFlags = Array.from({ length: 40 }, (_, i) => planReserveTwists(new SeededRandom(i + 1)).secretVetoArmed);
 });
 
-Then("in some the secret power is armed and in others it is held back", function (this: BbWorld) {
-  assert.ok(this.twistArmedFlags!.some((a) => a), "some seasons arm the secret power");
+Then("in some the secret veto is armed and in others it is held back", function (this: BbWorld) {
+  assert.ok(this.twistArmedFlags!.some((a) => a), "some seasons arm the secret veto");
   assert.ok(this.twistArmedFlags!.some((a) => !a), "some seasons hold it back");
 });
 
 Then("whether it is armed is reproducible under the season's seed", function (this: BbWorld) {
   for (let i = 1; i <= 10; i++) {
-    assert.equal(planReserveTwists(new SeededRandom(i)).secretPowerArmed, planReserveTwists(new SeededRandom(i)).secretPowerArmed);
+    assert.equal(planReserveTwists(new SeededRandom(i)).secretVetoArmed, planReserveTwists(new SeededRandom(i)).secretVetoArmed);
   }
 });
 
@@ -167,14 +167,14 @@ Given("a live season in which each twist mechanic is driven to fire", function (
   s.beat = "battle-back"; s.evictionOrder = [npc(20), npc(21)];
   advance(s, ctx, new SeededRandom(1)); // battle-back fires
   s.beat = "eviction"; s.hoh = npc(6); s.finalNominees = [npc(1), npc(2)];
-  s.secretPower = { holder: npc(1), used: false };
-  advance(s, ctx, new SeededRandom(1)); // secret power fires
+  s.secretVeto = { holder: npc(1), used: false };
+  advance(s, ctx, new SeededRandom(1)); // secret veto fires
   (s.firedTwists ??= []).push({ kind: "double-eviction", beat: s.week }); // the double-eviction night completes
   this.twistFiredKinds = s.firedTwists.map((t) => t.kind);
 });
 
-Then("the double eviction, the secret power, and the battle-back each fire exactly once", function (this: BbWorld) {
-  assert.deepEqual(new Set(this.twistFiredKinds), new Set<TwistKind>(["double-eviction", "secret-power", "battle-back"]));
+Then("the double eviction, the secret veto, and the battle-back each fire exactly once", function (this: BbWorld) {
+  assert.deepEqual(new Set(this.twistFiredKinds), new Set<TwistKind>(["double-eviction", "secret-veto", "battle-back"]));
 });
 
 Then("no twist fires twice", function (this: BbWorld) {
@@ -200,35 +200,35 @@ Then("only one twist arms that roll and the other defers to a later week", funct
 
 // --- Player agency ------------------------------------------------------------
 
-Given("the secret power is granted to the player while they are on the block", function (this: BbWorld) {
+Given("the secret veto is granted to the player while they are on the block", function (this: BbWorld) {
   const s = newLiveSeason([PLAYER, npc(1), npc(2), npc(3), npc(4), npc(5), npc(6)]);
   s.beat = "eviction"; s.hoh = npc(6); s.finalNominees = [PLAYER, npc(2)];
-  s.secretPower = { holder: PLAYER, used: false };
+  s.secretVeto = { holder: PLAYER, used: false };
   this.twistLive = s; this.twistCtx = ctxOf(new RelationshipModel(0.5));
   this.twistLastEvent = advance(s, this.twistCtx, new SeededRandom(3));
 });
 
-Then("the player is offered the choice to play the secret power", function (this: BbWorld) {
+Then("the player is offered the choice to play the secret veto", function (this: BbWorld) {
   assert.equal(this.twistLastEvent, null);
-  assert.equal(this.twistLive!.pending?.kind, "secret-power");
+  assert.equal(this.twistLive!.pending?.kind, "secret-veto");
 });
 
 Then("the engine does not play it for them", function (this: BbWorld) {
-  assert.equal(this.twistLive!.secretPower!.used, false); // untouched until the player chooses
+  assert.equal(this.twistLive!.secretVeto!.used, false); // untouched until the player chooses
 });
 
-Given("the secret power is granted to a houseguest while they are on the block", function (this: BbWorld) {
+Given("the secret veto is granted to a houseguest while they are on the block", function (this: BbWorld) {
   const s = newLiveSeason([PLAYER, npc(1), npc(2), npc(3), npc(4), npc(5), npc(6)]);
   s.beat = "eviction"; s.hoh = npc(6); s.finalNominees = [npc(1), npc(2)];
-  s.secretPower = { holder: npc(1), used: false };
+  s.secretVeto = { holder: npc(1), used: false };
   this.twistLive = s; this.twistCtx = ctxOf(new RelationshipModel(0.5));
   this.twistLastEvent = advance(s, this.twistCtx, new SeededRandom(3));
 });
 
 Then("the engine plays it off the block for them", function (this: BbWorld) {
-  assert.match(this.twistLastEvent!.content, /SECRET POWER/);
+  assert.match(this.twistLastEvent!.content, /SECRET VETO/);
   assert.ok(!this.twistLive!.finalNominees!.includes(npc(1)));
-  assert.equal(this.twistLive!.secretPower!.used, true);
+  assert.equal(this.twistLive!.secretVeto!.used, true);
 });
 
 Then("exactly one houseguest is still evicted that week", function (this: BbWorld) {
@@ -256,10 +256,10 @@ When("any player-facing or admin-facing surface is produced before a twist fires
 });
 
 Then("no armed twist, its trigger, or its timing appears", function (this: BbWorld) {
-  for (const kind of ["double-eviction", "secret-power", "battle-back"]) {
+  for (const kind of ["double-eviction", "secret-veto", "battle-back"]) {
     assert.ok(!this.lastOutput.includes(kind), `armed twist leaked: ${kind}`);
   }
-  assert.ok(!this.lastOutput.includes("twistPlan") && !this.lastOutput.includes("secretPower"));
+  assert.ok(!this.lastOutput.includes("twistPlan") && !this.lastOutput.includes("secretVeto"));
 });
 
 When("a reactive reserve twist fires", function (this: BbWorld) {
@@ -277,15 +277,15 @@ Then("it becomes a witnessed in-game event", function (this: BbWorld) {
 
 Then("only then is it known", function (this: BbWorld) {
   // The fire produced the reveal; before it there was no such event (the state was freshly armed).
-  assert.match(this.twistLastEvent!.content, /BATTLE-BACK|SECRET POWER|DOUBLE EVICTION/);
+  assert.match(this.twistLastEvent!.content, /BATTLE-BACK|SECRET VETO|DOUBLE EVICTION/);
 });
 
 // --- Format-preserving --------------------------------------------------------
 
-Given("the secret power is played off the block", function (this: BbWorld) {
+Given("the secret veto is played off the block", function (this: BbWorld) {
   const s = newLiveSeason([PLAYER, npc(1), npc(2), npc(3), npc(4), npc(5), npc(6)]);
   s.beat = "eviction"; s.hoh = npc(6); s.finalNominees = [npc(1), npc(2)];
-  s.secretPower = { holder: npc(1), used: false };
+  s.secretVeto = { holder: npc(1), used: false };
   this.twistLive = s;
   advance(s, ctxOf(new RelationshipModel(0.5)), new SeededRandom(3));
 });
@@ -306,7 +306,7 @@ Then("exactly one houseguest is evicted that week", function (this: BbWorld) {
 });
 
 Given("a full live season in which the battle-back fires", function (this: BbWorld) {
-  const sb = freshReactiveSandbox(4, allArmed({ doubleEvictionArmed: false, secretPowerArmed: false, battleBackArmed: true, battleBackAtJury: 1 }));
+  const sb = freshReactiveSandbox(4, allArmed({ doubleEvictionArmed: false, secretVetoArmed: false, battleBackArmed: true, battleBackAtJury: 1 }));
   playFull(sb.session);
   const core = sb.session.snapshot();
   this.twistFiredKinds = (core.live?.firedTwists ?? []).map((t) => t.kind);

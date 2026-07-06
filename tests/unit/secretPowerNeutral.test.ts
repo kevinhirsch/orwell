@@ -27,7 +27,7 @@ const SEED = 7;
 
 /** Hash the SEEDED content of every recorded event (the comp/vote/society stream the calibration spine draws). */
 function streamHash(sb: UserSandbox): string {
-  const events = sb.engine.events.query();
+  const events = sb.engine.events.queryAll();
   const sig = (e: (typeof events)[number]): string =>
     `${e.type}|${e.initiator}|${[...e.witnessSet].sort().join(",")}|${e.hidden ? 1 : 0}|${e.content}`;
   return createHash("sha256").update(events.map(sig).join("\n")).digest("hex");

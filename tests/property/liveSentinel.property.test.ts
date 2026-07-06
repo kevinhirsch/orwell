@@ -58,6 +58,14 @@ const args = (name: string, seed: number): Record<string, unknown> => {
     // lie) must NEVER carry a planted sealed sentinel; the engine only ever discloses the secret it
     // chose + recorded, blurred/glossed to the tier, and a lie is engine-authored, not a real secret.
     case "confide": return { npcId: npc(1) };
+    // 0095: accuse a pair of a prior connection. The sweep plants no seeded tie between npc(1)/npc(2),
+    // so this exercises the MISS path (no sealed tie ⇒ no Vault read) — the result must never carry a
+    // planted sealed sentinel either way (a hit would only ever echo the tie's own public nature/names).
+    case "accuseTie": return { aId: npc(1), bId: npc(2) };
+    // 0094: confront a houseguest over a learned belief. The sweep plants no player-held fact with this
+    // id, so `confront` returns null (the Vault bright line — a non-learned belief is never minted); the
+    // sweep proves the null return itself carries no sentinel.
+    case "confront": return { npcId: npc(1), factId: `b42-no-such-fact:${seed}` };
     // 0093/0099: wield a secret. The sweep plants no learned fact, so a real factId would be rejected
     // (harmless) — instead exercise the BLUFF path (a fabricated claim that reads NOTHING from the Vault):
     // the result must NEVER carry a planted sealed sentinel (a bluff invents a claim; it never crosses a secret).
@@ -114,7 +122,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
       // The canary only bites if the sentinels are GENUINELY in the live hidden state. Prove it: every
       // planted marker is present engine-side (house souls + the hidden event/Vault/soul/knowledge)…
       const engineSide = JSON.stringify(reg.sandboxFor(user).session.snapshot())
-        + JSON.stringify(reg.sandboxFor(user).engine.events.query())
+        + JSON.stringify(reg.sandboxFor(user).engine.events.queryAll())
         + JSON.stringify(reg.sandboxFor(user).engine.soul.soulOf(npc(1)))
         + JSON.stringify(reg.sandboxFor(user).engine.knowledge.knownTo(npc(2)))
         + JSON.stringify(reg.sandboxFor(user).engine.vault.readHidden());

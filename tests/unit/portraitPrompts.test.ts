@@ -221,7 +221,7 @@ describe("0051 — recordImageBeat (recorded or it didn't happen; player-witness
     const { eventId } = cmd.recordImageBeat({ houseguestId: "npc:1", imageRef: "img-ref-abc" });
     expect(eventId).toBeTruthy();
 
-    const ev = core.events.query().find((e) => e.id === eventId)!;
+    const ev = core.events.queryAll().find((e) => e.id === eventId)!;
     expect(ev).toBeDefined();
     expect(ev.type).toBe("image-shown");
     // Player-witnessed by construction ⇒ never hidden ⇒ never an off-screen/Vault secret.
@@ -235,7 +235,7 @@ describe("0051 — recordImageBeat (recorded or it didn't happen; player-witness
     const { eventId } = cmd.recordImageBeat({ houseguestId: "npc:2", imageRef: "img-ref-xyz" });
 
     // No hidden event carries this beat (it is the player's own knowledge, Journal-visible).
-    const hiddenEvents = core.events.query().filter((e) => e.hidden);
+    const hiddenEvents = core.events.queryAll().filter((e) => e.hidden);
     expect(hiddenEvents.some((e) => e.id === eventId)).toBe(false);
     // The Vault's hidden-attribute store never gained a record for it either.
     const vaultRecords = core.vault.readHidden();

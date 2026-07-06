@@ -2286,6 +2286,17 @@ function initializeEventListeners() {
     const inputBottom = document.querySelector('.chat-input-bottom');
     const _isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
+    // AXE-10 (WCAG 4.1.2 Name, Role, Value): the composer's aria-label was frozen at the
+    // generic "Message input" baked into the HTML while its visible placeholder is swapped
+    // per-build (data-default-placeholder — "Say or do something…" in the game build). Set
+    // it here, once, unconditionally (BEFORE the `_isMobile` early-return below, which skips
+    // the rest of this function on touch devices) so a screen-reader user's accessible name
+    // always matches what a sighted player sees, on desktop and mobile alike.
+    if (textarea) {
+      const _label = textarea.dataset.defaultPlaceholder || textarea.getAttribute('placeholder') || 'Message input';
+      textarea.setAttribute('aria-label', _label);
+    }
+
     function checkPickerOverflow() {
       // Skip responsive collapse on mobile — keyboard open/close causes flicker
       if (_isMobile) return;
@@ -2296,6 +2307,9 @@ function initializeEventListeners() {
       // rendered (data-default-placeholder — "Message Orwell…" in the full
       // workspace, "Say or do something…" in the game build), never a hardcoded
       // string, so the responsive collapse can't reintroduce the app-name copy.
+      // NOTE: aria-label is intentionally NOT blanked here even when the visible
+      // placeholder collapses for width — that's a sighted-only space-saving move;
+      // the accessible name must stay meaningful regardless (AXE-10).
       if (textarea) {
         const _restore = textarea.dataset.defaultPlaceholder || 'Message Orwell...';
         textarea.setAttribute('placeholder', w < PLACEHOLDER_HIDE_WIDTH ? '' : _restore);

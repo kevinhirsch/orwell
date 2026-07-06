@@ -51,7 +51,7 @@ function runOffscreenSeason(user: string, seed: number, ticks: number, biasPlaye
     }
     orch.advance(user, "offscreen-tick");
   }
-  return sb.engine.events.query().filter((e) => e.type === "confessional").map((e) => e.content);
+  return sb.engine.events.queryAll().filter((e) => e.type === "confessional").map((e) => e.content);
 }
 
 describe("BB-2/SG-8 — off-screen confessionals vary across a season (orchestrator wiring)", () => {

@@ -153,7 +153,7 @@ Then("its highlights come from the recorded events — HOH reigns, nominations, 
 });
 
 Then("it contains no fact that was not in the stores", function (this: BbWorld) {
-  const recorded = new Set(this.rtSandbox!.engine.events.query().filter((e) => !e.hidden).map((e) => e.content));
+  const recorded = new Set(this.rtSandbox!.engine.events.queryAll().filter((e) => !e.hidden).map((e) => e.content));
   for (const h of this.rtRecap!.highlights) assert.ok(recorded.has(h), `not in the record: ${h}`);
 });
 

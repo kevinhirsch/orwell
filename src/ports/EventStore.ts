@@ -10,7 +10,19 @@ export interface EventQuery {
 /** The single interaction record. Not the Vault — outward code may read this. */
 export interface EventStore {
   record(event: GameEvent): void;
-  query(filter?: EventQuery): GameEvent[];
+  /**
+   * BE-6: a FILTERED read — at least one of `witnessedBy`/`hidden`/`type` MUST be set, or the
+   * implementation throws. Bare, unfiltered `query()` used to fast-path to the FULL log (Vault-hidden
+   * content included) whenever no filter was supplied, making the safe call (an explicit filter) opt-in
+   * effort and the unsafe call (bare `.query()`) the path of least resistance for a future outward-
+   * reachable caller. Genuinely-unfiltered engine-internal reads (gossip pathway search, snapshot
+   * export, confessional/richness scans) must call `queryAll()` explicitly instead.
+   */
+  query(filter: EventQuery): GameEvent[];
+  /** The FULL unfiltered log (Vault-hidden content included) — the explicit, clearly-named escape hatch
+   *  for the small set of genuinely engine-internal callers that need everything (BE-6). Never call this
+   *  from a player- or admin-facing surface. */
+  queryAll(): GameEvent[];
   /**
    * The events appended AT OR AFTER index `fromIndex` in the append-only log, in order — the O(Δ) tail
    * (0065 Part E). It copies ONLY `count() - fromIndex` elements (an array slice from an offset), never

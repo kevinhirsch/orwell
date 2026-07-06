@@ -238,7 +238,7 @@ Given("one group talks by the pool and another at the workout corner of the back
     initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a quiet poolside scheme",
   });
   this.pmEventId = eventId;
-  const ev = this.pmSandbox!.engine.events.query().find((e) => e.id === eventId)!;
+  const ev = this.pmSandbox!.engine.events.queryAll().find((e) => e.id === eventId)!;
   this.pmWitnessSet = [...ev.witnessSet];
 });
 
@@ -365,7 +365,7 @@ Given("other houseguests are present in the open-plan core", function (this: BbW
 Then("those houseguests can see the one-on-one is happening", function (this: BbWorld) {
   // The un-zoned public core has no earshot subdivision: a co-present bystander witnesses the scene —
   // a 1:1 there is never private (by construction, the early-game privacy crunch).
-  const ev = this.pmSandbox!.engine.events.query().find((e) => e.id === this.pmEventId)!;
+  const ev = this.pmSandbox!.engine.events.queryAll().find((e) => e.id === this.pmEventId)!;
   assert.ok(ev.witnessSet.includes(this.pmSuspectId!), "the co-present bystander sees the one-on-one");
   assert.ok(!isZonedRoom("kitchen"), "the kitchen is open plan — no private corner to slip into");
   assert.ok(ROOM_ZONES.size > 0, "zones exist, but only in the big rooms (not the public core)");

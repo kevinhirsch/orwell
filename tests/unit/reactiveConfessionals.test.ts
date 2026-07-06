@@ -228,7 +228,7 @@ describe("0089 — the LIVE ceremony confessional reacts AND stays Vault-sealed 
 
   it("an involved houseguest's ceremony confessional references a concrete recent beat", () => {
     const { sb } = playOneWeek("rc-react", 6);
-    const confs = sb.engine.events.query().filter((e) => e.type === "confessional");
+    const confs = sb.engine.events.queryAll().filter((e) => e.type === "confessional");
     expect(confs.length).toBeGreaterThan(0);
     // At least one ceremony confessional opens with a 0089 reactive gist (a real beat the confessor lived),
     // not only the bare standing readout. We look for ANY of the class-keyed openers.
@@ -239,7 +239,7 @@ describe("0089 — the LIVE ceremony confessional reacts AND stays Vault-sealed 
 
   it("every reactive confessional is recorded witnessed by the confessor ALONE and hidden", () => {
     const { sb } = playOneWeek("rc-vault", 8);
-    const confs = sb.engine.events.query().filter((e) => e.type === "confessional");
+    const confs = sb.engine.events.queryAll().filter((e) => e.type === "confessional");
     expect(confs.length).toBeGreaterThan(0);
     for (const c of confs) {
       expect(c.hidden).toBe(true);
@@ -250,7 +250,7 @@ describe("0089 — the LIVE ceremony confessional reacts AND stays Vault-sealed 
 
   it("the reactive confessional reaches NO player surface and NO admin surface (no leak)", () => {
     const { sb } = playOneWeek("rc-leak", 11);
-    const confs = sb.engine.events.query().filter((e) => e.type === "confessional");
+    const confs = sb.engine.events.queryAll().filter((e) => e.type === "confessional");
     expect(confs.length).toBeGreaterThan(0);
     // Player surface sweep.
     const playerSurface =
@@ -275,7 +275,7 @@ describe("0089 — the LIVE ceremony confessional reacts AND stays Vault-sealed 
     const orch = new Orchestrator(reg, new FakeClock(), { seed: 3 });
     for (let i = 0; i < 6; i++) orch.advance(user, "offscreen-tick");
     const sb = reg.sandboxFor(user);
-    const confs = sb.engine.events.query().filter((e) => e.type === "confessional");
+    const confs = sb.engine.events.queryAll().filter((e) => e.type === "confessional");
     expect(confs.length).toBeGreaterThan(0);
     const playerSurface = JSON.stringify(sb.player.getVisibleState()) + sb.player.produce("player-visible log");
     const adminSurface = JSON.stringify(sb.admin.inspect());
@@ -289,7 +289,7 @@ describe("0089 — the LIVE ceremony confessional reacts AND stays Vault-sealed 
 
   it("the assembled reactive content carries no hidden NUMBER and no other-houseguest sealed read", () => {
     const { sb } = playOneWeek("rc-sentinel", 14);
-    const confs = sb.engine.events.query().filter((e) => e.type === "confessional");
+    const confs = sb.engine.events.queryAll().filter((e) => e.type === "confessional");
     expect(confs.length).toBeGreaterThan(0);
     // The confessional content embeds the confessor's own id + the gist + their own target/ally read
     // (entity ids `npc:N` — references the 0040 read already embeds, Vault-only, never an outcome). It
@@ -321,8 +321,8 @@ describe("0089 — reactive confessionals deepen the soul deterministically", ()
   it("two runs from the same seed produce the same confessionals and the soul retains earlier ones", () => {
     const a = playOneWeek("rc-det", 21);
     const b = playOneWeek("rc-det2", 21); // different user key but same seed: like-for-like determinism
-    const confsA = a.sandboxFor("rc-det").engine.events.query().filter((e) => e.type === "confessional").map((e) => e.content);
-    const confsB = b.sandboxFor("rc-det2").engine.events.query().filter((e) => e.type === "confessional").map((e) => e.content);
+    const confsA = a.sandboxFor("rc-det").engine.events.queryAll().filter((e) => e.type === "confessional").map((e) => e.content);
+    const confsB = b.sandboxFor("rc-det2").engine.events.queryAll().filter((e) => e.type === "confessional").map((e) => e.content);
     expect(confsA.length).toBeGreaterThan(0);
     // The per-user sandbox seeds off the game seed (not the user key), so like-seeded runs match content.
     expect(confsA.join("|")).toBe(confsB.join("|"));

@@ -147,8 +147,13 @@ if [[ -f "$ENV_FILE" ]]; then
   # demands it on every tool route (only /health is exempt). The tool probe below
   # MUST present it or a perfectly healthy engine answers 401 — a false FAIL. Fall
   # back to the admin token (admin ⊇ player privilege) when only that is set.
-  ENGINE_TOKEN="$(env_get ORWELL_ENGINE_TOKEN BBAI_ENGINE_TOKEN)"
-  [[ -z "$ENGINE_TOKEN" ]] && ENGINE_TOKEN="$(env_get ORWELL_ENGINE_ADMIN_TOKEN BBAI_ENGINE_ADMIN_TOKEN)"
+  # SEC-21: keep the RAW per-key values too (before the fallback merge below) so
+  # token_security_check can tell "admin unset" / "admin == player" apart from a
+  # merely-successful probe.
+  ENGINE_TOKEN_RAW="$(env_get ORWELL_ENGINE_TOKEN BBAI_ENGINE_TOKEN)"
+  ENGINE_ADMIN_TOKEN_RAW="$(env_get ORWELL_ENGINE_ADMIN_TOKEN BBAI_ENGINE_ADMIN_TOKEN)"
+  ENGINE_TOKEN="$ENGINE_TOKEN_RAW"
+  [[ -z "$ENGINE_TOKEN" ]] && ENGINE_TOKEN="$ENGINE_ADMIN_TOKEN_RAW"
   ENGINE_PORT="${ENGINE_PORT:-8765}"
 else
   warn "config: ${ENV_FILE} not found (using defaults; set ORWELL_HOME if installed elsewhere)"
@@ -261,6 +266,25 @@ engine_serves_tools() {
   grep -Eq '"result"|no active game' <<<"$out"
 }
 
+# SEC-21: the engine's admin/God-Mode channel (audit E27, SEC-5 in the security lane) MUST use a
+# secret DISTINCT from the player token — since the SEC-5 fix, an engine started with the player
+# token set but no admin token now DISABLES the admin channel outright (503) rather than falling
+# back to the player token, so this is a "will admin access work at all" check, not just a
+# best-practice nag. The official installer (orwell-install.sh) mints both correctly; this catches
+# a hand-deployed box (copied .env, docker run, etc.) that never got the memo.
+token_security_check() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  if [[ -n "$ENGINE_TOKEN_RAW" && -z "$ENGINE_ADMIN_TOKEN_RAW" ]]; then
+    warn "ORWELL_ENGINE_ADMIN_TOKEN is not set while ORWELL_ENGINE_TOKEN is — the engine DISABLES the admin/God-Mode channel entirely (SEC-5 fail-closed) until you set a distinct ORWELL_ENGINE_ADMIN_TOKEN in ${ENV_FILE}"
+  elif [[ -n "$ENGINE_TOKEN_RAW" && -n "$ENGINE_ADMIN_TOKEN_RAW" && "$ENGINE_TOKEN_RAW" == "$ENGINE_ADMIN_TOKEN_RAW" ]]; then
+    warn "ORWELL_ENGINE_ADMIN_TOKEN equals ORWELL_ENGINE_TOKEN in ${ENV_FILE} — mint a DISTINCT admin secret so the player token can't reach producerVault / God Mode"
+  elif [[ -n "$ENGINE_TOKEN_RAW" && -n "$ENGINE_ADMIN_TOKEN_RAW" ]]; then
+    pass "engine admin/player tokens are set and distinct"
+  else
+    info "engine tokens not set (ORWELL_ENGINE_TOKEN/ORWELL_ENGINE_ADMIN_TOKEN) — trusted-loopback-only posture"
+  fi
+}
+
 # The HTTP status of the FE health probe ("000" = no answer at all). Any real status — even a
 # 401 from an auth-gated build — proves the front-end PROCESS is up and serving.
 fe_http_code() { curl -s -m 5 -o /dev/null -w '%{http_code}' "${FE_BASE}/api/orwell/health" 2>/dev/null; }
@@ -318,6 +342,7 @@ diagnose() {
     unit_active "$FRONTEND_SVC" && pass "unit active: ${FRONTEND_SVC}" || fail "unit active: ${FRONTEND_SVC}"
   fi
   [[ -f "${APP_DIR}/dist/main.js" ]] && pass "build artifact: dist/main.js" || fail "build artifact missing — run: bash ${APP_DIR}/deploy/orwell-update.sh"
+  token_security_check
   engine_http_ok       && pass "engine /health answers"        || fail "engine /health answers (${ENGINE_BASE}/health)"
   # DEPLOY-12 (B2): report which opt-in "living house" behavioral-fidelity layers are live, so an
   # operator can answer "is the house actually alive on my box?" without grepping data/.env. Best-effort

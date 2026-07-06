@@ -12,20 +12,20 @@ import { PLAYER, npc } from "../../src/domain/ids";
 import type { EntityId } from "../../src/domain/ids";
 import type { TwistKind } from "../../src/engine/reserveTwists";
 
-// Feature 0025 (reactive redesign) — the LIVE twist mechanics: secret power off the block, the
+// Feature 0025 (reactive redesign) — the LIVE twist mechanics: secret veto off the block, the
 // battle-back juror return, and full-season format preservation. HARD rule: roles only, no names.
 
 const ctxOf = (rel: RelationshipModel): SeasonCtx => ({
   player: PLAYER, statsOf: () => ({ physical: 0.5, mental: 0.5, social: 0.5 }), rel,
 });
 
-// ── Secret power (played off the block) ───────────────────────────────────────
-describe("0025 secret power — a nominee pulls themselves off the block", () => {
+// ── Secret veto (played off the block) ───────────────────────────────────────
+describe("0025 secret veto — a nominee pulls themselves off the block", () => {
   function onBlockHolding(holder: EntityId): { s: LiveSeasonState; ctx: SeasonCtx } {
     const active = [PLAYER, npc(1), npc(2), npc(3), npc(4), npc(5), npc(6)];
     const s = newLiveSeason(active);
     s.beat = "eviction"; s.hoh = npc(6); s.finalNominees = [holder === npc(1) ? npc(1) : PLAYER, npc(2)];
-    s.secretPower = { holder, used: false };
+    s.secretVeto = { holder, used: false };
     return { s, ctx: ctxOf(new RelationshipModel(0.5)) };
   }
 
@@ -33,34 +33,34 @@ describe("0025 secret power — a nominee pulls themselves off the block", () =>
     const { s, ctx } = onBlockHolding(npc(1));
     const ev = advance(s, ctx, new SeededRandom(3))!;
     expect(ev.beat).toBe("twist-reveal");
-    expect(ev.content).toMatch(/SECRET POWER/);
+    expect(ev.content).toMatch(/SECRET VETO/);
     expect(s.finalNominees).not.toContain(npc(1)); // holder came off the block
     expect(s.finalNominees).toContain(npc(2));      // the other nominee stays
     expect(s.finalNominees).toHaveLength(2);        // still a two-nominee block ⇒ one eviction
-    expect(s.secretPower!.used).toBe(true);
-    expect((s.firedTwists ?? []).map((t) => t.kind)).toContain("secret-power");
+    expect(s.secretVeto!.used).toBe(true);
+    expect((s.firedTwists ?? []).map((t) => t.kind)).toContain("secret-veto");
   });
 
   it("a player holder is asked — their choice to play it", () => {
     const { s, ctx } = onBlockHolding(PLAYER);
     const paused = advance(s, ctx, new SeededRandom(3));
     expect(paused).toBeNull();
-    expect(s.pending?.kind).toBe("secret-power");
-    const played = applyDecision(s, { kind: "secret-power", use: true }, ctx, new SeededRandom(3));
-    expect(played.content).toMatch(/SECRET POWER/);
+    expect(s.pending?.kind).toBe("secret-veto");
+    const played = applyDecision(s, { kind: "secret-veto", use: true }, ctx, new SeededRandom(3));
+    expect(played.content).toMatch(/SECRET VETO/);
     expect(s.finalNominees).not.toContain(PLAYER);
-    expect(s.secretPower!.used).toBe(true);
+    expect(s.secretVeto!.used).toBe(true);
   });
 
   it("a player holder may HOLD it — not consumed, the eviction proceeds, not re-offered this week", () => {
     const { s, ctx } = onBlockHolding(PLAYER);
     advance(s, ctx, new SeededRandom(3)); // raises the pending
-    applyDecision(s, { kind: "secret-power", use: false }, ctx, new SeededRandom(3));
-    expect(s.secretPower!.used).toBe(false);          // still holds it
-    expect(s.secretPower!.declinedWeek).toBe(s.week);  // but not re-offered this week
+    applyDecision(s, { kind: "secret-veto", use: false }, ctx, new SeededRandom(3));
+    expect(s.secretVeto!.used).toBe(false);          // still holds it
+    expect(s.secretVeto!.declinedWeek).toBe(s.week);  // but not re-offered this week
     expect(s.beat).toBe("eviction");
     const next = advance(s, ctx, new SeededRandom(3)); // proceeds to the vote, no re-prompt
-    expect(s.pending?.kind).not.toBe("secret-power");
+    expect(s.pending?.kind).not.toBe("secret-veto");
     expect(next).not.toBeNull();
   });
 });
@@ -94,14 +94,14 @@ describe("0025 — all three twists can fire in one season, each once", () => {
     // battle-back
     s.beat = "battle-back"; s.evictionOrder = [npc(20), npc(21)];
     advance(s, ctx, new SeededRandom(1));
-    // secret power
+    // secret veto
     s.beat = "eviction"; s.hoh = npc(6); s.finalNominees = [npc(1), npc(2)];
-    s.secretPower = { holder: npc(1), used: false };
+    s.secretVeto = { holder: npc(1), used: false };
     advance(s, ctx, new SeededRandom(1));
     // double eviction (its fire is bookkept when the running night completes)
     (s.firedTwists ??= []).push({ kind: "double-eviction", beat: s.week });
     const kinds = (s.firedTwists ?? []).map((t) => t.kind);
-    expect(new Set(kinds)).toEqual(new Set<TwistKind>(["battle-back", "secret-power", "double-eviction"]));
+    expect(new Set(kinds)).toEqual(new Set<TwistKind>(["battle-back", "secret-veto", "double-eviction"]));
     expect(kinds).toHaveLength(3); // each exactly once
   });
 });
@@ -116,7 +116,7 @@ function resolveLive(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"
     case "comp-round": return submit({ kind: "comp-round", intent: "compete" });
     case "houseguests-choice": return submit({ kind: "houseguests-choice", vote: p.options[0]!.id });
     case "replacement": return submit({ kind: "replacement", replacement: p.options[0]!.id });
-    case "secret-power": return submit({ kind: "secret-power", use: true });
+    case "secret-veto": return submit({ kind: "secret-veto", use: true });
     case "goodbye-message": return submit({ kind: "goodbye-message", vote: (p as { options: { id: string }[] }).options[0]!.id });
     case "finale-statement": return submit({ kind: "finale-statement", statement: "x" });
     case "finale-answer": return submit({ kind: "finale-answer", appeal: (p as { appeals: string[] }).appeals![0]! });
@@ -154,7 +154,7 @@ describe("0025 reactive twists — full-season format preservation (live)", () =
   it("a forced battle-back season still closes at a jury of nine and a Final 2", () => {
     const r = playFullSeason(4, {
       doubleEvictionAtActive: 8, doubleEvictionArmed: false,
-      secretPowerStreak: 2, secretPowerArmed: false,
+      secretVetoStreak: 2, secretVetoArmed: false,
       battleBackAtJury: 1, battleBackArmed: true,
     });
     expect(r.finished).toBe(true);

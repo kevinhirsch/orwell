@@ -109,7 +109,7 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // The season record (0048/B56): the recap reads the PUBLIC record; the retrospective reads the
   // hidden side THROUGH the session's finished-state gate (the one sanctioned Vault seam).
   session.setRecordProviders({
-    events: () => engine.events.query(),
+    events: () => engine.events.queryAll(),
     hidden: () => engine.vault.readHidden(),
   });
   // 0065 Part E — the delta feed's O(Δ) providers. `count` anchors each beat checkpoint at commit time
@@ -289,9 +289,15 @@ function buildUserSandbox(user = "default"): UserSandbox {
   });
   // 0093/0099 — secrets as power. The player's own knowledge READER (so a wielded `factId` is validated
   // against what the player legitimately holds — the Vault bright line; a non-learned secret is rejected,
-  // no minting). Returns the player's facts with id + content + subject + lineage factId.
+  // no minting). Returns the player's facts with id + content + subject + lineage factId. 0094 (distorted
+  // gossip consequences) additively widens this with the belief-reliability fields ALREADY on every
+  // `KnowledgeFact` (`distortion`/`confidence`) — no new store, no new seam, just a wider projection of
+  // the same reader `confront` also validates a cited `factId` against.
   session.setPlayerKnowledgeReader(() =>
-    engine.knowledge.knownTo(PLAYER).map((f) => ({ id: f.id, content: f.content, subject: f.subject, factId: f.factId, pathway: f.pathway })),
+    engine.knowledge.knownTo(PLAYER).map((f) => ({
+      id: f.id, content: f.content, subject: f.subject, factId: f.factId, pathway: f.pathway,
+      distortion: f.distortion, confidence: f.confidence,
+    })),
   );
   // 0093/0099 — surface an EXPOSED/TRADED secret INTO a houseguest's knowledge through the in-game
   // pathway (the player is the source). The recipient first HOLDS the content (a seeded origin belief so
@@ -361,7 +367,7 @@ function exportSnapshot(sb: UserSandbox): SessionSnapshot {
   return {
     ...sb.session.snapshot(),
     snapshotVersion: SNAPSHOT_VERSION,
-    events: sb.engine.events.query(),
+    events: sb.engine.events.queryAll(),
     relationships: sb.engine.relationships.serialize().edges,
     // The whole knowledge layer (B40) — facts + suspicions + counters — so a restart resumes it.
     // Through the port seam (E63): `serialize`/`load` are on `KnowledgeService`, no concrete cast.

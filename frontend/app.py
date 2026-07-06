@@ -186,8 +186,12 @@ if LOCALHOST_BYPASS:
 # off, localhost-bypass on, insecure cookies, or an unpinned Host header — instead of
 # silently serving the game in the clear. No-op when ORWELL_PUBLIC is unset, so the
 # default / trusted-LAN start path is byte-identical.
-from core.middleware import assert_public_profile_safe
+from core.middleware import assert_public_profile_safe, assert_auth_off_requires_loopback
 assert_public_profile_safe(os.environ)
+# SEC-3: independent of ORWELL_PUBLIC — refuse to boot with AUTH_ENABLED=false on a
+# non-loopback bind (every network caller would get unauthenticated bash/python tool
+# access via tool_security's unconfigured-mode fail-open). See middleware.py's docstring.
+assert_auth_off_requires_loopback(os.environ)
 
 if AUTH_ENABLED:
     AUTH_EXEMPT_EXACT = {
@@ -275,30 +279,11 @@ if AUTH_ENABLED:
         _token_cache.update(new_map)
         app.state._token_cache_dirty = False
 
-    # Headers that prove a request was forwarded by a proxy/tunnel (cloudflared,
-    # nginx, Caddy, Tailscale Funnel, …). cloudflared connects to the app FROM
-    # 127.0.0.1, so without this check every tunneled request would look like
-    # loopback and could bypass auth.
-    _PROXY_FWD_HEADERS = (
-        "cf-connecting-ip", "cf-ray", "cf-visitor",
-        "x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded",
-    )
-
-    def _is_trusted_loopback(request: Request) -> bool:
-        """True ONLY for a DIRECT loopback connection with no proxy/tunnel
-        forwarding headers. A bare ``client.host in ('127.0.0.1','::1')`` check is
-        unsafe behind a Cloudflare tunnel / reverse proxy: those connect from
-        loopback, so a remote visitor would otherwise inherit local trust and
-        slip past LOCALHOST_BYPASS or spoof the internal-tool path. Orwell's own
-        in-process agent loopback calls carry none of these headers, so they still
-        qualify."""
-        host = request.client.host if request.client else None
-        if host not in ("127.0.0.1", "::1"):
-            return False
-        for _h in _PROXY_FWD_HEADERS:
-            if request.headers.get(_h):
-                return False
-        return True
+    # Direct-loopback-only check (excludes proxy/tunnel-forwarded requests — cloudflared
+    # connects to the app FROM 127.0.0.1, so without this a tunneled request would look
+    # like loopback and could bypass auth). Shared with routes/auth_routes.py's SEC-1
+    # first-run-setup gate so the two loopback trust decisions can't drift apart.
+    from core.middleware import is_trusted_loopback as _is_trusted_loopback
 
     class AuthMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):

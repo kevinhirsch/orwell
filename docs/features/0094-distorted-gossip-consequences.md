@@ -1,7 +1,13 @@
 # 0094 — Distorted gossip has consequences (acting on a wrong belief burns you)
 
-> **Status:** 🟡 **SPEC ONLY (drafted 2026-06-25).** Design + executable Gherkin only — no source,
-> no `cucumber.cjs` wiring, no README index row yet. Built next as a new queue item.
+> **Status:** ✅ **BUILT (2026-07-06).** Built with a **narrowed scope** — see
+> `docs/features/README.md`'s 0094 row for the full account. The spec's "closed-set move" (nomination /
+> vote / a confronting fold) is built as a NEW dedicated lever, `confront(npcId, factId)` (the
+> `confide`/`accuseTie` sibling) — retrofitting `nominate`/`vote` themselves was assessed as touching a
+> hard, calibration-load-bearing invariant out of scope for a bounded build, and is left for a dedicated
+> owner-scoped change. The dramatic-irony reveal and the behavioral-uncertainty texture ride the
+> EXISTING 0002/0038 factId-lineage/hedge-phrase machinery verbatim. `src/engine/beliefReliability.ts`,
+> wired in `cucumber.cjs`, gated by `ORWELL_GOSSIP_CONSEQUENCE` (default OFF).
 > **Tracks #865.**
 > **Depends on:** 0001 (Vault Wall), 0002 (event visibility & pathway propagation — the gossip
 > belief model `src/engine/gossip.ts` ALREADY carries per-rumor `distortion` / `confidence` /

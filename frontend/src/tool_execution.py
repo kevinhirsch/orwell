@@ -18,7 +18,7 @@ import sys
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
-from src.tool_security import is_public_blocked_tool, owner_is_admin_or_single_user
+from src.tool_security import is_public_blocked_tool, owner_may_use_god_mode_tools
 from src.tool_policy import ToolPolicy
 from src.constants import MAX_OUTPUT_CHARS, MAX_READ_CHARS, MAX_DIFF_LINES
 
@@ -505,8 +505,14 @@ _ADMIN_TOOLS = {
 
 
 def _owner_is_admin(owner: Optional[str]) -> bool:
-    """Mirror route-level admin behavior for agent tool execution."""
-    return owner_is_admin_or_single_user(owner)
+    """Gate for `_ADMIN_TOOLS` (the engine's God-Mode channel — inspectNonVaultState/
+    overrideMechanic/configureGame/manageSandbox/sandboxHealth) and `is_public_blocked_tool`
+    (bash/python/the vault_* trio/manage_*/…) below — i.e. every God-Mode-adjacent tool this module
+    can execute. Uses the narrow `owner_may_use_god_mode_tools` gate (CA-23/5c) rather than
+    `owner_is_admin_or_single_user` directly, so the single-user/auth-off convenience the latter
+    grants elsewhere does NOT also hand the player channel God-Mode tool execution in the game
+    build."""
+    return owner_may_use_god_mode_tools(owner)
 
 # ---------------------------------------------------------------------------
 # MCP-backed tool helpers
@@ -1172,7 +1178,7 @@ async def execute_tool_block(
         do_form_alliance, do_join_alliance,
         do_expose_secret, do_trade_secret,
         do_premiere_intros, do_mark_houseguest_met,
-        do_season_recap, do_season_retrospective, do_npc_voice,
+        do_season_recap, do_season_retrospective, do_daily_recap, do_npc_voice,
         do_app_api,
     )
 
@@ -1547,6 +1553,9 @@ async def execute_tool_block(
     elif tool == "seasonRetrospective":
         desc = "seasonRetrospective"
         result = await do_season_retrospective(content, owner=owner)
+    elif tool == "dailyRecap":
+        desc = "dailyRecap"
+        result = await do_daily_recap(content, owner=owner)
     elif tool == "npcVoice":
         desc = "npcVoice"
         result = await do_npc_voice(content, owner=owner)

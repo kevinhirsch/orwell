@@ -54,7 +54,7 @@ describe("behavioral fidelity on the PRODUCTION path (B54)", () => {
     let revealsAcrossSeeds = 0;
     for (const seed of SEEDS) {
       const { sb, edgesBefore } = playLiveStretch(seed);
-      const m = liveRichnessMetrics(sb.engine.events.query());
+      const m = liveRichnessMetrics(sb.engine.events.queryAll());
       const ctx = `seed ${seed}: ${JSON.stringify({ ...m, types: m.types.slice(0, 12) })}`;
 
       // The off-screen society EXISTS on the live path, and it dominates (0003 mandate #1).

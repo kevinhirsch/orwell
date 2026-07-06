@@ -190,8 +190,50 @@ def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
         return False
 
 
+def owner_may_use_god_mode_tools(owner: Optional[str]) -> bool:
+    """God-Mode/admin-tool exposure gate (CA-23/5c, 2026-07-05) — a NARROWER decision than
+    ``owner_is_admin_or_single_user``, scoped strictly to whether `owner` may reach God-Mode-adjacent
+    tooling (``NON_ADMIN_BLOCKED_TOOLS`` here, and the engine's admin-channel tools —
+    ``inspectNonVaultState`` / ``overrideMechanic`` / ``configureGame`` / ``manageSandbox`` /
+    ``sandboxHealth`` — gated the same way in ``tool_execution._owner_is_admin``).
+
+    ``owner_is_admin_or_single_user`` auto-grants admin to EVERY caller when auth is unconfigured — a
+    deliberate single-user-build convenience that several UNRELATED admin-surface checks
+    (workspace_routes, email_helpers contacts, …) still rely on, and this function does not change
+    that for them. But that convenience must NOT extend to God-Mode tooling in the GAME BUILD:
+    Orwell's player channel is a distinct product surface from the inherited workspace, and "auth
+    happens to be off" must never be read as "the player may reach bash/python/the vault_* trio/
+    manage_settings/the engine's admin channel/…" just because this is a single-user deployment. So
+    outside the game build this is identical to ``owner_is_admin_or_single_user``; inside it, the
+    auth-unconfigured auto-grant is refused (fail closed) and only a genuinely authenticated admin
+    passes. Scoped STRICTLY to this one decision — do not widen it into
+    ``owner_is_admin_or_single_user`` itself, and do not change auth posture anywhere else (an owner
+    call, not this lane's to make).
+    """
+    if not owner_is_admin_or_single_user(owner):
+        return False
+    try:
+        from src.settings import game_build_enabled
+
+        if not game_build_enabled():
+            return True
+        from src.auth_helpers import shared_auth_manager
+
+        auth = shared_auth_manager()
+        if getattr(auth, "load_failed", False):
+            return False  # config gap — fail closed, same as owner_is_admin_or_single_user
+        if not auth.is_configured:
+            # Auth is genuinely unconfigured: the single-user convenience does not extend to
+            # God-Mode tooling while the game build is live.
+            return False
+        return bool(owner and auth.is_admin(owner))
+    except Exception as exc:
+        logger.warning("Unable to evaluate God-Mode tool exposure for owner: %s", exc)
+        return False
+
+
 def blocked_tools_for_owner(owner: Optional[str]) -> Set[str]:
     """Tools to hide/disable for this owner under public-user policy."""
-    if owner_is_admin_or_single_user(owner):
+    if owner_may_use_god_mode_tools(owner):
         return set()
     return set(NON_ADMIN_BLOCKED_TOOLS)

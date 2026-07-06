@@ -92,7 +92,7 @@ describe("0100 — when enabled, the jury house lives and the grudge accumulates
     sb.session.setJuryHouseEnabled(true);
     const before = sb.engine.events.count();
     for (let t = 0; t < 12; t++) sb.session.juryHouseTick(sb.engine.events, sb.engine.knowledge);
-    const produced = sb.engine.events.query().slice(before);
+    const produced = sb.engine.events.queryAll().slice(before);
     expect(produced.length, "the jury house produced hidden scenes").toBeGreaterThan(0);
     for (const ev of produced) {
       expect(ev.hidden, "every jury-house scene is hidden").toBe(true);

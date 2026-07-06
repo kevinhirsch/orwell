@@ -121,7 +121,7 @@ describe("live-GENERATED hidden content never reaches a player surface (C6)", ()
           else if (p.options[0]) sb.session.submitDecision({ kind: p.kind, vote: p.options[0].id, replacement: p.options[0].id } as never);
         }
       }
-      const hidden = sb.engine.events.query().filter((e) => e.hidden && e.content.length > 0).map((e) => e.content);
+      const hidden = sb.engine.events.queryAll().filter((e) => e.hidden && e.content.length > 0).map((e) => e.content);
       expect(hidden.length).toBeGreaterThan(10); // the sweep has real teeth — generated, not planted
 
       // Every player-channel surface, including the prompt builders the audit named.

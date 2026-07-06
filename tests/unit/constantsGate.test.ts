@@ -63,9 +63,9 @@ describe("the retune test (a knob turn genuinely changes behavior)", () => {
       const user = `retune-${interactions}`;
       const orch = new Orchestrator(reg, { now: () => 1 }, { seed: 11, offscreenInteractions: interactions });
       reg.sandboxFor(user).session.createCharacter({ playerName: "The Player", seed: 11 });
-      const before = reg.sandboxFor(user).engine.events.query().length;
+      const before = reg.sandboxFor(user).engine.events.queryAll().length;
       orch.advance(user, "offscreen-tick");
-      return reg.sandboxFor(user).engine.events.query().length - before;
+      return reg.sandboxFor(user).engine.events.queryAll().length - before;
     };
     // More scenes per tick ⇒ strictly more recorded events for the same seed.
     expect(run(6)).toBeGreaterThan(run(1));

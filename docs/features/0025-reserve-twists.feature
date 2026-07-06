@@ -1,6 +1,6 @@
 # Executable spec — BUILT & green; BDD-gated in cucumber.cjs. Opt-in ORWELL_REACTIVE_TWISTS.
 # Feature 0025 (reactive redesign, PO ruling 2026-07-06) — a STANDING POOL the live house earns.
-# All three twists (double eviction, secret power, battle-back) sit armed from game start; each fires
+# All three twists (double eviction, secret veto, battle-back) sit armed from game start; each fires
 # when the house reaches a state that earns it, on per-season seeded triggers; all three may fire in one
 # season, each at most once; sealed from player AND admin until it fires; always format-preserving.
 # HARD rule: roles only (HOH, nominee, evictee, juror, the-player). No names.
@@ -15,7 +15,7 @@ Feature: Reserve twists — a standing pool of surprises the live house earns, s
 
     Scenario: The pool arms all three twists from game start
       Given a new season with the reactive pool armed
-      Then the double eviction, the secret power, and the battle-back are each watchable in the plan
+      Then the double eviction, the secret veto, and the battle-back are each watchable in the plan
       And none has a pre-decided fire week
       And no player-facing or admin-facing surface reveals the pool
 
@@ -32,15 +32,15 @@ Feature: Reserve twists — a standing pool of surprises the live house earns, s
   Rule: A twist can be earned but still held back (some seasons stay quiet)
 
     Scenario: An eligible trigger does not always fire
-      Given many seasons that each reach the secret-power trigger
-      Then in some the secret power is armed and in others it is held back
+      Given many seasons that each reach the secret-veto trigger
+      Then in some the secret veto is armed and in others it is held back
       And whether it is armed is reproducible under the season's seed
 
   Rule: Each twist fires at most once; all three may fire in one season
 
     Scenario: A single season can fire all three twists, each once
       Given a live season in which each twist mechanic is driven to fire
-      Then the double eviction, the secret power, and the battle-back each fire exactly once
+      Then the double eviction, the secret veto, and the battle-back each fire exactly once
       And no twist fires twice
 
     Scenario: One reactive twist arms per week roll (the cooldown spaces them)
@@ -49,13 +49,13 @@ Feature: Reserve twists — a standing pool of surprises the live house earns, s
 
   Rule: Twists involving the player are the player's to play (agency)
 
-    Scenario: A secret power granted to the player is the player's to hold and play
-      Given the secret power is granted to the player while they are on the block
-      Then the player is offered the choice to play the secret power
+    Scenario: A secret veto granted to the player is the player's to hold and play
+      Given the secret veto is granted to the player while they are on the block
+      Then the player is offered the choice to play the secret veto
       And the engine does not play it for them
 
-    Scenario: A secret power granted to an NPC is resolved by the engine
-      Given the secret power is granted to a houseguest while they are on the block
+    Scenario: A secret veto granted to an NPC is resolved by the engine
+      Given the secret veto is granted to a houseguest while they are on the block
       Then the engine plays it off the block for them
       And exactly one houseguest is still evicted that week
 
@@ -77,8 +77,8 @@ Feature: Reserve twists — a standing pool of surprises the live house earns, s
 
   Rule: Every twist is format-preserving (jury of 9 → final 2, hard rules hold)
 
-    Scenario: The secret power preserves the count — still one eviction that week
-      Given the secret power is played off the block
+    Scenario: The secret veto preserves the count — still one eviction that week
+      Given the secret veto is played off the block
       Then the protected houseguest is removed from the block
       And a replacement nominee stands
       And exactly one houseguest is evicted that week

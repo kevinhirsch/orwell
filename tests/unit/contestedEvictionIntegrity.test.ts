@@ -184,7 +184,7 @@ describe("#1106 — the non-degradation guard is NOT weakened by the recovery pa
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       expect(() => runtime.orchestrator.commitPlayerTurn(user)).toThrowError(/turn refused/);
-      expect(runtime.registry.sandboxFor(user).engine.events.query().some((e) => e.content.includes(SECRET))).toBe(false);
+      expect(runtime.registry.sandboxFor(user).engine.events.queryAll().some((e) => e.content.includes(SECRET))).toBe(false);
     } finally {
       errSpy.mockRestore();
     }

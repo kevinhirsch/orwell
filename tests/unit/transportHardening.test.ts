@@ -163,7 +163,7 @@ describe("E12 — determinism hygiene", () => {
     events.record({ id: "a", ts: 5, type: "x", initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true, content: "a" });
     events.record({ id: "b", ts: 1, type: "x", initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true, content: "b" }); // would go backwards
     events.record({ id: "c", ts: 100, type: "x", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: "c" });
-    const ts = events.query().map((e) => e.ts);
+    const ts = events.queryAll().map((e) => e.ts);
     expect(ts).toEqual([...ts].sort((x, y) => x - y));
     expect(new Set(ts).size).toBe(ts.length); // strictly increasing — ordering by ts is meaningful
     // …and a real driven game's record is coherent too.
@@ -174,7 +174,7 @@ describe("E12 — determinism hygiene", () => {
       const v = sb.session.advanceGame();
       if (v.pending) break;
     }
-    const live = sb.engine.events.query().map((e) => e.ts);
+    const live = sb.engine.events.queryAll().map((e) => e.ts);
     expect(live).toEqual([...live].sort((x, y) => x - y));
   });
 });

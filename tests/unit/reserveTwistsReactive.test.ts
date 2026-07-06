@@ -13,7 +13,7 @@ import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 
 const armedPlan = (over: Partial<TwistPlan> = {}): TwistPlan => ({
   doubleEvictionAtActive: 8, doubleEvictionArmed: true,
-  secretPowerStreak: 2, secretPowerArmed: true,
+  secretVetoStreak: 2, secretVetoArmed: true,
   battleBackAtJury: 1, battleBackArmed: true,
   ...over,
 });
@@ -32,7 +32,7 @@ describe("0025 reactive triggers — the sealed per-season plan", () => {
   });
 
   it("holds back some seasons and arms others (reproducibly)", () => {
-    const armed = Array.from({ length: 40 }, (_, i) => planReserveTwists(new SeededRandom(i + 1)).secretPowerArmed);
+    const armed = Array.from({ length: 40 }, (_, i) => planReserveTwists(new SeededRandom(i + 1)).secretVetoArmed);
     expect(armed.some((a) => a)).toBe(true);       // some seasons fire
     expect(armed.some((a) => !a)).toBe(true);      // some are held back
   });
@@ -42,8 +42,8 @@ describe("0025 reactive triggers — the sealed per-season plan", () => {
       const p = planReserveTwists(new SeededRandom(i));
       expect(p.doubleEvictionAtActive).toBeGreaterThanOrEqual(6);
       expect(p.doubleEvictionAtActive).toBeLessThanOrEqual(9);
-      expect(p.secretPowerStreak).toBeGreaterThanOrEqual(2);
-      expect(p.secretPowerStreak).toBeLessThanOrEqual(3);
+      expect(p.secretVetoStreak).toBeGreaterThanOrEqual(2);
+      expect(p.secretVetoStreak).toBeLessThanOrEqual(3);
       expect(p.battleBackAtJury).toBeGreaterThanOrEqual(1);
       expect(p.battleBackAtJury).toBeLessThanOrEqual(3);
     }
@@ -52,20 +52,20 @@ describe("0025 reactive triggers — the sealed per-season plan", () => {
 
 describe("0025 reactive triggers — triggeredTwist", () => {
   it("fires the double eviction when the house reaches the seeded size", () => {
-    const p = armedPlan({ battleBackArmed: false, secretPowerArmed: false });
+    const p = armedPlan({ battleBackArmed: false, secretVetoArmed: false });
     expect(triggeredTwist(p, sig({ activeCount: 9 }), [])).toBeNull();     // not yet
     expect(triggeredTwist(p, sig({ activeCount: 8 }), [])).toBe("double-eviction");
     expect(triggeredTwist(p, sig({ activeCount: 7 }), [])).toBe("double-eviction"); // <= target
   });
 
-  it("fires the secret power once the house goes lopsided", () => {
-    const p = armedPlan({ battleBackArmed: false, doubleEvictionArmed: false, secretPowerStreak: 3 });
+  it("fires the secret veto once the house goes lopsided", () => {
+    const p = armedPlan({ battleBackArmed: false, doubleEvictionArmed: false, secretVetoStreak: 3 });
     expect(triggeredTwist(p, sig({ lopsidedStreak: 2 }), [])).toBeNull();
-    expect(triggeredTwist(p, sig({ lopsidedStreak: 3 }), [])).toBe("secret-power");
+    expect(triggeredTwist(p, sig({ lopsidedStreak: 3 }), [])).toBe("secret-veto");
   });
 
   it("fires the battle-back only inside the early-jury window", () => {
-    const p = armedPlan({ doubleEvictionArmed: false, secretPowerArmed: false, battleBackAtJury: 2 });
+    const p = armedPlan({ doubleEvictionArmed: false, secretVetoArmed: false, battleBackAtJury: 2 });
     expect(triggeredTwist(p, sig({ juryCount: 1 }), [])).toBeNull();
     expect(triggeredTwist(p, sig({ juryCount: 2 }), [])).toBe("battle-back");
     expect(triggeredTwist(p, sig({ juryCount: 4 }), [])).toBeNull(); // window closed

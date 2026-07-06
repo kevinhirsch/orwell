@@ -137,7 +137,7 @@ When("the player completes a confirmed self-eviction", function (this: BbWorld) 
 
 When("the player expresses a bare, ambiguous intent to leave", function (this: BbWorld) {
   const sb = this.svSandbox!;
-  this.svEventsBefore = sb.engine.events.query().length;
+  this.svEventsBefore = sb.engine.events.queryAll().length;
   // A bare OOC intent — it raises the confirmation, never an eviction (the L36/L39a gate holds).
   this.svView = sb.session.requestSelfEviction();
 });
@@ -162,7 +162,7 @@ Then("a self-eviction event is recorded with the player in its witness set", fun
 });
 
 Then("the recorded event is not hidden", function (this: BbWorld) {
-  const exit = this.svSandbox!.engine.events.query().find((e) => /self-evict/i.test(e.content));
+  const exit = this.svSandbox!.engine.events.queryAll().find((e) => /self-evict/i.test(e.content));
   assert.ok(exit, "the self-eviction event exists");
   assert.equal(exit!.hidden, false, "the self-eviction event is not hidden");
 });
@@ -201,9 +201,9 @@ Then("a self-eviction confirmation decision is surfaced on the player-level OOC 
 
 Then("no self-eviction event is recorded", function (this: BbWorld) {
   const sb = this.svSandbox!;
-  assert.equal(sb.engine.events.query().length, this.svEventsBefore ?? sb.engine.events.query().length,
+  assert.equal(sb.engine.events.queryAll().length, this.svEventsBefore ?? sb.engine.events.queryAll().length,
     "no new event was recorded by the bare intent");
-  assert.ok(!sb.engine.events.query().some((e) => /self-evict/i.test(e.content)), "no self-eviction event exists");
+  assert.ok(!sb.engine.events.queryAll().some((e) => /self-evict/i.test(e.content)), "no self-eviction event exists");
 });
 
 Then("the player's status is still active", function (this: BbWorld) {
@@ -213,7 +213,7 @@ Then("the player's status is still active", function (this: BbWorld) {
 Then("the house neither hears nor reacts to the out-of-character intent", function (this: BbWorld) {
   const sb = this.svSandbox!;
   // The OOC intent is NOT a recorded in-game event — no houseguest witnessed it, nothing folded.
-  assert.ok(!sb.engine.events.query().some((e) => /self-evict/i.test(e.content)), "the house has no record of the intent");
+  assert.ok(!sb.engine.events.queryAll().some((e) => /self-evict/i.test(e.content)), "the house has no record of the intent");
   assert.equal(playerLeft(sb.session), false, "the player is still in the house");
 });
 

@@ -26,10 +26,41 @@ export type TieNature = "casting-callback" | "mutual-friend" | "shared-hometown"
 /** A showmance's arc, advancing only as the live relationship genuinely develops (never instant). */
 export type ShowmanceStage = "spark" | "bond" | "visible" | "resolved";
 
+/**
+ * Feature 0095 — a pre-game tie's EXPOSURE state (the only new sealed state this feature adds; see
+ * `docs/features/0095-pre-show-ties-reveal.md`). `sealed` (the 0059 default, invisible to player AND
+ * admin) → `surfaced-to-house` (a pathway has carried it to SOME houseguests; it may have reached the
+ * player as a low-confidence rumor) → `public` (a settled house fact — the narrator may now name the
+ * pair openly, exactly like a `visible` showmance). Monotonic — never regresses on restore or re-derive.
+ */
+export type TieExposure = "sealed" | "surfaced-to-house" | "public";
+
 export interface PreGameTie {
   a: EntityId;
   b: EntityId;
   nature: TieNature;
+  /** 0095 — absent (⇒ `sealed`) on a pre-0095 save; use `tieExposureOf` to read it defensively. */
+  exposure?: TieExposure;
+}
+
+/** Read a tie's exposure, defaulting a pre-0095 (or freshly-seeded) tie to `sealed`. */
+export function tieExposureOf(t: Pick<PreGameTie, "exposure">): TieExposure {
+  return t.exposure ?? "sealed";
+}
+
+/**
+ * 0095 — promote a tie's exposure ONE step for a firing pathway event, never regressing. An `accusation`
+ * that lands is a witnessed, public confrontation — it jumps straight to `public` regardless of the
+ * current state (mirrors a real "wait, you two DO know each other?!" room reaction). An `overhear`/`slip`
+ * pathway (off-screen, NPC↔NPC) promotes one step at a time: `sealed` → `surfaced-to-house` on the first
+ * spark, `surfaced-to-house` → `public` on a SECOND real spark (sustained spread, never a single tell).
+ * Pure; `"none"` (or an already-`public` tie) is a no-op.
+ */
+export function nextTieExposure(current: TieExposure, event: "none" | "overhear" | "slip" | "accusation"): TieExposure {
+  if (current === "public" || event === "none") return current;
+  if (event === "accusation") return "public";
+  if (current === "sealed") return "surfaced-to-house";
+  return "public"; // already surfaced-to-house ⇒ a second spark goes public
 }
 export interface Showmance {
   a: EntityId;
@@ -144,6 +175,11 @@ const TIE_NATURE_PROSE: Record<TieNature, string> = {
   "old-acquaintance": "already knew each other before the show",
 };
 
+/** 0095 — the Vault-free prose of WHY a tied pair knew each other, for a reveal's diffused content. */
+export function tieNatureProse(nature: TieNature): string {
+  return TIE_NATURE_PROSE[nature];
+}
+
 const SHOWMANCE_STAGE_PROSE: Record<ShowmanceStage, string> = {
   spark: "an early spark that never went public",
   bond: "a quiet bond that stayed under the radar",
@@ -151,9 +187,25 @@ const SHOWMANCE_STAGE_PROSE: Record<ShowmanceStage, string> = {
   resolved: "a showmance that ran its course",
 };
 
-/** Render one pre-game tie as readable post-season prose, both ids resolved to names. No raw token. */
+/**
+ * Render one pre-game tie as readable post-season prose, both ids resolved to names. No raw token.
+ * 0095 — an EXPOSED tie (the pair's connection came out mid-game) reads distinctly from one that stayed
+ * sealed all season; the reveal itself is a highlight the retrospective is precisely for.
+ */
 export function preGameTieToRetrospectiveProse(t: PreGameTie, nameOf: (id: EntityId) => string): string {
-  return `${nameOf(t.a)} and ${nameOf(t.b)} ${TIE_NATURE_PROSE[t.nature]} — it stayed hidden unless it came out in the house.`;
+  const fate = tieExposureOf(t) === "sealed"
+    ? "it stayed hidden unless it came out in the house."
+    : "it came out in the house — and blew up how the two were read for the rest of the season.";
+  return `${nameOf(t.a)} and ${nameOf(t.b)} ${TIE_NATURE_PROSE[t.nature]} — ${fate}`;
+}
+
+/**
+ * 0095 — the Vault-FREE public projection: names a pair ONLY once their tie has reached `public` (the
+ * `visibleShowmances`-style sibling). Never surfaces a `sealed` or merely `surfaced-to-house` tie — those
+ * stay off every player/admin surface by construction.
+ */
+export function exposedTies(ties: readonly PreGameTie[]): Array<{ a: EntityId; b: EntityId }> {
+  return ties.filter((t) => tieExposureOf(t) === "public").map((t) => ({ a: t.a, b: t.b }));
 }
 
 /** Render one showmance as readable post-season prose, both ids resolved to names. No raw token. */

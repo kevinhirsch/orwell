@@ -13,6 +13,28 @@ export class InMemoryVaultStore implements VaultStore {
   }
 
   writeHidden(record: HiddenRecord): void {
+    // PERSIST-12: guard against duplicate-id growth, mirroring `InMemoryEventStore.record()`'s
+    // duplicate-id guard in SPIRIT (no two live records ever share an id) — but stay IDEMPOTENT
+    // rather than throwing, because `writeHidden` is used as a stable-id UPSERT by several live re-fold
+    // paths, not a strict append log: the 0063 private-orientation seal re-derives + re-writes every
+    // still-private houseguest's record on every `recordCastIdentity` call (most re-seals are byte-
+    // identical no-ops, but the one houseguest whose proposal just changed their orientation legitimately
+    // re-seals the SAME id with genuinely DIFFERENT content — see `GameSessionAdapter.recordCastIdentity`,
+    // exercised by `castIdentity.test.ts` and the `liveSentinel` property gate). So: an identical re-seal
+    // is a no-op (nothing duplicated), and a re-seal with different content updates that one record IN
+    // PLACE (an id-scoped upsert, exactly what `replaceHidden({ id }, [record])` would do) — either way
+    // the store never ends up with two records under the same id, so `readHidden` can't return stale AND
+    // current content for the same subject at once, but no detail is silently dropped either (the
+    // current truth for that id is always present).
+    const existing = this.records.findIndex((r) => r.id === record.id);
+    if (existing !== -1) {
+      const prior = this.records[existing]!;
+      if (prior.kind === record.kind && prior.subject === record.subject && prior.content === record.content) {
+        return; // identical re-seal — idempotent no-op
+      }
+      this.records[existing] = record; // an evolved re-seal of the SAME id — update in place, never duplicate
+      return;
+    }
     this.records.push(record);
   }
 

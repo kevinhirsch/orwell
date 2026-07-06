@@ -8,6 +8,7 @@ import logging
 import os
 
 from core.auth import AuthManager
+from core.middleware import is_trusted_loopback
 from src.rate_limiter import RateLimiter, client_ip
 from src.settings_scrub import scrub_settings
 from src.settings import (
@@ -97,6 +98,21 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(429, "Too many requests — try again later")
         if auth_manager.is_configured:
             raise HTTPException(400, "Already configured")
+        # SEC-1: this route is necessarily auth-EXEMPT (there is no account yet to authenticate
+        # against), so without a gate here the first remote caller to reach it after the port
+        # opens — a cert-transparency scanner, a forgotten port-forward — becomes the SOLE
+        # PERMANENT ADMIN. `_setup_limiter` + AuthManager's own `_setup_lock` only prevent a
+        # concurrent double-win; they don't stop an attacker beating the operator to the punch.
+        # Restrict claiming the first admin account to a direct, unproxied loopback connection —
+        # mirrors `require_user`'s own unconfigured-mode fallback (auth_helpers.py), which already
+        # only allows loopback callers pre-setup for every OTHER route. A remote operator can still
+        # complete setup via an SSH tunnel / the console.
+        if not is_trusted_loopback(request):
+            raise HTTPException(
+                403,
+                "First-run setup must be completed from the host itself (loopback) — e.g. via an "
+                "SSH tunnel or the console, not the public network.",
+            )
         if len(body.password) < 8:
             raise HTTPException(400, "Password must be at least 8 characters")
         ok = await asyncio.to_thread(auth_manager.setup, body.username, body.password)

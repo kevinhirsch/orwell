@@ -4,7 +4,7 @@ import type { OutwardChannel, ToolDescriptor } from "../../surfaces/tools/regist
 import type { PlayerSurface } from "../../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
-import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq } from "../../ports/EngineCommands";
+import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, RecordImageBeatReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
 import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
 
@@ -142,6 +142,16 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       if (!isStr(args["npcId"])) refuse("npcId", "a houseguest id (string)");
       return;
+    case "accuseTie": // 0095
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      if (!isStr(args["aId"])) refuse("aId", "a houseguest id (string)");
+      if (!isStr(args["bId"])) refuse("bId", "a houseguest id (string)");
+      return;
+    case "confront": // 0094
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      if (!isStr(args["npcId"])) refuse("npcId", "a houseguest id (string)");
+      if (!isStr(args["factId"])) refuse("factId", "a learned fact id (string)");
+      return;
     case "exposeSecret":
       // 0093 — out a learned secret. EITHER a real `factId` (a string) OR a `bluff` (a boolean) with a
       // `subject`. The engine validates ownership / the season cap; this is the shape guard only.
@@ -174,6 +184,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
       return;
     case "recordImageBeat":
+      guardSyncFields(false); // BE-5 — optional expectedBeatSeq (0065 Part A parity with the other write-backs)
       if (!isStr(args["houseguestId"])) refuse("houseguestId", "a houseguest id (string)");
       if (!isStr(args["imageRef"])) refuse("imageRef", "a non-empty string");
       return;
@@ -300,6 +311,11 @@ export class McpServer {
       case "recordWorldSnapshot":
         // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
         return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);
+      case "worldSnapshotView":
+        // BE-103/TCG-16: the read counterpart of recordWorldSnapshot — was fully implemented in the
+        // port + adapter but never wired here, so it was a dead endpoint (no registry entry, no dispatch
+        // case). No args; null pre-game or when no snapshot was ever captured.
+        return this.deps.session.worldSnapshotView();
       case "getOffscreenSceneSkeletons":
         // 0070: return the Vault-free skeletons of the most-recent tick's off-screen scenes (ids + nature; no hidden content).
         return this.deps.session.getOffscreenSceneSkeletons();
@@ -347,6 +363,18 @@ export class McpServer {
       case "confide":
         // 0075 — the trust-gated confidence: the engine decides + records; the model voices the result.
         return this.deps.session.confide(args["npcId"] as EntityId, args["expectedBeatSeq"] as number | undefined);
+      case "accuseTie":
+        // 0095 — the pre-show-tie accusation: the engine checks the sealed layer + decides + records;
+        // the model only voices the result (landed/missed).
+        return this.deps.session.accuseTie(
+          args["aId"] as EntityId, args["bId"] as EntityId, args["expectedBeatSeq"] as number | undefined,
+        );
+      case "confront":
+        // 0094 — the closed-set confrontation: the engine classifies the cited belief + resolves the
+        // outcome against reality; the model only voices the result (landed/misfired).
+        return this.deps.session.confront(
+          args["npcId"] as EntityId, args["factId"] as string, args["expectedBeatSeq"] as number | undefined,
+        );
       case "exposeSecret":
         // 0093 — out a learned secret: the engine validates ownership + resolves the bounded fallout + records the pathway.
         return this.deps.session.exposeSecret(args as unknown as ExposeSecretReq);
@@ -402,9 +430,9 @@ export class McpServer {
       case "diaryRoom":
         return this.deps.commands.diaryRoom(args as unknown as DiaryRoomReq);
       case "recordImageBeat":
-        return this.deps.commands.recordImageBeat(
-          args as unknown as { houseguestId: string; imageRef: string },
-        );
+        // BE-5 — `args` may carry the optional `expectedBeatSeq` CAS token (guarded above); the cast
+        // through `RecordImageBeatReq` (not a bare `{houseguestId,imageRef}` shape) lets it flow through.
+        return this.deps.commands.recordImageBeat(args as unknown as RecordImageBeatReq);
       case "inspectNonVaultState":
         return this.deps.admin.inspect();
       case "overrideMechanic":

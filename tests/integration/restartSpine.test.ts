@@ -201,7 +201,7 @@ describe("T14 — restore into a FRESH registry, then tick (the B71 regression t
       const res = r2.orchestrator.advance(user, "offscreen-tick");
       expect(res.integrity, `tick ${i}: ${JSON.stringify(res.faults)}`).toBe("ok");
     }
-    const ids = r2.registry.sandboxFor(user).engine.events.query().map((e) => e.id);
+    const ids = r2.registry.sandboxFor(user).engine.events.queryAll().map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length); // no duplicate ids minted by the resumed tick streams
     expect((r2.orchestrator.sandboxHealth(user) as HealthRecord).lastIntegrity).toBe("ok");
   });

@@ -1426,6 +1426,14 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "dailyRecap",
+            "description": "The most recently CLOSED in-game day's 'day in review' digest (0102): witnessed highlights + gossip already surfaced, plus an optional non-committal forward tease. Usually delivered inline on turnIn's result — call this only to re-fetch the same day's digest. Vault-free, reproducible; returns nothing before any day has closed.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "seasonRetrospective",
             "description": "POST-SEASON ONLY (0048): opens the Producer's Vault for the FINISHED season — off-screen scheming, confessionals, the twist that never fired. Returns nothing while a season is live; after the winner it is the payoff.",
             "parameters": {"type": "object", "properties": {}},
@@ -1868,6 +1876,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "premiereIntros", "markHouseguestMet",
     # B56/0048: the reunion reads — the public recap + the post-season Vault unsealing.
     "seasonRecap", "seasonRetrospective",
+    # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
+    "dailyRecap",
     # B65: the knowledge-bounded per-NPC voicing projection.
     "npcVoice",
 })

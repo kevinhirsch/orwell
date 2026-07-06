@@ -158,10 +158,10 @@ export type PendingDecision =
   // raised by an intent-to-leave and lives ALONGSIDE (never overriding) a ceremony pending, so it is
   // legal at any beat and corrupts no in-flight ceremony. Only an explicit confirm resolves it. ---
   | { kind: "self-evict"; by: EntityId }
-  // --- secret power (0025 reactive redesign): the player secretly holds a one-time SAFETY and is on
+  // --- secret veto (0025 reactive redesign): the player secretly holds a one-time SAFETY and is on
   // the block this week — their choice to play it (pull themselves off) or hold it. Player-agency only;
   // an NPC holder is resolved by the engine. ---
-  | { kind: "secret-power"; by: EntityId; nominee: EntityId };
+  | { kind: "secret-veto"; by: EntityId; nominee: EntityId };
 
 /** Which stage of the live finale sub-loop (0037) we are advancing. */
 export type FinaleStage = "statements" | "questions" | "vote" | "reveal";
@@ -348,14 +348,14 @@ export interface LiveSeasonState {
    */
   twistPlan?: TwistPlan;
   /**
-   * A granted-but-unplayed SECRET POWER (0025 redesign): the sealed one-time safety and who secretly
-   * holds it. Granted when the secret-power trigger fires (invisible), consumed when the holder plays
+   * A granted-but-unplayed SECRET VETO (0025 redesign): the sealed one-time safety and who secretly
+   * holds it. Granted when the secret-veto trigger fires (invisible), consumed when the holder plays
    * it off the block (the reveal). ENGINE-ONLY until played — no projection selects it.
    */
-  secretPower?: { holder: EntityId; used: boolean; declinedWeek?: number };
+  secretVeto?: { holder: EntityId; used: boolean; declinedWeek?: number };
   /**
    * The running lopsided-eviction streak (0025 redesign) — consecutive near-unanimous evictions, the
-   * "the house is steamrolling" signal the secret-power trigger reads. Reset by a close vote. Vault-free
+   * "the house is steamrolling" signal the secret-veto trigger reads. Reset by a close vote. Vault-free
    * bookkeeping (a count of already-public margins); persisted with the season.
    */
   lopsidedStreak?: number;
@@ -533,9 +533,9 @@ export type DecisionInput =
   | { kind: "juror-vote"; vote: EntityId }
   // --- self-eviction (0061): ONLY `confirmed:true` executes the irreversible walk-out (§4.2) ---
   | { kind: "self-evict"; confirmed: boolean }
-  // --- secret power (0025 reactive redesign): the player, on the block and secretly holding the
+  // --- secret veto (0025 reactive redesign): the player, on the block and secretly holding the
   // one-time safety, chooses to play it (pull off the block) or hold it for later ---
-  | { kind: "secret-power"; use: boolean };
+  | { kind: "secret-veto"; use: boolean };
 
 /** Draw this week's competition from the curated library (0042) — seeded, no immediate repeats. */
 const drawFor = (s: LiveSeasonState, phase: CompetitionPhase, rng: RandomnessSource): CompetitionDef =>
@@ -1262,17 +1262,17 @@ function twistSignalsOf(s: LiveSeasonState): TwistSignals {
   return { activeCount: s.active.length, juryCount: juryCountOf(s), lopsidedStreak: s.lopsidedStreak ?? 0 };
 }
 
-/** The already-fired kinds PLUS a granted-but-unplayed secret power, so neither re-arms (at most once). */
+/** The already-fired kinds PLUS a granted-but-unplayed secret veto, so neither re-arms (at most once). */
 function firedOrGrantedKinds(s: LiveSeasonState): TwistKind[] {
   const set = new Set((s.firedTwists ?? []).map((t) => t.kind));
-  if (s.secretPower) set.add("secret-power");
+  if (s.secretVeto) set.add("secret-veto");
   return [...set];
 }
 
 /** Grant the sealed one-time safety to an underdog — the fewest-resume active houseguest (engine-only). */
-function grantSecretPower(s: LiveSeasonState): void {
+function grantSecretVeto(s: LiveSeasonState): void {
   const holder = [...s.active].sort((a, b) => (s.resume?.[a] ?? 0) - (s.resume?.[b] ?? 0))[0];
-  if (holder) s.secretPower = { holder, used: false };
+  if (holder) s.secretVeto = { holder, used: false };
 }
 
 /** Arm whichever twist the reactive plan says the house has just earned (at most one per roll). */
@@ -1283,8 +1283,8 @@ function armReactiveTwist(s: LiveSeasonState): void {
     s.twist = { kind, phase: "pending" }; // fires as the compressed second cycle next roll (existing machinery)
   } else if (kind === "battle-back") {
     s.beat = "battle-back"; // resolved in `advance` (needs ctx + rng) before this week's HOH comp
-  } else if (kind === "secret-power" && !s.secretPower) {
-    grantSecretPower(s); // sealed; "fires" only if/when the holder plays it off the block
+  } else if (kind === "secret-veto" && !s.secretVeto) {
+    grantSecretVeto(s); // sealed; "fires" only if/when the holder plays it off the block
   }
 }
 
@@ -1491,7 +1491,7 @@ function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: Entit
   // secret votes become tellable only once the season is over.
   (s.voteRecord ??= []).push({ week: s.week, evictee, voteOf: { ...e.voteOf } });
   const votesToEvict = Object.entries(e.voteOf).filter(([, t]) => t === evictee).map(([v]) => v);
-  // 0025 reactive: track the lopsided-eviction streak (the secret-power trigger's "steamroll" signal).
+  // 0025 reactive: track the lopsided-eviction streak (the secret-veto trigger's "steamroll" signal).
   // A near-unanimous eviction (all-but-≤1 of a meaningful vote) extends the streak; a close vote resets it.
   const totalVoters = Object.keys(e.voteOf).length;
   const lopsided = totalVoters >= 3 && votesToEvict.length >= totalVoters - 1;
@@ -1768,9 +1768,9 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     }
     case "eviction": {
       if (s.eviction) return advanceEviction(s, ctx, rng); // a reveal is already staging — step it
-      // 0025 secret power: a final nominee secretly holds the unplayed safety — they may pull off the
+      // 0025 secret veto: a final nominee secretly holds the unplayed safety — they may pull off the
       // block before the vote (player: their choice; NPC: a rational self-save). One eviction still lands.
-      const sp = maybePlaySecretPower(s, ctx, rng);
+      const sp = maybePlaySecretVeto(s, ctx, rng);
       if (sp.handled) return sp.event; // a reveal event (played) OR null with the player's choice pending
       const fn = s.finalNominees!;
       const voters = evictionVoters({ ...weekState(s, ctx), nominees: fn });
@@ -1804,10 +1804,10 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
   }
 }
 
-// --- 0025 reactive twist mechanics (secret power off the block, battle-back juror return) ---------
+// --- 0025 reactive twist mechanics (secret veto off the block, battle-back juror return) ---------
 
-/** The houseguests the HOH may name as the secret-power replacement: active, non-HOH, non-nominee. */
-function secretPowerReplacementOptions(s: LiveSeasonState, holder: EntityId): EntityId[] {
+/** The houseguests the HOH may name as the secret-veto replacement: active, non-HOH, non-nominee. */
+function secretVetoReplacementOptions(s: LiveSeasonState, holder: EntityId): EntityId[] {
   const fn = s.finalNominees!;
   return s.active.filter((h) => h !== s.hoh && h !== holder && !fn.includes(h));
 }
@@ -1818,26 +1818,26 @@ function secretPowerReplacementOptions(s: LiveSeasonState, holder: EntityId): En
  * saves themselves). Playing it removes the holder and the HOH names a replacement — still exactly one
  * eviction that week (format-preserving). `handled:false` ⇒ no power in play, proceed normally.
  */
-function maybePlaySecretPower(
+function maybePlaySecretVeto(
   s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource,
 ): { handled: boolean; event: BeatEvent | null } {
-  const sp = s.secretPower;
+  const sp = s.secretVeto;
   if (!sp || sp.used) return { handled: false, event: null };
   const fn = s.finalNominees!;
   if (!fn.includes(sp.holder)) return { handled: false, event: null }; // holder not on the block this week
   if (sp.declinedWeek === s.week) return { handled: false, event: null }; // player already chose to hold it
-  const options = secretPowerReplacementOptions(s, sp.holder);
+  const options = secretVetoReplacementOptions(s, sp.holder);
   if (options.length === 0) return { handled: false, event: null }; // no legal replacement ⇒ cannot force one
   if (sp.holder === ctx.player) {
-    if (!s.pending) s.pending = { kind: "secret-power", by: ctx.player, nominee: sp.holder };
+    if (!s.pending) s.pending = { kind: "secret-veto", by: ctx.player, nominee: sp.holder };
     return { handled: true, event: null }; // the player's choice — pause here
   }
-  return { handled: true, event: playSecretPower(s, ctx, sp.holder, options) };
+  return { handled: true, event: playSecretVeto(s, ctx, sp.holder, options) };
 }
 
-/** Play the secret power: the holder comes off the block, the HOH names a replacement, the reveal fires. */
-function playSecretPower(s: LiveSeasonState, ctx: SeasonCtx, holder: EntityId, options: EntityId[]): BeatEvent {
-  const sp = s.secretPower!;
+/** Play the secret veto: the holder comes off the block, the HOH names a replacement, the reveal fires. */
+function playSecretVeto(s: LiveSeasonState, ctx: SeasonCtx, holder: EntityId, options: EntityId[]): BeatEvent {
+  const sp = s.secretVeto!;
   sp.used = true;
   const fn = s.finalNominees!;
   const staying = fn[0] === holder ? fn[1] : fn[0];
@@ -1845,10 +1845,10 @@ function playSecretPower(s: LiveSeasonState, ctx: SeasonCtx, holder: EntityId, o
   const mood = ctx.emotionalOf?.(hoh) ?? 0.5;
   const replacement = [...options].sort((a, b) => nominationScore(hoh, b, ctx.rel, mood) - nominationScore(hoh, a, ctx.rel, mood))[0]!;
   s.finalNominees = [staying, replacement];
-  (s.firedTwists ??= []).push({ kind: "secret-power", beat: s.week });
+  (s.firedTwists ??= []).push({ kind: "secret-veto", beat: s.week });
   return {
     beat: "twist-reveal",
-    content: `SECRET POWER: ${holder} reveals a secret one-time safety and removes themselves from the block; ` +
+    content: `SECRET VETO: ${holder} reveals a secret one-time safety and removes themselves from the block; ` +
       `${hoh} must name ${replacement} as the replacement nominee`,
     participants: [holder, hoh, replacement, staying],
   };
@@ -1970,9 +1970,9 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
       // confirmation never rides `s.pending` (it lives on `selfEvictPending`), so the auto-driver
       // (calibration / admin fast-forward) is never asked to resolve one. Refuse defensively.
       throw new Error("self-eviction is a deliberate player choice — never auto-resolved");
-    case "secret-power":
+    case "secret-veto":
       // 0025: a rational underdog on the block plays their one-time safety to save themselves.
-      return { kind: "secret-power", use: true };
+      return { kind: "secret-veto", use: true };
   }
 }
 
@@ -2101,12 +2101,12 @@ export function applyDecision(
         participants: [p.by, e.evictee!],
       };
     }
-    // --- secret power (0025 reactive redesign) ---------------------------------
-    case "secret-power": {
+    // --- secret veto (0025 reactive redesign) ---------------------------------
+    case "secret-veto": {
       const p = s.pending;
-      if (!p || p.kind !== "secret-power") throw new Error("no pending secret-power decision");
-      const sp = s.secretPower;
-      if (!sp || sp.used || sp.holder !== p.by) throw new Error("no secret power to play");
+      if (!p || p.kind !== "secret-veto") throw new Error("no pending secret-veto decision");
+      const sp = s.secretVeto;
+      if (!sp || sp.used || sp.holder !== p.by) throw new Error("no secret veto to play");
       s.pending = undefined;
       if (!input.use) {
         // The player holds it for later — not consumed, but not re-offered this week; the eviction proceeds.
@@ -2114,9 +2114,9 @@ export function applyDecision(
         s.beat = "eviction";
         return { beat: "eviction", content: `${p.by} keeps their options to themselves`, participants: [p.by] };
       }
-      const options = secretPowerReplacementOptions(s, sp.holder);
-      if (options.length === 0) throw new Error("the secret power cannot be played — no legal replacement exists");
-      return playSecretPower(s, ctx, sp.holder, options);
+      const options = secretVetoReplacementOptions(s, sp.holder);
+      if (options.length === 0) throw new Error("the secret veto cannot be played — no legal replacement exists");
+      return playSecretVeto(s, ctx, sp.holder, options);
     }
     // --- finale (0037) ---------------------------------------------------------
     case "finale-statement": {

@@ -48,6 +48,8 @@ export const ORWELL_TOOL_BEATS = {
   'markHouseguestMet': '\u{1F91D} First impressions',
   'seasonRecap': '\u{1F4DC} The season so far',
   'seasonRetrospective': '\u{1F513} The producers’ vault',
+  // 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
+  'dailyRecap': '\u{1F4C6} The day in review',
   'npcVoice': '\u{1F3AD} In their head',
   'inspectNonVaultState': '\u{1F50E} Control room',
   'overrideMechanic': '\u{1F39B} Control room',
@@ -80,7 +82,18 @@ export function orwellBeat(tool) {
 export const ORWELL_SILENT_BEATS = new Set([
   'getGameState', 'gameStatus', 'getVisibleStateFor', 'getMomentPrompt',
   'whereabouts', 'socialRead', 'socialInitiatives', 'npcVoice', 'seasonRecap',
+  // 0102: a pure re-fetch of a digest already delivered inline on turnIn — no new mutation.
+  'dailyRecap',
   'inspectNonVaultState', 'sandboxHealth', 'list_models', 'search_chats',
+  // FEDEEP-6/CA-23 — the admin/God-Mode meta-port tools (CLAUDE.md: "configure, override
+  // mechanics, inspect non-Vault state, manage the sandbox"). These should never reach the player
+  // channel at all, but ORWELL_TOOL_BEATS still maps them to a "🎛 Control room" label for the
+  // admin/dev render path — silencing them in the game build is defense-in-depth so a stray
+  // God-Mode call (e.g. a misrouted admin session sharing this render path) never announces
+  // itself to the player. inspectNonVaultState/sandboxHealth were already silent; this closes the
+  // rest of the admin/God Mode set (`configureGame` has no live engine tool of that name today —
+  // kept here anyway as a harmless belt-and-suspenders in case one is ever added).
+  'overrideMechanic', 'configureGame', 'manageSandbox',
 ]);
 
 export function orwellBeatIsSilent(tool) {

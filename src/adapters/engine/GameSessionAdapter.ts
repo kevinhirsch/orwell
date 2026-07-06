@@ -3,7 +3,7 @@ import type {
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
-  SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult, SealedFact,
+  SeasonRecapView, RetrospectiveView, NpcVoiceView, ConfideResult, SealedFact, AccuseTieResult, ConfrontResult,
   DailyRecapView,
   ExposeSecretReq, ExposeResult, TradeSecretReq, TradeResult, SecretLeverDescriptor,
   UpdateCastingReq, CastingStatusView, PortraitPromptEntry, HouseguestCard,
@@ -25,9 +25,10 @@ import { moodWord, voiceFingerprint } from "../../engine/voice";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt } from "../../engine/diaryRoom";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
-  formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, advancePlayerCampaign,
+  formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, PLAN_FOR, advancePlayerCampaign,
   deriveDrive, ownBallotLean, ARCHETYPE_AGGRESSION,
-  type Campaign, type CampaignActor, type Influence, type Drive,
+  selectNemesis, NEMESIS, NO_NEMESIS,
+  type Campaign, type CampaignActor, type Influence, type Drive, type NemesisTrack, type NemesisCandidate,
 } from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
 import { runJuryHouseStretch } from "../../engine/juryHouse";
@@ -160,10 +161,15 @@ import {
   loadSeededRelationships, TIE_AFFINITY_BIAS, SHOWMANCE_SPARK_BIAS,
   DEFAULT_TIE_BUDGET, DEFAULT_SHOWMANCE_BUDGET, nextShowmanceStage,
   preGameTieToRetrospectiveProse, showmanceToRetrospectiveProse,
+  tieExposureOf, tieNatureProse, exposedTies, nextTieExposure,
 } from "../../engine/seededRelationships";
 import type { SeededRelationships } from "../../engine/seededRelationships";
 import { surfaceSeededTies } from "../../engine/seededTieSurfacing";
 import type { SurfacedTie } from "../../engine/seededTieSurfacing";
+import { overhearTieReveal } from "../../engine/tieReveal";
+import type { TieRevealEvent } from "../../engine/tieReveal";
+import { TIE_REVEAL } from "../../engine/tieRevealConstants";
+import { isMateriallyDistorted } from "../../engine/beliefReliability";
 import type { DeepProfile, StoryThread } from "../../engine/deepProfile";
 import {
   generateDiversityLayer, repairDiversityLayer, privateOrientationToVaultContent, showmancePlausible,
@@ -342,9 +348,6 @@ const PREWARM_PLAYER_NAME = "(pre-warm)";
 function sanitizeFlavor(s: string, max = 160): string {
   return s.replace(/\s+/g, " ").trim().slice(0, max);
 }
-
-/** The twist kinds the LIVE loop can actually run (0025/B53). The pool may hold more; only these load. */
-const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-eviction"]);
 
 /**
  * 0085 B2 — whether the live campaign layer runs by DEFAULT. OFF unless `ORWELL_CAMPAIGNS=1` (the deploy
@@ -606,6 +609,15 @@ export class GameSessionAdapter implements GameSession {
    * vote. Empty unless the campaign layer is enabled ⇒ no drives ⇒ no lean ⇒ calibration byte-identical.
    */
   private drives: Map<EntityId, Drive> = new Map();
+  /**
+   * 0096 — the emergent NEMESIS bookkeeping: at most one NPC elevated into a felt recurring antagonist
+   * by a SUSTAINED (not spike) threat-toward-player read + a sticky `target`-the-player drive. Derived
+   * each `campaignTick` (after drives, `selectNemesis`) from signals the campaign layer already computes
+   * — no new hidden attribute. Engine-only + Vault-sealed (never on any player OR admin projection except
+   * the Vault-safe `rivalry` tone hint on `npcVoice`). Empty unless the campaign layer is enabled ⇒ no
+   * nemesis ⇒ no bias ⇒ calibration byte-identical.
+   */
+  private nemesisTrack: NemesisTrack = NO_NEMESIS;
   /**
    * 0087 — whether the RELATIONSHIP-TRAJECTORY layer RUNS. DEFAULT OFF (the dedicated `ORWELL_TRAJECTORIES`
    * flag): when off, no momentum is computed, the off-screen tick passes no `trajectoryOf` ⇒ `natureWeights`
@@ -1075,6 +1087,16 @@ export class GameSessionAdapter implements GameSession {
   private tieScheduleTickCount = 0;
 
   /**
+   * Feature 0095 — the pre-show-TIE REVEAL layer (a SEPARATE, distinct pathway from 0059 §5 above, which
+   * only ever produces ambient suspicion and folds nothing but a mild third-party re-read). `tieExposureCount`
+   * is the per-season hard cap (ties ever promoted past `sealed`, by ANY pathway including `accuseTie`);
+   * `tieRevealTickCount` is the DEDICATED scheduler tick counter (off the game seed, never the shared
+   * society/vote stream). Both persisted; both zero unless the opt-in `ORWELL_TIE_REVEAL` flag is on.
+   */
+  private tieExposureCount = 0;
+  private tieRevealTickCount = 0;
+
+  /**
    * 0059 §5 — the tie-surfacing SEAMS (the session holds no events/knowledge handle, exactly like the
    * 0060 thread scheduler). `onTieSurfaceToPlayer` lands the Vault-free observation in the player's
    * knowledge through an anchored `told-by` pathway (the registry wires the in-game pathway); it returns
@@ -1170,7 +1192,10 @@ export class GameSessionAdapter implements GameSession {
   /** 0093/0099 — wire the player's own knowledge reader (validate a wielded factId; resolve its subject).
    *  A0: `pathway` rides along (additive) so the knowledge-wall manifest can select the Diary-Room-tagged
    *  facts — the class provably sealed from the whole house. */
-  setPlayerKnowledgeReader(fn: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string; pathway?: string }>): void {
+  setPlayerKnowledgeReader(fn: () => ReadonlyArray<{
+    id: string; content: string; subject?: EntityId; factId?: string; pathway?: string;
+    distortion?: number; confidence?: number;
+  }>): void {
     this.playerKnowledgeReader = fn;
   }
 
@@ -1275,9 +1300,14 @@ export class GameSessionAdapter implements GameSession {
    * 0093/0099 — the player's own KNOWLEDGE reader (wired by the composition root, like the npc-knowledge
    * providers): returns the player's learned facts so the lever can VALIDATE that a wielded `factId` is
    * one the player legitimately holds (the Vault bright line — a non-learned secret is rejected, no
-   * Vault-minting) and resolve which houseguest it is about. Returns [] when unwired.
+   * Vault-minting) and resolve which houseguest it is about. Returns [] when unwired. 0094 additively
+   * widens the shape with `distortion`/`confidence` (already on every `KnowledgeFact`) so `confront`
+   * can classify a cited belief via `isMateriallyDistorted` — no new seam, no new store.
    */
-  private playerKnowledgeReader?: () => ReadonlyArray<{ id: string; content: string; subject?: EntityId; factId?: string; pathway?: string }>;
+  private playerKnowledgeReader?: () => ReadonlyArray<{
+    id: string; content: string; subject?: EntityId; factId?: string; pathway?: string;
+    distortion?: number; confidence?: number;
+  }>;
   /**
    * 0093/0099 — surface a fact INTO another houseguest's (or the house's) knowledge through the in-game
    * pathway (wired by the composition root, mirroring `onConfide`). The player is the teller for an
@@ -1508,6 +1538,9 @@ export class GameSessionAdapter implements GameSession {
         const read = currentReadOf(edge, disp, soul?.emotionalState, anchor);
         return { currentRead: read };
       })() : {}),
+      // 0096: the Vault-safe `rivalry` tone hint — present ONLY for the held nemesis, ONLY inside a live
+      // scene with them. Never a number, never a stated motivation, never a cold-open announcement.
+      ...(isActive ? (() => { const r = this.rivalryFor(id); return r ? { rivalry: r } : {}; })() : {}),
     };
   }
 
@@ -2187,8 +2220,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: "juror-vote", vote: input.vote };
       case "self-evict": // 0061: the auto-driver never produces a self-evict (it's a deliberate quit) — mapped for exhaustiveness.
         return { kind: "self-evict", confirmed: input.confirmed };
-      case "secret-power": // 0025: the fast-forward plays a player-held safety exactly as a live decision does.
-        return { kind: "secret-power", use: input.use };
+      case "secret-veto": // 0025: the fast-forward plays a player-held safety exactly as a live decision does.
+        return { kind: "secret-veto", use: input.use };
     }
   }
 
@@ -2245,6 +2278,10 @@ export class GameSessionAdapter implements GameSession {
       ...(this.campaigns.length ? { campaigns: this.campaigns.map((c) => ({ ...c, owners: [...c.owners], plan: [...c.plan], knownTo: [...c.knownTo] })) } : {}),
       ...(this.drives.size ? { drives: Object.fromEntries([...this.drives].map(([k, v]) => [k, { ...v }])) as Record<EntityId, Drive> } : {}),
       ...(this.campaignTickCount > 0 ? { campaignTickCount: this.campaignTickCount } : {}),
+      // 0096: persist the emergent-nemesis arc + its sustain history so it survives a restart and
+      // accumulates (never re-guessed). Absent ⇒ byte-shaped as a pre-0096 save.
+      ...(this.nemesisTrack.current !== undefined ? { nemesis: this.nemesisTrack.current } : {}),
+      ...(Object.keys(this.nemesisTrack.streak).length ? { nemesisStreak: { ...this.nemesisTrack.streak } } : {}),
       // Phase 2 ("the player can play offense") — the player's OWN dedicated campaign-rng draw counter
       // + its per-beat progress throttle, persisted so both stay reproducible/consistent across a
       // restart (absent ⇒ 0 / null, byte-shaped as a pre-Phase-2 save).
@@ -2358,6 +2395,12 @@ export class GameSessionAdapter implements GameSession {
       ...(this.playerTieSurfaceCount > 0 ? { playerTieSurfaceCount: this.playerTieSurfaceCount } : {}),
       ...(this.surfacedTieSubjects.size > 0 ? { surfacedTieSubjects: [...this.surfacedTieSubjects] } : {}),
       ...(this.tieScheduleTickCount > 0 ? { tieScheduleTickCount: this.tieScheduleTickCount } : {}),
+      // 0095 — the tie-REVEAL pathway's own bookkeeping (a SEPARATE counter/cap from §5 above): the
+      // per-season exposure count (ties promoted past `sealed` by ANY pathway, incl. `accuseTie`) and the
+      // dedicated scheduler's own tick counter. The `exposure` field on each tie already rides inside the
+      // `seededRelationships` blob above. Absent ⇒ byte-shaped as a pre-0095 save.
+      ...(this.tieExposureCount > 0 ? { tieExposureCount: this.tieExposureCount } : {}),
+      ...(this.tieRevealTickCount > 0 ? { tieRevealTickCount: this.tieRevealTickCount } : {}),
       // 0063: the engine-only HIDDEN private-orientation map — persisted so a closeted houseguest's
       // sealed orientation survives a restart losslessly and never silently resets. ENGINE-ONLY (the
       // snapshot never crosses the wall). The PUBLIC facets ride on the persisted Character (byte-stable).
@@ -2481,6 +2524,9 @@ export class GameSessionAdapter implements GameSession {
     this.legendLastActTick = core.legendLastActTick ?? 0;
     // 0086: restore live drives (absent on pre-0086 saves ⇒ none ⇒ re-derived on the next campaign tick).
     this.drives = core.drives ? new Map(Object.entries(core.drives) as [EntityId, Drive][]) : new Map();
+    // 0096: restore the emergent-nemesis arc + its sustain history (absent on a pre-0096 save / when the
+    // campaign layer is off ⇒ no nemesis, cleanly re-derived on the next campaign tick).
+    this.nemesisTrack = { current: core.nemesis, streak: core.nemesisStreak ? { ...core.nemesisStreak } : {} };
     // 0087: restore the hidden relationship-trajectory momentum + recent-fold ring buffers (absent on
     // pre-0087 saves ⇒ empty ⇒ every pair resumes at steady/0, byte-identical to a pre-feature load).
     this.trajectories = core.trajectories ? new Map(Object.entries(core.trajectories)) : new Map();
@@ -2630,6 +2676,10 @@ export class GameSessionAdapter implements GameSession {
     this.playerTieSurfaceCount = core.playerTieSurfaceCount ?? 0;
     this.surfacedTieSubjects = new Set(core.surfacedTieSubjects ?? []);
     this.tieScheduleTickCount = core.tieScheduleTickCount ?? 0;
+    // 0095 — restore the tie-REVEAL bookkeeping (absent on a pre-0095 save ⇒ zero: every tie's `exposure`
+    // already defaults to `sealed` via `tieExposureOf`, and the cap is intact — never silently re-opened).
+    this.tieExposureCount = core.tieExposureCount ?? 0;
+    this.tieRevealTickCount = core.tieRevealTickCount ?? 0;
     this.rebuildSoulIndex();
     this.wireDispositions(); // re-derive archetype dispositions from the persisted Character (B55)
     // 0070 — restore the prose texture layer (persisted so voiced scenes survive a restart byte-identical).
@@ -3721,10 +3771,10 @@ export class GameSessionAdapter implements GameSession {
       // 0030) — no projection selects it — so it is invisible to player AND admin until a twist fires.
       this.live.twistPlan = planReserveTwists(new SeededRandom(hashSeed(`${seed}:twist-plan`)));
     } else {
-      // 0025/B53 legacy path — load + SEAL the pre-scheduled reserve twists: seeded, rare, at most one
-      // armed week each, only kinds the live loop implements. Byte-identical to the pre-redesign setup.
+      // 0025/B53 legacy path — load + SEAL the pre-scheduled reserve twists. BE-3: `loadReserveTwists`
+      // now draws the KIND only from `IMPLEMENTED_TWISTS` itself (never the full curated pool), so no
+      // post-hoc filter is needed. Byte-identical to the pre-redesign setup.
       const reserve = loadReserveTwists(this.twistCount, new SeededRandom(hashSeed(`${seed}:twists`)))
-        .filter((t) => IMPLEMENTED_TWISTS.has(t.kind))
         .filter((t, i, all) => all.findIndex((o) => o.fireAtBeat === t.fireAtBeat) === i); // one twist per week
       if (reserve.length > 0) {
         this.live.reserve = reserve;
@@ -4604,6 +4654,166 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * Feature 0095 — whether the pre-show-TIE REVEAL pathway runs. OPT-IN, default OFF, exactly like 0059
+   * §5 above — but a DISTINCT flag/gate: turning on §5's ambient suspicion does NOT turn this on, and
+   * vice versa (they are separate pathways with separate rng streams, never aliased).
+   */
+  private static tieRevealOverride: boolean | null = null;
+
+  /** Flip the 0095 tie-reveal pathway at runtime (admin-only, via the composition delegate). `null` ⇒ env. */
+  static setTieRevealEnabled(enabled: boolean | null): void {
+    GameSessionAdapter.tieRevealOverride = enabled;
+  }
+
+  private get tieRevealEnabled(): boolean {
+    if (GameSessionAdapter.tieRevealOverride !== null) return GameSessionAdapter.tieRevealOverride;
+    const v = process.env.ORWELL_TIE_REVEAL;
+    return v === "1" || v === "true" || v === "on";
+  }
+
+  /**
+   * Feature 0095 — the per-tick pre-show-TIE REVEAL scheduler (the OVERHEAR pathway; `accuseTie` below
+   * is the player-reachable lever). A sealed tie stays sealed until a real spark (the pair conspicuously
+   * close) lets an observer catch the ACTUAL connection — not 0059 §5's vague "seem close" — which then
+   * diffuses as a genuine, confidence-scaled betrayal-grade belief. Exposure promotes monotonically and
+   * is capped per season (`TIE_REVEAL.maxExposuresPerSeason`, counting `accuseTie` hits too).
+   *
+   * STRICTLY OPT-IN + CALIBRATION-NEUTRAL: returns `[]` immediately unless `ORWELL_TIE_REVEAL` is on (so
+   * the seeded sims never enter it). When on, every roll is on a DEDICATED rng (off the game seed + its
+   * own private tick counter — never the shared society/vote stream, never §5's own stream).
+   */
+  advanceTieReveal(knowledge: KnowledgeService): TieRevealEvent[] {
+    if (!this.tieRevealEnabled) return []; // default OFF ⇒ fully inert (calibration spine untouched)
+    if (!this.house || this.seededRels.ties.length === 0) return [];
+    if (this.tieExposureCount >= TIE_REVEAL.maxExposuresPerSeason) return [];
+    this.tieRevealTickCount += 1;
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const awake = this.awakeNow();
+    const npcs = this.house.npcs
+      .map((n) => n.id)
+      .filter((id) => !evicted.has(id) && (!awake || awake.has(id)));
+    if (npcs.length < 2) return [];
+    // DEDICATED stream — its OWN namespace + private tick counter, distinct from §5's `tieScheduleTickCount`
+    // and from `presenceTickCount`, so none of the three dedicated streams ever alias.
+    const rng = new SeededRandom(hashSeed(`tie-reveal:${this.gameSeed ?? ""}:${this.tieRevealTickCount}`));
+    const events = overhearTieReveal({
+      ties: this.seededRels.ties,
+      npcs,
+      player: this.house.player.id,
+      affinity: (a, b) => this.rel.edge(a, b).affinity,
+      nameOf: (id) => this.nameOf(id),
+      natureProse: (t) => tieNatureProse(t.nature),
+      knowledge,
+      rel: this.rel,
+      occupancy: this.presence ?? undefined,
+      exposureCount: this.tieExposureCount,
+      rng,
+    });
+    for (const ev of events) {
+      const tie = this.seededRels.ties.find((t) => (t.a === ev.pair[0] && t.b === ev.pair[1]) || (t.a === ev.pair[1] && t.b === ev.pair[0]));
+      if (!tie) continue;
+      tie.exposure = ev.exposure;
+      if (ev.firstExposure) this.tieExposureCount += 1;
+    }
+    if (events.length) this.persist();
+    return events;
+  }
+
+  /**
+   * Feature 0095 — `accuseTie`, the single player-reachable authority for exposing a pre-show tie (the
+   * `confide` sibling: the model previews/voices "you two knew each other, didn't you?", the ENGINE
+   * decides + commits). Checks the SEALED 0059 layer: a real tie between the pair LANDS (jumps straight
+   * to `public` — a landed accusation is a witnessed, public confrontation) and folds the betrayal-grade
+   * fallout; a pair with no tie MISSES (no Vault read beyond the check itself, recorded as an ordinary
+   * social scene, no edge touched). Returns a Vault-safe `{ landed }` — no number, no tell on a miss.
+   */
+  accuseTie(aId: EntityId, bId: EntityId, expectedBeatSeq?: number): AccuseTieResult | null {
+    this.guardBeatSeq(expectedBeatSeq);
+    if (!this.house) return null;
+    const tie = this.seededRels.ties.find((t) => (t.a === aId && t.b === bId) || (t.a === bId && t.b === aId));
+    if (!tie) return { landed: false }; // no sealed tie exists ⇒ an ordinary wrong guess, no Vault read
+    if (this.tieExposureCount >= TIE_REVEAL.maxExposuresPerSeason && tieExposureOf(tie) === "sealed") {
+      return { landed: false }; // the season cap is spent — a real tie can still miss (rare, capped)
+    }
+    const wasSealed = tieExposureOf(tie) === "sealed";
+    tie.exposure = nextTieExposure(tieExposureOf(tie), "accusation");
+    if (wasSealed) this.tieExposureCount += 1;
+    // A LANDED accusation always jumps straight to `public` — a witnessed, public confrontation, not
+    // hearsay — so every OTHER living houseguest (not just the player) who was present re-reads the
+    // pair, at near-full confidence (they saw it themselves). Bounded: the SAME per-listener magnitude
+    // as any other betrayal fold, applied once per learner (never additively stacked, never a flat
+    // house-wide FLAG — each learner's own directed edge moves by the same seeded amount).
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:accuse-tie:${aId}:${bId}:${this.week}:${this.phase}`));
+    const impact = scaleImpact(RELATIONSHIP_CONSTANTS.BETRAYAL_SHOCK, TIE_REVEAL.directWitnessConfidence);
+    const learners = this.livingIds().filter((id) => id !== aId && id !== bId);
+    for (const learner of learners) {
+      for (const member of [aId, bId] as const) this.rel.applyImpactDirected(learner, member, impact, rng);
+    }
+    // Record it as the PLAYER's own knowledge through the in-game pathway (0002) — the accusation
+    // landing is the player's own confirmed read, not a Vault read (they made the accusation).
+    this.onConfide?.(
+      aId,
+      `You called it: ${this.nameOf(aId)} and ${this.nameOf(bId)} ${tieNatureProse(tie.nature)}.`,
+      TIE_REVEAL.directWitnessConfidence,
+    );
+    this.persist();
+    return { landed: true };
+  }
+
+  /**
+   * Feature 0094 — whether the belief-vs-reality DIVERGENCE runs. Default OFF (`ORWELL_GOSSIP_CONSEQUENCE`).
+   * Off is NOT "the lever is unavailable" — `confront` still validates the cited `factId` against what
+   * the player legitimately holds (the Vault bright line always applies) and always resolves `landed:
+   * true` with no fold, so a distorted belief simply cannot misfire. On, `isMateriallyDistorted`
+   * classifies + the misfire fold can fire. Since `confront` is reachable ONLY via the player MCP
+   * channel (never the seeded off-screen tick/vote/competition spine, exactly like `confide`), this flag
+   * is a rollout/product lever, not a load-bearing calibration guard — but it keeps the family's "opt-in,
+   * off ⇒ no divergence, no fold" discipline uniform across 0094/0095/0096.
+   */
+  private static gossipConsequenceOverride: boolean | null = null;
+
+  static setGossipConsequenceEnabled(enabled: boolean | null): void {
+    GameSessionAdapter.gossipConsequenceOverride = enabled;
+  }
+
+  private get gossipConsequenceEnabled(): boolean {
+    if (GameSessionAdapter.gossipConsequenceOverride !== null) return GameSessionAdapter.gossipConsequenceOverride;
+    const v = process.env.ORWELL_GOSSIP_CONSEQUENCE;
+    return v === "1" || v === "true" || v === "on";
+  }
+
+  /**
+   * Feature 0094 — `confront`, the single closed-set authority a player confrontation resolves through
+   * (the `confide`/`accuseTie` sibling). Validates the cited `factId` against what the player
+   * LEGITIMATELY holds (`playerKnowledgeReader` — the same Vault bright line 0093/0099 already enforce;
+   * an unrecognized fact ⇒ `null`, never minted) REGARDLESS of the flag, then — only when
+   * `gossipConsequenceEnabled` — classifies it via `isMateriallyDistorted` (reading ONLY the belief's own
+   * already-existing `distortion`/`confidence` — no new belief model, no Vault read of "reality") and
+   * resolves the outcome: a FAITHFUL belief lands with no divergence; a MATERIALLY DISTORTED one
+   * misfires — the confronted houseguest's own read of the player takes the SAME betrayal-grade blow a
+   * real betrayal folds (0026 `IMPACT.betrayal`), seeded per (npc, week, phase). Off ⇒ always `landed:
+   * true`, no fold. The engine never states why a misfire happened; no confidence/distortion value ever crosses.
+   */
+  confront(npcId: EntityId, factId: string, expectedBeatSeq?: number): ConfrontResult | null {
+    this.guardBeatSeq(expectedBeatSeq);
+    if (!this.house || !this.live) return null;
+    const evicted = new Set(this.live.evictionOrder);
+    if (evicted.has(npcId) || !this.house.npcs.some((n) => n.id === npcId)) return null;
+    const belief = (this.playerKnowledgeReader?.() ?? []).find((f) => (f.factId ?? f.id) === factId || f.id === factId);
+    if (!belief) return null; // the Vault bright line — a non-learned belief is never minted
+    const landed = !this.gossipConsequenceEnabled || !isMateriallyDistorted(belief);
+    if (!landed) {
+      // The move misfires against REALITY, not the belief: the wrongly-confronted houseguest's own
+      // read of the player takes the same betrayal-grade blow a real betrayal folds — seeded,
+      // deterministic, and NEVER narrated as "because the belief was wrong."
+      const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? 0}:confront:${npcId}:${this.week}:${this.phase}`));
+      this.rel.applyDirected(npcId, PLAYER, "betrayal", rng);
+      this.persist();
+    }
+    return { landed };
+  }
+
+  /**
    * 0059 / L40 — the Vault-free projection of the PUBLIC showmances (stage `visible`): once a showmance
    * is visible the whole house knows it, so naming the pair is a public fact, not a Vault leak. This is
    * what lets the narrator voice romance for THESE pairs ONLY (the L40 restraint). Pre-visible (sealed)
@@ -5429,9 +5639,18 @@ export class GameSessionAdapter implements GameSession {
       const strainNow = triggerStrain(n.soul);
       const precipitant = Math.min(1, Math.max(0, precipitants.get(n.id) ?? 0));
       if (!shouldFire({ volatility: trig.volatility, kind: eruptionKind }, strainNow, precipitant, rng)) continue;
-      // FIRE — a Vault-safe PUBLIC eruption the player witnesses. The recorded content is a GENERIC pool line
-      // (no name, no sealed wording, no number); the connection trigger → event stays Vault-side.
+      // FIRE — a Vault-safe PUBLIC eruption. The recorded content is a GENERIC pool line (no name, no
+      // sealed wording, no number); the connection trigger → event stays Vault-side.
       const content = eruptionEvent(eruptionKind, events, rng, { week: this.week, phase: this.phase });
+      // BE-DEEP2-3/COMP-6: compute the TRUE co-present witness set ONCE and reuse it for both the
+      // recorded event's `witnessSet` and the relationship fold below, so the two can never drift apart
+      // again. Previously the event hardcoded `[PLAYER, n.id]` regardless of how many OTHER houseguests
+      // were actually in the room — starving every other co-present houseguest of a legitimate
+      // witnessed-event recall (they couldn't reference "that blow-up" in a confessional even though the
+      // fiction says they were standing right there). The player stays unconditionally in the set: this
+      // is a headline house-wide announcement (a public eruption, `hidden: false`), and `validateEvent`
+      // (src/domain/event.ts) HARD-requires the player be a witness of any non-hidden event.
+      const witnesses = this.coPresentWitnessesOf(n.id);
       events.record({
         id: `trigger:erupt:${this.gameSeed ?? 0}:${this.triggerTickCount}:${n.id}`,
         // The EventStore is the monotonic tick authority (B60/E12): any non-advancing ts is normalized to
@@ -5439,14 +5658,15 @@ export class GameSessionAdapter implements GameSession {
         ts: 0,
         type: "house-event",
         initiator: n.id,
-        witnessSet: [PLAYER, n.id], // player-witnessed ⇒ ordinary player knowledge (0002), never secret
+        // PLAYER always (see above) + the erupter + every OTHER houseguest actually co-present — never secret.
+        witnessSet: [PLAYER, n.id, ...witnesses.filter((id) => id !== PLAYER)],
         hidden: false,
         content,
       });
       // Durable consequence (0023/0041): the erupter's soul folds (charge spent or volatility raised), and
       // co-present witnesses' reads of them shift along the existing pathway (0026) — a real fold, no number.
       this.inflect(n.id, GameSessionAdapter.eruptionEmotion(eruptionKind));
-      this.foldEruptionWitnesses(n.id, rng);
+      this.foldEruptionWitnesses(n.id, witnesses, rng);
       // Mark the fuse spent (monotonic, persisted on the byte-stable house) + bump the season cap counter.
       trig.fired = true;
       trig.lastFiredWeek = this.week;
@@ -5454,16 +5674,23 @@ export class GameSessionAdapter implements GameSession {
     }
   }
 
+  /** 0091/BE-DEEP2-3 — the erupter's TRUE co-present witness set: every living houseguest (including the
+   *  player) sharing their room (when presence is tracked) and awake (when the sleep clock is on). Shared
+   *  by the recorded event's `witnessSet` and the relationship fold so the two never drift apart. */
+  private coPresentWitnessesOf(erupter: EntityId): EntityId[] {
+    const room = this.presence?.get(erupter);
+    const awake = this.awakeNow();
+    return this.livingIds().filter(
+      (id) => id !== erupter && (!this.presence || !room || this.presence.get(id) === room) && (!awake || awake.has(id)),
+    );
+  }
+
   /** 0091 — a public eruption shifts how the co-present house (and the player) reads the erupter: a small
    *  THREAT/CONFLICT fold along the existing relationship pathway (0026), drawn on the DEDICATED trigger rng
    *  (never the shared spine). The player is a witness like anyone — their read of the erupter moves, never a
-   *  number shown. No-op if no one else is on the floor. */
-  private foldEruptionWitnesses(erupter: EntityId, rng: SeededRandom): void {
-    const room = this.presence?.get(erupter);
-    const awake = this.awakeNow();
-    const witnesses = this.livingIds().filter(
-      (id) => id !== erupter && (!this.presence || !room || this.presence.get(id) === room) && (!awake || awake.has(id)),
-    );
+   *  number shown. No-op if no one else is on the floor. `witnesses` is the SAME set the caller just used
+   *  for the recorded event's `witnessSet` (BE-DEEP2-3) — never recomputed separately. */
+  private foldEruptionWitnesses(erupter: EntityId, witnesses: readonly EntityId[], rng: SeededRandom): void {
     for (const w of witnesses) {
       // Seeing someone blow up reads as conflict toward them (threat ▲, warmth ▼) — the society's own
       // `conflict` impact, directed witness → erupter. Drawn on the dedicated trigger rng only.
@@ -5607,6 +5834,57 @@ export class GameSessionAdapter implements GameSession {
         aggression: ARCHETYPE_AGGRESSION[this.archetypeOf(a.id)] ?? 0.5,
         emotional: this.soulObj(a.id)?.emotionalState ?? 0.5,
       }, this.drives.get(a.id)));
+    }
+    // 0096 — select (or hold, or hand off) the player's emergent nemesis from the signals just derived:
+    // each living NPC's OWN threat-toward-player edge + whether their JUST-DERIVED drive targets the
+    // player. PURE, no rng of its own (reads only already-seeded signals) — cannot perturb `rng`'s
+    // sequence, so every other draw this tick (campaign formation/advance/alliance-naming below) is
+    // byte-identical to before this feature existed. Gated by the same `campaignsEnabled` guard as the
+    // rest of this method (unreachable when disabled).
+    const nemesisCandidates: NemesisCandidate[] = this.campaignActors().map((a) => {
+      const drv = nextDrives.get(a.id);
+      return {
+        id: a.id,
+        threatTowardPlayer: this.rel.edge(a.id, PLAYER).threat,
+        targetsPlayer: drv?.motivation === "target" && drv.target === PLAYER,
+      };
+    });
+    this.nemesisTrack = selectNemesis(nemesisCandidates, this.nemesisTrack);
+    const nemesis = this.nemesisTrack.current;
+    if (nemesis !== undefined) {
+      // Escalation bias #1 (0086 drive): hold the nemesis's `target` drive on the player at the UPPER of
+      // its existing intensity band — sharpens intensity WITHIN the bound, never past it.
+      const drv = nextDrives.get(nemesis);
+      if (drv) nextDrives.set(nemesis, { ...drv, intensity: Math.max(drv.intensity, NEMESIS.escalationIntensity) });
+      // Escalation bias #2 (0085 campaign): PRIORITIZE an active evict-the-player campaign for the
+      // nemesis, under the UNCHANGED `maxConcurrent` cap (never raised). If they already own an active
+      // campaign, re-aim it onto the player (a personal obsession displaces whatever else they were
+      // pursuing); otherwise seed a fresh one IF the cap allows — never bump another owner's campaign to
+      // make room (that would be a new decision path, not a sharpened existing one).
+      const existing = this.campaigns.find((c) => c.status === "active" && c.owners[0] === nemesis);
+      if (existing) {
+        if (existing.goal !== "evict" || existing.target !== PLAYER) {
+          this.campaigns = this.campaigns.map((c) => c === existing
+            ? { ...c, goal: "evict" as const, target: PLAYER, plan: [...PLAN_FOR.evict], progress: 0 }
+            : c);
+        }
+      } else if (activeCount() < CAMPAIGN.maxConcurrent) {
+        const threat = nemesisCandidates.find((cand) => cand.id === nemesis)?.threatTowardPlayer ?? 0;
+        this.campaigns.push({
+          id: `campaign:${nemesis}:${beat}:nemesis`,
+          owners: [nemesis],
+          goal: "evict",
+          target: PLAYER,
+          plan: [...PLAN_FOR.evict],
+          progress: 0,
+          horizon: "week",
+          status: "active",
+          startedBeat: beat,
+          deadlineBeat: beat + CAMPAIGN.weekBeats,
+          confidence: Math.max(0, Math.min(1, threat)),
+          knownTo: [nemesis], // owner-only at formation — the symmetric-perspective spine, unchanged
+        });
+      }
     }
     this.drives = nextDrives;
     // 0107 Phase B: NPCs name alliances off-screen + pitch the player (gated by campaignsEnabled ⇒ the
@@ -6854,6 +7132,23 @@ export class GameSessionAdapter implements GameSession {
     );
   }
 
+  /**
+   * 0096 — the Vault-SAFE `rivalry` tone hint for `npcVoice`, present ONLY for the currently-held
+   * nemesis and ONLY inside a live scene with them (no cold-open arc announcement, the 0075 sibling
+   * guarantee). Carries a coarse HEAT WORD only — never a number, never "this is your nemesis," never
+   * the threat edge. Reads the nemesis's OWN threat-toward-player edge (perspective-bound, the same
+   * symmetric-perspective spine 0085/0086 hold) to pick the band. `undefined` for everyone else (the
+   * common case) and whenever the campaign layer hasn't elevated anyone.
+   */
+  private rivalryFor(npcId: EntityId): NpcVoiceView["rivalry"] {
+    if (this.nemesisTrack.current !== npcId) return undefined;
+    if (!this.presence || !this.house) return undefined;
+    const room = this.presence.get(npcId);
+    if (!room || this.presence.get(this.house.player.id) !== room) return undefined; // only in a live scene
+    const threat = this.rel.edge(npcId, PLAYER).threat;
+    return { tone: threat >= NEMESIS.threatThreshold + NEMESIS.handoffMargin ? "open" : "simmering" };
+  }
+
   /** Reconcile a binding action against open player-party deals: kept/broken + the fallout (0039). */
   private reconcileDeals(action: BindingAction): void {
     if (!this.live) return;
@@ -7202,8 +7497,8 @@ export class GameSessionAdapter implements GameSession {
       }
       case "self-evict": // 0061: intercepted in `submitDecision` BEFORE this map — never reached here.
         return { kind: "self-evict", confirmed: req.confirmed === true };
-      case "secret-power": // 0025: the player plays (true) or holds (false) their one-time safety.
-        return { kind: "secret-power", use: req.use === true };
+      case "secret-veto": // 0025: the player plays (true) or holds (false) their one-time safety.
+        return { kind: "secret-veto", use: req.use === true };
     }
   }
 
@@ -7299,11 +7594,11 @@ export class GameSessionAdapter implements GameSession {
         // `selfEvictPending`, surfaced above), so this branch is unreachable — handled for
         // type-exhaustiveness only.
         return { kind: p.kind, by, prompt: "Confirm to self-evict, or cancel to stay.", options: [], pick: 0 };
-      // --- secret power (0025 reactive redesign): the reveal + the player's choice, all at once ---
-      case "secret-power":
+      // --- secret veto (0025 reactive redesign): the reveal + the player's choice, all at once ---
+      case "secret-veto":
         return {
           kind: p.kind, by,
-          prompt: "You are on the block — and you secretly hold a one-time safety. Play it now to pull yourself off the block (the Head of Household must name a replacement), or hold it and take your chances at the vote.",
+          prompt: "You are on the block — and you secretly hold a one-time SECRET VETO. Play it now to pull yourself off the block (the Head of Household must name a replacement), or hold it and take your chances at the vote.",
           options: refs([p.nominee]), pick: 1,
         };
     }
