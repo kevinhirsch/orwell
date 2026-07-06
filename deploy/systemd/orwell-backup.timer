@@ -1,0 +1,13 @@
+[Unit]
+Description=orwell scheduled backup timer (DEPLOY-9 — daily backup + retention)
+
+[Timer]
+# Daily, with a random spread so a fleet of boxes doesn't all snapshot at the same instant, and
+# Persistent= so a box that was off at 03:00 (e.g. a laptop-hosted LXC, or routine maintenance)
+# still gets a catch-up run at next boot instead of silently skipping a whole day.
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

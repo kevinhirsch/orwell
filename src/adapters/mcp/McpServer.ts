@@ -246,7 +246,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       // B2: every field is an OPTIONAL boolean (a malformed present value is the R6 class that would
       // otherwise cast blindly into the adapter's setters) — an absent field is fine (that layer stays
       // untouched), a present non-boolean is refused by name.
-      const boolFields = ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse", "seededTieSurfacing"];
+      const boolFields = ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse", "seededTieSurfacing", "mythMaking"];
       for (const f of boolFields) {
         if (args[f] !== undefined && typeof args[f] !== "boolean") refuse(f, "a boolean when present");
       }
@@ -379,6 +379,8 @@ export class McpServer {
         return this.deps.session.markHouseguestMet(args["id"] as EntityId);
       case "seasonRecap":
         return this.deps.session.seasonRecap();
+      case "dailyRecap":
+        return this.deps.session.dailyRecap();
       case "seasonRetrospective":
         return this.deps.session.seasonRetrospective();
       case "npcVoice":

@@ -56,6 +56,11 @@
     // end a houseguest's game just like the four above, so they get the same risk skin.
     "replacement",
     "tie-break",
+    // INT-7/CA-15: "Don't use the veto" is the single highest-leverage, irrevocable choice of
+    // the week for a first-time HOH/veto-holder — it locks the current two nominees in place
+    // with no walk-back, and is a precondition for every high-stakes kind downstream (the
+    // ceremony's own body copy already says "locked in and plays out" with no matching badge).
+    "veto-decision",
   ]);
   const isHighStakes = (kind) => HIGH_STAKES_KINDS.has(kind);
 
@@ -78,6 +83,23 @@
     if (_notice) { try { _notice.hide(); } catch (_) {} _notice = null; }
     const old = document.getElementById(CARD_ID);
     if (old) old.remove();
+  }
+
+  // API-2: on a 409 (the board moved since this card armed), the old copy CLAIMED "refreshing
+  // the latest state" but nothing ever refreshed — the same stale options/selection just sat
+  // there disabled-then-re-enabled, wedged until the player noticed and manually dismissed it.
+  // Actively re-fetch the engine's own current pending and either replace the stale card with
+  // the fresh one immediately, or (no fresh pending) remove it outright so the 2.5s backstop poll
+  // (below) can re-arm the real thing — never leave a card up that lies about refreshing.
+  async function _recoverFrom409() {
+    try {
+      const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const st = await r.json();
+      const fresh = st && st.pending && st.pending.kind ? st.pending : null;
+      removeCard();
+      if (fresh) window.dispatchEvent(new CustomEvent("orwell:pending", { detail: { pending: fresh } }));
+    } catch (_) { /* fail open — the 2.5s backstop poll still recovers it */ }
   }
 
   function ensureStyles() {
@@ -173,6 +195,9 @@
         cursor: pointer; border-radius: 999px; padding: .5rem .8rem; min-height: 44px;
         font: inherit;
       }
+      /* INT-26/VM-22: a non-binding comp-round's two NON-selected chips — dimmed + inert so
+         they read as color-only, never as a live "you could change this" affordance. */
+      #${CARD_ID} .odec-opt.odec-opt-inert { cursor: default; opacity: .4; }
       /* Normal-tier (non-glass) chip chrome — the glass tiers take the kit prominent instead. */
       body:not(.theme-frosted) #${CARD_ID} .odec-opt {
         /* J5-04: the plain --border (#355a66) on the chip's translucent fill is ~2.25:1 on the
@@ -550,6 +575,16 @@
         sel = [COMP_INTENTS[0]];
         chips[0].setAttribute("aria-pressed", "true");
         confirm.disabled = false;
+        // INT-26/VM-22: a non-binding round must not LOOK like a fresh decision — tapping a
+        // different chip visibly moved the selection ring exactly as if a new binding choice
+        // were being made, contradicting the card's own "this is just color" disclosure. Disable
+        // the two NON-selected chips (the locked approach stays the only interactive-looking one)
+        // rather than leaving all three freely toggleable.
+        chips.slice(1).forEach((c) => {
+          c.disabled = true;
+          c.classList.add("odec-opt-inert");
+          c.title = "This round is flavor only — your approach was locked in round one.";
+        });
       }
     } else if (kind === "self-evict") {
       // 0061: no options to pick — an explicit Confirm IS the irreversible decision (a Cancel
@@ -621,14 +656,28 @@
       // never the prominent option-chip treatment + aria-pressed toggle semantics.
       cancel.className = "ow-btn ow-btn-secondary odec-opt"; cancel.type = "button";
       cancel.textContent = "Cancel — stay in the house";
+      // FE2-5: this is the ONE binding, irreversible-adjacent action on this card that must fail
+      // SAFE — a network blip here must never tell the player "you're safe, keep playing" while
+      // the engine may still hold a live self-eviction confirmation. Mirror the Confirm handler's
+      // pattern: only declare success (and stop re-arming) once the POST actually reached the
+      // engine; on failure, keep the card up, surface a role="alert" error, and let them retry.
       cancel.addEventListener("click", async () => {
-        _userDismissed = true;
-        _dismissedSig = _sig(pending);
+        cancel.disabled = true;
+        const prevLabel = cancel.textContent;
+        cancel.textContent = "Cancelling…";
         try {
-          await fetch("/api/orwell/self-eviction/cancel", { method: "POST", credentials: "same-origin" });
-        } catch (_) { if (window.OrwellReport) window.OrwellReport.fail("self-evict", "cancel-post", _); }
-        if (window.orwellGameChanged) window.orwellGameChanged("self-evict:cancel");
-        removeCard();
+          const r = await fetch("/api/orwell/self-eviction/cancel", { method: "POST", credentials: "same-origin" });
+          if (!r.ok) throw Object.assign(new Error("HTTP " + r.status), { httpStatus: r.status });
+          _userDismissed = true;   // only suppress re-arming once the cancel is CONFIRMED
+          _dismissedSig = _sig(pending);
+          if (window.orwellGameChanged) window.orwellGameChanged("self-evict:cancel");
+          removeCard();
+        } catch (_) {
+          if (window.OrwellReport) window.OrwellReport.fail("self-evict", "cancel-post", _); // G11: fail open, never silent
+          cancel.disabled = false;
+          cancel.textContent = prevLabel;
+          err.textContent = "That cancel didn't reach the house — you may still be flagged to leave. Try again, or decide in conversation.";
+        }
       });
       row.appendChild(cancel);
     }
@@ -716,6 +765,7 @@
         const status = _ && _.httpStatus;
         if (status === 409) {
           err.textContent = "The board moved since this card appeared — refreshing the latest state. Try again in a moment, or decide in conversation.";
+          _recoverFrom409(); // API-2: actually DO the refresh the copy above promises
         } else if (status === 400) {
           err.textContent = "That move isn't legal right now — pick another, or decide in conversation.";
         } else {

@@ -93,7 +93,11 @@
       ".og-card.og-collapsed .og-chev { transform: rotate(-90deg); }" +
       ".og-card.og-collapsed .og-body { display: none; }" +
       // The body holds the gadget's own content (its existing inner markup unchanged).
-      ".og-card .og-body { overflow-wrap: anywhere; }" +
+      // GADGET-13: a scroll CAP at the kit level — every gadget but Cast-pin (which rolled its
+      // own) had no ceiling, so a season-long deals ledger / a late-night "turned in" list / the
+      // premiere's "still to meet" roster could balloon the whole rail. One rule fixes every
+      // consumer at once; a gadget with a genuinely short body never notices (no cap = no scroll).
+      ".og-card .og-body { overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; }" +
       // The shared empty-state treatment (the quiet italic the gadgets already used).
       ".og-card .og-empty { opacity: .6; font-style: italic; }" +
       "@media (prefers-reduced-motion: reduce) { .og-card .og-chev { transition: none; } }";
