@@ -131,7 +131,7 @@ export class AdminPort {
   behavioralFlags(): Required<BehavioralFlags> {
     return this.behavioralFlagsProvider?.() ?? {
       campaigns: false, trajectories: false, triggers: false,
-      secretPacing: false, juryHouse: false, seededTieSurfacing: false,
+      secretPacing: false, juryHouse: false, seededTieSurfacing: false, mythMaking: false,
     };
   }
 

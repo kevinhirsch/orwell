@@ -637,6 +637,15 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   // ADDITIVE second society whose only downstream effect is the (hidden) jury lean, read at the finale.
   sandbox.session.juryHouseTick(sandbox.engine.events, sandbox.engine.knowledge);
 
+  // 0101 — NPC MYTH-MAKING: at most once per off-screen tick, mint a LEGEND about a rare, notable player
+  // act (a comp win, a veto save, a bold ceremony move) and let it diffuse NPC-to-NPC exactly like the
+  // ordinary rumor below — the player's own reputation becoming house folklore. SELF-GATED: a no-op (ZERO
+  // draws, no legend) unless the layer is enabled (ORWELL_MYTH_MAKING=1), so the calibration harness —
+  // which never enables it — is byte-identical. Uses its OWN dedicated, isolated rng and folds NO
+  // relationship edge (never the player's own, never any NPC's read of the player) — only the hidden
+  // knowledge layer changes, so the seeded competition/vote spine is untouched even while ON.
+  sandbox.session.legendTick(sandbox.engine.events, sandbox.engine.knowledge);
+
   // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
   // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
   // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at

@@ -192,6 +192,8 @@ export class BbWorld extends World {
   // T4: a real generated houseguest's static Character captured at premiere for byte-stability.
   premiereCharacter?: import("../../src/engine/characterFactory").Character;
   premiereCharacterBytes?: string;
+  // 0024 Option B: the rendered inner-diary narrative under test.
+  soulNarrative?: string;
 
   // Reserve twists (0025) scratch state.
   reserve?: import("../../src/engine/reserveTwists").ReserveTwist[];
@@ -658,6 +660,24 @@ export class BbWorld extends World {
     seededHashA?: string;
     seededHashB?: string;
     finaleBlob?: string;
+  };
+
+  // Feature 0101 — NPC myth-making scratch state (one bag).
+  myth?: {
+    reg?: import("../../src/composition/registry").GameSessionRegistry;
+    user?: string;
+    sandbox?: import("../../src/composition/registry").UserSandbox;
+    origin?: Eid;
+    chain?: Eid[];
+    factId?: string;
+    actClass?: string;
+    minted?: boolean;
+    beforeEdgesJson?: string;
+    playerEdgesBeforeJson?: string;
+    seededOutcomeA?: string;
+    seededOutcomeB?: string;
+    legendsA?: string[];
+    legendsB?: string[];
   };
 
   constructor(options: IWorldOptions) {
