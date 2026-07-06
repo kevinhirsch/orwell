@@ -178,7 +178,7 @@ describe("0059 §5 — calibration-neutral: flag OFF ⇒ the off-screen spine is
     const fx = adrFixture(user, seed);
     for (let t = 0; t < ticks; t++) fx.orch.advance(user, "offscreen-tick");
     return {
-      events: JSON.stringify(fx.sb.engine.events.query()),
+      events: JSON.stringify(fx.sb.engine.events.queryAll()),
       rels: JSON.stringify(fx.sb.engine.relationships.serialize().edges),
     };
   }
@@ -204,7 +204,7 @@ describe("0059 §5 — calibration-neutral: flag OFF ⇒ the off-screen spine is
     const got = fx.sb.session.advanceSeededTies(fx.sb.engine.knowledge);
     expect(got).toEqual([]); // returns immediately, surfaced nothing
     // No tie-observation event, no edge moved by the (skipped) discovery fold.
-    expect(fx.sb.engine.events.query().some((e) => /unusually tight|go back further/.test(e.content))).toBe(false);
+    expect(fx.sb.engine.events.queryAll().some((e) => /unusually tight|go back further/.test(e.content))).toBe(false);
     expect(JSON.stringify(fx.sb.engine.relationships.serialize().edges)).toBe(relsBefore);
     // The dedicated tick counter never advanced (no draw was made on any stream).
     expect(fx.sb.session.snapshot().tieScheduleTickCount ?? 0).toBe(0);
@@ -217,7 +217,7 @@ describe("0059 §5 — calibration-neutral: flag OFF ⇒ the off-screen spine is
     off.sb.engine.relationships.edge(npc(1), npc(2)).affinity = 0.99;
     off.sb.engine.relationships.edge(npc(2), npc(1)).affinity = 0.99;
     for (let t = 0; t < 20; t++) off.sb.session.advanceSeededTies(off.sb.engine.knowledge);
-    const offFired = off.sb.engine.events.query().some((e) => /unusually tight|go back further/.test(e.content))
+    const offFired = off.sb.engine.events.queryAll().some((e) => /unusually tight|go back further/.test(e.content))
       || off.sb.engine.knowledge.knownTo(PLAYER).some((f) => /unusually tight|go back further/.test(f.content));
     expect(offFired).toBe(false);
 

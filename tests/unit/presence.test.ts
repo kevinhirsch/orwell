@@ -536,7 +536,7 @@ describe("presence in the live loop (0049)", () => {
     const { eventId } = sb.commands.recordInteraction({
       initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a quiet talk by the pool",
     });
-    const ev = sb.engine.events.query().find((e) => e.id === eventId)!;
+    const ev = sb.engine.events.queryAll().find((e) => e.id === eventId)!;
     expect(ev.witnessSet).toContain(npc(2));       // in the room ⇒ a witness
     expect(ev.witnessSet).not.toContain(npc(3));   // not in the room (hoh-room is not adjacent grounds for witnessing)
     expect(ev.hidden).toBe(false);                  // the player witnessed it — never secret (0002)
@@ -564,7 +564,7 @@ describe("presence in the live loop (0049)", () => {
       const { eventId } = sb.commands.recordInteraction({
         initiator: PLAYER, witnessSet: [PLAYER], content: `a quiet poolside plan number ${i}`,
       });
-      const ev = sb.engine.events.query().find((e) => e.id === eventId)!;
+      const ev = sb.engine.events.queryAll().find((e) => e.id === eventId)!;
       if (!ev.witnessSet.includes(npc(1))) sameWitnessAlways = false; // same-zone ⇒ always a full witness
       if (ev.witnessSet.includes(npc(2))) adjEverWitness++;            // adjacent-zone ⇒ NEVER a full witness
       if (ev.witnessSet.includes(npc(3))) farEverHeard++;             // far-zone ⇒ NEVER a witness either
@@ -643,7 +643,7 @@ describe("presence in the live loop (0049)", () => {
     // shorter scene's full string as an incidental substring, and the engine's own Vault-leak
     // checkpoint (which sanctions held-via-pathway beliefs) green-lights exactly that — comparing a
     // fragment to an unrelated scene is the test being broader than the contract. Roles only.
-    const byId = new Map(sb.engine.events.query().map((e) => [e.id, e] as const));
+    const byId = new Map(sb.engine.events.queryAll().map((e) => [e.id, e] as const));
     let checkedOverhears = 0;
     for (const f of sb.engine.knowledge.knownTo(PLAYER)) {
       if (!f.pathway.startsWith("overheard:")) continue;

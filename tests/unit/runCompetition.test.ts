@@ -113,7 +113,7 @@ describe("runCompetition — single outcome authority (B37)", () => {
     crownHoh(sb.session);
     const winName = preview.winner!.name;
     const hasWin = (r: GameSessionRegistry): boolean =>
-      r.sandboxFor("u").engine.events.query().some((e) => !e.hidden && e.content.includes(winName) && /Head of Household/.test(e.content));
+      r.sandboxFor("u").engine.events.queryAll().some((e) => !e.hidden && e.content.includes(winName) && /Head of Household/.test(e.content));
     expect(hasWin(reg)).toBe(true);
 
     // Restart: a fresh registry restored from the durable snapshot still holds the win.

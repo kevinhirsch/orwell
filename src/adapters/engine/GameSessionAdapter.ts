@@ -148,7 +148,7 @@ import {
 import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
-import { loadReserveTwists } from "../../engine/reserveTwists";
+import { loadReserveTwists, IMPLEMENTED_TWISTS } from "../../engine/reserveTwists";
 import {
   generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads,
   defaultTriggerConditionFor, triggerMet, sourceWindowClosed, threadRumor,
@@ -342,9 +342,6 @@ const PREWARM_PLAYER_NAME = "(pre-warm)";
 function sanitizeFlavor(s: string, max = 160): string {
   return s.replace(/\s+/g, " ").trim().slice(0, max);
 }
-
-/** The twist kinds the LIVE loop can actually run (0025/B53). The pool may hold more; only these load. */
-const IMPLEMENTED_TWISTS: ReadonlySet<TwistKind> = new Set<TwistKind>(["double-eviction"]);
 
 /**
  * 0085 B2 — whether the live campaign layer runs by DEFAULT. OFF unless `ORWELL_CAMPAIGNS=1` (the deploy
@@ -3697,11 +3694,12 @@ export class GameSessionAdapter implements GameSession {
     this.introducedNames = new Set();
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
-    // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each, only
-    // kinds the live loop implements. Engine-only: the schedule rides in the loop state (persisted,
-    // 0030) and the registry writes the Vault audit copy. Invisible to player AND admin until fired.
+    // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each. BE-3:
+    // `loadReserveTwists` now draws the KIND only from `IMPLEMENTED_TWISTS` itself (never the full
+    // curated pool) — no post-hoc filter needed here, and no wasted slot ever silently loads a twist
+    // that can't fire. Engine-only: the schedule rides in the loop state (persisted, 0030) and the
+    // registry writes the Vault audit copy. Invisible to player AND admin until fired.
     const reserve = loadReserveTwists(this.twistCount, new SeededRandom(hashSeed(`${seed}:twists`)))
-      .filter((t) => IMPLEMENTED_TWISTS.has(t.kind))
       .filter((t, i, all) => all.findIndex((o) => o.fireAtBeat === t.fireAtBeat) === i); // one twist per week
     if (reserve.length > 0) {
       this.live.reserve = reserve;
@@ -5405,9 +5403,18 @@ export class GameSessionAdapter implements GameSession {
       const strainNow = triggerStrain(n.soul);
       const precipitant = Math.min(1, Math.max(0, precipitants.get(n.id) ?? 0));
       if (!shouldFire({ volatility: trig.volatility, kind: eruptionKind }, strainNow, precipitant, rng)) continue;
-      // FIRE — a Vault-safe PUBLIC eruption the player witnesses. The recorded content is a GENERIC pool line
-      // (no name, no sealed wording, no number); the connection trigger → event stays Vault-side.
+      // FIRE — a Vault-safe PUBLIC eruption. The recorded content is a GENERIC pool line (no name, no
+      // sealed wording, no number); the connection trigger → event stays Vault-side.
       const content = eruptionEvent(eruptionKind, events, rng, { week: this.week, phase: this.phase });
+      // BE-DEEP2-3/COMP-6: compute the TRUE co-present witness set ONCE and reuse it for both the
+      // recorded event's `witnessSet` and the relationship fold below, so the two can never drift apart
+      // again. Previously the event hardcoded `[PLAYER, n.id]` regardless of how many OTHER houseguests
+      // were actually in the room — starving every other co-present houseguest of a legitimate
+      // witnessed-event recall (they couldn't reference "that blow-up" in a confessional even though the
+      // fiction says they were standing right there). The player stays unconditionally in the set: this
+      // is a headline house-wide announcement (a public eruption, `hidden: false`), and `validateEvent`
+      // (src/domain/event.ts) HARD-requires the player be a witness of any non-hidden event.
+      const witnesses = this.coPresentWitnessesOf(n.id);
       events.record({
         id: `trigger:erupt:${this.gameSeed ?? 0}:${this.triggerTickCount}:${n.id}`,
         // The EventStore is the monotonic tick authority (B60/E12): any non-advancing ts is normalized to
@@ -5415,14 +5422,15 @@ export class GameSessionAdapter implements GameSession {
         ts: 0,
         type: "house-event",
         initiator: n.id,
-        witnessSet: [PLAYER, n.id], // player-witnessed ⇒ ordinary player knowledge (0002), never secret
+        // PLAYER always (see above) + the erupter + every OTHER houseguest actually co-present — never secret.
+        witnessSet: [PLAYER, n.id, ...witnesses.filter((id) => id !== PLAYER)],
         hidden: false,
         content,
       });
       // Durable consequence (0023/0041): the erupter's soul folds (charge spent or volatility raised), and
       // co-present witnesses' reads of them shift along the existing pathway (0026) — a real fold, no number.
       this.inflect(n.id, GameSessionAdapter.eruptionEmotion(eruptionKind));
-      this.foldEruptionWitnesses(n.id, rng);
+      this.foldEruptionWitnesses(n.id, witnesses, rng);
       // Mark the fuse spent (monotonic, persisted on the byte-stable house) + bump the season cap counter.
       trig.fired = true;
       trig.lastFiredWeek = this.week;
@@ -5430,16 +5438,23 @@ export class GameSessionAdapter implements GameSession {
     }
   }
 
+  /** 0091/BE-DEEP2-3 — the erupter's TRUE co-present witness set: every living houseguest (including the
+   *  player) sharing their room (when presence is tracked) and awake (when the sleep clock is on). Shared
+   *  by the recorded event's `witnessSet` and the relationship fold so the two never drift apart. */
+  private coPresentWitnessesOf(erupter: EntityId): EntityId[] {
+    const room = this.presence?.get(erupter);
+    const awake = this.awakeNow();
+    return this.livingIds().filter(
+      (id) => id !== erupter && (!this.presence || !room || this.presence.get(id) === room) && (!awake || awake.has(id)),
+    );
+  }
+
   /** 0091 — a public eruption shifts how the co-present house (and the player) reads the erupter: a small
    *  THREAT/CONFLICT fold along the existing relationship pathway (0026), drawn on the DEDICATED trigger rng
    *  (never the shared spine). The player is a witness like anyone — their read of the erupter moves, never a
-   *  number shown. No-op if no one else is on the floor. */
-  private foldEruptionWitnesses(erupter: EntityId, rng: SeededRandom): void {
-    const room = this.presence?.get(erupter);
-    const awake = this.awakeNow();
-    const witnesses = this.livingIds().filter(
-      (id) => id !== erupter && (!this.presence || !room || this.presence.get(id) === room) && (!awake || awake.has(id)),
-    );
+   *  number shown. No-op if no one else is on the floor. `witnesses` is the SAME set the caller just used
+   *  for the recorded event's `witnessSet` (BE-DEEP2-3) — never recomputed separately. */
+  private foldEruptionWitnesses(erupter: EntityId, witnesses: readonly EntityId[], rng: SeededRandom): void {
     for (const w of witnesses) {
       // Seeing someone blow up reads as conflict toward them (threat ▲, warmth ▼) — the society's own
       // `conflict` impact, directed witness → erupter. Drawn on the dedicated trigger rng only.

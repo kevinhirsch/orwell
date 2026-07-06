@@ -172,7 +172,7 @@ Then("the write-back is refused at the channel boundary", function (this: BbWorl
 
 Then("no event is created, no witness set changes, and no relationship number crosses", function (this: BbWorld) {
   // The events count is unchanged relative to before the refused write-back attempt.
-  const events = this.txSandbox!.engine.events.query();
+  const events = this.txSandbox!.engine.events.queryAll();
   // No extra events were created by the write-back.
   const refusalEvents = events.filter((e) => e.id.startsWith("texture:"));
   assert.equal(refusalEvents.length, 0, "unexpected texture: events were created by a refused write-back");

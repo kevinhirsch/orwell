@@ -13,7 +13,7 @@ describe("simulateOffscreenStretch — genuine, hidden, player-excluded off-scre
     const events = new InMemoryEventStore();
     const produced = simulateOffscreenStretch({ events, rng: new SeededRandom(1), npcs: NPCS, interactions: 8 });
     expect(produced).toHaveLength(8);
-    expect(events.query({}).length).toBeGreaterThanOrEqual(8);
+    expect(events.queryAll().length).toBeGreaterThanOrEqual(8);
   });
 
   it("every off-screen event is hidden, NPC-to-NPC, and excludes the player", () => {

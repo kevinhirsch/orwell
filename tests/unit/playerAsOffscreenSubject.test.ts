@@ -129,7 +129,7 @@ describe("PV1 (#1029) — the player as a SUBJECT of off-screen NPC cognition", 
 
     const events = new InMemoryEventStore();
     recordConfessional(events, conf, new SeededRandom(1), 0);
-    const rec = events.query().filter((e) => e.type === "confessional");
+    const rec = events.queryAll().filter((e) => e.type === "confessional");
     expect(rec.length).toBe(1);
     // The player is NAMED (subject) but is NEVER a witness — the Vault Wall holds.
     expect(rec[0]!.content).toContain(PLAYER);

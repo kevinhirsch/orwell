@@ -171,6 +171,33 @@ describe("0065 Part A — compare-and-swap stale-write rejection", () => {
     expect(ok.eventId).toBeTruthy();
   });
 
+  // BE-5 — `recordImageBeat` is the one FE-driven write-back on this port that had NO expectedBeatSeq
+  // guard at all (unlike recordInteraction/surfaceInformationTo/advanceGame/submitDecision above), so a
+  // stale image-shown beat could commit against a superseded board with no 409 to reconcile against.
+  it("recordImageBeat enforces the SAME CAS guard as every other mutating command (BE-5)", () => {
+    const { sb, session } = startedRuntime();
+    const current = session.gameStatus().beatSeq;
+    const eventsBefore = sb.engine.events.count();
+    expect(() =>
+      sb.commands.recordImageBeat({ houseguestId: npc(1), imageRef: "img-1", expectedBeatSeq: current - 1 }),
+    ).toThrow(StaleBeatError);
+    expect(sb.engine.events.count()).toBe(eventsBefore); // refused before the mutation — nothing recorded
+    // The CURRENT token is accepted on the command port.
+    const ok = sb.commands.recordImageBeat({ houseguestId: npc(1), imageRef: "img-1", expectedBeatSeq: session.gameStatus().beatSeq });
+    expect(ok.eventId).toBeTruthy();
+    expect(sb.engine.events.count()).toBe(eventsBefore + 1);
+  });
+
+  it("recordImageBeat with an ABSENT expectedBeatSeq is unchanged (byte-identical to the pre-BE-5 path)", () => {
+    const { sb, session } = startedRuntime();
+    const before = session.gameStatus().beatSeq;
+    const eventsBefore = sb.engine.events.count();
+    const ok = sb.commands.recordImageBeat({ houseguestId: npc(1), imageRef: "img-1" });
+    expect(ok.eventId).toBeTruthy();
+    expect(sb.engine.events.count()).toBe(eventsBefore + 1);
+    expect(session.gameStatus().beatSeq).toBe(before + 1); // still a committed mutation
+  });
+
   // R1c / audit A-S3 / issue #591 — the consequence FOLD (the hidden trust/affinity move that is "the
   // whole point of the game", mandate #4) lands EXACTLY ONCE across a stale-409 → reconcile → re-attempt.
   // The event-count guard above proves nothing was RECORDED on a stale write; this is the stronger claim

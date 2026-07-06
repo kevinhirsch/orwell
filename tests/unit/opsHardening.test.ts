@@ -115,7 +115,7 @@ describe("E5 — the admin surface is live, not decorative", () => {
     expect(health.lastIntegrity).toBe("ok");
     expect(health.circuitOpen).toBe(false);
     // Vault-free: metadata only — no hidden event content rides along.
-    const hidden = sb.engine.events.query().filter((e) => e.hidden).map((e) => e.content);
+    const hidden = sb.engine.events.queryAll().filter((e) => e.hidden).map((e) => e.content);
     const blob = JSON.stringify(health);
     for (const c of hidden) expect(blob.includes(c)).toBe(false);
   });

@@ -64,6 +64,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "recordCastProfile", channel: "player", readsVault: false, description: "FE-driven write-back (0058/0065): seal one houseguest's authored §3 profile — the PUBLIC biography + structured physical facet (cross to the player) SPLIT from the HIDDEN secrets/true-goals/weakness/Day-1 read (Vault-sealed). Reports accepted field NAMES only, never a hidden value; refuses a player-mirroring profile. Lands on the pre-warmed cast pre-game, the live house once a season runs. Not a model lever." },
   { name: "recordCastIdentity", channel: "player", readsVault: false, description: "FE-driven write-back (#544, the AI half of the 0063 diversity floor): the FE producer-LLM PROPOSES the whole cast's DESCRIPTIVE identity facets ({ facets: { <id>: { ethnicity, genderPresentation, orientation, out, age } } }) targeting U.S.-population rates; the ENGINE validates + REPAIRS the proposal against the proportional targets (floors/caps), re-grounds skin tone from the FINAL heritage, folds the PUBLIC facets onto the byte-stable cast, and re-seals each PRIVATE orientation into the Vault. Never accepts a hidden game weight (the seeded Day-1 read / competition leans stay engine-owned). Calibration-neutral; idempotent; with no proposal the deterministic floor stands. Lands on the pre-warmed cast pre-game or the live house. Not a model lever." },
   { name: "recordWorldSnapshot", channel: "player", readsVault: false, description: "FE-driven write-back (0062): freeze the move-in zeitgeist — the PUBLIC, shared real-world flavor the whole cast moved in WITH (an optional subset of public slices: screen/music/sports/news/internet/mood). The FE owns the concrete web-search capture (like the 0051 image port); the engine persists it as the single FROZEN artifact and RECALLS it (never re-searches) all season. Empty slices keep the fallback's value (non-degradation). Public flavor only — no Vault, no game input. Not a model lever." },
+  { name: "worldSnapshotView", channel: "player", readsVault: false, description: "BE-103: the Vault-free read of the frozen move-in zeitgeist (0062) — the same PUBLIC, shared real-world flavor recordWorldSnapshot captured (public slices + the off-screen-channel rendered block), so the narrator can weave it into the current moment. Null pre-game or when no snapshot was ever captured." },
   // 0070: off-screen society texture enrichment — the FE voices prose for already-recorded hidden off-screen
   // scenes and writes it back. Vault-free (public participant ids + nature only out; prose only in).
   { name: "getOffscreenSceneSkeletons", channel: "player", readsVault: false, description: "0070: the Vault-free skeletons of the off-screen scenes recorded in the most recent tick — public participant ids, room, and nature only. The texture write-back (recordOffscreenSceneTexture) addresses these by id. Returns [] before a game starts or when no off-screen scenes have been recorded this tick. Not a model lever." },
@@ -171,7 +172,11 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // A0 knowledge-wall: `sealedFromHouse` is FE-guard support (the narration guard reads it to strip a
   // houseguest voicing the player's Diary-Room content), NOT a game-driving lever the GM model pulls —
   // so it stays OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).
-  "sealedFromHouse"]);
+  "sealedFromHouse",
+  // BE-103: `worldSnapshotView` is the read counterpart of the FE-driven `recordWorldSnapshot` write-
+  // back (0062) — background flavor context, not a game-driving decision lever the GM model pulls — so
+  // it stays OUT of the base prompt's lever manifest, exactly like `recordWorldSnapshot` itself.
+  "worldSnapshotView"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the

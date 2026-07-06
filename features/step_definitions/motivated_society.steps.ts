@@ -319,7 +319,7 @@ Then("it records, folds its impact, and persists", function (this: BbWorld) {
 
 Then("nothing is left inert", function (this: BbWorld) {
   const ms = this.ms!;
-  const hidden = ms.sandbox!.engine.events.query().filter((e) => e.hidden && e.id.startsWith("offscreen:"));
+  const hidden = ms.sandbox!.engine.events.queryAll().filter((e) => e.hidden && e.id.startsWith("offscreen:"));
   assert.ok(hidden.length > 0, "every off-screen scene this tick is a real recorded event — none narrated-but-unrecorded");
 });
 
@@ -354,9 +354,9 @@ Then("a houseguest who has gone to bed is absent from the awake house and appear
   const around = new Set([...(w?.present ?? []), ...(w?.nearby ?? []).flatMap((n) => n.present)].map((p) => p.id));
   for (const id of asleep) assert.ok(!around.has(id), "an asleep houseguest is not around the player");
   // (2) Appears in no off-screen scene: run the society and assert no fresh hidden pair includes an asleep id.
-  const beforeIds = new Set(ms.sandbox!.engine.events.query().map((e) => e.id));
+  const beforeIds = new Set(ms.sandbox!.engine.events.queryAll().map((e) => e.id));
   for (let t = 0; t < 8; t++) ms.orch!.advance(ms.user!, "offscreen-tick");
-  const fresh = ms.sandbox!.engine.events.query().filter((e) => !beforeIds.has(e.id) && e.hidden && e.witnessSet.length === 2);
+  const fresh = ms.sandbox!.engine.events.queryAll().filter((e) => !beforeIds.has(e.id) && e.hidden && e.witnessSet.length === 2);
   for (const e of fresh) for (const id of e.witnessSet) {
     if (id !== PLAYER) assert.ok(!asleep.includes(id), "an asleep houseguest never schemed off-screen at night");
   }

@@ -700,7 +700,7 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
     // size), never the shared society/vote stream `rng`, so the seeded calibration spine is untouched
     // (the selection draws no rng at all unless two of the confessor's events fully tie).
     const recentRng = new SeededRandom(hashSeed(`${core.seed ?? ""}:confessional-recent:${confessor}:${clockNow}:${before}`));
-    const recentEvents = selectRecentForConfessional(sandbox.engine.events.query(), confessor, clockNow, { rng: recentRng });
+    const recentEvents = selectRecentForConfessional(sandbox.engine.events.queryAll(), confessor, clockNow, { rng: recentRng });
     // BB-2/SG-8 — without these three, EVERY confessional all season rendered the identical first
     // template (`pick()` falls back to `lines[0]` with no rng) and named the player with the bare
     // `player` id (no resolver), killing the 0048 retrospective payoff (41/41 identical lines). A
@@ -790,7 +790,13 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
         ts: clockNow,
         type: "house-event",
         initiator: ids[0]!,
-        witnessSet: [PLAYER, ids[0]!],
+        // BE-DEEP2-3/COMP-6: the pool's content reads whole-house ("A house meeting...", "the house
+        // calls to order"), so the witness set must be the true co-present house, not just one
+        // hardcoded NPC — otherwise every other houseguest is permanently unable to recall/confessional
+        // an event their own flavor text says they were in. `awakeIds` (computed above, ADR 0006) is
+        // IDENTITY to `ids` when the sleep clock is off (the default + the calibration spine's state),
+        // so this is byte-identical there and only narrows on the opt-in live-time path.
+        witnessSet: [PLAYER, ...awakeIds],
         hidden: false,
         content: nextHouseEvent(sandbox.engine.events, ambientRng, { week: core.week, phase: core.phase }), // E58: varied + day-indexed, never a verbatim repeat
       });

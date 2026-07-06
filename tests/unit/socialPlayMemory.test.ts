@@ -20,7 +20,7 @@ describe("L27 — summarized social play is stored in the engine and recallable 
     sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, ally], kind: "strategy", content: summary });
 
     // (1) STORED in the event record — retrievable; the player's own witnessed knowledge.
-    expect(sb.engine.events.query().some((e) => e.content === summary)).toBe(true);
+    expect(sb.engine.events.queryAll().some((e) => e.content === summary)).toBe(true);
 
     // (2) INDEXED into the houseguest's deepening soul memory (0024) — the recall substrate.
     expect(sb.engine.soul.soulOf(ally).memories.some((m) => m.content === summary)).toBe(true);
@@ -31,7 +31,7 @@ describe("L27 — summarized social play is stored in the engine and recallable 
     // (3) SURVIVES persistence (non-degradation #4): still in the record after a save/restore.
     const core = sb.session.snapshot();
     sb.session.restore(core);
-    expect(sb.engine.events.query().some((e) => e.content === summary)).toBe(true);
+    expect(sb.engine.events.queryAll().some((e) => e.content === summary)).toBe(true);
   });
 
   it("an OOC scene the player was NOT in is refused (the recording seam is player-witnessed only)", () => {

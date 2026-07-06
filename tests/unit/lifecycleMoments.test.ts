@@ -48,7 +48,7 @@ describe("B62 — the re-entry beat (resume opens with the store, never the chat
     expect(systemPrompt).toContain(`Week: ${s.gameStatus().week}`);
     expect(systemPrompt).toContain(`Phase: ${s.gameStatus().phase}`);
     // A real recorded, WITNESSED beat is woven in as a fact to voice…
-    const witnessed = sb.engine.events.query().filter((e) => !e.hidden);
+    const witnessed = sb.engine.events.queryAll().filter((e) => !e.hidden);
     expect(witnessed.length).toBeGreaterThan(0);
     expect(systemPrompt).toContain("morning");
     // …and the hidden layer never is (the wall holds through the lifecycle beats).

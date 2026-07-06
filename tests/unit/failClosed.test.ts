@@ -38,7 +38,7 @@ describe("the integrity checkpoint is genuinely fail-closed (C9)", () => {
       const orch = new Orchestrator(reg, { now: () => 1 }, {
         seed: 1,
         apply: (sandbox) => {
-          const n = sandbox.engine.events.query().length;
+          const n = sandbox.engine.events.queryAll().length;
           sandbox.engine.events.record({ id: `c9:h:${n}`, ts: 9_400_000 + n, type: "conversation", initiator: npc(1), witnessSet: [npc(1), npc(2)], hidden: true, content: leak });
           sandbox.engine.events.record({ id: `c9:v:${n}`, ts: 9_400_001 + n, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: leak });
           return 2;
@@ -47,15 +47,15 @@ describe("the integrity checkpoint is genuinely fail-closed (C9)", () => {
       reg.sandboxFor(user).session.createCharacter({ playerName: "The Player", seed: 1 });
       reg.saveUser(user);
       const savesBefore = store.saves;
-      const eventsBefore = reg.sandboxFor(user).engine.events.query().length;
+      const eventsBefore = reg.sandboxFor(user).engine.events.queryAll().length;
 
       const res = orch.advance(user, "offscreen-tick");
       expect(res.integrity).toBe("fault");
       expect(res.faults.map((f) => f.kind)).toContain("vault-leak");
       // Fail-closed: NOTHING persisted, and the in-memory sandbox rolled back clean.
       expect(store.saves).toBe(savesBefore);
-      expect(reg.sandboxFor(user).engine.events.query().length).toBe(eventsBefore);
-      const blob = JSON.stringify(reg.sandboxFor(user).engine.events.query());
+      expect(reg.sandboxFor(user).engine.events.queryAll().length).toBe(eventsBefore);
+      const blob = JSON.stringify(reg.sandboxFor(user).engine.events.queryAll());
       expect(blob).not.toContain(leak); // no aborted event left behind
       // The prior save is intact and loadable.
       expect(store.loadLatest(user)?.started).toBe(true);

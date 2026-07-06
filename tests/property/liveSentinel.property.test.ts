@@ -114,7 +114,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
       // The canary only bites if the sentinels are GENUINELY in the live hidden state. Prove it: every
       // planted marker is present engine-side (house souls + the hidden event/Vault/soul/knowledge)…
       const engineSide = JSON.stringify(reg.sandboxFor(user).session.snapshot())
-        + JSON.stringify(reg.sandboxFor(user).engine.events.query())
+        + JSON.stringify(reg.sandboxFor(user).engine.events.queryAll())
         + JSON.stringify(reg.sandboxFor(user).engine.soul.soulOf(npc(1)))
         + JSON.stringify(reg.sandboxFor(user).engine.knowledge.knownTo(npc(2)))
         + JSON.stringify(reg.sandboxFor(user).engine.vault.readHidden());

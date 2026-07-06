@@ -47,14 +47,14 @@ describe("E21 — the player-channel witness rule", () => {
     expect(() =>
       cmd.recordInteraction({ initiator: npc(1), witnessSet: [npc(1), npc(2)], content: "a fabricated off-screen scheme" }),
     ).toThrow(/witness set must include the player/);
-    expect(core.events.query()).toHaveLength(0); // nothing recorded, hidden or otherwise
+    expect(core.events.queryAll()).toHaveLength(0); // nothing recorded, hidden or otherwise
   });
 
   it("the player initiating IS being in the scene: their seat is made explicit and the event is never hidden", () => {
     const core = buildEngineCore();
     const cmd = new EngineCommandsAdapter(core.events, core.knowledge, core.relationships);
     const { eventId } = cmd.recordInteraction({ initiator: PLAYER, witnessSet: [npc(1)], content: "a hallway aside" });
-    const ev = core.events.query().find((e) => e.id === eventId)!;
+    const ev = core.events.queryAll().find((e) => e.id === eventId)!;
     expect(ev.witnessSet).toContain(PLAYER);
     expect(ev.hidden).toBe(false); // player-witnessed is never secret (0002)
   });
@@ -90,7 +90,7 @@ describe("E21 — the per-beat fold budget bounds repeated identical calls", () 
 
     // A resolved season beat lands in the record (how the registry stores every loop beat) …
     core.events.record({
-      id: `season:${core.events.query().length}`, ts: core.events.query().length,
+      id: `season:${core.events.queryAll().length}`, ts: core.events.queryAll().length,
       type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: "a ceremony resolves",
     });
     // … and the SAME interaction folds again: a new beat, a fresh budget.
@@ -112,7 +112,7 @@ describe("E21 — the per-beat fold budget bounds repeated identical calls", () 
 describe("R3 — currentBeatKey is O(Δ), not O(events) (the Part E latency tail)", () => {
   /** The old whole-log backward scan (the reference implementation `currentBeatKey` must equal). */
   const oldScan = (events: ReturnType<typeof buildEngineCore>["events"]): string => {
-    const evs = events.query();
+    const evs = events.queryAll();
     for (let i = evs.length - 1; i >= 0; i--) if (evs[i]!.id.startsWith("season:")) return evs[i]!.id;
     return "pre-season";
   };

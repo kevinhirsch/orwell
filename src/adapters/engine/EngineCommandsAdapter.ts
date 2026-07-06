@@ -1,5 +1,5 @@
 import type {
-  EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq,
+  EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, RecordImageBeatReq,
 } from "../../ports/EngineCommands";
 import type { EventStore } from "../../ports/EventStore";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
@@ -436,7 +436,10 @@ export class EngineCommandsAdapter implements EngineCommands {
     return { recorded: true };
   }
 
-  recordImageBeat(req: { houseguestId: EntityId; imageRef: string }): { eventId: string } {
+  recordImageBeat(req: RecordImageBeatReq): { eventId: string } {
+    // BE-5: refuse an image beat computed against a superseded board BEFORE anything is recorded or the
+    // budget is spent — the same guard every other mutating tool on this port already has.
+    this.guardBeatSeq(req.expectedBeatSeq);
     // 0051: an image shown to the player in-character is a BEAT — recorded like any scene, so it
     // has consequence and memory ("recorded or it didn't happen"). Player-witnessed by construction
     // (the witness set is the player — they saw it); never hidden. No hidden-layer write: the image

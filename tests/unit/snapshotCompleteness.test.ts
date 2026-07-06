@@ -50,7 +50,7 @@ describe("B40 — the knowledge layer survives a restart", () => {
     const after = sb2.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "chat B" });
 
     expect(after.eventId).not.toBe(before.eventId); // no duplicate id across the restart
-    const evs = sb2.engine.events.query();
+    const evs = sb2.engine.events.queryAll();
     const tsOf = (id: string): number => evs.find((e) => e.id === id)!.ts;
     expect(tsOf(after.eventId)).toBeGreaterThan(tsOf(before.eventId)); // ts is monotonic
   });
