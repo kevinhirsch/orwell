@@ -1,7 +1,12 @@
 # 0095 — Pre-show ties as time-bombs (a sealed pre-alliance detonates when exposed)
 
-> **Status:** 🟡 **SPEC ONLY (drafted 2026-06-25).** Design + executable Gherkin only — no source,
-> no `cucumber.cjs` wiring, no README index row yet. Built next as a new queue item.
+> **Status:** ✅ **BUILT (2026-07-06).** `src/engine/seededRelationships.ts` (`exposure`/`nextTieExposure`/
+> `exposedTies`), `src/engine/tieReveal.ts` (the overhear pathway) + `tieRevealConstants.ts`, and
+> `accuseTie` (the `confide` sibling, four-place wired). Note: `ORWELL_SEEDED_TIE_SURFACING` (0059 §5) is
+> a narrower, PRE-EXISTING precursor — ambient "seem close" suspicion only, no confirmed fact, no
+> betrayal fold — and is untouched; 0095 ships as a SEPARATE pathway/flag (`ORWELL_TIE_REVEAL`), never a
+> mode of §5. The "slip" pathway is deferred (no BDD scenario requires it); overhear + the
+> player-reachable `accuseTie` cover the built v1. Wired in `cucumber.cjs`.
 > **Tracks #867.**
 > **Depends on:** 0001 (Vault Wall), 0002 (event visibility — a fact reaches the player ONLY through
 > a modeled pathway; `surfaceInformationTo` / the `told-by` / overhear seam), 0017/0026 (the directed

@@ -115,6 +115,16 @@ export interface SessionCore {
    * campaign layer is off. */
   drives?: Record<EntityId, Drive>;
   /**
+   * Feature 0096 — the emergent NEMESIS bookkeeping: the currently-held nemesis (if any) + each
+   * candidate's consecutive-tick sustained-threat streak, so the arc SURVIVES a save/restore and a
+   * fresh context window (recalled, never re-guessed) and its history accumulates, never thins
+   * (non-degradation #4). ENGINE-ONLY (ONLY the Vault-safe `rivalry` tone hint ever crosses, on
+   * `npcVoice`). Absent on a pre-0096 save / whenever the campaign layer is off ⇒ no nemesis,
+   * re-derived cleanly on the next `campaignTick` (back-compatible).
+   */
+  nemesis?: EntityId;
+  nemesisStreak?: Record<EntityId, number>;
+  /**
    * RELATIONSHIP TRAJECTORIES (feature 0087) — the hidden MOMENTUM per directed pair (`"a->b"` → {phase,
    * momentum}), so a multi-week arc RESUMES mid-curdle across a restart and ACCUMULATES, never thins
    * (non-degradation #4). VAULT-CLASS hidden engine state (it carries no player/admin-visible number): the
@@ -306,6 +316,16 @@ export interface SessionCore {
   playerTieSurfaceCount?: number;
   surfacedTieSubjects?: string[];
   tieScheduleTickCount?: number;
+  /**
+   * Feature 0095 — the pre-show-TIE REVEAL pathway's own bookkeeping (a SEPARATE counter/cap from §5
+   * above — a DIFFERENT pathway, a different rng stream). `tieExposureCount` is the per-season count of
+   * ties EVER exposed (promoted past `sealed`, by the overhear pathway OR `accuseTie`) — the hard cap;
+   * `tieRevealTickCount` is this pathway's own dedicated rng tick counter. Each tie's own `exposure`
+   * state rides on `seededRelationships` above (a field on `PreGameTie`) — monotonic, never regresses.
+   * Absent on pre-0095 saves / when the pathway has never fired ⇒ 0 (every tie defaults to `sealed`).
+   */
+  tieExposureCount?: number;
+  tieRevealTickCount?: number;
   /**
    * The engine-only HIDDEN private-orientation map (feature 0063): the orientation of each houseguest who
    * holds it PRIVATELY (closeted / not-yet-out), Vault-sealed from the player AND the admin. Persisted so
@@ -572,6 +592,8 @@ export interface SessionCoreCounts {
   playerTieSurfaceCount: number;
   tieScheduleTickCount: number;
   surfacedThreadCount: number;
+  tieExposureCount: number;
+  tieRevealTickCount: number;
 }
 
 /** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100) — each is
@@ -590,6 +612,8 @@ export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
     playerTieSurfaceCount: snap.playerTieSurfaceCount ?? 0,
     tieScheduleTickCount: snap.tieScheduleTickCount ?? 0,
     surfacedThreadCount: snap.surfacedThreadCount ?? 0,
+    tieExposureCount: snap.tieExposureCount ?? 0,
+    tieRevealTickCount: snap.tieRevealTickCount ?? 0,
   };
 }
 
@@ -645,6 +669,21 @@ export function sessionCoreIsSuperset(later: SessionSnapshot, earlier: SessionSn
   // surfacedTieSubjects (0059 §5): a discovered pre-game tie subject is never un-surfaced (Set, add-only).
   const laterTieSubjects = new Set(later.surfacedTieSubjects ?? []);
   for (const s of earlier.surfacedTieSubjects ?? []) if (!laterTieSubjects.has(s)) return false;
+
+  // 0095 — a pre-show tie's `exposure` (sealed → surfaced-to-house → public) never regresses to a
+  // LESS-exposed state across a save/restore. Matched by unordered pair (a/b order is not guaranteed
+  // stable across a re-derive on an old save with no `seededRelationships` at all).
+  const exposureRank: Record<string, number> = { sealed: 0, "surfaced-to-house": 1, public: 2 };
+  const laterTieExposure = new Map<string, number>();
+  for (const t of later.seededRelationships?.ties ?? []) {
+    laterTieExposure.set([t.a, t.b].sort().join("|"), exposureRank[t.exposure ?? "sealed"]!);
+  }
+  for (const t of earlier.seededRelationships?.ties ?? []) {
+    const key = [t.a, t.b].sort().join("|");
+    const laterRank = laterTieExposure.get(key);
+    const earlierRank = exposureRank[t.exposure ?? "sealed"]!;
+    if (laterRank === undefined || laterRank < earlierRank) return false;
+  }
 
   // pacingLastDrippedWeek (0092): once a thread edges toward the player, the week it did so is recorded
   // and can only move FORWARD (it is always set to the current, monotonically-increasing season week).

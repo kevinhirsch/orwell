@@ -56,7 +56,7 @@ Feature: 0096 — Emergent nemesis (a personal villain to outlast)
 
     Scenario: No surface ever names the nemesis or a number
       Given a houseguest held as the player's nemesis
-      When the player views any player-facing surface
+      When the player checks every player-facing surface for the rivalry
       And the admin views any God-Mode surface
       Then neither surface returns the nemesis identity
       And neither surface returns a threat number, a hostility score, or an escalation tier

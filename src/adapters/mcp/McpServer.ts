@@ -142,6 +142,16 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       if (!isStr(args["npcId"])) refuse("npcId", "a houseguest id (string)");
       return;
+    case "accuseTie": // 0095
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      if (!isStr(args["aId"])) refuse("aId", "a houseguest id (string)");
+      if (!isStr(args["bId"])) refuse("bId", "a houseguest id (string)");
+      return;
+    case "confront": // 0094
+      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      if (!isStr(args["npcId"])) refuse("npcId", "a houseguest id (string)");
+      if (!isStr(args["factId"])) refuse("factId", "a learned fact id (string)");
+      return;
     case "exposeSecret":
       // 0093 — out a learned secret. EITHER a real `factId` (a string) OR a `bluff` (a boolean) with a
       // `subject`. The engine validates ownership / the season cap; this is the shape guard only.
@@ -347,6 +357,18 @@ export class McpServer {
       case "confide":
         // 0075 — the trust-gated confidence: the engine decides + records; the model voices the result.
         return this.deps.session.confide(args["npcId"] as EntityId, args["expectedBeatSeq"] as number | undefined);
+      case "accuseTie":
+        // 0095 — the pre-show-tie accusation: the engine checks the sealed layer + decides + records;
+        // the model only voices the result (landed/missed).
+        return this.deps.session.accuseTie(
+          args["aId"] as EntityId, args["bId"] as EntityId, args["expectedBeatSeq"] as number | undefined,
+        );
+      case "confront":
+        // 0094 — the closed-set confrontation: the engine classifies the cited belief + resolves the
+        // outcome against reality; the model only voices the result (landed/misfired).
+        return this.deps.session.confront(
+          args["npcId"] as EntityId, args["factId"] as string, args["expectedBeatSeq"] as number | undefined,
+        );
       case "exposeSecret":
         // 0093 — out a learned secret: the engine validates ownership + resolves the bounded fallout + records the pathway.
         return this.deps.session.exposeSecret(args as unknown as ExposeSecretReq);
