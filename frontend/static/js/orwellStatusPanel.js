@@ -81,27 +81,53 @@ import { onNarrowChange } from './platform.js';
   // because it involved a page reload). A player can only legitimately be out once an eviction has
   // actually happened THIS season: the season is finished, week > 1, or at least one houseguest is
   // already out. A pristine live season (not finished, week ≤ 1, nobody out) ⇒ the seat is stale.
+  // GADGET-1: `commitStagedEviction` (the real vote-tally path) flips the evicted player's
+  // seat to "evicted"/"jury" IMMEDIATELY, while `rollWeek()` (the week bump that would clear
+  // the guard below) is deferred until AFTER the whole goodbye-message sequence resolves. So a
+  // first-week player eviction landed mid-goodbye with week still 1 and no NPC yet out — exactly
+  // the shape `seatStale` otherwise (correctly) treats as a carried-over stale S1→S2 status. The
+  // engine's own `phase === "eviction"` is the tell that a REAL eviction is live/just resolved
+  // this season, so it overrides the week/anyOut heuristic.
   function seatStale(status, state) {
     const finished = !!(status && status.finished);
     const week = (status && typeof status.week === "number") ? status.week : 0;
     const house = (state && Array.isArray(state.house)) ? state.house : [];
     const anyOut = house.some((h) => h && h.status && h.status !== "active");
-    return !(finished || week > 1 || anyOut);
+    const phase = status && status.phase;
+    return !(finished || week > 1 || anyOut || phase === "eviction");
   }
 
+  // GADGET-2/SG-15: a nominee who wins the veto (or otherwise holds more than one role at once)
+  // can legitimately carry multiple badges — the old single-string chain returned only the FIRST
+  // match, so a nominee holding the veto (the single most decision-critical state: "you can save
+  // yourself") never showed the "VETO" badge at all. Return every applicable badge.
   function selfBadge(status, state) {
     const me = state && state.player && state.player.id;
     const seat = state && state.player && state.player.status;
-    if (seat === "evicted") return seatStale(status, state) ? "" : "EVICTED"; // #556
-    if (seat === "jury") return seatStale(status, state) ? "" : "JURY";
-    if (!me || !status) return "";
+    if (seat === "evicted") return seatStale(status, state) ? [] : ["EVICTED"];
+    if (seat === "jury") return seatStale(status, state) ? [] : ["JURY"];
+    if (!me || !status) return [];
+    const id = (c) => (c && typeof c === "object" ? c.id : c);
+    const b = [];
+    if (id(status.hoh) === me) b.push("HOH");
+    if ((status.nominees || []).map(id).includes(me)) b.push("ON THE BLOCK");
+    if (id((status.veto || {}).holder) === me) b.push("VETO");
+    return b;
+  }
+
+  // SG-15: a phase-conditional seat CUE at eviction phase — the roles the eviction phase itself
+  // creates (voter / tie-breaker / the-one-being-voted-on) had no board cue at all, so a
+  // first-timer had no glanceable answer to "do I have anything to do right now?".
+  function seatHint(status, state) {
+    if (!status || status.phase !== "eviction") return "";
+    const me = state && state.player && state.player.id;
+    const seat = state && state.player && state.player.status;
+    if (!me || seat !== "active") return "";
     const idOf = (c) => (c && typeof c === "object" ? c.id : c);
-    if (idOf(status.hoh) === me) return "HOH";
+    if (idOf(status.hoh) === me) return "You break ties";
     const noms = Array.isArray(status.nominees) ? status.nominees.map(idOf) : [];
-    if (noms.includes(me)) return "ON THE BLOCK";
-    const veto = status.veto || {};
-    if (idOf(veto.holder) === me) return "VETO";
-    return "";
+    if (noms.includes(me)) return "The House votes on you";
+    return "You vote tonight";
   }
 
   // #640: compose the OrwellGadget kit (collapsible). The kit owns the card shell, the
@@ -122,6 +148,9 @@ import { onNarrowChange } from './platform.js';
         #orwell-status .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
         #orwell-status .os-tod { opacity: .85; font-weight: 400; font-size: .92em; }
         #orwell-status .os-rest { opacity: .6; font-weight: 400; font-style: italic; margin-left: .45em; font-size: .9em; }
+        /* SG-15: the phase-conditional eviction-night seat cue ("You vote tonight" / "You break
+           ties" / "The House votes on you") — a lightweight, non-badge readout beside the self row. */
+        #orwell-status .os-hint { opacity: .72; font-weight: 400; margin-left: .45em; font-size: .85em; }
         #orwell-status .os-row { display: flex; gap: .4rem; }
         #orwell-status .os-row .os-k { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); min-width: 4.2em; }
         #orwell-status .os-row .os-v { flex: 1; }
@@ -217,10 +246,11 @@ import { onNarrowChange } from './platform.js';
           <div class="os-prem-left" id="os-prem-left" hidden></div>
         </div>
         <div class="os-ceremony" id="os-ceremony">
-          <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span><span class="os-rest" id="os-you-rest" hidden title="How rested you are — your own read"></span></div>
+          <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span><span class="os-rest" id="os-you-rest" hidden title="How rested you are — your own read"></span><span class="os-hint" id="os-you-hint" hidden></span></div>
           <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
           <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
           <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
+          <div class="os-row" id="os-last-evict-row" hidden><span class="os-k">Last out</span><span class="os-v" id="os-last-evict">—</span></div>
         </div>
         <div class="os-roster-h" id="os-roster-h" role="heading" aria-level="3">The House</div>
         <div id="os-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);"></div>`;
@@ -252,6 +282,8 @@ import { onNarrowChange } from './platform.js';
     "veto-ceremony": "Veto ceremony", "eviction": "Eviction night",
     "final-eviction": "Final eviction", "finale": "The finale", "jury": "Jury",
     "social": "A day in the house",
+    "twist-reveal": "A twist!", // GADGET-5: one of the 8 legal structural Beat values — was falling
+                                 // through to a raw word-swap ("Twist reveal") on a sealed-twist night.
   };
   const phaseLabel = (p) => PHASE_LABELS[p] || String(p || "").replace(/-/g, " ");
 
@@ -264,6 +296,15 @@ import { onNarrowChange } from './platform.js';
 
   // A3: announce only what CHANGED, in show terms — never a full re-read per poll.
   let _last = { phase: null, hoh: null, noms: null, veto: null };
+
+  // SG-14: the veto's aftermath (who was saved off the block, who was named in their place) is a
+  // one-time diff between the pre-ceremony nominee pair and the post-ceremony pair — the engine's
+  // own status projection only ever carries the CURRENT nominees + whether the veto was used, not
+  // the "before" half of the swap. Tracked client-side from consecutive polls; reset once a new
+  // week's veto is unused again.
+  let _prevNominees = []; // [{id, name}] as of the LAST poll — the pre-swap pair when the swap lands
+  let _prevVetoUsed = false;
+  let _vetoAftermath = null; // { holder, saved, named } once computed for the live veto-use; else null
 
   // TRANS-3 (#627): the power-transition / ceremony reveal used to land as a silent
   // textContent swap (no crown drop, no row flash) — when the narrator under-calls
@@ -356,24 +397,64 @@ import { onNarrowChange } from './platform.js';
     if (ceremonyEl) ceremonyEl.hidden = false;
     if (doneEl) doneEl.hidden = true;
 
-    el.querySelector("#os-week").textContent = "Week " + st.week;
-    el.querySelector("#os-phase").textContent = phaseLabel(st.phase);
+    setText(el.querySelector("#os-week"), "Week " + st.week);
+    setText(el.querySelector("#os-phase"), phaseLabel(st.phase));
     // ADR 0006: the in-game clock (opt-in engine side; absent ⇒ the chip simply stays hidden).
     { const todEl = el.querySelector("#os-tod"); const tod = todLabel(st.timeOfDay);
-      if (todEl) { if (tod) { todEl.textContent = tod; todEl.hidden = false; } else todEl.hidden = true; } }
-    el.querySelector("#os-hoh").textContent = name(st.hoh);
-    const noms = Array.isArray(st.nominees) ? st.nominees.map((n) => n.name).filter(Boolean) : [];
-    el.querySelector("#os-noms").textContent = noms.length ? noms.join(", ") : "—";
+      if (todEl) { if (tod) { setText(todEl, tod); todEl.hidden = false; } else todEl.hidden = true; } }
+    setText(el.querySelector("#os-hoh"), name(st.hoh));
+    const idOf = (c) => (c && typeof c === "object" ? c.id : c);
+    const nomRefs = Array.isArray(st.nominees) ? st.nominees : [];
+    const noms = nomRefs.map((n) => n.name).filter(Boolean);
+    setText(el.querySelector("#os-noms"), noms.length ? noms.join(", ") : "—");
     const veto = st.veto || {};
-    const vetoText = veto.used
-      ? "used" + (veto.holder ? " · " + veto.holder.name : "")
-      : (veto.holder ? veto.holder.name : "—");
-    el.querySelector("#os-veto").textContent = vetoText;
+    const vetoUsedNow = !!veto.used;
+    // SG-14: the veto's aftermath — diff the nominee pair the moment the veto flips to used, so
+    // the board can say WHO was saved and WHO was named in their place, not just "used · holder".
+    if (vetoUsedNow && !_prevVetoUsed) {
+      const prevIds = _prevNominees.map((n) => n.id);
+      const curIds = nomRefs.map(idOf);
+      const savedNom = _prevNominees.find((n) => !curIds.includes(n.id));
+      const namedNom = nomRefs.find((n) => !prevIds.includes(idOf(n)));
+      _vetoAftermath = {
+        holder: veto.holder ? veto.holder.name : "",
+        saved: savedNom ? savedNom.name : "",
+        named: namedNom ? namedNom.name : "",
+      };
+    } else if (!vetoUsedNow) {
+      _vetoAftermath = null; // a new week's unused veto clears the last week's aftermath
+    }
+    _prevVetoUsed = vetoUsedNow;
+    _prevNominees = nomRefs.map((n) => ({ id: idOf(n), name: n.name }));
+    const showAftermath = vetoUsedNow && _vetoAftermath && _vetoAftermath.saved && _vetoAftermath.named &&
+      (st.phase === "veto-ceremony" || st.phase === "eviction");
+    const vetoText = showAftermath
+      ? "used by " + (_vetoAftermath.holder || "—") + " — saved " + _vetoAftermath.saved + " · " + _vetoAftermath.named + " named"
+      : veto.used
+        ? "used" + (veto.holder ? " · " + veto.holder.name : "")
+        : (veto.holder ? veto.holder.name : "—");
+    setText(el.querySelector("#os-veto"), vetoText);
     announceDeltas(el, st, {
       hoh: name(st.hoh),
       noms: noms.length ? noms.join(", ") : "—",
       veto: vetoText,
     });
+    // SG-13: the last eviction's result + tally — a Vault-free, already-public broadcast fact
+    // (the anonymized reveal, E12-safe) the status projection doesn't carry YET. Wired
+    // defensively so it lights up the moment the engine adds `status.lastEviction` (an
+    // engine-side addition out of scope for this pass); until then it stays hidden — never a
+    // guess, never a fabricated tally.
+    const lastEvictRow = el.querySelector("#os-last-evict-row");
+    if (lastEvictRow) {
+      const le = st.lastEviction;
+      const evictee = le && le.evictee && (le.evictee.name || le.evictee);
+      if (evictee) {
+        setText(el.querySelector("#os-last-evict"), String(evictee) + (le.tally ? " · " + le.tally : ""));
+        lastEvictRow.hidden = false;
+      } else {
+        lastEvictRow.hidden = true;
+      }
+    }
     if (st._state !== undefined) renderRoster(el, st, st._state);
     el.style.display = "block";
   }
@@ -419,10 +500,19 @@ import { onNarrowChange } from './platform.js';
   // the player's own rest cue.
   function renderRoster(el, st, state) {
     renderPremiere(el, state);
+    // GADGET-2/SG-15: render EVERY applicable badge (a nominee holding the veto shows both).
     const badgeEl = el.querySelector("#os-you-badge");
-    const badge = selfBadge(st, state);
-    if (badge) { badgeEl.textContent = badge; badgeEl.hidden = false; }
+    const badges = selfBadge(st, state);
+    if (badges.length) { setText(badgeEl, badges.join(" · ")); badgeEl.hidden = false; }
     else { badgeEl.hidden = true; }
+
+    // SG-15: the phase-conditional eviction-night seat cue.
+    const hintEl = el.querySelector("#os-you-hint");
+    if (hintEl) {
+      const hint = seatHint(st, state);
+      if (hint) { setText(hintEl, hint); hintEl.hidden = false; }
+      else { hintEl.hidden = true; }
+    }
 
     // ADR 0006 §Principle 5: the player's OWN qualitative tiredness — a cue (never a number), and only
     // ever the player's own (no NPC's). Absent ⇒ hidden (the clock isn't running).
@@ -449,12 +539,20 @@ import { onNarrowChange } from './platform.js';
     const playerActive = state.player && state.player.status === "active";
     const total = house.length + 1; // player + NPCs
     const activeCount = house.filter((h) => h.status === "active").length + (playerActive ? 1 : 0);
-    headEl.textContent = "The House · " + activeCount + "/" + total;
+    setText(headEl, "The House · " + activeCount + "/" + total);
   }
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // TRANS-25: guard every plain HUD text write so an unchanged value never re-mutates the DOM
+  // (the status HUD text nodes were wholesale-replaced on EVERY poll, unsynchronized with the
+  // narration stream — a flicker/latch risk under concurrent updates). A no-op when the value
+  // already matches; deterministically stable values are simply never touched again.
+  function setText(node, text) {
+    if (node && node.textContent !== text) node.textContent = text;
   }
 
   // True once we've shown a real game at least once this session. Lets a transient engine

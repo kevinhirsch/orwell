@@ -145,8 +145,12 @@
       }
     }
 
+    // GADGET-8: the old -12 cap could silently drop the season's best EARLY beat (a week-1/2
+    // blindside) at the one screen that's supposed to pay it off — exactly backwards for a
+    // "watched back" reel. Raised to match hiddenStory's own non-degradation posture; the panel
+    // body already scrolls (.ow-body in orwellWindow.js), so nothing needs to be cut to fit.
     const list = el("ul", "margin:6px 0;padding-left:18px;opacity:0.85");
-    for (const h of (recap.highlights || []).slice(-12)) list.appendChild(el("li", "", h));
+    for (const h of (recap.highlights || []).slice(-40)) list.appendChild(el("li", "", h));
     _body.appendChild(list);
 
     const vaultWrap = el("div", "margin-top:8px");

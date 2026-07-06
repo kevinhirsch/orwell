@@ -146,9 +146,15 @@
     st.textContent =
       // The stacked container: a vertical column of notices anchored above the composer.
       // gap separates stacked affordances; it carries no chrome of its own (the cards do).
+      // NOTIFY-2: up to FOUR affordance kinds (guide, system-notice, continue, decision) can
+      // legitimately co-occupy this ONE zone at once with no ceiling — a premiere guide + a
+      // comp-intent decision card + a continue nudge, all live on a short mobile viewport, could
+      // push the composer itself toward/off the bottom of the screen. Cap the stack and let it
+      // scroll once more than ~2 cards pile up, so the composer keeps its guaranteed real estate.
       "#" + ZONE_ID + " {" +
       "  display: flex; flex-direction: column; gap: var(--space-2, .45rem);" +
       "  margin: 0 auto var(--space-2, .45rem); width: 100%; max-width: 760px;" +
+      "  max-height: min(40vh, 320px); overflow-y: auto;" +
       "  pointer-events: none; }" +   // the column is inert; each card re-enables pointer events
       "#" + ZONE_ID + ":empty { display: none; margin: 0; }" +
       // A single notice card — the shared above-composer chrome. The visual language matches
@@ -617,9 +623,11 @@
     var self = this;
     this._autoTimer = setTimeout(function () {
       self._autoTimer = null;
-      // A toast is transient: it auto-hides WITHOUT persisting a dismissal (persistDismiss:false),
-      // so the same id can show again next time. hide() is the no-persist exit.
-      self.hide();
+      // NOTIFY-5: route through dismiss() (reason 'timeout'), not a bare hide() — dismiss() is the
+      // ONLY path that fires onDismiss(reason), and a bare hide() silently skipped it for every
+      // auto-expiring toast. A toast is still transient: persistDismiss:false means dismiss()
+      // does NOT persist a dismissal, so the same id can show again next time — this costs nothing.
+      self.dismiss("timeout");
     }, ms);
   };
   OrwellNotice.prototype._clearAutoDismiss = function () {
@@ -653,7 +661,8 @@
         el.style.transform = "translateX(" + (dx > 0 ? "120%" : "-120%") + ")";
         el.style.opacity = "0";
         self._clearAutoDismiss();
-        setTimeout(function () { self.hide(); }, 180);
+        // NOTIFY-5: dismiss('swipe'), not a bare hide() — see the auto-dismiss timer above.
+        setTimeout(function () { self.dismiss("swipe"); }, 180);
       } else { el.style.transform = ""; el.style.opacity = ""; }
     };
     el.addEventListener("touchend", end);
