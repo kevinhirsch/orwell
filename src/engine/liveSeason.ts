@@ -72,8 +72,8 @@ import {
 } from "./jury";
 import { MANNER_THRESHOLDS, MANNER_GRADING } from "./juryConstants";
 import { RELATIONSHIP_CONSTANTS } from "./relationshipConstants";
-import { maybeFireTwist } from "./reserveTwists";
-import type { ReserveTwist, TwistEvent, TwistKind } from "./reserveTwists";
+import { maybeFireTwist, triggeredTwist } from "./reserveTwists";
+import type { ReserveTwist, TwistEvent, TwistKind, TwistPlan, TwistSignals } from "./reserveTwists";
 import { drawCompetition, competitionById } from "./competitionLibrary";
 import type { CompetitionDef, CompetitionFormat, CompetitionPhase } from "./competitionLibrary";
 import {
@@ -103,6 +103,8 @@ export type Beat =
   | "comp-elimination"
   // a sealed reserve twist firing (0025/B53): the production reveal that opens a twist night.
   | "twist-reveal"
+  // the reactive battle-back (0025 redesign): recently-evicted jurors compete; one re-enters the game.
+  | "battle-back"
   // finale sub-loop events (0037) — emitted on BeatEvent only; never a structural `s.beat`.
   | "finale-reveal" | "finale-result"
   // eviction sub-loop events (0047) — emitted on BeatEvent only; the staged reveal/goodbye/result.
@@ -155,7 +157,11 @@ export type PendingDecision =
   // --- self-eviction (0061): the player-level/OOC confirmation to voluntarily walk out / quit. It is
   // raised by an intent-to-leave and lives ALONGSIDE (never overriding) a ceremony pending, so it is
   // legal at any beat and corrupts no in-flight ceremony. Only an explicit confirm resolves it. ---
-  | { kind: "self-evict"; by: EntityId };
+  | { kind: "self-evict"; by: EntityId }
+  // --- secret power (0025 reactive redesign): the player secretly holds a one-time SAFETY and is on
+  // the block this week — their choice to play it (pull themselves off) or hold it. Player-agency only;
+  // an NPC holder is resolved by the engine. ---
+  | { kind: "secret-power"; by: EntityId; nominee: EntityId };
 
 /** Which stage of the live finale sub-loop (0037) we are advancing. */
 export type FinaleStage = "statements" | "questions" | "vote" | "reveal";
@@ -334,6 +340,25 @@ export interface LiveSeasonState {
   twist?: { kind: TwistKind; phase: "pending" | "running" };
   /** Twists that actually fired (exactly-once bookkeeping + the 0048 unsealing payoff). */
   firedTwists?: TwistEvent[];
+  /**
+   * The REACTIVE per-season twist plan (0025 redesign): the sealed, seeded thresholds that decide
+   * WHEN each pooled twist fires + whether each is armed this season. Present ⇒ the reactive path is
+   * live (set at setup when ORWELL_REACTIVE_TWISTS is on); absent ⇒ the legacy pre-scheduled `reserve`
+   * path. ENGINE-ONLY Vault content, carried on the loop state so it persists with the season (0030).
+   */
+  twistPlan?: TwistPlan;
+  /**
+   * A granted-but-unplayed SECRET POWER (0025 redesign): the sealed one-time safety and who secretly
+   * holds it. Granted when the secret-power trigger fires (invisible), consumed when the holder plays
+   * it off the block (the reveal). ENGINE-ONLY until played — no projection selects it.
+   */
+  secretPower?: { holder: EntityId; used: boolean; declinedWeek?: number };
+  /**
+   * The running lopsided-eviction streak (0025 redesign) — consecutive near-unanimous evictions, the
+   * "the house is steamrolling" signal the secret-power trigger reads. Reset by a close vote. Vault-free
+   * bookkeeping (a count of already-public margins); persisted with the season.
+   */
+  lopsidedStreak?: number;
   /** The drawn competitions so far, per phase (0042) — feeds the no-immediate-repeat draw; persisted (0030). */
   compHistory?: { hoh: string[]; veto: string[] };
   /**
@@ -507,7 +532,10 @@ export type DecisionInput =
   | { kind: "juror-question"; question?: string }
   | { kind: "juror-vote"; vote: EntityId }
   // --- self-eviction (0061): ONLY `confirmed:true` executes the irreversible walk-out (§4.2) ---
-  | { kind: "self-evict"; confirmed: boolean };
+  | { kind: "self-evict"; confirmed: boolean }
+  // --- secret power (0025 reactive redesign): the player, on the block and secretly holding the
+  // one-time safety, chooses to play it (pull off the block) or hold it for later ---
+  | { kind: "secret-power"; use: boolean };
 
 /** Draw this week's competition from the curated library (0042) — seeded, no immediate repeats. */
 const drawFor = (s: LiveSeasonState, phase: CompetitionPhase, rng: RandomnessSource): CompetitionDef =>
@@ -1208,10 +1236,56 @@ function rollWeek(s: LiveSeasonState): void {
     s.twist = undefined;
   }
   s.week += 1; s.beat = "hoh-competition";
-  // Arm a sealed twist scheduled for the week we just rolled into; it stays invisible until the
-  // night's eviction lands (the reveal IS the firing — there is no "a twist is coming" tell).
-  const due = maybeFireTwist(s.week, s.reserve ?? []);
-  if (due && !s.twist) s.twist = { kind: due.kind, phase: "pending" };
+  if (s.twistPlan) {
+    // 0025 REACTIVE: the standing pool watches the live house and arms the ONE twist the house
+    // has now earned (if any). Evaluated once per roll ⇒ at most one arms per week (the cooldown).
+    armReactiveTwist(s);
+  } else {
+    // Legacy pre-scheduled path (flag off): arm a sealed twist scheduled for the week we just rolled
+    // into; it stays invisible until the night's eviction lands (the reveal IS the firing).
+    const due = maybeFireTwist(s.week, s.reserve ?? []);
+    if (due && !s.twist) s.twist = { kind: due.kind, phase: "pending" };
+  }
+}
+
+// ── 0025 reactive twists: the live-loop wiring (behind ORWELL_REACTIVE_TWISTS via `s.twistPlan`) ──
+
+/** Jurors seated so far. Cast size is conserved (active + evicted); the first `castSize−11` evictions
+ *  are pre-jury, everything after is a juror (a battle-back returnee drops out of this count). */
+function juryCountOf(s: LiveSeasonState): number {
+  const castSize = s.active.length + s.evictionOrder.length;
+  return Math.max(0, s.evictionOrder.length - (castSize - 11));
+}
+
+/** The compact live snapshot the reactive triggers read. */
+function twistSignalsOf(s: LiveSeasonState): TwistSignals {
+  return { activeCount: s.active.length, juryCount: juryCountOf(s), lopsidedStreak: s.lopsidedStreak ?? 0 };
+}
+
+/** The already-fired kinds PLUS a granted-but-unplayed secret power, so neither re-arms (at most once). */
+function firedOrGrantedKinds(s: LiveSeasonState): TwistKind[] {
+  const set = new Set((s.firedTwists ?? []).map((t) => t.kind));
+  if (s.secretPower) set.add("secret-power");
+  return [...set];
+}
+
+/** Grant the sealed one-time safety to an underdog — the fewest-resume active houseguest (engine-only). */
+function grantSecretPower(s: LiveSeasonState): void {
+  const holder = [...s.active].sort((a, b) => (s.resume?.[a] ?? 0) - (s.resume?.[b] ?? 0))[0];
+  if (holder) s.secretPower = { holder, used: false };
+}
+
+/** Arm whichever twist the reactive plan says the house has just earned (at most one per roll). */
+function armReactiveTwist(s: LiveSeasonState): void {
+  if (s.twist) return; // a double-eviction is already armed/mid-flight this cycle
+  const kind = triggeredTwist(s.twistPlan!, twistSignalsOf(s), firedOrGrantedKinds(s));
+  if (kind === "double-eviction") {
+    s.twist = { kind, phase: "pending" }; // fires as the compressed second cycle next roll (existing machinery)
+  } else if (kind === "battle-back") {
+    s.beat = "battle-back"; // resolved in `advance` (needs ctx + rng) before this week's HOH comp
+  } else if (kind === "secret-power" && !s.secretPower) {
+    grantSecretPower(s); // sealed; "fires" only if/when the holder plays it off the block
+  }
 }
 
 /** Atomic eviction (record manner + remove + roll) — used by the non-staged paths (Final-3 0045). */
@@ -1417,6 +1491,11 @@ function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: Entit
   // secret votes become tellable only once the season is over.
   (s.voteRecord ??= []).push({ week: s.week, evictee, voteOf: { ...e.voteOf } });
   const votesToEvict = Object.entries(e.voteOf).filter(([, t]) => t === evictee).map(([v]) => v);
+  // 0025 reactive: track the lopsided-eviction streak (the secret-power trigger's "steamroll" signal).
+  // A near-unanimous eviction (all-but-≤1 of a meaningful vote) extends the streak; a close vote resets it.
+  const totalVoters = Object.keys(e.voteOf).length;
+  const lopsided = totalVoters >= 3 && votesToEvict.length >= totalVoters - 1;
+  s.lopsidedStreak = lopsided ? (s.lopsidedStreak ?? 0) + 1 : 0;
   // 0110 — the jury grudge folds on WHO THE EVICTEE BELIEVES moved against them, not the true secret
   // ballot. When deduction is on, the evictee deduces the defectors by process of elimination from the
   // PUBLIC count + eligible pool + their own reads (a belief that CAN be wrong); when off, we fold the
@@ -1689,6 +1768,10 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     }
     case "eviction": {
       if (s.eviction) return advanceEviction(s, ctx, rng); // a reveal is already staging — step it
+      // 0025 secret power: a final nominee secretly holds the unplayed safety — they may pull off the
+      // block before the vote (player: their choice; NPC: a rational self-save). One eviction still lands.
+      const sp = maybePlaySecretPower(s, ctx, rng);
+      if (sp.handled) return sp.event; // a reveal event (played) OR null with the player's choice pending
       const fn = s.finalNominees!;
       const voters = evictionVoters({ ...weekState(s, ctx), nominees: fn });
       if (voters.includes(ctx.player)) {
@@ -1710,11 +1793,88 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
         participants: [...s.active],
       };
     }
+    case "battle-back":
+      // 0025 reactive: the sealed battle-back FIRES — recently-evicted jurors compete and one
+      // re-enters the game. Only now is it known. The returning week's HOH comp opens next.
+      return resolveBattleBack(s, ctx, rng);
     case "finale":
       return advanceFinale(s, ctx, rng);
     default:
       return null;
   }
+}
+
+// --- 0025 reactive twist mechanics (secret power off the block, battle-back juror return) ---------
+
+/** The houseguests the HOH may name as the secret-power replacement: active, non-HOH, non-nominee. */
+function secretPowerReplacementOptions(s: LiveSeasonState, holder: EntityId): EntityId[] {
+  const fn = s.finalNominees!;
+  return s.active.filter((h) => h !== s.hoh && h !== holder && !fn.includes(h));
+}
+
+/**
+ * If a final nominee secretly holds an unplayed safety, resolve it at the eviction gate. The player's
+ * is THEIRS to play (a pending choice); an NPC's is engine-resolved (a rational underdog on the block
+ * saves themselves). Playing it removes the holder and the HOH names a replacement — still exactly one
+ * eviction that week (format-preserving). `handled:false` ⇒ no power in play, proceed normally.
+ */
+function maybePlaySecretPower(
+  s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource,
+): { handled: boolean; event: BeatEvent | null } {
+  const sp = s.secretPower;
+  if (!sp || sp.used) return { handled: false, event: null };
+  const fn = s.finalNominees!;
+  if (!fn.includes(sp.holder)) return { handled: false, event: null }; // holder not on the block this week
+  if (sp.declinedWeek === s.week) return { handled: false, event: null }; // player already chose to hold it
+  const options = secretPowerReplacementOptions(s, sp.holder);
+  if (options.length === 0) return { handled: false, event: null }; // no legal replacement ⇒ cannot force one
+  if (sp.holder === ctx.player) {
+    if (!s.pending) s.pending = { kind: "secret-power", by: ctx.player, nominee: sp.holder };
+    return { handled: true, event: null }; // the player's choice — pause here
+  }
+  return { handled: true, event: playSecretPower(s, ctx, sp.holder, options) };
+}
+
+/** Play the secret power: the holder comes off the block, the HOH names a replacement, the reveal fires. */
+function playSecretPower(s: LiveSeasonState, ctx: SeasonCtx, holder: EntityId, options: EntityId[]): BeatEvent {
+  const sp = s.secretPower!;
+  sp.used = true;
+  const fn = s.finalNominees!;
+  const staying = fn[0] === holder ? fn[1] : fn[0];
+  const hoh = s.hoh!;
+  const mood = ctx.emotionalOf?.(hoh) ?? 0.5;
+  const replacement = [...options].sort((a, b) => nominationScore(hoh, b, ctx.rel, mood) - nominationScore(hoh, a, ctx.rel, mood))[0]!;
+  s.finalNominees = [staying, replacement];
+  (s.firedTwists ??= []).push({ kind: "secret-power", beat: s.week });
+  return {
+    beat: "twist-reveal",
+    content: `SECRET POWER: ${holder} reveals a secret one-time safety and removes themselves from the block; ` +
+      `${hoh} must name ${replacement} as the replacement nominee`,
+    participants: [holder, hoh, replacement, staying],
+  };
+}
+
+/**
+ * Resolve the battle-back: the most-recently-evicted jurors compete and the winner RE-ENTERS the game.
+ * The returnee is pulled out of the eviction record (their first eviction is voided — no grudge stands)
+ * and back into the active house; when they are re-evicted later they rejoin the jury, so the finale
+ * still closes at a jury of nine and a Final 2. The player, if a juror in the window, competes.
+ */
+function resolveBattleBack(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
+  const k = Math.min(4, s.evictionOrder.length);
+  const field = s.evictionOrder.slice(-k); // the recent jurors — includes the player if they were one
+  const def = drawFor(s, "hoh", rng);
+  const winner = resolveComp(field, def, ctx, rng, "compete").winner;
+  s.evictionOrder = s.evictionOrder.filter((h) => h !== winner);
+  s.active.push(winner);
+  if (s.mannerByEvictee) delete s.mannerByEvictee[winner]; // the voided eviction leaves no jury grudge
+  (s.firedTwists ??= []).push({ kind: "battle-back", beat: s.week });
+  s.beat = "hoh-competition";
+  return {
+    beat: "twist-reveal",
+    content: `BATTLE-BACK: the evicted jurors compete for a second chance — ${winner} wins and re-enters the game.`,
+    participants: [...field],
+  };
 }
 
 /** After a veto save: the HOH names the replacement (player pends; NPC auto-picks). */
@@ -1810,6 +1970,9 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
       // confirmation never rides `s.pending` (it lives on `selfEvictPending`), so the auto-driver
       // (calibration / admin fast-forward) is never asked to resolve one. Refuse defensively.
       throw new Error("self-eviction is a deliberate player choice — never auto-resolved");
+    case "secret-power":
+      // 0025: a rational underdog on the block plays their one-time safety to save themselves.
+      return { kind: "secret-power", use: true };
   }
 }
 
@@ -1937,6 +2100,23 @@ export function applyDecision(
         content: `${p.by} leaves ${e.evictee} a ${input.tone} goodbye message`,
         participants: [p.by, e.evictee!],
       };
+    }
+    // --- secret power (0025 reactive redesign) ---------------------------------
+    case "secret-power": {
+      const p = s.pending;
+      if (!p || p.kind !== "secret-power") throw new Error("no pending secret-power decision");
+      const sp = s.secretPower;
+      if (!sp || sp.used || sp.holder !== p.by) throw new Error("no secret power to play");
+      s.pending = undefined;
+      if (!input.use) {
+        // The player holds it for later — not consumed, but not re-offered this week; the eviction proceeds.
+        sp.declinedWeek = s.week;
+        s.beat = "eviction";
+        return { beat: "eviction", content: `${p.by} keeps their options to themselves`, participants: [p.by] };
+      }
+      const options = secretPowerReplacementOptions(s, sp.holder);
+      if (options.length === 0) throw new Error("the secret power cannot be played — no legal replacement exists");
+      return playSecretPower(s, ctx, sp.holder, options);
     }
     // --- finale (0037) ---------------------------------------------------------
     case "finale-statement": {

@@ -200,6 +200,17 @@ export class BbWorld extends World {
   fires?: import("../../src/engine/reserveTwists").TwistEvent[];
   visibleBefore?: number;
   twistEventId?: string;
+  // Reactive reserve twists (0025 redesign) scratch state.
+  twistPlan?: import("../../src/engine/reserveTwists").TwistPlan;
+  twistPlanB?: import("../../src/engine/reserveTwists").TwistPlan;
+  twistLive?: import("../../src/engine/liveSeason").LiveSeasonState;
+  twistCtx?: import("../../src/engine/liveSeason").SeasonCtx;
+  twistFiredKinds?: import("../../src/engine/reserveTwists").TwistKind[];
+  twistFiredKindsB?: import("../../src/engine/reserveTwists").TwistKind[];
+  twistArmedFlags?: boolean[];
+  twistLastEvent?: import("../../src/engine/liveSeason").BeatEvent | null;
+  twistJury?: number;
+  twistFinalTwo?: number;
 
   // Temperature & emotional constants (0028) scratch state.
   baseWinRate?: number;

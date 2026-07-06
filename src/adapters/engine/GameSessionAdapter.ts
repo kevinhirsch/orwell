@@ -148,7 +148,7 @@ import {
 import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
-import { loadReserveTwists } from "../../engine/reserveTwists";
+import { loadReserveTwists, planReserveTwists } from "../../engine/reserveTwists";
 import {
   generateCastDeepLayer, deepProfileToVaultContent, generateDeepProfile, deriveStoryThreads,
   defaultTriggerConditionFor, triggerMet, sourceWindowClosed, threadRumor,
@@ -966,6 +966,19 @@ export class GameSessionAdapter implements GameSession {
 
   setTwistCount(n: number): void {
     this.twistCount = Math.max(0, Math.floor(n));
+  }
+
+  /**
+   * 0025 reactive redesign (PO ruling 2026-07-06): when on, a NEW season arms the standing reactive
+   * pool (all three twists watch the live house, per-season seeded triggers) instead of the legacy
+   * pre-scheduled double-eviction-only path. Default OFF ⇒ the setup + loop are byte-identical to
+   * before (the tuned calibration baseline is untouched); the whole reactive path is gated by whether
+   * `s.twistPlan` is set at setup, so an in-flight legacy game never changes shape.
+   */
+  private reactiveTwistsEnabled = process.env.ORWELL_REACTIVE_TWISTS === "1";
+
+  setReactiveTwistsEnabled(on: boolean): void {
+    this.reactiveTwistsEnabled = on;
   }
 
   /** Vault audit-copy hook (0025/B53): the registry seals the loaded twists into the engine's Vault. */
@@ -2049,10 +2062,12 @@ export class GameSessionAdapter implements GameSession {
       hiddenStory.push({ type: retrospectiveLabel(r.kind), content: this.retroScrub(r.content) });
     }
     const fired = new Map((this.live.firedTwists ?? []).map((t) => [t.kind as string, t.beat]));
-    const twists = (this.live.reserve ?? []).map((t) => ({
-      kind: t.kind as string,
-      firedWeek: fired.get(t.kind) ?? null,
-    }));
+    // Legacy path: list the pre-scheduled reserve (fired or not). Reactive path (0025 redesign): the
+    // pool is a standing plan with no pre-scheduled entries, so the retrospective lists what ACTUALLY
+    // fired (`firedTwists`) — the "sealed twist that never fired" is simply absent, as it was invisible.
+    const twists = this.live.reserve?.length
+      ? this.live.reserve.map((t) => ({ kind: t.kind as string, firedWeek: fired.get(t.kind) ?? null }))
+      : [...fired].map(([kind, week]) => ({ kind, firedWeek: week }));
     // E12: the weekly secret ballots unseal HERE — and only here, behind the same terminal gate.
     const evictionVotes = (this.live.voteRecord ?? []).map((r) => ({
       week: r.week,
@@ -2172,6 +2187,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: "juror-vote", vote: input.vote };
       case "self-evict": // 0061: the auto-driver never produces a self-evict (it's a deliberate quit) — mapped for exhaustiveness.
         return { kind: "self-evict", confirmed: input.confirmed };
+      case "secret-power": // 0025: the fast-forward plays a player-held safety exactly as a live decision does.
+        return { kind: "secret-power", use: input.use };
     }
   }
 
@@ -3697,15 +3714,22 @@ export class GameSessionAdapter implements GameSession {
     this.introducedNames = new Set();
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
-    // 0025/B53 — load + SEAL the reserve twists: seeded, rare, at most one armed week each, only
-    // kinds the live loop implements. Engine-only: the schedule rides in the loop state (persisted,
-    // 0030) and the registry writes the Vault audit copy. Invisible to player AND admin until fired.
-    const reserve = loadReserveTwists(this.twistCount, new SeededRandom(hashSeed(`${seed}:twists`)))
-      .filter((t) => IMPLEMENTED_TWISTS.has(t.kind))
-      .filter((t, i, all) => all.findIndex((o) => o.fireAtBeat === t.fireAtBeat) === i); // one twist per week
-    if (reserve.length > 0) {
-      this.live.reserve = reserve;
-      this.onSeal?.(reserve);
+    if (this.reactiveTwistsEnabled) {
+      // 0025 REACTIVE (PO ruling 2026-07-06): arm the standing pool — all three twists watch the live
+      // house, each fires when the house EARNS its (per-season seeded) trigger, at most once, and all
+      // three may fire in one season. The sealed plan rides the engine-only loop state (persisted,
+      // 0030) — no projection selects it — so it is invisible to player AND admin until a twist fires.
+      this.live.twistPlan = planReserveTwists(new SeededRandom(hashSeed(`${seed}:twist-plan`)));
+    } else {
+      // 0025/B53 legacy path — load + SEAL the pre-scheduled reserve twists: seeded, rare, at most one
+      // armed week each, only kinds the live loop implements. Byte-identical to the pre-redesign setup.
+      const reserve = loadReserveTwists(this.twistCount, new SeededRandom(hashSeed(`${seed}:twists`)))
+        .filter((t) => IMPLEMENTED_TWISTS.has(t.kind))
+        .filter((t, i, all) => all.findIndex((o) => o.fireAtBeat === t.fireAtBeat) === i); // one twist per week
+      if (reserve.length > 0) {
+        this.live.reserve = reserve;
+        this.onSeal?.(reserve);
+      }
     }
     if (adopt) {
       // 0065 — adopt the warmed cast's already-sealed layers wholesale (the diversity floor + the §3
@@ -7178,6 +7202,8 @@ export class GameSessionAdapter implements GameSession {
       }
       case "self-evict": // 0061: intercepted in `submitDecision` BEFORE this map — never reached here.
         return { kind: "self-evict", confirmed: req.confirmed === true };
+      case "secret-power": // 0025: the player plays (true) or holds (false) their one-time safety.
+        return { kind: "secret-power", use: req.use === true };
     }
   }
 
@@ -7273,6 +7299,13 @@ export class GameSessionAdapter implements GameSession {
         // `selfEvictPending`, surfaced above), so this branch is unreachable — handled for
         // type-exhaustiveness only.
         return { kind: p.kind, by, prompt: "Confirm to self-evict, or cancel to stay.", options: [], pick: 0 };
+      // --- secret power (0025 reactive redesign): the reveal + the player's choice, all at once ---
+      case "secret-power":
+        return {
+          kind: p.kind, by,
+          prompt: "You are on the block — and you secretly hold a one-time safety. Play it now to pull yourself off the block (the Head of Household must name a replacement), or hold it and take your chances at the vote.",
+          options: refs([p.nominee]), pick: 1,
+        };
     }
   }
 

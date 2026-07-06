@@ -1,66 +1,100 @@
-# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
-# Feature 0025 — Reserve twists. Vault-sealed from player AND admin; engine-timed; format-preserving.
-# HARD rule: roles only. A twist's existence/timing is secret until it fires.
+# Executable spec — BUILT & green; BDD-gated in cucumber.cjs. Opt-in ORWELL_REACTIVE_TWISTS.
+# Feature 0025 (reactive redesign, PO ruling 2026-07-06) — a STANDING POOL the live house earns.
+# All three twists (double eviction, secret power, battle-back) sit armed from game start; each fires
+# when the house reaches a state that earns it, on per-season seeded triggers; all three may fire in one
+# season, each at most once; sealed from player AND admin until it fires; always format-preserving.
+# HARD rule: roles only (HOH, nominee, evictee, juror, the-player). No names.
+# Legacy pre-scheduled path (flag off) is byte-identical; the reactive path is proven with the flag on.
 
-Feature: Reserve twists — a Vault-sealed surprise neither the player nor the admin can see coming
-
-  A small curated pool of classic, non-structural twists is held in reserve. The engine decides if
-  and when one fires, at a dramatic beat. Until it fires, what it is and when it fires are sealed in
-  the Vault — invisible to the player and to the admin alike — and the core format is never broken.
+Feature: Reserve twists — a standing pool of surprises the live house earns, sealed from everyone
 
   Background:
-    Given a running game sandbox with a reserve twist loaded and sealed in the Vault
+    Given a running game sandbox with the reserve-twist pool armed and sealed in the Vault
 
-  Scenario: A pending twist is invisible to the player
-    When any player-facing surface is produced before the twist fires
-    Then no reserve twist appears
-    And no hint that a twist is pending appears
-    And no Vault sentinel value appears
+  Rule: All three twists stand ready in the pool, watching for their trigger (reactive, not pre-scheduled)
 
-  Scenario: A pending twist is invisible to the admin too
-    Given the admin enabled reserve twists by count
-    When the admin inspects the sandbox before the twist fires
-    Then the admin cannot see which twist was prepared
-    And the admin cannot see when it will fire
-    And no Vault sentinel value appears
+    Scenario: The pool arms all three twists from game start
+      Given a new season with the reactive pool armed
+      Then the double eviction, the secret power, and the battle-back are each watchable in the plan
+      And none has a pre-decided fire week
+      And no player-facing or admin-facing surface reveals the pool
 
-  Scenario: The engine fires a twist rarely and deterministically
-    When the game is played out under a fixed seed
-    Then at most the admin-enabled count of twists fires
-    And each fires at a dramatic beat
-    And the same seed reproduces the same twist and timing
+    Scenario: A twist fires only when the live house reaches its trigger
+      Given a season whose house never reaches the double-eviction trigger
+      Then the double eviction never fires
 
-  Scenario: Firing a twist makes it a witnessed event
-    When a reserve twist fires
-    Then it becomes a witnessed in-game event
-    And the narrator can voice it
-    And only then is it known
+  Rule: The triggers are dynamic — the same conditions do not recur every season
 
-  Scenario: A twist never breaks the hard rules or the core arc
-    When a reserve twist fires
-    Then the eligibility and legality invariants still hold
-    And the season still reaches a jury of nine and a final two
+    Scenario: Two different seasons trigger a twist under different conditions
+      Given two seasons whose seeded twist thresholds differ
+      Then the double eviction targets a different house size across the two seasons
 
-  # --- B53 amendment (2026-06-10): the twists fire in the LIVE game ---------------
-  # The original scenarios proved the pure module; these prove the live loop fires a
-  # sealed double eviction through the real decision seam (audit D6 + B8).
+  Rule: A twist can be earned but still held back (some seasons stay quiet)
 
-  Scenario: A sealed double eviction fires in the live game, exactly once
-    Given a live seeded game with a double eviction sealed for an upcoming week
-    When the season is played through the live decision seam
-    Then the double eviction fires exactly once, at its sealed week
-    And the reveal is a witnessed live event
-    And no player or admin surface revealed the twist before it fired
+    Scenario: An eligible trigger does not always fire
+      Given many seasons that each reach the secret-power trigger
+      Then in some the secret power is armed and in others it is held back
+      And whether it is armed is reproducible under the season's seed
 
-  Scenario: The double-eviction night preserves the hard rules and the arc
-    Given a live seeded game with a double eviction sealed for an upcoming week
-    When the season is played through the live decision seam
-    Then two houseguests are evicted in the twist week
-    And the first crown's head of household does not win the second crown of the night
-    And both evictions count toward the jury order
-    And the live season still reaches a final two with a winner
+  Rule: Each twist fires at most once; all three may fire in one season
 
-  Scenario: The sealed twist schedule survives an engine restart
-    Given a live seeded game with a double eviction sealed for an upcoming week
-    When the engine restarts before the twist week
-    Then the restored game still fires the double eviction at its sealed week
+    Scenario: A single season can fire all three twists, each once
+      Given a live season in which each twist mechanic is driven to fire
+      Then the double eviction, the secret power, and the battle-back each fire exactly once
+      And no twist fires twice
+
+    Scenario: One reactive twist arms per week roll (the cooldown spaces them)
+      Given two triggers are eligible on the same roll
+      Then only one twist arms that roll and the other defers to a later week
+
+  Rule: Twists involving the player are the player's to play (agency)
+
+    Scenario: A secret power granted to the player is the player's to hold and play
+      Given the secret power is granted to the player while they are on the block
+      Then the player is offered the choice to play the secret power
+      And the engine does not play it for them
+
+    Scenario: A secret power granted to an NPC is resolved by the engine
+      Given the secret power is granted to a houseguest while they are on the block
+      Then the engine plays it off the block for them
+      And exactly one houseguest is still evicted that week
+
+    Scenario: A battle-back the player is eligible for is the player's to compete
+      Given the player sits among the recently-evicted jurors when the battle-back fires
+      Then the player is a competitor in the battle-back
+
+  Rule: Sealed from player AND admin until it fires (Vault Wall, both surfaces)
+
+    Scenario: The armed pool is invisible to the player and the admin
+      When any player-facing or admin-facing surface is produced before a twist fires
+      Then no armed twist, its trigger, or its timing appears
+      And no Vault sentinel value appears
+
+    Scenario: Firing a twist reveals it as a witnessed event
+      When a reactive reserve twist fires
+      Then it becomes a witnessed in-game event
+      And only then is it known
+
+  Rule: Every twist is format-preserving (jury of 9 → final 2, hard rules hold)
+
+    Scenario: The secret power preserves the count — still one eviction that week
+      Given the secret power is played off the block
+      Then the protected houseguest is removed from the block
+      And a replacement nominee stands
+      And exactly one houseguest is evicted that week
+
+    Scenario: The battle-back returns a juror yet the jury still closes at nine
+      Given a full live season in which the battle-back fires
+      Then one juror re-enters the game
+      And the season still reaches a jury of nine and a final two
+
+  Rule: Deterministic and durable
+
+    Scenario: The same seed reproduces the same twists
+      Given a full live season played twice under the same seed
+      Then the same twists fire both times
+
+    Scenario: The sealed plan survives an engine restart
+      Given a live season with the reactive pool armed
+      When the engine restarts mid-season
+      Then the restored game still carries the sealed twist plan

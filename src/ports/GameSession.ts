@@ -792,7 +792,11 @@ export interface PendingDecisionView {
   kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
     // --- self-eviction (0061): the player-level/OOC confirmation to voluntarily walk out / quit ---
-    | "self-evict";
+    | "self-evict"
+    // --- secret power (0025 reactive redesign): the player is on the block and secretly holds a
+    // one-time safety — their choice to play it (pull off the block) or hold it. `options` is the two
+    // nominees; the prompt frames the choice. Vault-free: the power's existence is revealed only here. ---
+    | "secret-power";
   by: NamedRef;
   /** A human-readable instruction for the moment (what the player must choose). */
   prompt: string;
@@ -1291,7 +1295,10 @@ export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
     // --- self-eviction (0061): the explicit, confirmed voluntary walk-out / quit ---
-    | "self-evict";
+    | "self-evict"
+    // --- secret power (0025 reactive redesign): the player plays or holds their one-time safety.
+    // Accepts the shared boolean `use` (play it off the block when true; hold it when false/absent). ---
+    | "secret-power";
   /**
    * self-evict (0061): the EXPLICIT confirmation. ONLY `confirmed:true` executes the irreversible
    * walk-out (record the event + fold its impact + flip status through the 0046 door). Anything else
@@ -1302,7 +1309,7 @@ export interface SubmitDecisionReq {
    *  a single pick may ride here as a 1-element array (the FE tool schema's convention) — the
    *  engine accepts it interchangeably with `vote` (audit A10). */
   choice?: EntityId[];
-  /** veto-decision: whether to use the veto. */
+  /** veto-decision: whether to use the veto. secret-power (0025): whether to play the one-time safety. */
   use?: boolean;
   /** veto-decision: the nominee saved when `use` is true. */
   save?: EntityId;

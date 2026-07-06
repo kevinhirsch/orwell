@@ -96,7 +96,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0022 | Player experience MVP-2 (rich game UI) | — | 🗑️ **Removed** (PO review 2026-06-28) — superseded by 0020/0051/0054 under ADR 0003; the dashboard direction was deliberately not taken |
 | 0023 | [Consequence & memory (the MVP-1 backbone)](./0023-consequence-and-memory.md) | BDD | ✅ Built |
 | 0024 | [Soul storage & memory recall (md + vector)](./0024-soul-storage-and-memory-recall.md) | BDD | ✅ Built |
-| 0025 | [Reserve twists (Vault-sealed, engine-timed)](./0025-reserve-twists.md) | BDD | ✅ Built · amended B53 (fires live) |
+| 0025 | [Reserve twists (Vault-sealed, engine-timed)](./0025-reserve-twists.md) | BDD | ✅ Built · **reactive redesign 2026-07-06** (all 3 twists live, standing pool, dynamic triggers; `ORWELL_REACTIVE_TWISTS`) |
 | 0026 | [Relationship math](./0026-relationship-math.md) | BDD | ✅ Built |
 | 0027 | [NarrativePort LLM adapter](./0027-narrative-port-llm-adapter.md) | BDD | ✅ Built |
 | 0028 | [Temperature & emotional-modifier constants](./0028-temperature-and-emotional-constants.md) | BDD | ✅ Built |

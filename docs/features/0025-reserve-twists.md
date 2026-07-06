@@ -1,10 +1,47 @@
 # 0025 — Reserve twists (Vault-sealed, engine-timed)
 
-> **Status:** Built (see the [README status index](./README.md#index)). A **small curated pool of classic, non-structural twists** held **in reserve**.
-> The engine decides **if and when** one fires, at a dramatic beat — and the twist (what *and* when)
-> is **sealed in the Vault so neither the player NOR the admin knows in advance**. Variety and
-> surprise without breaking the 16 → jury-9 → final-2 core.
+> **Status:** Built. **REACTIVE REDESIGN (PO ruling 2026-07-06)** — see §0. A **curated pool of classic,
+> non-structural twists** held **in reserve**. The engine decides **if and when** one fires — and the twist
+> (what *and* when) is **sealed in the Vault so neither the player NOR the admin knows in advance**. Variety
+> and surprise without breaking the jury-9 → final-2 core.
 > **Executable spec:** [`0025-reserve-twists.feature`](./0025-reserve-twists.feature)
+
+## 0. Reactive redesign (PO ruling 2026-07-06) — the current, built model
+
+The original model (below, §1–§12) **pre-scheduled** at most one twist at setup and only ever implemented
+the **double eviction** live. The PO redesigned it so **all three** twists (double eviction, secret power,
+returning-juror battle-back) are **real and live**, and the whole pool is **reactive**:
+
+- **A standing pool, not a pre-pick.** All three twists sit armed from game start, each **watching the live
+  house**; a twist fires when the house reaches a state that *earns* its trigger — never a week chosen at t=0.
+- **Dynamic, per-season triggers.** Each twist's threshold is **re-rolled every season** (double eviction
+  targets a seeded house size; secret power waits for a seeded lopsided-eviction streak; battle-back opens in
+  a seeded early-jury window), so the same conditions **do not recur** across playthroughs — reducing
+  predictability. Within one season everything stays **reproducible** under the seed (saves + tests).
+- **Hold-back.** Even an earned trigger can be **held back** by a seeded per-season arming roll, so some
+  seasons stay quiet and twists stay special.
+- **All three, each at most once.** A season can see **0–3** twists; one arms per week roll (a cooldown that
+  spaces them), and none blocks another.
+- **The player plays their own.** A secret power the **player** secretly holds is **theirs** to play (pull
+  off the block) or hold — surfaced as a real `secret-power` decision; a battle-back the player is in, they
+  **compete** in. NPC-held twists are engine-resolved.
+- **The three mechanics.** Double eviction = the existing compressed second cycle. Secret power = a one-time
+  **safety**: when the holder is on the block they come off, the HOH names a replacement — still exactly one
+  eviction that week. Battle-back = the recently-evicted **jurors compete and one re-enters**; the returnee's
+  first eviction is voided and they can be re-evicted, so the finale still closes at **jury-9 → final-2**.
+- **Still sealed from player AND admin**, still **format-preserving**, still **deterministic**, still
+  **durable** (the sealed plan rides the persisted loop state).
+
+Gated behind **`ORWELL_REACTIVE_TWISTS`** (default **off** ⇒ the legacy §1–§12 pre-scheduled path is
+byte-identical, so the tuned calibration baseline is untouched; **on** ⇒ the reactive pool). Built in
+`src/engine/reserveTwists.ts` (`planReserveTwists`/`triggeredTwist`) + `src/engine/liveSeason.ts` (the three
+mechanics) + `src/adapters/engine/GameSessionAdapter.ts` (arming + the `secret-power` player decision).
+Gates: `tests/unit/reserveTwistsReactive.test.ts`, `tests/unit/reactiveTwistsLive.test.ts`, and the
+reactive `0025-reserve-twists.feature`.
+
+---
+
+*The original pre-redesign spec follows (§1–§12), retained for provenance — the legacy flag-off path.*
 
 ## 1. Summary
 
