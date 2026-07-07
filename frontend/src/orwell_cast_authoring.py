@@ -491,6 +491,19 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         orchestrator integrity checkpoint (the live-verify's 3 `degradation` refusals).
     All three stay fail-soft: after the bounded retries the call simply lands on the seeded floor.
     """
+    # 0108: under the golden record/replay seam the authoring pipeline must be ORDER-
+    # deterministic — parallel commits land in wall-clock arrival order, the engine's shared
+    # seeded stream makes mutation order load-bearing for every later draw, and the fourth
+    # GLM record diverged from its own replay exactly here (two recordCastProfile commits
+    # swapped positions; the walk's presence layouts split from that point). One-at-a-time
+    # in cast order under golden (asyncio.Semaphore waiters are FIFO); production keeps the
+    # parallel pipeline unchanged.
+    try:
+        from src import golden_path as _gp
+        if _gp.active():
+            concurrency = 1
+    except Exception:
+        pass
     sem = asyncio.Semaphore(max(1, int(concurrency)))
     # #1057: SERIALIZE the engine write-back. The per-NPC recordCastProfile write-backs collide on the
     # orchestrator integrity checkpoint when they run concurrently (the live-verify's 3 `degradation`
