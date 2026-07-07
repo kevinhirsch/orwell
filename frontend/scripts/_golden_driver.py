@@ -499,6 +499,14 @@ class GoldenDriver:
                             "no headshot beat surfaced in this run's casting")
 
         # ── cast authoring depth (invariant 4, #1007) ───────────────────────────────
+        # Wait for the WHOLE cast, never a quorum: the walk must start from the FINAL cast
+        # state. The sixth record broke early at >=13 and built its first walk prompt while
+        # the last two profiles were still committing — those two houseguests entered the
+        # prompt with their seeded-floor descriptions, while replay's fixture-fed authoring
+        # finished instantly and rendered their AUTHORED descriptions: a record↔replay state
+        # divergence and a key miss. Record mode additionally requires the FULL 15/15 for a
+        # committable fixture (a partial cast is a wall-clock artifact, not golden state);
+        # replay keeps the spec's >=13 tolerance since it inherits the recorded outcome.
         authored, total = 0, 15
         authoring_budget = 600 if self.mode == "record" else 90
         deadline = time.time() + authoring_budget
@@ -508,13 +516,18 @@ class GoldenDriver:
                 comp = (health.get("orwell") or {}).get("castAuthoring") or health.get("castAuthoring") or {}
                 authored = int(comp.get("authored") or 0)
                 total = int(comp.get("total") or 15)
-                if authored >= 13:
+                if total and authored >= total:
                     break
             except Exception:
                 pass
             time.sleep(5)
+        need = total if self.mode == "record" else 13
         self.inv.record("I4", "cast authoring lands >=13/15 deep profiles",
-                        authored >= 13, f"{authored}/{total} deep-authored")
+                        authored >= need, f"{authored}/{total} deep-authored"
+                        + ("" if authored >= (total or 15) else " (record requires the full cast)"))
+        # The last write-backs just committed — settle their folds before the first walk
+        # prompt reads the board (the same barrier every other mutation seam gets).
+        self._quiesce_beats("post-authoring")
 
         # ── the week: HOH → noms → veto → ceremony → eviction → roll (I5, I6, I8) ──
         phases_seen: list[str] = []

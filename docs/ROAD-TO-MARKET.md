@@ -89,6 +89,19 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   `PHASE_STALL_ABORT`=25 backstop that fails I5 honestly instead of burning a paid budget on a
   real stall. *Product datum worth keeping: a socially-active player can hold a phase open
   indefinitely — by design (lingering is play), but note the pacing texture for M2 copy.*
+- **Finding (record attempts #5/#6 — walk proven; two determinism classes closed):** #5 walked a
+  PERFECT week (every invariant green, roll included) and was rejected solely by the
+  review-hardened initialized-vs-populated integrity rule — the record SCRIPT stamped the meta
+  line from its own pid. Fixed by construction: the FE process now writes the meta line itself on
+  its first record (declared tier via `ORWELL_GOLDEN_NARRATION_MODEL`/`_UTILITY_MODEL`/`_SEED`
+  envs). #6 recorded green end-to-end but its replay missed at the first walk turn: the I4 gate
+  broke early at `authored >= 13` and the walk started while the last two profiles were still
+  committing — the record's first prompt carried their seeded-floor descriptions while replay's
+  fixture-fed authoring finished instantly and rendered the AUTHORED ones (a cast-state
+  divergence, pinned by a direct record-vs-replay system-prompt diff). The driver now waits for
+  the FULL cast before walking (record mode requires 15/15 for a committable fixture; replay
+  keeps the >=13 tolerance since it inherits the recorded outcome) and quiesces the final folds
+  before the first prompt.
 - **Finding (record attempt #3 — the structural gates' first clean pass + M0-7 discovered):**
   integrity scan PASSED (single writer; qwen×61 + glm×198, zero foreign records — the
   contamination class is dead), leak scan clean, escalation cleared three phase-dwells and the
