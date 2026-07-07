@@ -86,7 +86,7 @@ class Invariants:
 
 
 class GoldenDriver:
-    def __init__(self, *, mode: str, fixture: str, model: str,
+    def __init__(self, *, mode: str, fixture: str, model: str, utility_model: str = "",
                  provider_url: str = "", provider_key: str = "",
                  engine_port: int = 8971, fe_port: int = 7971,
                  turn_timeout: int = 420, settle: float = 1.0,
@@ -95,6 +95,10 @@ class GoldenDriver:
         self.mode = mode
         self.fixture = os.path.abspath(fixture)
         self.model = model
+        # The two-tier production topology (owner, 2026-07-07): narration on the premium
+        # narrator, the utility/background call classes on the cheap tier. Empty ⇒ one model
+        # for both (the pre-split behavior).
+        self.utility_model = utility_model or model
         self.provider_url = provider_url
         self.provider_key = provider_key
         self.engine_port = engine_port
@@ -199,6 +203,10 @@ class GoldenDriver:
             current = {}
         current["default_endpoint_id"] = ep["id"]
         current["default_model"] = self.model
+        # Per-class routing (the FE's existing utility_model seam): background/utility call
+        # classes resolve the cheap tier; narration stays on the narrator model.
+        current["utility_endpoint_id"] = ep["id"]
+        current["utility_model"] = self.utility_model
         os.makedirs(os.path.dirname(settings_file), exist_ok=True)
         with open(settings_file, "w", encoding="utf-8") as fh:
             json.dump(current, fh, indent=2)
@@ -502,14 +510,27 @@ class GoldenDriver:
         return rep
 
 
-def fixture_model(fixture: str) -> str:
-    """The model id the fixture was recorded against (first record's `model`)."""
+def fixture_models(fixture: str) -> tuple[str, str]:
+    """(narration_model, utility_model) the fixture was recorded against — narration from the
+    first streamed record, utility from the first non-stream record (falls back to narration).
+    Replay pins BOTH on the dead-end endpoint so every request key matches the recording."""
+    narration, utility = "", ""
     with open(fixture, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
-            if line:
-                return json.loads(line).get("model") or "deepseek/deepseek-v4-pro"
-    raise RuntimeError(f"fixture is empty: {fixture}")
+            if not line:
+                continue
+            rec = json.loads(line)
+            if rec.get("kind") == "stream" and not narration:
+                narration = rec.get("model") or ""
+            elif rec.get("kind") == "call" and not utility:
+                utility = rec.get("model") or ""
+            if narration and utility:
+                break
+    if not narration and not utility:
+        raise RuntimeError(f"fixture is empty: {fixture}")
+    narration = narration or utility
+    return narration, (utility or narration)
 
 
 def run_once(**kw) -> GoldenDriver:

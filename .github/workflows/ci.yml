@@ -249,11 +249,13 @@ jobs:
       - name: fixture presence gate
         id: fixture
         run: |
-          if [ -f frontend/tests/golden/golden_path_deepseek_v4_pro.jsonl ]; then
+          # Model-agnostic: the gate replays whatever tier the owner recorded (the fixture is
+          # model-named; golden_path_replay.py self-resolves the single committed fixture).
+          if compgen -G "frontend/tests/golden/golden_path_*.jsonl" > /dev/null; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=golden-path dormant::no committed fixture yet — record one against the live narrator (cd frontend && OPENROUTER_API_KEY=… ORWELL_GOLDEN_RECORD=1 python3 scripts/golden_path_record.py) and commit frontend/tests/golden/golden_path_deepseek_v4_pro.jsonl to arm this gate."
+            echo "::notice title=golden-path dormant::no committed fixture yet — record one against the live narrator (cd frontend && OPENROUTER_API_KEY=… ORWELL_GOLDEN_RECORD=1 python3 scripts/golden_path_record.py --model <narrator> --utility-model <cheap-tier>) and commit frontend/tests/golden/golden_path_<model>.jsonl to arm this gate."
           fi
       - uses: actions/setup-node@v4
         if: steps.fixture.outputs.present == 'true'

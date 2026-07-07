@@ -62,15 +62,19 @@ jobs:
         working-directory: frontend
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        # The two-tier production topology (owner, 2026-07-07): narration on GLM 5.2, the
+        # utility/background call classes on the cheap qwen tier (locally-served in prod;
+        # OpenRouter stands in here — request keys exclude the endpoint URL by design).
         run: |
           python3 scripts/golden_path_record.py \
-            --fixture /tmp/golden-nightly/golden_path_deepseek_v4_pro.jsonl \
+            --model z-ai/glm-5.2 --utility-model qwen/qwen3.6-flash \
+            --fixture /tmp/golden-nightly/golden_path_glm-5.2.jsonl \
             --report /tmp/golden-nightly/record-report.json
       - name: replay the COMMITTED fixture for the drift diff
         if: steps.key.outputs.present == 'true'
         working-directory: frontend
         run: |
-          if [ -f tests/golden/golden_path_deepseek_v4_pro.jsonl ]; then
+          if compgen -G "tests/golden/golden_path_*.jsonl" > /dev/null; then
             python3 scripts/golden_path_replay.py --runs 1 \
               --report /tmp/golden-nightly/replay-report.json || true
           else

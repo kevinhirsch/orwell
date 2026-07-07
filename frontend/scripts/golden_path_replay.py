@@ -19,17 +19,29 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scripts._golden_driver import fixture_model, run_once  # noqa: E402
+from scripts._golden_driver import fixture_models, run_once  # noqa: E402
 from src import golden_path as gp  # noqa: E402
+
+
+def _default_fixture() -> str:
+    """The canonical committed fixture: DEFAULT_FIXTURE when present, else the single
+    golden_path_*.jsonl under tests/golden/ (the fixture is model-named; the gate is
+    model-agnostic — it replays whatever tier the owner recorded)."""
+    if os.path.isfile(gp.DEFAULT_FIXTURE):
+        return gp.DEFAULT_FIXTURE
+    import glob
+    hits = sorted(glob.glob(os.path.join(os.path.dirname(gp.DEFAULT_FIXTURE), "golden_path_*.jsonl")))
+    return hits[0] if len(hits) == 1 else (hits[-1] if hits else gp.DEFAULT_FIXTURE)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--fixture", default=gp.DEFAULT_FIXTURE)
+    ap.add_argument("--fixture", default="")
     ap.add_argument("--runs", type=int, default=2)
     ap.add_argument("--turn-budget", type=int, default=60)
     ap.add_argument("--report", default="")
     args = ap.parse_args()
+    args.fixture = args.fixture or _default_fixture()
 
     if not os.path.isfile(args.fixture):
         print(f"FAIL: fixture not found: {args.fixture}\n{gp.REGENERATE_HINT}")
@@ -41,11 +53,11 @@ def main() -> int:
             print("  -", v)
         return 1
 
-    model = fixture_model(args.fixture)
+    model, utility_model = fixture_models(args.fixture)
     digests, failed = [], []
     for n in range(max(1, args.runs)):
         print(f"\n── replay run {n + 1}/{args.runs} ─────────────────────────────", flush=True)
-        d = run_once(mode="replay", fixture=args.fixture, model=model,
+        d = run_once(mode="replay", fixture=args.fixture, model=model, utility_model=utility_model,
                      engine_port=8971 + n, fe_port=7971 + n,
                      turn_timeout=120, turn_budget=args.turn_budget)
         rep = d.report((args.report + f".run{n + 1}.json") if args.report else None)

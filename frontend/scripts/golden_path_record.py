@@ -28,7 +28,11 @@ from src import golden_path as gp  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fixture", default=gp.DEFAULT_FIXTURE)
-    ap.add_argument("--model", default="deepseek/deepseek-v4-pro")
+    ap.add_argument("--model", default="deepseek/deepseek-v4-pro",
+                    help="the NARRATION model (default_model)")
+    ap.add_argument("--utility-model", default="",
+                    help="the cheap tier for utility/background call classes "
+                         "(utility_model); empty = same as --model")
     ap.add_argument("--base-url", default=os.environ.get(
         "ORWELL_GOLDEN_BASE_URL", "https://openrouter.ai/api/v1"))
     ap.add_argument("--api-key", default=os.environ.get("OPENROUTER_API_KEY")
@@ -44,6 +48,7 @@ def main() -> int:
         os.remove(args.fixture)  # a recording always starts a FRESH fixture
 
     d = run_once(mode="record", fixture=args.fixture, model=args.model,
+                 utility_model=args.utility_model,
                  provider_url=args.base_url, provider_key=args.api_key,
                  turn_budget=args.turn_budget)
     rep = d.report(args.report or None)
