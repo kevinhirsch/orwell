@@ -394,8 +394,16 @@ def _roster_payload(user: Optional[str], cards: list, *, stale: bool) -> dict:
         progress = orwell_portraits.generation_progress(user)
     except Exception:
         progress = None
+    # M1-9 (audit A9): the last completed run's honest verdict — a 0-of-N run must flip the
+    # panel's copy to "failing", never an eternal "Generating…". Counts only, Vault-free.
+    last_run = None
+    try:
+        last_run = orwell_portraits.last_run_outcome(user)
+    except Exception:
+        last_run = None
     payload = {
         "roster": cards,
+        "portraitLastRun": last_run,
         "imagesAvailable": images_available,
         "portraitsPresent": counts["present"],
         "portraitsTotal": counts["total"],

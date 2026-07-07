@@ -183,6 +183,28 @@ def _progress_finish(user: Optional[str]) -> None:
 # GC'd mid-flight) — `generation_progress` reports it as inactive so the panel never spins forever.
 _GEN_PROGRESS_STALE_S = 120.0
 
+# M1-9 (audit A9): the last COMPLETED run's honest verdict, per user. `image_generation_available`
+# deliberately stays permissive (a configured endpoint is enough to TRY — the false-negative fix),
+# so honesty lives HERE: a run that attempted portraits and landed ZERO flips the cast panel and
+# the admin row to a failing message instead of an eternal "Generating…" spinner.
+_LAST_RUN_OUTCOME: dict = {}
+
+
+def _note_last_run(user: Optional[str], *, generated: int, skipped: int, total: int) -> None:
+    attempted = max(0, int(total) - int(skipped))
+    if attempted <= 0:
+        return  # nothing genuinely attempted (all skipped/idempotent) — keep the prior verdict
+    _LAST_RUN_OUTCOME[_safe_user(user)] = {
+        "generated": int(generated), "attempted": attempted,
+        "failing": int(generated) == 0,
+    }
+
+
+def last_run_outcome(user: Optional[str]) -> Optional[dict]:
+    """``{generated, attempted, failing}`` for this user's last completed generation run, or
+    None when no run has genuinely attempted anything (pre-game, all-idempotent, never ran)."""
+    return _LAST_RUN_OUTCOME.get(_safe_user(user))
+
 
 def generation_progress(user: Optional[str]) -> Optional[dict]:
     """The live generation-progress record for this user, or None when nothing is/was running.
@@ -1520,6 +1542,8 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             logger.info("[portraits] L17 distinctness pass failed: %s", e)
 
     _progress_finish(user)  # L15: the run is done — the panel drops to the idle cadence
+    # M1-9: stamp the run's honest verdict (a 0-of-N run flips the panel/admin to "failing").
+    _note_last_run(user, generated=generated, skipped=skipped, total=len(prompts))
 
     if record_beats and newly_shown:
         await _record_image_beats(newly_shown, user)
@@ -2123,6 +2147,8 @@ def scrub_user(user: Optional[str]) -> None:
     """Delete one user's portrait set (used on a per-user new-season reset)."""
     import shutil
 
+    # M1-9: a new season is a fresh verdict — never carry a "failing" flag across resets.
+    _LAST_RUN_OUTCOME.pop(_safe_user(user), None)
     d = user_portrait_dir(user)
     try:
         if d.exists():

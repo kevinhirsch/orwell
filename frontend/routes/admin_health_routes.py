@@ -221,6 +221,9 @@ async def _image_state(user: str | None) -> dict:
         enabled, model_spec, quality = orwell_portraits._image_settings(user)
         state.update({"enabled": bool(enabled), "model": model_spec or "", "quality": quality or ""})
         state["available"] = bool(orwell_portraits.image_generation_available(user))
+        # M1-9 (audit A9): availability is deliberately permissive ("configured is enough to
+        # TRY"), so the row also carries the last run's honest verdict — 0-of-N ⇒ failing.
+        state["lastRun"] = orwell_portraits.last_run_outcome(user)
     except Exception as e:
         state["error"] = f"{type(e).__name__}: {e}"
     try:
@@ -1291,7 +1294,7 @@ function render(d) {
     ["Engine", B(!!eng.ok, eng.ok ? "REACHABLE" : "DOWN") + (eng.latencyMs != null ? " · " + esc(eng.latencyMs) + " ms" : "") + (eng.uptimeSeconds != null ? " · up " + esc(up(eng.uptimeSeconds)) : "") + (eng.error ? " · " + esc(eng.error) : "")],
     ["Tiers agree", B(!!d.tiersAgree, d.tiersAgree ? "YES" : "NO")],
     ["Embeddings", emb ? esc(emb.provider || "?") + " " + B(!emb.degraded, emb.degraded ? "DEGRADED" : "OK") : B(false, "UNKNOWN")],
-    ["Image generation", (img.available ? B(true, "AVAILABLE") : B(false, img.enabled ? "NO USABLE MODEL" : "DISABLED")) + (img.model ? " · " + esc(img.model) : "") + (img.portraits && img.portraits.total ? " · portraits " + (img.portraits.missing ? '<span class="warn">' : '<span class="ok">') + esc(img.portraits.present) + "/" + esc(img.portraits.total) + "</span>" : "")],
+    ["Image generation", (img.available ? B(true, "AVAILABLE") : B(false, img.enabled ? "NO USABLE MODEL" : "DISABLED")) + (img.model ? " · " + esc(img.model) : "") + (img.portraits && img.portraits.total ? " · portraits " + (img.portraits.missing ? '<span class="warn">' : '<span class="ok">') + esc(img.portraits.present) + "/" + esc(img.portraits.total) + "</span>" : "") + (img.lastRun && img.lastRun.failing ? ' · <span class="warn">last run FAILED (0/' + esc(img.lastRun.attempted) + ' — provider not producing images)</span>' : "")],
     ["Cast authoring", (ca && ca.total ? (ca.missing ? '<span class="warn">' : '<span class="ok">') + esc(ca.authored) + "/" + esc(ca.total) + "</span> deep-authored" + (ca.missing ? " · " + esc(ca.missing) + " on floor" : "") : '<span class="sub">—</span>')],
     ["Tool calls", esc(tc.total ?? 0) + " total · " + esc(tc.failed ?? 0) + " failed"],
     ["Front-end store", (st.degraded ? B(false, "DEGRADED") + " · " : "") + esc(st.sessions ?? "?") + " session(s) · " + esc(st.messages ?? "?") + " message(s)" + (st.database_size_mb != null ? " · " + esc(st.database_size_mb) + " MB" : "")],
