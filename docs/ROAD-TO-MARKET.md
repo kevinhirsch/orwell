@@ -45,24 +45,64 @@ are parallel unless `Depends` says otherwise.
 
 ## Wave M0 — finish the proof system (owner: critical; 0108 tail + owed verification)
 
-### M0-1 · Record + commit the canonical real-model golden fixture — S (owner-keyed) 
-Source: 0108 (built, gate dormant). Depends: PR #1233 merged.
-- **DoR:** OpenRouter key at hand; `frontend/INTEGRATION.md` §golden-path read; ~one
-  season-week of real-model spend accepted.
-- **DoD:** `cd frontend && OPENROUTER_API_KEY=… ORWELL_GOLDEN_RECORD=1 python3
-  scripts/golden_path_record.py` run once; printed invariant table reviewed; leak scan clean;
-  `frontend/tests/golden/golden_path_deepseek_v4_pro.jsonl` committed; the `golden-path` CI job
-  flips from its dormant notice to **green on two consecutive runs** (`--runs 2` digest-equal);
-  `OPENROUTER_API_KEY` repo secret set so `golden-nightly` arms.
+> **Standing owner decision (2026-07-07, this session):** the production model topology is
+> **two-tier** — narration on **GLM 5.2**, utility/background call classes on **Qwen 3.6**
+> (locally served in prod; `deepseek/deepseek-v4-flash` as the cloud alternate). The FE's
+> existing per-class routing (`default_model` + `utility_model`/`utility_endpoint_id`) carries it
+> with zero new code; the golden gate is model-agnostic (fixtures are model-named, keys exclude
+> endpoint URLs — a local re-record stays compatible). Qwen 3.6 Flash verified tool-calling clean;
+> note it reasons by default (~266 reasoning tokens on a trivial call — ADR-0010 per-class
+> reasoning budgets are the lever if utility cost creeps).
+
+### M0-1 · Record + commit the canonical real-model golden fixture — S · **IN PROGRESS (this session)**
+Source: 0108 (built, gate dormant). Retargeted by the owner from deepseek-v4-pro to the two-tier
+GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time of writing.
+- **DoR (met):** key at hand ✓; OpenRouter reachability through the proxy verified ✓; both models
+  verified tool-capable ✓; two-tier driver support shipped ✓ (`--model` + `--utility-model`).
+- **DoD:** the live run's invariant table reviewed; leak scan clean;
+  `frontend/tests/golden/golden_path_glm-5.2.jsonl` committed (mid-write fixtures are never
+  committed — the commit IS the gate-arming event); the `golden-path` CI job green on two
+  consecutive runs (`--runs 2` digest-equal); **owner:** set the `OPENROUTER_API_KEY` repo secret
+  (arms `golden-nightly`) and **rotate the key pasted in chat** after the session.
 
 ### M0-2 · Calibrate invariants I2/I3 against the real belts — S–M
-Source: 0108 stub-run findings (I2 opener never fired headless; I3 skipped — no headshot beat).
-Depends: M0-1 (first real recording shows the belts' true behavior).
+Source: 0108 stub-run findings, now twice-confirmed on real runs pending (I2 opener never fired
+headless in any stub cycle; I3 skipped — no headshot beat surfaces headless).
+Depends: M0-1 (the GLM run report is the evidence base).
 - **DoR:** M0-1's run report at hand; decision noted whether the #967 opener belt is
   client-kicked (if so, the driver emulates the kick) or server-side (if so, its absence is a bug).
 - **DoD:** I2 and I3 each either PASS on a real record/replay cycle or are converted into a filed
   issue with the run-report evidence attached; the driver's conditional SKIP for I3 only remains
   if the golden path legitimately has no photo beat under the recorded config.
+
+### M0-5 · Close the residual replay-miss class — M · **OPEN (characterized, instrumented)**
+Source: this session's determinism campaign. Four volatility classes are already fixed and
+committed (the wall-clock prompt section neutralized key-side; the web-search zeitgeist quiesced;
+the off-screen-texture and portrait pipelines quiesced — the ledger-diff finding; the presence
+dwell counter neutralized; per-turn + post-create beat-quiesce barriers in the driver). Replay
+digest determinism and invariant-vector reproducibility are green; a **residual deterministic R1
+miss class remains on the stub fixture** (same misses both runs — a record↔replay divergence, not
+a flake).
+- **DoR:** the GLM fixture's own `--runs 2` replay result (it either shows the same residual or
+  clears it — the stub's compressed pacing may be the trigger); the engine-call ledger
+  (`ORWELL_GOLDEN_CALL_LEDGER`) + miss dump (`ORWELL_GOLDEN_DEBUG_DUMP`) diffs from that run.
+  **Constraint learned: one driver run at a time — `frontend/data` is shared state** (parallel
+  runs cross-clobber model config; two crashes proved it).
+- **DoD:** replay of the committed real fixture reports **R1 zero misses** on two consecutive
+  runs; whatever seam the ledger diff names is fixed with the same discipline as the four above
+  (quiesce/neutralize/serialize — never mute); the fix lands with a unit gate in
+  `test_0108_golden_path.py`.
+
+### M0-6 · Reconcile the model-tier defaults to the two-tier decision — S (docs + config)
+Source: the owner retarget above vs the repo's standing defaults (ADR 0016 names GLM-4.7 +
+Seedream; `settings.py` defaults `z-ai/glm-4.7`(chat)/`glm-4.7-flash`(utility); `oobe_reset.py`
+resets narrator to `deepseek/deepseek-v4-pro`).
+- **DoR:** owner confirms the OOB defaults should BE the two-tier pair (vs merely this
+  deployment's settings) — the local-Qwen posture means the OOB cloud default may deliberately
+  differ from the owner's own rig.
+- **DoD:** ADR 0016 gains an amendment line recording the 2026-07-07 tier decision;
+  `settings.py` defaults + `oobe_reset.py` OOB models + the `golden-nightly` model args agree
+  with whatever the owner confirms; the settings-wiring source gates updated in the same PR.
 
 ### M0-3 · ADR-0008/0012 owed live-LLM two-window re-run + mid-gen-join pin — M
 Source: repo's own owed-verification list; market #3 ("prove the real product works").
@@ -410,7 +450,9 @@ deliberately isolates the transcript author name behind one constant for this re
 ### P-2 · Who pays for inference (BYOK vs hosted) + unit economics — OWNER
 Prep task available on request: the cost-per-season instrument — a read-only harness over the
 0069 token ledger emitting $/season for N real seasons. No product change; feeds the pricing
-decision whenever taken.
+decision whenever taken. *(Partially fed by M0-1: the GLM 5.2 + Qwen record run produces the
+first real cost-per-week number from the token ledger; the owner's local-Qwen posture drops the
+utility tier's marginal cost to ~zero in production.)*
 
 ---
 
