@@ -54,7 +54,7 @@ are parallel unless `Depends` says otherwise.
 > note it reasons by default (~266 reasoning tokens on a trivial call — ADR-0010 per-class
 > reasoning budgets are the lever if utility cost creeps).
 
-### M0-1 · Record + commit the canonical real-model golden fixture — S · **IN PROGRESS (this session)**
+### M0-1 · Record + commit the canonical real-model golden fixture — S · **BLOCKED on M0-8 (engine logical clock)**
 Source: 0108 (built, gate dormant). Retargeted by the owner from deepseek-v4-pro to the two-tier
 GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time of writing.
 - **DoR (met):** key at hand ✓; OpenRouter reachability through the proxy verified ✓; both models
@@ -89,6 +89,17 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   `PHASE_STALL_ABORT`=25 backstop that fails I5 honestly instead of burning a paid budget on a
   real stall. *Product datum worth keeping: a socially-active player can hold a phase open
   indefinitely — by design (lingering is play), but note the pacing texture for M2 copy.*
+- **Finding (record attempt #7 — the terminal class: WALL-CLOCK INSIDE THE ENGINE TICK; M0-8 filed):**
+  #7 recorded perfectly (all invariants, 15/15 authored BEFORE the walk, integrity + leak clean)
+  and its replay cleared walk turn 1 for the first time — then missed at turn 2 on the presence
+  divergence again. The ledger proof is conclusive: **36 byte-identical mutations** (names + arg
+  digests) through turn 1, reads rng-pure, yet the record's world evolved 2–3 presence steps
+  further. Cause: `orchestrator.defaultApply` hashes **`clockNow` (wall-clock) into derived rng
+  seeds** (`confessional-recent/-phrasing:${clockNow}`) and event recency windows / ids — a
+  40-min record and a 4-min replay live in different clocks, so tick behavior diverges no matter
+  what the driver does. Terminal for driver-side fixes; requires the engine-side logical clock
+  (**M0-8**). The fixture is NOT committable until M0-8 lands; the golden-path gate stays
+  dormant-with-notice (by design), and the PR ships complete without it.
 - **Finding (record attempts #5/#6 — walk proven; two determinism classes closed):** #5 walked a
   PERFECT week (every invariant green, roll included) and was rejected solely by the
   review-hardened initialized-vs-populated integrity rule — the record SCRIPT stamped the meta
@@ -113,6 +124,28 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   emulation. The engine-side projection disagreement is filed as **M0-7**. I7's mid-body scrub
   also false-positived on host voice ("Let me get a read on…") — mid-body now flags only
   unambiguous operator signatures; the full planning set still applies to the leading strip.
+
+### M0-8 · Engine: logical clock under golden mode (wall-clock is in the tick's rng) — M (engine) · **NEW · BLOCKS the fixture commit**
+Source: record attempt #7 autopsy (2026-07-07). `orchestrator.defaultApply` seeds per-tick derived
+rng streams and recency windows with **wall-clock `clockNow`** (`confessional-recent/-phrasing:
+${clockNow}`, `selectRecentForConfessional(events, …, clockNow)`, `orch:day:${clockNow}` ids) — so
+a real-time record and a fast replay diverge in tick behavior even with byte-identical mutation
+sequences (proven by ledger diff: 36 identical mutations, different presence/gossip state one
+turn later). Every future record/replay pair diverges the same way; this is the terminal blocker
+for committing any golden fixture.
+- **DoR:** locate the engine's `Clock` port wiring in `src/composition/runtime.ts` (a
+  deterministic clock adapter likely already exists for the test sandbox); decide the golden
+  semantics — recommended: an env-gated **logical clock** that starts at a fixed epoch and
+  advances ONLY on committed mutations (reads never advance it — read counts are
+  wall-clock-paced and must stay clock-neutral), so identical commit sequences ⇒ identical
+  clock sequences ⇒ identical tick behavior.
+- **DoD:** with the env set, two engine runs fed identical tool-call sequences at different
+  wall-clock pacing produce byte-identical event streams and projections (a unit gate proves
+  it); default behavior (env unset) byte-identical to today; the golden driver sets the env on
+  the engine it boots; a fresh GLM record + `--runs 2` replay then validates end-to-end and the
+  fixture commits (closing M0-1). *Also note: the FE agent loop's round-continuation decision
+  ("round counts vary ±1 with stream timing" — the reason `turnsHere` is key-neutralized) is the
+  next-frontier nondeterminism if it survives the clock fix; keep the miss-dump/ledger drill.*
 
 ### M0-7 · Engine: `getGameState.pending` disagrees with `gameStatus.pending` — S–M (engine) · **NEW**
 
