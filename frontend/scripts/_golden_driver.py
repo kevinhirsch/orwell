@@ -212,6 +212,31 @@ class GoldenDriver:
                             {"name": "preSeedCast", "args": {"seed": SEASON_SEED}})
         if "result" not in r:
             raise RuntimeError(f"preSeedCast failed: {r}")
+        self._quiesce_beats("post-preseed")
+
+    def _quiesce_beats(self, label: str, stable_polls: int = 3, budget_s: int | None = None) -> None:
+        """Wait until the engine's beatSeq stops moving — a serialization barrier so the
+        fire-and-forget background write-backs (cast identity, prewarm) land at a
+        DEFINED point relative to the walk in BOTH modes, instead of racing the turns
+        (a mid-walk background commit shifts every later tool result's beatSeq and
+        drifts the replay keys)."""
+        budget = budget_s if budget_s is not None else (120 if self.mode == "record" else 45)
+        last, stable = None, 0
+        deadline = time.time() + budget
+        while time.time() < deadline:
+            try:
+                r = self._post_json(self.engine, "/player/call",
+                                    {"name": "getGameState", "args": {}})
+                seq = (r.get("result") or {}).get("beatSeq")
+            except Exception:
+                seq = None
+            stable = stable + 1 if (seq is not None and seq == last) else 0
+            last = seq
+            if stable >= stable_polls:
+                print(f"  quiesce[{label}]: beatSeq stable at {seq}", flush=True)
+                return
+            time.sleep(1)
+        print(f"  quiesce[{label}]: budget elapsed (beatSeq {last}) — proceeding", flush=True)
 
     # ── the walk ──────────────────────────────────────────────────────────────────
 
@@ -296,6 +321,9 @@ class GoldenDriver:
                         f"after {turn_no} casting turns")
         if not started:
             return
+        # Serialize the create-kicked background write-backs before probing the opener /
+        # walking the week — same barrier in both modes (see _quiesce_beats).
+        self._quiesce_beats("post-create")
 
         # ── the producers' opener fires unprompted (invariant 2, #967) ─────────────
         before = sum(1 for m in self._history() if m.get("role") == "assistant")

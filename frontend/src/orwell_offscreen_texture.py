@@ -169,6 +169,17 @@ def kickoff_enrich(owner: Optional[str] = None) -> None:
     """Fire-and-forget the off-screen texture enrichment in the background after an advance tick.
     Never blocks the advance; never raises into the caller. A per-user in-flight guard drops a second
     overlapping run for the same user (the next tick, after this one finishes, runs normally)."""
+    # 0108: quiesced under golden record/replay — its per-tick model calls and engine write-backs
+    # land on a background schedule (bumping beatSeq between player turns), which makes the
+    # replayed conversation's tool results non-reproducible. Fail-soft by design: the engine's
+    # deterministic skeletons stand un-voiced, exactly as when no utility model is configured.
+    try:
+        from src import golden_path
+        if golden_path.active():
+            logger.info("[offscreen-texture] skipped: golden record/replay mode (0108 determinism)")
+            return
+    except Exception:
+        pass
     k = _key(owner)
     if k in _IN_FLIGHT:
         return
