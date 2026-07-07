@@ -136,3 +136,26 @@ compares against), under **0001** (Vault sentinel) and **0021** (per-user isolat
 **0016** (God Mode). Implements the **`Clock`/`Scheduler`** port named in `CLAUDE.md`'s architecture.
 Answers the product question: *no runtime orchestrator/watcher/integrity-verifier exists today* — this
 is it, built as a hybrid (deterministic turn-driven spine + background supervisor).
+
+## 8. Shipped defaults & clarifications (PO review 2026-07-06)
+
+- **The background wall-clock watcher is OFF by default** (`ORWELL_WATCHER_TICK_MS=0`; ruling
+  2026-06-10, wired in `src/composition/runtime.ts`). Production runs **pure turn-driven**: the
+  house does NOT advance while the player is away (NPCs can't leave the house, the player can — a
+  background advance during an absence would be a structural disadvantage). Instead the orchestrator
+  fires **one bounded off-screen tick per player turn** (`maybeTurnDrivenTick`), so the house still
+  lives turn-to-turn. The watcher (scenario 2's wall-clock idle ticks) is an **opt-in operator knob**,
+  never the default. So "advance" in normal play is **player-turn-triggered**, not clock-triggered.
+- **Advance vs. in-game time (the two tracks).** An "advance" is one *committed player turn* (snapshot →
+  work → verify → keep-or-revert). It is **not** 1:1 with a ceremony **beat**: ceremony beats
+  (HOH → noms → veto → veto-ceremony → eviction) are the **sparse plot milestones** (~one per in-game
+  day) and only progress on the turn that performs the ceremony action; **most turns are lingering /
+  conversation** that advance the **in-game time-of-day** (0066, via `advanceClockPerConversation`) and
+  run the off-screen life **without** moving the ceremony beat. Time-of-day (0066) is the finer-grained
+  *pacing of a day* that fills the space between the sparse beats; as the in-game night gets late the
+  awake set shrinks (0049) and the day ends by running out of *people*, not a timer. The orchestrator's
+  turn commit is the seam that carries the 0066 clock forward — they are the same heartbeat, not rival
+  clocks.
+- **Health record.** The live `HealthRecord` also carries a `circuitOpen` flag (a resilience
+  circuit-breaker: repeated off-screen-tick faults open the circuit so a wedged sandbox stops being
+  hammered; any clean advance closes it) beyond the §4.4 metadata list — still Vault-free metadata only.
