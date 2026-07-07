@@ -41,6 +41,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       deploy: ${{ steps.filter.outputs.deploy }}
       heavy: ${{ steps.filter.outputs.heavy }}
+      golden: ${{ steps.filter.outputs.golden }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,13 +78,18 @@ jobs:
           # HEAVY (calibration-relevant): the simulation inputs. A subset of engine — a docs/frontend
           # change can never move a calibration result, so the heavy lane skips for those.
           HEAVY_RE='^(src/|tests/|package\.json$|package-lock\.json$|vitest\.config\.ts$|cucumber\.cjs$|\.github/workflows/ci\.yml$)'
+          # GOLDEN (0108): the golden-path replay exercises the model↔engine seam end to end, so a
+          # regression can come from EITHER side — the FE (agent loop, belts, guards), the engine,
+          # or the committed fixture itself (frontend/tests/golden/, matched by frontend/).
+          GOLDEN_RE='^(frontend/|src/|package\.json$|package-lock\.json$|\.github/workflows/ci\.yml$)'
 
-          for name in engine frontend deploy heavy; do
+          for name in engine frontend deploy heavy golden; do
             case "$name" in
               engine)   re="$ENGINE_RE" ;;
               frontend) re="$FRONTEND_RE" ;;
               deploy)   re="$DEPLOY_RE" ;;
               heavy)    re="$HEAVY_RE" ;;
+              golden)   re="$GOLDEN_RE" ;;
             esac
             if matches "$re"; then
               echo "${name}=true" >> "$GITHUB_OUTPUT"
@@ -221,6 +227,54 @@ jobs:
         run: for s in $(git ls-files 'deploy/*.sh' 'deploy/**/*.sh'); do bash -n "$s"; done
       - name: engine + system deploy smoke
         run: bash deploy/smoke.sh
+
+  # ── 0108 golden-path replay gate (deterministic, key-free, blocking) ─────────────
+  # Replays the committed real-model transcript fixture against the REAL engine + REAL
+  # front-end — the FE's model chokepoints re-emit the recorded bytes (no provider, no
+  # key, no network beyond loopback) — and asserts the eight golden-path invariants plus
+  # the replay contract, TWICE, comparing run digests (a non-deterministic replay is
+  # itself a seam bug to fix, never to mute). DORMANT with an explicit notice until the
+  # first fixture is recorded and committed; the nightly workflow re-records against the
+  # live model so prompt drift surfaces before it lands here.
+  golden-path:
+    needs: changes
+    if: needs.changes.outputs.golden == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Self-hosted runner: don't leave the job GITHUB_TOKEN in .git/config for later steps.
+          persist-credentials: false
+      - name: fixture presence gate
+        id: fixture
+        run: |
+          if [ -f frontend/tests/golden/golden_path_deepseek_v4_pro.jsonl ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=golden-path dormant::no committed fixture yet — record one against the live narrator (cd frontend && OPENROUTER_API_KEY=… ORWELL_GOLDEN_RECORD=1 python3 scripts/golden_path_record.py) and commit frontend/tests/golden/golden_path_deepseek_v4_pro.jsonl to arm this gate."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.fixture.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        if: steps.fixture.outputs.present == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.fixture.outputs.present == 'true'
+        run: npm ci
+      - if: steps.fixture.outputs.present == 'true'
+        run: npm run build
+      - if: steps.fixture.outputs.present == 'true'
+        run: pip install -r frontend/requirements.txt
+      - name: replay the golden path (twice, deterministic, key-free)
+        if: steps.fixture.outputs.present == 'true'
+        working-directory: frontend
+        run: python3 scripts/golden_path_replay.py --runs 2
 
   # ── Front-end gate (SPLIT 3 ways so it fans out across the runner pool) ──────────
   # The vendored Python app is outside the TS tooling. It used to be ONE ~7-min job (the CI long
@@ -383,6 +437,7 @@ jobs:
       - test
       - coverage
       - smoke
+      - golden-path
       - fe-unit
       - fe-browser-tests
       - fe-browser
@@ -398,6 +453,7 @@ jobs:
             test=${{ needs.test.result }}
             coverage=${{ needs.coverage.result }}
             smoke=${{ needs.smoke.result }}
+            golden-path=${{ needs.golden-path.result }}
             fe-unit=${{ needs.fe-unit.result }}
             fe-browser-tests=${{ needs.fe-browser-tests.result }}
             fe-browser=${{ needs.fe-browser.result }}
