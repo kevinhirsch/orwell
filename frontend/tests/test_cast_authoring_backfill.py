@@ -31,6 +31,7 @@ import asyncio
 import importlib
 
 import pytest
+from conftest import _run
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -38,12 +39,6 @@ A = importlib.import_module("src.orwell_cast_authoring")
 orwell_engine = importlib.import_module("src.orwell_engine")
 orwell_routes = importlib.import_module("routes.orwell_routes")
 ahr = importlib.import_module("routes.admin_health_routes")
-
-
-def _run(coro):
-    # FE loop discipline (test_l28b_cast_authoring): drive on the EXISTING loop, never asyncio.run
-    # (which would close the main-thread loop out from under sibling test files).
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _kick(ids, user, force=False):

@@ -129,16 +129,16 @@ def reset_user_season(user: Optional[str]) -> None:
     # A new season = a new cast: scrub the prior portrait set before generating (0051).
     try:
         orwell_portraits.scrub_user(user)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.info("[prewarm] reset_user_season: scrub_user failed: %s", e)
     try:  # M1-10: new season ⇒ the authoring give-up ledger resets with the cast
         orwell_cast_authoring.reset_attempts(user)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.info("[prewarm] reset_user_season: reset_attempts failed: %s", e)
     try:
         reset(user)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.info("[prewarm] reset_user_season: reset failed: %s", e)
 
 
 async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=None, identity=None) -> dict:

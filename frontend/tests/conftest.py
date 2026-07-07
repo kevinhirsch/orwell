@@ -7,6 +7,7 @@ app-admin logic, though, lives entirely in the self-contained `core.auth` and
 heavy `__init__` never runs.
 """
 
+import asyncio
 import functools
 import os
 import pathlib
@@ -92,6 +93,29 @@ def pytest_collection_modifyitems(config, items):
 # later completeness/concurrency assertion, so co-run ORDER (and xdist worker distribution) decides
 # pass/fail. Reset it before every test that already imported the module (cheap: no-op when it isn't
 # loaded, so unrelated tests pay nothing).
+# ── shared async-test helper ──────────────────────────────────────────────────────────
+#
+# Four cast-authoring test files each defined the same helper inline. Hoisted here so
+# there is a single canonical copy: one call per test, no shared loop state. The helper
+# creates a pristine loop, runs the coroutine, closes the loop, then installs a fresh
+# OPEN loop so subsequent `asyncio.get_event_loop()` consumers never meet a closed loop
+# (a bare `asyncio.run()` would leave the main-thread loop closed, breaking later tests).
+def _run(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+@pytest.fixture(name="run")
+def _run_fixture():
+    """Fixture form of the `_run` helper — accepts a coroutine and returns its result."""
+    return _run
+
+
 @pytest.fixture(autouse=True)
 def _reset_cast_authoring_ledger():
     mod = sys.modules.get("src.orwell_cast_authoring")

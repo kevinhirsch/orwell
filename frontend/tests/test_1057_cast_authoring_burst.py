@@ -22,19 +22,8 @@ confirmed live — these prove the FE is now robust to the shapes the live-verif
 import asyncio
 import json
 
+from conftest import _run
 from src import orwell_cast_authoring as A
-
-
-def _run(coro):
-    # Pristine loop per call (no inherited half-drained state), leaving a fresh OPEN loop installed
-    # afterward so later get_event_loop() consumers never meet a closed loop (unlike bare asyncio.run).
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 class _LogSink:

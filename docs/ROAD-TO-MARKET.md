@@ -102,6 +102,7 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   unambiguous operator signatures; the full planning set still applies to the leading strip.
 
 ### M0-7 · Engine: `getGameState.pending` disagrees with `gameStatus.pending` — S–M (engine) · **NEW**
+
 Source: record attempt #3 autopsy (2026-07-07). A pending created inside an advance (the
 eviction-vote ballot) surfaces on `gameStatus` (and in the `advanceGame` result itself) but reads
 `null` on `getGameState` — two Vault-free closed-set projections of the same sandbox disagreeing

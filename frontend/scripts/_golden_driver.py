@@ -407,7 +407,8 @@ class GoldenDriver:
         try:
             st = self._get(self.fe, "/api/orwell/status")
             return (st.get("pending") or {}) if isinstance(st, dict) else {}
-        except Exception:
+        except Exception as e:
+            print(f"  _pending: /api/orwell/status failed ({e}) — returning empty", flush=True)
             return {}
 
     def _note_state(self, turn_no: int, last_text: str) -> dict:

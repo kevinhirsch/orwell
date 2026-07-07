@@ -12,22 +12,10 @@ with NO log. These pin the fix:
 Roles only (no names as data). The injectable orchestrator makes the whole pipeline testable with a
 stubbed model — but whether DeepSeek actually returns parseable JSON now can ONLY be confirmed live.
 """
-import asyncio
 import json
 
+from conftest import _run
 from src import orwell_cast_authoring as A
-
-
-def _run(coro):
-    # Pristine loop per call (no inherited half-drained state), leaving a fresh OPEN loop installed
-    # afterward so later get_event_loop() consumers never meet a closed loop (unlike bare asyncio.run).
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 class _LogSink:
