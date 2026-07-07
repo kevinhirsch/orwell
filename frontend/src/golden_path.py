@@ -112,6 +112,12 @@ _VOLATILE_RES = (
                 r"\s+\d{1,2},\s+\d{4}\b"),
     # "2:57 PM" / "14:57" / "14:57:03"
     _re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AaPp][Mm])?\b"),
+    # The presence dwell counter in the moment prompt ("you've been here 4 turns"): it ticks per
+    # FRAMED MODEL ROUND, and round counts legitimately vary ±1 with stream timing (an agent-loop
+    # continuation decision), so a cosmetic counter would drift every later key. Neutralized in
+    # the KEY only — the recorded prompt keeps the real number; every other roster/room detail in
+    # the same section still keys (validated by the 0108 unit gates).
+    _re.compile(r"you'?ve been here \d+ turns?", _re.IGNORECASE),
 )
 
 

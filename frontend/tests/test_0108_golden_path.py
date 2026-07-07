@@ -78,6 +78,25 @@ def test_wall_clock_text_never_drifts_the_key(golden):
         golden.request_key("stream", changed, TOOLS, PARAMS)
 
 
+def test_presence_dwell_counter_never_drifts_the_key(golden):
+    """turnsHere ticks per framed model round; round counts vary ±1 with stream timing,
+    so the dwell phrase is neutralized in the key — while every other room/roster detail
+    in the same prompt section still drifts it."""
+    at_3 = [{"role": "system", "content":
+             "Your room: the living room (you've been here 3 turns).\nWith you: two houseguests."},
+            {"role": "user", "content": "hello"}]
+    at_4 = [{"role": "system", "content":
+             "Your room: the living room (you've been here 4 turns).\nWith you: two houseguests."},
+            {"role": "user", "content": "hello"}]
+    moved = [{"role": "system", "content":
+              "Your room: the backyard (you've been here 3 turns).\nWith you: two houseguests."},
+             {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", at_3, TOOLS, PARAMS) == \
+        golden.request_key("stream", at_4, TOOLS, PARAMS)
+    assert golden.request_key("stream", at_3, TOOLS, PARAMS) != \
+        golden.request_key("stream", moved, TOOLS, PARAMS)
+
+
 def test_tool_schema_order_does_not_drift_the_key(golden):
     two = TOOLS + [{"type": "function", "function": {"name": "getGameState",
                                                       "parameters": {"type": "object"}}}]
