@@ -60,6 +60,21 @@ WEEK_PROMPTS = [
     "Time to see this through. What happens next?",
 ]
 
+# Phase-stall escalation (the second GLM record burned 65 turns of rich SOCIAL play pinned
+# inside hoh-competition): a chatty narrator happily lingers forever — legitimately, since the
+# FE's forced-advance belt is LULL-gated by owner ruling and the walk's social prompts read as
+# engagement, never a lull. The fix is player-side, ADR-0003-clean: after a phase sits
+# unchanged for PHASE_STALL_AFTER player turns, the walk speaks like a player who wants the
+# week to move — an explicit, unambiguous "run the ceremony now" — every turn until the phase
+# flips. The model still calls advanceGame itself; the driver never touches the engine.
+PHASE_STALL_AFTER = 6
+PUSH_PROMPT = ("I'm ready — production, run the next competition or ceremony right now. "
+               "I head over and take my place. Let's move the week forward.")
+# Backstop, not pacing: a phase that survives this many player turns (WITH escalation after
+# the first 6) is a real product stall — abort the walk and fail I5 honestly instead of
+# burning the rest of a paid budget re-proving it turn after turn.
+PHASE_STALL_ABORT = 25
+
 # Invariant 7 — the same leak definitions the game-build scrub enforces
 # (frontend/static/js/markdown.js) + the golden fixture gate (src/golden_path.py).
 RAW_NPC_ID_RE = re.compile(r"\bnpc:\d+\b", re.I)
@@ -471,6 +486,9 @@ class GoldenDriver:
         eviction_turns = 0
         prompt_i = 0
         week_rolled = False
+        prev_phase = None
+        same_phase_turns = 0
+        phase_stalled = False
         start_beat = self.timeline[-1]["beatSeq"] or 0
         for _ in range(self.turn_budget):
             st = self._state()
@@ -485,10 +503,27 @@ class GoldenDriver:
                 time.sleep(self.settle)
                 continue
             turn_no += 1
-            text = self._turn(WEEK_PROMPTS[prompt_i % len(WEEK_PROMPTS)])
-            prompt_i += 1
+            # Phase-stall escalation: past the threshold, the walk asks for the ceremony
+            # OUTRIGHT every turn until the phase flips (see PUSH_PROMPT rationale above).
+            if same_phase_turns >= PHASE_STALL_AFTER:
+                prompt = PUSH_PROMPT
+                if same_phase_turns == PHASE_STALL_AFTER:
+                    print(f"  walk: phase {prev_phase!r} unchanged for {same_phase_turns} turns "
+                          "— escalating to the push prompt", flush=True)
+            else:
+                prompt = WEEK_PROMPTS[prompt_i % len(WEEK_PROMPTS)]
+                prompt_i += 1
+            text = self._turn(prompt)
             st = self._note_state(turn_no, text)
             phase = st.get("phase") or "?"
+            same_phase_turns = same_phase_turns + 1 if phase == prev_phase else 0
+            prev_phase = phase
+            if same_phase_turns >= PHASE_STALL_ABORT:
+                phase_stalled = True
+                print(f"  walk: phase {phase!r} survived {same_phase_turns} player turns "
+                      "(escalation included) — aborting the walk (a real stall, not pacing)",
+                      flush=True)
+                break
             if not phases_seen or phases_seen[-1] != phase:
                 phases_seen.append(phase)
             if phase == "eviction":
@@ -510,8 +545,11 @@ class GoldenDriver:
         expected = ["nominations", "veto", "eviction"]
         order_ok = all(any(e in p for p in phases_seen) for e in expected)
         self.inv.record("I5", "phases advance monotonically with no stuck beat",
-                        monotonic and order_ok and stuck < 10,
-                        f"phases={phases_seen} stuck={stuck} beats {beats[0] if beats else '?'}"
+                        monotonic and order_ok and stuck < 10 and not phase_stalled,
+                        f"phases={phases_seen} stuck={stuck}"
+                        + (f" PHASE-STALLED@{prev_phase} ({same_phase_turns} turns)"
+                           if phase_stalled else "")
+                        + f" beats {beats[0] if beats else '?'}"
                         f"→{beats[-1] if beats else '?'}")
 
         engine_errors = []

@@ -80,6 +80,15 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   `golden-path` sessions/endpoints, layout dirt; clears crashed-run port squatters), and
   meta-first `fixture_models()` (the old first-stream heuristic mis-derived two-tier fixtures —
   cast-identity calls stream on the utility tier). Unit gates in `test_0108_golden_path.py`.
+- **Finding (record attempt #2 — walk pacing, driver-side, fixed):** GLM 5.2 lingered in rich
+  social play pinned inside `hoh-competition` for 40+ player turns (the run was killed at 65
+  turns to save budget). Legitimately so: the FE's forced-advance belt is LULL-gated by owner
+  ruling, and the walk's social prompts read as engagement — never a lull. Fixed player-side,
+  ADR-0003-clean: after `PHASE_STALL_AFTER`=6 same-phase player turns the walk escalates to an
+  explicit "production, run the ceremony now" prompt until the phase flips, with a
+  `PHASE_STALL_ABORT`=25 backstop that fails I5 honestly instead of burning a paid budget on a
+  real stall. *Product datum worth keeping: a socially-active player can hold a phase open
+  indefinitely — by design (lingering is play), but note the pacing texture for M2 copy.*
 
 ### M0-2 · Calibrate invariants I2/I3 against the real belts — S–M
 Source: 0108 stub-run findings, now twice-confirmed on real runs pending (I2 opener never fired
