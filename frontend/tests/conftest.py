@@ -8,12 +8,15 @@ heavy `__init__` never runs.
 """
 
 import asyncio
+import contextlib
 import functools
 import os
 import pathlib
 import sys
 import tempfile
 import types
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 import pytest
 
@@ -100,7 +103,7 @@ def pytest_collection_modifyitems(config, items):
 # creates a pristine loop, runs the coroutine, closes the loop, then installs a fresh
 # OPEN loop so subsequent `asyncio.get_event_loop()` consumers never meet a closed loop
 # (a bare `asyncio.run()` would leave the main-thread loop closed, breaking later tests).
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -111,18 +114,15 @@ def _run(coro):
 
 
 @pytest.fixture(name="run")
-def _run_fixture():
+def _run_fixture() -> Callable[..., Any]:
     """Fixture form of the `_run` helper — accepts a coroutine and returns its result."""
     return _run
 
 
 @pytest.fixture(autouse=True)
-def _reset_cast_authoring_ledger():
+def _reset_cast_authoring_ledger() -> None:
     mod = sys.modules.get("src.orwell_cast_authoring")
     if mod is not None:
         for attr in ("_attempt_ledger", "_gaveup_logged", "_LAST_AUTHORING_BACKFILL_AT"):
-            try:
+            with contextlib.suppress(AttributeError):
                 getattr(mod, attr).clear()
-            except Exception:
-                pass
-    yield

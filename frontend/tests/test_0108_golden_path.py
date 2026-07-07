@@ -304,29 +304,29 @@ def test_meta_models_come_from_the_driver_envs(golden, tmp_path, monkeypatch):
 def test_integrity_scan_passes_a_clean_two_tier_fixture(golden, tmp_path):
     fix = tmp_path / "clean.jsonl"
     golden.write_meta(str(fix), narration_model="narrator-model", utility_model="cheap-model")
-    # A clean fixture is single-writer: the records must carry the SAME writer the meta
-    # line was stamped with (write_meta uses _WRITER_ID), else the single-writer integrity
-    # check flags an init-by-A / populate-by-B split.
+    # Records may carry any writer — the meta is written by the recorder process while
+    # records come from the FE subprocess (a different PID → different _WRITER_ID).
+    # The only enforcement is that all records share ONE writer (no concurrent writers).
     with open(fix, "a", encoding="utf-8") as fh:
         for i, m in enumerate(["narrator-model", "cheap-model", "narrator-model"]):
             fh.write(json.dumps({"key": f"k{i}", "kind": "stream", "seq": i, "model": m,
-                                 "writer": golden._WRITER_ID, "chunks": []}) + "\n")
+                                 "writer": "subprocess.abc123", "chunks": []}) + "\n")
     assert golden.fixture_integrity_scan(str(fix)) == []
     assert golden.fixture_model_census(str(fix)) == {"narrator-model": 2, "cheap-model": 1}
 
 
-def test_integrity_scan_fails_records_foreign_to_meta_writer(golden, tmp_path):
-    # The init-by-A / populate-entirely-by-B case: every record shares ONE writer, so the
-    # multiple-writers check is silent, but that writer differs from the meta stamp — the
-    # single-writer integrity check must still catch it.
-    fix = tmp_path / "foreignwriter.jsonl"
+def test_integrity_scan_fails_two_concurrent_record_writers(golden, tmp_path):
+    # Two distinct record-writer IDs in one fixture means two processes appended
+    # concurrently — the multi-writer check must catch it regardless of the meta writer.
+    fix = tmp_path / "multiwriter.jsonl"
     golden.write_meta(str(fix), narration_model="narrator-model", utility_model="narrator-model")
     with open(fix, "a", encoding="utf-8") as fh:
-        for i in range(2):
-            fh.write(json.dumps({"key": f"k{i}", "kind": "call", "seq": i, "model": "narrator-model",
-                                 "writer": "999.notmeta", "response": ""}) + "\n")
+        fh.write(json.dumps({"key": "k0", "kind": "call", "seq": 0, "model": "narrator-model",
+                             "writer": "pid1.aaa", "response": ""}) + "\n")
+        fh.write(json.dumps({"key": "k1", "kind": "call", "seq": 1, "model": "narrator-model",
+                             "writer": "pid2.bbb", "response": ""}) + "\n")
     violations = golden.fixture_integrity_scan(str(fix))
-    assert any("stamped by" in v for v in violations)
+    assert any("multiple record writers" in v for v in violations)
 
 
 def test_integrity_scan_fails_a_foreign_model_record(golden, tmp_path):

@@ -1361,9 +1361,7 @@ async def llm_call_async(
                     url, model, messages, temperature=temperature, max_tokens=max_tokens,
                     headers=headers, timeout=timeout, max_retries=max_retries,
                     prompt_type=prompt_type, call_class=call_class, user=user, session=session)
-            except Exception as e:
-                _golden.record_call(model, messages, _gparams, None,
-                                    error=f"{type(e).__name__}: {e}")
+            except Exception:
                 raise
             _golden.record_call(model, messages, _gparams, _gtext)
             return _gtext
