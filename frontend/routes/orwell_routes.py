@@ -1227,6 +1227,10 @@ def setup_orwell_routes() -> APIRouter:
                 orwell_portraits.scrub_user(user)
             except Exception:
                 pass
+            try:  # M1-10: new season ⇒ the authoring give-up ledger resets with the cast
+                orwell_cast_authoring.reset_attempts(user)
+            except Exception:
+                pass
             # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
             # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
             try:
@@ -1387,6 +1391,10 @@ def setup_orwell_routes() -> APIRouter:
                 orwell_portraits.scrub_user(user)
             except Exception:
                 pass
+            try:  # M1-10: new season ⇒ the authoring give-up ledger resets with the cast
+                orwell_cast_authoring.reset_attempts(user)
+            except Exception:
+                pass
             # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
             # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
             try:
@@ -1465,6 +1473,10 @@ def setup_orwell_routes() -> APIRouter:
         try:
             try:
                 orwell_portraits.scrub_user(user)
+            except Exception:
+                pass
+            try:  # M1-10: new season ⇒ the authoring give-up ledger resets with the cast
+                orwell_cast_authoring.reset_attempts(user)
             except Exception:
                 pass
             # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm

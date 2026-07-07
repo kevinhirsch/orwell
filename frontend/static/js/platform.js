@@ -90,13 +90,25 @@ export function onNarrowChange(fn) {
 // breadcrumb only — listeners must not branch on it.
 const GAMECHANGED_DEBOUNCE_MS = 250;
 let _gameChangedTimer = null;
+// M1-3 (audit A3): the seams that KNOW the committed beatSeq (a tool result, the decision
+// POST body) pass it as the second arg; the debounce window coalesces to the HIGHEST beat
+// seen, and the event detail carries it so a panel can verify its refetch actually caught
+// up to the claimed commit (and re-fetch briefly if the read raced the write) instead of
+// rendering a stale board beside a fresh ceremony card for a whole poll interval.
+let _gameChangedBeat = 0;
 
-export function orwellGameChanged(reason) {
+export function orwellGameChanged(reason, beatSeq) {
+  const b = Number(beatSeq);
+  if (Number.isFinite(b) && b > _gameChangedBeat) _gameChangedBeat = b;
   if (_gameChangedTimer) clearTimeout(_gameChangedTimer);
   _gameChangedTimer = setTimeout(() => {
     _gameChangedTimer = null;
+    const beat = _gameChangedBeat;
+    _gameChangedBeat = 0;
     try {
-      window.dispatchEvent(new CustomEvent('orwell:gamechanged', { detail: { reason: String(reason || '') } }));
+      window.dispatchEvent(new CustomEvent('orwell:gamechanged', {
+        detail: { reason: String(reason || ''), beatSeq: beat > 0 ? beat : undefined },
+      }));
     } catch (_) { /* fail open — every panel keeps its poll fallback */ }
   }, GAMECHANGED_DEBOUNCE_MS);
 }

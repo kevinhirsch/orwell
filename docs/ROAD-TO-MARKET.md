@@ -166,7 +166,14 @@ Source: audit A2 (`app.py:1097` boot-only apply; "no active game" at boot ⇒ cl
   game created *after* FE boot reports `timeOfDay` in state; the fe.log failure line demoted to
   info on the pre-game path (it is expected there).
 
-### M1-3 · Board renders on beatSeq change; ceremony beats kick the rail — S–M · `P2`
+### M1-3 · Board renders on beatSeq change; ceremony beats kick the rail — S–M · `P2` · ✅ DONE
+*Shipped 2026-07-07. Root cause was a COMMIT RACE, not a missing subscription: the panel already
+refetched on `orwell:gamechanged`, but the refetch could read pre-commit state and nothing re-kicked
+until the 20–30s poll. Fix: the seams that know the committed `beatSeq` (chat tool-result output,
+decision POST response) pass it through THE single dispatcher (`orwellGameChanged(reason, beatSeq)`,
+debounce coalesces to the highest beat); the status panel catch-up-fetches (1s, bounded ×3) until
+its read reaches the claimed beat. Poll cadence unchanged; g15 one-dispatcher rule holds. Gate:
+`tests/test_m1_3_beatseq_freshness.py` (5 source pins) + `test_g15_gamechanged.py` green.*
 Source: audit A3 (goodbye card announcing an eviction beside a board still reading "HOH
 Competition · 16/16").
 - **DoR:** decision: keep the 20–30s poll cadence but render on `beatSeq` delta + pass the chat
@@ -177,15 +184,15 @@ Competition · 16/16").
   phase label can never lag a committed pending kind by more than one poll interval in the
   mirror-drive harness.
 
-### M1-4 · Decision card: nothing clipped, Confirm always reachable — S · `P1` (mobile) · **IN PROGRESS**
-*Anatomy findings (2026-07-07): the double roster is the ENGINE's pending prompt ("Still in with
-you: …") + the FE's structured `pending.stillIn` field both rendering — fix FE-side by eliding the
-prompt's templated roster sentence only when the structured field renders (fallback: untouched
-prose); the clipped helper is `.odec-hint` (flex-basis:100%, order:99) at the card's bottom edge;
-mobile Confirm-below-fold needs the PROSE region (`.odec-prompt`/`.odec-stillin`) to scroll
-internally on small viewports while `.odec-opts` + the confirm row stay visible. The card already
-has three host modes (kit notice card / anchored sheet / bare fallback) — the fix must hold in all
-three.*
+### M1-4 · Decision card: nothing clipped, Confirm always reachable — S · `P1` (mobile) · ✅ DONE (a86ca29)
+*Shipped 2026-07-07. The double roster was the ENGINE's pending prompt ("Still in with you: …") +
+the FE's structured `pending.stillIn` both rendering — fixed FE-side: `orwellDecision.js` elides
+the prompt's templated roster sentence ONLY when the structured region renders (untouched prose
+fallback); `.odec-hint` un-clipped (margin/line-height); small viewports (`max-width:480px` /
+`max-height:720px`) scroll the PROSE region internally (`.odec-prompt`/`.odec-stillin`
+max-height:20vh) while options + Confirm stay visible. Holds in all three host modes. Gates:
+`tests/test_m1_4_decision_card_layout.py` (4 source gates) + a real-render browser-smoke block
+(dispatches a comp-round pending, asserts single roster + kept prose + visible hint).*
 Source: audit A4 (`s-b9` clipped helper line; `m-1` Confirm below the fold, double roster).
 - **DoR:** decision (default yes): option chips instead of comma prose on coarse pointers.
 - **DoD:** card prose scrolls internally; option row + confirm row always visible at 1440×900
@@ -240,7 +247,14 @@ admin says "Image generation AVAILABLE").
   config presence); without a provider the cast panel says "No portrait model configured —
   Settings → Models" and the admin row reads NOT CONFIGURED; pytest source gate on both labels.
 
-### M1-10 · Utility-call retry backoff — S · `P3`
+### M1-10 · Utility-call retry backoff — S · `P3` · ✅ DONE
+*Shipped 2026-07-07. In-run retries now back off exponentially (0.4s→0.8s→1.6s, call- and
+write-side); a per-houseguest per-season attempt ledger caps TOTAL provider calls across every
+re-kick (`_ATTEMPT_CAP`=6) — at the cap the NPC gives up LOUDLY (warn-once log, run-summary tally,
+`authoring_completeness()["givenUp"]` → the /admin/status castAuthoring block) until
+`reset_attempts()` clears it at the new-season scrub (all three scrub sites). Per-user scoped.
+Gate: `tests/test_m1_10_authoring_backoff.py` (5 gates incl. bounded-total-calls across 5
+re-kicks).*
 Source: audit A11 (same-second identical cast-authoring bursts against a bad provider).
 - **DoD:** background authoring retries carry exponential backoff + a give-up cap per NPC per
   session; a unit test proving a permanently-failing utility model produces a bounded call count;

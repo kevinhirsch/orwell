@@ -746,7 +746,11 @@
         _dismissedSig = _sig(pending);
         // G15: a bound decision mutates the game — nudge every panel through the
         // shared debounced dispatcher NOW, not at the next 20–30s poll.
-        if (window.orwellGameChanged) window.orwellGameChanged("decision:" + kind);
+        // M1-3: best-effort read of the commit's beatSeq off the decision response so the
+        // panels can verify their refetch reached it (the goodbye-card-beside-stale-board race).
+        let _beat;
+        try { _beat = ((await r.json()) || {}).beatSeq; } catch (_) {}
+        if (window.orwellGameChanged) window.orwellGameChanged("decision:" + kind, _beat);
         card.classList.add("odec-done");
         card.innerHTML = `<div class="odec-head"><span class="odec-title">✓ Locked in.</span></div>`;
         // The play continues in conversation: prefill (never auto-send) so the model

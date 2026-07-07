@@ -2670,7 +2670,11 @@ import { isNarrow } from './platform.js';
                   // FEJS-3: the trailing 8 also move public state the panels read — debounced.
                   // DRIFT-1: + the 0093/0099/0107 mutators (sync w/ chat_helpers.py).
                   if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat', 'formAlliance', 'joinAlliance', 'exposeSecret', 'tradeSecret'].includes(json.tool)) {
-                    if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool);
+                    // M1-3: the tool result carries the COMMITTED beatSeq (0065) — thread it
+                    // through the single dispatcher so panels can verify their refetch caught up.
+                    let _beat;
+                    try { _beat = (JSON.parse(json.output || '{}') || {}).beatSeq; } catch (_) {}
+                    if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool, _beat);
                     if (json.tool === 'createCharacter') {
                       // E65: a season RESTART opens a FRESH chat (armed only by reset-progress /
                       // next-season); NO-OP for the initial onboarding — it stays ONE conversation.
