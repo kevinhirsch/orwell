@@ -224,7 +224,9 @@
       #${CARD_ID} .odec-note { opacity: .80; font-size: var(--ow-fs-body, .875rem); flex: 1; }
       /* J4-20: the disabled-Confirm hint — quiet, italicized, sits beside the button; its hidden
          attribute is toggled in sync() so it shows only while Confirm can't be pressed. */
-      #${CARD_ID} .odec-hint { opacity: .7; font-size: var(--ow-fs-caption, .75rem); font-style: italic; flex-basis: 100%; order: 99; margin-top: -.2rem; }
+      /* M1-4 (audit A4): no negative top margin — it pulled the hint's descenders into the card's
+         bottom edge, half-clipping "Make your selection above to enable Confirm." at 1440×900. */
+      #${CARD_ID} .odec-hint { opacity: .7; font-size: var(--ow-fs-caption, .75rem); font-style: italic; flex-basis: 100%; order: 99; margin-top: 0; line-height: 1.35; }
       #${CARD_ID} .odec-hint[hidden] { display: none; }
       #${CARD_ID} .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
       #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }
@@ -234,6 +236,14 @@
         #${CARD_ID} .odec-row { flex-direction: column; align-items: stretch; gap: .5rem; }
         #${CARD_ID} .odec-note { flex: none; order: -1; }
         #${CARD_ID} .odec-confirm { width: 100%; padding: .6rem .95rem; }
+      }
+      /* M1-4 (audit A4): on a small viewport the PROSE scrolls internally so the option chips +
+         the Confirm row always stay reachable — a long ceremony prompt must never push the
+         binding control below the fold (the m-1 audit shot: Confirm off-screen on 390×844). */
+      @media (max-width: 480px), (max-height: 720px) {
+        #${CARD_ID} .odec-prompt, #${CARD_ID} .odec-stillin {
+          max-height: 20vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+        }
       }
       /* ── LIQUID GLASS (body.theme-frosted) ──────────────────────────────────────
          The decision card surface must read as the SAME ONE LIGHT GLASS as the rest of the
@@ -458,16 +468,26 @@
       removeCard();
     });
 
+    // M1-4 (audit A4): the engine's comp prompt embeds the roster ("Still in with you: …") AND the
+    // structured `stillIn` field renders the same roster below — a sixteen-name wall twice over
+    // (brutal on a phone). When the structured block WILL render, elide the prompt's templated
+    // roster sentence; any non-matching prompt passes through untouched (closed-set prose is never
+    // rewritten beyond this one known template — ADR 0005).
+    const willRenderStillIn = kind === "comp-round" && Array.isArray(pending.stillIn) && pending.stillIn.length;
     if (pending.prompt) {
       const p = document.createElement("div");
       p.className = "odec-prompt";
-      p.textContent = pending.prompt + (pending.juror && pending.juror.name ? ` (asked by ${pending.juror.name})` : "");
+      let promptText = pending.prompt;
+      if (willRenderStillIn) {
+        promptText = promptText.replace(/\s*Still in with you:\s*[^.]+\.\s*/, " ").replace(/\s{2,}/g, " ").trim();
+      }
+      p.textContent = promptText + (pending.juror && pending.juror.name ? ` (asked by ${pending.juror.name})` : "");
       card.appendChild(p);
     }
 
     // 0006 staged-rounds: show WHO IS STILL IN this elimination round so the player adapts their
     // approach to the narrowed field (e.g. everyone left is an ally → throw; a threat still in → compete).
-    if (kind === "comp-round" && Array.isArray(pending.stillIn) && pending.stillIn.length) {
+    if (willRenderStillIn) {
       const still = document.createElement("div");
       still.className = "odec-stillin";
       const names = pending.stillIn.map((r) => esc(r.name || String(r.id))).join(", ");

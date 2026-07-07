@@ -706,6 +706,42 @@ def main() -> int:
             page.evaluate("document.querySelector('#orwell-decision-card .odec-x').click()")
             check(page.query_selector("#orwell-decision-card") is None, "decision card: dismissible (prose path stays open)")
 
+            # M1-4 (audit A4): a comp-round card with the STRUCTURED roster must render the roster
+            # ONCE (the prompt's templated "Still in with you: …" sentence elides; the rest of the
+            # prompt survives), and the disabled-Confirm hint must be fully visible inside the
+            # card (the old -.2rem margin half-clipped its descenders at the bottom edge).
+            page.evaluate("""
+              window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: {
+                kind: 'comp-round', intents: ['compete','throw','play-safe'], round: 1, binding: true,
+                prompt: 'Set your approach to this competition: compete, throw (drop out), or play it safe. Still in with you: A, B, C, D, E, F, G, H, I, J, K, L, M, N, O. This locks in how you play the comp.',
+                stillIn: [ {id:'npc:1',name:'A'}, {id:'npc:2',name:'B'}, {id:'npc:3',name:'C'} ],
+              }}}));
+            """)
+            page.wait_for_selector("#orwell-decision-card .odec-stillin", timeout=3000)
+            dedup = page.evaluate("""() => {
+              const card = document.getElementById('orwell-decision-card');
+              const prompt = (card.querySelector('.odec-prompt') || {}).textContent || '';
+              const still = (card.querySelector('.odec-stillin') || {}).textContent || '';
+              const hint = card.querySelector('.odec-hint');
+              const cr = card.getBoundingClientRect();
+              const hr = hint ? hint.getBoundingClientRect() : null;
+              return {
+                promptHasRoster: /Still in with you:/i.test(prompt),
+                promptKeptRest: /Set your approach/.test(prompt) && /locks in how you play/.test(prompt),
+                stillinOnce: /Still in:/.test(still),
+                hintVisible: !!hr && hr.bottom <= cr.bottom + 0.5 && hr.height > 6,
+              };
+            }""")
+            check(dedup.get("promptHasRoster") is False,
+                  f"M1-4: the prompt's templated roster sentence elides when stillIn renders ({dedup})")
+            check(dedup.get("promptKeptRest") is True,
+                  f"M1-4: the rest of the engine prompt survives the elide ({dedup})")
+            check(dedup.get("stillinOnce") is True,
+                  f"M1-4: the structured roster renders (the ONE roster) ({dedup})")
+            check(dedup.get("hintVisible") is True,
+                  f"M1-4: the disabled-Confirm hint sits fully inside the card ({dedup})")
+            page.evaluate("document.querySelector('#orwell-decision-card .odec-x').click()")
+
             # C25/A11Y-1: the holding card is a REAL modal — focus lands on the card,
             # Tab never escapes it, everything behind the scrim inert.
             page.evaluate("window._orwellOnboardingMount && window._orwellOnboardingMount()")
