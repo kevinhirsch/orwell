@@ -241,8 +241,13 @@ class GoldenDriver:
             raise RuntimeError("engine bundle missing — run `npm run build` at the repo root first")
         engine_data = os.path.join(self.work, "engine-data")
         os.makedirs(engine_data, exist_ok=True)
+        # M0-8: the LOGICAL clock — engine time advances per committed mutation, never wall
+        # time, so a minutes-per-turn record and a seconds-per-turn replay live in the SAME
+        # clock (the terminal divergence class: wall-clock hashed into the tick's derived rng
+        # seeds/recency windows). Both modes set it; the fixture is only valid under it.
         env = dict(os.environ, ORWELL_DATA_DIR=engine_data,
-                   ORWELL_ENGINE_PORT=str(self.engine_port))
+                   ORWELL_ENGINE_PORT=str(self.engine_port),
+                   ORWELL_LOGICAL_CLOCK="1")
         self.procs.append(subprocess.Popen(
             ["node", dist], cwd=REPO, env=env,
             stdout=open(self.engine_log, "w"), stderr=subprocess.STDOUT))

@@ -2,11 +2,39 @@ import { GameSessionRegistry } from "./registry";
 import { Orchestrator } from "./orchestrator";
 import { GameWatcher, type WatcherConfig } from "./gameWatcher";
 import { SystemClock } from "../adapters/time/SystemClock";
+import { FakeClock } from "../adapters/time/FakeClock";
 import { FileSaveStore } from "../adapters/engine/FileSaveStore";
 import { SqliteSaveStore } from "../adapters/sqlite/SqliteSaveStore";
 import { FileUserNotorietyStore } from "../adapters/engine/FileUserNotorietyStore";
 import type { Clock, Scheduler } from "../ports/Clock";
 import type { UserSaveStore } from "../ports/UserSaveStore";
+
+// ── the LOGICAL clock (M0-8 / 0108) ────────────────────────────────────────────────
+//
+// The orchestrator's per-turn tick seeds derived rng streams and recency windows with
+// `clock.now()` (`confessional-recent/-phrasing:${clockNow}`, `orch:day:${clockNow}` ids) —
+// correct for live play, but WALL time makes the tick pacing-dependent: a real-model
+// golden-path RECORD walks in minutes-per-turn, its REPLAY in seconds, so the two runs live
+// in different clocks and the world diverges even with byte-identical mutation sequences
+// (proven by ledger diff, 2026-07-07: 36 identical mutations, different presence/gossip one
+// turn later). `ORWELL_LOGICAL_CLOCK` swaps in a virtual clock that starts at a FIXED epoch
+// and advances ONLY on committed mutations — identical commit sequences ⇒ identical clock
+// sequences ⇒ identical tick behavior, at any pacing. Reads never advance it (read counts
+// are wall-clock-paced — the driver's quiesce polls — and must stay clock-neutral).
+// Set to "1" for the fixed default epoch, or to an epoch-ms integer. Unset ⇒ byte-identical
+// to today (real `SystemClock`).
+
+/** 2026-01-01T00:00:00Z — an arbitrary fixed epoch so logical timestamps read plausibly. */
+const LOGICAL_CLOCK_EPOCH_MS = 1_767_225_600_000;
+/** One committed mutation ≈ one in-house minute — keeps recency windows meaningful. */
+const LOGICAL_CLOCK_STEP_MS = 60_000;
+
+export function logicalClockFromEnv(env: Record<string, string | undefined> = process.env): FakeClock | null {
+  const raw = (env.ORWELL_LOGICAL_CLOCK ?? "").trim();
+  if (!raw || raw === "0" || raw.toLowerCase() === "false") return null;
+  const epoch = /^\d{6,}$/.test(raw) ? parseInt(raw, 10) : LOGICAL_CLOCK_EPOCH_MS;
+  return new FakeClock(epoch);
+}
 
 /**
  * Live engine runtime composition (feature 0035). Wires the per-user
@@ -103,7 +131,9 @@ function buildDurableStore(env: Record<string, string | undefined> = process.env
 }
 
 export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
-  const clock: Clock & Scheduler = opts.clock ?? new SystemClock();
+  // An injected clock (tests) always wins; else the env-gated logical clock; else real time.
+  const logicalClock = opts.clock ? null : logicalClockFromEnv();
+  const clock: Clock & Scheduler = opts.clock ?? logicalClock ?? new SystemClock();
   const saveStore = opts.saveStore ?? (opts.durable ? buildDurableStore() : undefined);
   const envResident = parseInt((process.env.ORWELL_MAX_RESIDENT_SANDBOXES ?? "").trim(), 10);
   const maxResident = opts.maxResidentSandboxes
@@ -117,6 +147,13 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
     ...(notorietyStore ? { notorietyStore } : {}),
   });
   const cfg: WatcherConfig = { ...watcherConfigFromEnv(), ...opts.watcher };
+  // The logical clock is turn-driven BY DEFINITION (time moves on commits) — a wall-clock
+  // watcher cadence would make FakeClock.advance fire watcher jobs per commit, a nonsense
+  // hybrid. Force pure turn-driven and say so, rather than compose it silently wrong.
+  if (logicalClock && cfg.tickEveryMs !== 0) {
+    console.warn("[runtime] ORWELL_LOGICAL_CLOCK forces pure turn-driven mode — ignoring watcher cadence");
+    cfg.tickEveryMs = 0;
+  }
   // Pure turn-driven mode (watcher disabled): the orchestrator fires one off-screen tick per player turn.
   const orchestrator = new Orchestrator(registry, clock, {
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
@@ -124,7 +161,12 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   });
   // The orchestrator becomes the real spine (B41/audit E3): every player-channel mutation now commits
   // through the fail-closed integrity checkpoint (+ touch + idle gating), not a blind save.
-  registry.setCommit((user) => orchestrator.commitPlayerTurn(user));
+  // M0-8: under the logical clock, time advances HERE — once per committed mutation, before
+  // the commit runs, so the tick this commit fires sees the new minute. Reads never advance.
+  registry.setCommit((user) => {
+    if (logicalClock) logicalClock.advance(LOGICAL_CLOCK_STEP_MS);
+    orchestrator.commitPlayerTurn(user);
+  });
   // The ONE restart door is COMPLETE (audit E1/D1/R1): when a season resets — admin reset or the
   // player channel's confirmed restart, both via registry.resetUser — the orchestrator forgets the
   // dead season's baseline/faults/rng, so season 2's first commit is a first commit, never a

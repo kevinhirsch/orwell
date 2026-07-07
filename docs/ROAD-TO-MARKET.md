@@ -54,7 +54,7 @@ are parallel unless `Depends` says otherwise.
 > note it reasons by default (~266 reasoning tokens on a trivial call — ADR-0010 per-class
 > reasoning budgets are the lever if utility cost creeps).
 
-### M0-1 · Record + commit the canonical real-model golden fixture — S · **BLOCKED on M0-8 (engine logical clock)**
+### M0-1 · Record + commit the canonical real-model golden fixture — S · **UNBLOCKED (M0-8 shipped) — record #8 pending**
 Source: 0108 (built, gate dormant). Retargeted by the owner from deepseek-v4-pro to the two-tier
 GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time of writing.
 - **DoR (met):** key at hand ✓; OpenRouter reachability through the proxy verified ✓; both models
@@ -125,7 +125,14 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   also false-positived on host voice ("Let me get a read on…") — mid-body now flags only
   unambiguous operator signatures; the full planning set still applies to the leading strip.
 
-### M0-8 · Engine: logical clock under golden mode (wall-clock is in the tick's rng) — M (engine) · **NEW · BLOCKS the fixture commit**
+### M0-8 · Engine: logical clock under golden mode (wall-clock is in the tick's rng) — M (engine) · ✅ DONE
+*Shipped 2026-07-08. `ORWELL_LOGICAL_CLOCK` (runtime.ts `logicalClockFromEnv`): reuses `FakeClock`
+at a fixed epoch (2026-01-01Z, or an env-supplied epoch-ms); advances +60s ONCE per committed
+mutation inside `registry.setCommit` (before the commit's tick, so the tick sees the new minute);
+reads clock-neutral; forces pure turn-driven (watcher cadence ignored with a warning); injected
+test clocks win over the env; unset ⇒ byte-identical SystemClock. Driver sets it on the engine in
+both modes. Gate: `tests/unit/logicalClock.test.ts` — 5 tests incl. the pacing-invariance proof
+(identical call sequences at 1ms vs 40ms wall pacing ⇒ byte-identical snapshots).*
 Source: record attempt #7 autopsy (2026-07-07). `orchestrator.defaultApply` seeds per-tick derived
 rng streams and recency windows with **wall-clock `clockNow`** (`confessional-recent/-phrasing:
 ${clockNow}`, `selectRecentForConfessional(events, …, clockNow)`, `orch:day:${clockNow}` ids) — so
