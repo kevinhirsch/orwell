@@ -284,6 +284,7 @@ async def _call(name: str, args: dict | None = None, user: str | None = None, ti
     what came back (or the failure) — feeding the /admin/status viewer."""
     import time as _t
     from src import log_rings as _rings
+    _golden_call_ledger(name, args)
     t0 = _t.monotonic()
     try:
         res = await _call_inner(name, args, user=user, timeout=timeout)
@@ -293,6 +294,29 @@ async def _call(name: str, args: dict | None = None, user: str | None = None, ti
         _rings.record_io(name, args, False, int((_t.monotonic() - t0) * 1000),
                          f"{type(e).__name__}: {e}")
         raise
+
+
+def _golden_call_ledger(name: str, args: dict | None) -> None:
+    """0108 determinism diagnosis aid: with ORWELL_GOLDEN_CALL_LEDGER=<path>, append one line
+    per FE→engine call (name + volatile-stripped args digest). Diffing a record run's ledger
+    against a replay run's shows exactly which engine call diverges in count or order — the
+    engine consumes seeded RNG per call/scene, so a mode-asymmetric caller shifts every later
+    surfacing draw. Off (the default) this is a single env read; never raises."""
+    import os as _os
+    path = _os.environ.get("ORWELL_GOLDEN_CALL_LEDGER")
+    if not path:
+        return
+    try:
+        import hashlib as _h
+        import json as _j
+        a = dict(args or {})
+        for volatile in ("expectedBeatSeq", "idempotencyKey"):
+            a.pop(volatile, None)
+        digest = _h.sha256(_j.dumps(a, sort_keys=True, default=str).encode()).hexdigest()[:12]
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{name} {digest}\n")
+    except Exception:
+        pass
 
 async def _call_inner(name: str, args: dict | None = None, user: str | None = None, timeout: float | None = None) -> dict:
     """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox.
