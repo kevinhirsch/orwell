@@ -134,7 +134,12 @@ Source: audit A1 (`s-b5`/`s-b6`; one completion → two bubbles, one persisted r
   harness grows a live-turns-after-reload scenario failing on any frame with two same-content
   `.msg-ai`; runs in `fe-browser-tests`.
 
-### M1-2 · Time-of-day re-applies on game creation — S · `P1`
+### M1-2 · Time-of-day re-applies on game creation — S · `P1` · ✅ DONE (ac4fc5c)
+*Shipped 2026-07-07. Root cause was sharper than the audit's guess: the deferred per-turn apply
+existed but its `not user` guard skipped anonymous single-tenant play (AUTH off ⇒ user None)
+forever. Fixed at three seams (framed-turn lazy apply now covers user=None via the anon→default
+mapping; the new-game ops door applies on season start; the boot log demotes the expected
+pre-game miss). Gate: `tests/test_m1_2_time_of_day_reapply.py`.*
 Source: audit A2 (`app.py:1097` boot-only apply; "no active game" at boot ⇒ clock dark all season).
 - **DoD:** `set_time_of_day(get_setting("time_of_day_enabled"))` re-fires on successful
   `new-game`/`createCharacter` (the same seam that kicks the pre-warm tasks); a pytest proving a
@@ -152,7 +157,15 @@ Competition · 16/16").
   phase label can never lag a committed pending kind by more than one poll interval in the
   mirror-drive harness.
 
-### M1-4 · Decision card: nothing clipped, Confirm always reachable — S · `P1` (mobile) 
+### M1-4 · Decision card: nothing clipped, Confirm always reachable — S · `P1` (mobile) · **IN PROGRESS**
+*Anatomy findings (2026-07-07): the double roster is the ENGINE's pending prompt ("Still in with
+you: …") + the FE's structured `pending.stillIn` field both rendering — fix FE-side by eliding the
+prompt's templated roster sentence only when the structured field renders (fallback: untouched
+prose); the clipped helper is `.odec-hint` (flex-basis:100%, order:99) at the card's bottom edge;
+mobile Confirm-below-fold needs the PROSE region (`.odec-prompt`/`.odec-stillin`) to scroll
+internally on small viewports while `.odec-opts` + the confirm row stay visible. The card already
+has three host modes (kit notice card / anchored sheet / bare fallback) — the fix must hold in all
+three.*
 Source: audit A4 (`s-b9` clipped helper line; `m-1` Confirm below the fold, double roster).
 - **DoR:** decision (default yes): option chips instead of comma prose on coarse pointers.
 - **DoD:** card prose scrolls internally; option row + confirm row always visible at 1440×900
@@ -187,12 +200,20 @@ the new casting interview; session titled "Casting interview" forever).
   session starts) with the casting interview starting clean; a pytest covering the reset →
   casting transcript state; no second restart path introduced (D1/R1 rule).
 
-### M1-8 · Silence the stream_status 404 poll — S · `P3`
+### M1-8 · Silence the stream_status 404 poll — S · `P3` · ✅ DONE (90175e9)
+*Shipped 2026-07-07 server-side: idle answers 200 `{"status":"idle"}`; both sessions.js consumers
+already branch on `status !== 'streaming'` (the F-8 probe-once client fix stands). Gate:
+`tests/test_m1_8_stream_status_idle.py`.*
 Source: audit A8 (`sessions.js:2258/2311`).
 - **DoD:** polling a session with no live stream returns 200-empty or the client gates the poll
   on stream presence; zero `stream_status` 404s in the browser-smoke console capture.
 
-### M1-9 · Image-capability honesty — S · `P3`
+### M1-9 · Image-capability honesty — S · `P3` · ✅ DONE (cb78b16)
+*Shipped 2026-07-07 as an OUTCOME verdict (design finding: `image_generation_available` is
+deliberately permissive — the documented false-negative fix — so honesty lives in the last
+completed run: 0-of-N attempted ⇒ failing, surfaced in the cast panel copy, the /roster payload,
+and the /admin/status row; all-skipped idempotent re-runs never overwrite a real verdict; a
+new-season scrub resets it). Gate: `tests/test_m1_9_portrait_honesty.py`.*
 Source: audit A9 (cast panel churns "Generating 16 remaining… (0/16)" with no image provider;
 admin says "Image generation AVAILABLE").
 - **DoD:** the backfill button and the admin label gate on a real image-capability probe (not
