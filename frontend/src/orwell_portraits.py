@@ -1698,6 +1698,18 @@ def kickoff_generation(prompts: list, user: Optional[str]) -> None:
     async request path); if called with no loop it runs synchronously to completion. Either
     way it is best-effort and swallows failures.
     """
+    # 0108: quiesced under golden record/replay — the pipeline's provider-capability probe is
+    # live-network (record's live endpoint passes it, replay's dead-end endpoint fails it, so the
+    # 16 getPortraitPrompt reads + engine write-backs run in ONE mode only, shifting seeded state
+    # for everything downstream — the ledger-diff finding). Fail-soft by design: placeholders
+    # stand, exactly as when no image provider is configured.
+    try:
+        from src import golden_path
+        if golden_path.active():
+            logger.info("[portraits] generation skipped: golden record/replay mode (0108 determinism)")
+            return
+    except Exception:
+        pass
     if not prompts:
         return
     try:
@@ -1828,6 +1840,15 @@ def kickoff_backfill(missing_ids: list, user: Optional[str], force: bool = False
     manual lever ("Generate cast portraits"): a deliberate click means "run now", so it
     bypasses the debounce window — but still STAMPS it, so an auto-poll seconds later can't
     pile on. Never blocks the caller: scheduled on the running loop like `kickoff_generation`."""
+    # 0108: quiesced under golden record/replay — same rationale as kickoff_generation (the
+    # provider probe is mode-asymmetric and the write-backs shift seeded state mid-walk).
+    try:
+        from src import golden_path
+        if golden_path.active():
+            logger.info("[portraits] backfill skipped: golden record/replay mode (0108 determinism)")
+            return False
+    except Exception:
+        pass
     if not missing_ids:
         return False
     if not force and not backfill_allowed(user):
