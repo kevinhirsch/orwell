@@ -182,8 +182,14 @@ class GoldenDriver:
             try:
                 con = sqlite3.connect(db, timeout=5)
                 try:
+                    # NOT name-only: the FE auto-titles sessions after a few turns (a
+                    # harness session renamed to e.g. "Casting interview" escaped the
+                    # first name-based scrub), so match the harness-owned ENDPOINT
+                    # bindings too — the dead-end replay URL and the stub model id.
                     ids = [r[0] for r in con.execute(
-                        "select id from sessions where name = 'golden-path'")]
+                        "select id from sessions where name = 'golden-path' "
+                        "or endpoint_url like '%golden-replay-dead-end%' "
+                        "or model = 'orwell-stub-narrator'")]
                     if ids:
                         qs = ",".join("?" * len(ids))
                         con.execute(f"delete from chat_messages where session_id in ({qs})", ids)
@@ -192,7 +198,7 @@ class GoldenDriver:
                                 "where name in ('golden-record', 'golden-replay')")
                     con.commit()
                     if ids:
-                        print(f"  scrub: dropped {len(ids)} stale golden-path session(s)", flush=True)
+                        print(f"  scrub: dropped {len(ids)} stale golden session(s)", flush=True)
                 finally:
                     con.close()
             except Exception as e:
@@ -264,9 +270,26 @@ class GoldenDriver:
         current["utility_endpoint_id"] = ep["id"]
         current["utility_model"] = self.utility_model
         os.makedirs(os.path.dirname(settings_file), exist_ok=True)
-        with open(settings_file, "w", encoding="utf-8") as fh:
+        # ATOMIC write (tmp + rename): this bypasses the FE's save seam, so a plain
+        # truncate-then-write could be read mid-write by the app (JSONDecodeError →
+        # silent defaults). The rename makes every reader see old-or-new, never torn.
+        tmp = f"{settings_file}.golden.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(current, fh, indent=2)
-        resolved = self._get(self.fe, "/api/default-chat")
+        os.replace(tmp, settings_file)
+        # VERIFY past the settings TTL cache: src.settings.load_settings serves a ~2s
+        # in-process cache and the direct file write above can't invalidate it, so the
+        # first read(s) after the write may legitimately serve PRE-write content (this
+        # transiently resolved a foreign model once and killed a paid record run at the
+        # guard below). Poll until the cache expires and the golden model resolves;
+        # only a STABLE mismatch is a real failure.
+        deadline = time.time() + 15
+        resolved: dict = {}
+        while time.time() < deadline:
+            resolved = self._get(self.fe, "/api/default-chat")
+            if resolved.get("model") == self.model:
+                break
+            time.sleep(1.0)
         if resolved.get("model") != self.model:
             raise RuntimeError(f"default-chat did not resolve the golden model: {resolved}")
 
