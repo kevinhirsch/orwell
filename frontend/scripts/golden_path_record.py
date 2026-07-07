@@ -23,7 +23,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scripts._golden_driver import SEASON_SEED, run_once  # noqa: E402
+from scripts._golden_driver import run_once  # noqa: E402
 from src import golden_path as gp  # noqa: E402
 
 
@@ -55,11 +55,11 @@ def main() -> int:
     # integrity scan, and the ACTUAL run all agree — passing the raw empty value to the run
     # while meta/integrity resolve it would make them describe a model the run didn't use.
     utility_model = args.utility_model or args.model
-    # Format-2 self-description: the fixture declares its two-tier models up front, so
-    # replay derives them authoritatively and the integrity scan below can prove no
-    # record drifted off the declared set mid-run.
-    gp.write_meta(args.fixture, narration_model=args.model,
-                  utility_model=utility_model, seed=SEASON_SEED)
+    # Format-2 self-description: the FE process writes the meta line ITSELF on its first
+    # record (driver passes the declared tier via env), so the meta writer and the record
+    # writer are the same process — the integrity scan's initialized-by-A-populated-by-B
+    # rule holds by construction. (Attempt #5 walked a perfect week and was rejected solely
+    # because the SCRIPT had stamped the meta line from its own pid.)
 
     d = run_once(mode="record", fixture=args.fixture, model=args.model,
                  utility_model=utility_model,

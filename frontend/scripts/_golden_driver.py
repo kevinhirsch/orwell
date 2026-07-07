@@ -254,6 +254,12 @@ class GoldenDriver:
         if self.mode == "record":
             fe_env["ORWELL_GOLDEN_RECORD"] = "1"
             fe_env["ORWELL_GOLDEN_FIXTURE"] = self.fixture
+            # The FE writes the fixture's meta line ITSELF on its first record (same
+            # process ⇒ meta writer == record writer, the integrity scan's rule); these
+            # envs declare the two-tier models + seed it stamps.
+            fe_env["ORWELL_GOLDEN_NARRATION_MODEL"] = self.model
+            fe_env["ORWELL_GOLDEN_UTILITY_MODEL"] = self.utility_model
+            fe_env["ORWELL_GOLDEN_SEED"] = str(SEASON_SEED)
             fe_env.pop("ORWELL_GOLDEN_REPLAY", None)
         else:
             fe_env["ORWELL_GOLDEN_REPLAY"] = self.fixture

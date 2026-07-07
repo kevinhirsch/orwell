@@ -39,6 +39,13 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 RECORD_ENV = "ORWELL_GOLDEN_RECORD"
 REPLAY_ENV = "ORWELL_GOLDEN_REPLAY"
 FIXTURE_ENV = "ORWELL_GOLDEN_FIXTURE"  # record-side output path override
+#: The DECLARED two-tier models + seed for the fixture's self-describing meta line. The
+#: record DRIVER sets these on the FE process; the FE writes the meta line itself on the
+#: first record so the meta writer and the record writer are the SAME process — the
+#: integrity scan's initialized-by-A-populated-by-B rule holds by construction.
+META_NARRATION_ENV = "ORWELL_GOLDEN_NARRATION_MODEL"
+META_UTILITY_ENV = "ORWELL_GOLDEN_UTILITY_MODEL"
+META_SEED_ENV = "ORWELL_GOLDEN_SEED"
 
 #: The one canonical committed fixture — the owner's two-tier topology (2026-07-07):
 #: narration z-ai/glm-5.2, utility qwen/qwen3.6-flash. The gate stays model-agnostic:
@@ -269,6 +276,25 @@ def _scrub(obj: Any) -> Any:
         return obj
 
 
+def _meta_record(first_rec: Dict[str, Any]) -> Dict[str, Any]:
+    """The self-describing meta line, written by THIS process on its first record so meta
+    writer == record writer (the integrity scan's initialized-vs-populated rule). Models
+    come from the driver-set envs; absent (a bare unit-test record), the first record's own
+    model stands in for both tiers so format-2 shape always holds."""
+    narration = os.environ.get(META_NARRATION_ENV, "") or str(first_rec.get("model") or "")
+    utility = os.environ.get(META_UTILITY_ENV, "") or narration
+    seed_raw = os.environ.get(META_SEED_ENV, "")
+    try:
+        seed: Optional[int] = int(seed_raw) if seed_raw else None
+    except ValueError:
+        seed = None
+    return {
+        "kind": "meta", "format": FIXTURE_FORMAT,
+        "narration_model": narration, "utility_model": utility,
+        "seed": seed, "writer": _WRITER_ID,
+    }
+
+
 def _append_record(rec: Dict[str, Any]) -> None:
     global _seq
     path = fixture_path()
@@ -278,7 +304,10 @@ def _append_record(rec: Dict[str, Any]) -> None:
             rec["writer"] = _WRITER_ID
             _seq += 1
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            need_meta = not os.path.exists(path) or os.path.getsize(path) == 0
             with open(path, "a", encoding="utf-8") as fh:
+                if need_meta:
+                    fh.write(json.dumps(_meta_record(rec), ensure_ascii=False) + "\n")
                 fh.write(json.dumps(_scrub(rec), ensure_ascii=False) + "\n")
     except Exception:
         # Recording must never break the live run it is riding — but a silent hole in

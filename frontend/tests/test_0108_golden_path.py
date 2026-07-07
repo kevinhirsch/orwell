@@ -229,7 +229,8 @@ def test_stream_record_then_replay_is_byte_identical(tmp_path, monkeypatch):
 
     recorded = asyncio.get_event_loop().run_until_complete(drive())
     assert recorded == live_chunks, "record mode must forward the live bytes unchanged"
-    assert fix.exists() and sum(1 for _ in open(fix)) == 1
+    # 2 lines: the self-written meta line (format 2) + the one recorded stream.
+    assert fix.exists() and sum(1 for _ in open(fix)) == 2
 
     # flip to replay with the network layer REMOVED — the recorded bytes must come back.
     monkeypatch.delenv("ORWELL_GOLDEN_RECORD", raising=False)
@@ -270,12 +271,34 @@ def test_meta_roundtrip_and_replay_skips_the_meta_line(golden, tmp_path, monkeyp
     assert gp.replay_call("narrator-model", MSGS, PARAMS) == "ok"
 
 
-def test_records_carry_the_writer_stamp(golden, tmp_path, monkeypatch):
+def test_records_carry_the_writer_stamp_and_meta_is_self_written(golden, tmp_path, monkeypatch):
+    """The FIRST record initializes the fixture with its meta line — written by the SAME
+    process (meta writer == record writer, the integrity scan's initialized-vs-populated
+    rule holds by construction; attempt #5's perfect walk was rejected solely because the
+    record SCRIPT had stamped meta from its own pid)."""
     monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
     gp = importlib.reload(sys.modules["src.golden_path"])
     gp.record_call("narrator-model", MSGS, {"temperature": 0}, "noted")
-    rec = json.loads(open(gp.fixture_path()).read().strip())
-    assert rec.get("writer") == gp._WRITER_ID and "." in rec["writer"]
+    lines = [json.loads(l) for l in open(gp.fixture_path()) if l.strip()]
+    assert lines[0]["kind"] == "meta" and lines[1]["kind"] == "call"
+    assert lines[0]["writer"] == lines[1]["writer"] == gp._WRITER_ID
+    # no declared-tier envs in this bare unit record ⇒ the record's own model stands in
+    assert lines[0]["narration_model"] == "narrator-model"
+    assert gp.fixture_integrity_scan(gp.fixture_path()) == []
+
+
+def test_meta_models_come_from_the_driver_envs(golden, tmp_path, monkeypatch):
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_GOLDEN_NARRATION_MODEL", "narrator-model")
+    monkeypatch.setenv("ORWELL_GOLDEN_UTILITY_MODEL", "cheap-model")
+    monkeypatch.setenv("ORWELL_GOLDEN_SEED", "108108")
+    gp = importlib.reload(sys.modules["src.golden_path"])
+    gp.record_call("cheap-model", MSGS, {"temperature": 0, "call_class": "utility"}, "{}")
+    meta = gp.fixture_meta(gp.fixture_path())
+    assert meta and meta["narration_model"] == "narrator-model"
+    assert meta["utility_model"] == "cheap-model" and meta["seed"] == 108108
+    assert gp.fixture_integrity_scan(
+        gp.fixture_path(), narration_model="narrator-model", utility_model="cheap-model") == []
 
 
 def test_integrity_scan_passes_a_clean_two_tier_fixture(golden, tmp_path):
