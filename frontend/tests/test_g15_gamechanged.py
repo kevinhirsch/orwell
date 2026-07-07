@@ -94,7 +94,10 @@ def _chat_g15_block():
     # The seam spans the G15 comment, the ok-gated mutating-tool dispatch, and the
     # createCharacter branch (fresh-session hook + the P1 finalizing indicator). The
     # window covers that whole branch — these are deeply indented lines.
-    return CHAT[i:i + 1500]
+    # Window sized to reach the createCharacter fresh-session hook: the seam grew with the
+    # full mutating-tools array (FEJS-3 + the 0093–0107 DRIFT mutators + 0094/0095) and the
+    # M1-3 _beat threading, pushing the hook to ~offset 1800.
+    return CHAT[i:i + 2200]
 
 
 def test_chat_tool_result_seam_routes_every_mutating_tool_through_the_helper():
@@ -227,7 +230,9 @@ def test_decision_card_success_branch_calls_the_helper():
     confirm = DECISION[DECISION.find('fetch("/api/orwell/decision"'):]
     ok_gate = confirm.find("if (!r.ok) throw")
     call = confirm.find("window.orwellGameChanged")
-    catch = confirm.find("} catch")
+    # the OUTER error-handler catch — anchored AFTER the dispatch so the inner
+    # `try { _beat = (await r.json()).beatSeq } catch` (M1-3 beatSeq read) isn't mistaken for it.
+    catch = confirm.find("} catch", call)
     assert ok_gate != -1 and call != -1 and catch != -1
     assert ok_gate < call < catch, \
         "orwellGameChanged must fire inside the success branch (post-throw-gate, pre-catch)"

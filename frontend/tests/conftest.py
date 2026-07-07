@@ -14,6 +14,8 @@ import sys
 import tempfile
 import types
 
+import pytest
+
 FRONTEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE_DIR = os.path.join(FRONTEND_DIR, "core")
 
@@ -80,3 +82,23 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if _module_launches_browser(str(item.fspath)):
             item.add_marker("browser")
+
+
+# ── cross-file isolation: the M1-10 cast-authoring ledger is process-global ──────────
+#
+# `orwell_cast_authoring` keeps the per-season attempt/give-up ledger in module globals
+# (`_attempt_ledger` / `_gaveup_logged`). Without a per-test reset it accumulates across tests
+# AND across files — a burst test that drives an NPC to the give-up cap leaks that give-up into a
+# later completeness/concurrency assertion, so co-run ORDER (and xdist worker distribution) decides
+# pass/fail. Reset it before every test that already imported the module (cheap: no-op when it isn't
+# loaded, so unrelated tests pay nothing).
+@pytest.fixture(autouse=True)
+def _reset_cast_authoring_ledger():
+    mod = sys.modules.get("src.orwell_cast_authoring")
+    if mod is not None:
+        for attr in ("_attempt_ledger", "_gaveup_logged", "_LAST_AUTHORING_BACKFILL_AT"):
+            try:
+                getattr(mod, attr).clear()
+            except Exception:
+                pass
+    yield

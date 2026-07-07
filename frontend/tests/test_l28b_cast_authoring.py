@@ -12,10 +12,17 @@ from src import orwell_cast_authoring as A
 
 
 def _run(coro):
-    # The FE convention (test_lane6_turn_integrity): drive a coroutine on the EXISTING session loop.
-    # NOT `async def` tests / asyncio.run() — those close the main-thread loop and break later tests
-    # that use the deprecated asyncio.get_event_loop() (e.g. the transcript-surface suite).
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Each call drives on a PRISTINE loop so a coroutine never inherits a prior test's half-drained
+    # loop — the co-run task-loss that made a concurrent author_cast return 7/8. A fresh OPEN loop is
+    # left installed afterward, so the FE convention's later asyncio.get_event_loop() consumers never
+    # meet a CLOSED loop (what a bare asyncio.run() would leave behind).
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 # ── the producer prompt ───────────────────────────────────────────────────────
