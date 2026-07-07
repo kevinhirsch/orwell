@@ -1879,7 +1879,11 @@ def setup_chat_routes(
         if rec is None:
             if agent_runs.is_active(session_id):
                 return {"status": "streaming", "detached": True}
-            raise HTTPException(404, "No active stream for this session")
+            # M1-8 (audit A8): "no active stream" is a NORMAL state, not an error — the old 404
+            # made every idle-session probe a red console line (masking real failures) for the
+            # exact path sessions.js polls each turn. Both client consumers already branch on
+            # `status !== 'streaming'`, so the idle payload is drop-in compatible.
+            return {"status": "idle"}
         return rec
 
     # ------------------------------------------------------------------ #
