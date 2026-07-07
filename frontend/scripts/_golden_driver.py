@@ -214,12 +214,14 @@ class GoldenDriver:
             raise RuntimeError(f"preSeedCast failed: {r}")
         self._quiesce_beats("post-preseed")
 
-    def _quiesce_beats(self, label: str, stable_polls: int = 3, budget_s: int | None = None) -> None:
+    def _quiesce_beats(self, label: str, stable_polls: int = 3, budget_s: int | None = None,
+                       poll_s: float = 1.0, quiet: bool = False) -> None:
         """Wait until the engine's beatSeq stops moving — a serialization barrier so the
-        fire-and-forget background write-backs (cast identity, prewarm) land at a
-        DEFINED point relative to the walk in BOTH modes, instead of racing the turns
-        (a mid-walk background commit shifts every later tool result's beatSeq and
-        drifts the replay keys)."""
+        fire-and-forget background write-backs (cast identity, prewarm, and the per-turn
+        _auto_record_scene fold) land at a DEFINED point relative to the walk in BOTH
+        modes, instead of racing the next turn's prompt build (a background commit
+        landing mid-race shifts turnsHere/beatSeq in every later prompt and drifts the
+        replay keys — the exact turnsHere 4-vs-3 divergence the validation caught)."""
         budget = budget_s if budget_s is not None else (120 if self.mode == "record" else 45)
         last, stable = None, 0
         deadline = time.time() + budget
@@ -233,9 +235,10 @@ class GoldenDriver:
             stable = stable + 1 if (seq is not None and seq == last) else 0
             last = seq
             if stable >= stable_polls:
-                print(f"  quiesce[{label}]: beatSeq stable at {seq}", flush=True)
+                if not quiet:
+                    print(f"  quiesce[{label}]: beatSeq stable at {seq}", flush=True)
                 return
-            time.sleep(1)
+            time.sleep(poll_s)
         print(f"  quiesce[{label}]: budget elapsed (beatSeq {last}) — proceeding", flush=True)
 
     # ── the walk ──────────────────────────────────────────────────────────────────
@@ -254,6 +257,11 @@ class GoldenDriver:
                 if not chunk:
                     break
         time.sleep(self.settle)
+        # Per-turn serialization: the post-turn background fold (_auto_record_scene's
+        # recordInteraction) must land BEFORE the next prompt builds, in both modes —
+        # otherwise turnsHere/beatSeq in the next system prompt race the write and the
+        # replay keys drift (the turnsHere 4-vs-3 class).
+        self._quiesce_beats("post-turn", stable_polls=2, budget_s=20, poll_s=0.3, quiet=True)
         msgs = self._history()
         for m in reversed(msgs):
             if m.get("role") == "assistant":
