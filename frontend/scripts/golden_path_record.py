@@ -51,14 +51,18 @@ def main() -> int:
         return 2
     if os.path.exists(args.fixture):
         os.remove(args.fixture)  # a recording always starts a FRESH fixture
+    # Resolve the utility tier ONCE (empty ⇒ same as narration) so the declared meta, the
+    # integrity scan, and the ACTUAL run all agree — passing the raw empty value to the run
+    # while meta/integrity resolve it would make them describe a model the run didn't use.
+    utility_model = args.utility_model or args.model
     # Format-2 self-description: the fixture declares its two-tier models up front, so
     # replay derives them authoritatively and the integrity scan below can prove no
     # record drifted off the declared set mid-run.
     gp.write_meta(args.fixture, narration_model=args.model,
-                  utility_model=args.utility_model or args.model, seed=SEASON_SEED)
+                  utility_model=utility_model, seed=SEASON_SEED)
 
     d = run_once(mode="record", fixture=args.fixture, model=args.model,
-                 utility_model=args.utility_model,
+                 utility_model=utility_model,
                  provider_url=args.base_url, provider_key=args.api_key,
                  turn_budget=args.turn_budget)
     rep = d.report(args.report or None)
@@ -69,7 +73,7 @@ def main() -> int:
     print("model census:", " ".join(f"{m}×{c}" for m, c in sorted(census.items())) or "<empty>")
     integrity = gp.fixture_integrity_scan(
         args.fixture, narration_model=args.model,
-        utility_model=args.utility_model or args.model)
+        utility_model=utility_model)
     if integrity:
         print("FAIL: fixture integrity scan (fixture NOT trustworthy — do not commit):")
         for v in integrity[:20]:

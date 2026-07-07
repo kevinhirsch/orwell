@@ -355,7 +355,11 @@ class GoldenDriver:
 
     def _turn(self, text: str) -> str:
         """One real player turn through POST /api/chat_stream; returns the settled
-        assistant text persisted for the turn (read back from history)."""
+        assistant text persisted for the turn (read back from history). FAILS loudly if
+        no NEW assistant message was persisted: a chat_stream that returns without
+        writing a fresh reply would otherwise silently re-serve the PRIOR turn's text and
+        let the digest/invariants advance on stale output."""
+        prior_assistants = sum(1 for m in self._history() if m.get("role") == "assistant")
         body = json.dumps({"message": text, "session": self.session}).encode()
         req = urllib.request.Request(
             f"{self.fe}/api/chat_stream", data=body, method="POST",
@@ -373,6 +377,11 @@ class GoldenDriver:
         # replay keys drift (the turnsHere 4-vs-3 class).
         self._quiesce_beats("post-turn", stable_polls=2, budget_s=20, poll_s=0.3, quiet=True)
         msgs = self._history()
+        if sum(1 for m in msgs if m.get("role") == "assistant") <= prior_assistants:
+            raise RuntimeError(
+                f"no new assistant message persisted for turn {text[:48]!r} — "
+                "chat_stream returned without a fresh reply (stale prior-turn output "
+                "would advance the digest/invariants on nothing new)")
         for m in reversed(msgs):
             if m.get("role") == "assistant":
                 return str(m.get("content") or "")
@@ -523,6 +532,12 @@ class GoldenDriver:
                     return
                 self._post_json(self.fe, "/api/orwell/decision", body)
                 time.sleep(self.settle)
+                # A decision submission mutates engine state and can bump beatSeq too, so
+                # settle it before the next prompt builds — same barrier as a chat turn,
+                # or the next system prompt races the decision's fold (the turnsHere/
+                # beatSeq drift class).
+                self._quiesce_beats("post-decision", stable_polls=2, budget_s=20,
+                                    poll_s=0.3, quiet=True)
                 continue
             turn_no += 1
             # Phase-stall escalation: past the threshold, the walk asks for the ceremony
@@ -626,9 +641,14 @@ class GoldenDriver:
         from src import golden_path as gp
         misses = log.count(gp.MISS_SENTINEL)
         self.inv.record("R1", "zero fixture misses", misses == 0, f"{misses} misses in FE log")
-        provider_lines = [ln for ln in log.splitlines() if "LLM stream to http" in ln]
+        # Provider reach logs in TWO shapes (llm_core): streaming as "LLM stream to
+        # <url> ended" and non-streaming utility/background calls as "LLM async call to
+        # <url> succeeded/failed". Either under replay means the golden seam failed to
+        # short-circuit before the network — catch both.
+        provider_lines = [ln for ln in log.splitlines()
+                          if "LLM stream to http" in ln or "LLM async call to http" in ln]
         self.inv.record("R2", "no outbound provider call", not provider_lines,
-                        f"{len(provider_lines)} stream-impl lines (must be 0 under replay)")
+                        f"{len(provider_lines)} provider-reach lines (must be 0 under replay)")
 
     def digest(self) -> str:
         return hashlib.sha256("\n".join(self.digest_parts).encode()).hexdigest()

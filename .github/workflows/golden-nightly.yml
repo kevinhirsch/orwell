@@ -16,6 +16,12 @@ on:
     - cron: "17 6 * * *"
   workflow_dispatch: {}
 
+# Minimal token scope: the job only checks out the repo and uploads an artifact (the
+# artifact API needs no repo write). Nothing here writes back to the repo, so read-only
+# `contents` is all it needs — avoids the overly-broad default token.
+permissions:
+  contents: read
+
 concurrency:
   group: golden-nightly
   cancel-in-progress: true

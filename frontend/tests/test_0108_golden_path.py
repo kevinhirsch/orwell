@@ -281,12 +281,29 @@ def test_records_carry_the_writer_stamp(golden, tmp_path, monkeypatch):
 def test_integrity_scan_passes_a_clean_two_tier_fixture(golden, tmp_path):
     fix = tmp_path / "clean.jsonl"
     golden.write_meta(str(fix), narration_model="narrator-model", utility_model="cheap-model")
+    # A clean fixture is single-writer: the records must carry the SAME writer the meta
+    # line was stamped with (write_meta uses _WRITER_ID), else the single-writer integrity
+    # check flags an init-by-A / populate-by-B split.
     with open(fix, "a", encoding="utf-8") as fh:
         for i, m in enumerate(["narrator-model", "cheap-model", "narrator-model"]):
             fh.write(json.dumps({"key": f"k{i}", "kind": "stream", "seq": i, "model": m,
-                                 "writer": "1.aaa", "chunks": []}) + "\n")
+                                 "writer": golden._WRITER_ID, "chunks": []}) + "\n")
     assert golden.fixture_integrity_scan(str(fix)) == []
     assert golden.fixture_model_census(str(fix)) == {"narrator-model": 2, "cheap-model": 1}
+
+
+def test_integrity_scan_fails_records_foreign_to_meta_writer(golden, tmp_path):
+    # The init-by-A / populate-entirely-by-B case: every record shares ONE writer, so the
+    # multiple-writers check is silent, but that writer differs from the meta stamp — the
+    # single-writer integrity check must still catch it.
+    fix = tmp_path / "foreignwriter.jsonl"
+    golden.write_meta(str(fix), narration_model="narrator-model", utility_model="narrator-model")
+    with open(fix, "a", encoding="utf-8") as fh:
+        for i in range(2):
+            fh.write(json.dumps({"key": f"k{i}", "kind": "call", "seq": i, "model": "narrator-model",
+                                 "writer": "999.notmeta", "response": ""}) + "\n")
+    violations = golden.fixture_integrity_scan(str(fix))
+    assert any("stamped by" in v for v in violations)
 
 
 def test_integrity_scan_fails_a_foreign_model_record(golden, tmp_path):
@@ -327,10 +344,11 @@ def test_integrity_scan_fails_meta_missing_or_not_first(golden, tmp_path):
     assert any("not first" in v for v in golden.fixture_integrity_scan(str(appended)))
 
 
-def test_fixture_models_prefers_the_meta_declaration(golden, tmp_path):
+def test_fixture_models_prefers_the_meta_declaration(golden, tmp_path, monkeypatch):
     """The format-1 heuristic mis-derives two-tier fixtures (identity calls stream on the
     utility tier but default to call_class narration) — meta wins when present."""
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Scoped + auto-reverted: don't leak a process-wide sys.path change into later tests.
+    monkeypatch.syspath_prepend(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from scripts._golden_driver import fixture_models
     fix = tmp_path / "twotier.jsonl"
     golden.write_meta(str(fix), narration_model="narrator-model", utility_model="cheap-model")

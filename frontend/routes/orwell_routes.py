@@ -1222,22 +1222,9 @@ def setup_orwell_routes() -> APIRouter:
                         "started": True,
                     },
                 )
-            # A new season = a new cast: scrub the prior portrait set before generating (0051).
-            try:
-                orwell_portraits.scrub_user(user)
-            except Exception:
-                pass
-            try:  # M1-10: new season ⇒ the authoring give-up ledger resets with the cast
-                orwell_cast_authoring.reset_attempts(user)
-            except Exception:
-                pass
-            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
-            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
-            try:
-                from src import orwell_prewarm
-                orwell_prewarm.reset(user)
-            except Exception:
-                pass
+            # A new season = a new cast: scrub portraits, the authoring ledger, and the pre-warm gate.
+            from src import orwell_prewarm
+            orwell_prewarm.reset_user_season(user)
             res = await orwell_engine.create_character(
                 body.playerName.strip() or None,
                 archetype=body.archetype,
@@ -1386,22 +1373,9 @@ def setup_orwell_routes() -> APIRouter:
             # public outcome BEFORE the reset wipes the engine sandbox — idempotent, so it never
             # double-logs a season the recap poll already captured. Never blocks the season advance.
             await _capture_season_outcome(user)
-            # A new season is a new cast: scrub the prior portrait set before generating (0051).
-            try:
-                orwell_portraits.scrub_user(user)
-            except Exception:
-                pass
-            try:  # M1-10: new season ⇒ the authoring give-up ledger resets with the cast
-                orwell_cast_authoring.reset_attempts(user)
-            except Exception:
-                pass
-            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
-            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
-            try:
-                from src import orwell_prewarm
-                orwell_prewarm.reset(user)
-            except Exception:
-                pass
+            # A new season is a new cast: scrub portraits, the authoring ledger, and the pre-warm gate.
+            from src import orwell_prewarm
+            orwell_prewarm.reset_user_season(user)
             if body.keep:
                 # Keep the houseguest (0056): a confirmed restart carrying the prior CHARACTER.
                 res = await orwell_engine.create_character(None, confirm_restart=True, keep_character=True, user=user)
@@ -1471,21 +1445,9 @@ def setup_orwell_routes() -> APIRouter:
         if not body.confirm:
             return JSONResponse(status_code=400, content={"error": "confirm=true is required to reset progress"})
         try:
-            try:
-                orwell_portraits.scrub_user(user)
-            except Exception:
-                pass
-            try:  # M1-10: new season ⇒ the authoring give-up ledger resets with the cast
-                orwell_cast_authoring.reset_attempts(user)
-            except Exception:
-                pass
-            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
-            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
-            try:
-                from src import orwell_prewarm
-                orwell_prewarm.reset(user)
-            except Exception:
-                pass
+            # A new season is a new cast: scrub portraits, the authoring ledger, and the pre-warm gate.
+            from src import orwell_prewarm
+            orwell_prewarm.reset_user_season(user)
             res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door
             orwell_engine.remember_pending(res, user=user)  # clear the prior season's cached decision card
             # 0064: rotate the canonical game session so the restarted level opens in a fresh chat.

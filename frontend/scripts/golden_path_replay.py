@@ -26,12 +26,24 @@ from src import golden_path as gp  # noqa: E402
 def _default_fixture() -> str:
     """The canonical committed fixture: DEFAULT_FIXTURE when present, else the single
     golden_path_*.jsonl under tests/golden/ (the fixture is model-named; the gate is
-    model-agnostic — it replays whatever tier the owner recorded)."""
+    model-agnostic — it replays whatever tier the owner recorded). Multiple candidates
+    with no canonical DEFAULT_FIXTURE is AMBIGUOUS and a HARD FAILURE — CI must never
+    silently pick one and replay the wrong tier."""
     if os.path.isfile(gp.DEFAULT_FIXTURE):
         return gp.DEFAULT_FIXTURE
     import glob
     hits = sorted(glob.glob(os.path.join(os.path.dirname(gp.DEFAULT_FIXTURE), "golden_path_*.jsonl")))
-    return hits[0] if len(hits) == 1 else (hits[-1] if hits else gp.DEFAULT_FIXTURE)
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        print("FAIL: multiple golden fixtures found and no canonical DEFAULT_FIXTURE at "
+              f"{gp.DEFAULT_FIXTURE} — refusing to guess which to replay. Candidates:")
+        for h in hits:
+            print(f"  - {h}")
+        print("Disambiguate: pass --fixture <path>, or commit the canonical fixture at "
+              "the DEFAULT_FIXTURE path.")
+        sys.exit(2)
+    return gp.DEFAULT_FIXTURE  # none found → main() reports not-found + the regenerate hint
 
 
 def main() -> int:

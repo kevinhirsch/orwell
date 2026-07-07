@@ -20,7 +20,9 @@ def test_zero_of_n_run_stamps_failing(monkeypatch):
     monkeypatch.setattr(orwell_portraits, "_LAST_RUN_OUTCOME", {})
     orwell_portraits._note_last_run("u1", generated=0, skipped=0, total=16)
     out = orwell_portraits.last_run_outcome("u1")
-    assert out and out["failing"] is True and out["attempted"] == 16
+    assert out, "a zero-of-N run must stamp an outcome"
+    assert out["failing"] is True
+    assert out["attempted"] == 16
 
 
 def test_partial_or_full_success_is_not_failing(monkeypatch):
@@ -47,21 +49,28 @@ def test_new_season_scrub_resets_the_verdict(monkeypatch, tmp_path):
 
 
 def test_cast_panel_carries_the_honest_copy():
-    js = open(os.path.join(FRONTEND, "static", "js", "orwellCast.js"), encoding="utf-8").read()
+    with open(os.path.join(FRONTEND, "static", "js", "orwellCast.js"), encoding="utf-8") as fh:
+        js = fh.read()
     assert "portraitLastRun" in js, "the panel must read the roster payload's verdict"
     assert "Portraits aren't landing" in js, "the failing state needs actionable copy"
     idx_fail = js.index("_lastRunFailing")
     idx_gen = js.index('"Generating " + missing.length')
-    assert idx_fail < idx_gen or "_lastRunFailing" in js[:idx_gen + 400], \
-        "the failing branch must gate the idle 'Generating N remaining' copy"
+    # Strict order: the failing branch must appear BEFORE the idle 'Generating N remaining'
+    # copy so it actually gates it. (The old `or "_lastRunFailing" in js[:idx_gen+400]`
+    # fallback was near-always true once both strings coexist, so it caught no mis-order.)
+    assert idx_fail < idx_gen, \
+        "the failing branch must precede (gate) the idle 'Generating N remaining' copy"
 
 
 def test_admin_row_carries_the_failed_marker():
-    src = open(os.path.join(FRONTEND, "routes", "admin_health_routes.py"), encoding="utf-8").read()
-    assert '"lastRun"' in src and "last run FAILED" in src, \
+    with open(os.path.join(FRONTEND, "routes", "admin_health_routes.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    assert '"lastRun"' in src, "/admin/status must carry the last-run marker"
+    assert "last run FAILED" in src, \
         "/admin/status must show the last run's honest verdict beside AVAILABLE"
 
 
 def test_roster_payload_exposes_the_verdict():
-    src = open(os.path.join(FRONTEND, "routes", "orwell_routes.py"), encoding="utf-8").read()
+    with open(os.path.join(FRONTEND, "routes", "orwell_routes.py"), encoding="utf-8") as fh:
+        src = fh.read()
     assert '"portraitLastRun"' in src, "the roster payload carries the verdict (counts only)"

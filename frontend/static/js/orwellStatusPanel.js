@@ -598,7 +598,12 @@ import { onNarrowChange } from './platform.js';
     markStale(false);
     // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
     st._state = (await fetchState()) || null;
-    render(st);
+    // M1-3: verify the read caught the claimed commit BEFORE painting. A read that raced the
+    // engine commit (got < wantBeat) is known-stale — don't paint the stale HUD for a retry
+    // interval and then correct it a beat later. Schedule the bounded catch-up refetch and
+    // render only once the read is fresh (or the bounded retries are exhausted, so a beat that
+    // never arrives still eventually renders the last read). The last-known panel stays up
+    // meanwhile (we simply skip this paint).
     const want = Number(wantBeat);
     const got = Number(st && st.beatSeq != null ? st.beatSeq
       : (st._state && st._state.beatSeq != null ? st._state.beatSeq : NaN));
@@ -606,9 +611,10 @@ import { onNarrowChange } from './platform.js';
       _catchupTries += 1;
       if (_catchupTimer) clearTimeout(_catchupTimer);
       _catchupTimer = setTimeout(() => refresh(want), 1000);
-    } else {
-      _catchupTries = 0;
+      return; // known-stale: don't paint; wait for the catch-up read to land
     }
+    render(st);
+    _catchupTries = 0;
   }
 
   // Seam for the headless browser gate: build + show the panel on demand.
@@ -633,6 +639,10 @@ import { onNarrowChange } from './platform.js';
   // catch-up-fetches past a read-raced commit instead of rendering stale for a poll interval.
   window.addEventListener("orwell:gamechanged", (e) => {
     _failures = 0;
+    // Cancel any in-flight catch-up retry: it was scheduled for an OLDER wanted-beat and would
+    // otherwise fire after this NEWER event and refetch/paint against the stale wanted-beat.
+    // Reset the attempt counter so this event's own catch-up gets its full bounded budget.
+    if (_catchupTimer) { clearTimeout(_catchupTimer); _catchupTimer = null; }
     _catchupTries = 0;
     if (timer) { clearTimeout(timer); timer = null; }
     start(e && e.detail ? e.detail.beatSeq : undefined);

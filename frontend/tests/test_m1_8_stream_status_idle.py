@@ -27,7 +27,10 @@ def test_idle_session_answers_200_idle_not_404():
 
 def test_detached_run_still_reports_streaming():
     body = _route_source()
-    assert '"detached": True' in body and '"streaming"' in body, \
+    # Split so a failure names which half of the detached-run signal regressed.
+    assert '"streaming"' in body, \
+        "the detached run must still report a streaming status"
+    assert '"detached": True' in body, \
         "the detached-run reconnect signal (F-8's whole purpose) must survive the idle change"
 
 
@@ -37,6 +40,7 @@ def test_clients_branch_on_status_not_ok(  ):
     import os
     p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "static", "js", "sessions.js")
-    js = open(p, encoding="utf-8").read()
+    with open(p, encoding="utf-8") as fh:
+        js = fh.read()
     assert js.count("status !== 'streaming'") >= 2, \
         "both stream_status consumers must branch on the status field"

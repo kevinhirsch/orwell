@@ -24,6 +24,8 @@ import asyncio
 import logging
 from typing import Awaitable, Callable, Optional
 
+from src import golden_path
+
 logger = logging.getLogger(__name__)
 
 # Hard cap: voice at most this many scenes per off-screen tick. Each voicing is one LLM call;
@@ -173,13 +175,9 @@ def kickoff_enrich(owner: Optional[str] = None) -> None:
     # land on a background schedule (bumping beatSeq between player turns), which makes the
     # replayed conversation's tool results non-reproducible. Fail-soft by design: the engine's
     # deterministic skeletons stand un-voiced, exactly as when no utility model is configured.
-    try:
-        from src import golden_path
-        if golden_path.active():
-            logger.info("[offscreen-texture] skipped: golden record/replay mode (0108 determinism)")
-            return
-    except Exception:
-        pass
+    if golden_path.active():
+        logger.info("[offscreen-texture] skipped: golden record/replay mode (0108 determinism)")
+        return
     k = _key(owner)
     if k in _IN_FLIGHT:
         return

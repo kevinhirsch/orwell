@@ -69,7 +69,12 @@ def replay_enabled() -> bool:
 
 
 def active() -> bool:
-    return record_enabled() or replay_enabled()
+    # Contract: never raises — callers gate imports/branches on this. Any error resolves
+    # to a definite ``False`` (disabled) rather than propagating out of a hot path.
+    try:
+        return record_enabled() or replay_enabled()
+    except Exception:
+        return False
 
 
 def fixture_path() -> str:
@@ -99,13 +104,20 @@ _PARAM_KEYS = (
 
 
 # Wall-clock text the FE legitimately injects into prompts (the "## Current date and
-# time" context section) drifts by the minute — and the DATE line drifts daily, which
-# would miss a fixture recorded any earlier day. The spec excludes timestamps from the
-# key, so canonicalization neutralizes date/time SHAPES — key-side only; the recorded
-# fixture bytes always keep the full original content.
+# time" context section — src/user_time.py current_datetime_prompt) drifts by the minute,
+# and the DATE line drifts daily, which would miss a fixture recorded any earlier day. The
+# spec excludes timestamps from the key, so canonicalization neutralizes date/time SHAPES
+# — key-side only; the recorded fixture bytes always keep the full original content. The
+# date/time shapes are neutralized ONLY inside that wall-clock section, so a genuine date
+# change in a game fact or a tool result still drifts the key (never masked as a clock tick).
 import re as _re
 
-_VOLATILE_RES = (
+#: The header the FE injects for the wall-clock section, and the pattern that ends it
+#: (the next markdown header, or end-of-string).
+_WALLCLOCK_HEADER = "## Current date and time"
+_NEXT_HEADER_RE = _re.compile(r"\n#{1,6} ")
+
+_WALLCLOCK_RES = (
     # "2026-07-07" / "2026-07-07T14:57:03Z"
     _re.compile(r"\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?\b"),
     # "Tuesday, July 7, 2026" / "July 7, 2026"
@@ -114,19 +126,34 @@ _VOLATILE_RES = (
                 r"\s+\d{1,2},\s+\d{4}\b"),
     # "2:57 PM" / "14:57" / "14:57:03"
     _re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AaPp][Mm])?\b"),
+)
+
+_GLOBAL_VOLATILE_RES = (
     # The presence dwell counter in the moment prompt ("you've been here 4 turns"): it ticks per
     # FRAMED MODEL ROUND, and round counts legitimately vary ±1 with stream timing (an agent-loop
-    # continuation decision), so a cosmetic counter would drift every later key. Neutralized in
-    # the KEY only — the recorded prompt keeps the real number; every other roster/room detail in
+    # continuation decision), so a cosmetic counter would drift every later key. It is a specific
+    # phrase (never a game fact), so unlike the date/time shapes it is safe to neutralize wherever
+    # it appears — the recorded prompt keeps the real number; every other roster/room detail in
     # the same section still keys (validated by the 0108 unit gates).
     _re.compile(r"you'?ve been here \d+ turns?", _re.IGNORECASE),
 )
 
 
 def _neutralize_volatile(s: str) -> str:
-    for rx in _VOLATILE_RES:
+    # Specific, never-a-game-fact shapes are safe to neutralize anywhere in the prompt.
+    for rx in _GLOBAL_VOLATILE_RES:
         s = rx.sub("<VOLATILE-TIME>", s)
-    return s
+    # Date/time shapes are neutralized ONLY inside the wall-clock context section, so a real
+    # date/time embedded in game content or a tool result still drifts the key.
+    idx = s.find(_WALLCLOCK_HEADER)
+    if idx == -1:
+        return s
+    m = _NEXT_HEADER_RE.search(s, idx + len(_WALLCLOCK_HEADER))
+    end = m.start() if m else len(s)
+    section = s[idx:end]
+    for rx in _WALLCLOCK_RES:
+        section = rx.sub("<VOLATILE-TIME>", section)
+    return s[:idx] + section + s[end:]
 
 
 def _canon_content(content: Any) -> Any:
@@ -164,8 +191,14 @@ def _canon_tools(tools: Optional[List[Dict]]) -> List[str]:
     for t in tools or []:
         try:
             fn = (t.get("function") or {}) if isinstance(t, dict) else {}
+            # The description is model-facing instruction text: changing it alters live
+            # behavior, so it MUST enter the key or CI would replay a stale fixture.
+            desc = fn.get("description")
+            if desc is None and isinstance(t, dict):
+                desc = t.get("description")
             canon.append(json.dumps(
-                {"name": fn.get("name") or t.get("name"), "schema": fn.get("parameters")},
+                {"name": fn.get("name") or t.get("name"),
+                 "description": desc, "schema": fn.get("parameters")},
                 sort_keys=True, ensure_ascii=False))
         except Exception:
             canon.append(str(t))
@@ -244,7 +277,7 @@ def _append_record(rec: Dict[str, Any]) -> None:
             rec["seq"] = _seq
             rec["writer"] = _WRITER_ID
             _seq += 1
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(_scrub(rec), ensure_ascii=False) + "\n")
     except Exception:
@@ -255,14 +288,28 @@ def _append_record(rec: Dict[str, Any]) -> None:
 
 
 def record_stream(candidates_model: str, messages: List[Dict],
-                  kwargs: Dict[str, Any], chunks: List[str]) -> None:
-    """Append one completed streamed call to the fixture (called from the chokepoint's
-    ``finally`` with the full ordered chunk list)."""
+                  kwargs: Dict[str, Any], chunks: List[str],
+                  *, completed: Optional[bool] = None) -> None:
+    """Append one NORMALLY-completed streamed call to the fixture (called from the
+    chokepoint's ``finally`` with the full ordered chunk list).
+
+    The ``finally`` also fires on an upstream exception or an async-generator close/cancel,
+    so a partial/failed live stream would otherwise be persisted as a replayable fixture and
+    poison replay. Only a stream that terminated normally is persisted: no error chunk was
+    seen AND the stream reached its end (a ``finish`` chunk set finishReason, or the SSE
+    ``[DONE]`` sentinel arrived). A caller may veto explicitly with ``completed=False``."""
     from src import llm_trace
     acc = llm_trace.StreamAccumulator()
     for c in chunks:
         acc.observe(c)
     resp = acc.response()
+    completed_normally = (
+        completed is not False
+        and not resp.get("error")
+        and (bool(resp.get("finishReason")) or any("[DONE]" in c for c in chunks))
+    )
+    if not completed_normally:
+        return
     params = dict(kwargs)
     params["model"] = candidates_model
     _append_record({
@@ -308,7 +355,7 @@ def write_meta(path: str, *, narration_model: str, utility_model: str,
     to pin from here instead of guessing from record shapes — the old first-stream/-call
     heuristic mis-derived on two-tier fixtures because cast-identity calls are streamed
     on the UTILITY tier but default to ``call_class: narration``."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "kind": "meta", "format": FIXTURE_FORMAT,
@@ -401,6 +448,16 @@ def fixture_integrity_scan(path: Optional[str] = None, *,
         violations.append(
             f"multiple record writers {sorted(writers)} — concurrent processes appended "
             "to one fixture path (run exactly one golden driver at a time)")
+    # A fixture initialized by writer A then populated by writer B has a single record
+    # writer (B) yet is NOT single-writer: every record must match the meta stamp.
+    meta_writer = meta.get("writer") if meta else None
+    if meta_writer:
+        foreign = sorted(w for w in writers if w != meta_writer)
+        if foreign:
+            violations.append(
+                f"records written by {foreign} but the meta line was stamped by "
+                f"{meta_writer!r} — the fixture was initialized by one process and "
+                "populated by another (single-writer integrity violated)")
     if allowed:
         for m, c in sorted(fixture_model_census(p).items()):
             if m not in allowed:
@@ -460,13 +517,17 @@ def _lookup(key: str, kind: str, params: Dict[str, Any],
         dump = os.environ.get("ORWELL_GOLDEN_DEBUG_DUMP")
         if dump:
             try:
-                with open(dump, "a", encoding="utf-8") as fh:
+                # noqa: the dump path is an operator/CI-controlled env var (opt-in drift
+                # diagnosis), never user input — not an untrusted-path traversal.
+                with open(dump, "a", encoding="utf-8") as fh:  # nosec B108
                     fh.write(json.dumps(_scrub({
                         "kind": kind, "key": key, "digest": digest,
                         "params": _canon_params(params),
                         "messages": _canon_messages(messages),
                     }), ensure_ascii=False) + "\n")
-            except Exception:
+            except OSError:
+                # Best-effort diagnostic only — a write failure must never mask the drift
+                # miss we are about to raise. Narrow to I/O errors so real bugs still surface.
                 pass
         raise GoldenReplayMiss(
             f"{MISS_SENTINEL}: no fixture entry for {kind} request key {key[:16]}… "
@@ -531,9 +592,45 @@ VAULT_KEY_PATTERNS = (
 SECRET_PATTERNS = (r"Bearer\s+[A-Za-z0-9._\-]{8,}", r"\bsk-[A-Za-z0-9._\-]{8,}\b")
 
 
+def _decoded_string_leaves(line: str) -> List[str]:
+    """Every JSON string leaf of a fixture line (recursively), so a Vault key embedded
+    inside a JSON string VALUE — where it serializes escaped as ``\\"trust\\"`` and the raw
+    ``"trust"`` pattern would miss it — is surfaced as the un-escaped ``"trust"``. A leaf
+    that is itself serialized JSON (nested escaping) is decoded one level further."""
+    out: List[str] = []
+    try:
+        obj = json.loads(line)
+    except Exception:
+        return out
+    stack = [obj]
+    seen = 0
+    while stack and seen < 100000:  # bound: a pathological fixture line can't wedge the scan
+        seen += 1
+        cur = stack.pop()
+        if isinstance(cur, str):
+            out.append(cur)
+            s = cur.strip()
+            if s[:1] in ("{", "["):
+                try:
+                    stack.append(json.loads(cur))
+                except Exception:
+                    pass
+        elif isinstance(cur, dict):
+            for k, v in cur.items():
+                out.append(k)
+                stack.append(v)
+        elif isinstance(cur, list):
+            stack.extend(cur)
+    return out
+
+
 def fixture_leak_scan(path: Optional[str] = None) -> List[str]:
     """Scan a serialized fixture for Vault keys / secret material. Returns a list of
-    human-readable violations (empty = clean). The 0108 structural test asserts []."""
+    human-readable violations (empty = clean). The 0108 structural test asserts [].
+
+    Both the RAW line and every DECODED JSON string leaf are scanned: a Vault key inside a
+    prompt/tool-result string value serializes escaped (``\\"trust\\"``) and would slip past
+    a raw-line ``"trust"`` pattern — decoding the string surfaces the bare key."""
     import re
     p = path or fixture_path()
     violations: List[str] = []
@@ -541,10 +638,12 @@ def fixture_leak_scan(path: Optional[str] = None) -> List[str]:
         return [f"fixture missing: {p}"]
     with open(p, "r", encoding="utf-8") as fh:
         for n, line in enumerate(fh, 1):
+            texts = [line]
+            texts.extend(_decoded_string_leaves(line))
             for pat in VAULT_KEY_PATTERNS:
-                if re.search(pat, line):
+                if any(re.search(pat, t) for t in texts):
                     violations.append(f"line {n}: vault-key pattern {pat}")
             for pat in SECRET_PATTERNS:
-                if re.search(pat, line):
+                if any(re.search(pat, t) for t in texts):
                     violations.append(f"line {n}: secret-shaped material {pat}")
     return violations

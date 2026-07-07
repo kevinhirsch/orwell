@@ -49,6 +49,7 @@ is invisible at exactly the moments a buyer looks**: the first five minutes, the
 ## A. Seam bugs (fix lane — each is small, each is trust-critical)
 
 ### A1 — Intermittent live double-render of a streamed reply (F5 family) — `P1`
+
 **Seen:** first turn after a reload on a fresh game: the same streamed reply painted as **two
 identical bubbles** (both with their own "View thinking process" accordions), while the store
 persisted **one** assistant row and a later reload showed the turn once (screenshots
@@ -65,6 +66,7 @@ same-content `.msg-ai`; instrument the append path with the round's convergence 
 of the in-flight round is dropped by key, not by content equality after settle.
 
 ### A2 — In-game clock silently never engages for a first game (boot-order) — `P1`
+
 **Seen:** `time_of_day_enabled: true` is the settings default, yet a full season ran with no
 `timeOfDay` in state, no Nightfall gadget, no rest cue — because the FE applies the setting only at
 boot, and at boot there was no game: `fe.log` — *"Failed to apply time-of-day setting on boot: no
@@ -77,6 +79,7 @@ kicks pre-warm background tasks in `tool_implementations.py` / `routes/orwell_ro
 boot retry once a game exists. Gate: create a game after boot → state carries `timeOfDay`.
 
 ### A3 — The board can contradict the ceremony it sits beside (freshness asymmetry) — `P2`
+
 **Seen:** the goodbye-message card announcing "Trey Wilson has been evicted" while the rail beside
 it still reads *"Week 1 · HOH Competition · HOH — · The House 16/16"* (`r-2-card-goodbye-message.png`
 vs `r-3-board-week2.png` seconds later). Part of this was the audit driver bypassing the FE seams —
@@ -89,6 +92,7 @@ on change; and let the chat tool-result seam pass the *result's* `beatSeq` to th
 mid-round ceremony chain refreshes panels once per bound beat, not once per debounce.
 
 ### A4 — Decision card clips its own helper line; mobile buries Confirm below the fold — `P2`
+
 **Seen:** desktop 1440×900: the card's last helper line ("Make your selection above to enable
 Confirm.") renders half-clipped at the card's bottom edge (`s-b9-decision-card.png`,
 `s-f5-postgame-turn.png`). Mobile 390×844: the comp-round card fills ~60% of the viewport with two
@@ -99,6 +103,7 @@ row always visible (sticky footer inside the card); on coarse pointers render op
 comma prose; drop the duplicated "Still in with you / Round 1 — Still in" double roster.
 
 ### A5 — Mobile gadget drawer: translucent layers collide into unreadability — `P1` (mobile)
+
 **Seen:** `m-3-rail.png` — the drawer's cards stack over the chat *and over each other* with no
 scrim: "The House" title double-exposes with "Week 1", the Cast gadget's Open/Un-pin buttons overlap
 the "Where You Are" card's text, a user bubble ghosts through the board card, and ghost text bleeds
@@ -109,6 +114,7 @@ scrim over the chat; gadget cards inside it opaque, single stacking context; the
 open-drawer state.
 
 ### A6 — First-run production-setup card: z-collisions and a 30-second dead CTA — `P2`
+
 **Seen:** `s-a1-landing.png` — the "Producers are getting the house ready…" toast overlaps the
 modal's own close ×; the Orwell wordmark and two lines of ambient text ghost *through* the card
 body; and a primary button on the card stayed `disabled` for 30+ s while pre-warm churned (the
@@ -120,6 +126,7 @@ below the titlebar instead of over it, and the gated CTA shows *why* it's waitin
 house — 15 of 16…") with a fail-open timeout that enables it with the deterministic floor.
 
 ### A7 — Season reset: dead season's transcript + a layout-shoving error slab — `P2`
+
 **Seen:** `t-3-after-start-casting.png` — after an engine reset to pre-game, the app shows the
 *finished season's* transcript with a new "Choose Your Character" card bolted underneath, while a
 full-width white banner ("Big Brother's having a technical moment — Production's on it, hang
@@ -132,6 +139,7 @@ old transcript behind a season divider (or starts a fresh session titled by seas
 guard already knows how to protect the live game, this is its counterpart for the *ended* one.
 
 ### A8/A9/A10/A11 — small but real — `P3`
+
 - **A8** `sessions.js:2258/2311` polls `stream_status` on sessions with no stream → recurring
   console 404 noise (masks real errors; return 200-empty or gate the poll).
 - **A9** With no image provider configured, the cast panel still offers **"Generate cast

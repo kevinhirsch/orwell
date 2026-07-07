@@ -47,6 +47,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from src import golden_path
 from src.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -1727,13 +1728,9 @@ def kickoff_generation(prompts: list, user: Optional[str]) -> None:
     # 16 getPortraitPrompt reads + engine write-backs run in ONE mode only, shifting seeded state
     # for everything downstream — the ledger-diff finding). Fail-soft by design: placeholders
     # stand, exactly as when no image provider is configured.
-    try:
-        from src import golden_path
-        if golden_path.active():
-            logger.info("[portraits] generation skipped: golden record/replay mode (0108 determinism)")
-            return
-    except Exception:
-        pass
+    if golden_path.active():
+        logger.info("[portraits] generation skipped: golden record/replay mode (0108 determinism)")
+        return
     if not prompts:
         return
     try:
@@ -1866,13 +1863,9 @@ def kickoff_backfill(missing_ids: list, user: Optional[str], force: bool = False
     pile on. Never blocks the caller: scheduled on the running loop like `kickoff_generation`."""
     # 0108: quiesced under golden record/replay — same rationale as kickoff_generation (the
     # provider probe is mode-asymmetric and the write-backs shift seeded state mid-walk).
-    try:
-        from src import golden_path
-        if golden_path.active():
-            logger.info("[portraits] backfill skipped: golden record/replay mode (0108 determinism)")
-            return False
-    except Exception:
-        pass
+    if golden_path.active():
+        logger.info("[portraits] backfill skipped: golden record/replay mode (0108 determinism)")
+        return False
     if not missing_ids:
         return False
     if not force and not backfill_allowed(user):

@@ -2669,7 +2669,8 @@ import { isNarrow } from './platform.js';
                   // comp result moves exactly what the status HUD shows (HOH/veto/phase).
                   // FEJS-3: the trailing 8 also move public state the panels read — debounced.
                   // DRIFT-1: + the 0093/0099/0107 mutators (sync w/ chat_helpers.py).
-                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat', 'formAlliance', 'joinAlliance', 'exposeSecret', 'tradeSecret'].includes(json.tool)) {
+                  // DRIFT-2: + the 0094/0095 mutators (confront / accuseTie).
+                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat', 'formAlliance', 'joinAlliance', 'exposeSecret', 'tradeSecret', 'confront', 'accuseTie'].includes(json.tool)) {
                     // M1-3: the tool result carries the COMMITTED beatSeq (0065) — thread it
                     // through the single dispatcher so panels can verify their refetch caught up.
                     let _beat;

@@ -20,6 +20,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, Optional
 
+from src import golden_path
+
 logger = logging.getLogger(__name__)
 
 # ~7-day one-time lag (§11 #1): the cast moves in slightly behind, so the snapshot is settled and fully
@@ -213,13 +215,9 @@ def kickoff_capture(owner: Optional[str]) -> None:
     # prompt (inherently non-reproducible) and its engine write bumps beatSeq on a background
     # schedule, both of which break the deterministic-replay contract. Fail-soft by design: the
     # engine's deterministic floor simply stands, exactly as when no provider is configured.
-    try:
-        from src import golden_path
-        if golden_path.active():
-            logger.info("[zeitgeist] skipped: golden record/replay mode (0108 determinism)")
-            return
-    except Exception:
-        pass
+    if golden_path.active():
+        logger.info("[zeitgeist] skipped: golden record/replay mode (0108 determinism)")
+        return
     k = _key(owner)
     if k in _IN_FLIGHT:
         return
