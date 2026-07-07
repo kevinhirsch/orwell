@@ -37,7 +37,10 @@ def main() -> int:
         "ORWELL_GOLDEN_BASE_URL", "https://openrouter.ai/api/v1"))
     ap.add_argument("--api-key", default=os.environ.get("OPENROUTER_API_KEY")
                     or os.environ.get("ORWELL_OPENROUTER_KEY") or "")
-    ap.add_argument("--turn-budget", type=int, default=60)
+    # A real narrator paces richer than the stub (multi-round scenes, fuller narration): the
+    # first GLM 5.2 run reached veto at 60 turns without hitting eviction. 120 covers the
+    # golden week with headroom; replay walks the same trajectory, budget-capped identically.
+    ap.add_argument("--turn-budget", type=int, default=120)
     ap.add_argument("--report", default="")
     args = ap.parse_args()
 

@@ -455,9 +455,19 @@ class GoldenDriver:
                 leaks.append("raw npc:<id> in player-facing body")
             if "<think" in body_text:
                 leaks.append("unclosed reasoning block reached the body")
-            for line in body_text.splitlines():
+            # Mirror the render-side L6b scrub (markdown.js): a CONTIGUOUS run of planning
+            # lines at the START of the body is dropped before the player ever sees it — so
+            # only what SURVIVES that strip is player-facing. (The first GLM 5.2 record run
+            # false-positived on leading "Let me ground myself…" lines the scrub eats; a
+            # planning line MID-body still fails, because the scrub deliberately doesn't
+            # reach past the first narration line.)
+            lines = body_text.splitlines()
+            i = 0
+            while i < len(lines) and (not lines[i].strip() or REASONING_LINE_RE.match(lines[i])):
+                i += 1
+            for line in lines[i:]:
                 if REASONING_LINE_RE.match(line):
-                    leaks.append(f"operator/planning line: {line.strip()[:60]!r}")
+                    leaks.append(f"operator/planning line survives the scrub: {line.strip()[:60]!r}")
                     break
         self.inv.record("I7", "every player-facing body is clean", not leaks,
                         "; ".join(sorted(set(leaks)))[:200] if leaks else
