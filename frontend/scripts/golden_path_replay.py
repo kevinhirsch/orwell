@@ -38,7 +38,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fixture", default="")
     ap.add_argument("--runs", type=int, default=2)
-    ap.add_argument("--turn-budget", type=int, default=60)
+    # Budget-parity with the record default: replay walks the recorded trajectory, so a
+    # smaller replay budget would truncate a real-narrator week that recorded fine.
+    ap.add_argument("--turn-budget", type=int, default=120)
     ap.add_argument("--report", default="")
     args = ap.parse_args()
     args.fixture = args.fixture or _default_fixture()
@@ -46,6 +48,13 @@ def main() -> int:
     if not os.path.isfile(args.fixture):
         print(f"FAIL: fixture not found: {args.fixture}\n{gp.REGENERATE_HINT}")
         return 2
+    integrity = gp.fixture_integrity_scan(args.fixture)
+    if integrity:
+        print("FAIL: committed fixture fails the integrity scan (multi-writer or "
+              "off-model records — re-record it):")
+        for v in integrity[:20]:
+            print("  -", v)
+        return 1
     leaks = gp.fixture_leak_scan(args.fixture)
     if leaks:
         print("FAIL: committed fixture fails the leak scan:")

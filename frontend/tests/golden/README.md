@@ -4,10 +4,20 @@ This directory holds the committed **real-model transcript fixture(s)** for the 
 replay gate — one JSONL file per recorded run, keying every FE→model request (stable hash of
 messages + tool schemas + shape-affecting params) to the recorded response bytes.
 
-- `golden_path_deepseek_v4_pro.jsonl` — THE canonical fixture: one real run of the deploy-default
-  narrator across casting → premiere → Week 1 HOH → nominations → veto → eviction → week roll.
-  **Until it is recorded and committed, the `golden-path` CI job is dormant** (it says so with an
-  explicit notice — never a silent pass).
+- `golden_path_glm-5.2.jsonl` — THE canonical fixture (owner's two-tier topology, 2026-07-07:
+  narration `z-ai/glm-5.2`, utility `qwen/qwen3.6-flash`): one real run across casting →
+  premiere → Week 1 HOH → nominations → veto → eviction → week roll. **Until it is recorded and
+  committed, the `golden-path` CI job is dormant** (it says so with an explicit notice — never a
+  silent pass). The gate is model-agnostic — the replay driver picks up whatever single
+  `golden_path_*.jsonl` is committed.
+
+Fixture format (2): line 1 is a `kind: meta` self-description — the declared
+narration/utility models (replay pins these; no derivation guesswork) — and every record
+carries a per-process `writer` stamp. `fixture_integrity_scan` (enforced at record time AND in
+the PR replay gate) fails a fixture with more than one record-writer or any record whose model
+is off the declared set: both are the signature of the mid-run resolution flip that silently
+contaminated the first GLM recording (stale shared-`data/` state re-binding the walk to an old
+session's endpoint pin).
 
 Record / regenerate (needs a live narrator key; ~one season-week of real-model calls):
 

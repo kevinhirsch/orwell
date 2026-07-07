@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import sys
 
 import pytest
@@ -243,3 +244,108 @@ def test_stream_record_then_replay_is_byte_identical(tmp_path, monkeypatch):
     monkeypatch.setattr(llm_core, "_stream_llm_with_fallback_traced", exploding_traced)
     replayed = asyncio.get_event_loop().run_until_complete(drive())
     assert replayed == live_chunks, "replay must re-emit the recorded chunks byte-for-byte"
+
+
+# ── fixture self-description + the integrity gate (format 2) ────────────────────────
+#
+# Scar tissue: the first GLM recording was silently contaminated when the walk's model
+# resolution flipped to a stale stub endpoint mid-run (90/251 records off-model), and the
+# old first-stream/-call model derivation mis-read two-tier fixtures. The meta line +
+# writer stamps + integrity scan make both failure classes structural, loud failures.
+
+def test_meta_roundtrip_and_replay_skips_the_meta_line(golden, tmp_path, monkeypatch):
+    fix = tmp_path / "meta.jsonl"
+    golden.write_meta(str(fix), narration_model="narrator-model",
+                      utility_model="cheap-model", seed=42)
+    meta = golden.fixture_meta(str(fix))
+    assert meta and meta["narration_model"] == "narrator-model"
+    assert meta["utility_model"] == "cheap-model" and meta["seed"] == 42
+    # a replayable record after the meta line still resolves — the loader skips meta
+    key = golden.request_key("call", MSGS, None, PARAMS)
+    with open(fix, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"key": key, "kind": "call", "seq": 0,
+                             "model": "narrator-model", "response": "ok", "meta": {}}) + "\n")
+    monkeypatch.setenv("ORWELL_GOLDEN_REPLAY", str(fix))
+    gp = importlib.reload(sys.modules["src.golden_path"])
+    assert gp.replay_call("narrator-model", MSGS, PARAMS) == "ok"
+
+
+def test_records_carry_the_writer_stamp(golden, tmp_path, monkeypatch):
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    gp = importlib.reload(sys.modules["src.golden_path"])
+    gp.record_call("narrator-model", MSGS, {"temperature": 0}, "noted")
+    rec = json.loads(open(gp.fixture_path()).read().strip())
+    assert rec.get("writer") == gp._WRITER_ID and "." in rec["writer"]
+
+
+def test_integrity_scan_passes_a_clean_two_tier_fixture(golden, tmp_path):
+    fix = tmp_path / "clean.jsonl"
+    golden.write_meta(str(fix), narration_model="narrator-model", utility_model="cheap-model")
+    with open(fix, "a", encoding="utf-8") as fh:
+        for i, m in enumerate(["narrator-model", "cheap-model", "narrator-model"]):
+            fh.write(json.dumps({"key": f"k{i}", "kind": "stream", "seq": i, "model": m,
+                                 "writer": "1.aaa", "chunks": []}) + "\n")
+    assert golden.fixture_integrity_scan(str(fix)) == []
+    assert golden.fixture_model_census(str(fix)) == {"narrator-model": 2, "cheap-model": 1}
+
+
+def test_integrity_scan_fails_a_foreign_model_record(golden, tmp_path):
+    fix = tmp_path / "flipped.jsonl"
+    golden.write_meta(str(fix), narration_model="narrator-model", utility_model="cheap-model")
+    with open(fix, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"key": "k0", "kind": "stream", "seq": 0,
+                             "model": "narrator-model", "writer": "1.aaa", "chunks": []}) + "\n")
+        fh.write(json.dumps({"key": "k1", "kind": "stream", "seq": 1,
+                             "model": "stale-stub-model", "writer": "1.aaa", "chunks": []}) + "\n")
+    violations = golden.fixture_integrity_scan(str(fix))
+    assert any("foreign model" in v and "stale-stub-model" in v for v in violations)
+
+
+def test_integrity_scan_fails_multiple_writers(golden, tmp_path):
+    fix = tmp_path / "twowriters.jsonl"
+    golden.write_meta(str(fix), narration_model="narrator-model", utility_model="narrator-model")
+    with open(fix, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"key": "k0", "kind": "call", "seq": 0, "model": "narrator-model",
+                             "writer": "100.aaa", "response": ""}) + "\n")
+        fh.write(json.dumps({"key": "k1", "kind": "call", "seq": 0, "model": "narrator-model",
+                             "writer": "200.bbb", "response": ""}) + "\n")
+    violations = golden.fixture_integrity_scan(str(fix))
+    assert any("multiple record writers" in v for v in violations)
+
+
+def test_integrity_scan_fails_meta_missing_or_not_first(golden, tmp_path):
+    bare = tmp_path / "bare.jsonl"
+    _write_fixture(bare, [{"key": "k", "kind": "call", "seq": 0,
+                           "model": "narrator-model", "writer": "1.a", "response": ""}])
+    assert any("no meta line" in v for v in golden.fixture_integrity_scan(str(bare)))
+    appended = tmp_path / "appended.jsonl"
+    _write_fixture(appended, [{"key": "k", "kind": "call", "seq": 0,
+                               "model": "narrator-model", "writer": "1.a", "response": ""}])
+    with open(appended, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"kind": "meta", "narration_model": "narrator-model",
+                             "utility_model": "narrator-model"}) + "\n")
+    assert any("not first" in v for v in golden.fixture_integrity_scan(str(appended)))
+
+
+def test_fixture_models_prefers_the_meta_declaration(golden, tmp_path):
+    """The format-1 heuristic mis-derives two-tier fixtures (identity calls stream on the
+    utility tier but default to call_class narration) — meta wins when present."""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from scripts._golden_driver import fixture_models
+    fix = tmp_path / "twotier.jsonl"
+    golden.write_meta(str(fix), narration_model="narrator-model", utility_model="cheap-model")
+    with open(fix, "a", encoding="utf-8") as fh:
+        # first STREAM record is a cast-identity call on the CHEAP tier — the old
+        # heuristic would have called this the narration model.
+        fh.write(json.dumps({"key": "k0", "kind": "stream", "seq": 0,
+                             "model": "cheap-model", "writer": "1.a", "chunks": []}) + "\n")
+        fh.write(json.dumps({"key": "k1", "kind": "stream", "seq": 1,
+                             "model": "narrator-model", "writer": "1.a", "chunks": []}) + "\n")
+    assert fixture_models(str(fix)) == ("narrator-model", "cheap-model")
+    # format-1 fixtures (no meta) still derive by the old heuristic
+    bare = tmp_path / "old.jsonl"
+    _write_fixture(bare, [
+        {"key": "k0", "kind": "stream", "seq": 0, "model": "narrator-model", "chunks": []},
+        {"key": "k1", "kind": "call", "seq": 1, "model": "cheap-model", "response": ""},
+    ])
+    assert fixture_models(str(bare)) == ("narrator-model", "cheap-model")

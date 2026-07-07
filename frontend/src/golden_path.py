@@ -40,10 +40,12 @@ RECORD_ENV = "ORWELL_GOLDEN_RECORD"
 REPLAY_ENV = "ORWELL_GOLDEN_REPLAY"
 FIXTURE_ENV = "ORWELL_GOLDEN_FIXTURE"  # record-side output path override
 
-#: The one canonical committed fixture (the deploy-default narrator's golden path).
+#: The one canonical committed fixture — the owner's two-tier topology (2026-07-07):
+#: narration z-ai/glm-5.2, utility qwen/qwen3.6-flash. The gate stays model-agnostic:
+#: the replay driver globs for whatever single golden_path_*.jsonl is committed.
 DEFAULT_FIXTURE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "tests", "golden", "golden_path_deepseek_v4_pro.jsonl")
+    "tests", "golden", "golden_path_glm-5.2.jsonl")
 
 #: The sentinel the replay-miss error carries — the CI driver greps for it, and the
 #: failure message tells a human exactly how to regenerate (spec: "a regenerate-the-
@@ -209,6 +211,20 @@ def request_digest(messages: Optional[List[Dict]], tools: Optional[List[Dict]],
 _write_lock = threading.Lock()
 _seq = 0
 
+#: Fixture format 2 = a leading ``kind: meta`` line (declared two-tier models + writer
+#: identity) written by the record script, and a ``writer`` stamp on every record.
+FIXTURE_FORMAT = 2
+
+#: Per-process fixture-writer identity. One recording must have exactly ONE record
+#: writer: the first GLM fixture was silently contaminated when the walk's model
+#: resolution flipped mid-run to a stale endpoint, and nothing structural could tell
+#: the two traffic sources apart after the fact. The stamp makes any interleaving —
+#: a second process appending to the same path, or a forked worker — a detectable,
+#: hard integrity failure instead of a corrupted-but-green fixture.
+import secrets as _secrets
+
+_WRITER_ID = f"{os.getpid()}.{_secrets.token_hex(3)}"
+
 
 def _scrub(obj: Any) -> Any:
     """Defence in depth — the 0107 scrub (bearer/sk-…/secret-shaped keys). Headers are
@@ -226,6 +242,7 @@ def _append_record(rec: Dict[str, Any]) -> None:
     try:
         with _write_lock:
             rec["seq"] = _seq
+            rec["writer"] = _WRITER_ID
             _seq += 1
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "a", encoding="utf-8") as fh:
@@ -281,6 +298,119 @@ def record_call(model: str, messages: List[Dict], params: Dict[str, Any],
     })
 
 
+# ── the fixture's self-description + integrity gate ────────────────────────────────
+
+
+def write_meta(path: str, *, narration_model: str, utility_model: str,
+               seed: Optional[int] = None) -> None:
+    """Start a FRESH fixture with its self-describing meta line (the record script calls
+    this after deleting the old fixture, before the FE boots). Replay derives the models
+    to pin from here instead of guessing from record shapes — the old first-stream/-call
+    heuristic mis-derived on two-tier fixtures because cast-identity calls are streamed
+    on the UTILITY tier but default to ``call_class: narration``."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "kind": "meta", "format": FIXTURE_FORMAT,
+            "narration_model": narration_model, "utility_model": utility_model,
+            "seed": seed, "writer": _WRITER_ID,
+        }, ensure_ascii=False) + "\n")
+
+
+def fixture_meta(path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The fixture's leading meta record, or None (a format-1 fixture)."""
+    p = path or fixture_path()
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            first = fh.readline().strip()
+        rec = json.loads(first) if first else None
+        return rec if isinstance(rec, dict) and rec.get("kind") == "meta" else None
+    except Exception:
+        return None
+
+
+def fixture_model_census(path: Optional[str] = None) -> Dict[str, int]:
+    """model id → record count over the fixture's records (meta line excluded)."""
+    p = path or fixture_path()
+    census: Dict[str, int] = {}
+    if not os.path.isfile(p):
+        return census
+    with open(p, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if rec.get("kind") == "meta":
+                continue
+            m = rec.get("model") or "<none>"
+            census[m] = census.get(m, 0) + 1
+    return census
+
+
+def fixture_integrity_scan(path: Optional[str] = None, *,
+                           narration_model: Optional[str] = None,
+                           utility_model: Optional[str] = None) -> List[str]:
+    """Structural trust gate for a recorded fixture (the record script asserts [] before
+    ever suggesting a commit). Two rules, each the scar of a real corruption:
+
+    * exactly ONE record-writer process — the first GLM fixture interleaved a second
+      traffic source and stayed silently green until replay missed 27 keys; and
+    * every record's model within the DECLARED two-tier set — mid-run the walk's model
+      resolution flipped to a stale stub endpoint (a previous run's canonical-session
+      binding), so 90 of 251 "GLM" records were stub narration.
+
+    Returns human-readable violations (empty = trustworthy).
+    """
+    p = path or fixture_path()
+    if not os.path.isfile(p):
+        return [f"fixture missing: {p}"]
+    violations: List[str] = []
+    meta = fixture_meta(p)
+    allowed = {m for m in (narration_model, utility_model) if m}
+    if meta:
+        allowed |= {m for m in (meta.get("narration_model"), meta.get("utility_model")) if m}
+        for want, have in (("narration_model", narration_model), ("utility_model", utility_model)):
+            if have and meta.get(want) and meta.get(want) != have:
+                violations.append(
+                    f"meta declares {want}={meta.get(want)!r} but the run intended {have!r}")
+    else:
+        violations.append("no meta line — record via scripts/golden_path_record.py "
+                          "(format 2 fixtures are self-describing)")
+    writers: set = set()
+    with open(p, "r", encoding="utf-8") as fh:
+        for n, line in enumerate(fh, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                violations.append(f"line {n}: unparseable record")
+                continue
+            if rec.get("kind") == "meta":
+                if n != 1:
+                    violations.append(f"line {n}: meta record not first — a second recording "
+                                      "appended onto an existing fixture")
+                continue
+            writers.add(rec.get("writer") or "<unstamped>")
+    if len(writers) > 1:
+        violations.append(
+            f"multiple record writers {sorted(writers)} — concurrent processes appended "
+            "to one fixture path (run exactly one golden driver at a time)")
+    if allowed:
+        for m, c in sorted(fixture_model_census(p).items()):
+            if m not in allowed:
+                violations.append(
+                    f"foreign model in fixture: {m} ({c} records) — model resolution "
+                    f"flipped off the declared set {sorted(allowed)} mid-run (stale "
+                    "session/endpoint state, or a provider fallback)")
+    return violations
+
+
 # ── replay side ────────────────────────────────────────────────────────────────────
 
 _replay_lock = threading.Lock()
@@ -305,6 +435,8 @@ def _load_fixture() -> Dict[str, List[Dict]]:
                 if not line:
                     continue
                 rec = json.loads(line)
+                if rec.get("kind") == "meta" or "key" not in rec:
+                    continue  # the format-2 self-description line is not a replayable record
                 by_key[rec["key"]].append(rec)
         for entries in by_key.values():
             entries.sort(key=lambda r: r.get("seq", 0))

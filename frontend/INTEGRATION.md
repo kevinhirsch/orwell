@@ -132,11 +132,17 @@ real engine + real FE on every PR — no API key (`.github/workflows/ci.yml` job
 - **Regenerate the fixture** (required whenever a prompt/tool-schema change makes the replay
   miss — that miss is the gate working):
   `cd frontend && OPENROUTER_API_KEY=sk-… ORWELL_GOLDEN_RECORD=1 python3 scripts/golden_path_record.py`
-  then commit `tests/golden/golden_path_deepseek_v4_pro.jsonl`. The nightly's uploaded
-  artifact is the same thing pre-baked: download, eyeball the invariant diff, commit.
+  then commit `tests/golden/golden_path_glm-5.2.jsonl` (defaults record the owner's two-tier
+  pair: GLM 5.2 narration + Qwen 3.6 Flash utility). The nightly's uploaded artifact is the
+  same thing pre-baked: download, eyeball the invariant diff, commit. **One driver run at a
+  time** — `frontend/data` is shared state; the driver pre-flight scrubs stale cross-run
+  state (canonical binding, old golden sessions/endpoints) before boot.
 - **Run the PR gate locally**: `python3 scripts/golden_path_replay.py --runs 2`.
 - The fixture is Vault-free by construction and leak-scanned on both record and replay
-  (`golden_path.fixture_leak_scan`); a new LLM-behavioral fix still needs a hand live-verify
+  (`golden_path.fixture_leak_scan`); format 2 is **self-describing** (leading `meta` line +
+  per-record `writer` stamps) and `fixture_integrity_scan` fails any multi-writer or
+  off-declared-model fixture — the mid-run resolution-flip class that silently contaminated
+  the first GLM recording. A new LLM-behavioral fix still needs a hand live-verify
   first (SOUL lesson 19) — this gate stops the *same* bug being re-discovered by hand.
 
 ## The responsive contract (Stream S — ruling #16; binding)

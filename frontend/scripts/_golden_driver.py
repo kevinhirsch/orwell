@@ -150,6 +150,62 @@ class GoldenDriver:
 
     # ── boot ──────────────────────────────────────────────────────────────────────
 
+    def scrub_stale_state(self) -> None:
+        """Pre-flight hygiene against the SHARED frontend data store (the FE has no
+        per-run data dir; only the engine gets a fresh one). Runs file-level, before the
+        FE boots. The trap that actually fired: ``data/orwell_game_session.json``
+        persists the canonical game-session binding ACROSS runs, and at game-start the
+        FE re-binds the walk onto the previous run's chat session — whose row pins that
+        run's endpoint+model. In the first GLM recording that silently flipped narration
+        to a stale stub endpoint mid-run (90 of 251 records contaminated; the #1086 seam
+        class, reproduced by the harness). Every scrub target below is driver-owned or
+        golden-specific — a developer's own endpoints/sessions are left alone."""
+        data = os.path.join(FRONTEND, "data")
+        for name in ("orwell_game_session.json", "orwell_layout.json"):
+            p = os.path.join(data, name)
+            if os.path.exists(p):
+                os.remove(p)
+                print(f"  scrub: removed stale {name}", flush=True)
+        settings_file = os.path.join(data, "settings.json")
+        try:
+            with open(settings_file, "r", encoding="utf-8") as fh:
+                cur = json.load(fh)
+            if cur.pop("default_model_fallbacks", None):
+                with open(settings_file, "w", encoding="utf-8") as fh:
+                    json.dump(cur, fh, indent=2)
+                print("  scrub: cleared default_model_fallbacks", flush=True)
+        except Exception:
+            pass
+        db = os.path.join(data, "app.db")
+        if os.path.isfile(db):
+            import sqlite3
+            try:
+                con = sqlite3.connect(db, timeout=5)
+                try:
+                    ids = [r[0] for r in con.execute(
+                        "select id from sessions where name = 'golden-path'")]
+                    if ids:
+                        qs = ",".join("?" * len(ids))
+                        con.execute(f"delete from chat_messages where session_id in ({qs})", ids)
+                        con.execute(f"delete from sessions where id in ({qs})", ids)
+                    con.execute("delete from model_endpoints "
+                                "where name in ('golden-record', 'golden-replay')")
+                    con.commit()
+                    if ids:
+                        print(f"  scrub: dropped {len(ids)} stale golden-path session(s)", flush=True)
+                finally:
+                    con.close()
+            except Exception as e:
+                print(f"  scrub: app.db cleanup skipped ({e})", flush=True)
+        # A crashed previous run's FE/engine still listening would corrupt (a live RECORD
+        # env appends to the same fixture path) or block this one. Best-effort clear.
+        for port in (self.engine_port, self.fe_port):
+            try:
+                subprocess.run(["fuser", "-k", f"{port}/tcp"],
+                               capture_output=True, timeout=10)
+            except Exception:
+                pass
+
     def boot(self) -> None:
         dist = os.path.join(REPO, "dist", "main.js")
         if not os.path.isfile(dist):
@@ -521,9 +577,17 @@ class GoldenDriver:
 
 
 def fixture_models(fixture: str) -> tuple[str, str]:
-    """(narration_model, utility_model) the fixture was recorded against — narration from the
-    first streamed record, utility from the first non-stream record (falls back to narration).
-    Replay pins BOTH on the dead-end endpoint so every request key matches the recording."""
+    """(narration_model, utility_model) the fixture was recorded against. Format-2
+    fixtures declare both in their leading meta line — authoritative, no guessing. The
+    format-1 fallback derives narration from the first streamed record and utility from
+    the first non-stream record; that heuristic MIS-DERIVES two-tier fixtures (cast-
+    identity calls are streamed on the utility tier but default to call_class narration),
+    which is exactly why format 2 exists. Replay pins BOTH on the dead-end endpoint so
+    every request key matches the recording."""
+    from src import golden_path as gp
+    meta = gp.fixture_meta(fixture)
+    if meta and meta.get("narration_model"):
+        return meta["narration_model"], meta.get("utility_model") or meta["narration_model"]
     narration, utility = "", ""
     with open(fixture, encoding="utf-8") as fh:
         for line in fh:
@@ -546,6 +610,7 @@ def fixture_models(fixture: str) -> tuple[str, str]:
 def run_once(**kw) -> GoldenDriver:
     d = GoldenDriver(**kw)
     try:
+        d.scrub_stale_state()
         d.boot()
         d.configure_model()
         d.preseed()

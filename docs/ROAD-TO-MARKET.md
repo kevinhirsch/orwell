@@ -64,6 +64,22 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   committed — the commit IS the gate-arming event); the `golden-path` CI job green on two
   consecutive runs (`--runs 2` digest-equal); **owner:** set the `OPENROUTER_API_KEY` repo secret
   (arms `golden-nightly`) and **rotate the key pasted in chat** after the session.
+- **Finding (2026-07-07, first record attempt — fixture invalidated, root-caused, fixes shipped):**
+  the first GLM recording was **silently contaminated**: 90 of 251 records carried a stale stub
+  model. Forensics (seq stamps are per-process): a **single writer** — the record run itself —
+  flipped narration mid-run at seq 144, right after an OpenRouter `502 (200-with-no-JSON-body)`
+  at seq 132. Root cause: **`frontend/data` is shared across driver runs** — the persisted
+  canonical game-session binding (`data/orwell_game_session.json`) re-bound the walk at game
+  start onto a PREVIOUS run's chat session, whose row pins that run's endpoint+model (a stale
+  stub endpoint from the audit-era screenshot harness): the **#1086 seam class**, reproduced by
+  the harness itself. Structural fixes shipped rather than a one-off cleanup: **format-2
+  self-describing fixtures** (leading `meta` line declares the two-tier models; every record
+  carries a per-process `writer` stamp), `fixture_integrity_scan` (exactly one writer + no
+  record off the declared model set) enforced at **record time and again in the PR replay
+  gate**, a driver pre-flight `scrub_stale_state()` (drops the canonical binding, stale
+  `golden-path` sessions/endpoints, layout dirt; clears crashed-run port squatters), and
+  meta-first `fixture_models()` (the old first-stream heuristic mis-derived two-tier fixtures —
+  cast-identity calls stream on the utility tier). Unit gates in `test_0108_golden_path.py`.
 
 ### M0-2 · Calibrate invariants I2/I3 against the real belts — S–M
 Source: 0108 stub-run findings, now twice-confirmed on real runs pending (I2 opener never fired
@@ -87,7 +103,11 @@ a flake).
   clears it — the stub's compressed pacing may be the trigger); the engine-call ledger
   (`ORWELL_GOLDEN_CALL_LEDGER`) + miss dump (`ORWELL_GOLDEN_DEBUG_DUMP`) diffs from that run.
   **Constraint learned: one driver run at a time — `frontend/data` is shared state** (parallel
-  runs cross-clobber model config; two crashes proved it).
+  runs cross-clobber model config; two crashes proved it). *Now partially fenced (M0-1 finding):
+  the driver pre-flight `scrub_stale_state()` clears cross-run state, and the fixture
+  writer/model integrity scan turns any surviving interleave into a hard failure — but the
+  shared-data constraint itself stands (a per-run FE data dir is a larger refactor, deliberately
+  not taken).*
 - **DoD:** replay of the committed real fixture reports **R1 zero misses** on two consecutive
   runs; whatever seam the ledger diff names is fixed with the same discipline as the four above
   (quiesce/neutralize/serialize — never mute); the fix lands with a unit gate in
