@@ -435,21 +435,18 @@ class GoldenDriver:
         # walking the week — same barrier in both modes (see _quiesce_beats).
         self._quiesce_beats("post-create")
 
-        # ── the producers' opener fires unprompted (invariant 2, #967) ─────────────
-        before = sum(1 for m in self._history() if m.get("role") == "assistant")
-        opener = False
-        opener_budget = 90 if self.mode == "record" else 30
-        for _ in range(opener_budget):
-            time.sleep(1)
-            msgs = self._history()
-            assistants = sum(1 for m in msgs if m.get("role") == "assistant")
-            users = [m for m in msgs if m.get("role") == "user"]
-            if assistants > before and str(users[-1].get("content", "")).strip() in (
-                    CASTING_SCRIPT[-1], "I'm ready. Let's start the season.", "Ready when you are."):
-                opener = True
-                break
-        self.inv.record("I2", "producers' opener fires without a player prompt", opener,
-                        f"assistant turns {before}→{assistants}")
+        # ── the producers' opener (invariant 2, #967) — a BROWSER seam, honest SKIP ─
+        # Settled after three consecutive headless FAILs (M0-2): the opener is CLIENT-KICKED —
+        # orwellOnboarding.js auto-sends the hidden OPEN_GAME_LINE production cue when the
+        # welcome dismisses ("the producers reach out first"), and there is NO server-side
+        # unprompted opener after createCharacter either (premiere narration rides the finalize
+        # turn). A REST-driven walk types first by design, so this beat structurally cannot
+        # occur here; asserting it was probing a message the product never produces headless.
+        # The covering gate for the real seam is the fe-browser onboarding smoke (browser lane).
+        self.inv.record("I2", "producers' opener fires without a player prompt", None,
+                        "client-kicked browser seam (orwellOnboarding.js OPEN_GAME_LINE) — "
+                        "not observable from a headless REST walk; covered by the fe-browser "
+                        "onboarding smoke")
 
         # ── post-photo resume (invariant 3, #969) ───────────────────────────────────
         if photo_beat_seen:

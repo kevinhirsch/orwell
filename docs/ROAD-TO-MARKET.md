@@ -90,7 +90,16 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   real stall. *Product datum worth keeping: a socially-active player can hold a phase open
   indefinitely — by design (lingering is play), but note the pacing texture for M2 copy.*
 
-### M0-2 · Calibrate invariants I2/I3 against the real belts — S–M
+### M0-2 · Calibrate invariants I2/I3 against the real belts — S–M · ✅ DONE
+*Resolved 2026-07-07 with three consecutive real-run data points. **I2 — settled: the opener is
+CLIENT-KICKED** (`orwellOnboarding.js` auto-sends the hidden `OPEN_GAME_LINE` production cue when
+the welcome dismisses — "the producers reach out first" is a browser seam, and there is no
+server-side unprompted opener after createCharacter either; premiere narration rides the finalize
+turn). A REST-driven walk types first by design, so the beat structurally cannot occur headless —
+I2 is now an honest SKIP with that rationale, and the covering gate for the real seam is the
+fe-browser onboarding smoke. **I3 — PASSES on real runs** (photo beat surfaced in casting on both
+GLM records; the conditional SKIP remains only for configs whose casting genuinely has no photo
+beat).*
 Source: 0108 stub-run findings, now twice-confirmed on real runs pending (I2 opener never fired
 headless in any stub cycle; I3 skipped — no headshot beat surfaces headless).
 Depends: M0-1 (the GLM run report is the evidence base).
