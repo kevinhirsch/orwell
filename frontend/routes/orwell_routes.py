@@ -1254,6 +1254,15 @@ def setup_orwell_routes() -> APIRouter:
                     orwell_portraits.kickoff_generation(prompts, user)
             except Exception:
                 pass
+            # M1-2 / ADR 0006 (audit A2): a sandbox now exists, so re-apply the persisted in-game
+            # clock immediately — the boot apply legitimately failed pre-game ("no active game"),
+            # and this debug/ops door may start a season with no framed chat turn to lazy-apply it.
+            # Best-effort; never blocks the response.
+            try:
+                from routes.chat_helpers import _apply_persisted_time_of_day_once
+                await _apply_persisted_time_of_day_once(user)
+            except Exception:
+                pass
             return res
         except Exception as e:
             logger.warning(f"[orwell] new-game failed: {e}")

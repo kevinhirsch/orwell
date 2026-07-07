@@ -79,9 +79,17 @@ _TIME_OF_DAY_APPLIED = False
 async def _apply_persisted_time_of_day_once(user) -> None:
     """Push the persisted `time_of_day_enabled` setting onto the live engine once per process, for a
     user whose sandbox already exists (so the global setTimeOfDay flag reflects the FE setting even
-    though the boot apply can't run in multiuser). Fail-soft."""
+    though the boot apply can't run in multiuser). Fail-soft.
+
+    M1-2 (audit A2, 2026-07-07): the old `not user` guard skipped ANONYMOUS single-tenant play
+    (AUTH_ENABLED=false ⇒ user is None) FOREVER — and the boot apply had already failed pre-game
+    ("no active game"), so a game created after FE boot ran its whole season with the in-game
+    clock dark (no timeOfDay, no Nightfall, no rest cue). A userless call routes to the engine's
+    "default" sandbox (the same anon→default mapping as the #1154 force gate), which is exactly
+    right single-tenant; in multiuser the engine refuses a userless call, we stay unlatched, and
+    the first real user's framed turn applies it — the original multiuser semantics unchanged."""
     global _TIME_OF_DAY_APPLIED
-    if _TIME_OF_DAY_APPLIED or not user:
+    if _TIME_OF_DAY_APPLIED:
         return
     try:
         from src.settings import get_setting
