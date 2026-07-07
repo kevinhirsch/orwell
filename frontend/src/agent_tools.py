@@ -65,6 +65,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "formAlliance", "joinAlliance",
              # 0093/0099: out a learned secret to the house / trade it to a houseguest for a favor.
              "exposeSecret", "tradeSecret",
+             # 0094/0095: confront over a learned fact / accuse a pre-show tie (engine-decided).
+             "confront", "accuseTie",
              "premiereIntros", "markHouseguestMet",
              "seasonRecap", "seasonRetrospective", "npcVoice",
              # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
@@ -108,6 +110,8 @@ GAME_TOOL_KEEP = frozenset({
     "formAlliance", "joinAlliance",
     # 0093/0099: expose a learned secret to the house / trade it to a houseguest (player-driven, Vault-free).
     "exposeSecret", "tradeSecret",
+    # 0094/0095: confront a houseguest over a learned fact / accuse a pre-show tie (engine-decided, Vault-free).
+    "confront", "accuseTie",
     # B64/0049: the Vault-free presence read (lingering play has engine ground truth).
     "whereabouts",
     # L21/L24: the player walks where they choose; the engine never auto-relocates a person.

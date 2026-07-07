@@ -747,6 +747,31 @@ async def trade_secret(to_npc_id: str, fact_id: str | None = None, bluff: bool =
     return await _call("tradeSecret", args, user=user)
 
 
+async def confront(npc_id: str, fact_id: str, expected_beat_seq: int | None = None,
+                   user: str | None = None) -> dict:
+    """Feature 0094 — the player CONFRONTS a houseguest over a fact they LEARNED. The engine is the
+    single authority: it validates the player actually holds `fact_id` (I3/Vault Wall — a non-learned
+    fact is REJECTED), classifies the cited belief, and resolves whether the confrontation lands —
+    returning only Vault-free `{landed}` (never why). 0065 Part A — the optional `expected_beat_seq`
+    CAS token threads in only when provided."""
+    args: dict = {"npcId": npc_id, "factId": fact_id}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("confront", args, user=user)
+
+
+async def accuse_tie(a_id: str, b_id: str, expected_beat_seq: int | None = None,
+                     user: str | None = None) -> dict:
+    """Feature 0095 — the player accuses two houseguests of a PRE-SHOW tie. The engine checks whether
+    a real connection exists (never invented or confirmed FE-side) and returns only Vault-free
+    `{landed}` — a miss is indistinguishable from an ordinary wrong guess. 0065 Part A — the optional
+    `expected_beat_seq` CAS token threads in only when provided."""
+    args: dict = {"aId": a_id, "bId": b_id}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("accuseTie", args, user=user)
+
+
 async def season_recap(user: str | None = None) -> dict:
     """The season's public arc from the event record (0048) — Vault-free, any time."""
     return await _call("seasonRecap", {}, user=user)
