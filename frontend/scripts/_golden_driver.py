@@ -81,6 +81,14 @@ RAW_NPC_ID_RE = re.compile(r"\bnpc:\d+\b", re.I)
 REASONING_LINE_RE = re.compile(
     r"^\s*(?:let me\b|looking at\b|the game state\b|i need to\b|i should\b|i'm going to\b"
     r"|based on the (?:roster|state)\b|the (?:roster|cast|state) (?:shows|is)\b)", re.I)
+# MID-body (past the render scrub's leading strip) only the UNAMBIGUOUS machine signatures
+# count — conversational openers ("Let me get a read on who's catching your attention.") are
+# legitimate host voice the product deliberately lets through, and the third GLM record
+# false-positived I7 on exactly that line. The full REASONING_LINE_RE stays for the
+# leading-strip mirror, where the render scrub genuinely eats those lines.
+OPERATOR_LINE_RE = re.compile(
+    r"^\s*(?:the game state\b|based on the (?:roster|state)\b"
+    r"|the (?:roster|cast|state) (?:shows|is)\b)", re.I)
 THINK_BLOCK_RE = re.compile(r"<think\b.*?</think>", re.S | re.I)
 
 
@@ -377,6 +385,22 @@ class GoldenDriver:
     def _state(self) -> dict:
         return self._get(self.fe, "/api/orwell/state")
 
+    def _pending(self) -> dict:
+        """The live pending decision — read from /api/orwell/status, the SAME surface the
+        product's decision card polls (D3/E66: gameStatus carries the authoritative pending).
+        The third GLM record proved the surfaces DISAGREE: an eviction-vote pending created
+        inside an advance shows on gameStatus but reads null on getGameState — the driver
+        polled state, never saw the vote, and the walk absorbed 25 escalated turns while the
+        engine idempotently waited for the player's ballot (engine autopsy: advanceGame kept
+        re-surfacing the pending at the same beatSeq). Reading status here is truer product
+        emulation AND sidesteps the projection gap; the engine-side disagreement is filed as
+        its own backlog item."""
+        try:
+            st = self._get(self.fe, "/api/orwell/status")
+            return (st.get("pending") or {}) if isinstance(st, dict) else {}
+        except Exception:
+            return {}
+
     def _note_state(self, turn_no: int, last_text: str) -> dict:
         st = self._state()
         row = {"turn": turn_no, "phase": st.get("phase"), "beatSeq": st.get("beatSeq"),
@@ -489,7 +513,8 @@ class GoldenDriver:
         start_beat = self.timeline[-1]["beatSeq"] or 0
         for _ in range(self.turn_budget):
             st = self._state()
-            pend = st.get("pending") or {}
+            # Pendings via gameStatus — the decision-card surface (see _pending's rationale).
+            pend = self._pending() or (st.get("pending") or {})
             if pend.get("kind"):
                 body = self._decision_body(pend)
                 if body is None:
@@ -580,7 +605,9 @@ class GoldenDriver:
             while i < len(lines) and (not lines[i].strip() or REASONING_LINE_RE.match(lines[i])):
                 i += 1
             for line in lines[i:]:
-                if REASONING_LINE_RE.match(line):
+                # Mid-body: STRONG operator signatures only (see OPERATOR_LINE_RE rationale) —
+                # conversational "let me…" host lines are product-legitimate prose here.
+                if OPERATOR_LINE_RE.match(line):
                     leaks.append(f"operator/planning line survives the scrub: {line.strip()[:60]!r}")
                     break
         self.inv.record("I7", "every player-facing body is clean", not leaks,

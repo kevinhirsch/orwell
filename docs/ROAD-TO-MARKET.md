@@ -89,6 +89,31 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   `PHASE_STALL_ABORT`=25 backstop that fails I5 honestly instead of burning a paid budget on a
   real stall. *Product datum worth keeping: a socially-active player can hold a phase open
   indefinitely — by design (lingering is play), but note the pacing texture for M2 copy.*
+- **Finding (record attempt #3 — the structural gates' first clean pass + M0-7 discovered):**
+  integrity scan PASSED (single writer; qwen×61 + glm×198, zero foreign records — the
+  contamination class is dead), leak scan clean, escalation cleared three phase-dwells and the
+  week reached eviction — where the walk absorbed 25 escalated turns because the driver polled
+  `getGameState` for pendings and **the eviction-vote pending only surfaces on `gameStatus`**
+  (engine autopsy on the preserved data dir: `advanceGame` idempotently re-returned the
+  player-vote pending at the same beatSeq while `getGameState.pending` read null). Driver now
+  reads pendings from `/api/orwell/status` — the decision card's own surface, truer product
+  emulation. The engine-side projection disagreement is filed as **M0-7**. I7's mid-body scrub
+  also false-positived on host voice ("Let me get a read on…") — mid-body now flags only
+  unambiguous operator signatures; the full planning set still applies to the leading strip.
+
+### M0-7 · Engine: `getGameState.pending` disagrees with `gameStatus.pending` — S–M (engine) · **NEW**
+Source: record attempt #3 autopsy (2026-07-07). A pending created inside an advance (the
+eviction-vote ballot) surfaces on `gameStatus` (and in the `advanceGame` result itself) but reads
+`null` on `getGameState` — two Vault-free closed-set projections of the same sandbox disagreeing
+about the live pending. Product impact is masked (the decision card polls status), but any
+consumer keying on state — an integration, a future surface, the admin snapshot's `tiersAgree`
+principle — inherits the gap silently.
+- **DoR:** reproduce in a unit sandbox (advance a seeded season to eviction; assert both
+  projections); locate where each read derives `pending`.
+- **DoD:** both player reads return the same pending at every beat of a full seeded week (a
+  property test over the UAT walk asserts projection agreement per step); no behavior change to
+  either surface beyond the missing field; FE untouched (the status-read remains the decision
+  card's source).
 
 ### M0-2 · Calibrate invariants I2/I3 against the real belts — S–M · ✅ DONE
 *Resolved 2026-07-07 with three consecutive real-run data points. **I2 — settled: the opener is
