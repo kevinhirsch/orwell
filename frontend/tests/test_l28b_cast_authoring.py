@@ -8,14 +8,8 @@ per houseguest, only forwards engine-accepted fields).
 import asyncio
 import json
 
+from conftest import _run
 from src import orwell_cast_authoring as A
-
-
-def _run(coro):
-    # The FE convention (test_lane6_turn_integrity): drive a coroutine on the EXISTING session loop.
-    # NOT `async def` tests / asyncio.run() — those close the main-thread loop and break later tests
-    # that use the deprecated asyncio.get_event_loop() (e.g. the transcript-surface suite).
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 # ── the producer prompt ───────────────────────────────────────────────────────

@@ -135,7 +135,7 @@ def test_decision_card_preserves_the_post_flow_and_gamechanged():
     js = _read("static", "js", "orwellDecision.js")
     # the engine-direct decision POST + the single g15 dispatch survive the migration.
     assert '"/api/orwell/decision"' in js
-    assert 'window.orwellGameChanged("decision:" + kind)' in js
+    assert 'window.orwellGameChanged("decision:" + kind, _beat)' in js
     # the consequential-action a11y (confirm-on-binding + the card-scoped Escape dismiss) survive.
     assert "Confirm" in js
     assert 'e.key !== "Escape"' in js

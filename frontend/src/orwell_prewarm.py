@@ -119,6 +119,28 @@ def reset(user: Optional[str] = None) -> None:
         _STATE.pop(_key(user), None)
 
 
+def reset_user_season(user: Optional[str]) -> None:
+    """Drop the per-user cast-warm state a NEW season replaces: scrub the prior portrait set (0051),
+    reset the authoring give-up ledger (M1-10), and drop the cast pre-warm gate (0065 belt-and-
+    suspenders — prewarm self-resets on seed change too). Each sub-step is independently fail-soft:
+    one failing must never abort the others, and none of it may block the season start. Called from
+    every season-reset route."""
+    from src import orwell_portraits, orwell_cast_authoring  # lazy: avoid an import cycle
+    # A new season = a new cast: scrub the prior portrait set before generating (0051).
+    try:
+        orwell_portraits.scrub_user(user)
+    except Exception as e:
+        logger.info("[prewarm] reset_user_season: scrub_user failed: %s", e)
+    try:  # M1-10: new season ⇒ the authoring give-up ledger resets with the cast
+        orwell_cast_authoring.reset_attempts(user)
+    except Exception as e:
+        logger.info("[prewarm] reset_user_season: reset_attempts failed: %s", e)
+    try:
+        reset(user)
+    except Exception as e:
+        logger.info("[prewarm] reset_user_season: reset failed: %s", e)
+
+
 async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=None, identity=None) -> dict:
     """AUTHOR WARM (earliest): pre-seed the cast in the engine, AI-seed its descriptive identity (#544),
     then deeply author it in the background.

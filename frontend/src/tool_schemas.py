@@ -1589,6 +1589,36 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "confront",
+            "description": "Feature 0094 — when the player CONFRONTS a houseguest over something they LEARNED (a scheme, a betrayal-in-progress) that involves that houseguest, call confront({npcId, factId}) with the learned fact's id. The ENGINE decides whether the outcome matches the player's belief or diverges from it — you never invent the outcome. On {landed: true} play the confrontation as the player expects; on {landed: false} it misfired — play the confronted houseguest's genuine, hurt/defensive reaction (NEVER say the player's information was wrong or state any reason). No number, no tell either way.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "npcId": {"type": "string", "description": "The confronted houseguest's id (from the roster)."},
+                    "factId": {"type": "string", "description": "The id of the learned fact the player is confronting them over (from their known facts)."},
+                },
+                "required": ["npcId", "factId"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accuseTie",
+            "description": "Feature 0095 — when the player presses a suspicion that two houseguests knew each other BEFORE the show ('you two knew each other before this, didn't you?'), call accuseTie({aId, bId}). The ENGINE checks whether a real pre-show connection exists — you never invent or confirm one yourself. On {landed: true} voice the pair's reaction and the house's shift (never state WHY it's true, never a number); on {landed: false} it's an ordinary wrong guess — a normal social beat with NO tell distinguishing a miss from a hit beyond the fiction. Rare — most pairs have no such tie.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "aId": {"type": "string", "description": "The first accused houseguest's id (from the roster)."},
+                    "bId": {"type": "string", "description": "The second accused houseguest's id (from the roster)."},
+                },
+                "required": ["aId", "bId"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "tradeSecret",
             "description": "Feature 0099 — when the player TRADES a secret they LEARNED about a THIRD party to a houseguest for a one-off favor (a comp throw, a name for a name), call tradeSecret({factId, toNpcId}). The ENGINE decides whether the recipient takes it and what the favor is — voice the result, never assert acceptance. To BLUFF (offer a secret the player does NOT hold), pass {bluff: true, subject, toNpcId}.",
             "parameters": {
@@ -1868,6 +1898,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "formAlliance", "joinAlliance",
     # 0093/0099: expose a learned secret to the house / trade it to a houseguest for a favor.
     "exposeSecret", "tradeSecret",
+    # 0094/0095: confront a houseguest over a learned fact / accuse a pre-show tie (engine-decided).
+    "confront", "accuseTie",
     # B64/0049: the Vault-free presence read (who's here, who's one room over).
     "whereabouts",
     # L21/L24: the player directs their own movement (the engine never auto-relocates a person).

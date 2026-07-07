@@ -1,0 +1,121 @@
+# 0108 — the nightly real-model golden-path smoke (scheduled, key-gated, NON-BLOCKING).
+#
+# Re-records the golden-path fixture against the LIVE deploy-default narrator and runs the
+# same invariant assertions on the live run, so a new under-call / truncation / desync or a
+# prompt drift surfaces the next morning instead of inside a player's season. It never
+# blocks a merge (continue-on-error) and is a clean skip when no provider key is present
+# (forks / a missing secret). Its uploaded artifact IS a ready-to-commit refreshed fixture —
+# the usual regenerate is "download, eyeball the invariant diff, commit".
+#
+# Secret: OPENROUTER_API_KEY (repo secret). Design note:
+# docs/features/0108-real-model-golden-path-gate.md.
+name: golden-nightly
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch: {}
+
+# Minimal token scope: the job only checks out the repo and uploads an artifact (the
+# artifact API needs no repo write). Nothing here writes back to the repo, so read-only
+# `contents` is all it needs — avoids the overly-broad default token.
+permissions:
+  contents: read
+
+concurrency:
+  group: golden-nightly
+  cancel-in-progress: true
+
+jobs:
+  record:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - name: provider key gate
+        id: key
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$OPENROUTER_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=golden-nightly skipped::no OPENROUTER_API_KEY secret — the nightly re-record is a clean skip."
+          fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.key.outputs.present == 'true'
+        run: npm ci
+      - if: steps.key.outputs.present == 'true'
+        run: npm run build
+      - if: steps.key.outputs.present == 'true'
+        run: pip install -r frontend/requirements.txt
+      - name: re-record the golden path against the live narrator
+        if: steps.key.outputs.present == 'true'
+        working-directory: frontend
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        # The two-tier production topology (owner, 2026-07-07): narration on GLM 5.2, the
+        # utility/background call classes on the cheap qwen tier (locally-served in prod;
+        # OpenRouter stands in here — request keys exclude the endpoint URL by design).
+        run: |
+          python3 scripts/golden_path_record.py \
+            --model z-ai/glm-5.2 --utility-model qwen/qwen3.6-flash \
+            --fixture /tmp/golden-nightly/golden_path_glm-5.2.jsonl \
+            --report /tmp/golden-nightly/record-report.json
+      - name: replay the COMMITTED fixture for the drift diff
+        if: steps.key.outputs.present == 'true'
+        working-directory: frontend
+        run: |
+          if compgen -G "tests/golden/golden_path_*.jsonl" > /dev/null; then
+            python3 scripts/golden_path_replay.py --runs 1 \
+              --report /tmp/golden-nightly/replay-report.json || true
+          else
+            echo "::notice::no committed fixture yet — nothing to diff against; commit the uploaded artifact to arm the PR gate."
+          fi
+      - name: diff the invariant results (live vs committed replay)
+        if: steps.key.outputs.present == 'true'
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          def load(p):
+              try:
+                  with open(p) as fh:
+                      return {r["invariant"]: r["status"] for r in json.load(fh)["invariants"]}
+              except Exception:
+                  return None
+          live = load("/tmp/golden-nightly/record-report.json")
+          committed = load("/tmp/golden-nightly/replay-report.json.run1.json")
+          if live is None:
+              print("::warning title=golden-nightly::no live record report — see the job log")
+          elif committed is None:
+              print("no committed-replay report to diff (fixture not yet committed)")
+          else:
+              drift = {k: (committed.get(k), live.get(k))
+                       for k in sorted(set(live) | set(committed))
+                       if committed.get(k) != live.get(k)}
+              if drift:
+                  print(f"::warning title=golden-nightly drift::invariant results diverged (committed→live): {drift} — download the artifact and consider committing the refreshed fixture.")
+              else:
+                  print("no invariant drift between the committed replay and the live run")
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          name: golden-nightly-fixture
+          path: /tmp/golden-nightly/
+          retention-days: 14
+          if-no-files-found: warn

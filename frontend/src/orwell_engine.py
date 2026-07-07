@@ -284,6 +284,7 @@ async def _call(name: str, args: dict | None = None, user: str | None = None, ti
     what came back (or the failure) — feeding the /admin/status viewer."""
     import time as _t
     from src import log_rings as _rings
+    _golden_call_ledger(name, args)
     t0 = _t.monotonic()
     try:
         res = await _call_inner(name, args, user=user, timeout=timeout)
@@ -293,6 +294,29 @@ async def _call(name: str, args: dict | None = None, user: str | None = None, ti
         _rings.record_io(name, args, False, int((_t.monotonic() - t0) * 1000),
                          f"{type(e).__name__}: {e}")
         raise
+
+
+def _golden_call_ledger(name: str, args: dict | None) -> None:
+    """0108 determinism diagnosis aid: with ORWELL_GOLDEN_CALL_LEDGER=<path>, append one line
+    per FE→engine call (name + volatile-stripped args digest). Diffing a record run's ledger
+    against a replay run's shows exactly which engine call diverges in count or order — the
+    engine consumes seeded RNG per call/scene, so a mode-asymmetric caller shifts every later
+    surfacing draw. Off (the default) this is a single env read; never raises."""
+    import os as _os
+    path = _os.environ.get("ORWELL_GOLDEN_CALL_LEDGER")
+    if not path:
+        return
+    try:
+        import hashlib as _h
+        import json as _j
+        a = dict(args or {})
+        for volatile in ("expectedBeatSeq", "idempotencyKey"):
+            a.pop(volatile, None)
+        digest = _h.sha256(_j.dumps(a, sort_keys=True, default=str).encode()).hexdigest()[:12]
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{name} {digest}\n")
+    except Exception:
+        pass
 
 async def _call_inner(name: str, args: dict | None = None, user: str | None = None, timeout: float | None = None) -> dict:
     """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox.
@@ -745,6 +769,31 @@ async def trade_secret(to_npc_id: str, fact_id: str | None = None, bluff: bool =
     if expected_beat_seq is not None:
         args["expectedBeatSeq"] = expected_beat_seq
     return await _call("tradeSecret", args, user=user)
+
+
+async def confront(npc_id: str, fact_id: str, expected_beat_seq: int | None = None,
+                   user: str | None = None) -> dict:
+    """Feature 0094 — the player CONFRONTS a houseguest over a fact they LEARNED. The engine is the
+    single authority: it validates the player actually holds `fact_id` (I3/Vault Wall — a non-learned
+    fact is REJECTED), classifies the cited belief, and resolves whether the confrontation lands —
+    returning only Vault-free `{landed}` (never why). 0065 Part A — the optional `expected_beat_seq`
+    CAS token threads in only when provided."""
+    args: dict = {"npcId": npc_id, "factId": fact_id}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("confront", args, user=user)
+
+
+async def accuse_tie(a_id: str, b_id: str, expected_beat_seq: int | None = None,
+                     user: str | None = None) -> dict:
+    """Feature 0095 — the player accuses two houseguests of a PRE-SHOW tie. The engine checks whether
+    a real connection exists (never invented or confirmed FE-side) and returns only Vault-free
+    `{landed}` — a miss is indistinguishable from an ordinary wrong guess. 0065 Part A — the optional
+    `expected_beat_seq` CAS token threads in only when provided."""
+    args: dict = {"aId": a_id, "bId": b_id}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    return await _call("accuseTie", args, user=user)
 
 
 async def season_recap(user: str | None = None) -> dict:

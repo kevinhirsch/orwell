@@ -127,6 +127,42 @@ _TRUNCATION_RETRY = (
 _EMPTY_TRUNCATED_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 0.4
 
+# M1-10 (audit A11): the per-houseguest give-up ledger. Authoring is re-kicked from several
+# seams (createCharacter, the roster's lazy backfill, the manual + admin levers), and against a
+# permanently-failing utility provider each re-kick used to retry every NPC afresh — same-second
+# identical call bursts, forever, with no memory. The ledger caps the TOTAL LLM calls spent per
+# houseguest per season (across every re-kick in this process); at the cap that NPC's authoring
+# GIVES UP loudly — tallied in the run summary and surfaced on /admin/status via
+# `authoring_completeness()["givenUp"]` — until `reset_attempts()` (the new-season scrub seam)
+# clears it. Retries inside one run ALSO spend from the same budget, and the backoff between
+# them is exponential (0.4s → 0.8s → 1.6s …) so a struggling provider gets air, not a hammer.
+_ATTEMPT_CAP = 6
+_attempt_ledger: dict = {}   # user_key -> {houseguest_id: llm calls spent}
+_gaveup_logged: set = set()  # (user_key, houseguest_id) — warn once per give-up, not per re-kick
+
+
+def _spend_attempt(user_key: str, hid: str) -> None:
+    self_map = _attempt_ledger.setdefault(user_key, {})
+    self_map[hid] = self_map.get(hid, 0) + 1
+
+
+def _given_up(user_key: str, hid: str) -> bool:
+    return _attempt_ledger.get(user_key, {}).get(hid, 0) >= _ATTEMPT_CAP
+
+
+def giveups(user) -> list:
+    """Houseguest ids whose authoring hit the give-up cap this season (admin visibility)."""
+    key = _safe_user(user)
+    return sorted(h for h, n in _attempt_ledger.get(key, {}).items() if n >= _ATTEMPT_CAP)
+
+
+def reset_attempts(user) -> None:
+    """New-season scrub: clear the give-up ledger so the fresh cast authors from zero."""
+    key = _safe_user(user)
+    _attempt_ledger.pop(key, None)
+    for k in [t for t in _gaveup_logged if t[0] == key]:
+        _gaveup_logged.discard(k)
+
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
 # NOTE: `dayOnePerception` is INTENTIONALLY NOT authored here (anti-sycophancy) — the engine owns the
 # seeded, balanced Day-1 read. We never send it, so the authoring path carries zero player coupling.
@@ -427,7 +463,8 @@ WriteFn = Callable[[dict], Awaitable[dict]]
 
 async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                       on_authored: Optional[Callable[[str], None]] = None,
-                      *, concurrency: int = _AUTHOR_CONCURRENCY) -> int:
+                      *, concurrency: int = _AUTHOR_CONCURRENCY,
+                      user: Optional[str] = None) -> int:
     """For each NPC in `cast`: build the producer prompt → `llm_fn` → parse → `write_fn`
     (recordCastProfile). Best-effort PER houseguest: one failure never aborts the rest (the seeded
     floor stays authoritative for any NPC that couldn't be authored). Returns how many were written.
@@ -454,6 +491,19 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         orchestrator integrity checkpoint (the live-verify's 3 `degradation` refusals).
     All three stay fail-soft: after the bounded retries the call simply lands on the seeded floor.
     """
+    # 0108: under the golden record/replay seam the authoring pipeline must be ORDER-
+    # deterministic — parallel commits land in wall-clock arrival order, the engine's shared
+    # seeded stream makes mutation order load-bearing for every later draw, and the fourth
+    # GLM record diverged from its own replay exactly here (two recordCastProfile commits
+    # swapped positions; the walk's presence layouts split from that point). One-at-a-time
+    # in cast order under golden (asyncio.Semaphore waiters are FIFO); production keeps the
+    # parallel pipeline unchanged.
+    try:
+        from src import golden_path as _gp
+        if _gp.active():
+            concurrency = 1
+    except Exception:
+        pass
     sem = asyncio.Semaphore(max(1, int(concurrency)))
     # #1057: SERIALIZE the engine write-back. The per-NPC recordCastProfile write-backs collide on the
     # orchestrator integrity checkpoint when they run concurrently (the live-verify's 3 `degradation`
@@ -469,6 +519,8 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     floor_truncated = 0   # #1057: the provider returned a CLIPPED/unbalanced object (after retries)
     floor_degradation = 0  # #1057: the write-back was refused as a transient degradation (after retries)
     floor_below = 0       # JSON parsed but nothing cleared the quality floor (seeded floor is richer)
+    floor_gaveup = 0      # M1-10: the per-season attempt cap is spent — give up loudly, stop calling
+    ukey = _safe_user(user)  # M1-10: the give-up ledger scope
 
     async def _call_with_retries(npc: dict, hid: str):
         """Issue the authoring call(s) for one NPC and return its parsed profile (or None).
@@ -480,6 +532,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
           3. #1002 — a NON-empty body with NO parseable JSON (genuine prose) ⇒ ONE strict-JSON reparse.
         Returns (profile_or_None, last_text) so the caller can classify the final no-op cause."""
         messages = build_authoring_messages(npc)
+        _spend_attempt(ukey, hid)  # M1-10: every real provider call spends from the season budget
         try:
             text = await llm_fn(messages)
         except Exception as e:  # the model can fail for one houseguest; carry on
@@ -492,14 +545,17 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         # roomy _AUTHOR_MIN_OUTPUT_TOKENS floor is applied in `_resolve_llm_fn`.
         attempt = 0
         while profile is None and _classify_visible_body(text or "") in ("empty", "truncated") \
-                and attempt < _EMPTY_TRUNCATED_RETRIES:
+                and attempt < _EMPTY_TRUNCATED_RETRIES and not _given_up(ukey, hid):
             attempt += 1
             shape = _classify_visible_body(text or "")
             logger.info(
                 f"[cast-authoring] {shape} visible body for {hid} (attempt {attempt}/"
                 f"{_EMPTY_TRUNCATED_RETRIES}) — re-issuing for the complete object")
             if _RETRY_BACKOFF_SECONDS:
-                await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
+                # M1-10: EXPONENTIAL backoff (0.4 → 0.8 → 1.6 …) — a struggling provider gets
+                # air between attempts instead of a same-second hammer (audit A11).
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+            _spend_attempt(ukey, hid)
             try:
                 text = await llm_fn(messages + [{"role": "user", "content": _TRUNCATION_RETRY}])
             except Exception as e:
@@ -508,10 +564,12 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
             profile = parse_authored_profile(text or "", hid)
         # #1002: one-shot reparse retry — a NON-empty body with NO JSON object at all (genuine prose).
         # Distinct from the empty/truncated case above; only fires when there WAS a full body to reparse.
-        if profile is None and _classify_visible_body(text or "") == "no_json":
+        if profile is None and _classify_visible_body(text or "") == "no_json" \
+                and not _given_up(ukey, hid):
             logger.info(
                 f"[cast-authoring] no JSON in reply for {hid} — retrying once with a "
                 "strict JSON-only instruction")
+            _spend_attempt(ukey, hid)
             try:
                 text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
             except Exception as e:
@@ -528,7 +586,8 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         last = None
         for attempt in range(1 + _EMPTY_TRUNCATED_RETRIES):
             if attempt and _RETRY_BACKOFF_SECONDS:
-                await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
+                # M1-10: exponential, matching the call-side retries.
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)))
             try:
                 async with write_lock:  # serialize: never two recordCastProfile commits at once
                     res = await write_fn(profile)
@@ -576,9 +635,22 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         return last
 
     async def _author_one(npc: dict) -> int:
-        nonlocal floor_no_json, floor_empty, floor_truncated, floor_degradation, floor_below
+        nonlocal floor_no_json, floor_empty, floor_truncated, floor_degradation, floor_below, \
+            floor_gaveup
         hid = npc.get("id")
         if not hid or hid == "player":
+            return 0
+        # M1-10: the season budget for this NPC is spent — give up LOUDLY (once), never silently
+        # re-burst on every re-kick. /admin/status surfaces the list via giveups(); the ledger
+        # resets on the new-season scrub.
+        if _given_up(ukey, hid):
+            floor_gaveup += 1
+            if (ukey, hid) not in _gaveup_logged:
+                _gaveup_logged.add((ukey, hid))
+                logger.warning(
+                    f"[cast-authoring] give-up cap reached for {hid} "
+                    f"({_ATTEMPT_CAP} provider calls this season) — keeping the seeded floor; "
+                    "re-authoring resumes next season or after a provider fix + manual lever")
             return 0
         async with sem:
             profile, text = await _call_with_retries(npc, hid)
@@ -637,7 +709,8 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     logger.info(
         f"[cast-authoring] cast authoring: authored {written}/{total} houseguests "
         f"(floor fallback for {floor}: {floor_no_json} no-JSON, {floor_empty} empty, "
-        f"{floor_truncated} truncated, {floor_degradation} degradation, {floor_below} below-floor)")
+        f"{floor_truncated} truncated, {floor_degradation} degradation, {floor_below} below-floor, "
+        f"{floor_gaveup} given-up)")
     return written
 
 
@@ -857,7 +930,7 @@ async def run_authoring(cast: list[dict], owner: Optional[str],
     # Only the DEFAULT sink mutates the LIVE cast; a `write` override targets the next-season
     # holding store (which deliberately does not touch the live board), so don't push for it.
     is_live_write = write is None
-    written = await author_cast(cast, llm_fn, write or _write, on_authored)
+    written = await author_cast(cast, llm_fn, write or _write, on_authored, user=owner)
     # #617: enrichment landed on the live game — push a server-side "game-updated" so open pages
     # reconcile now instead of waiting for the next poll. Best-effort/fail-soft.
     if written and is_live_write:
@@ -964,7 +1037,11 @@ def authoring_completeness(user: Optional[str], roster_cards: list) -> dict:
         and not (c.get("isPlayer") or c.get("id") == "player")
     ]
     missing = unauthored_ids(user, roster_cards)
-    return {"total": len(active_npcs), "authored": len(active_npcs) - len(missing), "missing": len(missing)}
+    return {"total": len(active_npcs), "authored": len(active_npcs) - len(missing),
+            "missing": len(missing),
+            # M1-10: NPCs whose authoring hit the per-season give-up cap — a give-up is visible
+            # on /admin/status (the castAuthoring block), never silence.
+            "givenUp": giveups(user)}
 
 
 async def authoring_completeness_for(user: Optional[str]) -> Optional[dict]:

@@ -1177,6 +1177,7 @@ async def execute_tool_block(
         do_social_initiatives, do_diary_room, do_make_deal, do_confide, do_whereabouts, do_move_to,
         do_form_alliance, do_join_alliance,
         do_expose_secret, do_trade_secret,
+        do_confront, do_accuse_tie,
         do_premiere_intros, do_mark_houseguest_met,
         do_season_recap, do_season_retrospective, do_daily_recap, do_npc_voice,
         do_app_api,
@@ -1580,6 +1581,12 @@ async def execute_tool_block(
     elif tool == "tradeSecret":
         desc = "tradeSecret"
         result = await do_trade_secret(content, owner=owner)
+    elif tool == "confront":
+        desc = "confront"
+        result = await do_confront(content, owner=owner)
+    elif tool == "accuseTie":
+        desc = "accuseTie"
+        result = await do_accuse_tie(content, owner=owner)
     elif tool == "createCharacter":
         desc = "createCharacter"
         result = await do_create_character(content, owner=owner)

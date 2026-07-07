@@ -570,7 +570,15 @@ import { onNarrowChange } from './platform.js';
     if (dot) dot.hidden = !on;
   }
 
-  async function refresh() {
+  // M1-3 (audit A3): beatSeq catch-up. A gamechanged event can CLAIM a committed beat
+  // (tool result / decision response); if our refetch reads an older beat, the read raced
+  // the engine commit — the exact "goodbye card beside a board still reading HOH" lag.
+  // Re-fetch briefly (bounded) until the read catches the claimed commit, instead of
+  // rendering stale for a whole 20–30s poll interval. Poll cadence itself is unchanged.
+  let _catchupTimer = null;
+  let _catchupTries = 0;
+
+  async function refresh(wantBeat) {
     let st;
     try {
       st = await fetchStatus();
@@ -590,14 +598,30 @@ import { onNarrowChange } from './platform.js';
     markStale(false);
     // Fold the roster in (best-effort, never blocks the ceremony rows on /state).
     st._state = (await fetchState()) || null;
+    // M1-3: verify the read caught the claimed commit BEFORE painting. A read that raced the
+    // engine commit (got < wantBeat) is known-stale — don't paint the stale HUD for a retry
+    // interval and then correct it a beat later. Schedule the bounded catch-up refetch and
+    // render only once the read is fresh (or the bounded retries are exhausted, so a beat that
+    // never arrives still eventually renders the last read). The last-known panel stays up
+    // meanwhile (we simply skip this paint).
+    const want = Number(wantBeat);
+    const got = Number(st && st.beatSeq != null ? st.beatSeq
+      : (st._state && st._state.beatSeq != null ? st._state.beatSeq : NaN));
+    if (Number.isFinite(want) && want > 0 && Number.isFinite(got) && got < want && _catchupTries < 3) {
+      _catchupTries += 1;
+      if (_catchupTimer) clearTimeout(_catchupTimer);
+      _catchupTimer = setTimeout(() => refresh(want), 1000);
+      return; // known-stale: don't paint; wait for the catch-up read to land
+    }
     render(st);
+    _catchupTries = 0;
   }
 
   // Seam for the headless browser gate: build + show the panel on demand.
   window._orwellStatusEnsure = () => { const el = ensurePanel(); el.style.display = "block"; return true; };
 
-  function start() {
-    refresh();
+  function start(wantBeat) {
+    refresh(wantBeat);
     if (timer) clearInterval(timer);
     const tick = async () => {
       if (!document.hidden) await refresh();  // C18: no polling in a hidden tab
@@ -611,10 +635,17 @@ import { onNarrowChange } from './platform.js';
   // F4(a): a turn elsewhere (run start/end) dispatches orwell:gamechanged — reconcile the HUD at
   // once instead of waiting out the ≤20s poll. Reset the backoff and re-arm the cadence so the next
   // scheduled poll counts from this fresh fetch (cancel/re-arm), not the stale in-flight tick.
-  window.addEventListener("orwell:gamechanged", () => {
+  // M1-3: the event's beatSeq (when a seam supplied it) rides into refresh() so the panel
+  // catch-up-fetches past a read-raced commit instead of rendering stale for a poll interval.
+  window.addEventListener("orwell:gamechanged", (e) => {
     _failures = 0;
+    // Cancel any in-flight catch-up retry: it was scheduled for an OLDER wanted-beat and would
+    // otherwise fire after this NEWER event and refetch/paint against the stale wanted-beat.
+    // Reset the attempt counter so this event's own catch-up gets its full bounded budget.
+    if (_catchupTimer) { clearTimeout(_catchupTimer); _catchupTimer = null; }
+    _catchupTries = 0;
     if (timer) { clearTimeout(timer); timer = null; }
-    start(); // start() refetches immediately, then re-arms the poll from now
+    start(e && e.detail ? e.detail.beatSeq : undefined);
   });
   // The sidebar drawer handles narrow layouts; nothing to repark (E64). Kept as a
   // no-op subscription so a future narrow-specific treatment has its hook.

@@ -33,6 +33,9 @@ export const ORWELL_TOOL_BEATS = {
   // 0093/0099: out a learned secret to the house / trade it to a houseguest for a favor.
   'exposeSecret': '🗣 Outing a secret',
   'tradeSecret': '🔁 Trading a secret',
+  // 0094/0095: confront a houseguest over a learned fact / accuse a pre-show tie.
+  'confront': '⚡ Confrontation',
+  'accuseTie': '🔍 Calling out a tie',
   // 0075: the player presses an ally to open up; the engine decides the disclosure.
   'confide': '🤫 Confiding',
   'askProducers': '🎙 Producers',

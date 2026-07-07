@@ -5261,6 +5261,50 @@ async def do_trade_secret(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_confront(content: str, owner: Optional[str] = None) -> Dict:
+    """Feature 0094 — the player CONFRONTS a houseguest over a fact they LEARNED. The ENGINE is the
+    single authority: it validates the player actually holds `factId` (I3/Vault Wall — a non-learned
+    fact is REJECTED, never fabricated here) and resolves whether the confrontation lands. We only
+    forward {npcId, factId} and return the engine's Vault-free {landed} result."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    npc_id = (args.get("npcId") or args.get("npc_id") or "").strip()
+    fact_id = (args.get("factId") or args.get("fact_id") or "").strip()
+    if not npc_id:
+        return {"error": "npcId (the confronted houseguest) is required", "exit_code": 1}
+    if not fact_id:
+        return {"error": "factId (a fact the player has actually learned) is required", "exit_code": 1}
+    try:
+        res = await orwell_engine.confront(npc_id, fact_id, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_accuse_tie(content: str, owner: Optional[str] = None) -> Dict:
+    """Feature 0095 — the player accuses two houseguests of a PRE-SHOW tie. The ENGINE checks whether
+    a real connection exists — never invented or confirmed here — and a miss must stay
+    indistinguishable from an ordinary wrong guess. We only forward {aId, bId} and return the
+    engine's Vault-free {landed} result."""
+    from src import orwell_engine
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    a_id = (args.get("aId") or args.get("a_id") or "").strip()
+    b_id = (args.get("bId") or args.get("b_id") or "").strip()
+    if not a_id or not b_id:
+        return {"error": "aId and bId (the two accused houseguests) are both required", "exit_code": 1}
+    try:
+        res = await orwell_engine.accuse_tie(a_id, b_id, user=owner)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_manage_sandbox(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:

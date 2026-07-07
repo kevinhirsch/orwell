@@ -22,12 +22,8 @@ confirmed live — these prove the FE is now robust to the shapes the live-verif
 import asyncio
 import json
 
+from conftest import _run
 from src import orwell_cast_authoring as A
-
-
-def _run(coro):
-    # FE convention: drive on the existing loop (do NOT asyncio.run — it closes the main loop).
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 class _LogSink:

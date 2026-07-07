@@ -22,7 +22,7 @@ def test_status_panel_keeps_last_known_on_engine_hiccup():
     # an offline indicator exists and a "_shown" guard distinguishes hiccup from no-game
     assert 'id="os-stale"' in src and "markStale(" in src
     assert "_shown" in src
-    ref = src[src.index("async function refresh()"): src.index("async function refresh()") + 800]
+    ref = src[src.index("async function refresh("): src.index("async function refresh(") + 800]
     assert "if (_shown) markStale(true)" in ref          # hiccup → keep + flag
     assert "else hidePanel()" in ref                      # never shown → nothing to keep
 

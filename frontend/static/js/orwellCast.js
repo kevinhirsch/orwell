@@ -533,6 +533,10 @@
     const empty = el.querySelector("#oc-empty");
     const roster = (data && Array.isArray(data.roster)) ? data.roster : [];
     _imagesAvailable = !!(data && data.imagesAvailable);
+    // M1-9 (audit A9): the last completed run's honest verdict from the roster payload —
+    // a 0-of-N run must flip the copy to a failure the player can act on, never an
+    // eternal "Generating…" spinner over a provider that is not producing images.
+    const _lastRunFailing = !!(data && data.portraitLastRun && data.portraitLastRun.failing);
 
     // G22 + L15: the adaptive cadence. The server reports a LIVE generation record
     // (`generation: {total, done, active}`) while a run is in flight — when present it is
@@ -581,6 +585,9 @@
           if (gen && gen.active && gen.total) {
             note.textContent = "Generating " + Math.min(gen.done, gen.total) + " of " +
               gen.total + " portrait" + (gen.total === 1 ? "" : "s") + "…";
+          } else if (_lastRunFailing) {
+            // M1-9: honest failure copy — no run is active and the last one landed nothing.
+            note.textContent = "Portraits aren't landing — check the image model (Settings → Models).";
           } else {
             note.textContent = "Generating " + missing.length + " remaining…" +
               (total != null && present != null ? " (" + present + "/" + total + " done)" : "");

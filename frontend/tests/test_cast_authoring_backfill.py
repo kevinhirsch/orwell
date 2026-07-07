@@ -31,6 +31,7 @@ import asyncio
 import importlib
 
 import pytest
+from conftest import _run
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -38,12 +39,6 @@ A = importlib.import_module("src.orwell_cast_authoring")
 orwell_engine = importlib.import_module("src.orwell_engine")
 orwell_routes = importlib.import_module("routes.orwell_routes")
 ahr = importlib.import_module("routes.admin_health_routes")
-
-
-def _run(coro):
-    # FE loop discipline (test_l28b_cast_authoring): drive on the EXISTING loop, never asyncio.run
-    # (which would close the main-thread loop out from under sibling test files).
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _kick(ids, user, force=False):
@@ -142,7 +137,7 @@ def test_authoring_completeness_counts_active_npcs_only():
         {"id": "npc:4", "status": "jury", "authored": False},     # departed — excluded
     ]
     # 3 active NPCs (1,2,3); 1 authored; 2 on the floor. The player + jury are NOT counted.
-    assert A.authoring_completeness("u", cards) == {"total": 3, "authored": 1, "missing": 2}
+    assert A.authoring_completeness("u", cards) == {"total": 3, "authored": 1, "missing": 2, "givenUp": []}
 
 
 def test_authoring_completeness_all_authored():
@@ -150,14 +145,14 @@ def test_authoring_completeness_all_authored():
         {"id": "npc:1", "status": "active", "authored": True},
         {"id": "npc:2", "status": "active", "authored": True},
     ]
-    assert A.authoring_completeness("u", cards) == {"total": 2, "authored": 2, "missing": 0}
+    assert A.authoring_completeness("u", cards) == {"total": 2, "authored": 2, "missing": 0, "givenUp": []}
 
 
 def test_authoring_completeness_for_derives_from_the_public_projection(monkeypatch):
     _stub_state(monkeypatch)
     # _STATE: npc:1 authored; npc:2 + npc:4 on the floor; npc:3 is jury (excluded); player excluded.
     comp = _run(A.authoring_completeness_for("u"))
-    assert comp == {"total": 3, "authored": 1, "missing": 2}
+    assert comp == {"total": 3, "authored": 1, "missing": 2, "givenUp": []}
 
 
 def test_authoring_completeness_for_is_none_pre_game_and_engine_down(monkeypatch):

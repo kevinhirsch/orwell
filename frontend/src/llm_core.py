@@ -1,6 +1,7 @@
 # src/llm_core.py
 import httpx
 import asyncio
+import os
 import time
 import json
 import logging
@@ -1343,6 +1344,47 @@ async def llm_call_async(
     user: Optional[str] = None,
     session: Optional[str] = None,
 ) -> str:
+    """The public non-streaming chokepoint: 0108 golden record/replay gate over the
+    traced utility call. Neither golden env var set ⇒ byte-identical passthrough
+    (``golden_path`` is never imported). Replay short-circuits before any network,
+    trace, or meter work; record tees the result into the fixture after the traced
+    call returns. See docs/features/0108-real-model-golden-path-gate.md."""
+    if os.environ.get("ORWELL_GOLDEN_RECORD") or os.environ.get("ORWELL_GOLDEN_REPLAY"):
+        from src import golden_path as _golden
+        _gparams = {"temperature": temperature, "max_tokens": max_tokens,
+                    "prompt_type": prompt_type, "call_class": call_class}
+        if _golden.replay_enabled():
+            return _golden.replay_call(model, messages, _gparams)
+        if _golden.record_enabled():
+            try:
+                _gtext = await _llm_call_async_traced(
+                    url, model, messages, temperature=temperature, max_tokens=max_tokens,
+                    headers=headers, timeout=timeout, max_retries=max_retries,
+                    prompt_type=prompt_type, call_class=call_class, user=user, session=session)
+            except Exception:
+                raise
+            _golden.record_call(model, messages, _gparams, _gtext)
+            return _gtext
+    return await _llm_call_async_traced(
+        url, model, messages, temperature=temperature, max_tokens=max_tokens,
+        headers=headers, timeout=timeout, max_retries=max_retries,
+        prompt_type=prompt_type, call_class=call_class, user=user, session=session)
+
+
+async def _llm_call_async_traced(
+    url: str,
+    model: str,
+    messages: List[Dict],
+    temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
+    max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS,
+    headers: Optional[Dict] = None,
+    timeout: int = LLMConfig.STREAM_TIMEOUT,
+    max_retries: int = LLMConfig.MAX_RETRIES,
+    prompt_type: Optional[str] = None,
+    call_class: Optional[str] = None,
+    user: Optional[str] = None,
+    session: Optional[str] = None,
+) -> str:
     """Tracing wrapper over the non-streaming utility call (src/llm_trace.py) — records
     the full request + response (or error) for the /admin/status LLM I/O trace, then
     returns the impl's result unchanged. Best-effort; disabled ⇒ near-zero passthrough.
@@ -2283,6 +2325,37 @@ def _summarize_stream_error(err_chunk: Optional[str]) -> str:
 
 
 async def stream_llm_with_fallback(candidates, messages, **kwargs):
+    """The public streaming chokepoint: 0108 golden record/replay gate over the traced
+    fallback chain.
+
+    With neither ``ORWELL_GOLDEN_RECORD`` nor ``ORWELL_GOLDEN_REPLAY`` set this is a
+    byte-identical passthrough to the traced impl (one env check — ``golden_path`` is
+    never even imported). Record mode tees the live SSE chunks into the golden fixture
+    while forwarding them unchanged; replay mode short-circuits BEFORE any network or
+    trace work and re-emits the recorded chunks by stable request key — a miss raises
+    (drift must be loud). See docs/features/0108-real-model-golden-path-gate.md."""
+    if os.environ.get("ORWELL_GOLDEN_RECORD") or os.environ.get("ORWELL_GOLDEN_REPLAY"):
+        from src import golden_path as _golden
+        _gc = _dedupe_candidates(candidates)
+        _gmodel = _gc[0][1] if _gc else "(none)"
+        if _golden.replay_enabled():
+            async for chunk in _golden.replay_stream(_gmodel, messages, kwargs):
+                yield chunk
+            return
+        if _golden.record_enabled():
+            _chunks: list = []
+            try:
+                async for chunk in _stream_llm_with_fallback_traced(candidates, messages, **kwargs):
+                    _chunks.append(chunk)
+                    yield chunk
+            finally:
+                _golden.record_stream(_gmodel, messages, kwargs, _chunks)
+            return
+    async for chunk in _stream_llm_with_fallback_traced(candidates, messages, **kwargs):
+        yield chunk
+
+
+async def _stream_llm_with_fallback_traced(candidates, messages, **kwargs):
     """Tracing wrapper over the fallback chain (src/llm_trace.py).
 
     Captures the full request (system prompt + messages + tool schemas + sampling

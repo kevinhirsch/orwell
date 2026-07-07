@@ -1108,7 +1108,13 @@ async def _startup_event():
             enabled = bool(load_settings().get("time_of_day_enabled", True))
             await orwell_engine.set_time_of_day(enabled)
         except Exception as _e:
-            logger.warning("Failed to apply time-of-day setting on boot: %s", _e)
+            # Pre-game this is EXPECTED ("no active game for this user") — the apply re-runs at the
+            # two in-game seams (the framed-turn lazy apply + the new-game route, M1-2/audit A2),
+            # so an expected miss logs as info, and only a genuinely unexpected failure warns.
+            if "no active game" in str(_e).lower():
+                logger.info("Time-of-day boot apply deferred (no game yet — applied at first framed turn/new-game): %s", _e)
+            else:
+                logger.warning("Failed to apply time-of-day setting on boot: %s", _e)
     _startup_tasks.append(asyncio.create_task(_apply_time_of_day()))
 
     # Keep-alive: ping endpoints every 60 seconds to prevent cold starts

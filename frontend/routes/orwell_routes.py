@@ -394,8 +394,16 @@ def _roster_payload(user: Optional[str], cards: list, *, stale: bool) -> dict:
         progress = orwell_portraits.generation_progress(user)
     except Exception:
         progress = None
+    # M1-9 (audit A9): the last completed run's honest verdict — a 0-of-N run must flip the
+    # panel's copy to "failing", never an eternal "Generating…". Counts only, Vault-free.
+    last_run = None
+    try:
+        last_run = orwell_portraits.last_run_outcome(user)
+    except Exception:
+        last_run = None
     payload = {
         "roster": cards,
+        "portraitLastRun": last_run,
         "imagesAvailable": images_available,
         "portraitsPresent": counts["present"],
         "portraitsTotal": counts["total"],
@@ -1214,18 +1222,9 @@ def setup_orwell_routes() -> APIRouter:
                         "started": True,
                     },
                 )
-            # A new season = a new cast: scrub the prior portrait set before generating (0051).
-            try:
-                orwell_portraits.scrub_user(user)
-            except Exception:
-                pass
-            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
-            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
-            try:
-                from src import orwell_prewarm
-                orwell_prewarm.reset(user)
-            except Exception:
-                pass
+            # A new season = a new cast: scrub portraits, the authoring ledger, and the pre-warm gate.
+            from src import orwell_prewarm
+            orwell_prewarm.reset_user_season(user)
             res = await orwell_engine.create_character(
                 body.playerName.strip() or None,
                 archetype=body.archetype,
@@ -1252,6 +1251,15 @@ def setup_orwell_routes() -> APIRouter:
                 prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
                 if prompts:
                     orwell_portraits.kickoff_generation(prompts, user)
+            except Exception:
+                pass
+            # M1-2 / ADR 0006 (audit A2): a sandbox now exists, so re-apply the persisted in-game
+            # clock immediately — the boot apply legitimately failed pre-game ("no active game"),
+            # and this debug/ops door may start a season with no framed chat turn to lazy-apply it.
+            # Best-effort; never blocks the response.
+            try:
+                from routes.chat_helpers import _apply_persisted_time_of_day_once
+                await _apply_persisted_time_of_day_once(user)
             except Exception:
                 pass
             return res
@@ -1365,18 +1373,9 @@ def setup_orwell_routes() -> APIRouter:
             # public outcome BEFORE the reset wipes the engine sandbox — idempotent, so it never
             # double-logs a season the recap poll already captured. Never blocks the season advance.
             await _capture_season_outcome(user)
-            # A new season is a new cast: scrub the prior portrait set before generating (0051).
-            try:
-                orwell_portraits.scrub_user(user)
-            except Exception:
-                pass
-            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
-            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
-            try:
-                from src import orwell_prewarm
-                orwell_prewarm.reset(user)
-            except Exception:
-                pass
+            # A new season is a new cast: scrub portraits, the authoring ledger, and the pre-warm gate.
+            from src import orwell_prewarm
+            orwell_prewarm.reset_user_season(user)
             if body.keep:
                 # Keep the houseguest (0056): a confirmed restart carrying the prior CHARACTER.
                 res = await orwell_engine.create_character(None, confirm_restart=True, keep_character=True, user=user)
@@ -1446,17 +1445,9 @@ def setup_orwell_routes() -> APIRouter:
         if not body.confirm:
             return JSONResponse(status_code=400, content={"error": "confirm=true is required to reset progress"})
         try:
-            try:
-                orwell_portraits.scrub_user(user)
-            except Exception:
-                pass
-            # 0065 (belt-and-suspenders): explicitly drop the cast pre-warm state so a stale warm
-            # gate can never bleed into the fresh cast. (prewarm self-resets on seed change too.)
-            try:
-                from src import orwell_prewarm
-                orwell_prewarm.reset(user)
-            except Exception:
-                pass
+            # A new season is a new cast: scrub portraits, the authoring ledger, and the pre-warm gate.
+            from src import orwell_prewarm
+            orwell_prewarm.reset_user_season(user)
             res = await orwell_engine.manage_sandbox("reset", user=user)  # the one sanctioned door
             orwell_engine.remember_pending(res, user=user)  # clear the prior season's cached decision card
             # 0064: rotate the canonical game session so the restarted level opens in a fresh chat.
