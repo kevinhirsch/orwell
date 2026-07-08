@@ -466,7 +466,7 @@ Source: audit B1 (`s-a1` — raw model IDs above the fantasy). Depends: M1-6.
   provider/model id string anywhere on the first screen (pytest source gate); onboarding
   browser-smoke block updated.
 
-### M2-2 · Designed monogram portrait system + role badges — M–L · `P1` (the leverage item) · ✅ DONE (pending owner mock sign-off)
+### M2-2 · Designed monogram portrait system + role badges — M–L · `P1` (the leverage item) · ✅ DONE (owner mock APPROVED 2026-07-08)
 *2026-07-08: `orwellMonogram.js` — ONE kit component: id-seeded two-tone gradient (FNV +
 murmur-avalanche finalizer so sequential ids spread the wheel) + four broadcast pattern
 families + two-letter initials + camera-bug ring; fixed badge set (HOH crown / nominee
@@ -509,7 +509,18 @@ Source: audit B9 ("Start casting" / "Choose Your Character" / "Meet the house").
 - **DoD:** one naming line (casting → premiere → play) applied across onboarding card, chat gate
   card, and premiere card; pytest source gate pinning the copy set so it can't re-diverge.
 
-### M2-5 · Narrator identity + production-slate beat styling — M · `P2`
+### M2-5 · Narrator identity + production-slate beat styling — M · `P2` · ✅ DONE
+*2026-07-08 (owner pick this session): the transcript author is **"Production"** — ONE constant
+(`GAME_NARRATOR`, `orwellToolBeats.js`; also `window.ORWELL_GAME_NARRATOR`) consumed by all six
+game-build author sites (live stream, placeholder/resume via `_senderLabel`, continuation rounds,
+history reload, image bubbles); slash/compacted meta-bubbles keep "Orwell" (product chrome).
+Beats render as production slates in the game build: aligned rail + slate caps
+(`game-trim.css`, `body[data-game-build]`-scoped), NO lowercase "done" tail (failures stay
+literal — operator truth), outcome slates keep richer type via the persistent
+`.ow-slate-outcome` marker (the reveal class is transient). Gates:
+`tests/test_m2_5_narrator_identity.py`; C14 pins retargeted to the constant; live screenshot
+verified. P-1 rebrand = one line.*
+
 Source: audit B4/B7 (bubbles "Orwell", beats "· ✔ 📺 PRODUCTION done", fiction "Big Brother").
 - **DoR:** owner picks the transcript author name (recommend the diegetic show voice; "Orwell"
   stays product chrome). *(Note: final naming may be revisited by parked item P-1 — implement as

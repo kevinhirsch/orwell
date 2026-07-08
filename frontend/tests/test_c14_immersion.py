@@ -249,10 +249,12 @@ def test_game_build_never_labels_messages_with_the_model_name():
     # ("deepseek-v4-pro → …") — the narrator is the show, not a model. The game build uses a
     # diegetic sender on BOTH the live and reload paths.
     chat = _read("static", "js", "chat.js")
-    assert "data-game-build" in chat and "label = 'Orwell'" in chat
+    # M2-5: the diegetic sender is the ONE GAME_NARRATOR constant (owner pick: "Production"),
+    # sourced from orwellToolBeats.js — never a per-site string literal.
+    assert "data-game-build" in chat and "label = GAME_NARRATOR" in chat
     renderer = _read("static", "js", "chatRenderer.js")
-    assert renderer.count('isGameBuild() ? "Orwell"') >= 2   # main reply + image bubble
-    assert "(isGameBuild() && role === 'assistant') ? 'Orwell'" in renderer  # the _roleText path
+    assert renderer.count("isGameBuild() ? GAME_NARRATOR") >= 2   # main reply + image bubble
+    assert "(isGameBuild() && role === 'assistant') ? GAME_NARRATOR" in renderer  # the _roleText path
 
 
 def test_game_build_suppresses_the_model_name_tooltip():
@@ -275,11 +277,11 @@ def test_game_build_uses_diegetic_sender_on_placeholder_and_continuation():
     # A single source (_senderLabel) keeps every placeholder diegetic in the game build.
     chat = _read("static", "js", "chat.js")
     assert "function _senderLabel(" in chat
-    assert "isGameBuild() ? 'Orwell'" in chat
+    assert "isGameBuild() ? GAME_NARRATOR" in chat
     # the placeholder/resume/reconnect sites route their model label through _senderLabel
     assert chat.count("_senderLabel(") >= 4
     # the continuation-round streaming label is diegetic in the game build
-    assert "newRole.textContent = isGameBuild() ? 'Orwell'" in chat
+    assert "newRole.textContent = isGameBuild() ? GAME_NARRATOR" in chat
     # a provider fallback stays diegetic too (no raw "(fallback)" model name reaches the player)
     assert "if (!isGameBuild()) {\n                        _rEl.textContent = _ansM + ' (fallback) ';" in chat
 

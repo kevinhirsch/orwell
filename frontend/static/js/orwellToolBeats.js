@@ -7,6 +7,13 @@
 //   • history reload → chatRenderer.js (same treatment when a session is re-opened)
 // Keeping it here prevents the two paths from drifting — a tool added to the live
 // path but not the reload path was leaking raw names + engine JSON on every reload.
+// M2-5 (audit B4; owner pick 2026-07-08): the ONE diegetic transcript author. Narration
+// bubbles are authored by the show's production voice — never the model name, and no longer
+// the product name ("Orwell" stays product chrome: wordmark, tab title, admin). A future
+// rebrand (parked P-1) is this one line.
+export const GAME_NARRATOR = 'Production';
+if (typeof window !== 'undefined') window.ORWELL_GAME_NARRATOR = GAME_NARRATOR;
+
 export const ORWELL_TOOL_BEATS = {
   'createCharacter': '🎬 Casting',
   'getGameState': '📋 Production notes',
