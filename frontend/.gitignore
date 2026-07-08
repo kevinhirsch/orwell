@@ -76,6 +76,10 @@ output.txt.txt
 !docs/**/*.jpg
 !docs/**/*.gif
 !docs/**/*.webp
+# 0113 visual-regression blessed baselines — committed on purpose (the repo is private); a
+# harness RUN's own output (--out) is never written inside the repo tree, so no separate
+# ignore is needed for that side — only the blessed set under baselines/ is ever tracked.
+!tests/visual/baselines/**/*.png
 
 # Reports and temp files
 reports/
