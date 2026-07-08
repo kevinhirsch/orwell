@@ -34,6 +34,7 @@
       : fn();
 
   let _open = false;
+  let _roles = {};          // M2-2: id -> public ceremony role (badges), refreshed with the roster
   let _timer = null;        // the ONE roster poll timer (a self-rescheduling setTimeout — G22)
   let _pollDelay = POLL_MS; // recomputed from the freshest roster counters after every render
   let _imagesAvailable = false;
@@ -230,15 +231,13 @@
           #orwell-cast .oc-portrait img.oc-justin { animation: none; }
         }
         #orwell-cast .oc-ph { font-size: 1.6rem; opacity: .45; }
-        /* J2-15: per-houseguest monogram placeholder — a name-derived hue + the initial, so a
-           portrait-less roster still reads as 15 distinct people. Fills the square holder. The
-           hue comes from the name only (Vault-free); reduced-motion is irrelevant (no animation). */
-        #orwell-cast .oc-ph.oc-monogram {
-          width: 100%; height: 100%; opacity: 1; font-size: 1.5rem; font-weight: 700;
-          letter-spacing: .01em; line-height: 1; text-transform: uppercase;
-          background: hsl(var(--oc-mono-hue, 210) 42% 28%);
-          color: hsl(var(--oc-mono-hue, 210) 70% 88%);
-        }
+        /* J2-15 → M2-2: the per-houseguest placeholder is now the DESIGNED monogram from the
+           shared OrwellMonogram kit (id-seeded gradient + pattern + initials — audit B3 killed
+           the flat letter-rectangles). This block keeps only holder sizing; the template lives
+           in orwellMonogram.js so the cast window, rail chips, and decision cards render the
+           same card. Vault-free: seeded from the public id/name only. */
+        #orwell-cast .oc-ph.oc-monogram { width: 100%; height: 100%; opacity: 1; display: block; }
+        #orwell-cast .oc-portrait { position: relative; } /* M2-2: anchors the role badge */
         #orwell-cast .oc-name { margin-top: .35rem; font-size: .78rem; line-height: 1.25; word-break: break-word; }
         #orwell-cast .oc-name b { color: var(--fg, #9cdef2); }
         #orwell-cast .oc-status {
@@ -248,7 +247,8 @@
         /* L16: the ONLY monochrome state is EVICTION. An active OR jury houseguest
            keeps full-color portrait; an evicted one renders grayscale/monotone.
            (Jury is still dimmed via oc-out, just not desaturated.) */
-        #orwell-cast .oc-hg.oc-evicted .oc-portrait img { filter: grayscale(1); }
+        #orwell-cast .oc-hg.oc-evicted .oc-portrait img,
+        #orwell-cast .oc-hg.oc-evicted .oc-portrait .ow-mono-svg { filter: grayscale(1); }
         #orwell-cast .oc-empty { opacity: .65; font-size: .8rem; line-height: 1.5; padding: .4rem 0; }
         /* L12: pin/un-pin the cast window into the right-side gadget rail. */
         #orwell-cast .oc-toolbar { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
@@ -376,7 +376,8 @@
   function statusLabel(s) {
     if (s === "jury") return "Jury";
     if (s === "evicted") return "Evicted";
-    return "In the house";
+    if (s === "winner") return "Winner";
+    return ""; // M2-2: the default state carries no caption — labels mark EXCEPTIONS only
   }
 
   // --- the G9 manual lever: backfill missing portraits -------------------------
@@ -454,10 +455,17 @@
       // its own person from the first frame. Pure presentation; zero new data.
       const ph = document.createElement("span");
       ph.className = "oc-ph oc-monogram";
-      const nm = (entry.name || "").trim();
-      ph.textContent = nm ? nm[0].toUpperCase() : "?";
-      ph.style.setProperty("--oc-mono-hue", String(nameHue(nm)));
+      // M2-2: the designed template (id-seeded gradient + pattern + initials) from the shared
+      // kit; the legacy flat initial stays only as the no-kit fallback so the card never blanks.
+      if (window.OrwellMonogram) {
+        ph.innerHTML = window.OrwellMonogram.svg({ id: entry.id, name: entry.name });
+      } else {
+        const nm = (entry.name || "").trim();
+        ph.textContent = nm ? nm[0].toUpperCase() : "?";
+        ph.style.setProperty("--oc-mono-hue", String(nameHue(nm)));
+      }
       entry.holder.appendChild(ph);
+      syncBadge(entry);
       return;
     }
     const img = document.createElement("img");
@@ -474,6 +482,23 @@
     img.onerror = () => setPortrait(entry, null, false);
     img.src = url;
     entry.holder.appendChild(img);
+    syncBadge(entry); // M2-2: the role badge composites on portraits and monograms alike
+  }
+
+  // M2-2: one badge slot per card, bottom-right of the portrait holder. Role precedence and
+  // markup come from the shared kit; this only reconciles the DOM to entry.role.
+  function syncBadge(entry) {
+    if (!entry || !entry.holder) return;
+    const cur = entry.holder.querySelector(".ow-mono-badge");
+    const role = entry.role || null;
+    if (!role) { if (cur) cur.remove(); return; }
+    const want = "ow-mono-badge-" + role;
+    if (cur && cur.classList.contains(want)) return; // already right
+    if (cur) cur.remove();
+    if (window.OrwellMonogram) {
+      window.OrwellMonogram.ensureCss();
+      entry.holder.insertAdjacentHTML("beforeend", window.OrwellMonogram.badgeSvg(role));
+    }
   }
 
   function makeCard(hg) {
@@ -492,13 +517,16 @@
     const statusEl = document.createElement("div");
     statusEl.className = "oc-status";
     statusEl.textContent = statusLabel(hg.status);
+    statusEl.hidden = !statusEl.textContent; // M2-2: no empty caption row
     card.appendChild(holder);
     card.appendChild(nameEl);
     card.appendChild(statusEl);
     const entry = {
       el: card, holder, nameB, statusEl,
+      id: cardKey(hg),
       name: hg.name == null ? "" : String(hg.name),
       status: hg.status || "active",
+      role: _roles[cardKey(hg)] || null, // M2-2: public ceremony role (badge), if any
       portrait: null,
     };
     // First paint of a brand-new card: no fade — the fade marks a portrait ARRIVING
@@ -514,11 +542,14 @@
       entry.el.classList.toggle("oc-out", !!(hg.status && hg.status !== "active"));
       entry.el.classList.toggle("oc-evicted", hg.status === "evicted"); // L16
       entry.statusEl.textContent = statusLabel(hg.status);
+      entry.statusEl.hidden = !entry.statusEl.textContent; // M2-2
     }
     const name = hg.name == null ? "" : String(hg.name);
     if (name !== entry.name) { entry.name = name; entry.nameB.textContent = name; }
     const url = hg.portrait || null;
     if (url !== entry.portrait) setPortrait(entry, url, !!url); // the stream moment
+    const role = _roles[cardKey(hg)] || null; // M2-2
+    if (role !== entry.role) { entry.role = role; syncBadge(entry); }
   }
 
   function render(data) {
@@ -707,7 +738,13 @@
     // this just signals a refresh is in flight, so a slow fill never reads as a frozen/blank window.
     if (_win && _win.setLoading) _win.setLoading(true);
     try {
-      const data = await getJSON("/api/orwell/roster");
+      // M2-2: the ceremony status rides beside the roster — the badge role map (hoh/nominees/
+      // veto/winner, all public board facts). Fail-soft: no status ⇒ no badges, never no cast.
+      const [data, st] = await Promise.all([
+        getJSON("/api/orwell/roster"),
+        getJSON("/api/orwell/status").catch(() => null),
+      ]);
+      _roles = (window.OrwellMonogram && st) ? window.OrwellMonogram.rolesFrom(st) : {};
       render(data);
       _failures = 0; // recovered: the next render() restores the adaptive cadence
     } catch (_) {

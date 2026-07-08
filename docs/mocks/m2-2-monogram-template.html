@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M2-2 — monogram template mock (owner approval)</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 2rem; background: #101318; color: #dfe6ee;
+         font-family: -apple-system, "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 1.15rem; margin: 0 0 .3rem; }
+  p.sub { margin: 0 0 1.6rem; opacity: .7; font-size: .85rem; max-width: 62ch; }
+  h2 { font-size: .85rem; letter-spacing: .06em; text-transform: uppercase; opacity: .75;
+       margin: 2rem 0 .8rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+          gap: 14px; max-width: 980px; }
+  .tile { text-align: center; }
+  .holder { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden;
+            border: 1px solid rgba(255,255,255,.12); }
+  .holder svg.ow-mono-svg { display: block; width: 100%; height: 100%; }
+  .cap { font-size: .68rem; margin-top: .35rem; opacity: .8; }
+  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .chipdemo { display: inline-flex; align-items: center; gap: .45em; border-radius: 999px;
+              padding: .5rem .9rem; background: rgba(255,255,255,.09);
+              border: 1px solid rgba(255,255,255,.16); font-size: .85rem; }
+  .chipdemo .face { width: 22px; height: 22px; border-radius: 6px; overflow: hidden; flex: none; }
+  .chipdemo .face svg { display: block; width: 100%; height: 100%; }
+  .evict .holder svg { filter: grayscale(1) brightness(.82); }
+  .note { font-size: .75rem; opacity: .65; max-width: 70ch; line-height: 1.5; }
+  .ow-mono-badge { position: absolute; right: 3%; bottom: 3%; width: 34%; height: 34%;
+    min-width: 13px; min-height: 13px; max-width: 30px; max-height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,.45), inset 0 0 0 1.5px rgba(255,255,255,.75); }
+  .ow-mono-badge svg { width: 72%; height: 72%; display: block; }
+</style>
+</head>
+<body>
+<h1>M2-2 · Designed monogram portrait system — the template, for owner approval</h1>
+<p class="sub">Deterministic per houseguest id: a two-tone diagonal gradient (id-seeded hue),
+one of four broadcast pattern families (id-seeded), two-letter initials, and a thin inner
+"camera bug" ring. Role badges composite bottom-right on any face — monogram or generated
+portrait. Eviction is grayscale (the L16 rule), never a badge. All inputs are the public
+roster card (id/name/status) + public board roles — Vault-free by construction.</p>
+
+<h2>Sixteen seeded houseguests (generic sample ids — the real cast seeds from engine ids)</h2>
+<div class="grid" id="cast"></div>
+
+<h2>The fixed badge set (DoR) — on monogram and on a portrait stand-in</h2>
+<div class="row" id="badges"></div>
+
+<h2>Eviction = grayscale (L16), winner keeps color + star</h2>
+<div class="row" id="states"></div>
+
+<h2>Decision-chip scale (22px face inside the option pill)</h2>
+<div class="row" id="chips"></div>
+
+<p class="note">Pattern families rotate by id hash: diagonal scanlines · dot grid · signal
+arcs · chevrons. The +40° hue sweep keeps each tile two-tone rather than a flat chip. Type is
+system-stack heavy (800) at 34–40% of tile. If the template is approved, these constants live
+in <code>frontend/static/js/orwellMonogram.js</code> and every surface inherits changes.</p>
+
+<script>
+/* The mock inlines the kit's template functions so the file is fully static/self-contained —
+   the SOURCE of truth is frontend/static/js/orwellMonogram.js (byte-equivalent output). */
+function hash(id){let h=0x811c9dc5;const s=String(id==null?"":id);for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=(h*0x01000193)>>>0;}
+h^=h>>>16;h=Math.imul(h,0x85ebca6b)>>>0;h^=h>>>13;h=Math.imul(h,0xc2b2ae35)>>>0;h^=h>>>16;return h>>>0;}
+function hueFor(id){return hash(id)%360;}
+const PATTERNS=["lines","dots","arcs","chevrons"];
+function patternFor(id){return PATTERNS[(hash(id)>>>9)%PATTERNS.length];}
+function initialsFor(name){const w=String(name||"?").trim().split(/\s+/).filter(Boolean);let ini="?";
+  if(w.length===1)ini=w[0].slice(0,2).toUpperCase();else if(w.length>1)ini=(w[0][0]+w[w.length-1][0]).toUpperCase();
+  return ini.replace(/[&<>"']/g,"").trim()||"?";}
+function patternMarkup(kind,hue){const tone=`hsl(${hue} 65% 78%)`;
+  if(kind==="dots"){let c="";for(let y=10;y<100;y+=16)for(let x=10;x<100;x+=16)c+=`<circle cx="${x}" cy="${y}" r="2.1"/>`;return `<g fill="${tone}" opacity=".13">${c}</g>`;}
+  if(kind==="arcs"){let c="";for(let r=18;r<=120;r+=20)c+=`<circle cx="100" cy="0" r="${r}"/>`;return `<g fill="none" stroke="${tone}" stroke-width="3" opacity=".12">${c}</g>`;}
+  if(kind==="chevrons"){let c="";for(let y=-10;y<120;y+=22)c+=`<path d="M-5 ${y} L50 ${y+14} L105 ${y}"/>`;return `<g fill="none" stroke="${tone}" stroke-width="4" opacity=".11">${c}</g>`;}
+  let c="";for(let i=-100;i<110;i+=13)c+=`<line x1="${i}" y1="110" x2="${i+110}" y2="0"/>`;return `<g stroke="${tone}" stroke-width="3.5" opacity=".12">${c}</g>`;}
+let _uid=0;
+function svg(card){const id=card.id||card.name||"?";const hue=hueFor(id);const hue2=(hue+40)%360;
+  const uid="m"+(++_uid);const ini=initialsFor(card.name);const fs=ini.length>1?34:40;
+  return `<svg class="ow-mono-svg" viewBox="0 0 100 100" role="img" aria-hidden="true"><defs><linearGradient id="${uid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 55% 34%)"/><stop offset="1" stop-color="hsl(${hue2} 60% 17%)"/></linearGradient></defs><rect width="100" height="100" fill="url(#${uid})"/>${patternMarkup(patternFor(id),hue)}<rect x="4.5" y="4.5" width="91" height="91" fill="none" rx="3" stroke="hsl(${hue} 70% 85%)" stroke-opacity=".22" stroke-width="1.5"/><text x="50" y="50" dy=".36em" text-anchor="middle" font-family="-apple-system,'SF Pro Display','Segoe UI',system-ui,sans-serif" font-weight="800" font-size="${fs}" letter-spacing="-1" fill="hsl(${hue} 30% 94%)" fill-opacity=".95">${ini}</text></svg>`;}
+const BADGES={
+  hoh:{tint:"#c9930f",label:"Head of Household",glyph:'<path d="M5 13.5 L5 7.5 L8.2 10.2 L12 5 L15.8 10.2 L19 7.5 L19 13.5 Z" fill="#fff"/><rect x="5" y="15" width="14" height="2.4" rx="1" fill="#fff"/>'},
+  nominee:{tint:"#b83a2e",label:"Nominated",glyph:'<circle cx="12" cy="12" r="6.4" fill="none" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="2.1" fill="#fff"/>'},
+  veto:{tint:"#1c7f86",label:"Veto holder",glyph:'<path d="M6.5 6 L12 18 L17.5 6" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'},
+  winner:{tint:"#c9930f",label:"Winner",glyph:'<path d="M12 4.4 L14.2 9.4 L19.6 9.9 L15.6 13.5 L16.8 18.8 L12 16 L7.2 18.8 L8.4 13.5 L4.4 9.9 L9.8 9.4 Z" fill="#fff"/>'}};
+function badgeSvg(role){const b=BADGES[role];return b?`<span class="ow-mono-badge" title="${b.label}" style="background:${b.tint}"><svg viewBox="0 0 24 24">${b.glyph}</svg></span>`:"";}
+
+/* generic sample identities — format only, never cast material (roles-only test rule) */
+const SAMPLE=["Alder Quinn","Briar Voss","Cedar Hale","Dune Marsh","Ember Kile","Fen Ash",
+  "Gale Rhodes","Harbor Lee","Iris Vale","Juniper Cole","Kestrel Moss","Lark Devon",
+  "Moss Arden","Nova Reyes","Onyx Hart","Pike Salter"];
+const cast=document.getElementById("cast");
+SAMPLE.forEach((n,i)=>{const id="hg-"+(i+1);
+  cast.insertAdjacentHTML("beforeend",
+    `<div class="tile"><div class="holder">${svg({id,name:n})}</div><div class="cap">${n}<br><span style="opacity:.55">${patternFor(id)} · hue ${hueFor(id)}</span></div></div>`);});
+
+const badges=document.getElementById("badges");
+["hoh","nominee","veto","winner"].forEach((r,i)=>{const id="hg-"+(i+3);
+  badges.insertAdjacentHTML("beforeend",
+    `<div class="tile" style="width:96px"><div class="holder">${svg({id,name:SAMPLE[i+2]})}${badgeSvg(r)}</div><div class="cap">${r.toUpperCase()}</div></div>`);});
+/* the same badges on a portrait stand-in (a gradient square standing in for a generated face) */
+["hoh","nominee"].forEach((r,i)=>{
+  badges.insertAdjacentHTML("beforeend",
+    `<div class="tile" style="width:96px"><div class="holder" style="background:linear-gradient(160deg,#5a6c80,#2c3644)"><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.6rem;opacity:.6">generated<br>portrait</div>${badgeSvg(r)}</div><div class="cap">${r.toUpperCase()} on portrait</div></div>`);});
+
+const states=document.getElementById("states");
+states.insertAdjacentHTML("beforeend",
+  `<div class="tile evict" style="width:96px"><div class="holder">${svg({id:"hg-7",name:SAMPLE[6]})}</div><div class="cap">Evicted (grayscale)</div></div>`+
+  `<div class="tile" style="width:96px"><div class="holder">${svg({id:"hg-8",name:SAMPLE[7]})}${badgeSvg("winner")}</div><div class="cap">Winner</div></div>`);
+
+const chips=document.getElementById("chips");
+[3,9,12].forEach(i=>{const id="hg-"+i;
+  chips.insertAdjacentHTML("beforeend",
+    `<span class="chipdemo"><span class="face">${svg({id,name:SAMPLE[i-1]})}</span>${SAMPLE[i-1]}</span>`);});
+</script>
+</body>
+</html>

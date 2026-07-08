@@ -80,7 +80,10 @@
       "body.theme-frosted #orwell-cast-pin .ocp-face { border-color: rgba(255,255,255,0.14); }" +
       "#orwell-cast-pin .ocp-face img { width: 100%; height: 100%; object-fit: cover; }" +
       // L16: evicted houseguests render grayscale; active/jury stay full color.
-      "#orwell-cast-pin .ocp-face.ocp-evicted img { filter: grayscale(1); }" +
+      // M2-2: the rule covers the designed monogram too, and the face anchors its role badge.
+      "#orwell-cast-pin .ocp-face { position: relative; }" +
+      "#orwell-cast-pin .ocp-face.ocp-evicted img," +
+      "#orwell-cast-pin .ocp-face.ocp-evicted .ow-mono-svg { filter: grayscale(1); }" +
       // #771 — the placeholder is a MONOCHROME inline SVG silhouette (currentColor), kit
       // glyph language, not an off-brand color emoji. Sized to the tiny rail face.
       "#orwell-cast-pin .ocp-face .ocp-ph { display: flex; align-items: center; justify-content: center; opacity: .42; }" +
@@ -120,17 +123,29 @@
 
   // #771 — monochrome silhouette glyph (currentColor) shared by every placeholder face,
   // matching the kit's inline-SVG icon language (no color emoji).
+  var _roles = {}; // M2-2: id -> public ceremony role, refreshed beside the roster
+
   var OCP_SILHOUETTE =
     '<span class="ocp-ph" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
     'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/>' +
     '<path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></span>';
 
-  function faceHtml(hg) {
+  function faceHtml(hg, roles) {
     var evicted = hg && hg.status === "evicted"; // L16
     var name = hg && hg.name;
+    // M2-2: the placeholder is the shared DESIGNED monogram (OrwellMonogram kit — the same
+    // template the cast window and decision cards render); the silhouette stays only as the
+    // no-kit fallback. A public ceremony role composites its badge on portrait and monogram alike.
     var inner = (hg && hg.portrait)
       ? '<img loading="lazy" alt="' + esc(name) + '" src="' + esc(hg.portrait) + '">'
-      : OCP_SILHOUETTE;
+      : (window.OrwellMonogram
+          ? window.OrwellMonogram.svg({ id: (hg && (hg.id || hg.name)) || "?", name: name })
+          : OCP_SILHOUETTE);
+    var role = roles && hg ? roles[hg.id] || roles[hg.name] : null;
+    if (role && window.OrwellMonogram) {
+      window.OrwellMonogram.ensureCss();
+      inner += window.OrwellMonogram.badgeSvg(role);
+    }
     // GADGET-4: a hover title + aria-label on the FACE wrapper — `alt` only helps screen readers
     // (and only once the image has loaded), so a sighted mouse user had zero way to identify a
     // ~40px tile (or an unloaded/placeholder one) without reopening the full cast window.
@@ -162,7 +177,8 @@
     var ordered = roster.slice().sort(function (a, b) { return rank(a) - rank(b); });
 
     var faces = el.querySelector('[data-role="portraits"]');
-    faces.innerHTML = ordered.map(faceHtml).join("") || '<div class="ocp-face">' + OCP_SILHOUETTE + "</div>";
+    faces.innerHTML = ordered.map(function (h) { return faceHtml(h, _roles); }).join("")
+      || '<div class="ocp-face">' + OCP_SILHOUETTE + "</div>";
 
     var present = roster.filter(function (h) { return !h.status || h.status === "active"; }).length;
     var foot = el.querySelector('[data-role="foot"]');
@@ -179,7 +195,13 @@
 
   function refresh() {
     if (!isPinned()) { if (_gadget) _gadget.hide(); else { var el = document.getElementById(ID); if (el) el.style.display = "none"; } return Promise.resolve(); }
-    return getJSON("/api/orwell/roster").then(render).catch(function (e) {
+    return Promise.all([
+      getJSON("/api/orwell/roster"),
+      getJSON("/api/orwell/status").catch(function () { return null; }),
+    ]).then(function (both) {
+      _roles = (window.OrwellMonogram && both[1]) ? window.OrwellMonogram.rolesFrom(both[1]) : {};
+      return render(both[0]);
+    }).catch(function (e) {
       if (window.OrwellReport) window.OrwellReport.fail("castpin", "roster-fetch", e);
       // fail open: keep whatever's shown
     });

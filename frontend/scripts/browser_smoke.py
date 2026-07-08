@@ -68,6 +68,18 @@ def new_page(browser, **kw):
 
 def boot():
     os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
+    # M2-2 session find (the #1086 shared-`data/` class, layout edition): the 0064 layout
+    # sync persists window park state SERVER-side (data/orwell_layout.json). A prior play
+    # session — or a smoke run that died inside the G16 park phase — leaves the cast window
+    # `minimized: true`, and then EVERY later local run mounts it parked and times out at
+    # the G16 open (a self-reinforcing false negative; CI never sees it because its checkout
+    # starts clean). The layout file is volatile presentation state, never precious — scrub
+    # it so the run starts from the same state CI does. (The golden driver's
+    # scrub_stale_state() is the same discipline for the canonical-session binding.)
+    try:
+        os.remove(os.path.join(ROOT, "data", "orwell_layout.json"))
+    except FileNotFoundError:
+        pass
     env = dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true")
     proc = subprocess.Popen(
         [PY, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
@@ -1674,6 +1686,25 @@ def main() -> int:
             check(l16.get("ok") is True and not gray(l16.get("active", ""))
                   and not gray(l16.get("jury", "")) and gray(l16.get("evicted", "")),
                   f"L16: cast portraits are color until EVICTED, then grayscale ({l16})")
+
+            # M2-2: with ZERO image provider configured (this smoke run wires none), every
+            # placeholder card renders the DESIGNED monogram from the shared kit — the
+            # id-seeded gradient+pattern SVG — never a flat letter-rectangle or a blank.
+            m22 = g16.evaluate("""() => {
+              const grid = document.querySelector('#orwell-cast #oc-grid');
+              if (!grid) return { ok: false, why: 'no-grid' };
+              const phs = Array.from(grid.querySelectorAll('.oc-ph.oc-monogram'));
+              const designed = phs.filter(el => el.querySelector('svg.ow-mono-svg'));
+              const gradients = designed.filter(el => el.querySelector('linearGradient'));
+              return { ok: true, kit: !!window.OrwellMonogram,
+                       placeholders: phs.length, designed: designed.length,
+                       gradients: gradients.length };
+            }""")
+            check(m22.get("ok") is True and m22.get("kit") is True
+                  and m22.get("placeholders", 0) > 0
+                  and m22.get("designed") == m22.get("placeholders")
+                  and m22.get("gradients") == m22.get("placeholders"),
+                  f"M2-2: zero-provider cast renders the DESIGNED monogram on every placeholder ({m22})")
 
             g16.click("#orwell-cast .ow-min")
             g16.wait_for_selector(  # the ruling-#19 fly-out (~270ms) precedes the chip

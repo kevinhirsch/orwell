@@ -466,7 +466,20 @@ Source: audit B1 (`s-a1` — raw model IDs above the fantasy). Depends: M1-6.
   provider/model id string anywhere on the first screen (pytest source gate); onboarding
   browser-smoke block updated.
 
-### M2-2 · Designed monogram portrait system + role badges — M–L · `P1` (the leverage item)
+### M2-2 · Designed monogram portrait system + role badges — M–L · `P1` (the leverage item) · ✅ DONE (pending owner mock sign-off)
+*2026-07-08: `orwellMonogram.js` — ONE kit component: id-seeded two-tone gradient (FNV +
+murmur-avalanche finalizer so sequential ids spread the wheel) + four broadcast pattern
+families + two-letter initials + camera-bug ring; fixed badge set (HOH crown / nominee
+target / veto V / winner star) composites bottom-right on portrait AND monogram; eviction
+stays the L16 grayscale (kit-owned). Consumers wired: cast window (badges from
+`/api/orwell/status` riding the roster poll; "In the house" caption suppressed for the
+default state), cast pin (silhouette → designed monogram + badges), decision chips (person
+options carry a 22px face, aria-name pinned to the label). The DoR mock is
+`docs/mocks/m2-2-monogram-template.html` (static, self-contained — owner approves in the PR;
+constants live in the kit so template tweaks are one-file). Gates:
+`tests/test_m2_2_monogram.py`, the J2-15 pin retargeted, browser-smoke zero-provider
+designed-monogram assert.*
+
 Source: audit B3 (`s-d1` flat letter-rectangles); prerequisite for M3-* faces work.
 - **DoR:** one designed template (archetype-tinted gradient + pattern + typography) approved via
   a static mock in the PR; badge set fixed (HOH crown / nominee target / veto / evicted / winner).

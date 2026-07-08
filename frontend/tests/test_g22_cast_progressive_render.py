@@ -181,19 +181,19 @@ def test_kept_g9_lever_g20_copy_and_g11_reporting_survive():
 
 
 def test_j2_15_placeholder_is_a_per_houseguest_monogram():
-    """J2-15: a portrait-less roster must read as distinct people, not 15 identical 👤.
+    """J2-15 → M2-2: a portrait-less roster must read as distinct people, not 15 identical 👤.
 
-    The placeholder now renders a name-initial monogram over a name-derived hue (Vault-free:
-    derived ONLY from the public name, the same every render so it never flickers)."""
+    The placeholder is now the DESIGNED monogram from the shared OrwellMonogram kit
+    (id-seeded gradient + pattern + initials — audit B3 retired the flat letter-rectangle);
+    the legacy name-hue initial stays only as the no-kit fallback so a card never blanks.
+    Vault-free either way: seeded from the public id/name only."""
     js = _js()
     sp = _block(js, "function setPortrait(", "function makeCard(")
     assert "oc-monogram" in sp, "placeholder should use the monogram class"
-    # the glyph is the name's initial, the tint comes from the deterministic name hash
-    assert "nameHue(" in js, "a deterministic name→hue helper must exist"
-    assert "--oc-mono-hue" in js
-    # the monogram CSS exists and is hue-driven (theme-aware), not a hard-coded fill
-    assert ".oc-ph.oc-monogram" in js
-    assert "var(--oc-mono-hue" in js
+    assert "OrwellMonogram.svg(" in sp, "the designed template comes from the shared kit"
+    # the fallback keeps the deterministic name→hue initial (kit unavailable ⇒ never blank)
+    assert "nameHue(" in sp and "--oc-mono-hue" in sp
+    assert ".oc-ph.oc-monogram" in js  # the holder CSS survives (sizing)
     # the hue is derived from the NAME only — never a hidden/Vault attribute
     nh = _block(js, "function nameHue(", "function cardKey(")
     assert "name" in nh and "hg." not in nh, "nameHue must read the name string, not a roster field"
