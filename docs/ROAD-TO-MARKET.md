@@ -197,7 +197,13 @@ Depends: M0-1 (the GLM run report is the evidence base).
   issue with the run-report evidence attached; the driver's conditional SKIP for I3 only remains
   if the golden path legitimately has no photo beat under the recorded config.
 
-### M0-5 · Close the residual replay-miss class — M · **OPEN (characterized, instrumented)**
+### M0-5 · Close the residual replay-miss class — M · ✅ CLOSED by the M0-1 campaign (superseded)
+*2026-07-08: the committed fixture replays with R1=0 across two runs — the residual class is gone
+(it fell to the logical clock + quiesce + awaited-belt fixes). One accepted-risk refinement noted
+from PR #1234 review: the `"(a moment)"/"(just arrived)"` dwell neutralization is global, not
+presence-line-scoped — a bare parenthetical in unrelated prose would be masked key-side. Low
+practical risk (phrases rare outside the presence section; fixture proven stable); scope it to
+`With you:` lines at the NEXT natural re-record, since the key change invalidates the fixture.*
 Source: this session's determinism campaign. Four volatility classes are already fixed and
 committed (the wall-clock prompt section neutralized key-side; the web-search zeitgeist quiesced;
 the off-screen-texture and portrait pipelines quiesced — the ledger-diff finding; the presence
