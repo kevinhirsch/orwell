@@ -132,8 +132,30 @@
     var left = document.body.getAttribute("data-gadget-side") !== "left";  // fail-soft
     applySide(left ? "left" : "right"); lsSet(SIDE_KEY, left ? "left" : "right");
   }
-  function openDrawer() { rail.classList.add("grail-open"); rail.style.removeProperty("bottom"); if (opener) opener.setAttribute("hidden", ""); }
-  function closeDrawer() { rail.classList.remove("grail-open"); _refreshOpener(); }
+  // M1-5 (audit A5): the open mobile drawer sits over a SCRIM — one modal layer, the chat
+  // dimmed beneath, tap-scrim closes. Created lazily, torn down on close; desktop never
+  // sees it (openDrawer is drawer-mode only).
+  function _scrim() {
+    var s = document.getElementById("grail-scrim");
+    if (!s) {
+      s = document.createElement("div");
+      s.id = "grail-scrim";
+      s.className = "grail-scrim";
+      s.addEventListener("click", closeDrawer);
+      document.body.appendChild(s);
+    }
+    return s;
+  }
+  function openDrawer() {
+    rail.classList.add("grail-open"); rail.style.removeProperty("bottom");
+    if (opener) opener.setAttribute("hidden", "");
+    _scrim().classList.add("grail-scrim-on");
+  }
+  function closeDrawer() {
+    rail.classList.remove("grail-open"); _refreshOpener();
+    var s = document.getElementById("grail-scrim");
+    if (s) s.classList.remove("grail-scrim-on");
+  }
 
   var _toggle = document.getElementById("gadget-rail-toggle");
   if (_toggle) _toggle.addEventListener("click", toggleCollapsed);

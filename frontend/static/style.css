@@ -2196,6 +2196,18 @@ body.bg-pattern-perlin-flow {
       }
       .gadget-rail.grail-open { transform: translateX(0); visibility: visible;
         transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s; }
+      /* M1-5 (audit A5): the OPEN drawer is ONE OPAQUE SHEET — glass themes make
+         --sidebar-bg/--panel translucent, and the slide-over became layer soup (gadget
+         titles double-exposing, chat text bleeding through). Opaque HERE only; the
+         desktop rail keeps the theme's glass. Cards inside go opaque with it so the
+         sheet reads as one surface. */
+      .gadget-rail { background: var(--bg, #15171c); backdrop-filter: none; }
+      .gadget-rail .ow-window { background: var(--panel, #1d2026); backdrop-filter: none; }
+      /* M1-5: the scrim under the open drawer — one modal layer, tap closes (the JS owns
+         add/remove; z sits just under the drawer's 60). */
+      .grail-scrim { position: fixed; inset: 0; z-index: 59; background: rgba(0,0,0,.42);
+        opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+      .grail-scrim.grail-scrim-on { opacity: 1; pointer-events: auto; }
       /* no width drag-resize on the mobile slide-over drawer */
       .gadget-rail-resize-handle { display: none; }
       /* the drawer always shows its full body on mobile — no icon-strip mode */
@@ -2267,6 +2279,12 @@ body.bg-pattern-perlin-flow {
       }
       .gadget-rail.grail-open { transform: translateX(0); visibility: visible;
         transition: transform .25s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s; }
+      /* M1-5: same opaque-sheet + scrim treatment as the narrow drawer above. */
+      .gadget-rail { background: var(--bg, #15171c); backdrop-filter: none; }
+      .gadget-rail .ow-window { background: var(--panel, #1d2026); backdrop-filter: none; }
+      .grail-scrim { position: fixed; inset: 0; z-index: 59; background: rgba(0,0,0,.42);
+        opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+      .grail-scrim.grail-scrim-on { opacity: 1; pointer-events: auto; }
       .gadget-rail-resize-handle { display: none; }
       .gadget-rail[data-collapsed="true"] { width: min(300px, 86vw); }
       .gadget-rail[data-collapsed="true"] .gadget-rail-body { display: block; }
