@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import sys
 
 import pytest
@@ -240,7 +241,7 @@ def test_pixeldiff_summarize_schema():
 
 def test_pixeldiff_triptych_has_three_panels_worth_of_width():
     a, b = _solid((0, 0, 0)), _solid((255, 255, 255))
-    result, highlight = vp.diff_images(a, b, shot_id="s7")
+    _result, highlight = vp.diff_images(a, b, shot_id="s7")
     trip = vp.make_triptych(a, b, highlight)
     # three 40px panels + 2x4px gutters = 128
     assert trip.size == (128, 40)
@@ -272,7 +273,7 @@ def test_manifest_bless_round_trip(tmp_path):
     # on-disk filenames use "__" (see `visual_manifest.encode_shot_id`); the manifest's shot
     # ids decode back to the canonical colon-delimited form the harness's reports use.
     assert set(manifest.entries) == {"tierA:chat:phone-390:glass", "tierB:eviction:wide-1440"}
-    for shot_id, entry in manifest.entries.items():
+    for _shot_id, entry in manifest.entries.items():
         assert entry.sha256 == vm.sha256_file(str(baselines / entry.path))
         assert entry.source == "ci-artifact:run-1"
 
@@ -523,7 +524,7 @@ def test_tier_a_surfaces_declare_a_known_moment():
 
 
 def test_split_xfail_demotes_a_registered_finding_and_blocks_the_rest():
-    shot = "tierB:hoh:phone-390"
+    shot = "tierB__hoh__phone-390"
     registered = {"kind": "clipped-by-ancestor", "selector": "#orwell-decision-card",
                  "id": "orwell-decision-card", "label": "div#orwell-decision-card",
                  "detail": "ancestor=section#orwell-decision-sheet ..."}
@@ -546,18 +547,31 @@ def test_split_xfail_with_no_registry_match_blocks_everything():
 def test_finding_line_shape_is_stable_for_registry_matching():
     # the XFAIL substrings match against THIS exact shape — a reshape silently defuses the
     # whole registry, so the shape itself is pinned.
-    line = vr.finding_line("tierB:veto:phone-390", {
+    line = vr.finding_line("tierB__veto__phone-390", {
         "kind": "clipped-by-ancestor", "label": "div#orwell-decision-card",
         "detail": "ancestor=section#x"})
-    assert line == ("tierB:veto:phone-390 clipped-by-ancestor div#orwell-decision-card: "
+    assert line == ("tierB__veto__phone-390 clipped-by-ancestor div#orwell-decision-card: "
                     "ancestor=section#x")
-    assert vr.XFAIL["VIS-1"] in line
+    assert vr.XFAIL["VIS-1"]["needle"] in line
 
 
 def test_every_xfail_entry_has_a_finding_id_and_nonempty_needle():
-    for fid, needle in vr.XFAIL.items():
+    for fid, ent in vr.XFAIL.items():
         assert fid.startswith("VIS-"), f"XFAIL id {fid!r} must carry a real finding id"
-        assert isinstance(needle, str) and len(needle) > 8
+        assert isinstance(ent, dict) and set(ent) == {"shot", "needle"}
+        assert isinstance(ent["needle"], str) and len(ent["needle"]) > 8
+        # the SHOT scope is mandatory (review P1, PR #1244): a bare substring registry would
+        # demote the same defect appearing on a different shot/theme.
+        assert isinstance(ent["shot"], str) and len(ent["shot"]) >= 6
+
+
+def test_xfail_scope_does_not_demote_the_same_defect_on_another_shot():
+    registered = {"kind": "clipped-by-ancestor", "selector": "#orwell-decision-card",
+                  "id": "orwell-decision-card", "label": "div#orwell-decision-card",
+                  "detail": "ancestor=section#orwell-decision-sheet ..."}
+    blocking, xfailed = vr.split_xfail("tierA__chat__wide-1440__glass", [registered])
+    assert xfailed == [] and len(blocking) == 1, \
+        "an XFAIL entry must be scoped to its shot — the same defect elsewhere must BLOCK"
 
 
 def test_overlay_allowlist_covers_the_known_deliberate_layers():
@@ -566,3 +580,11 @@ def test_overlay_allowlist_covers_the_known_deliberate_layers():
     for sel in (".ow-scrim", ".grail-scrim", "#app-loader", "#settings-modal",
                 "#orwell-onboarding", "#gadget-rail", "#orwell-decision-card"):
         assert sel in vr.OVERLAY_ALLOWLIST
+
+
+def test_harness_errors_block_the_exit_code():
+    """Review P1 (PR #1244): a capture/setup failure recorded into walk.errors must fail the
+    process even with zero geometry findings — otherwise a wedged run lets the required CI job
+    pass as if the visual checks ran (the never-a-silent-pass rule)."""
+    src = (pathlib.Path(__file__).parents[1] / "scripts" / "visual_regression.py").read_text()
+    assert "return 1 if (total_findings or walk.errors) else 0" in src

@@ -90,6 +90,7 @@ def apply_masks(img: Image.Image, masks: List[MaskRect]) -> Image.Image:
 def diff_images(baseline: Image.Image, candidate: Image.Image, *, shot_id: str,
                 masks: Optional[List[MaskRect]] = None,
                 channel_threshold: int = DEFAULT_CHANNEL_THRESHOLD,
+                diff_ratio_flag: float = DEFAULT_DIFF_RATIO_FLAG,
                 ) -> Tuple[PixelDiffResult, Optional[Image.Image]]:
     """Compare two in-memory images. Returns (result, diff_highlight_image_or_None).
 
@@ -128,12 +129,15 @@ def diff_images(baseline: Image.Image, candidate: Image.Image, *, shot_id: str,
         red_layer = Image.new("RGBA", b.size, (255, 0, 64, 200))
         highlight.paste(red_layer, (0, 0), mask_img)
 
-    status = "diff" if ratio > 0 else "match"
+    # A shot is only HEADLINED as "diff" past the ratio flag (review P1, PR #1244 — a single
+    # anti-aliased pixel above channel_threshold must not spam the advisory report); the exact
+    # ratio/differing counts still report either way.
+    status = "diff" if ratio > diff_ratio_flag else "match"
     return PixelDiffResult(
         shot_id=shot_id, status=status, diff_ratio=ratio, differing_pixels=differing,
         total_pixels=total, baseline_size=baseline.size, candidate_size=candidate.size,
         masks_applied=len(masks),
-        detail=("" if status == "match" else f"{differing}/{total} px differ ({ratio:.4%})"),
+        detail=("" if not differing else f"{differing}/{total} px differ ({ratio:.4%})"),
     ), highlight
 
 

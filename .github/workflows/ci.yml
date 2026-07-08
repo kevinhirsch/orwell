@@ -83,12 +83,6 @@ jobs:
           # regression can come from EITHER side — the FE (agent loop, belts, guards), the engine,
           # or the committed fixture itself (frontend/tests/golden/, matched by frontend/).
           GOLDEN_RE='^(frontend/|src/|package\.json$|package-lock\.json$|\.github/workflows/ci\.yml$)'
-          # VISUAL (0113): the screenshot matrix rides the SAME golden-replay drive as GOLDEN_RE
-          # (a regression can come from either side of the seam, or from the FE surfaces the
-          # matrix screenshots), plus it additionally cares about the blessed-baselines directory
-          # (also under frontend/, already matched) — same trigger surface as golden-path.
-          VISUAL_RE='^(frontend/|src/|package\.json$|package-lock\.json$|\.github/workflows/ci\.yml$)'
-
           for name in engine frontend deploy heavy golden visual; do
             case "$name" in
               engine)   re="$ENGINE_RE" ;;
@@ -96,7 +90,10 @@ jobs:
               deploy)   re="$DEPLOY_RE" ;;
               heavy)    re="$HEAVY_RE" ;;
               golden)   re="$GOLDEN_RE" ;;
-              visual)   re="$VISUAL_RE" ;;
+              # VISUAL (0113) deliberately rides the SAME trigger surface as GOLDEN — the
+              # screenshot matrix replays the same golden drive and the baselines dir is
+              # already under frontend/. ONE regex so the two lanes can never drift apart.
+              visual)   re="$GOLDEN_RE" ;;
             esac
             if matches "$re"; then
               echo "${name}=true" >> "$GITHUB_OUTPUT"

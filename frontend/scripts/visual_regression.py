@@ -169,20 +169,24 @@ OVERLAY_ALLOWLIST: List[str] = [
 #: the gate ratchets; an xpass prints a nudge to remove the entry). Entries are only ever
 #: added against a REAL, observed finding — never speculatively. The formatted line shape is
 #: `{shot_id} {kind} {label}: {detail}` (see `finding_line`).
-XFAIL: Dict[str, str] = {
-    # VIS-1 (first live run, 2026-07-08): the decision card's content escapes its anchored
-    # sheet's overflow:hidden box by ~10-45px at the bottom on phone-390 during comp-round
-    # beats (tierB hoh + veto: el bottom 733/701 vs ancestor box 690) — the card's lower edge
-    # is silently clipped. A real product finding to file; remove this entry when the fix lands.
-    "VIS-1": "clipped-by-ancestor div#orwell-decision-card",
-    # VIS-2/2b (first live run, 2026-07-08): with the gadget-rail drawer OPEN at tablet-768
-    # the rail (and the status card inside it) measured entirely off the right viewport edge —
-    # rect left 774 on a 768-wide viewport, i.e. translateX(100%) — under ONE of the five
-    # themes only. Likely a mid-slide capture (the drawer's slide transition does not honor
-    # the forced prefers-reduced-motion — itself a product nit), belt-and-suspendered by the
-    # post-hook layout-stabilization wait; if it never recurs the xpass nudge says to remove.
-    "VIS-2": "off-viewport aside#gadget-rail",
-    "VIS-2b": "off-viewport section#orwell-status",
+#: Each entry scopes BOTH the shot (a shot_id prefix — e.g. one tier/surface/viewport slice)
+#: AND the finding substring, so a registered known-issue can never demote the same defect
+#: appearing on a DIFFERENT shot or theme (review P1, PR #1244 — a bare substring registry
+#: would silently absorb new regressions that happen to render the same line).
+XFAIL: Dict[str, Dict[str, str]] = {
+    # VIS-1 (first live run, 2026-07-08, tracked in issue #1245): the decision card's content
+    # escapes its anchored sheet's overflow:hidden box by ~10-45px at the bottom on phone-390
+    # during comp-round beats (tierB hoh + veto: el bottom 733/701 vs ancestor box 690) — the
+    # card's lower edge is silently clipped. Remove this entry when the fix lands.
+    "VIS-1": {"shot": "tierB__", "needle": "clipped-by-ancestor div#orwell-decision-card"},
+    # VIS-2/2b (first live run, 2026-07-08, issue #1245): with the gadget-rail drawer OPEN at
+    # tablet-768 the rail (and the status card inside it) measured entirely off the right
+    # viewport edge — rect left 774 on a 768-wide viewport, i.e. translateX(100%) — under ONE
+    # of the five themes only. Likely a mid-slide capture (the drawer's slide transition does
+    # not honor the forced prefers-reduced-motion — itself a product nit), belt-and-suspendered
+    # by the post-hook layout-stabilization wait; if it never recurs the xpass nudge says remove.
+    "VIS-2": {"shot": "tierA__gadget-rail__tablet-768", "needle": "off-viewport aside#gadget-rail"},
+    "VIS-2b": {"shot": "tierA__gadget-rail__tablet-768", "needle": "off-viewport section#orwell-status"},
 }
 
 
@@ -199,7 +203,8 @@ def split_xfail(shot_id: str, findings: List[dict]) -> Tuple[List[dict], List[di
     blocking, xfailed = [], []
     for f in findings:
         line = finding_line(shot_id, f)
-        matched = next((fid for fid, needle in XFAIL.items() if needle in line), None)
+        matched = next((fid for fid, ent in XFAIL.items()
+                        if shot_id.startswith(ent["shot"]) and ent["needle"] in line), None)
         if matched:
             xfailed.append({**f, "xfail_id": matched})
         else:
@@ -729,7 +734,10 @@ def run(args: argparse.Namespace) -> int:
         print("  (xpass — consider removing the XFAIL entries: " + ", ".join(xpasses) + ")")
     if walk.errors:
         print(f"  ({len(walk.errors)} harness error(s) — see summary.md)")
-    return 1 if total_findings else 0
+    # Harness errors BLOCK too (review P1, PR #1244): a capture/setup failure that lands zero
+    # shots must never let the required CI job pass as if the visual checks ran — the same
+    # never-a-silent-pass rule the missing-baseline notice follows.
+    return 1 if (total_findings or walk.errors) else 0
 
 
 def main() -> int:
