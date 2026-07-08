@@ -244,7 +244,11 @@ GAME_SURFACES = ["#orwell-status", "#orwell-presence",
                  # never coexist — register the fab in the D2 overlap sweep so a regression that lets
                  # them paint together is caught (the fab is opacity:0/hidden otherwise, so is_visible()
                  # filters it out in the no-card case).
-                 "#orwell-scroll-bottom"]
+                 "#orwell-scroll-bottom",
+                 # M3-1: the room-strip chips sit directly above the composer — register so the
+                 # overlap sweep (and the generic overflow:page check) covers it at every phone
+                 # tier down to tiny-320, proving it collapses gracefully on narrow viewports.
+                 "#orwell-room-strip"]
 CHROME = {"composer": "#chat-form", "sidebar": "#sidebar"}
 
 
