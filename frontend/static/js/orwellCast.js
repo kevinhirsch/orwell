@@ -136,63 +136,36 @@
              kit minimum up to this content cap and the gallery reflows column-count as it grows. */
           contain-intrinsic-size: auto 720px;
         }
-        /* #894: the cast roster is a HORIZONTAL, paged, scroll-snap gallery. At the normal widget
-           width exactly 2 columns × 2 rows = 4 photos are visible; the rest of the 16-cast roster
-           lives one swipe sideways, snapping a page at a time. grid-auto-flow:column fills the two
-           fixed rows top-to-bottom then starts a new column to the right — so the keyed in-place
-           upsert + deterministic reorder (which only appendChild()s the same nodes in tier order)
-           is untouched: the flow direction is purely a layout property, the DOM order is identical.
-              --oc-cols           = columns visible per page (responsive, via @container below)
-              grid-auto-columns   = sized so exactly --oc-cols columns fill the scroll viewport,
-                                    accounting for the inter-column gaps. */
+        /* M4-1 (audit C4 — the "2×2-dots" finding): the cast roster is a FULL, wrapping grid —
+           every houseguest visible without paging (the window body scrolls VERTICALLY, via the
+           kit's own .ow-body overflow:auto rule, when the roster outgrows the visible height).
+           --oc-cols keeps driving columns-per-row (responsive via the SAME @container tiers
+           below — narrower at a docked-in-rail width, wider on a widened float), just as a WRAP
+           row count instead of a page-column count; the keyed in-place upsert + deterministic
+           reorder (appendChild() in tier order) is untouched — flow direction/wrap is purely a
+           layout property, the DOM order is identical. */
         #orwell-cast .oc-grid {
           --oc-cols: 2;
           --oc-gap: .6rem;
           display: grid;
-          grid-auto-flow: column;
-          grid-template-rows: repeat(2, 1fr);
-          grid-auto-columns: calc((100% - (var(--oc-cols) - 1) * var(--oc-gap)) / var(--oc-cols));
+          grid-template-columns: repeat(var(--oc-cols), 1fr);
           gap: var(--oc-gap);
-          overflow-x: auto;
-          overflow-y: hidden;
-          scroll-snap-type: x mandatory;
-          /* one swipe = one page: snap-align lives on each column (.oc-hg). */
-          scroll-padding-inline: 0;
-          padding-bottom: .35rem; /* room for the thin scroll affordance without clipping names */
-          /* scroll-edge affordance (LIQUID_GLASS scroll edge effect): a soft right-edge fade tells
-             the player there is more cast to swipe to; it lifts once scrolled to the far end. */
-          -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.6rem), transparent);
-                  mask-image: linear-gradient(to right, #000 calc(100% - 1.6rem), transparent);
-          scrollbar-width: thin;
-          scrollbar-color: rgba(255,255,255,.18) transparent;
         }
-        /* fully scrolled to the end ⇒ drop the fade (nothing more to reveal). */
-        #orwell-cast .oc-grid.oc-at-end {
-          -webkit-mask-image: none; mask-image: none;
+        /* M3-6-ready: every cast tile is a door — the whole card is a keyboard-operable
+           button that opens the M4-1 dossier for that houseguest (see makeCard() below). */
+        #orwell-cast .oc-hg {
+          text-align: center; cursor: pointer; border-radius: 10px; padding: .1rem;
+          transition: background-color .15s ease;
         }
-        /* taste: a slim, translucent horizontal scrollbar — present (still scrollable by drag/wheel)
-           but visually quiet, in the glass language. */
-        #orwell-cast .oc-grid::-webkit-scrollbar { height: 6px; }
-        #orwell-cast .oc-grid::-webkit-scrollbar-track { background: transparent; }
-        #orwell-cast .oc-grid::-webkit-scrollbar-thumb {
-          background: rgba(255,255,255,.16); border-radius: 999px;
+        #orwell-cast .oc-hg:hover, #orwell-cast .oc-hg:focus-visible {
+          background: rgba(255,255,255,.06);
         }
-        #orwell-cast .oc-grid::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.28); }
-        /* each card is one cell; snap on its column start so pages land flush. Assigning snap-align
-           to every card is harmless (the snap container resolves to the nearest aligned child) and
-           keeps the keyed upsert simple (no per-position class churn). */
-        #orwell-cast .oc-hg { text-align: center; scroll-snap-align: start; }
-        /* #894: reduced motion ⇒ instant snap, no smooth-scroll easing (the paging dots' click
-           handler also respects this). */
-        @media (prefers-reduced-motion: reduce) {
-          #orwell-cast .oc-grid { scroll-behavior: auto; }
+        #orwell-cast .oc-hg:focus-visible {
+          outline: none; box-shadow: 0 0 0 2px var(--ow-ios-blue, #0a84ff);
         }
-        @media (prefers-reduced-motion: no-preference) {
-          #orwell-cast .oc-grid { scroll-behavior: smooth; }
-        }
-        /* #894: intelligently responsive columns-per-page — keyed off the WINDOW width (container
-           query), so a docked-in-rail narrow cast keeps the 2-row band with sideways paging at 1
-           column/page, the normal float shows 2, and a widened float shows 3+. Never letterboxed. */
+        /* #894/M4-1: intelligently responsive columns-per-row — keyed off the WINDOW width
+           (container query), so a docked-in-rail narrow cast stays a single column, the normal
+           float shows 2, and a widened float shows 3+. Never letterboxed. */
         @container oc-win (max-width: 240px) {
           #orwell-cast .oc-grid { --oc-cols: 1; }
         }
@@ -201,21 +174,6 @@
         }
         @container oc-win (min-width: 620px) {
           #orwell-cast .oc-grid { --oc-cols: 4; }
-        }
-        /* #894: the paging-dots affordance — one dot per page, the current page lit. Hidden when
-           the whole roster fits on one page (no overflow). Pure presentation, rebuilt on scroll. */
-        #orwell-cast .oc-dots {
-          display: none; justify-content: center; gap: .4rem; margin-top: .5rem; min-height: 8px;
-        }
-        #orwell-cast .oc-dots.oc-dots-on { display: flex; }
-        #orwell-cast .oc-dot {
-          width: 6px; height: 6px; border-radius: 999px; padding: 0; border: 0; cursor: pointer;
-          background: rgba(255,255,255,.22); transition: background-color .18s ease, transform .18s ease;
-        }
-        #orwell-cast .oc-dot:hover { background: rgba(255,255,255,.4); }
-        #orwell-cast .oc-dot.oc-dot-cur { background: var(--fg, #9cdef2); transform: scale(1.25); }
-        #orwell-cast .oc-dot:focus-visible {
-          outline: none; box-shadow: 0 0 0 2px var(--ow-ios-blue, #0a84ff);
         }
         #orwell-cast .oc-portrait {
           width: 100%; aspect-ratio: 1 / 1; border-radius: 10px; overflow: hidden;
@@ -318,7 +276,6 @@
         <button type="button" class="oc-pin ow-btn ow-btn-secondary" id="oc-pin" aria-pressed="false" title="Compact pin — dock the cast roster into the control-room rail"><svg class="oc-pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 8 3 3H7l3-3-1-8z"/></svg><span>Compact pin</span></button>
       </div>
       <div class="oc-grid" id="oc-grid"></div>
-      <div class="oc-dots" id="oc-dots" role="tablist" aria-label="Cast pages"></div>
       <div class="oc-empty" id="oc-empty" style="display:none"></div>
       <div class="oc-actions" id="oc-actions" style="display:none">
         <button type="button" class="oc-backfill" id="oc-backfill">Generate cast portraits</button>
@@ -529,6 +486,21 @@
       role: _roles[cardKey(hg)] || _roles[hg.name] || null, // M2-2: role by id, name-keyed fallback (status may name-key)
       portrait: null,
     };
+    // M4-1 (idea 12 / M3-6-ready): every cast tile is a DOOR into that houseguest's
+    // dossier — the shared handler `window.OrwellDossier.open`. Keyboard-operable (role
+    // button, tabindex 0, an accessible name, Enter/Space) so it isn't a mouse-only click
+    // target. entry.id/entry.name are read live at open() time (a closure over `entry`,
+    // not a copied value), so this stays correct even after updateCard() renames the tile.
+    card.setAttribute("role", "button");
+    card.tabIndex = 0;
+    card.setAttribute("aria-label", "Open " + (entry.name || "houseguest") + "'s dossier");
+    const openDossier = () => {
+      if (window.OrwellDossier) window.OrwellDossier.open(entry.id, card);
+    };
+    card.addEventListener("click", openDossier);
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDossier(); }
+    });
     // First paint of a brand-new card: no fade — the fade marks a portrait ARRIVING
     // on a card the player is already looking at.
     setPortrait(entry, hg.portrait || null, false);
@@ -545,7 +517,10 @@
       entry.statusEl.hidden = !entry.statusEl.textContent; // M2-2
     }
     const name = hg.name == null ? "" : String(hg.name);
-    if (name !== entry.name) { entry.name = name; entry.nameB.textContent = name; }
+    if (name !== entry.name) {
+      entry.name = name; entry.nameB.textContent = name;
+      entry.el.setAttribute("aria-label", "Open " + (name || "houseguest") + "'s dossier");
+    }
     const url = hg.portrait || null;
     if (url !== entry.portrait) setPortrait(entry, url, !!url); // the stream moment
     const role = _roles[cardKey(hg)] || _roles[hg.name] || null; // M2-2 (name-keyed fallback, like the pin)
@@ -594,8 +569,6 @@
       empty.style.display = "";
       empty.textContent = "The cast hasn't moved in yet.";
       if (actions) actions.style.display = "none";
-      const dots = el.querySelector("#oc-dots"); // #894: no pages when there's no cast
-      if (dots) { dots.classList.remove("oc-dots-on"); dots.textContent = ""; }
       return;
     }
     empty.style.display = "none";
@@ -656,76 +629,8 @@
     if (current.length !== desired.length || desired.some((node, i) => current[i] !== node)) {
       for (const node of desired) grid.appendChild(node);
     }
-
-    // #894: the gallery affordances ride on top of the keyed upsert — bind the scroll listener once
-    // (idempotent) and re-derive the paging dots + the end-fade for the now-current card set.
-    bindGallery(grid, el);
-    syncGallery(grid, el);
-  }
-
-  // --- #894: horizontal-gallery affordances (dots + end-fade) -------------------
-  // Pure presentation over the existing keyed grid: NOTHING here mutates a card, the DOM order, or
-  // the roster — it only reads geometry and paints page indicators. Fail-soft throughout.
-
-  let _scrollRaf = 0;
-  function bindGallery(grid, el) {
-    if (!grid || grid._ocGalleryBound) return;
-    grid._ocGalleryBound = true;
-    // rAF-coalesced so a fast swipe doesn't thrash layout reads.
-    grid.addEventListener("scroll", () => {
-      if (_scrollRaf) return;
-      _scrollRaf = requestAnimationFrame(() => { _scrollRaf = 0; syncGallery(grid, el); });
-    }, { passive: true });
-    // A kit resize / dock re-home changes columns-per-page (the @container breakpoints) but fires no
-    // scroll event — re-derive the dots + end-fade when the grid's box changes. Fail-soft.
-    try {
-      if (typeof ResizeObserver === "function") {
-        new ResizeObserver(() => syncGallery(grid, el)).observe(grid);
-      }
-    } catch (_) { /* no ResizeObserver: the render/scroll paths still keep it fresh */ }
-  }
-
-  // The visible page width = one column-pair + its gap (the snap step). We derive page count from the
-  // total scroll width so the math stays correct at every responsive --oc-cols breakpoint.
-  function pageMetrics(grid) {
-    const view = grid.clientWidth || 1;
-    const max = grid.scrollWidth - view;
-    const pages = max > 2 ? Math.max(1, Math.round(grid.scrollWidth / view)) : 1;
-    const cur = max > 2 ? Math.min(pages - 1, Math.round(grid.scrollLeft / view)) : 0;
-    return { view, max, pages, cur };
-  }
-
-  function syncGallery(grid, el) {
-    if (!grid) return;
-    const dots = el && el.querySelector("#oc-dots");
-    const m = pageMetrics(grid);
-    // end-fade: lift the right-edge mask once there is nothing more to reveal (or no overflow).
-    grid.classList.toggle("oc-at-end", m.max <= 2 || grid.scrollLeft >= m.max - 2);
-    if (!dots) return;
-    if (m.pages <= 1) { dots.classList.remove("oc-dots-on"); dots.textContent = ""; return; }
-    dots.classList.add("oc-dots-on");
-    // Rebuild only when the page COUNT changed (a resize / roster growth); otherwise just move the
-    // lit dot — so a swipe never re-creates nodes.
-    if (dots.children.length !== m.pages) {
-      dots.textContent = "";
-      for (let i = 0; i < m.pages; i++) {
-        const d = document.createElement("button");
-        d.type = "button";
-        d.className = "oc-dot";
-        d.setAttribute("role", "tab");
-        d.setAttribute("aria-label", "Cast page " + (i + 1) + " of " + m.pages);
-        d.addEventListener("click", () => {
-          const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          grid.scrollTo({ left: i * grid.clientWidth, behavior: reduce ? "auto" : "smooth" });
-        });
-        dots.appendChild(d);
-      }
-    }
-    Array.from(dots.children).forEach((d, i) => {
-      const on = i === m.cur;
-      d.classList.toggle("oc-dot-cur", on);
-      d.setAttribute("aria-selected", on ? "true" : "false");
-    });
+    // M4-1: no paging affordance to re-derive — every card is already in the grid; the
+    // window body (the kit's `.ow-body { overflow: auto }`) scrolls vertically on its own.
   }
 
   // Poll backoff (perf/resilience): consecutive failures widen the cadence so a slow/502-ing engine
