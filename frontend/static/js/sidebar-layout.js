@@ -662,6 +662,12 @@ const RAIL_MIRRORS = [
   // click-handler that opens the sidebar and scrolls to the element.
   { rail: 'rail-diary-room', source: 'sidebar-diary-room-btn', activate: true },
   { rail: 'rail-cast', source: 'sidebar-cast-btn', activate: true },
+  // M4-2: the Memory Wall button (orwellMemoryWall.js) — beside Cast, game-gated, has its own svg
+  // (no `fallback` → the "exactly one fallback" H4 gate stays green; the rail clones the row's icon).
+  // NB: 'rail-memory' is TAKEN — index.html ships a static Brain/Memory tool button under that id
+  // (data-rail-source="tool-memory-btn"); reusing it hijacked that button's icon + gating and broke
+  // the H4 icon-parity smoke. This entry must keep its own unique id.
+  { rail: 'rail-memory-wall', source: 'sidebar-memory-btn', activate: true },
   {
     rail: 'rail-game-status', source: 'orwell-status', section: 'orwell-status',
     iconSel: '.os-hdr svg',
