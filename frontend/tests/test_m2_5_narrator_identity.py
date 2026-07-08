@@ -46,6 +46,10 @@ def test_game_build_slates_drop_the_done_tail():
     chat = _read("static/js/chat.js")
     assert "(ok && isGameBuild()) ? ''" in chat, "success slates must carry no debug tail"
     assert "'failed'" in chat, "failures stay literal (operator truth)"
+    # PR #1235 review: the RELOAD path mirrors the live suppression + the outcome marker
+    renderer = _read("static/js/chatRenderer.js")
+    assert "(ok && isGameBuild()) ? ''" in renderer, "reload must mirror the live done-tail rule"
+    assert "ow-slate-outcome" in renderer
 
 
 def test_slate_styling_is_game_build_scoped():

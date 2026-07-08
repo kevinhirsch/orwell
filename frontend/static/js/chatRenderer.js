@@ -2088,13 +2088,19 @@ export function addMessage(role, content, modelName, metadata) {
             const _evExpandHtml = `${evCmdHtml}${outHtml}${evDiffHtml}`;
             const _evHasExpand = !!_evExpandHtml.trim();
             node.className = 'agent-thread-node' + (ok ? '' : ' error') + (_evHasExpand ? '' : ' agent-thread-node--flat');
+            // (className extended below once the outcome is known — reload mirrors the live path.)
             const _evChevron = _evHasExpand ? '<span class="agent-thread-chevron">\u25B6</span>' : '';
             const _evContentDiv = _evHasExpand ? `<div class="agent-thread-content">${_evExpandHtml}</div>` : '';
             // L42: render the PUBLIC outcome (Vault-free, from the persisted tool result) on reload too,
             // so the re-opened transcript reads as what happened, not a stack of identical beat rows.
             const _evOutcome = (_beat && ok) ? orwellBeatOutcome(ev.tool, ev.output) : null;
             const _evToolText = _evOutcome || _beat || ev.tool;
-            const _evStatusHtml = _evOutcome ? '' : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+            // M2-5 (PR #1235 review): mirror the LIVE path — game-build success slates carry
+            // no "done" debug tail on reload either (failures stay literal), and an outcome
+            // slate keeps its persistent richer-type marker. Live/reload parity is the F5 rule.
+            const _evStatusHtml = _evOutcome ? '' : (ok && isGameBuild()) ? ''
+              : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+            if (_evOutcome) node.className += ' ow-slate-outcome';
             node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_evToolText)}</span>${_evStatusHtml}${_evChevron}</div>${_evContentDiv}`;
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);

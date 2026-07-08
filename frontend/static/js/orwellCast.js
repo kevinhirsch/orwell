@@ -526,7 +526,7 @@
       id: cardKey(hg),
       name: hg.name == null ? "" : String(hg.name),
       status: hg.status || "active",
-      role: _roles[cardKey(hg)] || null, // M2-2: public ceremony role (badge), if any
+      role: _roles[cardKey(hg)] || _roles[hg.name] || null, // M2-2: role by id, name-keyed fallback (status may name-key)
       portrait: null,
     };
     // First paint of a brand-new card: no fade — the fade marks a portrait ARRIVING
@@ -548,7 +548,7 @@
     if (name !== entry.name) { entry.name = name; entry.nameB.textContent = name; }
     const url = hg.portrait || null;
     if (url !== entry.portrait) setPortrait(entry, url, !!url); // the stream moment
-    const role = _roles[cardKey(hg)] || null; // M2-2
+    const role = _roles[cardKey(hg)] || _roles[hg.name] || null; // M2-2 (name-keyed fallback, like the pin)
     if (role !== entry.role) { entry.role = role; syncBadge(entry); }
   }
 
