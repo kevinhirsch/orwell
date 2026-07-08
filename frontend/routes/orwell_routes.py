@@ -586,12 +586,23 @@ def _public_persona(card: dict) -> dict:
     return {k: card.get(k) for k in _PERSONA_FIELDS if card.get(k) not in (None, "")}
 
 
+def _public_ref(r) -> dict:
+    """Deep-allowlist a nested NamedRef to id/name ONLY. The top-level allowlists aren't enough:
+    `parties`/`members` entries used to pass VERBATIM, so a NamedRef that ever grows a non-public
+    field would serialize straight into this player-facing route (review P1, PR #1242)."""
+    if isinstance(r, dict):
+        return {"id": r.get("id"), "name": r.get("name")}
+    return {"id": r, "name": r}  # a plain-string ref is already just a public id/name
+
+
 def _public_deal(d: dict) -> dict:
     """Allowlisted fields only — id/parties/kind/terms/status (never a hidden opinion number;
-    NPC↔NPC deals never appear in `state.deals` to begin with — see `DealView`)."""
+    NPC↔NPC deals never appear in `state.deals` to begin with — see `DealView`). Parties are
+    deep-allowlisted refs (id/name only)."""
+    parties = d.get("parties") if isinstance(d.get("parties"), list) else []
     return {
         "id": d.get("id"),
-        "parties": d.get("parties") if isinstance(d.get("parties"), list) else [],
+        "parties": [_public_ref(p) for p in parties],
         "kind": d.get("kind"),
         "terms": d.get("terms"),
         "status": d.get("status"),
@@ -599,11 +610,13 @@ def _public_deal(d: dict) -> dict:
 
 
 def _public_alliance(a: dict) -> dict:
-    """Allowlisted fields only — id/name/members/youAreFounder (never a hidden loyalty number)."""
+    """Allowlisted fields only — id/name/members/youAreFounder (never a hidden loyalty number).
+    Members are deep-allowlisted refs (id/name only)."""
+    members = a.get("members") if isinstance(a.get("members"), list) else []
     return {
         "id": a.get("id"),
         "name": a.get("name"),
-        "members": a.get("members") if isinstance(a.get("members"), list) else [],
+        "members": [_public_ref(m) for m in members],
         "youAreFounder": bool(a.get("youAreFounder")),
     }
 

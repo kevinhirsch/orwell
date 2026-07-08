@@ -249,6 +249,19 @@ def test_public_deal_is_an_explicit_allowlist():
     assert set(out.keys()) == {"id", "parties", "kind", "terms", "status"}
 
 
+def test_public_deal_deep_allowlists_nested_party_refs():
+    """Nested NamedRefs must be rebuilt from id/name ONLY — a ref carrying a non-public field
+    used to serialize VERBATIM into the player-facing route (review P1, PR #1242)."""
+    poisoned = {
+        "id": "d1", "kind": "safety", "terms": "t", "status": "open",
+        "parties": [{"id": "npc:1", "name": "A", "trust": 0.93, "hiddenNote": VAULT_SENTINEL}],
+    }
+    out = orwell_routes._public_deal(poisoned)
+    assert out["parties"] == [{"id": "npc:1", "name": "A"}]
+    # a plain-string ref survives as a public id/name pair (FE reads .name)
+    assert orwell_routes._public_ref("npc:2") == {"id": "npc:2", "name": "npc:2"}
+
+
 def test_public_alliance_is_an_explicit_allowlist():
     poisoned = {
         "id": "a1", "name": "n", "members": [], "youAreFounder": True,
@@ -256,6 +269,15 @@ def test_public_alliance_is_an_explicit_allowlist():
     }
     out = orwell_routes._public_alliance(poisoned)
     assert set(out.keys()) == {"id", "name", "members", "youAreFounder"}
+
+
+def test_public_alliance_deep_allowlists_nested_member_refs():
+    poisoned = {
+        "id": "a1", "name": "n", "youAreFounder": False,
+        "members": [{"id": "npc:3", "name": "B", "loyalty": 0.7, "hiddenNote": VAULT_SENTINEL}],
+    }
+    out = orwell_routes._public_alliance(poisoned)
+    assert out["members"] == [{"id": "npc:3", "name": "B"}]
 
 
 def test_public_beat_is_an_explicit_allowlist():
