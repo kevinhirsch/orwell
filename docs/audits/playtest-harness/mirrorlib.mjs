@@ -169,10 +169,28 @@ export async function drainMirror(page) {
 // The SETTLED rendered transcript of the chat container — the thing that must be byte-identical
 // across windows. Per-message {cls,id,text}; reasoning/footer stripped (those are per-window UI
 // chrome, not the shared transcript). Works identically on live, stub, echo, or error text.
+//
+// M4-6 (ceremony slates): `.ow-cslate` cards are TOP-LEVEL siblings of `.msg` in #chat-history
+// (a beat's designed full-width card, inserted beside the compact tool-thread chip) — included
+// here in document order so the SAME byte-identity diff below (diffTranscripts) also catches a
+// slate divergence between two mirrored windows (wrong kind/names/kicker/badge/grayscale), not
+// just message-bubble text. No new harness: this is the one shared transcript snapshot every
+// mirror script (`mirror_toolturn_parity.mjs` and friends) already asserts on.
 export async function transcriptOf(page) {
   return page.evaluate(() => {
-    const msgs = [...document.querySelectorAll('#chat-history .msg')];
-    return msgs.map((el, i) => {
+    const nodes = [...document.querySelectorAll('#chat-history .msg, #chat-history .ow-cslate')];
+    return nodes.map((el, i) => {
+      if (el.classList.contains('ow-cslate')) {
+        const kind = el.getAttribute('data-ow-cslate') || '';
+        const kicker = (el.querySelector('.ow-cslate-kicker') || {}).textContent || '';
+        const names = (el.querySelector('.ow-cslate-names') || {}).textContent || '';
+        const line = (el.querySelector('.ow-cslate-line') || {}).textContent || '';
+        const badge = el.querySelector('.ow-mono-badge');
+        const badgeRole = badge ? [...badge.classList].find((c) => c.startsWith('ow-mono-badge-')) || 'badge' : '';
+        const grayscale = !!el.querySelector('.ow-mono-evicted');
+        const text = [kicker, names, line, badgeRole, grayscale ? 'grayscale' : ''].join(' | ').replace(/\\s+/g, ' ').trim();
+        return { i, cls: 'ow-cslate:' + kind, id: '', text };
+      }
       const cls = [...el.classList].filter((c) => c.startsWith('msg')).join(',');
       const id = el.id || el.dataset.id || el.dataset.messageId || el.getAttribute('data-msg-id') || el.getAttribute('data-mid') || '';
       const c = el.cloneNode(true);

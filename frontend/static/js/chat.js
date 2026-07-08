@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR, orwellCeremonySlate, orwellRenderCeremonySlate } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -2724,6 +2724,18 @@ import { isNarrow } from './platform.js';
                     const _clearReveal = () => currentToolBubble.classList.remove('ow-ceremony-reveal');
                     if (_revealHeader) _revealHeader.addEventListener('animationend', _clearReveal, { once: true });
                     setTimeout(_clearReveal, 500); // belt: reduced-motion/no animationend still clears the marker
+                  }
+                  // M4-6 (idea 7): a curated ceremony beat (HOH win / nominations / veto win /
+                  // veto ceremony / eviction result — the week roll rides the HOH card) also
+                  // inserts a DESIGNED FULL-WIDTH slate card beside this compact chip, sourced
+                  // ONLY from the same closed-set tool-result JSON (never parsed from prose —
+                  // ADR 0005). Game-build only; the workspace build keeps the plain chip.
+                  if (ok && isGameBuild()) {
+                    const _slate = orwellCeremonySlate(json.tool, json.output);
+                    if (_slate) {
+                      const _threadEl = currentToolBubble.closest('.agent-thread');
+                      if (_threadEl) _threadEl.insertAdjacentElement('afterend', orwellRenderCeremonySlate(_slate));
+                    }
                   }
                   // Reset so thinking spinner between tools says "Thinking" not the old tool's label
                   _lastToolName = '';

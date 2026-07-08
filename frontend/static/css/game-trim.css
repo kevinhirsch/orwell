@@ -247,3 +247,92 @@ body[data-game-build] .agent-thread-node.ow-slate-outcome .agent-thread-tool {
   font-size: .8rem;
   opacity: .95;
 }
+
+/* ── M4-6 (road-to-market, idea 7): CEREMONY SLATES ──────────────────────────────────────
+ * A curated set of resolved beats (HOH win / nominations / veto win / veto ceremony /
+ * eviction result — the week roll rides the HOH card, see orwellToolBeats.js) render a
+ * DESIGNED FULL-WIDTH card beside the compact production chip above: a portrait
+ * (OrwellMonogram — deterministic, Vault-free, never a live-fetch dependency), the
+ * subject's name, and a role line. Game-build only — this is Big Brother ceremony
+ * language, not a general chat convention. */
+body[data-game-build] .ow-cslate {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  width: 100%;
+  max-width: 100%;
+  margin: .5rem 0 .65rem;
+  padding: .7rem .9rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--fg, #fff) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg, #fff) 12%, transparent);
+  box-sizing: border-box;
+}
+body[data-game-build] .ow-cslate-faces {
+  display: flex;
+  flex-shrink: 0;
+}
+body[data-game-build] .ow-cslate-face-holder {
+  display: block;
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+}
+/* a second/third face (nominations, a busy veto ceremony) overlaps slightly, like a cast
+   strip, instead of a wide row that could crowd the headline on narrow viewports. */
+body[data-game-build] .ow-cslate-face-holder + .ow-cslate-face-holder {
+  margin-left: -14px;
+  border: 2px solid var(--bg, #15171c);
+}
+body[data-game-build] .ow-cslate-body {
+  min-width: 0;
+  flex: 1;
+}
+body[data-game-build] .ow-cslate-kicker {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  opacity: .62;
+}
+body[data-game-build] .ow-cslate-names {
+  font-size: .98rem;
+  font-weight: 700;
+  margin: .1rem 0 .15rem;
+  overflow-wrap: anywhere;
+}
+body[data-game-build] .ow-cslate-line {
+  font-size: .85rem;
+  opacity: .82;
+  line-height: 1.35;
+}
+/* a thin left rule keyed to the ceremony — subtle color language, not a loud banner. */
+body[data-game-build] .ow-cslate-hoh { border-left: 3px solid #c9930f; }
+body[data-game-build] .ow-cslate-nominations { border-left: 3px solid #b83a2e; }
+body[data-game-build] .ow-cslate-veto-win,
+body[data-game-build] .ow-cslate-veto-ceremony { border-left: 3px solid #1c7f86; }
+body[data-game-build] .ow-cslate-eviction { border-left: 3px solid color-mix(in srgb, var(--fg, #fff) 35%, transparent); }
+
+/* entrance — a brief staged reveal, same family as .ow-ceremony-reveal above (shared kit
+   easing); reduced-motion strips it to an instant, already-settled render. */
+body[data-game-build] .ow-cslate {
+  animation: ow-cslate-in .42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+@keyframes ow-cslate-in {
+  0%   { opacity: 0; transform: translateY(4px) scale(.99); }
+  60%  { opacity: 1; transform: none; }
+  100% { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-game-build] .ow-cslate { animation: none !important; }
+}
+
+@media (max-width: 768px) {
+  body[data-game-build] .ow-cslate { padding: .6rem .7rem; gap: .6rem; }
+  body[data-game-build] .ow-cslate-face-holder { width: 38px; height: 38px; }
+  body[data-game-build] .ow-cslate-names { font-size: .9rem; }
+  body[data-game-build] .ow-cslate-line { font-size: .8rem; }
+}

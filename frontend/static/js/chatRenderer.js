@@ -10,7 +10,7 @@ import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
 import { isNarrow } from './platform.js';
-import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR, orwellCeremonySlate, orwellRenderCeremonySlate } from './orwellToolBeats.js';
 import { detectOocAside } from './orwellOocAside.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -2039,6 +2039,11 @@ export function addMessage(role, content, modelName, metadata) {
             box.appendChild(threadWrap);
           }
           const _gbBeat = isGameBuild();
+          // M4-6: ceremony slates queued while walking this round's tools, inserted as full-width
+          // cards right after the thread once it's fully built (mirrors the live path's per-event
+          // insertion — see chat.js — since appending more chips INTO threadWrap never moves its
+          // position relative to a sibling already inserted after it).
+          const _pendingSlates = [];
           for (const ev of _visibleTools) {
             const ok = (ev.exit_code === 0 || ev.exit_code == null);
             // C14/C19 immersion: in the game build a recognised engine/agent tool
@@ -2104,6 +2109,23 @@ export function addMessage(role, content, modelName, metadata) {
             node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_evToolText)}</span>${_evStatusHtml}${_evChevron}</div>${_evContentDiv}`;
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
+            // M4-6: the SAME pure descriptor + shared DOM builder the live path uses (chat.js) \u2014
+            // identical (tool, output) always yields identical markup, so a re-opened transcript
+            // paints the exact card the player saw live.
+            if (ok && _gbBeat) {
+              const _slate = orwellCeremonySlate(ev.tool, ev.output);
+              if (_slate) _pendingSlates.push(_slate);
+            }
+          }
+          { // M4-6: insert the queued ceremony-slate card(s) right after the built thread — a
+            // sibling of threadWrap, in order, so appending more chips INTO threadWrap (a later
+            // tool in the same round) never moves it relative to a slate already placed after it.
+            let _slateAnchor = threadWrap;
+            for (const _slate of _pendingSlates) {
+              const _card = orwellRenderCeremonySlate(_slate);
+              _slateAnchor.insertAdjacentElement('afterend', _card);
+              _slateAnchor = _card;
+            }
           }
           // ADR 0011 — cap the reload rail (mirror of the live backstop): keep the most recent
           // ORWELL_MAX_VISIBLE_BEATS chips, drop older overflow (no live timers on reload nodes).
