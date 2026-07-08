@@ -618,7 +618,14 @@ def replay_stats() -> Dict[str, Any]:
 # body (the reply text the transcript renders), where it would be a machinery leak.
 
 VAULT_KEY_PATTERNS = (
-    r'"soul"', r'"trust"', r'"threat"', r'"affinity"', r'"hidden(?:Target|Agenda)?"',
+    # `hidden` requires the ENGINE Vault field suffixes (hiddenTarget/hiddenAgenda): the
+    # fixture stores MODEL OUTPUT only (prompts are digests), and the cast-authoring
+    # write-back legitimately AUTHORS hidden profile content in flight TO the engine —
+    # record #11's identity stream carried `"hiddenLifeStakes"` and the bare-word pattern
+    # false-failed a leak-clean fixture. Engine Vault state can never reach these bytes
+    # structurally; the scan hunts engine FIELD NAMES echoed back, not the sanctioned
+    # authoring direction.
+    r'"soul"', r'"trust"', r'"threat"', r'"affinity"', r'"hidden(?:Target|Agenda)"',
     r'"grudge"', r'"scheme"', r'"confession(?:al)?"',
 )
 SECRET_PATTERNS = (r"Bearer\s+[A-Za-z0-9._\-]{8,}", r"\bsk-[A-Za-z0-9._\-]{8,}\b")

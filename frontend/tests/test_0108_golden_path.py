@@ -177,6 +177,20 @@ def test_leak_scan_flags_vault_keys_and_secrets(golden, tmp_path):
     assert any("secret-shaped" in v for v in violations)
 
 
+def test_leak_scan_allows_authoring_direction_but_flags_engine_vault_fields(golden, tmp_path):
+    """The cast-authoring write-back AUTHORS hidden profile content in flight TO the engine
+    (record #11's identity stream carried "hiddenLifeStakes" and false-failed) — sanctioned.
+    Engine Vault FIELD NAMES echoed back (hiddenTarget/hiddenAgenda) still fail."""
+    ok = tmp_path / "authoring.jsonl"
+    _write_fixture(ok, [{"key": "k", "kind": "stream", "seq": 0,
+                         "chunks": ['data: {"delta": "\\"hiddenLifeStakes\\": \\"debt\\""}\n\n']}])
+    assert golden.fixture_leak_scan(str(ok)) == []
+    bad = tmp_path / "vaultfield.jsonl"
+    _write_fixture(bad, [{"key": "k", "kind": "call", "seq": 0,
+                          "response": '{"hiddenTarget": "npc:2"}', "meta": {}}])
+    assert any("vault-key" in v for v in golden.fixture_leak_scan(str(bad)))
+
+
 def test_leak_scan_passes_a_clean_fixture(golden, tmp_path):
     clean = tmp_path / "clean.jsonl"
     _write_fixture(clean, [{"key": "k", "kind": "stream", "seq": 0,
