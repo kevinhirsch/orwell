@@ -280,12 +280,19 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
 
     # --- overlap: registered surfaces vs each other and the composer (D2) ----
     boxes = {}
+    els = {}
     for sel in GAME_SURFACES:
         el = page.query_selector(sel)
         if el and el.is_visible():
-            b = el.bounding_box()
-            if b and b["width"] > 4 and b["height"] > 4:
-                boxes[sel.strip('#[]*=\"')] = b
+            b = _clipped_box(el)
+            # M3-4: is_visible() doesn't account for opacity (only `display`/`visibility`/size) —
+            # skip an element that is fully transparent (e.g. the scroll-bottom fab between shows,
+            # which fades via opacity rather than display so its CSS transition can run). It isn't
+            # painting anything, so it can't be "overlapping" a real surface.
+            if b and b["width"] > 4 and b["height"] > 4 and b.get("opacity", 1) > 0.05:
+                key = sel.strip('#[]*=\"')
+                boxes[key] = b
+                els[key] = el
     if cbox:
         for name, b in boxes.items():
             if _intersects(b, cbox):
@@ -293,8 +300,24 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
     names = list(boxes)
     for i in range(len(names)):
         for j in range(i + 1, len(names)):
-            if _intersects(boxes[names[i]], boxes[names[j]]):
-                report("fail", f"{vp_name} overlap:{names[i]} intersects {names[j]}")
+            a, c = names[i], names[j]
+            if not _intersects(boxes[a], boxes[c]):
+                continue
+            # M3-4: two GAME_SURFACES selectors can resolve to the SAME element, or one nested
+            # inside the other — e.g. the id selector `#orwell-decision-card` and the broader
+            # `[class*='odec']` catch-all both match the card once it carries an .odec-* class
+            # (the risk/done state) or once its own internal `.odec-*` children exist (every
+            # decision card has one). That is nested DOM STRUCTURE, not a D2 surface collision —
+            # skip a pair in an ancestor/descendant (or identical-element) relationship. A
+            # genuinely separate overlapping surface (e.g. the scroll-bottom fab painting over
+            # the card, the very regression `[class*='odec']` + `#orwell-scroll-bottom` guards
+            # against) is unrelated in the DOM and is still reported below.
+            nested = els[a].evaluate(
+                "(node, other) => node === other || node.contains(other) || other.contains(node)",
+                els[c],
+            )
+            if not nested:
+                report("fail", f"{vp_name} overlap:{a} intersects {c}")
     report("pass", f"{vp_name} overlap sweep ({len(boxes)} surfaces)")
 
     # --- #740: the gadget RAIL / cast-PIN card never sits over the composer ----
@@ -405,6 +428,49 @@ def _intersects(a, b):
     pad = 2  # px of grace for borders/shadows
     return not (a["x"] + a["width"] - pad <= b["x"] or b["x"] + b["width"] - pad <= a["x"] or
                 a["y"] + a["height"] - pad <= b["y"] or b["y"] + b["height"] - pad <= a["y"])
+
+
+# M3-4: an element's raw getBoundingClientRect() (what Playwright's bounding_box() reports) is its
+# full LAYOUT extent — it does NOT shrink when a scrollable ancestor clips/scrolls it (e.g. the
+# decision card's OrwellSheet host, `.ow-sheet.ow-sheet-anchored .ow-sheet-body { max-height: 60vh;
+# overflow: auto; }`, deliberately contains a long option list). A many-option decision at a short
+# phone viewport can be TALLER than its own sheet, but a real player never sees it "overlap" the
+# composer below — the sheet clips and scrolls it. Clip the measured box to every scrollable
+# ancestor within a bounded walk so the D2 overlap sweep matches what actually PAINTS, not the
+# unclipped layout box.
+_CLIP_TO_SCROLL_ANCESTOR_JS = """
+(el) => {
+  const r = el.getBoundingClientRect();
+  let clip = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  let node = el.parentElement, hops = 0;
+  while (node && hops < 8) {
+    const cs = getComputedStyle(node);
+    if (/(auto|hidden|scroll)/.test(cs.overflowY) || /(auto|hidden|scroll)/.test(cs.overflowX)) {
+      const pr = node.getBoundingClientRect();
+      clip = {
+        left: Math.max(clip.left, pr.left), top: Math.max(clip.top, pr.top),
+        right: Math.min(clip.right, pr.right), bottom: Math.min(clip.bottom, pr.bottom),
+      };
+    }
+    node = node.parentElement; hops++;
+  }
+  return { x: clip.left, y: clip.top,
+           width: Math.max(0, clip.right - clip.left), height: Math.max(0, clip.bottom - clip.top),
+           opacity: parseFloat(getComputedStyle(el).opacity) };
+}
+"""
+
+
+def _clipped_box(el):
+    """The element's box, clipped to any scrolling ancestor — see _CLIP_TO_SCROLL_ANCESTOR_JS.
+    Also carries `opacity` so callers can skip an element that is in the DOM and
+    `is_visible()`-true (has layout, no `visibility:hidden`) but fully transparent — e.g. a
+    fixed-position affordance (the scroll-bottom fab) that fades via opacity, never `display`, so
+    it is ALWAYS geometrically present at its anchored spot even while fully invisible/inert."""
+    try:
+        return el.evaluate(_CLIP_TO_SCROLL_ANCESTOR_JS)
+    except Exception:
+        return el.bounding_box()
 
 
 # #758 — a top system-banner must RESERVE space + COMPRESS the fixed-chrome layer below it: no
@@ -557,6 +623,40 @@ def remove_endgame_card(page):
         pass
 
 
+# M3-4 (road-to-market — "faces on decisions"): a synthetic multi-option pending (mirrors the
+# browser_smoke.py fixture convention — single-letter placeholder names, never a persona-plausible
+# full name; the matrix never reaches a real game far enough to land a live "nominations" pending on
+# a fresh turn-0 stage). Six houseguest options is enough to exercise the wrapped face-button GRID
+# (not just a single row) at a phone width.
+_FACE_GRID_PENDING = {
+    "kind": "nominations",
+    "prompt": "Name your two nominees for eviction this week.",
+    "pick": 2,
+    "binding": True,
+    "options": [
+        {"id": "npc:1", "name": "A"}, {"id": "npc:2", "name": "B"},
+        {"id": "npc:3", "name": "C"}, {"id": "npc:4", "name": "D"},
+        {"id": "npc:5", "name": "E"}, {"id": "npc:6", "name": "F"},
+    ],
+}
+
+
+def mount_face_grid_card(page):
+    """M3-4: force-mount a synthetic decision card carrying SEVERAL houseguest options (the
+    face-button grid) via the SAME orwell:pending seam mount_endgame_card uses — so the matrix
+    measures the grid's layout without depending on a live engine ever reaching a nominations
+    pending on the fresh turn-0 game the default run stages. Fail-soft; needs no engine."""
+    try:
+        page.evaluate(
+            "(p) => window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: p } }))",
+            _FACE_GRID_PENDING,
+        )
+        page.wait_for_timeout(600)  # let the card's entrance animation + face renders settle
+        return bool(page.query_selector("#orwell-decision-card .odec-face"))
+    except Exception:
+        return False
+
+
 def mount_retro(page):
     """Build+show #orwell-retro via its headless seam (window._orwellRetroEnsure, mirrored from the
     other panels). On a finished season its own 30s poll fills the body (winner headline, highlights,
@@ -617,6 +717,17 @@ def main():
                         remove_endgame_card(page)
                     if mount_retro(page):
                         audit_page(page, vp_name + "+retro", w, h, coarse, with_game)
+
+                # M3-4: the face-button grid — a synthetic multi-option decision (nominations, six
+                # houseguest faces) mounted the SAME way as the endgame card above, but engine-
+                # independent (a fresh turn-0 stage_game() never reaches nominations, and CI's
+                # fe-responsive job runs with no ORWELL_MATRIX_ENGINE at all) — so this case runs
+                # unconditionally at the phone tiers, covering the DoD's named "face-button grid on
+                # the phone profile" regardless of whether a live game is staged.
+                if vp_name in ("phone-390", "tiny-320"):
+                    if mount_face_grid_card(page):
+                        audit_page(page, vp_name + "+face-grid", w, h, coarse, with_game)
+                    remove_endgame_card(page)
 
                 # G6: the settings tab rail keeps its LEFT orientation in any
                 # modal wider than the 480 token (explicit user preference);
