@@ -157,3 +157,160 @@ export function orwellBeatOutcome(tool, output) {
 export function isGameBuild() {
   return !!(typeof document !== 'undefined' && document.body && document.body.hasAttribute('data-game-build'));
 }
+
+// ── M4-6 — CEREMONY SLATES ────────────────────────────────────────────────────────────────
+// A curated subset of resolved beats — HOH win, nominations, veto win, veto ceremony, and
+// eviction result — upgrade from the compact `.ow-slate-outcome` chip (above) to a DESIGNED
+// FULL-WIDTH card: a portrait (OrwellMonogram), the subject's name, and a role line, inserted
+// into the transcript beside the model's narration. The week roll rides the HOH card rather
+// than getting its own synthetic card: a "week" IS one HOH reign (CLAUDE.md), so the HOH
+// competition beat that just resolved is, definitionally, the moment the new week begins —
+// there is no separate engine beat to source a distinct card from, and inventing one would be
+// a card not backed by a real tool-result event.
+//
+// Sourced ONLY from the resolved tool result's closed-set fields — `event.beat` / `content` /
+// `participants` (Vault-free NamedRefs, EVT-1) and `status.veto.holder` (Vault-free
+// PublicGameStatus) — NEVER parsed from narration prose (ADR 0005). `orwellCeremonySlate` is a
+// PURE function of (tool, output): the live path (chat.js, at tool_output) and the reload path
+// (chatRenderer.js, at history render) both call it with the SAME tool-result JSON shape
+// (`json.tool`/`json.output` live, `ev.tool`/`ev.output` persisted), so the two paths derive an
+// identical descriptor — and `orwellRenderCeremonySlate` below is the ONE shared DOM builder
+// both paths call, so the markup itself can never drift between live and reload.
+export const CEREMONY_SLATE_KIND = {
+  'hoh-competition': 'hoh',
+  'nominations': 'nominations',
+  'veto-competition': 'veto-win',
+  'veto-ceremony': 'veto-ceremony',
+  'eviction-result': 'eviction',
+  'eviction': 'eviction',
+};
+
+// Role-line text matches OrwellMonogram's own badge labels (BADGES[*].label) so the card's
+// caption and the face's badge tooltip always agree.
+const _SLATE_ROLE = {
+  'hoh': 'Head of Household',
+  'nominations': 'Nominated',
+  'veto-win': 'Veto holder',
+  'veto-ceremony': 'Veto Ceremony',
+  'eviction': 'Evicted',
+};
+
+// OrwellMonogram badge keys (orwellMonogram.js BADGES) — veto-ceremony and eviction carry NO
+// badge: the ceremony can name several people in different roles (holder / saved / replacement)
+// with no single structural "the" subject, and eviction is the L16 grayscale-only rule (an
+// evicted houseguest is never badged, per orwellMonogram.js's own comment).
+const _SLATE_BADGE = {
+  'hoh': 'hoh',
+  'nominations': 'nominee',
+  'veto-win': 'veto',
+};
+
+/**
+ * Build a Vault-free ceremony-slate descriptor from a resolved advanceGame/submitDecision tool
+ * result, or null when this tool/output isn't a slate-worthy ceremony beat. Pure + deterministic:
+ * identical (tool, output) always yields an identical descriptor, live or on reload.
+ */
+export function orwellCeremonySlate(tool, output) {
+  if (tool !== 'advanceGame' && tool !== 'submitDecision') return null;
+  let r;
+  try { r = typeof output === 'string' ? JSON.parse(output) : output; }
+  catch (_) { return null; }
+  if (!r || typeof r !== 'object') return null;
+  const ev = r.event;
+  if (!ev || !ev.content || !ev.beat) return null;
+  const kind = CEREMONY_SLATE_KIND[ev.beat];
+  if (!kind) return null;
+  const participants = Array.isArray(ev.participants) ? ev.participants : [];
+  const week = (r.status && typeof r.status.week === 'number') ? r.status.week : null;
+
+  let subjects = [];
+  if (kind === 'hoh') {
+    subjects = participants.slice(0, 1); // the crown event carries just the winner
+  } else if (kind === 'nominations') {
+    subjects = participants.slice(1, 3); // [hoh, nominee, nominee] — the two nominees
+  } else if (kind === 'veto-win') {
+    // The crown event's `participants` carries the FULL drawn field (it folds consequence for
+    // the whole six), not just the winner — the structured winner lives on status.veto.holder.
+    const holder = r.status && r.status.veto && r.status.veto.holder;
+    subjects = holder ? [holder] : participants.slice(0, 1);
+  } else if (kind === 'veto-ceremony') {
+    subjects = participants.slice(0, 3); // holder/saved/hoh/replacement — shape varies by branch
+  } else if (kind === 'eviction') {
+    subjects = participants.slice(0, 1); // the evictee
+  }
+  if (!subjects.length) return null;
+
+  let ballotLine = null;
+  if (kind === 'eviction' && r.eviction && Array.isArray(r.eviction.votesRevealed) && r.eviction.votesRevealed.length) {
+    const counts = {};
+    for (const v of r.eviction.votesRevealed) {
+      const n = v && v.votedFor && v.votedFor.name;
+      if (n) counts[n] = (counts[n] || 0) + 1;
+    }
+    const nums = Object.values(counts).sort((a, b) => b - a);
+    if (nums.length) ballotLine = nums.join('-');
+  }
+
+  const weekRoll = kind === 'hoh' && week != null;
+  return {
+    kind,
+    week,
+    weekRoll,
+    role: _SLATE_ROLE[kind],
+    kicker: weekRoll ? `Week ${week} · ${_SLATE_ROLE[kind]}`
+      : (kind === 'nominations' && participants[0] && participants[0].name)
+        ? `${_SLATE_ROLE[kind]} by ${participants[0].name}`
+        : _SLATE_ROLE[kind],
+    badge: _SLATE_BADGE[kind] || null,
+    headline: String(ev.content) + (ballotLine ? ` (${ballotLine})` : ''),
+    subjects, // NamedRef[] — {id, name}
+  };
+}
+
+/**
+ * The ONE shared DOM builder for a ceremony-slate card — chat.js (live) and chatRenderer.js
+ * (reload) both call this with the descriptor from `orwellCeremonySlate` so the same input
+ * always produces byte-identical markup. Faces render through OrwellMonogram in ID-SEEDED mode
+ * (never a live portrait-image fetch) — deterministic and synchronous, so the card never depends
+ * on a network round-trip landing before paint, and live vs. reload can never visually diverge
+ * because a portrait loaded on one pass but not the other.
+ */
+export function orwellRenderCeremonySlate(slate) {
+  const card = document.createElement('div');
+  card.className = 'ow-cslate ow-cslate-' + slate.kind;
+  card.setAttribute('data-ow-cslate', slate.kind);
+
+  const faces = document.createElement('div');
+  faces.className = 'ow-cslate-faces';
+  const evicted = slate.kind === 'eviction';
+  for (const subj of slate.subjects) {
+    const holder = document.createElement('span');
+    holder.className = 'ow-cslate-face-holder';
+    if (typeof window !== 'undefined' && window.OrwellMonogram) {
+      holder.appendChild(window.OrwellMonogram.face(
+        { id: (subj && (subj.id || subj.name)) || '?', name: subj && subj.name, status: evicted ? 'evicted' : 'active' },
+        { role: slate.badge, alt: subj && subj.name }
+      ));
+    }
+    faces.appendChild(holder);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'ow-cslate-body';
+  const kicker = document.createElement('div');
+  kicker.className = 'ow-cslate-kicker';
+  kicker.textContent = slate.kicker;
+  const names = document.createElement('div');
+  names.className = 'ow-cslate-names';
+  names.textContent = slate.subjects.map((s) => s && s.name).filter(Boolean).join(' & ');
+  const line = document.createElement('div');
+  line.className = 'ow-cslate-line';
+  line.textContent = slate.headline;
+  body.appendChild(kicker);
+  body.appendChild(names);
+  body.appendChild(line);
+
+  card.appendChild(faces);
+  card.appendChild(body);
+  return card;
+}
