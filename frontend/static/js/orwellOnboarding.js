@@ -321,6 +321,15 @@
     // can legitimately disagree (the default model may not be a literal catalog id yet). The chat
     // summary is display-only; an unresolved id shows "resolving…" but never blocks Start.
     let _startBtn = null;
+    let _startHint = null;
+    // M1-6 (audit A6): the gated CTA must never sit silently disabled — while Start waits
+    // on a feed, a visible hint says WHY and a poll re-probes (the models-changed event can
+    // race a settings write, which left the button dead for 30s+ with no cue). The gate
+    // itself is honest and stays: no narrator feed ⇒ the house cannot speak, so Start does
+    // not fail-open — it explains and keeps checking.
+    let _startPoll = null;
+    let _startPollT0 = 0;
+    const _stopStartPoll = () => { if (_startPoll) { clearInterval(_startPoll); _startPoll = null; } };
     const refresh = async () => {
       const [{ chat, image }, hasFeed] = await Promise.all([_setupModelSummary(), anyModelConfigured()]);
       const chatEl = card.querySelector(".ob-setup-chat b");
@@ -331,6 +340,22 @@
         _startBtn.disabled = !hasFeed;
         _startBtn.title = hasFeed ? "" : "Connect a feed in Settings first — the house can't speak without a narrator model.";
       }
+      if (_startHint) {
+        if (hasFeed) {
+          _startHint.hidden = true;
+          _stopStartPoll();
+        } else {
+          const waited = _startPollT0 ? Math.round((Date.now() - _startPollT0) / 1000) : 0;
+          _startHint.hidden = false;
+          _startHint.textContent = waited > 45
+            ? "Still no narrator feed — open Choose models and connect one (Start unlocks the moment it lands)."
+            : "Start unlocks once a narrator feed connects — checking…";
+          if (!_startPoll) {
+            _startPollT0 = Date.now();
+            _startPoll = setInterval(refresh, 2500);
+          }
+        }
+      }
     };
     // Re-render when the player connects/changes a feed in Settings (no premature kickoff — this
     // only updates the summary + enables Start). Cleaned up on dismiss so it never leaks.
@@ -339,6 +364,7 @@
 
     const dismiss = () => {
       if (_down) return; _down = true;
+      _stopStartPoll(); // M1-6: never leak the feed re-probe past the card
       try { window.removeEventListener("orwell:models-changed", onModels); } catch (_) {}
       markWelcomeSeen();
       uninertBackground();
@@ -394,6 +420,12 @@
     go.addEventListener("click", () => { if (!go.disabled) dismiss(); });
     row.appendChild(go);
     _startBtn = go;
+    // M1-6: the why-is-Start-disabled cue, under the button row (refresh() owns its text).
+    const hint = document.createElement("div");
+    hint.className = "ob-start-hint";
+    hint.hidden = true;
+    row.insertAdjacentElement("afterend", hint);
+    _startHint = hint;
 
     // Escape is owned by the kit (ui.js arbiter → dismissTop → close → onClose → dismiss); keep an
     // explicit card listener as a belt so a focused-card keypress always dismisses.
