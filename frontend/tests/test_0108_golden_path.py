@@ -464,6 +464,9 @@ def test_portrait_reconciler_is_quiesced_under_golden(monkeypatch):
     from src import orwell_portraits
 
     monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    # Isolate the module global: the guard returns BEFORE touching _RECONCILER_TASK, so
+    # without this the final assertion would ride whatever a prior test left behind.
+    monkeypatch.setattr(orwell_portraits, "_RECONCILER_TASK", None)
 
     async def run():
         return orwell_portraits.ensure_reconciler_started()

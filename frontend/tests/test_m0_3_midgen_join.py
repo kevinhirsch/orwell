@@ -237,6 +237,7 @@ def _stack():
         if os.path.exists(sfile):
             with open(sfile, encoding="utf-8") as fh:
                 cur = json.load(fh)
+        prior_settings = dict(cur)  # restored on teardown — the file is SHARED checkout state
         cur.update({"default_model": "stub-narrator", "default_endpoint_id": ep["id"]})
         tmp = sfile + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -267,9 +268,18 @@ def _stack():
         if "result" not in r:
             raise RuntimeError(f"createCharacter failed: {r}")
 
-        yield {"fe": fbase, "engine": ebase, "settings": sfile, "prior": cur,
+        yield {"fe": fbase, "engine": ebase, "settings": sfile, "prior": prior_settings,
                "endpoint_id": ep["id"]}
     finally:
+        # Restore the shared settings file — the stub endpoint/model must not leak into
+        # later tests or dirty the checkout (the golden driver's shared-frontend/data lesson).
+        try:
+            tmp2 = sfile + ".tmp"
+            with open(tmp2, "w", encoding="utf-8") as fh:
+                json.dump(prior_settings, fh, indent=2)
+            os.replace(tmp2, sfile)
+        except Exception:
+            pass
         for p in (fe, engine):
             p.terminate()
             try:

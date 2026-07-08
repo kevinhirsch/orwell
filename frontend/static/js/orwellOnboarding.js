@@ -370,6 +370,7 @@
         if (hasFeed) {
           _startHint.hidden = true;
           _stopStartPoll();
+          _startPollT0 = 0; // a later feed drop restarts the escalation clock at "checking…"
         } else {
           const waited = _startPollT0 ? Math.round((Date.now() - _startPollT0) / 1000) : 0;
           _startHint.hidden = false;
@@ -893,6 +894,11 @@
       clearTimeout(window._orwellCastingTransitionTimer);
       window._orwellCastingTransitionTimer = setTimeout(() => { window._orwellCastingTransition = false; }, 1500);
     } catch (_) {}
+    // M1-7 rename seam: capture the PRE-click session id FIRST — a synchronous session
+    // switch inside the click would otherwise make `before` read the NEW id and the rename
+    // poll below never observe a change (Greptile T-Rex repro on PR #1234: no PATCH fired).
+    const _preNewChatSid = window.sessionModule && window.sessionModule.getCurrentSessionId
+      ? window.sessionModule.getCurrentSessionId() : null;
     try {
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
       if (nb) nb.click();
@@ -904,8 +910,7 @@
     // so the title sticks.
     (async () => {
       try {
-        const before = window.sessionModule && window.sessionModule.getCurrentSessionId
-          ? window.sessionModule.getCurrentSessionId() : null;
+        const before = _preNewChatSid;
         let sid = null;
         for (let i = 0; i < 10; i++) {
           await new Promise((r) => setTimeout(r, 200));
