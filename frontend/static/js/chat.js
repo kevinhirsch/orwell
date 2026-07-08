@@ -4654,6 +4654,9 @@ import { isNarrow } from './platform.js';
     // full canonical render, which is rebuilt from the saved DB record on reload.
     // Plain text replies can be finalized in place without a reload.
     let rich = false;
+    // M1-1: per-chunk paint batching (see the delta branch) — deltas mark dirty; the
+    // paint runs after each chunk's parts are processed, so a same-chunk dup-abort wins.
+    let paintDirty = false;
 
     const cleanup = () => {
       try { spinner.destroy(); } catch (_) {}
@@ -4719,7 +4722,10 @@ import { isNarrow } from './platform.js';
             if (json.thinking) reasoningText += json.delta;
             else replyText += json.delta;
             if (!gotDelta) { gotDelta = true; try { spinner.destroy(); } catch (_) {} }
-            renderDelta();
+            // M1-1: paint per network CHUNK (after this parts-loop), not per delta — a
+            // SETTLED run's replay arrives as one burst whose message_saved rides the same
+            // chunk, so the own-echo dup-abort below runs before any content ever paints.
+            paintDirty = true;
           } else if (json.type === 'doc_stream_open') {
             rich = true;
             if (documentModule) documentModule.streamDocOpen(json.title || '', json.lang || '');
@@ -4729,6 +4735,17 @@ import { isNarrow } from './platform.js';
           } else if (json.type === 'metrics') {
             metricsData = json.data || metricsData;
           } else if (json.type === 'message_saved') {
+            // M1-1 (audit A1) — CONVERGENCE KEY: the replayed message_saved carries the
+            // server-minted DB id. A bubble with that id already in the DOM means this
+            // resume re-attached to a run THIS tab rendered (the deferred own-echo flush
+            // after our own stream settled) — finishing would paint a duplicate. Abort by
+            // id, never content-equality: drop the placeholder, keep the settled bubble.
+            if (json.id && box.querySelector('.msg[data-db-id="' + String(json.id).replace(/"/g, '') + '"]')) {
+              try { await reader.cancel(); } catch (_) {}
+              cleanup();
+              if (holder.parentNode) holder.remove();
+              return true;
+            }
             // ADR 0012 §2.2: the run's persisted-message signal is in the replay buffer — capture its
             // server timestamp and re-stamp the live bubble so this observer reads the same time as
             // every other window. (json.id is the DB id; the finalize/reload carries it forward.)
@@ -4744,6 +4761,8 @@ import { isNarrow } from './platform.js';
             rich = true;
           }
         }
+        // M1-1: flush this chunk's accumulated deltas in ONE paint (post-dup-check).
+        if (paintDirty) { paintDirty = false; renderDelta(); }
       }
     } catch (e) {
       // Network drop or parse failure: fall through to the reload below.
