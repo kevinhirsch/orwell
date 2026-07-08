@@ -284,6 +284,20 @@ async def _call(name: str, args: dict | None = None, user: str | None = None, ti
     what came back (or the failure) — feeding the /admin/status viewer."""
     import time as _t
     from src import log_rings as _rings
+    # 0108: under the golden seam, DROP the 0065 compare-and-swap token. The golden walk is
+    # single-writer by definition (no concurrent windows), so the protection has nothing to
+    # protect — while the RACE it guards is wall-clock-paced: record #10 hit 4 intra-turn
+    # stale-beat 409s (a belt commit landing between the model's read and its action) that a
+    # fast replay can never reproduce, forking the mutation branch and the presence rng.
+    # No token ⇒ no 409 branch ⇒ identical mutation sequences at any pacing. Production
+    # keeps the token byte-identically.
+    if args and "expectedBeatSeq" in args:
+        try:
+            from src import golden_path as _gp
+            if _gp.active():
+                args = {k: v for k, v in args.items() if k != "expectedBeatSeq"}
+        except Exception:
+            pass
     _golden_call_ledger(name, args)
     t0 = _t.monotonic()
     try:
