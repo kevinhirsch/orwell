@@ -500,6 +500,137 @@ def _sanitize_knowledge(visible: dict, state: dict) -> list:
         items.append({"content": content, "source": source, "subject": subject})
     return items
 
+# ── M4-1: the houseguest dossier (audit C4 + idea 12) ──────────────────────────────────────────
+# Content contract (DoR, fixed by the road-to-market backlog): public persona + met/last-seen +
+# WITNESSED history beats + public alliances/deals with the player — facts and sources ONLY,
+# never a weight/number/hidden edge (the Vault Wall; the player forms their own reads). Built
+# ENTIRELY from two Vault-free projections already on the outward surface:
+#   * getGameState — the public HouseguestCard (persona facets) + `deals`/`alliances` (0039/0107,
+#     both scoped to "the player is a party to" already, never an NPC-to-NPC entry);
+#   * getVisibleStateFor — the PLAYER's own visible projection (`visibleEvents`), which the
+#     VisibleStateService builds by filtering the event store to the player's witness set. An
+#     event is included here ONLY when the caller (the player) is IN its `witnessSet` — so
+#     filtering that already-witnessed list down to entries this OTHER houseguest also shares
+#     (their id in the SAME witness set, or as the scene's initiator) can only ever narrow a
+#     player-witnessed set, never introduce anything the player didn't witness themselves. No raw
+#     confidence/trust/threat number crosses this route — beliefs-with-confidence (`knowledge`,
+#     the gossip-diffusion facts) are OUT OF SCOPE here by design (that surface is M4-2's Memory
+#     Wall); the dossier renders only what the player was actually IN THE ROOM for.
+
+
+def _entity_matches(value, houseguest_id: str, name: Optional[str]) -> bool:
+    """True when a raw event/knowledge participant value (a bare EntityId string OR a
+    {id, name} ref) names this houseguest — by id first, falling back to the public name."""
+    if isinstance(value, str):
+        return value == houseguest_id or (bool(name) and value == name)
+    if isinstance(value, dict):
+        return _entity_matches(value.get("id"), houseguest_id, name) or (
+            bool(name) and value.get("name") == name)
+    return False
+
+
+def _event_involves(ev: dict, houseguest_id: str, name: Optional[str]) -> bool:
+    """True when a player-visible event (already witness-filtered to the player by the engine)
+    also names this houseguest — as the scene's initiator or anywhere in its witness set."""
+    if _entity_matches(ev.get("initiator"), houseguest_id, name):
+        return True
+    witnesses = ev.get("witnessSet")
+    if isinstance(witnesses, list):
+        return any(_entity_matches(w, houseguest_id, name) for w in witnesses)
+    return False
+
+
+def _refs_include(refs, houseguest_id: str, name: Optional[str]) -> bool:
+    """True when a list of NamedRef-shaped {id, name} entries (a deal's `parties`, an alliance's
+    `members`) names this houseguest."""
+    if not isinstance(refs, list):
+        return False
+    return any(_entity_matches(r, houseguest_id, name) for r in refs)
+
+
+def _dossier_card(state: dict, houseguest_id: str) -> Optional[dict]:
+    """Resolve the ONE public card (player or house) this dossier is for — the SAME id-or-name
+    resolution `_roster_cards` uses, so a dossier id built from a roster card always matches."""
+    player = state.get("player") if isinstance(state.get("player"), dict) else None
+    if player and player.get("name"):
+        pid = str(player.get("id") or "player")
+        if pid == houseguest_id:
+            card = dict(player)
+            card["id"] = pid
+            card["isPlayer"] = True
+            card.setdefault("status", player.get("status") or "active")
+            return card
+    house = state.get("house") if isinstance(state.get("house"), list) else []
+    for hg in house:
+        if not isinstance(hg, dict) or not hg.get("name"):
+            continue
+        hid = str(hg.get("id") or hg.get("name"))
+        if hid == houseguest_id:
+            card = dict(hg)
+            card["id"] = hid
+            card["isPlayer"] = False
+            return card
+    return None
+
+
+# The ONLY persona facets the dossier renders — an explicit allowlist (never a passthrough of
+# the whole HouseguestCard dict), so a future Vault-adjacent field added to the card can never
+# silently reach this surface without a deliberate edit here.
+_PERSONA_FIELDS = (
+    "archetype", "strategyStyle", "background", "vocation", "hometown",
+    "age", "demeanor", "biography",
+)
+
+
+def _public_persona(card: dict) -> dict:
+    return {k: card.get(k) for k in _PERSONA_FIELDS if card.get(k) not in (None, "")}
+
+
+def _public_ref(r) -> dict:
+    """Deep-allowlist a nested NamedRef to id/name ONLY. The top-level allowlists aren't enough:
+    `parties`/`members` entries used to pass VERBATIM, so a NamedRef that ever grows a non-public
+    field would serialize straight into this player-facing route (review P1, PR #1242)."""
+    if isinstance(r, dict):
+        return {"id": r.get("id"), "name": r.get("name")}
+    return {"id": r, "name": r}  # a plain-string ref is already just a public id/name
+
+
+def _public_deal(d: dict) -> dict:
+    """Allowlisted fields only — id/parties/kind/terms/status (never a hidden opinion number;
+    NPC↔NPC deals never appear in `state.deals` to begin with — see `DealView`). Parties are
+    deep-allowlisted refs (id/name only)."""
+    parties = d.get("parties") if isinstance(d.get("parties"), list) else []
+    return {
+        "id": d.get("id"),
+        "parties": [_public_ref(p) for p in parties],
+        "kind": d.get("kind"),
+        "terms": d.get("terms"),
+        "status": d.get("status"),
+    }
+
+
+def _public_alliance(a: dict) -> dict:
+    """Allowlisted fields only — id/name/members/youAreFounder (never a hidden loyalty number).
+    Members are deep-allowlisted refs (id/name only)."""
+    members = a.get("members") if isinstance(a.get("members"), list) else []
+    return {
+        "id": a.get("id"),
+        "name": a.get("name"),
+        "members": [_public_ref(m) for m in members],
+        "youAreFounder": bool(a.get("youAreFounder")),
+    }
+
+
+def _public_beat(ev: dict) -> dict:
+    """Allowlisted fields only — id/ts/type/content (the already player-facing-scrubbed prose;
+    never the raw witness set or any other event-store metadata)."""
+    return {
+        "id": ev.get("id"),
+        "ts": ev.get("ts"),
+        "type": ev.get("type"),
+        "content": ev.get("content"),
+    }
+
 
 class NewGameRequest(BaseModel):
     # 0056: optional when keepCharacter is set — the engine carries the prior player's name.
@@ -835,6 +966,68 @@ def setup_orwell_routes() -> APIRouter:
         items = _sanitize_knowledge(visible, state)
         _clear_warn("knowledge")
         return {"started": True, "items": items}
+
+    @router.get("/dossier/{houseguest_id}")
+    async def orwell_dossier(houseguest_id: str, request: Request):
+        """M4-1 — the houseguest dossier: public persona + met/last-seen + WITNESSED history
+        beats + public deals/alliances with the player. Fails OPEN to `{found: false}` (a
+        pre-game read, an unknown id, or an engine hiccup) — the FE renders an honest offline
+        empty state rather than a 502 wall. See the module-level comment above for the
+        Vault-freedom argument."""
+        user = _current_user(request)
+        try:
+            state = await orwell_engine.get_game_state(user=user, timeout=orwell_engine._POLL_TIMEOUT)
+        except Exception as e:
+            _warn_throttled("dossier", f"[orwell] dossier state read failed: {_err_detail(e)}")
+            return {"found": False}
+        if not isinstance(state, dict) or state.get("started") is False:
+            return {"found": False}
+
+        card = _dossier_card(state, houseguest_id)
+        if card is None:
+            return {"found": False}
+        name = card.get("name")
+
+        # The player's OWN visible projection (witness-filtered by the engine already) —
+        # narrowed here to the beats this houseguest actually shares. A read failure here still
+        # renders the persona/deals/alliances sections; it just shows the history empty state.
+        history = []
+        try:
+            vis = await orwell_engine.get_visible_state(user=user)
+        except Exception as e:
+            vis = None
+            logger.info(f"[orwell] dossier visible-state read failed: {_err_detail(e)}")
+        if isinstance(vis, dict):
+            events = vis.get("visibleEvents")
+            if isinstance(events, list):
+                for ev in events:
+                    if isinstance(ev, dict) and _event_involves(ev, houseguest_id, name):
+                        history.append(_public_beat(ev))
+        history.sort(key=lambda e: e.get("ts") if isinstance(e.get("ts"), (int, float)) else 0, reverse=True)
+
+        deals = [
+            _public_deal(d) for d in (state.get("deals") or [])
+            if isinstance(d, dict) and _refs_include(d.get("parties"), houseguest_id, name)
+        ]
+        alliances = [
+            _public_alliance(a) for a in (state.get("alliances") or [])
+            if isinstance(a, dict) and _refs_include(a.get("members"), houseguest_id, name)
+        ]
+
+        return {
+            "found": True,
+            "id": card.get("id"),
+            "name": name,
+            "status": card.get("status") or "active",
+            "isPlayer": bool(card.get("isPlayer")),
+            "portrait": orwell_portraits.portrait_ref(user, card.get("id")),
+            "persona": _public_persona(card),
+            "met": bool(history),
+            # A highlight reel, not the full log — newest first (the dossier's "last seen").
+            "history": history[:20],
+            "deals": deals,
+            "alliances": alliances,
+        }
 
     @router.post("/portraits/backfill")
     async def orwell_portraits_backfill(request: Request):
