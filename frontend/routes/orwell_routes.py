@@ -415,6 +415,92 @@ def _roster_payload(user: Optional[str], cards: list, *, stale: bool) -> dict:
     return payload
 
 
+# ── M4-2: the Memory Wall (knowledge journal) projection ─────────────────────────────────────────
+# The Vault-free shaping for GET /api/orwell/knowledge — everything the PLAYER legitimately knows,
+# from their OWN knowledge (getVisibleStateFor.knowledge) + the PUBLIC roster (getGameState). Every
+# rule here is a Vault-Wall boundary, not an omission (CLAUDE.md: "the player forms their own reads
+# — NEVER a number"):
+#   • the raw knowledge fact carries hidden-state NUMBERS (`confidence`/`distortion`/`hops`) and the
+#     UNDISTORTED ORIGIN of a distorted belief (`originalContent` — the truth the player's belief
+#     drifts from). NONE of these may reach the browser, so they are dropped SERVER-SIDE — the
+#     sanitized payload has no numeric field at all, which makes the leak gate airtight at the data
+#     layer (a number can't be rendered if it never crosses).
+#   • the qualitative reliability signal is carried by the PATHWAY (a slug, never a number): what the
+#     player SAW / wrote themselves (firsthand knowledge) vs. what they were TOLD / OVERHEARD (a
+#     secondhand belief — rendered AS an attributed claim, never truth-flagged). This mirrors the
+#     engine's own domain `pathwayLabel` (src/domain/humanize.ts), name-resolved against the public
+#     roster (names are public facts, never Vault).
+# KNOWN ENGINE GAPS (filed for a v2, NOT bolted on here per the DoR): the projection exposes no
+# QUALITATIVE confidence BAND (only the raw number, which we refuse to bucket FE-side) and no per-fact
+# WEEK attribution (only a monotonic `ts` event-count), so this v1 groups by HOUSEGUEST, not by week.
+_KNOWLEDGE_FORBIDDEN_KEYS = ("confidence", "distortion", "hops", "originalContent", "sourceEventId")
+
+
+def _knowledge_name_map(state: dict) -> dict:
+    """id → PUBLIC display name, from getGameState.player + house (both public NamedRef-shaped).
+    Names are public roster facts — never Vault. Fail-soft: a malformed state yields an empty map
+    (the journal then renders subject-less, never crashing)."""
+    m: dict = {}
+    if not isinstance(state, dict):
+        return m
+    p = state.get("player")
+    if isinstance(p, dict) and p.get("id") and p.get("name"):
+        m[str(p["id"])] = str(p["name"])
+    for hg in (state.get("house") or []):
+        if isinstance(hg, dict) and hg.get("id") and hg.get("name"):
+            m[str(hg["id"])] = str(hg["name"])
+    return m
+
+
+def _knowledge_source(pathway, name_by_id: dict) -> dict:
+    """Map a raw knowledge PATHWAY slug → a Vault-free, number-free source descriptor
+    ({kind, who, firsthand}). Mirrors the engine domain `pathwayLabel` (src/domain/humanize.ts):
+    the pathway is a QUALITATIVE field (never a number), name-resolved against the public roster.
+    `firsthand` splits what the player KNOWS (saw it / their own diary note) from a secondhand
+    BELIEF (told / overheard / gossip) — the qualitative reliability the window renders WITHOUT a
+    confidence number (the graded within-belief band awaits the engine-side spec item)."""
+    import re as _re
+    p = str(pathway or "")
+    told = _re.match(r"^told-by:(.+)$", p)
+    if told:
+        who = name_by_id.get(told.group(1))
+        return {"kind": "told", "who": who, "firsthand": False}
+    if p.startswith("overheard"):
+        return {"kind": "overheard", "who": None, "firsthand": False}
+    if p.startswith("diary-room"):
+        return {"kind": "diary", "who": None, "firsthand": True}
+    if p.startswith("witnessed"):
+        return {"kind": "witnessed", "who": None, "firsthand": True}
+    if _re.match(r"^(gossip|origin|surfaced)", p):
+        return {"kind": "gossip", "who": None, "firsthand": False}
+    return {"kind": "other", "who": None, "firsthand": False}
+
+
+def _sanitize_knowledge(visible: dict, state: dict) -> list:
+    """Build the Vault-free Memory Wall items from the player's OWN knowledge projection
+    (getVisibleStateFor.knowledge) + the public roster. Each item carries ONLY {content, source,
+    subject} — the player-facing prose, a qualitative source, and the houseguest the fact is about.
+    Every hidden-state number and the undistorted origin truth are DROPPED (see _KNOWLEDGE_FORBIDDEN_KEYS),
+    so no raw number — nor the belief's real origin — ever leaves the server. Order is preserved by
+    array position (the engine returns knowledge chronologically), so no `ts` number is needed."""
+    name_by_id = _knowledge_name_map(state)
+    facts = (visible.get("knowledge") if isinstance(visible, dict) else None) or []
+    items: list = []
+    for f in facts:
+        if not isinstance(f, dict):
+            continue
+        content = str(f.get("content") or "").strip()
+        if not content:
+            continue
+        source = _knowledge_source(f.get("pathway"), name_by_id)
+        subject = None
+        subj_id = f.get("subject")
+        if subj_id is not None and name_by_id.get(str(subj_id)):
+            subject = {"id": str(subj_id), "name": name_by_id[str(subj_id)]}
+        items.append({"content": content, "source": source, "subject": subject})
+    return items
+
+
 class NewGameRequest(BaseModel):
     # 0056: optional when keepCharacter is set — the engine carries the prior player's name.
     playerName: str = ""
@@ -710,6 +796,43 @@ def setup_orwell_routes() -> APIRouter:
             logger.info(f"[orwell] cast-authoring backfill kick failed: {e}")
 
         return _roster_payload(user, cards, stale=False)
+
+    @router.get("/knowledge")
+    async def orwell_knowledge(request: Request):
+        """M4-2 — the Memory Wall (knowledge journal): everything the PLAYER legitimately knows,
+        projected Vault-free from their OWN knowledge (getVisibleStateFor.knowledge) merged with the
+        PUBLIC roster (getGameState) for name resolution. Each item carries the player-facing prose,
+        a QUALITATIVE source (how they learned it — saw it / told by X / overheard / word around the
+        house), and the houseguest it's about (for grouping). NEVER a confidence/threat/trust NUMBER,
+        and NEVER the undistorted origin of a distorted belief — the shaping (`_sanitize_knowledge`)
+        drops every hidden-state field server-side, so the Wall holds at the data layer, not by
+        rendering discipline. A distorted rumor surfaces AS the player's belief (its source named),
+        never truth-flagged (the human forms their own reads). Fails OPEN: {started:false, items:[]}
+        pre-game or on any engine hiccup — the journal never blocks the page."""
+        user = _current_user(request)
+        try:
+            visible = await orwell_engine.get_visible_state(user=user)
+        except orwell_engine.EngineToolError as e:
+            # Pre-game ("no active game") is a normal state, not an outage — an honest empty journal.
+            if e.no_game:
+                return {"started": False, "items": []}
+            _warn_throttled("knowledge", f"[orwell] knowledge failed: {_err_detail(e)}")
+            return {"started": False, "items": []}
+        except Exception as e:
+            _warn_throttled("knowledge", f"[orwell] knowledge failed: {_err_detail(e)}")
+            return {"started": False, "items": []}
+        # A successful visible-state read means a game is live. Fetch state ONLY for the public
+        # roster name map (subject + teller resolution); its failure just drops names, never the journal.
+        state: dict = {}
+        try:
+            got = await orwell_engine.get_game_state(user=user)
+            if isinstance(got, dict):
+                state = got
+        except Exception as e:
+            logger.info(f"[orwell] knowledge name-map read skipped: {_err_detail(e)}")
+        items = _sanitize_knowledge(visible, state)
+        _clear_warn("knowledge")
+        return {"started": True, "items": items}
 
     @router.post("/portraits/backfill")
     async def orwell_portraits_backfill(request: Request):
