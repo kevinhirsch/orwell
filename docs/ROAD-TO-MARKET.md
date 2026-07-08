@@ -163,7 +163,50 @@ for committing any golden fixture.
   ("round counts vary ±1 with stream timing" — the reason `turnsHere` is key-neutralized) is the
   next-frontier nondeterminism if it survives the clock fix; keep the miss-dump/ledger drill.*
 
-### M0-7 · Engine: `getGameState.pending` disagrees with `gameStatus.pending` — S–M (engine) · **NEW**
+### M0-9 · Two residual golden nondeterminism classes (tick pacing + a wall-clock writer) — S+S · ✅ DONE
+*2026-07-08, the M0-7 re-record campaign (records r2/r3, one deterministic R1 miss each — both
+autopsied via the miss dump + llm-io twin diff + engine event-prefix diff):*
+
+*Class 1 — aux commits tick the house under the logical clock (r2's miss: the 0076 "MOVEMENT IN
+THE ROOM" cue rendered in replay but not record; occupancy lines and the committed EVENT prefix
+byte-identical, so the fork was presence SAMPLING, not presence state). Under the M0-8 logical
+clock every commit advances a full 60s step, so the E57 wall-time aux-tick debounce (10s) can
+NEVER absorb — the house ticked once per TOOL CALL instead of once per turn, resurrecting the
+E57 regression golden-side and amplifying the known round-count ±1 nondeterminism (record
+streams over wall seconds; replay is instant — a commit shifts across a turn boundary and
+everything presence-sampled at framing time jitters: seating, dwell, the movement cue). Fix:
+`auxTicksNever` orchestrator flag, set by `composeRuntime` whenever the logical clock is active
+— an aux commit never fires the off-screen tick; beats only (beat commits replay identically).
+Production untouched (the wall debounce is correct under real time). Gate: `logicalClock.test.ts`
+"aux commits never tick under the logical clock — seating frozen between beats". The M0-8 note's
+"next-frontier nondeterminism" prediction was exactly this.*
+
+*Class 2 — the G20 portrait reconciler is a WALL-CLOCK engine writer (r3's miss: replay one
+event + one commit behind record at the same turn — `evt:mcp:8` vs `9`, `beatSeq 24` vs `25` —
+and the event-prefix diff named the extra record-only event: `evt:image:6`, "image shown to the
+player: npc:… portrait"). The 5-minute reconciler sweep fired mid-record (a record outlives the
+interval; a replay doesn't), found "missing" portraits, generated REAL ones through
+`backfill_missing` → `generate_and_store` against the live provider (also unbudgeted image
+spend), and recorded image-shown beats a dead-end-provider replay can never reproduce — every
+later event id / beatSeq shifted one and the first tool result carrying one forked the key. The
+turn-driven portrait paths were already quiesced (kickoff_generation / kickoff_backfill); the
+reconciler start was the gap. Fix: `ensure_reconciler_started` no-ops under `golden_path.active()`
+(same quiesce family as the memory/title/skill extractors + zeitgeist). Gate:
+`test_portrait_reconciler_is_quiesced_under_golden` (loop-safe via conftest `_run` — a bare
+`asyncio.run` in a test poisons the xdist worker's default loop; 91 later tests failed until it
+used the suite idiom).*
+
+### M0-7 · Engine: `getGameState.pending` disagrees with `gameStatus.pending` — S–M (engine) · ✅ DONE
+*2026-07-08: root was `GameSessionAdapter.view()` (the `getGameState` projection) simply omitting
+the field — `gameStatus` and the `advanceGame` result both read `pendingView()`, `view()` never
+did. `GameStateView` now carries `pending` (live reads return `pendingView()`, pre-game `null`);
+`tests/unit/pendingProjectionAgreement.test.ts` walks a seeded season through a full week
+answering every pending with a fixed legal policy and asserts the two projections agree at EVERY
+beat (plus advance-result agreement). FE untouched behaviorally (the status-read remains the
+decision card's source; one stale comment updated). The new field rides in `getGameState` tool
+results the model sees, so it forked every downstream golden request key — the fixture was
+re-recorded on live GLM 5.2 the same day (the "next natural re-record" the M0-5 note was waiting
+on; its dwell-scope refinement was taken in the same cycle) and validated replay ×2.*
 
 Source: record attempt #3 autopsy (2026-07-07). A pending created inside an advance (the
 eviction-vote ballot) surfaces on `gameStatus` (and in the `advanceGame` result itself) but reads
@@ -201,9 +244,13 @@ Depends: M0-1 (the GLM run report is the evidence base).
 *2026-07-08: the committed fixture replays with R1=0 across two runs — the residual class is gone
 (it fell to the logical clock + quiesce + awaited-belt fixes). One accepted-risk refinement noted
 from PR #1234 review: the `"(a moment)"/"(just arrived)"` dwell neutralization is global, not
-presence-line-scoped — a bare parenthetical in unrelated prose would be masked key-side. Low
-practical risk (phrases rare outside the presence section; fixture proven stable); scope it to
-`With you:` lines at the NEXT natural re-record, since the key change invalidates the fixture.*
+presence-line-scoped — a bare parenthetical in unrelated prose would be masked key-side.
+**Refinement landed 2026-07-08** with the M0-7 re-record (the "next natural" one): the dwell subs
+are now scoped to the `With you:`/`Your room:` presence lines (`_PRESENCE_LINE_RES` in
+`frontend/src/golden_path.py`), the Your-room tenure clause covers its word forms too
+(`(you've been here just arrived/a moment)` — the old numeric-only pattern missed them), and an
+out-of-line parenthetical drifts the key again
+(`test_dwell_neutralization_is_scoped_to_presence_lines`).*
 Source: this session's determinism campaign. Four volatility classes are already fixed and
 committed (the wall-clock prompt section neutralized key-side; the web-search zeitgeist quiesced;
 the off-screen-texture and portrait pipelines quiesced — the ledger-diff finding; the presence

@@ -79,6 +79,18 @@ export interface OrchestratorConfig {
    * commit ticks only when this much wall time has passed since the user's last turn tick.
    */
   auxTickDebounceMs?: number;
+  /**
+   * 0108/M0-9 — deterministic tick pacing for the golden record/replay seam. Under the logical
+   * clock (M0-8) every commit advances "time" by a full step, so the wall-time aux debounce above
+   * NEVER absorbs (60s > 10s on every aux commit) and the house ticks once per TOOL CALL instead
+   * of once per turn. Worse than the E57 regression it resurrects: per-turn commit counts vary
+   * with the model's live round pacing (a stream-timing continuation is ±1 round record-vs-replay),
+   * so tick counts — and everything presence-sampled at turn boundaries (seating, dwell, the 0076
+   * movement cue) — fork the replay keys. With this flag an aux commit NEVER ticks: the off-screen
+   * tick fires only on progressed (beat) commits, which replay identically. Set by composeRuntime
+   * whenever the logical clock is active; never in production (the wall debounce is correct there).
+   */
+  auxTicksNever?: boolean;
 }
 
 export class Orchestrator {
@@ -98,6 +110,7 @@ export class Orchestrator {
   private readonly applyFn: NonNullable<OrchestratorConfig["apply"]>;
   private readonly turnDriven: boolean;
   private readonly auxTickDebounceMs: number;
+  private readonly auxTicksNever: boolean;
   private readonly rngs = new Map<string, SeededRandom>();
   private readonly health = new Map<string, HealthRecord>();
   private readonly lastActivity = new Map<string, number>();
@@ -121,6 +134,7 @@ export class Orchestrator {
     this.applyFn = cfg.apply ?? defaultApply;
     this.turnDriven = cfg.turnDriven ?? false;
     this.auxTickDebounceMs = cfg.auxTickDebounceMs ?? Orchestrator.AUX_TICK_DEBOUNCE_MS;
+    this.auxTicksNever = cfg.auxTicksNever ?? false;
   }
 
   /**
@@ -353,6 +367,7 @@ export class Orchestrator {
       || baseline.week !== candidate.week
       || baseline.phase !== candidate.phase
       || JSON.stringify(baseline.live ?? null) !== JSON.stringify(candidate.live ?? null);
+    if (!progressed && this.auxTicksNever) return; // M0-9: logical-clock runs tick on beats only
     const now = this.clock.now();
     const last = this.lastTurnTickAt.get(user);
     if (!progressed && last !== undefined && now - last < this.auxTickDebounceMs) return; // E57/R5

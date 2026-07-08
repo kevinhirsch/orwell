@@ -318,6 +318,15 @@ export interface GameStateView {
    * `createRefused` is.
    */
   createRefusedReason?: string;
+  /**
+   * M0-7 — the live pending decision, IDENTICAL to `gameStatus().pending` (both read
+   * `pendingView()`). The two closed-set projections of one sandbox used to DISAGREE: a
+   * pending created inside an advance (the eviction-vote ballot) surfaced on `gameStatus`
+   * but read null here, and any consumer keying on state inherited the gap silently (the
+   * golden driver absorbed 25 escalated turns on exactly this). Vault-free — the same
+   * legal-options view the decision card renders.
+   */
+  pending: PendingDecisionView | null;
 }
 
 /**

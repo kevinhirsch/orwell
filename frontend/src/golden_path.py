@@ -135,28 +135,45 @@ _WALLCLOCK_RES = (
     _re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AaPp][Mm])?\b"),
 )
 
-_GLOBAL_VOLATILE_RES = (
-    # The presence dwell counter in the moment prompt ("you've been here 4 turns"): it ticks per
-    # FRAMED MODEL ROUND, and round counts legitimately vary ±1 with stream timing (an agent-loop
-    # continuation decision), so a cosmetic counter would drift every later key. It is a specific
-    # phrase (never a game fact), so unlike the date/time shapes it is safe to neutralize wherever
-    # it appears — the recorded prompt keeps the real number; every other roster/room detail in
-    # the same section still keys (validated by the 0108 unit gates).
-    _re.compile(r"you'?ve been here \d+ turns?", _re.IGNORECASE),
-    # NPC dwell labels in the presence section — "(lingering, 9 turns)" / "(a moment)" /
-    # "(just arrived)" — derive from the SAME per-framed-round counter as turnsHere, so a
-    # legitimate ±1 round (stream-timing continuation) shifts every label. Record #9's replay
-    # diverged on EXACTLY this: identical co-present sets and rooms, every dwell +1. Cosmetic
-    # texture, never a game fact — neutralized key-side; the recorded bytes keep real labels.
-    _re.compile(r"\(lingering, \d+ turns?\)", _re.IGNORECASE),
-    _re.compile(r"\((?:a moment|just arrived)\)", _re.IGNORECASE),
+# The presence dwell counter/labels tick per FRAMED MODEL ROUND, and round counts
+# legitimately vary ±1 with stream timing (an agent-loop continuation decision), so a
+# cosmetic counter would drift every later key. Record #9's replay diverged on EXACTLY
+# this: identical co-present sets and rooms, every dwell +1. They are neutralized
+# key-side — but ONLY on the two prompt lines that render them (`Your room:` /
+# `With you:` in the whereabouts block, src/engine/momentPrompts.ts), so the same
+# parenthetical worded into unrelated prose ("she paused (a moment)") still drifts the
+# key like any other game fact (PR #1234 review — the old global sub masked those too).
+# The recorded bytes always keep the real labels; every other roster/room detail on the
+# same lines still keys (the 0108 unit gates).
+_PRESENCE_LINE_RES: tuple = (
+    # "With you: A (lingering, 9 turns), B (a moment), C (just arrived)."
+    (_re.compile(r"^\s*With you: .*$", _re.MULTILINE), (
+        _re.compile(r"\(lingering, \d+ turns?\)", _re.IGNORECASE),
+        _re.compile(r"\((?:a moment|just arrived)\)", _re.IGNORECASE),
+    )),
+    # "Your room: the living room (you've been here 3 turns)." — the tenure clause also
+    # renders word forms at t<=1 ("just arrived"/"a moment"), which the old numeric-only
+    # global pattern silently missed; [^)]* covers all three.
+    (_re.compile(r"^\s*Your room: .*$", _re.MULTILINE), (
+        _re.compile(r"\(you'?ve been here [^)]*\)", _re.IGNORECASE),
+    )),
 )
 
 
+def _neutralize_presence_lines(s: str) -> str:
+    for line_rx, subs in _PRESENCE_LINE_RES:
+        def _sub_line(m: "_re.Match[str]") -> str:
+            line = m.group(0)
+            for rx in subs:
+                line = rx.sub("<VOLATILE-TIME>", line)
+            return line
+        s = line_rx.sub(_sub_line, s)
+    return s
+
+
 def _neutralize_volatile(s: str) -> str:
-    # Specific, never-a-game-fact shapes are safe to neutralize anywhere in the prompt.
-    for rx in _GLOBAL_VOLATILE_RES:
-        s = rx.sub("<VOLATILE-TIME>", s)
+    # Dwell counters/labels are neutralized only on the presence lines that render them.
+    s = _neutralize_presence_lines(s)
     # Date/time shapes are neutralized ONLY inside the wall-clock context section, so a real
     # date/time embedded in game content or a tool result still drifts the key.
     idx = s.find(_WALLCLOCK_HEADER)

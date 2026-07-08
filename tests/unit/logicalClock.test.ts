@@ -97,4 +97,37 @@ describe("logical clock (M0-8) — pacing-invariant engine time", () => {
     const slow = await driveWalk(40);
     expect(slow).toBe(fast);
   }, 30_000);
+
+  it("aux commits never tick under the logical clock — seating frozen between beats (M0-9)", async () => {
+    // Under the logical clock every commit is a full step apart, so the wall-time aux
+    // debounce (E57) can never absorb — pre-fix, each aux commit fired an off-screen tick
+    // and NPC seating sampled at turn boundaries varied with the model's live round pacing
+    // (the 0076 movement-cue replay fork). With auxTicksNever, aux commits (an interaction,
+    // a met-mark) leave presence byte-stable; only beat commits move the house.
+    process.env.ORWELL_LOGICAL_CLOCK = "1";
+    const runtime = composeRuntime({ watcher: WATCHER_OFF });
+    try {
+      const tools = runtime.registry.resolver()("player", "frozen");
+      await tools.callTool("createCharacter", { playerName: "P", seed: 9109 });
+      // Reach the live house (premiere seats the cast).
+      await tools.callTool("advanceGame", {});
+      const state: any = await tools.callTool("getGameState", {});
+      const ids: string[] = (state.house ?? [])
+        .filter((h: any) => h.status === "active")
+        .map((h: any) => h.id);
+      expect(ids.length).toBeGreaterThan(2);
+      const before: any = await tools.callTool("whereabouts", {});
+      // A burst of AUX commits — each bumps the logical clock, none may tick the house.
+      for (let i = 0; i < 3 && i < ids.length; i++) {
+        await tools.callTool("recordInteraction", {
+          initiator: "player", withIds: [ids[i]], kind: "social",
+          content: "a quick word in passing", witnessSet: ["player", ids[i]],
+        });
+      }
+      const after: any = await tools.callTool("whereabouts", {});
+      expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+    } finally {
+      runtime.stop();
+    }
+  }, 30_000);
 });

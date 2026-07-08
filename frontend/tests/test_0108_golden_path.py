@@ -117,6 +117,32 @@ def test_npc_dwell_labels_never_drift_the_key(golden):
         golden.request_key("stream", moved, TOOLS, PARAMS)
 
 
+def test_dwell_neutralization_is_scoped_to_presence_lines(golden):
+    """PR #1234 review: the dwell subs are line-scoped — the SAME parenthetical worded
+    into unrelated prompt prose is a game fact and must still drift the key; and the
+    Your-room tenure clause neutralizes its word forms too (t<=1 renders "just arrived"/
+    "a moment", which the old numeric-only pattern missed)."""
+    prose_a = [{"role": "system", "content": "She hesitated (a moment) before answering."},
+               {"role": "user", "content": "hello"}]
+    prose_b = [{"role": "system", "content": "She hesitated (just arrived) before answering."},
+               {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", prose_a, TOOLS, PARAMS) != \
+        golden.request_key("stream", prose_b, TOOLS, PARAMS)
+    word_a = [{"role": "system", "content":
+               "Your room: the kitchen (you've been here just arrived).\nWith you: no one."},
+              {"role": "user", "content": "hello"}]
+    word_b = [{"role": "system", "content":
+               "Your room: the kitchen (you've been here a moment).\nWith you: no one."},
+              {"role": "user", "content": "hello"}]
+    word_c = [{"role": "system", "content":
+               "Your room: the kitchen (you've been here 2 turns).\nWith you: no one."},
+              {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", word_a, TOOLS, PARAMS) == \
+        golden.request_key("stream", word_b, TOOLS, PARAMS)
+    assert golden.request_key("stream", word_b, TOOLS, PARAMS) == \
+        golden.request_key("stream", word_c, TOOLS, PARAMS)
+
+
 def test_tool_schema_order_does_not_drift_the_key(golden):
     two = TOOLS + [{"type": "function", "function": {"name": "getGameState",
                                                       "parameters": {"type": "object"}}}]
@@ -423,3 +449,24 @@ def test_fixture_models_prefers_the_meta_declaration(golden, tmp_path, monkeypat
         {"key": "k1", "kind": "call", "seq": 1, "model": "cheap-model", "response": ""},
     ])
     assert fixture_models(str(bare)) == ("narrator-model", "cheap-model")
+
+
+def test_portrait_reconciler_is_quiesced_under_golden(monkeypatch):
+    """The G20 reconciler is a WALL-CLOCK background sweep (5-min interval) that generates
+    portraits through `backfill_missing` → `generate_and_store` and records image-shown
+    beats. A record run outlives the interval; a replay run doesn't (and its provider is a
+    dead end) — so a mid-record sweep bakes record-only `evt:image:*` events into the
+    fixture and every later event id / beatSeq shifts one (the r3 replay miss, 2026-07-08).
+    Under golden the reconciler must never start; the turn-driven portrait seams are
+    already covered by the kickoff_generation / kickoff_backfill guards."""
+    from conftest import _run
+
+    from src import orwell_portraits
+
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+
+    async def run():
+        return orwell_portraits.ensure_reconciler_started()
+
+    assert _run(run()) is False
+    assert orwell_portraits._RECONCILER_TASK is None

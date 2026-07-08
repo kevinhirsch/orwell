@@ -155,9 +155,14 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
     cfg.tickEveryMs = 0;
   }
   // Pure turn-driven mode (watcher disabled): the orchestrator fires one off-screen tick per player turn.
+  // M0-9: under the logical clock the wall-time aux debounce can never absorb (every commit is a
+  // full step), so aux commits must never tick — beats only. Per-turn commit counts vary with the
+  // model's live round pacing, and presence sampled off per-commit ticks forked golden replay keys
+  // (the 0076 movement cue was the surface). Beat commits replay identically; aux ones don't.
   const orchestrator = new Orchestrator(registry, clock, {
     ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     turnDriven: cfg.tickEveryMs === 0,
+    ...(logicalClock ? { auxTicksNever: true } : {}),
   });
   // The orchestrator becomes the real spine (B41/audit E3): every player-channel mutation now commits
   // through the fail-closed integrity checkpoint (+ touch + idle gating), not a blind save.
