@@ -102,6 +102,35 @@
     } catch (_) { /* fail open — the 2.5s backstop poll still recovers it */ }
   }
 
+  // M3-4 (road-to-market, pairs with M1-4/M2-2): a lightweight roster-portrait cache so a
+  // houseguest option carries their REAL persisted portrait when one exists — the designed
+  // monogram (M2-2) is the fallback, never the only face. Reads ONLY the public roster route
+  // (id/name/status/portrait — the same public projection every cast surface already renders);
+  // Vault-free by construction. Best-effort/fail-open: an unfetched or failed cache simply
+  // leaves every option on the monogram fallback (the sanctioned default), and self-heals on
+  // the next refresh — it NEVER blocks or delays the card (a binding decision must always
+  // reach the player immediately).
+  let _portraitById = Object.create(null);
+  let _rosterFetchedAt = 0;
+  async function _refreshRosterCache(force) {
+    const now = Date.now();
+    if (!force && now - _rosterFetchedAt < 8000) return; // /roster is already polled elsewhere too
+    _rosterFetchedAt = now;
+    try {
+      const r = await fetch("/api/orwell/roster", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const data = await r.json();
+      const roster = Array.isArray(data && data.roster) ? data.roster : [];
+      const map = Object.create(null);
+      for (const hg of roster) {
+        if (hg && hg.id != null) map[String(hg.id)] = { portrait: hg.portrait || null, status: hg.status || "active" };
+      }
+      _portraitById = map;
+    } catch (_) { /* fail open — every option renders the monogram fallback */ }
+  }
+  _refreshRosterCache(true);
+  window.addEventListener("orwell:gamechanged", () => _refreshRosterCache(true));
+
   function ensureStyles() {
     if (document.getElementById("orwell-decision-css")) return;
     const st = document.createElement("style");
@@ -196,14 +225,15 @@
         font: inherit;
         display: inline-flex; align-items: center; gap: .45em; /* M2-2: face + label */
       }
-      /* M2-2: houseguest options carry the shared designed monogram (OrwellMonogram kit) —
-         a person you pick, not an abstract label. Small, round-cornered, never the tap target
-         on its own (the whole chip is the button). */
+      /* M2-2/M3-4: houseguest options carry the shared designed-monogram-OR-portrait face
+         (OrwellMonogram kit) — a person you pick, not an abstract label. A real persisted
+         portrait renders when the roster cache has one; the monogram is the fallback. Small,
+         round-cornered, never the tap target on its own (the whole chip is the button). */
       #${CARD_ID} .odec-face {
         width: 22px; height: 22px; border-radius: 6px; overflow: hidden; flex: none;
         display: inline-block; pointer-events: none;
       }
-      #${CARD_ID} .odec-face .ow-mono-svg { display: block; width: 100%; height: 100%; }
+      #${CARD_ID} .odec-face .ow-mono-svg, #${CARD_ID} .odec-face img { display: block; width: 100%; height: 100%; }
       /* INT-26/VM-22: a non-binding comp-round's two NON-selected chips — dimmed + inert so
          they read as color-only, never as a live "you could change this" affordance. */
       #${CARD_ID} .odec-opt.odec-opt-inert { cursor: default; opacity: .4; }
@@ -543,14 +573,21 @@
       b.className = "ow-btn ow-btn-prominent odec-opt"; b.type = "button";
       b.setAttribute("aria-pressed", "false");
       if (person && window.OrwellMonogram) {
-        // The face svg carries initials as SVG <text>, which would pollute the button's
+        // The face carries initials/portrait pixels, which would pollute the button's
         // computed name ("AB Alice") — pin the accessible name to the label alone.
         b.setAttribute("aria-label", label);
-        // M2-2: the same designed monogram the cast surfaces render (id-seeded, Vault-free).
-        const f = document.createElement("span");
-        f.className = "odec-face";
+        // M2-2/M3-4: the SAME designed-monogram-or-portrait face the cast surfaces render
+        // (id-seeded, Vault-free) — a real persisted portrait when the roster cache has one,
+        // the monogram otherwise (OrwellMonogram.face()'s own sanctioned fallback).
+        const cached = _portraitById[String(person.id)];
+        const f = window.OrwellMonogram.face(
+          { id: person.id, name: person.name || label,
+            status: (cached && cached.status) || "active",
+            portrait: cached && cached.portrait },
+          { alt: label }
+        );
+        f.classList.add("odec-face");
         f.setAttribute("aria-hidden", "true");
-        f.innerHTML = window.OrwellMonogram.svg({ id: person.id, name: person.name || label });
         b.appendChild(f);
       }
       b.appendChild(document.createTextNode(label));

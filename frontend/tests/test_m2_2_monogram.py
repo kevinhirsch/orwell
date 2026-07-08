@@ -73,9 +73,12 @@ def test_cast_pin_consumes_the_kit():
 
 def test_decision_chips_consume_the_kit():
     js = _read("static/js/orwellDecision.js")
-    assert "OrwellMonogram.svg(" in js
+    # M3-4: decision chips upgraded from the monogram-only .svg() to the kit's .face() —
+    # a real persisted portrait when the roster cache has one, the SAME designed monogram as
+    # the sanctioned fallback otherwise (still the ONE shared kit, never a bespoke render path).
+    assert "OrwellMonogram.face(" in js
     assert "odec-face" in js
-    # the accessible-name belt: the face svg's initials must not pollute the option name
+    # the accessible-name belt: the face's initials/portrait must not pollute the option name
     assert 'setAttribute("aria-label", label)' in js
 
 

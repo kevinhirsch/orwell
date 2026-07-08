@@ -91,8 +91,19 @@ import * as modalManager from "./modalManager.js";
            mono use; the rest of the window now rides the kit's --ow-ui-font (above). */
         #orwell-finale .ofin-fin .ofin-tally { font-family: var(--mono, monospace); font-size: 1.1rem; opacity: .9; }
         #orwell-finale .ofin-hd { opacity: .6; margin: .5rem 0 .25rem; letter-spacing: .03em; }
-        #orwell-finale .ofin-reveal { margin: .2rem 0; opacity: .9; }
+        #orwell-finale .ofin-reveal { margin: .2rem 0; opacity: .9; display: flex; align-items: center; flex-wrap: wrap; gap: .3rem; }
         #orwell-finale .ofin-reveal b { color: var(--fg, #9cdef2); }
+        /* M3-4: the finalist card + reveal-row face — the OrwellMonogram kit's designed
+           portrait-or-monogram tile, sized small and never the interactive target on its own
+           (this panel's move buttons are the affordances; the face is presentation only). */
+        #orwell-finale .ofin-fin .ofin-face {
+          width: 28px; height: 28px; border-radius: 8px; overflow: hidden; margin: 0 auto .3rem;
+          display: block;
+        }
+        #orwell-finale .ofin-reveal .ofin-face {
+          width: 16px; height: 16px; border-radius: 4px; overflow: hidden; flex: none;
+          display: inline-block; margin: 0;
+        }
         #orwell-finale .ofin-move { margin-top: .5rem; }
         /* #775 element-kit migration: the finale move buttons now compose .ow-btn
            .ow-btn-secondary (the kit owns frosted chrome — ONE source of truth). This
@@ -189,6 +200,41 @@ import * as modalManager from "./modalManager.js";
     if (ref && ref.id != null && _nameById[String(ref.id)]) return _nameById[String(ref.id)];
     return "A houseguest";
   }
+  // M3-4 (road-to-market): a lightweight roster-portrait cache — mirrors _nameById's fetch-and-
+  // cache shape, but /state (the finale's own name source) carries no portrait ref, so this reads
+  // the public roster route (id/name/status/portrait — the SAME public projection every cast
+  // surface renders; Vault-free). Fire-and-forget from refresh() (below): a not-yet-warm or
+  // failed cache simply leaves every face on the OrwellMonogram fallback and self-heals on the
+  // next 5s/45s poll — it never blocks the finale panel.
+  let _portraitById = Object.create(null);
+  async function _refreshRosterCache() {
+    try {
+      const r = await fetch("/api/orwell/roster", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const data = await r.json();
+      const roster = Array.isArray(data && data.roster) ? data.roster : [];
+      const map = Object.create(null);
+      for (const hg of roster) {
+        if (hg && hg.id != null) map[String(hg.id)] = { portrait: hg.portrait || null, status: hg.status || "active" };
+      }
+      _portraitById = map;
+    } catch (_) { /* fail open — every face renders the monogram fallback */ }
+  }
+  // The finale jury reveal rows carry faces (M3-4): a small OrwellMonogram face (portrait, or the
+  // monogram fallback) for a NamedRef — null when the kit or the ref is unavailable, so callers can
+  // skip appending it (fails open; text-only rows are still fully correct).
+  function faceEl(ref) {
+    if (!ref || !window.OrwellMonogram) return null;
+    const cached = ref.id != null ? _portraitById[String(ref.id)] : null;
+    const el = window.OrwellMonogram.face(
+      { id: ref.id, name: nameOf(ref), status: (cached && cached.status) || "active",
+        portrait: cached && cached.portrait },
+      { alt: nameOf(ref) }
+    );
+    el.classList.add("ofin-face");
+    el.setAttribute("aria-hidden", "true");
+    return el;
+  }
   // -1 = not yet rendered this page load. The FIRST render (live OR after a refresh) syncs
   // the count WITHOUT announcing — otherwise a reload mid-finale re-announced every vote
   // already on screen through the aria-live region (reload-persistence audit). Only reveals
@@ -248,6 +294,8 @@ import * as modalManager from "./modalManager.js";
     for (const f of finalists) {
       const card = document.createElement("div");
       card.className = "ofin-fin";
+      const face = faceEl(f); // M3-4: the finale jury reveal rows carry faces
+      if (face) card.appendChild(face);
       const b = document.createElement("b"); b.textContent = nameOf(f);
       const t = document.createElement("span"); t.className = "ofin-tally"; t.textContent = String(tally[f.id] || 0);
       t.setAttribute("aria-label", String(tally[f.id] || 0) + " votes"); // J5-14: the bare number has no accessible meaning
@@ -276,9 +324,18 @@ import * as modalManager from "./modalManager.js";
     for (const r of reveals) {
       const line = document.createElement("div");
       line.className = "ofin-reveal";
-      line.innerHTML = "<b></b> votes for <b></b>";
-      const bs = line.querySelectorAll("b");
-      bs[0].textContent = nameOf(r.juror); bs[1].textContent = nameOf(r.votedFor);
+      // M3-4: each reveal row carries the juror's + the voted-for finalist's face (portrait, or
+      // the OrwellMonogram fallback) beside their name — built via DOM (not innerHTML) so the
+      // faces slot in at the right reading-order position; aria-hidden keeps them decorative.
+      const jFace = faceEl(r.juror);
+      if (jFace) line.appendChild(jFace);
+      const jB = document.createElement("b"); jB.textContent = nameOf(r.juror);
+      line.appendChild(jB);
+      line.appendChild(document.createTextNode(" votes for "));
+      const vFace = faceEl(r.votedFor);
+      if (vFace) line.appendChild(vFace);
+      const vB = document.createElement("b"); vB.textContent = nameOf(r.votedFor);
+      line.appendChild(vB);
       revWrap.appendChild(line);
     }
 
@@ -346,6 +403,10 @@ import * as modalManager from "./modalManager.js";
     // GADGET-15: resolve names against the SAME /state roster already fetched above (public
     // NamedRef-shaped facts — no extra call, no Vault data).
     _nameById = nameMapFrom(st);
+    // M3-4: fire-and-forget the portrait cache refresh — render() uses whatever is already
+    // cached (fills in on the NEXT poll if this is the very first finale render this session),
+    // so a slow/failed roster read never delays the finale panel.
+    _refreshRosterCache();
     render(finale);
   }
 
