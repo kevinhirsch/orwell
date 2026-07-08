@@ -143,6 +143,13 @@ _GLOBAL_VOLATILE_RES = (
     # it appears — the recorded prompt keeps the real number; every other roster/room detail in
     # the same section still keys (validated by the 0108 unit gates).
     _re.compile(r"you'?ve been here \d+ turns?", _re.IGNORECASE),
+    # NPC dwell labels in the presence section — "(lingering, 9 turns)" / "(a moment)" /
+    # "(just arrived)" — derive from the SAME per-framed-round counter as turnsHere, so a
+    # legitimate ±1 round (stream-timing continuation) shifts every label. Record #9's replay
+    # diverged on EXACTLY this: identical co-present sets and rooms, every dwell +1. Cosmetic
+    # texture, never a game fact — neutralized key-side; the recorded bytes keep real labels.
+    _re.compile(r"\(lingering, \d+ turns?\)", _re.IGNORECASE),
+    _re.compile(r"\((?:a moment|just arrived)\)", _re.IGNORECASE),
 )
 
 

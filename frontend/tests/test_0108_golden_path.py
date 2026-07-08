@@ -98,6 +98,25 @@ def test_presence_dwell_counter_never_drifts_the_key(golden):
         golden.request_key("stream", moved, TOOLS, PARAMS)
 
 
+def test_npc_dwell_labels_never_drift_the_key(golden):
+    """NPC dwell labels ride the same per-framed-round counter as turnsHere; a legitimate
+    ±1 round shifts every label (record #9's replay diverged on exactly this). Neutralized
+    key-side; a real presence change (who is co-present) still drifts."""
+    a = [{"role": "system", "content":
+          "With you: A (lingering, 9 turns), B (just arrived), C (lingering, 22 turns)."},
+         {"role": "user", "content": "hello"}]
+    b = [{"role": "system", "content":
+          "With you: A (lingering, 10 turns), B (a moment), C (lingering, 23 turns)."},
+         {"role": "user", "content": "hello"}]
+    moved = [{"role": "system", "content":
+              "With you: A (lingering, 9 turns), D (just arrived), C (lingering, 22 turns)."},
+             {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", a, TOOLS, PARAMS) == \
+        golden.request_key("stream", b, TOOLS, PARAMS)
+    assert golden.request_key("stream", a, TOOLS, PARAMS) != \
+        golden.request_key("stream", moved, TOOLS, PARAMS)
+
+
 def test_tool_schema_order_does_not_drift_the_key(golden):
     two = TOOLS + [{"type": "function", "function": {"name": "getGameState",
                                                       "parameters": {"type": "object"}}}]
