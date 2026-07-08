@@ -184,12 +184,44 @@ def test_met_progress_gate_behaviour():
 def test_strip_hides_when_premiere_absent_or_complete():
     src = _read(PANEL)
     body = _fn_body(src, "renderPremiereStrip")
-    # absent OR complete OR no kit -> hide the strip and tear its tiles down.
+    # absent OR complete OR no kit -> hide the strip and tear its tiles down via the shared helper.
     assert "prem.complete" in body
-    assert "strip.hidden = true" in body
-    # the parent #os-premiere block is itself hidden by renderPremiere on complete (the outer retire).
+    assert "clearPremiereStrip(el)" in body
+    # the shared teardown both hides the strip AND removes every tile (button + its click listener).
+    clear = _fn_body(src, "clearPremiereStrip")
+    assert "strip.hidden = true" in clear
+    assert "_stripTiles.delete(k)" in clear
+    # the parent #os-premiere block is itself hidden by renderPremiere on complete (the outer retire) …
     prem = _fn_body(src, "renderPremiere")
     assert "wrap.hidden = true" in prem
+    # … and renderPremiere ALSO tears the strip down on its early hide paths (no stale tiles linger).
+    assert "clearPremiereStrip(el)" in prem
+
+
+def test_empty_strip_stays_hidden_against_the_flex_default():
+    """The `.os-prem-strip` rule sets display:flex, which would override the UA [hidden]{display:none};
+    an explicit `[hidden]{display:none!important}` keeps an empty strip (no premiere / no cards) from
+    rendering as a blank flex row."""
+    src = _read(PANEL)
+    assert ".os-prem-strip[hidden]" in src
+    assert re.search(r"\.os-prem-strip\[hidden\]\s*\{\s*display:\s*none\s*!important", src)
+
+
+def test_strip_is_capped_at_sixteen_tiles_and_deduped():
+    """The strip is player + up to 15 houseguests; an oversized/duplicated public roster must not
+    exceed sixteen tiles or repeat an id."""
+    src = _read(PANEL)
+    body = _fn_body(src, "renderPremiereStrip")
+    assert "cards.length >= 16" in body          # the hard cap
+    assert "cardKeys" in body                     # the id-dedupe guard
+
+
+def test_met_lighting_honors_the_name_fallback():
+    """premiereUnmetIds keys by id-or-name; the tile lighting must check BOTH so a name-only
+    `remaining` ref doesn't wrongly light an id-carrying roster card as met."""
+    src = _read(PANEL)
+    body = _fn_body(src, "renderPremiereStrip")
+    assert "unmet.has(String(card.name))" in body
 
 
 def test_strip_is_the_unlit_class_gate():

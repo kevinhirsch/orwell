@@ -251,6 +251,9 @@ import { onNarrowChange } from './platform.js';
           overflow-x: auto; overflow-y: hidden;
           scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent;
         }
+        /* An author display:flex overrides the UA [hidden]{display:none}, so pin the hidden state
+           explicitly — an empty strip (no premiere / no cards) must not render as a blank flex row. */
+        #orwell-status .os-prem-strip[hidden] { display: none !important; }
         #orwell-status .os-prem-strip::-webkit-scrollbar { height: 5px; }
         #orwell-status .os-prem-strip::-webkit-scrollbar-track { background: transparent; }
         #orwell-status .os-prem-strip::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 999px; }
@@ -544,10 +547,10 @@ import { onNarrowChange } from './platform.js';
     const wrap = el.querySelector("#os-premiere");
     if (!wrap) return;
     const prem = state && state.premiere;
-    if (!prem || typeof prem !== "object" || prem.complete) { wrap.hidden = true; return; }
+    if (!prem || typeof prem !== "object" || prem.complete) { clearPremiereStrip(el); wrap.hidden = true; return; }
     const total = Number(prem.total) - 1;     // NPCs only
     const met = Number(prem.metCount) - 1;    // NPCs the player has met
-    if (!(total > 0) || !(met >= 0)) { wrap.hidden = true; return; }
+    if (!(total > 0) || !(met >= 0)) { clearPremiereStrip(el); wrap.hidden = true; return; }
     const countEl = el.querySelector("#os-prem-count");
     if (countEl) countEl.textContent = met + " of " + total + " met";
     // The still-to-meet names (the same observable roster facets the engine exposes) — so the panel
@@ -575,13 +578,20 @@ import { onNarrowChange } from './platform.js';
   // augments, never replaces). It lives inside #os-premiere, so it appears only during the premiere and
   // retires with the block the moment the first HOH begins. Keyed, idempotent upsert (no flicker).
   const _stripTiles = new Map(); // roster id -> tile button
+  // Shared teardown: hide the strip and remove every tile (buttons + their click listeners). Called from
+  // renderPremiereStrip AND from every renderPremiere hide/early-return path, so stale tiles never linger
+  // in the hidden block when the premiere completes or becomes invalid.
+  function clearPremiereStrip(el) {
+    const strip = el && el.querySelector("#os-prem-strip");
+    if (strip) strip.hidden = true;
+    for (const [k, t] of Array.from(_stripTiles)) { t.remove(); _stripTiles.delete(k); }
+  }
   function renderPremiereStrip(el, state) {
     const strip = el.querySelector("#os-prem-strip");
     if (!strip) return;
     const prem = state && state.premiere;
     if (!prem || typeof prem !== "object" || prem.complete || !window.OrwellMonogram) {
-      strip.hidden = true;
-      for (const [k, t] of Array.from(_stripTiles)) { t.remove(); _stripTiles.delete(k); }
+      clearPremiereStrip(el);
       return;
     }
     // The full roster (player + house) — the same public cards the cast gallery renders. /state carries
@@ -590,12 +600,17 @@ import { onNarrowChange } from './platform.js';
     const p = state && state.player;
     if (p && p.name) cards.push({ id: p.id || "player", name: p.name, status: p.status || "active", isPlayer: true });
     const house = Array.isArray(state && state.house) ? state.house : [];
+    const cardKeys = new Set(cards.map((c) => String(c.id))); // dedupe a repeated public-roster entry
     for (const h of house) {
-      if (h && h.name) cards.push({ id: h.id || h.name, name: h.name, status: h.status || "active", isPlayer: false });
+      if (cards.length >= 16) break;                          // player + up to 15 houseguests = the 16-tile strip
+      if (!h || !h.name) continue;
+      const hk = String(h.id || h.name);
+      if (cardKeys.has(hk)) continue;
+      cardKeys.add(hk);
+      cards.push({ id: h.id || h.name, name: h.name, status: h.status || "active", isPlayer: false });
     }
     if (!cards.length) {
-      strip.hidden = true;
-      for (const [k, t] of Array.from(_stripTiles)) { t.remove(); _stripTiles.delete(k); }
+      clearPremiereStrip(el);
       return;
     }
     const unmet = new Set(premiereUnmetIds(prem)); // the not-yet-lit tiles
@@ -603,7 +618,7 @@ import { onNarrowChange } from './platform.js';
     for (const card of cards) {
       const key = String(card.id);
       seen.add(key);
-      const met = card.isPlayer || !unmet.has(key); // the player is always "met"
+      const met = card.isPlayer || (!unmet.has(key) && !unmet.has(String(card.name))); // player always met; honor premiereUnmetIds' id-or-name key
       let tile = _stripTiles.get(key);
       if (!tile) {
         tile = document.createElement("button");
