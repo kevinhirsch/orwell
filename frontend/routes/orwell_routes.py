@@ -822,10 +822,12 @@ def setup_orwell_routes() -> APIRouter:
             _warn_throttled("knowledge", f"[orwell] knowledge failed: {_err_detail(e)}")
             return {"started": False, "items": []}
         # A successful visible-state read means a game is live. Fetch state ONLY for the public
-        # roster name map (subject + teller resolution); its failure just drops names, never the journal.
+        # roster name map (subject + teller resolution); its failure just drops names, never the
+        # journal. Poll timeout (not the 3s framing default) — matches /roster, drops names less
+        # often under load.
         state: dict = {}
         try:
-            got = await orwell_engine.get_game_state(user=user)
+            got = await orwell_engine.get_game_state(user=user, timeout=orwell_engine._POLL_TIMEOUT)
             if isinstance(got, dict):
                 state = got
         except Exception as e:
