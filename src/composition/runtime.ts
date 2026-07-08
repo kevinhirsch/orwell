@@ -165,7 +165,16 @@ export function composeRuntime(opts: RuntimeOptions = {}): Runtime {
   // the commit runs, so the tick this commit fires sees the new minute. Reads never advance.
   registry.setCommit((user) => {
     if (logicalClock) logicalClock.advance(LOGICAL_CLOCK_STEP_MS);
-    orchestrator.commitPlayerTurn(user);
+    try {
+      orchestrator.commitPlayerTurn(user);
+    } catch (e) {
+      // A REFUSED commit (TurnRefused / PersistFailure) rolled the sandbox back — roll the
+      // minute back too, so a retry of the same turn sees the same clock-derived tick seeds
+      // and recency windows (review finding: an advanced clock on a failed commit would fork
+      // the retry). Refusals are deterministic, so record and replay roll back alike.
+      if (logicalClock) logicalClock.advance(-LOGICAL_CLOCK_STEP_MS);
+      throw e;
+    }
   });
   // The ONE restart door is COMPLETE (audit E1/D1/R1): when a season resets — admin reset or the
   // player channel's confirmed restart, both via registry.resetUser — the orchestrator forgets the
