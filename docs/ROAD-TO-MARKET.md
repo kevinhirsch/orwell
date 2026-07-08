@@ -291,14 +291,23 @@ Source: repo's own owed-verification list; market #3 ("prove the real product wo
   sequence including a mid-generation join; the mid-gen-join behavior pinned by a test (the owed
   "test pin" from the ADR-0010/0012 residual list); results appended to the ship-gate doc.
 
-### M0-4 · A-S3: stale-409 must not drop a scene's only consequence fold — M (engine)
-Source: audit A10 — `recordInteraction → StaleBeatError` fired in an ordinary 40-minute session;
-`docs/REFACTOR-ROADMAP.md` A-S3 pulled forward from post-launch.
-- **DoR:** repro read (admin error table row); decision on strategy (retry with refreshed
-  `beatSeq` vs queue-and-refold) taken from the roadmap's A-S3 sketch.
-- **DoD:** a 409'd `recordInteraction` whose scene recorded nothing else re-lands its fold
-  (never silently dropped); engine unit test simulating the stale-CAS race; the sync-ledger
-  records the recovery; `npm test` green.
+### M0-4 · A-S3: stale-409 must not drop a scene's only consequence fold — M (engine) · ✅ DONE (was already shipped; row was stale)
+*Source-verified 2026-07-08: the CON-11 audit campaign had already built the full R1c design —
+this row predated it. Both strategies from the DoR landed, layered: (1) **retry-once with the
+refreshed token** — `agent_loop._backfill_with_cas` reconciles a stale-409 via
+`_handle_stale_beat` and re-attempts against the fresh `beatSeq` (safe because the engine throws
+BEFORE any record/fold — fail-closed CAS); (2) **queue-and-refold** — a SECOND consecutive 409 on
+a fold-bearing call (`defer_fold=True`) queues into the bounded per-owner
+`chat_helpers._defer_fold` queue, drained at the top of every later back-fill
+(`_drain_deferred_folds`) — the loss is bounded to latency, never data; positional belts
+(`moveTo`) keep reconcile-and-skip by design (a stale location re-derived late would be wrong).
+The MODEL-called `do_record_interaction` attaches no CAS token at all, so it structurally cannot
+409. DoD mapping: engine stale-CAS race test = `tests/unit/syncSpine.test.ts` ("a stale
+recordInteraction folds NOTHING; the re-attempt at the fresh beatSeq folds exactly once (#591)");
+FE gates = `frontend/tests/test_0065_backfill_cas.py` (14 tests: retry-lands, double-409 defers,
+drain-lands, overflow-drops-loudly, no-self-409); ledger = per-turn `staleRejections` in
+`orwell_sync_ledger` + the `deferred_fold_count()` ops hook. Both suites green this session
+(engine `test:ci` 623 scenarios; fe-unit 4021).*
 
 ---
 
