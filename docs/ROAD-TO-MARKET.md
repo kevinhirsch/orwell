@@ -483,7 +483,15 @@ Source: audit B2 (`s-b1` — empty premiere, `HOH — / Noms — / Veto —`). D
   dead board rows read "First HOH tonight" instead of em-dashes; strip disappears (or docks)
   after the first HOH; Vault-free proof (tiles render only roster/met/public-status data).
 
-### M2-4 · One verb set across the entry journey — S · `P2`
+### M2-4 · One verb set across the entry journey — S · `P2` · ✅ DONE
+*2026-07-08: the pinned line is one diegetic, house-centric register — **Enter the house →
+Take your cast photo → Meet the house**. M2-1 set the onboarding CTA; this renames the casting
+photo pill ("Choose Your Character" was RPG-speak off the fiction) with its aria following; the
+premiere tutorial + status-panel objective already spoke "Meet the house" and stay. Structural
+ids (`data-ob-setup-start`, `orwell-choose-character`, `hs-choose-btn`) unchanged. Gate:
+`tests/test_m2_4_verb_set.py` — pins each surface to its verb AND asserts the retired verbs are
+no longer renderable (render-site scan, so history comments stay legal); smoke + oobe pins moved.*
+
 Source: audit B9 ("Start casting" / "Choose Your Character" / "Meet the house").
 - **DoD:** one naming line (casting → premiere → play) applied across onboarding card, chat gate
   card, and premiere card; pytest source gate pinning the copy set so it can't re-diverge.

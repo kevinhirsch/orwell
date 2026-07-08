@@ -2734,7 +2734,7 @@ def main() -> int:
                   "P1: the composer placeholder is NOT the old hard-gate reason")
             # MID-INTERVIEW REVEAL: simulate the producers' opener (a rendered .msg.msg-ai); the
             # engine-gated step (casting.missing includes "castPhoto") now surfaces — but per Thing 2
-            # the box NO LONGER auto-opens: a competition-style "Choose Your Character" pill appears
+            # the box NO LONGER auto-opens: a competition-style "Take your cast photo" pill appears
             # in the chat after the question, and clicking IT opens the box.
             f4.evaluate("""() => {
               const h = document.getElementById('chat-history');
@@ -2753,9 +2753,9 @@ def main() -> int:
                 return !!(p && (!h || !h.contains(p))); })(),
               boxAutoOpened: !!document.getElementById('orwell-headshot'),
             })""")
-            check(pill.get("pill") is True and pill.get("text") == "Choose Your Character"
+            check(pill.get("pill") is True and pill.get("text") == "Take your cast photo"
                   and pill.get("pinnedAboveComposer") is True and pill.get("boxAutoOpened") is False,
-                  f"P1/Thing2/#913: the 'Choose Your Character' pill appears pinned above the composer (not inline in history); the box does NOT auto-open ({pill})")
+                  f"P1/Thing2/#913/M2-4: the 'Take your cast photo' pill appears pinned above the composer (not inline in history); the box does NOT auto-open ({pill})")
             # Clicking the pill opens the box (and removes the pill).
             f4.click(".hs-choose-btn")
             f4.wait_for_timeout(800)
