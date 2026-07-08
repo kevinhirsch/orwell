@@ -185,7 +185,9 @@ def test_strip_hides_when_premiere_absent_or_complete():
     src = _read(PANEL)
     body = _fn_body(src, "renderPremiereStrip")
     # absent OR complete OR no kit -> hide the strip and tear its tiles down via the shared helper.
-    assert "prem.complete" in body
+    assert "!prem" in body                     # absent-premiere guard
+    assert "prem.complete" in body             # complete guard
+    assert "!window.OrwellMonogram" in body    # no-kit guard
     assert "clearPremiereStrip(el)" in body
     # the shared teardown both hides the strip AND removes every tile (button + its click listener).
     clear = _fn_body(src, "clearPremiereStrip")
@@ -221,6 +223,9 @@ def test_met_lighting_honors_the_name_fallback():
     `remaining` ref doesn't wrongly light an id-carrying roster card as met."""
     src = _read(PANEL)
     body = _fn_body(src, "renderPremiereStrip")
+    # BOTH lookups must survive: the id path (key = String(card.id)) and the name fallback.
+    assert "const key = String(card.id)" in body
+    assert "unmet.has(key)" in body
     assert "unmet.has(String(card.name))" in body
 
 
