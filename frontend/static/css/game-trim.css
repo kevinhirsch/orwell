@@ -218,3 +218,32 @@ body.ow-onboarding #orwell-notice-toast { top: 64px; }
 .ob-prod-settings-link:focus-visible {
   color: var(--fg);
 }
+
+/* ── M2-5 (audit B7): tool beats read as PRODUCTION SLATES in the game build ─────────────
+ * One aligned rail (a thin accent rule down the beat column), the label set in slate type
+ * (small-caps tracking, dimmed ink), no debug tail (the "done" span is suppressed at the
+ * render site; this styles what remains). Scoped to the game build only — the workspace
+ * build keeps the technical thread look. */
+body[data-game-build] .agent-thread-node {
+  border-left: 2px solid color-mix(in srgb, var(--fg, #9cdef2) 22%, transparent);
+  padding-left: .55rem;
+  margin-left: .1rem;
+}
+body[data-game-build] .agent-thread-node + .agent-thread-node { margin-top: .18rem; }
+body[data-game-build] .agent-thread-tool {
+  font-size: .72rem;
+  font-weight: 650;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  opacity: .78;
+}
+body[data-game-build] .agent-thread-node .agent-thread-icon { opacity: .6; }
+/* an OUTCOME slate keeps its richer type — outcomes are the show speaking. Keyed on the
+   persistent .ow-slate-outcome marker (the reveal class is transient — it clears after the
+   entrance animation, which would have snapped outcomes back to slate caps). */
+body[data-game-build] .agent-thread-node.ow-slate-outcome .agent-thread-tool {
+  text-transform: none;
+  letter-spacing: .01em;
+  font-size: .8rem;
+  opacity: .95;
+}

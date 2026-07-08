@@ -194,7 +194,16 @@
       #${CARD_ID} .odec-opt {
         cursor: pointer; border-radius: 999px; padding: .5rem .8rem; min-height: 44px;
         font: inherit;
+        display: inline-flex; align-items: center; gap: .45em; /* M2-2: face + label */
       }
+      /* M2-2: houseguest options carry the shared designed monogram (OrwellMonogram kit) —
+         a person you pick, not an abstract label. Small, round-cornered, never the tap target
+         on its own (the whole chip is the button). */
+      #${CARD_ID} .odec-face {
+        width: 22px; height: 22px; border-radius: 6px; overflow: hidden; flex: none;
+        display: inline-block; pointer-events: none;
+      }
+      #${CARD_ID} .odec-face .ow-mono-svg { display: block; width: 100%; height: 100%; }
       /* INT-26/VM-22: a non-binding comp-round's two NON-selected chips — dimmed + inert so
          they read as color-only, never as a live "you could change this" affordance. */
       #${CARD_ID} .odec-opt.odec-opt-inert { cursor: default; opacity: .4; }
@@ -529,11 +538,22 @@
       hint.hidden = !confirm.disabled;
     };
 
-    const addChip = (label, value) => {
+    const addChip = (label, value, person) => {
       const b = document.createElement("button");
       b.className = "ow-btn ow-btn-prominent odec-opt"; b.type = "button";
       b.setAttribute("aria-pressed", "false");
-      b.textContent = label;
+      if (person && window.OrwellMonogram) {
+        // The face svg carries initials as SVG <text>, which would pollute the button's
+        // computed name ("AB Alice") — pin the accessible name to the label alone.
+        b.setAttribute("aria-label", label);
+        // M2-2: the same designed monogram the cast surfaces render (id-seeded, Vault-free).
+        const f = document.createElement("span");
+        f.className = "odec-face";
+        f.setAttribute("aria-hidden", "true");
+        f.innerHTML = window.OrwellMonogram.svg({ id: person.id, name: person.name || label });
+        b.appendChild(f);
+      }
+      b.appendChild(document.createTextNode(label));
       b.addEventListener("click", () => {
         const on = b.getAttribute("aria-pressed") === "true";
         if (on) {
@@ -621,7 +641,7 @@
         sync();
       });
       (pending.options || []).forEach((o) => {
-        const chip = addChip("Save " + (o.name || o.id), o.id);
+        const chip = addChip("Save " + (o.name || o.id), o.id, o); // M2-2: person option
         chip.addEventListener("click", () => {
           useVeto = sel.length === 1 ? true : null;
           dont.setAttribute("aria-pressed", "false");
@@ -629,7 +649,10 @@
         });
       });
     } else {
-      (pending.options || []).forEach((o) => addChip(o.name || String(o.id), o.id));
+      // M2-2: every kind that lands here picks a HOUSEGUEST (nominations, eviction-vote,
+      // replacement, houseguests-choice, tie-break, juror-vote, final-eviction) — the chip
+      // carries the person's face. Tone/approach kinds branch above and stay text-only.
+      (pending.options || []).forEach((o) => addChip(o.name || String(o.id), o.id, o));
     }
 
     const row = document.createElement("div");

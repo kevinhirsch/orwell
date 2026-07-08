@@ -1,5 +1,12 @@
 # Road-to-market backlog — waves M0–M4 (2026-07-07)
 
+> **Status (2026-07-08, close of the build session):** **Wave M0 — DONE** (the golden gate is
+> ARMED; owner actions owed: the `OPENROUTER_API_KEY` repo secret + rotating the in-chat key).
+> **Wave M1 — DONE** (10/10). **Wave M2 — 4/8 shipped**: M2-1 ✅ · M2-2 ✅ (owner approved the
+> mock in-session) · M2-4 ✅ · M2-5 ✅ (owner pick: "Production") — M2-3 is next (unblocked by
+> M2-2), M2-6 has recon notes inline, M2-7/M2-8 are small P3s. **Waves M3–M4 — not started**
+> (M3 depends on M2-2, now in). Shipped via PR **#1234 (merged)** and PR **#1235 (open)**.
+
 **What this is.** The consolidated, owner-triaged backlog from the 2026-07-07 FE–BE integration
 review session: every actionable item from the screenshot audit
 (`docs/audits/2026-07-07-fe-be-integration-gap-review.md`), the faces-in-the-flow idea catalog,
@@ -466,7 +473,20 @@ Source: audit B1 (`s-a1` — raw model IDs above the fantasy). Depends: M1-6.
   provider/model id string anywhere on the first screen (pytest source gate); onboarding
   browser-smoke block updated.
 
-### M2-2 · Designed monogram portrait system + role badges — M–L · `P1` (the leverage item)
+### M2-2 · Designed monogram portrait system + role badges — M–L · `P1` (the leverage item) · ✅ DONE (owner mock APPROVED 2026-07-08)
+*2026-07-08: `orwellMonogram.js` — ONE kit component: id-seeded two-tone gradient (FNV +
+murmur-avalanche finalizer so sequential ids spread the wheel) + four broadcast pattern
+families + two-letter initials + camera-bug ring; fixed badge set (HOH crown / nominee
+target / veto V / winner star) composites bottom-right on portrait AND monogram; eviction
+stays the L16 grayscale (kit-owned). Consumers wired: cast window (badges from
+`/api/orwell/status` riding the roster poll; "In the house" caption suppressed for the
+default state), cast pin (silhouette → designed monogram + badges), decision chips (person
+options carry a 22px face, aria-name pinned to the label). The DoR mock is
+`docs/mocks/m2-2-monogram-template.html` (static, self-contained — owner approves in the PR;
+constants live in the kit so template tweaks are one-file). Gates:
+`tests/test_m2_2_monogram.py`, the J2-15 pin retargeted, browser-smoke zero-provider
+designed-monogram assert.*
+
 Source: audit B3 (`s-d1` flat letter-rectangles); prerequisite for M3-* faces work.
 - **DoR:** one designed template (archetype-tinted gradient + pattern + typography) approved via
   a static mock in the PR; badge set fixed (HOH crown / nominee target / veto / evicted / winner).
@@ -476,19 +496,43 @@ Source: audit B3 (`s-d1` flat letter-rectangles); prerequisite for M3-* faces wo
   and decision cards consume the same component; browser-smoke asserts monograms render with
   zero image provider configured.
 
-### M2-3 · Premiere cast strip + pre-HOH board reframe — M · `P1`
-Source: audit B2 (`s-b1` — empty premiere, `HOH — / Noms — / Veto —`). Depends: M2-2.
+### M2-3 · Premiere cast strip + pre-HOH board reframe — M · `P1` · NEXT (unblocked — M2-2 is in)
+*Hand-off: build the 16-tile strip on `OrwellMonogram.face()` (it already takes the roster card
++ status; met flags ride the roster); the met-progress count lives in `orwellStatusPanel.js`
+(`os-prem-count`); the dead pre-HOH board rows render in the status panel — reframe when
+`status.hoh` is null and week === 1.*
+
+Source: audit B2 (`s-b1` — empty premiere, `HOH — / Noms — / Veto —`). Depends: M2-2 ✅.
 - **DoD:** premiere shows the sixteen-tile strip lighting up with the met-progress gate (0/15 →
   15/15), clicking a tile scrolls/focuses the chat (never replaces it — ADR 0003); pre-HOH the
   dead board rows read "First HOH tonight" instead of em-dashes; strip disappears (or docks)
   after the first HOH; Vault-free proof (tiles render only roster/met/public-status data).
 
-### M2-4 · One verb set across the entry journey — S · `P2`
+### M2-4 · One verb set across the entry journey — S · `P2` · ✅ DONE
+*2026-07-08: the pinned line is one diegetic, house-centric register — **Enter the house →
+Take your cast photo → Meet the house**. M2-1 set the onboarding CTA; this renames the casting
+photo pill ("Choose Your Character" was RPG-speak off the fiction) with its aria following; the
+premiere tutorial + status-panel objective already spoke "Meet the house" and stay. Structural
+ids (`data-ob-setup-start`, `orwell-choose-character`, `hs-choose-btn`) unchanged. Gate:
+`tests/test_m2_4_verb_set.py` — pins each surface to its verb AND asserts the retired verbs are
+no longer renderable (render-site scan, so history comments stay legal); smoke + oobe pins moved.*
+
 Source: audit B9 ("Start casting" / "Choose Your Character" / "Meet the house").
 - **DoD:** one naming line (casting → premiere → play) applied across onboarding card, chat gate
   card, and premiere card; pytest source gate pinning the copy set so it can't re-diverge.
 
-### M2-5 · Narrator identity + production-slate beat styling — M · `P2`
+### M2-5 · Narrator identity + production-slate beat styling — M · `P2` · ✅ DONE
+*2026-07-08 (owner pick this session): the transcript author is **"Production"** — ONE constant
+(`GAME_NARRATOR`, `orwellToolBeats.js`; also `window.ORWELL_GAME_NARRATOR`) consumed by all six
+game-build author sites (live stream, placeholder/resume via `_senderLabel`, continuation rounds,
+history reload, image bubbles); slash/compacted meta-bubbles keep "Orwell" (product chrome).
+Beats render as production slates in the game build: aligned rail + slate caps
+(`game-trim.css`, `body[data-game-build]`-scoped), NO lowercase "done" tail (failures stay
+literal — operator truth), outcome slates keep richer type via the persistent
+`.ow-slate-outcome` marker (the reveal class is transient). Gates:
+`tests/test_m2_5_narrator_identity.py`; C14 pins retargeted to the constant; live screenshot
+verified. P-1 rebrand = one line.*
+
 Source: audit B4/B7 (bubbles "Orwell", beats "· ✔ 📺 PRODUCTION done", fiction "Big Brother").
 - **DoR:** owner picks the transcript author name (recommend the diegetic show voice; "Orwell"
   stays product chrome). *(Note: final naming may be revisited by parked item P-1 — implement as
@@ -497,7 +541,13 @@ Source: audit B4/B7 (bubbles "Orwell", beats "· ✔ 📺 PRODUCTION done", fict
   slates (aligned rail, styled label, no lowercase "done" debug tail); beat labels stay sourced
   from `orwellToolBeats.js` (single registry); browser-smoke label checks updated.
 
-### M2-6 · In-world timestamps on beats — S–M · `P2`
+### M2-6 · In-world timestamps on beats — S–M · `P2` (recon done, unstarted)
+*Hand-off: stamp `game_moment` into assistant-message metadata at the persist site — the seam
+already stamps `phase="casting"` pre-game (`routes/chat_routes.py` ~1457) and carries a
+server-minted ts via the ADR-0012 `message_saved` event; the render hook is `roleTimestamp()`
+(`chatRenderer.js` ~825) — prefer `metadata.game_moment`, demote the wall clock to `title`.
+The moment string comes from the engine status the FE already fetches (week/phase/time-of-day).*
+
 Source: audit B5 (wall-clock "12:35 PM" inside the fiction). Depends: M1-2 (clock live).
 - **DoD:** transcript messages stamp the game moment ("Week 1 · Eviction Night · Late night")
   with the real clock demoted to hover/metadata; pre-game (casting) keeps neutral stamps; render

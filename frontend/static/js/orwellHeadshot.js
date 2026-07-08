@@ -619,7 +619,9 @@
   let _photoHandledLocally = false;
 
   // Thing 2: the cast-photo box no longer AUTO-opens. Instead, once the producer's opener has
-  // rendered, route() surfaces a competition-style "Choose Your Character" pill in the chat
+  // rendered, route() surfaces a competition-style "Take your cast photo" pill in the chat
+  // (M2-4: one verb set across the entry journey — Enter the house → Take your cast photo →
+  // Meet the house; the old RPG-speak "Choose Your Character" broke the diegetic register)
   // (right after that message). The box opens only when the player clicks the pill — then the
   // pill is removed. This keeps the box from popping unbidden over the live narration.
   const PILL_ID = "orwell-choose-character";
@@ -641,8 +643,8 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "ow-btn ow-btn-prominent hs-choose-btn";
-    btn.textContent = "Choose Your Character";
-    btn.setAttribute("aria-label", "Choose your character — open your cast photo");
+    btn.textContent = "Take your cast photo";
+    btn.setAttribute("aria-label", "Take your cast photo — open the photo booth");
     btn.addEventListener("click", () => { removePill(); mount(); });
 
     const hasKit = !!(window.OrwellNoticeKit && document.querySelector(".chat-input-bar"));

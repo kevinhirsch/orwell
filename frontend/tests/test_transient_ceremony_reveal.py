@@ -44,8 +44,11 @@ def _css_rule(selector_literal: str, text: str) -> str:
 def test_chat_js_tags_only_real_outcomes_with_reveal_class():
     """The reveal class rides the SAME `_outcome` gate as the L42 outcome text —
     never a generic 'done'/'failed' swap — so ordinary tool beats stay untouched."""
+    # M2-5: the outcome branch may carry companion classes (ow-slate-outcome, the
+    # persistent slate-type marker) — the pin holds the GATE (_outcome ? reveal : ''),
+    # not the exact class list.
     assert re.search(
-        r"_outcome\s*\?\s*['\"]\s*ow-ceremony-reveal['\"]\s*:\s*['\"]['\"]",
+        r"_outcome\s*\?\s*['\"]\s*ow-ceremony-reveal[^'\"]*['\"]\s*:\s*['\"]['\"]",
         CHAT_JS,
     ), "currentToolBubble.className must conditionally add ow-ceremony-reveal only when _outcome is truthy"
 

@@ -506,14 +506,14 @@ def test_issue1_meta_strip_hidden_in_game_build():
 
 def test_thing2_cast_photo_is_a_pill_not_an_auto_open():
     # Thing 2: the cast-photo box no longer AUTO-opens after the producer's opener — route() surfaces a
-    # competition-style "Choose Your Character" pill; clicking it opens the box.
+    # competition-style "Take your cast photo" pill (M2-4 verb set); clicking it opens the box.
     hs = _read("static", "js", "orwellHeadshot.js")
     route = hs[hs.index("async function route"):]
     # route surfaces the pill as the reveal action and must NOT auto-call mount() (the box opens on
     # the pill click). Strip 'unmount' first so its substring 'mount(' isn't a false positive.
     assert "showPill();" in route
     assert "mount(" not in route.replace("unmount", "_um_")
-    assert "Choose Your Character" in hs
+    assert "Take your cast photo" in hs  # M2-4: one verb set (was "Choose Your Character")
     assert "orwell-choose-character" in hs
     # the pill's click is what opens the box
     pill = hs[hs.index("function showPill"):hs.index("function removePill")]

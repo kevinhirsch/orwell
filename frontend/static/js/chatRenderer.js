@@ -10,7 +10,7 @@ import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
 import { isNarrow } from './platform.js';
-import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR } from './orwellToolBeats.js';
 import { detectOocAside } from './orwellOocAside.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -1088,7 +1088,7 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
   const role = document.createElement('div');
   role.className = 'role';
   // Immersion: image bubbles (in-character portraits) never show the raw image-model name.
-  role.textContent = isGameBuild() ? "Orwell" : (model || 'image').split('/').pop();
+  role.textContent = isGameBuild() ? GAME_NARRATOR : (model || 'image').split('/').pop();
   wrap.appendChild(role);
 
   const body = document.createElement('div');
@@ -1979,7 +1979,7 @@ export function addMessage(role, content, modelName, metadata) {
           const contModel = pair.actualModel || pair.requestedModel;
           // C14/immersion: never render the raw LLM model name as the sender in the game
           // build — the narrator is the show (matches the live path's _setRoleModelLabel).
-          roleEl.textContent = isGameBuild() ? "Orwell" : modelRouteLabel(pair.requestedModel, contModel);
+          roleEl.textContent = isGameBuild() ? GAME_NARRATOR : modelRouteLabel(pair.requestedModel, contModel);
           // C14/immersion: the "alias -> dated-version" tooltip is a model-name leak too —
           // suppressed in the game build (mirrors the live path's _setRoleModelLabel).
           if (!isGameBuild() && pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
@@ -2088,13 +2088,19 @@ export function addMessage(role, content, modelName, metadata) {
             const _evExpandHtml = `${evCmdHtml}${outHtml}${evDiffHtml}`;
             const _evHasExpand = !!_evExpandHtml.trim();
             node.className = 'agent-thread-node' + (ok ? '' : ' error') + (_evHasExpand ? '' : ' agent-thread-node--flat');
+            // (className extended below once the outcome is known — reload mirrors the live path.)
             const _evChevron = _evHasExpand ? '<span class="agent-thread-chevron">\u25B6</span>' : '';
             const _evContentDiv = _evHasExpand ? `<div class="agent-thread-content">${_evExpandHtml}</div>` : '';
             // L42: render the PUBLIC outcome (Vault-free, from the persisted tool result) on reload too,
             // so the re-opened transcript reads as what happened, not a stack of identical beat rows.
             const _evOutcome = (_beat && ok) ? orwellBeatOutcome(ev.tool, ev.output) : null;
             const _evToolText = _evOutcome || _beat || ev.tool;
-            const _evStatusHtml = _evOutcome ? '' : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+            // M2-5 (PR #1235 review): mirror the LIVE path — game-build success slates carry
+            // no "done" debug tail on reload either (failures stay literal), and an outcome
+            // slate keeps its persistent richer-type marker. Live/reload parity is the F5 rule.
+            const _evStatusHtml = _evOutcome ? '' : (ok && isGameBuild()) ? ''
+              : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+            if (_evOutcome) node.className += ' ow-slate-outcome';
             node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_evToolText)}</span>${_evStatusHtml}${_evChevron}</div>${_evContentDiv}`;
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
@@ -2152,7 +2158,7 @@ export function addMessage(role, content, modelName, metadata) {
     const resolvedModel = replyModels.actualModel || replyModels.requestedModel;
     // C14/immersion: in the game build the assistant is the show ("Orwell"), never the model name.
     var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Orwell'
-      : (isGameBuild() && role === 'assistant') ? 'Orwell'
+      : (isGameBuild() && role === 'assistant') ? GAME_NARRATOR
       : modelRouteLabel(replyModels.requestedModel, resolvedModel);
     if (role === 'assistant' && (metadata?.research || metadata?.research_clarification)) {
       _roleText += ' (Research)';

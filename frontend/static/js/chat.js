@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -79,7 +79,7 @@ import { isNarrow } from './platform.js';
   // placeholder / resume / continuation site so the model machinery stays invisible to the
   // player (mirrors _setRoleModelLabel for the resolved-model path).
   function _senderLabel(modelLabel) {
-    return isGameBuild() ? 'Orwell' : (modelLabel || '');
+    return isGameBuild() ? GAME_NARRATOR : (modelLabel || '');
   }
   // J1-30 (immersion): the pre-token wait — most visible right after the player's first deliberate
   // action ("Start casting"), where a generic "Processing request…" reads as lag/OOC. In the game
@@ -117,7 +117,7 @@ import { isNarrow } from './platform.js';
     // C14/immersion: the player must never see the raw LLM model name as the sender —
     // in the game build the narrator IS the show. Use a diegetic label unless a specific
     // speaker name was supplied.
-    else if (document.body.hasAttribute('data-game-build')) label = 'Orwell';
+    else if (document.body.hasAttribute('data-game-build')) label = GAME_NARRATOR;
     roleEl.textContent = label + ' ';
     _applyModelColor(roleEl, actual || req);
     // C14/immersion: the raw "alias -> dated-version" model string must never reach the
@@ -2707,13 +2707,17 @@ import { isNarrow } from './platform.js';
                   // result) instead of a generic "done" \u2014 "\ud83d\uddf3\ufe0f Troy is evicted (7-1)", "\ud83c\udfc6 Maya wins HOH".
                   const _outcome = (_beatOut && ok) ? orwellBeatOutcome(json.tool, json.output) : null;
                   const _toolText = _outcome || _beatOut || json.tool;
-                  const _statusHtml = _outcome ? '' : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
+                  // M2-5 (audit B7): game-build slates carry NO lowercase "done" debug tail —
+                  // the ✓ + styled label IS the resolved state. Failures stay literal (operator
+                  // truth, the J1-30 rule); the workspace build keeps its done/failed status.
+                  const _statusHtml = _outcome ? '' : (ok && isGameBuild()) ? ''
+                    : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
                   // TRANS-12/VM-5 (2026-07 pre-ship audit): a ceremony beat's outcome (HOH crown,
                   // nomination reveal, veto result, eviction vote reveal) used to swap in via this
                   // innerHTML replace with zero motion \u2014 the show's biggest beats landed as a
                   // silent state flip. `ow-ceremony-reveal` (style.css) gives the header a brief
                   // staged entrance; reduced-motion strips it to the same instant swap as before.
-                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_hasExpand ? '' : ' agent-thread-node--flat') + (_wasOpen ? ' open' : '') + (_outcome ? ' ow-ceremony-reveal' : '');
+                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_hasExpand ? '' : ' agent-thread-node--flat') + (_wasOpen ? ' open' : '') + (_outcome ? ' ow-ceremony-reveal ow-slate-outcome' : '');
                   currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_toolText)}</span>${_statusHtml}${_chevron2}</div>${_contentDiv2}`;
                   if (_outcome) {
                     const _revealHeader = currentToolBubble.querySelector('.agent-thread-header');
@@ -3034,7 +3038,7 @@ import { isNarrow } from './platform.js';
                 const _roundActual = holder?._actualModel || _roundRequested;
                 // C14/immersion: a continuation round in the game build is still the show —
                 // never the raw model name as the sender.
-                newRole.textContent = isGameBuild() ? 'Orwell' : (_modelRouteLabel(_roundRequested, _roundActual) || '');
+                newRole.textContent = isGameBuild() ? GAME_NARRATOR : (_modelRouteLabel(_roundRequested, _roundActual) || '');
                 _applyModelColor(newRole, _roundActual);
                 // #834: a promoted header bubble carries the timestamp (matches the initial holder +
                 // the reload path). roleTimestamp() with no arg falls back to "now" — correct for a

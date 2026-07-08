@@ -362,6 +362,67 @@ A continuation that cleared the merge train then ran a full cross-artifact audit
   session (used runtime-only, in `frontend/data/app.db` + settings, NEVER committed). Rotate it when done —
   plus the still-owed earlier `sk-or-…`/`ghp_…` rotations.
 
+## Where things stand (2026-07-07→08 — the integration-review → road-to-market marathon; PR #1234 MERGED, #1235 open)
+
+**The arc:** a screenshot-driven FE–BE integration gap review became the owner-triaged
+road-to-market backlog (`docs/ROAD-TO-MARKET.md`, waves M0–M4, DoR/DoD per item) and then a
+build campaign across it. **PR #1234 (12 commits) is MERGED to main** — it carried: the whole
+**M0 proof system** (the 0108 real-model golden fixture: 12 record attempts, each failure
+converted to a STRUCTURAL fix — fixture integrity/writer forensics, `scrub_stale_state`,
+settings TTL race, phase-stall escalation, M0-7 pending-surface gap, serialized authoring,
+M0-8 logical clock `ORWELL_LOGICAL_CLOCK`, background-LLM quiesce, dwell-label key
+neutralization, 409-token strip, the awaited post-turn record belt; final fixture
+`golden_path_glm-5.2.jsonl`, digest `78b5e660e6cc6734`, replayed byte-identical twice; the
+`golden-path` PR gate is ARMED), **M0-3 both halves** (the deterministic mid-gen-join pin +
+the LIVE two-window run — 14/14 parity through premiere→HOH→noms, evidence in the ship-gate
+doc), **all of Wave M1** (10 items: decision-card layout, first-run card, season-titled chats,
+engine-down holding card, the works), and **M2-1** (cold open leads with the show). The
+owner's model topology ruling is in the backlog header: **two-tier GLM 5.2 narration +
+Qwen 3.6 Flash utility**; fixtures are model-agnostic.
+
+**PR #1235 (open, this branch)** carries the rest of Wave M2 so far: **M2-2** the designed
+monogram portrait system + role badges (`orwellMonogram.js` — ONE kit for cast window / cast
+pin / decision chips; **owner APPROVED the mock in-session**: `docs/mocks/m2-2-monogram-template.html`),
+**M2-4** one verb set (Enter the house → Take your cast photo → Meet the house), **M2-5**
+narrator identity (**owner picked "Production"** — the `GAME_NARRATOR` constant in
+`orwellToolBeats.js`, all six author sites, product chrome keeps "Orwell") + production-slate
+beat styling (no "done" tail; persistent `.ow-slate-outcome` marker). Remaining in M2:
+**M2-3** (premiere cast strip, unblocked by M2-2), **M2-6** (in-world timestamps — recon done:
+extend the existing `phase="casting"` metadata stamp seam in `chat_routes.py` ~line 1457 and
+the ADR-0012 `message_saved` ts flow; renderer hook is `roleTimestamp` in `chatRenderer.js`),
+**M2-7/M2-8** (small P3 copy/theme curation).
+
+**New expensive lessons (add to the numbered canon):**
+- **The 0064 layout sync persists window PARK STATE server-side** (`data/orwell_layout.json`) —
+  the #1086 shared-`frontend/data` class, layout edition. A smoke run dying inside the G16 park
+  phase leaves `orwell-cast minimized:true` and EVERY later local browser-smoke times out at the
+  G16 open (self-reinforcing false negative; CI never sees it — clean checkout). `browser_smoke
+  boot()` now scrubs the file; if a local browser gate fails inexplicably, CHECK THE DATA DIR
+  FIRST (same for `orwell_game_session.json` — record #1's contamination).
+- **Pin the GATE, not the string.** Two source-pin breaks in one session: the L42 Vault-scan
+  window (a ±1400-char slice) caught the word "tran*script*" in a COMMENT I added nearby (move
+  code, don't fight the scanner); the TRANS-12 reveal pin regexed the exact class literal and
+  broke when the branch gained a companion class (rewrote the pin to hold `_outcome ? reveal…`
+  — the invariant — not the class list). When adding near a scanning gate, read the scanner.
+- **Never `pytest | tail -1 && git commit` in one chain** — the pipe eats the exit code; I
+  pushed a red commit (caught + fixed forward in minutes, but the chain design was the bug).
+  Run the suite, READ the verdict, then commit as a separate action.
+- **The mock catches what the code review can't:** the monogram hash (plain FNV-1a) clustered
+  sequential ids into four color families — visible only in the rendered 16-tile sheet. A
+  murmur-style avalanche finalizer fixed it. Render design work: screenshot EARLY.
+
+**Owner interaction pattern that worked:** ask the DoR decision the moment the owner appears
+(the M2-5 narrator-name pick took one AskUserQuestion with a recommended default) — DoR-blocked
+items convert to shipped items same-session.
+
+**Standing owner directives this session:** "check comments & tests and merge your PRs when
+ready" (a standing merge grant for this campaign's PRs once green + threads addressed), and at
+close: document, tie up, backlog current, work on main.
+
+**⚠️ Carry-forward:** the OpenRouter key rotation is STILL owed (the owner's `sk-or-v1-…` from
+the record session — runtime-only, never committed — plus the older rotations); the
+`OPENROUTER_API_KEY` repo secret for `golden-nightly` is still an owner action.
+
 ## How to resume
 1. Read `CLAUDE.md` (authoritative), then `docs/features/README.md` + `git log --oneline` for live
    truth. `docs/IMPLEMENTATION_QUEUE.md` and the audits hold the prose.
