@@ -178,15 +178,15 @@ XFAIL: Dict[str, Dict[str, str]] = {
     # escapes its anchored sheet's overflow:hidden box by ~10-45px at the bottom on phone-390
     # during comp-round beats (tierB hoh + veto: el bottom 733/701 vs ancestor box 690) — the
     # card's lower edge is silently clipped. Remove this entry when the fix lands.
-    "VIS-1": {"shot": "tierB__", "needle": "clipped-by-ancestor div#orwell-decision-card"},
+    "VIS-1": {"shot": "tierB:", "needle": "clipped-by-ancestor div#orwell-decision-card"},
     # VIS-2/2b (first live run, 2026-07-08, issue #1245): with the gadget-rail drawer OPEN at
     # tablet-768 the rail (and the status card inside it) measured entirely off the right
     # viewport edge — rect left 774 on a 768-wide viewport, i.e. translateX(100%) — under ONE
     # of the five themes only. Likely a mid-slide capture (the drawer's slide transition does
     # not honor the forced prefers-reduced-motion — itself a product nit), belt-and-suspendered
     # by the post-hook layout-stabilization wait; if it never recurs the xpass nudge says remove.
-    "VIS-2": {"shot": "tierA__gadget-rail__tablet-768", "needle": "off-viewport aside#gadget-rail"},
-    "VIS-2b": {"shot": "tierA__gadget-rail__tablet-768", "needle": "off-viewport section#orwell-status"},
+    "VIS-2": {"shot": "tierA:gadget-rail:tablet-768", "needle": "off-viewport aside#gadget-rail"},
+    "VIS-2b": {"shot": "tierA:gadget-rail:tablet-768", "needle": "off-viewport section#orwell-status"},
 }
 
 

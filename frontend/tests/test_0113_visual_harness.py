@@ -524,7 +524,7 @@ def test_tier_a_surfaces_declare_a_known_moment():
 
 
 def test_split_xfail_demotes_a_registered_finding_and_blocks_the_rest():
-    shot = "tierB__hoh__phone-390"
+    shot = "tierB:hoh:phone-390"
     registered = {"kind": "clipped-by-ancestor", "selector": "#orwell-decision-card",
                  "id": "orwell-decision-card", "label": "div#orwell-decision-card",
                  "detail": "ancestor=section#orwell-decision-sheet ..."}
@@ -547,10 +547,10 @@ def test_split_xfail_with_no_registry_match_blocks_everything():
 def test_finding_line_shape_is_stable_for_registry_matching():
     # the XFAIL substrings match against THIS exact shape — a reshape silently defuses the
     # whole registry, so the shape itself is pinned.
-    line = vr.finding_line("tierB__veto__phone-390", {
+    line = vr.finding_line("tierB:veto:phone-390", {
         "kind": "clipped-by-ancestor", "label": "div#orwell-decision-card",
         "detail": "ancestor=section#x"})
-    assert line == ("tierB__veto__phone-390 clipped-by-ancestor div#orwell-decision-card: "
+    assert line == ("tierB:veto:phone-390 clipped-by-ancestor div#orwell-decision-card: "
                     "ancestor=section#x")
     assert vr.XFAIL["VIS-1"]["needle"] in line
 
@@ -563,13 +563,22 @@ def test_every_xfail_entry_has_a_finding_id_and_nonempty_needle():
         # the SHOT scope is mandatory (review P1, PR #1244): a bare substring registry would
         # demote the same defect appearing on a different shot/theme.
         assert isinstance(ent["shot"], str) and len(ent["shot"]) >= 6
+        # ...and it must be a LIVE-format prefix (second review P1, PR #1244): live shot ids
+        # are colon-separated (`tierA:{surface}:{viewport}:{theme}` / `tierB:{beat}:{viewport}`);
+        # `__` is only the on-disk filename encoding (`encode_shot_id`). A registry entry written
+        # in filename form never matches `shot_id.startswith(...)`, so the known finding
+        # silently keeps blocking CI.
+        assert ent["shot"].startswith(("tierA:", "tierB:")), \
+            f"XFAIL {fid!r} shot scope {ent['shot']!r} is not a live-format shot-id prefix"
+        assert "__" not in ent["shot"], \
+            f"XFAIL {fid!r} shot scope {ent['shot']!r} uses the filename encoding, not the shot id"
 
 
 def test_xfail_scope_does_not_demote_the_same_defect_on_another_shot():
     registered = {"kind": "clipped-by-ancestor", "selector": "#orwell-decision-card",
                   "id": "orwell-decision-card", "label": "div#orwell-decision-card",
                   "detail": "ancestor=section#orwell-decision-sheet ..."}
-    blocking, xfailed = vr.split_xfail("tierA__chat__wide-1440__glass", [registered])
+    blocking, xfailed = vr.split_xfail("tierA:chat:wide-1440:glass", [registered])
     assert xfailed == [] and len(blocking) == 1, \
         "an XFAIL entry must be scoped to its shot — the same defect elsewhere must BLOCK"
 
