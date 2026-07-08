@@ -54,7 +54,16 @@ are parallel unless `Depends` says otherwise.
 > note it reasons by default (~266 reasoning tokens on a trivial call — ADR-0010 per-class
 > reasoning budgets are the lever if utility cost creeps).
 
-### M0-1 · Record + commit the canonical real-model golden fixture — S · **UNBLOCKED (M0-8 shipped) — record #8 pending**
+### M0-1 · Record + commit the canonical real-model golden fixture — S · ✅ DONE (record #12)
+*Shipped 2026-07-08. `frontend/tests/golden/golden_path_glm-5.2.jsonl` (118 records, GLM 5.2
+narration + Qwen 3.6 Flash utility, seed 108108) committed with its run report — record digest
+`78b5e660e6cc6734` reproduced EXACTLY by two consecutive replays (R1 zero misses, R2 zero
+provider reach). The `golden-path` PR gate is ARMED. Twelve records total; every replay failure
+converted to a structural fix: fixture integrity/writer forensics, shared-state scrub, settings
+TTL race, phase-stall escalation, pending-surface gap (M0-7), serialized authoring, cast-state
+walk gate, the M0-8 logical clock, background-LLM quiesce (memory/title/skill), dwell-label
+neutralization, golden 409-token strip, and the awaited post-turn record belt. Owner actions
+remain: `OPENROUTER_API_KEY` repo secret (nightly) + rotate the in-chat key.*
 Source: 0108 (built, gate dormant). Retargeted by the owner from deepseek-v4-pro to the two-tier
 GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time of writing.
 - **DoR (met):** key at hand ✓; OpenRouter reachability through the proxy verified ✓; both models

@@ -1,0 +1,260 @@
+{
+ "mode": "record",
+ "fixture": "/home/user/orwell/frontend/tests/golden/golden_path_glm-5.2.jsonl",
+ "model": "z-ai/glm-5.2",
+ "seed": 108108,
+ "invariants": [
+  {
+   "invariant": "I1",
+   "name": "casting finalizes and the season starts",
+   "status": "PASS",
+   "detail": "after 5 casting turns"
+  },
+  {
+   "invariant": "I2",
+   "name": "producers' opener fires without a player prompt",
+   "status": "SKIP",
+   "detail": "client-kicked browser seam (orwellOnboarding.js OPEN_GAME_LINE) \u2014 not observable from a headless REST walk; covered by the fe-browser onboarding smoke"
+  },
+  {
+   "invariant": "I3",
+   "name": "post-photo resume without a manual continue",
+   "status": "PASS",
+   "detail": "photo beat occurred in casting"
+  },
+  {
+   "invariant": "I4",
+   "name": "cast authoring lands >=13/15 deep profiles",
+   "status": "PASS",
+   "detail": "15/15 deep-authored"
+  },
+  {
+   "invariant": "I5",
+   "name": "phases advance monotonically with no stuck beat",
+   "status": "PASS",
+   "detail": "phases=['premiere', 'hoh-competition', 'veto-competition', 'veto-ceremony', 'eviction', 'hoh-competition'] stuck=0 beats 1\u2192101"
+  },
+  {
+   "invariant": "I6",
+   "name": "eviction reveal batched; no premature result / stale-beat trip",
+   "status": "PASS",
+   "detail": "eviction turns=8, stale-beat errors=0"
+  },
+  {
+   "invariant": "I7",
+   "name": "every player-facing body is clean",
+   "status": "PASS",
+   "detail": "25 bodies scanned"
+  },
+  {
+   "invariant": "I8",
+   "name": "the week rolls into the next HOH reign",
+   "status": "PASS",
+   "detail": "week_rolled=True, beatSeq 5\u2192101"
+  }
+ ],
+ "timeline": [
+  {
+   "turn": 1,
+   "phase": "setup",
+   "beatSeq": 1,
+   "week": 0,
+   "started": false,
+   "pending": null
+  },
+  {
+   "turn": 2,
+   "phase": "setup",
+   "beatSeq": 2,
+   "week": 0,
+   "started": false,
+   "pending": null
+  },
+  {
+   "turn": 3,
+   "phase": "setup",
+   "beatSeq": 3,
+   "week": 0,
+   "started": false,
+   "pending": null
+  },
+  {
+   "turn": 4,
+   "phase": "setup",
+   "beatSeq": 4,
+   "week": 0,
+   "started": false,
+   "pending": null
+  },
+  {
+   "turn": 5,
+   "phase": "premiere",
+   "beatSeq": 5,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 6,
+   "phase": "premiere",
+   "beatSeq": 18,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 7,
+   "phase": "premiere",
+   "beatSeq": 20,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 8,
+   "phase": "hoh-competition",
+   "beatSeq": 27,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 9,
+   "phase": "hoh-competition",
+   "beatSeq": 33,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 10,
+   "phase": "veto-competition",
+   "beatSeq": 43,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 11,
+   "phase": "veto-competition",
+   "beatSeq": 47,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 12,
+   "phase": "veto-competition",
+   "beatSeq": 52,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 13,
+   "phase": "veto-competition",
+   "beatSeq": 57,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 14,
+   "phase": "veto-ceremony",
+   "beatSeq": 60,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 15,
+   "phase": "veto-ceremony",
+   "beatSeq": 61,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 16,
+   "phase": "veto-ceremony",
+   "beatSeq": 62,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 17,
+   "phase": "eviction",
+   "beatSeq": 64,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 18,
+   "phase": "eviction",
+   "beatSeq": 65,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 19,
+   "phase": "eviction",
+   "beatSeq": 66,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 20,
+   "phase": "eviction",
+   "beatSeq": 70,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 21,
+   "phase": "eviction",
+   "beatSeq": 77,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 22,
+   "phase": "eviction",
+   "beatSeq": 82,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 23,
+   "phase": "eviction",
+   "beatSeq": 87,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 24,
+   "phase": "eviction",
+   "beatSeq": 93,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
+   "turn": 25,
+   "phase": "hoh-competition",
+   "beatSeq": 101,
+   "week": 2,
+   "started": true,
+   "pending": null
+  }
+ ],
+ "digest": "78b5e660e6cc67345b0a6a4f438037a44b04ce04e0355bdad3f474e451dca981",
+ "work": "/tmp/golden-path-dj0ylkg1"
+}
