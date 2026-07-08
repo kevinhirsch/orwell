@@ -257,7 +257,8 @@ Source: audit A10 — `recordInteraction → StaleBeatError` fired in an ordinar
 
 ## Wave M1 — one live truth, zero seams (audit lane A)
 
-### M1-1 · Kill the live double-render race — M · `P1`
+### M1-1 · Kill the live double-render race — M · `P1` · ✅ DONE (3835e68)
+*Root cause: the deferred peer-resume flush re-attached to the tab's OWN just-settled run and replayed the reply into a fresh bubble. Fixed by convergence key (the replayed message_saved's server DB id aborts a resume whose bubble already exists) + per-chunk paint batching so the one-burst settled replay can never flash a transient dup frame. Gate: tests/test_m1_1_resume_own_echo.py + the #873 suite.*
 Source: audit A1 (`s-b5`/`s-b6`; one completion → two bubbles, one persisted row; intermittent).
 - **DoR:** repro conditions noted (first streamed turn after reload on a fresh game); the #873
   harness (`frontend/scripts/_capture_873_dedup.py`) understood as the instrumentation template.
@@ -313,14 +314,16 @@ Source: audit A4 (`s-b9` clipped helper line; `m-1` Confirm below the fold, doub
   assertion (XFAIL registered/removed in the same PR per Stream-S rules); existing C20
   browser-smoke decision block untouched and green.
 
-### M1-5 · Mobile gadget drawer: one opaque sheet, a scrim, zero collisions — M · `P1` (mobile)
+### M1-5 · Mobile gadget drawer: one opaque sheet, a scrim, zero collisions — M · `P1` (mobile) · ✅ DONE (9409b91)
+*Both drawer media blocks force the opaque sheet (rail --bg, cards --panel, backdrop off; desktop keeps glass); scrim at z59 under the drawer's 60, tap-closes, lifecycle owned by openDrawer/closeDrawer. Gate: tests/test_m1_5_drawer_sheet.py.*
 Source: audit A5 (`m-3` — translucent layer soup, titles double-exposing, buttons overlapping text).
 - **DoD:** on coarse pointers the rail opens as an opaque (or ≥.95 alpha) sheet over a scrim;
   gadget cards opaque within it; one stacking context; `responsive_matrix.py` asserts no two
   gadget-card boxes intersect and no drawer text node sits over chat text in the open-drawer
   state on the phone profile.
 
-### M1-6 · First-run card: own stacking context, docked toast, honest gated CTA — S–M · `P2`
+### M1-6 · First-run card: own stacking context, docked toast, honest gated CTA — S–M · `P2` · ✅ DONE (c74526f)
+*Onboarding window opaque + isolation:isolate (scoped :has([data-ob-setup])); corner toast docks below the titlebar band while body.ow-onboarding; Start carries a visible why-disabled cue + bounded 2.5s re-probe (event-race cover) torn down on dismiss — the gate stays honest (no narrator feed ⇒ no game) rather than failing open. Gate: tests/test_m1_6_first_run_card.py.*
 Source: audit A6 (`s-a1` — wordmark/ambient text ghosting through the card, toast over the ×,
 primary CTA disabled 30+s with no cue).
 - **DoD:** nothing renders through the modal; the "producers are getting the house ready" toast
@@ -328,7 +331,8 @@ primary CTA disabled 30+s with no cue).
   fail-opens to enabled with the deterministic floor after a bounded wait; browser-smoke
   onboarding block extended to assert the CTA is enabled-or-progressing within the bound.
 
-### M1-7 · Season reset: overlay banner + season divider — M · `P2`
+### M1-7 · Season reset: overlay banner + season divider — M · `P2` · ✅ DONE (this commit)
+*Owner-recommended path taken: fresh session per season (the existing E65 seam) + the restart chat now titled "Season N" off /api/orwell/season (form-encoded rename; auto-namer skips custom names). The degraded-engine banner overlays without reflow — the notice kit gains reflow:false (host reserves body padding only while a reflow-participating card is up) and orwellEngineStatus opts in. Gate: tests/test_m1_7_season_reset.py.*
 Source: audit A7 (`t-3` — "technical moment" slab reflows the app; dead season's transcript under
 the new casting interview; session titled "Casting interview" forever).
 - **DoR:** owner-consistent choice confirmed in-PR: archive-behind-divider vs fresh session per

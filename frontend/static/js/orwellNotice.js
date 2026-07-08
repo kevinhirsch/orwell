@@ -434,6 +434,14 @@
   // round UP, so a fractional line-height can never leave a 1px sliver of banner over the content.
   function setBannerInset(host) {
     try {
+      // M1-7 (audit t-3): a banner created with `reflow: false` OVERLAYS instead of
+      // reserving body padding — the degraded-engine slab used to reflow the whole app on
+      // every show/hide. The host only reserves height while at least one card that OPTED
+      // INTO reflow is up; a host holding only no-reflow cards releases the inset.
+      if (host && host.querySelector && !host.querySelector(".on-card:not([data-on-noreflow])")) {
+        clearBannerInset();
+        return;
+      }
       var rect = host && host.getBoundingClientRect ? host.getBoundingClientRect() : null;
       var h = rect ? Math.ceil(rect.height) : ((host && host.offsetHeight) || 0);
       document.body.style.setProperty("--on-banner-inset", h + "px");
@@ -563,6 +571,9 @@
       ((kind === "system-notice" || kind === "toast") && this.o.severity ? " on-sev-" + this.o.severity : "");
     el.setAttribute("data-on-notice", "");
     el.setAttribute("data-on-kind", kind);
+    // M1-7: a `reflow: false` banner overlays — it never reserves body padding (see
+    // setBannerInset's no-reflow host check).
+    if (this.o.reflow === false) el.setAttribute("data-on-noreflow", "");
     el.setAttribute("role", this._roleFor());
     if (this.o.title) el.setAttribute("aria-label", this.o.title);
     // aria-live per kind — a consequential notice announces assertively; an ambient one politely.

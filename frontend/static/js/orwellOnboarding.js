@@ -868,6 +868,35 @@
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
       if (nb) nb.click();
     } catch (_) {}
+    // M1-7 (audit t-3): title the fresh season chat BY SEASON ("Season N") instead of
+    // leaving every restart named by its casting smalltalk ("Casting interview" forever in
+    // the sidebar). Best-effort: wait for the new-chat click to land a session id, read the
+    // live season number, rename once. needs_auto_name() then skips a custom-named session,
+    // so the title sticks.
+    (async () => {
+      try {
+        const before = window.sessionModule && window.sessionModule.getCurrentSessionId
+          ? window.sessionModule.getCurrentSessionId() : null;
+        let sid = null;
+        for (let i = 0; i < 10; i++) {
+          await new Promise((r) => setTimeout(r, 200));
+          const cur = window.sessionModule && window.sessionModule.getCurrentSessionId
+            ? window.sessionModule.getCurrentSessionId() : null;
+          if (cur && cur !== before) { sid = cur; break; }
+        }
+        if (!sid) return;
+        const r = await fetch("/api/orwell/season", { credentials: "same-origin" });
+        if (!r.ok) return;
+        const season = ((await r.json()) || {}).season;
+        if (!season || season < 1) return;
+        await fetch(`/api/session/${sid}`, {
+          method: "PATCH", credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ name: "Season " + season }).toString(),
+        });
+        if (window.sessionModule && window.sessionModule.loadSessions) window.sessionModule.loadSessions();
+      } catch (_) { /* best-effort — the auto-namer remains the fallback */ }
+    })();
   };
 
   // Audit welcome-splash bleed-through: a started season is authoritative — the "Type /setup …"

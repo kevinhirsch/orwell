@@ -48,6 +48,11 @@
       // inert (nothing sets dismissedKey), kept only so show()/hide() read uniformly.
       dismissible: false,
       persistDismiss: false,
+      // M1-7 (audit t-3): OVERLAY, never reflow — the degraded slab used to push the whole
+      // app down on every show/hide (body padding-top), a layout thrash exactly when the
+      // player is already watching an outage. It floats over the chat top instead; the
+      // banner is transient and the chat's first line returning beats the whole app jumping.
+      reflow: false,
     });
     return _notice;
   }
