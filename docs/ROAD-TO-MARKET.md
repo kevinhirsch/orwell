@@ -447,7 +447,17 @@ Source: audit A11 (same-second identical cast-authoring bursts against a bad pro
 
 ## Wave M2 — the first five minutes look like television (audit lane B)
 
-### M2-1 · Cold-open first-run — M · `P1`
+### M2-1 · Cold-open first-run — M · `P1` · ✅ DONE
+*2026-07-08: the setup wizard now leads with the show — h1 "Welcome to the Big Brother house",
+one primary CTA "Enter the house" (was "Start casting"); the model summary is ONE demoted
+humanized production-feeds line ("Narrator: GLM 5.2 · Portraits: Gemini 2.5 Flash Image",
+`humanizeModelId` — display-only, resolution keeps raw ids); the config door is the quiet
+"Production settings" link (same `data-ob-choose-models` behavior + modal stack). Raw ids render
+only inside the real Settings. Gates: `tests/test_m2_1_cold_open.py` (fantasy h1, one CTA,
+humanized-only render path, demoted link) + the updated `test_oobe_onboarding` pins + the
+browser-smoke block now asserts the fantasy lead AND regexes the cold open for raw slash-form
+model ids. M1-6's gated-CTA hint machinery untouched (copy follows the new naming). fe-unit 4025.*
+
 Source: audit B1 (`s-a1` — raw model IDs above the fantasy). Depends: M1-6.
 - **DoR:** decision: cold-open copy voice (existing diegetic copy is the baseline); model config
   demoted behind a "Production settings" link.

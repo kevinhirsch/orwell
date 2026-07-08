@@ -254,7 +254,8 @@ def test_setup_wizard_is_its_own_modal_not_in_chat():
     # the ONLY welcome copy is the framing line; the rest is feed/model setup. F1 (#1022): the
     # wizard heading is now DISTINCT from the holding-card model gate so the two read differently.
     seg = _setup_seg(onb)
-    assert "Pick your season's models" in seg
+    # M2-1 (audit B1): the cold open leads with the SHOW FANTASY, not the plumbing.
+    assert "Welcome to the Big Brother house" in seg
     # the holding-card gate's framing must NOT be reused here (F1 — the two were indistinguishable)
     assert "Production needs the feeds" not in seg
     # the old verbose welcome copy is gone
@@ -270,7 +271,7 @@ def test_onboarding_gates_read_distinctly():
     wizard = _setup_seg(onb)
     # the holding-card gate (mountHolding call in route()) and the wizard <h1> are different strings.
     assert "No feed connected yet" in onb          # the J4 holding-card title
-    assert "Pick your season's models" in wizard   # the wizard <h1>
+    assert "Welcome to the Big Brother house" in wizard   # the wizard <h1> (M2-1 fantasy lead)
     # the old shared framing is gone from BOTH gates' copy.
     assert "Production needs the feeds" not in wizard
     # and the model-gate holding card no longer uses it either (it is now the distinct title above).
@@ -326,7 +327,7 @@ def test_setup_wizard_sequenced_after_the_model_gate():
     # F1 (#1022): the J4 holding card and the wizard now carry DISTINCT framing so a new player can
     # tell the "no model — go in anyway" gate apart from the "pick your season's models" wizard.
     assert "No feed connected yet" in onb        # J4 holding-card model gate
-    assert "Pick your season's models" in onb    # the setup wizard h1
+    assert "Welcome to the Big Brother house" in onb    # the setup wizard h1 (M2-1)
     assert "Production needs a feed source" not in onb
 
 
@@ -337,7 +338,7 @@ def test_setup_wizard_starts_only_on_explicit_confirm_not_on_feed_probe():
     # listener (which only re-renders the wizard's model summary).
     onb = _read("static", "js", "orwellOnboarding.js")
     seg = _setup_seg(onb)
-    assert "Start casting" in seg
+    assert "Enter the house" in seg   # M2-1: the one cold-open CTA (was "Start casting")
     assert "data-ob-setup-start" in seg
     # the Start button gates on a resolved chat model (no narrator ⇒ disabled)
     assert "_startBtn" in seg and "disabled" in seg
@@ -354,15 +355,16 @@ def test_setup_wizard_borrows_the_settings_model_controls():
     # real Settings model controls — no parallel source of truth.
     onb = _read("static", "js", "orwellOnboarding.js")
     seg = _setup_seg(onb)
-    assert "Choose models" in seg
+    assert "Production settings" in seg  # M2-1: the demoted config link (was "Choose models")
     assert "data-ob-choose-models" in seg
     assert "openSettings" in seg
     # the summary is read from the chatbox/Settings projections, not a separate store
     assert "/api/default-chat" in onb
     assert "image_model" in onb
-    # narrator + portrait model rows
-    assert "Narrator model" in seg
-    assert "Portrait model" in seg
+    # the demoted production-feeds line (M2-1): humanized narrator + portrait slots
+    assert "Narrator:" in seg
+    assert "Portraits:" in seg
+    assert "humanizeModelId" in seg
 
 
 # ── 3b. Auto-advance after the model is configured (no manual reload, no premature start) ──

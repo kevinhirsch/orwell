@@ -200,3 +200,21 @@ body.ow-onboarding #orwell-notice-toast { top: 64px; }
   color: color-mix(in srgb, var(--fg) 70%, transparent);
   line-height: 1.4;
 }
+
+/* M2-1 (audit B1): the cold open's config door is a QUIET LINK under the one primary CTA
+   ("Enter the house"), not a peer button — the first screen leads with the show, the
+   plumbing lives behind Production settings. */
+.ob-prod-settings-link {
+  background: none;
+  border: none;
+  padding: .35rem .5rem;
+  font-size: var(--fs-sm, .85rem);
+  color: color-mix(in srgb, var(--fg) 62%, transparent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.ob-prod-settings-link:hover,
+.ob-prod-settings-link:focus-visible {
+  color: var(--fg);
+}
