@@ -237,6 +237,17 @@ def test_live_multi_beat_turn_preserves_slate_order():
         "live slate insertion must anchor past prior slates in the same thread (order-preserving)"
 
 
+def test_reload_merged_rounds_preserve_slate_order():
+    """The reload twin: consecutive rounds merging into the same reused threadWrap must not reset
+    the slate anchor to threadWrap (that inserted a later round's slates BEFORE a prior round's).
+    The anchor walks past .ow-cslate siblings first — mirroring the live path (review P1)."""
+    renderer = _read("static", "js", "chatRenderer.js")
+    blk = renderer[renderer.index("let _slateAnchor = threadWrap"):]
+    blk = blk[: blk.index("for (const _slate of _pendingSlates)")]
+    assert "nextElementSibling" in blk and "ow-cslate" in blk, \
+        "reload slate insertion must walk the anchor past prior rounds' slates (order-preserving)"
+
+
 def test_reload_path_calls_the_shared_builders_on_the_persisted_event():
     renderer = _read("static", "js", "chatRenderer.js")
     assert "orwellCeremonySlate(ev.tool, ev.output)" in renderer

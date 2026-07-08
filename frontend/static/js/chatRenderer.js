@@ -2120,7 +2120,13 @@ export function addMessage(role, content, modelName, metadata) {
           { // M4-6: insert the queued ceremony-slate card(s) right after the built thread — a
             // sibling of threadWrap, in order, so appending more chips INTO threadWrap (a later
             // tool in the same round) never moves it relative to a slate already placed after it.
+            // When consecutive rounds MERGE into the same reused threadWrap, walk the anchor past
+            // slates a prior round already placed — resetting to threadWrap reversed cross-round
+            // order vs the live path's walk, breaking .ow-cslate mirror parity (review P1).
             let _slateAnchor = threadWrap;
+            while (_slateAnchor.nextElementSibling && _slateAnchor.nextElementSibling.classList.contains('ow-cslate')) {
+              _slateAnchor = _slateAnchor.nextElementSibling;
+            }
             for (const _slate of _pendingSlates) {
               const _card = orwellRenderCeremonySlate(_slate);
               _slateAnchor.insertAdjacentElement('afterend', _card);
