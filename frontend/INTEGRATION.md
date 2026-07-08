@@ -145,6 +145,39 @@ real engine + real FE on every PR — no API key (`.github/workflows/ci.yml` job
   the first GLM recording. A new LLM-behavioral fix still needs a hand live-verify
   first (SOUL lesson 19) — this gate stops the *same* bug being re-discovered by hand.
 
+## The visual-regression harness (0113 — screenshot matrix + off-screen detector + baselines)
+
+A pixel-level sibling to the golden-path gate, tracking issue #1237. Rides the SAME committed
+golden fixture (`ORWELL_GOLDEN_REPLAY`, key-free, deterministic) to park a real engine + real FE
+walk at a canonical mid-week state (Tier A: 6 surfaces x 4 viewports x 5 house themes, ~120
+shots) and at up to 7 journey beats (Tier B: casting → premiere → hoh → nominations → veto →
+eviction → finale, x 2 viewports, ~14 shots — `finale` reports SKIPPED until a finale-covering
+fixture is recorded, never fabricated). Two independent checks per shot:
+
+- **Geometry/off-screen detector (BLOCKING)** — one DOM pass, off-viewport / clipped-by-ancestor
+  / zero-size / covered. Pure classification lives in `src/visual_geometry.py`
+  (`classify_shot_geometry`, unit-testable with no browser); the extraction JS is
+  `GEOMETRY_PROBE_JS` in the same module.
+- **Pixel diff vs. blessed baselines (ADVISORY)** — pure PIL (`src/visual_pixeldiff.py`), no new
+  heavyweight dependency. A shot id with no blessed baseline reports `baseline-missing`
+  (explicit, never a silent pass). Masks (`MaskRect`) blank out known time-varying regions (a
+  wall-clock readout) in both images before comparison.
+
+- **Run it**: `cd frontend && python3 scripts/visual_regression.py --tier all --out /tmp/visual-run`
+  (needs `npm run build` at the repo root first, and `playwright install chromium`).
+- **Bless a new baseline set**: `python3 scripts/visual_bless.py --run /tmp/visual-run --source "ci-artifact:<run-id>"`
+  — one command, works on any conforming run directory (a local run or an unpacked CI artifact).
+  **Policy: bless from CI artifacts, not local renders** (font/AA drift between machines would
+  otherwise poison the baseline for everyone else) — the script prints a reminder but does not
+  refuse (it can't structurally verify provenance).
+- Baselines live in `tests/visual/baselines/` (PNGs + `manifest.json`, committed — the repo is
+  private). CI job `visual-regression` is DORMANT (an explicit notice, never a silent pass) until
+  the same golden fixture the `golden-path` job needs is committed; an empty baselines set is a
+  legitimate first run (every shot advisory-skips its pixel compare; geometry still blocks).
+- Design note: `docs/features/0113-visual-regression-harness.md`. Extends
+  `scripts/responsive_matrix.py` (Stream S, ruling #16) without duplicating its
+  overflow/overlap/tap-target duties.
+
 ## The responsive contract (Stream S — ruling #16; binding)
 
 `static/css/responsive-tokens.css` (loaded **before** `style.css`) is the one responsive
