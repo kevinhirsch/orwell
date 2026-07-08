@@ -130,6 +130,39 @@ import { onNarrowChange } from './platform.js';
     return "You vote tonight";
   }
 
+  // M2-3 (audit B2): pre-HOH board state — before the very first HOH exists (week 1, no HOH crowned
+  // yet, season not over) the three "HOH — / Noms — / Veto —" rows are all dead em-dashes and read as
+  // broken. Pure + Vault-free (a public board fact only), so it's node-testable in isolation.
+  function isPreHoh(st) {
+    return !!(st && !st.hoh && st.week === 1 && !st.finished);
+  }
+
+  // M2-3: the premiere's NOT-yet-met ids (the unlit tiles) — derived from the Vault-free premiere
+  // projection's `remaining` set, keyed by houseguest id (name fallback). Pure + node-testable; reads
+  // ONLY the public NamedRef (id/name), never a soul, number, or hidden field.
+  function premiereUnmetIds(prem) {
+    const out = [];
+    if (!prem || typeof prem !== "object" || !Array.isArray(prem.remaining)) return out;
+    for (const fi of prem.remaining) {
+      const hg = fi && fi.houseguest;
+      const k = hg && (hg.id != null ? hg.id : hg.name);
+      if (k != null) out.push(String(k));
+    }
+    return out;
+  }
+
+  // ADR 0003 (the conversation is the game): a tile CLICK focuses the chat — it NEVER replaces it or
+  // navigates. Scroll the composer into view and focus the input so the player can talk immediately.
+  function focusChat() {
+    try {
+      const input = document.getElementById("message");
+      if (!input) return;
+      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      input.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+      input.focus();
+    } catch (_) {}
+  }
+
   // #640: compose the OrwellGadget kit (collapsible). The kit owns the card shell, the
   // collapsible header (role=button + chevron + the persisted/synced collapse), and the rail
   // mount. This panel's DYNAMIC header line (Week N / phase / time-of-day / stale-dot) renders
@@ -208,7 +241,37 @@ import { onNarrowChange } from './platform.js';
           margin-left: .4rem; font-weight: 700;
           color: var(--accent, #9cdef2);
         }
-        #orwell-status .os-prem-left { opacity: .7; font-size: .9em; margin-top: .1rem; }`;
+        #orwell-status .os-prem-left { opacity: .7; font-size: .9em; margin-top: .1rem; }
+        /* M2-3 (audit B2): the premiere cast STRIP — a Vault-free row of sixteen monogram tiles
+           (the shared OrwellMonogram kit) that LIGHTS UP as the player meets the house (0/15 →
+           15/15). It rides the ONE glass plane (no second slab); a not-yet-met tile reads unlit.
+           Horizontal scroll so sixteen faces fit the sidebar; retires with the premiere block. */
+        #orwell-status .os-prem-strip {
+          display: flex; gap: .3rem; margin-top: .4rem; padding-bottom: .2rem;
+          overflow-x: auto; overflow-y: hidden;
+          scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent;
+        }
+        #orwell-status .os-prem-strip::-webkit-scrollbar { height: 5px; }
+        #orwell-status .os-prem-strip::-webkit-scrollbar-track { background: transparent; }
+        #orwell-status .os-prem-strip::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 999px; }
+        #orwell-status .os-tile {
+          flex: 0 0 auto; width: 30px; height: 30px; padding: 0; border: 0; cursor: pointer;
+          border-radius: 7px; overflow: hidden; background: transparent; position: relative;
+          transition: opacity .28s ease, transform .14s ease, filter .28s ease;
+        }
+        #orwell-status .os-tile .ow-mono-face { border-radius: 7px; }
+        #orwell-status .os-tile:hover { transform: translateY(-1px); }
+        #orwell-status .os-tile:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ow-ios-blue, #0a84ff); }
+        /* the ONLY state a tile carries: met (lit) vs. not-yet-met (unlit) — the gate the strip visualizes. */
+        #orwell-status .os-tile-unmet { opacity: .34; filter: grayscale(.7); }
+        @media (prefers-reduced-motion: reduce) {
+          #orwell-status .os-tile { transition: none; }
+          #orwell-status .os-tile:hover { transform: none; }
+        }
+        /* M2-3 (audit B2): the pre-HOH board line — before the first HOH exists (week 1, no HOH yet)
+           the three dead "HOH — / Noms — / Veto —" rows read as broken. This single line replaces
+           them until the first HOH crowns. */
+        #orwell-status .os-prehoh { margin: .1rem 0 .15rem; opacity: .82; font-style: italic; }`;
       document.head.appendChild(st);
     }
 
@@ -243,13 +306,17 @@ import { onNarrowChange } from './platform.js';
         <div class="os-done" id="os-done" hidden><span id="os-done-label"></span><span id="os-done-winner"></span></div>
         <div class="os-premiere" id="os-premiere" hidden>
           <div class="os-prem-obj">Meet the house<span class="os-prem-count" id="os-prem-count"></span></div>
+          <div class="os-prem-strip" id="os-prem-strip" role="group" aria-label="The premiere cast — tap a face to talk in chat" hidden></div>
           <div class="os-prem-left" id="os-prem-left" hidden></div>
         </div>
         <div class="os-ceremony" id="os-ceremony">
           <div class="os-you" id="os-you">You<span class="os-badge" id="os-you-badge" hidden></span><span class="os-rest" id="os-you-rest" hidden title="How rested you are — your own read"></span><span class="os-hint" id="os-you-hint" hidden></span></div>
-          <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
-          <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
-          <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
+          <div class="os-prehoh" id="os-prehoh" hidden>First HOH tonight</div>
+          <div id="os-board">
+            <div class="os-row"><span class="os-k">HOH</span><span class="os-v" id="os-hoh">—</span></div>
+            <div class="os-row"><span class="os-k">Noms</span><span class="os-v os-noms" id="os-noms">—</span></div>
+            <div class="os-row"><span class="os-k">Veto</span><span class="os-v" id="os-veto">—</span></div>
+          </div>
           <div class="os-row" id="os-last-evict-row" hidden><span class="os-k">Last out</span><span class="os-v" id="os-last-evict">—</span></div>
         </div>
         <div class="os-roster-h" id="os-roster-h" role="heading" aria-level="3">The House</div>
@@ -434,6 +501,13 @@ import { onNarrowChange } from './platform.js';
         ? "used" + (veto.holder ? " · " + veto.holder.name : "")
         : (veto.holder ? veto.holder.name : "—");
     setText(el.querySelector("#os-veto"), vetoText);
+    // M2-3: pre-HOH board reframe — swap the three dead em-dash rows for a single "First HOH tonight"
+    // line until the first HOH is crowned (the rows still exist + update underneath, just hidden).
+    { const preHoh = isPreHoh(st);
+      const boardEl = el.querySelector("#os-board");
+      const preHohEl = el.querySelector("#os-prehoh");
+      if (boardEl) boardEl.hidden = preHoh;
+      if (preHohEl) preHohEl.hidden = !preHoh; }
     announceDeltas(el, st, {
       hoh: name(st.hoh),
       noms: noms.length ? noms.join(", ") : "—",
@@ -490,7 +564,79 @@ import { onNarrowChange } from './platform.js';
         leftEl.hidden = true;
       }
     }
+    renderPremiereStrip(el, state); // M2-3: the sixteen-tile cast strip below the objective
     wrap.hidden = false;
+  }
+
+  // M2-3 (audit B2): the PREMIERE CAST STRIP — a Vault-free row of sixteen monogram tiles (the shared
+  // OrwellMonogram kit) that lights up as the player meets the house (0/15 → 15/15). Each tile carries
+  // ONLY the public roster card (id/name/status) + a met flag derived from the premiere projection's
+  // `remaining` set — no soul, number, or hidden field. Clicking a tile FOCUSES the chat (ADR 0003:
+  // augments, never replaces). It lives inside #os-premiere, so it appears only during the premiere and
+  // retires with the block the moment the first HOH begins. Keyed, idempotent upsert (no flicker).
+  const _stripTiles = new Map(); // roster id -> tile button
+  function renderPremiereStrip(el, state) {
+    const strip = el.querySelector("#os-prem-strip");
+    if (!strip) return;
+    const prem = state && state.premiere;
+    if (!prem || typeof prem !== "object" || prem.complete || !window.OrwellMonogram) {
+      strip.hidden = true;
+      for (const [k, t] of Array.from(_stripTiles)) { t.remove(); _stripTiles.delete(k); }
+      return;
+    }
+    // The full roster (player + house) — the same public cards the cast gallery renders. /state carries
+    // no portrait ref here, so every tile is the id-seeded monogram (which is exactly the DoD).
+    const cards = [];
+    const p = state && state.player;
+    if (p && p.name) cards.push({ id: p.id || "player", name: p.name, status: p.status || "active", isPlayer: true });
+    const house = Array.isArray(state && state.house) ? state.house : [];
+    for (const h of house) {
+      if (h && h.name) cards.push({ id: h.id || h.name, name: h.name, status: h.status || "active", isPlayer: false });
+    }
+    if (!cards.length) {
+      strip.hidden = true;
+      for (const [k, t] of Array.from(_stripTiles)) { t.remove(); _stripTiles.delete(k); }
+      return;
+    }
+    const unmet = new Set(premiereUnmetIds(prem)); // the not-yet-lit tiles
+    const seen = new Set();
+    for (const card of cards) {
+      const key = String(card.id);
+      seen.add(key);
+      const met = card.isPlayer || !unmet.has(key); // the player is always "met"
+      let tile = _stripTiles.get(key);
+      if (!tile) {
+        tile = document.createElement("button");
+        tile.type = "button";
+        tile.className = "os-tile";
+        tile.dataset.hgId = key;
+        tile.addEventListener("click", focusChat); // ADR 0003: focus chat, never replace it
+        _stripTiles.set(key, tile);
+      }
+      // Repaint only when identity/status/met changed — a loaded tile is never rebuilt (no flicker).
+      const sig = card.name + "|" + card.status + "|" + (met ? "1" : "0");
+      if (tile._owSig !== sig) {
+        tile._owSig = sig;
+        tile.innerHTML = "";
+        tile.appendChild(window.OrwellMonogram.face(
+          { id: card.id, name: card.name, status: card.status, portrait: null },
+          { alt: card.name, forceMono: true }));
+        tile.classList.toggle("os-tile-unmet", !met);
+        const you = card.isPlayer ? " (you)" : "";
+        tile.setAttribute("aria-label", card.name + you + (met ? " — met" : " — not yet met") + ". Tap to talk in chat.");
+        tile.title = card.name + (met ? "" : " — not yet met");
+      }
+    }
+    // Drop vanished ids (defensive) and reconcile order (player first, then house order).
+    for (const [k, t] of Array.from(_stripTiles)) {
+      if (!seen.has(k)) { t.remove(); _stripTiles.delete(k); }
+    }
+    const desired = cards.map((c) => _stripTiles.get(String(c.id)));
+    const cur = Array.from(strip.children);
+    if (cur.length !== desired.length || desired.some((n, i) => cur[i] !== n)) {
+      for (const n of desired) strip.appendChild(n);
+    }
+    strip.hidden = false;
   }
 
   // The head-count tally + the player's own public role badge. From getGameState().house[] + the
