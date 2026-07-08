@@ -58,11 +58,24 @@ Feature: 0113 — Visual regression harness (screenshot matrix + off-screen dete
     Then the element produces no covered finding
 
   Scenario: any geometry finding fails the CI job regardless of the pixel-diff outcome
-    Given a shot with at least one geometry finding
+    Given a shot with at least one geometry finding not registered in the XFAIL ratchet
     And every pixel diff for the same run reports a clean match
     When the harness computes its exit code
     Then the exit code is non-zero
     And the job is wired as a required, blocking check
+
+  Scenario: a known, filed finding is demoted to xfail until its fix lands
+    Given a geometry finding whose formatted line matches a registered XFAIL entry
+    When the harness computes its exit code
+    Then that finding reports as xfail with its finding id and does not block
+    And removing the registry entry when the fix lands flips it back to a hard failure
+    And an entry that matched nothing this run prints an xpass removal nudge
+
+  Scenario: a covering element inside a deliberate overlay layer is not a finding
+    Given a registered element whose center probe resolves inside a declared overlay layer
+    When the geometry detector classifies the shot
+    Then no covered finding is reported for that element
+    And a covering element outside every declared overlay layer still reports as covered
 
   # ── The screenshot matrix (sparse — axes kept, not fully crossed) ──────────────────
 
