@@ -225,6 +225,18 @@ def test_live_path_calls_the_shared_builders_on_the_tool_result():
     assert "if (ok && isGameBuild()) {" in chat
 
 
+def test_live_multi_beat_turn_preserves_slate_order():
+    """Two+ ceremony beats in one .agent-thread must keep EVENT order live: the insertion walks
+    its anchor past .ow-cslate siblings already appended for that thread. Always inserting
+    'afterend' of the thread itself REVERSED them — diverging from the reload path's sequential
+    anchoring and breaking .ow-cslate mirror parity (Greptile P1, PR #1243)."""
+    chat = _read("static", "js", "chat.js")
+    blk = chat[chat.index("orwellCeremonySlate(json.tool"):]
+    blk = blk[: blk.index("insertAdjacentElement")]
+    assert "nextElementSibling" in blk and "ow-cslate" in blk, \
+        "live slate insertion must anchor past prior slates in the same thread (order-preserving)"
+
+
 def test_reload_path_calls_the_shared_builders_on_the_persisted_event():
     renderer = _read("static", "js", "chatRenderer.js")
     assert "orwellCeremonySlate(ev.tool, ev.output)" in renderer

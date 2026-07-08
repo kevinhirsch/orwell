@@ -2734,7 +2734,17 @@ import { isNarrow } from './platform.js';
                     const _slate = orwellCeremonySlate(json.tool, json.output);
                     if (_slate) {
                       const _threadEl = currentToolBubble.closest('.agent-thread');
-                      if (_threadEl) _threadEl.insertAdjacentElement('afterend', orwellRenderCeremonySlate(_slate));
+                      if (_threadEl) {
+                        // Anchor past slates already inserted for THIS thread, so a turn with two+
+                        // ceremony beats keeps event order — always inserting 'afterend' of the
+                        // thread itself would reverse them, diverging from the reload path's
+                        // sequential anchoring and breaking .ow-cslate mirror parity (F1).
+                        let _anchor = _threadEl;
+                        while (_anchor.nextElementSibling && _anchor.nextElementSibling.classList.contains('ow-cslate')) {
+                          _anchor = _anchor.nextElementSibling;
+                        }
+                        _anchor.insertAdjacentElement('afterend', orwellRenderCeremonySlate(_slate));
+                      }
                     }
                   }
                   // Reset so thinking spinner between tools says "Thinking" not the old tool's label
