@@ -1,0 +1,72 @@
+[
+ {
+  "check": "after-warm-join",
+  "ok": true,
+  "detail": "A=2 msgs, B=2 msgs"
+ },
+ {
+  "check": "turn-01-premiere",
+  "ok": true,
+  "detail": "A=2 msgs, B=2 msgs"
+ },
+ {
+  "check": "turn-02-premiere",
+  "ok": true,
+  "detail": "A=4 msgs, B=4 msgs"
+ },
+ {
+  "check": "turn-03-premiere",
+  "ok": true,
+  "detail": "A=5 msgs, B=5 msgs"
+ },
+ {
+  "check": "turn-04-premiere",
+  "ok": true,
+  "detail": "A=5 msgs, B=5 msgs"
+ },
+ {
+  "check": "midgen-join-window-C",
+  "ok": true,
+  "detail": "partial 52ch -> final 584ch"
+ },
+ {
+  "check": "turn-05-hoh-competition",
+  "ok": true,
+  "detail": "A=7 msgs, B=7 msgs"
+ },
+ {
+  "check": "turn-06-hoh-competition",
+  "ok": true,
+  "detail": "A=10 msgs, B=10 msgs"
+ },
+ {
+  "check": "turn-07-hoh-competition",
+  "ok": true,
+  "detail": "A=10 msgs, B=10 msgs"
+ },
+ {
+  "check": "turn-08-hoh-competition",
+  "ok": true,
+  "detail": "A=14 msgs, B=14 msgs"
+ },
+ {
+  "check": "turn-09-hoh-competition",
+  "ok": true,
+  "detail": "A=15 msgs, B=15 msgs"
+ },
+ {
+  "check": "turn-10-nominations",
+  "ok": true,
+  "detail": "A=16 msgs, B=16 msgs"
+ },
+ {
+  "check": "turn-11-nominations",
+  "ok": true,
+  "detail": "A=17 msgs, B=17 msgs"
+ },
+ {
+  "check": "turn-12-nominations",
+  "ok": true,
+  "detail": "A=19 msgs, B=19 msgs"
+ }
+]

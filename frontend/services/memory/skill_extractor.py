@@ -117,6 +117,16 @@ async def maybe_extract_skill(
     if not model:
         logger.debug("[skill-extract] No model provided, skipping")
         return None
+    # 0108: quiesce under the golden record/replay seam — fires on run-complexity heuristics
+    # with a sliding window; record and replay sample different windows (the memory-extractor
+    # miss class). Skipping is the documented no-op path.
+    try:
+        from src import golden_path as _gp
+        if _gp.active():
+            logger.debug("[skill-extract] golden record/replay active — skipping")
+            return None
+    except Exception:
+        pass
 
     # Quiet by default; flip to DEBUG when chasing extractor issues.
     logger.debug(

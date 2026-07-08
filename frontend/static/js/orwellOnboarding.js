@@ -273,6 +273,26 @@
   // "Start casting" button; adding/changing a feed merely re-renders the wizard's model summary
   // (and enables Start once a chat model resolves). The player owns the moment the game begins.
   //
+  // M2-1 (audit B1): the first screen leads with the SHOW, never the plumbing — raw provider/model
+  // ids ("z-ai/glm-5.2") read as debug chrome above the fantasy. Humanize an id for display
+  // ("Narrator: GLM 5.2"); the RAW id stays visible only inside the real Settings model controls
+  // (the "Production settings" door). Display-only — resolution still uses the raw id everywhere.
+  function humanizeModelId(id) {
+    if (!id) return "";
+    const seg = String(id).split("/").pop().split(":")[0];
+    const CAPS = {
+      glm: "GLM", gpt: "GPT", deepseek: "DeepSeek", qwen: "Qwen", gemini: "Gemini",
+      llama: "Llama", claude: "Claude", seedream: "Seedream", mistral: "Mistral",
+      flash: "Flash", image: "Image", pro: "Pro", mini: "Mini", nano: "Nano", chat: "Chat",
+    };
+    return seg.split("-").map((t) => {
+      const k = t.toLowerCase();
+      if (CAPS[k]) return CAPS[k];
+      if (/^v?\d/.test(k)) return k.toUpperCase();
+      return t.charAt(0).toUpperCase() + t.slice(1);
+    }).join(" ");
+  }
+
   // The model summary is read from the same projections the chatbox + Settings use
   // (GET /api/default-chat for the narrator, GET /api/auth/settings for image_model), so what the
   // wizard shows is exactly what will run — no parallel source of truth.
@@ -301,14 +321,19 @@
     el.setAttribute("data-ob-setup", ""); // tag so the model-change re-render can find + refresh it
     // The framing line + a compact model summary borrowed from Settings. "Auto-detect" is shown for
     // an empty image_model (which resolves to the gemini default at generation time).
+    // M2-1 (audit B1): the cold open leads with the SHOW FANTASY — one h1, one primary CTA
+    // ("Enter the house"). The model summary is demoted to one humanized production line
+    // (never a raw provider/model id — humanizeModelId), and the config door is a quiet
+    // "Production settings" link under the CTA, not a peer button.
     card.innerHTML = `
       <div class="ob-hold">
-        <h1>Pick your season's models</h1>
-        <p class="ob-hold-sub">Choose the narrator and portrait models that will run your season,
-          then we'll roll. The producers reach out the moment you're ready — they go first.</p>
+        <h1>Welcome to the Big Brother house</h1>
+        <p class="ob-hold-sub">Sixteen strangers sealed inside, every camera live — and one of the
+          sixteen is you. Step in and casting begins; the producers reach out first.</p>
         <div class="ob-setup-models" aria-live="polite">
-          <p class="ob-hold-sub ob-setup-chat">Narrator model: <b>…</b></p>
-          <p class="ob-hold-sub ob-setup-image">Portrait model: <b>…</b></p>
+          <p class="ob-hold-sub ob-setup-feeds">This season's production feeds —
+            <span class="ob-setup-chat">Narrator: <b>…</b></span> ·
+            <span class="ob-setup-image">Portraits: <b>…</b></span></p>
         </div>
         <div class="ob-hold-actions"></div>
       </div>`;
@@ -321,15 +346,42 @@
     // can legitimately disagree (the default model may not be a literal catalog id yet). The chat
     // summary is display-only; an unresolved id shows "resolving…" but never blocks Start.
     let _startBtn = null;
+    let _startHint = null;
+    // M1-6 (audit A6): the gated CTA must never sit silently disabled — while Start waits
+    // on a feed, a visible hint says WHY and a poll re-probes (the models-changed event can
+    // race a settings write, which left the button dead for 30s+ with no cue). The gate
+    // itself is honest and stays: no narrator feed ⇒ the house cannot speak, so Start does
+    // not fail-open — it explains and keeps checking.
+    let _startPoll = null;
+    let _startPollT0 = 0;
+    const _stopStartPoll = () => { if (_startPoll) { clearInterval(_startPoll); _startPoll = null; } };
     const refresh = async () => {
       const [{ chat, image }, hasFeed] = await Promise.all([_setupModelSummary(), anyModelConfigured()]);
       const chatEl = card.querySelector(".ob-setup-chat b");
       const imgEl = card.querySelector(".ob-setup-image b");
-      if (chatEl) chatEl.textContent = chat || (hasFeed ? "resolving from your feed…" : "— connect a feed —");
-      if (imgEl) imgEl.textContent = image || "Auto-detect (Gemini)";
+      // M2-1: humanized display only — the raw id never renders on the first screen.
+      if (chatEl) chatEl.textContent = humanizeModelId(chat) || (hasFeed ? "resolving from your feed…" : "— connect a feed —");
+      if (imgEl) imgEl.textContent = humanizeModelId(image) || "Auto-detect (Gemini)";
       if (_startBtn) {
         _startBtn.disabled = !hasFeed;
         _startBtn.title = hasFeed ? "" : "Connect a feed in Settings first — the house can't speak without a narrator model.";
+      }
+      if (_startHint) {
+        if (hasFeed) {
+          _startHint.hidden = true;
+          _stopStartPoll();
+          _startPollT0 = 0; // a later feed drop restarts the escalation clock at "checking…"
+        } else {
+          const waited = _startPollT0 ? Math.round((Date.now() - _startPollT0) / 1000) : 0;
+          _startHint.hidden = false;
+          _startHint.textContent = waited > 45
+            ? "Still no narrator feed — open Production settings and connect one (Enter unlocks the moment it lands)."
+            : "Start unlocks once a narrator feed connects — checking…";
+          if (!_startPoll) {
+            _startPollT0 = Date.now();
+            _startPoll = setInterval(refresh, 2500);
+          }
+        }
       }
     };
     // Re-render when the player connects/changes a feed in Settings (no premature kickoff — this
@@ -339,6 +391,7 @@
 
     const dismiss = () => {
       if (_down) return; _down = true;
+      _stopStartPoll(); // M1-6: never leak the feed re-probe past the card
       try { window.removeEventListener("orwell:models-changed", onModels); } catch (_) {}
       markWelcomeSeen();
       uninertBackground();
@@ -364,8 +417,8 @@
       try { onProceed && onProceed(); } catch (_) {}
     };
 
-    // "Choose models" opens the REAL Settings model controls (the elements this wizard borrows
-    // from) so the player can pick their OpenRouter narrator/portrait models. It does NOT dismiss
+    // "Production settings" opens the REAL Settings model controls (the elements this wizard
+    // borrows from) so the player can pick their OpenRouter narrator/portrait models. It does NOT dismiss
     // the wizard or start the game — Settings opens OVER it; on return the orwell:models-changed
     // re-render reflects the new pick and Start enables.
     //
@@ -375,25 +428,34 @@
     // interactive top. No manual inert dance — the old "uninert, open, re-inert on a 50ms timer"
     // hack was the symptom of the missing stack coordinator (it deadlocked when the two modals'
     // inert sets and scrims collided). Just open Settings; the stack does the rest.
-    const choose = document.createElement("button");
-    choose.type = "button";
-    choose.className = "ow-btn ow-btn-secondary ob-btn";
-    choose.setAttribute("data-ob-choose-models", "");
-    choose.textContent = "Choose models";
-    choose.addEventListener("click", () => {
-      try { openSettings(); } catch (_) {}
-    });
-    row.appendChild(choose);
-
     const go = document.createElement("button");
     go.type = "button";
     go.className = "ow-btn ow-btn-prominent ob-btn ob-btn-primary";
     go.setAttribute("data-ob-setup-start", "");
-    go.textContent = "Start casting";
+    go.textContent = "Enter the house"; // M2-1: the one cold-open CTA (was "Start casting")
     go.disabled = true; // enabled by refresh() once a narrator model resolves (avoids the async race)
     go.addEventListener("click", () => { if (!go.disabled) dismiss(); });
     row.appendChild(go);
+
+    // M2-1: the config door DEMOTED to a quiet link under the CTA (was a peer button). Same
+    // behavior: opens the REAL Settings model controls over the wizard (the kit's modal stack
+    // coordinates inert/scrim — #870); raw model ids live THERE, never on this screen.
+    const choose = document.createElement("button");
+    choose.type = "button";
+    choose.className = "ob-prod-settings-link";
+    choose.setAttribute("data-ob-choose-models", "");
+    choose.textContent = "Production settings";
+    choose.addEventListener("click", () => {
+      try { openSettings(); } catch (_) {}
+    });
+    row.appendChild(choose);
     _startBtn = go;
+    // M1-6: the why-is-Start-disabled cue, under the button row (refresh() owns its text).
+    const hint = document.createElement("div");
+    hint.className = "ob-start-hint";
+    hint.hidden = true;
+    row.insertAdjacentElement("afterend", hint);
+    _startHint = hint;
 
     // Escape is owned by the kit (ui.js arbiter → dismissTop → close → onClose → dismiss); keep an
     // explicit card listener as a belt so a focused-card keypress always dismisses.
@@ -832,10 +894,43 @@
       clearTimeout(window._orwellCastingTransitionTimer);
       window._orwellCastingTransitionTimer = setTimeout(() => { window._orwellCastingTransition = false; }, 1500);
     } catch (_) {}
+    // M1-7 rename seam: capture the PRE-click session id FIRST — a synchronous session
+    // switch inside the click would otherwise make `before` read the NEW id and the rename
+    // poll below never observe a change (Greptile T-Rex repro on PR #1234: no PATCH fired).
+    const _preNewChatSid = window.sessionModule && window.sessionModule.getCurrentSessionId
+      ? window.sessionModule.getCurrentSessionId() : null;
     try {
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
       if (nb) nb.click();
     } catch (_) {}
+    // M1-7 (audit t-3): title the fresh season chat BY SEASON ("Season N") instead of
+    // leaving every restart named by its casting smalltalk ("Casting interview" forever in
+    // the sidebar). Best-effort: wait for the new-chat click to land a session id, read the
+    // live season number, rename once. needs_auto_name() then skips a custom-named session,
+    // so the title sticks.
+    (async () => {
+      try {
+        const before = _preNewChatSid;
+        let sid = null;
+        for (let i = 0; i < 10; i++) {
+          await new Promise((r) => setTimeout(r, 200));
+          const cur = window.sessionModule && window.sessionModule.getCurrentSessionId
+            ? window.sessionModule.getCurrentSessionId() : null;
+          if (cur && cur !== before) { sid = cur; break; }
+        }
+        if (!sid) return;
+        const r = await fetch("/api/orwell/season", { credentials: "same-origin" });
+        if (!r.ok) return;
+        const season = ((await r.json()) || {}).season;
+        if (!season || season < 1) return;
+        await fetch(`/api/session/${sid}`, {
+          method: "PATCH", credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ name: "Season " + season }).toString(),
+        });
+        if (window.sessionModule && window.sessionModule.loadSessions) window.sessionModule.loadSessions();
+      } catch (_) { /* best-effort — the auto-namer remains the fallback */ }
+    })();
   };
 
   // Audit welcome-splash bleed-through: a started season is authoritative — the "Type /setup …"

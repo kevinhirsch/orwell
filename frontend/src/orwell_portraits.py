@@ -2084,6 +2084,15 @@ def ensure_reconciler_started() -> bool:
     a second start never double-runs (the single-task guard). A task whose loop died
     (test harnesses / reloads) is replaced rather than wedging the guard forever."""
     global _RECONCILER_TASK
+    # 0108: quiesced under golden record/replay — same rationale as kickoff_generation/
+    # kickoff_backfill, but this is the WALL-CLOCK path: the 5-min sweep fired mid-record
+    # (a record outlives the interval; a replay doesn't), generated real portraits through
+    # `backfill_missing` → `generate_and_store`, and recorded image-shown beats the replay
+    # can never reproduce (dead-end provider) — every later event id/beatSeq shifted one
+    # and the r3 replay missed (`evt:image:6`, the record-only npc portrait beat).
+    if golden_path.active():
+        logger.info("[portraits] reconciler skipped: golden record/replay mode (0108 determinism)")
+        return False
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

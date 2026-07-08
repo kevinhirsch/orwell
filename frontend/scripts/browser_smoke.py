@@ -2697,16 +2697,21 @@ def main() -> int:
             f4_seat0 = f4.input_value("#message")
             check(not f4_seat0.strip(),
                   f"P1: pre-game boot does NOT prefill the composer (no seat pre-prompt) ({f4_seat0!r})")
-            # the SETUP WIZARD (its own modal, data-ob-setup), shown on every fresh game/season; the
-            # only welcome copy is the framing line "Pick your season's models" (F1 #1022 — distinct
-            # from the holding-card model gate) and it shows the model SETUP (a narrator/portrait
-            # model summary + a "Choose models" door into Settings).
+            # the SETUP WIZARD (its own modal, data-ob-setup), shown on every fresh game/season. M2-1:
+            # the cold open leads with the show fantasy ("Welcome to the Big Brother house", one
+            # "Enter the house" CTA); the humanized production-feeds line + the quiet "Production
+            # settings" link carry the model setup (raw ids live in Settings only).
             f4_welcome = f4.evaluate(
                 "() => { const c = document.querySelector('#orwell-onboarding[data-ob-setup] .ob-card');"
                 "  return c ? c.textContent : ''; }")
             _wz = (f4_welcome or "").lower()
-            check("pick your season's models" in _wz and ("model" in _wz or "casting" in _wz),
-                  f"P1: the setup wizard frames the feeds and shows model setup ({(f4_welcome or '')[:80]!r})")
+            check("welcome to the big brother house" in _wz and "enter the house" in _wz,
+                  f"P1: the cold open leads with the show fantasy + one CTA (M2-1) ({(f4_welcome or '')[:80]!r})")
+            # M2-1: no raw provider/model id on the first screen (a slash-form id like
+            # "z-ai/glm-5.2" or "deepseek/deepseek-v4-pro" reads as debug chrome above the fantasy).
+            import re as _re_m21
+            check(not _re_m21.search(r"\b[\w.]+/[\w.-]+-[\w.]+\b", f4_welcome or ""),
+                  f"P1: no raw model id on the cold open ({(f4_welcome or '')[:80]!r})")
             # the cast-photo box is HIDDEN at boot — it follows the producers' question, never the
             # wizard (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)
             check(f4.evaluate("!document.getElementById('orwell-headshot')") is True,

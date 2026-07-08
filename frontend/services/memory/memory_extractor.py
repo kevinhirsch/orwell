@@ -252,6 +252,18 @@ async def extract_and_store(
     if not endpoint_url or not model:
         logger.debug("[memory-extract] No model or URL provided, skipping")
         return
+    # 0108: quiesce under the golden record/replay seam — this fires on a cadence with a
+    # sliding context window, so record and replay sample DIFFERENT windows and the request
+    # key can never match (the eighth GLM record's replay missed on exactly this call).
+    # Same class as the zeitgeist/offscreen/portrait quiesce; a skipped extraction is the
+    # documented no-op path (the game build barely uses assistant memory anyway).
+    try:
+        from src import golden_path as _gp
+        if _gp.active():
+            logger.debug("[memory-extract] golden record/replay active — skipping")
+            return
+    except Exception:
+        pass
 
     try:
         from src.llm_core import llm_call_async

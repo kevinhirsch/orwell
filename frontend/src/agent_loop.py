@@ -5804,7 +5804,7 @@ async def stream_agent_loop(
                         # PLAYER pending (goodbye/vote), forcing again would just no-op AND we'd never let
                         # the player decide — so gate the drain on "no player pending open right now". The
                         # surface-the-pending belt (post-turn) then brings the card up. Read the live pending
-                        # here (a player pending is reachable only via game_status, not get_game_state).
+                        # here via game_status (get_game_state carries the same `pending` since M0-7).
                         _eviction_drain_force = False
                         if _want_drain_eviction and not _previewed_uncommitted and not _decision_undelivered:
                             try:

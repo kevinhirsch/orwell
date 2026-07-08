@@ -78,6 +78,11 @@ PHASE_STALL_ABORT = 25
 # Invariant 7 — the same leak definitions the game-build scrub enforces
 # (frontend/static/js/markdown.js) + the golden fixture gate (src/golden_path.py).
 RAW_NPC_ID_RE = re.compile(r"\bnpc:\d+\b", re.I)
+# The render scrub REDACTS raw ids anywhere in the body before the player sees them —
+# mirror of markdown.js `_RAW_NPC_ID_GLOBAL_RE` (id + a trailing dash/colon/paren swallowed).
+# I7 judges the POST-scrub body: an id in the stored text is machinery the player never sees
+# (record #9 false-FAILed on one), while an id SURVIVING this mirror would be a real leak.
+RAW_NPC_ID_GLOBAL_RE = re.compile(r"\bnpc:\d+\b[ \t]*(?:[-–—:(]\s*)?", re.I)
 REASONING_LINE_RE = re.compile(
     r"^\s*(?:let me\b|looking at\b|the game state\b|i need to\b|i should\b|i'm going to\b"
     r"|based on the (?:roster|state)\b|the (?:roster|cast|state) (?:shows|is)\b)", re.I)
@@ -241,8 +246,13 @@ class GoldenDriver:
             raise RuntimeError("engine bundle missing — run `npm run build` at the repo root first")
         engine_data = os.path.join(self.work, "engine-data")
         os.makedirs(engine_data, exist_ok=True)
+        # M0-8: the LOGICAL clock — engine time advances per committed mutation, never wall
+        # time, so a minutes-per-turn record and a seconds-per-turn replay live in the SAME
+        # clock (the terminal divergence class: wall-clock hashed into the tick's derived rng
+        # seeds/recency windows). Both modes set it; the fixture is only valid under it.
         env = dict(os.environ, ORWELL_DATA_DIR=engine_data,
-                   ORWELL_ENGINE_PORT=str(self.engine_port))
+                   ORWELL_ENGINE_PORT=str(self.engine_port),
+                   ORWELL_LOGICAL_CLOCK="1")
         self.procs.append(subprocess.Popen(
             ["node", dist], cwd=REPO, env=env,
             stdout=open(self.engine_log, "w"), stderr=subprocess.STDOUT))
@@ -599,8 +609,15 @@ class GoldenDriver:
 
         beats = [r["beatSeq"] for r in self.timeline if isinstance(r.get("beatSeq"), int)]
         monotonic = all(b2 >= b1 for b1, b2 in zip(beats, beats[1:]))
-        expected = ["nominations", "veto", "eviction"]
-        order_ok = all(any(e in p for p in phases_seen) for e in expected)
+        # ORDER of the ceremony phases the walk SAMPLED, not presence of every label: the
+        # driver reads phase once per player turn, and a fast narrator can legally carry a
+        # whole ceremony inside one turn (record #9 sampled hoh→veto with nominations
+        # resolved mid-turn — the engine cannot skip noms before veto, so absence from the
+        # samples is pacing, not a defect). Eviction must be sampled (the week can't roll
+        # without it — and I8 asserts the roll independently).
+        expected = ["nominations", "veto-competition", "veto-ceremony", "eviction"]
+        sampled = [p for p in phases_seen if p in expected]
+        order_ok = sampled == [p for p in expected if p in sampled] and "eviction" in phases_seen
         self.inv.record("I5", "phases advance monotonically with no stuck beat",
                         monotonic and order_ok and stuck < 10 and not phase_stalled,
                         f"phases={phases_seen} stuck={stuck}"
@@ -625,8 +642,12 @@ class GoldenDriver:
             if m.get("role") != "assistant":
                 continue
             body_text = THINK_BLOCK_RE.sub("", str(m.get("content") or ""))
+            # Mirror the render scrub's global id redaction FIRST (markdown.js) — the stored
+            # body is pre-scrub; the player-facing one never carries raw ids. Only an id that
+            # survives the mirror (i.e. the scrub pattern missing it) is a real leak.
+            body_text = RAW_NPC_ID_GLOBAL_RE.sub("", body_text)
             if RAW_NPC_ID_RE.search(body_text):
-                leaks.append("raw npc:<id> in player-facing body")
+                leaks.append("raw npc:<id> survives the render scrub mirror")
             if "<think" in body_text:
                 leaks.append("unclosed reasoning block reached the body")
             # Mirror the render-side L6b scrub (markdown.js): a CONTIGUOUS run of planning

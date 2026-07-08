@@ -3567,6 +3567,14 @@ def needs_auto_name(name: str) -> bool:
 
 async def auto_name_session(session_manager, sess):
     """Generate a short title for a session from its first user message."""
+    # 0108: quiesce under the golden record/replay seam — title timing is state-paced and its
+    # request window shifts between record and replay (the memory-extractor miss class).
+    try:
+        from src import golden_path as _gp
+        if _gp.active():
+            return
+    except Exception:
+        pass
     try:
         from src.llm_core import llm_call_async
         from src.task_endpoint import resolve_task_endpoint

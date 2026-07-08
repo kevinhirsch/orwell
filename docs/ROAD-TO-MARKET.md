@@ -54,7 +54,16 @@ are parallel unless `Depends` says otherwise.
 > note it reasons by default (~266 reasoning tokens on a trivial call — ADR-0010 per-class
 > reasoning budgets are the lever if utility cost creeps).
 
-### M0-1 · Record + commit the canonical real-model golden fixture — S · **BLOCKED on M0-8 (engine logical clock)**
+### M0-1 · Record + commit the canonical real-model golden fixture — S · ✅ DONE (record #12)
+*Shipped 2026-07-08. `frontend/tests/golden/golden_path_glm-5.2.jsonl` (118 records, GLM 5.2
+narration + Qwen 3.6 Flash utility, seed 108108) committed with its run report — record digest
+`78b5e660e6cc6734` reproduced EXACTLY by two consecutive replays (R1 zero misses, R2 zero
+provider reach). The `golden-path` PR gate is ARMED. Twelve records total; every replay failure
+converted to a structural fix: fixture integrity/writer forensics, shared-state scrub, settings
+TTL race, phase-stall escalation, pending-surface gap (M0-7), serialized authoring, cast-state
+walk gate, the M0-8 logical clock, background-LLM quiesce (memory/title/skill), dwell-label
+neutralization, golden 409-token strip, and the awaited post-turn record belt. Owner actions
+remain: `OPENROUTER_API_KEY` repo secret (nightly) + rotate the in-chat key.*
 Source: 0108 (built, gate dormant). Retargeted by the owner from deepseek-v4-pro to the two-tier
 GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time of writing.
 - **DoR (met):** key at hand ✓; OpenRouter reachability through the proxy verified ✓; both models
@@ -125,7 +134,14 @@ GLM 5.2 + Qwen 3.6 Flash pair; key provided in-session; record run live at time 
   also false-positived on host voice ("Let me get a read on…") — mid-body now flags only
   unambiguous operator signatures; the full planning set still applies to the leading strip.
 
-### M0-8 · Engine: logical clock under golden mode (wall-clock is in the tick's rng) — M (engine) · **NEW · BLOCKS the fixture commit**
+### M0-8 · Engine: logical clock under golden mode (wall-clock is in the tick's rng) — M (engine) · ✅ DONE
+*Shipped 2026-07-08. `ORWELL_LOGICAL_CLOCK` (runtime.ts `logicalClockFromEnv`): reuses `FakeClock`
+at a fixed epoch (2026-01-01Z, or an env-supplied epoch-ms); advances +60s ONCE per committed
+mutation inside `registry.setCommit` (before the commit's tick, so the tick sees the new minute);
+reads clock-neutral; forces pure turn-driven (watcher cadence ignored with a warning); injected
+test clocks win over the env; unset ⇒ byte-identical SystemClock. Driver sets it on the engine in
+both modes. Gate: `tests/unit/logicalClock.test.ts` — 5 tests incl. the pacing-invariance proof
+(identical call sequences at 1ms vs 40ms wall pacing ⇒ byte-identical snapshots).*
 Source: record attempt #7 autopsy (2026-07-07). `orchestrator.defaultApply` seeds per-tick derived
 rng streams and recency windows with **wall-clock `clockNow`** (`confessional-recent/-phrasing:
 ${clockNow}`, `selectRecentForConfessional(events, …, clockNow)`, `orch:day:${clockNow}` ids) — so
@@ -147,7 +163,50 @@ for committing any golden fixture.
   ("round counts vary ±1 with stream timing" — the reason `turnsHere` is key-neutralized) is the
   next-frontier nondeterminism if it survives the clock fix; keep the miss-dump/ledger drill.*
 
-### M0-7 · Engine: `getGameState.pending` disagrees with `gameStatus.pending` — S–M (engine) · **NEW**
+### M0-9 · Two residual golden nondeterminism classes (tick pacing + a wall-clock writer) — S+S · ✅ DONE
+*2026-07-08, the M0-7 re-record campaign (records r2/r3, one deterministic R1 miss each — both
+autopsied via the miss dump + llm-io twin diff + engine event-prefix diff):*
+
+*Class 1 — aux commits tick the house under the logical clock (r2's miss: the 0076 "MOVEMENT IN
+THE ROOM" cue rendered in replay but not record; occupancy lines and the committed EVENT prefix
+byte-identical, so the fork was presence SAMPLING, not presence state). Under the M0-8 logical
+clock every commit advances a full 60s step, so the E57 wall-time aux-tick debounce (10s) can
+NEVER absorb — the house ticked once per TOOL CALL instead of once per turn, resurrecting the
+E57 regression golden-side and amplifying the known round-count ±1 nondeterminism (record
+streams over wall seconds; replay is instant — a commit shifts across a turn boundary and
+everything presence-sampled at framing time jitters: seating, dwell, the movement cue). Fix:
+`auxTicksNever` orchestrator flag, set by `composeRuntime` whenever the logical clock is active
+— an aux commit never fires the off-screen tick; beats only (beat commits replay identically).
+Production untouched (the wall debounce is correct under real time). Gate: `logicalClock.test.ts`
+"aux commits never tick under the logical clock — seating frozen between beats". The M0-8 note's
+"next-frontier nondeterminism" prediction was exactly this.*
+
+*Class 2 — the G20 portrait reconciler is a WALL-CLOCK engine writer (r3's miss: replay one
+event + one commit behind record at the same turn — `evt:mcp:8` vs `9`, `beatSeq 24` vs `25` —
+and the event-prefix diff named the extra record-only event: `evt:image:6`, "image shown to the
+player: npc:… portrait"). The 5-minute reconciler sweep fired mid-record (a record outlives the
+interval; a replay doesn't), found "missing" portraits, generated REAL ones through
+`backfill_missing` → `generate_and_store` against the live provider (also unbudgeted image
+spend), and recorded image-shown beats a dead-end-provider replay can never reproduce — every
+later event id / beatSeq shifted one and the first tool result carrying one forked the key. The
+turn-driven portrait paths were already quiesced (kickoff_generation / kickoff_backfill); the
+reconciler start was the gap. Fix: `ensure_reconciler_started` no-ops under `golden_path.active()`
+(same quiesce family as the memory/title/skill extractors + zeitgeist). Gate:
+`test_portrait_reconciler_is_quiesced_under_golden` (loop-safe via conftest `_run` — a bare
+`asyncio.run` in a test poisons the xdist worker's default loop; 91 later tests failed until it
+used the suite idiom).*
+
+### M0-7 · Engine: `getGameState.pending` disagrees with `gameStatus.pending` — S–M (engine) · ✅ DONE
+*2026-07-08: root was `GameSessionAdapter.view()` (the `getGameState` projection) simply omitting
+the field — `gameStatus` and the `advanceGame` result both read `pendingView()`, `view()` never
+did. `GameStateView` now carries `pending` (live reads return `pendingView()`, pre-game `null`);
+`tests/unit/pendingProjectionAgreement.test.ts` walks a seeded season through a full week
+answering every pending with a fixed legal policy and asserts the two projections agree at EVERY
+beat (plus advance-result agreement). FE untouched behaviorally (the status-read remains the
+decision card's source; one stale comment updated). The new field rides in `getGameState` tool
+results the model sees, so it forked every downstream golden request key — the fixture was
+re-recorded on live GLM 5.2 the same day (the "next natural re-record" the M0-5 note was waiting
+on; its dwell-scope refinement was taken in the same cycle) and validated replay ×2.*
 
 Source: record attempt #3 autopsy (2026-07-07). A pending created inside an advance (the
 eviction-vote ballot) surfaces on `gameStatus` (and in the `advanceGame` result itself) but reads
@@ -181,7 +240,17 @@ Depends: M0-1 (the GLM run report is the evidence base).
   issue with the run-report evidence attached; the driver's conditional SKIP for I3 only remains
   if the golden path legitimately has no photo beat under the recorded config.
 
-### M0-5 · Close the residual replay-miss class — M · **OPEN (characterized, instrumented)**
+### M0-5 · Close the residual replay-miss class — M · ✅ CLOSED by the M0-1 campaign (superseded)
+*2026-07-08: the committed fixture replays with R1=0 across two runs — the residual class is gone
+(it fell to the logical clock + quiesce + awaited-belt fixes). One accepted-risk refinement noted
+from PR #1234 review: the `"(a moment)"/"(just arrived)"` dwell neutralization is global, not
+presence-line-scoped — a bare parenthetical in unrelated prose would be masked key-side.
+**Refinement landed 2026-07-08** with the M0-7 re-record (the "next natural" one): the dwell subs
+are now scoped to the `With you:`/`Your room:` presence lines (`_PRESENCE_LINE_RES` in
+`frontend/src/golden_path.py`), the Your-room tenure clause covers its word forms too
+(`(you've been here just arrived/a moment)` — the old numeric-only pattern missed them), and an
+out-of-line parenthetical drifts the key again
+(`test_dwell_neutralization_is_scoped_to_presence_lines`).*
 Source: this session's determinism campaign. Four volatility classes are already fixed and
 committed (the wall-clock prompt section neutralized key-side; the web-search zeitgeist quiesced;
 the off-screen-texture and portrait pipelines quiesced — the ledger-diff finding; the presence
@@ -214,7 +283,18 @@ resets narrator to `deepseek/deepseek-v4-pro`).
   `settings.py` defaults + `oobe_reset.py` OOB models + the `golden-nightly` model args agree
   with whatever the owner confirms; the settings-wiring source gates updated in the same PR.
 
-### M0-3 · ADR-0008/0012 owed live-LLM two-window re-run + mid-gen-join pin — M
+### M0-3 · ADR-0008/0012 owed live-LLM two-window re-run + mid-gen-join pin — M · ✅ DONE
+*2026-07-08: both halves shipped. The PIN — `frontend/tests/test_m0_3_midgen_join.py`
+(fe-browser-tests lane): real engine + real FE + a scripted slow-drip stub; window B joins
+MID-GENERATION and must paint live partials then converge byte-identical (3/3 green). The LIVE
+run — `frontend/scripts/_verify_two_window_live.py` on real GLM 5.2: one game driven
+premiere → HOH → nominations → veto with two windows open throughout + a third joining
+mid-generation, **VERIFY OK 14/14** (26 parity checks across two runs, zero divergences, held at
+1–3 min/round real latency). Results + screenshots appended to
+`docs/audits/2026-06-27-ship-gate.md` §M0-3. Driver hardening learned live: socket reads 600s
+(a 240s read timeout killed run 1 mid-GLM-thinking-pause), fail-soft turn reader (the run is
+server-detached), incremental verdict persistence.*
+
 Source: repo's own owed-verification list; market #3 ("prove the real product works").
 - **DoR:** real narrator endpoint configured (same lesson-17 recipe as M0-1); the F1–F5 airtight
   bar (`docs/audits/2026-06-27-ship-gate.md`) open beside the run.
@@ -222,20 +302,30 @@ Source: repo's own owed-verification list; market #3 ("prove the real product wo
   sequence including a mid-generation join; the mid-gen-join behavior pinned by a test (the owed
   "test pin" from the ADR-0010/0012 residual list); results appended to the ship-gate doc.
 
-### M0-4 · A-S3: stale-409 must not drop a scene's only consequence fold — M (engine)
-Source: audit A10 — `recordInteraction → StaleBeatError` fired in an ordinary 40-minute session;
-`docs/REFACTOR-ROADMAP.md` A-S3 pulled forward from post-launch.
-- **DoR:** repro read (admin error table row); decision on strategy (retry with refreshed
-  `beatSeq` vs queue-and-refold) taken from the roadmap's A-S3 sketch.
-- **DoD:** a 409'd `recordInteraction` whose scene recorded nothing else re-lands its fold
-  (never silently dropped); engine unit test simulating the stale-CAS race; the sync-ledger
-  records the recovery; `npm test` green.
+### M0-4 · A-S3: stale-409 must not drop a scene's only consequence fold — M (engine) · ✅ DONE (was already shipped; row was stale)
+*Source-verified 2026-07-08: the CON-11 audit campaign had already built the full R1c design —
+this row predated it. Both strategies from the DoR landed, layered: (1) **retry-once with the
+refreshed token** — `agent_loop._backfill_with_cas` reconciles a stale-409 via
+`_handle_stale_beat` and re-attempts against the fresh `beatSeq` (safe because the engine throws
+BEFORE any record/fold — fail-closed CAS); (2) **queue-and-refold** — a SECOND consecutive 409 on
+a fold-bearing call (`defer_fold=True`) queues into the bounded per-owner
+`chat_helpers._defer_fold` queue, drained at the top of every later back-fill
+(`_drain_deferred_folds`) — the loss is bounded to latency, never data; positional belts
+(`moveTo`) keep reconcile-and-skip by design (a stale location re-derived late would be wrong).
+The MODEL-called `do_record_interaction` attaches no CAS token at all, so it structurally cannot
+409. DoD mapping: engine stale-CAS race test = `tests/unit/syncSpine.test.ts` ("a stale
+recordInteraction folds NOTHING; the re-attempt at the fresh beatSeq folds exactly once (#591)");
+FE gates = `frontend/tests/test_0065_backfill_cas.py` (14 tests: retry-lands, double-409 defers,
+drain-lands, overflow-drops-loudly, no-self-409); ledger = per-turn `staleRejections` in
+`orwell_sync_ledger` + the `deferred_fold_count()` ops hook. Both suites green this session
+(engine `test:ci` 623 scenarios; fe-unit 4021).*
 
 ---
 
 ## Wave M1 — one live truth, zero seams (audit lane A)
 
-### M1-1 · Kill the live double-render race — M · `P1`
+### M1-1 · Kill the live double-render race — M · `P1` · ✅ DONE (3835e68)
+*Root cause: the deferred peer-resume flush re-attached to the tab's OWN just-settled run and replayed the reply into a fresh bubble. Fixed by convergence key (the replayed message_saved's server DB id aborts a resume whose bubble already exists) + per-chunk paint batching so the one-burst settled replay can never flash a transient dup frame. Gate: tests/test_m1_1_resume_own_echo.py + the #873 suite.*
 Source: audit A1 (`s-b5`/`s-b6`; one completion → two bubbles, one persisted row; intermittent).
 - **DoR:** repro conditions noted (first streamed turn after reload on a fresh game); the #873
   harness (`frontend/scripts/_capture_873_dedup.py`) understood as the instrumentation template.
@@ -291,14 +381,16 @@ Source: audit A4 (`s-b9` clipped helper line; `m-1` Confirm below the fold, doub
   assertion (XFAIL registered/removed in the same PR per Stream-S rules); existing C20
   browser-smoke decision block untouched and green.
 
-### M1-5 · Mobile gadget drawer: one opaque sheet, a scrim, zero collisions — M · `P1` (mobile)
+### M1-5 · Mobile gadget drawer: one opaque sheet, a scrim, zero collisions — M · `P1` (mobile) · ✅ DONE (9409b91)
+*Both drawer media blocks force the opaque sheet (rail --bg, cards --panel, backdrop off; desktop keeps glass); scrim at z59 under the drawer's 60, tap-closes, lifecycle owned by openDrawer/closeDrawer. Gate: tests/test_m1_5_drawer_sheet.py.*
 Source: audit A5 (`m-3` — translucent layer soup, titles double-exposing, buttons overlapping text).
 - **DoD:** on coarse pointers the rail opens as an opaque (or ≥.95 alpha) sheet over a scrim;
   gadget cards opaque within it; one stacking context; `responsive_matrix.py` asserts no two
   gadget-card boxes intersect and no drawer text node sits over chat text in the open-drawer
   state on the phone profile.
 
-### M1-6 · First-run card: own stacking context, docked toast, honest gated CTA — S–M · `P2`
+### M1-6 · First-run card: own stacking context, docked toast, honest gated CTA — S–M · `P2` · ✅ DONE (c74526f)
+*Onboarding window opaque + isolation:isolate (scoped :has([data-ob-setup])); corner toast docks below the titlebar band while body.ow-onboarding; Start carries a visible why-disabled cue + bounded 2.5s re-probe (event-race cover) torn down on dismiss — the gate stays honest (no narrator feed ⇒ no game) rather than failing open. Gate: tests/test_m1_6_first_run_card.py.*
 Source: audit A6 (`s-a1` — wordmark/ambient text ghosting through the card, toast over the ×,
 primary CTA disabled 30+s with no cue).
 - **DoD:** nothing renders through the modal; the "producers are getting the house ready" toast
@@ -306,7 +398,8 @@ primary CTA disabled 30+s with no cue).
   fail-opens to enabled with the deterministic floor after a bounded wait; browser-smoke
   onboarding block extended to assert the CTA is enabled-or-progressing within the bound.
 
-### M1-7 · Season reset: overlay banner + season divider — M · `P2`
+### M1-7 · Season reset: overlay banner + season divider — M · `P2` · ✅ DONE (this commit)
+*Owner-recommended path taken: fresh session per season (the existing E65 seam) + the restart chat now titled "Season N" off /api/orwell/season (form-encoded rename; auto-namer skips custom names). The degraded-engine banner overlays without reflow — the notice kit gains reflow:false (host reserves body padding only while a reflow-participating card is up) and orwellEngineStatus opts in. Gate: tests/test_m1_7_season_reset.py.*
 Source: audit A7 (`t-3` — "technical moment" slab reflows the app; dead season's transcript under
 the new casting interview; session titled "Casting interview" forever).
 - **DoR:** owner-consistent choice confirmed in-PR: archive-behind-divider vs fresh session per
@@ -354,7 +447,17 @@ Source: audit A11 (same-second identical cast-authoring bursts against a bad pro
 
 ## Wave M2 — the first five minutes look like television (audit lane B)
 
-### M2-1 · Cold-open first-run — M · `P1`
+### M2-1 · Cold-open first-run — M · `P1` · ✅ DONE
+*2026-07-08: the setup wizard now leads with the show — h1 "Welcome to the Big Brother house",
+one primary CTA "Enter the house" (was "Start casting"); the model summary is ONE demoted
+humanized production-feeds line ("Narrator: GLM 5.2 · Portraits: Gemini 2.5 Flash Image",
+`humanizeModelId` — display-only, resolution keeps raw ids); the config door is the quiet
+"Production settings" link (same `data-ob-choose-models` behavior + modal stack). Raw ids render
+only inside the real Settings. Gates: `tests/test_m2_1_cold_open.py` (fantasy h1, one CTA,
+humanized-only render path, demoted link) + the updated `test_oobe_onboarding` pins + the
+browser-smoke block now asserts the fantasy lead AND regexes the cold open for raw slash-form
+model ids. M1-6's gated-CTA hint machinery untouched (copy follows the new naming). fe-unit 4025.*
+
 Source: audit B1 (`s-a1` — raw model IDs above the fantasy). Depends: M1-6.
 - **DoR:** decision: cold-open copy voice (existing diegetic copy is the baseline); model config
   demoted behind a "Production settings" link.

@@ -8126,6 +8126,7 @@ export class GameSessionAdapter implements GameSession {
         ceremony: { hoh: null, nominees: [], veto: { holder: null, used: false, players: [] } },
         whereabouts: null,
         player: null, house: [], casting: castingStatusOf(this.intake),
+        pending: null,
       };
     }
     const p = this.house.player;
@@ -8149,6 +8150,11 @@ export class GameSessionAdapter implements GameSession {
     return {
       started: true,
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
+      // M0-7: the SAME pendingView gameStatus/advance expose — the two closed-set
+      // projections of one sandbox must never disagree about the live pending (the
+      // eviction-vote ballot surfaced only on gameStatus and state-keyed consumers
+      // silently missed it).
+      pending: this.pendingView(),
       finished: !!this.live?.finished, // B6-01: the over-signal the FE season lifecycle (0057) gates on
       // C8-04: the live ceremony state in the model's persistent context (the same Vault-free public
       // facts gameStatus() exposes), so the narrator voices the REAL HOH/nominees/veto, never invents.
