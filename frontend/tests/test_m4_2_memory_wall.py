@@ -18,6 +18,7 @@ real name (CLAUDE.md testing rule).
 
 import importlib
 import pathlib
+import re
 
 import pytest
 from fastapi import FastAPI
@@ -340,8 +341,19 @@ def test_js_does_not_define_the_shared_factline_module():
 
 def test_rail_mirror_is_registered():
     layout = LAYOUT.read_text(encoding="utf-8")
-    assert "rail-memory" in layout and "sidebar-memory-btn" in layout, \
+    assert "rail-memory-wall" in layout and "sidebar-memory-btn" in layout, \
         "RAIL_MIRRORS must create the collapsed-rail twin for the Memory Wall button (H4)"
+
+
+def test_rail_mirror_id_avoids_the_static_brain_button():
+    """index.html ships a STATIC #rail-memory (data-rail-source=\"tool-memory-btn\", the inherited
+    Brain/Memory tool). The Memory Wall mirror must NOT reuse that id — doing so hijacks the Brain
+    button's icon + gating and fails the H4 icon-parity smoke (caught live on PR #1238)."""
+    layout = LAYOUT.read_text(encoding="utf-8")
+    block = layout[layout.index("RAIL_MIRRORS"):]
+    block = block[:block.index("];")]
+    assert re.search(r"rail:\s*'rail-memory'[,\s]", block) is None, \
+        "RAIL_MIRRORS must not claim the static Brain button's id 'rail-memory'"
 
 
 def test_rail_mirror_adds_no_second_fallback():
