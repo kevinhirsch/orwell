@@ -283,7 +283,18 @@ resets narrator to `deepseek/deepseek-v4-pro`).
   `settings.py` defaults + `oobe_reset.py` OOB models + the `golden-nightly` model args agree
   with whatever the owner confirms; the settings-wiring source gates updated in the same PR.
 
-### M0-3 · ADR-0008/0012 owed live-LLM two-window re-run + mid-gen-join pin — M
+### M0-3 · ADR-0008/0012 owed live-LLM two-window re-run + mid-gen-join pin — M · ✅ DONE
+*2026-07-08: both halves shipped. The PIN — `frontend/tests/test_m0_3_midgen_join.py`
+(fe-browser-tests lane): real engine + real FE + a scripted slow-drip stub; window B joins
+MID-GENERATION and must paint live partials then converge byte-identical (3/3 green). The LIVE
+run — `frontend/scripts/_verify_two_window_live.py` on real GLM 5.2: one game driven
+premiere → HOH → nominations → veto with two windows open throughout + a third joining
+mid-generation, **VERIFY OK 14/14** (26 parity checks across two runs, zero divergences, held at
+1–3 min/round real latency). Results + screenshots appended to
+`docs/audits/2026-06-27-ship-gate.md` §M0-3. Driver hardening learned live: socket reads 600s
+(a 240s read timeout killed run 1 mid-GLM-thinking-pause), fail-soft turn reader (the run is
+server-detached), incremental verdict persistence.*
+
 Source: repo's own owed-verification list; market #3 ("prove the real product works").
 - **DoR:** real narrator endpoint configured (same lesson-17 recipe as M0-1); the F1–F5 airtight
   bar (`docs/audits/2026-06-27-ship-gate.md`) open beside the run.
