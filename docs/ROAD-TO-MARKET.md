@@ -1,5 +1,12 @@
 # Road-to-market backlog — waves M0–M4 (2026-07-07)
 
+> **Status (2026-07-08, close of the build session):** **Wave M0 — DONE** (the golden gate is
+> ARMED; owner actions owed: the `OPENROUTER_API_KEY` repo secret + rotating the in-chat key).
+> **Wave M1 — DONE** (10/10). **Wave M2 — 4/8 shipped**: M2-1 ✅ · M2-2 ✅ (owner approved the
+> mock in-session) · M2-4 ✅ · M2-5 ✅ (owner pick: "Production") — M2-3 is next (unblocked by
+> M2-2), M2-6 has recon notes inline, M2-7/M2-8 are small P3s. **Waves M3–M4 — not started**
+> (M3 depends on M2-2, now in). Shipped via PR **#1234 (merged)** and PR **#1235 (open)**.
+
 **What this is.** The consolidated, owner-triaged backlog from the 2026-07-07 FE–BE integration
 review session: every actionable item from the screenshot audit
 (`docs/audits/2026-07-07-fe-be-integration-gap-review.md`), the faces-in-the-flow idea catalog,
@@ -489,8 +496,13 @@ Source: audit B3 (`s-d1` flat letter-rectangles); prerequisite for M3-* faces wo
   and decision cards consume the same component; browser-smoke asserts monograms render with
   zero image provider configured.
 
-### M2-3 · Premiere cast strip + pre-HOH board reframe — M · `P1`
-Source: audit B2 (`s-b1` — empty premiere, `HOH — / Noms — / Veto —`). Depends: M2-2.
+### M2-3 · Premiere cast strip + pre-HOH board reframe — M · `P1` · NEXT (unblocked — M2-2 is in)
+*Hand-off: build the 16-tile strip on `OrwellMonogram.face()` (it already takes the roster card
++ status; met flags ride the roster); the met-progress count lives in `orwellStatusPanel.js`
+(`os-prem-count`); the dead pre-HOH board rows render in the status panel — reframe when
+`status.hoh` is null and week === 1.*
+
+Source: audit B2 (`s-b1` — empty premiere, `HOH — / Noms — / Veto —`). Depends: M2-2 ✅.
 - **DoD:** premiere shows the sixteen-tile strip lighting up with the met-progress gate (0/15 →
   15/15), clicking a tile scrolls/focuses the chat (never replaces it — ADR 0003); pre-HOH the
   dead board rows read "First HOH tonight" instead of em-dashes; strip disappears (or docks)
@@ -529,7 +541,13 @@ Source: audit B4/B7 (bubbles "Orwell", beats "· ✔ 📺 PRODUCTION done", fict
   slates (aligned rail, styled label, no lowercase "done" debug tail); beat labels stay sourced
   from `orwellToolBeats.js` (single registry); browser-smoke label checks updated.
 
-### M2-6 · In-world timestamps on beats — S–M · `P2`
+### M2-6 · In-world timestamps on beats — S–M · `P2` (recon done, unstarted)
+*Hand-off: stamp `game_moment` into assistant-message metadata at the persist site — the seam
+already stamps `phase="casting"` pre-game (`routes/chat_routes.py` ~1457) and carries a
+server-minted ts via the ADR-0012 `message_saved` event; the render hook is `roleTimestamp()`
+(`chatRenderer.js` ~825) — prefer `metadata.game_moment`, demote the wall clock to `title`.
+The moment string comes from the engine status the FE already fetches (week/phase/time-of-day).*
+
 Source: audit B5 (wall-clock "12:35 PM" inside the fiction). Depends: M1-2 (clock live).
 - **DoD:** transcript messages stamp the game moment ("Week 1 · Eviction Night · Late night")
   with the real clock demoted to hover/metadata; pre-game (casting) keeps neutral stamps; render
