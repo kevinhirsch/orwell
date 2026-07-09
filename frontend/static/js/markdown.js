@@ -815,6 +815,10 @@ function _speakerChipHtml(id, name) {
   let face = '';
   try {
     if (typeof window !== 'undefined' && window.OrwellMonogram && window.OrwellMonogram.svg) {
+      // svg() (unlike face()) does NOT inject the monogram CSS, and the `.ow-mono-face
+      // .ow-mono-svg` sizing rules live there — on a fresh transcript where no cast/decision
+      // surface has loaded it yet, the SVG would render unsized. Ensure it here.
+      if (typeof window.OrwellMonogram.ensureCss === 'function') window.OrwellMonogram.ensureCss();
       const seed = _resolveSpeakerSeed(id, nm);
       face = `<span class="ow-mono-face">${window.OrwellMonogram.svg({ id: seed, name: nm })}</span>`;
     }
