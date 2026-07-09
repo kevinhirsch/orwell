@@ -431,16 +431,43 @@
   // The surface the ink truly sits on = the frost tint composited over the wallpaper at scrimAlpha
   // (the bubble blurs the wall but the scrim is opaque-over the blurred result), so that is what we
   // measure. Polarity-flip alone is the floor; the scrim escalation is the guarantee.
-  function resolveBubbleScrim(L, bgRgb) {
-    var dark = L >= INK_THRESHOLD;          // bright backdrop → DARK ink + light frost
-    var ink = dark ? parseColor(INK_DARK).slice(0, 3) : [255, 255, 255];
-    var frost = dark ? BUBBLE_LIGHT_RGB : BUBBLE_DARK_RGB;
+  // Escalate ONE polarity's scrim: composite the frost over the sampled backdrop and climb the
+  // LOCAL per-bubble scrim alpha (from the CSS default toward the near-opaque cap) until
+  // APCA(ink↔surface) clears the floor — or we hit the cap. Returns the best {alpha, lc} this
+  // polarity can reach over THIS backdrop.
+  function _escalateScrim(ink, frost, bgRgb) {
     var a = SCRIM_BASE, lc = 0, surface;
     for (;;) {
       surface = compositeOver(frost, a, bgRgb);
       lc = Math.abs(apcaContrast(ink, surface));
       if (lc >= APCA_FLOOR || a >= SCRIM_MAX) break;
       a = Math.min(SCRIM_MAX, a + SCRIM_STEP);
+    }
+    return { alpha: a, lc: lc };
+  }
+
+  function resolveBubbleScrim(L, bgRgb) {
+    // PREFERRED polarity from the linear-Y flip (Apple Messages received-bubble behaviour):
+    // a BRIGHT backdrop → DARK ink + light frost; a DARK backdrop → WHITE ink + dark frost.
+    var darkPref = L >= INK_THRESHOLD;
+    var darkInk = parseColor(INK_DARK).slice(0, 3), lightInk = [255, 255, 255];
+    var prefInk = darkPref ? darkInk : lightInk;
+    var prefFrost = darkPref ? BUBBLE_LIGHT_RGB : BUBBLE_DARK_RGB;
+    var pref = _escalateScrim(prefInk, prefFrost, bgRgb);
+    var dark = darkPref, ink = prefInk, frost = prefFrost, a = pref.alpha, lc = pref.lc;
+    // The legibility FLOOR is the non-negotiable; the polarity FLIP is the aesthetic preference.
+    // At the extremes (a clearly bright or clearly dark wall) the preferred polarity always wins
+    // on contrast, so this is a no-op there. Only when a STARVED mid-tone right at the flip
+    // boundary can't reach the floor with the preferred polarity even at the scrim cap do we fall
+    // back to whichever polarity contrasts MORE — so a received bubble is legible over ANY
+    // wallpaper, not just the threshold-preferred half.
+    if (pref.lc < APCA_FLOOR) {
+      var altInk = darkPref ? lightInk : darkInk;
+      var altFrost = darkPref ? BUBBLE_DARK_RGB : BUBBLE_LIGHT_RGB;
+      var alt = _escalateScrim(altInk, altFrost, bgRgb);
+      if (alt.lc > pref.lc) {
+        dark = !darkPref; ink = altInk; frost = altFrost; a = alt.alpha; lc = alt.lc;
+      }
     }
     return { ink: ink, frostRgb: frost, scrimAlpha: a, lc: lc, dark: dark };
   }

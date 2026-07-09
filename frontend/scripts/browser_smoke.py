@@ -446,6 +446,52 @@ def main() -> int:
                 check(not _below,
                       f"#744: EVERY received bubble clears the APCA floor (Lc>=60) over a busy "
                       f"mid-tone wallpaper — frost+scrim escalation guarantees it ({measured})")
+
+                # ── #738 item #1 — the OTHER worst case: a BUSY/LIGHT wallpaper ──────────────
+                # DoD: "worst-case wallpaper" — a busy MID-TONE is only half of it. A busy/LIGHT
+                # backdrop drives the polarity the OTHER way (DARK ink + light frost); a bare
+                # polarity flip over a bright, high-frequency wall is exactly where a received
+                # bubble can wash out. Swap the wallpaper on the SAME seeded bubbles, re-run the
+                # adaptive pass, and assert every received bubble STILL clears the floor.
+                page.evaluate(
+                    """() => {
+                      const wp = document.getElementById('__wp');
+                      if (wp) wp.style.background =
+                        'linear-gradient(115deg,#eef0d6 0%,#f4dca8 20%,#dbe6f2 42%,#f2d8de 64%,'
+                        + '#e0f0e4 82%,#f4ecd2 100%)';
+                    }"""
+                )
+                # Assert on the module's own per-bubble APCA verdict (data-apca-lc), computed from
+                # its REAL per-pixel canvas sampling of the wallpaper — the same value that drives the
+                # rendered scrim. (An in-smoke "independent" recompute can't sample a CSS *gradient*
+                # backdrop: getComputedStyle('#__wp').backgroundColor is transparent for a gradient, so
+                # it would measure ink over a fictional black surface, not the real wallpaper. The
+                # module's canvas sample is the trustworthy signal; test_0744 pins the polarity fallback.)
+                measured_light = None
+                for _ in range(8):
+                    try:
+                        page.evaluate("() => window.OrwellAdaptiveGlass && window.OrwellAdaptiveGlass.refresh && window.OrwellAdaptiveGlass.refresh()")
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(180)
+                    measured_light = page.evaluate(
+                        """() => {
+                          const FLOOR = (window.OrwellAdaptiveGlass && window.OrwellAdaptiveGlass.APCA_FLOOR) || 60;
+                          const out = [];
+                          document.querySelectorAll('.msg-ai[data-s744]').forEach((el, i) => {
+                            out.push({ i, ink: getComputedStyle(el).color,
+                                       attrLc: parseInt(el.getAttribute('data-apca-lc') || '0', 10), floor: FLOOR });
+                          });
+                          return out;
+                        }"""
+                    )
+                    if measured_light and all(b.get("attrLc", 0) > 0 for b in measured_light):
+                        break
+                _below_light = [b for b in (measured_light or []) if b.get("attrLc", 0) < b.get("floor", 60)]
+                check(bool(measured_light) and len(measured_light) >= 2 and not _below_light,
+                      f"#738-1: EVERY received bubble clears the APCA floor (Lc>=60) over a busy "
+                      f"LIGHT wallpaper too — polarity flip + scrim floor guarantees it ({measured_light})")
+
                 # teardown the seeded bubbles + restore the page background so later suites are clean.
                 page.evaluate(
                     """() => {
