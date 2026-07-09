@@ -174,11 +174,18 @@ OVERLAY_ALLOWLIST: List[str] = [
 #: appearing on a DIFFERENT shot or theme (review P1, PR #1244 — a bare substring registry
 #: would silently absorb new regressions that happen to render the same line).
 XFAIL: Dict[str, Dict[str, str]] = {
-    # VIS-1 (first live run, 2026-07-08, tracked in issue #1245): the decision card's content
-    # escapes its anchored sheet's overflow:hidden box by ~10-45px at the bottom on phone-390
-    # during comp-round beats (tierB hoh + veto: el bottom 733/701 vs ancestor box 690) — the
-    # card's lower edge is silently clipped. Remove this entry when the fix lands.
-    "VIS-1": {"shot": "tierB:", "needle": "clipped-by-ancestor div#orwell-decision-card"},
+    # VIS-1 (first live run, 2026-07-08, tracked in issue #1245) FIXED 2026-07-09: the decision
+    # card's content escaped its anchored sheet's overflow:hidden box by ~10-45px at the bottom
+    # on phone-390 during comp-round beats (tierB hoh + veto: el bottom 733/701 vs ancestor box
+    # 690) — the card's lower edge (incl. Confirm) was silently clipped. Root cause: the anchored
+    # `.ow-sheet` mounts as a flex ITEM of `#on-notice-zone` (a max-height-capped flex column with
+    # its own overflow-y:auto) — because the sheet itself sets overflow:hidden, its flexbox
+    # automatic minimum size collapsed to 0, so the zone's default flex-shrink:1 squeezed the
+    # sheet down to fit the zone's cap instead of letting the ZONE scroll around it. Fixed by
+    # `flex-shrink: 0` on `.ow-sheet.ow-sheet-anchored` (style.css + the orwellSheet.js
+    # ensureCss() runtime copy, kept in lock-step) — the sheet now keeps its natural,
+    # content-capped-by-its-own-`.ow-sheet-body` height and the zone scrolls around it, so
+    # Confirm is always reachable. Re-verified clean (0 findings) via a live tierB run.
     # VIS-2/2b (first live run, 2026-07-08, issue #1245): with the gadget-rail drawer OPEN at
     # tablet-768 the rail (and the status card inside it) measured entirely off the right
     # viewport edge — rect left 774 on a 768-wide viewport, i.e. translateX(100%) — under ONE
