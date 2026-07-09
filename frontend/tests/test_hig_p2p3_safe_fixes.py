@@ -78,15 +78,35 @@ def test_hwfit_sched_err_has_non_color_channel():
 
 
 # ── F-TOUCH-2 ─────────────────────────────────────────────────────────────────
-def test_og_act_is_a_real_button_not_tap_exempt():
-    """The gadget action button is created as a real <button> with class `og-act` and no
-    `.tap-exempt`, so the responsive-tokens.css coarse-pointer 44pt floor
+def _addaction_body():
+    """The body of `OrwellGadget.prototype.addAction` — the ONE function that creates the
+    `.og-act` button — sliced from its declaration to the next prototype method (mirrors
+    the ratchet test's function-scoping so a stray `og-act`/`button` elsewhere in the file
+    can't satisfy the assertions)."""
+    decl = "OrwellGadget.prototype.addAction = function"
+    start = GADGET_JS.index(decl)
+    nxt = GADGET_JS.index("OrwellGadget.prototype.", start + len(decl))
+    return GADGET_JS[start:nxt]
+
+
+def test_og_act_button_creator_scoped():
+    """Within `addAction` (the sole `.og-act` creator), the SAME button is a real
+    `document.createElement("button")`, is given the `og-act` class, and carries no
+    `.tap-exempt` — so the responsive-tokens.css coarse-pointer 44pt floor
     (`button:not(.tap-exempt)`) reaches it on touch (F-TOUCH-2)."""
-    assert 'createElement("button")' in GADGET_JS, "og-act must be a real <button> element"
-    assert 'className = "og-act"' in GADGET_JS, "the action button must carry the .og-act class"
-    assert "tap-exempt" not in GADGET_JS, (
-        "og-act must NOT be tap-exempt — that would drop it below the 44pt coarse floor "
-        "(F-TOUCH-2)"
+    body = _addaction_body()
+    # Slice guard: this must be the real button-creating function, not empty/misresolved.
+    assert 'createElement("button")' in body, (
+        "addAction must create a real <button> element (F-TOUCH-2 slice guard)"
+    )
+    # The created button gets the og-act class (className = "og-act" or a classList add).
+    assert re.search(r'className\s*=\s*"og-act"', body) or 'classList.add("og-act")' in body, (
+        "the addAction button must carry the .og-act class"
+    )
+    # And it is NEVER made tap-exempt inside its own creator.
+    assert "tap-exempt" not in body, (
+        "the og-act button must NOT be tap-exempt — that would drop it below the 44pt "
+        "coarse floor (F-TOUCH-2)"
     )
 
 

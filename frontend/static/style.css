@@ -37668,10 +37668,10 @@ body.theme-frosted .modal {
   100% { box-shadow: 0 0 0 2px transparent; }
 }
 /* F-MOTION-1 (HIG Motion / WCAG 2.3.3): these non-kit decorative surfaces honor Reduce
-   Motion too — the kits (.ow-*/.og-*/.on-*) already opt in per-surface, but legacy/feature
-   CSS animations slip through one by one. Neutralize the note-card flash and the hwfit
-   schedule-chip transition when the OS setting is on. Decorative only — never functional
-   state. */
+   Motion too — the kits (the .ow- / .og- / .on- families) already opt in per-surface, but
+   legacy/feature CSS animations slip through one by one. Neutralize the note-card flash and
+   the hwfit schedule-chip transition when the OS setting is on. Decorative only — never
+   functional state. */
 @media (prefers-reduced-motion: reduce) {
   .note-card-flash { animation: none; }
   .hwfit-sched-day-chip { transition: none; }
