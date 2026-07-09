@@ -82,10 +82,12 @@
     pill = document.createElement("div");
     pill.id = PILL_ID;
     pill.setAttribute("role", "status");
+    // #738 item 22 (owner ruling "tone down to a hint"): the confessional pill's BULK
+    // chrome is neutralised — its fill/border/ink live in style.css (#orwell-dr-pill) so the
+    // glass theme can swap the bulk to the ONE shared colourless light-glass material, keeping
+    // only a WHISPER of rose as a thin edge. Only LAYOUT stays inline here (no rose fill).
     pill.style.cssText = "display:none;align-items:center;gap:6px;margin:0 0 4px;" +
-      "padding:3px 10px;border-radius:999px;width:fit-content;" +
-      "background:color-mix(in srgb, var(--accent, #e06c75) 18%, transparent);" +
-      "border:1px solid var(--accent, #e06c75);font-size:var(--fs-xs);";
+      "padding:3px 10px;border-radius:999px;width:fit-content;font-size:var(--fs-xs);";
     pill.innerHTML = `<span>📔 Diary Room — private &amp; out-of-character; the house never hears this.</span>
       <button type="button" id="orwell-dr-exit" class="ow-btn ow-btn-plain" aria-label="Leave the Diary Room" title="Leave the Diary Room"
         style="color:inherit;font-size:1em;min-width:44px;min-height:44px;padding:0 2px;">×</button>`;
