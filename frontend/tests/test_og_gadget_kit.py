@@ -41,6 +41,7 @@ NATIVE_GADGETS = (
     "orwellCastPin.js",
     "orwellNightStatus.js",
     "orwellPresence.js",
+    "orwellCastingFile.js",  # M4-5: the pre-game casting-file progress card
 )
 
 # The kit module itself + the window-tier panels that dock into the rail via the WINDOW kit

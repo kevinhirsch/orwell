@@ -2018,6 +2018,7 @@ body.bg-pattern-perlin-flow {
     .gadget-rail-body > #orwell-cast-pin { order: 6; }  /* L12: compact docked cast roster (opt-in / mobile) */
     .gadget-rail-body > #orwell-finale { order: 7; }    /* 0054 P2: docked finale */
     .gadget-rail-body > #orwell-retro { order: 8; }     /* 0054 P2: docked retrospective */
+    .gadget-rail-body > #orwell-casting-file { order: 9; } /* M4-5: pre-game casting-file progress (hides at season start) */
     /* The collapsed icon strip: a column of up to 8 gadget icons in a 50px-wide rail.
        It SCROLLS (min-height:0 inside the flex column gives it a real overflow context)
        so on a short viewport the icons never stack on top of each other — the strip

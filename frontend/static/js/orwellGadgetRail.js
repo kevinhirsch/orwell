@@ -49,6 +49,9 @@
     { id: "orwell-cast-pin", icon: "👥", title: "Pinned Cast",    order: 6 },
     { id: "orwell-finale",   icon: "🏆", title: "The Finale",     order: 7 },
     { id: "orwell-retro",    icon: "📼", title: "Season Recap",   order: 8 },
+    // M4-5: the casting-file progress card — PRE-GAME only (0050). It shows during the interview
+    // and hides at season start, so its numeric order never collides with the in-game gadgets.
+    { id: "orwell-casting-file", icon: "🎥", title: "Your Casting File", order: 9 },
   ];
   var REG_BY_ID = {};
   REGISTRY.forEach(function (g) { REG_BY_ID[g.id] = g; });
@@ -81,7 +84,9 @@
     // clapperboard (The Cast)
     "orwell-cast": _svg('<rect x="3" y="8" width="18" height="12" rx="1"/><path d="M3 8l2.5-4 4 2 4-2 4 2"/><path d="M5.5 4L8 8M9.5 6L12 10"/>'),
     // film reel (Season Recap)
-    "orwell-retro": _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>')
+    "orwell-retro": _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>'),
+    // clapperboard + person (Your Casting File — the pre-game interview progress)
+    "orwell-casting-file": _svg('<rect x="3" y="9" width="18" height="11" rx="1"/><path d="M3 9l2-4 4 1.5 4-1.5 4 1.5"/><circle cx="12" cy="14" r="2"/><path d="M9 19a3 3 0 0 1 6 0"/>')
   };
   // Registry-declared ids, in canonical order — the base sequence the strip + inline `order`
   // both derive from (the per-user saved order, when present, takes precedence).
