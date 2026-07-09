@@ -79,3 +79,28 @@ def test_tray_attach_duplicate_still_dropped_in_game_build():
     gate = APP_JS[APP_JS.index("function applyGameBuildMenuGating"):]
     gate = gate[: gate.index("_g13CascadeMenuTriggers();") + 40]
     assert "overflow-attach-btn" in gate and "remove()" in gate and "data-game-build" in gate
+
+
+# ── 3. a stale 'attach' mode can never BLOCK sending (review P1) ────────────────
+
+def test_attach_click_branch_is_gated_on_live_empty_state():
+    # The attach branch must ALSO require an empty composer (no text, no files) — otherwise, after
+    # a file is picked, a stale `dataset.mode === 'attach'` would re-open the picker on the next
+    # click instead of sending (the reported P1). The gate uses the already-computed hasText/hasFiles.
+    h = _click_handler()
+    assert "dataset.mode === 'attach' && !hasText && !hasFiles" in h, \
+        "the attach click branch must be gated on the live empty-composer state so a stale mode " \
+        "can never block sending"
+
+
+def test_file_input_and_paste_refresh_the_send_icon():
+    # Attaching a file (picker OR paste) must refresh the send button so its "+" flips to Send and
+    # `dataset.mode` leaves 'attach' immediately, not only on the next keystroke.
+    change = APP_JS[APP_JS.index("el('file-input').addEventListener('change'"):]
+    change = change[: change.index("});") + 3]
+    assert "window._updateSendBtnIcon" in change, \
+        "the file-input change handler must refresh the send-btn icon after adding files"
+    paste = APP_JS[APP_JS.index("window.addEventListener('paste'"):]
+    paste = paste[: paste.index("});") + 3]
+    assert "window._updateSendBtnIcon" in paste, \
+        "the paste handler must refresh the send-btn icon when it adds files"

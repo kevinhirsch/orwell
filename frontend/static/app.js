@@ -207,6 +207,9 @@ function initializeEventListeners() {
   el('file-input').addEventListener('change', (e)=>{
     for (const f of e.target.files) fileHandlerModule.addFiles([f]);
     fileHandlerModule.renderAttachStrip();
+    // #831: files are now present — refresh the send button so its "+" attach affordance flips
+    // to the real Send arrow (and `dataset.mode` leaves 'attach') instead of staying stale.
+    try { window._updateSendBtnIcon && window._updateSendBtnIcon(); } catch (_) {}
     // Refocus textarea after file picker closes (mobile keyboard)
     const ta = el('message');
     if (ta) setTimeout(() => ta.focus(), 100);
@@ -225,7 +228,11 @@ function initializeEventListeners() {
         }
       }
     }
-    if (changed) fileHandlerModule.renderAttachStrip();
+    if (changed) {
+      fileHandlerModule.renderAttachStrip();
+      // #831: pasted files present — flip the send button off the "+" attach affordance too.
+      try { window._updateSendBtnIcon && window._updateSendBtnIcon(); } catch (_) {}
+    }
   });
 
   // Message count in the header — recount on any DOM change in
@@ -3886,7 +3893,10 @@ function startOrwellApp() {
       // 'attach'). A click opens the file picker; it never sends, and — being 'attach', never
       // 'newchat' — it can never detach the session (the A6 guarantee). Once text/files are present
       // the button is a real Send, so this branch is unreachable with content in the composer.
-      if (sendBtn.dataset.mode === 'attach') {
+      // Gate on the LIVE empty-composer state, not just `dataset.mode`: the file-input change
+      // handler refreshes the icon, but this belt guarantees that once text/files are present a
+      // click SENDS instead of re-opening the picker even if `dataset.mode` is momentarily stale.
+      if (sendBtn.dataset.mode === 'attach' && !hasText && !hasFiles) {
         const fi = el('file-input');
         if (fi) fi.click();
         return;
