@@ -79,21 +79,24 @@ def test_no_dark_opaque_menu_survives_in_light_theme():
         )
 
 
-def test_folded_menus_join_the_corner_clip_list():
-    """Both folded menus now share the light-glass material, so they must also share the
-    Full-Glass corner-clip (`overflow: hidden`) that keeps the SVG-refraction backdrop from
-    bleeding past the rounded corners — the same clamp the sibling popovers already carry."""
+def test_folded_menus_stay_out_of_the_refraction_corner_clip():
+    """The two folded menus share the light-glass MATERIAL but are deliberately NOT in the
+    JS SVG-refraction set (liquidGlass.js — only .dropdown/.overflow-menu/.cp-popover/
+    .model-picker-menu refract), so they have no corner halo to clip and must stay OUT of the
+    `overflow: hidden` corner-clip rule. That rule is a source-pinned 'exactly four refracted
+    popovers' intent (test_liquid_glass.py::test_edge_bleed_clamp_menus_clip_backdrop_to_rounded_rect);
+    adding them would both break that gate and needlessly clip a non-refracted menu."""
     clip = [
         (sel, body) for sel, body in _css_blocks(CSS, ".model-picker-menu")
         if "theme-frosted" in sel and "overflow: hidden" in body
     ]
-    assert clip, "no body.theme-frosted overflow:hidden corner-clip rule for the leaf popovers (#738 item 5)"
-    clip_selectors = clip[0][0]
+    assert clip, "no body.theme-frosted overflow:hidden corner-clip rule for the leaf popovers"
     for menu in (".export-dropdown-menu", ".msg-overflow-menu"):
-        assert menu in clip_selectors, (
-            f"{menu} shares the light-glass material but is missing from the corner-clip clamp — "
-            f"the Full-Glass refraction could bleed past its corners (#738 item 5)"
-        )
+        for sel, _body in clip:
+            assert menu not in sel, (
+                f"{menu} must NOT be added to the SVG-refraction corner-clip — it isn't refracted, "
+                f"and that rule is pinned to exactly the four refracted popovers (#738 item 5)"
+            )
 
 
 # ── ITEM 23 — the sent-bubble timestamp cluster carries no accent ink ──────────────────
