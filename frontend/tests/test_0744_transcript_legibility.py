@@ -118,6 +118,23 @@ def test_escalation_is_local_not_global_theme_tinted(adaptive_src):
         "must not apply a global theme-tinted state to body/document (that is #739)"
 
 
+def test_floor_falls_back_to_the_stronger_polarity(adaptive_src):
+    """#738 item #1 — the legibility floor is non-negotiable. If the linear-Y-PREFERRED polarity
+    can't reach APCA_FLOOR even at the scrim cap (a starved mid-tone right at the flip boundary),
+    resolveBubbleScrim must fall back to whichever polarity contrasts MORE — so a received bubble
+    is legible over ANY wallpaper, not just the threshold-preferred half. (At the extremes the
+    preferred polarity always wins, so this only bites the ambiguous middle.)"""
+    # the per-polarity escalation is factored so BOTH polarities can be measured & compared
+    assert "function _escalateScrim" in adaptive_src, \
+        "per-polarity scrim escalation must be factored (_escalateScrim) so both polarities are measurable"
+    # the fallback triggers only when the preferred polarity misses the floor …
+    assert re.search(r"pref\.lc\s*<\s*APCA_FLOOR", adaptive_src), \
+        "resolveBubbleScrim must detect the preferred polarity failing the floor"
+    # … and then picks the polarity with the higher achieved APCA
+    assert re.search(r"alt\.lc\s*>\s*pref\.lc", adaptive_src), \
+        "resolveBubbleScrim must fall back to the higher-APCA polarity when the preferred can't reach the floor"
+
+
 def test_only_msg_ai_is_the_adaptive_bubble(adaptive_src):
     """The adaptive bubble target is the RECEIVED bubble only (.msg-ai) — sent bubbles never adapt."""
     assert re.search(r'BUBBLE_ADAPTIVE\s*=\s*"\.msg-ai"', adaptive_src), \
