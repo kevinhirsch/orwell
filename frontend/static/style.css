@@ -41182,6 +41182,20 @@ body.glass-full .chat-input-bar::before {
   position: relative; left: auto; bottom: auto; transform: none;
   width: 100%; max-width: 760px; margin: 0 auto var(--space-2, .45rem);
   height: auto !important; z-index: auto; pointer-events: auto;
+  /* #1245 (VIS-1): this sheet mounts as a flex ITEM of #on-notice-zone (orwellNotice.js), a
+     max-height-capped flex column with its OWN overflow-y:auto scroll. A flex item's automatic
+     minimum main size is its content size UNLESS the item itself sets overflow != visible — this
+     sheet does (overflow:hidden, for the rounded-corner clip), so its floor silently collapsed to
+     0 and the zone's flex-shrink:1 default squeezed it down to fit the zone's cap instead of
+     letting the ZONE scroll to reveal the full sheet. On phone-390 during a comp-round beat that
+     visibly guillotined the card's own footer/Confirm button with no scrollbar to reach it (the
+     0113 harness geometry gate, VIS-1: el bottom exceeded the sheet's own clipped box by
+     10-45px). flex-shrink:0 keeps the sheet at its natural (content-capped-by-its-OWN
+     .ow-sheet-body max-height:60vh) height regardless of the zone's tighter cap — the zone scrolls
+     around the whole sheet instead of crushing it, so Confirm is ALWAYS reachable (M1-4's
+     invariant). No-op wherever the sheet isn't inside a shrinking flex ancestor (the desktop/
+     tablet fallback-host cases), so this cannot regress the non-mobile layout. */
+  flex-shrink: 0;
   border-radius: var(--ow-glass-radius-inner, 14px);
   border: 1px solid var(--accent, var(--red, #e06c75));
   border-bottom: 1px solid var(--accent, var(--red, #e06c75));

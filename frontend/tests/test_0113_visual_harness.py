@@ -524,16 +524,18 @@ def test_tier_a_surfaces_declare_a_known_moment():
 
 
 def test_split_xfail_demotes_a_registered_finding_and_blocks_the_rest():
-    shot = "tierB:hoh:phone-390"
-    registered = {"kind": "clipped-by-ancestor", "selector": "#orwell-decision-card",
-                 "id": "orwell-decision-card", "label": "div#orwell-decision-card",
-                 "detail": "ancestor=section#orwell-decision-sheet ..."}
+    # VIS-1 (the decision-card/ow-sheet clip) was FIXED and its XFAIL entry removed (#1245) — this
+    # mechanism test now exercises the ratchet against VIS-2, the remaining registered finding.
+    shot = "tierA:gadget-rail:tablet-768"
+    registered = {"kind": "off-viewport", "selector": "#gadget-rail",
+                 "id": "gadget-rail", "label": "aside#gadget-rail",
+                 "detail": "rect=(774,0,1200,600) viewport=768x1024"}
     novel = {"kind": "covered", "selector": "#sidebar", "id": "sidebar",
             "label": "nav#sidebar", "detail": "covered by div.stray"}
     blocking, xfailed = vr.split_xfail(shot, [registered, novel])
     assert [f["kind"] for f in blocking] == ["covered"]
     assert len(xfailed) == 1
-    assert xfailed[0]["xfail_id"] == "VIS-1"
+    assert xfailed[0]["xfail_id"] == "VIS-2"
 
 
 def test_split_xfail_with_no_registry_match_blocks_everything():
@@ -546,13 +548,14 @@ def test_split_xfail_with_no_registry_match_blocks_everything():
 
 def test_finding_line_shape_is_stable_for_registry_matching():
     # the XFAIL substrings match against THIS exact shape — a reshape silently defuses the
-    # whole registry, so the shape itself is pinned.
-    line = vr.finding_line("tierB:veto:phone-390", {
-        "kind": "clipped-by-ancestor", "label": "div#orwell-decision-card",
-        "detail": "ancestor=section#x"})
-    assert line == ("tierB:veto:phone-390 clipped-by-ancestor div#orwell-decision-card: "
-                    "ancestor=section#x")
-    assert vr.XFAIL["VIS-1"]["needle"] in line
+    # whole registry, so the shape itself is pinned. (VIS-1, the decision-card/ow-sheet clip,
+    # was FIXED and its entry removed (#1245) — pinned against VIS-2, the remaining entry.)
+    line = vr.finding_line("tierA:gadget-rail:tablet-768:glass", {
+        "kind": "off-viewport", "label": "aside#gadget-rail",
+        "detail": "rect=(774,0,1200,600) viewport=768x1024"})
+    assert line == ("tierA:gadget-rail:tablet-768:glass off-viewport aside#gadget-rail: "
+                    "rect=(774,0,1200,600) viewport=768x1024")
+    assert vr.XFAIL["VIS-2"]["needle"] in line
 
 
 def test_every_xfail_entry_has_a_finding_id_and_nonempty_needle():

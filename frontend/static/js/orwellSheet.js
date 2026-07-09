@@ -185,6 +185,13 @@
       "  position: relative; left: auto; bottom: auto; transform: none;" +
       "  width: 100%; max-width: 760px; margin: 0 auto var(--space-2, .45rem);" +
       "  height: auto !important; z-index: auto; pointer-events: auto;" +
+      // #1245 (VIS-1): this sheet mounts as a flex ITEM of #on-notice-zone (a max-height-capped
+      // flex column with its own overflow-y:auto). Because the sheet itself sets overflow:hidden,
+      // its flexbox automatic minimum size collapses to 0, so the zone's default flex-shrink:1
+      // squeezed the sheet down to fit the zone's cap instead of letting the ZONE scroll around
+      // it — guillotining the card's footer/Confirm on phone-390 with no way to reach it. Keep
+      // this in lock-step with the linked-stylesheet copy in style.css.
+      "  flex-shrink: 0;" +
       "  border-radius: var(--ow-glass-radius-inner, 14px); border: 1px solid var(--accent, var(--red, #e06c75));" +
       "  border-bottom: 1px solid var(--accent, var(--red, #e06c75));" +
       "  box-shadow: var(--win-shadow, 0 8px 32px rgba(0,0,0,.45)); }" +

@@ -166,7 +166,13 @@ and an entry that matched nothing this run prints an xpass removal nudge. Entrie
 against a real observed finding, never speculatively. The first live run (2026-07-08, 132 shots)
 seeded three: **VIS-1** (the decision card's content escapes its anchored sheet's
 `overflow:hidden` box by ~10–45px at the bottom on phone-390 during comp-round beats — a real
-clipping bug to file and fix) and **VIS-2/2b** (the open gadget-rail drawer + the status card
+clipping bug, tracked in issue #1245 — **FIXED 2026-07-09**: the anchored `.ow-sheet` is a flex
+item of `#on-notice-zone`, a `max-height`-capped flex column with its own scroll; because the
+sheet itself sets `overflow:hidden`, its flexbox automatic minimum size collapsed to 0, so the
+zone's default `flex-shrink:1` crushed the sheet to fit instead of letting the zone scroll around
+it. `flex-shrink: 0` on `.ow-sheet.ow-sheet-anchored` (style.css + orwellSheet.js's `ensureCss()`
+runtime copy) restores the sheet's natural, content-capped height; its XFAIL entry is removed —
+a live tierB re-run confirms 0 findings) and **VIS-2/2b** (the open gadget-rail drawer + the status card
 inside it measured wholly off the right viewport edge at tablet-768 under one theme — a
 mid-slide capture, the drawer's slide transition ignoring the forced reduced-motion;
 belt-and-suspendered by the harness's post-hook layout-stabilization poll, kept as a flake
