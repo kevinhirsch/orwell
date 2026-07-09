@@ -37643,6 +37643,14 @@ body.theme-frosted .modal {
   color: var(--red, #ff6b6b);
   display: none;
 }
+/* F-CONTRAST-2 (HIG Color / WCAG 1.4.1): red hue is NOT the only error channel — a
+   leading warning glyph carries the meaning for color-blind users and on low-contrast
+   glass. Text-presentation variation selector (FE0E) renders it as a mono glyph, not a
+   colored emoji. */
+.hwfit-sched-err::before {
+  content: "\26A0\FE0E";
+  margin-right: 4px;
+}
 .hwfit-sched-err.is-visible { display: block; }
 @media (max-width: 768px) {
   .hwfit-schedule-row { gap: 8px; }
@@ -37658,6 +37666,15 @@ body.theme-frosted .modal {
 @keyframes note-card-flash-anim {
   0%   { box-shadow: 0 0 0 2px var(--accent, var(--red)); }
   100% { box-shadow: 0 0 0 2px transparent; }
+}
+/* F-MOTION-1 (HIG Motion / WCAG 2.3.3): these non-kit decorative surfaces honor Reduce
+   Motion too — the kits (the .ow- / .og- / .on- families) already opt in per-surface, but
+   legacy/feature CSS animations slip through one by one. Neutralize the note-card flash and
+   the hwfit schedule-chip transition when the OS setting is on. Decorative only — never
+   functional state. */
+@media (prefers-reduced-motion: reduce) {
+  .note-card-flash { animation: none; }
+  .hwfit-sched-day-chip { transition: none; }
 }
 /* ── ask_user: multiple-choice question card ─────────────────────────────
    The agent posed a question and ended its turn. The user clicks an option,
