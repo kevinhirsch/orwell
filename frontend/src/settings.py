@@ -152,7 +152,7 @@ DEFAULT_SETTINGS = {
     # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
     # reasoning budget. Maps a call class to a reasoning effort. Defaults to the
     # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1), AMENDED by ADR 0016: casting =
-    # medium (quality-sensitive, player-facing), narration = **low** (GLM-4.7 narrator — see the
+    # medium (quality-sensitive, player-facing), narration = **low** (the GLM narrator — see the
     # inline note below), background-authoring = low (background flavor), and **utility-extraction =
     # off** — pure JSON
     # extraction/classification whose prompts forbid thinking; the 2026-06-21 I/O
@@ -168,7 +168,8 @@ DEFAULT_SETTINGS = {
     # get_setting("reasoning_budget", {}) → token_policy.resolve_token_policy();
     # edit per class at runtime via the Token Economy settings card or POST /api/settings.
     "reasoning_budget": {
-        # ADR 0016: "low" (was "medium") for the GLM-4.7 narrator. GLM-4.7's tool-calling rides on
+        # ADR 0016: "low" (was "medium") for the GLM narrator (GLM-4.7 at the ruling; GLM-5.2 since
+        # the 2026-07-07 two-tier amendment — same family, same posture). GLM's tool-calling rides on
         # INTERLEAVED THINKING — it reasons before each tool call/action — so a small reasoning budget
         # is what lets it DECIDE which engine tool to call ("off" would strip that mechanism and regress
         # "call the tool when we need to"; "low" keeps it at modest cost/latency). Runtime-editable from
@@ -198,7 +199,7 @@ DEFAULT_SETTINGS = {
     # here. token_policy.resolve_token_policy treats any in-band value under this key as an EXPLICIT
     # ADMIN OVERRIDE that always wins over the class default — so seeding "narration": 4096 /
     # "casting": 2048 silently re-activated the exact #835/#620 NARR-5 truncation vector token_policy's
-    # own _DEFAULT_MAX_TOKENS comment documents: on a reasoning model (GLM-4.7, the ADR-0016 narrator)
+    # own _DEFAULT_MAX_TOKENS comment documents: on a reasoning model (the GLM narrator, ADR 0016)
     # reasoning tokens count against `max_tokens`, so a flat 4096/2048 ceiling produced empty response
     # bodies or mid-sentence truncation. The class default for narration/casting is `None` ("use the
     # model-aware cap computed at the call site from the concrete model") — leaving them OUT of this
@@ -249,22 +250,28 @@ DEFAULT_SETTINGS = {
     "task_model": "",
     "default_endpoint_id": "",
     # OOB default chat/narration model. OpenRouter is the default provider (added at first-run
-    # setup); z-ai/glm-4.7 is the out-of-box selected model (chat box + narrator + onboarding all
-    # read this resolved default). `default_endpoint_id` stays empty so resolution binds it to the
+    # setup); z-ai/glm-5.2 is the out-of-box selected model (chat box + narrator + onboarding all
+    # read this resolved default) — the 2026-07-07 two-tier owner decision (ADR 0016 amendment,
+    # confirmed as the OOB pair 2026-07-09; the M0-1 golden fixture + golden-nightly record on the
+    # same pair). `default_endpoint_id` stays empty so resolution binds it to the
     # first enabled endpoint (the OpenRouter one the setup wizard creates); the setup wizard also
     # writes the endpoint id explicitly once it exists.
-    "default_model": "z-ai/glm-4.7",
+    "default_model": "z-ai/glm-5.2",
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat
     # dispatch retries the next entry in order.
     "default_model_fallbacks": [],
     "utility_endpoint_id": "",
-    # OOB utility model (ADR 0016): GLM-4.7-Flash on OpenRouter — a cheap (free on Z.ai-direct), fast,
-    # NON-reasoning 30B-class model for background JSON work (cast authoring/prewarm/zeitgeist,
-    # summarization, naming). `utility_endpoint_id` stays "" so it binds to the first enabled endpoint
-    # (the OpenRouter one the setup wizard creates). Background classes already run reasoning "off".
-    "utility_model": "z-ai/glm-4.7-flash",
+    # OOB utility model (ADR 0016 as amended 2026-07-07/09 — the two-tier pair): Qwen 3.6 Flash on
+    # OpenRouter — the cheap, fast flash tier for background JSON work (cast authoring/prewarm/
+    # zeitgeist, summarization, naming); verified tool-calling clean on the M0-1 golden record runs
+    # (locally served in prod; deepseek/deepseek-v4-flash is the cloud alternate). NOTE it reasons by
+    # default (~266 reasoning tokens on a trivial call) — the per-class reasoning budgets below
+    # ("off" for the JSON classes) are the cost lever. It is its OWN key (utility_model), so it does
+    # NOT inherit the narrator swap. `utility_endpoint_id` stays "" so it binds to the first enabled
+    # endpoint (the OpenRouter one the setup wizard creates).
+    "utility_model": "qwen/qwen3.6-flash",
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
     "utility_model_fallbacks": [],
