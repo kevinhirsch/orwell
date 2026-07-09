@@ -178,6 +178,30 @@ fixture is recorded, never fabricated). Two independent checks per shot:
   `scripts/responsive_matrix.py` (Stream S, ruling #16) without duplicating its
   overflow/overlap/tap-target duties.
 
+## The theme-surface-consistency gate (0114 — computed-style probe, not pixels)
+
+A semantic sibling to 0113 — same golden-replay state source (composes 0113's own `VisualWalk`
+rather than re-driving the wire protocol), but a computed-style check instead of a pixel diff.
+Owner-reported bug: a surface hardcodes a polarity-fixed color instead of the ACTIVE theme's own
+`--bg`/`--panel` token, so it stays wrong on every theme except the one it happened to be
+authored against. Sweeps BOTH base themes (`light`, `dark`) x 2 viewports (390×844, 1440×900)
+over the registered game-build surfaces (`.ow-window`, `.ow-sheet`, gadget-rail cards, the
+sidebar(s), the headshot-studio portrait tiles) — BLOCKING, always (no advisory half; there is no
+baseline concept here, unlike 0113's pixel diff).
+
+- Pure classification lives in `src/theme_probe.py` (`classify_theme_findings`, unit-testable
+  with no browser); the extraction JS is `THEME_PROBE_JS` in the same module. A finding is a
+  surface whose effective composited background (alpha-composited over a bounded ancestor chain)
+  is far — by a calibrated "redmean" perceptual distance — from BOTH the active theme's own `--bg`
+  and `--panel`.
+- Same XFAIL-ratchet pattern as `visual_regression.py` (`scripts/theme_consistency.py`'s
+  `XFAIL`), scoped to the live colon-form shot id (`theme:<name>:<viewport>:<moment>`).
+- **Run it**: `cd frontend && python3 scripts/theme_consistency.py --out /tmp/theme-run` (needs
+  `npm run build` at the repo root first, and `playwright install chromium`).
+- CI job `theme-consistency` is DORMANT (an explicit notice, never a silent pass) until the same
+  golden fixture the `golden-path`/`visual-regression` jobs need is committed.
+- Design note: `docs/features/0114-theme-surface-consistency.md`.
+
 ## The responsive contract (Stream S — ruling #16; binding)
 
 `static/css/responsive-tokens.css` (loaded **before** `style.css`) is the one responsive

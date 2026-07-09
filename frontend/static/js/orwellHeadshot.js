@@ -83,7 +83,11 @@
       .ow-headshot-studio .hs-hint[hidden] { display: none; }
       .ow-headshot-studio .hs-btn-ghost { background: transparent; color: var(--fg, #cfd8e3); border-color: var(--border, #355a66); font-weight: 400; }
       .ow-headshot-studio .hs-preview { width: 92px; height: 92px; border-radius: 8px; flex: none;
-        border: 1px solid var(--border, #355a66); background: #0d0f14 center/cover no-repeat;
+        border: 1px solid var(--border, #355a66);
+        /* 0114: was a hardcoded #0d0f14 — a foreign-polarity dark tile that stayed a near-black
+           box on the light theme regardless of the active theme's --panel. Token-driven, same
+           fallback the sibling .hs-cand.hs-loading/.hs-broken rules already use below. */
+        background: var(--panel, #11151c) center/cover no-repeat;
         display: flex; align-items: center; justify-content: center; font-size: 28px; opacity: .85; }
       .ow-headshot-studio .hs-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
       .ow-headshot-studio .hs-opts { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 8px; }
@@ -100,7 +104,9 @@
       .ow-headshot-studio .hs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 6px 0 2px; }
       /* Portrait tiles are real <button>s (keyboard/SR operable — UX audit J1-26); reset native chrome. */
       .ow-headshot-studio .hs-cand { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: pointer;
-        border: 2px solid transparent; background: #0d0f14 center/cover no-repeat;
+        border: 2px solid transparent;
+        /* 0114: token-driven idle tile (was a hardcoded #0d0f14 — see .hs-preview above). */
+        background: var(--panel, #11151c) center/cover no-repeat;
         padding: 0; margin: 0; font: inherit; width: 100%; -webkit-appearance: none; appearance: none; }
       .ow-headshot-studio .hs-cand.sel { border-color: var(--brand-color, var(--accent, #4a9)); }
       .ow-headshot-studio .hs-cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -131,7 +137,9 @@
       .ow-headshot-studio .hs-lib { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border, #355a66); }
       .ow-headshot-studio .hs-libstrip { display: flex; gap: 8px; flex-wrap: wrap; }
       .ow-headshot-studio .hs-libitem { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden;
-        border: 2px solid transparent; background: #0d0f14 center/cover no-repeat; flex: none; }
+        border: 2px solid transparent;
+        /* 0114: token-driven idle tile (was a hardcoded #0d0f14 — see .hs-preview above). */
+        background: var(--panel, #11151c) center/cover no-repeat; flex: none; }
       .ow-headshot-studio .hs-libitem.cur { border-color: var(--brand-color, var(--accent, #4a9)); }
       .ow-headshot-studio .hs-libpick { position: absolute; inset: 0; padding: 0; margin: 0; border: none;
         background: none; cursor: pointer; -webkit-appearance: none; appearance: none; }

@@ -43,6 +43,7 @@ jobs:
       heavy: ${{ steps.filter.outputs.heavy }}
       golden: ${{ steps.filter.outputs.golden }}
       visual: ${{ steps.filter.outputs.visual }}
+      theme: ${{ steps.filter.outputs.theme }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,7 +84,7 @@ jobs:
           # regression can come from EITHER side — the FE (agent loop, belts, guards), the engine,
           # or the committed fixture itself (frontend/tests/golden/, matched by frontend/).
           GOLDEN_RE='^(frontend/|src/|package\.json$|package-lock\.json$|\.github/workflows/ci\.yml$)'
-          for name in engine frontend deploy heavy golden visual; do
+          for name in engine frontend deploy heavy golden visual theme; do
             case "$name" in
               engine)   re="$ENGINE_RE" ;;
               frontend) re="$FRONTEND_RE" ;;
@@ -94,6 +95,11 @@ jobs:
               # screenshot matrix replays the same golden drive and the baselines dir is
               # already under frontend/. ONE regex so the two lanes can never drift apart.
               visual)   re="$GOLDEN_RE" ;;
+              # THEME (0114) rides the SAME trigger surface too — it composes visual_regression's
+              # own VisualWalk against the same golden drive, and a theme-token regression can
+              # come from either the FE (theme.js / any orwell*.js surface) or an engine change
+              # that moves rendered state. Same regex, same rationale as VISUAL.
+              theme)    re="$GOLDEN_RE" ;;
             esac
             if matches "$re"; then
               echo "${name}=true" >> "$GITHUB_OUTPUT"
@@ -365,6 +371,86 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # ── 0114 theme-surface-consistency gate (blocking) ────────────────────────────────
+  # A computed-style probe (never a pixel diff) over the SAME committed golden-replay fixture
+  # visual-regression rides — see docs/features/0114-theme-surface-consistency.md. Owner-reported
+  # bug: a surface hardcodes a polarity-fixed color instead of the active theme's own token, so it
+  # stays wrong on every theme except the one it happened to be authored against. Every registered
+  # game-build surface (.ow-window, .ow-sheet, gadget-rail cards, sidebar(s), the headshot-studio
+  # portrait tiles) is probed under BOTH base themes (light, dark) at two viewports; a finding
+  # BLOCKS via the same XFAIL-ratchet pattern visual-regression.py uses. DORMANT with an explicit
+  # notice until the first golden fixture is recorded and committed (mirrors golden-path's own
+  # dormant shape — the fixture already exists on main, so this normally runs armed).
+  theme-consistency:
+    needs: changes
+    if: needs.changes.outputs.theme == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Self-hosted runner: don't leave the job GITHUB_TOKEN in .git/config for later steps.
+          persist-credentials: false
+      - name: fixture presence gate
+        id: fixture
+        run: |
+          # Same model-agnostic resolution as golden-path/visual-regression.
+          if compgen -G "frontend/tests/golden/golden_path_*.jsonl" > /dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=theme-consistency dormant::no committed golden fixture yet — this gate rides the SAME fixture as golden-path/visual-regression (see golden-path's notice to record one); it arms automatically once frontend/tests/golden/golden_path_<model>.jsonl is committed."
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.fixture.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        if: steps.fixture.outputs.present == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.fixture.outputs.present == 'true'
+        run: npm ci
+      - if: steps.fixture.outputs.present == 'true'
+        run: npm run build
+      - if: steps.fixture.outputs.present == 'true'
+        run: pip install -r frontend/requirements.txt
+      - name: resolve playwright version (cache key)
+        id: pw
+        if: steps.fixture.outputs.present == 'true'
+        run: echo "version=$(pip show playwright | awk '/^Version:/ {print $2}')" >> "$GITHUB_OUTPUT"
+      - name: cache playwright browsers
+        if: steps.fixture.outputs.present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - name: install playwright chromium
+        if: steps.fixture.outputs.present == 'true'
+        run: python3 -m playwright install chromium
+      - name: run the theme-consistency sweep (light + dark)
+        id: run
+        if: steps.fixture.outputs.present == 'true'
+        working-directory: frontend
+        # Any finding makes this step (and the job) fail via the script's own exit code.
+        run: python3 scripts/theme_consistency.py --out "$RUNNER_TEMP/theme-run"
+      - name: append the run summary to the job summary
+        if: always() && steps.fixture.outputs.present == 'true'
+        run: |
+          if [ -f "$RUNNER_TEMP/theme-run/summary.md" ]; then
+            cat "$RUNNER_TEMP/theme-run/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: upload shots + reports (artifact)
+        if: always() && steps.fixture.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-consistency-run
+          path: ${{ runner.temp }}/theme-run
+          retention-days: 14
+          if-no-files-found: ignore
+
   # ── Front-end gate (SPLIT 3 ways so it fans out across the runner pool) ──────────
   # The vendored Python app is outside the TS tooling. It used to be ONE ~7-min job (the CI long
   # pole). Split into pytest / browser-smoke / responsive-matrix so a multi-runner pool runs them
@@ -528,6 +614,7 @@ jobs:
       - smoke
       - golden-path
       - visual-regression
+      - theme-consistency
       - fe-unit
       - fe-browser-tests
       - fe-browser
@@ -545,6 +632,7 @@ jobs:
             smoke=${{ needs.smoke.result }}
             golden-path=${{ needs.golden-path.result }}
             visual-regression=${{ needs.visual-regression.result }}
+            theme-consistency=${{ needs.theme-consistency.result }}
             fe-unit=${{ needs.fe-unit.result }}
             fe-browser-tests=${{ needs.fe-browser-tests.result }}
             fe-browser=${{ needs.fe-browser.result }}
