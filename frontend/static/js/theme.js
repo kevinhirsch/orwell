@@ -1572,7 +1572,10 @@ export function initThemeUI() {
         if (szs) szs.value = String(Math.round(sz * 100));
         _syncGlassTierControl(tier);
         _syncBgSourceControls(img);
-        save(name, colors, { font: f, density: d, bgPattern: (img ? 'none' : p), bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, glassTier: tier, bgImage: img, _explicit: true });
+        // #739 — carry the CURRENT glass tint through a preset-swatch apply (the swatch handler
+        // leaves the tint control untouched, so _getOpts().tinted is the live value); without it
+        // save() would drop `tinted` from the persisted record and the next reload/sync reverts to Clear.
+        save(name, colors, { font: f, density: d, bgPattern: (img ? 'none' : p), bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, glassTier: tier, tinted: _getOpts().tinted, bgImage: img, _explicit: true });
       });
     });
     g.querySelectorAll('.theme-delete-btn').forEach(btn => {

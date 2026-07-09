@@ -177,6 +177,17 @@ def test_tint_is_persisted_to_the_theme_store():
     )
 
 
+def test_preset_swatch_apply_preserves_the_active_tint():
+    """Applying a preset theme swatch while Tinted is active must NOT drop the tint from the
+    persisted record (else the next reload / cross-device sync silently reverts to Clear). The
+    swatch handler leaves the tint control untouched, so its save() must carry the live tint."""
+    js = _read("static", "js", "theme.js")
+    assert "tinted: _getOpts().tinted" in js, (
+        "#739: the preset-swatch apply save() must carry the current tint "
+        "(tinted: _getOpts().tinted), else selecting a swatch while Tinted drops it on reload"
+    )
+
+
 def test_tint_control_is_bound_and_syncs():
     js = _read("static", "js", "theme.js")
     assert "function _syncGlassTintControl(tint)" in js, (
