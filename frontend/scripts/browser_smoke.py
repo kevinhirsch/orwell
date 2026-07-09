@@ -2475,15 +2475,24 @@ def main() -> int:
               const ovfTrigger = document.getElementById('overflow-plus-btn');
               if (vis(ovfTrigger)) ovfTrigger.click();
               const ovf = items('overflow-menu', '.overflow-menu-item');
-              // #760: in the game build, attach is promoted to a first-class VISIBLE
-              // composer paperclip — there must be exactly one reachable attach affordance.
+              // #831 (supersedes #760's paperclip): in the game build the SINGLE attach affordance
+              // is the send button itself — an EMPTY composer paints it as a "+" in mode 'attach'
+              // (opens the file picker); the standalone composer paperclip is dropped. Empty the
+              // composer + refresh the icon so the probe reads the attach state deterministically,
+              // regardless of any restored draft left by an earlier step.
+              const msg = document.getElementById('message');
+              if (msg) { msg.value = ''; try { msg.dispatchEvent(new Event('input', {bubbles: true})); } catch (_) {} }
+              try { window._updateSendBtnIcon && window._updateSendBtnIcon(); } catch (_) {}
+              const sendBtn = document.querySelector('.send-btn');
               const attachPaperclip = document.getElementById('composer-attach-btn');
               return { overflow: ovf,
                        renamePencilVisible: vis(renamePencil),
                        exportDropdownGone: !document.getElementById('export-dl-btn')
                                            && !document.getElementById('export-dropdown-menu'),
                        overflowTrigger: vis(ovfTrigger),
-                       composerAttachVisible: vis(attachPaperclip),
+                       sendAttachMode: sendBtn ? (sendBtn.dataset.mode || '') : null,
+                       sendAttachTitle: sendBtn ? (sendBtn.title || '') : null,
+                       paperclipGone: !vis(attachPaperclip),
                        trayAttachPresent: !!document.getElementById('overflow-attach-btn') };
             }""")
             page.keyboard.press("Escape")  # fold the overflow menu back
@@ -2507,12 +2516,16 @@ def main() -> int:
                   "(the cascade is hide-only, never over-hides — a non-empty menu keeps its "
                   "trigger; an emptied one correctly hides it) "
                   f"(items={g13_menus['overflow']}, trigger={g13_menus['overflowTrigger']})")
-            # #760: exactly one attach affordance in the composer. The game build shows the
-            # first-class paperclip; it must not ALSO keep the redundant overflow-tray entry.
-            check(g13_menus["composerAttachVisible"] is True,
-                  "G13/#760: the first-class composer attach paperclip is visible (one clear attach affordance)")
+            # #831 (supersedes #760's paperclip): exactly one attach affordance in the game build —
+            # the EMPTY composer's send button paints a "+" in mode 'attach' (opens the picker); the
+            # standalone paperclip is dropped and the overflow-tray duplicate stays gone.
+            check(g13_menus["sendAttachMode"] == "attach" and g13_menus["sendAttachTitle"] == "Attach a file",
+                  "G13/#831: the empty-composer send button is the single attach affordance "
+                  f"(mode 'attach', title 'Attach a file') ({g13_menus['sendAttachMode']!r}, {g13_menus['sendAttachTitle']!r})")
+            check(g13_menus["paperclipGone"] is True,
+                  "G13/#831: the redundant standalone composer paperclip is dropped (one attach control)")
             check(g13_menus["trayAttachPresent"] is False,
-                  "G13/#760: the redundant overflow-tray 'Attach files' duplicate is gone (no two attach entry points)")
+                  "G13/#831: the redundant overflow-tray 'Attach files' duplicate is gone (no two attach entry points)")
 
             # (b) the shortcuts modal: rows render, none names a dropped
             # vertical, and no category header floats over zero rows.
