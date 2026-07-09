@@ -42,11 +42,29 @@ window.uiModule = uiModule;
 window.adminModule = adminModule;
 window.cookbookModule = cookbookModule;
 
-// Redirect to login on 401 from any fetch
+// Mid-session 401 handling (#914). A 401 from any fetch (other than the auth endpoints
+// themselves, and skipped once we're already on /login — no redirect loop) means the
+// session expired between requests. This used to be a SILENT `location.href = '/login'`
+// with no notice — the live context (an in-flight composer draft) was lost with zero
+// explanation, a real abandonment risk on a first session (audit L7).
+//
+// Fix: before navigating away,
+//   (1) flush the composer draft synchronously — orwellComposerDraft.js normally saves
+//       on a 250ms debounce, but `location.href =` fires immediately, so a very recent
+//       keystroke could otherwise never reach sessionStorage;
+//   (2) leave a one-shot sessionStorage flag for the login page to render an honest
+//       "you've been signed out" notice instead of a silent bounce.
+// Nothing else needs to change to "return the player to where they were": the composer
+// draft (sessionStorage, survives same-tab navigation) and the last-open session id
+// (Storage 'lastSessionId', localStorage) are both untouched by this redirect, so signing
+// back in resumes the same session with the same draft restored.
 const _origFetch = window.fetch;
 window.fetch = async function(...args) {
   const res = await _origFetch.apply(this, args);
-  if (res.status === 401 && !String(args[0]).includes('/api/auth/')) {
+  if (res.status === 401 && !String(args[0]).includes('/api/auth/') &&
+      !window.location.pathname.startsWith('/login')) {
+    try { window._orwellComposerDraftFlush && window._orwellComposerDraftFlush(); } catch (_) {}
+    try { sessionStorage.setItem('orwell-session-expired-notice', String(Date.now())); } catch (_) {}
     window.location.href = '/login';
   }
   return res;

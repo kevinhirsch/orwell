@@ -167,6 +167,11 @@
   window._orwellComposerDraftClear = clearDraft;
   // Test seam (the headless browser gate): read the stored record.
   window._orwellComposerDraftPeek = load;
+  // #914 — app.js's mid-session-401 handler calls this to flush the debounced save
+  // BEFORE navigating away to /login: a `window.location.href` assignment fires
+  // immediately, so a keystroke still sitting inside the 250ms debounce window would
+  // otherwise never reach sessionStorage and the player would lose it silently.
+  window._orwellComposerDraftFlush = saveNow;
 
   ready(() => {
     wire();
