@@ -924,6 +924,17 @@
   function watchMounts() {
     try {
       var mo = new MutationObserver(function (muts) {
+        // PERF: two cheap early bail-outs before the per-node selector scan.
+        //  (1) A pass is already queued for the next frame — it will re-collect EVERY
+        //      current surface (any just-mounted one included), so there's no need to
+        //      scan this mutation batch too. During streaming narration (a churn of
+        //      added nodes each microtask) this collapses a querySelector storm into
+        //      the single already-scheduled pass.
+        //  (2) Not the Full-Glass tier ⇒ applyPass would clearAll and return anyway, so
+        //      scanning for new refraction targets is pure waste. Off/Frosted therefore
+        //      do NEAR-ZERO work per DOM mutation; the tier flip back to glass-full is
+        //      handled by watchTheme() (body-class observer → a full re-collect pass).
+        if (applyScheduled || !isFrosted()) return;
         for (var i = 0; i < muts.length; i++) {
           var m = muts[i];
           for (var j = 0; j < m.addedNodes.length; j++) {
@@ -1032,23 +1043,32 @@
     specPending = null;
     if (!p || p.el !== specActive || !specActive) return;
     if (reducedMotion()) return; // static rim ignores the pointer
+    // PERF (layout-thrash fix): the getBoundingClientRect — a forced synchronous
+    // layout — is read HERE, in the once-per-frame rAF flush, NOT in the pointermove
+    // handler. A pointermove storm during streaming DOM churn therefore costs ONE
+    // layout read per frame instead of one per event, and the rect is FRESH each
+    // frame (drag-correct: a window dragged under the pointer measures now, not stale).
+    // specPending carries RAW clientX/clientY; normalize against the current rect.
+    var r;
+    try { r = specActive.getBoundingClientRect(); } catch (_) { return; }
+    if (r.width <= 0 || r.height <= 0) return;
+    var x = (p.x - r.left) / r.width;
+    var y = (p.y - r.top) / r.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return; // pointer left the surface between events
     try {
-      specActive.style.setProperty("--ow-spec-x", p.x.toFixed(4));
-      specActive.style.setProperty("--ow-spec-y", p.y.toFixed(4));
+      specActive.style.setProperty("--ow-spec-x", Math.min(1, Math.max(0, x)).toFixed(4));
+      specActive.style.setProperty("--ow-spec-y", Math.min(1, Math.max(0, y)).toFixed(4));
     } catch (_) {}
   }
 
   function onSpecPointerMove(e) {
     if (!specActive || reducedMotion() || !specEligible()) return;
-    // Only track when the pointer is actually over the active surface (one at a time).
-    var el = specActive;
-    var r;
-    try { r = el.getBoundingClientRect(); } catch (_) { return; }
-    if (r.width <= 0 || r.height <= 0) return;
-    var x = (e.clientX - r.left) / r.width;
-    var y = (e.clientY - r.top) / r.height;
-    if (x < 0 || x > 1 || y < 0 || y > 1) return; // pointer left the surface
-    specPending = { el: el, x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+    // Stash only the RAW pointer coords and schedule a flush — deliberately NO
+    // getBoundingClientRect here (that forced layout is deferred to flushSpec, which
+    // runs at most once per frame). This is the batch-reads-then-writes pattern: the
+    // hot per-event path does zero layout work; the single rAF flush does the one read
+    // + the CSS-var write. (One at a time — specActive is the sole tracked surface.)
+    specPending = { el: specActive, x: e.clientX, y: e.clientY };
     if (!specRaf) {
       specRaf = (window.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); })(flushSpec);
     }
