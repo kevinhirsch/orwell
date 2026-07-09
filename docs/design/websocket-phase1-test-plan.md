@@ -8,6 +8,10 @@
 > frame shapes, `fromSeq` semantics, and the handshake branch. Every test below cites the real symbol
 > it drives (`file:line`) so it can be coded directly.
 >
+> *(Both companions are in-flight: ADR 0017 in PR #1265 and the protocol spec in PR #1267. This test
+> plan depends on them and should merge **after** both land; the two links above resolve then — do not
+> retarget them.)*
+>
 > **This plan is INERT until Phase 0 is met.** Per ADR 0017 §Phasing and the protocol spec's Hard Gate,
 > the F5 mirror-parity harness (`docs/audits/playtest-harness/mirror_live_parity.mjs` +
 > `run_mirror_gate.sh`) is **RED on `main` as of 2026-07-09** (`bUsesIncrementalRenderer` fails). Phase 0
