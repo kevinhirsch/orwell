@@ -281,42 +281,48 @@
   async function showNoFeedNotice() {
     _setComposerDisabledForNoFeed(true);
     setOnboardingActive(true); // suppress the splash tip rotator while the composer is disabled
-    if (window.OrwellNoticeKit && typeof window.OrwellNoticeKit.create === "function") {
-      const admin = await isAdmin();
-      if (!_noFeedNotice) {
-        _noFeedNotice = window.OrwellNoticeKit.create({
-          id: _NO_FEED_NOTICE_ID,
-          kind: "system-notice",
-          placement: "top-banner",
-          severity: "warn",
-          icon: "warn",
-          role: "status",
-          title: "No feed connected yet",
-          dismissible: true,     // advisory — the player may wave it away; the composer stays
-          persistDismiss: false, // disabled regardless (dismissing the copy is not fixing the feed)
-          reflow: false,
-        });
+    // The notice is advisory chrome; the composer-disable + re-probe below are the real gate.
+    // Guard the whole notice-kit render so a throw from create()/show()/update() (or the awaited
+    // isAdmin() probe) can NEVER leave the composer disabled with no re-probe armed — the timer
+    // setup after this block must always be reached.
+    try {
+      if (window.OrwellNoticeKit && typeof window.OrwellNoticeKit.create === "function") {
+        const admin = await isAdmin();
+        if (!_noFeedNotice) {
+          _noFeedNotice = window.OrwellNoticeKit.create({
+            id: _NO_FEED_NOTICE_ID,
+            kind: "system-notice",
+            placement: "top-banner",
+            severity: "warn",
+            icon: "warn",
+            role: "status",
+            title: "No feed connected yet",
+            dismissible: true,     // advisory — the player may wave it away; the composer stays
+            persistDismiss: false, // disabled regardless (dismissing the copy is not fixing the feed)
+            reflow: false,
+          });
+        }
+        const body = document.createElement("div");
+        const p = document.createElement("p");
+        p.textContent = "The house can't speak until a feed is live — " +
+          (admin ? "connect one in Settings." : "ask your administrator to connect one.");
+        body.appendChild(p);
+        if (admin) {
+          const row = document.createElement("div");
+          row.className = "on-no-feed-actions";
+          const openBtn = document.createElement("button");
+          openBtn.type = "button";
+          openBtn.className = "ow-btn ow-btn-secondary";
+          openBtn.setAttribute("data-no-feed-settings", "");
+          openBtn.textContent = "Open Settings";
+          openBtn.addEventListener("click", () => { try { openSettings(); } catch (_) {} });
+          row.appendChild(openBtn);
+          body.appendChild(row);
+        }
+        _noFeedNotice.show();
+        _noFeedNotice.update({ severity: "warn", icon: "warn", title: "No feed connected yet", body: body });
       }
-      const body = document.createElement("div");
-      const p = document.createElement("p");
-      p.textContent = "The house can't speak until a feed is live — " +
-        (admin ? "connect one in Settings." : "ask your administrator to connect one.");
-      body.appendChild(p);
-      if (admin) {
-        const row = document.createElement("div");
-        row.className = "on-no-feed-actions";
-        const openBtn = document.createElement("button");
-        openBtn.type = "button";
-        openBtn.className = "ow-btn ow-btn-secondary";
-        openBtn.setAttribute("data-no-feed-settings", "");
-        openBtn.textContent = "Open Settings";
-        openBtn.addEventListener("click", () => { try { openSettings(); } catch (_) {} });
-        row.appendChild(openBtn);
-        body.appendChild(row);
-      }
-      _noFeedNotice.show();
-      _noFeedNotice.update({ severity: "warn", icon: "warn", title: "No feed connected yet", body: body });
-    }
+    } catch (_) { /* notice chrome failed — the composer-disable + re-probe below still stand */ }
     if (!_noFeedTimer) {
       _noFeedTimer = setInterval(async () => {
         try {
