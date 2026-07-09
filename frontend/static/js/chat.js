@@ -1561,17 +1561,32 @@ import { isNarrow } from './platform.js';
         const bodyEl = roundHolder.querySelector('.body');
         const contentEl = _ensureStreamLayout(bodyEl);
 
+        // #828: classify the WRAP as an OOC/producer aside on every live delta — the SAME
+        // detectOocAside verdict the reload path (chatRenderer.addMessage) applies — so the
+        // bubble picks up `.msg-ooc`/`.msg-ooc-producer` the instant the text resolves to a
+        // whole-message `((...))` wrap, not only after a refresh. `dt` unchanged when it isn't
+        // (yet) a whole-wrap message, so ordinary narration renders byte-identically to before.
+        const _liveOoc = chatRenderer.applyOocClass(roundHolder, dt.trim(), 'assistant');
+        const displayText = _liveOoc.text;
+
         // When the reasoning accordion has collapsed in-place, a dedicated reply container exists
         // — render the reply into it (preserve the thinking bar when there's no reply yet).
         const liveReply = contentEl.querySelector('.live-reply-content');
         if (liveReply) {
-          const replyTrimmed = dt.trim();
+          const replyTrimmed = displayText.trim();
           if (replyTrimmed) {
-            const r = liveReply._streamRenderer ||
-              (liveReply._streamRenderer = createStreamRenderer(liveReply, {
-                render: (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t)),
-                hljs: window.hljs,
-              }));
+            // #828: `displayText` DROPS the `((`/`))` markers the instant the wrap is classified
+            // OOC — that is not an append-only extension of the raw text the renderer already
+            // committed, so a renderer built against the pre-classification (unstripped) text
+            // must not keep receiving the shorter, stripped one (streamingRenderer.js's `update`
+            // precondition). Recreate on the ooc-state EDGE rather than every call.
+            const r = (liveReply._streamRenderer && liveReply._streamRendererOoc === _liveOoc.ooc)
+              ? liveReply._streamRenderer
+              : (liveReply._streamRendererOoc = _liveOoc.ooc,
+                 liveReply._streamRenderer = createStreamRenderer(liveReply, {
+                   render: (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t)),
+                   hljs: window.hljs,
+                 }));
             r.update(replyTrimmed);
           }
           uiModule.scrollHistory();
@@ -1580,12 +1595,14 @@ import { isNarrow } from './platform.js';
 
         // Normal streaming: incremental render (freeze finalized blocks, re-render only the
         // growing tail, highlight each code block once). See streamingRenderer.js.
-        const renderer = contentEl._streamRenderer ||
-          (contentEl._streamRenderer = createStreamRenderer(contentEl, {
-            render: (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t)),
-            hljs: window.hljs,
-          }));
-        renderer.update(dt);
+        const renderer = (contentEl._streamRenderer && contentEl._streamRendererOoc === _liveOoc.ooc)
+          ? contentEl._streamRenderer
+          : (contentEl._streamRendererOoc = _liveOoc.ooc,
+             contentEl._streamRenderer = createStreamRenderer(contentEl, {
+               render: (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t)),
+               hljs: window.hljs,
+             }));
+        renderer.update(displayText);
         uiModule.scrollHistory();
       };
 
@@ -2463,7 +2480,7 @@ import { isNarrow } from './platform.js';
                 if (!roundFinalized) {
                   roundFinalized = true;
                   if (spinner && spinner.element) spinner.destroy();
-                  const dt = stripToolBlocks(roundReplyText);  // F8: reply-only (reasoning → accordion)
+                  let dt = stripToolBlocks(roundReplyText);  // F8: reply-only (reasoning → accordion)
                   // L6c (supersedes L6b): a round that produced VISIBLE narration is the player's
                   // dialogue (the casting interviewer's lines, a scene beat) — KEEP it even when a
                   // tool follows. Only a truly-EMPTY tool-only round is hidden. The old L6b rule hid
@@ -2476,6 +2493,11 @@ import { isNarrow } from './platform.js';
                     var _body3 = roundHolder.querySelector('.body');
                     var _contentEl3 = _ensureStreamLayout(_body3);
                     _contentEl3.style.minHeight = '';  // clear streaming inflate
+                    // #828: same wrap classification as _renderStream/reload — feed the
+                    // marker-stripped text so a whole-`((...))`-wrap round doesn't ALSO get
+                    // processWithThinking's inner `.ooc-producer-aside` div stacked on top of
+                    // the wrap-level `.msg-ooc-producer` styling this just applied.
+                    dt = chatRenderer.applyOocClass(roundHolder, dt.trim(), 'assistant').text;
                     _contentEl3.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
                     if (window.hljs) roundHolder.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
                   } else {
@@ -3254,6 +3276,13 @@ import { isNarrow } from './platform.js';
         // F8: finalize the BODY from the reply-only buffer; reasoning lives in the accordion
         // already, so no extraction is needed (the old garbled-<think>/prefix dance is gone).
         const finalDisplay = stripToolBlocks(roundReplyText);
+        // #828: re-run the SAME wrap classification the reload path (chatRenderer.addMessage)
+        // applies, on the FINAL settled text, and feed the marker-stripped result into the
+        // renders below — otherwise this settle would re-derive HTML from the raw `((...))`
+        // text and stack processWithThinking's inner `.ooc-producer-aside` div on top of the
+        // wrap-level `.msg-ooc-producer` styling, a double treatment reload never produces.
+        const _finalOoc = chatRenderer.applyOocClass(roundHolder, finalDisplay.trim(), 'assistant');
+        const finalDisplayText = _finalOoc.text;
         if (finalDisplay.trim()) {
           var _body4 = roundHolder.querySelector('.body');
           // Preserve sources expanded state before final render
@@ -3261,7 +3290,7 @@ import { isNarrow } from './platform.js';
 
           // If thinking was collapsed in-place during streaming, a reply container exists.
           var _liveReplyEl = _body4 && _body4.querySelector('.live-reply-content');
-          var _finalReply = _liveReplyEl ? finalDisplay.trim() : '';
+          var _finalReply = _liveReplyEl ? finalDisplayText.trim() : '';
           if (_liveReplyEl && _finalReply) {
             // Render reply into the live-reply container (thinking bar already showing).
             // #762: the live thinking accordion is ALREADY in the DOM (its own caret).
@@ -3291,7 +3320,7 @@ import { isNarrow } from './platform.js';
           } else {
             // Full re-render (reply empty or no live-reply container)
             _body4.innerHTML = (_sourcesData ? _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded) : '')
-              + markdownModule.processWithThinking(markdownModule.squashOutsideCode(finalDisplay))
+              + markdownModule.processWithThinking(markdownModule.squashOutsideCode(finalDisplayText))
               + (_findingsData ? chatRenderer.buildFindingsBox(_findingsData) : '');
           }
         } else if (_sourcesHtml) {
@@ -4561,8 +4590,12 @@ import { isNarrow } from './platform.js';
    * the caller owns (`{}` initially); the helper hangs the accordion refs + the reply renderer off it
    * across delta calls. Idempotent + self-contained: it only ever writes its own children of
    * `contentDiv`.
+   *
+   * `wrap` (#828) is the outer `.msg` bubble — passed through to `chatRenderer.applyOocClass` so the
+   * OBSERVER's bubble gets the SAME `.msg-ooc`/`.msg-ooc-producer` wrap classification the sender's
+   * `_renderStream` applies, live, instead of only picking it up on a later reload.
    */
-  function _renderLiveStream(contentDiv, replyText, reasoningText, render, state) {
+  function _renderLiveStream(contentDiv, replyText, reasoningText, render, state, wrap) {
     if (!contentDiv) return;
     const reasoning = (reasoningText || '').trim();
     // 1) Reasoning → a default-COLLAPSED live accordion at the top of the content. Created lazily the
@@ -4590,14 +4623,22 @@ import { isNarrow } from './platform.js';
     // 2) Reply → the SHARED incremental renderer into a dedicated `.live-reply-content` child (the same
     //    container class the sender's post-thinking reply path mounts), so the gate sees both windows
     //    mount the streaming container and stream through createStreamRenderer.
-    const replySrc = stripToolBlocks(replyText || '');
-    if (!replySrc.trim()) { uiModule.scrollHistory(); return; }
+    const replySrcRaw = stripToolBlocks(replyText || '');
+    if (!replySrcRaw.trim()) { uiModule.scrollHistory(); return; }
+    // #828: classify the OBSERVER's wrap the SAME way the sender's `_renderStream` does, so a
+    // producer/OOC turn picks up `.msg-ooc`/`.msg-ooc-producer` in BOTH windows the instant it
+    // streams, not only the sender's — and feed the marker-stripped text through so `render`
+    // (processWithThinking) doesn't ALSO wrap it in the inner `.ooc-producer-aside` div.
+    const _liveOoc = chatRenderer.applyOocClass(wrap, replySrcRaw.trim(), 'assistant');
+    const replySrc = _liveOoc.text;
     let replyEl = state._replyEl;
-    if (!replyEl || !replyEl.isConnected) {
+    if (!replyEl || !replyEl.isConnected || state._replyRendererOoc !== _liveOoc.ooc) {
+      if (replyEl && replyEl.isConnected) replyEl.remove();
       replyEl = document.createElement('div');
       replyEl.className = 'live-reply-content';
       contentDiv.appendChild(replyEl);
       state._replyEl = replyEl;
+      state._replyRendererOoc = _liveOoc.ooc;
       state._replyRenderer = createStreamRenderer(replyEl, { render, hljs: window.hljs });
     }
     state._replyRenderer.update(replySrc);
@@ -4714,7 +4755,7 @@ import { isNarrow } from './platform.js';
     // <think>/operator-aside scrub the game build applies in processWithThinking runs here too.
     const _liveRender = (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t));
     const renderDelta = () => {
-      _renderLiveStream(contentDiv, replyText, reasoningText, _liveRender, _liveState);
+      _renderLiveStream(contentDiv, replyText, reasoningText, _liveRender, _liveState, holder);
     };
 
     try {
