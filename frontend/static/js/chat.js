@@ -3240,6 +3240,13 @@ import { isNarrow } from './platform.js';
         // survive into it. Same chain processWithThinking's public-reply branch already runs.
         holder.dataset.raw = markdownModule.scrubMachineryForPersistence(accumulated);
 
+        // F-A11Y-1: announce the COMPLETED reply ONCE for screen readers. The transcript log is
+        // aria-live="off" (it streams token-by-token and would otherwise flood AT with fragments);
+        // window.orwellAnnounce (js/a11y.js) reads the painted public reply from the bubble — the
+        // reasoning accordion is stripped there, so reasoning is never spoken — into the dedicated
+        // #a11y-announcer polite region. Fail-soft: absent helper ⇒ no-op.
+        try { if (window.orwellAnnounce) window.orwellAnnounce(roundHolder || holder); } catch (_e) {}
+
         // Anti-stall: a turn that ran tools but ended with essentially no
         // final prose usually means the model stopped mid-task (the case
         // where you had to type "did you finish?"). Offer a one-click

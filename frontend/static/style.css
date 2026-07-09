@@ -12566,6 +12566,30 @@ textarea.memory-add-input {
   white-space: nowrap !important; border: 0 !important;
 }
 
+/* F-A11Y-2 (WCAG 2.4.1 Bypass Blocks): the "Skip to chat" link. Off-screen until it takes
+   keyboard focus, then pinned to the top-left so a keyboard / switch / AT user can jump straight
+   to the composer instead of tabbing the whole sidebar. z-index sits above the boot loader
+   (#app-loader is 99999) so it stays reachable. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100000;
+  padding: 10px 16px;
+  background: var(--bg, #282c34);
+  color: var(--fg, #e6e6e6);
+  border: 2px solid var(--accent-primary, var(--red, #e06c75));
+  border-radius: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  left: 0;
+  outline: none;
+}
+
 /* ── Custom language type picker (replaces visible chrome of native <select>
    — <option>s can't render SVG). Hidden select stays as the source of truth. */
 .doc-langpicker-native-hidden {

@@ -118,6 +118,43 @@
     el.click();
   });
 
+  // ---- F-A11Y-1: single announcement per completed narration round ---------
+  // The transcript log (#chat-history) is aria-live="off" so a screen reader is
+  // not flooded with partial token fragments as the reply streams. Instead the
+  // finished reply text is announced ONCE per completed round into a dedicated,
+  // visually-hidden polite region (#a11y-announcer). chat.js calls
+  // window.orwellAnnounce(...) at its round-complete (final-render) seam.
+  //
+  // Respects the reasoning-scrub split: we announce ONLY the public reply text.
+  // When passed the round's bubble element we read what was actually painted and
+  // strip the reasoning accordion + tool nodes, so reasoning can never be spoken.
+  function _extractReplyText(el) {
+    if (!el || el.nodeType !== 1) return '';
+    var body = el.querySelector('.body') || el;
+    var clone = body.cloneNode(true);
+    clone.querySelectorAll(
+      '.thinking-section,.thinking-header,.thinking-content,' +
+      '.agent-thread,.agent-thread-node,.live-thinking'
+    ).forEach(function (n) { n.remove(); });
+    return (clone.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  var _lastAnnounced = '';
+  window.orwellAnnounce = function (arg) {
+    var region = document.getElementById('a11y-announcer');
+    if (!region) return;
+    var text = (typeof arg === 'string') ? arg : _extractReplyText(arg);
+    text = (text || '').replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    _lastAnnounced = text;
+    // aria-atomic re-reads the whole region; clear first, then set on the next
+    // frame so an identical or repeated reply still fires a fresh announcement.
+    region.textContent = '';
+    window.requestAnimationFrame(function () {
+      if (_lastAnnounced === text) region.textContent = text;
+    });
+  };
+
   function init() {
     enhanceAll(document);
     enhanceModals(document);
