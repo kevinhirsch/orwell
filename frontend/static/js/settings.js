@@ -53,8 +53,17 @@ function _animatePanelEntrance(tab) {
 }
 
 // The single panel-swap primitive shared by tab clicks AND the public open(tab).
+// #659: this is also where the ONE tab component's selected-state + roving-tabindex
+// (WAI-ARIA APG vertical tabs) get synced — every activation path (click, arrow-key
+// nav, or open(tab) landing on a tab) funnels through here, so aria-selected/tabIndex
+// can never drift out of sync with the visible `.active` state.
 function _swapToPanel(tab) {
-  modalEl.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b.dataset.settingsTab === tab));
+  modalEl.querySelectorAll('[data-settings-tab]').forEach(b => {
+    const isActive = b.dataset.settingsTab === tab;
+    b.classList.toggle('active', isActive);
+    b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    b.tabIndex = isActive ? 0 : -1;
+  });
   modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== tab));
   // Mark when the Appearance tab is open so the modal can go
   // semi-transparent — lets the user see the rest of the UI react as
@@ -83,10 +92,46 @@ function activateTab(tab) {
   _swapToPanel(tab);
 }
 
+// #659: the ONE tab component's keyboard half — WAI-ARIA APG roving tabindex for a
+// vertical tablist. ArrowUp/ArrowDown (and ArrowLeft/ArrowRight, which the APG also
+// allows) move + activate; Home/End jump to the first/last tab. Only VISIBLE tabs
+// are candidates — admin-gated or game-build-trimmed tabs (display:none) are skipped,
+// matching the same visibility rule open()/syncAdminVisibility() already use for
+// click-landing, so keyboard and pointer navigation can never diverge.
+function _visibleSettingsTabs() {
+  if (!modalEl) return [];
+  return Array.from(modalEl.querySelectorAll('[data-settings-tab]'))
+    .filter(b => getComputedStyle(b).display !== 'none');
+}
+
+function _settingsTabsKeydown(e) {
+  const tabs = _visibleSettingsTabs();
+  if (!tabs.length) return;
+  const cur = tabs.indexOf(document.activeElement);
+  let next;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = cur < 0 ? 0 : (cur + 1) % tabs.length;
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = cur < 0 ? tabs.length - 1 : (cur - 1 + tabs.length) % tabs.length;
+  else if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = tabs.length - 1;
+  else return;
+  e.preventDefault();
+  activateTab(tabs[next].dataset.settingsTab);
+  tabs[next].focus();
+}
+
 function initTabs() {
-  modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {
-    btn.addEventListener('click', () => activateTab(btn.dataset.settingsTab));
-  });
+  // Bind click + keydown once — the SAME bound flag guards BOTH against double-wiring
+  // across re-init (initTabs can run again if initAll is re-entered; without the guard the
+  // click listeners would stack and fire activateTab N times per click).
+  const sidebar = modalEl.querySelector('.settings-sidebar');
+  if (sidebar && sidebar.dataset.tabsKeyboardBound !== '1') {
+    sidebar.dataset.tabsKeyboardBound = '1';
+    modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {
+      btn.addEventListener('click', () => activateTab(btn.dataset.settingsTab));
+    });
+    // Delegate keydown once on the tablist container.
+    sidebar.addEventListener('keydown', _settingsTabsKeydown);
+  }
 }
 
 /* ── Dragging ── */
