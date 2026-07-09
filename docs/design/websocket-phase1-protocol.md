@@ -224,10 +224,37 @@ just a second subscriber transport beside the SSE one.
 - The channel keys on the socket's `ack`'d `canonicalId` (the `run_key` — `chat_routes.py:1791`
   `run_key = ctx.canonical_session or session`). The client never picks the run key; the handshake did.
 
+**The `subscribe`→`ack`→`event` handshake — ONE ordering, no replay race.** `subscribe` is a
+request/response pair like `hello` (§1.2): the server **FIRST** answers with an `ack` echoing the
+`subscribe` `cid`, **THEN** streams the replay `event` frames from `fromSeq` and live-tails. The `ack`
+is what resolves the client's subscription promise and declares the window it is about to receive, so
+the replay start can never race an unresolved promise. Reuse the same `ack` frame shape as the `hello`
+handshake (§2.3), discriminated by `ch`/`cid`:
+
+```jsonc
+// server → client — sent BEFORE any event frame on this channel
+{ "t":"ack", "ch":"chat", "cid":"c_01", "d":{ "fromSeq":0, "headSeq":41 } }
+```
+
+- **`fromSeq`** — echoes the accepted replay start (the client's requested cursor, clamped to the
+  buffer if it over-shot). **`headSeq`** — the current buffer head (`len(_Run.buffer) - 1`,
+  `agent_runs.py:47`), i.e. the last `seq` the client is about to receive from the replay before the
+  live tail begins. Together they tell the client exactly the `[fromSeq..headSeq]` window the replay
+  covers, so it knows when the prefix ends and the live tail starts — no guessing, no race.
+- **Ordering is mandatory:** the client MUST NOT begin rendering/ordering `event` frames until it has
+  the `ack` for that `subscribe` `cid`; the server MUST NOT emit any `chat` `event` frame for a
+  `subscribe` before its `ack`. (`hello`/`bind` already follow this ack-first rule, §2 — `subscribe`
+  is the same contract on the `chat` channel.)
+- **On failure the server sends an `error` instead and streams nothing:** a `subscribe` for a
+  dead/non-owned session or a malformed `fromSeq` → `{"t":"error","ch":"chat","cid":"c_01","d":{"code":…}}`
+  (`not-bound` / `forbidden` / `bad-cursor`, echoing the `cid` per §1.2) and **zero** `event` frames.
+  The client rejects the subscription promise on that `cid`.
+
 ### 3.2 Server behavior (a thin socket adapter over `agent_runs`)
 
-The `subscribe` handler runs the **existing** `agent_runs.subscribe(canonicalId)` generator, wrapping each
-yielded SSE-event string in an `event` frame. Critically, **`_Run.buffer` is already seq-indexed**
+The `subscribe` handler sends the `ack{cid, ch:"chat", d:{fromSeq, headSeq}}` first (§3.1), then runs the
+**existing** `agent_runs.subscribe(canonicalId)` generator, wrapping each yielded SSE-event string in an
+`event` frame (the `ack` is emitted **before** the first of these). Critically, **`_Run.buffer` is already seq-indexed**
 (`_publish` does `seq = len(run.buffer) - 1`, `agent_runs.py:47`), so the socket adapter attaches that
 same index as the frame `seq`. To honor `fromSeq > 0` without touching `_Run`, the adapter skips yielded
 events whose buffer index `< fromSeq` (the generator yields in buffer order, so the index is just a
@@ -447,8 +474,8 @@ and fallback mode.**
 
 | # | Case (ADR 0017 §Testability) | Concrete assertion |
 |---|---|---|
-| a | **Reconnect-resume splice** | Open socket, start a turn, drop the socket mid-stream at event seq N, reconnect with `subscribe{fromSeq:N+1}`. Assert the reassembled token stream == the single-connection stream: **no seq gap, no dup**, terminal `done:true` once. Exercises the ported `agent_runs` primitive (§3.3). Run once with the run still **live** at reconnect and once **terminal-but-buffered** (`has_run` true, within 180 s) — both must replay fully (§3.6). |
-| b | **Liveness handshake** | `hello` for (i) a **dead** canonical id (row deleted) → `ack{live:false}`, **no channel subscribed**; the stored binding is unbound (`resolve_live_game_session` side effect). (ii) a **non-owned** session → `error{forbidden}` + close, no bind. Proves the #1085/#1086 guard is socket-native and fires **before** subscribe. |
+| a | **Reconnect-resume splice** | Open socket, start a turn, drop the socket mid-stream at event seq N, reconnect with `subscribe{cid,fromSeq:N+1}`. **Assert the `ack{cid, d:{fromSeq,headSeq}}` arrives BEFORE any `event` frame on the channel** (no replay frame precedes its `ack`), then that the reassembled token stream == the single-connection stream: **no seq gap, no dup**, terminal `done:true` once. Exercises the ported `agent_runs` primitive (§3.1/§3.3). Run once with the run still **live** at reconnect and once **terminal-but-buffered** (`has_run` true, within 180 s) — both must replay fully (§3.6). |
+| b | **Liveness handshake / subscribe-refuse** | `hello` for (i) a **dead** canonical id (row deleted) → `ack{live:false}`, **no channel subscribed**; the stored binding is unbound (`resolve_live_game_session` side effect). (ii) a **non-owned** session → `error{cid,forbidden}` + close, no bind. And a `subscribe` on a dead/non-owned/unbound channel → `error{cid, code}` with **ZERO `event` frames emitted** (the server streams nothing on refuse, §3.1). Proves the #1085/#1086 guard is socket-native and that both the bind handshake and the subscribe handshake refuse **before** any replay. |
 | c | **Multiplex isolation** | Interleave `chat` `event` frames and `hud`/`layout` frames on one socket; assert the client router dispatches each strictly by `ch` — a `hud` frame never reaches the chat renderer, a `chat` delta never reaches the layout store. No cross-channel bleed. |
 | d | **Layout LWW + echo-suppression** | Two tabs on **one device** + one tab on a **second device**. Move a window in tab A: tab B (same device) applies it; the second device does **NOT** (per-device scope); tab A ignores its own `origin` echo. Two rapid conflicting moves → last write wins per field. |
 | e | **Fallback parity** | Force the client into fallback (flag off / simulated upgrade failure). Assert it runs the SSE/poll stack unchanged **and passes the F5 mirror-parity harness** (two-window incremental mirror). |
