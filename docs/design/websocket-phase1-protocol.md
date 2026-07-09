@@ -28,7 +28,7 @@ FE seams Phase 1 re-hosts on the socket:
 
 | Concern | Today's transport | file:line | Ported onto |
 |---|---|---|---|
-| Live token stream (+ reasoning split) | `POST /api/chat_stream` chunked SSE | `frontend/routes/chat_routes.py:685` | `stream` frames |
+| Live token stream (+ reasoning split) | `POST /api/chat_stream` chunked SSE | `frontend/routes/chat_routes.py:685` | `event` frames on `chat` (§3.2) |
 | Detached run replay→live-tail (**the crown jewel**) | `agent_runs._Run` + `subscribe()` | `frontend/src/agent_runs.py:25,179` | `subscribe`/`event` frames |
 | Mirror resume (late-attach) | `GET /api/chat/resume/{id}` → `agent_runs.subscribe` | `chat_routes.py:1867` | `subscribe{fromSeq}` |
 | Cross-device invitation bus | `GET /api/chat/events/{id}` → `session_events` | `chat_routes.py:1851`, `frontend/src/session_events.py:103,126` | `event` frames (invitation-class) |
@@ -82,7 +82,7 @@ type — kept terse because chat deltas are high-frequency). Envelope:
 
 ```jsonc
 {
-  "t":   "stream",        // discriminator (required, every frame)
+  "t":   "event",         // discriminator (required, every frame)
   "ch":  "chat",          // channel id (required for multiplexed frames; see §2)
   "cid": "c_7f3a",        // correlation id (request/response frames only)
   "seq": 42,              // per-channel monotonic seq (subscribe/event frames)
@@ -90,7 +90,10 @@ type — kept terse because chat deltas are high-frequency). Envelope:
 }
 ```
 
-- **`t`** — one of `hello|bind|ack|subscribe|event|stream|state|hud|turn|decision|layout|notice|error|ping|pong`.
+- **`t`** — one of `hello|bind|ack|subscribe|event|state|hud|turn|decision|layout|notice|error|ping|pong`.
+  **There is no separate `stream` frame:** chat tokens (live AND replayed) are `event` frames on the
+  `chat` channel carrying `seq` — one chat-token contract, so the replay-then-tail splice uses the same
+  wire type on both sides (§3).
 - **`ch`** — the multiplex channel. Phase-1 channels: `chat`, `state`, `hud`, `layout`, `notice`.
   (`hello`/`bind`/`ack`/`error`/`ping`/`pong` are socket-level and carry no `ch`.)
 - **`cid`** — correlation id for request/response pairs (`turn`, `decision`, `subscribe`→first `ack`).
@@ -264,7 +267,7 @@ already solves it and the socket must not break it:
    re-rendered). The incremental renderer (ADR 0015) already reconciles by `{id, seq}`, so even a
    belt-and-suspenders overlap is a cheap no-op.
 
-### 3.4 Reasoning split rides INSIDE the `stream`/`event` payload (never a separate channel)
+### 3.4 Reasoning split rides INSIDE the `event` payload (never a separate channel)
 
 The `event.d` for a token delta is `{"delta": str, "thinking": bool}` — the **same** field the
 `chat_stream` producer emits (`agent_loop.py:4820`). The client keeps its two per-round buffers exactly
