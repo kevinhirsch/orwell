@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 FRONTEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if FRONTEND_DIR not in sys.path:
     sys.path.insert(0, FRONTEND_DIR)
@@ -182,11 +184,8 @@ def test_theme_seed_script_is_valid_looking_js_for_every_base_theme():
 
 
 def test_theme_seed_script_unknown_theme_raises():
-    try:
+    with pytest.raises(KeyError):
         tc.theme_seed_script("not-a-real-theme")
-        assert False, "expected a KeyError for an unregistered theme"
-    except KeyError:
-        pass
 
 
 def test_finding_line_shape_is_stable_for_registry_matching():

@@ -111,9 +111,13 @@ EXPECTED_UNREACHED: Dict[str, str] = {
     "#orwell-finale": "endgame-only window; the Week-1 fixture never reaches the finale beat",
     "#orwell-retro": "post-season retrospective; not reached by the Week-1 fixture",
     "#orwell-headshot": "the PRE-GAME casting-card window id; in-game the studio mounts inside "
-                        "Settings→Account, whose tiles (.hs-preview/.hs-libitem) ARE reached",
+                        "Settings→Account, whose preview tile (.hs-preview) IS reached",
     ".hs-cand": "the generate-3-options AI candidate tiles — only mount after a portrait "
-                "generation; carry the identical fixed rule as .hs-preview/.hs-libitem (reached)",
+                "generation; carry the identical fixed rule as .hs-preview (reached)",
+    ".hs-libitem": "the headshot-library tiles — only mount once a prior generation has been "
+                   "SAVED to the library, which the Week-1 golden fixture never does (the library "
+                   "is empty at this beat); carry the identical fixed rule as .hs-preview (reached), "
+                   "which covers the orwellHeadshot.js token fix",
     ".gadget-rail .ow-window": "gadgets render as .og-card (reached=5), not docked .ow-window",
 }
 
@@ -269,8 +273,8 @@ class ThemeSweep:
         for hook in open_hooks:
             try:
                 page.evaluate(hook)
-            except Exception:
-                pass
+            except Exception as e:
+                self.errors.append(f"open-hook failed (non-fatal): {hook[:40]}...: {e}")
             page.wait_for_timeout(300)
         # dossier: a door opened FROM the cast window — wait for a cast tile to mount (the roster
         # is fetched async), then open the shared dossier handler on the first houseguest. Poll,
@@ -280,8 +284,8 @@ class ThemeSweep:
             page.evaluate(
                 "(() => { const t = document.querySelector('#orwell-cast .oc-hg');"
                 " if (t) t.click(); })()")
-        except Exception:
-            pass
+        except Exception as e:
+            self.errors.append(f"open-hook failed (non-fatal): dossier click...: {e}")
         page.wait_for_timeout(400)
         # settings modal + Account tab LAST (its scrim would block the sidebar clicks above).
         for hook in (
@@ -292,8 +296,8 @@ class ThemeSweep:
         ):
             try:
                 page.evaluate(hook)
-            except Exception:
-                pass
+            except Exception as e:
+                self.errors.append(f"open-hook failed (non-fatal): {hook[:40]}...: {e}")
             page.wait_for_timeout(350)
         # OrwellHeadshotStudio.mount() kicks off an ASYNC refreshStatus() fetch before its first
         # render() call — `.hs-preview` doesn't exist in the DOM until that fetch resolves, so a
@@ -311,7 +315,8 @@ class ThemeSweep:
             try:
                 if page.evaluate("(sel) => !!document.querySelector(sel)", selector):
                     return
-            except Exception:
+            except Exception as e:
+                self.errors.append(f"open-hook failed (non-fatal): wait_for_selector({selector[:40]}...): {e}")
                 return
             page.wait_for_timeout(poll_ms)
 
