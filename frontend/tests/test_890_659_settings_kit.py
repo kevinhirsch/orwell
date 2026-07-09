@@ -64,13 +64,18 @@ def test_sourcepin_single_in_place_swap_primitive():
 
 
 def test_sourcepin_admin_tabs_never_reopen_the_window():
-    """Admin-category tabs (services/ai/search/tools/users/system) must NOT call
+    """Admin-category tabs (services/integrations/tools/users/system) must NOT call
     win.open()/win.restore() — only a lazy _initData() plus the same panel swap
     every other tab gets."""
     js = _read(SETTINGS_JS)
     assert "const ADMIN_TABS = new Set(" in js
-    for name in ("services", "tools", "users", "system"):
-        assert f"'{name}'" in js
+    # Assert the names live INSIDE the ADMIN_TABS set literal (not merely anywhere in the
+    # file) so a regression that drops one from the set but references it elsewhere is caught.
+    set_start = js.index("const ADMIN_TABS = new Set(")
+    set_end = js.index(")", set_start)
+    set_literal = js[set_start:set_end]
+    for name in ("services", "integrations", "tools", "users", "system"):
+        assert f"'{name}'" in set_literal, f"{name} missing from ADMIN_TABS set literal"
     fn_start = js.index("function activateTab(tab)")
     fn_end = js.index("\n}\n", fn_start)
     body = js[fn_start:fn_end]

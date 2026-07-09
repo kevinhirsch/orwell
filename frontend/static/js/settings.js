@@ -120,14 +120,16 @@ function _settingsTabsKeydown(e) {
 }
 
 function initTabs() {
-  modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {
-    btn.addEventListener('click', () => activateTab(btn.dataset.settingsTab));
-  });
-  // Delegate keydown once on the tablist container — bound flag guards double-wiring
-  // across re-init (initTabs can run again if initAll is re-entered).
+  // Bind click + keydown once — the SAME bound flag guards BOTH against double-wiring
+  // across re-init (initTabs can run again if initAll is re-entered; without the guard the
+  // click listeners would stack and fire activateTab N times per click).
   const sidebar = modalEl.querySelector('.settings-sidebar');
   if (sidebar && sidebar.dataset.tabsKeyboardBound !== '1') {
     sidebar.dataset.tabsKeyboardBound = '1';
+    modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {
+      btn.addEventListener('click', () => activateTab(btn.dataset.settingsTab));
+    });
+    // Delegate keydown once on the tablist container.
     sidebar.addEventListener('keydown', _settingsTabsKeydown);
   }
 }
