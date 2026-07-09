@@ -2057,6 +2057,33 @@ function initBeatHapticsToggle() {
         try { localStorage.setItem('orwell-haptics', chk.checked ? 'on' : 'off'); } catch (_) {}
       });
     }
+
+    // #738 item #4: an independent AUDIO sub-toggle. The vibration pulse and the chime
+    // silence separately — keep the buzz without the beep in a quiet room, or vice-versa.
+    // Persists to localStorage 'orwell-haptics-audio' ('on'/'off'; absent ⇒ default ON);
+    // orwellHaptics.js reads the same key. Injected once (guarded by data-haptics-key).
+    var audioChk = modalEl.querySelector('[data-haptics-key="beat-audio"]');
+    if (!audioChk) {
+      var arow = document.createElement('label');
+      arow.className = 'vis-row';
+      arow.innerHTML =
+        '<span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>' +
+        '<span class="vis-label">Beat Chime <span class="vis-hint">Play the audio cue too (vibration stays on)</span></span>' +
+        '<input type="checkbox" data-haptics-key="beat-audio"><span class="vis-switch"></span>';
+      group.appendChild(arow);
+      audioChk = arow.querySelector('[data-haptics-key="beat-audio"]');
+    }
+    if (audioChk) {
+      var astored = null;
+      try { astored = localStorage.getItem('orwell-haptics-audio'); } catch (_) {}
+      audioChk.checked = astored !== 'off';
+      if (!audioChk.dataset.wired) {
+        audioChk.dataset.wired = '1';
+        audioChk.addEventListener('change', function() {
+          try { localStorage.setItem('orwell-haptics-audio', audioChk.checked ? 'on' : 'off'); } catch (_) {}
+        });
+      }
+    }
   } catch (_) { /* fail-soft — never break the settings panel over an accent toggle */ }
 }
 
