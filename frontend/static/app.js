@@ -170,12 +170,11 @@ function applyGameBuildMenuGating() {
     const tts = el('overflow-tts-btn');
     if (tts) tts.remove();
   }
-  // #760: the game build promotes attach to a first-class composer paperclip
-  // (#composer-attach-btn, E94 above). Keeping "Attach files" in the overflow
-  // tray too = TWO attach entry points (a duplicate behind the chevron). Drop
-  // the tray duplicate; the cascade below then hides the now-empty chevron, so
-  // the composer shows exactly ONE attach control. (Full build keeps both: its
-  // first-class paperclip stays hidden, the tray entry is the only attach.)
+  // #760 → #831: the game build's first-class attach control is now the composer's SEND button
+  // itself — an empty composer shows a "+" that opens the picker (see _updateSendBtnIcon). Keeping
+  // "Attach files" in the overflow tray too = a duplicate behind the chevron. Drop the tray
+  // duplicate; the cascade below then hides the now-empty chevron, so the composer shows exactly ONE
+  // attach control (the send-button "+"). (Full build keeps the tray entry as its only attach.)
   if (document.body.hasAttribute('data-game-build')) {
     const trayAttach = el('overflow-attach-btn');
     if (trayAttach) trayAttach.remove();
@@ -192,10 +191,13 @@ function initializeEventListeners() {
 
   // File attachments (inside overflow menu)
   const _overflowAttach = el('overflow-attach-btn');
-  // E94: the first-class composer paperclip (game build) drives the same file-input flow.
+  // #831: the game build's first-class attach affordance is now the composer SEND button ("+" on an
+  // empty composer — see _updateSendBtnIcon / the send-btn click handler), so the standalone paperclip
+  // is REDUNDANT and stays hidden (dropped) in the game build. The full build never showed it either
+  // (its attach lives in the overflow tray). The click wiring stays as a harmless no-op fallback and so
+  // the same #file-input flow is reachable if the button is ever surfaced.
   const _composerAttach = el('composer-attach-btn');
   if (_composerAttach) {
-    if (document.body.hasAttribute('data-game-build')) _composerAttach.style.display = '';
     _composerAttach.addEventListener('click', () => {
       const fi = el('file-input');
       if (fi) fi.click();
@@ -205,6 +207,9 @@ function initializeEventListeners() {
   el('file-input').addEventListener('change', (e)=>{
     for (const f of e.target.files) fileHandlerModule.addFiles([f]);
     fileHandlerModule.renderAttachStrip();
+    // #831: files are now present — refresh the send button so its "+" attach affordance flips
+    // to the real Send arrow (and `dataset.mode` leaves 'attach') instead of staying stale.
+    try { window._updateSendBtnIcon && window._updateSendBtnIcon(); } catch (_) {}
     // Refocus textarea after file picker closes (mobile keyboard)
     const ta = el('message');
     if (ta) setTimeout(() => ta.focus(), 100);
@@ -223,7 +228,11 @@ function initializeEventListeners() {
         }
       }
     }
-    if (changed) fileHandlerModule.renderAttachStrip();
+    if (changed) {
+      fileHandlerModule.renderAttachStrip();
+      // #831: pasted files present — flip the send button off the "+" attach affordance too.
+      try { window._updateSendBtnIcon && window._updateSendBtnIcon(); } catch (_) {}
+    }
   });
 
   // Message count in the header — recount on any DOM change in
@@ -3791,13 +3800,16 @@ function startOrwellApp() {
         newMode = 'idle';
         sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded');
       } else if (document.body.hasAttribute('data-game-build')) {
-        // A6: the generic-chat-app dual-purpose Send-as-"+New" transform is a "New Chat hazard"
-        // in the game build — an empty composer can never become a session-detach affordance
-        // here. Always the plain muted send arrow; the click/Enter handlers below make an
-        // empty-composer Send an outright no-op (never a bare `#rail-new-session` fallback).
-        sendBtn.innerHTML = _sendIcon;
-        sendBtn.title = 'Send message';
-        newMode = 'idle';
+        // #831 + A6: in the game build an EMPTY composer has nothing to send AND must never become a
+        // "+New" session-detach hazard — so the send button is the file-ATTACH affordance instead. It
+        // shows a "+" that opens the file picker (the click handler below, keyed on mode 'attach'); the
+        // moment any text or attachment is present it flips to the real Send arrow. This makes the
+        // standalone composer paperclip redundant (dropped in initializeEventListeners), leaving the
+        // composer with exactly ONE attach control. The mode is 'attach' — NEVER 'newchat' — so the A6
+        // no-silent-detach guarantee holds by construction.
+        sendBtn.innerHTML = _newChatIcon;   // the "+" glyph — here it means "attach", not "new chat"
+        sendBtn.title = 'Attach a file';
+        newMode = 'attach';
         sendBtn.classList.add('newchat-mode'); // muted gray style only — never functional newchat
         sendBtn.classList.remove('mic-mode', 'newchat-expanded');
         clearTimeout(sendBtn._expandTimer);
@@ -3854,7 +3866,7 @@ function startOrwellApp() {
     // string), which let the lingering anim-land class from the stop icon's
     // entry replay on the +, making it look like the + comes from below.
     // Never animate into send mode (arrow) — it should just appear instantly.
-    if (newMode !== prevMode && (newMode === 'newchat' || newMode === 'mic')) {
+    if (newMode !== prevMode && (newMode === 'newchat' || newMode === 'mic' || newMode === 'attach')) {
       if (!sendBtn.classList.contains('anim-spin')) {
         sendBtn.classList.remove('anim-launch', 'anim-land');
         sendBtn.classList.add('anim-spin');
@@ -3876,6 +3888,19 @@ function startOrwellApp() {
 
       const hasText = messageInput && messageInput.value.trim().length > 0;
       const hasFiles = _hasAttachments();
+
+      // #831 — game build: an EMPTY composer's send button is a "+" file-ATTACH affordance (mode
+      // 'attach'). A click opens the file picker; it never sends, and — being 'attach', never
+      // 'newchat' — it can never detach the session (the A6 guarantee). Once text/files are present
+      // the button is a real Send, so this branch is unreachable with content in the composer.
+      // Gate on the LIVE empty-composer state, not just `dataset.mode`: the file-input change
+      // handler refreshes the icon, but this belt guarantees that once text/files are present a
+      // click SENDS instead of re-opening the picker even if `dataset.mode` is momentarily stale.
+      if (sendBtn.dataset.mode === 'attach' && !hasText && !hasFiles) {
+        const fi = el('file-input');
+        if (fi) fi.click();
+        return;
+      }
 
       // New chat mode — empty input, no attachments, no STT. A6: `_updateSendBtnIcon` never
       // arms 'newchat' mode in the game build (see above) — the explicit build check here is a
