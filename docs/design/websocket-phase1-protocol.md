@@ -4,6 +4,9 @@
 > [`0017`](../decisions/0017-multiplexed-websocket-session-transport.md) — it turns 0017's frame
 > taxonomy into a concrete, per-frame wire contract an engineer can implement directly. **Docs-only.**
 > Not an ADR (it decides no new policy) and not code (it specifies the code Phase 1 writes).
+> *(Merge-order dependency: ADR 0017 is **Proposed** in PR #1265 and is not yet on `main`, so the link
+> above resolves only once #1265 lands. 0017 IS the correct companion — do not retarget the link; #1265
+> must merge before this spec.)*
 >
 > **Scope:** ADR 0017 **Phase 1** — one multiplexed WebSocket per canonical session, **browser ↔ FE**
 > (Hop 1). Hop 2 (FE ↔ engine) stays request/response, unchanged. No engine push. Not one byte of
@@ -91,7 +94,11 @@ type — kept terse because chat deltas are high-frequency). Envelope:
 - **`ch`** — the multiplex channel. Phase-1 channels: `chat`, `state`, `hud`, `layout`, `notice`.
   (`hello`/`bind`/`ack`/`error`/`ping`/`pong` are socket-level and carry no `ch`.)
 - **`cid`** — correlation id for request/response pairs (`turn`, `decision`, `subscribe`→first `ack`).
-  Echoed on the matching reply so the client resolves the right promise.
+  Echoed on the matching reply so the client resolves the right promise. **This includes NEGATIVE
+  replies:** an `error` frame answering a `hello`, `bind`, `subscribe`, `turn`, or `decision` **MUST**
+  carry the original request's `cid` so the client rejects the correct pending promise (a bare
+  `error` with no `cid` would leave the request hung and mis-attribute the failure). Only a truly
+  unsolicited/socket-level `error` (e.g. a malformed frame with no parseable `cid`) may omit it.
 - **`seq`** — the per-channel replay sequence (see §3). Only on `subscribe`/`event`.
 
 Heartbeat: server sends `{"t":"ping"}` every 20 s (mirrors `session_events._HEARTBEAT_S`); client replies
@@ -111,41 +118,53 @@ This is the socket-native replacement for the `GET/POST /api/orwell/game-session
 ```jsonc
 {
   "t": "hello",
+  "cid": "c_00",               // correlation id — the ack (or a negative error) echoes it
   "d": {
     "perTabId": "sess_ab12",   // the tab's own chat-session id (may be pre-game / per-tab)
-    "framed":   true,          // is this a game/casting-framed surface? (ctx.framed)
-    "gameActive": true,        // is a season STARTED? (ctx.game_active) — casting is false
     "protocol": 1
   }
 }
 ```
 
 The client sends `hello` immediately on open, before any `subscribe`. `perTabId` is the id this tab
-would POST under today (`sessions.js` current session).
+would POST under today (`sessions.js` current session) — it is only an **input** for the fallback/bind
+target, never a control over which resolution branch the server takes (§2.2). The `hello` deliberately
+carries **no** `framed`/`gameActive` flags: those are **server-derived**, not client-supplied (§2.2).
+The `ack` (or a `cid`-tagged `error`) is the reply.
 
-### 2.2 Server resolution (mirrors `_resolve_canonical_session`, `chat_helpers.py:4121`)
+### 2.2 Server resolution — the branch is SERVER-DERIVED, never client-supplied (mirrors `_resolve_canonical_session`, `chat_helpers.py:4121`)
 
-On `hello` the server resolves the canonical id with the **exact existing rules** — do not fork the
-logic; call the same helpers:
+**Security-critical:** which resolution branch runs is decided from **authenticated server state**, not
+from anything in the `hello` payload. The client sends only `perTabId`; the server derives "is this a
+live started game?" and "is this casting/pre-game?" from its **own** sources — the same ones
+`_resolve_canonical_session` / `resolve_live_game_session` already read (the per-user canonical binding
++ `_is_live_chat_session` row check + the engine's authoritative "season started" state). A forged
+`hello` that *claimed* a started game (or claimed casting) must NOT be able to flip the branch, adopt a
+foreign canonical id, or weaken the dead-session guard — so the server ignores any client-asserted
+`framed`/`gameActive` and computes them itself. Do not fork the logic; call the same helpers:
 
-1. If `framed && gameActive` → `resolve_live_game_session(user, _is_live_chat_session)`
-   (`orwell_game_session.py:119`): the first-writer-wins bound id **iff it still resolves to a live
-   chat-session row**; a confirmed-dead binding is unbound as a side effect and falls back to `perTabId`.
-2. If `framed && !gameActive` (**casting**) → the **per-tab id** (GAP-2-b1, `chat_helpers.py:4131`).
-   Casting stays strictly per-tab; two casting tabs do not mirror, by design.
+1. **Started live game** (server-derived: the user's canonical binding resolves and the season is
+   started) → `resolve_live_game_session(user, _is_live_chat_session)` (`orwell_game_session.py:119`):
+   the first-writer-wins bound id **iff it still resolves to a live chat-session row**; a confirmed-dead
+   binding is unbound as a side effect and falls back to `perTabId`.
+2. **Casting / pre-game** (server-derived: no started season) → the **per-tab id** (`perTabId`)
+   (GAP-2-b1, `chat_helpers.py:4131`). Casting stays strictly per-tab; two casting tabs do not mirror,
+   by design.
 3. Else → `perTabId`.
 
-If nothing is bound yet and this is a started-game frame, **first-writer-wins bind** via
-`bind_game_session(user, perTabId)` (`orwell_game_session.py:55`) — a racing second socket adopts the
-already-bound id. **Liveness is validated (`_is_live_chat_session`) before the id is handed back.** A
-socket is never `ack`-bound to a dead id, so no channel is ever subscribed to a 404 (the root cause of
-#1085 window-collapse and #1086 reply-strip).
+`perTabId` is used **only** as the fallback and the first-writer bind *target* — never as the signal
+that picks the branch. If nothing is bound yet and the server determines this is a started-game frame,
+**first-writer-wins bind** via `bind_game_session(user, perTabId)` (`orwell_game_session.py:55`) — a
+racing second socket adopts the already-bound id. **Liveness is validated (`_is_live_chat_session`)
+before the id is handed back.** A socket is never `ack`-bound to a dead id, so no channel is ever
+subscribed to a 404 (the root cause of #1085 window-collapse and #1086 reply-strip).
 
 ### 2.3 `ack` (server → client)
 
 ```jsonc
 {
   "t": "ack",
+  "cid": "c_00",                // echoes the hello/bind cid so the client resolves the right promise
   "d": {
     "canonicalId": "sess_ab12", // the id every channel keys on for this socket
     "adopted": false,           // true ⇒ this socket LOST the bind race and adopted a different id
@@ -161,18 +180,21 @@ exactly as `sessionSync.convergeView` does today — **without** the settle-time
 casting reply (#1086), because the re-point happens at handshake, before any stream is subscribed.
 
 **`bind` frame.** A live socket that needs to *re-resolve* (e.g. a season reset unbinds the canonical id,
-surfaced today by `orwell:gamechanged`) sends `{"t":"bind","d":{...same as hello...}}` and receives a
-fresh `ack`. This is the socket-native form of `refreshCanonical()` re-ticking on a new id
-(`sessionSync.js:54`). The client still drops its cached canonical id on `orwell:gamechanged` and issues
-`bind` — the one-dispatcher g15 invariant is untouched (§4).
+surfaced today by `orwell:gamechanged`) sends `{"t":"bind","cid":"c_1a","d":{"perTabId":"sess_ab12"}}`
+(same shape as `hello` — a `cid` plus `perTabId`; the branch is still server-derived per §2.2) and
+receives a fresh `ack` echoing that `cid`. This is the socket-native form of `refreshCanonical()`
+re-ticking on a new id (`sessionSync.js:54`). The client still drops its cached canonical id on
+`orwell:gamechanged` and issues `bind` — the one-dispatcher g15 invariant is untouched (§4).
 
 ### 2.4 Refusal
 
-A `hello`/`bind` for a **non-owned** session → `{"t":"error","d":{"code":"forbidden"}}` then close
-(mirrors `_verify_session_owner` raising). A `hello` that resolves to a **dead** id after unbinding, with
-no live fallback, → `ack` with `live:false`; the client shows the reconnect/reload affordance rather than
-subscribing a dead channel. **No subscribe is accepted before a successful `ack`** — enforce this
-server-side (a `subscribe` on an unbound socket → `error{code:"not-bound"}`).
+A `hello`/`bind` for a **non-owned** session → `{"t":"error","cid":"c_00","d":{"code":"forbidden"}}`
+then close (mirrors `_verify_session_owner` raising) — the `cid` echoes the refused request so the client
+rejects the matching pending promise (§1.2). A `hello` that resolves to a **dead** id after unbinding,
+with no live fallback, → `ack` with `live:false` (still `cid`-tagged); the client shows the reconnect/
+reload affordance rather than subscribing a dead channel. **No subscribe is accepted before a successful
+`ack`** — enforce this server-side (a `subscribe` on an unbound socket →
+`{"t":"error","cid":"c_01","d":{"code":"not-bound"}}`, echoing the `subscribe` cid).
 
 ---
 
@@ -375,8 +397,22 @@ On success → WS mode: it does **not** open the SSE streams and **cancels** the
 failure/close-without-ack → **fallback mode**: it runs the *unchanged* existing stack —
 `POST /api/chat_stream` (SSE), `GET /api/chat/events/{id}`, `GET /api/chat/resume/{id}`, and the g15/
 presence polls. Both paths hit the **same** server helpers (`agent_runs`, `session_events`,
-`_resolve_canonical_session`), so behavior is identical; only the pipe differs. A WS that drops mid-session
-falls back to SSE for the remainder (and retries WS on the next load).
+`_resolve_canonical_session`), so behavior is identical; only the pipe differs.
+
+**A mid-session WS→SSE downgrade must carry the resume cursor — do NOT replay from 0 or skip the tail.**
+When a WS drops mid-turn, the client is holding the highest `chat`-channel `event.seq` it has already
+rendered (§3.2). On the downgrade it reopens the SSE resume path
+(`GET /api/chat/resume/{canonicalId}`) and hands that cursor forward as the buffer position to resume
+from — i.e. it resumes at `fromSeq = highestRenderedSeq + 1`, the same "give me everything after what I
+have" cursor the WS `subscribe{fromSeq}` uses (§3.1). Because the SSE `agent_runs.subscribe` replays the
+run buffer from index 0, the client **discards** the already-rendered prefix up to that cursor and
+mounts only the buffered tail + live continuation — the incremental renderer's `{id, seq}` reconcile
+makes the overlap a cheap no-op — so nothing is double-rendered and nothing after the drop is skipped.
+The client also carries its last-seen `beatSeq` (from `ack`/`state`) into the SSE path so the next
+`turn`'s `expectedBeatSeq` CAS (0065) stays correct across the downgrade. A fresh `POST /api/chat_stream`
+turn started after the downgrade is unaffected — it keys the run on the same `run_key` and the sender
+adopts its own bubble by `clientMsgId`/`{id, seq}` exactly as today. The client retries WS on the next
+load.
 
 **Feature flag & rollout.** A server flag (`ORWELL_WS_TRANSPORT`, default **off** in Phase 1) gates
 whether the client *attempts* the upgrade at all; when off, every client uses today's stack (zero-risk
@@ -403,7 +439,7 @@ and fallback mode.**
 | c | **Multiplex isolation** | Interleave `chat` `event` frames and `hud`/`layout` frames on one socket; assert the client router dispatches each strictly by `ch` — a `hud` frame never reaches the chat renderer, a `chat` delta never reaches the layout store. No cross-channel bleed. |
 | d | **Layout LWW + echo-suppression** | Two tabs on **one device** + one tab on a **second device**. Move a window in tab A: tab B (same device) applies it; the second device does **NOT** (per-device scope); tab A ignores its own `origin` echo. Two rapid conflicting moves → last write wins per field. |
 | e | **Fallback parity** | Force the client into fallback (flag off / simulated upgrade failure). Assert it runs the SSE/poll stack unchanged **and passes the F5 mirror-parity harness** (two-window incremental mirror). |
-| f | **beatSeq CAS over the socket** | A `turn` with a stale `expectedBeatSeq` → `error{code:"stale-beat", d:{beatSeq}}`, no write; client reconciles and retries. Mirrors the HTTP 409 `stale-beat` contract (0065). |
+| f | **beatSeq CAS over the socket** | A `turn` with a stale `expectedBeatSeq` → `error{cid, code:"stale-beat", d:{beatSeq}}` (the `cid` echoes the `turn` so the client rejects the right promise), no write; client reconciles and retries. Mirrors the HTTP 409 `stale-beat` contract (0065). |
 
 **Boundaries unchanged & still green** (ADR 0017): dependency-cruiser Vault-edge test + Vault sentinels
 (no new reader — the socket carries only the projections the SSE/poll surfaces already carry);
