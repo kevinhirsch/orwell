@@ -787,6 +787,17 @@
               <button type="button" class="theme-seg-btn" data-tier="normal" aria-pressed="false" title="No glass — flat chrome">Off</button>
             </div>
           </div>
+          <div class="theme-fd-group" id="theme-glass-tint-group">
+            <label class="theme-fd-label">Glass tint</label>
+            <!-- #739 — Clear vs Tinted (the iOS 26.1 opacity control). Clear (DEFAULT)
+                 is the colorless glass; Tinted raises opacity + contrast while keeping
+                 the refraction. Flips body.theme-tinted via a single --glass-opacity
+                 token (theme.js applyGlassTint / _syncGlassTintControl). -->
+            <div id="theme-glass-tint" class="theme-seg" role="group" aria-label="Glass tint" data-value="clear">
+              <button type="button" class="theme-seg-btn" data-tint="clear" aria-pressed="true" title="Clear — colorless glass (default)">Clear</button>
+              <button type="button" class="theme-seg-btn" data-tint="tinted" aria-pressed="false" title="Tinted — more opaque, higher-contrast glass">Tinted</button>
+            </div>
+          </div>
         </div>
         <div class="theme-fd-row" id="theme-google-font-row">
           <div class="theme-fd-group" style="flex:1 1 0;min-width:0;">
