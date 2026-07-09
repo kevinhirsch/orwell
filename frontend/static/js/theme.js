@@ -166,6 +166,15 @@ function resolveGlassTier(rec, name) {
   return defaultGlassTierFor(name);
 }
 
+// #739 — resolve the glass TINT ('clear'|'tinted') for a saved theme record. The
+// DEFAULT is 'clear' (the colorless glass, #738 colorless-material default); the
+// player opts INTO 'tinted' (a gentle opacity+contrast bump that keeps the
+// refraction). An unset/absent preference resolves to 'clear'; only an explicit
+// saved `tinted:true` returns 'tinted'. Orthogonal to the glass TIER above.
+function resolveGlassTint(rec) {
+  return (rec && rec.tinted === true) ? 'tinted' : 'clear';
+}
+
 // ── Custom theme persistence ──
 // #582: the cross-device merge was additive-only (server themes filled in missing local ones),
 // with NO record of a deletion — so a theme deleted on one device resurrected from a stale server
@@ -732,6 +741,20 @@ export function applyFrostedGlass(on) {
   applyGlassTier(on ? 'frosted' : 'normal');
 }
 
+/** #739 — Apply the global glass TINT (the iOS 26.1 "Liquid Glass → {Clear, Tinted}"
+ *  opacity control). Toggles a single body-STATE class:
+ *    • 'tinted' → body.theme-tinted — raises the --glass-opacity token, which the
+ *                 two fill tokens derive from, so every glass chrome surface gets a
+ *                 gentle neutral opacity+contrast bump (refraction damped-but-kept).
+ *    • 'clear'  → class removed (the DEFAULT) — the colorless kube 0.60 glass.
+ *  Orthogonal to the glass TIER (Full/Frosted/Off) and to the a11y reduce-
+ *  transparency kill-switch (which forces SOLID and outranks this). Any value other
+ *  than 'tinted' resolves to Clear. Neutral opacity only — no accent hue, no ink
+ *  recolouring. */
+export function applyGlassTint(tint) {
+  document.body.classList.toggle('theme-tinted', tint === 'tinted');
+}
+
 // The fixed full-bleed wallpaper layer id. adaptiveGlass.js samples `#__wp`
 // first (see its `ids` list) so the glass legibility flip reads the chosen
 // image as its backdrop — keep this id in sync with that consumer.
@@ -1142,6 +1165,10 @@ export function save(name, colors, opts) {
     // the next boot. The legacy `frosted` bool is read on load (back-compat) but
     // no longer WRITTEN; glassTier supersedes it.
     if (opts.glassTier !== undefined) obj.glassTier = opts.glassTier;
+    // #739 — persist the glass TINT only when opted-in (tinted). Clear is the
+    // default, so we OMIT the field for Clear (matching the other default-omit
+    // fields above) — an absent `tinted` resolves to Clear on load.
+    if (opts.tinted) obj.tinted = true;
     // A chosen wallpaper image (URL or downscaled data URL). Empty ⇒ omit.
     if (opts.bgImage) obj.bgImage = opts.bgImage;
     // Stamp a DELIBERATE selection so the stale-old-default migration
@@ -1466,6 +1493,11 @@ export function initThemeUI() {
     // mirrored onto the control's dataset by the change handler; read that.
     const gt = document.getElementById('theme-glass-tier');
     if (gt && gt.dataset.value) opts.glassTier = gt.dataset.value;
+    // #739 — glass TINT — the 2-way control (id=theme-glass-tint). Its current
+    // value ('clear'|'tinted') rides the control's dataset (set by the change
+    // handler + _syncGlassTintControl). Persist a boolean; absent ⇒ Clear.
+    const gtint = document.getElementById('theme-glass-tint');
+    if (gtint && gtint.dataset.value) opts.tinted = (gtint.dataset.value === 'tinted');
     // The wallpaper image is tracked on the bg-source control's dataset (a URL or
     // a downscaled data URL), set whenever an image is applied. Empty ⇒ omit.
     const bs = document.getElementById('theme-bg-source');
@@ -1746,6 +1778,7 @@ export function initThemeUI() {
       const _defTier = defaultGlassTierFor(DEFAULT_THEME);
       const _defPattern = THEME_DEFAULT_PATTERN[DEFAULT_THEME] || 'none';
       applyGlassTier(_defTier);
+      applyGlassTint('clear');   // #739 — reset returns to the Clear default
       applyBgImage('');
       applyBgPattern(_defPattern);
       // Drop any active Google font (synthetic option + the dynamic <link>).
@@ -1759,6 +1792,7 @@ export function initThemeUI() {
       if (ds) ds.value = DEFAULT_DENSITY;
       if (ps) ps.value = _defPattern;
       _syncGlassTierControl(_defTier);
+      _syncGlassTintControl('clear');   // #739
       _syncBgSourceControls('');
       grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
       const defSwatch = grid.querySelector('[data-theme="' + DEFAULT_THEME + '"]');
@@ -1920,12 +1954,14 @@ export function initThemeUI() {
     : (saved && THEME_DEFAULT_INTENSITY[saved.name] !== undefined ? THEME_DEFAULT_INTENSITY[saved.name] : 1);
   const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : 1;
   const _initTier = resolveGlassTier(saved, saved ? saved.name : DEFAULT_THEME);
+  const _initTint = resolveGlassTint(saved);   // #739 — Clear by default
   const _initBgImage = (saved && saved.bgImage) ? saved.bgImage : '';
   applyFontDensity(_initFont, _initDensity);
   applyBgEffectColor(_initEffectColor);
   applyBgEffectIntensity(_initEffectIntensity);
   applyBgEffectSize(_initEffectSize);
   applyGlassTier(_initTier);
+  applyGlassTint(_initTint);
   applyBgImage(_initBgImage);
   // A saved wallpaper supersedes the animated pattern.
   applyBgPattern(_initBgImage ? 'none' : _initPattern);
@@ -2064,6 +2100,20 @@ export function initThemeUI() {
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
   }
+  // #739 — mirror the glass TINT ('clear'|'tinted') onto the 2-way control: the
+  // active button gets .active + aria-pressed, and the value rides dataset.value
+  // so _getOpts can read it. Anything but 'tinted' resolves to Clear (the default).
+  function _syncGlassTintControl(tint) {
+    const ctrl = document.getElementById('theme-glass-tint');
+    if (!ctrl) return;
+    const t = (tint === 'tinted') ? 'tinted' : 'clear';
+    ctrl.dataset.value = t;
+    ctrl.querySelectorAll('[data-tint]').forEach((b) => {
+      const on = b.dataset.tint === t;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
   // Reflect the active wallpaper into the bg-source select + URL input. An image
   // ⇒ source='image' and the URL field shows it (unless it's a data: upload);
   // none ⇒ source='animation' and the field clears. The chosen image string is
@@ -2101,6 +2151,24 @@ export function initThemeUI() {
     });
   }
   _syncGlassTierControl(_initTier);
+
+  // #739 — glass TINT control (Clear ↔ Tinted). Mirrors the tier control: apply
+  // the body-state class, sync the control, then persist through _getOpts (which
+  // reads dataset.value). Tint is a GLOBAL taste control — switching themes never
+  // resets it (the swatch handler leaves body.theme-tinted untouched).
+  const glassTintCtrl = document.getElementById('theme-glass-tint');
+  if (glassTintCtrl && glassTintCtrl.dataset.bound !== '1') {
+    glassTintCtrl.dataset.bound = '1';
+    glassTintCtrl.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-tint]');
+      if (!btn) return;
+      const tint = btn.dataset.tint;
+      applyGlassTint(tint);
+      _syncGlassTintControl(tint);
+      const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+    });
+  }
+  _syncGlassTintControl(_initTint);
 
   // ── Background source (animation vs image) + the URL / file inputs.
   const bgSourceSelect = document.getElementById('theme-bg-source');
@@ -3078,7 +3146,7 @@ function _initEmbers() {
 const themeModule = { initThemeUI, togglePopup, closePopup, openPopup, makeDraggable,
                        THEMES, applyColors, applyFontDensity, applyBgPattern,
                        applyBgEffectColor, applyBgEffectIntensity, applyBgEffectSize,
-                       applyGlassTier, applyFrostedGlass, applyBgImage, applyGlassMeshBackground,
+                       applyGlassTier, applyFrostedGlass, applyGlassTint, applyBgImage, applyGlassMeshBackground,
                        save, getSaved, saveCustomTheme, deleteCustomTheme,
                        getCustomThemes };
 

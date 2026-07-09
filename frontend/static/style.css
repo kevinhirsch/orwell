@@ -37808,11 +37808,33 @@ body.theme-frosted .sidebar-brand-title {
      refraction layer (Full = the SVG vector-field displacement via liquidGlass.js; Frosted =
      the CSS blur below). Cite: docs/design/liquid-glass/LIQUID_GLASS_REFERENCE.md §"Regular"
      (light, luminous, content-legible) + ADAPTIVE_LEGIBILITY_REFERENCE.md §4 (kube refraction). */
+  /* #739 — Clear vs Tinted (the iOS 26.1 "Liquid Glass → {Clear, Tinted}" opacity control).
+     --glass-opacity is the base surface opacity of the ONE light glass, defaulting to the kube
+     0.60. Clear (the DEFAULT) keeps 0.60 — colorless, the #738 colorless-material default. Opting
+     into Tinted (body.theme-tinted, below) raises THIS ONE token, which re-flows through the two
+     fill tokens to every glass chrome surface from a single edit — a gentle opacity/contrast bump
+     that DAMPS BUT KEEPS the refraction. It is a NEUTRAL (white) opacity control, NOT an accent
+     hue: no colour is introduced, the fill just becomes more opaque (backdrop shows through less,
+     dark ink reads with more contrast). Orthogonal to the perf tier ladder (Full/Frosted/Off) and
+     to the a11y reduce-transparency kill-switch (which forces SOLID and outranks this). */
+  --glass-opacity: 0.60;
+  /* Both fill tokens DERIVE from --glass-opacity so Tinted is a one-edit flip. At the 0.60
+     default these resolve byte-equivalent to the prior literals (top 0.62 / bottom 0.52 / flat
+     0.60) — the calc() only diverges once body.theme-tinted raises --glass-opacity. */
   --ow-glass-light-fill: linear-gradient(180deg,
-    rgba(255,255,255,0.62) 0%,
-    rgba(255,255,255,0.52) 100%);
-  --ow-glass-light-color: rgba(255,255,255,0.60);   /* the kube 0.60 white-ish translucent fill */
+    rgba(255,255,255,calc(var(--glass-opacity) + 0.02)) 0%,
+    rgba(255,255,255,calc(var(--glass-opacity) - 0.08)) 100%);
+  --ow-glass-light-color: rgba(255,255,255,var(--glass-opacity));   /* the kube 0.60 white-ish translucent fill (Clear default) */
   --ow-glass-text-shadow: 0 1px 3px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.55);
+}
+/* #739 — TINTED opt-in. Raises the single --glass-opacity token; because both fill tokens above
+   derive from it, every glass chrome surface (windows, chrome, popovers, sheets, the transient
+   pills — each already consuming --ow-glass-light-color/-fill) gets a gentle neutral opacity +
+   contrast bump from THIS ONE rule. Refraction is kept (liquidGlass.js still runs) but reads as
+   damped over the more-opaque fill. DEFAULT is Clear (this class absent). No accent hue, no ink
+   recolouring — opacity/neutral-tint only; a body-STATE class (not a per-element sweep). */
+body.theme-tinted {
+  --glass-opacity: 0.80;
 }
 /* The glass FILL is the ONE LIGHT glass (kube.io music player — rgba(255,255,255,0.60)
    with a light top-down lift), painted identically for BOTH tiers (Full + Frosted). The
