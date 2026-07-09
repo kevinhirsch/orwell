@@ -495,9 +495,14 @@
         Math.round(curInk[2] + (target[2] - curInk[2]) * 0.5),
       ];
     }
-    // Last resort: pure-extreme ink + a SOLID frost. The surface is now the frost tint alone, which
-    // the extreme ink clears by construction — the absolute guarantee behind the empirical escalation.
+    // The pure extreme at the CURRENT alpha — try it before spending translucency: a mid-tone that
+    // starved a partial ink often clears once the ink is pure black/white, with the scrim still glass.
     curInk = target.slice();
+    surface = compositeOver(frost, a, bgRgb);
+    lc = Math.abs(apcaContrast(curInk, surface));
+    if (lc >= APCA_FLOOR) return { ink: curInk, alpha: a, lc: lc };
+    // Last resort: pure-extreme ink + a SOLID frost — the surface is now the frost tint alone, which
+    // the extreme ink clears by construction (the absolute guarantee behind the empirical escalation).
     a = SCRIM_SOLID;
     surface = compositeOver(frost, a, bgRgb);
     lc = Math.abs(apcaContrast(curInk, surface));

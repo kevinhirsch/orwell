@@ -41,11 +41,16 @@ def test_hardening_step_is_factored(js):
     the resolved surface until the APCA floor is met."""
     assert "function _hardenToFloor" in js, \
         "a _hardenToFloor() step must exist (the further escalate/clamp beyond scrim escalation)"
+    # Scope the asserts to the _hardenToFloor block so _escalateScrim (which also compares to the
+    # floor) can't satisfy them. (_hardenToFloor is defined before resolveBubbleScrim in the source.)
+    assert js.index("function _hardenToFloor") < js.index("function resolveBubbleScrim"), \
+        "_hardenToFloor must precede resolveBubbleScrim (the slice bound below assumes it)"
+    harden = js[js.index("function _hardenToFloor"): js.index("function resolveBubbleScrim")]
     # it escalates the ink toward the polarity extreme (pure black / pure white).
-    assert re.search(r"var target\s*=\s*dark\s*\?\s*\[0,\s*0,\s*0\]\s*:\s*\[255,\s*255,\s*255\]", js), \
+    assert re.search(r"var target\s*=\s*dark\s*\?\s*\[0,\s*0,\s*0\]\s*:\s*\[255,\s*255,\s*255\]", harden), \
         "harden must push the ink toward pure black (dark) / pure white (light)"
     # it keeps climbing while below the floor and stops once cleared.
-    assert re.search(r"lc\s*>=\s*APCA_FLOOR", js), \
+    assert re.search(r"lc\s*>=\s*APCA_FLOOR", harden), \
         "harden must stop once |Lc| >= APCA_FLOOR"
 
 
