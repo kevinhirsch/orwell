@@ -49,6 +49,9 @@
     { id: "orwell-cast-pin", icon: "👥", title: "Pinned Cast",    order: 6 },
     { id: "orwell-finale",   icon: "🏆", title: "The Finale",     order: 7 },
     { id: "orwell-retro",    icon: "📼", title: "Season Recap",   order: 8 },
+    // M4-3: the "Catch Me Up" recap affordance — a button that sends a prefilled PLAYER prose
+    // turn ("Previously, in the house…") through the normal chat path (never renders engine text).
+    { id: "orwell-recap",    icon: "📖", title: "Catch Me Up",    order: 9 },
   ];
   var REG_BY_ID = {};
   REGISTRY.forEach(function (g) { REG_BY_ID[g.id] = g; });
@@ -81,7 +84,9 @@
     // clapperboard (The Cast)
     "orwell-cast": _svg('<rect x="3" y="8" width="18" height="12" rx="1"/><path d="M3 8l2.5-4 4 2 4-2 4 2"/><path d="M5.5 4L8 8M9.5 6L12 10"/>'),
     // film reel (Season Recap)
-    "orwell-retro": _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>')
+    "orwell-retro": _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>'),
+    // open book (Catch Me Up — recap affordance)
+    "orwell-recap": _svg('<path d="M12 6.5C10.5 5 8 4.5 4 4.5v13c4 0 6.5.5 8 2M12 6.5C13.5 5 16 4.5 20 4.5v13c-4 0-6.5.5-8 2M12 6.5v13"/>')
   };
   // Registry-declared ids, in canonical order — the base sequence the strip + inline `order`
   // both derive from (the per-user saved order, when present, takes precedence).
