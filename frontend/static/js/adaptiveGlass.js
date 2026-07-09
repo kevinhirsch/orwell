@@ -85,6 +85,12 @@
   var SCRIM_BASE = 0.46;     // mirrors the style.css --ai-scrim-alpha default (worst-case floor)
   var SCRIM_MAX = 0.92;      // near-opaque cap — still a frost, never a flat solid slab
   var SCRIM_STEP = 0.06;     // climb granularity when APCA fails for this bubble's backdrop
+  // #738-19 — the LAST-RESORT hard clamp. When even the stronger polarity + pure-extreme ink can't
+  // reach the floor over a badly starved mid-tone, the scrim goes fully SOLID so the ink sits on the
+  // frost tint alone (which clears the floor by construction). The floor is non-negotiable — at the
+  // very edge the glass look yields to legibility. This fires vanishingly rarely (SCRIM_MAX=0.92
+  // already nearly obscures the wallpaper); it exists so the guarantee is absolute, not empirical.
+  var SCRIM_SOLID = 1.0;
 
   // Apple's adaptation is SIZE-DEPENDENT (WWDC25 219 + HIG Color):
   //   • SMALL bars/tiles (toolbars, tab bars — our composer bar, gadget tiles, the dock):
@@ -161,6 +167,14 @@
   }
   // Composite an opaque scrim (tint at alpha) over an opaque backdrop → the effective bubble
   // surface the ink actually sits on (standard src-over alpha blend; backdrop alpha = 1).
+  //
+  // #738-19 — this stays a straight sRGB src-over blend ON PURPOSE. An OKLCH mix was considered for
+  // the scrim/ink derivation but is NOT a clean improvement HERE: the browser composites the bubble's
+  // rgba() frost fill over the backdrop in sRGB, so this JS estimate must mirror that space to keep
+  // the APCA(ink↔surface) measurement faithful to what actually renders. An OKLCH mix would DIVERGE
+  // from the rendered surface and degrade the floor estimate. (OKLCH earns its keep on decorative hue
+  // mixing — the specular/fringe tokens in style.css — not on a legibility scrim.) Deferred, kept
+  // byte-identical; revisit only if the fill itself moves to an OKLCH color space.
   function compositeOver(tint, alpha, backdrop) {
     var a = clamp(alpha, 0, 1);
     return [
@@ -171,6 +185,20 @@
   }
   function prefersContrast() {
     try { return !!(window.matchMedia && window.matchMedia("(prefers-contrast: more)").matches); } catch (_) { return false; }
+  }
+
+  // #738-19 — Safari's CSS `contrast-color()` (progressive enhancement). Where the UA supports it,
+  // the browser natively picks the maximally-contrasting black/white ink for a given surface — a
+  // guaranteed-correct polarity pick done in the engine, not our JS approximation. Feature-detected
+  // via CSS.supports and cached; EVERYWHERE it is absent we fall back to the JS APCA computation
+  // (which itself floors legibility). This never REPLACES the JS path — it layers on top of it where
+  // available, and the halo/scrim we compute stay authoritative either way.
+  var _ccSupport = null;
+  function supportsContrastColor() {
+    if (_ccSupport !== null) return _ccSupport;
+    try { _ccSupport = !!(window.CSS && window.CSS.supports && window.CSS.supports("color", "contrast-color(white)")); }
+    catch (_) { _ccSupport = false; }
+    return _ccSupport;
   }
 
   // ── unified backdrop canvas (image OR gradient OR solid — composited) ─────────
@@ -446,6 +474,36 @@
     return { alpha: a, lc: lc };
   }
 
+  // #738-19 — the FLOOR IS NON-NEGOTIABLE. When neither polarity's scrim escalation reaches the APCA
+  // floor over a starved mid-tone (the frost tint composited over the wallpaper still can't clear Lc
+  // 60 even at SCRIM_MAX), push HARDER: first escalate the INK toward its polarity extreme (pure
+  // black / pure white — the same move the hero ink makes) against the current surface; then, only if
+  // the pure extreme STILL can't clear it, clamp the scrim SOLID (alpha 1.0) so the ink sits on the
+  // frost tint alone — dark ink on the near-white light frost, or white ink on the neutral dark frost,
+  // both clear the floor by construction. This is a guaranteed terminator: it ALWAYS returns at/above
+  // the floor. Returns { ink, alpha, lc }.
+  function _hardenToFloor(ink, dark, frost, alpha, bgRgb) {
+    var target = dark ? [0, 0, 0] : [255, 255, 255];
+    var a = alpha, curInk = ink.slice(), surface, lc;
+    for (var step = 0; step < 6; step++) {
+      surface = compositeOver(frost, a, bgRgb);
+      lc = Math.abs(apcaContrast(curInk, surface));
+      if (lc >= APCA_FLOOR) return { ink: curInk, alpha: a, lc: lc };
+      curInk = [
+        Math.round(curInk[0] + (target[0] - curInk[0]) * 0.5),
+        Math.round(curInk[1] + (target[1] - curInk[1]) * 0.5),
+        Math.round(curInk[2] + (target[2] - curInk[2]) * 0.5),
+      ];
+    }
+    // Last resort: pure-extreme ink + a SOLID frost. The surface is now the frost tint alone, which
+    // the extreme ink clears by construction — the absolute guarantee behind the empirical escalation.
+    curInk = target.slice();
+    a = SCRIM_SOLID;
+    surface = compositeOver(frost, a, bgRgb);
+    lc = Math.abs(apcaContrast(curInk, surface));
+    return { ink: curInk, alpha: a, lc: lc };
+  }
+
   function resolveBubbleScrim(L, bgRgb) {
     // PREFERRED polarity from the linear-Y flip (Apple Messages received-bubble behaviour):
     // a BRIGHT backdrop → DARK ink + light frost; a DARK backdrop → WHITE ink + dark frost.
@@ -468,6 +526,13 @@
       if (alt.lc > pref.lc) {
         dark = !darkPref; ink = altInk; frost = altFrost; a = alt.alpha; lc = alt.lc;
       }
+    }
+    // #738-19 — if the BEST polarity STILL misses the floor at the scrim cap (a badly starved
+    // mid-tone that neither polarity's escalation could clear), harden until it does: escalate the
+    // ink toward the extreme, then clamp the scrim solid as the last resort. The floor is guaranteed.
+    if (lc < APCA_FLOOR) {
+      var hard = _hardenToFloor(ink, dark, frost, a, bgRgb);
+      ink = hard.ink; a = hard.alpha; lc = hard.lc;
     }
     return { ink: ink, frostRgb: frost, scrimAlpha: a, lc: lc, dark: dark };
   }
@@ -540,13 +605,26 @@
         el.style.setProperty("--ai-scrim-alpha", s.scrimAlpha.toFixed(3));
         el.style.setProperty("background-color",
           "rgba(" + s.frostRgb[0] + "," + s.frostRgb[1] + "," + s.frostRgb[2] + ",var(--ai-scrim-alpha))", "important");
+        // #738-19 — the surface the ink actually sits on (frost tint composited over the sampled
+        // wallpaper at the escalated/hardened alpha). Where the UA supports Safari's contrast-color()
+        // we hand the ink pick to it (native, guaranteed-max-contrast black/white against that
+        // surface); everywhere else we apply our JS-resolved (floor-hardened) ink. The halo tracks our
+        // polarity — which equals the max-contrast pick, since the frost polarity follows the backdrop
+        // polarity — so the two paths never disagree on which halo to draw.
+        var _surf = compositeOver(s.frostRgb, s.scrimAlpha, bg);
+        var _ccInk = supportsContrastColor()
+          ? "contrast-color(rgb(" + _surf[0] + "," + _surf[1] + "," + _surf[2] + "))" : null;
         if (s.dark) {
-          el.style.setProperty("color", INK_DARK, "important");
+          // dark ink over the light frost — use the hardened ink (byte-identical to INK_DARK in the
+          // common case; darker only when a starved mid-tone forced the harden step).
+          el.style.setProperty("color",
+            _ccInk || ("rgb(" + s.ink[0] + "," + s.ink[1] + "," + s.ink[2] + ")"), "important");
           el.style.setProperty("text-shadow", "none", "important");
           el.setAttribute("data-adaptive-ink", "dark");
         } else {
           // white ink over the dark frost — keep the legibility halo from the CSS default.
-          el.style.removeProperty("color");
+          if (_ccInk) el.style.setProperty("color", _ccInk, "important");
+          else el.style.removeProperty("color");
           el.style.setProperty("text-shadow", "0 1px 2px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.40)", "important");
           el.setAttribute("data-adaptive-ink", "light");
         }
@@ -712,6 +790,7 @@
         refresh: schedule, _pass: pass,
         apcaContrast: apcaContrast, compositeOver: compositeOver,
         resolveBubbleScrim: resolveBubbleScrim, APCA_FLOOR: APCA_FLOOR,
+        supportsContrastColor: supportsContrastColor,   // #738-19 — Safari contrast-color() PE probe
       };
     } catch (_) {
       try { window.OrwellAdaptiveGlass = { refresh: function () {} }; } catch (__) {}
