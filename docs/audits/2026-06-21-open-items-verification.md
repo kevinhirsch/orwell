@@ -14,6 +14,14 @@ aggregation. Each verdict carries file/test/commit evidence in the body (summari
 > code) for the live mirror/concurrency, the post-launch refactor roadmap
 > (`docs/REFACTOR-ROADMAP.md` R1–R7), a low-severity UX-polish tail, and the one hardware-gated
 > Proxmox host smoke.
+>
+> **SUPERSEDED 2026-07-09 on F5 (one point only):** the "no launch-blockers left" headline predates
+> the F5 mirror-parity harness becoming the executable gate. On 2026-07-09 that harness
+> (`docs/audits/playtest-harness/mirror_live_parity.mjs`) was **executed on current main and found
+> RED** — it exits 1 on `bUsesIncrementalRenderer` — so **F5 is now the sole launch-blocker**. The
+> "owed *verification runs* for the live mirror/concurrency" noted above resolved to a **failing**
+> gate, not a pass. A fix is in flight on branch `claude/f5-mirror-parity-fix`. The rest of this
+> doc stands; see `docs/audits/2026-07-09-ship-gate-reverification.md` for the full re-verification.
 
 ## Tier 1 — Critical / launch-blocking → **CLOSED**
 
