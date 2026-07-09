@@ -164,8 +164,40 @@
 
   let _chipState = new Map(); // the room's chip map, carried across renders
 
+  // ── the scene-presence seam (M3-3) ──────────────────────────────────────────────────
+  // The room strip owns the SINGLE presence poll (its `tick`). A scene-aware consumer (the
+  // M3-3 one-on-one header) rides THIS seam instead of minting a second poll (the DoD hazard).
+  // A plain callback registry — NOT a `new CustomEvent` (this file's M3-1 gate forbids dispatching
+  // one, and g15's single-`orwell:gamechanged`-dispatcher rule stays intact regardless). Each
+  // render publishes the resolved scene ctx ({ room, present, roster, roles, asleep } | null); a
+  // late subscriber is replayed the last value so it never misses the current room.
+  let _sceneSubs = [];
+  let _lastScene; // undefined until the first publish
+  function _publishScene(sceneCtx) {
+    _lastScene = sceneCtx || null;
+    for (let i = 0; i < _sceneSubs.length; i++) {
+      try { _sceneSubs[i](_lastScene); } catch (_) { /* a bad consumer never breaks the strip */ }
+    }
+  }
+  if (!window.OrwellRoomStrip) {
+    window.OrwellRoomStrip = {
+      subscribe: function (fn) {
+        if (typeof fn !== "function") return function () {};
+        _sceneSubs.push(fn);
+        if (_lastScene !== undefined) { try { fn(_lastScene); } catch (_) {} }
+        return function () { _sceneSubs = _sceneSubs.filter(function (f) { return f !== fn; }); };
+      },
+      latest: function () { return _lastScene === undefined ? null : _lastScene; },
+    };
+  }
+
   // ctx: { room, present, roster, roles, asleep } — or null/incomplete to collapse the strip.
   function render(ctx) {
+    // Publish the resolved presence to any scene consumer (M3-3) BEFORE the notice-kit guard, so
+    // the header updates even on a tick where the strip's own kit isn't mounted yet. A valid ctx
+    // (room + present array) is the two-person source of truth; anything else dissolves the scene.
+    _publishScene(ctx && ctx.room && Array.isArray(ctx.present) ? ctx : null);
+
     const notice = ensureNotice();
     if (!notice) return;
     if (!ctx || !ctx.room || !Array.isArray(ctx.present)) {
