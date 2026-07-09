@@ -277,13 +277,16 @@ buffered — the socket carries the already-scrubbed visible text, identical to 
 
 ### 3.5 Up-half: `turn` / `decision` (request/response, correlation-id)
 
-The player's send and decision-card submit become up-frames:
+The player's send and decision-card submit become up-frames. Both ride the **`chat` channel**
+(`"ch":"chat"`, per §1.2 — every multiplexed frame carries `ch`): they are the up-half of the same
+single-writer turn whose result is fanned out as `chat` `event` frames below, so there is one contract
+— `turn`/`decision` are chat-channel frames, not socket-level ones.
 
 ```jsonc
 // client → server
 { "t":"turn", "ch":"chat", "cid":"c_09", "d":{ "message":"I pull them aside", "clientMsgId":"tmp_5",
                                                "attachments":[], "mode":"agent" } }
-{ "t":"decision", "cid":"c_10", "d":{ "pendingId":"veto-ceremony", "choice":"use", "target":"npc_3" } }
+{ "t":"decision", "ch":"chat", "cid":"c_10", "d":{ "pendingId":"veto-ceremony", "choice":"use", "target":"npc_3" } }
 ```
 
 The FE relay handler runs the **exact** existing pipeline: for `turn`, the `chat_stream` body path
