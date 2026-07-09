@@ -303,6 +303,14 @@
     border: 1px solid rgba(255, 120, 120, 0.4); border-radius: 8px;
     padding: 0.5rem 0.7rem; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   }
+  /* #914 — a neutral (non-alarming) sibling of .error: surfaces the "you were signed
+     out" notice after a mid-session 401, not a fault the user caused. */
+  .notice-info {
+    color: #c3ddff; font-size: 0.85rem; margin-bottom: 0.75rem; display: none;
+    background: rgba(30, 60, 110, 0.32);
+    border: 1px solid rgba(130, 175, 255, 0.4); border-radius: 8px;
+    padding: 0.5rem 0.7rem; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
   .toggle { text-align: center; margin-top: calc(1rem + 4px); font-size: 0.85rem; color: color-mix(in srgb, var(--ink) 62%, transparent); }
   /* The toggle link is neutral underlined ink (no accent on content — accent is
      reserved for the primary CTA only). */
@@ -417,6 +425,12 @@
   </h1>
   <p class="setup-note" id="setupNote" style="display:none"></p>
 
+  <!-- #914: a one-shot "you were signed out" notice, shown when app.js's mid-session
+       401 handler flags a forced re-auth (not an error the player caused — role=status,
+       not role=alert). Populated + revealed by the script below when the sessionStorage
+       flag is present; otherwise stays hidden and empty. -->
+  <div class="notice-info" id="sessionExpiredNotice" role="status" aria-live="polite"></div>
+
   <div class="error" id="error" role="alert" aria-live="assertive"></div>
 
   <form id="authForm" autocomplete="on">
@@ -461,6 +475,22 @@
 
 <script nonce="{{CSP_NONCE}}">
 (async () => {
+  // #914 — surface the mid-session-401 notice, if app.js's fetch wrapper left one behind
+  // right before it redirected here. One-shot: removed immediately so it never resurfaces
+  // on a plain visit to /login (a fresh browser tab, an explicit logout, a bookmark, or a
+  // second load of this same page) — only the redirect that set it triggers the notice.
+  try {
+    const expiredFlag = sessionStorage.getItem('orwell-session-expired-notice');
+    if (expiredFlag) {
+      sessionStorage.removeItem('orwell-session-expired-notice');
+      const notice = document.getElementById('sessionExpiredNotice');
+      if (notice) {
+        notice.textContent = "You've been signed out — sign back in to continue where you left off.";
+        notice.style.display = 'block';
+      }
+    }
+  } catch (_) {}
+
   // Load version
   try {
     const vr = await fetch('/api/version');
