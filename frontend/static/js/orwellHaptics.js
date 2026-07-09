@@ -40,13 +40,24 @@
   window.__orwellHapticsInstalled = true;
 
   var SETTING_KEY = "orwell-haptics";
+  var AUDIO_KEY = "orwell-haptics-audio";
 
-  // ── Setting + reduced-motion gate ──────────────────────────────────────────
+  // ── Setting + reduced-motion / reduced-transparency gate ───────────────────
   function enabled() {
     try {
       // Default ON: only an explicit "off" disables.
       if (localStorage.getItem(SETTING_KEY) === "off") return false;
     } catch (_) { /* private mode / no storage ⇒ treat as default-on */ }
+    return true;
+  }
+
+  // Audio sub-toggle: the vibration pulse and the chime silence INDEPENDENTLY, so a
+  // player can keep the tactile buzz in a quiet room without the tone (or vice-versa).
+  // Default ON — only an explicit "off" mutes the tone; vibration still fires.
+  function audioEnabled() {
+    try {
+      if (localStorage.getItem(AUDIO_KEY) === "off") return false;
+    } catch (_) { /* no storage ⇒ default-on */ }
     return true;
   }
 
@@ -57,7 +68,19 @@
     } catch (_) { return false; }
   }
 
-  function active() { return enabled() && !reducedMotion(); }
+  // A player who asked for REDUCED TRANSPARENCY has signalled they want a calmer, less
+  // "material" experience; honour that as also opting out of the tactile/auditory accent
+  // (part of the Liquid Glass a11y trio — #738 #29). Silent, never forced.
+  function reducedTransparency() {
+    try {
+      return !!(window.matchMedia &&
+        window.matchMedia("(prefers-reduced-transparency: reduce)").matches);
+    } catch (_) { return false; }
+  }
+
+  function active() {
+    return enabled() && !reducedMotion() && !reducedTransparency();
+  }
 
   // ── Cue table — beat type → { vibe: [ms…], tone: [{f,ms,gap?}…] } ──────────
   // Each cue is sub-second. `vibe` is a navigator.vibrate pattern (pulse/gap ms);
@@ -129,7 +152,7 @@
     var cue = CUES[beat];
     if (!cue) return;
     pulse(cue.vibe);
-    playTone(cue.tone);
+    if (audioEnabled()) playTone(cue.tone); // the chime is independently mutable
   }
   // Exposed for tests / manual triggering; harmless to call.
   window.orwellHapticsFire = fire;
