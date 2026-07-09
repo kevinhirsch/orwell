@@ -21,7 +21,8 @@ aggregation. Each verdict carries file/test/commit evidence in the body (summari
 > RED** — it exits 1 on `bUsesIncrementalRenderer` — so **F5 is now the sole launch-blocker**. The
 > "owed *verification runs* for the live mirror/concurrency" noted above resolved to a **failing**
 > gate, not a pass. A fix is in flight on branch `claude/f5-mirror-parity-fix`. The rest of this
-> doc stands; see `docs/audits/2026-07-09-ship-gate-reverification.md` for the full re-verification.
+> doc stands; see `docs/audits/2026-07-09-ship-gate-reverification.md` for the full re-verification
+> (committed in PR #1269; this PR should merge after it, and the link resolves then).
 
 ## Tier 1 — Critical / launch-blocking → **CLOSED**
 
