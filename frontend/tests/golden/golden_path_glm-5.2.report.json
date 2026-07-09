@@ -8,7 +8,7 @@
    "invariant": "I1",
    "name": "casting finalizes and the season starts",
    "status": "PASS",
-   "detail": "after 3 casting turns"
+   "detail": "after 4 casting turns"
   },
   {
    "invariant": "I2",
@@ -32,7 +32,7 @@
    "invariant": "I5",
    "name": "phases advance monotonically with no stuck beat",
    "status": "PASS",
-   "detail": "phases=['premiere', 'hoh-competition', 'nominations', 'veto-competition', 'veto-ceremony', 'eviction', 'hoh-competition'] stuck=0 beats 2\u219298"
+   "detail": "phases=['premiere', 'hoh-competition', 'nominations', 'veto-competition', 'veto-ceremony', 'eviction', 'hoh-competition'] stuck=0 beats 2\u219292"
   },
   {
    "invariant": "I6",
@@ -44,13 +44,13 @@
    "invariant": "I7",
    "name": "every player-facing body is clean",
    "status": "PASS",
-   "detail": "23 bodies scanned"
+   "detail": "22 bodies scanned"
   },
   {
    "invariant": "I8",
    "name": "the week rolls into the next HOH reign",
    "status": "PASS",
-   "detail": "week_rolled=True, beatSeq 5\u219298"
+   "detail": "week_rolled=True, beatSeq 5\u219292"
   }
  ],
  "timeline": [
@@ -72,6 +72,14 @@
   },
   {
    "turn": 3,
+   "phase": "setup",
+   "beatSeq": 4,
+   "week": 0,
+   "started": false,
+   "pending": null
+  },
+  {
+   "turn": 4,
    "phase": "premiere",
    "beatSeq": 5,
    "week": 1,
@@ -79,40 +87,32 @@
    "pending": null
   },
   {
-   "turn": 4,
-   "phase": "premiere",
-   "beatSeq": 6,
-   "week": 1,
-   "started": true,
-   "pending": null
-  },
-  {
    "turn": 5,
    "phase": "premiere",
-   "beatSeq": 10,
+   "beatSeq": 16,
    "week": 1,
    "started": true,
    "pending": null
   },
   {
    "turn": 6,
-   "phase": "hoh-competition",
-   "beatSeq": 26,
-   "week": 1,
-   "started": true,
-   "pending": "comp-round"
-  },
-  {
-   "turn": 7,
-   "phase": "hoh-competition",
-   "beatSeq": 32,
+   "phase": "premiere",
+   "beatSeq": 18,
    "week": 1,
    "started": true,
    "pending": null
   },
   {
+   "turn": 7,
+   "phase": "hoh-competition",
+   "beatSeq": 27,
+   "week": 1,
+   "started": true,
+   "pending": "comp-round"
+  },
+  {
    "turn": 8,
-   "phase": "nominations",
+   "phase": "hoh-competition",
    "beatSeq": 37,
    "week": 1,
    "started": true,
@@ -121,7 +121,7 @@
   {
    "turn": 9,
    "phase": "nominations",
-   "beatSeq": 38,
+   "beatSeq": 42,
    "week": 1,
    "started": true,
    "pending": null
@@ -129,23 +129,23 @@
   {
    "turn": 10,
    "phase": "nominations",
-   "beatSeq": 40,
+   "beatSeq": 43,
    "week": 1,
    "started": true,
    "pending": null
   },
   {
    "turn": 11,
-   "phase": "veto-competition",
-   "beatSeq": 46,
+   "phase": "nominations",
+   "beatSeq": 44,
    "week": 1,
    "started": true,
-   "pending": "comp-round"
+   "pending": null
   },
   {
    "turn": 12,
    "phase": "veto-competition",
-   "beatSeq": 49,
+   "beatSeq": 48,
    "week": 1,
    "started": true,
    "pending": null
@@ -153,7 +153,7 @@
   {
    "turn": 13,
    "phase": "veto-competition",
-   "beatSeq": 51,
+   "beatSeq": 49,
    "week": 1,
    "started": true,
    "pending": null
@@ -161,15 +161,15 @@
   {
    "turn": 14,
    "phase": "veto-competition",
-   "beatSeq": 56,
+   "beatSeq": 51,
    "week": 1,
    "started": true,
    "pending": null
   },
   {
    "turn": 15,
-   "phase": "veto-ceremony",
-   "beatSeq": 60,
+   "phase": "veto-competition",
+   "beatSeq": 55,
    "week": 1,
    "started": true,
    "pending": null
@@ -177,31 +177,31 @@
   {
    "turn": 16,
    "phase": "veto-ceremony",
-   "beatSeq": 61,
+   "beatSeq": 60,
    "week": 1,
    "started": true,
    "pending": null
   },
   {
    "turn": 17,
-   "phase": "veto-ceremony",
-   "beatSeq": 64,
-   "week": 1,
-   "started": true,
-   "pending": null
-  },
-  {
-   "turn": 18,
    "phase": "eviction",
-   "beatSeq": 68,
+   "beatSeq": 64,
    "week": 1,
    "started": true,
    "pending": "eviction-vote"
   },
   {
+   "turn": 18,
+   "phase": "eviction",
+   "beatSeq": 72,
+   "week": 1,
+   "started": true,
+   "pending": null
+  },
+  {
    "turn": 19,
    "phase": "eviction",
-   "beatSeq": 78,
+   "beatSeq": 75,
    "week": 1,
    "started": true,
    "pending": null
@@ -209,7 +209,7 @@
   {
    "turn": 20,
    "phase": "eviction",
-   "beatSeq": 80,
+   "beatSeq": 81,
    "week": 1,
    "started": true,
    "pending": null
@@ -217,28 +217,20 @@
   {
    "turn": 21,
    "phase": "eviction",
-   "beatSeq": 84,
-   "week": 1,
-   "started": true,
-   "pending": null
-  },
-  {
-   "turn": 22,
-   "phase": "eviction",
-   "beatSeq": 89,
+   "beatSeq": 85,
    "week": 1,
    "started": true,
    "pending": "goodbye-message"
   },
   {
-   "turn": 23,
+   "turn": 22,
    "phase": "hoh-competition",
-   "beatSeq": 98,
+   "beatSeq": 92,
    "week": 2,
    "started": true,
    "pending": "comp-round"
   }
  ],
- "digest": "bd958b113643ef8607c27d0b3481683f87ad32efc78fed8663afcc7c5452e184",
- "work": "/tmp/golden-path-js2c3m3d"
+ "digest": "60cbac9365a1d692062fa9832592bc4d6c7db7ccec3843cd1870403dfa7bdebf",
+ "work": "/tmp/golden-path-68z945ek"
 }

@@ -719,6 +719,156 @@ export function scrubMachineryForPersistence(text) {
   return cleaned;
 }
 
+// ── M3-2 · Speaker-attributed dialogue (the microformat) ──────────────────────────────
+//
+// This INVERTS the raw-id scrub above. Today the ONLY way a houseguest's engine handle can
+// appear in narration is the bare `npc:<id>` token, which is machinery and is redacted
+// (redactRawIds). M3-2 adds a SANCTIONED, well-formed speaker tag the narrator may emit to
+// attribute a spoken line to a houseguest — the interface turns it into that person's face
+// (an OrwellMonogram chip) in the bubble gutter beside the line. Malformed / unsanctioned raw
+// ids still scrub exactly as before; this is purely additive to the scrub layer.
+//
+// THE MICROFORMAT (see the momentPrompts speaker-tag instruction): a LINE-LEADING
+//   @[Full Name]
+// — an at-sign, the houseguest's EXACT public roster name in square brackets — immediately
+// followed by their words on the same line. Design properties:
+//   · Vault-free: it carries only the PUBLIC name the player already sees (never a raw id,
+//     never hidden state), so the chip is keyed by public identity alone.
+//   · Markdown-safe: it has no `(...)`, so the markdown link pass never touches it; and we
+//     extract it to an inert `___OWSPK_N___` placeholder BEFORE any markdown/scrub pass and
+//     restore the chip AFTER mdToHtml, so no transform can mangle it.
+//   · Streaming-safe: only a COMPLETE `@[…]` transforms. A tag split across chunks arrives as a
+//     trailing partial (`@[Fai`) which is swallowed until it completes — fail open, no flash of
+//     raw markup, no broken chip.
+//   · Fail-open: an untransformed tag (mid-line, a non-game build, the reasoning accordion)
+//     degrades to the plain houseguest name in mdToHtml (never a dead link, never literal
+//     brackets); absent tags render exactly as today's prose.
+//
+// The BODY channel only: extraction/restore run inside processWithThinking's public-reply
+// branch (and the mdToHtml degrade is universal) — the reasoning channel is never touched.
+
+// A COMPLETE, line-leading sanctioned tag. `m` flag so `^` is per line; the name is 1..80
+// visible chars (no `]`/newline). An optional `(npc:<id>)` id-bearing form is tolerated for
+// robustness (a caller/tool that already holds the id gets an exact cross-surface hue match),
+// but the narrator is instructed to use the name-only form.
+const _SPEAKER_TAG_RE = /^([ \t]*)@\[([^\]\n]{1,80})\](?:\(npc:(\d+)\))?[ \t]*:?[ \t]*/gm;
+// A trailing INCOMPLETE tag at the very end of the (streaming) buffer: `@[` with no closing
+// `]` yet. A complete `@[Name]` always carries a `]`, so this only ever matches a partial.
+const _SPEAKER_TRAILING_PARTIAL_RE = /@\[[^\]\n]{0,80}$/;
+
+function _speakerInitials(name) {
+  try {
+    if (typeof window !== 'undefined' && window.OrwellMonogram && window.OrwellMonogram.initialsFor) {
+      return window.OrwellMonogram.initialsFor(name);
+    }
+  } catch (_) { /* fall through to the local computation */ }
+  const w = String(name || '?').trim().split(/\s+/).filter(Boolean);
+  let ini = '?';
+  if (w.length === 1) ini = w[0].slice(0, 2).toUpperCase();
+  else if (w.length > 1) ini = (w[0][0] + w[w.length - 1][0]).toUpperCase();
+  return ini.replace(/[&<>"']/g, '').trim() || '?';
+}
+
+// The monogram SEED. Prefer an explicit id (id-bearing form). Otherwise, if the page exposes a
+// name→id resolver (the cast roster), use the real houseguest id so the chip's tile matches
+// that person's face on every other surface (cast window, decision cards). Absent both — the
+// isolated render-contract test, or before the roster loads — the public NAME is a stable,
+// deterministic seed. Never throws.
+function _resolveSpeakerSeed(id, name) {
+  if (id) return id;
+  try {
+    if (typeof window !== 'undefined' && typeof window.orwellResolveHouseguestId === 'function') {
+      const r = window.orwellResolveHouseguestId(name);
+      if (r) return r;
+    }
+  } catch (_) { /* seed by name */ }
+  return name;
+}
+
+// The gutter-chip CSS, injected once (mirrors OrwellMonogram.ensureCss). No-op headless.
+function ensureSpeakerCss() {
+  try {
+    if (typeof document === 'undefined' || !document.head) return;
+    if (document.getElementById('ow-speaker-css')) return;
+    const s = document.createElement('style');
+    s.id = 'ow-speaker-css';
+    s.textContent =
+      '.ow-speaker-line{display:flex;align-items:flex-start;gap:.5rem;}' +
+      '.ow-speaker-line>.ow-speaker-chip{margin-top:.14em;}' +
+      '.ow-speaker-chip{flex:0 0 auto;display:inline-flex;width:1.7em;height:1.7em;' +
+        'border-radius:50%;overflow:hidden;position:relative;vertical-align:middle;' +
+        'box-shadow:0 1px 2px rgba(0,0,0,.35);}' +
+      '.ow-speaker-chip .ow-mono-face{width:100%;height:100%;}' +
+      '.ow-speaker-chip-ini{display:flex;align-items:center;justify-content:center;' +
+        'width:100%;height:100%;font:800 .62em/1 system-ui,-apple-system,sans-serif;' +
+        'background:#274a54;color:#e6f2f5;letter-spacing:-.02em;}';
+    (document.head || document.documentElement).appendChild(s);
+  } catch (_) { /* CSS is a nicety; never let it break the render */ }
+}
+
+// The chip HTML for one speaker. Uses the designed OrwellMonogram tile when the kit is present
+// (the real app); falls back to a monochrome initials tile headless / when the kit is absent so
+// the chip never blanks. Vault-free: keyed by public id/name only.
+function _speakerChipHtml(id, name) {
+  const nm = String(name || '').trim();
+  const safe = escapeHtml(nm || '?');
+  let face = '';
+  try {
+    if (typeof window !== 'undefined' && window.OrwellMonogram && window.OrwellMonogram.svg) {
+      // svg() (unlike face()) does NOT inject the monogram CSS, and the `.ow-mono-face
+      // .ow-mono-svg` sizing rules live there — on a fresh transcript where no cast/decision
+      // surface has loaded it yet, the SVG would render unsized. Ensure it here.
+      if (typeof window.OrwellMonogram.ensureCss === 'function') window.OrwellMonogram.ensureCss();
+      const seed = _resolveSpeakerSeed(id, nm);
+      face = `<span class="ow-mono-face">${window.OrwellMonogram.svg({ id: seed, name: nm })}</span>`;
+    }
+  } catch (_) { face = ''; }
+  if (!face) face = `<span class="ow-speaker-chip-ini">${escapeHtml(_speakerInitials(nm))}</span>`;
+  const idAttr = id ? ` data-hg-id="${escapeHtml(String(id))}"` : '';
+  return `<span class="ow-speaker-chip"${idAttr} data-hg-name="${safe}" title="${safe}" `
+    + `aria-label="${safe}" role="img">${face}</span>`;
+}
+
+// Extract every complete, line-leading sanctioned speaker tag, replacing it with an inert
+// `___OWSPK_N___` placeholder (so downstream scrubs + mdToHtml can't mangle it) and returning
+// the parsed {id, name} chips in order. Also swallows a trailing INCOMPLETE tag so a tag split
+// across stream chunks never flashes raw markup (fail open until it completes). Pure.
+export function extractSpeakerTags(text) {
+  if (!text) return { text: text, chips: [] };
+  const chips = [];
+  let out = String(text).replace(_SPEAKER_TAG_RE, (_m, lead, name, id) => {
+    const nm = String(name || '').trim();
+    if (!nm) return _m;                    // `@[]` — not a real speaker; leave it for the scrub
+    const i = chips.length;
+    chips.push({ id: id ? 'npc:' + id : null, name: nm });
+    return (lead || '') + '___OWSPK_' + i + '___ ';
+  });
+  // A dangling partial tag at the very end of a streaming buffer renders as nothing until the
+  // next delta closes it. (A complete tag was already replaced above, so this is only a partial.)
+  out = out.replace(_SPEAKER_TRAILING_PARTIAL_RE, '');
+  return { text: out, chips };
+}
+
+// Restore `___OWSPK_N___` placeholders (from extractSpeakerTags) into face chips in a rendered
+// HTML string. A placeholder that mdToHtml wrapped as its own paragraph becomes a flex speaker
+// line (chip in the gutter, dialogue beside it); any other leftover placeholder gets an inline
+// chip. Pure apart from the one-time CSS injection.
+export function restoreSpeakerChips(html, chips) {
+  if (!html || !chips || !chips.length) return html;
+  ensureSpeakerCss();
+  const chipFor = (i) => {
+    const c = chips[+i];
+    return c ? _speakerChipHtml(c.id, c.name) : '';
+  };
+  let out = String(html).replace(
+    /<p>(\s*)___OWSPK_(\d+)___[ \t]*/g,
+    (_m, _ws, i) => `<p class="ow-speaker-line">${chipFor(i)}`);
+  // Fallback: any placeholder mdToHtml did NOT wrap in its own <p> (a list item, an inline
+  // position) gets a bare inline chip so the tag never renders as raw text.
+  out = out.replace(/___OWSPK_(\d+)___[ \t]*/g, (_m, i) => chipFor(i));
+  return out;
+}
+
 export function processWithThinking(text) {
   const { thinkingBlocks, content, thinkingTime } = extractThinkingBlocks(text);
 
@@ -728,7 +878,15 @@ export function processWithThinking(text) {
   // reasoning/draft/"rewind" text ever reaches the public bubble.
   if (gameBuildSuppressesThinking()) {
     let reply = content;
+    // M3-2: pull any sanctioned line-leading speaker tags (`@[Name]`) OUT to inert
+    // `___OWSPK_N___` placeholders FIRST — before scrubReasoningPreamble / redactRawIds,
+    // which key on `npc:<id>` and would otherwise mangle a tag's optional id (and could drop
+    // a leading tagged line as a "reasoning" line). The chips are restored on the rendered
+    // HTML below. A bare/malformed raw id is untouched here and still scrubs as today.
+    let spk = { text: reply, chips: [] };
     if (reply) {
+      spk = extractSpeakerTags(reply);
+      reply = spk.text;
       const stripped = normalizePlainThinking(reply);
       if (/<think/i.test(stripped)) {
         reply = (extractThinkingBlocks(stripped).content || '').trim();
@@ -808,10 +966,16 @@ export function processWithThinking(text) {
     // as a separate normal bubble below it. Both halves go through mdToHtml (the prose already ran
     // the machinery/reasoning scrubs above), so reasoning can never reach either public bubble.
     if (leadingAsideText) {
-      gbHtml += `<div class="ooc-producer-aside">${mdToHtml(leadingAsideText)}</div>`;
+      // M3-2: restore any speaker chips extracted from inside the leading OOC block too, so a
+      // `___OWSPK_N___` placeholder can never surface literally in the aside bubble. No-op when
+      // the aside carried no tags.
+      gbHtml += `<div class="ooc-producer-aside">${restoreSpeakerChips(mdToHtml(leadingAsideText), spk.chips)}</div>`;
     }
     if (reply) {
-      const replyHtml = mdToHtml(reply);
+      // M3-2: restore the extracted speaker tags into face chips on the rendered HTML — a
+      // `___OWSPK_N___` placeholder mdToHtml wrapped as its own paragraph becomes a flex
+      // speaker line (chip in the gutter beside the dialogue). No-op when there were no tags.
+      const replyHtml = restoreSpeakerChips(mdToHtml(reply), spk.chips);
       gbHtml += oocAside ? `<div class="ooc-producer-aside">${replyHtml}</div>` : replyHtml;
     }
     return _useSvgEmoji() ? svgifyEmoji(gbHtml) : gbHtml;
@@ -924,6 +1088,15 @@ export function mdToHtml(src, opts) {
       return `<img class="orwell-portrait-inline" src="${u}" alt="${a}" title="${a}" loading="lazy" `
         + `style="max-width:160px;border-radius:10px;border:1px solid var(--border,#355a66);margin:.25rem .35rem .25rem 0;vertical-align:middle">`;
     });
+
+  // M3-2 fail-open: a sanctioned speaker tag `@[Name]` is promoted to a face chip UPSTREAM
+  // (processWithThinking's game-build branch, before this runs). Any speaker tag that reaches
+  // raw markdown here instead — a tag NOT at a line start, a non-game build, or the reasoning
+  // accordion — degrades to the plain houseguest name (never literal brackets, never a dead
+  // `npc:` link). The name-only `@[Name]` (no following `(`) collapses to the bare name; the
+  // id-bearing `@[Name](npc:3)` sheds its `@` so the link handler below renders just `Name`.
+  s = s.replace(/@\[([^\]\n]{1,80})\](?!\()/g, '$1');
+  s = s.replace(/@(\[[^\]\n]{1,80}\]\(npc:\d+\))/g, '$1');
 
   // Convert markdown links [text](url) to clickable links
   // Internal #hash links navigate in-page; external links open in new tab
@@ -1203,6 +1376,8 @@ const markdownModule = {
   redactRawIds,
   scrubMachineryAsides,
   scrubMachineryForPersistence,
+  extractSpeakerTags,
+  restoreSpeakerChips,
   renderMermaid
 };
 
