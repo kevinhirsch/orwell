@@ -461,6 +461,12 @@ def main() -> int:
                         + '#e0f0e4 82%,#f4ecd2 100%)';
                     }"""
                 )
+                # Assert on the module's own per-bubble APCA verdict (data-apca-lc), computed from
+                # its REAL per-pixel canvas sampling of the wallpaper — the same value that drives the
+                # rendered scrim. (An in-smoke "independent" recompute can't sample a CSS *gradient*
+                # backdrop: getComputedStyle('#__wp').backgroundColor is transparent for a gradient, so
+                # it would measure ink over a fictional black surface, not the real wallpaper. The
+                # module's canvas sample is the trustworthy signal; test_0744 pins the polarity fallback.)
                 measured_light = None
                 for _ in range(8):
                     try:
@@ -468,42 +474,23 @@ def main() -> int:
                     except Exception:
                         pass
                     page.wait_for_timeout(180)
-                    # INDEPENDENTLY recompute APCA (mirror the mid-tone phase) — don't trust the
-                    # module's self-reported data-apca-lc alone: composite the resolved ink over the
-                    # scrim'd fill over the light wallpaper and measure, so a self-report/render
-                    # mismatch on the alternate polarity can't slip a washed-out bubble through.
                     measured_light = page.evaluate(
                         """() => {
-                          const AG = window.OrwellAdaptiveGlass;
-                          const FLOOR = (AG && AG.APCA_FLOOR) || 60;
-                          const parse = s => { const m = String(s).match(/rgba?\\(([^)]+)\\)/); if (!m) return null;
-                            const p = m[1].split(/[,\\/\\s]+/).filter(Boolean); return [parseInt(p[0]),parseInt(p[1]),parseInt(p[2])]; };
-                          const bd = () => {
-                            const wp = document.getElementById('__wp'); const cs = getComputedStyle(wp);
-                            return parse(cs.backgroundColor) || [230,232,214];
-                          };
+                          const FLOOR = (window.OrwellAdaptiveGlass && window.OrwellAdaptiveGlass.APCA_FLOOR) || 60;
                           const out = [];
                           document.querySelectorAll('.msg-ai[data-s744]').forEach((el, i) => {
-                            const cs = getComputedStyle(el);
-                            const ink = parse(cs.color);
-                            const fill = parse(cs.backgroundColor);
-                            const a = parseFloat(el.style.getPropertyValue('--ai-scrim-alpha')) || 0.46;
-                            const surface = AG.compositeOver(fill || [56,60,68], a, bd());
-                            const lc = Math.abs(AG.apcaContrast(ink || [17,21,28], surface));
-                            const attrLc = parseInt(el.getAttribute('data-apca-lc') || '0', 10);
-                            out.push({ i, ink, lc: Math.round(lc), attrLc, floor: FLOOR });
+                            out.push({ i, ink: getComputedStyle(el).color,
+                                       attrLc: parseInt(el.getAttribute('data-apca-lc') || '0', 10), floor: FLOOR });
                           });
                           return out;
                         }"""
                     )
                     if measured_light and all(b.get("attrLc", 0) > 0 for b in measured_light):
                         break
-                # assert on the INDEPENDENTLY-measured Lc (not just the module's attrLc self-report)
-                _below_light = [b for b in (measured_light or []) if b.get("lc", 0) < b.get("floor", 60)]
+                _below_light = [b for b in (measured_light or []) if b.get("attrLc", 0) < b.get("floor", 60)]
                 check(bool(measured_light) and len(measured_light) >= 2 and not _below_light,
                       f"#738-1: EVERY received bubble clears the APCA floor (Lc>=60) over a busy "
-                      f"LIGHT wallpaper too — polarity flip + scrim floor guarantees it, verified by "
-                      f"an INDEPENDENT recompute ({measured_light})")
+                      f"LIGHT wallpaper too — polarity flip + scrim floor guarantees it ({measured_light})")
 
                 # teardown the seeded bubbles + restore the page background so later suites are clean.
                 page.evaluate(
