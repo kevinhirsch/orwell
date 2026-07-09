@@ -37357,6 +37357,7 @@ body.theme-frosted .modal {
 @media (hover: none) and (pointer: coarse) {
   .gadget-rail-head button,
   .og-card .og-act,
+  .og-card.og-collapsible .og-head, /* #738 item 13: the collapse affordance is role=button — floor it */
   #gadget-rail-strip [data-grail-gadget],
   #gadget-rail-strip button {
     min-width: 44px !important;
@@ -40639,6 +40640,68 @@ body.theme-frosted .cp-popover {
      muted DARK that's legible on the light glass and keeps the muted gradation (full vs.
      secondary), instead of the old light-on-light. */
   --fg: #16191f;
+}
+
+/* ── #738 item 8 — gadget-card ROW legibility (contrast floor) ─────────────────
+   The gadget-rail cards carry dense HUD status rows in DARK ink (--fg redefined to
+   #16191f above). Under the glass theme adaptiveGlass STANDS DOWN on chrome, so —
+   unlike the received chat bubble (.msg-ai), which escalates its scrim per-bubble in
+   JS — the gadget cards get NO runtime legibility backstop: they rely entirely on this
+   CSS-STATIC floor. So mirror the .msg-ai worst-case-scrim idea in the opposite polarity
+   (dark ink over LIGHT glass): floor the light-glass FILL opaque-enough that the small,
+   dense rows clear APCA over ANY wallpaper — a busy mid-tone wall blooming through a
+   too-thin fill is exactly what smears small text. It stays glass (the wallpaper still
+   tints through the sub-opaque alpha); the value sits between the 0.60 chrome fill and
+   opaque. The alpha is a var (cf. .msg-ai's --ai-scrim-alpha) so the intent reads the
+   same. Only RAISES opacity over the shared fill, so browser_smoke's light-on-light
+   contrast probe can only get stronger. */
+body.theme-frosted .og-card {
+  --og-scrim-alpha: 0.76;   /* worst-case row-legibility floor (cf. .msg-ai --ai-scrim-alpha) */
+  background-color: rgba(255, 255, 255, var(--og-scrim-alpha)) !important;
+  background-image: linear-gradient(180deg,
+    rgba(255, 255, 255, 0.80) 0%,
+    rgba(255, 255, 255, 0.74) 100%) !important;
+}
+/* This floor is LATER than the a11y reduced-transparency block above, so re-assert the
+   opaque panel fallback here (else a reduced-transparency user would get the translucent
+   floor back — the a11y opaque is a STRONGER legibility floor than this glass one). */
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .og-card {
+    background-color: var(--panel, var(--bg)) !important;
+    background-image: none !important;
+  }
+}
+
+/* ── #738 item 22 — Diary Room confessional pill (orwellDiaryRoom.js) ──────────
+   OWNER RULING "tone down to a hint": the confessional used to carry a full ROSE
+   chrome tint (a color-mix(var(--accent) 18%) fill + a solid rose border). Under
+   #738's colourless-material rule the BULK chrome is neutralised — the glass theme
+   swaps the fill to the ONE shared light-glass material like every other surface —
+   but a WHISPER of rose is deliberately KEPT as the confessional's diegetic identity:
+   a thin, bounded rose EDGE only (never a rose-washed fill). Layout stays inline in the
+   JS; fill/border/ink live here so the glass theme can carry the light-glass material. */
+#orwell-dr-pill {
+  background: color-mix(in srgb, var(--panel, #111) 82%, transparent);
+  border: 1px solid color-mix(in srgb, #e06c75 45%, transparent);  /* the rose whisper (bounded) */
+  color: var(--fg, #9cdef2);
+}
+body.theme-frosted #orwell-dr-pill {
+  /* BULK → the ONE colourless light-glass material (item-2 rule: no per-surface tint). */
+  background-color: var(--ow-glass-light-color) !important;
+  background-image: var(--ow-glass-light-fill) !important;
+  -webkit-backdrop-filter: var(--ow-glass-backdrop);
+  backdrop-filter: var(--ow-glass-backdrop);
+  color: #16191f;                                                   /* dark ink on light glass */
+  border-color: color-mix(in srgb, #e06c75 42%, transparent) !important;  /* the KEPT rose hint */
+}
+@media (prefers-reduced-transparency: reduce) {
+  /* a11y: the pill goes opaque like every other glass surface (it uses the light-glass token). */
+  body.theme-frosted #orwell-dr-pill {
+    background-color: var(--panel, var(--bg)) !important;
+    background-image: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
 }
 
 /* LIGHT-ON-LIGHT GUARD — some text controls inside the light-glass chrome set their
