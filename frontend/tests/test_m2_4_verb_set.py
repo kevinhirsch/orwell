@@ -2,13 +2,14 @@
 
 The journey used to speak three unrelated registers — "Start casting" (onboarding),
 "Choose Your Character" (casting photo pill — RPG-speak, off-fiction), "Meet the house"
-(premiere). The pinned line is now one diegetic, house-centric register:
+(premiere). The pinned line was: "Enter the house" → "Take your cast photo" → "Meet the
+house". #874 (2026-07-09) retired the first step's gating CTA entirely — the healthy
+onboarding case now proceeds straight into the interview with no confirm click at all, so
+there is no more "Enter the house" button surface to pin. The remaining two verbs still hold.
 
-    Enter the house  →  Take your cast photo  →  Meet the house
-
-Source pins hold each surface to its verb AND keep the retired verbs from creeping back
-into any of the three surfaces. Copy only — ids/classes (`data-ob-setup-start`,
-`orwell-choose-character`, `hs-choose-btn`) stay stable for the structural gates.
+Source pins hold each surviving surface to its verb AND keep the retired verbs from creeping
+back into any journey surface. Copy only — ids/classes (`orwell-choose-character`,
+`hs-choose-btn`) stay stable for the structural gates.
 """
 from __future__ import annotations
 
@@ -16,9 +17,9 @@ import os
 
 FE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-#: The one journey line — change it HERE and in every surface together, or this gate fails.
-VERB_SET = ("Enter the house", "Take your cast photo", "Meet the house")
-RETIRED = ("Start casting", "Choose Your Character")
+#: The surviving journey line — change it HERE and in the surface together, or this gate fails.
+VERB_SET = ("Take your cast photo", "Meet the house")
+RETIRED = ("Start casting", "Choose Your Character", "Enter the house")
 
 
 def _read(rel: str) -> str:
@@ -26,10 +27,12 @@ def _read(rel: str) -> str:
         return fh.read()
 
 
-def test_onboarding_carries_enter_the_house():
+def test_onboarding_carries_no_gating_cta():
+    # #874: the healthy case has no "Enter the house" (or any other) confirm CTA — onboarding
+    # proceeds straight into the interview with no gating step at all.
     js = _read("static/js/orwellOnboarding.js")
-    seg = js[js.index("function mountSetup"):]
-    assert 'go.textContent = "Enter the house"' in seg
+    assert "function mountSetup" not in js
+    assert "Enter the house" not in js
 
 
 def test_casting_pill_carries_take_your_cast_photo():

@@ -88,13 +88,14 @@ def test_step_numbers_and_title_are_neutral_foreground():
 # ── 4. The CTAs compose the element kit (legible glass buttons) ───────────────────────────────────
 
 def test_buttons_use_the_element_kit():
-    # The primary CTA (Start casting / Open Settings) → .ow-btn .ow-btn-prominent; the dismiss /
-    # secondary CTAs → .ow-btn .ow-btn-secondary. The kit owns their legible glass styling + focus
-    # ring, so the bespoke black-on-black .ob-btn coloring is gone.
+    # The primary/secondary CTAs (the F5 holding card's "Open Settings" / dismiss, the #874
+    # no-feed notice's "Open Settings") → .ow-btn .ow-btn-prominent / .ow-btn-secondary. The kit
+    # owns their legible glass styling + focus ring, so the bespoke black-on-black .ob-btn
+    # coloring is gone.
     assert "ow-btn-prominent" in ONB
     assert "ow-btn-secondary" in ONB
     # legacy hooks kept additive so existing JS/tests selecting them keep working
-    assert "ob-btn" in ONB and "data-ob-setup-start" in ONB and "data-ob-dismiss" in ONB
+    assert "ob-btn" in ONB and "data-ob-dismiss" in ONB
 
 
 # ── 5. The card gets its glass material from the kit, under the glass tiers ───────────────────────
@@ -131,9 +132,13 @@ def test_external_seams_preserved():
     assert "window._orwellMarkRestart" in ONB
 
 
-def test_setup_wizard_proceed_chain_preserved():
-    # "Start casting" still marks the welcome seen + runs onProceed (open interview + producers'
-    # kickoff), and "Choose models" still opens the real Settings without starting the season.
-    assert "markWelcomeSeen()" in ONB
-    assert "onProceed && onProceed()" in ONB
-    assert "data-ob-choose-models" in ONB and "openSettings" in ONB
+def test_healthy_case_proceed_chain_preserved():
+    # #874 (2026-07-09): the setup-wizard confirm step is gone — the healthy case (a feed
+    # resolves) proceeds straight to opening the interview + firing the producers' kickoff, with
+    # no "mark welcome seen" bookkeeping and no intervening confirm click.
+    route = ONB[ONB.index("async function route"):]
+    assert "openFreshInterviewSession" in route
+    assert "_orwellOpenGameAfterCasting" in route
+    assert "markWelcomeSeen" not in ONB
+    # the #874 no-feed notice still opens the real Settings (never starts the season by itself)
+    assert "openSettings" in ONB

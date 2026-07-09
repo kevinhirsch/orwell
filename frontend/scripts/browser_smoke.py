@@ -2723,37 +2723,21 @@ def main() -> int:
             f4.route("**/api/orwell/casting/photo",
                      lambda r: r.fulfill(status=200, content_type="application/json", body='{"ok": true}'))
             f4.goto(base + "/", wait_until="load", timeout=30000)
-            f4.wait_for_timeout(3000)  # route() probes + the welcome modal
+            f4.wait_for_timeout(3000)  # route() probes + (a healthy feed) proceeds directly
             # the composer is NOT prefilled — the producers open the interview; the player never types first
             f4_seat0 = f4.input_value("#message")
             check(not f4_seat0.strip(),
                   f"P1: pre-game boot does NOT prefill the composer (no seat pre-prompt) ({f4_seat0!r})")
-            # the SETUP WIZARD (its own modal, data-ob-setup), shown on every fresh game/season. M2-1:
-            # the cold open leads with the show fantasy ("Welcome to the Big Brother house", one
-            # "Enter the house" CTA); the humanized production-feeds line + the quiet "Production
-            # settings" link carry the model setup (raw ids live in Settings only).
-            f4_welcome = f4.evaluate(
-                "() => { const c = document.querySelector('#orwell-onboarding[data-ob-setup] .ob-card');"
-                "  return c ? c.textContent : ''; }")
-            _wz = (f4_welcome or "").lower()
-            check("welcome to the big brother house" in _wz and "enter the house" in _wz,
-                  f"P1: the cold open leads with the show fantasy + one CTA (M2-1) ({(f4_welcome or '')[:80]!r})")
-            # M2-1: no raw provider/model id on the first screen (a slash-form id like
-            # "z-ai/glm-5.2" or "deepseek/deepseek-v4-pro" reads as debug chrome above the fantasy).
-            import re as _re_m21
-            check(not _re_m21.search(r"\b[\w.]+/[\w.-]+-[\w.]+\b", f4_welcome or ""),
-                  f"P1: no raw model id on the cold open ({(f4_welcome or '')[:80]!r})")
-            # the cast-photo box is HIDDEN at boot — it follows the producers' question, never the
-            # wizard (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)
+            # #874 (2026-07-09): the old SETUP WIZARD modal (data-ob-setup) is REMOVED for the healthy
+            # case — a feed is configured in this env, so route() proceeds straight into the interview
+            # with NO intervening gate/modal at all. No "Enter the house" CTA to click, nothing to wait
+            # on but the producers' own opener.
+            check(f4.evaluate("!document.getElementById('orwell-onboarding')") is True,
+                  "P874: no onboarding modal mounts when a feed is already configured (healthy case)")
+            # the cast-photo box is HIDDEN at boot — it follows the producers' question, never any
+            # pre-game surface (no .msg.msg-ai has rendered yet, so the engine-gated box stays closed)
             check(f4.evaluate("!document.getElementById('orwell-headshot')") is True,
                   "P1: the cast-photo box is hidden at boot (it follows the producers' question)")
-            # PREMATURE-START FIX: the season begins ONLY on the explicit "Start casting" button (gated
-            # on a resolved narrator model — a feed is configured in this env, so it enables). Clicking
-            # it IS the proceed: it opens the interview + fires the producers' kickoff. Playwright's
-            # click auto-waits for the button to become enabled (after the async model summary resolves).
-            if f4.query_selector("#orwell-onboarding [data-ob-setup-start]"):
-                f4.click("#orwell-onboarding [data-ob-setup-start]")
-                f4.wait_for_timeout(800)
             # NO HARD GATE: the chat input + send are USABLE immediately — the interview runs before
             # any photo (the old "locked until a photo is secured" gate is retired).
             check(f4.evaluate("!document.getElementById('message').disabled") is True,
