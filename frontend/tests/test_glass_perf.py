@@ -62,8 +62,10 @@ def test_pointermove_defers_layout_read_to_raf_flush():
 
 def test_raf_flush_owns_the_single_layout_read():
     flush = _fn("flushSpec", "onSpecPointerMove")
-    # The forced layout is read once per frame, in the flush.
-    assert ".getBoundingClientRect(" in flush, (
+    # The forced layout is read EXACTLY ONCE per frame, in the flush. Presence alone
+    # is too weak: a second getBoundingClientRect sneaking into flushSpec would
+    # reintroduce per-frame layout thrash yet still pass a mere `in` check.
+    assert flush.count(".getBoundingClientRect(") == 1, (
         "flushSpec must own the single per-frame getBoundingClientRect (fresh rect "
         "each frame keeps it drag-correct)."
     )
