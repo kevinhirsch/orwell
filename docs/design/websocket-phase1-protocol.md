@@ -495,8 +495,10 @@ cross-user isolation (0021); the full `frontend/` pytest suite; the ADR 0008 `se
   not a client-invented counter — otherwise a reconnect's `fromSeq` misaligns and drops or dups a token.
   Bind the frame `seq` to `_Run.buffer`'s index (`agent_runs.py:47`) exactly.
 - **Casting stays per-tab (GAP-2-b1).** The handshake must NOT converge a **casting** socket onto a
-  canonical id (`chat_helpers.py:4131`) — doing so re-introduces the #1086 reply-strip. `hello` carries
-  `gameActive` precisely so the server can keep casting per-tab.
+  canonical id (`chat_helpers.py:4131`) — doing so re-introduces the #1086 reply-strip. The server keeps
+  casting per-tab by deciding the casting-vs-live-game branch from its **own authenticated state** (no
+  started season ⇒ per-tab), never from anything the client sent — the `hello` carries no
+  `framed`/`gameActive` flag to trust (§2.1/§2.2).
 - **`session_events` ring vs. socket replay.** The invitation ring
   (`_RING_REPLAY_EVENTS`, `session_events.py:92`) exists because a late SSE subscriber could miss a
   `run-started`. On the socket, the handshake + `subscribe{fromSeq}` make attach deterministic, so the ring
