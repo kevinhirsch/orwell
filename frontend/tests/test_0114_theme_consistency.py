@@ -275,12 +275,30 @@ def test_live_form_scope_actually_matches_while_encoded_form_does_not():
         tc.XFAIL = orig
 
 
-def test_theme_registry_covers_the_named_surface_families():
-    reg = " ".join(tc.THEME_REGISTRY)
-    assert ".ow-window" in reg
-    assert ".ow-sheet" in reg
-    assert "gadget-rail" in reg
-    assert "sidebar" in reg.lower()
+def test_theme_registry_covers_the_full_surface_inventory():
+    """The owner reports the wrong-polarity problem as PERVASIVE across windows/gadgets/sidebars,
+    so the registry must span every surface FAMILY enumerated from source — not a curated few (a
+    3-surface cut gave false confidence). Pins each family so a future edit can't silently narrow
+    coverage back down."""
+    reg = set(tc.THEME_REGISTRY)
+    reg_str = " ".join(tc.THEME_REGISTRY)
+    # floating kit windows (cast, memory, dossier, finale, retro, settings, headshot)
+    assert ".ow-window" in reg and ".ow-sheet" in reg
+    for wid in ("#orwell-cast", "#orwell-memory", "#orwell-dossier",
+                "#orwell-finale", "#orwell-retro", "#settings-modal", "#orwell-headshot"):
+        assert wid in reg, f"missing floating window {wid}"
+    # gadget rail: the container, its rows, and the OrwellGadget cards
+    assert "gadget-rail" in reg_str and ".og-card" in reg
+    for gid in ("#orwell-status", "#orwell-deals", "#orwell-presence",
+                "#orwell-night", "#orwell-cast-pin"):
+        assert gid in reg, f"missing gadget {gid}"
+    # sidebar chrome
+    assert "#sidebar" in reg and ".sidebar" in reg
+    # above-composer notice cards + ceremony slates
+    assert ".on-card" in reg and "#orwell-decision-card" in reg
+    assert "#orwell-room-strip" in reg and ".ow-cslate" in reg
+    # headshot-studio tiles (the first real offender)
+    assert ".hs-preview" in reg and ".hs-cand" in reg and ".hs-libitem" in reg
 
 
 def test_open_surfaces_polls_for_async_mounted_headshot_tiles_not_a_fixed_sleep():
@@ -293,6 +311,64 @@ def test_open_surfaces_polls_for_async_mounted_headshot_tiles_not_a_fixed_sleep(
     src = (pathlib.Path(__file__).parents[1] / "scripts" / "theme_consistency.py").read_text()
     assert "_wait_for_selector" in src
     assert ".hs-preview" in src and "budget_polls" in src
+
+
+def test_open_surfaces_opens_the_full_window_gadget_sidebar_inventory():
+    """The broaden (coordinator review): `_open_surfaces` must OPEN every surface family, not
+    just settings + rail + headshot — an un-opened surface can't be probed, so a narrow opener
+    turns "0 findings" into false confidence. Pins the open seams for cast / memory / dossier /
+    rail so a future edit can't silently drop coverage back to the 3-surface cut."""
+    import pathlib
+    src = (pathlib.Path(__file__).parents[1] / "scripts" / "theme_consistency.py").read_text()
+    assert "sidebar-cast-btn" in src, "must open the Cast window"
+    assert "sidebar-memory-btn" in src, "must open the Memory wall"
+    assert "#orwell-cast .oc-hg" in src, "must open a dossier by clicking a cast tile"
+    assert "gadget-rail-open" in src, "must open the gadget rail drawer"
+
+
+def test_coverage_gap_on_an_expected_reachable_surface_is_a_blocking_error():
+    """A '0 findings' is only meaningful if the surfaces were reached. If an EXPECTED-reachable
+    surface (e.g. the cast window) matched nothing on every shot, the opener regressed and the
+    clean result is a false-clean — coverage_gaps must flag it so run() folds it into the
+    blocking error set."""
+    # cast window reached nowhere, but everything else fine — a real opener regression.
+    cov = {"theme:light:wide-1440:midweek": {"#orwell-cast": 0, ".ow-window": 3}}
+    gaps = tc.coverage_gaps(cov)
+    assert any("#orwell-cast" in g for g in gaps), "an un-reached cast window must be a gap"
+
+
+def test_coverage_gap_ignores_documented_expected_absent_surfaces():
+    """finale/retro/#orwell-headshot/.hs-cand/.gadget-rail .ow-window are legitimately absent at
+    the Week-1 fixture's parked state — a 0 there is expected, NOT a harness error."""
+    cov = {"theme:light:wide-1440:midweek": {sel: 0 for sel in tc.EXPECTED_UNREACHED}}
+    # ...but every OTHER registry selector reached (so only the expected-absent ones are 0)
+    for sel in tc.THEME_REGISTRY:
+        if sel not in tc.EXPECTED_UNREACHED:
+            cov["theme:light:wide-1440:midweek"][sel] = 1
+    assert tc.coverage_gaps(cov) == [], "expected-absent surfaces must not be flagged as gaps"
+
+
+def test_expected_unreached_is_a_subset_of_the_registry_with_reasons():
+    for sel, reason in tc.EXPECTED_UNREACHED.items():
+        assert sel in tc.THEME_REGISTRY, f"{sel} is documented expected-absent but not registered"
+        assert isinstance(reason, str) and len(reason) > 15, f"{sel} needs a real reason"
+
+
+def test_summary_reports_per_surface_coverage_so_zero_findings_isnt_false_clean(tmp_path):
+    """A '0 findings' result is only meaningful if the surfaces were actually reached. The
+    summary must render per-selector coverage and flag a NOT-REACHED surface, so an un-opened
+    surface can never masquerade as clean."""
+    reached = {"theme:light:wide-1440:midweek": {".ow-window": 3, "#orwell-cast": 1}}
+    summary_path = tc._write_summary_md(str(tmp_path), wall_seconds=0.5, findings={}, xfails={},
+                                        tokens={"theme:light:wide-1440:midweek": {"bg": "x", "panel": "y"}},
+                                        errors=[], coverage=reached)
+    summary = open(summary_path, encoding="utf-8").read()
+    assert "Surface coverage" in summary
+    # an un-matched EXPECTED-reachable selector (e.g. #orwell-memory, not in this partial cov)
+    # renders the blocking NOT-REACHED marker; an expected-absent one (e.g. #orwell-finale)
+    # renders the "expected-absent" label instead.
+    assert "NOT REACHED" in summary
+    assert "expected-absent" in summary
 
 
 def test_write_report_and_summary_produce_expected_files(tmp_path):

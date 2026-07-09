@@ -43,9 +43,12 @@ of the theme that's ACTUALLY on screen."
    parked state, exactly as 0113's Tier A does, so every probed surface is real, walked game
    state (never an injected synthetic pending/decision-card event).
 3. A sweep over **BOTH base themes** (`light`, `dark` — the two named in the DoD) × **2
-   viewports** (390×844, 1440×900), opening the same panels 0113's Tier A opens (gadget rail,
-   settings) PLUS the Settings → Account tab (mounts the headshot studio, G28 — the only reliable
-   post-game moment to reach `.hs-preview`/`.hs-cand`/`.hs-libitem`).
+   viewports** (390×844, 1440×900), opening the **FULL game window/gadget/sidebar/notice/slate
+   inventory** (see the "Surface inventory" table below) — the owner reports the wrong-polarity
+   problem as PERVASIVE, so the sweep opens every surface family, not a curated few. Every shot
+   also records **per-selector coverage** (how many elements each registry selector matched) so a
+   "0 findings" result is only ever reported alongside proof that the surfaces were actually
+   reached — an un-opened surface reads as `NOT REACHED` in the report, never a silent false-clean.
 4. The **exact XFAIL-ratchet pattern** `visual_regression.py` uses: a `finding-id ->
    {shot-prefix, needle}` registry demotes a known, filed finding to non-blocking; removing the
    entry when the fix lands flips it back to a hard failure. A contract test pins the LIVE
@@ -68,6 +71,43 @@ of the theme that's ACTUALLY on screen."
   per-element, semantic. Both are useful; neither subsumes the other.
 - **A nightly fuller cross.** Named as a natural follow-on (mirrors 0113's own non-goal); not
   built here.
+
+## Surface inventory (enumerated from source)
+
+The full game-build surface set, its mount/open seam, its root CSS background, and the beat at
+which the golden walk reaches it. Enumerated by grepping `static/js/orwell*.js` for the kit mount
+seams (`OrwellWindow`/`OrwellGadget`/`OrwellNotice`/`OrwellSheet`), the `orwellGadgetRail.js`
+`REGISTRY`, and `index.html`/module-created sidebar buttons.
+
+| Surface | Selector | Kit / seam | Opened by | Root background | Reached at |
+|---|---|---|---|---|---|
+| Sidebar | `#sidebar`,`.sidebar` | app chrome | always on screen | `var(--sidebar-bg, var(--panel))` | always |
+| Sidebar bands | `.sidebar-header`,`.sidebar-user-bar` | app chrome | always | `var(--panel)` (transparent under frost) | always |
+| Gadget rail | `#gadget-rail`,`.gadget-rail` | rail container | rail-open button | `var(--bg)` (mobile drawer) / theme glass | always (drawer opened) |
+| House Status | `#orwell-status` `.og-card` | OrwellGadget | rail | `color-mix(var(--panel) 70%…)` | rail |
+| Your Deals | `#orwell-deals` `.og-card` | OrwellGadget | rail (content-driven) | `var(--panel)` 70% | rail (if deals exist) |
+| Where You Are | `#orwell-presence` `.og-card` | OrwellGadget | rail | `var(--panel)` 70% | rail |
+| Nightfall | `#orwell-night` `.og-card` | OrwellGadget | rail | `var(--panel)` 70% | rail |
+| Pinned Cast | `#orwell-cast-pin` `.og-card` | OrwellGadget | rail | `var(--panel)` 70% | rail |
+| Cast window | `#orwell-cast` `.ow-window` | OrwellWindow | sidebar "Cast" btn | `var(--win-bg, var(--panel))` | any (roster) |
+| Memory wall | `#orwell-memory` `.ow-window` | OrwellWindow | sidebar "What You Know" btn | `var(--panel)` | any |
+| Dossier | `#orwell-dossier` `.ow-window` | OrwellWindow | click a cast tile (`.oc-hg`) | `var(--panel)` | any (a houseguest) |
+| Decision card | `#orwell-decision-card` `.on-card` | OrwellNotice | live at a decision beat | `var(--panel)` | HOH-intent / noms parked |
+| Room strip | `#orwell-room-strip` `.on-card` | OrwellNotice | above-composer presence | `var(--panel)` | always in-house |
+| Ceremony slates | `.ow-cslate` | in-chat (M4-6) | scrollback | `color-mix(var(--fg) 5%…)` wash | Week-1 HOH/noms/veto/eviction |
+| Settings | `#settings-modal` `.ow-window` | OrwellWindow | gear button | `var(--win-bg, var(--panel))` | always |
+| Headshot studio tiles | `.hs-preview`/`.hs-cand`/`.hs-libitem` | studio (G26–G28) | Settings → Account | **was `#0d0f14` (fixed → `var(--panel)`)** | always |
+| Finale window | `#orwell-finale` `.ow-window` | OrwellWindow | endgame rail gadget | `var(--win-bg, var(--panel))` | **NOT reached** (endgame) |
+| Retrospective | `#orwell-retro` `.ow-window` | OrwellWindow | post-season | `var(--panel)` | **NOT reached** (post-season) |
+
+**Genuinely not reached by the committed fixture:** the FINALE window content and the post-season
+RETROSPECTIVE — their beats (jury/finale) are past the fixture's Week-1 walk, exactly the same
+honest limitation as 0113's finale-beat skip. Their gadget-rail cards may still mount empty and
+get probed as `.og-card`; the windows self-extend the moment a finale-covering fixture lands (no
+harness change needed — the selectors are already registered). A "handbook" and a "casting-file
+gadget" were named speculatively in review but **do not exist** in the codebase (no such module) —
+the daily/season recap renders as an in-chat narration beat (inherits the chat `--bg`, not a
+distinct hardcoded-bg surface).
 
 ## The classifier — "far from --bg/--panel," not "light theme ⇒ white"
 
@@ -112,12 +152,16 @@ examples fixed `OFFENDER_DISTANCE_THRESHOLD = 90`:
   on the theme closest to the hardcoded value and wrong everywhere else), and the classifier
   reproduces exactly that asymmetry rather than blanket-flagging the color on every theme.
 
-## Offenders found (first live audit, 2026-07-09)
+## Offenders found (live audit over the FULL inventory, 2026-07-09)
 
-A manual pre-audit (grepping `static/style.css` + every `static/js/orwell*.js` for hardcoded
+Two passes: (1) a manual grep of `static/style.css` + every `static/js/orwell*.js` for hardcoded
 `background:` values not derived from `var(...)`, cross-checked against which selectors are
-actually GAME-BUILD surfaces vs. the inherited general-purpose workspace apps — email/gallery/
-notes/cookbook/tasks/calendar are NOT in scope) found:
+GAME-BUILD surfaces vs. the inherited general-purpose workspace apps (email/gallery/notes/cookbook/
+tasks/calendar are NOT in scope); and (2) the **live probe over the full opened inventory** (every
+window/gadget/sidebar/notice/slate — see the Surface inventory table; coverage-verified all 25
+expected-reachable surfaces were reached, both themes, both viewports). Result: **exactly ONE real
+offender across the whole inventory** (the headshot tiles below), everything else clean — proven,
+not assumed, by the coverage-guarded 0-findings run.
 
 - **Real, fixed offender:** `orwellHeadshot.js`'s `.hs-preview` / `.hs-cand` / `.hs-libitem`
   (the headshot/casting-studio portrait tiles — G26/G27/G28) hardcoded `background: #0d0f14
@@ -149,6 +193,41 @@ notes/cookbook/tasks/calendar are NOT in scope) found:
     surfaces in the sense this gate audits (`.ow-window` / `.ow-sheet` / gadget-rail cards /
     sidebar).
 
+## The `--bg` vs `--panel` mixing question (coordinator review point 4)
+
+The owner SEES surfaces that read as "light and dark on the same theme." Two mechanisms can
+produce that: (a) a hardcoded foreign-polarity color (the `#0d0f14` bug — caught + fixed here),
+or (b) surfaces that are each individually theme-correct but split INCONSISTENTLY between `--bg`
+and `--panel`, so on a theme where those two tokens differ a lot you'd see a patchwork. I
+investigated (b) directly by grepping every surface root's declared background:
+
+- **Floating windows** (`.ow-window`): `var(--win-bg, var(--panel))` → `--panel`.
+- **Gadget cards** (`.og-card`): `color-mix(var(--panel) 70%, transparent)` → `--panel`.
+- **Notice cards** (room strip, decision card): `var(--panel)`.
+- **Sidebar** (`#sidebar`, header, user-bar): `var(--sidebar-bg, var(--panel))` → `--panel`.
+- **Ceremony slates**: a `color-mix(var(--fg) 5%…)` wash over the chat canvas.
+- **The chat canvas / page**: `var(--bg)` — the elevation BASE.
+- **The ONE deliberate `--bg` surface**: the onboarding first-run card
+  (`body.ow-onboarding .ow-window:has([data-ob-setup])`), explicitly set to `var(--bg)` +
+  `isolation:isolate` so glass themes can't ghost the wordmark through it (game-trim.css M1-6).
+
+**Finding: there is NO problematic mixing.** Every floating surface consistently uses `--panel`;
+`--bg` is used only as the page/chat elevation base and for the one deliberately-opaque onboarding
+card. In the base themes `--bg`/`--panel` differ by ~1–2 shades (light `#f0ebe3`/`#faf6f0`; dark
+`#282c34`/`#111111`), a small ELEVATION delta, not a polarity flip — it reads as depth, not as
+"light and dark surfaces." So mechanism (b) is **not** the owner-reported effect; mechanism (a),
+the hardcoded color, is — and that is what the gate catches.
+
+**Design decision (with rationale): the gate deliberately accepts "close to EITHER `--bg` or
+`--panel`" as correct, and does NOT additionally assert a single-surface-token convention.** Both
+tokens are legitimate surface bases (the onboarding card's `--bg` is a real, correct design
+choice), so a strict "all surfaces must use `--panel`" assertion would false-positive on it and on
+the chat canvas. Enforcing a strict elevation convention (page=`--bg`, all floating surfaces=`--panel`,
+never mixed) is a **separate design call for the owner** — it's a stylistic tightening, not a
+correctness bug, and it would need the owner to rule that the ~1-shade elevation delta is
+unwanted. Documented here so it isn't silently ignored; recommend NOT adding it to this gate
+unless the owner asks, because on the current codebase it would only fire on intentional design.
+
 ## Harness gotcha: an async-mounted surface needs a poll, not a fixed sleep
 
 Live verification caught a real false-negative in the harness itself, not the classifier: the
@@ -177,9 +256,10 @@ A new job, `theme-consistency`, in `.github/workflows/ci.yml`, following `visual
 shape exactly (same fixture-presence dormant gate, same build/install steps, same
 `timeout-minutes: 25`):
 
-- **Path-gated** on the SAME `changes.visual` output 0113 uses (a theme-token edit lives in
-  `frontend/`, same as everything else this lane audits — no new path-filter regex needed; the
-  `visual` boolean already covers `frontend/**` + `src/**`).
+- **Path-gated** on a new `changes.theme` output that rides the SAME trigger surface as
+  `changes.visual`/`changes.golden` (`frontend/**` + `src/**` — one shared regex so the lanes
+  can't drift apart; a theme-token edit or any `orwell*.js` surface edit lives there, and an
+  engine change can move rendered state).
 - **Fixture presence gate** — dormant with an explicit notice, mirroring `golden-path`/
   `visual-regression`'s own shape, until the committed golden fixture exists (it already does).
 - Runs `python3 scripts/theme_consistency.py --out $RUNNER_TEMP/theme-run`.
@@ -201,10 +281,17 @@ shape exactly (same fixture-presence dormant gate, same build/install steps, sam
    `visual_regression.py`'s tests pin, PLUS a dedicated test proving a live-form (`theme:`)
    scope matches while the same entry written in the `__`-encoded filename form does NOT — the
    exact 0113 bug class this reuses the pattern from.
-4. **Matrix config sanity** — the two base themes, the two viewports, and the registry's surface
-   families (window/sheet/gadget-rail/sidebar) match the design.
-5. **Report schema** — `theme_report.json` / `summary.md` carry the expected shape; a clean run
-   reads as clean, a findings run reads as BLOCKING.
+4. **Matrix config sanity** — the two base themes, the two viewports, and the registry's FULL
+   surface inventory (every window/gadget/sidebar/notice/slate family, pinned so a future edit
+   can't silently narrow coverage) match the design.
+5. **Reach coverage is a real guard, not just info** — the sweep records a dedup-independent
+   `querySelectorAll(sel).length` per selector; `coverage_gaps` turns an EXPECTED-reachable
+   surface that matched nothing on every shot into a BLOCKING harness error (an un-opened surface
+   can never masquerade as a clean 0-findings). Documented-absent surfaces (`EXPECTED_UNREACHED`:
+   finale/retro/pre-game-headshot-window/generate-tiles/docked-window) are exempt with reasons.
+   Pinned by `test_coverage_gap_*` + `test_open_surfaces_opens_the_full_window_gadget_sidebar_inventory`.
+6. **Report schema** — `theme_report.json` / `summary.md` carry the expected shape; a clean run
+   reads as clean, a findings run reads as BLOCKING, and the coverage table proves reach.
 6. **Run the WHOLE FE suite** (`cd frontend && python3 -m pytest tests/ -m "not browser"`, plus
    the browser-marked tests) before pushing.
 7. **CI wiring** — `theme-consistency` is in `ci-gate`'s `needs:`/`RESULTS`; the fixture-presence

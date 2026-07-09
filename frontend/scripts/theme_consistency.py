@@ -69,21 +69,72 @@ VIEWPORTS: List[Tuple[str, int, int]] = [
     ("wide-1440", 1440, 900),
 ]
 
-#: The registered game-build SURFACES (per the design note): the OrwellWindow kit windows, the
-#: OrwellSheet kit, gadget-rail gadgets (the rail container's own children — including its
-#: docked `.ow-window` cards), and the sidebar(s). PLUS `.hs-preview`/`.hs-cand`/`.hs-libitem` —
-#: the headshot-studio portrait tiles (G26/G27/G28) this gate's first live run found hardcoding
-#: `#0d0f14` instead of `var(--panel)` (fixed in `static/js/orwellHeadshot.js` — see the design
-#: note's "offenders found" table). They are reachable game-build gadgets (portrait candidate
-#: cards), not merely a window's own root background, so they are curated in explicitly rather
-#: than left to a broad wildcard descendant walk (the same curation discipline
-#: `responsive_matrix.py` / `visual_regression.py`'s `GEOMETRY_REGISTRY` already use).
+#: The registered game-build SURFACE ROOTS — the FULL window/gadget/sidebar/notice/slate
+#: inventory (enumerated from source: the `OrwellWindow` kit windows, the `OrwellGadget` kit
+#: cards + the `orwellGadgetRail.js` `REGISTRY`, the `OrwellNotice`/`OrwellSheet` kits, the
+#: sidebar chrome, the in-chat ceremony slates, and the `orwellHeadshot.js` studio tiles). The
+#: owner reports the wrong-polarity problem as PERVASIVE across "windows and gadgets and
+#: sidebars", so this probes every surface family, not a curated few (the earlier 3-surface cut
+#: gave false confidence). Each entry is a surface ROOT whose OWN background should derive from
+#: the active theme's `--panel` (floating surfaces) or `--bg` (the onboarding first-run card, by
+#: design) — the classifier accepts EITHER, see the design note's "--bg vs --panel" section.
+#:
+#: Grouped by family (all probed on every shot; a selector that matches nothing this shot simply
+#: contributes no elements — best-effort, like `visual_regression.py`'s `GEOMETRY_REGISTRY`):
 THEME_REGISTRY: List[str] = [
+    # ── floating kit windows (OrwellWindow) — cast, memory, dossier, finale, retro, settings,
+    #    headshot; `.ow-window` catches every one that is currently mounted/open ──
     ".ow-window", ".ow-sheet",
-    ".gadget-rail > *", ".gadget-rail .ow-window",
-    "#sidebar", ".sidebar",
+    "#orwell-cast", "#orwell-memory", "#orwell-dossier",
+    "#orwell-finale", "#orwell-retro", "#settings-modal", "#orwell-headshot",
+    # ── gadget-rail: the container, its rows, and every OrwellGadget CARD (og-card) — status,
+    #    deals, presence, night, cast-pin (the rail REGISTRY) ──
+    "#gadget-rail", ".gadget-rail", ".gadget-rail > *", ".gadget-rail .ow-window",
+    ".og-card",
+    "#orwell-status", "#orwell-deals", "#orwell-presence", "#orwell-night", "#orwell-cast-pin",
+    # ── sidebar chrome ──
+    "#sidebar", ".sidebar", ".sidebar-header", ".sidebar-user-bar",
+    # ── above-composer notice cards (OrwellNotice) — the room strip + the decision card ──
+    ".on-card", "#orwell-room-strip", "#orwell-decision-card",
+    # ── in-chat ceremony slates (M4-6) — HOH/nominations/veto/eviction reveal cards ──
+    ".ow-cslate",
+    # ── headshot-studio portrait tiles (G26/G27/G28) — the first live audit's real offender ──
     ".hs-preview", ".hs-cand", ".hs-libitem",
 ]
+
+#: Registry selectors that are LEGITIMATELY absent at the committed fixture's parked state — a 0
+#: match count for these is EXPECTED, not a harness regression (documented in the design note's
+#: inventory table). Every OTHER selector must be reached on at least one shot, or the opener has
+#: regressed and a "0 findings" would be a false-clean — `_coverage_guard` turns that into a
+#: blocking harness error (the never-a-silent-pass rule applied to REACH, not just findings).
+EXPECTED_UNREACHED: Dict[str, str] = {
+    "#orwell-finale": "endgame-only window; the Week-1 fixture never reaches the finale beat",
+    "#orwell-retro": "post-season retrospective; not reached by the Week-1 fixture",
+    "#orwell-headshot": "the PRE-GAME casting-card window id; in-game the studio mounts inside "
+                        "Settings→Account, whose tiles (.hs-preview/.hs-libitem) ARE reached",
+    ".hs-cand": "the generate-3-options AI candidate tiles — only mount after a portrait "
+                "generation; carry the identical fixed rule as .hs-preview/.hs-libitem (reached)",
+    ".gadget-rail .ow-window": "gadgets render as .og-card (reached=5), not docked .ow-window",
+}
+
+
+def coverage_gaps(coverage: Dict[str, dict]) -> List[str]:
+    """Registry selectors that matched NOTHING on ANY shot AND are not in EXPECTED_UNREACHED —
+    i.e. a surface the opener was supposed to reach but didn't (the opener regressed). Returns a
+    list of harness-error strings; empty when every expected-reachable surface was probed."""
+    agg: Dict[str, int] = {}
+    for cov in coverage.values():
+        for sel, n in cov.items():
+            agg[sel] = max(agg.get(sel, 0), n)
+    gaps = []
+    for sel in THEME_REGISTRY:
+        if agg.get(sel, 0) <= 0 and sel not in EXPECTED_UNREACHED:
+            gaps.append(f"surface never reached by the opener: {sel!r} (0 matches on every shot) "
+                        "— a '0 findings' here would be a false-clean; fix the open hook or, if "
+                        "it is legitimately absent at this beat, add it to EXPECTED_UNREACHED "
+                        "with a reason")
+    return gaps
+
 
 #: KNOWN theme findings — same EXACT registry pattern as `visual_regression.py`'s `XFAIL`: a
 #: finding-ID -> {shot prefix, formatted-line substring}. A match demotes a finding to xfail
@@ -160,6 +211,7 @@ class ThemeSweep:
         self.findings: Dict[str, list] = {}      # blocking findings per shot id
         self.xfails: Dict[str, list] = {}         # known (XFAIL-registered) findings per shot id
         self.tokens: Dict[str, dict] = {}         # the active --bg/--panel this shot resolved to
+        self.coverage: Dict[str, dict] = {}       # per-shot {selector: match count} — proves reach
         self.errors: List[str] = []
 
     def _new_context(self, w: int, h: int, theme: str):
@@ -179,24 +231,65 @@ class ThemeSweep:
         page.wait_for_timeout(300)
 
     def _open_surfaces(self, page) -> None:
-        """Best-effort JS hooks mounting/opening the panels the registry probes — mirrors the
-        same `open_js`/`ensure_js` seams `visual_regression.py`'s Tier A surfaces use. Each hook
-        is independent and swallowed on failure (a missing surface must not sink the whole
-        sweep — it simply contributes no elements for that bucket)."""
-        hooks = [
-            # the gadget rail drawer
+        """Best-effort JS hooks opening the FULL game window/gadget/sidebar inventory the
+        registry probes — mirrors the `open_js`/`ensure_js` seams `visual_regression.py`'s Tier A
+        surfaces use, extended to every surface family. Each hook is independent and swallowed on
+        failure (a missing/unreachable surface must not sink the sweep — it simply contributes no
+        elements for that bucket, best-effort like every hook here).
+
+        Beat-reachability (see the design note's inventory table) — this sweep probes at the
+        parked golden-walk state (the fixture rolls through Week-1 HOH→noms→veto→eviction into
+        Week-2 HOH), so on the fresh-load sweep the following are reachable and probed:
+          - sidebar chrome                       — always on screen
+          - gadget rail + status/deals/presence/night/cast/cast-pin cards — the rail drawer opens
+          - cast window (#orwell-cast)           — the sidebar "Cast" button
+          - memory wall (#orwell-memory)         — the sidebar "What You Know" button
+          - dossier (#orwell-dossier)            — clicking a cast tile (a door into a houseguest)
+          - decision card (#orwell-decision-card)— live at the parked HOH-intent beat
+          - room strip (#orwell-room-strip)      — the above-composer presence notice
+          - ceremony slates (.ow-cslate)         — Week-1 HOH/noms/veto/eviction cards in scrollback
+          - settings + headshot studio           — the gear → Account tab
+        Genuinely NOT reached by the committed fixture (documented, never fabricated — the same
+        honesty as 0113's finale skip): the FINALE window content (#orwell-finale, endgame only)
+        and the post-season RETROSPECTIVE (#orwell-retro) — their beats are past the fixture's
+        Week-1 walk. Their gadget-rail cards may still mount empty and get probed as `.og-card`;
+        the windows themselves self-extend the moment a finale-covering fixture lands.
+        """
+        # Sidebar-button / API hooks FIRST (before the settings modal + its scrim, which would
+        # otherwise inert the background and block these clicks). JS .click() fires the handler
+        # even when the control is visually collapsed (mobile), so this is robust across viewports.
+        open_hooks = [
+            # the gadget-rail drawer (mounts status/deals/presence/night/cast/cast-pin cards)
             "(document.querySelector('.gadget-rail-open,#gadget-rail-open')||{click(){}}).click()",
-            # settings modal
+            # cast window
+            "(document.getElementById('sidebar-cast-btn')||{click(){}}).click()",
+            # memory wall ("What You Know")
+            "(document.getElementById('sidebar-memory-btn')||{click(){}}).click()",
+        ]
+        for hook in open_hooks:
+            try:
+                page.evaluate(hook)
+            except Exception:
+                pass
+            page.wait_for_timeout(300)
+        # dossier: a door opened FROM the cast window — wait for a cast tile to mount (the roster
+        # is fetched async), then open the shared dossier handler on the first houseguest. Poll,
+        # never a fixed sleep (the async-mount lesson below).
+        self._wait_for_selector(page, "#orwell-cast .oc-hg", budget_polls=15)
+        try:
+            page.evaluate(
+                "(() => { const t = document.querySelector('#orwell-cast .oc-hg');"
+                " if (t) t.click(); })()")
+        except Exception:
+            pass
+        page.wait_for_timeout(400)
+        # settings modal + Account tab LAST (its scrim would block the sidebar clicks above).
+        for hook in (
             "(document.getElementById('user-bar-settings')"
             "||document.getElementById('tool-settings-btn')"
-            "||document.getElementById('rail-settings')"
-            "||{click(){}}).click()",
-            # the Account tab inside settings — mounts the headshot studio (G28), the ONLY
-            # reachable moment for `.hs-preview`/`.hs-cand`/`.hs-libitem` outside the ephemeral
-            # pre-game "Choose Your Character" casting beat.
+            "||document.getElementById('rail-settings')||{click(){}}).click()",
             "(document.querySelector('[data-settings-tab=\"account\"]')||{click(){}}).click()",
-        ]
-        for hook in hooks:
+        ):
             try:
                 page.evaluate(hook)
             except Exception:
@@ -259,6 +352,16 @@ class ThemeSweep:
             if xfailed:
                 self.xfails[shot_id] = xfailed
             self.tokens[shot_id] = raw.get("tokens") or {}
+            # per-selector RAW presence counts (dedup-INDEPENDENT) — proves the sweep actually
+            # REACHED each surface. The classification probe de-duplicates by element identity
+            # (`seen`), so a window matched by the broad `.ow-window` selector would show 0 under
+            # its own `#orwell-cast` id — misleading. This separate `querySelectorAll(sel).length`
+            # pass counts true DOM presence per selector, so a genuinely un-opened surface reads
+            # as 0 while an opened one (even if classified under a broader selector) reads > 0.
+            self.coverage[shot_id] = page.evaluate(
+                "(sels) => { const o = {}; for (const s of sels) {"
+                " try { o[s] = document.querySelectorAll(s).length; } catch (e) { o[s] = -1; } }"
+                " return o; }", THEME_REGISTRY)
             page.screenshot(path=os.path.join(self.shots_dir, shot_id.replace(":", "__") + ".png"))
         except Exception as e:  # noqa: BLE001 — one theme/viewport failing must not sink the run
             self.errors.append(f"{shot_id}: {e}")
@@ -283,7 +386,9 @@ def _write_report(out_dir: str, name: str, data: dict) -> str:
 
 
 def _write_summary_md(out_dir: str, *, wall_seconds: float, findings: Dict[str, list],
-                      xfails: Dict[str, list], tokens: Dict[str, dict], errors: list) -> str:
+                      xfails: Dict[str, list], tokens: Dict[str, dict], errors: list,
+                      coverage: Optional[Dict[str, dict]] = None) -> str:
+    coverage = coverage or {}
     total = sum(len(v) for v in findings.values())
     total_xfail = sum(len(v) for v in xfails.values())
     lines = [
@@ -314,6 +419,25 @@ def _write_summary_md(out_dir: str, *, wall_seconds: float, findings: Dict[str, 
     for shot_id, tok in sorted(tokens.items()):
         lines.append(f"- `{shot_id}` — bg={tok.get('bg')!r} panel={tok.get('panel')!r}")
     lines.append("")
+    # Surface COVERAGE — the max match count each registry selector reached across all shots.
+    # Proves "0 findings" is meaningful (the surface was actually opened + probed), not a
+    # false-clean from an un-opened surface. A selector at 0 everywhere is flagged NOT REACHED.
+    if coverage:
+        agg: Dict[str, int] = {}
+        for cov in coverage.values():
+            for sel, n in cov.items():
+                agg[sel] = max(agg.get(sel, 0), n)
+        lines += ["## Surface coverage (max matches across shots — proves reach)", ""]
+        for sel in THEME_REGISTRY:
+            n = agg.get(sel, 0)
+            if n:
+                mark = ""
+            elif sel in EXPECTED_UNREACHED:
+                mark = f"  (expected-absent: {EXPECTED_UNREACHED[sel]})"
+            else:
+                mark = "  ❌ NOT REACHED (opener regressed — blocks)"
+            lines.append(f"- `{sel}` — {n}{mark}")
+        lines.append("")
     path = os.path.join(out_dir, "summary.md")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
@@ -380,7 +504,11 @@ def run(args: argparse.Namespace) -> int:
     wall = time.time() - t0
 
     assert sweep is not None
-    all_errors = walk_errors + sweep.errors
+    # Coverage guard: an EXPECTED-reachable surface that matched nothing on any shot means the
+    # opener regressed — a "0 findings" would be a false-clean. Fold those into the blocking
+    # error set (same never-a-silent-pass rule as a capture failure).
+    coverage_errors = coverage_gaps(sweep.coverage)
+    all_errors = walk_errors + sweep.errors + coverage_errors
     total_xfails = sum(len(v) for v in sweep.xfails.values())
     matched_ids = {f.get("xfail_id") for v in sweep.xfails.values() for f in v}
     xpasses = sorted(set(XFAIL) - matched_ids)
@@ -390,11 +518,12 @@ def run(args: argparse.Namespace) -> int:
         "total_findings": sum(len(v) for v in sweep.findings.values()),
         "total_xfails": total_xfails,
         "shots": sweep.findings, "xfails": sweep.xfails, "xpasses": xpasses,
-        "tokens": sweep.tokens, "errors": all_errors,
+        "tokens": sweep.tokens, "coverage": sweep.coverage, "errors": all_errors,
     }
     _write_report(args.out, "theme_report.json", report)
     _write_summary_md(args.out, wall_seconds=wall, findings=sweep.findings,
-                      xfails=sweep.xfails, tokens=sweep.tokens, errors=all_errors)
+                      xfails=sweep.xfails, tokens=sweep.tokens, errors=all_errors,
+                      coverage=sweep.coverage)
 
     total_findings = report["total_findings"]
     print(f"\n==== theme-consistency: {len(sweep.tokens)} shots · "

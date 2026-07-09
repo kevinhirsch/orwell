@@ -75,6 +75,26 @@ Feature: 0114 — Theme surface consistency (computed-style probe + XFAIL ratche
     And each theme is probed at 390x844 and at 1440x900
     And no additional engine turn runs between two shots of the same parked state
 
+  Scenario: the sweep opens the full window, gadget, and sidebar inventory
+    Given the golden-replay walk parks at the midweek state
+    When the theme sweep opens the surfaces before probing
+    Then it opens the cast window, the memory wall, and a houseguest dossier
+    And it opens the gadget rail and every gadget card in it
+    And it opens the settings window and the headshot studio
+    And the sidebar, room strip, decision card, and ceremony slates are probed in place
+
+  Scenario: an expected-reachable surface that was never opened blocks the run
+    Given a registry surface that is not documented as expected-absent
+    And that surface matched nothing on every shot (the opener failed to reach it)
+    When the harness computes its exit code
+    Then the missing coverage is reported as a blocking harness error
+    And a clean zero-findings result can never be a false-clean from an un-opened surface
+
+  Scenario: a surface the current fixture cannot reach is expected-absent, not a failure
+    Given the finale window and the post-season retrospective are past the Week-1 fixture's walk
+    When the theme sweep finishes
+    Then their zero coverage is labeled expected-absent with a reason, never a blocking gap
+
   Scenario: harness setup errors block the exit code
     Given a capture or setup failure recorded during the sweep
     And zero theme findings were produced
