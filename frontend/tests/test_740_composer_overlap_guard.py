@@ -107,10 +107,14 @@ def test_cast_pin_orphan_belt_forces_static_position():
 
 
 def test_cast_pin_mounts_into_the_rail_body():
-    """The pinned cast is a RAIL gadget — it mounts into the in-flow rail column (which
-    clears the composer), never a free-floating overlay."""
-    assert "gadget-rail-body" in CASTPIN_JS, (
-        "the cast-pin gadget must mount into the in-flow rail body (#740)"
+    """The pinned cast is a RAIL gadget — it composes the OrwellGadget kit, which mounts it
+    into the in-flow rail column (which clears the composer), never a free-floating overlay.
+    Pin the actual mount MECHANISM (the kit `create` call) rather than the bare
+    'gadget-rail-body' string, which also appears in this file's comments + the orphan-belt
+    selector and so would pass without proving the real rail mount (#740)."""
+    assert "OrwellGadgetKit.create(" in CASTPIN_JS, (
+        "the cast-pin must compose the OrwellGadget kit, which mounts it into the in-flow "
+        "rail body (never a free-floating overlay over the composer) (#740)"
     )
 
 
