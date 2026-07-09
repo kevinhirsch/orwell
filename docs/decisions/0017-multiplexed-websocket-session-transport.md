@@ -25,7 +25,7 @@ window fresh. Grounded inventory (Browser ↔ FastAPI FE, all file:line verified
 
 | Channel | Endpoint | Transport today |
 |---|---|---|
-| Live chat stream (tokens) | `POST /api/chat/stream` | chunked SSE-over-fetch-POST |
+| Live chat stream (tokens) | `POST /api/chat_stream` | chunked SSE-over-fetch-POST |
 | Two-window mirror events | `GET /api/chat/events/{id}` | persistent SSE (ids/types only) |
 | Mirror resume (replay-then-tail) | `GET /api/chat/resume/{id}` | chunked SSE + `agent_runs.subscribe` replay→live-tail |
 | Canonical-session binding | `GET/POST /api/orwell/game-session` | fetch-JSON (first-writer-wins) + liveness DB check |
@@ -34,7 +34,7 @@ window fresh. Grounded inventory (Browser ↔ FastAPI FE, all file:line verified
 | Cross-device reconcile (0064) | `game-updated` over the events SSE | ad-hoc server push |
 | Window layout (0064-F) | `GET/PATCH /api/orwell/layout` + `layout-changed` SSE | localStorage + debounced PATCH, LWW |
 | Notifications (OrwellNotice) | — | client-created; only dismissal-state syncs (via layout) |
-| Up-channel (turn / decision) | `POST /api/chat/stream`, `POST /api/orwell/decision` | fetch-POST |
+| Up-channel (turn / decision) | `POST /api/chat_stream`, `POST /api/orwell/decision` | fetch-POST |
 
 Two structural facts make this the right time to consolidate:
 
@@ -69,7 +69,7 @@ reversing the turn-driven ruling — see §Engine hop).
 | Frame | Dir | Replaces | Notes |
 |---|---|---|---|
 | `hello` / `bind` | ↑↓ | the `/game-session` GET/POST handshake | client presents its per-tab id; server resolves + **validates liveness** (`_is_live_chat_session`), first-writer-wins binds, ACKs the canonical id. **Binding+liveness happen BEFORE any subscribe** — the socket never subscribes to a dead channel (kills the #1085/#1086 class). |
-| `stream` | ↓ | `POST /api/chat/stream` down-half | the same `delta` / `message_saved` / `[DONE]` events; the reasoning split (`roundReplyText`/`roundReasoningText`) rides **inside** the payload, unchanged. |
+| `stream` | ↓ | `POST /api/chat_stream` down-half | the same `delta` / `message_saved` / `[DONE]` events; the reasoning split (`roundReplyText`/`roundReasoningText`) rides **inside** the payload, unchanged. |
 | `subscribe {fromSeq}` / `event` | ↑↓ | `/api/chat/events` + `/api/chat/resume` | **THE load-bearing port**: the `agent_runs` replay-then-tail (replay from `fromSeq`, then live-tail; 180 s evict grace; `has_run` resumes a *terminal-but-buffered* run) must survive verbatim at the socket splice — no gap/dup where the buffered prefix meets the live tail. |
 | `state` / `hud` | ↓ | the 20 s status poll + 25 s presence poll + `game-updated` ping | server-pushed, `beatSeq`-keyed. **Deletes the poll timers.** The in-page `orwell:gamechanged` dispatcher stays as the *client-internal* fan-out (its one-dispatcher g15 invariant is untouched). |
 | `turn` / `decision` (correlation-id) | ↑ | the up-channel POSTs | request/response over the socket; the FE relay routes to the engine and pushes the result + the `state` reconcile back. |
@@ -182,11 +182,13 @@ living-house ADR would build on (§Phasing Phase 3).
   (§Testability).
 - **Phase 2 (optional).** RPC-over-WS on Hop 2 — behavior-preserving, no engine change. (Open decision #1;
   marginal gain since the FE already pools `httpx`.)
-- **Phase 3 (owner-elected → a SEPARATE living-house ADR).** Engine event-push. Scoped by presence (§Engine
-  hop 2a/2b): **push while the socket is open (present player) is admissible without reversing the
-  2026-06-10 ruling**; push while absent is not. The separate ADR defines the socket-gated in-session
-  producer, keeps the closed-set spine (`beatSeq`/409) authoritative, and holds the Vault Wall. This ADR's
-  transport is its enabler; the game-design ruling is decided *there*, not here.
+- **Phase 3 (owner-elected → a SEPARATE living-house ADR).** Engine event-push. **The socket is the pipe,
+  NOT the licence** (§Engine hop): an open socket means only "a live pipe exists," never "the player is
+  present/playing." Whether the engine may originate beats — and on what **explicit activity/presence
+  signal** (the current per-turn off-screen tick keys off the player *taking a turn*; anything looser is a
+  new signal) — is a game-design decision that **re-litigates the 2026-06-10 ruling** and is settled in the
+  separate living-house ADR, not here. That ADR defines the activity signal + producer, keeps the closed-set
+  spine (`beatSeq`/409) authoritative, and holds the Vault Wall. This ADR's transport is its enabler only.
 
 ## Rejected / not-now alternatives
 
@@ -195,9 +197,11 @@ living-house ADR would build on (§Phasing Phase 3).
   nothing.
 - **Keep the patchwork, lean on the settled-log reconcile.** Rejected: it leaves the 20–30 s HUD lag and
   the binding/liveness fragility that keeps re-breaking F5.
-- **Engine server-push *while the player is absent* (2b).** Rejected/gated: this is what the 2026-06-10
-  turn-driven ruling forbids. *(Present-player push (2a) is a separate, admissible case — see §Engine hop;
-  owner electing to pursue it in a distinct living-house ADR.)*
+- **Gating engine push on socket-open ("the socket is a presence signal").** Rejected explicitly (§Engine
+  hop): an open socket is a background tab / pocketed phone as easily as an engaged player — it says only
+  "live pipe," never "playing." Any engine push must key off a real **activity signal** (the player taking
+  turns), and choosing that signal re-litigates the 2026-06-10 ruling — a game-design call for the separate
+  living-house ADR, not something the transport smuggles in.
 - **Dropping the SSE/poll fallback once WS proves out.** Rejected (owner call 2026-07-09): kept permanently
   so restrictive-proxy clients that cannot upgrade to WS still work and still pass F5.
 - **One shared per-user layout synced cross-device (0064-F).** Superseded (owner call 2026-07-09): layout is
@@ -226,9 +230,11 @@ living-house ADR would build on (§Phasing Phase 3).
 **Resolved by the owner (2026-07-09):**
 
 2. **Engine push / living house → PURSUE, in a separate ADR.** The real "end-to-end to the engine" question
-   is elevated to its own ADR (§Engine hop, Phase 3). The socket makes it *presence-gated*: push while the
-   socket is open (present player, case 2a) is admissible without reversing the 2026-06-10 ruling; push
-   while absent (2b) is not. The separate ADR scopes 2a/2b and the socket-gated producer.
+   is elevated to its own ADR (§Engine hop, Phase 3). **The socket is the transport enabler, not the
+   licence** — an open socket is not a presence/activity signal (a background tab holds one), so engine push
+   must key off an explicit activity signal (the player taking turns), and choosing that signal
+   re-litigates the 2026-06-10 turn-driven ruling. The separate ADR owns that game-design decision + the
+   producer; this ADR only carries the bytes.
 4. **Fallback lifetime → KEEP the SSE/poll fallback permanently.** For restrictive proxies / clients that
    cannot upgrade to WS; not dropped once WS is proven.
 3. **Layout policy → PER-DEVICE.** Supersedes 0064-F's single shared per-user layout: geometry is
