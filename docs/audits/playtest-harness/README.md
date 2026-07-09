@@ -327,17 +327,31 @@ canonical session, sends a turn from A, and asserts B mirrors A's LIVE stream. E
   not a full-`innerHTML`-repaint reconcile (`renderDelta`).
 - `lagWithinBudget` — B converges within `MIRROR_LAG_BUDGET_MS` (default 2500) of A's settle.
 
-**Current verdict: RED.** On `main`, B sits blank through A's entire stream (~2-4 s), then pops a late
-`softReloadHistory` reconcile through a different (non-incremental) renderer — exactly the "scratch and
-grind". Representative telemetry: A first-render ~2.0 s / settles ~3.9 s; **B first-render ~5.8 s**; A
-`incrementalStream=true` / **B `incrementalStream=false`** (B does 0 streaming-container mounts).
+**Current verdict: GREEN** (fixed 2026-07-09, PR "F5 mirror-parity render-race"). R2 already unified the
+render PATHS (the source-pin tripwire `test_0012_mirror.py::test_chat_client_mirror_does_not_full_repaint_per_delta`
+is green), but the harness stayed RED because of a fast-settle RACE: under the deterministic fake model the
+turn often settles before window B finishes attaching, so B's visible bubble came from the
+`softReloadHistory`/`selectSession` reconcile (a STATIC `.body`, no `.live-reply-content`), and
+`resumeStream`'s own-echo dup-abort then tore down B's incremental holder before it painted — B never
+mounted the streaming container (`incrementalStream=false`). The fix scopes that dup-abort to the true
+own-echo case (a bubble THIS tab live-rendered) and, for a LATE-ATTACHING OBSERVER whose reconcile already
+painted a static from-history bubble (`data-fromHistory="1"`), REMOVES it and replays the terminal-buffered
+run through the SHARED incremental renderer (`createStreamRenderer` → `.live-reply-content`) — plus flushes
+the buffered paint before the one-burst replay's trailing `[DONE]` breaks the read loop. Representative
+GREEN telemetry (deterministic fake, quiet host): A first-render ~1.9 s / settles ~4.1 s; **B first-render
+~2.9 s** (DURING A's stream); **A & B `incrementalStream=true`**; mirror lag ~0.3 s.
 
-**Green-after:** when **refactor-roadmap R2** unifies the mirror's live render path onto the sender's
-incremental renderer (B live-attaches via `resumeStream` and streams through the same `createStreamRenderer`),
-all three checks pass. Then promote it to a required CI gate (it already runs key-free against the
-deterministic narrator, like `browser_smoke.py`/`deploy/smoke.sh`) and delete the `xfail` on
-`frontend/tests/test_0012_mirror.py::test_chat_client_mirror_does_not_full_repaint_per_delta` (the fast
-source-pin tripwire — it XPASSes the moment R2 lands).
+> **Timing sensitivity (host contention):** the three checks are all `true` when B attaches during A's
+> stream. On a CPU-starved host (5 heavy procs — engine + fake model + FE + two Chromium windows — on ≤4
+> cores) B's canonical-binding discovery + `/api/chat/resume` attach can slip PAST A's settle, failing the
+> two TIMING checks (`bStartsDuringAStream`, `lagWithinBudget`) even though `bUsesIncrementalRenderer` stays
+> green — this is a first-turn cold-start artifact (the canonical session binds mid-turn; the HUD gate §10a
+> warms up around it), not a render regression. The CI job therefore RETRIES the gate a few times and passes
+> on the first green (mirroring the `fe-browser-tests` `--reruns 1` policy).
+
+Promoted to a CI gate (`mirror-parity` in `.github/workflows/ci.yml`, under the `ci-gate` required check,
+on the FE-changed path filter) — key-free against the deterministic narrator, like `browser_smoke.py` /
+`deploy/smoke.sh`.
 
 ## 10a. The two-window HUD-parity gate (F5 status/gadget half · feature 0064 §B/D)
 

@@ -134,9 +134,15 @@ diff is blind). PASS requires **all** of:
 **The fast tripwire** — `frontend/tests/test_0012_mirror.py`
 (`test_chat_client_mirror_does_not_full_repaint_per_delta`): a source-level assertion that the mirror's
 `resumeStream` no longer full-`innerHTML`-repaints per delta. **R2 landed 2026-06-27** (`bb2c3076`/
-`14d071c1`) and the `xfail` marker has been removed — the tripwire now passes outright. The harness
-gate itself is still run manually (`run_mirror_gate.sh`); promoting it to a required CI gate remains
-an owed follow-on.
+`14d071c1`) and the `xfail` marker has been removed — the tripwire passes outright. **But the R2
+render-path unification alone did NOT turn the behaviour harness green:** under the fast deterministic fake
+the turn often settled before window B finished attaching, so B rendered the `softReloadHistory` reconcile
+(a STATIC bubble) and `resumeStream`'s own-echo dup-abort tore B's incremental holder down before it painted
+(`bUsesIncrementalRenderer=false`). The **fast-settle race fix (2026-07-09)** closed that: the dup-abort is
+scoped to the true own-echo case, a late-attaching observer's from-history reconcile is REPLACED by a live
+incremental replay, and the one-burst `[DONE]` flush lands the paint. The harness gate is now **green** and
+**promoted to a required CI gate** (`mirror-parity` in `.github/workflows/ci.yml`, under `ci-gate`, on the
+FE path filter; retried a few times for the first-turn timing artifact — see harness §10).
 
 > The executable BDD lives in the **harness gate + the pytest tripwire** referenced above — **not** in a
 > Cucumber `.feature` / `cucumber.cjs`. That lane is the **TS engine** and cannot run an FE-render
@@ -186,9 +192,11 @@ gates (ADR 0008's `seq`/reconcile contract, the `_Run` replay-then-tail behaviou
   single window already renders; the channel split keeps reasoning out of the public bubble.
 - **Single-window play is byte-identical** — the sender already renders through `createStreamRenderer`; with
   one subscriber nothing about its render changes.
-- **R2 landed 2026-06-27** (`bb2c3076`/`14d071c1`) and the harness gate is **green**; the
-  `frontend/tests/test_0012_mirror.py` `xfail` has been removed (it now passes outright). Promoting
-  the harness to a **required CI gate** remains an owed follow-on.
+- **R2 landed 2026-06-27** (`bb2c3076`/`14d071c1`) — the render PATHS were unified and the
+  `frontend/tests/test_0012_mirror.py` `xfail` removed (it passes outright). The behaviour **harness**
+  stayed RED on a fast-settle race until the **2026-07-09 mirror-parity fix** (late-observer incremental
+  replay + scoped dup-abort + one-burst `[DONE]` paint flush), which turned it **green** and **promoted it
+  to a required CI gate** (`mirror-parity`, under `ci-gate`, FE path filter).
 
 ## Traceability
 

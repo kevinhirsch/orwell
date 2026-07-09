@@ -17,8 +17,12 @@ ADMIN_USER=admin; ADMIN_PW="mirror-gate-pw"   # stable throwaway local admin (ne
 FE_DATA="$ROOT/frontend/data"                 # the dir the app actually reads (auth.json is hardcoded data/auth.json)
 LIVE="${MIRROR_LIVE:-}"                        # MIRROR_LIVE=1 → real OpenRouter model (env ORWELL_TEST_OPENROUTER_KEY); else the deterministic fake
 TOOLTURN="${MIRROR_TOOLTURN:-}"                 # MIRROR_TOOLTURN=1 → the tool-rich multi-round settled-parity gate (fake_model_server FAKE_SCRIPT=toolturn)
-export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-export PW_CHROMIUM=/opt/pw-browsers/chromium
+# Browser location — overridable so the same driver runs under CI (or any box) without editing it.
+# Defaults match this sandbox's provisioning (global npm playwright + chromium under /opt/pw-browsers);
+# a caller (e.g. the CI job) can point these elsewhere. Leave PW_CHROMIUM empty to let playwright
+# auto-resolve the browser from PLAYWRIGHT_BROWSERS_PATH.
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}"
+export PW_CHROMIUM="${PW_CHROMIUM-/opt/pw-browsers/chromium}"
 export BASE_URL="http://127.0.0.1:$FE_PORT"; export ENGINE_URL="http://127.0.0.1:$ENGINE_PORT"
 
 PIDS=()

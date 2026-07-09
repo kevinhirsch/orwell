@@ -4674,7 +4674,9 @@ import { isNarrow } from './platform.js';
 
     // Block duplicate re-attach attempts while this reader is live. A dedicated
     // set (not _backgroundStreams) so checkBackgroundStream doesn't mistake this
-    // for a same-tab POST stream and spawn its own spinner+poll on re-entry.
+    // for a same-tab POST stream and spawn its own spinner+poll on re-entry. Set BEFORE the first
+    // paint below, so a `softReloadHistory` reconcile that races this attach sees `hasActiveStream`
+    // and DEFERS past it (never rebuilds the DOM out from under the live holder mid-paint).
     _resumingStreams.add(sessionId);
 
     const holder = document.createElement('div');
@@ -4778,6 +4780,10 @@ import { isNarrow } from './platform.js';
           if (!line) continue;
           const payload = line.slice(6);
           if (payload === '[DONE]') {
+            // Flush any deltas buffered earlier in THIS chunk before we break — otherwise a
+            // terminal replay whose reply + `[DONE]` ride one burst would skip the chunk-end
+            // paint batch and never mount the incremental container (ship-gate F5).
+            if (paintDirty) { paintDirty = false; renderDelta(); }
             try { await reader.cancel(); } catch (_) {}
             break readLoop;
           }
@@ -4803,15 +4809,35 @@ import { isNarrow } from './platform.js';
             metricsData = json.data || metricsData;
           } else if (json.type === 'message_saved') {
             // M1-1 (audit A1) — CONVERGENCE KEY: the replayed message_saved carries the
-            // server-minted DB id. A bubble with that id already in the DOM means this
-            // resume re-attached to a run THIS tab rendered (the deferred own-echo flush
-            // after our own stream settled) — finishing would paint a duplicate. Abort by
-            // id, never content-equality: drop the placeholder, keep the settled bubble.
-            if (json.id && box.querySelector('.msg[data-db-id="' + String(json.id).replace(/"/g, '') + '"]')) {
-              try { await reader.cancel(); } catch (_) {}
-              cleanup();
-              if (holder.parentNode) holder.remove();
-              return true;
+            // server-minted DB id. A bubble with that id already in the DOM is one of two things:
+            const _dup = json.id && box.querySelector('.msg[data-db-id="' + String(json.id).replace(/"/g, '') + '"]');
+            if (_dup) {
+              // (b) OBSERVER RECONCILE (ship-gate F5): a from-history render (selectSession /
+              // softReloadHistory) already painted a STATIC bubble for a run this tab is only
+              // MIRRORING (the sender settled before we finished attaching). Aborting here would
+              // strand B on that non-incremental reconcile — the F5 "scratch and grind". Instead
+              // REMOVE the static bubble and let this resume render the turn LIVE through the SHARED
+              // incremental renderer (createStreamRenderer), then finalize-in-place re-stamping the
+              // SAME db-id, so a later reconcile adopts it with ZERO churn (no duplicate).
+              if (_dup.dataset && _dup.dataset.fromHistory === '1') {
+                _dup.remove();
+                // Commit to the LIVE mirror render NOW. The terminal replay arrives as one burst
+                // whose trailing `[DONE]` `break`s out of the read loop BEFORE the chunk-end paint
+                // batch — so a deferred paint would never fire and B would fall back to the static
+                // finalize (the incremental container never mounts → the F5 miss). Paint the buffered
+                // reply through the SHARED incremental renderer here, then fall through to capture
+                // ts/id and keep tailing.
+                paintDirty = false; renderDelta();
+                // fall through — capture ts/id below, keep reading, and paint incrementally.
+              } else {
+                // (a) OWN-ECHO: this tab live-rendered + finalized the bubble via its own primary
+                // POST stream (NOT from history). Finishing would paint a duplicate → abort by id,
+                // never content-equality: drop the placeholder, keep the settled bubble.
+                try { await reader.cancel(); } catch (_) {}
+                cleanup();
+                if (holder.parentNode) holder.remove();
+                return true;
+              }
             }
             // ADR 0012 §2.2: the run's persisted-message signal is in the replay buffer — capture its
             // server timestamp and re-stamp the live bubble so this observer reads the same time as
@@ -4860,6 +4886,12 @@ import { isNarrow } from './platform.js';
       if (savedDbId) meta_._db_id = savedDbId;
       chatRenderer.addMessage('assistant', _combined(), model, meta_);
       uiModule.scrollHistory();
+      // F5 / ADR 0008: a reconcile that raced this live attach may have DEFERRED past it (it saw the
+      // `_resumingStreams` lock and added to `_pendingReconcile` instead of rebuilding). Now that the
+      // lock is released (cleanup) and the reply is finalized in place (db-id stamped), flush any such
+      // pending reconcile so a MIRRORING observer still lands the sender's user turn in seq order — the
+      // adopt pass claims this finalized bubble by id with zero churn, so there is no re-render / dup.
+      try { flushPendingReconcile(sessionId); } catch (_) {}
       return true;
     }
 
