@@ -389,7 +389,10 @@ class ThemeSweep:
             self.errors.append(f"{shot_id}: {e}")
         finally:
             if ctx is not None:
-                ctx.close()
+                try:
+                    ctx.close()
+                except Exception as e:  # noqa: BLE001 — a teardown failure must not sink the run either
+                    self.errors.append(f"{shot_id}: ctx.close failed (non-fatal): {e}")
 
     def run(self) -> None:
         for theme in THEME_NAMES:
@@ -549,12 +552,15 @@ def run(args: argparse.Namespace) -> int:
     print(f"\n==== theme-consistency: {len(sweep.tokens)} shots · "
           f"{total_findings} finding(s) · {total_xfails} xfail (known) · {wall:.1f}s")
     if xpasses:
-        print("  (xpass — consider removing the XFAIL entries: " + ", ".join(xpasses) + ")")
+        print("  (xpass — REMOVE the now-stale XFAIL entries: " + ", ".join(xpasses) + ")")
     if all_errors:
         print(f"  ({len(all_errors)} harness error(s) — see summary.md)")
     # Harness errors BLOCK too — same never-a-silent-pass rule 0113's visual_regression.py uses:
     # a capture/setup failure landing zero shots must never let this required job pass quietly.
-    return exit_code(total_findings, all_errors)
+    # An XPASS blocks too (stronger than 0113's advisory nudge): a registered XFAIL that no longer
+    # matches means the known finding was fixed, so the stale entry MUST be removed or it would
+    # silently re-demote the same defect if it regresses — the ratchet only tightens.
+    return exit_code(total_findings, all_errors + [f"xpass: {x}" for x in xpasses])
 
 
 def main() -> int:
