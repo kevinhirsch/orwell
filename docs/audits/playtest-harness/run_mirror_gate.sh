@@ -39,11 +39,28 @@ pkill -9 -f 'fake_model_server.mjs' 2>/dev/null; pkill -9 -f "uvicorn app:app --
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 wait_http() { local url="$1" name="$2" n=0; until curl -sf -o /dev/null --max-time 3 "$url"; do n=$((n+1)); [ $n -ge 40 ] && { echo "!! $name never came up ($url)"; return 1; }; sleep 1; done; echo "ok: $name"; }
 
-# 0) playwright resolvable for the harness's `import 'playwright'` (global 1.56.1 + cached chromium).
-say "0) link playwright into node_modules"
-PW_GLOBAL="$(npm root -g)"   # global node_modules (playwright 1.56.1 bundles playwright-core)
-[ -d "$ROOT/node_modules/playwright" ] || ln -sfn "$PW_GLOBAL/playwright" "$ROOT/node_modules/playwright"
-[ -d "$ROOT/node_modules/playwright-core" ] || ln -sfn "$PW_GLOBAL/playwright-core" "$ROOT/node_modules/playwright-core" 2>/dev/null || true
+# 0) playwright resolvable for the harness's `import 'playwright'`. The rig only drives an EXISTING
+#    chromium (executablePath=$PW_CHROMIUM), so we need just the JS driver — never a browser download.
+#    Resolution order, most-portable first, so the SAME driver runs on this sandbox AND a clean CI
+#    runner: (a) already resolvable? done. (b) a GLOBAL npm playwright to symlink in. (c) neither —
+#    install it locally, no-save, browser-download skipped. package.json intentionally does NOT carry
+#    playwright (it's not a runtime/engine dep); this keeps the gate self-contained regardless of host.
+PW_VER="${MIRROR_PW_VERSION:-1.56.1}"   # match the chromium provisioned under $PLAYWRIGHT_BROWSERS_PATH
+say "0) ensure playwright resolvable for the harness"
+mkdir -p "$ROOT/node_modules"
+pw_ok() { node -e "import('playwright').then(()=>process.exit(0)).catch(()=>process.exit(1))" >/dev/null 2>&1; }
+if ! pw_ok; then
+  PW_GLOBAL="$(npm root -g 2>/dev/null || true)"
+  if [ -n "$PW_GLOBAL" ] && [ -d "$PW_GLOBAL/playwright" ]; then
+    ln -sfn "$PW_GLOBAL/playwright" "$ROOT/node_modules/playwright"
+    [ -d "$PW_GLOBAL/playwright-core" ] && ln -sfn "$PW_GLOBAL/playwright-core" "$ROOT/node_modules/playwright-core" 2>/dev/null || true
+  fi
+fi
+if ! pw_ok; then
+  say "0b) no resolvable playwright (no global) — installing locally (no-save, browser download skipped)"
+  ( cd "$ROOT" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --no-save --no-audit --no-fund "playwright@$PW_VER" >"$LOGS/pw-install.log" 2>&1 ) \
+    || { echo "!! playwright install failed"; tail -30 "$LOGS/pw-install.log" 2>/dev/null; exit 1; }
+fi
 node -e "import('playwright').then(()=>console.log('playwright import ok')).catch(e=>{console.error(e);process.exit(1)})" || exit 1
 
 # secrets file the rig reads for admin login (gitignored — see .gitignore add).
