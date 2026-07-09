@@ -129,7 +129,7 @@ def _run_battery(cases):
     process.stdout.write(JSON.stringify(out));
     """
     res = subprocess.run([_NODE, "-e", program, "--", MD, json.dumps(cases)],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, timeout=60)
     assert res.returncode == 0, f"node failed: {res.stderr}"
     return json.loads(res.stdout)
 

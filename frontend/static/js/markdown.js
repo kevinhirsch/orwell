@@ -962,7 +962,10 @@ export function processWithThinking(text) {
     // as a separate normal bubble below it. Both halves go through mdToHtml (the prose already ran
     // the machinery/reasoning scrubs above), so reasoning can never reach either public bubble.
     if (leadingAsideText) {
-      gbHtml += `<div class="ooc-producer-aside">${mdToHtml(leadingAsideText)}</div>`;
+      // M3-2: restore any speaker chips extracted from inside the leading OOC block too, so a
+      // `___OWSPK_N___` placeholder can never surface literally in the aside bubble. No-op when
+      // the aside carried no tags.
+      gbHtml += `<div class="ooc-producer-aside">${restoreSpeakerChips(mdToHtml(leadingAsideText), spk.chips)}</div>`;
     }
     if (reply) {
       // M3-2: restore the extracted speaker tags into face chips on the rendered HTML — a
