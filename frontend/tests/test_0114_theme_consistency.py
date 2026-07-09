@@ -396,10 +396,13 @@ def test_write_summary_reports_clean_run_as_clean(tmp_path):
 
 def test_harness_errors_block_the_exit_code():
     """Mirrors visual_regression.py's same rule (PR #1244 review P1): a capture/setup failure
-    must fail the process even with zero findings — never a silent pass."""
-    import pathlib
-    src = (pathlib.Path(__file__).parents[1] / "scripts" / "theme_consistency.py").read_text()
-    assert "return 1 if (total_findings or all_errors) else 0" in src
+    must fail the process even with zero findings — never a silent pass. Asserts the exit-code
+    DECISION behaviorally (not by grepping source), so a harmless refactor of run()'s return can't
+    silently break the guarantee."""
+    assert tc.exit_code(0, []) == 0                       # clean: no findings, no errors
+    assert tc.exit_code(1, []) == 1                       # a finding blocks
+    assert tc.exit_code(0, ["some harness error"]) == 1   # a harness error blocks even at 0 findings
+    assert tc.exit_code(2, ["err"]) == 1
 
 
 def test_shot_id_scheme_is_the_documented_colon_form():

@@ -292,11 +292,11 @@ shape exactly (same fixture-presence dormant gate, same build/install steps, sam
    Pinned by `test_coverage_gap_*` + `test_open_surfaces_opens_the_full_window_gadget_sidebar_inventory`.
 6. **Report schema** — `theme_report.json` / `summary.md` carry the expected shape; a clean run
    reads as clean, a findings run reads as BLOCKING, and the coverage table proves reach.
-6. **Run the WHOLE FE suite** (`cd frontend && python3 -m pytest tests/ -m "not browser"`, plus
+7. **Run the WHOLE FE suite** (`cd frontend && python3 -m pytest tests/ -m "not browser"`, plus
    the browser-marked tests) before pushing.
-7. **CI wiring** — `theme-consistency` is in `ci-gate`'s `needs:`/`RESULTS`; the fixture-presence
+8. **CI wiring** — `theme-consistency` is in `ci-gate`'s `needs:`/`RESULTS`; the fixture-presence
    step mirrors `visual-regression`'s dormant framing.
-8. **Live evidence** — the harness was actually run against the real engine + FE (composing the
+9. **Live evidence** — the harness was actually run against the real engine + FE (composing the
    SAME golden-replay walk 0113 uses), confirming the fix (`orwellHeadshot.js`'s three tiles) is
    green on both themes; before/after screenshots at 1440×900 and 390×844 are referenced in the
    PR.

@@ -122,14 +122,29 @@ EXPECTED_UNREACHED: Dict[str, str] = {
 }
 
 
-def coverage_gaps(coverage: Dict[str, dict]) -> List[str]:
-    """Registry selectors that matched NOTHING on ANY shot AND are not in EXPECTED_UNREACHED —
-    i.e. a surface the opener was supposed to reach but didn't (the opener regressed). Returns a
-    list of harness-error strings; empty when every expected-reachable surface was probed."""
+def _aggregate_coverage(coverage: Dict[str, dict]) -> Dict[str, int]:
+    """The max match-count per selector across all shots — the single 'proves reach' aggregate
+    shared by `coverage_gaps` (the blocking check) and `_write_summary_md` (the human table), so
+    the two can never drift."""
     agg: Dict[str, int] = {}
     for cov in coverage.values():
         for sel, n in cov.items():
             agg[sel] = max(agg.get(sel, 0), n)
+    return agg
+
+
+def exit_code(total_findings: int, all_errors: list) -> int:
+    """Never-a-silent-pass: harness/coverage errors block the process too, exactly like theme
+    findings — a capture/setup failure must fail even with zero findings (mirrors
+    visual_regression.py, PR #1244 review P1)."""
+    return 1 if (total_findings or all_errors) else 0
+
+
+def coverage_gaps(coverage: Dict[str, dict]) -> List[str]:
+    """Registry selectors that matched NOTHING on ANY shot AND are not in EXPECTED_UNREACHED —
+    i.e. a surface the opener was supposed to reach but didn't (the opener regressed). Returns a
+    list of harness-error strings; empty when every expected-reachable surface was probed."""
+    agg = _aggregate_coverage(coverage)
     gaps = []
     for sel in THEME_REGISTRY:
         if agg.get(sel, 0) <= 0 and sel not in EXPECTED_UNREACHED:
@@ -230,8 +245,8 @@ class ThemeSweep:
         page.wait_for_timeout(1200)
         try:
             page.evaluate("window._orwellStatusEnsure && window._orwellStatusEnsure()")
-        except Exception:
-            pass
+        except Exception as e:
+            self.errors.append(f"_orwellStatusEnsure failed (non-fatal): {e}")
         page.wait_for_timeout(300)
 
     def _open_surfaces(self, page) -> None:
@@ -335,7 +350,8 @@ class ThemeSweep:
             page.wait_for_timeout(120)
             try:
                 snap = page.evaluate(self._LAYOUT_SNAP_JS, THEME_REGISTRY)
-            except Exception:
+            except Exception as e:
+                self.errors.append(f"_wait_layout_stable failed (non-fatal): {e}")
                 return
             if prev is not None and snap == prev:
                 return
@@ -343,8 +359,9 @@ class ThemeSweep:
 
     def _sweep_one(self, theme: str, vp_name: str, w: int, h: int) -> None:
         shot_id = f"theme:{theme}:{vp_name}:midweek"
-        ctx = self._new_context(w, h, theme)
+        ctx = None
         try:
+            ctx = self._new_context(w, h, theme)
             page = ctx.new_page()
             page.goto(self.driver.fe, wait_until="domcontentloaded")
             self._settle(page)
@@ -371,7 +388,8 @@ class ThemeSweep:
         except Exception as e:  # noqa: BLE001 — one theme/viewport failing must not sink the run
             self.errors.append(f"{shot_id}: {e}")
         finally:
-            ctx.close()
+            if ctx is not None:
+                ctx.close()
 
     def run(self) -> None:
         for theme in THEME_NAMES:
@@ -428,10 +446,7 @@ def _write_summary_md(out_dir: str, *, wall_seconds: float, findings: Dict[str, 
     # Proves "0 findings" is meaningful (the surface was actually opened + probed), not a
     # false-clean from an un-opened surface. A selector at 0 everywhere is flagged NOT REACHED.
     if coverage:
-        agg: Dict[str, int] = {}
-        for cov in coverage.values():
-            for sel, n in cov.items():
-                agg[sel] = max(agg.get(sel, 0), n)
+        agg = _aggregate_coverage(coverage)
         lines += ["## Surface coverage (max matches across shots — proves reach)", ""]
         for sel in THEME_REGISTRY:
             n = agg.get(sel, 0)
@@ -539,7 +554,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"  ({len(all_errors)} harness error(s) — see summary.md)")
     # Harness errors BLOCK too — same never-a-silent-pass rule 0113's visual_regression.py uses:
     # a capture/setup failure landing zero shots must never let this required job pass quietly.
-    return 1 if (total_findings or all_errors) else 0
+    return exit_code(total_findings, all_errors)
 
 
 def main() -> int:
