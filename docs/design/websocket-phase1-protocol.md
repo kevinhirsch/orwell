@@ -285,8 +285,9 @@ single-writer turn whose result is fanned out as `chat` `event` frames below, so
 ```jsonc
 // client → server
 { "t":"turn", "ch":"chat", "cid":"c_09", "d":{ "message":"I pull them aside", "clientMsgId":"tmp_5",
-                                               "attachments":[], "mode":"agent" } }
-{ "t":"decision", "ch":"chat", "cid":"c_10", "d":{ "pendingId":"veto-ceremony", "choice":"use", "target":"npc_3" } }
+                                               "expectedBeatSeq":118, "attachments":[], "mode":"agent" } }
+{ "t":"decision", "ch":"chat", "cid":"c_10", "d":{ "pendingId":"veto-ceremony", "choice":"use",
+                                                   "target":"npc_3", "expectedBeatSeq":118 } }
 ```
 
 The FE relay handler runs the **exact** existing pipeline: for `turn`, the `chat_stream` body path
@@ -301,10 +302,16 @@ is the single-writer broadcast) plus a `state` reconcile (§4). The `cid` reply 
 
 - `clientMsgId` round-trips the optimistic bubble id (ADR 0008, `chat_routes.py:715`) so the sender
   adopts its own bubble by canonical `{id, seq}` from the `message_saved` event.
-- `expectedBeatSeq` (0065): attach the client's last-seen `beatSeq` (from `ack`/`state`); a stale value
-  → the engine's typed `StaleBeatError` surfaces as `error{cid, code:"stale-beat", d:{beatSeq}}` (today's
-  HTTP 409 `stale-beat`), and the client reconciles via the existing desync path. The CAS lives in the
-  relay/engine hop — the socket only carries the token.
+- **`expectedBeatSeq` (0065) — MANDATORY on every mutating up-frame.** Both `turn` and `decision`
+  MUST carry `expectedBeatSeq` set to the client's last-seen `beatSeq` (from the `ack`/`state` frames,
+  §2.3/§4) as the 0065 compare-and-swap token. The server refuses a stale value **before any mutation**:
+  the engine's typed `StaleBeatError` surfaces as an `error` frame `{cid, code:"stale-beat", d:{beatSeq}}`
+  (the `cid` echoes the refused up-frame; equivalent to today's HTTP **409 `stale-beat`**), and the client
+  reconciles via the existing desync path, then retries with the fresh `beatSeq`. The CAS lives in the
+  relay/engine hop — the socket only carries the token — but an implementer who omits it from the frame
+  loses the stale-beat guard entirely, so it is a required field, not an optional one. (An engine that
+  advertises no `beatSeq` yet — pre-0065 sandbox — simply omits the CAS; where the `ack` returned a
+  `beatSeq`, the up-frame MUST echo it.)
 
 ### 3.6 `has_run` and the terminal-but-buffered resume
 
