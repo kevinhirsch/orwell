@@ -220,6 +220,30 @@ function buildAttachCards(attachments) {
   return attachWrap;
 }
 
+// #828 — the SINGLE classification point for "is this bubble's WRAP an out-of-character
+// producer/OOC aside?", shared by BOTH render paths so they can never drift again:
+//   · the RELOAD/settled render (addMessage, below) — always used it.
+//   · the LIVE stream (chat.js `_renderStream` / `_renderLiveStream`) — used to classify
+//     ONLY on the next reload (chatRenderer.addMessage), so a live producer bubble painted
+//     as a normal bubble until the page refreshed. chat.js now calls this on every live
+//     delta too, so the wrap picks up `.msg-ooc`/`.msg-ooc-producer` the instant the text
+//     resolves to a whole-message `((...))` wrap or a leading `ooc:` — identical to reload,
+//     no refresh required.
+// Returns `detectOocAside`'s verdict `{ ooc, text }` (`text` has the markers stripped when
+// `ooc` is true) so a caller can feed the SAME marker-stripped text into `processWithThinking`
+// — that keeps its own internal whole-wrap detection from ALSO firing and double-wrapping the
+// body in `.ooc-producer-aside` (the live-only inner-div fallback for a case this can't yet
+// classify, e.g. a still-open `((` mid-stream).
+export function applyOocClass(wrap, rawText, role) {
+  if (!wrap || !((role === 'user' || role === 'assistant')) || !isGameBuild()) {
+    return { ooc: false, text: rawText };
+  }
+  const result = detectOocAside(rawText);
+  wrap.classList.toggle('msg-ooc', result.ooc);
+  wrap.classList.toggle('msg-ooc-producer', result.ooc && role === 'assistant');
+  return result;
+}
+
 // Re-render the attachment cards of an already-rendered message. Used to swap
 // in real upload ids (and image thumbnails) on the optimistic user bubble once
 // uploadPending() resolves — otherwise image previews only appear after a
@@ -2531,6 +2555,7 @@ const chatRenderer = {
   displayMetrics,
   addMessage,
   updateMessageAttachments,
+  applyOocClass,
 };
 
 export default chatRenderer;
