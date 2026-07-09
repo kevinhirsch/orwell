@@ -27,6 +27,16 @@ export interface KnowledgeFact {
   distortion?: number;
   /** The undistorted origin content, for comparison. */
   originalContent?: string;
+
+  // --- OUTWARD-ONLY qualitative belief projection (#1239) ----------------------
+  // Populated ONLY on the player-facing projection (`VisibleStateService.getVisibleStateFor`), never
+  // stored and never on an internal fact: the raw `confidence`/`distortion`/`hops` numbers must NOT
+  // cross to the player ("never show the player a number"), so the outward shape carries these
+  // Vault-safe *words* instead (and drops the numeric fields + `originalContent` at the boundary).
+  /** A coarse, decaying clarity WORD for how firmly the player holds this belief (`confidenceWord`). */
+  confidenceBand?: string;
+  /** Whether the belief is materially distorted (both drift + decay gates clear — `isMateriallyDistorted`). */
+  distorted?: boolean;
 }
 
 export type KnowledgeState = readonly KnowledgeFact[];

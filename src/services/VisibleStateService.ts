@@ -4,7 +4,8 @@ import type { EntityId } from "../domain/ids";
 import type { GameEvent } from "../domain/event";
 import { classify } from "../domain/event";
 import type { KnowledgeFact, Suspicion } from "../domain/knowledge";
-import { makeForPlayerScrub } from "../domain/humanize";
+import { makeForPlayerScrub, confidenceWord } from "../domain/humanize";
+import { isMateriallyDistorted } from "../domain/beliefReliability";
 
 export interface VisibleState {
   forEntity: EntityId;
@@ -53,6 +54,30 @@ export class VisibleStateService {
     return makeForPlayerScrub(this.roster())(content);
   }
 
+  /**
+   * Project one knowledge fact into its OUTWARD-safe shape (#1239 — the Memory Wall projection audit):
+   *   - STRIP `originalContent` — the undistorted TRUTH behind a distorted belief. The player does not
+   *     hold that; carrying it outward leaks truth through the distortion model (0002/0094 dramatic
+   *     irony collapses). This is the priority leak fix: strip it at the boundary so NO downstream
+   *     consumer can ever render it (defense-in-depth beyond the FE route's own drop, PR #1238).
+   *   - STRIP the raw belief NUMBERS (`confidence` / `distortion` / `hops`): "never show the player a
+   *     number", and the number shouldn't cross the boundary at all. They are replaced by…
+   *   - ADD Vault-safe QUALITATIVE words computed from those numbers before they're dropped: a
+   *     `confidenceBand` clarity word (`confidenceWord`) and a `distorted` boolean
+   *     (`isMateriallyDistorted`, single-sourced from the 0094 thresholds).
+   * `content` is already scrubbed by the caller. Byte-identical for a plain witnessed fact (no belief
+   * metadata ⇒ no numbers to strip; `confidenceBand`="clearly" from the default certainty, `distorted`=false).
+   */
+  private toPlayerKnowledge(fact: KnowledgeFact): KnowledgeFact {
+    // Omit the truth-leak + raw-number fields; keep everything else (id, content, pathway, subject, …).
+    const { originalContent, confidence, distortion, hops, ...safe } = fact;
+    return {
+      ...safe,
+      confidenceBand: confidenceWord(confidence ?? 1),
+      distorted: isMateriallyDistorted({ confidence, distortion }),
+    };
+  }
+
   getVisibleStateFor(entity: EntityId): VisibleState {
     // Build the scrub ONCE for this read (the id matcher compiles once), then apply it across the whole
     // visible log + knowledge — instead of recompiling 16 per-id regexes for every event/fact. The
@@ -66,7 +91,7 @@ export class VisibleStateService {
         .map((e) => ({ ...e, content: scrub(e.content) })),
       knowledge: this.knowledge
         .knownTo(entity)
-        .map((k) => ({ ...k, content: scrub(k.content) })),
+        .map((k) => this.toPlayerKnowledge({ ...k, content: scrub(k.content) })),
     };
   }
 
