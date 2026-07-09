@@ -63,15 +63,22 @@ def test_announcer_helper_defined_and_reasoning_scrubbed():
     assert "agent-thread" in js, "the announcer must strip tool nodes, announcing only the public reply"
 
 
-def test_chat_js_announces_once_at_round_complete():
+def test_chat_js_announces_at_footer_target_seam():
     js = _read("static", "js", "chat.js")
-    assert "window.orwellAnnounce" in js, (
-        "chat.js must call window.orwellAnnounce at the round-complete seam (F-A11Y-1)"
+    # The call must pass footerTarget — the SAME last-visible-bubble resolution the footer uses —
+    # so a tool-only trailing round (empty roundHolder) still announces the earlier real narration,
+    # not an empty bubble. This is also the settled render point (post final-render + empty-hide).
+    assert "orwellAnnounce(footerTarget)" in js, (
+        "chat.js must call window.orwellAnnounce(footerTarget) at the settled round-complete seam — "
+        "passing the settled last-visible bubble, not a raw roundHolder/holder that can be an empty "
+        "trailing tool-round bubble (F-A11Y-1)"
     )
-    # The call sits inside the foreground final-render block (not the background path).
-    idx = js.index("window.orwellAnnounce")
-    window_slice = js[max(0, idx - 4000):idx]
-    assert "_isBgFinal" in window_slice, (
+    idx = js.index("orwellAnnounce(footerTarget)")
+    # footerTarget is resolved just above the call, inside the foreground final-render block.
+    assert "const footerTarget" in js[max(0, idx - 1200):idx], (
+        "the announce call must sit right after footerTarget is resolved (the settled render point)"
+    )
+    assert "_isBgFinal" in js[max(0, idx - 14000):idx], (
         "the announce call must live in the foreground final-render block, not the background stream path"
     )
 

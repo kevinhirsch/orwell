@@ -134,7 +134,7 @@
     var clone = body.cloneNode(true);
     clone.querySelectorAll(
       '.thinking-section,.thinking-header,.thinking-content,' +
-      '.agent-thread,.agent-thread-node,.live-thinking'
+      '.agent-thread,.agent-thread-node'
     ).forEach(function (n) { n.remove(); });
     return (clone.textContent || '').replace(/\s+/g, ' ').trim();
   }
