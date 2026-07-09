@@ -43,7 +43,7 @@ pass — `2026-06-21-open-items-verification.md:69`).
 Ran `bash docs/audits/playtest-harness/run_mirror_gate.sh` (real engine + deterministic fake model +
 FE + a started season). Result:
 
-```
+```text
 B rendered the turn        : true
 B starts DURING A's stream : A firstRender=2688ms · A settled=4595ms · B firstRender=4045ms → true
 B uses A's live renderer   : A incrementalStream=true · B incrementalStream=false → FALSE
@@ -83,9 +83,13 @@ VERDICT: FAIL — windows DIVERGE during streaming (gate exit 1)
 
 ## G-tier — the casting→eviction golden path
 
-Every G-beat's mechanism is present in source **and** is now asserted by the **armed** 0108
-golden-path replay (`frontend/tests/golden/golden_path_glm-5.2.report.json`, regenerated today in
-#1251).
+Every G-beat's mechanism is present in source. **G1–G8** are additionally **replay-gated** by the
+**armed** 0108 golden-path job, which replays the **committed fixture**
+`frontend/tests/golden/golden_path_glm-5.2.jsonl` (its per-run record — the generated
+`golden_path_glm-5.2.report.json` — is the *output*, not the replay input; both were regenerated on
+2026-07-09 in PR #1251). **G9 is not a replay invariant — it is structurally gated**
+(dependency-cruiser + the `producerVault` test). The "0108 replay" column below cites, for G1–G8, the
+invariant the replayed fixture asserts.
 
 | # | Gate | Verdict | Mechanism (file:line) | 0108 replay |
 |---|------|---------|----------------------|-------------|
