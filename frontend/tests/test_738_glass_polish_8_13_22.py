@@ -55,7 +55,7 @@ def test_gadget_card_has_static_contrast_floor():
         "no body.theme-frosted .og-card contrast-floor rule with --og-scrim-alpha — the "
         "gadget rows have no legibility backstop over a busy wallpaper (#738 item 8)"
     )
-    sel, body = floor[0]
+    _sel, body = floor[0]
     m = re.search(r"--og-scrim-alpha:\s*([0-9.]+)", body)
     assert m, "the gadget contrast floor sets no --og-scrim-alpha value"
     alpha = float(m.group(1))
@@ -105,8 +105,19 @@ def test_collapsible_gadget_head_meets_touch_floor():
     sel, body = coarse[0]
     assert "min-width: 44px" in body, "the gadget-head touch floor sets no min-width"
     # it rides the SAME coarse-pointer floor as .og-act (not a separate desktop-affecting rule)
-    assert ".og-act" in sel and "pointer: coarse" not in sel, (
+    assert ".og-act" in sel, (
         "the gadget-head floor should share the existing coarse-pointer block with .og-act"
+    )
+    # ...and that shared block is ACTUALLY enclosed in the coarse-pointer media query (not
+    # unconditional — desktop must stay compact). `_css_blocks` only returns the inner selector
+    # text, so verify the `@media (hover: none) and (pointer: coarse)` enclosure directly.
+    assert re.search(
+        r"@media \(hover: none\) and \(pointer: coarse\)\s*\{[^{}]*"
+        r"\.og-card\.og-collapsible \.og-head[^{}]*\{[^{}]*min-height:\s*44px",
+        CSS,
+    ), (
+        "the gadget-head 44px floor is not enclosed in @media (hover: none) and "
+        "(pointer: coarse) — it would apply on desktop too (#738 item 13)"
     )
 
 
