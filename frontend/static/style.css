@@ -40550,7 +40550,9 @@ body.theme-frosted .cp-popover {
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
 body.theme-frosted .cp-popover,
-body.theme-frosted .model-picker-menu {
+body.theme-frosted .model-picker-menu,
+body.theme-frosted .export-dropdown-menu,
+body.theme-frosted .msg-overflow-menu {
   overflow: hidden;
 }
 }
