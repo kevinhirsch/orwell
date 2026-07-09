@@ -116,10 +116,18 @@ GRANDFATHERED_MODAL_BUILDERS = {
     "ui.js",            # styledConfirm/styledPrompt — class-B, migrate to kit modal:true
     "assistant.js", "group.js", "planWindow.js", "sessions.js", "workspace.js",  # build=0
 }
-# The construction signature: assigning/adding the bare `modal` class to an element
-# (NOT the `modal-content`/`modal-header`/`modal-minimized` compounds — those are
-# chrome PARTS the kit + plumbing legitimately reference, incl. in comments).
-_MODAL_ROOT_RX = r"""(?:className\s*=\s*['"]|classList\.add\(\s*['"])modal(?:\s+[^'"]*)?['"]"""
+# The construction signature: assigning/adding the bare `modal` CLASS TOKEN to an
+# element, in ANY class position (not just first) — so a bypass like
+# `className = 'foo modal'` or `classList.add('foo', 'modal')` is caught too (a
+# regression Greptile flagged on the first cut, which only matched the leading
+# position). The `(?<![\w-])modal(?![\w-])` boundaries keep it to the STANDALONE
+# `modal` token: the `modal-content`/`modal-header`/`modal-minimized`/
+# `settings-modal-content` compounds and camel `modalManager` are chrome PARTS the
+# kit + plumbing legitimately reference (incl. in comments) and must NOT false-match.
+_MODAL_ROOT_RX = (
+    r"""className\s*=\s*['"][^'"]*(?<![\w-])modal(?![\w-])[^'"]*['"]"""
+    r"""|classList\.add\([^)]*['"]modal['"][^)]*\)"""
+)
 
 
 def test_ratchet_no_new_hand_rolled_modal_window():
@@ -131,6 +139,37 @@ def test_ratchet_no_new_hand_rolled_modal_window():
         "focus-trap + inert + one z-authority), never a bespoke `.modal` root "
         "(2026-06-23 window-kit coverage audit §7.1)."
     )
+
+
+def test_ratchet_modal_signature_catches_bypass_forms():
+    """The `.modal`-root signature must catch `modal` in ANY class position, not just
+    the leading one — otherwise `className = 'foo modal'` / `classList.add('foo',
+    'modal')` slip past and the convention gate is bypassable (Greptile P1 repro).
+    Compound/camel names (`modal-*`, `*-modal`, `modalFoo`) must NOT false-match, or the
+    shrink-only allowlist breaks on legitimate chrome-part references."""
+    rx = re.compile(_MODAL_ROOT_RX)
+    # both bypass forms + the canonical forms are CAUGHT
+    caught = (
+        "el.className = 'foo modal';",          # modal not first (the bypass)
+        "el.classList.add('foo', 'modal');",    # modal not first arg (the bypass)
+        "el.className = 'modal';",
+        "el.className = 'modal hidden';",
+        "el.classList.add('modal');",
+        'el.className = "panel modal open";',
+    )
+    for s in caught:
+        assert rx.search(s), f"bypass slipped past the gate: {s!r}"
+    # compound / camel class names are NOT the bare `modal` root — must NOT match
+    ignored = (
+        "el.className = 'modal-primary';",
+        "el.className = 'modalFoo';",
+        "el.className = 'settings-modal-content';",
+        "el.className = 'foo-modal-bar';",
+        "el.classList.add('modal-minimized');",
+        "el.classList.add('modalManager');",
+    )
+    for s in ignored:
+        assert not rx.search(s), f"false-matched a chrome-part compound: {s!r}"
 
 
 def test_ratchet_drag_engine_callers_are_frozen():
