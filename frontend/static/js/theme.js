@@ -743,7 +743,7 @@ export function applyFrostedGlass(on) {
 
 /** #739 — Apply the global glass TINT (the iOS 26.1 "Liquid Glass → {Clear, Tinted}"
  *  opacity control). Toggles a single body-STATE class:
- *    • 'tinted' → body.theme-tinted — raises the --glass-opacity token, which the
+ *    • 'tinted' → body.theme-tinted — raises the --ow-glass-opacity token, which the
  *                 two fill tokens derive from, so every glass chrome surface gets a
  *                 gentle neutral opacity+contrast bump (refraction damped-but-kept).
  *    • 'clear'  → class removed (the DEFAULT) — the colorless kube 0.60 glass.
