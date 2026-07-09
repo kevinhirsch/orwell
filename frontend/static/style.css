@@ -38015,6 +38015,8 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-chi
   body.theme-frosted .icon-rail,
   body.theme-frosted .modal-content,
   body.theme-frosted .dropdown,
+  body.theme-frosted .export-dropdown-menu,
+  body.theme-frosted .msg-overflow-menu,
   body.theme-frosted #minimized-dock.ow-has-rows,
   body.theme-frosted #minimized-dock .minimized-dock-chip,
   /* the newly-glassed chrome surfaces fall back to SOLID too (Apple: Reduce
@@ -39986,6 +39988,15 @@ body.theme-frosted .msg-user .msg-footer .timestamp {
   text-shadow: 0 1px 2px rgba(0,40,90,0.55) !important;
   opacity: 1 !important;
 }
+/* #738 item 23 — the sent-bubble role line (the "You · time" cluster) carries a leading
+   `.role::before` status dot. The base rule paints it color-mix(var(--fg) 40%, transparent);
+   on the glass theme --fg is the LIGHT-CYAN ink, so the dot rendered as a faint COLORED
+   (cyan) speck sitting right on the blue sent bubble beside the timestamp — an accent/hue
+   cast on chrome the "no accent on text" mandate forbids. Match it to the sanctioned
+   white-on-blue timestamp treatment: a translucent NEUTRAL WHITE dot, no hue. */
+body.theme-frosted .msg-user .role::before {
+  background: rgba(255,255,255,0.55) !important;
+}
 /* RECEIVED bubbles DEFAULT to white over the dark frost (over a dark wallpaper / the dark
    animation). adaptiveGlass.js FLIPS them to dark ink + a light frost over a BRIGHT
    wallpaper (Apple Messages received-bubble polarity) by setting an inline color on .msg-ai;
@@ -40492,6 +40503,12 @@ body.theme-frosted .attach-card,
 body.theme-frosted .attach-image-skeleton,
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
+/* #738 item 5: the chat-header export popover (Rename/Copy/PDF) + the per-message overflow
+   menu still painted the dark `var(--panel)` opaque fill, reading as a dark box in the light
+   glass theme. Fold BOTH onto the ONE shared light-glass material like every other chrome
+   popover — no dark opaque menu survives in the light theme. */
+body.theme-frosted .export-dropdown-menu,
+body.theme-frosted .msg-overflow-menu,
 /* COHERENCE (#8/#9): the Control-Center dock is ONE glass family with the windows +
    cards — it consumes the SAME light-glass material/backdrop/rim here (it used to carry a
    bespoke dark blur(36px) over rgba(0,0,0,.4) + an --fg-tinted cyan border, reading as a
@@ -40557,6 +40574,8 @@ body.theme-frosted .thinking-section,
 body.theme-frosted .thinking-section .thinking-header,
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
+body.theme-frosted .export-dropdown-menu,
+body.theme-frosted .msg-overflow-menu,
 body.theme-frosted .cp-popover {
   color: #16191f !important;
   text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
@@ -40611,6 +40630,8 @@ body.theme-frosted .modal-content,
 body.theme-frosted .on-card,
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
+body.theme-frosted .export-dropdown-menu,
+body.theme-frosted .msg-overflow-menu,
 body.theme-frosted .cp-popover {
   /* Redefine --fg to the chrome dark ink on these surfaces, so inner
      `color: var(--fg)` AND `color-mix(in srgb, var(--fg) N%, …)` resolve to dark /
