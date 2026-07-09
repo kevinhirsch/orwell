@@ -69,12 +69,16 @@ def test_l2_open_settings_prefers_the_real_gear_not_the_rail():
 
 def test_l2_admin_gate_uses_the_real_probe_not_the_unset_global():
     js = _read("static", "js", "orwellOnboarding.js")
-    # the live admin probe replaces the never-set window._isAdmin gate for the J4 card
+    # the live admin probe replaces the never-set window._isAdmin gate for the J4 surface
     assert "/api/auth/status" in js
     assert "async function isAdmin" in js
     assert "await isAdmin()" in js
-    # the J4 button + copy branch on the probe result, not on the dead global
-    assert "admin ? [{ label: \"Open Settings\"" in js
+    # #874: the J4 surface is now the no-feed notice — its "Open Settings" action + copy still
+    # branch on the real probe result, not the dead global
+    seg = js[js.index("async function showNoFeedNotice"):]
+    seg = seg[: seg.index("\n  function openSettings")]
+    assert "const admin = await isAdmin();" in seg
+    assert "if (admin) {" in seg and '"Open Settings"' in seg
 
 
 # ── L3: generated photos show expanded, never auto-collapse ─────────────────────────

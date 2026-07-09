@@ -387,11 +387,13 @@ def test_sourcepin_870_modal_stack_manager():
 
 
 def test_sourcepin_870_onboarding_drops_manual_inert_dance():
-    # The old "Choose models" hack lifted inert, opened Settings, then re-inerted on
-    # a 50ms timer — the symptom of the missing stack coordinator. With the stack it
-    # just opens Settings; the manual re-inert timer is gone from the handler.
+    # The old "Choose models" hack (the now-removed #874 setup wizard) lifted inert, opened
+    # Settings, then re-inerted on a 50ms timer — the symptom of the missing stack coordinator.
+    # #874 retired that wizard's own "Production settings" door; the #874 no-feed notice's
+    # "Open Settings" action is its replacement — it still just opens real Settings, no manual
+    # re-inert dance.
     onb = _read("static", "js", "orwellOnboarding.js")
-    assert "data-ob-choose-models" in onb               # the door is still there…
-    assert "openSettings" in onb                         # …and still opens real Settings
+    assert "data-no-feed-settings" in onb                 # the door is still there…
+    assert "openSettings" in onb                          # …and still opens real Settings
     # the brittle re-inert-on-a-timer dance is gone (the stack owns coordination now)
     assert "win._inertBackground && win._inertBackground()" not in onb

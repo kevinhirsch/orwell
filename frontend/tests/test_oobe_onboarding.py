@@ -183,15 +183,17 @@ def test_producers_open_with_a_hidden_kickoff_on_welcome_dismiss():
     assert "hasActiveStream" in kern
 
 
-def test_welcome_dismiss_runs_the_kickoff():
-    # The setup wizard's onProceed ("Start casting") opens the fresh interview session then fires the
-    # producers' kickoff — the season begins on the player's explicit confirm, not on feed-probe.
+def test_healthy_case_proceeds_directly_with_no_gate_or_modal():
+    # #874: once a feed resolves (the healthy case — it now does OOB per #860), route() opens the
+    # fresh interview session and fires the producers' kickoff DIRECTLY — no intermediate "Start
+    # casting" confirm step, no wizard modal in between.
     onb = _read("static", "js", "orwellOnboarding.js")
     route = onb[onb.index("async function route"):]
-    assert "const onProceed" in route
     assert "openFreshInterviewSession" in route
     assert "_orwellOpenGameAfterCasting" in route
-    assert "mountSetup(onProceed)" in route
+    # the removed setup-wizard modal never mounts from the healthy path
+    assert "mountSetup" not in onb
+    assert "function mountSetup" not in route
 
 
 def test_resume_cue_after_photo_exists():
@@ -231,172 +233,136 @@ def test_the_hidden_cue_seam_exists_in_chat():
     assert "_hideUserBubble" in js
 
 
-# ── 3. The SETUP WIZARD (pre-game model setup; replaces the verbose welcome modal) ──────
-# Owner request (2026-06-23): set the LLM/models in a wizard-like step BEFORE the game starts,
-# borrowing the Settings model controls, showing NO welcome data apart from the framing line
-# "Production needs the feeds". And the premature-start bug: adding a feed used to start the
-# season before the player could pick their models — now the season begins only on "Start casting".
+# ── 3. #874 — the gating "Production needs the feeds" modal is REMOVED for the healthy case ──
+# Owner ruling (issue #874, from the first-run UX audit): the healthy case (a feed already
+# resolves — which it now does OOB per #860) gets NO gate and NO modal at all; the producers reach
+# out in-chat immediately. Only a genuinely MISSING feed gets any UI, and that UI is a NON-BLOCKING
+# above-composer notice + a disabled composer + a working Settings door — never a full-window modal,
+# never a raw model id.
 
-def _setup_seg(onb):
-    """The mountSetup function body (helper-robust slice: from the fn to the next top-level fn)."""
-    start = onb.index("function mountSetup")
+def _no_feed_seg(onb):
+    """The showNoFeedNotice function body (helper-robust slice: from the fn to the next top-level fn)."""
+    start = onb.index("async function showNoFeedNotice")
     end = onb.index("function openSettings", start)
     return onb[start:end]
 
 
-def test_setup_wizard_is_its_own_modal_not_in_chat():
+def test_setup_wizard_modal_is_gone():
+    # The old full-window "Production needs the feeds" / "Welcome to the Big Brother house" wizard
+    # modal is retired entirely — no mount function, no wizard-only CTA/copy survive.
     onb = _read("static", "js", "orwellOnboarding.js")
-    assert "function mountSetup" in onb
-    # #709: it is a real dialog modal — RECREATED on the OrwellWindow kit (modal:true owns the
-    # scrim + inert + focus-trap + aria-modal), the same overlay machinery as the holding cards.
-    assert "OrwellWindowKit.create" in onb
-    assert "modal: true" in onb
-    # the ONLY welcome copy is the framing line; the rest is feed/model setup. F1 (#1022): the
-    # wizard heading is now DISTINCT from the holding-card model gate so the two read differently.
-    seg = _setup_seg(onb)
-    # M2-1 (audit B1): the cold open leads with the SHOW FANTASY, not the plumbing.
-    assert "Welcome to the Big Brother house" in seg
-    # the holding-card gate's framing must NOT be reused here (F1 — the two were indistinguishable)
+    assert "function mountSetup" not in onb
+    assert "Welcome to the Big Brother house" not in onb
+    assert "Production needs the feeds" not in onb
+    assert "data-ob-setup-start" not in onb
+    assert "data-ob-choose-models" not in onb
+    assert "humanizeModelId" not in onb
+    # no "Start casting" / "Enter the house" gating confirm step survives anywhere
+    assert "Enter the house" not in onb
+
+
+def test_no_feed_notice_is_non_blocking_not_a_modal():
+    onb = _read("static", "js", "orwellOnboarding.js")
+    assert "async function showNoFeedNotice" in onb
+    seg = _no_feed_seg(onb)
+    # it composes the above-composer/top-banner NOTICE kit, never the blocking OrwellWindow kit —
+    # this is the structural "non-blocking" guarantee (no scrim, no inert background, no focus-trap).
+    assert "OrwellNoticeKit.create" in seg
+    assert "OrwellWindowKit.create" not in seg
+    assert 'placement: "top-banner"' in seg
+    assert "No feed connected yet" in seg
     assert "Production needs the feeds" not in seg
-    # the old verbose welcome copy is gone
-    assert "Welcome to the house" not in onb
 
 
-def test_onboarding_gates_read_distinctly():
-    # F1 (#1022): the holding-card MODEL GATE (no model configured — go in anyway) and the SETUP
-    # WIZARD (pick your season's models) used to share the same "Production needs the feeds" framing,
-    # leaving the two screens indistinguishable to a new player (and to an automated harness). They
-    # must now carry DISTINCT headings/copy.
+def test_no_feed_notice_disables_the_composer():
     onb = _read("static", "js", "orwellOnboarding.js")
-    wizard = _setup_seg(onb)
-    # the holding-card gate (mountHolding call in route()) and the wizard <h1> are different strings.
-    assert "No feed connected yet" in onb          # the J4 holding-card title
-    assert "Welcome to the Big Brother house" in wizard   # the wizard <h1> (M2-1 fantasy lead)
-    # the old shared framing is gone from BOTH gates' copy.
-    assert "Production needs the feeds" not in wizard
-    # and the model-gate holding card no longer uses it either (it is now the distinct title above).
-    route = onb[onb.index("async function route"):]
-    gate = route[route.index("mountHolding("):]
-    gate = gate[: gate.index(");")]
-    assert "Production needs the feeds" not in gate
-    assert "No feed connected yet" in gate
+    assert "function _setComposerDisabledForNoFeed" in onb
+    seg = _no_feed_seg(onb)
+    assert "_setComposerDisabledForNoFeed(true)" in seg
+    # disabling touches the real composer elements (never a fake/duplicate control)
+    disable_fn = onb[onb.index("function _setComposerDisabledForNoFeed"):]
+    disable_fn = disable_fn[: disable_fn.index("\n  }")]
+    assert 'getElementById("message")' in disable_fn or "_composerEls" in disable_fn
+    assert "box.disabled = !!disabled" in onb
+    # it re-enables on hideNoFeedNotice (the feed-lands / re-route path)
+    hide_fn = onb[onb.index("function hideNoFeedNotice"):]
+    hide_fn = hide_fn[: hide_fn.index("\n  }")]
+    assert "_setComposerDisabledForNoFeed(false)" in hide_fn
 
 
-def test_setup_wizard_shows_on_every_fresh_season():
-    # The wizard shows on EVERY fresh game/season (not once per account). The per-user seen-marker
-    # only debounces page RELOADS within the same pre-game session; the restart entry points CLEAR
-    # it so a new season sets up again.
+def test_no_feed_notice_offers_a_working_settings_door_for_admins():
     onb = _read("static", "js", "orwellOnboarding.js")
-    assert "orwell-welcome-seen" in onb
-    assert "document.body.dataset.user" in onb or "document.body && document.body.dataset.user" in onb
-    assert "welcomeSeen()" in onb and "markWelcomeSeen()" in onb
-    # the marker is cleared at restart so the wizard re-shows for a fresh season
-    assert "function clearWelcomeSeen" in onb
-    # _orwellMarkRestart clears it (both restart entry points call markRestart)
-    mr = onb[onb.index("window._orwellMarkRestart"):]
-    mr = mr[: mr.index("\n  };")]
-    assert "clearWelcomeSeen()" in mr
-    # it is shown from route() only pre-game (started === false), after the model gate
-    route = onb[onb.index("async function route"):]
-    assert "if (!welcomeSeen())" in route
-    assert "mountSetup(onProceed)" in route
+    seg = _no_feed_seg(onb)
+    assert "isAdmin" in seg
+    assert "openSettings" in seg
+    assert '"Open Settings"' in seg
 
 
-def test_setup_wizard_reshows_after_a_backend_reset_via_fresh_intake():
-    # A BACKEND/host factory reset runs server-side and never reaches the FE restart hooks
-    # (settings.js / orwellNewSeason.js), so the per-user marker can go stale and skip the wizard on
-    # the new season's first open. route() detects a genuinely fresh casting (the engine intake is
-    # empty — casting.known has no captured fields) with NO interview yet underway and clears the
-    # stale marker so the wizard shows again — without re-popping on a same-session mid-interview reload.
+def test_no_feed_notice_never_shows_a_raw_model_id():
+    # The notice's own copy never names a provider/model id — it only says a feed is missing and
+    # points at Settings (raw ids stay confined to the real Settings model controls).
+    import re
     onb = _read("static", "js", "orwellOnboarding.js")
-    route = onb[onb.index("async function route"):]
-    assert "st.casting.known" in route
-    assert "_intakeEmpty" in route and "!_conversationHasAssistantTurn()" in route
-    assert "!_seatTakenBefore" not in route   # the per-tab seat-flag gate is retired
-    # the stale marker is cleared so the wizard re-shows, BEFORE the !welcomeSeen() gate
-    clear_at = route.index("clearWelcomeSeen()")
-    gate_at = route.index("if (!welcomeSeen())")
-    assert clear_at < gate_at
+    seg = _no_feed_seg(onb)
+    literal_strings = "".join(re.findall(r'"[^"]*"', seg))
+    assert not re.search(r"\b[\w.]+/[\w.-]+-[\w.]+\b", literal_strings)
 
 
-def test_setup_wizard_sequenced_after_the_model_gate():
+def test_no_feed_notice_reprobes_and_clears_itself():
+    # Mirrors the old holding card's 5s re-probe, minus the blocking modal: once a feed connects,
+    # the notice hides, the composer re-enables, and route() re-evaluates (proceeding directly).
+    onb = _read("static", "js", "orwellOnboarding.js")
+    seg = _no_feed_seg(onb)
+    assert "setInterval" in seg and "5000" in seg
+    assert "anyModelConfigured()" in seg
+    assert "hideNoFeedNotice()" in seg and "route()" in seg
+
+
+def test_healthy_case_has_no_gate_after_a_feed_resolves():
+    # F1/#874: the J4 no-feed notice (a genuinely missing feed) and the healthy proceed-path read
+    # distinctly — there is no shared "Production needs the feeds" framing anywhere, and the healthy
+    # path never mounts any onboarding surface at all.
     onb = _read("static", "js", "orwellOnboarding.js")
     route = onb[onb.index("async function route"):]
-    # the model gate (J4) returns BEFORE the wizard mounts — production needs a feed first
-    assert route.index("anyModelConfigured") < route.index("mountSetup(onProceed)")
-    # F1 (#1022): the J4 holding card and the wizard now carry DISTINCT framing so a new player can
-    # tell the "no model — go in anyway" gate apart from the "pick your season's models" wizard.
-    assert "No feed connected yet" in onb        # J4 holding-card model gate
-    assert "Welcome to the Big Brother house" in onb    # the setup wizard h1 (M2-1)
+    # the model gate (J4) returns BEFORE the healthy path proceeds — production needs a feed first
+    assert route.index("anyModelConfigured") < route.index("openFreshInterviewSession")
+    assert "No feed connected yet" in onb          # the J4 notice title
+    assert "Production needs the feeds" not in onb
     assert "Production needs a feed source" not in onb
 
 
-def test_setup_wizard_starts_only_on_explicit_confirm_not_on_feed_probe():
-    # The PREMATURE-START FIX: the season begins on the wizard's "Start casting" button, NOT
-    # automatically when a feed is probed. The kickoff (_orwellOpenGameAfterCasting) is reached
-    # through onProceed, which fires from the Start button's dismiss — never from the model-change
-    # listener (which only re-renders the wizard's model summary).
-    onb = _read("static", "js", "orwellOnboarding.js")
-    seg = _setup_seg(onb)
-    assert "Enter the house" in seg   # M2-1: the one cold-open CTA (was "Start casting")
-    assert "data-ob-setup-start" in seg
-    # the Start button gates on a resolved chat model (no narrator ⇒ disabled)
-    assert "_startBtn" in seg and "disabled" in seg
-    # dismissing marks it seen and runs onProceed (open the interview + producers' kickoff)
-    assert "markWelcomeSeen()" in seg
-    assert "onProceed && onProceed()" in seg
-    # the model-change listener re-renders (refresh) but does NOT proceed/kickoff
-    assert "orwell:models-changed" in seg and "refresh" in seg
-
-
-def test_setup_wizard_borrows_the_settings_model_controls():
-    # Owner request: copy the elements from the Settings page. The wizard shows the model summary
-    # (read from the same projections the chatbox/Settings use) and a "Choose models" door into the
-    # real Settings model controls — no parallel source of truth.
-    onb = _read("static", "js", "orwellOnboarding.js")
-    seg = _setup_seg(onb)
-    assert "Production settings" in seg  # M2-1: the demoted config link (was "Choose models")
-    assert "data-ob-choose-models" in seg
-    assert "openSettings" in seg
-    # the summary is read from the chatbox/Settings projections, not a separate store
-    assert "/api/default-chat" in onb
-    assert "image_model" in onb
-    # the demoted production-feeds line (M2-1): humanized narrator + portrait slots
-    assert "Narrator:" in seg
-    assert "Portraits:" in seg
-    assert "humanizeModelId" in seg
-
-
-# ── 3b. Auto-advance after the model is configured (no manual reload, no premature start) ──
+# ── 3b. Auto-advance after the model is configured (no manual reload) ──────────────────────
 
 def test_flow_re_renders_after_model_config_without_a_reload():
-    # Once the player connects/changes a feed in Settings, the wizard must re-evaluate WITHOUT a page
-    # reload — but it must NOT start the season (premature-start fix). models.js fires
-    # orwell:models-changed on the none→some transition; onboarding listens.
+    # Once the player connects/changes a feed in Settings, onboarding must re-evaluate WITHOUT a
+    # page reload. models.js fires orwell:models-changed on the none→some transition; onboarding
+    # listens and clears the #874 no-feed notice immediately (not on its own 5s re-probe).
     models = _read("static", "js", "models.js")
     assert "orwell:models-changed" in models
     assert "_modelsAvailable" in models       # the none→some guard
     onb = _read("static", "js", "orwellOnboarding.js")
     assert 'addEventListener("orwell:models-changed"' in onb
-    # the re-route clears a stale holding card immediately (not on the 5s re-probe)
     assert "_reRouteAfterModelConfig" in onb
-    assert "data-ob-holding" in onb           # only a holding card is auto-dismissed
-    # the re-route ultimately calls route()
+    # the re-route clears the no-feed notice immediately, then re-evaluates
     seg = onb[onb.index("function _reRouteAfterModelConfig"):]
     seg = seg[: seg.index("\n  }")]
+    assert "hideNoFeedNotice()" in seg
     assert "route()" in seg
 
 
-def test_splash_tips_are_suppressed_during_onboarding():
+def test_splash_tips_are_suppressed_while_the_no_feed_notice_is_up():
     # The welcome splash's rotating gameplay tips + the "house is waiting" tagline must NOT show
-    # during the setup wizard / cast-photo step (they bleed through behind the surface). A body flag
-    # drives a CSS suppression.
+    # while the composer is disabled for a missing feed (they'd bleed through behind the notice). A
+    # body flag drives a CSS suppression.
     onb = _read("static", "js", "orwellOnboarding.js")
     assert "setOnboardingActive" in onb
     assert 'classList.toggle("ow-onboarding"' in onb
-    # the wizard arms it on mount
-    seg = _setup_seg(onb)
+    # the no-feed notice arms it on mount, disarms it on clear
+    seg = _no_feed_seg(onb)
     assert "setOnboardingActive(true)" in seg
+    hide_fn = onb[onb.index("function hideNoFeedNotice"):]
+    hide_fn = hide_fn[: hide_fn.index("\n  }")]
+    assert "setOnboardingActive(false)" in hide_fn
     css = _read("static", "css", "game-trim.css")
     # both onboarding flags hide the splash tip + tagline
     assert ".ow-onboarding #welcome-screen .welcome-tip" in css

@@ -1,11 +1,15 @@
-"""M1-6 (audit A6) — first-run card: own stacking context, docked toast, honest gated CTA.
+"""M1-6 (audit A6) → #874 (2026-07-09) — first-run surfaces stay honest without a gating modal.
 
-Source pins: (1) the onboarding window is one opaque surface in its own stacking context
-(no wordmark/splash ghosting through glass); (2) the corner toast docks below the card's
-titlebar band while onboarding is up (never over the ×); (3) the gated Start CTA carries a
-visible why-disabled cue with a bounded re-probe poll (the models-changed event can race a
-settings write) that is torn down on dismiss — the gate itself stays honest (no narrator
-feed ⇒ no game), it explains instead of failing open.
+M1-6 originally hardened the setup-wizard's "why is Start disabled" cue + opaque stacking
+context. #874 removed that wizard entirely for the healthy case: a resolved feed proceeds
+straight into the interview with no gated CTA to explain. The M1-6 PRINCIPLE carries forward
+onto the surface that replaced it — the #874 no-feed notice — which still (1) never fails open
+silently (no feed ⇒ the composer visibly disables, with a notice that says why) and (2) still
+re-probes past a settings-write race instead of going stale.
+
+Source pins: (1) the dead wizard-only CSS (`[data-ob-setup]` opaque surface, `.ob-start-hint`,
+`.ob-prod-settings-link`) is gone; (2) the no-feed notice disables the composer + explains why +
+re-probes on a bounded interval, torn down the instant a feed connects.
 """
 from __future__ import annotations
 
@@ -20,28 +24,31 @@ def _read(rel: str) -> str:
         return fh.read()
 
 
-def test_onboarding_window_is_opaque_and_isolated():
+def test_dead_wizard_only_css_is_gone():
     css = _read("static/css/game-trim.css")
-    m = re.search(r"body\.ow-onboarding \.ow-window:has\(\[data-ob-setup\]\) \{(.*?)\}", css, re.S)
-    assert m, "the opaque-surface rule targets ONLY the onboarding window"
-    body = m.group(1)
-    assert "background: var(--bg" in body
-    assert "backdrop-filter: none" in body
-    assert "isolation: isolate" in body
+    assert "[data-ob-setup]" not in css
+    assert ".ob-start-hint" not in css
+    assert ".ob-prod-settings-link" not in css
 
 
-def test_toast_docks_below_the_card_while_onboarding():
-    css = _read("static/css/game-trim.css")
-    assert re.search(r"body\.ow-onboarding #orwell-notice-toast \{ top: \d+px; \}", css), \
-        "the corner toast must clear the onboarding card's titlebar/× band"
-
-
-def test_start_cta_carries_a_cue_and_a_bounded_reprobe():
+def test_no_feed_notice_carries_a_visible_why_disabled_cue():
     js = _read("static/js/orwellOnboarding.js")
-    assert '_startHint' in js and 'ob-start-hint' in js
-    assert re.search(r"Start unlocks once a narrator feed connects", js), "the cue names WHY"
-    assert re.search(r"_startPoll = setInterval\(refresh, 2500\)", js), "a poll re-probes past the event race"
-    assert re.search(r"const dismiss = \(\) => \{\s*\n\s*if \(_down\) return; _down = true;\s*\n\s*_stopStartPoll\(\)", js), \
-        "dismiss tears the poll down (never leaks past the card)"
-    assert re.search(r"if \(hasFeed\) \{\s*\n\s*_startHint\.hidden = true;\s*\n\s*_stopStartPoll\(\)", js), \
-        "a connected feed clears both the cue and the poll"
+    assert "async function showNoFeedNotice" in js
+    seg = js[js.index("async function showNoFeedNotice"):]
+    seg = seg[: seg.index("\n  function openSettings")]
+    assert "No feed connected yet" in seg
+    assert "can't speak until a feed is live" in seg
+
+
+def test_no_feed_notice_reprobes_on_a_bounded_interval_and_tears_down():
+    js = _read("static/js/orwellOnboarding.js")
+    seg = js[js.index("async function showNoFeedNotice"):]
+    seg = seg[: seg.index("\n  function openSettings")]
+    assert re.search(r"_noFeedTimer = setInterval\(async \(\) => \{", seg)
+    assert "5000" in seg
+    assert "anyModelConfigured()" in seg
+    # a connected feed clears both the notice and the composer disable, and torn down cleanly
+    hide_fn = js[js.index("function hideNoFeedNotice"):]
+    hide_fn = hide_fn[: hide_fn.index("\n  }")]
+    assert "clearInterval(_noFeedTimer)" in hide_fn
+    assert "_setComposerDisabledForNoFeed(false)" in hide_fn

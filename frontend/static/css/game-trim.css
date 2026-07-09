@@ -178,47 +178,6 @@ body[data-game-build] [data-vis-card="chat-bar"] {
   display: none !important;
 }
 
-/* ── M1-6 (audit A6): the first-run card is ONE OPAQUE SURFACE in its own stacking
-   context — glass themes let the wordmark/ambient splash text ghost straight through the
-   welcome modal. Scoped to the onboarding window only (`:has([data-ob-setup])`); every
-   other window keeps the theme's glass. */
-body.ow-onboarding .ow-window:has([data-ob-setup]) {
-  background: var(--bg, #15171c);
-  backdrop-filter: none;
-  isolation: isolate;
-}
-body.ow-onboarding .ow-window:has([data-ob-setup]) .on-card { background: var(--panel, #1d2026); }
-
-/* M1-6: while the onboarding card is up, the corner toast DOCKS below the card's titlebar
-   band instead of landing over its close ×. */
-body.ow-onboarding #orwell-notice-toast { top: 64px; }
-
-/* M1-6: the why-is-Start-disabled cue under the button row (text owned by refresh()). */
-.ob-start-hint {
-  margin-top: .45rem;
-  font-size: var(--fs-sm, .85rem);
-  color: color-mix(in srgb, var(--fg) 70%, transparent);
-  line-height: 1.4;
-}
-
-/* M2-1 (audit B1): the cold open's config door is a QUIET LINK under the one primary CTA
-   ("Enter the house"), not a peer button — the first screen leads with the show, the
-   plumbing lives behind Production settings. */
-.ob-prod-settings-link {
-  background: none;
-  border: none;
-  padding: .35rem .5rem;
-  font-size: var(--fs-sm, .85rem);
-  color: color-mix(in srgb, var(--fg) 62%, transparent);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-.ob-prod-settings-link:hover,
-.ob-prod-settings-link:focus-visible {
-  color: var(--fg);
-}
-
 /* ── M2-5 (audit B7): tool beats read as PRODUCTION SLATES in the game build ─────────────
  * One aligned rail (a thin accent rule down the beat column), the label set in slate type
  * (small-caps tracking, dimmed ink), no debug tail (the "done" span is suppressed at the
