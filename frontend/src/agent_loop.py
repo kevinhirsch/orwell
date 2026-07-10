@@ -2493,9 +2493,20 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         # (the board moved under us mid-turn) is reconciled-and-RETRIED (#591); a SECOND consecutive one
         # is DEFERRED (CON-11, `defer_fold=True`) rather than dropped — this is frequently the scene's
         # ONLY consequence fold, so it must land eventually, never evaporate (mandate #4).
+        #
+        # A10 / #591 / R1c — mint ONE stable at-most-once key for THIS scene and thread it through EVERY
+        # attempt: it rides in kwargs, so `_backfill_with_cas`'s single retry AND the CON-11 deferred
+        # queue (which stores + re-passes the same kwargs) all reuse it. Under sustained two-window
+        # concurrency two turns can drain the same deferred fold and re-drive it; a 409 there is
+        # ambiguous, so the FE conservatively re-queues and the fold would land TWICE. The engine dedups
+        # by this key (a repeat returns the prior eventId without re-folding), so the scene's consequence
+        # can never double-apply — CAS alone can't prevent it (both re-drives carry a valid token).
+        from routes import chat_helpers as _ch_idem
+        _scene_idem_key = _ch_idem._mint_idempotency_key()
         if await _backfill_with_cas(owner, _oe.record_interaction, content[:400],
                                     with_ids=ids, kind=kind, consequence=consequence,
-                                    user=owner, defer_fold=True) is None:
+                                    user=owner, defer_fold=True,
+                                    idempotency_key=_scene_idem_key) is None:
             return False
         n_edges = len(consequence["edges"]) if consequence and "edges" in consequence else 0
         n_about = len(consequence["aboutEdges"]) if consequence and "aboutEdges" in consequence else 0

@@ -547,7 +547,7 @@ async def run_competition(comp_type: str | None = None, participant_ids: list | 
     return await _call("runCompetition", args, user=user)
 
 
-async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
     """Record a player-present scene as an engine event (player-witnessed → the player's
     knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023);
     an optional Vault-free `consequence` descriptor (ADR 0005) lets the caller PROPOSE which
@@ -557,7 +557,14 @@ async def record_interaction(content: str, with_ids: list | None = None, initiat
     0065 Part A — an optional `expected_beat_seq` compare-and-swap token is threaded in ONLY when
     provided; if it no longer matches the engine's committed beatSeq the call is refused (409
     `stale-beat`). Absent ⇒ the request is identical to today (the FE owns the per-turn capture/
-    attach of the token — sequenced after this engine slice)."""
+    attach of the token — sequenced after this engine slice).
+
+    A10 / #591 / R1c — an optional `idempotency_key` (0065 Part B, extended to this port) is threaded
+    in ONLY when provided. A fold-bearing scene the FE re-drives after a stale-409 (the #591 retry + the
+    CON-11 deferred-fold queue) reuses the SAME key across every attempt, so the engine applies the fold
+    AT-MOST-ONCE: under sustained two-window concurrency two turns can drain the same deferred fold and
+    re-drive it, and the key is what stops that from double-folding the hidden layer (CAS alone can't —
+    both re-drives carry a valid reconciled token). Absent ⇒ byte-identical to the pre-key path."""
     witness = [initiator] + [w for w in (with_ids or []) if w != initiator]
     if "player" not in witness:
         witness.append("player")
@@ -568,6 +575,8 @@ async def record_interaction(content: str, with_ids: list | None = None, initiat
         req["consequence"] = consequence
     if expected_beat_seq is not None:
         req["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        req["idempotencyKey"] = idempotency_key
     return await _call("recordInteraction", req, user=user)
 
 

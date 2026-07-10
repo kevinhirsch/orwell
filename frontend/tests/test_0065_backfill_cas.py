@@ -67,7 +67,7 @@ def test_record_interaction_backfill_attaches_token_and_refreshes(monkeypatch):
         return '{"withIds":["npc:3"],"kind":"bonding","content":"a quiet bond"}'
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         captured["expected_beat_seq"] = expected_beat_seq
         return {"recorded": True, "beatSeq": 12}  # the record committed → board moved to 12
 
@@ -155,7 +155,7 @@ def test_normal_multicall_turn_record_then_advance_never_self_409s(monkeypatch):
         return '{"withIds":["npc:3"],"kind":"strategy","content":"the player worked the room"}'
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         if expected_beat_seq is not None and expected_beat_seq != seq["v"]:
             raise _stale_409(seq["v"])
         seq["v"] += 1                          # the record committed — beatSeq moved
@@ -267,7 +267,7 @@ def test_record_backfill_stale_409_is_reattempted_and_lands(monkeypatch):
         return '{"withIds":["npc:3"],"kind":"bonding","content":"a bond"}'
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         record_calls["n"] += 1
         # First call carries the stale token (4) → 409; the reconcile refreshes last-seen to 9, so the
         # RE-ATTEMPT carries 9 and the engine accepts it (the fold lands).
@@ -306,7 +306,7 @@ def test_record_backfill_stale_twice_defers_instead_of_dropping(monkeypatch):
         return '{"withIds":["npc:3"],"kind":"bonding","content":"a bond"}'
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         record_calls["n"] += 1
         raise _stale_409(9 + record_calls["n"])  # always stale — the board keeps moving
 
@@ -380,7 +380,7 @@ def test_deferred_fold_lands_on_next_backfill_opportunity(monkeypatch):
     # mirrors that (swapping the monkeypatched attribute mid-test would NOT affect an already-deferred
     # closure's captured reference, since `_backfill_with_cas` receives `fn` by value at call time).
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         record_calls["n"] += 1
         if expected_beat_seq == 11:
             return {"recorded": True, "beatSeq": 12}  # the board has since settled at 11 — it lands
@@ -536,7 +536,7 @@ def test_non_stale_error_in_backfill_is_swallowed_fail_closed(monkeypatch):
         return '{"withIds":["npc:3"],"kind":"bonding","content":"a bond"}'
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         raise orwell_engine.EngineToolError("engine exploded", status=500)
 
     monkeypatch.setattr(llm_core, "llm_call_async", fake_llm)
