@@ -80,6 +80,97 @@ def _auth_disabled() -> bool:
     return os.getenv("AUTH_ENABLED", "true").lower() == "false"
 
 
+def _origin_netloc(origin: str) -> Optional[str]:
+    """The ``host[:port]`` authority of an ``Origin`` value (``scheme://host[:port]``), lowercased and
+    with the scheme's DEFAULT port stripped so an explicit ``:80``/``:443`` matches a bare ``Host``
+    header (browsers omit default ports in both, but normalize defensively). ``None`` if unparseable /
+    hostless (an opaque ``Origin`` like ``null`` — which a sandboxed/foreign context sends)."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit((origin or "").strip())
+    except Exception:
+        return None
+    host = (parts.hostname or "").lower()
+    if not host:
+        return None
+    scheme = (parts.scheme or "").lower()
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    if port is None or (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        return host
+    return f"{host}:{port}"
+
+
+def _allowed_ws_origins() -> set:
+    """The explicit cross-origin allowlist for a WS upgrade — the SAME ``ALLOWED_ORIGINS`` the app's
+    credentialed CORS layer trusts (``app.py`` / ``core.middleware``), normalized to
+    ``scheme://host[:port]`` (default port stripped, lowercased). No new origin model: the WS guard
+    reuses exactly the origins the rest of the app already sanctions for cross-site credentialed
+    reads. An empty/unset value ⇒ empty set (the same-origin ``Host`` match below is the floor)."""
+    import os
+    raw = (os.getenv("ALLOWED_ORIGINS") or "").strip()
+    out = set()
+    for o in raw.split(","):
+        o = o.strip()
+        if not o or o == "*":
+            continue
+        netloc = _origin_netloc(o)
+        scheme = o.split("://", 1)[0].lower() if "://" in o else ""
+        if netloc and scheme:
+            out.add(f"{scheme}://{netloc}")
+    return out
+
+
+def _ws_origin_allowed(websocket: WebSocket) -> bool:
+    """Cross-Site WebSocket-Hijacking (CSWSH) defense — protocol spec §1.1. A browser attaches the
+    session cookie to a CROSS-SITE WS upgrade automatically, and the HTTP CORS / TrustedHost middleware
+    does NOT cover a WebSocket handshake, so cookie auth alone cannot stop a malicious page from opening
+    an authenticated socket to a victim's session. This enforces an ``Origin`` allowlist BEFORE any
+    ``hello``/``bind``/frame is processed — it sits ALONGSIDE the cookie auth (``_ws_current_user``) +
+    owner guard (``_ws_owns``), never in place of them.
+
+    The rule (spec §1.1 — reject a present-and-foreign Origin):
+
+      * **No ``Origin`` header → allow.** A browser ALWAYS sends ``Origin`` on a cross-site WS
+        handshake, so the CSWSH attack surface always carries one; the absent case is a non-browser /
+        native / same-origin server-side / test client (which also does not auto-attach the victim's
+        cookie), so refusing it would break legitimate non-browser paths for no security gain.
+      * **``Origin`` present → allow IFF** it is same-origin with the request ``Host`` (``host[:port]``
+        match — the deploy's own host, so LAN + tunnel/HTTPS exposure per ADR 0007/0014 works with no
+        hard-coded domain) **OR** it is in the configured ``ALLOWED_ORIGINS`` allowlist (the same
+        origins the credentialed CORS layer trusts).
+      * **Otherwise (present + foreign / opaque ``null``) → reject** (the upgrade is refused, no ack).
+
+    A browser cannot forge either ``Origin`` or ``Host`` from page JS, and in a public deployment
+    ``Host`` is additionally pinned by ``TrustedHostMiddleware`` — so the same-origin comparison is
+    robust against the browser-driven CSWSH attack even with ``ALLOWED_HOSTS`` unset."""
+    try:
+        origin = websocket.headers.get("origin")
+    except Exception:
+        # No header surface at all (a non-Starlette/test transport) — treat as the absent-Origin
+        # non-browser path (allow); cookie auth + owner guard still apply below.
+        return True
+    if not origin:
+        return True  # non-browser / same-origin native / test path — CSWSH always carries an Origin
+    origin_netloc = _origin_netloc(origin)
+    if origin_netloc is None:
+        return False  # present but opaque/unparseable (e.g. "null") → foreign
+    # 1) Same-origin: the Origin's host[:port] equals the request Host (the deploy's own host).
+    try:
+        host = (websocket.headers.get("host") or "").strip().lower()
+    except Exception:
+        host = ""
+    if host and origin_netloc == host:
+        return True
+    # 2) Explicit allowlist — the CORS ALLOWED_ORIGINS the app already sanctions (scheme+host+port).
+    scheme = origin.split("://", 1)[0].lower() if "://" in origin else ""
+    if scheme and f"{scheme}://{origin_netloc}" in _allowed_ws_origins():
+        return True
+    return False
+
+
 def _ws_current_user(websocket: WebSocket) -> Optional[str]:
     """Resolve the authenticated user for a WebSocket upgrade.
 
@@ -210,6 +301,16 @@ def _resolve_canonical(user: Optional[str], per_tab_id: str, started: bool) -> t
 # ``setup_ws_routes`` just binds it to the path.
 
 async def ws_session(websocket: WebSocket) -> None:
+        # CSWSH guard (protocol §1.1) — FIRST, before accept or any frame. A foreign-origin upgrade is
+        # refused at handshake time (policy-violation close 1008, no accept, no ack): a browser attaches
+        # the session cookie to a cross-site WS upgrade automatically, so cookie auth alone cannot stop a
+        # malicious page from opening an authenticated socket. Same-origin browser clients (matching
+        # Origin) and non-browser/native/test paths (no Origin header) are unaffected. This is IN
+        # ADDITION to the cookie auth + owner guard below.
+        if not _ws_origin_allowed(websocket):
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1008)  # 1008 = policy violation
+            return
         await websocket.accept()
         user = _ws_current_user(websocket)
 

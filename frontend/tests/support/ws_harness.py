@@ -46,8 +46,13 @@ class FakeWebSocket:
     ``client_send`` / ``client_disconnect`` and reads server→client frames with ``recv`` — both over
     asyncio queues, so the handler and the test cooperate in one loop."""
 
-    def __init__(self, cookies: Optional[dict] = None, app: Any = None):
+    def __init__(self, cookies: Optional[dict] = None, app: Any = None,
+                 headers: Optional[dict] = None):
         self.cookies = cookies or {}
+        # Starlette's ``WebSocket.headers`` is a case-insensitive ``Headers`` with ``.get`` returning
+        # lowercased keys — the CSWSH origin guard reads ``origin``/``host``. Model that with a
+        # lowercase-keyed dict so a test can inject an ``Origin`` (an absent map ⇒ the non-browser path).
+        self.headers = {str(k).lower(): v for k, v in (headers or {}).items()}
         self.app = app or _FakeApp()
         self.sent: list[dict] = []
         self.accepted = False
@@ -100,8 +105,8 @@ class FakeWebSocket:
                 return out
 
 
-def new_ws(cookies: Optional[dict] = None) -> FakeWebSocket:
-    return FakeWebSocket(cookies=cookies)
+def new_ws(cookies: Optional[dict] = None, headers: Optional[dict] = None) -> FakeWebSocket:
+    return FakeWebSocket(cookies=cookies, headers=headers)
 
 
 def spawn(ws: FakeWebSocket) -> asyncio.Task:
