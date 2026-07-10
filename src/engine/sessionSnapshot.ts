@@ -396,6 +396,27 @@ export interface SessionCore {
    * pre-0070 saves (no texture; the deterministic template content simply stands).
    */
   textureOverrides?: Record<string, string>;
+  /**
+   * Issue #1322 (P2) — the approach-rotation anti-recency cooldown: per-NPC remaining STRETCHES (a
+   * distinct week:phase) before they are eligible to lead `socialInitiatives`'s top-3 again, so the
+   * same seeded-affinity NPC can't monopolize every approach. Persisted so the rotation survives a
+   * restart instead of re-favoring the same top NPC (0030). PLAYER-FACING PROJECTION state only —
+   * `rankApproaches` itself is untouched/pure; this is applied at the ONE call site that renders the
+   * approach surface (`GameSessionAdapter.socialInitiatives`, via `conversation.ts`'s
+   * `applyApproachCooldown`). Current, mutable per-stretch state (like `presence`) — a lapsed
+   * cooldown legitimately drops back out of the map, so this is deliberately excluded from the
+   * `sessionCoreCounts`/`sessionCoreIsSuperset` non-degradation guards below. Absent on a pre-feature
+   * save ⇒ every NPC starts eligible (byte-identical to a pre-feature load).
+   */
+  approachCooldown?: Record<EntityId, number>;
+  /**
+   * The stretch key (`week:phase`) the cooldown bookkeeping above was last advanced for
+   * (`GameSessionAdapter.syncProjection`) — so a read-only `socialInitiatives()` poll never
+   * double-decrements within the same stretch; only an ACTUAL stretch transition rotates it. Absent
+   * ⇒ the very next transition is treated as the first (harmless: an empty cooldown map decremented
+   * once is still empty).
+   */
+  approachStretchKey?: string;
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */
@@ -599,6 +620,9 @@ export function toGameState(snap: SessionSnapshot): GameState {
  *     `readAnchors` — current-position / per-week snapshot state, overwritten by design every tick/week
  *     (like `ceremony`/`live`, already outside the checkpoint).
  *   - `pacingDripCount` (resets every new week by design; `pacingDripWeek` moves with it).
+ *   - `approachCooldown` (issue #1322) — a per-NPC remaining-stretches counter that legitimately
+ *     counts back DOWN to 0 and drops out of the map as the cooldown lapses, by design (like
+ *     `presence` above), never a monotonic accumulator.
  * Season boundaries (a brand-new game or the one sanctioned restart door) are exempt structurally: the
  * orchestrator only ever diffs a baseline against a LATER candidate of the SAME season — a season's
  * first commit has no baseline at all (`Orchestrator.commitPlayerTurn`), so a reset-to-empty at season

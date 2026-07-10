@@ -48,7 +48,7 @@ import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAll
 import type { Alliance } from "../../engine/alliances";
 import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
 import type { ConfessionalContext } from "../../engine/confessionals";
-import { rankApproaches } from "../../engine/conversation";
+import { rankApproaches, applyApproachCooldown } from "../../engine/conversation";
 import { DECISION } from "../../engine/decisionConstants";
 import type { EvictionManner } from "../../engine/jury";
 import type { NarrativePort } from "../../ports/NarrativePort";
@@ -147,7 +147,7 @@ import {
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
 import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
-import { APPROACH_GATE } from "../../engine/decisionConstants";
+import { APPROACH_GATE, APPROACH_COOLDOWN_STRETCHES } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists, planReserveTwists } from "../../engine/reserveTwists";
 import {
@@ -784,6 +784,25 @@ export class GameSessionAdapter implements GameSession {
 
   /** Feature 0088 — per-NPC current-read anchor bonds (Vault-only; persisted in snapshot). */
   private readAnchors = new Map<EntityId, number>();
+
+  /**
+   * Issue #1322 (P2) — the approach-rotation anti-recency cooldown: per-NPC remaining STRETCHES
+   * before they are eligible to lead `socialInitiatives`'s top-3 again (persisted; see
+   * `sessionSnapshot.ts`'s `approachCooldown`). PLAYER-FACING PROJECTION state only.
+   */
+  private approachCooldown = new Map<EntityId, number>();
+  /** The stretch key the cooldown map above was last advanced for (see `advanceApproachCooldown`). */
+  private approachStretchKey: string | undefined;
+  /**
+   * Ephemeral (NOT persisted, like `producerCache`) — the top-3 initiators `socialInitiatives()`
+   * itself last computed, and the stretch key they were computed FOR. `socialInitiatives()` is a
+   * pure, poll-safe read (the SAME stretch always reproduces the SAME ranking, 0012), so the
+   * cooldown can only rotate at an ACTUAL stretch transition (`syncProjection`, once per committed
+   * beat via `commit()`) — and that rotation needs to know who was actually SHOWN to the player
+   * during the stretch that just ended. If the surface was never read during a stretch, no one is
+   * penalized for it (correct: nothing was ever shown). Recomputed fresh on restore/first read.
+   */
+  private lastApproachStretch: { key: string; initiators: EntityId[] } | undefined;
 
   /** Wire a persistence callback invoked after every mutation (durable save, 0030). */
   setOnPersist(fn: () => void): void {
@@ -2333,6 +2352,11 @@ export class GameSessionAdapter implements GameSession {
        // 0088: persist per-NPC current-read anchor bonds so drift reads warming/cooling/steady across
        // a restart. Vault-only (derived convenience — never a label, never crossed). Absent ⇒ steady.
        ...(this.readAnchors.size > 0 ? { readAnchors: Object.fromEntries(this.readAnchors) as Record<EntityId, number> } : {}),
+       // #1322: persist the approach-rotation cooldown + the stretch key it was last advanced for, so
+       // the anti-recency rotation survives a restart instead of re-favoring the same top NPC. Absent
+       // ⇒ every NPC starts eligible (byte-identical to a pre-feature load).
+       ...(this.approachCooldown.size > 0 ? { approachCooldown: Object.fromEntries(this.approachCooldown) as Record<EntityId, number> } : {}),
+       ...(this.approachStretchKey !== undefined ? { approachStretchKey: this.approachStretchKey } : {}),
        ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       // The producer persona's seed (producer-persona feature) — persisted so the SAME off-camera casting
       // producer is voiced across turns and a restart (it is established pre-game, before any season seed).
@@ -2558,6 +2582,14 @@ export class GameSessionAdapter implements GameSession {
       : null;
     // 0088: restore per-NPC current-read anchor bonds (absent on pre-0088 saves ⇒ empty ⇒ drift "steady").
     this.readAnchors = core.readAnchors ? new Map(Object.entries(core.readAnchors) as [EntityId, number][]) : new Map();
+    // #1322: restore the approach-rotation cooldown bookkeeping (absent on a pre-feature save ⇒ every
+    // NPC starts eligible). `lastApproachStretch` is ephemeral (like `producerCache`) — recomputed
+    // fresh on the next `socialInitiatives()` read, so a restart never loses a stretch's rotation.
+    this.approachCooldown = core.approachCooldown
+      ? new Map(Object.entries(core.approachCooldown) as [EntityId, number][])
+      : new Map();
+    this.approachStretchKey = core.approachStretchKey;
+    this.lastApproachStretch = undefined;
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     // The producer persona's seed (producer-persona feature): restore so the SAME off-camera casting
     // producer is voiced after a restart. Persisted on feature+ saves; on a started game that predates
@@ -3485,8 +3517,17 @@ export class GameSessionAdapter implements GameSession {
     // so the same week/phase reproduces the same approaches. The hidden drive NUMBER is NOT
     // surfaced — only the name + the coarse motive category (E60: the fact the GM voices in its
     // own words, never a canned pretext line), so no trust/threat read leaks across the wall.
-    const rng = new SeededRandom(hashSeed(`approaches:${this.gameSeed ?? ""}:${this.week}:${this.phase}`));
-    return rankApproaches(player, npcIds, this.rel, rng).slice(0, 3).map((a) => ({
+    const stretchKey = `${this.week}:${this.phase}`;
+    const rng = new SeededRandom(hashSeed(`approaches:${this.gameSeed ?? ""}:${stretchKey}`));
+    const ranked = rankApproaches(player, npcIds, this.rel, rng);
+    // #1322: a player-facing-projection-only anti-recency filter — an NPC who led a recent stretch
+    // sinks below everyone still eligible, so the same seeded-affinity NPC can't monopolize every
+    // stretch. `rankApproaches` itself is untouched/pure; see `applyApproachCooldown`'s own doc.
+    const initiators = applyApproachCooldown(ranked, this.approachCooldown).slice(0, 3);
+    // Remember what THIS stretch actually showed, so the next stretch transition (`syncProjection`)
+    // knows whom to cool down — a stretch never read here penalizes no one (nothing was ever shown).
+    this.lastApproachStretch = { key: stretchKey, initiators: initiators.map((a) => a.npc) };
+    return initiators.map((a) => ({
       houseguest: { id: a.npc, name: this.nameOf(a.npc) },
       motive: a.motive,
     }));
@@ -3781,6 +3822,11 @@ export class GameSessionAdapter implements GameSession {
     this.premiereMet = new Set();
     // A1: a fresh season starts with no locked names either — the new cast has not been introduced yet.
     this.introducedNames = new Set();
+    // #1322: a fresh season starts with no approach-rotation cooldown either — a reused adapter
+    // instance (the one sanctioned restart door) must not carry a prior season's rotation forward.
+    this.approachCooldown = new Map();
+    this.approachStretchKey = undefined;
+    this.lastApproachStretch = undefined;
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
     if (this.reactiveTwistsEnabled) {
@@ -7426,6 +7472,9 @@ export class GameSessionAdapter implements GameSession {
     // 0088: detect week advance — snapshot the NPC→player bond as the drift anchor
     // so "warming"/"cooling" reads relative to start-of-week.
     const weekChanged = s.week !== this.week;
+    // #1322: capture the OUTGOING stretch key BEFORE it's overwritten below, so the cooldown rotation
+    // (mirroring this same weekChanged-detection pattern) knows exactly which stretch just ended.
+    const outgoingStretchKey = `${this.week}:${this.phase}`;
     this.week = s.week;
     this.phase = s.finished ? "finale" : s.beat;
     this.ceremony = {
@@ -7444,6 +7493,36 @@ export class GameSessionAdapter implements GameSession {
         }
       }
     }
+    // #1322: the approach-rotation cooldown only rotates on an ACTUAL stretch transition — never on a
+    // read of `socialInitiatives()` itself (which must stay poll-safe/idempotent within a stretch).
+    const stretchChanged = outgoingStretchKey !== `${this.week}:${this.phase}`;
+    if (stretchChanged) this.advanceApproachCooldown(outgoingStretchKey);
+  }
+
+  /**
+   * Issue #1322 (P2) — advance the approach-rotation anti-recency cooldown on a stretch transition.
+   * Decrements every NPC's remaining cooldown by one (floor 0 — a lapsed entry is dropped so the
+   * persisted map stays bounded to whoever is actually cooling down right now), THEN re-arms a fresh
+   * `APPROACH_COOLDOWN_STRETCHES`-stretch cooldown for whichever NPCs the JUST-ENDED stretch actually
+   * showed the player as top-3 initiators (`lastApproachStretch`, populated by `socialInitiatives()`
+   * itself — if the surface was never read during that stretch, no one is penalized, which is correct:
+   * nothing was ever shown). Order matters: decrementing first, then re-arming, means an NPC who just
+   * initiated is excluded for the NEXT `APPROACH_COOLDOWN_STRETCHES` stretches, never zero.
+   *
+   * Player-facing PROJECTION bookkeeping only — never touches `rankApproaches`, the relationship
+   * model, or any rng stream, so it cannot perturb the seeded society/competition/vote calibration.
+   */
+  private advanceApproachCooldown(outgoingStretchKey: string): void {
+    for (const [id, remaining] of [...this.approachCooldown]) {
+      if (remaining > 1) this.approachCooldown.set(id, remaining - 1);
+      else this.approachCooldown.delete(id);
+    }
+    if (this.lastApproachStretch?.key === outgoingStretchKey) {
+      for (const id of this.lastApproachStretch.initiators) {
+        this.approachCooldown.set(id, APPROACH_COOLDOWN_STRETCHES);
+      }
+    }
+    this.approachStretchKey = outgoingStretchKey;
   }
 
   private toDecisionInput(req: SubmitDecisionReq): DecisionInput {
