@@ -225,3 +225,32 @@ mechanism. The rules, enforced by `tests/test_s_responsive_mechanism.py` (source
   `env(safe-area-inset-*)`. A vendored update must not regress the manifest/SW posture.
 - **The matrix gate ratchets**: known failures live in `responsive_matrix.py`'s `XFAIL`
   registry keyed by finding ID; landing a finding removes its entry in the same PR.
+
+## LLM-call observability (0112 — Vault-free trace tagging + opt-in forwarding)
+
+Always-on production live-verify telemetry for the gap the stubbed gates leave open. Every LLM
+call can emit a **Vault-free** `TraceRecord` (the 0069 token-ledger facts PLUS the 0065
+`beatSeq`/`phase` correlation keys) and, when enabled, tag the OpenRouter request with those keys.
+**Everything is opt-in, fail-soft, and byte-identical when unconfigured.**
+
+- **Code:** `src/llm_trace.py` (record builder + request-metadata builder + settings + sampling +
+  the `emit_trace` point), `src/trace_sink.py` (the `TraceSink` port — `NoopTraceSink` default,
+  `OtlpTraceSink` for OTLP/Langfuse/JSON-over-HTTP), wired at the two `src/llm_core.py` traced
+  chokepoints (`_llm_call_async_traced`, `_stream_llm_with_fallback_traced`).
+- **Settings** (admin-editable, read per-request — no restart): `observability_enabled` (default
+  **false**), `observability_endpoint` (""), `observability_privacy_mode` (`metrics-only` default |
+  `full`), `observability_sampling` (0.0–1.0, deterministic by session; default 1.0).
+- **Request metadata (OpenRouter Broadcast handshake):** when enabled, the OpenAI-compatible
+  payload gains `metadata: { orwell_session, beatSeq, phase, call_class }` — all Vault-free. Enable
+  **OpenRouter Broadcast** account-side (OpenRouter UI → pick destinations); zero shipper code, it
+  forwards correlatable traces to any of its 18+ sinks. Absent ⇒ byte-identical payload.
+- **Direct-ship path:** set `observability_endpoint` to an OTLP/Langfuse/JSON-over-HTTP sink and
+  the `OtlpTraceSink` POSTs each record directly (provider-agnostic, self-hostable) — no reliance
+  on OpenRouter's feature.
+- **Vault Wall:** the record builder reads neither the Vault store nor the soul provider (the FE
+  holds no Vault handle); a structural gate (`tests/test_0112_llm_observability.py`) asserts the
+  record + metadata carry **no** Vault key. `metrics-only` (the default) forwards **no** prompt/
+  completion content; `full` is an explicit operator opt-in, best paired with a self-hosted sink.
+- **Self-hosted sink (opt-in, off by default):** `deploy/observability/docker-compose.yml` brings
+  up Langfuse on-box so a private/LAN deploy (ADR 0014) keeps all trace data local — point
+  `observability_endpoint` at it.
