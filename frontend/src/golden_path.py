@@ -171,9 +171,46 @@ def _neutralize_presence_lines(s: str) -> str:
     return s
 
 
+# The off-screen-society block carries two MORE tick-timing-volatile framing spans (the
+# #1355 record↔replay divergence, at the HOH-competition forced-advance turn) that
+# legitimately vary ±1 between the slow live record and the instant replay — exactly like
+# the dwell counters / wall-clock above. Both are neutralized key-side ONLY (the recorded
+# fixture bytes keep the full original content), and NARROWLY — only the volatile span,
+# preserving the surrounding stable framing so a genuine prompt change still drifts the key.
+#
+# (1) The gossip DRIFT hedge appended to a surfaced fact by src/engine/gossip.ts `distort`:
+#     " · <hedge phrase>#<0-999>" (a random hedge word + a random id, re-rolled every
+#     retelling — and a retelling can happen ±1 more time between record and replay). The
+#     surfaced-fact CONTENT ("word around the house is that A and B are plotting something",
+#     "(overheard, muffled) …") reaches the prompt via `renderSurfacedFacts` through the
+#     adapter's id-only `humanize` (`humanizeIds`), which — unlike the player-display scrub —
+#     does NOT run `tidyPathwaySlugs`, so this marker survives verbatim into the key. The
+#     pattern MIRRORS that strip (`src/domain/humanize.ts tidyPathwaySlugs`) so it targets
+#     exactly the machine hedge and nothing else; a `\n` guard keeps it to a single fact line.
+_GOSSIP_DRIFT_RE = _re.compile(r"\s*·\s*[^·#\n]*#\d+")
+
+# (2) The MOVEMENT-IN-THE-ROOM presence-diff cue (frontend/routes/chat_helpers.py
+#     `_render_presence_movement`): "MOVEMENT IN THE ROOM (engine truth) — <who came/went>.
+#     Voice it as a natural beat …". WHO came/went between the em-dash and the fixed
+#     ". Voice it as a natural beat" is the ±1 volatile span (the per-turn presence diff);
+#     the instruction around it is stable framing. Single-line by construction (the parts are
+#     "; "-joined, no newlines), so `[^\n]` keeps the match from spanning unrelated prompt text.
+_MOVEMENT_LINE_RE = _re.compile(
+    r"(MOVEMENT IN THE ROOM \(engine truth\) — )[^\n]*?(\. Voice it as a natural beat)")
+
+
+def _neutralize_offscreen_society(s: str) -> str:
+    s = _GOSSIP_DRIFT_RE.sub(" <VOLATILE-GOSSIP-DRIFT>", s)
+    s = _MOVEMENT_LINE_RE.sub(r"\1<VOLATILE-MOVEMENT>\2", s)
+    return s
+
+
 def _neutralize_volatile(s: str) -> str:
     # Dwell counters/labels are neutralized only on the presence lines that render them.
     s = _neutralize_presence_lines(s)
+    # The off-screen-society gossip-drift hedge + the movement-in-the-room cue (#1355) —
+    # both tick-timing-volatile framing, narrowly neutralized (see the module notes above).
+    s = _neutralize_offscreen_society(s)
     # Date/time shapes are neutralized ONLY inside the wall-clock context section, so a real
     # date/time embedded in game content or a tool result still drifts the key.
     idx = s.find(_WALLCLOCK_HEADER)
