@@ -92,6 +92,10 @@ function buildUserSandbox(user = "default"): UserSandbox {
   // makes (recordInteraction's aboutEdges, Phase 1) folds into the player's OWN persistent campaign,
   // mirroring formCampaigns/advanceCampaign/campaignTilt — self-gated by the session's own campaign flag.
   commands.setPlayerCampaignFold((target, holder) => session.foldPlayerCampaignMove(target, holder));
+  // #1318 — a recorded player↔NPC scene registers a GENUINE premiere hot read, so the asymmetric first-
+  // power gate unlocks on real engagement rather than a name merely name-dropped in the move-in narration
+  // (which only the FE regex belt marks, meet-list-only). The session no-ops this outside the premiere.
+  commands.setPlayerReadSink((npcIds) => session.notePremiereReads(npcIds));
   // L27/L27b/0024: every recorded social scene is indexed into each houseguest's SEMANTIC recall
   // memory, so later story/narrative is built from the store recalled (ADR 0003), never the chat
   // window. Routed through the session's `recordSceneMemory` — NOT engine.soul.recordToSoul directly —

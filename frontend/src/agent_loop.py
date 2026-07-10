@@ -2442,7 +2442,12 @@ async def _auto_mark_premiere_intros(narration, owner) -> int:
         if (re.search(rf"\b{re.escape(name)}\b", narration, re.IGNORECASE)
                 or re.search(rf"\b{re.escape(first)}\b", narration, re.IGNORECASE)):
             try:
-                await _oe.mark_houseguest_met(hid, user=owner)
+                # #1318 — the belt is a REGEX name-match, not a genuine player-formed read: pass
+                # via="belt" so it fills the meet-list (its anti-soft-lock job) WITHOUT unlocking the
+                # asymmetric first-power gate. Otherwise a move-in narration that merely names two people
+                # flipped powerReachable and the first HOH fired before the toast/bedroom beats ran. Real
+                # engagement (a recorded player↔NPC scene) is what forms hot reads now (engine-side).
+                await _oe.mark_houseguest_met(hid, user=owner, via="belt")
                 marked += 1
             except Exception as e:
                 logger.warning(f"[orwell] auto markHouseguestMet failed for {hid}: "

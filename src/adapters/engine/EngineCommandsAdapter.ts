@@ -72,6 +72,14 @@ export class EngineCommandsAdapter implements EngineCommands {
    */
   private playerCampaignFold?: (target: EntityId, holder: EntityId) => void;
   /**
+   * #1318 — invoked with the NPC partners of each recorded player↔NPC scene, so the session can register
+   * them as genuine premiere HOT reads (the asymmetric first-power gate unlocks on real engagement, not on
+   * a name merely heard). The 0055 auto-record belt guarantees an engaged premiere turn is recorded even
+   * when the model skips the tool, making this the RELIABLE hot-read signal. Fired unconditionally on every
+   * recorded scene; the session no-ops it outside the premiere. Unset = standalone (no premiere effect).
+   */
+  private playerReadSink?: (npcIds: EntityId[]) => void;
+  /**
    * 0065 Part A — the compare-and-swap stale-write guard for this command port. The authoritative
    * monotonic `beatSeq` lives on the session adapter (it owns the snapshot it is persisted in); the
    * registry wires these so this adapter can READ the current counter + the Vault-free current board
@@ -163,6 +171,14 @@ export class EngineCommandsAdapter implements EngineCommands {
    */
   setPlayerCampaignFold(fn: (target: EntityId, holder: EntityId) => void): void {
     this.playerCampaignFold = fn;
+  }
+
+  /**
+   * #1318 — wire the premiere hot-read sink (see the field doc). The registry routes it to
+   * `GameSessionAdapter.notePremiereReads`; unwired (standalone) ⇒ no-op.
+   */
+  setPlayerReadSink(fn: (npcIds: EntityId[]) => void): void {
+    this.playerReadSink = fn;
   }
 
   /**
@@ -262,6 +278,18 @@ export class EngineCommandsAdapter implements EngineCommands {
       initiator: req.initiator, witnessSet,
       hidden: !witnessSet.includes(PLAYER), content: req.content,
     });
+    // #1318 — a recorded player↔NPC scene is a GENUINE premiere hot read. Feed the CALLER-declared
+    // partners (req.witnessSet + initiator, minus the player) — NOT the presence-expanded set — so a
+    // mere same-room bystander added by co-presence above is not miscounted as a read; the player must
+    // actually be in a scene WITH the houseguest. The session no-ops this outside the premiere, so it is
+    // free every other turn. This is the reliable engagement signal that lets first power become reachable.
+    if (this.playerReadSink) {
+      const partners = new Set<EntityId>(req.witnessSet);
+      partners.add(req.initiator);
+      partners.delete(PLAYER);
+      const reads = [...partners].filter(isLiving);
+      if (reads.length) this.playerReadSink(reads);
+    }
     // Adjacency overhears (0049): occupants of the rooms NEXT DOOR may catch a piece of the scene —
     // an NPC overhearing the player's conversation, exactly as the player overhears NPCs. Gated,
     // recorded, traceable (`overheard:<eventId>`), partial and lower-confidence.

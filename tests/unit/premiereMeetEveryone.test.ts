@@ -129,6 +129,126 @@ describe("premiere meet-everyone — the first HOH waits on it", () => {
   });
 });
 
+describe("premiere first-power gate — genuine reads unlock power, name-belt marks do not (#1318)", () => {
+  it("BELT-source marks fill the meet-list but NEVER form a hot read or unlock power", () => {
+    const { sb } = liveGame("belt-no-power", 21);
+    const activeNpcs = sb.session.getGameState().house.filter((h) => h.status === "active");
+
+    // The FE regex belt "meets" the WHOLE cast (a move-in narration that names everyone). The meet-list
+    // fills and `complete` flips — its anti-soft-lock job is intact — but NOT ONE hot read forms, so the
+    // first power stays LOCKED. This is the #1318 fix: hearing names is not engagement.
+    for (const h of activeNpcs) sb.session.markHouseguestMet(h.id, { via: "belt" });
+    const pr = sb.session.premiereIntros()!;
+    expect(pr.complete).toBe(true);                 // meet-list machinery unchanged
+    expect(pr.metCount).toBe(activeNpcs.length + 1);
+    expect(pr.hotReads).toBe(0);                     // belt marks are never hot reads
+    expect(pr.powerReachable).toBe(false);           // power stays locked off pure name-drops
+  });
+
+  it("PLAYER-source marks (the default) form hot reads and unlock power once a couple are formed", () => {
+    const { sb } = liveGame("player-power", 22);
+    const activeNpcs = sb.session.getGameState().house.filter((h) => h.status === "active");
+
+    // No genuine reads yet ⇒ locked.
+    expect(sb.session.premiereIntros()!.powerReachable).toBe(false);
+
+    // One genuine read (default source = a model-driven introduction the player was part of): still short
+    // of the couple the gate wants.
+    sb.session.markHouseguestMet(activeNpcs[0]!.id);
+    const afterOne = sb.session.premiereIntros()!;
+    expect(afterOne.hotReads).toBe(1);
+    expect(afterOne.powerReachable).toBe(false);
+
+    // A second genuine read ⇒ a couple of hot reads formed and (everyone seated/visible at move-in) power
+    // is REACHABLE — without grinding through all fifteen formal introductions (`complete` still false).
+    sb.session.markHouseguestMet(activeNpcs[1]!.id);
+    const afterTwo = sb.session.premiereIntros()!;
+    expect(afterTwo.hotReads).toBe(2);
+    expect(afterTwo.powerReachable).toBe(true);
+    expect(afterTwo.complete).toBe(false);
+  });
+
+  it("a RECORDED player↔NPC scene (notePremiereReads) is a genuine hot read and unlocks power", () => {
+    const { sb } = liveGame("recorded-power", 23);
+    const activeNpcs = sb.session.getGameState().house.filter((h) => h.status === "active");
+
+    // The reliable engagement signal: the 0055 auto-record belt records the scene even when the model
+    // skips the tool. Two distinct recorded partners ⇒ two hot reads ⇒ power reachable.
+    sb.session.notePremiereReads([activeNpcs[0]!.id]);
+    expect(sb.session.premiereIntros()!.powerReachable).toBe(false); // one is not yet a couple
+    sb.session.notePremiereReads([activeNpcs[1]!.id]);
+    const pr = sb.session.premiereIntros()!;
+    expect(pr.hotReads).toBe(2);
+    expect(pr.powerReachable).toBe(true);
+    // A recorded scene also counts the partner as met (name-lock included) — the meet-list shrinks too.
+    expect(pr.met.some((m) => m.houseguest.id === activeNpcs[0]!.id)).toBe(true);
+    expect(sb.session.snapshot().introducedNames).toContain(activeNpcs[0]!.id);
+  });
+
+  it("belt marks + genuine reads mix cleanly: belt fills the list, only the genuine reads count as hot", () => {
+    const { sb } = liveGame("belt-plus-genuine", 24);
+    const activeNpcs = sb.session.getGameState().house.filter((h) => h.status === "active");
+
+    // Belt-meet everyone (list fills), then form exactly two genuine reads on two of them.
+    for (const h of activeNpcs) sb.session.markHouseguestMet(h.id, { via: "belt" });
+    sb.session.markHouseguestMet(activeNpcs[0]!.id);            // upgrade to a genuine read
+    sb.session.notePremiereReads([activeNpcs[1]!.id]);         // recorded genuine read
+    const pr = sb.session.premiereIntros()!;
+    expect(pr.complete).toBe(true);       // still met-everyone
+    expect(pr.hotReads).toBe(2);          // only the two genuine reads, not all fifteen belt marks
+    expect(pr.powerReachable).toBe(true);
+  });
+
+  it("the earned hot-read state survives a snapshot/restore and is cleared once the first HOH begins", () => {
+    const { sb } = liveGame("hotread-resume", 25);
+    const activeNpcs = sb.session.getGameState().house.filter((h) => h.status === "active");
+    sb.session.markHouseguestMet(activeNpcs[0]!.id);   // genuine
+    sb.session.markHouseguestMet(activeNpcs[1]!.id);   // genuine
+    for (const h of activeNpcs.slice(2)) sb.session.markHouseguestMet(h.id, { via: "belt" });
+
+    // Persisted…
+    const core = sb.session.snapshot();
+    expect(core.premiereHotReads!.sort()).toEqual([activeNpcs[0]!.id, activeNpcs[1]!.id].sort());
+    sb.session.restore(core);
+    const pr = sb.session.premiereIntros()!;
+    expect(pr.hotReads).toBe(2);           // the earned power state is not lost on restore
+    expect(pr.powerReachable).toBe(true);
+
+    // …and cleared, like the meet-list, once the premiere is over.
+    sb.session.advanceGame();
+    expect(sb.session.getGameState().phase).not.toBe("premiere");
+    expect(sb.session.snapshot().premiereHotReads).toBeUndefined();
+  });
+
+  it("recordInteraction (the live registry wiring) registers premiere hot reads end to end", () => {
+    const { sb } = liveGame("record-e2e", 27);
+    const player = sb.session.getGameState().player!.id;
+    const activeNpcs = sb.session.getGameState().house.filter((h) => h.status === "active");
+
+    // Drive the LIVE command port (as the FE would). The registry wires recordInteraction →
+    // notePremiereReads, so a genuine player↔NPC scene forms a hot read without any markHouseguestMet call.
+    sb.commands.recordInteraction({
+      initiator: player, witnessSet: [player, activeNpcs[0]!.id], content: "a real first one-on-one",
+    });
+    expect(sb.session.premiereIntros()!.hotReads).toBe(1);
+    sb.commands.recordInteraction({
+      initiator: player, witnessSet: [player, activeNpcs[1]!.id], content: "another genuine connection",
+    });
+    const pr = sb.session.premiereIntros()!;
+    expect(pr.hotReads).toBe(2);
+    expect(pr.powerReachable).toBe(true);
+  });
+
+  it("a via='belt' mark and a later genuine mark of the SAME houseguest upgrades it to a hot read", () => {
+    const { sb } = liveGame("belt-then-genuine", 26);
+    const activeNpcs = sb.session.getGameState().house.filter((h) => h.status === "active");
+    sb.session.markHouseguestMet(activeNpcs[0]!.id, { via: "belt" });
+    expect(sb.session.premiereIntros()!.hotReads).toBe(0);
+    sb.session.markHouseguestMet(activeNpcs[0]!.id); // genuine read of the same person
+    expect(sb.session.premiereIntros()!.hotReads).toBe(1);
+  });
+});
+
 describe("premiere meet-everyone — determinism (same seed ⇒ same reads)", () => {
   it("two same-seed premieres surface the SAME observable reads in the same order", () => {
     const a = liveGame("det-a", 14).sb.session.premiereIntros()!;

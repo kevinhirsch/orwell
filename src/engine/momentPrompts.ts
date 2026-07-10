@@ -687,13 +687,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the introductions, the " +
     "toast, the bedroom pick, and a little settling-in, call advanceGame to bring up the first HOH " +
     "competition; do not let the premiere drift indefinitely. " +
-    "THE FIRST POWER ARRIVES FAST — do not stall it behind a completionist roll-call. The GAME CONTEXT " +
-    "below tells you when the premiere is ready for power (the 'FIRST POWER' line: a couple of hot reads " +
-    "formed and no houseguest left invisible). Once it reads reachable and the player signals they're ready " +
-    "for the game to start, THAT is your cue to advanceGame into the first HOH — you do NOT need every one " +
-    "of the fifteen formally introduced first; the stragglers get met in motion, during the mingle and the " +
-    "comp itself. Nobody should be invisible (everyone at least seen), but the first HOH should not wait on " +
-    "the last formal handshake.",
+    "THE FIRST POWER ARRIVES FAST — do not stall it behind a completionist roll-call, but it arrives AFTER " +
+    "the premiere's own beats, not before them: perform the TOAST and let the player PICK A BEDROOM first — " +
+    "those are the moments where the first real reads actually form. A 'hot read' is a GENUINE connection — " +
+    "a real one-on-one, a beat shared over the champagne — NOT merely having said someone's name in a crowd; " +
+    "so the way to reach first power is to let the player actually engage a couple of people, not to rattle " +
+    "off names. The GAME CONTEXT below tells you when the premiere is ready for power (the 'FIRST POWER' " +
+    "line: a couple of genuine hot reads formed and no houseguest left invisible). Once it reads reachable " +
+    "and the player signals they're ready for the game to start, THAT is your cue to advanceGame into the " +
+    "first HOH — you do NOT need every one of the fifteen formally introduced first; the stragglers get met " +
+    "in motion, during the mingle and the comp itself. Nobody should be invisible (everyone at least seen), " +
+    "but the first HOH should not wait on the last formal handshake — nor jump the toast and the bedroom.",
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
@@ -1159,8 +1163,8 @@ export function renderGameContext(view: GameStateView): string {
       `${pr.hotReads} hot first read${pr.hotReads === 1 ? "" : "s"} formed.`,
     `- PREMIERE — FIRST POWER: ` +
       (pr.powerReachable
-        ? "REACHABLE — a couple of hot reads are formed and no houseguest is invisible; the first HOH may begin the moment the player is ready (the stragglers get met in motion, you do NOT need every formal introduction first)."
-        : `not yet — get 2–3 hot first reads going (everyone stays at least seen, nobody invisible). ${pr.remaining.length} still only met in motion.`),
+        ? "REACHABLE — a couple of GENUINE hot reads are formed and no houseguest is invisible; the first HOH may begin the moment the player is ready (the stragglers get met in motion, you do NOT need every formal introduction first)."
+        : `not yet — a couple of GENUINE hot reads still need to form, through real engagement (a one-on-one, a beat over the champagne toast), not by merely naming people. Run the toast and the bedroom pick — that is where the reads form. Everyone stays at least seen, nobody invisible; ${pr.remaining.length} still only met in motion.`),
     ...(pr.remaining.length
       ? [
           "- PREMIERE — STILL TO MEET IN MOTION (met around the house but not yet a hot read; markHouseguestMet",

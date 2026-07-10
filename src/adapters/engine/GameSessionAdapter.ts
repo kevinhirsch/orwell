@@ -12,7 +12,7 @@ import type {
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   RecordCastIdentityReq, RecordCastIdentityResult, ProposedCastIdentityFacets,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
-  PremiereIntrosView, FirstImpressionView,
+  PremiereIntrosView, FirstImpressionView, MarkHouseguestMetOpts,
   StateDeltaView, DeltaEventView,
   BehavioralFlags,
 } from "../../ports/GameSession";
@@ -779,6 +779,16 @@ export class GameSessionAdapter implements GameSession {
    * introduction event); reset to empty at every season start alongside it. PUBLIC ids only.
    */
   private introducedNames: Set<EntityId> = new Set();
+  /**
+   * #1318 — the PLAYER-FORMED HOT-READ set: the subset of `premiereMet` reached through GENUINE
+   * engagement (a model-driven `markHouseguestMet` the player was part of, or a recorded player↔NPC
+   * scene routed through `notePremiereReads`) — NOT the FE regex name-belt, which fills `premiereMet`
+   * alone. ONLY this set feeds `premiereIntros().hotReads` / `powerReachable`, so the asymmetric first-
+   * power gate unlocks on real engagement, never on two names heard in a move-in narration (#1318 root).
+   * Premiere-scoped exactly like `premiereMet` (cleared once the first HOH begins); persisted (0030) so a
+   * half-done premiere resumes with its EARNED power state intact. PUBLIC ids only — a pure count, no Vault.
+   */
+  private premiereHotReads: Set<EntityId> = new Set();
   // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -2382,6 +2392,10 @@ export class GameSessionAdapter implements GameSession {
       // resumes after a restart (0030) — the producer never re-introduces someone or loses track of
       // who's still to meet. Public ids; absent once the premiere is over (the set is then empty).
       ...(this.premiereMet.size > 0 ? { premiereIntros: [...this.premiereMet] } : {}),
+      // #1318: the player-formed HOT-READ subset — persisted so a half-done premiere resumes with its
+      // EARNED first-power state (never re-derivable from `premiereIntros`, which mixes in belt marks).
+      // Premiere-scoped like `premiereIntros` (empty once the first HOH begins ⇒ absent).
+      ...(this.premiereHotReads.size > 0 ? { premiereHotReads: [...this.premiereHotReads] } : {}),
       // A1: the DURABLE name-lock companion to `premiereIntros` above — never cleared once the premiere
       // ends, so `recordCastProfile`'s name-race guard survives a restart. Public ids only.
       ...(this.introducedNames.size > 0 ? { introducedNames: [...this.introducedNames] } : {}),
@@ -2637,6 +2651,9 @@ export class GameSessionAdapter implements GameSession {
     // PREMIERE (feature #380 follow-on): restore who's been met so a half-done premiere resumes (0030).
     // Absent on a pre-feature save OR once the premiere is over ⇒ empty (no one outstanding to re-meet).
     this.premiereMet = new Set(core.premiereIntros ?? []);
+    // #1318: restore the player-formed HOT-READ subset. Absent on a pre-#1318 save ⇒ empty (no earned
+    // reads yet, so the gate simply waits for the first genuine one — never a spurious early unlock).
+    this.premiereHotReads = new Set(core.premiereHotReads ?? []);
     // A1: restore the DURABLE name-lock companion set. Absent on a pre-A1 save ⇒ empty (a save made
     // before this fix simply has no locked names yet; any houseguest introduced from here on locks
     // going forward exactly as a fresh season does — no regression, no false lock on old saves).
@@ -3602,8 +3619,11 @@ export class GameSessionAdapter implements GameSession {
 
   /** Lazily clear a stale tracker once the premiere is over (keeps the snapshot clean; idempotent). */
   private clearPremiereIfOver(): void {
-    if (!this.inPremiere() && this.premiereMet.size > 0) {
+    if (!this.inPremiere() && (this.premiereMet.size > 0 || this.premiereHotReads.size > 0)) {
       this.premiereMet.clear();
+      // #1318: the hot-read set is premiere-scoped too — clear it alongside so it never lingers in the
+      // snapshot (the DURABLE name-lock `introducedNames` is intentionally NOT cleared here).
+      this.premiereHotReads.clear();
       this.persist();
     }
   }
@@ -3650,7 +3670,11 @@ export class GameSessionAdapter implements GameSession {
     // is REACHABLE once a couple of hot reads are formed AND everyone is visible, WITHOUT grinding through
     // all fifteen formal introductions. The HOH itself stays a real seeded competition (only the gate
     // is reframed, never the outcome). `hotReads`/`powerReachable` are pure counts/flags — no Vault data.
-    const hotReads = met.length;
+    // #1318: a HOT read is a GENUINE player-formed read (`premiereHotReads`), NOT merely "met." The FE
+    // regex name-belt fills `premiereMet` (so intros keep shrinking) but is EXCLUDED here — otherwise the
+    // first HOH fired the moment two names were name-dropped in the move-in narration. Only a model-driven
+    // introduction the player was part of, or a recorded player↔NPC scene (notePremiereReads), counts.
+    const hotReads = activeNpcs.filter((n) => this.premiereHotReads.has(n.id)).length;
     const everyoneVisible = activeNpcs.every((n) => this.presence === null || this.presence.has(n.id));
     // +1 on both counts for the player (they ARE met — they're playing). total = the whole cast.
     return {
@@ -3670,19 +3694,56 @@ export class GameSessionAdapter implements GameSession {
    * unknown houseguest, the player (auto-met), an evicted/departed seat, or once the premiere is over.
    * Persists (durable resume, 0030) and returns the resulting progress (or `null` outside the premiere).
    */
-  markHouseguestMet(id: EntityId): PremiereIntrosView | null {
+  markHouseguestMet(id: EntityId, opts?: MarkHouseguestMetOpts): PremiereIntrosView | null {
     this.clearPremiereIfOver();
     if (!this.house || !this.inPremiere()) return null;
     // Only a real, active NPC can be "met" — the player is implicitly met; an unknown/departed id is a no-op.
     const isActiveNpc = this.house.npcs.some((n) => n.id === id && this.seatOf(n.id) === "active");
-    if (isActiveNpc && !this.premiereMet.has(id)) {
-      this.premiereMet.add(id);
-      // A1: the DURABLE name-lock companion — never cleared (unlike `premiereMet`). From this moment
-      // the player has witnessed this houseguest's name; `recordCastProfile` must never change it.
-      this.introducedNames.add(id);
-      this.persist();
+    if (isActiveNpc) {
+      let changed = false;
+      if (!this.premiereMet.has(id)) {
+        this.premiereMet.add(id);
+        // A1: the DURABLE name-lock companion — never cleared (unlike `premiereMet`). From this moment
+        // the player has witnessed this houseguest's name; `recordCastProfile` must never change it.
+        this.introducedNames.add(id);
+        changed = true;
+      }
+      // #1318 — SOURCE distinction: a `belt` mark (the FE regex name-belt) fills the meet-list ONLY, so the
+      // intro list keeps shrinking (its anti-soft-lock job) WITHOUT unlocking power off a bare name mention.
+      // A `player` mark (the default — a model-driven introduction the player was part of) is a genuine hot
+      // read. `notePremiereReads` feeds the same set from recorded player↔NPC scenes.
+      if ((opts?.via ?? "player") !== "belt" && !this.premiereHotReads.has(id)) {
+        this.premiereHotReads.add(id);
+        changed = true;
+      }
+      if (changed) this.persist();
     }
     return this.premiereIntros();
+  }
+
+  /**
+   * #1318 — register genuine player↔NPC reads from RECORDED premiere scenes (wired by the registry off
+   * `EngineCommandsAdapter.recordInteraction`). A recorded scene is the RELIABLE engagement signal (the
+   * 0055 auto-record belt guarantees an engaged premiere turn is recorded even when the model skips the
+   * tool), so this is what lets power become reachable after real play — not after a name is merely heard.
+   * Each named NPC counts as met (name-lock included) AND as a hot read. No-op outside the premiere, for a
+   * non-active/unknown id, or the player. Idempotent.
+   *
+   * Persistence is DELIBERATELY the caller's: this is invoked ONLY from the registry's read-sink, DURING
+   * `EngineCommandsAdapter.recordInteraction`'s own commit — which always fires `onPersist` right after,
+   * capturing this session mutation in the SAME commit. Calling `persist()` here would fire a SECOND
+   * commit funnel and double-bump `beatSeq` (one logical mutation → two beats), so it must not.
+   */
+  notePremiereReads(npcIds: readonly EntityId[]): void {
+    // Guard on the phase directly (not `clearPremiereIfOver`, whose lazy snapshot-clean would fire a
+    // stray persist INSIDE the enclosing recordInteraction commit on the premiere→HOH transition turn).
+    // Other read paths (premiereIntros/getGameState) still lazily clear the vestigial sets post-premiere.
+    if (!this.house || !this.inPremiere()) return;
+    for (const id of npcIds) {
+      if (!this.house.npcs.some((n) => n.id === id && this.seatOf(n.id) === "active")) continue;
+      if (!this.premiereMet.has(id)) { this.premiereMet.add(id); this.introducedNames.add(id); }
+      this.premiereHotReads.add(id);
+    }
   }
   // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -3840,6 +3901,8 @@ export class GameSessionAdapter implements GameSession {
     // introduced yet. The producer (driven by the premiere moment prompt's who's-left list) walks the
     // player through all 15 NPCs before the first HOH; `premiereMet` records who's been met. Persisted.
     this.premiereMet = new Set();
+    // #1318: a fresh season has formed no hot reads yet — power waits for the first genuine one.
+    this.premiereHotReads = new Set();
     // A1: a fresh season starts with no locked names either — the new cast has not been introduced yet.
     this.introducedNames = new Set();
     // #1322: a fresh season starts with no approach-rotation cooldown either — a reused adapter

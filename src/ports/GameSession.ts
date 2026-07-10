@@ -1015,6 +1015,18 @@ export interface PremiereIntrosView {
 }
 
 /**
+ * #1318 — the SOURCE of a premiere meet-mark. `player` (the default) is a genuine player-formed read:
+ * a model-driven introduction the player was part of, or a recorded player↔NPC scene — it feeds BOTH
+ * the meet-list AND the asymmetric power gate's `hotReads`. `belt` is the FE regex auto-belt catching a
+ * bare first name in narration — it fills the meet-list (its anti-soft-lock job, so the intro list keeps
+ * shrinking) but is NOT a hot read and MUST NOT unlock power (name-drops are not engagement). Splitting
+ * the two is the fix for "the first HOH fires the moment two names are heard."
+ */
+export interface MarkHouseguestMetOpts {
+  via?: "player" | "belt";
+}
+
+/**
  * Where the player stands in the house RIGHT NOW (0049) — the Vault-free presence read. Who is in
  * the player's room and who is one room over: facts a houseguest could see or hear themselves.
  * NEVER motives, numbers, hidden state, or the occupancy of non-adjacent rooms (you can't see
@@ -1820,8 +1832,13 @@ export interface GameSession {
    * tracker the producer drives so all 15 NPCs are met before the first HOH. Idempotent; a no-op for
    * an unknown houseguest, the player (auto-met), or once the premiere is over. Returns the resulting
    * meet-everyone progress (or `null` outside the premiere) so the caller can voice who is left.
+   *
+   * #1318 — `opts.via` distinguishes a genuine player-formed read (`player`, the default — it counts
+   * toward the asymmetric power gate's `hotReads`) from the FE regex auto-belt (`belt` — meet-list only,
+   * never a hot read). Backward-compatible: an omitted `opts` is `player`, byte-identical to the prior
+   * single-arg call (existing model-driven introductions still form hot reads).
    */
-  markHouseguestMet(id: EntityId): PremiereIntrosView | null;
+  markHouseguestMet(id: EntityId, opts?: MarkHouseguestMetOpts): PremiereIntrosView | null;
 
   /**
    * The Vault-free projection of an in-progress finale (0037 §8.1) for a polling finale panel — the
