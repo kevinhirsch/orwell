@@ -666,6 +666,23 @@
     }
   }
 
+  // WS Phase-1 (§4): when the multiplexed socket is live the server PUSHES a `state`/`hud`
+  // frame on every board change; platform.js relays it to the one `orwell:gamechanged`
+  // dispatcher, which already re-runs refreshGate + refreshRoster below. So both cast polls
+  // (the 20s gate poll and the adaptive open-roster poll) stand down in WS mode and stay
+  // edge-triggered (fail-soft: any doubt ⇒ keep polling). The fallback/SSE path is unchanged
+  // and still polls — including the FAST cadence while portraits stream in.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+  // The 20s gate poll (button show/hide) as a managed interval, so WS mode can suspend it.
+  let _gateTimer = null;
+  function startGatePoll() {
+    if (_gateTimer) { clearInterval(_gateTimer); _gateTimer = null; }
+    if (!_wsActive()) _gateTimer = setInterval(refreshGate, 20000);
+  }
+
   // G22: ONE self-rescheduling poll timer. The next delay is recomputed from the
   // freshest roster (render() above) after each refresh — fast while portraits are
   // landing, the idle cadence once the set is complete — and the timer is always
@@ -676,6 +693,9 @@
   function scheduleNextPoll() {
     if (_timer) { clearTimeout(_timer); _timer = null; }
     if (!_open) return;
+    // In WS mode the `state`/`hud` push (via orwell:gamechanged) supersedes the poll — the
+    // immediate refreshRoster still runs, but don't re-arm the periodic timer.
+    if (_wsActive()) return;
     // Under a run of failures, back off exponentially (capped) on TOP of the adaptive cadence — a
     // late-game engine that 502s a roster read should not be re-hit every 30s. A success resets it.
     const delay = _failures > 0
@@ -732,9 +752,20 @@
     refreshGate();
     if (_open) refreshRoster().then(scheduleNextPoll);
   });
+  // WS Phase-1 (§4/§6): cancel both polls the instant the socket goes live; resume them if
+  // it falls back to SSE (startGatePoll/scheduleNextPoll re-arm only while !_wsActive()).
+  window.addEventListener("orwell:ws-active", () => {
+    if (_gateTimer) { clearInterval(_gateTimer); _gateTimer = null; }
+    if (_timer) { clearTimeout(_timer); _timer = null; }
+  });
+  window.addEventListener("orwell:ws-inactive", () => {
+    refreshGate();
+    startGatePoll();
+    if (_open) refreshRoster().then(scheduleNextPoll);
+  });
 
   ready(() => {
     refreshGate();
-    setInterval(refreshGate, 20000);
+    startGatePoll();
   });
 })();
