@@ -11,9 +11,11 @@ forced call" check is OWED separately — these pin the WIRE + the gate):
     budget: forcing rides its own payload key and never perturbs `reasoning` (reasoning stays on its own
     channel — never the public bubble).
   • agent_loop: the pure `_forced_tool_choice_for_beat` gate fires at the right ENGINE-OWNED beats
-    (comp → "required"; ceremony advance → named advanceGame; previewed-uncommitted → named advanceGame)
-    and NOT on ordinary turns, never forces submitDecision, and is suppressed by an open player pending;
-    plus the model-rejecter gate (DeepSeek-V4 never gets forced) and the kill-switch default.
+    (comp → named advanceGame, #1319 — never a bare "required", since `runCompetition` is a no-op once
+    a staged comp is already in progress; ceremony advance → named advanceGame; previewed-uncommitted →
+    named advanceGame) and NOT on ordinary turns, never forces submitDecision, and is suppressed by an
+    open player pending; plus the model-rejecter gate (DeepSeek-V4 never gets forced) and the
+    kill-switch default.
 
 Roles only (no names as data).
 """
@@ -176,14 +178,18 @@ def _gate(framed_key, fired, *, pending=False):
 _ADV = {"type": "function", "function": {"name": "advanceGame"}}
 
 
-def test_comp_phase_forces_required_when_nothing_fired():
-    # hoh-competition with no comp tool yet → force SOME engine call (model picks runComp OR advanceGame).
-    assert _gate(("w1", "hoh-competition", "hoh-competition"), []) == "required"
-    assert _gate(("w2", "veto-competition", "veto-competition"), []) == "required"
+def test_comp_phase_forces_named_advance_when_nothing_fired():
+    # #1319: hoh-competition/veto-competition with no advanceGame fired yet → force the NAMED call
+    # directly (never a bare "required" — runCompetition is a no-op once a staged comp is already in
+    # progress, so permitting it as an equally-valid forced choice let a turn spend its forced attempt
+    # on a dead-end preview and never reveal a round — the staged play-by-play bug this test pins).
+    assert _gate(("w1", "hoh-competition", "hoh-competition"), []) == _ADV
+    assert _gate(("w2", "veto-competition", "veto-competition"), []) == _ADV
 
 
-def test_comp_phase_previewed_uncommitted_forces_named_advance():
-    # runCompetition previewed a winner but never committed → force advanceGame to COMMIT (the #1 desync).
+def test_comp_phase_previewed_uncommitted_still_forces_named_advance():
+    # A model that ALSO calls runCompetition first (e.g. for narrative color) is unaffected — the
+    # guarantee is only met once advanceGame itself fires this round.
     assert _gate(("w1", "hoh-competition", "x"), ["runCompetition"]) == _ADV
 
 
@@ -191,6 +197,18 @@ def test_comp_phase_already_advanced_does_not_force():
     # The engine call already happened this turn → the guarantee is met → no forcing.
     assert _gate(("w1", "hoh-competition", "x"), ["advanceGame"]) is None
     assert _gate(("w1", "hoh-competition", "x"), ["runCompetition", "advanceGame"]) is None
+
+
+def test_comp_phase_in_progress_forces_every_turn_until_crowned():
+    # #1319: the pure gate is stateless — each fresh call (mirroring a fresh user turn, since
+    # tool_events resets every turn) with the SAME still-in-progress framed key re-forces the named
+    # advanceGame, round after round, for as long as the phase stays a force-comp-phase with no tool
+    # fired yet. This is the "every turn until the crown" guarantee — not just the first round.
+    key = ("w1", "hoh-competition", "hoh-competition")
+    for _ in range(5):  # STAGED_TARGET_ROUNDS-ish consecutive turns
+        assert _gate(key, []) == _ADV
+    # Once the engine crowns (phase flips away from the comp phase), forcing stops on its own.
+    assert _gate(("w1", "nominations", "nominations"), []) == _ADV  # a DIFFERENT force (ceremony)
 
 
 def test_ceremony_advance_phase_forces_named_advance():
@@ -243,7 +261,7 @@ def test_matching_ceremony_moment_still_forces():
     # The genuine, un-overridden case (moment == phase) is unchanged — forcing still fires.
     assert _gate(("w1", "nominations", "nominations"), []) == _ADV
     assert _gate(("w1", "eviction", "eviction"), []) == _ADV
-    assert _gate(("w1", "hoh-competition", "hoh-competition"), []) == "required"
+    assert _gate(("w1", "hoh-competition", "hoh-competition"), []) == _ADV  # #1319: named, not "required"
     # And the 3-tuple back-compat shape (no moment element) still forces — an empty moment is neither
     # the social hold nor a mismatched ceremony override.
     assert _gate(("w1", "eviction"), []) == _ADV
@@ -255,6 +273,11 @@ def test_open_player_pending_suppresses_all_forcing():
     assert _gate(("w1", "eviction", "x", "goodbye-message"), [], pending=True) is None
     assert _gate(("w1", "hoh-competition", "x", "comp-intent"), [], pending=True) is None
     assert _gate(("w1", "nominations", "x", "nominations"), [], pending=True) is None
+    # #1319: the round-1 `comp-round` pending (the player's binding compete/throw/play-safe pick,
+    # liveSeason.ts `resolveHohBeat`/`resolveVetoComp`) is the literal case the root cause names —
+    # forcing must stay fully suppressed while that card is open, exactly like every other pending.
+    assert _gate(("w1", "hoh-competition", "x", "comp-round"), [], pending=True) is None
+    assert _gate(("w2", "veto-competition", "x", "comp-round"), [], pending=True) is None
 
 
 def test_never_forces_submit_decision():
@@ -360,11 +383,13 @@ def _drive_loop_capture_tool_choice(monkeypatch, *, model, framed_key, pending=N
     return cap
 
 
-def test_loop_forces_required_at_a_comp_beat(monkeypatch):
+def test_loop_forces_named_advance_at_a_comp_beat(monkeypatch):
+    # #1319: a comp phase forces the NAMED advanceGame directly (never bare "required") so every
+    # forced attempt guarantees a real round reveal, not a dead-end runCompetition preview.
     cap = _drive_loop_capture_tool_choice(
         monkeypatch, model="z-ai/glm-4.7", framed_key=("w1", "hoh-competition", "hoh-competition"))
     assert cap.get("tools"), "tools must be on the wire for forcing to be legal"
-    assert cap.get("tool_choice") == "required", cap.get("tool_choice")
+    assert cap.get("tool_choice") == {"type": "function", "function": {"name": "advanceGame"}}, cap.get("tool_choice")
 
 
 def test_loop_forces_named_advance_at_a_ceremony_beat(monkeypatch):
@@ -382,7 +407,7 @@ def test_loop_forces_under_no_auth_owner_none(monkeypatch):
     cap = _drive_loop_capture_tool_choice(
         monkeypatch, model="z-ai/glm-4.7",
         framed_key=("w1", "hoh-competition", "hoh-competition"), owner=None)
-    assert cap.get("tool_choice") == "required", cap.get("tool_choice")
+    assert cap.get("tool_choice") == {"type": "function", "function": {"name": "advanceGame"}}, cap.get("tool_choice")
 
 
 def test_loop_does_not_force_on_an_ordinary_social_turn(monkeypatch):
