@@ -1482,10 +1482,15 @@ _ADVANCE_GRACE_TURNS = 2
 # choice — the opposite of the mandate. An OPEN PLAYER PENDING therefore SUPPRESSES all forcing (the
 # model must surface the card and wait, which the pending-barrier framing already pins).
 #
-# Phases where runCompetition is the mandatory read (the comp winner is the engine's; the model must
-# read it before narrating). At these we force `"required"` (NOT a named function) because the model
-# may legitimately use EITHER runCompetition (preview) OR advanceGame (resolve) to read the winner —
-# both go to the engine — so we guarantee SOME engine call without over-constraining which.
+# Phases where the engine's competition outcome is the mandatory read (the comp winner and every
+# staged drop are the engine's; the model must read them before narrating). #1319: at these we force a
+# NAMED `advanceGame` (NOT bare `"required"`) — `runCompetition` is a genuine no-op once a staged comp
+# is already in progress (`peekCompetition` just re-reports the fixed winner, never advancing the
+# reveal), so permitting it as an equally-valid forced choice let the model satisfy the guarantee
+# without ever revealing the next round: the staged play-by-play silently never surfaced. `advanceGame`
+# alone is always sufficient here (it resolves the field on first entry AND reveals the next batch
+# mid-reveal), so forcing it by name guarantees real progression on every forced attempt, one batch per
+# turn, until the crown.
 _FORCE_COMP_PHASES = {"hoh-competition", "veto-competition"}
 # Ceremony advance-phases the model reliably narrates as already-done WITHOUT advancing (so the engine
 # sits unmoved and the board contradicts the prose). At these we force a NAMED advanceGame — only
@@ -1512,10 +1517,19 @@ def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_op
         forcing: the engine waits on the PLAYER (a card), and the model must surface it, not advance or
         run a comp past it. (We never force submitDecision — see the block comment above.)
 
-    Precedence: a comp phase wants the WINNER read first, so if no comp tool fired yet → force
-    `"required"`; if runCompetition already previewed but nothing committed → force a named advanceGame
-    to COMMIT it (mirrors the reactive _previewed_uncommitted nudge, proactively). A non-comp ceremony
-    advance-phase that hasn't advanced yet → force a named advanceGame.
+    Precedence: a comp phase forces a NAMED advanceGame directly (never a bare `"required"`) whenever
+    `advanceGame` hasn't fired yet this round. #1319: `runCompetition` is a genuine NO-OP once a staged
+    competition is already in progress — `peekCompetition` (liveSeason.ts) re-reports the SAME fixed
+    winner without touching `stillIn`/`eliminated`, so it never reveals the next drop batch. The prior
+    `"required"` choice let the model satisfy the guarantee by calling that dead-end preview instead of
+    `advanceGame`; if a turn's internal round budget didn't allow the follow-up escalation round, the
+    turn ended having "read the winner" without ever revealing a round — the staged reveals silently
+    never surfaced (zero play-by-play) while the model narrated around the gap, until a later turn's
+    advanceGame call landed on a stale expectedBeatSeq. Forcing the NAMED call directly closes that gap:
+    `advanceGame` alone is always sufficient at this phase (it resolves the field on first entry AND
+    reveals the next batch mid-reveal — the one call an in-progress comp ever needs), so every forced
+    attempt now guarantees real progression, one batch per turn, until the crown. A non-comp ceremony
+    advance-phase that hasn't advanced yet → force a named advanceGame (unchanged).
 
     J-3 fix (ceremony one-beat-per-turn guard, root (a)): `chat_helpers` overrides the framed MOMENT
     away from the raw `phase` in exactly two cases — the social-runway HOLD (`_hold_for_social`, moment
@@ -1543,11 +1557,12 @@ def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_op
         return None
     names = turn_tool_names or set()
     if phase in _FORCE_COMP_PHASES:
-        # Read the winner first (either runCompetition or advanceGame is valid) …
-        if not (names & {"runCompetition", "advanceGame"}):
-            return "required"
-        # … then COMMIT a preview that never advanced (the #1 previewed-uncommitted desync).
-        if "runCompetition" in names and "advanceGame" not in names:
+        # #1319: force the NAMED advanceGame directly — it is the ONE call that both resolves an
+        # unstarted comp AND reveals the next batch of an already-staged one, so this alone guarantees
+        # real progression every forced attempt (see the docstring precedence note above). A model that
+        # ALSO calls runCompetition first (e.g. for narrative color) is unaffected — only advanceGame
+        # satisfies the guarantee, so the force stays live until it actually fires this round.
+        if "advanceGame" not in names:
             return {"type": "function", "function": {"name": "advanceGame"}}
         return None
     if phase in _FORCE_ADVANCE_PHASES:
