@@ -419,14 +419,27 @@ import * as modalManager from "./modalManager.js";
     } catch (_) {}
   }
 
+  // WS Phase-1 (§4): when the multiplexed socket is live the server PUSHES a `state`
+  // frame on every board change; platform.js relays it to the one `orwell:gamechanged`
+  // dispatcher, which triggers refresh() below. So we cancel the periodic poll TIMER in
+  // WS mode and stay edge-triggered (fail-soft: any doubt ⇒ keep polling). The fallback/
+  // SSE path is unchanged and still polls — INCLUDING the latency-sensitive 5s staging
+  // cadence, which is only ever suspended when WS is genuinely active.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+
   function start() {
     refresh();
     if (timer) clearTimeout(timer);
     const tick = async () => {
       if (!document.hidden) await refresh(); // E67/C18: a hidden tab polls nothing
-      timer = setTimeout(tick, _pollDelay());
+      // In WS mode the `state` push (via orwell:gamechanged) supersedes the poll —
+      // don't re-arm the periodic timer, just stay edge-triggered.
+      if (!_wsActive()) timer = setTimeout(tick, _pollDelay());
     };
-    timer = setTimeout(tick, _pollDelay());
+    if (!_wsActive()) timer = setTimeout(tick, _pollDelay());
   }
 
   // Seam for the headless gate (F3 and the finale's own F-2 wave): build + show on demand.
@@ -443,5 +456,10 @@ import * as modalManager from "./modalManager.js";
   };
   window.orwellRefreshFinale = refresh;
   window.addEventListener("orwell:gamechanged", refresh);
+  // WS Phase-1 (§4/§6): cancel the periodic poll the instant the socket goes live; resume
+  // polling (including the brisk 5s staging cadence) if it falls back to SSE. start() re-arms
+  // the timer only while !_wsActive(), so re-running it after a downgrade restores the cadence.
+  window.addEventListener("orwell:ws-active", () => { if (timer) { clearTimeout(timer); timer = null; } });
+  window.addEventListener("orwell:ws-inactive", () => { _failures = 0; if (timer) { clearTimeout(timer); timer = null; } start(); });
   ready(start);
 })();

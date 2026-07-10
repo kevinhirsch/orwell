@@ -213,12 +213,32 @@
   window._orwellOpenDiaryRoom = () => { ensureButton(); wireComposer(); enterDRMode(); return true; };
   window._orwellDiaryRoomActive = () => drMode;
 
+  // WS Phase-1 (§4): when the multiplexed socket is live the server PUSHES a `state`
+  // frame on every board change; platform.js relays it to the one `orwell:gamechanged`
+  // dispatcher, which already re-runs refreshGate below. So we stand the 30s gate poll
+  // down in WS mode and stay edge-triggered (fail-soft: any doubt ⇒ keep polling). The
+  // fallback/SSE path is unchanged and still polls.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+  let _gateTimer = null;
+  function startGatePoll() {
+    if (_gateTimer) { clearInterval(_gateTimer); _gateTimer = null; }
+    // Re-arm the periodic gate poll ONLY while WS is inactive (byte-identical to before when off).
+    if (!_wsActive()) _gateTimer = setInterval(() => { if (!document.hidden) refreshGate(); }, 30000);
+  }
+
   function start() {
     ensureButton();
     wireComposer();
     refreshGate();
     window.addEventListener("orwell:gamechanged", refreshGate);
-    setInterval(() => { if (!document.hidden) refreshGate(); }, 30000);
+    startGatePoll();
+    // WS Phase-1 (§4/§6): cancel the periodic poll the instant the socket goes live; resume
+    // polling if it falls back to SSE (startGatePoll re-arms only while !_wsActive()).
+    window.addEventListener("orwell:ws-active", () => { if (_gateTimer) { clearInterval(_gateTimer); _gateTimer = null; } });
+    window.addEventListener("orwell:ws-inactive", () => { refreshGate(); startGatePoll(); });
   }
 
   ready(start);
