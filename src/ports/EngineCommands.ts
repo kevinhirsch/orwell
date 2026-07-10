@@ -109,6 +109,19 @@ export interface RecordInteractionReq {
    * conflict (HTTP 409, no event recorded, no fold). Absent ⇒ byte-identical to the pre-0065 path.
    */
   expectedBeatSeq?: number;
+  /**
+   * Optional at-most-once retry key (0065 Part B, extended to this port — A10 / #591 / R1c). The FE
+   * re-drives a fold-bearing scene after a stale-409: the single retry of issue #591 PLUS the CON-11
+   * deferred-fold queue. `expectedBeatSeq` (CAS-before-write) makes ONE retry safe — but under sustained
+   * two-window concurrency two turns can drain the SAME deferred fold and re-drive it, and a 409 there is
+   * AMBIGUOUS ("the peer already applied this" vs "the board moved on"), so the FE conservatively
+   * re-queues it and it folds TWICE (the hidden relationship layer moves twice — a non-degradation /
+   * anti-sycophancy break). CAS cannot close this: both re-drives carry a valid, freshly-reconciled
+   * token. A stable caller-minted `idempotencyKey` does: a repeat key returns the prior `eventId` WITHOUT
+   * re-recording or re-folding — at-most-once, exactly the discipline `advanceGame`/`submitDecision`
+   * already use. Absent ⇒ byte-identical to the pre-key path (every call folds, as today).
+   */
+  idempotencyKey?: string;
 }
 
 export interface SurfaceReq {

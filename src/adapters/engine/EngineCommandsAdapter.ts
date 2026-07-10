@@ -108,6 +108,19 @@ export class EngineCommandsAdapter implements EngineCommands {
    * cache key (it only ever grows under append-only), so a miss is always a fresh, correct recompute.
    */
   private beatKeyCache: { atCount: number; key: string } | null = null;
+  /**
+   * A10 / #591 / R1c — the at-most-once idempotency ledger for `recordInteraction` (idempotencyKey →
+   * eventId). See `RecordInteractionReq.idempotencyKey`: it makes the FE's stale-409 re-drive (the
+   * single retry of #591 + the CON-11 deferred-fold queue) at-most-once AT THE ENGINE, not merely via
+   * the fragile "the engine refuses BEFORE folding" CAS timing — because two concurrent turns draining
+   * the SAME deferred fold each carry a valid, freshly-reconciled CAS token, so CAS alone cannot stop a
+   * DOUBLE fold. Bounded LRU (the retry window is seconds; a few hundred keys is ample), in-memory
+   * per-sandbox (cross-user isolation is structural — ONE adapter per user; a restart also drops the
+   * FE's in-flight deferred queue, so there is nothing to dedup across one), and Vault-free (the key is
+   * an opaque token, never secret state).
+   */
+  private static readonly RECORD_IDEMPOTENCY_MAX = 256;
+  private readonly recordIdempotency = new Map<string, string>();
 
   constructor(
     private readonly events: EventStore,
@@ -178,6 +191,21 @@ export class EngineCommandsAdapter implements EngineCommands {
   }
 
   recordInteraction(req: RecordInteractionReq): { eventId: string } {
+    // A10 / #591 / R1c — AT-MOST-ONCE: a REPEAT idempotencyKey returns the prior eventId WITHOUT
+    // re-recording or re-folding, so a concurrently re-driven fold (two windows draining the same
+    // deferred-fold queue, or an ambiguous-response retry) can never double-apply. Checked BEFORE
+    // guardBeatSeq so a duplicate is a no-op SUCCESS regardless of how far the board has since moved —
+    // the reconcile / re-drive returns the prior eventId cleanly, never a spurious 409 the FE would
+    // conservatively re-queue (which is precisely how the second fold lands under sustained concurrency).
+    // This whole method is synchronous (no await), so Node serializes two concurrent calls: the first
+    // fully records + stores its key before the second is dispatched, and the second short-circuits here.
+    if (req.idempotencyKey !== undefined) {
+      const prior = this.recordIdempotency.get(req.idempotencyKey);
+      if (prior !== undefined) {
+        this.rememberRecordIdempotent(req.idempotencyKey, prior); // refresh LRU recency
+        return { eventId: prior };
+      }
+    }
     // 0065 Part A — refuse a scene computed against a superseded board BEFORE recording/folding.
     this.guardBeatSeq(req.expectedBeatSeq);
     // Validated references (B39/audit A4): an interaction may only name LIVING houseguests — never an
@@ -366,7 +394,22 @@ export class EngineCommandsAdapter implements EngineCommands {
       if (this.soulMemo) for (const w of witnessSet) if (w !== PLAYER) this.soulMemo(w, rationale);
     }
     this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart
+    // A10/#591 — record the at-most-once key ONLY after a clean commit. Placed AFTER onPersist so a
+    // persist failure (which rolls the whole commit back, including this in-memory event) leaves no key
+    // behind — a later retry then correctly re-attempts rather than short-circuiting to a rolled-back id.
+    if (req.idempotencyKey !== undefined) this.rememberRecordIdempotent(req.idempotencyKey, eventId);
     return { eventId };
+  }
+
+  /** A10/#591 — remember a recordInteraction result under its idempotency key (bounded LRU; oldest evicts). */
+  private rememberRecordIdempotent(key: string, eventId: string): void {
+    this.recordIdempotency.delete(key);          // re-insert at the tail (insertion-ordered = LRU)
+    this.recordIdempotency.set(key, eventId);
+    while (this.recordIdempotency.size > EngineCommandsAdapter.RECORD_IDEMPOTENCY_MAX) {
+      const oldest = this.recordIdempotency.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.recordIdempotency.delete(oldest);
+    }
   }
 
   /**

@@ -271,7 +271,7 @@ def _wire_scene(monkeypatch, extraction_json, recorded):
         return extraction_json
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         recorded.append({"content": content, "with_ids": with_ids, "kind": kind,
                          "consequence": consequence, "user": user})
         return {"ok": True}
