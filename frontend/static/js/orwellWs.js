@@ -48,6 +48,14 @@
   // `orwell:gamechanged`, spaced by a growing backoff so a genuinely-blocked upgrade never storms.
   var UPGRADE_BACKOFF_MIN_MS = 8000;
   var UPGRADE_BACKOFF_MAX_MS = 60000;
+  // Per-tab-id READINESS gate (the hello REQUIRES a non-null `perTabId`). The tab's chat-session id is
+  // resolved ASYNCHRONOUSLY at boot (the session bootstrap / `selectSession`), so `_perTabId()` is null
+  // for the first few hundred ms after DOMContentLoaded. If we hello with that null, the server refuses
+  // it `bad-request` and we lock into a PERMANENT (handshake-cause) fallback that never recovers — the
+  // exact turn-on blocker. So we DEFER the connect until the id lands (poll below), bounded so a
+  // game-build page that never establishes a session (an idle welcome screen) doesn't poll forever.
+  var PERTAB_POLL_MS = 200;
+  var PERTAB_WAIT_MAX_MS = 30000;
 
   // `ORWELL_WS_TRANSPORT` (default OFF in Phase 1 — zero-risk default, §6). The
   // server injects it; we read it defensively from either a global or a body
@@ -102,6 +110,7 @@
   var _beatSeq = 0;              // last-seen engine beatSeq (0065)
   var _highestChatSeq = -1;      // highest `chat` event.seq rendered (reconnect cursor)
   var _chatSubscribed = false;
+  var _chatTailActive = false;   // are we tailing a LIVE chat run right now? (§4.1 re-attach guard)
   var _fallbackReason = null;    // WHY we fell back — only "pregame-not-live" is recoverable (see _goFallback)
   var _helloTimer = null;
   var _reconnectFails = 0;
@@ -109,11 +118,15 @@
   var _closingForGood = false;
   var _lastUpgradeAttempt = 0;                    // ms of the last fallback→WS upgrade attempt
   var _upgradeBackoffMs = UPGRADE_BACKOFF_MIN_MS; // grows per failed upgrade, caps at MAX; reset on activate
+  var _pertabTimer = null;                        // the deferred-connect poll while `_perTabId()` is null
+  var _pertabWaitStart = 0;                       // ms the current defer-for-perTabId wait began
 
   // per-channel handler registries — strict `ch` routing (§ multiplex).
   var _handlers = { chat: [], state: [], hud: [], layout: [], notice: [] };
 
   function _nextCid() { _cid += 1; return "c_" + _cid.toString(36); }
+
+  function _now() { return (typeof Date !== "undefined" && Date.now) ? Date.now() : +new Date(); }
 
   function _emitWindow(name, detail) {
     try { window.dispatchEvent(new CustomEvent(name, { detail: detail || {} })); } catch (_) {}
@@ -159,6 +172,9 @@
         // Route by `ch`; a non-`chat` frame can never reach the chat buffers.
         if (frame.ch === "chat") {
           if (typeof frame.seq === "number" && frame.seq > _highestChatSeq) _highestChatSeq = frame.seq;
+          // A terminal `done` ends this run's tail — a LATER `run-started` edge must re-attach for the
+          // NEXT run (a standing subscribe does NOT span runs; each run is a fresh per-run buffer).
+          if (frame.d && frame.d.done) _chatTailActive = false;
           _emit("chat", frame);
         } else if (_handlers[frame.ch]) {
           _emit(frame.ch, frame);
@@ -166,6 +182,12 @@
         return;
       case "state":
         if (frame.d && typeof frame.d.beatSeq === "number") _noteBeat(frame.d.beatSeq);
+        // §4.1 — the `run-started` invitation edge: a NEW run began on our canonical. A standing chat
+        // subscription does NOT tail across runs (agent_runs' `subscribe()` returns when its run ends,
+        // and each run is a fresh per-run buffer), so we must RE-ATTACH the chat channel to mirror the
+        // new run — the sender's own reply AND a peer's turn both ride this. Skipped while we're already
+        // tailing a live run (§4.1 "a run it is not already tailing").
+        if (frame.d && frame.d.reason === "run-started") _onRunStarted();
         _emit("state", frame);
         return;
       case "hud":
@@ -207,7 +229,14 @@
     // replay window.
     if (cid && _pending[cid]) {
       var q = _pending[cid]; delete _pending[cid];
-      if (frame.ch === "chat") _chatSubscribed = true;
+      if (frame.ch === "chat") {
+        _chatSubscribed = true;
+        // §3.1/§3.6 — `hasRun:false` means there is NO run to tail right now (the ack returns with no
+        // live tail). Clear the tail flag so the FIRST subsequent `run-started` edge (§4.1) re-attaches
+        // instead of being skipped as "already tailing". A live/terminal-buffered run keeps the flag —
+        // its `done` event (or a drop) clears it.
+        if (frame.d && frame.d.hasRun === false) _chatTailActive = false;
+      }
       try { q.resolve(frame); } catch (_) {}
       return;
     }
@@ -324,7 +353,21 @@
   function _subscribeChat(fromSeq) {
     var from = (typeof fromSeq === "number") ? fromSeq : (_highestChatSeq + 1);
     if (from < 0) from = 0;
+    _chatTailActive = true;   // after a subscribe we ARE tailing this run (until its `done`)
     return _request("subscribe", "chat", { fromSeq: from }, "subscribe");
+  }
+
+  // §4.1 — re-attach the chat channel when a NEW run starts on our canonical. The previous run's
+  // `subscribe()` returned at its own end (per-run buffers don't span runs), so `_chatSubscribed` being
+  // "true" is stale — the server-side tail is gone. Re-subscribe from 0 (the new run's buffer restarts
+  // at seq 0). Guarded on `_chatTailActive` so we never interrupt an in-flight run we're already
+  // mirroring (the queued back-to-back case) and never double-attach a run.
+  function _onRunStarted() {
+    if (_mode !== "ws") return;
+    if (_chatTailActive) return;   // already tailing a live run — nothing to do (§4.1)
+    _highestChatSeq = -1;          // a NEW run's buffer restarts at seq 0 — replay it from the top
+    _chatSubscribed = false;
+    _subscribeChat(0).catch(function () { _chatTailActive = false; });
   }
 
   // ── the state/hud EDGE channels (§4) — the HUD push keystone ─────────────
@@ -406,8 +449,10 @@
     _mode = "fallback";
     _fallbackReason = reason || _fallbackReason || "handshake";
     _chatSubscribed = false;
+    _chatTailActive = false;
     _rebinding = null;
     _clearHelloTimer();
+    _clearPertabTimer();
     _closingForGood = true;
     try { if (_sock) _sock.close(); } catch (_) {}
     _sock = null;
@@ -446,9 +491,11 @@
   function _maybeUpgradeFromFallback() {
     if (_mode !== "fallback") return;
     if (!_flagOn() || !_gameBuild()) return;   // flag off / non-game build ⇒ stay in fallback (dormant)
-    // Gate by CAUSE: only a pre-game-not-live fallback recovers. A proxy/handshake/exhaustion
-    // fallback is permanent — retrying it just re-pays the hello timeout on every gamechanged.
-    if (_fallbackReason !== "pregame-not-live") return;
+    // Gate by CAUSE: only a pre-game-not-live fallback (the canonical id wasn't live yet) OR a
+    // pertab-pending fallback (the wait window elapsed before the per-tab session id resolved) recovers.
+    // A proxy/handshake/exhaustion fallback is permanent — retrying it just re-pays the hello timeout on
+    // every gamechanged. (start() below re-defers if the id STILL isn't ready, so it never hellos null.)
+    if (_fallbackReason !== "pregame-not-live" && _fallbackReason !== "pertab-pending") return;
     var now = (typeof Date !== "undefined" && Date.now) ? Date.now() : +new Date();
     if (now - _lastUpgradeAttempt < _upgradeBackoffMs) return;  // within the backoff window — skip
     _lastUpgradeAttempt = now;
@@ -458,7 +505,45 @@
     start();                   // resolves the canonical id LIVE before subscribing; live:false ⇒ back to fallback
   }
 
+  // ── deferred connect: WAIT for a valid perTabId before the hello (§2 handshake) ─────────────────
+  // The hello frame carries `perTabId` and the server refuses a null/empty one `bad-request` (its guard
+  // is correct — a socket must name a session). At boot that id resolves async, so rather than hello
+  // with null and lock into a permanent handshake-cause fallback, we POLL until `_perTabId()` lands, then
+  // connect for real. Bounded by `PERTAB_WAIT_MAX_MS`; on expiry we fall soft to the SSE stack with a
+  // RECOVERABLE cause so a later game-load re-arms the wait through `orwell:gamechanged`.
+  function _clearPertabTimer() { if (_pertabTimer) { clearTimeout(_pertabTimer); _pertabTimer = null; } }
+
+  function _deferForPerTab() {
+    if (_pertabTimer) return;                      // a wait is already armed — never stack a second
+    if (!_pertabWaitStart) _pertabWaitStart = _now();
+    _pertabTimer = setTimeout(function () {
+      _pertabTimer = null;
+      if (_mode !== "idle") return;                // a real connect / fallback already took over
+      if (!_flagOn() || !_gameBuild()) return;     // dormancy (flag flipped off) — stop quietly
+      if (_perTabId()) { _connect(); return; }     // the id landed → connect for real (a VALID hello)
+      if (_now() - _pertabWaitStart >= PERTAB_WAIT_MAX_MS) {
+        // No session after the wait window (an idle no-game page). Fall soft to SSE, but mark the cause
+        // RECOVERABLE: a later game-load's `orwell:gamechanged` re-runs start() → re-arms this wait.
+        _goFallback("pertab-pending");
+        return;
+      }
+      _deferForPerTab();                            // keep polling until the id lands or the bound elapses
+    }, PERTAB_POLL_MS);
+  }
+
+  // While DEFERRING (idle, poll armed), the session bootstrap that establishes the per-tab id also
+  // dispatches `orwell:gamechanged` (the ONE g15 seam). Use it to connect PROMPTLY once the id is ready
+  // rather than waiting out the next poll tick. Re-checks the dormancy gate; a no-op if the id still
+  // isn't ready (the poll keeps waiting) — so we never hello with a null perTabId.
+  function _maybeConnectWhenPerTabReady() {
+    if (_mode !== "idle") return;
+    if (!_flagOn() || !_gameBuild()) return;
+    if (_perTabId()) { _clearPertabTimer(); _pertabWaitStart = 0; _connect(); }
+  }
+
   function _connect() {
+    _clearPertabTimer();
+    _pertabWaitStart = 0;
     _mode = "negotiating";
     _closingForGood = false;
     var perTabId = _perTabId();
@@ -508,6 +593,7 @@
     sock.onclose = function () {
       _sock = null;
       _chatSubscribed = false;
+      _chatTailActive = false;
       _rebinding = null;
       _clearHelloTimer();
       if (_closingForGood) return;
@@ -538,6 +624,7 @@
       _emitWindow("orwell:ws-inactive", { mode: "fallback", reason: "flag-off" });
       return;
     }
+    if (!_perTabId()) { _deferForPerTab(); return; }  // id not resolved yet — DEFER, never hello null
     _connect();
   }
 
@@ -547,6 +634,9 @@
     window.addEventListener("orwell:gamechanged", function () {
       if (_mode === "ws") { try { rebind(); } catch (_) {} }
       else if (_mode === "fallback") { try { _maybeUpgradeFromFallback(); } catch (_) {} }
+      // Still deferring for the per-tab id (idle, poll armed): the bootstrap that JUST established the id
+      // fired this event — connect promptly now that it's ready instead of waiting the next poll tick.
+      else if (_mode === "idle") { try { _maybeConnectWhenPerTabReady(); } catch (_) {} }
     });
   } catch (_) {}
 
