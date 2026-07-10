@@ -65,6 +65,27 @@
   var BUBBLE_LIGHT_RGB = [245, 246, 248];   // near-white frost tint over a BRIGHT wall
   var BUBBLE_DARK_RGB = [56, 60, 68];       // neutral dark frost tint (matches style.css default)
 
+  // ── F-CONTRAST-1 (HIG Color / Materials; broadens #738 item 19) ───────────────
+  // Secondary UI text — the `--fg-muted` token (de-facto #888) used for captions / gadget rows /
+  // settings sub-labels — sits over the SAME fixed light glass the chrome does. adaptiveGlass
+  // stands the chrome down under the glass theme (it is a FIXED light glass, no per-surface veil),
+  // so #744's per-bubble floor never reached that muted text: over a DARK backdrop showing through
+  // the 0.60 white fill the effective surface is light-but-muted, and #888 on it drops well under a
+  // legible floor. We floor it the SAME way the received bubble does — measure APCA against the real
+  // composited surface, then ESCALATE the ink toward the theme `--fg` until it clears — but ONCE at
+  // the TOKEN level (a single `--fg-muted` override), not per surface, so the chrome keeps standing
+  // down. Promoting `--fg-muted` toward `--fg` is exactly the audit's sanctioned fix.
+  var MUTED_BASE_RGB = [136, 136, 136];   // the documented `--fg-muted` fallback (#888)
+  // The ONE light glass fill (style.css --ow-glass-light-color = rgba(255,255,255,0.60), the kube
+  // 0.60 white). The muted ink's true surface = this fill composited over the sampled backdrop.
+  var GLASS_LIGHT_RGB = [255, 255, 255];
+  var GLASS_FILL_ALPHA = 0.60;
+  // MUTED floor = Lc 45. APCA "bronze" sets Lc 45 as the minimum for SECONDARY / non-body text
+  // (body prose is Lc 60 — the bubble floor above). Muted captions are intentionally de-emphasized,
+  // so 45 keeps them legible without promoting them all the way to full `--fg` (which would erase the
+  // visual hierarchy). Only escalate PAST #888 when the backdrop-through-glass actually starves it.
+  var MUTED_FLOOR = 45;
+
   // ── #744 — APCA legibility floor for the RECEIVED transcript ──────────────────
   // The chat transcript IS the game (read for hours) and is the most-cited legibility gap.
   // Polarity-flip ALONE (a dark-ink/light-ink choice at a single Y threshold) is not enough:
@@ -565,6 +586,70 @@
     return { ink: ink, halo: dark ? HERO_HALO_LIGHT : HERO_HALO_DARK, dark: dark, lc: lc };
   }
 
+  // F-CONTRAST-1 — floor the `--fg-muted` token over the fixed light glass. The muted base (#888)
+  // sits on the glass surface = the 0.60 white fill composited over the sampled backdrop. Measure
+  // APCA(muted ↔ surface); if it misses the secondary-text floor, ESCALATE the muted ink toward the
+  // theme `--fg` (the sanctioned "promote --fg-muted toward --fg" fix — the light glass stays light
+  // even over a dark backdrop, so darker ink is the right move) until it clears — or it is already
+  // maxed. Mirrors the received-bubble/hero escalation, at the TOKEN level (one value for the theme,
+  // never per-surface, so the fixed-light-glass chrome keeps standing down). Returns
+  // { ink, lc, floored }; `floored` is false when #888 already clears (⇒ leave the design untouched).
+  function resolveMutedInk(bgRgb, fgRgb) {
+    var surface = compositeOver(GLASS_LIGHT_RGB, GLASS_FILL_ALPHA, bgRgb);
+    var ink = MUTED_BASE_RGB.slice();
+    var lc = Math.abs(apcaContrast(ink, surface));
+    var floored = false;
+    for (var step = 0; step < 8 && lc < MUTED_FLOOR; step++) {
+      ink = [
+        Math.round(ink[0] + (fgRgb[0] - ink[0]) * 0.5),
+        Math.round(ink[1] + (fgRgb[1] - ink[1]) * 0.5),
+        Math.round(ink[2] + (fgRgb[2] - ink[2]) * 0.5),
+      ];
+      lc = Math.abs(apcaContrast(ink, surface));
+      floored = true;
+    }
+    return { ink: ink, lc: lc, floored: floored };
+  }
+
+  // Read a CSS custom property as [r,g,b] (resolving var()/color-mix() via computed style). Falls
+  // back to the supplied default when unset/unparseable. Used by the F-CONTRAST-1 token floor.
+  function _readVarRgb(name, fallback) {
+    try {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      if (!v && document.body) v = getComputedStyle(document.body).getPropertyValue(name).trim();
+      var c = parseColor(v);
+      if (c) return [c[0], c[1], c[2]];
+    } catch (_) {}
+    return fallback;
+  }
+
+  // F-CONTRAST-1 — compute + apply the floored `--fg-muted` token under the glass theme. Sample the
+  // whole-viewport backdrop (one token for the theme, matching how the chrome is one fixed glass),
+  // resolve the theme `--fg` as the escalation target, and set `--fg-muted` on <html> ONLY when the
+  // base #888 actually misses the floor (otherwise remove any prior override so the design stands).
+  // Vault-free; purely a legibility floor. `data-muted-apca-lc` on <html> is the probe hook.
+  function _floorMutedToken() {
+    var root = document.documentElement;
+    try {
+      var bg = backdropAvgColor({ left: 0, top: 0,
+        width: window.innerWidth || 1280, height: window.innerHeight || 800 });
+      if (!bg) { root.style.removeProperty("--fg-muted"); root.removeAttribute("data-muted-apca-lc"); return; }
+      var fg = _readVarRgb("--fg", [22, 25, 31]);   // #16191f — the glass-chrome dark ink default
+      var m = resolveMutedInk(bg, fg);
+      if (m.floored) root.style.setProperty("--fg-muted", "rgb(" + m.ink[0] + "," + m.ink[1] + "," + m.ink[2] + ")");
+      else root.style.removeProperty("--fg-muted");
+      root.setAttribute("data-muted-apca-lc", Math.round(m.lc));
+    } catch (_) {}
+  }
+
+  // Drop the F-CONTRAST-1 muted-token override (standdown paths let the CSS backstop / base stand).
+  function _clearMutedToken() {
+    try {
+      document.documentElement.style.removeProperty("--fg-muted");
+      document.documentElement.removeAttribute("data-muted-apca-lc");
+    } catch (_) {}
+  }
+
   // ── apply ───────────────────────────────────────────────────────────────────
   function isFrosted() { return !!(document.body && document.body.classList.contains("theme-frosted")); }
 
@@ -714,7 +799,7 @@
     // now keyed on theme-frosted, which covers BOTH tiers, so glass-full is a subset of it.)
     // Accessibility wins: under Increase Contrast the system goes black/white + a border;
     // drop ALL our overrides and let the CSS high-contrast treatment stand.
-    if (prefersContrast()) { _dropTagged(null); return; }
+    if (prefersContrast()) { _dropTagged(null); _clearMutedToken(); return; }
 
     // GLASS THEME (BOTH tiers — theme-frosted): the CHROME is a FIXED light glass (the kube
     // 0.60 fill; Full adds SVG refraction, Frosted a CSS blur). The old per-surface, backdrop-
@@ -737,11 +822,15 @@
         if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue;
         applyTo(el);
       }
+      // F-CONTRAST-1 — floor the shared `--fg-muted` token against the fixed light glass (once per
+      // pass; only overrides when #888 actually misses the secondary-text floor over this backdrop).
+      _floorMutedToken();
       return;
     }
 
     // No glass theme → full standdown (the static CSS stands).
     _dropTagged(null);
+    _clearMutedToken();
   }
 
   // Remove our inline overrides from previously-tagged elements. keepSel (a selector) is
@@ -796,6 +885,7 @@
         apcaContrast: apcaContrast, compositeOver: compositeOver,
         resolveBubbleScrim: resolveBubbleScrim, APCA_FLOOR: APCA_FLOOR,
         supportsContrastColor: supportsContrastColor,   // #738-19 — Safari contrast-color() PE probe
+        resolveMutedInk: resolveMutedInk, MUTED_FLOOR: MUTED_FLOOR,   // F-CONTRAST-1 — muted-text floor probe
       };
     } catch (_) {
       try { window.OrwellAdaptiveGlass = { refresh: function () {} }; } catch (__) {}

@@ -501,6 +501,54 @@ def main() -> int:
                     }"""
                 )
 
+            # ── F-CONTRAST-1 — SECONDARY (`--fg-muted`) TEXT FLOOR OVER GLASS ─────────────
+            # #744 floors the RECEIVED-bubble text; F-CONTRAST-1 extends the SAME APCA escalation to
+            # the muted secondary text (`--fg-muted`, de-facto #888) rendered over the fixed light
+            # glass — captions / gadget rows / settings sub-labels. The chrome stands down under the
+            # glass theme (fixed light glass), so the floor is applied ONCE at the token level:
+            # resolveMutedInk() composites the 0.60 white fill over the sampled backdrop and promotes
+            # the muted ink toward --fg until APCA clears MUTED_FLOOR. We prove the floor holds over a
+            # SWEEP of backdrops (incl. the worst case: a dark backdrop showing through the glass,
+            # where #888 alone fails badly). (theme-frosted is still applied here.)
+            muted = page.evaluate(
+                """() => {
+                  const AG = window.OrwellAdaptiveGlass;
+                  if (!AG || !AG.resolveMutedInk) return { missing: true };
+                  const FLOOR = AG.MUTED_FLOOR || 45;
+                  const GLASS = [255, 255, 255], A = 0.60;   // the ONE light glass fill (kube 0.60)
+                  const fg = [22, 25, 31];                    // the glass-chrome dark ink (--fg default)
+                  // a sweep from pure-black through mid-tones to pure-white backdrops-through-glass.
+                  const backs = [[0,0,0],[24,26,30],[60,72,90],[120,110,130],[150,150,150],
+                                 [190,180,160],[230,230,235],[255,255,255]];
+                  const out = [];
+                  for (const bg of backs) {
+                    const m = AG.resolveMutedInk(bg, fg);
+                    const surface = AG.compositeOver(GLASS, A, bg);
+                    // independent re-measure of the RESOLVED ink against the SAME light-glass surface.
+                    const lc = Math.abs(AG.apcaContrast(m.ink, surface));
+                    out.push({ bg, ink: m.ink, lc: Math.round(lc), reportLc: Math.round(m.lc),
+                               floored: m.floored, floor: FLOOR });
+                  }
+                  return { floor: FLOOR, results: out };
+                }"""
+            )
+            if not muted.get("missing"):
+                results = muted.get("results", [])
+                floor = muted.get("floor", 45)
+                check(len(results) >= 6,
+                      f"F-CONTRAST-1: muted-ink floor was measured across a backdrop sweep ({muted})")
+                _below_muted = [r for r in results if r.get("lc", 0) < floor]
+                check(not _below_muted,
+                      f"F-CONTRAST-1: the floored --fg-muted ink clears the APCA secondary-text floor "
+                      f"(Lc>={floor}) over the light glass for EVERY backdrop — promoting toward --fg "
+                      f"guarantees it ({results})")
+                # the worst case (a DARK backdrop through the 0.60 fill) MUST have actually escalated:
+                # base #888 fails there, so `floored` proves the escalation fired (not a vacuous pass).
+                dark_case = results[0] if results else {}
+                check(dark_case.get("floored") is True,
+                      f"F-CONTRAST-1: a dark backdrop through the glass DID escalate --fg-muted past "
+                      f"#888 (else #888's ~Lc 13 would have leaked) ({dark_case})")
+
             page.evaluate("() => document.body.classList.remove('theme-frosted')")  # restore frosted-off
             try:
                 page.evaluate("() => window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh()")

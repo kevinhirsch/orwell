@@ -92,6 +92,13 @@ html {
 @media (display-mode: standalone) {
   body {
     padding-top: var(--safe-top);
+    /* F-SAFE-1 (HIG Layout): honor the LANDSCAPE sensor housing too — on a notched
+       phone held sideways the notch eats the LEFT or RIGHT edge, so the whole app
+       body keeps out of both horizontal insets (portrait / non-notched ⇒ 0, no
+       visible change). The per-surface floors in style.css (composer, sidebar)
+       reinforce it inside a browser tab, where display-mode is not standalone. */
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
   /* Any fixed top banner (engine status) sits below the status bar. */
   .orwell-banner,
