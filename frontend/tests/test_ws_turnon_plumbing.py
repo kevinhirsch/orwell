@@ -40,8 +40,11 @@ def test_websockets_is_pinned_in_both_requirement_files():
         req = f.read()
     with open(os.path.join(FRONTEND_DIR, "requirements.lock.txt"), encoding="utf-8") as f:
         lock = f.read()
-    assert "\nwebsockets\n" in req, "websockets missing from requirements.txt intent"
-    assert "websockets==" in lock, "websockets not pinned in requirements.lock.txt"
+    # Pin EXACTLY in both files so CI == prod (the lock is what deploy installs) and the
+    # intent file can't drift to a different version — a bare/range pin would let the two
+    # diverge, the CI-vs-prod hazard the requirements.txt header warns about.
+    assert "\nwebsockets==16.0\n" in req, "websockets not pinned to ==16.0 in requirements.txt"
+    assert "\nwebsockets==16.0\n" in lock, "websockets not pinned to ==16.0 in requirements.lock.txt"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
