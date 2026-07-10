@@ -158,6 +158,60 @@ export function isGameBuild() {
   return !!(typeof document !== 'undefined' && document.body && document.body.hasAttribute('data-game-build'));
 }
 
+// ── #1325 — PHASE-AWARE narrator WAIT/status chrome copy ─────────────────────────────────
+// GAME_NARRATOR (above) is deliberately PHASE-INVARIANT — "Production" stays the byline in
+// every phase (M2-5 owner pick: the one diegetic transcript author, never the raw model name).
+// But the WAIT-state copy underneath that byline is a DIFFERENT thing: "the producers are
+// rolling / talking it over" is a pre-game/casting voice, and it stayed on screen unchanged
+// after the season started because the chrome that renders it never asked what phase the
+// game was in (#1325). This is the one shared source both callers (chat.js's `_waitLabel` /
+// `_inProgressLabel`) read from — a producer-flavored table pre-game, a house/broadcast-
+// flavored table once a season is live.
+const _WAIT_COPY = {
+  casting: {
+    init: 'The producers are rolling',
+    waiting: 'The producers are talking it over',
+    still: 'The producers are still deliberating',
+  },
+  started: {
+    init: 'The feeds are rolling',
+    waiting: 'The house is in motion',
+    still: 'Cameras are still rolling',
+  },
+};
+
+// The ONE cached, Vault-free "has the season started?" signal this module tracks — never a
+// new poll. It fetches `/api/orwell/state` (the same shared HUD read every other panel already
+// polls) exactly ONCE at load, then refreshes only when the existing g15 seam says something
+// changed — `orwell:gamechanged`, the single debounced dispatcher owned by platform.js
+// (this module only LISTENS; it never dispatches). Fails open to `false` (the casting/pre-game
+// voice) so a slow/unreachable read never falsely announces a started season.
+let _seasonStarted = false;
+function _refreshSeasonStartedSignal() {
+  if (typeof fetch !== 'function') return;
+  fetch('/api/orwell/state', { credentials: 'same-origin' })
+    .then((r) => (r && r.ok ? r.json() : null))
+    .then((st) => { if (st && typeof st.started === 'boolean') _seasonStarted = st.started; })
+    .catch(() => { /* fail open — keep the last-known value */ });
+}
+export function isSeasonStarted() { return _seasonStarted; }
+if (typeof window !== 'undefined') {
+  _refreshSeasonStartedSignal();
+  window.addEventListener('orwell:gamechanged', _refreshSeasonStartedSignal);
+}
+
+/**
+ * The phase-aware wait/status copy for a generic waiting `stage` ('init' | 'waiting' | 'still').
+ * `started` is optional — pass it explicitly (e.g. from a caller that already has fresher state)
+ * or omit it to read the cached signal above. Returns null for an unknown stage so callers keep
+ * their own literal fallback (mirrors `orwellBeat`'s null-on-miss contract).
+ */
+export function narratorWaitCopy(stage, started) {
+  const phase = (typeof started === 'boolean' ? started : isSeasonStarted()) ? 'started' : 'casting';
+  const table = _WAIT_COPY[phase];
+  return (table && table[stage]) || null;
+}
+
 // ── M4-6 — CEREMONY SLATES ────────────────────────────────────────────────────────────────
 // A curated subset of resolved beats — HOH win, nominations, veto win, veto ceremony, and
 // eviction result — upgrade from the compact `.ow-slate-outcome` chip (above) to a DESIGNED

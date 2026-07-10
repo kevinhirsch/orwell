@@ -528,24 +528,34 @@ def test_pre_token_wait_copy_is_in_universe_in_the_game_build():
     # J1-30: the pre-token wait (most visible right after "Start casting") read as OOC lag
     # ("Processing request…"). In the game build the GENERIC waiting stages get a production voice;
     # the literal strings remain as the non-game-build fallback.
+    # #1325: the in-universe copy is now PHASE-AWARE (casting vs. started) and lives in
+    # orwellToolBeats.js's `narratorWaitCopy` — chat.js's `_waitLabel` just dresses the
+    # game-build gate around it and keeps the literal fallback.
     chat = _read("static", "js", "chat.js")
     assert "function _waitLabel" in chat
-    # the in-universe copy is producers-framed and gated on the game build
     seg = chat[chat.index("function _waitLabel"):]
     seg = seg[: seg.index("\n  }")]
     assert "isGameBuild()" in seg
-    assert "producers" in seg.lower()
+    assert "narratorWaitCopy(stage)" in seg
+    assert "narratorWaitCopy" in chat[: chat.index("addAITTSButton")]  # imported from orwellToolBeats.js near the top
     # the generic spinner stages route through the helper (with the literal fallback preserved)
     assert "_waitLabel('init', 'Initializing')" in chat
     assert "_waitLabel('waiting', 'Processing request')" in chat
     assert "_waitLabel('still', 'Still waiting for model')" in chat
+    # the in-universe (pre-game/casting) copy itself is producers-framed
+    beats = _read("static", "js", "orwellToolBeats.js")
+    assert "producers" in beats.lower()
 
 
 def test_pre_token_copy_stays_consistent_with_producers_framing():
     # CONVENTION: the FE's in-universe "producers" voice must stay consistent with the engine-side
     # framing (apply_game_framing's PRE_GAME_PROMPT casts the show's voice as the PRODUCER). The
-    # pre-token wait copy uses the same "producers" framing — no competing fiction.
+    # pre-token wait copy uses the same "producers" framing pre-game — no competing fiction.
+    # #1325: the copy table lives in orwellToolBeats.js now, not inline in chat.js's _waitLabel.
     ch = _read("routes", "chat_helpers.py")
     assert "PRODUCER" in ch  # the pre-game framing voice
-    chat = _read("static", "js", "chat.js")
-    assert "producers" in chat[chat.index("function _waitLabel"):chat.index("function _waitLabel") + 600].lower()
+    beats = _read("static", "js", "orwellToolBeats.js")
+    assert "const _WAIT_COPY" in beats
+    casting = beats[beats.index("const _WAIT_COPY"):]
+    casting = casting[: casting.index("started:")]
+    assert "producers" in casting.lower()

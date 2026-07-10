@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR, orwellCeremonySlate, orwellRenderCeremonySlate } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR, orwellCeremonySlate, orwellRenderCeremonySlate, narratorWaitCopy } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -86,14 +86,12 @@ import { isNarrow } from './platform.js';
   // build, dress the GENERIC waiting stages in a production voice so the gap feels like the show
   // rolling, not the app stalling. Endpoint-DIAGNOSTIC states (online/offline/latency/countdown)
   // stay literal — they are operator truth a player rarely sees and must not be fictionalised.
+  // #1325: the copy itself is PHASE-AWARE — a producers-are-deliberating voice reads as pre-game
+  // once the season is actually live, so the strings live in orwellToolBeats.js's `narratorWaitCopy`
+  // (casting vs. started tables) and this helper just dresses the game-build gate around it.
   function _waitLabel(stage, fallback) {
     if (!isGameBuild()) return fallback;
-    switch (stage) {
-      case 'init':    return 'The producers are rolling';
-      case 'waiting': return 'The producers are talking it over';
-      case 'still':   return 'The producers are still deliberating';
-      default:        return fallback;
-    }
+    return narratorWaitCopy(stage) || fallback;
   }
   // #986 — the ONE in-progress ("model is generating a response") spinner label, so it reads in the
   // same in-character "producers" voice across EVERY spinner-create site: the initial send, a
