@@ -63,6 +63,8 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["content"])) refuse("content", "a non-empty string");
       if (args["kind"] !== undefined && typeof args["kind"] !== "string") refuse("kind", "a string when present");
       if (args["toward"] !== undefined && !isStrArray(args["toward"])) refuse("toward", "an array of houseguest ids when present");
+      // Phase 2 — the LLM's per-scene felt duration in minutes; the engine clamps it (feltHoursFromMinutes).
+      if (args["feltMinutes"] !== undefined && typeof args["feltMinutes"] !== "number") refuse("feltMinutes", "a number of minutes when present");
       // 0005: the optional generative-consequence descriptor. Shape-guard only (R6 class: a string
       // where an array/object is expected dies deep in the fold) — the engine owns the magnitude and
       // degrades gracefully on an unknown direction, so domain validation stays there, not here.

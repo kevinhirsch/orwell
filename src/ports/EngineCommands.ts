@@ -98,6 +98,15 @@ export interface RecordInteractionReq {
   /** Whose hidden opinion of the initiator moves (default: the other witnesses). */
   toward?: EntityId[];
   /**
+   * Phase 2 (duration-based clock) — the LLM's proposal for how long THIS scene felt, in in-game MINUTES
+   * (a quick word ~15–30, a chat ~60, a long strategy summit ~150). When supplied AND the in-game clock is
+   * running, the engine advances the day's clock by this scene's bounded duration on the next per-turn tick
+   * (instead of the flat per-conversation floor), so time tracks the play the player actually did. The
+   * value is CLAMPED to a sane envelope (`feltHoursFromMinutes`) — the model proposes, the engine bounds
+   * it (ADR 0005 for time). ABSENT ⇒ the flat floor ⇒ byte-identical; clock OFF ⇒ inert (the seeded sims).
+   */
+  feltMinutes?: number;
+  /**
    * The OPTIONAL generative-consequence descriptor (ADR 0005). When supplied, it REFINES the fold's
    * targeting + per-edge direction (open-set interpretation of the scene) while `kind` may still seed
    * the engine's base magnitude. When ABSENT, behavior is byte-identical to the `kind`-only path.

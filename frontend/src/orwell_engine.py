@@ -555,7 +555,7 @@ async def run_competition(comp_type: str | None = None, participant_ids: list | 
     return await _call("runCompetition", args, user=user)
 
 
-async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
+async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, expected_beat_seq: int | None = None, idempotency_key: str | None = None, felt_minutes: int | None = None, user: str | None = None) -> dict:
     """Record a player-present scene as an engine event (player-witnessed → the player's
     knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023);
     an optional Vault-free `consequence` descriptor (ADR 0005) lets the caller PROPOSE which
@@ -585,6 +585,10 @@ async def record_interaction(content: str, with_ids: list | None = None, initiat
         req["expectedBeatSeq"] = expected_beat_seq
     if idempotency_key is not None:
         req["idempotencyKey"] = idempotency_key
+    # Phase 2 (duration-based clock): the LLM's proposal for how long this scene FELT, in in-game minutes.
+    # The engine clamps it and advances the day clock by that bounded duration (pacing-only; clock-gated).
+    if isinstance(felt_minutes, (int, float)) and felt_minutes > 0:
+        req["feltMinutes"] = felt_minutes
     return await _call("recordInteraction", req, user=user)
 
 
