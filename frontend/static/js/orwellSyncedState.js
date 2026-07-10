@@ -93,13 +93,19 @@
       _route(key, seeded);
     }
 
+    // A disposed handle is INERT: set()/get() close over `entry` directly, so without this flag a
+    // disposed handle would remain a zombie write path — still mutating entry.last and dispatching
+    // `orwell:window-layout` after it left the registry. Since this substrate gates the kits, that
+    // must not leak.
+    var disposed = false;
     var handle = {
       key: key,
-      // The last state this tab has seen for the key (defensive copy).
-      get: function () { return _merge(entry.last, null); },
+      // The last state this tab has seen for the key (defensive copy). Inert once disposed.
+      get: function () { return disposed ? {} : _merge(entry.last, null); },
       // Persist a partial + mirror it. Emits the EXACT event orwellLayoutSync captures, so this
       // inherits per-device persistence, LWW, and realtime two-window mirror with zero transport code.
       set: function (partial) {
+        if (disposed) return handle;
         if (!partial || typeof partial !== 'object') return handle;
         var state = entry.coerce ? entry.coerce(partial) : partial;
         if (!state || typeof state !== 'object') return handle;
@@ -109,7 +115,13 @@
         } catch (_) {}
         return handle;
       },
-      dispose: function () { delete registry[key]; },
+      // Idempotent: mark the handle inert BEFORE unregistering so no in-flight closure can revive it.
+      // Only drop the registry slot if it still points at OUR entry (a re-register may have replaced it).
+      dispose: function () {
+        if (disposed) return;
+        disposed = true;
+        if (registry[key] === entry) delete registry[key];
+      },
     };
     return handle;
   }

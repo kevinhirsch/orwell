@@ -168,7 +168,33 @@ assert(lateApplied[0].shown === true, "the replayed seed carries the persisted s
 // get() reflects the last-seen state.
 assert(lateHandle.get().shown === true, "handle.get() reflects the merged last-seen state");
 
-// ── 6. the substrate mints NO orwell:gamechanged (g15 single-dispatcher invariant) ──────────────
+// ── 6. dispose() makes the handle INERT — no zombie write path ───────────────────────────────────
+// A disposed handle closes over `entry`; set()/get() must no-op so it cannot mutate entry.last or
+// dispatch capture events after leaving the registry.
+const zh = global.window.OrwellSyncedState.register("gadget:zombie", { apply: function () {} });
+zh.set({ collapsed: true });
+assert(zh.get().collapsed === true, "sanity: the handle persists before dispose");
+const capBeforeDispose = dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length;
+zh.dispose();
+zh.dispose();  // idempotent — a second dispose must not throw
+const retZombie = zh.set({ collapsed: false });   // no-op after dispose
+assert(retZombie === zh, "set() still returns the handle after dispose (chainable no-op)");
+const capAfterDispose = dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length;
+assert(capAfterDispose === capBeforeDispose, "a disposed handle must NOT dispatch orwell:window-layout");
+assert(Object.keys(zh.get()).length === 0, "a disposed handle's get() is inert ({})");
+
+// re-register the same key works and is a live, independent handle again.
+const zh2 = global.window.OrwellSyncedState.register("gadget:zombie", { apply: function () {} });
+const capBeforeReuse = dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length;
+zh2.set({ collapsed: true });
+const capAfterReuse = dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length;
+assert(capAfterReuse === capBeforeReuse + 1, "a re-registered key dispatches again (live handle)");
+// The stale disposed handle must not hijack the fresh registry slot.
+zh.set({ collapsed: false });
+assert(dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length === capAfterReuse,
+  "the stale disposed handle stays inert even after the key is re-registered");
+
+// ── 7. the substrate mints NO orwell:gamechanged (g15 single-dispatcher invariant) ──────────────
 assert(dispatched.filter(function (e) { return e.type === "orwell:gamechanged"; }).length === 0,
   "the substrate must never dispatch orwell:gamechanged");
 
@@ -209,6 +235,13 @@ def test_exposes_register_returning_a_handle():
     # the handle surface the kits consume
     for member in ("set:", "get:", "dispose:"):
         assert member in SRC, f"the handle must expose {member}"
+
+
+def test_dispose_makes_the_handle_inert():
+    # A per-handle `disposed` flag guards set()/get() — not just a registry delete (which would leave
+    # a zombie write path through the closed-over entry).
+    assert "disposed" in SRC
+    assert "if (disposed) return" in SRC, "set() must early-return when disposed"
 
 
 def test_capture_uses_the_layout_sync_seam_not_a_new_transport():
