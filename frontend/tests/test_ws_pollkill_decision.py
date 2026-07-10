@@ -64,3 +64,43 @@ def test_decision_backstop_still_fetches_status_as_fallback():
     assert 'new CustomEvent("orwell:pending"' in DECISION
     # And the fallback is armed on load (not gated away) — never leave the UI with no update path.
     assert "_startBackstop();" in DECISION
+
+
+import re
+
+
+def _backstop_body():
+    # The fn body up to its 2-space-indented closing brace (inner braces are deeper).
+    m = re.search(r"async function _backstopPending\(\)\s*\{(.*?)\n  \}", DECISION, re.DOTALL)
+    assert m, "could not locate the _backstopPending fn body"
+    return m.group(1)
+
+
+def test_backstop_rechecks_ws_after_awaits_before_dispatch():
+    """CodeRabbit Major (WS-vs-fallback race): clearing the interval on `orwell:ws-active` does NOT
+    cancel a `_backstopPending` call ALREADY awaiting fetch/r.json() — that in-flight response could
+    dispatch a STALE orwell:pending AFTER the WS `state` push took over. The fix re-checks
+    `_wsActive()` at the top AND after EACH await, before dispatch. Prove the guard's presence and
+    ORDER structurally (no browser): every await is followed by a `_wsActive()` bail BEFORE the
+    orwell:pending dispatch — so a fetch that resolves after ws-active suppresses the stale card."""
+    body = _backstop_body()
+
+    # Top-of-fn guard: bail before we even start if WS is already live.
+    assert re.search(r"try\s*\{\s*(//[^\n]*\n\s*)*if \(_wsActive\(\)\) return;", body), \
+        "the backstop must bail at the TOP of the try when WS is already active"
+
+    # A guard immediately after the fetch await, and another after the json await.
+    assert "if (!r.ok || _wsActive()) return;" in body, \
+        "the backstop must re-check _wsActive() right after `await fetch(...)`"
+    assert re.search(r"await r\.json\(\);\s*\n\s*if \(_wsActive\(\)\) return;", body), \
+        "the backstop must re-check _wsActive() right after `await r.json()`"
+
+    # ORDER: the LAST post-await _wsActive() guard must precede the orwell:pending dispatch, so a
+    # response resolving after ws-active can never reach dispatch.
+    dispatch_at = body.index('new CustomEvent("orwell:pending"')
+    json_guard_at = body.rindex("if (_wsActive()) return;")
+    assert json_guard_at < dispatch_at, \
+        "the post-await WS-active guard must come BEFORE the orwell:pending dispatch"
+
+    # The dispatch is still reachable when WS is OFF (the permanent fallback is not gated away).
+    assert 'window.dispatchEvent(new CustomEvent("orwell:pending"' in body

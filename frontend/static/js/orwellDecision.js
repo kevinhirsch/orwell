@@ -1002,11 +1002,18 @@
   // is already up, so it never re-nags a waved-away card. Fail-open everywhere.
   async function _backstopPending() {
     try {
+      // WS race guard: the interval is cleared on `orwell:ws-active`, but a `_backstopPending`
+      // call ALREADY awaiting the fetch keeps running — so re-check `_wsActive()` before we start
+      // AND after each await, BEFORE dispatching. Otherwise an in-flight status read could surface
+      // a STALE/duplicate card after the WS `state` push has already taken over. (`_wsActive` is a
+      // hoisted fn declaration below.)
+      if (_wsActive()) return;
       if (document.getElementById(CARD_ID)) return;    // a card is already showing
       if (!document.getElementById("chat-history")) return;
       const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
-      if (!r.ok) return;
+      if (!r.ok || _wsActive()) return;                // WS took over while the fetch was in flight
       const st = await r.json();
+      if (_wsActive()) return;                          // …or while parsing the body — do not dispatch
       const pending = st && st.pending && st.pending.kind ? st.pending : null;
       // F-NEW-4: respect a dismissal PER SIGNATURE, not as a blanket flag — the old
       // unconditional `if (_userDismissed) return` let a dismissed low-stakes pending
