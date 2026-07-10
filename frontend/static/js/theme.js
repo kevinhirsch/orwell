@@ -2086,21 +2086,27 @@ export function initThemeUI() {
     });
   }
 
-  // ── Glass tier — the 3-way control (id=theme-glass-tier): full | frosted | normal.
-  // The container holds one [data-tier] button per value; the active one carries
-  // .active + aria-pressed, and the chosen value is mirrored to the container's
-  // dataset.value so _getOpts can read it. (Function declarations below are
-  // hoisted, so the swatch handler can call these helpers.)
+  // ── Glass tier — TWO mirrored controls: the full 3-way ladder (id=theme-glass-tier,
+  // Customize -> Font & Layout: full | frosted | normal) and the #1316 picker-level quick
+  // control (id=theme-glass-tier-quick, Browse tab: full | frosted only — "Off" stays
+  // Customize-only). Each container holds one [data-tier] button per value; the active one
+  // carries .active + aria-pressed, and the chosen value is mirrored to the container's
+  // dataset.value so _getOpts can read it (it reads #theme-glass-tier specifically, which
+  // this function always keeps in lockstep with the quick control). (Function declarations
+  // below are hoisted, so the swatch handler can call these helpers.)
+  const GLASS_TIER_CONTROL_IDS = ['theme-glass-tier', 'theme-glass-tier-quick'];
   function _syncGlassTierControl(tier) {
-    const ctrl = document.getElementById('theme-glass-tier');
-    if (!ctrl) return;
     const t = (tier === 'full' || tier === 'frosted' || tier === 'normal') ? tier : 'frosted';
-    ctrl.dataset.value = t;
-    ctrl.querySelectorAll('[data-tier]').forEach((b) => {
-      const on = b.dataset.tier === t;
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
+    for (const id of GLASS_TIER_CONTROL_IDS) {
+      const ctrl = document.getElementById(id);
+      if (!ctrl) continue;
+      ctrl.dataset.value = t;
+      ctrl.querySelectorAll('[data-tier]').forEach((b) => {
+        const on = b.dataset.tier === t;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
   }
   // #739 — mirror the glass TINT ('clear'|'tinted') onto the 2-way control: the
   // active button gets .active + aria-pressed, and the value rides dataset.value
@@ -2140,10 +2146,14 @@ export function initThemeUI() {
     if (imgWrap) imgWrap.style.display = isImg ? '' : 'none';
   }
 
-  const glassTierCtrl = document.getElementById('theme-glass-tier');
-  if (glassTierCtrl && glassTierCtrl.dataset.bound !== '1') {
-    glassTierCtrl.dataset.bound = '1';
-    glassTierCtrl.addEventListener('click', (e) => {
+  // #1316: bind BOTH the Customize 3-way control and the Browse-tab quick 2-way control —
+  // either one applies + persists identically (applyGlassTier + _saveFull), and
+  // _syncGlassTierControl keeps the other in lockstep so they never disagree.
+  for (const _gtId of GLASS_TIER_CONTROL_IDS) {
+    const ctrl = document.getElementById(_gtId);
+    if (!ctrl || ctrl.dataset.bound === '1') continue;
+    ctrl.dataset.bound = '1';
+    ctrl.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-tier]');
       if (!btn) return;
       const tier = btn.dataset.tier;

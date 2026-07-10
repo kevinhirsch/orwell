@@ -1,0 +1,189 @@
+"""#1316 (P1) — Light + Dark as first-class base identities, each toggleable glass/frosted,
+frosted default; a PROMINENT picker-level glass/frosted control (not buried in
+Customize -> Font & Layout).
+
+Source-pinned, JS/HTML-as-text like the sibling `test_739_glass_tint_toggle.py` /
+`test_l32_l33_l34_theme_defaults.py` gates (the pytest lane has no DOM runtime; the
+browser-smoke + responsive-matrix gates cover the live DOM).
+
+What shipped:
+  1. A NEW compact 2-way (Glass / Frosted — deliberately no "Off" at this level) segmented
+     control, `#theme-glass-tier-quick`, lives on the Browse/Presets tab (the FIRST tab you
+     see opening Theme), bound to the ACTIVE theme's tier. It reuses the EXACT SAME
+     `applyGlassTier` + `save()` persistence path as the existing Customize-tab
+     `#theme-glass-tier` 3-way control — no new storage shape, no parallel state. theme.js's
+     `_syncGlassTierControl` keeps BOTH controls in lockstep (`GLASS_TIER_CONTROL_IDS`), so
+     picking either one updates the other, and the click-binding loop wires both identically.
+  2. `light` and `dark` (the two named base-identity presets) carry no `glass`/`glassTier`
+     override in THEMES, so `defaultGlassTierFor` already resolves them to 'frosted' — the
+     issue's "frosted default" requirement was already true for these two and this pins it
+     explicitly (a regression guard: nobody should give either preset a `glass`/`glassTier:
+     'full'` override later without a deliberate decision).
+  3. DEFAULT_THEME was deliberately left as 'glass' (NOT swapped to the literal 'dark' preset,
+     and the 'glass' preset's own Full-tier default was NOT touched) — see the report / commit
+     message for the reasoning: `test_l32_l33_l34_theme_defaults.py` already hard-pins
+     `DEFAULT_THEME = 'glass'` plus a NEGATIVE guard forbidding `DEFAULT_THEME = 'dark'`, and
+     CLAUDE.md documents the Apple Liquid-Glass default as recent, deliberate, heavily-audited
+     work (#738/#660/the HIG audit) — reverting it wasn't in scope for this ticket without a
+     product-owner ruling. This file does not re-pin that decision (the L32 tests already do);
+     it only proves light/dark's OWN frosted default, which is the part actually in scope here.
+"""
+import os
+import re
+
+FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read(*rel):
+    with open(os.path.join(FRONTEND, *rel), encoding="utf-8") as f:
+        return f.read()
+
+
+# ── HTML: the quick control lives on the Browse/Presets tab, defaults to Frosted ──────────
+
+
+def test_quick_glass_control_exists_on_the_browse_tab():
+    html = _read("static", "index.html")
+    browse_m = re.search(
+        r'<div id="theme-tab-browse"[^>]*>(.*?)<div id="theme-tab-customize"', html, re.S)
+    assert browse_m, "could not locate the #theme-tab-browse (Presets) tab panel"
+    browse = browse_m.group(1)
+    assert 'id="theme-glass-tier-quick"' in browse, (
+        "#1316: a quick glass/frosted control (#theme-glass-tier-quick) must live on the "
+        "Browse/Presets tab, not only in Customize -> Font & Layout"
+    )
+    # It must NOT be the same element as the Customize-tab control (which stays there too).
+    assert 'id="theme-glass-tier"' not in browse, (
+        "#1316: the quick control is a SEPARATE element from the Customize-tab "
+        "#theme-glass-tier control (they are kept in sync by theme.js, not literally the same "
+        "DOM node)"
+    )
+
+
+def test_quick_control_is_two_way_glass_or_frosted_no_off():
+    html = _read("static", "index.html")
+    ctrl_m = re.search(
+        r'<div id="theme-glass-tier-quick"[^>]*>(.*?)</div>\s*</div>', html, re.S)
+    assert ctrl_m, "#theme-glass-tier-quick control body not found"
+    body = ctrl_m.group(1)
+    assert 'data-tier="full"' in body and 'data-tier="frosted"' in body, (
+        "#1316: the quick control must offer both Glass (full) and Frosted"
+    )
+    # Deliberately no "Off"/normal option at the quick level (the full 3-way ladder,
+    # including Off, stays in Customize -> Font & Layout's #theme-glass-tier).
+    assert 'data-tier="normal"' not in body, (
+        "#1316: the quick picker-level control is 2-way (Glass/Frosted) by design — "
+        "'Off' stays behind the full Customize control"
+    )
+
+
+def test_quick_control_defaults_to_frosted():
+    html = _read("static", "index.html")
+    ctrl_m = re.search(r'<div id="theme-glass-tier-quick"[^>]*>', html)
+    assert ctrl_m, "#theme-glass-tier-quick control not found"
+    assert 'data-value="frosted"' in ctrl_m.group(0), (
+        "#1316: the quick control must default to Frosted (data-value='frosted')"
+    )
+    body_m = re.search(
+        r'<div id="theme-glass-tier-quick"[^>]*>(.*?)</div>\s*</div>', html, re.S)
+    body = body_m.group(1)
+    frosted_btn = re.search(r'data-tier="frosted"[^>]*>', body).group(0)
+    assert 'aria-pressed="true"' in frosted_btn, (
+        "#1316: the Frosted button must be the pressed default"
+    )
+    full_btn = re.search(r'data-tier="full"[^>]*>', body).group(0)
+    assert 'aria-pressed="false"' in full_btn, (
+        "#1316: Glass (full) must NOT be pressed by default"
+    )
+
+
+def test_quick_control_reuses_the_shared_segmented_control_class():
+    html = _read("static", "index.html")
+    m = re.search(r'<div id="theme-glass-tier-quick"[^>]*>', html)
+    assert m and 'class="theme-seg"' in m.group(0), (
+        "#1316: the quick control must reuse the shared .theme-seg styling class "
+        "(the same segmented-control look as #theme-glass-tier / #theme-glass-tint)"
+    )
+
+
+# ── JS: both controls are kept in lockstep and share ONE apply+persist path ───────────────
+
+
+def test_both_glass_tier_controls_are_tracked_together():
+    js = _read("static", "js", "theme.js")
+    assert "const GLASS_TIER_CONTROL_IDS = ['theme-glass-tier', 'theme-glass-tier-quick'];" in js, (
+        "#1316: theme.js must track BOTH controls in one id list so a single sync/bind "
+        "routine drives them identically"
+    )
+
+
+def test_sync_glass_tier_control_updates_every_tracked_control():
+    js = _read("static", "js", "theme.js")
+    m = re.search(r"function _syncGlassTierControl\(tier\)\s*\{(.*?)\n  \}", js, re.S)
+    assert m, "_syncGlassTierControl body not found"
+    body = m.group(1)
+    assert "for (const id of GLASS_TIER_CONTROL_IDS)" in body, (
+        "#1316: _syncGlassTierControl must loop over GLASS_TIER_CONTROL_IDS so picking "
+        "either control updates the other"
+    )
+
+
+def test_both_controls_are_bound_through_the_same_handler_loop():
+    js = _read("static", "js", "theme.js")
+    m = re.search(
+        r"for \(const _gtId of GLASS_TIER_CONTROL_IDS\)\s*\{(.*?)\n  \}", js, re.S)
+    assert m, "#1316: the glass-tier click-binding loop over GLASS_TIER_CONTROL_IDS was not found"
+    handler = m.group(1)
+    # Apply + sync + persist — the EXACT same path the pre-#1316 single control used.
+    assert "applyGlassTier(tier)" in handler
+    assert "_syncGlassTierControl(tier)" in handler
+    assert "_saveFull(s.name, s.colors)" in handler, (
+        "#1316: choosing a tier from EITHER control must persist through the same "
+        "save() path (no parallel storage)"
+    )
+
+
+def test_getopts_still_reads_the_customize_tab_control_which_stays_synced():
+    """_getOpts() reads #theme-glass-tier specifically (unchanged) — this only works because
+    _syncGlassTierControl (pinned above) always keeps it mirrored to whichever control the
+    player actually clicked, including the new quick control."""
+    js = _read("static", "js", "theme.js")
+    assert "const gt = document.getElementById('theme-glass-tier');" in js
+    assert "if (gt && gt.dataset.value) opts.glassTier = gt.dataset.value;" in js
+
+
+# ── Light + Dark default to Frosted (the issue's headline requirement) ────────────────────
+
+
+def test_light_and_dark_presets_carry_no_glass_override():
+    js = _read("static", "js", "theme.js")
+    body = re.search(r"export const THEMES = \{(.*?)\n\};", js, re.S).group(1)
+    for name in ("light", "dark"):
+        m = re.search(r"^\s*" + name + r":\s*\{([^}]*)\}", body, re.M)
+        assert m, f"{name} theme entry not found in THEMES"
+        entry = m.group(1)
+        assert "glass:" not in entry and "glassTier:" not in entry, (
+            f"#1316: {name} must carry no glass/glassTier override so it resolves through "
+            "defaultGlassTierFor's frosted fallback, not a hardcoded tier"
+        )
+
+
+def test_default_glass_tier_for_light_and_dark_is_frosted():
+    js = _read("static", "js", "theme.js")
+    # defaultGlassTierFor: 'glass' (or an explicit glass/full flag) -> full; explicit
+    # 'normal' -> normal; everything else (incl. light/dark) -> frosted.
+    m = re.search(r"function defaultGlassTierFor\([^)]*\)\s*\{(.*?)\n\}", js, re.S)
+    assert m, "defaultGlassTierFor body not found"
+    body = m.group(1)
+    assert "return 'frosted';" in body
+    # light/dark are neither 'glass' nor glass/full-flagged nor 'normal', so they fall
+    # through every branch to the frosted return — this is the ACTUAL resolution path a
+    # brand-new player choosing Light or Dark takes.
+    assert "name === 'glass'" in body
+    assert "t.glassTier === 'normal'" in body
+
+
+def test_light_and_dark_are_real_named_presets_in_the_picker():
+    js = _read("static", "js", "theme.js")
+    assert re.search(r"^\s*dark:\s*\{", js, re.M), "dark preset must exist"
+    assert re.search(r"^\s*light:\s*\{", js, re.M), "light preset must exist"
