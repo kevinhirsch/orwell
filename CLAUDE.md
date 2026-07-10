@@ -79,7 +79,7 @@ are authoritative and reference each other as companions.
 | `docs/decisions/` | **Decision records (ADRs 0001–0016)** — accepted refinements to the canonical mechanics. 0001 competition stats / Character-Soul split / veto "Houseguest's Choice" · 0002 organic relationship model · 0003 the conversation is the game · 0004 embedding provider (fastembed/ONNX) · 0005 split authority by openness · 0006 in-game time/sleep/presence economy · 0007 public-internet exposure · 0008 cross-tab/-device chat consistency · 0009 location/movement single source of truth · 0010 token-economy architecture · 0011 concurrent engine-drive beat-aware guardrails · 0012 two-window lockstep "Messenger mirror" · 0013 cast photos require a model-authored identity · 0014 local & tunable HTTPS (LAN-trusted, with or without a domain) · 0015 collapse the duplicated live-vs-mirror chat render paths (ship-gate F5's root cause) · 0016 LLM model selection (GLM-4.7 narrator/utility, Seedream portraits — the currently-live default). (`README.md` there indexes them.) |
 | `docs/features/` | **Priority-ordered feature specs** — each `NNNN-*.md` (design note) + `NNNN-*.feature` (executable Gherkin), built in order. `README.md` there holds the live per-feature **status index** and the **Amendments to shipped specs** table (implementers must pick those up). |
 | `docs/IMPLEMENTATION_QUEUE.md` | **Live work queue** — per-item implementation prompts (B/C/D/U/L-numbered lanes), dispatch order + dependencies, and the truest prose snapshot of what's done vs. remaining. |
-| `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). The 2026-06-11 **house-audit pattern** (real FE + real engine driven headless under Playwright, DOC-ONLY) produced `2026-06-11-dwe-window-audit.md` (windowing), `2026-06-11-refresh-persistence-audit.md` (every transient UI state × reload), and `2026-06-11-settings-wiring-audit.md` (every settings control × {wired, persisted, applied}). The **`2026-06-27-ship-gate.md`** is the **launch-acceptance bar** — the authoritative "what blocks ship": the FE-airtight standard **F1–F5** (no missing messages, right status, smart queueing, multi-window concurrency, realtime two-window mirror parity — the #1 release blocker) and the casting→eviction golden path **G1–G9**, each with the real-model gate that proves it, plus the launch-blocker / post-launch / parked triage of every open issue. |
+| `docs/audits/` | **Audit record & rulings.** `2026-06-10-full-product-audit.md` carries the product-owner **rulings #1–#21** and the **campaign close-out ledger** (the authoritative open-items list); `2026-06-10-v1-transcript-meta-feedback-audit.md` reconstructs the v1 game from its logged transcripts (why the Bible's emphatic passages exist). The 2026-06-11 **house-audit pattern** (real FE + real engine driven headless under Playwright, DOC-ONLY) produced `2026-06-11-dwe-window-audit.md` (windowing), `2026-06-11-refresh-persistence-audit.md` (every transient UI state × reload), and `2026-06-11-settings-wiring-audit.md` (every settings control × {wired, persisted, applied}). The **`2026-06-27-ship-gate.md`** is the **launch-acceptance bar** — the authoritative "what blocks ship": the FE-airtight standard **F1–F5** (no missing messages, right status, smart queueing, multi-window concurrency, realtime two-window mirror parity — historically the #1 release blocker, now **CLOSED + CI-gated** as a required check, #1276, 2026-07-09) and the casting→eviction golden path **G1–G9**, each with the real-model gate that proves it, plus the launch-blocker / post-launch / parked triage of every open issue. |
 | `docs/legacy/BB_GameBible.md` | **Legacy reference only.** The old chat-prompt implementation being replaced. Source of the *concrete* mechanics, but its fixed player persona / names are illustrative — never hard-code them. Same rule for the vendored v1 transcripts in `docs/legacy/meta-feedback/`. |
 
 ## The non-negotiable mandate
@@ -584,6 +584,21 @@ key-free and is blocking via `ci-gate` (`frontend/INTEGRATION.md` §golden-path)
 **0022** (the rich game UI / MVP-2) was **removed** in the 2026-06-28 PO review — by ADR 0003 the chat *is*
 the UI, and its goals were delivered chat-forward via 0020/0051/0054, so the standalone dashboard spec was cut.
 
+**Since 2026-07-07 (reconciled 2026-07-10):** the drafted spec set now extends to **0114** —
+**0113** (visual-regression harness) and **0114** (theme-surface consistency) are **built** (FE + CI
+gates), while **0111** (the Day-1 experience) and **0112** (LLM-call observability) are **in progress
+(being built now)**; see `docs/features/README.md`. **Ship-gate F5** (realtime two-window mirror
+parity) is **fixed and wired as a required CI gate** (#1276, 2026-07-09) — no longer a launch blocker.
+A **WebSocket Phase-1 transport** (ADR 0017/0018; spec `docs/design/websocket-phase1-protocol.md`)
+landed **DORMANT behind `ORWELL_WS_TRANSPORT` (default off)** — the full client/server/layout stack is
+merged (#1283–#1287, #1293) but not turned on (the live turn-on + two-window verification cadence is
+the owed Phase-2 item). The **Apple-HIG audit (#694)** shipped all findings bar F-CHROME-1, and the
+**#660 game-build window-kit migration** is done (the Theme-window drag, #1289, was the last game-build
+residual); the **#738 Liquid-Glass legibility/a11y batch** is substantially shipped (residual tracked
+in issue #738). The 2026-07-07 **FE↔BE integration gap review**
+(`docs/audits/2026-07-07-fe-be-integration-gap-review.md`) is being executed via the **M1–M4 build
+lanes** (`frontend/tests/test_m{1,2,3,4}_*.py`).
+
 **Trust the code over this prose — it drifts.** The authoritative sources, in order:
 - `docs/features/README.md` — the per-feature status index, reconciled against the source (built /
   spec-only / deferred, with each feature's verification gate).
@@ -658,10 +673,13 @@ modifier; Character/Soul split; organic relationship model; veto "Houseguest's C
    **0007–0014**, all **accepted and built** (features 0067/0068 public exposure, 0069 token
    economy/usage envelope, 0074 local & tunable HTTPS (ADR 0014), and the 0008/0011/0012 multi-window seams all shipped). Their *residual* open
    items are **tuning, owed
-   verification runs, and post-launch refactor** — **not** unbuilt architecture: ADR 0010 token-economy
-   follow-ons (per-class `max_tokens` runtime-edit; model-aware reasoning sizing; ledger
-   `appliedMaxTokens`/`finishReason`; `Continue ▸` in chat mode), the ADR 0008/0012 live-LLM two-window
-   re-run + mid-gen-join test pin, and the architecture latents filed in `docs/REFACTOR-ROADMAP.md`
+   verification runs, and post-launch refactor** — **not** unbuilt architecture: the ADR 0010 token-economy
+   follow-ons are now mostly shipped — **#1 per-class `max_tokens` runtime-edit** (admin-editable
+   `max_tokens_budget` in `token_policy.py`) and **#3 ledger `appliedMaxTokens`/`finishReason`**
+   (`orwell_token_ledger.py`) are **DONE (reconciled 2026-07-10)**; still open are **#2 model-aware
+   reasoning sizing** and **#4 `Continue ▸` in chat mode**. The ADR 0008/0012 live-LLM two-window
+   re-run + mid-gen-join test pin remains owed (the F5 render-parity half is now closed + CI-gated,
+   #1276), and the architecture latents filed in `docs/REFACTOR-ROADMAP.md`
    (R1–R7, post-launch — the highest-value being **A-S3**, a stale-409 that can drop a scene's only
    consequence fold). The full source-verified status is
    `docs/audits/2026-06-21-open-items-verification.md`.
