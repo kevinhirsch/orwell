@@ -346,7 +346,7 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
         if: steps.fixture.outputs.present == 'true'
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: run the visual-regression matrix (Tier A + Tier B)
         id: run
         if: steps.fixture.outputs.present == 'true'
@@ -428,7 +428,7 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
         if: steps.fixture.outputs.present == 'true'
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: run the theme-consistency sweep (light + dark)
         id: run
         if: steps.fixture.outputs.present == 'true'
@@ -495,8 +495,8 @@ jobs:
   # The headless-Chromium pytest tests (the `browser` marker). Serial (they bind fixed ports / drive a
   # real page) with `--reruns 1` so the known environmental onboarding-scrim flake (#925/#1148/#930)
   # self-recovers within the job instead of reddening the whole run. Needs the chromium binary, installed
-  # the same way as the `fe-browser` job (no `--with-deps`: the self-hosted box has the system libs baked
-  # in; a sudo apt install is not granted).
+  # the same way as the `fe-browser` job (`--with-deps` so the gh-hosted ubuntu image gets chromium's
+  # system libs via apt).
   fe-browser-tests:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
@@ -522,7 +522,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: pytest — headless-browser suite, serial + retry-once
         run: cd frontend && python3 -m pytest tests/ -m browser --reruns 1 -q
 
@@ -553,11 +553,10 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
-      # NO `--with-deps` (it apt-installs via sudo, which the self-hosted runner does not grant);
-      # the runner box has the chromium system libs pre-installed once (the provisioning script
-      # bakes them in). Install only the browser binary into ~/.cache.
+      # `--with-deps` apt-installs chromium's system libs — the gh-hosted ubuntu-latest image grants
+      # sudo, and (unlike the old self-hosted box) does not have them pre-baked.
       - name: install playwright chromium
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: boot smoke — real app, game-build gating (feature 0032)
         run: cd frontend && python3 scripts/boot_smoke.py
       - name: browser smoke — keep-set UI loads, no broken modules (feature 0032)
@@ -590,7 +589,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: responsive matrix gate — viewports x surfaces (Stream S, ruling 16)
         run: cd frontend && python3 scripts/responsive_matrix.py
 
