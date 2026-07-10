@@ -30,7 +30,8 @@ your-domain.example, www.your-domain.example {
 	#     }
 	# }
 
-	# Front-end on THIS host:
+	# Front-end on THIS host. reverse_proxy passes the WebSocket Upgrade transparently, so
+	# GET /api/ws/session (WS Phase-1 / ADR 0017) works with no extra directive — see ../README.md.
 	reverse_proxy 127.0.0.1:8080
 	# …or the front-end in the LXC reached over WireGuard (origin opens no public ports), e.g.:
 	# reverse_proxy 10.10.0.2:8080

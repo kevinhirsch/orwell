@@ -21,6 +21,8 @@ orwell.lan, orwell.local, 192.168.1.50 {
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
+	# reverse_proxy passes the WebSocket Upgrade transparently — GET /api/ws/session
+	# (WS Phase-1 / ADR 0017) needs no extra directive. See ../README.md.
 	reverse_proxy 127.0.0.1:8080
 }
 

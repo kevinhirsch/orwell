@@ -32,6 +32,47 @@ Before exposing, the FE must run the **public profile** (`docs/INSTALL.md`): `OR
 > All targets below use the FE port **8080** (the installer default `ORWELL_PORT`). If you changed
 > `ORWELL_PORT`, change it here too.
 
+## WebSockets through the perimeter (WS Phase-1 turn-on)
+
+The player tier ships a **multiplexed WebSocket transport** (ADR
+[`0017`](../../docs/decisions/0017-multiplexed-websocket-session-transport.md); wire spec
+`docs/design/websocket-phase1-protocol.md`) that re-hosts the live chat stream, the mirror
+resume, and the HUD/presence pushes on **one socket per tab** at `GET /api/ws/session`. It is
+**dormant by default** — the browser only *attempts* the upgrade when the front-end is started
+with `ORWELL_WS_TRANSPORT=1` (add it to `data/.env`, then restart the FE). Unset ⇒ the page is
+byte-identical and the proven SSE/poll stack carries everything, so turning it on is reversible
+by flipping the flag back.
+
+**Every terminator here passes the upgrade with no extra config**, and turning WS on does **not**
+change what is exposed — it is the *same* FE route on the *same* port, so the "only the front-end
+is ever exposed" rule above still holds unchanged.
+
+| Terminator | WebSocket handling | Action needed |
+|---|---|---|
+| **Direct uvicorn** (LAN / loopback) | `websockets` is pinned in `frontend/requirements*.txt`; uvicorn's default `--ws auto` enables it. The systemd unit does **not** pass `--ws none`. | none |
+| **Caddy** (`orwell https`, Option C) | `reverse_proxy` proxies the `Upgrade`/`Connection` handshake transparently, streams unbuffered, and applies no idle timeout to the hijacked connection. | none |
+| **Cloudflare Tunnel** (Option A) | `cloudflared` + the Cloudflare edge proxy WebSockets natively. | none |
+| **Pangolin / Newt** (Option B) | The Newt connector (Traefik-based) proxies WebSockets natively. | none |
+
+Two things make the long-lived socket robust across any of these: the server sends an
+application-level `ping` **every 20 s** (client replies `pong`), which keeps intermediaries from
+idling the connection out; and a client that genuinely *cannot* upgrade (a restrictive corporate
+MITM, an ancient browser) **falls back to the SSE/poll transport automatically** — that fallback
+is a permanent path, not a transitional one, so a proxy that strips the upgrade degrades cleanly
+rather than breaking the game.
+
+**Verify the upgrade reaches uvicorn** (run from the origin host, adjusting scheme/host):
+
+```bash
+# Expect: HTTP/1.1 101 Switching Protocols  (a 200/400/404/426 means the upgrade was NOT proxied)
+curl -sSi -o /dev/null -w '%{http_code}\n' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  http://127.0.0.1:8080/api/ws/session
+# Through the terminator, swap the URL for https://your-domain.example/api/ws/session
+# (unauthenticated it will 101 then immediately close — that still proves the pipe).
+```
+
 ## Option A — Cloudflare Tunnel + Access  *(recommended)*
 
 Fastest path to internet-grade: an outbound-only tunnel (the origin opens **zero inbound ports**),
