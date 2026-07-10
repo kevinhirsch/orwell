@@ -145,6 +145,19 @@ describe("0066 Phase-2 Ext 1 — the pure advance is gated, non-vacuous, and nev
     expect(PHASES).toContain(s.gameStatus().timeOfDay);
   });
 
+  it("DEFAULT ON: a fresh session with the master clock on advances per-conversation time WITHOUT opting in", () => {
+    // The fast-forward-bug fix: `PER_CONVERSATION_CLOCK_ENABLED_DEFAULT` is now ON, so a real playtest (the
+    // FE runs the master clock) gets in-fiction time during social play WITHOUT any env var or setter. We do
+    // NOT call setPerConversationClockEnabled here — the default alone must make lingering press the clock.
+    GameSessionAdapter.setTimeOfDayEnabled(true);
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "The Player", seed: SEED });
+    s.advanceGame(); // start the day (no opt-in call)
+    const startDepth = s.snapshot().live?.nightDepth ?? 0;
+    for (let i = 0; i < 20; i++) s.advanceClockPerConversation();
+    expect(s.snapshot().live?.nightDepth ?? 0, "the DEFAULT-on per-conversation clock presses time forward").toBeGreaterThan(startDepth);
+  });
+
   it("NEVER RUSHES: a long lingering run clamps near the 8am wake and never WRAPS the night (no auto-bedtime)", () => {
     // The pure liveSeason check — the per-conversation step holds at the bitter pre-dawn edge; only the
     // player's own turnIn (or a ceremony beat) ends the night. So a player can linger indefinitely in an

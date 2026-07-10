@@ -250,9 +250,18 @@ class GoldenDriver:
         # time, so a minutes-per-turn record and a seconds-per-turn replay live in the SAME
         # clock (the terminal divergence class: wall-clock hashed into the tick's derived rng
         # seeds/recency windows). Both modes set it; the fixture is only valid under it.
+        # #1320: PIN the per-conversation clock OFF for the golden seam. The committed fixture was
+        # recorded with the per-conversation clock (and its night-gate follow-on) OFF, so the FE↔engine
+        # transcript — the time-of-day in every prompt/projection, and the HOH→nominations transition —
+        # is only byte-reproducible under the SAME setting. Pinning `=0` makes the replay deterministic
+        # regardless of the engine's compiled default (which is now ON for real play, PR #1309/#1320), so
+        # an existing fixture replays byte-identically; a fresh re-record (nightly / a deliberate re-cut)
+        # can drop this pin to capture the clock-on pacing. The master clock itself stays as the FE pushes
+        # it (time-of-day ON at boot); only the per-conversation pacing + its night-gate are pinned off.
         env = dict(os.environ, ORWELL_DATA_DIR=engine_data,
                    ORWELL_ENGINE_PORT=str(self.engine_port),
-                   ORWELL_LOGICAL_CLOCK="1")
+                   ORWELL_LOGICAL_CLOCK="1",
+                   ORWELL_TIME_PER_CONVERSATION="0")
         self.procs.append(subprocess.Popen(
             ["node", dist], cwd=REPO, env=env,
             stdout=open(self.engine_log, "w"), stderr=subprocess.STDOUT))

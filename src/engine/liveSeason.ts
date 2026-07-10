@@ -111,7 +111,14 @@ export type Beat =
   | "eviction-reveal" | "eviction-goodbye" | "eviction-result"
   // the player's voluntary walk-out (0061) — a recorded, witnessed, non-hidden exit event; emitted
   // on BeatEvent only (the structural transition is the player's removal + the terminal `selfEvicted`).
-  | "self-eviction";
+  | "self-eviction"
+  // the HOH→nominations night-gate (#1320, ADR 0006 pacing): a diegetic "the house turns in; a new
+  // day dawns" beat inserted BETWEEN the HOH crown and the nominations, so nominations land the NEXT
+  // in-fiction day (the canonical Day-1-HOH → Day-2-noms cadence) instead of the same moment. Emitted
+  // on BeatEvent only (the structural beat stays `nominations`); INERT — it crosses the clock itself
+  // (see `crossToNextDay`) and carries no rng/fold/soul inflection. GATED behind the clock pacing, so
+  // it never fires in the calibration harness / a clock-off game ⇒ byte-identical.
+  | "day-break";
 
 /**
  * The INERT, presentation-only beats (0006 staged-rounds): a per-round staged-competition DROP. It
@@ -121,7 +128,7 @@ export type Beat =
  * is NOT inert. Callers that gate substantive side-effects (e.g. the ADR-0006 clock, #537) consult this
  * so an inert reveal can never perturb game state the same way it can never perturb the seeded stream.
  */
-const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination"]);
+const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination", "day-break"]);
 
 /** Whether a beat is an inert, presentation-only staged reveal (no rng / no fold / no clock advance). */
 export function isInertBeat(beat: Beat): boolean {
@@ -394,6 +401,14 @@ export interface LiveSeasonState {
    */
   nightDepth?: number;
   lastSleepDepth?: number;
+  /**
+   * #1320 night-gate one-shot: set once the pre-nominations day-break has fired for the CURRENT HOH reign,
+   * so the "a new day dawns" beat is inserted exactly once between the HOH crown and the nominations
+   * (cleared each reign by `rollWeek`). Written ONLY when the clock-pacing night-gate is active
+   * (`SeasonCtx.nightGate`), so a clock-off / calibration game never sets it ⇒ absent ⇒ byte-identical.
+   * Persisted with the season like the rest of the clock state (0030).
+   */
+  preNomsNightPassed?: boolean;
   /** 0066 Phase-2: the COMPOUNDING multi-night fatigue meter (0..1) — an EMA of nightly deficits, so a
    *  STRING of late nights wears a houseguest down beyond the single-night cost. Persisted (0007/0030 —
    *  non-degradation); absent ⇒ 0 ⇒ byte-identical when the clock is off. `npcFatigue` is keyed by id. */
@@ -468,6 +483,16 @@ export interface SeasonCtx {
    * tests omit it and every HOH plays the direct, threat-primary read — byte-stable.
    */
   dispositionOf?: (id: EntityId) => RelationshipDisposition;
+  /**
+   * #1320 — the HOH→nominations NIGHT-GATE is live for this turn. When true, the advance that would
+   * resolve the nominations first crosses the night to the next morning as its own diegetic `day-break`
+   * beat, so nominations land the NEXT in-fiction day (Day-1-HOH → Day-2-noms) instead of the same
+   * moment as the crown. The adapter sets it to `perConversationClockEnabled && timeOfDayEnabled` — the
+   * clock-pacing pair — so it is the "deeper half" of the fast-forward pacing fix and rides the SAME
+   * gate the per-conversation clock does. Optional/absent (pure tests, calibration harness, a clock-off
+   * game) ⇒ the gate is fully inert ⇒ BYTE-IDENTICAL to the pre-feature model.
+   */
+  nightGate?: boolean;
   /**
    * The OPEN deals binding a houseguest (0039 → 0044): an eviction vote leans away from evicting
    * a party the voter promised to protect — and breaking that lean anyway is a real betrayal the
@@ -1163,6 +1188,22 @@ export function advanceClockPerConversation(s: LiveSeasonState, hours: number = 
 }
 
 /**
+ * #1320 night-gate — cross the night to the NEXT MORNING as a clean day boundary (the HOH→nominations
+ * gate: nominations must not land the same in-fiction moment as the crown). Unlike the per-beat/per-
+ * conversation clock this is not a bounded nudge — it deliberately banks the whole night and resets to
+ * the 8am wake, so the nominations resolve on Day 2 (the canonical cadence). PURE, no rng. A no-op until
+ * the clock is running (the first ceremony beat starts the day). No sleep debt is stamped here: the night
+ * between the crown and the noms is a normal night's rest, and any real deficit is (re)banked by the
+ * player's own `turnIn` / the per-beat wraps during the days of play that follow before the next comp.
+ */
+export function crossToNextDay(s: LiveSeasonState): void {
+  if (s.nightDepth === undefined) return; // dormant until the per-beat clock starts the day
+  s.nightDepth = WAKE_HOUR;
+  s.timeOfDay = DAY_START;
+  s.playerRetired = false;
+}
+
+/**
  * The player's bedtime lever (§Principle 6): the player CHOOSES to turn in. Captures the clock-HOUR they
  * retired at as last night's bedtime (an early night ⇒ rested, a pre-dawn riser even; outlasting the house
  * past midnight ⇒ real debt), then rolls to the next 8am wake. Never auto-called — only the player's own
@@ -1216,6 +1257,7 @@ function rollWeek(s: LiveSeasonState): void {
   s.hoh = undefined; s.nominees = undefined; s.vetoField = undefined;
   s.vetoHolder = undefined; s.vetoUsed = false; s.saved = undefined;
   s.replacement = undefined; s.finalNominees = undefined; s.vetoComp = undefined;
+  s.preNomsNightPassed = undefined; // #1320: re-arm the night-gate for the new reign (undefined ⇒ serialization-neutral)
   if (s.active.length <= 2) {
     s.beat = "finale";
     return;
@@ -1720,6 +1762,21 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return ev;
     }
     case "nominations": {
+      // #1320 NIGHT-GATE: the HOH crown and the nominations must not resolve in the same in-fiction
+      // moment. When the clock pacing is live, the FIRST advance into this beat crosses the night to the
+      // next morning as its own diegetic `day-break` beat (one-shot per reign), and nominations resolve on
+      // the following advance — Day 1 HOH → Day 2 noms (WEEKLY_CADENCE), never a fast-forward. GATED, so a
+      // clock-off / calibration game skips this entirely ⇒ byte-identical. (ADR 0006: a diegetic day
+      // boundary, not a curfew — it never interrupts an engaged scene, it just seats the ceremony a day on.)
+      if (ctx.nightGate && !s.preNomsNightPassed) {
+        s.preNomsNightPassed = true;
+        crossToNextDay(s);
+        return {
+          beat: "day-break",
+          content: "The house turns in for the night, and a new day dawns over the Head of Household's first morning in power.",
+          participants: [],
+        };
+      }
       if (s.hoh === ctx.player) {
         s.pending = { kind: "nominations", by: ctx.player, options: s.active.filter((h) => h !== ctx.player), pick: 2 };
         return null;

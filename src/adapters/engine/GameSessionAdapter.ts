@@ -444,12 +444,19 @@ const MYTH_MAKING_ENABLED_DEFAULT = process.env.ORWELL_MYTH_MAKING === "1";
  *
  *  1. `ORWELL_TIME_PER_CONVERSATION` — the per-conversation clock advance (the day's finite scheming time,
  *     felt turn-by-turn). Pacing-only; never rushes an engaged scene (clamps at late-night, never wraps).
+ *     **Default ON** (set `=0` to disable): without it the clock only lurches on ceremony beats (~3h each),
+ *     so the player's social play costs zero in-game time and a day collapses into a handful of beats — the
+ *     "fast-forward" playtest bug. It rides the MASTER clock (`timeOfDayEnabled`), so the seeded sims (which
+ *     leave `ORWELL_TIME_OF_DAY` off) never advance it ⇒ byte-identical calibration regardless of this flag.
  *  2. `ORWELL_SOCIAL_FATIGUE` — a tired houseguest sways the house LESS next day + a conflict drains them
  *     to an earlier bedtime (social, not just comps).
  *  3. `ORWELL_MULTI_NIGHT_FATIGUE` — the compounding multi-night fatigue meter (consecutive late nights
  *     stack a deeper deficit; rested nights recover).
  */
-const PER_CONVERSATION_CLOCK_ENABLED_DEFAULT = process.env.ORWELL_TIME_PER_CONVERSATION === "1";
+// Default ON — a real playtest runs the master clock (the FE flips `time_of_day_enabled` on at boot), and
+// with per-conversation advance OFF the day had no in-fiction time between ceremonies (the fast-forward
+// bug). `=0` is the escape hatch. Still self-gated on `timeOfDayEnabled`, so the clock-off sims are byte-identical.
+const PER_CONVERSATION_CLOCK_ENABLED_DEFAULT = process.env.ORWELL_TIME_PER_CONVERSATION !== "0";
 const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE === "1";
 const MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_MULTI_NIGHT_FATIGUE === "1";
 
@@ -5398,6 +5405,11 @@ export class GameSessionAdapter implements GameSession {
           : undefined;
         return hg ? dispositionOf(hg.character.archetype) : "neutral";
       },
+      // #1320 night-gate: the HOH→nominations day boundary is live ONLY when the clock pacing is running
+      // (the per-conversation clock AND the master clock) — it is the "deeper half" of the fast-forward
+      // fix and rides the same pair, so the golden replay (which pins `ORWELL_TIME_PER_CONVERSATION=0`)
+      // and the calibration harness (master clock off) both leave it inert ⇒ byte-identical.
+      nightGate: this.perConversationClockEnabled && this.timeOfDayEnabled,
       // Open deals binding the houseguest (0039 → 0044): the vote leans to honor; the ledger still
       // reconciles a break with its full betrayal consequence downstream.
       dealsOf: (id) => this.deals.open().filter((d) => d.condition.promisors.includes(id)),
