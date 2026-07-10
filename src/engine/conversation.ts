@@ -79,6 +79,31 @@ export function npcInitiatedApproaches(
   return rankApproaches(player, npcs, rel, rng).slice(0, Math.max(0, count)).map((a) => a.npc);
 }
 
+/**
+ * Issue #1322 (P2) — a deterministic PROJECTION-LAYER post-filter over an already-computed
+ * `rankApproaches` ordering: any NPC still on cooldown (a positive remaining-stretches count in
+ * `cooldown`) sinks BELOW every eligible NPC, but is never dropped outright — so a short board
+ * (fewer living/awake NPCs than the caller's `count`) still fills out. Relative order is preserved
+ * WITHIN each group, so the relationship signal keeps deciding who leads among whoever is actually
+ * eligible — this only stops the single top NPC from monopolizing every stretch.
+ *
+ * Deliberately NOT folded into `rankApproaches` itself: that function stays pure (no cooldown
+ * concept, no new rng draws) so any other reader of it — today there are none in production code;
+ * only this module's own BDD/unit tests call it directly — can never be perturbed by a rotation rule
+ * that only makes sense for the one player-facing approach surface
+ * (`GameSessionAdapter.socialInitiatives`). Pure and rng-free: applying it never touches any seeded
+ * stream, so it cannot affect calibration.
+ */
+export function applyApproachCooldown(
+  ranked: readonly Approach[],
+  cooldown: ReadonlyMap<EntityId, number>,
+): Approach[] {
+  const eligible: Approach[] = [];
+  const cooling: Approach[] = [];
+  for (const a of ranked) ((cooldown.get(a.npc) ?? 0) > 0 ? cooling : eligible).push(a);
+  return [...eligible, ...cooling];
+}
+
 export type Expression =
   | { mode: "assert"; content: string }
   | { mode: "suspect"; content: string }

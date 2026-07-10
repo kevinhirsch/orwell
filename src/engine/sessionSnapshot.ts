@@ -396,6 +396,42 @@ export interface SessionCore {
    * pre-0070 saves (no texture; the deterministic template content simply stands).
    */
   textureOverrides?: Record<string, string>;
+  /**
+   * Issue #1322 (P2) — the approach-rotation anti-recency cooldown: per-NPC remaining STRETCHES (a
+   * distinct week:phase) before they are eligible to lead `socialInitiatives`'s top-3 again, so the
+   * same seeded-affinity NPC can't monopolize every approach. Persisted so the rotation survives a
+   * restart instead of re-favoring the same top NPC (0030). PLAYER-FACING PROJECTION state only —
+   * `rankApproaches` itself is untouched/pure; this is applied at the ONE call site that renders the
+   * approach surface (`GameSessionAdapter.socialInitiatives`, via `conversation.ts`'s
+   * `applyApproachCooldown`). Current, mutable per-stretch state (like `presence`) — a lapsed
+   * cooldown legitimately drops back out of the map, so this is deliberately excluded from the
+   * `sessionCoreCounts`/`sessionCoreIsSuperset` non-degradation guards below. Absent on a pre-feature
+   * save ⇒ every NPC starts eligible (byte-identical to a pre-feature load).
+   */
+  approachCooldown?: Record<EntityId, number>;
+  /**
+   * The stretch key (`week:phase`) the cooldown bookkeeping above was last advanced for
+   * (`GameSessionAdapter.syncProjection`) — so a read-only `socialInitiatives()` poll never
+   * double-decrements within the same stretch; only an ACTUAL stretch transition rotates it. Absent
+   * ⇒ the very next transition is treated as the first (harmless: an empty cooldown map decremented
+   * once is still empty).
+   */
+  approachStretchKey?: string;
+  /**
+   * Issue #1322 P1 follow-up (Greptile, PR #1335): the top-3 initiators the CURRENT stretch has
+   * actually SHOWN the player (`socialInitiatives()`'s own record), plus the stretch key they were
+   * shown FOR — persisted so a save+restart BETWEEN a `socialInitiatives()` read and the next
+   * committed beat doesn't lose whom to cool down at the coming stretch transition. (Previously
+   * this record was process-local only, so a mid-stretch restart cleared it, the transition
+   * re-armed nobody, and the just-shown NPCs could lead again immediately — the exact
+   * monopolization #1322 fixed, reopened through the restart door.) Same classification as
+   * `approachCooldown` above: PLAYER-FACING PROJECTION state only, current/mutable per-stretch
+   * (fully replaced on every stretch's first read), so it is deliberately excluded from the
+   * `sessionCoreCounts`/`sessionCoreIsSuperset` non-degradation guards. Absent on a pre-feature
+   * save OR when the surface was never read this stretch ⇒ nobody re-arms (correct: nothing was
+   * shown). Public ids + a week:phase key only — no Vault content.
+   */
+  approachShown?: { key: string; initiators: EntityId[] };
 }
 
 /** The full durable unit: the session core plus the engine detail (for non-degradation). */
@@ -599,6 +635,10 @@ export function toGameState(snap: SessionSnapshot): GameState {
  *     `readAnchors` — current-position / per-week snapshot state, overwritten by design every tick/week
  *     (like `ceremony`/`live`, already outside the checkpoint).
  *   - `pacingDripCount` (resets every new week by design; `pacingDripWeek` moves with it).
+ *   - `approachCooldown` / `approachShown` (issue #1322) — the per-NPC remaining-stretches counter
+ *     legitimately counts back DOWN to 0 and drops out of the map as the cooldown lapses, and the
+ *     shown-initiators record is fully replaced each stretch, by design (like `presence` above) —
+ *     neither is a monotonic accumulator.
  * Season boundaries (a brand-new game or the one sanctioned restart door) are exempt structurally: the
  * orchestrator only ever diffs a baseline against a LATER candidate of the SAME season — a season's
  * first commit has no baseline at all (`Orchestrator.commitPlayerTurn`), so a reset-to-empty at season

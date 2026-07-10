@@ -84,3 +84,17 @@ export const APPROACH_GATE = {
   /** Approaches stay silent until the first ceremony beat of the season has resolved. */
   requireFirstCeremonyBeat: true,
 } as const;
+
+/**
+ * Issue #1322 (P2): "one NPC monopolizes approaches" — `rankApproaches` (0012) is deliberately
+ * unable to invert a clear relationship gap (0028's bounded per-moment temperature), so the top
+ * seeded-affinity NPC was stably rank 1 EVERY stretch, reading as a forced tutorial guide / instant
+ * best friend. `APPROACH_COOLDOWN_STRETCHES` is how many STRETCHES (a distinct week:phase — the same
+ * unit `socialInitiatives`'s rng key already uses) an NPC sits out the top-3 approach pool after
+ * initiating, so the relationship signal still dominates the ordering but can't monopolize every
+ * single stretch. Applied ONLY at the player-facing approach PROJECTION
+ * (`GameSessionAdapter.socialInitiatives` via `conversation.ts`'s `applyApproachCooldown`) — never
+ * inside `rankApproaches` itself, which stays pure/untouched so no seeded off-screen or decision
+ * stream that might one day read it is perturbed. The threshold lives HERE, not inline (B59).
+ */
+export const APPROACH_COOLDOWN_STRETCHES = 2;
