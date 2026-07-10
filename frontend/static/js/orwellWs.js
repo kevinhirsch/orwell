@@ -295,12 +295,26 @@
   }
   function sendDecision(payload) {
     payload = payload || {};
-    return _request("decision", "chat", {
-      pendingId: payload.pendingId,
-      choice: payload.choice,
-      target: payload.target,
-      expectedBeatSeq: _beatFor(payload.expectedBeatSeq)
-    }, "decision");
+    // Carry the FULL decision body (kind + kind-specific fields — vote/save/use/intent/
+    // statement/appeal/confirmed/choice…) VERBATIM so the server relay reconstructs the SAME
+    // body the HTTP POST /api/orwell/decision handler receives (ws_routes `_handle_decision`
+    // strips the two sync-spine tokens back out and forwards the rest to submit_decision). The
+    // engine requires `kind` — a fixed {pendingId,choice,target} shape would drop it and be
+    // refused `unknown-kind`. The explicit pendingId/choice/target still round-trip through the
+    // spread (superset — back-compatible). `expectedBeatSeq` defaults to the last-seen beatSeq
+    // (0065 CAS) when the caller didn't pin one; `idempotencyKey` (snake_case `idempotency_key`
+    // accepted too) rides its own normalized slot the server pulls out.
+    var d = {};
+    for (var k in payload) {
+      if (!Object.prototype.hasOwnProperty.call(payload, k)) continue;
+      if (k === "expectedBeatSeq" || k === "idempotencyKey" || k === "idempotency_key") continue;
+      if (payload[k] === undefined) continue;
+      d[k] = payload[k];
+    }
+    d.expectedBeatSeq = _beatFor(payload.expectedBeatSeq);
+    var idem = payload.idempotencyKey || payload.idempotency_key;
+    if (idem) d.idempotencyKey = idem;
+    return _request("decision", "chat", d, "decision");
   }
   // layout is fire-and-forget per-device LWW (§5) — no cid/ack.
   function sendLayout(d) { return _send({ t: "layout", ch: "layout", d: d || {} }); }

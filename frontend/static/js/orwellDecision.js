@@ -796,20 +796,48 @@
       confirm.disabled = true;
       confirm.textContent = "Locking in…";
       try {
-        const r = await fetch("/api/orwell/decision", {
-          method: "POST", credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!r.ok) throw Object.assign(new Error("HTTP " + r.status), { httpStatus: r.status });
+        // WS Phase-1 (ADR 0017 §3.5): when the OrwellWs socket is LIVE (flag ON + a successful
+        // handshake), the confirm goes UP as a `decision` frame carrying the 0065 expectedBeatSeq
+        // CAS; the server relay runs the EXACT POST /api/orwell/decision handler below the
+        // transport (ws_routes `_handle_decision`) and fans a `state` edge back that re-reads the
+        // moved board. DORMANT when the socket is not active (the flag is OFF by default — the
+        // zero-risk Phase-1 default — or the upgrade failed/downgraded to SSE): the byte-identical
+        // HTTP POST below stands. A WS error is mapped onto the SAME httpStatus the catch below
+        // already branches on, so a stale-beat reconciles through the existing 409 desync path
+        // exactly as the HTTP 409 does.
+        const _ws = window.OrwellWs;
+        const _wsLive = !!(_ws && _ws.isActive && _ws.isActive() && _ws.sendDecision);
+        let _beat;
+        if (_wsLive) {
+          try {
+            const _pinned = (_ws.lastBeatSeq && _ws.lastBeatSeq()) || undefined;
+            const _ack = await _ws.sendDecision(Object.assign({}, payload, { expectedBeatSeq: _pinned }));
+            // The `decision` ack carries no board body (§3.5 — the result fans out as a `state`
+            // edge, which platform.js turns into the ONE orwellGameChanged('ws:state') too); read
+            // the freshest beatSeq the socket has seen for the M1-3 nudge below.
+            _beat = (_ws.lastBeatSeq && _ws.lastBeatSeq()) || (_ack && _ack.d && _ack.d.beatSeq) || undefined;
+          } catch (e) {
+            const _code = e && e.code;
+            throw Object.assign(new Error(_code || "ws-decision-failed"), {
+              httpStatus: _code === "stale-beat" ? 409
+                : (_code === "unknown-kind" || _code === "no-game") ? 400 : undefined,
+            });
+          }
+        } else {
+          const r = await fetch("/api/orwell/decision", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!r.ok) throw Object.assign(new Error("HTTP " + r.status), { httpStatus: r.status });
+          // M1-3: best-effort read of the commit's beatSeq off the decision response so the
+          // panels can verify their refetch reached it (the goodbye-card-beside-stale-board race).
+          try { _beat = ((await r.json()) || {}).beatSeq; } catch (_) {}
+        }
         _userDismissed = true;   // this pending is handled — stop any boot re-assert loop
         _dismissedSig = _sig(pending);
         // G15: a bound decision mutates the game — nudge every panel through the
         // shared debounced dispatcher NOW, not at the next 20–30s poll.
-        // M1-3: best-effort read of the commit's beatSeq off the decision response so the
-        // panels can verify their refetch reached it (the goodbye-card-beside-stale-board race).
-        let _beat;
-        try { _beat = ((await r.json()) || {}).beatSeq; } catch (_) {}
         if (window.orwellGameChanged) window.orwellGameChanged("decision:" + kind, _beat);
         card.classList.add("odec-done");
         card.innerHTML = `<div class="odec-head"><span class="odec-title">✓ Locked in.</span></div>`;
