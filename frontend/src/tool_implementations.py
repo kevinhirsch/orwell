@@ -4520,10 +4520,14 @@ async def do_record_interaction(content: str, owner: Optional[str] = None) -> Di
     _consequence = args.get("consequence")
     if not isinstance(_consequence, dict):
         _consequence = None
+    # Phase 2 (duration-based clock): the LLM's proposal for how long the scene FELT, in in-game minutes.
+    # Forward only a positive number; the engine clamps it and advances the day clock (pacing-only).
+    _felt = args.get("feltMinutes")
+    _felt = _felt if isinstance(_felt, (int, float)) and _felt > 0 else None
     try:
         res = await orwell_engine.record_interaction(
             text, with_ids=args.get("withIds"), kind=args.get("kind"),
-            consequence=_consequence, user=owner,
+            consequence=_consequence, felt_minutes=_felt, user=owner,
         )
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:

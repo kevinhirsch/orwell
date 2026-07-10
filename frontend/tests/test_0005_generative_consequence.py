@@ -143,8 +143,8 @@ def test_record_interaction_omits_consequence_when_none_is_byte_identical(monkey
 def _capture_record_interaction(monkeypatch):
     seen = {}
 
-    async def fake_ri(content, with_ids=None, kind=None, consequence=None, user=None):
-        seen.update(content=content, with_ids=with_ids, kind=kind, consequence=consequence, user=user)
+    async def fake_ri(content, with_ids=None, kind=None, consequence=None, felt_minutes=None, user=None):
+        seen.update(content=content, with_ids=with_ids, kind=kind, consequence=consequence, felt_minutes=felt_minutes, user=user)
         return {"ok": True}
 
     monkeypatch.setattr(orwell_engine, "record_interaction", fake_ri)
@@ -181,6 +181,21 @@ def test_do_record_interaction_with_no_consequence_forwards_none(monkeypatch):
     _run(tool_impl.do_record_interaction(
         json.dumps({"content": "a scene", "withIds": ["npc:3"], "kind": "gossip"}), owner="owner"))
     assert seen["consequence"] is None
+
+
+def test_do_record_interaction_forwards_felt_minutes(monkeypatch):
+    # Phase 2 (duration-based clock): a positive feltMinutes forwards; a missing / non-positive one is None.
+    seen = _capture_record_interaction(monkeypatch)
+    import json
+    _run(tool_impl.do_record_interaction(
+        json.dumps({"content": "a long summit", "withIds": ["npc:3"], "kind": "strategy", "feltMinutes": 120}),
+        owner="owner"))
+    assert seen["felt_minutes"] == 120
+    for junk in (0, -5, "soon", None):
+        seen.clear()
+        _run(tool_impl.do_record_interaction(
+            json.dumps({"content": "a scene", "withIds": ["npc:3"], "feltMinutes": junk}), owner="owner"))
+        assert seen["felt_minutes"] is None, f"a non-positive feltMinutes ({junk!r}) must be dropped"
 
 
 # --- 4a. the _validate_consequence helper (the targeting/direction/emphasis gate) -----------------
