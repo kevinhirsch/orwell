@@ -534,3 +534,422 @@ def _maybe_auto_trim() -> None:
             threading.Thread(target=lambda: trim_logs(None), daemon=True).start()
     except Exception:
         pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════════
+# Feature 0112 — LLM-call observability (Vault-free trace tagging + opt-in forwarding)
+# ══════════════════════════════════════════════════════════════════════════════════
+#
+# The *external, queryable* counterpart to the in-process I/O trace above and 0079's
+# internal diagnostic log. Every LLM call can emit a **Vault-free** ``TraceRecord`` — the
+# existing token-ledger facts (0069) PLUS the 0065 correlation keys (``beatSeq``/``phase``/
+# ``moment``/``call_class``/``session``/``user``) — and, when enabled, tags the OpenRouter
+# request with those same keys so **OpenRouter Broadcast** (or an opt-in OTLP/Langfuse sink)
+# forwards correlatable traces off-box.
+#
+# Everything here is **opt-in, fail-soft, and byte-identical when unconfigured**:
+#   * ``observability_enabled`` defaults **false** ⇒ no request ``metadata``, the no-op sink.
+#   * The record builder reads NEITHER the Vault store NOR the soul provider — the FE has no
+#     Vault handle at all, and every field is a closed-set / projection scalar. A structural
+#     test asserts the serialized record (and the request metadata) match no Vault key.
+#   * ``privacy_mode`` defaults ``metrics-only`` ⇒ NO prompt/completion content is forwarded.
+#   * The sink (``src/trace_sink.py``) swallows every error/timeout — telemetry never touches
+#     the turn.
+#
+# See docs/features/0112-llm-call-observability.{md,feature}.
+
+import contextvars
+import hashlib
+
+# The Vault/soul key denylist — the SAME class of guard as the engine ``secrets.test.ts`` and
+# the FE redaction gates. A serialized ``TraceRecord`` / request ``metadata`` object must match
+# none of these as a (case-insensitive) key. These are engine-internal hidden-layer names that
+# a Vault-free projection can never legitimately carry.
+_VAULT_KEYS = (
+    "soul", "trust", "threat", "affinity", "hidden", "target",
+    "relationship", "grudge", "scheme", "confession",
+)
+
+# The privacy modes. ``metrics-only`` (the default) strips prompt/completion content; ``full`` is
+# an explicit operator opt-in that additionally carries the (already Vault-free) prompt/completion.
+_PRIVACY_METRICS_ONLY = "metrics-only"
+_PRIVACY_FULL = "full"
+_VALID_PRIVACY_MODES = (_PRIVACY_METRICS_ONLY, _PRIVACY_FULL)
+
+# The per-turn correlation context. A caller (the agent loop / chat route, or a test/harness) MAY
+# set the current beat's keys here; llm_core reads them at the single emit point. Unset ⇒ empty
+# ⇒ the record carries only what llm_core already knows (model/usage/session) and no metadata is
+# attached (still byte-identical, since the enable gate defaults off). A ``ContextVar`` is
+# task-local, so concurrent turns never cross their correlation keys.
+_OBS_CONTEXT: "contextvars.ContextVar[dict]" = contextvars.ContextVar("orwell_obs_context", default={})
+
+
+# ── settings (read per-request; no restart — mirrors the token_policy / _resolve_llm_fn seam) ──
+
+
+def observability_enabled() -> bool:
+    """The master gate — default **false**. Off ⇒ no request metadata, the no-op sink."""
+    try:
+        from src.settings import get_setting
+        return bool(get_setting("observability_enabled", False))
+    except Exception:
+        return False
+
+
+def observability_privacy_mode() -> str:
+    """``metrics-only`` (default; strips content) or ``full`` (explicit opt-in). An
+    unrecognized value falls back to the safe default (never accidentally forward content)."""
+    try:
+        from src.settings import get_setting
+        v = get_setting("observability_privacy_mode", _PRIVACY_METRICS_ONLY)
+        return v if v in _VALID_PRIVACY_MODES else _PRIVACY_METRICS_ONLY
+    except Exception:
+        return _PRIVACY_METRICS_ONLY
+
+
+def observability_sampling() -> float:
+    """The sampling rate in [0.0, 1.0] (default 1.0). Out-of-band / unusable ⇒ 1.0."""
+    try:
+        from src.settings import get_setting
+        v = float(get_setting("observability_sampling", 1.0))
+        if not (0.0 <= v <= 1.0):
+            return 1.0
+        return v
+    except Exception:
+        return 1.0
+
+
+# ── correlation context ──────────────────────────────────────────────────────────
+
+
+def set_observability_context(**keys: Any) -> "contextvars.Token":
+    """Set the current beat's correlation keys (``beat_seq``/``phase``/``moment``/``call_class``/
+    ``session``/``user``) for the trace built at the emit point. Returns the reset token. Callers
+    that set this SHOULD ``reset_observability_context(token)`` when the turn ends. All keys are
+    Vault-free closed-set/projection facts by contract; a caller cannot smuggle a Vault field
+    through — the record builder only reads the known scalar keys below."""
+    ctx = {k: v for k, v in keys.items() if v is not None}
+    return _OBS_CONTEXT.set(ctx)
+
+
+def reset_observability_context(token: "contextvars.Token") -> None:
+    try:
+        _OBS_CONTEXT.reset(token)
+    except Exception:
+        pass
+
+
+def _current_context() -> dict:
+    try:
+        c = _OBS_CONTEXT.get()
+        return dict(c) if isinstance(c, dict) else {}
+    except Exception:
+        return {}
+
+
+# ── sampling (deterministic by session) ────────────────────────────────────────────
+
+
+def session_sampled(session: Any, rate: float) -> bool:
+    """Whether ``session`` is sampled — a **deterministic** function of its id, so a given game is
+    consistently in or out of the sample (never a per-call coin-flip). ``rate>=1`` ⇒ always;
+    ``rate<=0`` ⇒ never. Mirrors the same discipline as the 0065 idempotency keying."""
+    try:
+        if rate >= 1.0:
+            return True
+        if rate <= 0.0:
+            return False
+        h = hashlib.sha256(str(session or "").encode("utf-8")).hexdigest()
+        # First 8 hex digits → a stable [0,1) fraction; sampled iff below the rate.
+        frac = int(h[:8], 16) / 0xFFFFFFFF
+        return frac < rate
+    except Exception:
+        return False
+
+
+# ── the Vault-free record + request metadata ───────────────────────────────────────
+
+
+def _usage_counts(usage: Optional[dict]) -> dict:
+    """Extract the Vault-free token counts + cost + provider from a usage envelope (the same
+    shape the token ledger consumes). Absent/garbage ⇒ zeros."""
+    u = usage if isinstance(usage, dict) else {}
+    # Support both the streamed {input_tokens,...} shape and the raw OpenAI {prompt_tokens,...}.
+    ptd = u.get("prompt_tokens_details") or {}
+    ctd = u.get("completion_tokens_details") or {}
+    def _i(*keys):
+        for k in keys:
+            v = u.get(k)
+            if isinstance(v, (int, float)):
+                return int(v)
+        return 0
+    return {
+        "input_tokens": _i("input_tokens", "prompt_tokens"),
+        "cached_tokens": (u.get("cached_tokens") if isinstance(u.get("cached_tokens"), (int, float))
+                          else ptd.get("cached_tokens", 0)) or 0,
+        "output_tokens": _i("output_tokens", "completion_tokens"),
+        "reasoning_tokens": (u.get("reasoning_tokens") if isinstance(u.get("reasoning_tokens"), (int, float))
+                             else ctd.get("reasoning_tokens", 0)) or 0,
+        "cost": float(u.get("cost") or 0.0),
+        "provider": u.get("provider"),
+    }
+
+
+def build_trace_record(
+    *,
+    user: Any = None,
+    session: Any = None,
+    call_class: Any = None,
+    model: Any = None,
+    beat_seq: Any = None,
+    phase: Any = None,
+    moment: Any = None,
+    usage: Optional[dict] = None,
+    applied_max_tokens: Any = None,
+    finish_reason: Any = None,
+    tool_call_seen: bool = False,
+    latency_ms: Any = 0,
+    status: str = "ok",
+    privacy_mode: Optional[str] = None,
+    prompt: Any = None,
+    completion: Any = None,
+) -> dict:
+    """Build ONE Vault-free ``TraceRecord`` from facts llm_core already holds.
+
+    Every field is a closed-set / projection scalar (token counts, cost, ids, the 0065
+    correlation keys). The builder reads NEITHER ``VaultStore`` NOR ``SoulProvider`` (the FE
+    holds no Vault handle) — the guarantee is structural, not by wording. ``prompt``/``completion``
+    are included ONLY in ``full`` privacy mode (default ``metrics-only`` ⇒ no content)."""
+    mode = privacy_mode if privacy_mode in _VALID_PRIVACY_MODES else _PRIVACY_METRICS_ONLY
+    counts = _usage_counts(usage)
+    record = {
+        "ts": int(time.time() * 1000),
+        "user": _obs_id(user),
+        "session": _obs_id(session),
+        "call_class": _obs_id(call_class),
+        "model": _obs_id(model),
+        # 0065 correlation keys — the engine already issues these; the FE forwards them.
+        "beatSeq": _obs_int_or_none(beat_seq),
+        "phase": _obs_id(phase),
+        "moment": _obs_id(moment),
+        # token-ledger facts (0069)
+        "input_tokens": _obs_int(counts["input_tokens"]),
+        "cached_tokens": _obs_int(counts["cached_tokens"]),
+        "output_tokens": _obs_int(counts["output_tokens"]),
+        "reasoning_tokens": _obs_int(counts["reasoning_tokens"]),
+        "applied_max_tokens": _obs_int_or_none(applied_max_tokens),
+        "cost": _obs_float(counts["cost"]),
+        "finish_reason": _obs_id(finish_reason),
+        "tool_call_seen": bool(tool_call_seen),
+        "latency_ms": _obs_int(latency_ms),
+        "status": _obs_id(status) or "ok",
+    }
+    if mode == _PRIVACY_FULL:
+        # Content is already Vault-free (the narrator only ever receives Vault-free projections),
+        # but it is the player's private game text — carried ONLY on the explicit ``full`` opt-in.
+        # Scrubbed for secret-shaped tokens as defence in depth (same as the I/O trace).
+        record["prompt"] = _scrub_str(str(prompt or ""))
+        record["completion"] = _scrub_str(str(completion or ""))
+    return record
+
+
+def request_metadata(*, session: Any = None, beat_seq: Any = None, phase: Any = None,
+                     call_class: Any = None) -> dict:
+    """The Vault-free ``metadata`` object attached to the OpenRouter (OpenAI-compatible) payload
+    when tagging is enabled — the correlation keys OpenRouter Broadcast forwards. Absent ⇒ the
+    payload is byte-identical to today (the caller only attaches this when observability is on)."""
+    return {
+        "orwell_session": _obs_id(session),
+        "beatSeq": _obs_int_or_none(beat_seq),
+        "phase": _obs_id(phase),
+        "call_class": _obs_id(call_class),
+    }
+
+
+def maybe_request_metadata(*, session: Any = None, call_class: Any = None,
+                           beat_seq: Any = None, phase: Any = None) -> Optional[dict]:
+    """Return the request ``metadata`` object IFF observability is enabled, else ``None`` (so the
+    caller omits the key entirely ⇒ byte-identical payload). Missing correlation keys are pulled
+    from the per-turn context set by the caller. Fail-open: any error ⇒ ``None`` (no metadata)."""
+    try:
+        if not observability_enabled():
+            return None
+        ctx = _current_context()
+        return request_metadata(
+            session=session if session is not None else ctx.get("session"),
+            beat_seq=beat_seq if beat_seq is not None else ctx.get("beat_seq"),
+            phase=phase if phase is not None else ctx.get("phase"),
+            call_class=call_class if call_class is not None else ctx.get("call_class"),
+        )
+    except Exception:
+        return None
+
+
+# ── coercion helpers (the Vault-free floor, mirroring orwell_token_ledger) ──────────
+
+_OBS_MAX_ID_LEN = 120
+
+
+def _obs_id(v: Any) -> str:
+    if v is None:
+        return ""
+    try:
+        return str(v)[:_OBS_MAX_ID_LEN]
+    except Exception:
+        return ""
+
+
+def _obs_int(v: Any) -> int:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return 0
+    return n if n >= 0 else 0
+
+
+def _obs_int_or_none(v: Any) -> Optional[int]:
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _obs_float(v: Any) -> float:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    return f if f >= 0.0 else 0.0
+
+
+def record_is_vault_free(record: Any) -> bool:
+    """Structural gate: True iff the serialized record/metadata matches NO Vault key (as a JSON
+    object key). The same class of assertion as the engine ``secrets.test.ts`` — used by the 0112
+    Vault-free test and safe to call defensively anywhere. Checks KEYS recursively (values are
+    closed-set scalars / already-Vault-free content)."""
+    try:
+        return not _has_vault_key(record)
+    except Exception:
+        return True
+
+
+def _has_vault_key(obj: Any) -> bool:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(k, str):
+                kl = k.lower()
+                if any(vk in kl for vk in _VAULT_KEYS):
+                    return True
+            if _has_vault_key(v):
+                return True
+        return False
+    if isinstance(obj, list):
+        return any(_has_vault_key(v) for v in obj)
+    return False
+
+
+# ── divergence detection (the F16 reach — expressible from the record alone) ────────
+
+# Eviction-result phrasings a narration might assert. The point (0112 scenario 7) is that with the
+# ``phase`` correlation key in the record, "the narration claims an eviction while the engine is at
+# phase:veto-competition" becomes a QUERY over stored records — not something only a live drive finds.
+_EVICTION_ASSERTION_RE = re.compile(
+    r"\b(has been evicted|is evicted|evicted from the (house|big brother)|"
+    r"eviction (is )?(complete|final)|the votes are in|by a vote of)\b",
+    re.IGNORECASE,
+)
+_EVICTION_PHASES = ("eviction", "eviction-vote", "eviction-results", "live-eviction")
+
+
+def record_asserts_eviction(record: dict) -> bool:
+    """True iff the record's ``completion`` asserts an eviction result (full privacy mode only —
+    metrics-only carries no completion, so this is vacuously False there)."""
+    try:
+        completion = (record or {}).get("completion") or ""
+        return bool(_EVICTION_ASSERTION_RE.search(str(completion)))
+    except Exception:
+        return False
+
+
+def record_is_eviction_phase(record: dict) -> bool:
+    try:
+        phase = str((record or {}).get("phase") or "").lower()
+        return any(p in phase for p in _EVICTION_PHASES)
+    except Exception:
+        return False
+
+
+def record_shows_divergence(record: dict) -> bool:
+    """True iff the record shows a model-vs-engine divergence detectable from its OWN fields: the
+    completion asserts an eviction result while the engine ``phase`` is NOT an eviction phase. This
+    is the F16-class alert made queryable by the correlation metadata."""
+    return record_asserts_eviction(record) and not record_is_eviction_phase(record)
+
+
+# ── the emit point (fail-soft, best-effort, sampled) ────────────────────────────────
+
+
+async def emit_trace(
+    *,
+    user: Any = None,
+    session: Any = None,
+    call_class: Any = None,
+    model: Any = None,
+    usage: Optional[dict] = None,
+    applied_max_tokens: Any = None,
+    finish_reason: Any = None,
+    tool_call_seen: bool = False,
+    latency_ms: Any = 0,
+    status: str = "ok",
+    beat_seq: Any = None,
+    phase: Any = None,
+    moment: Any = None,
+    prompt: Any = None,
+    completion: Any = None,
+) -> None:
+    """The single 0112 emit point (called from ``src/llm_core.py``'s traced chokepoints).
+
+    Fail-soft, best-effort, and byte-identical when unconfigured:
+      * ``observability_enabled`` off (the default) ⇒ instant return, nothing built or shipped.
+      * Sampling (deterministic by session) is applied BEFORE building the record.
+      * The record is built Vault-free; ``privacy_mode`` gates content.
+      * The resolved sink emits it; ANY error/timeout in the sink is swallowed (a failing sink
+        never harms the turn — 0112 scenario "a failing sink never harms the turn").
+
+    Missing correlation keys are pulled from the per-turn context; ``beat_seq`` additionally falls
+    back to the FE's last-seen 0065 beatSeq for the session's owner (best-effort)."""
+    try:
+        if not observability_enabled():
+            return
+        ctx = _current_context()
+        _session = session if session is not None else ctx.get("session")
+        rate = observability_sampling()
+        if not session_sampled(_session, rate):
+            return
+        mode = observability_privacy_mode()
+        record = build_trace_record(
+            user=user if user is not None else ctx.get("user"),
+            session=_session,
+            call_class=call_class if call_class is not None else ctx.get("call_class"),
+            model=model,
+            beat_seq=beat_seq if beat_seq is not None else ctx.get("beat_seq"),
+            phase=phase if phase is not None else ctx.get("phase"),
+            moment=moment if moment is not None else ctx.get("moment"),
+            usage=usage,
+            applied_max_tokens=applied_max_tokens,
+            finish_reason=finish_reason,
+            tool_call_seen=tool_call_seen,
+            latency_ms=latency_ms,
+            status=status,
+            privacy_mode=mode,
+            prompt=prompt if mode == _PRIVACY_FULL else None,
+            completion=completion if mode == _PRIVACY_FULL else None,
+        )
+        from src.trace_sink import resolve_trace_sink
+        sink = resolve_trace_sink()
+        await sink.emit(record)
+    except Exception:
+        # Observability must NEVER hurt the app — swallow everything (incl. a throwing sink).
+        return None

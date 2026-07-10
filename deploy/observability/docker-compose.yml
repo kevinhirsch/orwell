@@ -1,0 +1,53 @@
+# Feature 0112 — OPT-IN self-hosted Langfuse trace sink (OFF by default).
+#
+# Orwell ships NOTHING to this by default: observability is disabled unless the operator sets
+# `observability_enabled=true` + `observability_endpoint` in the FE settings. This compose is a
+# convenience so a private/LAN deploy (ADR 0014) can keep ALL trace data on-box — nothing leaves
+# the host. Bring it up only if you want direct-ship telemetry:
+#
+#   docker compose -f deploy/observability/docker-compose.yml up -d
+#
+# Then set (admin settings, read per-request — no restart):
+#   observability_enabled     = true
+#   observability_endpoint    = http://127.0.0.1:3000/api/public/otel   # or your Langfuse ingest URL
+#   observability_privacy_mode = metrics-only   # keep content off unless you explicitly opt in
+#
+# The trace path is Vault-free by construction (see frontend/src/llm_trace.py) and the sink is
+# fail-soft: if this stack is down, the game is unaffected.
+#
+# NOTE: pin the image tags and set the secrets below before any non-local use. Values here are
+# placeholders for a LAN-trusted, single-host deploy.
+services:
+  langfuse-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: change-me-langfuse-db
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  langfuse:
+    image: langfuse/langfuse:latest
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:change-me-langfuse-db@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://127.0.0.1:3000
+      NEXTAUTH_SECRET: change-me-nextauth-secret
+      SALT: change-me-salt
+      TELEMETRY_ENABLED: "false"
+    # Bind to loopback by default — a LAN deploy can widen this deliberately.
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  langfuse-db-data:
