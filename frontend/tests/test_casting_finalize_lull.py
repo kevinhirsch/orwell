@@ -43,10 +43,13 @@ def test_production_cue_is_not_a_lull():
     assert agent_loop._player_turn_is_lull(_user(cue)) is False
 
 
-def test_real_player_continue_is_still_a_lull():
-    # A genuine short player "continue" stays a lull (the error-correction net is preserved).
-    assert agent_loop._player_turn_is_lull(_user("continue")) is True
-    # Empty player turn is a lull.
+def test_short_continue_is_no_longer_a_lull():
+    # Pacing rework 2026-07: the char-count lull heuristic is gone, so a bare short reply like
+    # "continue" is NOT a lull — it was ambiguous ("continue bonding" vs "continue to the next beat")
+    # and short replies mis-reading as "ready to advance" drove the fast-forward feel. Only an explicit
+    # readiness cue or an empty message reads as a lull now.
+    assert agent_loop._player_turn_is_lull(_user("continue")) is False
+    # Empty player turn is STILL a lull (nothing to engage with).
     assert agent_loop._player_turn_is_lull(_user("")) is True
 
 

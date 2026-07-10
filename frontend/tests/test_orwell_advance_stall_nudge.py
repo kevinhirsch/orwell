@@ -62,12 +62,14 @@ def test_stall_escalation_resets_when_the_game_advances():
 
 def test_nudge_only_seizes_a_lull_not_substantive_play():
     # Pacing is engagement, not a turn count (owner ruling): substantive social play runs
-    # indefinitely; we only nudge progression on a LULL (short/closing reply or an explicit
-    # readiness signal) that the model failed to seize.
+    # indefinitely; we only nudge progression on a LULL that the model failed to seize. Pacing
+    # rework 2026-07: a lull is now an EXPLICIT readiness signal (or an empty message) ONLY — the
+    # old `_LULL_SHORT_CHARS` char-count heuristic is GONE (a short reply is not a lull), because it
+    # mis-read ordinary brief social replies as "ready to advance" and drove the fast-forward feel.
     js = _read("src", "agent_loop.py")
     assert "_player_turn_is_lull" in js
     assert "_LULL_READY_RE" in js
-    assert "_LULL_SHORT_CHARS" in js
+    assert "_LULL_SHORT_CHARS" not in js  # the char-count lull heuristic was removed
     # the advance-nudge fires on a lull, OR a previewed-but-uncommitted outcome (#1), OR an
     # undelivered decision result (1b) — the latter two bypass the lull gate.
     assert "_want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (" in js
@@ -181,11 +183,15 @@ def test_lull_detection_engagement_vs_lull():
     import importlib
     al = importlib.import_module("src.agent_loop")
     mk = lambda txt: [{"role": "user", "content": txt}]
-    # lulls / readiness
-    assert al._player_turn_is_lull(mk("ok"))
+    # lulls = an EXPLICIT readiness cue, or an empty turn (the char-count heuristic is gone)
     assert al._player_turn_is_lull(mk("let's go"))
     assert al._player_turn_is_lull(mk("what's next?"))
     assert al._player_turn_is_lull(mk("alright, I'm ready — bring it on"))
+    assert al._player_turn_is_lull(mk(""))
+    # a SHORT but non-ready reply is NO LONGER a lull (pacing rework 2026-07 — no length-as-count),
+    # so an ordinary brief social reply keeps the scene going instead of marching the game forward
+    assert not al._player_turn_is_lull(mk("ok"))
+    assert not al._player_turn_is_lull(mk("yeah, sounds good"))
     # substantive social play is NOT a lull
     rich = ("I find Dawn away from the noise and make my case quietly: she barely knows me, "
             "Ava put me up as a number not a threat, and using the veto on me costs her nothing "
