@@ -328,3 +328,23 @@ export function makeWindowDraggable(modal, options = {}) {
     }, { passive: true });
   }
 }
+
+// Generic draggable helper for fixed-position elements. A thin, opinionated
+// wrapper over makeWindowDraggable for the legacy workspace surfaces (e.g.
+// sessions.js's clearing/archive panes) that pass (el, handle): `el` is what
+// gets moved, `handle` is the drag handle. No fullscreen support (none of
+// these consumers wanted it). Formerly lived in theme.js; relocated here (its
+// natural home beside the drag engine) so the game-build Theme window — now on
+// the OrwellWindow kit's native drag — no longer calls the drag engine at all
+// (F-3 / #660 residual).
+export function makeDraggable(el, handle) {
+  if (!el || !handle) return;
+  const dockTarget = (el.closest && el.closest('.modal')) || el;
+  makeWindowDraggable(dockTarget, {
+    content: el,
+    header: handle,
+    // Don't start a window-drag when the user grabs an interactive control in
+    // the header (buttons, form fields, the theme opacity slider wrapper).
+    skipSelector: 'button, input, select, .theme-opacity-wrap',
+  });
+}

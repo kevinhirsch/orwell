@@ -49,10 +49,13 @@ KIT = {"orwellWindow.js"}
 # work may MIGRATE these onto the kit (remove from this list); nothing may
 # be added. settings.js MIGRATED onto the kit (#553; 2026-06-23 window-kit
 # coverage audit §5 step 2): it composes OrwellWindowKit.create and no longer
-# calls makeWindowDraggable — shrink-only, removed here. theme.js still
-# hand-wires drag (a sibling migration, coverage audit §5 step 3); planWindow
-# / workspace are inherited-workspace, game-build-dropped.
-GRANDFATHERED_DRAG = {"planWindow.js", "theme.js", "workspace.js"}
+# calls makeWindowDraggable — shrink-only, removed here. theme.js MIGRATED too
+# (#660 residual / HIG F-CHROME-1): its Theme window composes the kit's native
+# drag, and the generic makeDraggable helper it used to host moved to
+# windowDrag.js (the drag engine's own module), so theme.js no longer calls the
+# drag engine — shrink-only, removed here. planWindow / workspace are
+# inherited-workspace, game-build-dropped.
+GRANDFATHERED_DRAG = {"planWindow.js", "workspace.js"}
 
 # Non-window slotted chrome (ruling-class strips/panels — placement only,
 # no window behavior). orwellRetrospective.js MIGRATED onto the kit (2026-06-19,
