@@ -5,8 +5,7 @@ import Storage from './storage.js';
 import uiModule from './ui.js';
 import { initColorPickers, attachColorPicker } from './colorPicker.js';
 import { hexToRgb, onAccentColor } from './color/hex.js';
-import { makeWindowDraggable } from './windowDrag.js';
-import { snapModalToZone } from './tileManager.js';
+import { makeDraggable } from './windowDrag.js';
 // The glass theme's wallpaper REUSES the login screen's mesh-gradient renderer
 // (DRY — one mesh, both surfaces). mountMeshGradient paints the shared
 // .login-bg-gradient layer (css/meshGradient.css); resolveLoginBackgroundConfig
@@ -2482,36 +2481,12 @@ export function initThemeZoneHighlight() {
   }
 }
 
-// Generic draggable helper for fixed-position elements
-// Thin wrapper around the shared makeWindowDraggable helper. Existing
-// callers pass (el, handle) — `el` is what gets moved, `handle` is the
-// drag handle. No fullscreen support (none of these consumers wanted it).
-export function makeDraggable(el, handle) {
-  if (!el || !handle) return;
-  const dockTarget = (el.closest && el.closest('.modal')) || el;
-  const dragOptions = {
-    content: el,
-    header: handle,
-    // Don't start a window-drag when the user grabs an interactive control
-    // in the header — e.g. the theme opacity slider now lives next to the
-    // title, and dragging its thumb must move the slider, not the window.
-    skipSelector: 'button, input, select, .theme-opacity-wrap',
-  };
-  if (dockTarget && dockTarget.id === 'theme-modal') {
-    dragOptions.onEnterFullscreen = () => {
-      snapModalToZone(dockTarget, {
-        name: 'fullscreen',
-        rect: {
-          left: 0,
-          top: 0,
-          width: window.innerWidth || document.documentElement.clientWidth || 0,
-          height: window.innerHeight || document.documentElement.clientHeight || 0,
-        },
-      });
-    };
-  }
-  makeWindowDraggable(dockTarget, dragOptions);
-}
+// The generic `makeDraggable(el, handle)` helper now lives in windowDrag.js
+// (re-exported below via themeModule for its remaining legacy consumers, e.g.
+// sessions.js). The game-build Theme window itself no longer hand-wires drag —
+// it composes the OrwellWindow kit's native drag (F-3 / #660 residual: the
+// theme window's drag is the kit's, and theme.js no longer calls the drag
+// engine directly, so it drops out of the F-3 GRANDFATHERED_DRAG set).
 
 // ── The Theme window is an OrwellWindow kit window (mirrors settings.js) ───────
 // It composes the unified kit: macOS traffic-light controls, the glass chrome,
