@@ -72,6 +72,9 @@ function _swapToPanel(tab) {
   syncAppearanceOpacity(tab === 'appearance');
   if (tab === 'ai') refreshAiModelEndpoints();
   _animatePanelEntrance(tab);
+  // #659 / DWE #660: every activation path funnels through here, so this is the single point that
+  // persists + cross-device-mirrors the selected tab (a no-op while applying a remote/seed change).
+  _persistActiveTab(tab);
 }
 
 // #890: ONE in-place panel swap for EVERY tab — admin tabs included. The defect:
@@ -132,6 +135,96 @@ function initTabs() {
     // Delegate keydown once on the tablist container.
     sidebar.addEventListener('keydown', _settingsTabsKeydown);
   }
+  // #659 / DWE #660: register the synced-state consumer for the selected tab (idempotent).
+  _initSyncedTab();
+}
+
+// ── #659 / DWE #660: persist + cross-device-mirror the SELECTED Settings tab ──────────────
+// The tab component (#659) is built; this is its synced-state ADOPTION. The selected tab is a
+// single non-geometry scalar — exactly the bounded `value` the layout store whitelists (#658/#659,
+// orwell_layout.py) — so it rides the SAME per-device layout seam the window kit uses, via the
+// kit-agnostic substrate (orwellSyncedState.js, DWE #643): persisted across sessions, mirrored in
+// realtime to this device's OTHER windows, own-origin echo dropped upstream. NO transport here —
+// the substrate + orwellLayoutSync own it. g15: this NEVER mints orwell:gamechanged (it doesn't
+// touch game state); the kit is a pure listener/writer on the layout channel. Fail-open: with the
+// substrate absent, set() is a no-op and open() falls back to the DOM-active / default tab exactly
+// as before.
+const _SETTINGS_TAB_KEY = 'tab:settings';
+let _syncedTab = null;
+// True ONLY while applying a remote/seed tab change, so the _swapToPanel it drives does not
+// re-persist (which would mint a fresh capture echoing our own change back out).
+let _applyingRemoteTab = false;
+
+// Find a tab button by its id WITHOUT building a selector from the (untrusted) value. A persisted
+// or peer-mirrored tab value is only length-bounded by the layout store (any ≤512-char string), so
+// string-concatenating it into querySelector('[data-settings-tab="'+value+'"]') would let a value
+// like `"]` throw a DOMException — breaking remote-apply and leaving open() unable to fall back to a
+// visible tab (Settings would fail to open). Comparing dataset makes selector injection impossible;
+// no match ⇒ null so every caller falls back to a valid default/visible tab.
+function _tabButton(tab) {
+  if (!modalEl || typeof tab !== 'string' || !tab) return null;
+  const btns = modalEl.querySelectorAll('[data-settings-tab]');
+  for (let i = 0; i < btns.length; i++) {
+    if (btns[i].dataset.settingsTab === tab) return btns[i];
+  }
+  return null;
+}
+
+// Is `tab` a landable tab for THIS viewer? Its button must exist, be visible (not display:none —
+// game-build trim / admin gate), and — for an admin-only tab — the viewer must be admin. Mirrors
+// open()'s own landing guard so a persisted/remote tab can never drop a non-admin on a panel that
+// would only 403.
+function _tabLandable(tab) {
+  const b = _tabButton(tab);
+  if (!b) return false;
+  try { if (getComputedStyle(b).display === 'none') return false; } catch (_) {}
+  if (b.classList.contains('admin-only') && !window._isAdmin) return false;
+  return true;
+}
+
+function _initSyncedTab() {
+  if (_syncedTab || !window.OrwellSyncedState) return;
+  try {
+    _syncedTab = window.OrwellSyncedState.register(_SETTINGS_TAB_KEY, {
+      // Only a non-empty string tab id ever crosses the wire (bounded to the store's `value` field).
+      coerce: (p) => (p && typeof p.value === 'string' && p.value) ? { value: p.value } : {},
+      // apply fires on the initial restore (seed) AND on every realtime peer change. On restore the
+      // window isn't on screen yet (open() reads the value instead); when it IS open, a peer's tab
+      // switch mirrors live.
+      apply: (state) => _applyRemoteTab(state),
+    });
+  } catch (_) { _syncedTab = null; }
+}
+
+// The last-persisted tab id ('' if none / substrate absent). open() prefers it so Settings RESUMES
+// the tab you left — this session, a prior session, or another of this device's windows.
+function _syncedTabValue() {
+  try {
+    const v = _syncedTab && _syncedTab.get().value;
+    return (typeof v === 'string' && v) ? v : '';
+  } catch (_) { return ''; }
+}
+
+// Persist the just-activated tab. Skipped while applying a remote change so a mirror never echoes,
+// and only writes when the value actually changed (avoids a redundant PATCH on every open()).
+function _persistActiveTab(tab) {
+  if (_applyingRemoteTab || !_syncedTab || typeof tab !== 'string' || !tab) return;
+  if (_syncedTabValue() === tab) return;
+  try { _syncedTab.set({ value: tab }); } catch (_) {}
+}
+
+// A peer window (or the initial seed) changed the selected tab. If Settings is on screen, mirror the
+// swap live; otherwise the value is already in the synced store and open() lands on it. The
+// _applyingRemoteTab guard keeps the driven activation from re-persisting.
+function _applyRemoteTab(state) {
+  if (!state || typeof state.value !== 'string' || !state.value) return;
+  const tab = state.value;
+  const onScreen = !!(win && win.el && win.el.isConnected);
+  if (!onScreen || !_tabLandable(tab)) return;
+  const cur = (modalEl.querySelector('[data-settings-tab].active') || {}).dataset?.settingsTab;
+  if (cur === tab) return;   // already showing it — no redundant re-animate
+  _applyingRemoteTab = true;
+  try { activateTab(tab); } finally { _applyingRemoteTab = false; }
 }
 
 /* ── Dragging ── */
@@ -5802,7 +5895,9 @@ export function open(tab) {
   // LLM config (services/ai) and the admin tabs are .admin-only, so a non-admin must
   // never LAND on one — its panel would only 403. They default to `account` instead.
   const _tabVisible = (t) => {
-    const b = modalEl.querySelector(`[data-settings-tab="${t}"]`);
+    // NEVER build a selector from the (untrusted) tab value — a persisted/synced value like `"]`
+    // would throw a DOMException and prevent Settings from opening. Match by dataset instead.
+    const b = _tabButton(t);
     // G13: a launcher hidden by ANY gate — admin-only, the all-admin-cards
     // cascade (syncAdminVisibility ran just above), or the game build's CSS
     // trim (game-trim.css) — must not be landable either.
@@ -5810,6 +5905,10 @@ export function open(tab) {
       !(b.classList.contains('admin-only') && !window._isAdmin);
   };
   let activeTab = tab
+    // #659 / DWE #660: RESUME the last-selected tab (this session, a prior session, or another of
+    // this device's windows) ahead of the DOM-active default so a reload/new window reopens where
+    // the user left off. Empty ⇒ falls through to the prior behavior (byte-compatible with no state).
+    || _syncedTabValue()
     || (modalEl.querySelector('[data-settings-tab].active') || {}).dataset?.settingsTab
     || (window._isAdmin ? 'services' : 'appearance');
   // J1-14: a non-admin player who opens Settings wants look/feel first, not account management.
