@@ -57,6 +57,7 @@ class FakeWebSocket:
         self.sent: list[dict] = []
         self.accepted = False
         self.closed = False
+        self.close_code: Optional[int] = None
         self._incoming: asyncio.Queue = asyncio.Queue()
         self._outgoing: asyncio.Queue = asyncio.Queue()
 
@@ -66,6 +67,7 @@ class FakeWebSocket:
 
     async def close(self, code: int = 1000) -> None:
         self.closed = True
+        self.close_code = code
 
     async def receive_text(self) -> str:
         item = await self._incoming.get()

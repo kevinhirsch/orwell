@@ -58,6 +58,7 @@ def test_foreign_origin_with_valid_cookie_is_rejected(run, monkeypatch):
         await asyncio.wait_for(t, timeout=1.0)   # the handler returns immediately after the refusal
         assert ws.accepted is False              # never accepted the upgrade
         assert ws.closed is True                 # policy-violation close
+        assert ws.close_code == 1008             # the guard contract's close code
         assert ws.sent == []                     # no ack, no error, no frame — nothing emitted
         # and no canonical binding leaked for the attacker
         assert ogs.get_game_session(None) is None
@@ -78,6 +79,7 @@ def test_foreign_origin_opaque_null_is_rejected(run, monkeypatch):
         await asyncio.wait_for(t, timeout=1.0)
         assert ws.accepted is False
         assert ws.closed is True
+        assert ws.close_code == 1008
         assert ws.sent == []
         await H.aclose_runs()
 
@@ -225,6 +227,7 @@ def test_foreign_ipv6_origin_is_rejected(run, monkeypatch):
         await asyncio.wait_for(t, timeout=1.0)
         assert ws.accepted is False
         assert ws.closed is True
+        assert ws.close_code == 1008
         assert ws.sent == []
         await H.aclose_runs()
 
@@ -285,6 +288,7 @@ def test_foreign_origin_not_in_allowlist_is_rejected(run, monkeypatch):
         await asyncio.wait_for(t, timeout=1.0)
         assert ws.accepted is False
         assert ws.closed is True
+        assert ws.close_code == 1008
         assert ws.sent == []
         await H.aclose_runs()
 
