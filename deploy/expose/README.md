@@ -43,9 +43,21 @@ with `ORWELL_WS_TRANSPORT=1` (add it to `data/.env`, then restart the FE). Unset
 byte-identical and the proven SSE/poll stack carries everything, so turning it on is reversible
 by flipping the flag back.
 
-**Every terminator here passes the upgrade with no extra config**, and turning WS on does **not**
-change what is exposed — it is the *same* FE route on the *same* port, so the "only the front-end
-is ever exposed" rule above still holds unchanged.
+> **⚠ Prerequisite for PUBLIC turn-on (not yet met).** The WS handshake in
+> `frontend/routes/ws_routes.py` currently authenticates by **session cookie only** — it does **not**
+> yet enforce the `Origin`/CSRF guard the protocol spec (`docs/design/websocket-phase1-protocol.md`
+> §1.1) requires. HTTP CORS middleware does **not** cover a WebSocket upgrade, so on a **public**
+> terminator that cookie-only posture is a **cross-site-WebSocket-hijack (CSWSH)** surface: a foreign
+> page could open an authenticated socket in the victim's browser. **Do not set
+> `ORWELL_WS_TRANSPORT=1` on an internet-exposed deploy until the Origin/CSRF guard lands** (in flight
+> on branch `claude/ws-origin-guard`). **LAN-only / loopback turn-on is fine meanwhile** — no
+> cross-origin attacker reaches a same-LAN or loopback socket. So this section's "turn it on" applies
+> today to LAN/local-HTTPS deploys; public deploys wait for the guard.
+
+**Every terminator here passes the upgrade with no extra config.** Turning WS on adds **no new route
+and no new port** — it is the *same* FE endpoint, so the "only the front-end is ever exposed" rule
+above is unchanged. What it *does* change is that an authenticated socket becomes reachable, which is
+why a **public** terminator needs the Origin guard above first; a LAN/loopback one does not.
 
 | Terminator | WebSocket handling | Action needed |
 |---|---|---|
@@ -61,17 +73,29 @@ MITM, an ancient browser) **falls back to the SSE/poll transport automatically**
 is a permanent path, not a transitional one, so a proxy that strips the upgrade degrades cleanly
 rather than breaking the game.
 
-**Verify the upgrade reaches uvicorn** (run from the origin host, adjusting scheme/host):
+**Verify the upgrade reaches uvicorn.** Force HTTP/1.1 (`Connection: Upgrade` is an HTTP/1.1
+mechanism — over an HTTP/2 negotiation the header is invalid and the check is meaningless):
 
 ```bash
-# Expect: HTTP/1.1 101 Switching Protocols  (a 200/400/404/426 means the upgrade was NOT proxied)
-curl -sSi -o /dev/null -w '%{http_code}\n' \
+# Directly against the FE — no auth wall on loopback. Expect: 101.
+curl --http1.1 -sSi -o /dev/null -w '%{http_code}\n' \
   -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
   -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
   http://127.0.0.1:8080/api/ws/session
 # Through the terminator, swap the URL for https://your-domain.example/api/ws/session
-# (unauthenticated it will 101 then immediately close — that still proves the pipe).
 ```
+
+Read the status code:
+
+- **`101` Switching Protocols** — the upgrade was proxied through to uvicorn. ✅ (Unauthenticated it
+  then closes immediately; the `101` still proves the pipe.)
+- **`302` / `401` / `403`** — the **perimeter auth wall** answered, *not* a WS/proxy failure. An
+  authenticating terminator (e.g. Cloudflare **Access**, a Pangolin gate) refuses the request before
+  it reaches uvicorn. Re-run with an **authenticated session** — a real logged-in cookie, or the
+  terminator's service token / bypass — to see the `101` behind it. The proxy is fine; you just have
+  to get past the gate.
+- **`200` / `400` / `404` / `426`** — the upgrade was **NOT** proxied (buffered, downgraded to plain
+  HTTP, or the route is missing). This is the actual "WS doesn't pass" failure to fix.
 
 ## Option A — Cloudflare Tunnel + Access  *(recommended)*
 
