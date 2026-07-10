@@ -88,3 +88,20 @@ def test_from_history_render_is_tagged_for_the_dup_distinguisher():
         renderer = fh.read()
     assert renderer.count("if (metadata?._fromHistory) wrap.dataset.fromHistory = '1';") >= 2, \
         "both addMessage db-id sites must tag a from-history render with data-fromHistory"
+
+
+def test_history_render_callers_always_tag_even_without_metadata():
+    """Greptile P1: tagging in chatRenderer is useless if a caller renders history WITHOUT the flag.
+    Every history-render caller must pass `_fromHistory: true` even when the persisted row has NO
+    metadata — else `meta = null` yields an untagged static bubble, a late observer's resumeStream
+    dup-check treats it as an own-echo and aborts, and that row strands non-incremental (F5 fails).
+    The `msg.metadata ? {...} : null` shape is the bug; the else branch MUST set `_fromHistory: true`."""
+    for fname in ("sessions.js", "chat.js"):
+        with open(os.path.join(JS, fname), encoding="utf-8") as fh:
+            src = fh.read()
+        # a history-render meta ternary must never fall back to a bare `null`/untagged else branch
+        assert "_fromHistory: true } : null" not in src, (
+            f"{fname}: a history-render caller falls back to `meta = null` when metadata is missing, "
+            "producing an UNTAGGED static bubble that strands a late observer non-incremental (F5). "
+            "Use `: { _fromHistory: true }` instead."
+        )

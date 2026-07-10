@@ -1720,7 +1720,10 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
         'OpenClaw');
     } else if (msgHistory.length) {
       for (const msg of msgHistory) {
-        const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : null;
+        // F5: ALWAYS tag a history render, even when the persisted row has no metadata — else an
+        // untagged static bubble makes a late observer's resumeStream dup-check treat it as an
+        // own-echo and abort, leaving that row non-incremental (matches softReloadHistory in chat.js).
+        const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : { _fromHistory: true };
         let displayContent;
         if (typeof msg.content === 'string') {
           displayContent = msg.content;
