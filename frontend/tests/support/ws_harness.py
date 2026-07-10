@@ -111,13 +111,20 @@ def spawn(ws: FakeWebSocket) -> asyncio.Task:
 
 
 async def stop(ws: FakeWebSocket, task: asyncio.Task) -> None:
-    """Disconnect the client and let the handler unwind (cancel as a fallback)."""
+    """Disconnect the client and let the handler unwind (cancel as a fallback), then AWAIT it so its
+    ``finally`` (which cancels + awaits the socket's heartbeat/channel tasks) fully runs IN THIS LOOP
+    — otherwise a cancelled-but-unawaited handler can survive to the ``_run`` loop close and raise
+    "Event loop is closed" in teardown (an fe-unit flake)."""
+    import contextlib
     ws.client_disconnect()
     try:
         await asyncio.wait_for(task, timeout=1.0)
     except (asyncio.TimeoutError, asyncio.CancelledError, WebSocketDisconnect):
         if not task.done():
             task.cancel()
+    # Drain the (possibly just-cancelled) handler to completion so nothing is left pending at close.
+    with contextlib.suppress(asyncio.CancelledError, WebSocketDisconnect, Exception):
+        await task
 
 
 async def hello(ws: FakeWebSocket, per_tab_id: str, cid: str = "c_hello", **extra) -> dict:
@@ -170,12 +177,14 @@ def push_run(canonical_id: str, events, gate: Optional[asyncio.Event] = None,
 def reset_runs() -> None:
     """Clear the process-global ``agent_runs`` registry between tests (they share module state) and
     cancel any dangling drain/evict tasks so the closing loop doesn't warn about pending timers. Use
-    ``aclose_runs`` from INSIDE a test's coroutine to also AWAIT the cancellations (the clean path)."""
+    ``aclose_runs`` from INSIDE a test's coroutine to also AWAIT the cancellations (the clean path).
+
+    Cancels go through ``agent_runs._safe_cancel``: a leftover task can belong to a PRIOR (now-closed)
+    ``_run`` loop, and cancelling it cross-loop raises ``RuntimeError: Event loop is closed`` — which
+    would fail the *next* test's setup/teardown, not the one that leaked it."""
     for run in list(agent_runs._RUNS.values()):
         for attr in ("task", "evict_task"):
-            t = getattr(run, attr, None)
-            if t is not None and not t.done():
-                t.cancel()
+            agent_runs._safe_cancel(getattr(run, attr, None))
     agent_runs._RUNS.clear()
 
 
@@ -183,15 +192,18 @@ async def aclose_runs() -> None:
     """Cancel AND await every dangling ``agent_runs`` drain/evict task, then clear the registry — call
     this at the end of a test's ``main()`` (inside the loop) so a detached run / its 180s evict timer
     never survives to the loop close (which would raise ``Event loop is closed`` in teardown)."""
-    import contextlib
     pending = []
     for run in list(agent_runs._RUNS.values()):
         for attr in ("task", "evict_task"):
             t = getattr(run, attr, None)
             if t is not None and not t.done():
-                t.cancel()
+                agent_runs._safe_cancel(t)
                 pending.append(t)
-    for t in pending:
-        with contextlib.suppress(Exception):
-            await t
+    if pending:
+        # ``gather(return_exceptions=True)`` is essential here: a fresh evict task cancelled BEFORE it
+        # ever ran raises ``CancelledError`` at its coroutine entry (before its own ``except`` guard),
+        # and ``CancelledError`` is a ``BaseException`` that ``contextlib.suppress(Exception)`` does NOT
+        # catch — so a plain ``await t`` would propagate it and fail the test (the observed
+        # ``aclose_runs`` teardown flake). ``gather`` collects it as a result instead of raising.
+        await asyncio.gather(*pending, return_exceptions=True)
     agent_runs._RUNS.clear()

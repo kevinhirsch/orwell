@@ -42,6 +42,22 @@ _RUNS: Dict[str, _Run] = {}
 _EVICT_GRACE_S = 180
 
 
+def _safe_cancel(task: Optional["asyncio.Task"]) -> None:
+    """Cancel a task, tolerating one whose event loop has already closed.
+
+    A drain/evict task can outlive the loop it was created on (e.g. a per-test ``_run`` loop that
+    closed with the 180s evict timer still pending). Cancelling such a cross-loop task reaches into
+    the dead loop and raises ``RuntimeError: Event loop is closed``. That is pure teardown noise —
+    the loop is gone, nothing is running — so swallow it. In production the loop never closes, so
+    this only ever takes the plain ``cancel()`` path (no behavior change)."""
+    if task is None or task.done():
+        return
+    try:
+        task.cancel()
+    except RuntimeError:
+        pass
+
+
 def _publish(run: _Run, ev: str) -> None:
     """Append one SSE event and fan it out to every live subscriber."""
     run.buffer.append(ev)
@@ -60,8 +76,7 @@ def _schedule_evict(session_id: str) -> None:
     run = _RUNS.get(session_id)
     if run is None:
         return
-    if run.evict_task and not run.evict_task.done():
-        run.evict_task.cancel()
+    _safe_cancel(run.evict_task)
 
     async def _evict(run_ref: _Run) -> None:
         try:
@@ -179,10 +194,9 @@ def start(session_id: str, agen: AsyncGenerator[str, None], *, queue: bool = Fal
     if prev:
         if prev.task and not prev.task.done():
             if not queue:
-                prev.task.cancel()  # plain chat: replace the in-flight run (the historical behavior)
+                _safe_cancel(prev.task)  # plain chat: replace the in-flight run (the historical behavior)
             prev_task = prev.task    # new run awaits this — a CANCELLED stomp OR a queued natural finish
-        if prev.evict_task and not prev.evict_task.done():
-            prev.evict_task.cancel()
+        _safe_cancel(prev.evict_task)
     run = _Run()
     _RUNS[session_id] = run
     run.task = asyncio.create_task(_drain(session_id, agen, prev_task))
@@ -240,6 +254,6 @@ def stop(session_id: str) -> bool:
     """Cancel an in-flight run (the wrapped generator saves its partial)."""
     run = _RUNS.get(session_id)
     if run and run.task and not run.task.done():
-        run.task.cancel()
+        _safe_cancel(run.task)
         return True
     return False
