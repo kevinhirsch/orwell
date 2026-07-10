@@ -198,8 +198,8 @@ def _push_portrait_arrival(user: Optional[str]) -> None:
             return  # flag off ⇒ zero production change; the roster poll is the permanent fallback
         from src import orwell_game_session
         orwell_game_session.publish_game_updated(user)
-    except Exception:  # pragma: no cover - defensive
-        pass
+    except Exception:  # best-effort/fail-soft — never perturb the run; surface at debug for diagnosis
+        logger.debug("[portraits] arrival push failed (best-effort)", exc_info=True)
 
 
 # A run whose heartbeat is older than this is considered dead (the process crashed / the task was
@@ -1425,6 +1425,8 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
         logger.info("[portraits] image generation unavailable — skipping cast portraits")
         if record_beats and newly_shown:
             await _record_image_beats(newly_shown, user)
+        if generated:  # a player-chosen headshot landed with NO provider — still fire the WS push edge
+            _push_portrait_arrival(user)
         total = len(prompts)
         return {"generated": generated, "skipped": total - generated, "total": total}
 
@@ -1566,7 +1568,8 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             logger.info("[portraits] L17 distinctness pass failed: %s", e)
 
     _progress_finish(user)  # L15: the run is done — the panel drops to the idle cadence
-    _push_portrait_arrival(user)  # WS push edge: final reconcile (dedupe regens + completion) on the push
+    if generated:  # only when the run actually landed a face — no spurious cast-panel refetch
+        _push_portrait_arrival(user)  # WS push edge: final reconcile (dedupe regens + completion)
     # M1-9: stamp the run's honest verdict (a 0-of-N run flips the panel/admin to "failing").
     _note_last_run(user, generated=generated, skipped=skipped, total=len(prompts))
 

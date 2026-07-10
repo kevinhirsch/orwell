@@ -100,6 +100,41 @@ def test_portrait_arrival_pushes_game_updated_when_ws_is_on(tmp_portraits, monke
     assert all(c == "u" for c in calls)
 
 
+# ── the NO-PROVIDER pre-pass path also fires the push (a player-chosen headshot lands with no model)
+
+def _player_prompt():
+    return {"houseguestId": orwell_portraits.PLAYER_PORTRAIT_ID, "name": "The Player",
+            "prompt": "photorealistic candid production still. Subject: The Player, 30 years old."}
+
+
+def test_chosen_headshot_pushes_with_no_image_model_when_ws_is_on(tmp_portraits, monkeypatch):
+    # No image model at all — the pre-pass writes the player's chosen headshot and RETURNS before the
+    # generation loop. Deliberately NOT using _stub_pipeline (which forces availability True).
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: False)
+    monkeypatch.setattr(orwell_portraits, "_read_intake_final", lambda user: b"CHOSEN-HEADSHOT-PNG")
+    monkeypatch.setattr(settings, "ws_transport_enabled", lambda: True)
+    calls = _capture_publishes(monkeypatch)
+
+    summary = _run(orwell_portraits.generate_and_store([_player_prompt()], "u", record_beats=False))
+    # The chosen headshot is stored even with no provider…
+    assert summary["generated"] == 1
+    assert orwell_portraits.portrait_file("u", orwell_portraits.PLAYER_PORTRAIT_ID) is not None
+    # …and the arrival STILL fires the push edge on this early-return path (user-scoped).
+    assert calls == ["u"]
+
+
+def test_chosen_headshot_does_not_push_when_ws_is_off(tmp_portraits, monkeypatch):
+    monkeypatch.setattr(orwell_portraits, "image_generation_available", lambda user: False)
+    monkeypatch.setattr(orwell_portraits, "_read_intake_final", lambda user: b"CHOSEN-HEADSHOT-PNG")
+    monkeypatch.setattr(settings, "ws_transport_enabled", lambda: False)
+    calls = _capture_publishes(monkeypatch)
+
+    summary = _run(orwell_portraits.generate_and_store([_player_prompt()], "u", record_beats=False))
+    assert summary["generated"] == 1  # stored
+    assert orwell_portraits.portrait_file("u", orwell_portraits.PLAYER_PORTRAIT_ID) is not None
+    assert calls == []  # dormant: no push when the flag is off (the poll is the fallback)
+
+
 # ── flag OFF ⇒ no push: byte-identical production, the poll is the permanent fallback ─────────────
 
 def test_no_push_when_ws_transport_is_off(tmp_portraits, monkeypatch):
