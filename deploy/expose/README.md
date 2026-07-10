@@ -50,14 +50,18 @@ by flipping the flag back.
 > terminator that cookie-only posture is a **cross-site-WebSocket-hijack (CSWSH)** surface: a foreign
 > page could open an authenticated socket in the victim's browser. **Do not set
 > `ORWELL_WS_TRANSPORT=1` on an internet-exposed deploy until the Origin/CSRF guard lands** (in flight
-> on branch `claude/ws-origin-guard`). **LAN-only / loopback turn-on is fine meanwhile** — no
-> cross-origin attacker reaches a same-LAN or loopback socket. So this section's "turn it on" applies
-> today to LAN/local-HTTPS deploys; public deploys wait for the guard.
+> on branch `claude/ws-origin-guard`). **LAN-only / loopback turn-on is acceptable only on a
+> *trusted* network meanwhile** — LAN placement *reduces* exposure but does not by itself prove no
+> cross-origin page can reach a victim's LAN/loopback socket (a malicious site the victim visits runs
+> in their browser, inside the LAN). So on a **shared, untrusted, or multi-tenant** LAN the
+> Origin/CSRF guard is still required; only a **single-operator, trusted** LAN/local-HTTPS deploy is
+> safe to turn on before the guard lands. Public deploys always wait for the guard.
 
 **Every terminator here passes the upgrade with no extra config.** Turning WS on adds **no new route
 and no new port** — it is the *same* FE endpoint, so the "only the front-end is ever exposed" rule
 above is unchanged. What it *does* change is that an authenticated socket becomes reachable, which is
-why a **public** terminator needs the Origin guard above first; a LAN/loopback one does not.
+why a **public** (or shared/untrusted-LAN) terminator needs the Origin guard above first; a
+trusted single-operator LAN/loopback one does not.
 
 | Terminator | WebSocket handling | Action needed |
 |---|---|---|
@@ -78,7 +82,7 @@ mechanism — over an HTTP/2 negotiation the header is invalid and the check is 
 
 ```bash
 # Directly against the FE — no auth wall on loopback. Expect: 101.
-curl --http1.1 -sSi -o /dev/null -w '%{http_code}\n' \
+curl --http1.1 --max-time 5 -sSi -o /dev/null -w '%{http_code}\n' \
   -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
   -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
   http://127.0.0.1:8080/api/ws/session
