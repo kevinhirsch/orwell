@@ -231,7 +231,14 @@
     try {
       const r = await fetch("/api/orwell/roster", { credentials: "same-origin" });
       if (seq !== _rosterFetchSeq) return; // a newer refresh superseded this one — drop the stale response
-      if (!r.ok) return;
+      if (!r.ok) {
+        // The server answered and said no (no game / reset / unauthorized): clear so a NEW
+        // season with reused ids can never render the OLD game's faces (greptile P1 on #1328).
+        // A transient network REJECTION (catch below) deliberately keeps the cache — the true
+        // reset path always reaches here or the successful repopulate.
+        for (const k of Object.keys(_portraitById)) delete _portraitById[k];
+        return;
+      }
       const data = await r.json();
       if (seq !== _rosterFetchSeq) return; // (json() awaited too — re-check before applying)
       const roster = Array.isArray(data && data.roster) ? data.roster : [];
