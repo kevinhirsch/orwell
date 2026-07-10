@@ -116,6 +116,20 @@ class FakeWebSocket:
             if pred(f):
                 return out
 
+    async def wait_closed(self, timeout: float = 2.0) -> None:
+        """Deterministically await the server-side close instead of asserting ``.closed`` inline.
+
+        The handler sends its final frame (e.g. a ``forbidden`` error) and THEN ``await``s
+        ``ws.close(...)`` — a separate step on the handler task. A test that reads the error frame
+        and immediately asserts ``ws.closed`` races that close (the handler hasn't been scheduled to
+        run its close yet), an fe-unit flake. Poll-yield until the flag flips, bounded by ``timeout``.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        while not self.closed:
+            if asyncio.get_event_loop().time() >= deadline:
+                raise AssertionError("socket did not close within %.1fs" % timeout)
+            await asyncio.sleep(0)
+
 
 def new_ws(cookies: Optional[dict] = None, headers: Optional[dict] = None,
            scheme: str = "ws") -> FakeWebSocket:
@@ -209,15 +223,26 @@ def reset_runs() -> None:
 async def aclose_runs() -> None:
     """Cancel AND await every dangling ``agent_runs`` drain/evict task, then clear the registry — call
     this at the end of a test's ``main()`` (inside the loop) so a detached run / its 180s evict timer
-    never survives to the loop close (which would raise ``Event loop is closed`` in teardown)."""
-    pending = []
-    for run in list(agent_runs._RUNS.values()):
-        for attr in ("task", "evict_task"):
-            t = getattr(run, attr, None)
-            if t is not None and not t.done():
-                agent_runs._safe_cancel(t)
-                pending.append(t)
-    if pending:
+    never survives to the loop close (which would raise ``Event loop is closed`` in teardown).
+
+    QUIESCENT, not single-pass (#1339): cancelling a still-DRAINING run does not just end the run — the
+    ``_drain`` ``finally`` arms a FRESH ``_schedule_evict`` timer (``asyncio.create_task``) as it unwinds.
+    A single snapshot-then-gather awaits the drain but MISSES that just-armed evict task, which then
+    survives the per-test ``_run`` loop close as ``Task was destroyed but it is pending!`` and, under
+    xdist, resurfaces as a stray ``CancelledError``/teardown error on an unrelated later test (the
+    observed fe-unit flake). So loop: cancel+await every dangling task, then RE-SCAN for any the
+    just-awaited finalizers armed, until the registry is fully quiescent (bounded so a genuinely stuck
+    task can never spin here forever)."""
+    for _ in range(8):
+        pending = []
+        for run in list(agent_runs._RUNS.values()):
+            for attr in ("task", "evict_task"):
+                t = getattr(run, attr, None)
+                if t is not None and not t.done():
+                    agent_runs._safe_cancel(t)
+                    pending.append(t)
+        if not pending:
+            break
         # ``gather(return_exceptions=True)`` is essential here: a fresh evict task cancelled BEFORE it
         # ever ran raises ``CancelledError`` at its coroutine entry (before its own ``except`` guard),
         # and ``CancelledError`` is a ``BaseException`` that ``contextlib.suppress(Exception)`` does NOT
