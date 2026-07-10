@@ -680,6 +680,14 @@ app.include_router(setup_chat_routes(
     skills_manager=skills_manager,
 ))
 
+# WebSocket Phase-1 (ADR 0017 / docs/design/websocket-phase1-protocol.md) — one multiplexed socket
+# per canonical session (browser ↔ FE). The route is always registered; the client only ATTEMPTS the
+# upgrade when the ORWELL_WS_TRANSPORT flag is on (default off in Phase 1 — the sibling client PR owns
+# negotiation), so this is a zero-risk addition that reuses the existing agent_runs / canonical-binding
+# helpers under the socket.
+from routes.ws_routes import setup_ws_routes
+app.include_router(setup_ws_routes())
+
 # Research (background deep-research tasks) — dropped under the game build.
 from routes.research_routes import setup_research_routes
 mount_optional(app, "deep_research", setup_research_routes(research_handler, session_manager=session_manager))
