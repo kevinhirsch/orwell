@@ -1570,6 +1570,25 @@ class TaskScheduler:
         """Run the full agent loop with tool access, collecting the final text."""
         from src.agent_loop import stream_agent_loop
 
+        # Fix #1314 (P0): this is a BACKGROUND entrypoint (scheduled tasks / the
+        # assistant check-in path) — both callers above pass `disabled_tools=None`
+        # or a crew-scoped set that knows nothing about the game build. Union in
+        # the same additions the live chat route computes
+        # (`game_build_disabled_additions`, `chat_routes.py`) so a scheduled task
+        # is never handed a wider tool surface than the interactive game turn
+        # gets. (agent_loop.py / tool_execution.py now also enforce this
+        # independently at the selection and dispatch chokepoints — this is
+        # belt-and-suspenders so the prompt's own tool listing agrees too.)
+        try:
+            from src.settings import game_build_enabled as _gbe_task, get_setting as _get_setting_task
+            if _gbe_task():
+                from src.agent_tools import game_build_disabled_additions
+                disabled_tools = set(disabled_tools or set()) | game_build_disabled_additions(
+                    _get_setting_task("game_tools_enabled", [])
+                )
+        except Exception as e:
+            logger.warning(f"[task-scheduler] game-build disabled-tools union failed: {e}")
+
         system_content = system_prompt or "You are a helpful assistant executing a scheduled task. Use available tools to complete the task thoroughly."
         user_content = override_user_message or task.prompt
         messages = [
