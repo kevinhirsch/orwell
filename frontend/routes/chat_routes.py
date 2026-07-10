@@ -6,7 +6,8 @@ import os
 import time
 import logging
 from datetime import datetime
-from typing import Dict, Any, AsyncGenerator, List
+from types import SimpleNamespace
+from typing import Dict, Any, AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, Request, HTTPException, Form, Query
 from fastapi.responses import StreamingResponse
@@ -524,6 +525,126 @@ def _set_user_time_from_request(request: Request) -> None:
         pass
 
 
+# ── WebSocket Phase-1 turn producer (ADR 0017 / routes/ws_routes.py, protocol §3.5) ─────────────────
+#
+# The WS `turn` up-frame must stream the SAME narration the HTTP `POST /api/chat_stream` path does. The
+# narration pipeline is the `_prepare_chat_stream` closure inside `setup_chat_routes` (extracted from the
+# old monolithic `chat_stream` — the HTTP route is now a THIN wrapper over it, byte-identical). To reuse
+# it off an HTTP request, the registered WS factory drives that same pipeline through a minimal Request
+# SHIM carrying exactly the surface the pipeline touches: the authenticated user (already resolved AND
+# owner-guarded by ws_routes before the factory is called), the live app (for the `auth_manager`
+# privilege gates), empty headers/cookies, and a form-like view of the `turn` frame's `d`. Nothing forks
+# — a WS turn is an ordinary game turn (agent mode, game-build tools), so every request-derived flag the
+# shim omits takes its exact HTTP default.
+
+
+class _PreparedChatTurn:
+    """The built-but-not-started narration producer plus the metadata the HTTP tail (ADR 0012 run-keying
+    / casting single-flight / subscribe) needs. ``producer`` is the ``_safe_stream`` async-generator
+    FUNCTION — call it once to get the SSE-string stream ``agent_runs.start`` drains. A distinct type (not
+    a bare tuple) so the wrapper can cleanly tell a prepared turn from an early ``_sse_error_response``."""
+
+    __slots__ = ("producer", "session", "ctx", "compare_mode")
+
+    def __init__(self, producer, session, ctx, compare_mode):
+        self.producer = producer
+        self.session = session
+        self.ctx = ctx
+        self.compare_mode = compare_mode
+
+
+def _resolve_fastapi_app():
+    """The live FastAPI app (for ``app.state.auth_manager``), resolved lazily so the WS request shim
+    never needs the socket handle. Imported at call time — long after ``app`` finished importing — so
+    there is no circular import."""
+    try:
+        import app as _app_mod
+        return getattr(_app_mod, "app", None)
+    except Exception:
+        return None
+
+
+class _WsChatRequest:
+    """A minimal Starlette-``Request`` stand-in presenting ONLY the surface the chat_stream pipeline
+    reads: ``.state.current_user`` (+ the non-api-token markers ``effective_user`` checks),
+    ``.app.state.auth_manager`` (the privilege gates), ``.headers.get`` (content-type + tz), ``.cookies``,
+    and the awaitable ``.form()`` / ``.json()``. Everything else is intentionally absent — a WS turn is a
+    plain game turn, so the pipeline's request-derived flags all take their HTTP defaults. The user was
+    ALREADY resolved and owner-guarded by ws_routes before this shim exists (the pipeline still re-checks
+    ownership itself, which passes for the user's own canonical session)."""
+
+    def __init__(self, user: Optional[str], form: dict):
+        app = _resolve_fastapi_app()
+        if app is None:  # degrade safely: no auth_manager ⇒ the privilege gates simply no-op
+            app = SimpleNamespace(state=SimpleNamespace(auth_manager=None))
+        self.app = app
+        self.state = SimpleNamespace(current_user=user, api_token=False, api_token_owner=None)
+        self.headers: dict = {}
+        self.cookies: dict = {}
+        self._form = form
+
+    async def form(self):
+        return self._form
+
+    async def json(self):  # unreachable: the shim never sets an application/json content-type
+        raise ValueError("no json body on a WS turn")
+
+
+def make_ws_turn_stream_factory(prepare_chat_stream):
+    """Build the WS ``turn`` producer factory over a chat pipeline ``prepare_chat_stream`` (the
+    ``_prepare_chat_stream`` closure ``setup_chat_routes`` owns). A WS ``turn`` up-frame reuses the
+    EXACT HTTP narration pipeline so both transports stream identical ``chat`` ``event`` frames (the
+    reasoning split rides INSIDE each payload as the ``thinking`` flag — never a separate channel;
+    ADR 0015). The producer defers all async prep INTO the returned generator (``build_chat_context``
+    persists the user message + fires message-added, then the ``_safe_stream`` tokens flow); ws_routes
+    drains it via ``agent_runs.start(canonical, producer, queue=True)`` — the single-writer game-turn
+    broadcast. Any prep failure surfaces as a clean ``event: error`` + ``[DONE]`` (the same terminal
+    contract ``_safe_stream`` guarantees), never a bare drop. Lifted to module level so it is unit-
+    testable against the real shim / producer wiring with only the LLM-backed narration substituted."""
+
+    def _ws_turn_stream_factory(d: dict, canonical: str, user: Optional[str]) -> AsyncGenerator[str, None]:
+        atts = d.get("attachments")
+        # A form-like view of the ``turn`` frame — only the fields a game turn carries; every other
+        # ``chat_stream`` form key is absent, so the pipeline takes its exact HTTP default. ``session``
+        # is the ALREADY-resolved canonical id (ws_routes keys the run on the same id), so persistence
+        # and the run share one identity — the converged, split-brain-free state (ADR 0012 §3.1).
+        form = {
+            "message": d.get("message"),
+            "session": canonical,
+            "mode": (d.get("mode") or "agent"),
+            "client_msg_id": d.get("clientMsgId"),
+        }
+        if isinstance(atts, list) and atts:
+            form["attachments"] = json.dumps([str(x) for x in atts])
+
+        async def _producer() -> AsyncGenerator[str, None]:
+            try:
+                prepared = await prepare_chat_stream(_WsChatRequest(user, form))
+            except HTTPException as e:
+                yield (f'event: error\ndata: '
+                       f'{json.dumps({"error": e.detail, "status": e.status_code, "terminal": True})}\n\n')
+                yield "data: [DONE]\n\n"
+                return
+            except Exception as e:  # noqa: BLE001 — surface, never a bare drop (mirrors _safe_stream)
+                logger.exception("[ws] turn producer prep failed (session %s)", canonical)
+                yield (f'event: error\ndata: '
+                       f'{json.dumps({"error": str(e) or "Turn failed.", "status": 500, "terminal": True})}\n\n')
+                yield "data: [DONE]\n\n"
+                return
+            if isinstance(prepared, _PreparedChatTurn):
+                async for chunk in prepared.producer():
+                    yield chunk
+            else:
+                # An early ``_sse_error_response`` (a StreamingResponse of SSE strings) — forward its
+                # body verbatim so a WS turn surfaces the same pre-stream guard the HTTP path would.
+                async for chunk in prepared.body_iterator:
+                    yield chunk
+
+        return _producer()
+
+    return _ws_turn_stream_factory
+
+
 def setup_chat_routes(
     session_manager,
     chat_handler,
@@ -680,10 +801,15 @@ def setup_chat_routes(
         return {"response": reply}
 
     # ------------------------------------------------------------------ #
-    # POST /api/chat_stream
+    # The shared narration pipeline behind POST /api/chat_stream. Extracted as
+    # a producer builder so the WS `turn` relay (routes/ws_routes.py) reuses it
+    # VERBATIM via set_turn_stream_factory (ADR 0017 §3.5). Returns either an
+    # early `_sse_error_response` (a StreamingResponse, forwarded as-is) or a
+    # `_PreparedChatTurn` bundle; the `chat_stream` route below runs the
+    # ADR 0012 run-keying / casting / subscribe TAIL over it. The refactor
+    # EXTRACTS — it does not change HTTP behavior.
     # ------------------------------------------------------------------ #
-    @router.post("/api/chat_stream")
-    async def chat_stream(request: Request) -> StreamingResponse:
+    async def _prepare_chat_stream(request):
         body = None
         try:
             if request.headers.get("content-type", "").startswith("application/json"):
@@ -1753,6 +1879,24 @@ def setup_chat_routes(
                        f'{json.dumps({"error": "The stream ended without a reply.", "status": 502, "terminal": True})}\n\n')
                 yield "data: [DONE]\n\n"
 
+        # _prepare_chat_stream ends here: hand the built producer + the turn metadata the tail needs
+        # (session / ctx / compare_mode) back to the caller. The WS `turn` relay reuses `producer` only;
+        # the HTTP route below runs the run-keying / casting / subscribe tail.
+        return _PreparedChatTurn(_safe_stream, session, ctx, compare_mode)
+
+    @router.post("/api/chat_stream")
+    async def chat_stream(request: Request) -> StreamingResponse:
+        # Thin HTTP wrapper over the shared `_prepare_chat_stream` pipeline (unchanged behavior): build
+        # the producer, then run the ADR 0012 run-keying / casting single-flight / subscribe tail. An
+        # early pre-stream guard returns an `_sse_error_response` (a StreamingResponse) — forward it as-is.
+        prepared = await _prepare_chat_stream(request)
+        if not isinstance(prepared, _PreparedChatTurn):
+            return prepared
+        _safe_stream = prepared.producer
+        session = prepared.session
+        ctx = prepared.ctx
+        compare_mode = prepared.compare_mode
+
         # Compare panes are short-lived, single-shot generations whose sessions
         # exist only to drive that one pane — there's nothing to "resume" and
         # the user expects the pane's Stop button (which aborts the fetch,
@@ -2060,5 +2204,15 @@ def setup_chat_routes(
                 yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 500})}\n\n'
 
         return StreamingResponse(stream_rewrite(), media_type="text/event-stream")
+
+    # ── WebSocket Phase-1 (ADR 0017 §3.5): register the `turn` producer ──────────────────────────
+    # Build the factory over THIS closure's `_prepare_chat_stream` and hand it to ws_routes. Dormant
+    # behind ORWELL_WS_TRANSPORT (client-gated) — registering it is inert until a socket relays a
+    # `turn`; the HTTP path is untouched.
+    try:
+        from routes.ws_routes import set_turn_stream_factory
+        set_turn_stream_factory(make_ws_turn_stream_factory(_prepare_chat_stream))
+    except Exception:
+        logger.debug("[ws] turn stream factory registration skipped", exc_info=True)
 
     return router

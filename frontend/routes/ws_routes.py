@@ -279,7 +279,10 @@ async def ws_session(websocket: WebSocket) -> None:
             try:
                 async for raw in session_events.subscribe(canonical):
                     reason = _sse_event_name(raw)
-                    if reason in (None, "connected", "keepalive"):
+                    # `layout-changed` rides the SAME per-session bus (§5) but is NOT a game-state edge —
+                    # the `layout` channel owns it. Skip it here so a window move never triggers a spurious
+                    # HUD/status re-read.
+                    if reason in (None, "connected", "keepalive", "layout-changed"):
                         continue
                     st = await _engine_state(user)
                     bs = _beat_seq_of(st)
@@ -290,6 +293,31 @@ async def ws_session(websocket: WebSocket) -> None:
                 return
             except Exception:
                 logger.debug("[ws] %s channel error for %s", ch, canonical, exc_info=True)
+
+        async def _run_layout_channel(cid: str) -> None:
+            """§5 — the per-device layout leg. Subscribe the SAME per-session ``session_events`` bus and
+            forward ONLY ``layout-changed`` events (published by ``_handle_layout`` and the HTTP PATCH
+            ``/layout`` route) as ``layout`` frames carrying the store's CANONICAL descriptor
+            (``windowId`` / ``state`` / ``deviceId`` / ``origin``). Per ADR 0017 the CLIENT does the
+            per-device filtering (apply only its own ``deviceId``) and drops its own ``origin`` echo —
+            the server fans out to every tab on the session, exactly as the ``orwell:layout-changed`` SSE
+            does today, so WS and fallback tabs stay in lockstep. Vault-free: geometry carries no secret."""
+            canonical = sock["canonical"]
+            await send({"t": "ack", "ch": "layout", "cid": cid, "d": {"subscribed": True}})
+            try:
+                async for raw in session_events.subscribe(canonical):
+                    if _sse_event_name(raw) != "layout-changed":
+                        continue
+                    data = _sse_event_data(raw)
+                    if not isinstance(data, dict):
+                        continue
+                    # Drop the bus's own bookkeeping `session` key; forward the layout descriptor only.
+                    descriptor = {k: v for k, v in data.items() if k != "session"}
+                    await send({"t": "layout", "ch": "layout", "d": descriptor})
+            except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                return
+            except Exception:
+                logger.debug("[ws] layout channel error for %s", canonical, exc_info=True)
 
         def _spawn_channel(key: str, coro) -> None:
             old = channel_tasks.pop(key, None)
@@ -351,10 +379,10 @@ async def ws_session(websocket: WebSocket) -> None:
             elif ch in ("state", "hud"):
                 _spawn_channel(ch, _run_state_channel(ch))
             elif ch == "layout":
-                # TODO(ws-phase1 §5): the per-device layout leg depends on a sibling change's
-                # patch_layout(user, deviceId, …) per-device re-key. Stubbed until that lands so we
-                # never persist geometry under the wrong (user-only) key.
-                await send({"t": "ack", "ch": ch, "cid": cid, "d": {"deferred": True}})
+                # §5 — per-device layout leg: subscribe the session bus and forward `layout-changed`
+                # descriptors to THIS tab (the client applies only its own deviceId + drops its origin
+                # echo). The sibling `patch_layout(user, deviceId, …)` per-device re-key is now MERGED.
+                _spawn_channel("layout", _run_layout_channel(cid))
             else:
                 await send({"t": "error", "ch": ch, "cid": cid, "d": {"code": "unknown-channel"}})
 
@@ -446,6 +474,45 @@ async def ws_session(websocket: WebSocket) -> None:
                 logger.warning("[ws] decision relay failed: %s", e)
                 await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "decision-failed"}})
 
+        async def _handle_layout(frame: dict) -> None:
+            """§5 — a window moved/resized/docked. Persist the change PER DEVICE
+            (``patch_layout(user, deviceId, …, origin=…)`` — LWW per field, bounded, geometry clamped)
+            and fan the store's CANONICAL descriptor out over the per-session bus so the SAME device's
+            OTHER tabs mirror it (a receiver applies only its own ``deviceId`` and drops its own
+            ``origin`` echo). Owner-guarded (cross-user isolation). Publishing the CANONICAL descriptor
+            — never the raw client values — is the exact bug the HTTP route fixed: ``patch_layout``
+            trims/normalizes ``windowId``/``deviceId`` before keying the write, so fanning out the raw
+            value would make same-device peers (holding the canonical token) reject their own update.
+            A layout up-frame is fire-and-forget (no ``cid``/ack); an unusable payload is ignored."""
+            if sock["canonical"] is None or not _ws_owns(user, sock["canonical"]):
+                return
+            d = frame.get("d") or {}
+            window_id = d.get("windowId")
+            state = d.get("state")
+            device_id = d.get("deviceId") or None
+            origin = d.get("origin") or ""
+            try:
+                from src import orwell_layout
+                result = orwell_layout.patch_layout(
+                    user, device_id, {"windowId": window_id, "state": state}, origin=origin,
+                )
+            except Exception:
+                logger.debug("[ws] layout patch failed", exc_info=True)
+                return
+            if not result:
+                return  # window id / payload unusable, or a per-device/window bound hit — nothing stored
+            descriptor = {
+                "windowId": result.get("windowId", window_id),
+                "state": result.get("state"),
+                "origin": result.get("origin", origin),
+                "deviceId": result.get("deviceId", "") or "",
+            }
+            # Fan out over the socket's canonical session bus: every tab (WS layout channel + fallback
+            # SSE) on this session receives it; the client scopes the apply to the originating device
+            # and self-suppresses by origin. Publishing the store's CANONICAL descriptor, never raw
+            # client values (mirrors the HTTP PATCH /layout fix).
+            session_events.publish(sock["canonical"], "layout-changed", descriptor)
+
         # ── receive loop ──────────────────────────────────────────────────────────────────────────
         try:
             while True:
@@ -470,7 +537,7 @@ async def ws_session(websocket: WebSocket) -> None:
                 elif t == "decision":
                     await _handle_decision(frame)
                 elif t == "layout":
-                    pass  # TODO(ws-phase1 §5): per-device layout leg (sibling patch_layout re-key)
+                    await _handle_layout(frame)
                 elif t == "ping":
                     await send({"t": "pong"})
                 elif t == "pong":
@@ -531,12 +598,27 @@ def _sse_to_payload(raw: str) -> dict:
 
 def _sse_event_name(raw: str) -> Optional[str]:
     """The ``event:`` name of a ``session_events`` SSE string (``run-started`` / ``message-added`` /
-    ``game-updated`` / ``connected``), or ``"keepalive"`` for the comment line, else None."""
+    ``game-updated`` / ``layout-changed`` / ``connected``), or ``"keepalive"`` for the comment line,
+    else None."""
     if raw.startswith(":"):
         return "keepalive"
     for line in raw.splitlines():
         if line.startswith("event:"):
             return line[len("event:"):].strip()
+    return None
+
+
+def _sse_event_data(raw: str) -> Optional[dict]:
+    """The parsed ``data:`` JSON body of a ``session_events`` SSE string (``session_events._fmt``
+    always emits a JSON object), or None if absent/unparseable. Used by the ``layout`` channel to
+    recover the canonical layout descriptor a ``layout-changed`` event carries (§5)."""
+    for line in raw.splitlines():
+        if line.startswith("data:"):
+            try:
+                payload = json.loads(line[len("data:"):].strip())
+            except Exception:
+                return None
+            return payload if isinstance(payload, dict) else None
     return None
 
 
