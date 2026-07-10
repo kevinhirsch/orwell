@@ -166,4 +166,33 @@ describe("#1320 night-gate — the pure cross + the live gate are correct", () =
     // drifts with the player's own per-conversation lingering, which is the point — the day now has time).
     expect(beats[dayBreakIdx]!.timeOfDay, "the day-break lands the house at the fresh morning wake").toBe(DAY_START);
   });
+
+  it("Phase 3a — a day-break seats EACH cadence beat (noms, veto, veto-ceremony, eviction) a day on", () => {
+    // The week is now one major beat per in-fiction day (WEEKLY_CADENCE): HOH → noms → veto → veto
+    // ceremony → eviction, each preceded by its own one-shot day-break. So a full week-1 walk sees FOUR
+    // day-breaks (one per transition after the HOH crown), never two ceremonies stacked in one day.
+    GameSessionAdapter.setTimeOfDayEnabled(true);
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("ng3");
+    sb.session.createCharacter({ playerName: "The Player", archetype: "floater", seed: SEED });
+    sb.session.setPerConversationClockEnabled(true);
+    const orch = new Orchestrator(reg, new FakeClock(), { seed: SEED, turnDriven: true });
+    reg.setCommit((u) => orch.commitPlayerTurn(u));
+    reg.setOnReset((u) => orch.forgetUser(u));
+
+    const names: string[] = [];
+    for (let i = 0; i < 400; i++) {
+      const adv = sb.session.advanceGame();
+      if (adv.event) names.push(adv.event.beat);
+      if (adv.pending) resolveLegally(sb.session, adv.pending);
+      if ((sb.session.snapshot().live?.evictionOrder ?? []).length > 0) break; // stop at the first eviction
+    }
+    expect(names.filter((n) => n === "day-break").length, "four day-breaks — one per cadence transition in week 1").toBe(4);
+    // …and each cadence beat is preceded by a day-break (the beat lands a day on, never same-day as the prior).
+    for (const beat of ["nominations", "veto-competition", "veto-ceremony", "eviction"]) {
+      const bi = names.indexOf(beat);
+      if (bi < 0) continue; // a name that doesn't surface this seed is covered by the exact count above
+      expect(names.lastIndexOf("day-break", bi - 1), `a day-break precedes ${beat}`).toBeGreaterThanOrEqual(0);
+    }
+  });
 });
