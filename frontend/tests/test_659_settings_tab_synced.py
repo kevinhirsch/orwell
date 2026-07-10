@@ -168,6 +168,72 @@ def test_settings_tab_round_trips_and_mirrors_on_the_real_seam():
     assert "OK" in out
 
 
+# ── REGRESSION (Greptile P1): a bogus synced/peer tab value must NOT throw a DOMException ──────────
+# `orwell_layout.py` accepts ANY <=512-char string as the generic `value`, so a persisted/mirrored
+# tab value can contain CSS-selector syntax (e.g. `"]`). If that value were string-concatenated into
+# querySelector('[data-settings-tab="'+value+'"]') it throws — breaking remote-apply and leaving
+# Settings unopenable (open() couldn't fall back). The fix compares `dataset.settingsTab` instead of
+# building a selector. This test extracts the REAL _tabButton/_tabLandable from settings.js and drives
+# them with selector-breaking values against a stub DOM: they must return null/false, never throw, and
+# a valid tab must still resolve.
+_HARNESS_INJECT = r"""
+const fs = require("node:fs");
+const src = fs.readFileSync(process.argv[1], "utf8");
+function assert(c, m) { if (!c) { throw new Error("ASSERT: " + m); } }
+
+// Extract a top-level `function NAME(...) { ... }` verbatim (its closing brace is at column 0, i.e.
+// the first "\n}\n" after the declaration — nested for/if braces are indented, so they don't match).
+function extract(name) {
+  const start = src.indexOf("function " + name + "(");
+  assert(start !== -1, "could not find function " + name + " in settings.js");
+  const end = src.indexOf("\n}\n", start);
+  assert(end !== -1, "could not find the end of function " + name);
+  return src.slice(start, end + 2);
+}
+const fnSrc = extract("_tabButton") + "\n" + extract("_tabLandable");
+
+// Stub DOM: a non-admin viewer; three tabs — a visible normal one, an admin-only one, a hidden one.
+function makeBtn(id, display, admin) {
+  return {
+    dataset: { settingsTab: id },
+    _display: display,
+    classList: { contains: function (c) { return admin && c === "admin-only"; } },
+  };
+}
+const buttons = [ makeBtn("appearance", "block", false), makeBtn("services", "block", true), makeBtn("account", "none", false) ];
+const modalEl = { querySelectorAll: function () { return buttons; } };
+const window = { _isAdmin: false };
+function getComputedStyle(b) { return { display: b._display }; }
+
+// Direct eval so the extracted functions close over the stubs above (sloppy-mode node -e).
+eval(fnSrc);
+
+// 1. selector-breaking / bogus values must NOT throw — they return null/false and fall through.
+const BOGUS = ['"]', '"] , *', 'x"]//', '[data-settings-tab]', 'has(', '\\'];
+BOGUS.forEach(function (bad) {
+  let r;
+  assert((r = _tabButton(bad)) === null, "_tabButton must be null (no throw) for bogus value " + JSON.stringify(bad) + " got " + JSON.stringify(r));
+  assert(_tabLandable(bad) === false, "_tabLandable must be false (no throw) for bogus value " + JSON.stringify(bad));
+});
+
+// 2. a valid, visible, non-admin tab still resolves (the happy path is preserved).
+assert(_tabButton("appearance") === buttons[0], "_tabButton finds a real, visible tab");
+assert(_tabLandable("appearance") === true, "a visible non-admin tab is landable");
+
+// 3. the landability gates still hold (no regression): admin-only hidden from a non-admin, and a
+// display:none tab is not landable — so a persisted admin/hidden tab falls back, never lands.
+assert(_tabLandable("services") === false, "an admin-only tab is not landable for a non-admin");
+assert(_tabLandable("account") === false, "a display:none tab is not landable");
+
+console.log("OK");
+"""
+
+
+def test_bogus_synced_tab_value_does_not_throw_and_falls_back():
+    out = _run_node(_HARNESS_INJECT, os.path.join(STATIC, "settings.js"))
+    assert "OK" in out
+
+
 # ── SERVER round-trip — the tab value survives persist → restore, and LWW overwrites ──────────────
 
 @pytest.fixture(autouse=True)
@@ -206,6 +272,24 @@ def test_registers_the_tab_key_through_the_substrate():
     assert "window.OrwellSyncedState.register(_SETTINGS_TAB_KEY, {" in SRC
     # a value-only string coerce (only a tab id ever crosses the wire)
     assert "typeof p.value === 'string'" in SRC
+
+
+def test_no_untrusted_selector_interpolation_of_the_tab_value():
+    """Greptile P1: the (untrusted, length-bounded) tab value must NEVER be concatenated into a
+    querySelector — a value like `"]` throws a DOMException. It is matched by dataset via _tabButton
+    instead. Guard against reintroducing the injection pattern."""
+    assert 'querySelector(`[data-settings-tab="${' not in SRC, (
+        "the tab value must not be string-concatenated into a selector (use _tabButton dataset compare)"
+    )
+    assert "function _tabButton(tab)" in SRC
+    # _tabButton iterates + compares dataset (no selector built from the value).
+    fn = SRC[SRC.index("function _tabButton(tab)"):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "querySelectorAll('[data-settings-tab]')" in fn
+    assert ".dataset.settingsTab === tab" in fn
+    # both landing guards route through it.
+    assert "const b = _tabButton(tab);" in SRC   # _tabLandable
+    assert "const b = _tabButton(t);" in SRC      # open()'s _tabVisible
 
 
 def test_swap_to_panel_persists_the_active_tab():

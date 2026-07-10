@@ -155,13 +155,27 @@ let _syncedTab = null;
 // re-persist (which would mint a fresh capture echoing our own change back out).
 let _applyingRemoteTab = false;
 
+// Find a tab button by its id WITHOUT building a selector from the (untrusted) value. A persisted
+// or peer-mirrored tab value is only length-bounded by the layout store (any ≤512-char string), so
+// string-concatenating it into querySelector('[data-settings-tab="'+value+'"]') would let a value
+// like `"]` throw a DOMException — breaking remote-apply and leaving open() unable to fall back to a
+// visible tab (Settings would fail to open). Comparing dataset makes selector injection impossible;
+// no match ⇒ null so every caller falls back to a valid default/visible tab.
+function _tabButton(tab) {
+  if (!modalEl || typeof tab !== 'string' || !tab) return null;
+  const btns = modalEl.querySelectorAll('[data-settings-tab]');
+  for (let i = 0; i < btns.length; i++) {
+    if (btns[i].dataset.settingsTab === tab) return btns[i];
+  }
+  return null;
+}
+
 // Is `tab` a landable tab for THIS viewer? Its button must exist, be visible (not display:none —
 // game-build trim / admin gate), and — for an admin-only tab — the viewer must be admin. Mirrors
 // open()'s own landing guard so a persisted/remote tab can never drop a non-admin on a panel that
 // would only 403.
 function _tabLandable(tab) {
-  if (!modalEl || typeof tab !== 'string' || !tab) return false;
-  const b = modalEl.querySelector(`[data-settings-tab="${tab}"]`);
+  const b = _tabButton(tab);
   if (!b) return false;
   try { if (getComputedStyle(b).display === 'none') return false; } catch (_) {}
   if (b.classList.contains('admin-only') && !window._isAdmin) return false;
@@ -5881,7 +5895,9 @@ export function open(tab) {
   // LLM config (services/ai) and the admin tabs are .admin-only, so a non-admin must
   // never LAND on one — its panel would only 403. They default to `account` instead.
   const _tabVisible = (t) => {
-    const b = modalEl.querySelector(`[data-settings-tab="${t}"]`);
+    // NEVER build a selector from the (untrusted) tab value — a persisted/synced value like `"]`
+    // would throw a DOMException and prevent Settings from opening. Match by dataset instead.
+    const b = _tabButton(t);
     // G13: a launcher hidden by ANY gate — admin-only, the all-admin-cards
     // cascade (syncAdminVisibility ran just above), or the game build's CSS
     // trim (game-trim.css) — must not be landable either.
