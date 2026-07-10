@@ -80,7 +80,7 @@ def test_non_owned_session_is_forbidden_and_closes(run, monkeypatch):
         assert reply["d"]["code"] == "forbidden"
         # the socket then closes (no ack, no channel, no bind for B)
         assert ogs.get_game_session("B") is None
-        assert ws.closed is True
+        await ws.wait_closed()   # deterministically await the close, not a race on the flag
         await H.stop(ws, t)
 
     run(main())

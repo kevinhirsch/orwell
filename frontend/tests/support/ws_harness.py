@@ -116,6 +116,20 @@ class FakeWebSocket:
             if pred(f):
                 return out
 
+    async def wait_closed(self, timeout: float = 2.0) -> None:
+        """Deterministically await the server-side close instead of asserting ``.closed`` inline.
+
+        The handler sends its final frame (e.g. a ``forbidden`` error) and THEN ``await``s
+        ``ws.close(...)`` — a separate step on the handler task. A test that reads the error frame
+        and immediately asserts ``ws.closed`` races that close (the handler hasn't been scheduled to
+        run its close yet), an fe-unit flake. Poll-yield until the flag flips, bounded by ``timeout``.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        while not self.closed:
+            if asyncio.get_event_loop().time() >= deadline:
+                raise AssertionError("socket did not close within %.1fs" % timeout)
+            await asyncio.sleep(0)
+
 
 def new_ws(cookies: Optional[dict] = None, headers: Optional[dict] = None,
            scheme: str = "ws") -> FakeWebSocket:
