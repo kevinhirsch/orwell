@@ -37,7 +37,6 @@ import { PLAYER, npc } from "../../src/domain/ids";
  * HARD rule: roles only — no names.
  */
 const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-1106-"));
-const TURN_OFF = { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 };
 
 function resolveLegally(s: GameSessionAdapter, p: PendingDecisionView): void {
   if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
@@ -66,7 +65,7 @@ describe("#1106 — the contested-eviction integrity fault sequence (correctly c
   it("six narrate-ahead degrading player-turn commits → circuit OPENS → next clean turn recovers; prior save intact throughout", () => {
     const dir = freshDir();
     const user = "default";
-    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
     const reg = runtime.registry;
     const orch = runtime.orchestrator;
     const sb = reg.sandboxFor(user);
@@ -147,12 +146,12 @@ describe("#1106 — the non-degradation guard is NOT weakened by the recovery pa
     const dir = freshDir();
     const user = "u";
     {
-      const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+      const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
       r1.registry.sandboxFor(user).session.createCharacter({ playerName: "The Player", seed: 7 });
       r1.registry.sandboxFor(user).session.advanceGame();
     }
     // Resume the healthy game; the boot preload seeds the non-degradation baseline from the save.
-    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
     const snap = runtime.registry.snapshot(user);
     expect(snap.events.length).toBeGreaterThan(0);
     const goodBlob = JSON.stringify(new FileSaveStore(dir).loadLatest(user)!);
@@ -172,7 +171,7 @@ describe("#1106 — the non-degradation guard is NOT weakened by the recovery pa
   });
 
   it("a leak (Vault content with no pathway) is STILL refused at the same beat — the guard's other arm is intact", () => {
-    const runtime = composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock: new FakeClock() });
     const user = "leaker";
     const sb = runtime.registry.sandboxFor(user);
     sb.session.createCharacter({ playerName: "The Player", seed: 2 });

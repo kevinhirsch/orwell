@@ -22,11 +22,12 @@ import { TurnRefusedError, PersistFailureError } from "../domain/errors";
  *              consequence fold → integrity checkpoint (fail-closed) → persist.
  *
  * Pure-logic and seed-deterministic: identical seed + identical trigger sequence
- * ⇒ identical state. The background watcher (gameWatcher.ts) only *triggers* this
- * and *reads* health — it holds no game logic, so a fake clock makes the whole
- * supervised loop deterministic. The checkpoint is fail-closed: an advance that
- * would drop persisted detail or leak hidden state is refused, the prior save is
- * left intact, and a fault is recorded — never a degraded/leaky commit (mandate #4).
+ * ⇒ identical state. The house lives ONLY on the player's play-clock (real-time purge
+ * 2026-07-10, PO ruling): every committed player turn fires ONE bounded off-screen
+ * tick — there is NO wall-clock watcher and NO real-world clock, so nothing advances a
+ * game while the player is away. The checkpoint is fail-closed: an advance that would
+ * drop persisted detail or leak hidden state is refused, the prior save is left intact,
+ * and a fault is recorded — never a degraded/leaky commit (mandate #4).
  */
 export type Trigger = "player-turn" | "offscreen-tick" | "audit";
 
@@ -49,7 +50,7 @@ export interface HealthRecord {
   faults: Fault[];
   /**
    * The circuit breaker (B58/audit E6): true after `BREAKER_THRESHOLD` consecutive faults — the
-   * watcher's off-screen ticks SKIP this sandbox (no identical blind retries) until a successful
+   * turn-driven off-screen tick SKIPS this sandbox (no identical blind retries) until a successful
    * player-turn commit closes the circuit again.
    */
   circuitOpen: boolean;
@@ -68,27 +69,30 @@ export interface OrchestratorConfig {
   /** Test seam: override the state-mutating step (off-screen + day). Default = the real one. */
   apply?: (sandbox: UserSandbox, trigger: Trigger, rng: SeededRandom, clockNow: number, interactions?: number) => number;
   /**
-   * Pure turn-driven mode (the watcher is disabled, `tickEveryMs:0`): the house can't live between
-   * wakes, so every player turn fires ONE bounded off-screen tick (B41/audit D4/M6). Default false.
+   * Pure turn-driven mode — the ONLY way the house lives (real-time purge 2026-07-10): there is no
+   * wall-clock watcher, so every committed player turn fires ONE bounded off-screen tick so the
+   * house lives on the player's play-clock alone (B41/audit D4/M6). Default false (off ⇒ the house
+   * never advances on its own — used by the seeded calibration spine).
    */
   turnDriven?: boolean;
   /**
    * Auxiliary-commit tick debounce (audit E57/R5): a beat commit (the live loop moved) always earns
    * its tick, but auxiliary tool calls inside the SAME player turn (recordInteraction + diaryRoom +
    * a read…) must not each fire one — one bounded tick per player TURN, not per tool call. An aux
-   * commit ticks only when this much wall time has passed since the user's last turn tick.
+   * commit ticks only when this many play-clock steps have passed since the user's last turn tick.
+   * (Under the always-on logical clock the runtime sets `auxTicksNever` instead — see below.)
    */
   auxTickDebounceMs?: number;
   /**
-   * 0108/M0-9 — deterministic tick pacing for the golden record/replay seam. Under the logical
-   * clock (M0-8) every commit advances "time" by a full step, so the wall-time aux debounce above
-   * NEVER absorbs (60s > 10s on every aux commit) and the house ticks once per TOOL CALL instead
-   * of once per turn. Worse than the E57 regression it resurrects: per-turn commit counts vary
-   * with the model's live round pacing (a stream-timing continuation is ±1 round record-vs-replay),
-   * so tick counts — and everything presence-sampled at turn boundaries (seating, dwell, the 0076
-   * movement cue) — fork the replay keys. With this flag an aux commit NEVER ticks: the off-screen
-   * tick fires only on progressed (beat) commits, which replay identically. Set by composeRuntime
-   * whenever the logical clock is active; never in production (the wall debounce is correct there).
+   * 0108/M0-9 — deterministic tick pacing for the golden record/replay seam. Under the always-on
+   * logical clock (real-time purge 2026-07-10) every commit advances "time" by a full step, so the
+   * play-clock aux debounce above NEVER absorbs (60s > 10s on every aux commit) and the house would
+   * tick once per TOOL CALL instead of once per turn. Worse than the E57 regression it resurrects:
+   * per-turn commit counts vary with the model's live round pacing (a stream-timing continuation is
+   * ±1 round record-vs-replay), so tick counts — and everything presence-sampled at turn boundaries
+   * (seating, dwell, the 0076 movement cue) — fork the replay keys. With this flag an aux commit
+   * NEVER ticks: the off-screen tick fires only on progressed (beat) commits, which replay
+   * identically. Set by `composeRuntime` for the production runtime (the only clock is now logical).
    */
   auxTicksNever?: boolean;
 }
@@ -184,16 +188,17 @@ export class Orchestrator {
     return r;
   }
 
-  /** Mark a player-driven moment of activity (resets the idle clock for the watcher). */
+  /** Mark a player-driven moment of activity (records the play-clock stamp of the last turn). Still
+   *  used by presence (0049) to tell milling/activity apart from idleness — not a watcher gate. */
   touch(user: string): void {
     this.lastActivity.set(user, this.clock.now());
   }
 
   /**
-   * Wall time of the user's last player activity. A user who has NEVER taken a turn is treated as
-   * NOT-yet-idle (B41/audit D4) — `+Infinity`, so the watcher's idle gate (`now - idleSince ≥ …`) is
-   * false and they accrue no off-screen ticks until they've actually played and then gone away. (The
-   * old `−Infinity` made every never-touched user permanently "idle" ⇒ the off-screen flood.)
+   * Play-clock stamp of the user's last player activity. A user who has NEVER taken a turn returns
+   * `+Infinity` (B41/audit D4). Presence (0049) reads this to distinguish an active player from an
+   * idle one; it is NOT a wall-clock gate (there is no watcher — the house lives per committed turn).
+   * (The old `−Infinity` made every never-touched user permanently "idle" ⇒ the off-screen flood.)
    */
   idleSince(user: string): number {
     return this.lastActivity.has(user) ? this.lastActivity.get(user)! : Infinity;
@@ -227,8 +232,8 @@ export class Orchestrator {
    *  `supplementary` (A9): a turn-driven off-screen tick that rides ON TOP of a player turn the
    *  live loop already moved — it is pure society enrichment, so a tick that legitimately has
    *  nothing to add is a clean no-op, not a `no-daily-event` fault (the daily-event invariant is
-   *  the live loop's own beats, not this background tick). Non-degradation and the Vault Wall are
-   *  still enforced. A watcher/direct off-screen tick (no flag) keeps the daily-event check. */
+   *  the live loop's own beats, not this supplementary tick). Non-degradation and the Vault Wall are
+   *  still enforced. A direct off-screen tick (no flag) keeps the daily-event check. */
   advance(user: string, trigger: Trigger, opts: { baseline?: SessionSnapshot; supplementary?: boolean } = {}): AdvanceResult {
     // The circuit breaker (B58/E6): after repeated identical faults, off-screen ticks SKIP this
     // sandbox instead of blindly retrying — the flag shows in health; a good player turn resets it.
@@ -289,9 +294,9 @@ export class Orchestrator {
    * The player-turn commit (B41/audit E3) — the orchestrator becomes the real spine. The registry
    * routes its save-on-mutation `onPersist` here, so EVERY player mutation now runs the fail-closed
    * integrity checkpoint instead of persisting blindly: a leaky/degrading commit is rolled back and
-   * NOT saved (mandate #4). It also `touch`es the user (so the watcher's idle gate stops flooding
-   * off-screen ticks mid-scene) and, in pure turn-driven mode, fires ONE bounded off-screen tick so
-   * the house still lives turn-to-turn without the watcher.
+   * NOT saved (mandate #4). It also `touch`es the user (recording play-clock activity for presence)
+   * and, in pure turn-driven mode, fires ONE bounded off-screen tick so the house lives turn-to-turn
+   * on the player's play-clock alone (real-time purge 2026-07-10 — there is no wall-clock watcher).
    *
    * A refused commit FAILS THE REQUEST (audit E3/D1): the rollback throws a typed error the HTTP
    * boundary maps to 4xx/5xx — never a 200 whose view narrates a beat that officially never

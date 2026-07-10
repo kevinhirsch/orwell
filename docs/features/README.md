@@ -106,11 +106,11 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0028 | [Temperature & emotional-modifier constants](./0028-temperature-and-emotional-constants.md) | BDD | ✅ Built |
 | 0029 | [App administrator role & user management](./0029-app-admin-and-user-management.md) | FE | ✅ Built |
 | 0030 | [Durable game persistence (survive restart)](./0030-durable-game-persistence-survive-restart.md) | BDD | ✅ Built |
-| 0031 | [Game orchestrator & integrity watcher](./0031-game-orchestrator-and-integrity-watcher.md) | BDD | ✅ Built |
+| 0031 | [Game orchestrator & integrity checkpoint](./0031-game-orchestrator-and-integrity-watcher.md) | BDD | ✅ Built · turn-driven only (real-time purge 2026-07-10) |
 | 0032 | [Front-end surface reduction (the "game build")](./0032-frontend-surface-reduction-game-build.md) | FE | ✅ Built |
 | 0033 | [Dynamic player tagline](./0033-dynamic-player-tagline.md) | unit | ✅ Built · recorded deviation E87a |
 | 0034 | [Live weekly progression & decision seam](./0034-live-weekly-progression-and-decision-seam.md) | BDD | ✅ Built |
-| 0035 | [Live off-screen life (running watcher)](./0035-live-offscreen-life-running-watcher.md) | BDD | ✅ Built |
+| 0035 | Live off-screen life (running watcher) | — | 🗑️ **Removed** 2026-07-10 (real-time purge, PO ruling) — the wall-clock watcher is deleted; the house lives only on the player's play-clock (0031). |
 | 0036 | [Live social surface (approaches + Diary Room)](./0036-live-social-surface-approaches-and-diary-room.md) | unit | ✅ Built · recorded deviation E87a |
 | 0037 | [Live jury-vote choreography (the finale)](./0037-live-jury-vote-choreography.md) | BDD | ✅ Built · + finale UI |
 | 0038 | [Live off-screen society](./0038-live-offscreen-society.md) | BDD | ✅ Built |

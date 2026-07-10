@@ -25,7 +25,7 @@ const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-0065-"));
 /** A turn-driven runtime over a fresh save dir with a started game (its first commit baselines). */
 function startedRuntime(seed = 2): { reg: GameSessionRegistry; sb: UserSandbox; session: GameSessionAdapter; dir: string } {
   const dir = freshDir();
-  const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: { tickEveryMs: 0, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 } });
+  const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
   const sb = runtime.registry.sandboxFor("u");
   sb.session.createCharacter({ playerName: "P", seed });
   return { reg: runtime.registry, sb, session: sb.session, dir };
@@ -305,7 +305,7 @@ describe("0065 Part B — idempotency keys on progression tools", () => {
 
 describe("0065 Part A — the HTTP edge maps stale-beat to 409 with code + beatSeq + board", () => {
   it("a stale expectedBeatSeq over HTTP is 409 { code, beatSeq, board }; current ⇒ 200; malformed ⇒ 400", async () => {
-    const runtime = composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock: new FakeClock(), watcher: { tickEveryMs: 0, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 } });
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock: new FakeClock() });
     const server = createHttpMcpServer({ resolve: runtime.registry.resolver() }, {});
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

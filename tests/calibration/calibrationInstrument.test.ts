@@ -380,7 +380,6 @@ describe("calibration instrument — passive vs active reach/win data (no tuning
     async () => {
       const runtime = composeRuntime({
         clock: new FakeClock(),
-        watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 },
         seed: 1,
       });
       const resolver = runtime.registry.resolver();

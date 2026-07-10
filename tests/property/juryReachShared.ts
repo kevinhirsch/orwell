@@ -94,15 +94,14 @@ function passiveAnswer(p: PendingView): Record<string, unknown> {
 }
 
 /**
- * Play one passive seeded live season through the production composition (`composeRuntime`, watcher
- * off ⇒ pure turn-driven, the deploy default) and return its public measurement. Per-season seeded,
+ * Play one passive seeded live season through the production composition (`composeRuntime`, pure
+ * turn-driven — the only mode; no wall-clock watcher) and return its public measurement. Per-season seeded,
  * so this is order-independent and runnable in any shard.
  */
 export async function playSeed(seed: number): Promise<SeasonResult> {
   const runtime = composeRuntime({
     clock: new FakeClock(),
-    watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 },
-    seed,
+        seed,
   });
   const resolver = runtime.registry.resolver();
   const mcp = resolver("player", `jury-reach-${seed}`);

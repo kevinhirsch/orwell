@@ -21,13 +21,14 @@ const port = parsePort(
   process.env["ORWELL_PORT"] ?? process.env["BBAI_PORT"],
   8765,
 );
-// The live runtime (0035): one long-lived per-user registry (0021) — each authenticated user
+// The live runtime (0031): one long-lived per-user registry (0021) — each authenticated user
 // (asserted over the x-orwell-user header) gets an isolated sandbox, recalled from a disk-backed
-// save store (0030) so a started game survives an engine restart. The game clock is the player's
-// play-clock (ruling 2026-06-10): the DEFAULT is pure turn-driven (ORWELL_WATCHER_TICK_MS=0) — the
-// house lives between the player's own turns (one bounded off-screen tick per turn) and does NOT
-// exist while the player is away. The wall-clock watcher (0031/0035) is an opt-in operator knob
-// (ORWELL_WATCHER_* env); data dir from ORWELL_DATA_DIR (BBAI_DATA_DIR legacy fallback).
+// save store (0030) so a started game survives an engine restart. The game runs ONLY on the
+// player's play-clock (ruling 2026-06-10; real-time purge 2026-07-10): pure turn-driven — the house
+// lives between the player's own turns (one bounded off-screen tick per turn) and does NOT exist
+// while the player is away. There is NO wall-clock watcher and NO real-world clock: nothing advances
+// the game on real time, by design (deleted, not disabled). Data dir from ORWELL_DATA_DIR
+// (BBAI_DATA_DIR legacy fallback).
 // Semantic recall provider (ADR 0004 / E86a): ORWELL_EMBEDDINGS=fastembed (the deploy
 // default — orwell-install.sh writes it and prefetches the pinned model) warms up the real
 // local-ONNX provider BEFORE any sandbox exists, committing the whole process to one vector
@@ -73,14 +74,10 @@ const requireUser = /^(1|true|yes|on)$/i.test(process.env["ORWELL_ENGINE_MULTIUS
 // spray ids to mint unlimited sandboxes (only createCharacter may start a fresh one).
 const knownUser = (user: string): boolean => runtime.knownUser(user);
 
-runtime.start();
 startHttpMcp({ resolve: runtime.registry.resolver() }, port, { token, adminToken, requireUser, knownUser, embeddingsStatus }, host);
-// Tear the watcher down cleanly on shutdown (its interval is unref'd, so this is belt-and-suspenders).
+// Clean shutdown (no background timers to tear down — the runtime is purely turn-driven).
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    runtime.stop();
-    process.exit(0);
-  });
+  process.on(signal, () => process.exit(0));
 }
 // eslint-disable-next-line no-console
 console.log(`Orwell engine MCP server listening on http://${host}:${port}`);

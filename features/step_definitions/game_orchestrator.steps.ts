@@ -8,7 +8,6 @@ import { GameSessionRegistry } from "../../src/composition/registry";
 import type { UserSandbox } from "../../src/composition/registry";
 import { Orchestrator } from "../../src/composition/orchestrator";
 import type { HealthRecord } from "../../src/composition/orchestrator";
-import { GameWatcher } from "../../src/composition/gameWatcher";
 import { FakeClock } from "../../src/adapters/time/FakeClock";
 import { FileSaveStore } from "../../src/adapters/engine/FileSaveStore";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
@@ -49,31 +48,28 @@ Then("the new state is persisted", function (this: BbWorld) {
   assert.ok(saved && saved.events.length > 0, "the advance was saved");
 });
 
-// --- S2: the house lives between turns ----------------------------------------
+// --- S2: the house lives between turns (turn-driven, no wall-clock watcher) ----
 
-Given("a started game that the player has left idle", function (this: BbWorld) {
+Given("a started game the player is actively playing", function (this: BbWorld) {
   this.saveDir = newDir();
   this.registry = new GameSessionRegistry(new FileSaveStore(this.saveDir));
   this.fakeClock = new FakeClock();
-  this.orchestrator = new Orchestrator(this.registry, this.fakeClock, { seed: 3 });
-  this.watcher = new GameWatcher(this.registry, this.orchestrator, this.fakeClock, this.fakeClock, {
-    tickEveryMs: 1000, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0,
-  });
+  // Turn-driven: the house lives ONLY on the player's play-clock — one bounded off-screen tick per
+  // committed turn (real-time purge 2026-07-10; there is no wall-clock watcher).
+  this.orchestrator = new Orchestrator(this.registry, this.fakeClock, { seed: 3, turnDriven: true });
   this.registry.sandboxFor(U).session.createCharacter({ playerName: "Idle", seed: 3 });
-  this.orchestrator.touch(U); // the player's last activity is now (t0)
 });
 
-When("the clock advances past the idle threshold", function (this: BbWorld) {
+When("the player commits a turn", function (this: BbWorld) {
   this.hiddenBefore = hiddenOf(this.registry!.sandboxFor(U)).length;
-  this.watcher!.start();
-  this.fakeClock!.advance(6000);
+  this.orchestrator!.commitPlayerTurn(U);
 });
 
-Then("the watcher triggers bounded off-screen advances for that game", function (this: BbWorld) {
+Then("that turn fires one bounded off-screen advance for that game", function (this: BbWorld) {
   assert.ok(hiddenOf(this.registry!.sandboxFor(U)).length > this.hiddenBefore!, "off-screen events accrued");
 });
 
-Then("on the player's return there are new off-screen consequences", function (this: BbWorld) {
+Then("on the next turn there are new off-screen consequences", function (this: BbWorld) {
   assert.ok(hiddenOf(this.registry!.sandboxFor(U)).length > this.hiddenBefore!);
 });
 
@@ -126,46 +122,36 @@ Then("an integrity fault is recorded on that sandbox's health", function (this: 
   assert.ok(health.faults.length >= 1);
 });
 
-// --- S4: the watcher is deterministic and holds no game logic -----------------
+// --- S4: off-screen life is deterministic and holds no game logic -------------
 
-/** T17: one fully-wired game (registry + orchestrator + WATCHER on a fake clock), un-ticked. */
+/** T17: one fully-wired turn-driven game (registry + orchestrator on a fake clock), un-committed. */
 interface TickedRun {
   reg: GameSessionRegistry;
-  clock: FakeClock;
-  watcher: GameWatcher;
+  orch: Orchestrator;
 }
 let tickedRunA: TickedRun | undefined;
 let tickedRunB: TickedRun | undefined;
 
 Given("two games started from the same seed", function (this: BbWorld) {
-  // T17: the Given only STARTS the two same-seed games; the When (previously an empty step)
-  // is what applies the identical clock-tick sequence through the real watcher seam.
+  // T17: the Given only STARTS the two same-seed games; the When applies the identical sequence of
+  // committed player turns through the turn-driven orchestrator seam (each turn = one off-screen tick).
   const mk = (): TickedRun => {
     const reg = new GameSessionRegistry();
-    const clock = new FakeClock();
-    const orch = new Orchestrator(reg, clock, { seed: 42 });
-    const watcher = new GameWatcher(reg, orch, clock, clock, {
-      tickEveryMs: 1000, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 2, auditEveryMs: 2000,
-    });
+    const orch = new Orchestrator(reg, new FakeClock(), { seed: 42, turnDriven: true });
     reg.sandboxFor(U).session.createCharacter({ playerName: "Same", seed: 42 });
-    orch.touch(U);
-    return { reg, clock, watcher };
+    return { reg, orch };
   };
   tickedRunA = mk();
   tickedRunB = mk();
 });
 
-When("the same sequence of clock ticks is applied to each", function (this: BbWorld) {
-  // The SAME tick sequence, driven through the running watcher on each game's fake clock —
-  // the watcher's off-screen advances (and audits) are what the ticks trigger.
-  const ticks = [1000, 1000, 500, 1500, 1000, 3000];
+When("the same sequence of committed turns is applied to each", function (this: BbWorld) {
+  // The SAME number of committed player turns on each game — each fires one bounded off-screen tick.
   const apply = (run: TickedRun): string => {
     const before = run.reg.sandboxFor(U).engine.events.queryAll().length;
-    run.watcher.start();
-    for (const ms of ticks) run.clock.advance(ms);
-    run.watcher.stop();
-    // The ticks genuinely advanced the game — the comparison below is not vacuous.
-    assert.ok(run.reg.sandboxFor(U).engine.events.queryAll().length > before, "the clock ticks advanced the game");
+    for (let i = 0; i < 6; i++) run.orch.commitPlayerTurn(U);
+    // The turns genuinely advanced the game — the comparison below is not vacuous.
+    assert.ok(run.reg.sandboxFor(U).engine.events.queryAll().length > before, "the committed turns advanced the game");
     const s = run.reg.snapshot(U);
     return JSON.stringify({ events: s.events, relationships: s.relationships });
   };
@@ -177,36 +163,31 @@ Then("their resulting states are identical", function (this: BbWorld) {
   assert.equal(this.stateA, this.stateB);
 });
 
-Then("disabling the watcher leaves games that never advance on their own", function () {
+Then("a game with no committed turn never advances on its own", function () {
+  // Turn-driven OFF (the default) + no committed turn ⇒ nothing ever runs the house. There is no
+  // wall-clock watcher and no real-world clock, so a game the player never touches simply sits still.
   const reg = new GameSessionRegistry();
-  const clock = new FakeClock();
-  const orch = new Orchestrator(reg, clock, { seed: 1 });
-  const watcher = new GameWatcher(reg, orch, clock, clock, {
-    tickEveryMs: 0, idleTickAfterMs: 1, maxOffscreenTicksPerWake: 5, auditEveryMs: 0,
-  });
+  const orch = new Orchestrator(reg, new FakeClock(), { seed: 1 });
   reg.sandboxFor(U).session.createCharacter({ playerName: "Still", seed: 1 });
   const before = reg.sandboxFor(U).engine.events.queryAll().length;
-  watcher.start();
-  clock.advance(100_000);
-  assert.equal(reg.sandboxFor(U).engine.events.queryAll().length, before, "a disabled watcher never self-advances");
+  // Even committing a turn on a non-turn-driven orchestrator adds no off-screen life.
+  orch.commitPlayerTurn(U);
+  assert.equal(reg.sandboxFor(U).engine.events.queryAll().length, before, "an untouched game never self-advances");
 });
 
-// --- S5: isolation holds while the watcher audits many sandboxes --------------
+// --- S5: isolation holds while the house lives between turns across sandboxes --
 // (Given "two users each have their own in-progress game" → durable_persistence.steps.)
 
-When("the watcher ticks and audits across all sandboxes", function (this: BbWorld) {
-  const clock = new FakeClock();
-  this.orchestrator = new Orchestrator(this.registry!, clock, { seed: 5 });
-  this.watcher = new GameWatcher(this.registry!, this.orchestrator, clock, clock, {
-    tickEveryMs: 1000, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 2, auditEveryMs: 1000,
-  });
+When("each user commits a turn in their own game", function (this: BbWorld) {
+  this.orchestrator = new Orchestrator(this.registry!, new FakeClock(), { seed: 5, turnDriven: true });
   this.registry!.sandboxFor("user-a").engine.events.record({ id: "mk-a", ts: 0, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: "MARKER-A-7f3" });
   this.registry!.sandboxFor("user-b").engine.events.record({ id: "mk-b", ts: 0, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: "MARKER-B-9k2" });
-  this.watcher.start();
-  clock.advance(3000);
+  // Each user's own play-clock drives their own off-screen life — no cross-user bleed.
+  this.orchestrator.commitPlayerTurn("user-a");
+  this.orchestrator.commitPlayerTurn("user-b");
 });
 
-Then("no advance or audit carries one user's content into the other's game", function (this: BbWorld) {
+Then("no advance carries one user's content into the other's game", function (this: BbWorld) {
   const a = JSON.stringify(this.registry!.sandboxFor("user-a").engine.events.queryAll());
   const b = JSON.stringify(this.registry!.sandboxFor("user-b").engine.events.queryAll());
   assert.ok(a.includes("MARKER-A-7f3") && !a.includes("MARKER-B-9k2"), "user A keeps only its own content");

@@ -24,7 +24,7 @@ const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-0065e-"));
 /** A turn-driven runtime over a fresh save dir with a started game (its first commit baselines). */
 function startedRuntime(seed = 2): { reg: GameSessionRegistry; sb: UserSandbox; session: GameSessionAdapter; dir: string } {
   const dir = freshDir();
-  const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: { tickEveryMs: 0, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 } });
+  const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
   const sb = runtime.registry.sandboxFor("u");
   sb.session.createCharacter({ playerName: "P", seed });
   return { reg: runtime.registry, sb, session: sb.session, dir };

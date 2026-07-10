@@ -116,7 +116,7 @@ export function personaDriftViolations(sb: UserSandbox, turns = 20): string[] {
 
 /**
  * ADR 0003 §7 — lingering safety (B64): N consecutive mill/talk turns leave week, phase, and the
- * pending ceremony untouched, and the watcher's idle clock treats milling as ACTIVITY.
+ * pending ceremony untouched, and the play-clock activity stamp treats milling as ACTIVITY.
  */
 export function lingeringViolations(
   fixture: { reg: GameSessionRegistry; sb: UserSandbox; orch: Orchestrator },
@@ -142,6 +142,6 @@ export function lingeringViolations(
     const nowPending = s.advanceGame().pending;
     if (nowPending?.kind !== before.kind) out.push(`turn ${i}: the pending ceremony changed`);
   }
-  if (fixture.orch.idleSince(user) === Infinity) out.push("milling did not register as watcher activity");
+  if (fixture.orch.idleSince(user) === Infinity) out.push("milling did not register as play-clock activity");
   return out;
 }

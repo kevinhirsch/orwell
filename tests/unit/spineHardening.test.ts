@@ -18,11 +18,10 @@ import { PLAYER, npc } from "../../src/domain/ids";
  * Audit E2 / E3 / E6 / E7 / E57(R5) / R3 / R4 — the commit/persist spine hardened. Roles only.
  */
 const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-spine-"));
-const TURN_OFF = { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 };
 
 describe("E2 — the pre-game interview fabricates NO hidden history", () => {
   it("casting-intake commits run zero off-screen ticks: no events, no Vault confessionals", async () => {
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF }); // pure turn-driven
+    const runtime = composeRuntime({ clock: new FakeClock() }); // pure turn-driven
     const user = "intake";
     const mcp = runtime.registry.resolver()("player", user);
 
@@ -139,12 +138,12 @@ describe("E6 — boot preload seeds the non-degradation baseline (no checkpoint-
     const dir = freshDir();
     const user = "resume";
     {
-      const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+      const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
       r1.registry.sandboxFor(user).session.createCharacter({ playerName: "The Player", seed: 7 });
       r1.registry.sandboxFor(user).session.advanceGame();
     }
     // Engine restart: the boot preload resumes the save AND seeds the baseline from it.
-    const r2 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+    const r2 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
     const snap = r2.registry.snapshot(user);
     expect(snap.events.length).toBeGreaterThan(0);
 

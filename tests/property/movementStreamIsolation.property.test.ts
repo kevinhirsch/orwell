@@ -86,7 +86,6 @@ function passiveAnswer(p: PendingView): Record<string, unknown> {
 async function seasonBeatLog(seed: number): Promise<string[]> {
   const runtime = composeRuntime({
     clock: new FakeClock(),
-    watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 },
     seed: 1,
   });
   const mcp = runtime.registry.resolver()("player", `move-iso-${seed}`);

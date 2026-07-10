@@ -37,7 +37,6 @@ module.exports = {
       "docs/features/0030-durable-game-persistence-survive-restart.feature",
       "docs/features/0031-game-orchestrator-and-integrity-watcher.feature",
       "docs/features/0034-live-weekly-progression-and-decision-seam.feature",
-      "docs/features/0035-live-offscreen-life-running-watcher.feature",
       "docs/features/0037-live-jury-vote-choreography.feature",
       "docs/features/0038-live-offscreen-society.feature",
       "docs/features/0039-promise-and-deal-tracking.feature",

@@ -1,15 +1,16 @@
 # Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted failing-first.)
-# Feature 0031 — Per-sandbox game orchestrator + integrity watcher (hybrid: turn-driven spine +
-# background supervisor). HARD rule: roles only (player, NPC, HOH, nominee); "user A"/"user B" are
-# account roles (0021). "the clock advances" = a FAKE clock stepped explicitly (no real timers).
+# Feature 0031 — Per-sandbox game orchestrator + integrity checkpoint (a pure turn-driven spine).
+# HARD rule: roles only (player, NPC, HOH, nominee); "user A"/"user B" are account roles (0021).
+# Real-time purge 2026-07-10 (PO ruling): there is NO wall-clock watcher and NO real-world clock —
+# the house lives ONLY on the player's play-clock (one bounded off-screen tick per committed turn).
 
-Feature: Game orchestrator & integrity watcher
+Feature: Game orchestrator & integrity checkpoint
 
   Every game advances through one deterministic, seeded path that runs off-screen NPC life,
   schedules the next meaningful day, folds consequences, persists, and verifies integrity
-  (fail-closed). A background watcher triggers bounded off-screen advances on idle games and
-  audits every sandbox's health — but holds no game logic, so a fake clock keeps it deterministic.
-  Health is visible to God Mode only, Vault-free.
+  (fail-closed). The house lives ONLY on the player's play-clock: every committed player turn
+  fires one bounded off-screen tick — nothing runs on real time, and the house does not exist
+  while the player is away. Health is visible to God Mode only, Vault-free.
 
   Scenario: A turn-driven advance runs off-screen life and passes the integrity checkpoint
     Given a started game
@@ -19,11 +20,11 @@ Feature: Game orchestrator & integrity watcher
     And the integrity checkpoint passes
     And the new state is persisted
 
-  Scenario: The house lives between turns (background off-screen ticks)
-    Given a started game that the player has left idle
-    When the clock advances past the idle threshold
-    Then the watcher triggers bounded off-screen advances for that game
-    And on the player's return there are new off-screen consequences
+  Scenario: The house lives between turns (one bounded off-screen tick per committed turn)
+    Given a started game the player is actively playing
+    When the player commits a turn
+    Then that turn fires one bounded off-screen advance for that game
+    And on the next turn there are new off-screen consequences
     But the player is shown no opinion numbers or hidden state
 
   Scenario: The integrity checkpoint is fail-closed (no degradation, no leak)
@@ -33,16 +34,16 @@ Feature: Game orchestrator & integrity watcher
     And the prior persisted save is left intact
     And an integrity fault is recorded on that sandbox's health
 
-  Scenario: The watcher is deterministic and holds no game logic
+  Scenario: Off-screen life is deterministic and holds no game logic
     Given two games started from the same seed
-    When the same sequence of clock ticks is applied to each
+    When the same sequence of committed turns is applied to each
     Then their resulting states are identical
-    And disabling the watcher leaves games that never advance on their own
+    And a game with no committed turn never advances on its own
 
-  Scenario: Isolation holds while the watcher audits many sandboxes
+  Scenario: Isolation holds while the house lives between turns across sandboxes
     Given two users each have their own in-progress game
-    When the watcher ticks and audits across all sandboxes
-    Then no advance or audit carries one user's content into the other's game
+    When each user commits a turn in their own game
+    Then no advance carries one user's content into the other's game
 
   Scenario: Sandbox health is visible to God Mode only and is Vault-free
     Given a started game whose Vault holds off-screen scheming and hidden attributes
