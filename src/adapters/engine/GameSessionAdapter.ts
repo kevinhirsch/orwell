@@ -2531,7 +2531,10 @@ export class GameSessionAdapter implements GameSession {
     if (this.house) {
       for (const npc of this.house.npcs) {
         if (npc.character.genderPresentation !== undefined) continue;
-        const derived = GENDER_PRESENTATIONS[new SeededRandom(hashSeed(`${npc.id}:genderPresentation-backfill`)).int(GENDER_PRESENTATIONS.length)]!;
+        // Keyed on id AND name: ids are positional (`npc-1`…`npc-15`) and repeat across every
+        // season/save, so id alone would deal the same repair to the same SLOT in every restored
+        // cast; the name ties the derivation to the actual saved character (review, PR #1346).
+        const derived = GENDER_PRESENTATIONS[new SeededRandom(hashSeed(`${npc.id}:${npc.name}:genderPresentation-backfill`)).int(GENDER_PRESENTATIONS.length)]!;
         npc.character.genderPresentation = derived;
         console.warn(`[orwell] ${npc.id} (${npc.name}) had no genderPresentation facet on load; backfilled to "${derived}" deterministically (#1326)`);
       }

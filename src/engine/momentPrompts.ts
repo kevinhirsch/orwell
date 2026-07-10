@@ -8,17 +8,20 @@ import { physicalFacetToAppearance } from "./portraitPrompts";
 import { genderPresentationPhrase, pronounsFor, genderGuidanceClause } from "../domain/gender";
 
 /**
- * #1326 — dedupe the "no genderPresentation facet on file" warning per houseguest id (per process),
+ * #1326 — dedupe the "no genderPresentation facet on file" warning per houseguest (per process),
  * so a live session doesn't spam the log every turn for the same houseguest. The `restore()` backfill
  * in `GameSessionAdapter` should make this rare-to-never for a resumed save; a non-standard creation
  * path that skips the diversity floor (a test fixture, a future direct-mint route) is the case this
  * stays visible for. `genderGuidanceClause` itself stays pure (no I/O) — the warning lives HERE, at
- * the one place that actually builds player-facing prompt text from the facet.
+ * the one place that actually builds player-facing prompt text from the facet. Keyed on id AND name:
+ * ids are positional (`npc-1`…`npc-15`) and repeat across every sandbox in one process, so id alone
+ * would swallow the warning for a DIFFERENT houseguest in the same slot (review, PR #1346).
  */
 const warnedUnsetGender = new Set<string>();
 function genderClauseFor(id: string, name: string, g: "man" | "woman" | "nonbinary" | undefined): string {
-  if (g === undefined && !warnedUnsetGender.has(id)) {
-    warnedUnsetGender.add(id);
+  const warnKey = `${id}|${name}`;
+  if (g === undefined && !warnedUnsetGender.has(warnKey)) {
+    warnedUnsetGender.add(warnKey);
     console.warn(`[orwell] ${id} (${name}) has no genderPresentation facet on file; narrating with the explicit "unconfirmed" fallback instead of silently dropping the pronoun cue (#1326)`);
   }
   return genderGuidanceClause(g);
