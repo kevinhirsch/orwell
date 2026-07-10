@@ -58,7 +58,11 @@ def _isolate(monkeypatch):
     yield
 
 
-def _make_ready(*, ready, authored, total=15):
+def _make_ready(*, ready, authored, total=None):
+    """Readiness-result stub — `total` defaults to the module's cast-size constant so a future
+    cast-size change flows through automatically (never a stale hardcoded 15)."""
+    total = ca._HOUSE_READY_TOTAL_DEFAULT if total is None else total
+
     async def _fn(owner, **k):
         return {"ready": ready, "authored": authored, "total": total,
                 "missing": max(0, total - authored)}
@@ -106,7 +110,8 @@ def test_gate_allows_start_when_cast_authored(monkeypatch, run):
     monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
     ca.clear_house_entry_gate_block("carol")
     monkeypatch.setattr(ca, "house_entry_gate_active", _async_true)
-    monkeypatch.setattr(ca, "await_house_ready", _make_ready(ready=True, authored=15))
+    monkeypatch.setattr(ca, "await_house_ready",
+                        _make_ready(ready=True, authored=ca.HOUSE_READY_MIN_AUTHORED))
 
     res = run(ti.do_create_character('{"playerName":"P"}', owner="carol"))
     assert res["exit_code"] == 0
@@ -213,14 +218,15 @@ def test_await_house_ready_returns_on_threshold(monkeypatch, run):
     the INVARIANT (`HOUSE_READY_MIN_AUTHORED`, the full cast size), never a literal number, so a
     future cast-size change can't silently reopen the gap."""
     threshold = ca.HOUSE_READY_MIN_AUTHORED
-    seq = iter([{"authored": threshold - 1, "total": 15, "missing": 15 - (threshold - 1)},
-                {"authored": threshold, "total": 15, "missing": 15 - threshold}])
+    total = ca._HOUSE_READY_TOTAL_DEFAULT
+    seq = iter([{"authored": threshold - 1, "total": total, "missing": total - (threshold - 1)},
+                {"authored": threshold, "total": total, "missing": total - threshold}])
 
     async def _comp(owner):
         try:
             return next(seq)
         except StopIteration:
-            return {"authored": threshold, "total": 15, "missing": 15 - threshold}
+            return {"authored": threshold, "total": total, "missing": total - threshold}
     monkeypatch.setattr(ca, "authoring_completeness_for", _comp)
     monkeypatch.setattr(ca, "_kick_backfill_for_stragglers", lambda owner: _noop())
 
@@ -309,9 +315,8 @@ def test_overlay_never_touches_a_not_started_projection(client, monkeypatch):
 def test_watch_clears_marker_and_fires_post_start_exactly_once(monkeypatch, run):
     """A refused entry arms ONE watch; when authoring lands, the watch clears the holding overlay
     and runs the deferred post-start kick (the zeitgeist) exactly once."""
-    async def _ready(owner, **k):
-        return {"ready": True, "authored": 15, "total": 15, "missing": 0}
-    monkeypatch.setattr(ca, "await_house_ready", _ready)
+    monkeypatch.setattr(ca, "await_house_ready",
+                        _make_ready(ready=True, authored=ca.HOUSE_READY_MIN_AUTHORED))
     gs = importlib.import_module("src.orwell_game_session")
     pushed = {"n": 0}
     monkeypatch.setattr(gs, "publish_game_updated",
