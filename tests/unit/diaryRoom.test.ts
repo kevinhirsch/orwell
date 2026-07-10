@@ -126,7 +126,9 @@ describe("0013/PG-14/PS-4 — the producer's Diary-Room invitation is live-wired
     expect(gs.moment).toBe("nominations");
     expect(gs.diaryRoomInvite).toBeDefined();
     expect(gs.diaryRoomInvite!.invite).toBe(true);
-    expect(gs.diaryRoomInvite!.reason).toContain("nomination");
+    // 0115 — the invitation is now a pointed, beat-specific QUESTION (not the old "dramatic beat: X" label).
+    expect(gs.diaryRoomInvite!.reason).toContain("nominees");
+    expect(gs.diaryRoomInvite!.reason!.endsWith("?")).toBe(true);
   });
 
   it("clears again once the ceremony moves past nominations into a routine competition beat", () => {

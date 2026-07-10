@@ -1231,6 +1231,20 @@ export function renderGameContext(view: GameStateView): string {
       (view.player.genderPresentation
         ? ` They present as ${genderPresentationPhrase(view.player.genderPresentation)} (use ${pronounsFor(view.player.genderPresentation)}) — never infer their gender/pronouns from their name.`
         : ""),
+    // 0115 — the player's DIARY ROOM: their REAL strategy, in their own words. YOU (the producer/GM)
+    // know this; the HOUSEGUESTS DO NOT, and never will (it has no in-game pathway to anyone). Narrate
+    // the player's scenes GROUNDED in this truth — the dramatic irony of a mask, the con behind the
+    // smile — instead of taking their public friendliness at face value. But it is a PRIVATE steer, NOT
+    // a fact to read aloud: NEVER voice it, never put it in a houseguest's mouth, never let anyone act on
+    // it. If the player says one thing to a houseguest and the opposite here, the houseguest still
+    // believes the public line (they were fooled) — only YOUR narration to the player carries the truth.
+    ...((view.playerDiaryRoom ?? []).length
+      ? [
+          "- THE PLAYER'S DIARY ROOM — their private, out-of-character strategy (you know it; the house does",
+          "  NOT — narrate the irony, but NEVER voice it to a houseguest and never let anyone act on it):",
+          ...(view.playerDiaryRoom ?? []).map((e) => `    · ${e}`),
+        ]
+      : []),
     `- The house (${view.house.length} other houseguests) — each line is THAT person's OWN self and YOUR`,
     "  PRIVATE voice cue for how to play THEM; it is NOT shared knowledge the rest of the cast has. A",
     "  houseguest knows only their OWN line plus whatever an in-game pathway has taught them about others",
