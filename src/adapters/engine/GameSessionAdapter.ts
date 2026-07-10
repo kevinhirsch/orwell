@@ -340,6 +340,14 @@ interface PrewarmCast {
 const PREWARM_PLAYER_NAME = "(pre-warm)";
 
 /**
+ * FEATURE 0111 (Pillar 3, #906) — how many HOT first reads make the first power REACHABLE. "A couple":
+ * house entry is fast + asymmetric, so the first HOH unlocks once the player has genuinely clocked 2–3
+ * houseguests (met NPCs), with the rest met in motion. Never gates the OUTCOME (the HOH stays a real
+ * seeded competition) — only the premiere GATE. Clamped to the cast size for tiny/degenerate houses.
+ */
+const PREMIERE_HOT_READ_THRESHOLD = 2;
+
+/**
  * Flatten untrusted FE text before it rides into a SYSTEM prompt (the C8 pattern): collapse ALL
  * whitespace (newlines/tabs/control chars that could forge a prompt line) into single spaces and cap the
  * length. Used by the 0062 zeitgeist write-back (`recordWorldSnapshot`) — the snapshot is non-secret
@@ -3574,6 +3582,15 @@ export class GameSessionAdapter implements GameSession {
       const fi = this.firstImpressionOf(n);
       (fi.met ? met : remaining).push(fi);
     }
+    // FEATURE 0111 (Pillar 3, #906) — the ASYMMETRIC premiere gate. "No one is invisible, not everyone
+    // is equal": a few first reads run HOT (met NPCs), the rest are met IN MOTION (still on `remaining`),
+    // and NOBODY is invisible because the engine seats every active houseguest in the house at move-in
+    // (the presence map covers them all — the player can always at least cross paths). So the first HOH
+    // is REACHABLE once a couple of hot reads are formed AND everyone is visible, WITHOUT grinding through
+    // all fifteen formal introductions. The HOH itself stays a real seeded competition (only the gate
+    // is reframed, never the outcome). `hotReads`/`powerReachable` are pure counts/flags — no Vault data.
+    const hotReads = met.length;
+    const everyoneVisible = activeNpcs.every((n) => this.presence === null || this.presence.has(n.id));
     // +1 on both counts for the player (they ARE met — they're playing). total = the whole cast.
     return {
       complete: remaining.length === 0,
@@ -3581,6 +3598,8 @@ export class GameSessionAdapter implements GameSession {
       total: activeNpcs.length + 1,
       remaining,
       met,
+      hotReads,
+      powerReachable: everyoneVisible && hotReads >= Math.min(PREMIERE_HOT_READ_THRESHOLD, activeNpcs.length),
     };
   }
 

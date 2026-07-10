@@ -85,6 +85,7 @@ module.exports = {
       "docs/features/0105-suspicion-and-mood-anchoring.feature",
       "docs/features/0109-deal-duration.feature",
       "docs/features/0110-vote-deduction.feature",
+      "docs/features/0111-day-1-experience.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

@@ -684,6 +684,32 @@ export class BbWorld extends World {
     legendsB?: string[];
   };
 
+  // Feature 0111 — the Day-1 experience scratch state (one bag).
+  d1?: {
+    reg?: import("../../src/composition/registry").GameSessionRegistry;
+    user?: string;
+    sandbox?: import("../../src/composition/registry").UserSandbox;
+    seed?: number;
+    castPrompt?: string;
+    needle?: string;
+    hotReads?: import("../../src/domain/ids").EntityId[];
+    premiere?: import("../../src/ports/GameSession").PremiereIntrosView;
+    firstHohWinnerA?: string;
+    firstHohWinnerB?: string;
+    consequence?: import("../../src/engine/consequence").ConsequenceEngine;
+    npc?: import("../../src/domain/ids").EntityId;
+    edgeBefore?: import("../../src/engine/relationships").EdgeSignals;
+    edgeAfter?: import("../../src/engine/relationships").EdgeSignals;
+    baselineRel?: string;
+    noBeatRel?: string;
+    drConfession?: string;
+    playerSurface?: string;
+    adminSurface?: string;
+    sentinels?: string[];
+    seasonHashA?: string;
+    seasonHashB?: string;
+  };
+
   constructor(options: IWorldOptions) {
     super(options);
   }

@@ -988,7 +988,7 @@ export interface FirstImpressionView {
  * already exposes. No Vault data, no numbers, no hidden state.
  */
 export interface PremiereIntrosView {
-  /** True iff every active houseguest has been introduced/met (the meet-everyone gate). */
+  /** True iff every active houseguest has been introduced/met (the full meet-everyone tally). */
   complete: boolean;
   /** How many of the cast (player + NPCs) have been met so far, and the total to meet. */
   metCount: number;
@@ -997,6 +997,21 @@ export interface PremiereIntrosView {
   remaining: FirstImpressionView[];
   /** Everyone met so far — the player's early observable reads, for a "first impressions" surface. */
   met: FirstImpressionView[];
+  /**
+   * FEATURE 0111 (Pillar 3, #906) — "no one invisible, not everyone equal." The number of HOT first
+   * reads formed (met NPCs, not counting the player). House entry is asymmetric: a few reads run hot,
+   * the rest are met in motion. Purely a count — no Vault data, no relationship number.
+   */
+  hotReads: number;
+  /**
+   * FEATURE 0111 (Pillar 3, #906) — the ASYMMETRIC premiere gate: the first HOH is REACHABLE once a
+   * couple of hot reads are formed AND no houseguest is left invisible (everyone is at least seated in
+   * the house / met in motion), WITHOUT requiring all fifteen formal introductions first (`complete`).
+   * This replaces "meet ALL before any power" with "first power fast, stragglers met in motion." The
+   * first HOH itself stays a real, un-rigged seeded competition — only the GATE is reframed, never the
+   * outcome (anti-sycophancy, mandate #3).
+   */
+  powerReachable: boolean;
 }
 
 /**

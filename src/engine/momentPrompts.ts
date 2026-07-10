@@ -2,6 +2,7 @@ import type { GameStateView } from "../ports/GameSession";
 import { WALKABLE_ROOMS, roomDisplayName } from "../domain/house";
 import { ARCHETYPES, ALL_STRATEGY_STYLES } from "./characterFactory";
 import { neutralizeForPrompt } from "./castingIntake";
+import { CURIOSITY_NEEDLE_INSTRUCTION } from "./curiosityNeedle";
 import { dayOfWeek } from "./houseEvents";
 import { physicalFacetToAppearance } from "./portraitPrompts";
 import { genderPresentationPhrase, pronounsFor } from "../domain/gender";
@@ -552,15 +553,23 @@ const CASTING_INTERVIEW_PROMPT = [
   "casting conversation that probes who this person actually is and how they intend to play. Ask one",
   "pointed question at a time, listen, then chase the most revealing thread with a sharper",
   "follow-up — press for specifics, push past the rehearsed answer, ask the thing they didn't",
-  "volunteer. The richest material lives in:",
-  "  · STRATEGY — how do they actually intend to WIN? Who do they cut, who do they keep, and when?",
-  "    What is their move when the house turns on them?",
+  "volunteer. Probe the SELF, not a strategy they can't have yet — in a coalition game, real strategy is",
+  "DISCOVERED live against a real house, so alliances and targets EMERGE in play; you are NOT here to make",
+  "them commit to a kill-list or name who they'd cut and when. Leave that to the house. The richest",
+  "material lives in:",
+  "  · SELF-BELIEF — how do they, in their gut, picture themselves WINNING this? The kind of player they",
+  "    believe they are, and what their move is when the house turns on them — an instinct, not a hit list.",
   "  · WHAT THEY WANT — why are they really here, beyond the money? What would make the season a",
   "    success for them even if they don't win it?",
   "  · WHO THEY THINK THEY ARE IN THE HOUSE — the role they picture themselves playing, the read they",
   "    expect others to form of them, and where they suspect that read is wrong.",
   "  · THE TELLS — how they handle pressure, their relationship to lying, the grudge they'd carry,",
   "    the line they won't cross. Probe the contradictions; that is the gold.",
+  "This is character you're capturing — self-belief and tells — not a committed strategy. Casting NEVER",
+  "requires a declared target list to finalize; the mid-season producer re-read (\"you said you'd never",
+  "lie…\") is what turns what they told you here into earned dramatic irony once they're actually playing.",
+  "",
+  CURIOSITY_NEEDLE_INSTRUCTION,
   "VARY YOUR ANGLE — there is NO fixed script and no set question order: open differently and chase",
   "different threads each session, so no two interviews feel the same. Let THEIR answers steer where",
   "you press, never a rote checklist. The GAME CONTEXT below carries the CASTING STATUS: what's",
@@ -630,19 +639,22 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "self to voice when they introduce themselves — never a thing the others already know). Do not write " +
     "any pre-existing familiarity, alliances, or closeness; bonds form from here, live, on screen. " +
     "WALK THE PLAYER THROUGH THESE PREMIERE BEATS, in order, lightly producer-guided: " +
-    "(1) INTRODUCTIONS — MEET EVERYONE before the first HOH. Production gathers the whole house in the " +
-    "living room and goes person by person until the player has met ALL FIFTEEN houseguests — nobody is " +
-    "skipped. Each houseguest introduces their PUBLIC self — name, where they're from, what they do, one " +
-    "real thing — voiced from THAT person's card (their look, demeanor, background/biography in the GAME " +
-    "CONTEXT), in their OWN register, as a STRANGER meeting strangers. Go a few at a time so it breathes; " +
-    "let the player jump in and introduce THEMSELVES. " +
+    "(1) INTRODUCTIONS — NO ONE IS INVISIBLE, BUT NOT EVERYONE IS EQUAL. This is a social game, not a " +
+    "roll-call: the player is playing, not auditioning. So let 2–3 first reads run HOT — a few houseguests " +
+    "the player actually clocks and connects with, up close — and meet the rest IN MOTION (a face across " +
+    "the champagne, a name caught in the crowd, someone drifting past): everyone gets seen, nobody is " +
+    "skipped, but you do NOT grind through all fifteen formal introductions before anything happens. " +
+    "Production gathers the whole house in the living room; each houseguest introduces their PUBLIC self — " +
+    "name, where they're from, what they do, one real thing — voiced from THAT person's card (their look, " +
+    "demeanor, background/biography in the GAME CONTEXT), in their OWN register, as a STRANGER meeting " +
+    "strangers. Go a few at a time so it breathes; let the player jump in and introduce THEMSELVES, and let " +
+    "them gravitate to whoever they want a real read on. " +
     "DO NOT TRACK THE INTRODUCTIONS FROM MEMORY — the GAME CONTEXT below carries a 'PREMIERE — STILL TO " +
-    "MEET' list (the engine's truth of exactly who has NOT been introduced yet) and a met-count. Drive " +
-    "the next introduction from THAT list — introduce the people on it, never re-introduce someone already " +
-    "met, and keep going until the list is empty (every houseguest met). The instant a houseguest has " +
-    "introduced their public self, call markHouseguestMet for them so the engine records the meeting and " +
-    "the list shrinks; never call the introductions done while that list still has names on it. Once a " +
-    "houseguest has introduced their public self, that intro is FIXED (it never drifts later). " +
+    "MEET' list (the engine's truth of exactly who has NOT been formally introduced yet) and a met-count. " +
+    "The instant a houseguest has introduced their public self / the player has gotten a real read on them, " +
+    "call markHouseguestMet for them so the engine records the meeting and the list shrinks. Never " +
+    "re-introduce someone already met. Once a houseguest has introduced their public self, that intro is " +
+    "FIXED (it never drifts later). " +
     "EARLY READS — the player gets to 'clock' people. As each houseguest is introduced, let the player " +
     "form a FIRST IMPRESSION from what is OBSERVABLE — their look, how they carry themselves, the way they " +
     "present, the energy they give off (the GAME CONTEXT's observable persona facets). This is the player " +
@@ -674,11 +686,13 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the introductions, the " +
     "toast, the bedroom pick, and a little settling-in, call advanceGame to bring up the first HOH " +
     "competition; do not let the premiere drift indefinitely. " +
-    "BUT THE FIRST HOH DOES NOT BEGIN UNTIL EVERYONE HAS BEEN MET: do NOT advanceGame into the first HOH " +
-    "while the 'PREMIERE — STILL TO MEET' list below still has houseguests on it. The player should be " +
-    "able to clock every face as their own personality before the game's first power is up for grabs, so " +
-    "finish the meet-everyone introductions first. Once the list is empty (all fifteen met) and the player " +
-    "signals they're ready for the game to start, THAT is your cue to advanceGame, not to keep milling.",
+    "THE FIRST POWER ARRIVES FAST — do not stall it behind a completionist roll-call. The GAME CONTEXT " +
+    "below tells you when the premiere is ready for power (the 'FIRST POWER' line: a couple of hot reads " +
+    "formed and no houseguest left invisible). Once it reads reachable and the player signals they're ready " +
+    "for the game to start, THAT is your cue to advanceGame into the first HOH — you do NOT need every one " +
+    "of the fifteen formally introduced first; the stragglers get met in motion, during the mingle and the " +
+    "comp itself. Nobody should be invisible (everyone at least seen), but the first HOH should not wait on " +
+    "the last formal handshake.",
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
@@ -1140,19 +1154,21 @@ export function renderGameContext(view: GameStateView): string {
     return bits.length ? ` — ${bits.join(", ")}` : "";
   };
   const premiereLines: string[] = !pr ? [] : [
-    `- PREMIERE — MEET EVERYONE (engine truth): ${pr.metCount} of ${pr.total} of the cast met so far.` +
-      (pr.complete
-        ? " Everyone has been introduced — the meet-everyone beat is COMPLETE; the first HOH may begin when the player is ready."
-        : " The first HOH must NOT begin until this is complete."),
+    `- PREMIERE — READING THE HOUSE (engine truth): ${pr.metCount} of ${pr.total} of the cast met so far, ` +
+      `${pr.hotReads} hot first read${pr.hotReads === 1 ? "" : "s"} formed.`,
+    `- PREMIERE — FIRST POWER: ` +
+      (pr.powerReachable
+        ? "REACHABLE — a couple of hot reads are formed and no houseguest is invisible; the first HOH may begin the moment the player is ready (the stragglers get met in motion, you do NOT need every formal introduction first)."
+        : `not yet — get 2–3 hot first reads going (everyone stays at least seen, nobody invisible). ${pr.remaining.length} still only met in motion.`),
     ...(pr.remaining.length
       ? [
-          "- PREMIERE — STILL TO MEET (introduce these next; call markHouseguestMet the instant each one has",
-          "  introduced their public self — drive the introductions from THIS list, never from memory, until it",
-          "  is empty; describe each by what is OBSERVABLE only, never a strategy or danger label said aloud and",
+          "- PREMIERE — STILL TO MEET IN MOTION (met around the house but not yet a hot read; markHouseguestMet",
+          "  the instant the player gets a real read on one — you never need to clear this whole list before the",
+          "  first HOH; describe each by what is OBSERVABLE only, never a strategy or danger label said aloud and",
           "  never how the player feels — the player forms their OWN read):",
           ...pr.remaining.map((fi) => `    · ${fi.houseguest.name}${observable(fi)}`),
         ]
-      : ["- PREMIERE — STILL TO MEET: nobody — every houseguest has been introduced."]),
+      : ["- PREMIERE — STILL TO MEET IN MOTION: nobody — every houseguest has had a hot first read."]),
   ];
   return [
     "GAME CONTEXT:",

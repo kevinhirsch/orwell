@@ -65,7 +65,7 @@ Feature: 0111 — The Day-1 experience (the first session is the first move of t
 
     Scenario: Neither the player nor the admin sees Day-1 hidden state
       Given the player has finished a Day-1 with a curiosity needle and a consequential beat
-      When the player-facing and admin-facing projections are assembled
+      When the Day-1 player-facing and admin-facing projections are assembled
       Then the curiosity needle exposes no specific hidden fact on either surface
       And no number from the consequence fold appears on either surface
       And the Diary Room exposes no pathway from the player's confession to any NPC

@@ -84,8 +84,8 @@ describe("the casting-interview moment prompt (0050)", () => {
   it("guides deep, probing, varied questions (no fixed script)", () => {
     expect(prompt).toMatch(/go DEEP, not wide/i);
     expect(prompt).toMatch(/probes who this person actually is/i);
-    // the three probe themes the playtest asked for
-    expect(prompt).toMatch(/STRATEGY/);
+    // the probe themes (0111 Pillar 1, #905: probe the SELF/self-belief, not a declared kill-list)
+    expect(prompt).toMatch(/SELF-BELIEF/);
     expect(prompt).toMatch(/WHAT THEY WANT/i);
     expect(prompt).toMatch(/WHO THEY THINK THEY ARE IN THE HOUSE/i);
     // seeded/varied feel: no fixed order, steered by the player's answers, never a rote checklist
