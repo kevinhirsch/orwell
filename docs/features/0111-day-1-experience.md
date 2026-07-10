@@ -4,7 +4,14 @@
 > `0102-weekly-recap-cliffhanger`; this is the newer, still-unbuilt spec, so it moved to the next
 > free slot. No content change.
 >
-> **Status:** 🟢 **PO REVIEW RESOLVED (owner, 2026-06-27) — BUILD-READY.** Category-level casting strategy (no kill-list); **champagne-circle premiere** (mingle → circle → mingle → first HOH); three sequenced PRs; Vault-free needle. See § "PO review" + `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #875.
+> **Status:** ✅ **BUILT (2026-07-10).** All five pillars shipped: casting probes the self / no kill-list
+> (#905), one Vault-free curiosity needle (#909, `src/engine/curiosityNeedle.ts`), the asymmetric premiere
+> gate (#906, `PremiereIntrosView.powerReachable`/`hotReads` — first power fast, no one invisible, the HOH
+> stays a real seeded competition), the consequential Day-1 beat via the existing `recordInteraction`/0023
+> fold + the 0055 `_auto_record_scene` belt (#908), and the Diary Room enterable Day-1 & OOC (#907). BDD
+> `0111-day-1-experience.feature` (wired in `cucumber.cjs`; `day1_experience.steps.ts`); the reframes are
+> calibration-neutral (byte-identical `advanceToFinale` season). FE premiere tutorial touch in
+> `orwellPremiereTutorial.js`. See § "PO review" + `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #875.
 > Tracks the first-run → end-of-day-1 audit (`docs/audits` / `scratchpad/audit_day1/AUDIT_REPORT.md`) and
 > its umbrella **#875**. This is the **coherent design** over five already-filed sub-issues — it does not
 > introduce a parallel system; it sequences and constrains them as **one first-session experience** rather

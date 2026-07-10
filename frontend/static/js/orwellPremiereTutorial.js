@@ -159,9 +159,15 @@
     card.classList.add("orwell-premiere-tutorial");   // keep the legacy hook class for inner CSS
     // J2-12: announce on insert without stealing focus (the kit already sets aria-live=polite for
     // the guide kind — non-intrusive note per ADR 0003).
+    // 0111 (Pillar 3, #906): house entry is FAST + asymmetric — get a couple of real reads going; you
+    // meet all fifteen houseguests, but the first power does NOT wait on a full roll-call. And (Pillar 5,
+    // #907) the Diary Room is introduced as an enterable room from day one — the private backstage.
     body.innerHTML =
-      '<div>Talk to anyone, wander any room — the house keeps playing around you. ' +
-      'You\'ll need to cross paths with all fifteen houseguests before Production calls the first HOH competition.</div>' +
+      '<div>Talk to anyone, wander any room — the house keeps playing around you. Get a couple of real ' +
+      'reads going: you\'ll meet all fifteen houseguests, but the first HOH won\'t wait on you shaking ' +
+      'every hand.</div>' +
+      '<div>The <strong>Diary Room</strong> is open from day one — step in whenever you want to vent. ' +
+      'Nobody in the house hears it.</div>' +
       '<div class="opt-rhythm">' +
         '<span aria-hidden="true">\u{1F3C6}</span> HOH → ' +
         '<span aria-hidden="true">\u{1F528}</span> Nominations → ' +

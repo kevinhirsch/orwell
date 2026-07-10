@@ -191,23 +191,26 @@ describe("premiere meet-everyone — the Vault Wall holds (sentinel sweep)", () 
     for (const s of Object.values(SENTINELS)) {
       expect(prompt, `the premiere prompt must not leak ${s}`).not.toContain(s);
     }
-    // And the woven prompt names the meet-everyone gate + the still-to-meet list it drives from.
-    expect(prompt).toMatch(/PREMIERE — MEET EVERYONE/);
-    expect(prompt).toMatch(/PREMIERE — STILL TO MEET/);
+    // And the woven prompt names the (0111-reframed) reading-the-house gate + the met-in-motion list.
+    expect(prompt).toMatch(/PREMIERE — READING THE HOUSE/);
+    expect(prompt).toMatch(/PREMIERE — FIRST POWER/);
+    expect(prompt).toMatch(/PREMIERE — STILL TO MEET IN MOTION/);
   });
 });
 
 describe("premiere meet-everyone — the prompt framing", () => {
-  it("the premiere fragment frames meet-everyone, the engine tracker, and the early observable reads", () => {
+  it("the premiere fragment frames the (0111) asymmetric entry, the engine tracker, and the early observable reads", () => {
     const premiere = MOMENT_PROMPTS["premiere"]!;
-    // Meet everyone before the first HOH; no skips; driven by the engine's list, never memory.
-    expect(premiere).toMatch(/MEET EVERYONE before the first HOH/);
-    expect(premiere).toMatch(/ALL FIFTEEN/);
+    // 0111 (Pillar 3, #906): the reframed gate — no one invisible, not everyone equal; a few hot reads,
+    // the rest met in motion; the first power arrives fast. Still engine-driven, never memory.
+    expect(premiere).toMatch(/NO ONE IS INVISIBLE, BUT NOT EVERYONE IS EQUAL/);
+    expect(premiere).toMatch(/first reads run HOT/);
+    expect(premiere).toMatch(/met the rest IN MOTION|meet the rest IN MOTION/i);
     expect(premiere).toMatch(/DO NOT TRACK THE INTRODUCTIONS FROM MEMORY/);
-    expect(premiere).toMatch(/PREMIERE — STILL TO MEET/);
     expect(premiere).toMatch(/markHouseguestMet/);
-    // The first HOH gate.
-    expect(premiere).toMatch(/THE FIRST HOH DOES NOT BEGIN UNTIL EVERYONE HAS BEEN MET/);
+    // The reframed first-power gate — reachable fast, not a completionist roll-call.
+    expect(premiere).toMatch(/THE FIRST POWER ARRIVES FAST/);
+    expect(premiere).toMatch(/do NOT need every one of the fifteen formally introduced first/i);
     // Early observable reads — "clock people as their type", anti-sycophancy intact.
     expect(premiere).toMatch(/EARLY READS/);
     expect(premiere).toMatch(/OBSERVABLE/);
