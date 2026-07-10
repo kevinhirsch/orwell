@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { renderGameContext } from "../../src/engine/momentPrompts";
-import { genderPresentationPhrase, pronounsFor } from "../../src/domain/gender";
+import { genderPresentationPhrase, pronounsFor, UNCONFIRMED_GENDER_CLAUSE } from "../../src/domain/gender";
 import { nameGenderOf } from "../../src/engine/data/nameGender";
+import type { GameStateView } from "../../src/ports/GameSession";
 
 /**
  * Issue #1140 — the NPC gender/pronoun ↔ portrait mismatch.
@@ -152,5 +153,253 @@ describe("#1140 — portrait and narration voice the SAME stored gender presenta
     // The three phrases are pairwise distinct, so portrait↔narration agreement is a real equality check.
     const phrases = new Set(["man", "woman", "nonbinary"].map((g) => genderPresentationPhrase(g as "man")));
     expect(phrases.size).toBe(3);
+  });
+});
+
+/**
+ * Issue #1326 — "gender/pronouns weird and inconsistent". Three concrete gaps closed:
+ *  (1) an unset NPC `genderPresentation` used to make the whole pronoun clause fall out of a
+ *      `filter(Boolean)` array — a SILENT drop that let the narrator guess gender from the name.
+ *  (2) the PLAYER's own pronouns were never captured or voiced at all.
+ *  (3) a legacy save loaded with the facet unset stayed unset forever (no repair).
+ */
+describe("#1326 — an unset genderPresentation is NEVER silently dropped", () => {
+  it("at the prompt layer: a doctored view with the facet unset still voices an explicit fallback clause, and warns once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const view = new GameSessionAdapter().createCharacter({ playerName: "The Player", seed: 11 });
+      const active = view.house.find((h) => h.status === "active" && h.genderPresentation !== undefined)!;
+      expect(active).toBeDefined();
+
+      // Doctor a COPY of the real view — simulating a houseguest whose facet is unset for any reason
+      // (a legacy save that predates restore()'s backfill, or a non-standard creation path) — and feed
+      // it directly to the pure prompt builder, bypassing the adapter's own backfill entirely.
+      const doctored: GameStateView = {
+        ...view,
+        house: view.house.map((h) => (h.id === active.id ? { ...h, genderPresentation: undefined } : h)),
+      };
+
+      const ctx = renderGameContext(doctored);
+      const line = ctx.split("\n").find((l) => l.trimStart().startsWith(`- ${active.name}`));
+      expect(line).toBeDefined();
+      // The explicit, never-silent fallback — NOT an absent/empty clause.
+      expect(line!).toContain(UNCONFIRMED_GENDER_CLAUSE);
+      expect(line!).toContain("they/them");
+
+      // A console warning surfaces the gap instead of it healing invisibly.
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]![0])).toContain(active.id);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the SAME fallback applies during the premiere's still-to-meet list", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const view = new GameSessionAdapter().createCharacter({ playerName: "The Player", seed: 23 });
+      // Force the premiere moment to be present with at least one still-to-meet houseguest whose
+      // facet we then strip, mirroring the roster-line doctoring above.
+      const remaining = view.premiere?.remaining ?? [];
+      // At creation the player has met nobody, so the still-to-meet list must be the full NPC cast —
+      // assert the precondition instead of silently skipping (review, PR #1346).
+      expect(remaining.length).toBeGreaterThan(0);
+      const target = remaining[0]!;
+      const doctored: GameStateView = {
+        ...view,
+        premiere: {
+          ...view.premiere!,
+          remaining: view.premiere!.remaining.map((fi) =>
+            fi.houseguest.id === target.houseguest.id ? { ...fi, genderPresentation: undefined } : fi,
+          ),
+        },
+      };
+      const ctx = renderGameContext(doctored);
+      const section = ctx.split("STILL TO MEET IN MOTION")[1] ?? "";
+      expect(section).toContain(UNCONFIRMED_GENDER_CLAUSE);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("genderGuidanceClause/isGenderPresentation are total and pure (no I/O)", async () => {
+    const { genderGuidanceClause, isGenderPresentation } = await import("../../src/domain/gender");
+    expect(genderGuidanceClause(undefined)).toContain(UNCONFIRMED_GENDER_CLAUSE);
+    for (const g of ["man", "woman", "nonbinary"] as const) {
+      expect(genderGuidanceClause(g)).toContain(genderPresentationPhrase(g));
+      expect(isGenderPresentation(g)).toBe(true);
+    }
+    expect(isGenderPresentation("alien")).toBe(false);
+    expect(isGenderPresentation(undefined)).toBe(false);
+  });
+});
+
+describe("#1326 — a legacy save with an unset genderPresentation is backfilled deterministically on restore", () => {
+  it("restore() repairs a stripped NPC facet, deterministically, and warns once", () => {
+    const adapter = new GameSessionAdapter();
+    const view = adapter.createCharacter({ playerName: "The Player", seed: 47 });
+    const targetId = view.house.find((h) => h.status === "active")!.id;
+
+    const snap = adapter.snapshot();
+    // Simulate a pre-0063 (or otherwise non-standard) save: strip the facet from one NPC.
+    const npc = snap.house!.npcs.find((n) => n.id === targetId)!;
+    delete (npc.character as { genderPresentation?: unknown }).genderPresentation;
+    expect(npc.character.genderPresentation).toBeUndefined();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let backfilled: string | undefined;
+    try {
+      const restored = new GameSessionAdapter();
+      restored.restore(JSON.parse(JSON.stringify(snap)));
+      const card = restored.getGameState().house.find((h) => h.id === targetId)!;
+      expect(card.genderPresentation).toBeDefined();
+      backfilled = card.genderPresentation;
+      // Exactly ONE warning for the repaired houseguest — catches duplicate-warning regressions
+      // (review, PR #1346).
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes(targetId))).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+
+    // Determinism: restoring the SAME stripped snapshot again yields the SAME backfilled value (keyed
+    // off a dedicated hash of the game seed + the houseguest's id + name, never the shared game-seed
+    // rng STREAM — so it never perturbs calibration and is reproducible).
+    const restoredAgain = new GameSessionAdapter();
+    restoredAgain.restore(JSON.parse(JSON.stringify(snap)));
+    const cardAgain = restoredAgain.getGameState().house.find((h) => h.id === targetId)!;
+    expect(cardAgain.genderPresentation).toBe(backfilled);
+  });
+
+  it("restore() does NOT touch the PLAYER's facet — an unset player facet is a legitimate, permanent choice", () => {
+    // Unlike an NPC (always dealt by the diversity floor — an unset facet is a genuine gap), the
+    // player's facet is player-authored and OPTIONAL: silence is a real choice, never a data gap to
+    // force-fill. A save where the player never answered must restore with it STILL unset, forever.
+    const adapter = new GameSessionAdapter();
+    adapter.createCharacter({
+      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "persona-role-fixture",
+    });
+    expect(adapter.getGameState().player!.genderPresentation).toBeUndefined();
+    const snap = adapter.snapshot();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const restored = new GameSessionAdapter();
+      restored.restore(JSON.parse(JSON.stringify(snap)));
+      expect(restored.getGameState().player!.genderPresentation).toBeUndefined();
+      expect(warn.mock.calls.some((c) => String(c[0]).includes("player"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a player facet that WAS captured survives restore unchanged (ordinary persistence, not backfill)", () => {
+    const adapter = new GameSessionAdapter();
+    adapter.updateCasting({
+      playerName: "The Player", backstory: "a life", motivation: "to win",
+      personaArchetype: "persona-role-fixture", genderPresentation: "woman",
+    });
+    adapter.createCharacter({});
+    const snap = adapter.snapshot();
+    const restored = new GameSessionAdapter();
+    restored.restore(JSON.parse(JSON.stringify(snap)));
+    expect(restored.getGameState().player!.genderPresentation).toBe("woman");
+  });
+
+  it("restore() of an INTACT save never warns and never changes the facet", () => {
+    const adapter = new GameSessionAdapter();
+    const view = adapter.createCharacter({ playerName: "The Player", seed: 47 });
+    const before = new Map(view.house.filter((h) => h.status === "active").map((h) => [h.id, h.genderPresentation]));
+    const snap = adapter.snapshot();
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const restored = new GameSessionAdapter();
+      restored.restore(JSON.parse(JSON.stringify(snap)));
+      const warnedGender = warn.mock.calls.some((c) => String(c[0]).includes("genderPresentation"));
+      expect(warnedGender).toBe(false);
+      for (const h of restored.getGameState().house) {
+        if (before.has(h.id)) expect(h.genderPresentation).toBe(before.get(h.id));
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("#1326 — the PLAYER's own pronouns, captured at casting, are voiced in the moment prompt", () => {
+  it("updateCasting(genderPresentation) round-trips onto the player card and the moment prompt", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({
+      playerName: "The Player", backstory: "a life", motivation: "to win",
+      personaArchetype: "persona-role-fixture", genderPresentation: "nonbinary",
+    });
+    const view = s.createCharacter({});
+    expect(view.player!.genderPresentation).toBe("nonbinary");
+
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toContain(genderPresentationPhrase("nonbinary"));
+    expect(prompt).toContain("they/them");
+  });
+
+  it("an unanswered player pronoun question omits the clause entirely — no forced 'unconfirmed' fallback", () => {
+    const s = new GameSessionAdapter();
+    const view = s.createCharacter({
+      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "persona-role-fixture",
+    });
+    expect(view.player!.genderPresentation).toBeUndefined();
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    // The player's own line names them but carries no gender-guidance clause at all (unlike an NPC,
+    // whose roster line always carries the explicit "unconfirmed" fallback).
+    const playerLine = prompt.split("\n").find((l) => l.includes("You are playing as:"));
+    expect(playerLine).toBeDefined();
+    expect(playerLine).not.toContain(UNCONFIRMED_GENDER_CLAUSE);
+    expect(playerLine).not.toContain("(use ");
+  });
+
+  it("a garbled genderPresentation value is validated away, never stored raw (mirrors archetype)", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({
+      playerName: "The Player", backstory: "a life", motivation: "to win",
+      personaArchetype: "persona-role-fixture",
+    });
+    const view = s.createCharacter({ genderPresentation: "not-a-real-value" });
+    expect(view.player!.genderPresentation).toBeUndefined();
+  });
+
+  it("the player's pronoun field aliases (`pronouns`, `gender`) onto the canonical field", () => {
+    const s = new GameSessionAdapter();
+    const st = s.updateCasting({ pronouns: "man" } as never);
+    expect(st.known["genderPresentation"]).toBe("man");
+  });
+
+  it("genderPresentation NEVER gates casting ready/finalizable — it is purely optional", () => {
+    // Name-only, no gender answer: still ready.
+    const s = new GameSessionAdapter();
+    const st = s.updateCasting({ playerName: "The Player" });
+    expect(st.ready).toBe(true);
+    expect(st.missing).toContain("genderPresentation");
+
+    // A full, finalizable interview that never touches gender is still finalizable.
+    const s2 = new GameSessionAdapter();
+    const st2 = s2.updateCasting({
+      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "persona-role-fixture",
+    });
+    expect(st2.finalizable).toBe(true);
+    const view = s2.createCharacter({});
+    expect(view.started).toBe(true);
+    expect(view.player!.genderPresentation).toBeUndefined();
+  });
+
+  it("season-to-season continuity (0056 keepCharacter) carries the player's recorded pronouns forward", () => {
+    const s = new GameSessionAdapter();
+    s.updateCasting({
+      playerName: "The Player", backstory: "a life", motivation: "to win",
+      personaArchetype: "persona-role-fixture", genderPresentation: "woman",
+    });
+    s.createCharacter({ seed: 5 });
+    expect(s.getGameState().player!.genderPresentation).toBe("woman");
+
+    const restarted = s.createCharacter({ confirmRestart: true, keepCharacter: true, seed: 9 });
+    expect(restarted.player!.genderPresentation).toBe("woman");
   });
 });

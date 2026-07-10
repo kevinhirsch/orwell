@@ -39,3 +39,31 @@ export function genderPresentationPhrase(g: "man" | "woman" | "nonbinary"): stri
 export function pronounsFor(g: "man" | "woman" | "nonbinary"): string {
   return g === "man" ? "he/him" : g === "woman" ? "she/her" : "they/them";
 }
+
+/** Type guard for the one gender-presentation enum shared by every facet (issue #1326). */
+export function isGenderPresentation(v: unknown): v is "man" | "woman" | "nonbinary" {
+  return v === "man" || v === "woman" || v === "nonbinary";
+}
+
+/**
+ * The explicit fallback voiced when NO `genderPresentation` facet is on file (issue #1326). An
+ * ACTIVE houseguest is dealt this facet by the diversity floor at cast time, so it should never be
+ * unset in a live game — but a legacy save predating feature 0063, or any non-standard creation path
+ * that skips the diversity floor, can still leave it `undefined`. Before this fix the roster/premiere
+ * builders in `momentPrompts.ts` gated the pronoun clause on `h.genderPresentation && …`, so an unset
+ * facet made the WHOLE clause fall out of a `filter(Boolean)` array — a SILENT omission that let the
+ * narrator fall back to guessing gender from the houseguest's NAME, the exact failure this module
+ * exists to prevent. This constant is the explicit, never-silent substitute for that dropped clause.
+ */
+export const UNCONFIRMED_GENDER_CLAUSE = "pronouns unconfirmed — use they/them, never infer from the name";
+
+/**
+ * The pronoun-guidance clause for a roster/premiere line: the real phrase + pronoun set when the
+ * facet is on file, or the explicit `UNCONFIRMED_GENDER_CLAUSE` fallback when it is not — NEVER an
+ * empty/falsy value a `filter(Boolean)` builder could silently drop (issue #1326). Pure (no I/O); a
+ * caller that wants to also SURFACE the unset case (e.g. a console warning) checks `g === undefined`
+ * itself before calling this.
+ */
+export function genderGuidanceClause(g: "man" | "woman" | "nonbinary" | undefined): string {
+  return g ? `${genderPresentationPhrase(g)} (use ${pronounsFor(g)})` : `(${UNCONFIRMED_GENDER_CLAUSE})`;
+}

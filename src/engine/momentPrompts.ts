@@ -5,7 +5,27 @@ import { neutralizeForPrompt } from "./castingIntake";
 import { CURIOSITY_NEEDLE_INSTRUCTION } from "./curiosityNeedle";
 import { dayOfWeek } from "./houseEvents";
 import { physicalFacetToAppearance } from "./portraitPrompts";
-import { genderPresentationPhrase, pronounsFor } from "../domain/gender";
+import { genderPresentationPhrase, pronounsFor, genderGuidanceClause } from "../domain/gender";
+
+/**
+ * #1326 — dedupe the "no genderPresentation facet on file" warning per houseguest (per process),
+ * so a live session doesn't spam the log every turn for the same houseguest. The `restore()` backfill
+ * in `GameSessionAdapter` should make this rare-to-never for a resumed save; a non-standard creation
+ * path that skips the diversity floor (a test fixture, a future direct-mint route) is the case this
+ * stays visible for. `genderGuidanceClause` itself stays pure (no I/O) — the warning lives HERE, at
+ * the one place that actually builds player-facing prompt text from the facet. Keyed on id AND name:
+ * ids are positional (`npc-1`…`npc-15`) and repeat across every sandbox in one process, so id alone
+ * would swallow the warning for a DIFFERENT houseguest in the same slot (review, PR #1346).
+ */
+const warnedUnsetGender = new Set<string>();
+function genderClauseFor(id: string, name: string, g: "man" | "woman" | "nonbinary" | undefined): string {
+  const warnKey = `${id}|${name}`;
+  if (g === undefined && !warnedUnsetGender.has(warnKey)) {
+    warnedUnsetGender.add(warnKey);
+    console.warn(`[orwell] ${id} (${name}) has no genderPresentation facet on file; narrating with the explicit "unconfirmed" fallback instead of silently dropping the pronoun cue (#1326)`);
+  }
+  return genderGuidanceClause(g);
+}
 
 /**
  * The canonical list of room names the narrator may walk the player to (Vault-free; the house's
@@ -588,7 +608,9 @@ const CASTING_INTERVIEW_PROMPT = [
   "  • interviewNotes — short get-to-know notes worth remembering (the feeds remember);",
   "  • archetype + strategyStyle — YOUR mapping of who they are onto the canonical casting sheet",
   "    below (pick the closest; the GAME derives their balanced aptitudes from it — every",
-  "    houseguest is strong somewhere and weak somewhere, nobody is invincible).",
+  "    houseguest is strong somewhere and weak somewhere, nobody is invincible);",
+  "  • genderPresentation — OPTIONAL: if they mention their pronouns or how they present, map it to",
+  "    man / woman / nonbinary (never required, never re-ask it if they'd rather skip it).",
   "updateCasting returns where casting stands; an interview can pause half-done and resume later —",
   "the game keeps the file.",
   "",
@@ -1041,7 +1063,11 @@ export function renderGameContext(view: GameStateView): string {
       // engine deliberately lets `genderPresentation` disagree with the NAME (diversity.ts), so the model
       // must anchor on THIS facet — never infer gender from the name. PUBLIC facet (gender PRESENTATION,
       // never orientation — a private orientation stays Vault-sealed and never appears here).
-      h.genderPresentation && `${genderPresentationPhrase(h.genderPresentation)} (use ${pronounsFor(h.genderPresentation)})`,
+      // #1326: ALWAYS a non-empty clause (never `h.genderPresentation && …`) — an unset facet used to make
+      // the whole clause fall out of this `filter(Boolean)` array, a SILENT drop that let the narrator
+      // guess gender from the name. `genderClauseFor` substitutes an explicit "unconfirmed" fallback and
+      // warns instead.
+      genderClauseFor(h.id, h.name, h.genderPresentation),
       // L28 (voice register): the STORED observable demeanor — voice THIS distinct register (a blunt one
       // is blunt, a quiet one stays quiet) so the house is NOT a room of identical warm professionals.
       h.demeanor && `comes across as ${h.demeanor}`,
@@ -1139,7 +1165,7 @@ export function renderGameContext(view: GameStateView): string {
   // Present ONLY in the premiere moment (`view.premiere` is absent otherwise). PUBLIC facets only — no
   // Vault data, no numbers, never an assertion of how the player feels (anti-sycophancy).
   const pr = view.premiere ?? null;
-  const observable = (fi: { archetype?: string; presentation?: string; demeanor?: string; background?: string; age?: number; genderPresentation?: "man" | "woman" | "nonbinary" }): string => {
+  const observable = (fi: { houseguest: { id: string; name: string }; archetype?: string; presentation?: string; demeanor?: string; background?: string; age?: number; genderPresentation?: "man" | "woman" | "nonbinary" }): string => {
     // The same Vault-free public facets the roster exposes — the observable read the player "clocks".
     // F3 (#1016) / NARR-26/PROMPT2-12: the archetype is the MOST spoiler-y token (the exact label the
     // premiere rules forbid saying aloud) — it is DEMOTED to a fenced private cue at the TAIL, mirroring
@@ -1149,8 +1175,8 @@ export function renderGameContext(view: GameStateView): string {
       fi.presentation,
       // #1140: the STORED gender presentation + pronoun set, so the premiere introductions voice the SAME
       // facet the portrait encodes (never inferring gender from the name). PUBLIC presentation, never
-      // orientation.
-      fi.genderPresentation && `${genderPresentationPhrase(fi.genderPresentation)} (use ${pronounsFor(fi.genderPresentation)})`,
+      // orientation. #1326: never silently dropped — see `genderClauseFor`.
+      genderClauseFor(fi.houseguest.id, fi.houseguest.name, fi.genderPresentation),
       fi.demeanor && `comes across as ${fi.demeanor}`,
       fi.background,
       fi.age !== undefined ? `${fi.age}` : undefined,
@@ -1195,7 +1221,16 @@ export function renderGameContext(view: GameStateView): string {
     ...((view.showmances ?? []).length
       ? [`- Public showmance${(view.showmances ?? []).length > 1 ? "s" : ""} (the house knows — you MAY voice romance for THESE pairs only): ${(view.showmances ?? []).map((s) => `${s.a} & ${s.b}`).join("; ")}.`]
       : []),
-    `- You are playing as: ${view.player.name}${ceremonyMark(view.player.id)} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.`,
+    // #1326: the PLAYER's own pronouns, when they recorded them at casting (updateCasting/
+    // genderPresentation) — voiced through the SAME `genderPresentationPhrase`/`pronounsFor` helpers the
+    // NPC roster and the portrait prompt read, so the player is never gendered off their name either.
+    // Genuinely OPTIONAL (a human may decline to answer): absent ⇒ this clause is simply omitted, unlike
+    // the NPC roster line (which always carries an explicit "unconfirmed" fallback — the player's silence
+    // is a legitimate choice, not a data gap to flag).
+    `- You are playing as: ${view.player.name}${ceremonyMark(view.player.id)} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.` +
+      (view.player.genderPresentation
+        ? ` They present as ${genderPresentationPhrase(view.player.genderPresentation)} (use ${pronounsFor(view.player.genderPresentation)}) — never infer their gender/pronouns from their name.`
+        : ""),
     `- The house (${view.house.length} other houseguests) — each line is THAT person's OWN self and YOUR`,
     "  PRIVATE voice cue for how to play THEM; it is NOT shared knowledge the rest of the cast has. A",
     "  houseguest knows only their OWN line plus whatever an in-game pathway has taught them about others",

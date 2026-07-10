@@ -56,6 +56,16 @@ export interface PlayerCard {
    * a number, and never any NPC's sleep state. Absent pre-game / when the clock isn't running.
    */
   restStatus?: string;
+  /**
+   * How the PLAYER presents (issue #1326) — the player-authored counterpart of a houseguest's public
+   * `genderPresentation` facet (same enum, same `domain/gender` helpers). OPTIONAL: the casting
+   * interview may capture it via `updateCasting({ genderPresentation })`, but it never gates `ready`/
+   * `finalizable` (a human may decline to answer). Absent when never recorded (every pre-#1326 save,
+   * and any player who skipped the question) — the narrator then simply omits the pronoun clause for
+   * the player rather than forcing an "unconfirmed" fallback (unlike an NPC, whose facet is always
+   * dealt by the diversity floor — the player's silence is a legitimate choice, not a data gap).
+   */
+  genderPresentation?: "man" | "woman" | "nonbinary";
 }
 
 /**
@@ -362,6 +372,15 @@ export interface UpdateCastingReq {
   privateStrategy?: string;
   /** Get-to-know notes — APPENDED to what's already recorded (never replaced). */
   interviewNotes?: string[];
+  /**
+   * How the player presents (issue #1326) — OPTIONAL, mirrors a houseguest's public
+   * `genderPresentation` facet (same "man" | "woman" | "nonbinary" enum, same `domain/gender`
+   * helpers). Stored as a plain string here (the incremental intake never type-narrows a scalar at
+   * merge time — see `mergeCastingUpdate`); `createCharacter` validates it against the enum via
+   * `isGenderPresentation` before it reaches the Character, exactly like `archetype`/`strategyStyle`.
+   * Never gates `ready`/`finalizable` — a player may decline to answer.
+   */
+  genderPresentation?: string;
 }
 
 /** Where the casting interview stands (0050) — Vault-free; it echoes only the player's own words. */
@@ -623,6 +642,12 @@ export interface CreateCharacterReq {
   privateStrategy?: string;
   /** Distilled get-to-know answers — seed the Soul memory as the player's pre-game memories. */
   interviewNotes?: string[];
+  /**
+   * How the player presents (issue #1326) — OPTIONAL override, same shape/validation as the intake
+   * field of the same name (`UpdateCastingReq.genderPresentation`); explicit args win over the intake
+   * field-by-field like every other deepener here.
+   */
+  genderPresentation?: string;
   /** Optional seed for a reproducible house; the front-end may send a random one for variety. */
   seed?: number;
   /**

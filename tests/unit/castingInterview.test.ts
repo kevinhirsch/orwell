@@ -240,14 +240,32 @@ describe("the incremental casting intake (0050 — OOBE can be half-done)", () =
   it("a fully covered intake has no next step", () => {
     let intake = emptyIntake();
     intake = mergeCastingUpdate(intake, {
-      castPhoto: "uploaded", playerName: "P", backstory: "b", motivation: "m", personaArchetype: "pa",
+      castPhoto: "uploaded", playerName: "the player", backstory: "b", motivation: "m", personaArchetype: "pa",
       personaStrategyStyle: "ps", privateStrategy: "x", interviewNotes: ["n"],
       archetype: ARCHETYPES[0]!.archetype, strategyStyle: ARCHETYPES[0]!.styles[0]!,
+      // #1326 — the newest (optional, never-gating) coverage field; it still counts toward "fully
+      // covered" once answered, same as every other field here.
+      genderPresentation: "nonbinary",
     });
     const st = castingStatusOf(intake);
     expect(st.missing).toEqual([]);
     expect(st.next).toBeNull();
     expect(intakeIsEmpty(intake)).toBe(false);
+  });
+
+  // #1326 — the mirror case: the SAME intake but WITHOUT genderPresentation is still `finalizable`
+  // and has everything else covered; the one open step is that lone optional question.
+  it("genderPresentation is the ONLY thing missing from an otherwise-complete intake, and it never blocks finalize", () => {
+    const intake = mergeCastingUpdate(emptyIntake(), {
+      castPhoto: "uploaded", playerName: "the player", backstory: "b", motivation: "m", personaArchetype: "pa",
+      personaStrategyStyle: "ps", privateStrategy: "x", interviewNotes: ["n"],
+      archetype: ARCHETYPES[0]!.archetype, strategyStyle: ARCHETYPES[0]!.styles[0]!,
+    });
+    const st = castingStatusOf(intake);
+    expect(st.missing).toEqual(["genderPresentation"]);
+    expect(st.next).toBe(CASTING_COVERAGE[CASTING_COVERAGE.length - 1]!.ask);
+    expect(st.ready).toBe(true);
+    expect(st.finalizable).toBe(true);
   });
 
   it("the session records answers as they land, persists each change, and resumes after restart", () => {
