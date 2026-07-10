@@ -138,6 +138,61 @@ def test_quick_control_reuses_the_shared_segmented_control_class():
     )
 
 
+# ── CSS: the .theme-seg BASE styling must survive every tier (Greptile P1) ────────────────
+
+
+def test_theme_seg_base_rules_are_not_frosted_scoped():
+    """Greptile P1 (#1343): the segmented control's own job is to switch the glass tier, so
+    its base layout/affordance must NOT be scoped under body.theme-frosted — with the frosted
+    scoping, clicking Flat (normal) removed the body class and instantly stripped ALL styling
+    from #theme-glass-tier-quick / #theme-glass-tier / #theme-glass-tint, in exactly the state
+    the 3-way ladder just made representable. The base track, segment, hover, and selected-pill
+    rules must all exist UNSCOPED (theme-independent, token-driven)."""
+    css = _read("static", "style.css")
+    # The base track rule: the selector starts the line (no body.theme-frosted prefix) and
+    # carries the structural layout.
+    m = re.search(r"^\.theme-seg\s*\{([^}]*)\}", css, re.M)
+    assert m, "#1316/P1: an UNSCOPED base `.theme-seg` rule must exist"
+    base = m.group(1)
+    assert "display: inline-flex" in base, (
+        "#1316/P1: the unscoped base must own the control's layout (inline-flex track)"
+    )
+    # Token-driven, 0114-safe: a subtle fg wash + the theme's own border token.
+    assert "color-mix(in srgb, var(--fg)" in base
+    assert "var(--border" in base, (
+        "#1316/P1: the base border must ride the theme's --border token, not a fixed "
+        "white rim (that's the frosted accent layer's job)"
+    )
+    # The glass MATERIAL must NOT live in the base — it belongs to the frosted accent layer
+    # (backdrop-filter on a flat theme is both wrong and a perf cost).
+    assert "backdrop-filter" not in base, (
+        "#1316/P1: the unscoped base must carry no glass material — the frosted-only "
+        "accent layer adds it"
+    )
+    # Base segment buttons + selected pill are unscoped too.
+    assert re.search(r"^\.theme-seg > button,", css, re.M), (
+        "#1316/P1: the segment-button rule must be unscoped"
+    )
+    assert re.search(r'^\.theme-seg > button\[aria-pressed="true"\],', css, re.M), (
+        "#1316/P1: the selected-pill rule must be unscoped (the active state must render "
+        "in every tier, including Flat)"
+    )
+
+
+def test_theme_seg_frosted_layer_is_purely_additive_material():
+    """The frosted-scoped .theme-seg rule may only ADD the glass accent (backdrop-filter +
+    luminous rim) on top of the unscoped base — it must never be the sole owner of layout
+    (that's the P1 regression shape: the layout dying with the body class)."""
+    css = _read("static", "style.css")
+    m = re.search(r"^body\.theme-frosted \.theme-seg\s*\{([^}]*)\}", css, re.M)
+    assert m, "the frosted-only .theme-seg accent layer must exist"
+    frosted = m.group(1)
+    assert "backdrop-filter" in frosted, "the frosted layer carries the glass material"
+    assert "display" not in frosted, (
+        "#1316/P1: layout must live in the unscoped base, never (only) in the frosted layer"
+    )
+
+
 # ── JS: both controls are kept in lockstep and share ONE apply+persist path ───────────────
 
 

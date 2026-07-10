@@ -40522,27 +40522,32 @@ body.theme-frosted #welcome-screen .welcome-sub .setup-trigger-link {
 
 /* ── The new background-image controls (theme.js builds these ids) ────────────
    .theme-seg — a clean SEGMENTED control (Apple segmented_control_poster: a translucent
-   capsule TRACK with a bright glass SELECTED pill; active uses the sanctioned system-blue).
+   capsule TRACK with a bright SELECTED pill; active uses the sanctioned system-blue).
    Shared by every theme.js segmented control: #theme-glass-tier (Customize -> Font & Layout,
    3-way full|frosted|normal), #theme-glass-tier-quick (#1316 — the Browse-tab picker-level
-   quick toggle, 2-way full|frosted), and #theme-glass-tint (Clear|Tinted). One rule set, so a
-   future segmented control on this window is styled by construction. #theme-bg-source / -url /
-   -file — standard glass form controls consistent with the kit. Scoped to body.theme-frosted. */
-body.theme-frosted .theme-seg {
+   quick toggle, the same 3-way ladder), and #theme-glass-tint (Clear|Tinted). One rule set,
+   so a future segmented control on this window is styled by construction.
+
+   Greptile P1 (#1343): these BASE rules are deliberately theme-INDEPENDENT (NOT scoped to
+   body.theme-frosted). The control's own job is to switch the glass tier — under the
+   frosted scoping, clicking Flat/normal removed body.theme-frosted and instantly stripped
+   the layout/affordance off the very control that picked it (and off #theme-glass-tier +
+   #theme-glass-tint). The base is token-driven (var(--fg)/var(--border) washes — 0114-safe:
+   a subtle fg wash composites over the theme's own panel) and carries NO glass material;
+   the frosted-only glassy accent (backdrop-filter + luminous rim) layers on top below and
+   may come and go with the tier without ever costing the control its shape. */
+.theme-seg {
   display: inline-flex;
   align-items: stretch;
   gap: 2px;
   padding: 3px;
   border-radius: var(--ow-radius-pill, 999px);
   background-color: color-mix(in srgb, var(--fg) 10%, transparent);
-  border: 1px solid rgba(255,255,255,0.14);
-  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
-  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
+  border: 1px solid var(--border, rgba(128,128,128,0.35));
 }
-body.theme-frosted .theme-seg > button,
-body.theme-frosted .theme-seg > .seg,
-body.theme-frosted .theme-seg > label {
+.theme-seg > button,
+.theme-seg > .seg,
+.theme-seg > label {
   flex: 1 1 0;
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 30px; padding: 4px 14px;
@@ -40553,18 +40558,28 @@ body.theme-frosted .theme-seg > label {
   cursor: pointer; white-space: nowrap;
   transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
 }
-body.theme-frosted .theme-seg > button:hover,
-body.theme-frosted .theme-seg > .seg:hover {
+.theme-seg > button:hover,
+.theme-seg > .seg:hover {
   background-color: color-mix(in srgb, var(--fg) 8%, transparent);
 }
-/* the SELECTED segment = the bright glass pill, sanctioned system-blue (active state). */
-body.theme-frosted .theme-seg > button[aria-pressed="true"],
-body.theme-frosted .theme-seg > button.active,
-body.theme-frosted .theme-seg > .seg.active,
-body.theme-frosted .theme-seg > input:checked + label {
+/* the SELECTED segment = the bright pill, sanctioned system-blue (active state) — the
+   same non-text accent in every theme (it survives the frosted class coming and going). */
+.theme-seg > button[aria-pressed="true"],
+.theme-seg > button.active,
+.theme-seg > .seg.active,
+.theme-seg > input:checked + label {
   background: var(--ow-ios-blue, #0a84ff);
   color: #fff;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.30), 0 2px 8px rgba(0,0,0,0.22);
+}
+/* FROSTED-ONLY accent layer: the glass material + luminous rim on the capsule track.
+   Purely additive — dropping body.theme-frosted (the Flat tier) falls back to the
+   token-driven base above, never to an unstyled control. */
+body.theme-frosted .theme-seg {
+  border-color: rgba(255,255,255,0.14);
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
 }
 /* The quick control's label/control row on the Browse tab — theme-independent LAYOUT only
    (flex placement, no material), so it is deliberately unscoped: one rule serves every
