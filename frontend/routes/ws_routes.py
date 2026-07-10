@@ -93,6 +93,12 @@ def _origin_netloc(origin: str) -> Optional[str]:
     host = (parts.hostname or "").lower()
     if not host:
         return None
+    if ":" in host:
+        # IPv6 literal — urlsplit STRIPS the brackets (``http://[::1]:7000`` → hostname ``::1``), while
+        # the browser's request ``Host`` keeps the bracketed authority (``[::1]:7000``). Restore the
+        # brackets so the composed authority matches the Host side (ADR 0074 LAN/local-HTTPS IPv6
+        # exposure) — otherwise a same-origin IPv6 client is falsely rejected.
+        host = f"[{host}]"
     scheme = (parts.scheme or "").lower()
     try:
         port = parts.port

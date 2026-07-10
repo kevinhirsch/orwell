@@ -173,6 +173,64 @@ def test_lan_same_origin_with_port_is_accepted(run, monkeypatch):
     run(main())
 
 
+# ── IPv6-literal same-origin is ACCEPTED (urlsplit strips brackets — the T-Rex repro) ─────────────
+
+def test_ipv6_same_origin_with_port_is_accepted(run, monkeypatch):
+    """IPv6 LAN/local-HTTPS exposure (ADR 0074): ``Origin http://[::1]:7000`` + ``Host [::1]:7000`` is
+    same-origin. urlsplit strips the brackets off the Origin host, so the authority must be rebuilt
+    bracketed to match the Host — else this legitimate client is falsely rejected before accept."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "http://[::1]:7000", "host": "[::1]:7000"})
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
+def test_ipv6_same_origin_default_port_host_is_accepted(run, monkeypatch):
+    """``Origin https://[::1]`` (bare, default 443) + a proxy-set ``Host [::1]:443`` is same-origin:
+    the Origin normalizes to ``[::1]`` and the Host default port is stripped to ``[::1]`` — accepted."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "https://[::1]", "host": "[::1]:443"})
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
+def test_foreign_ipv6_origin_is_rejected(run, monkeypatch):
+    """A foreign IPv6 Origin against a DIFFERENT Host is still refused (the fix must not weaken the
+    foreign-origin rejection)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "http://[fe80::dead:beef]:7000", "host": "[::1]:7000"})
+        t = H.spawn(ws)
+        await asyncio.wait_for(t, timeout=1.0)
+        assert ws.accepted is False
+        assert ws.closed is True
+        assert ws.sent == []
+        await H.aclose_runs()
+
+    run(main())
+
+
 # ── absent Origin (non-browser / native / test) is ACCEPTED per spec §1.1 ──────────────────────────
 
 def test_absent_origin_is_accepted(run, monkeypatch):
@@ -241,6 +299,11 @@ def test_origin_helpers_unit(monkeypatch):
     assert ws_routes._origin_netloc("https://a.example:443") == "a.example"
     assert ws_routes._origin_netloc("http://a.example:80") == "a.example"
     assert ws_routes._origin_netloc("http://a.example:7000") == "a.example:7000"
+    # IPv6 literals — urlsplit strips the brackets; the authority must be rebuilt bracketed.
+    assert ws_routes._origin_netloc("http://[::1]:7000") == "[::1]:7000"
+    assert ws_routes._origin_netloc("https://[::1]") == "[::1]"
+    assert ws_routes._origin_netloc("http://[::1]:80") == "[::1]"
+    assert ws_routes._origin_netloc("http://[fe80::1]") == "[fe80::1]"
     assert ws_routes._origin_netloc("null") is None
     assert ws_routes._origin_netloc("") is None
 
@@ -250,6 +313,11 @@ def test_origin_helpers_unit(monkeypatch):
     assert ws_routes._host_authority("A.Example:7000") == "a.example:7000"
     assert ws_routes._host_authority("a.example") == "a.example"
     assert ws_routes._host_authority("") == ""
+    # IPv6 Host authority — bracket-safe: default port stripped, a literal ending in 443 untouched.
+    assert ws_routes._host_authority("[::1]:443") == "[::1]"
+    assert ws_routes._host_authority("[::1]:80") == "[::1]"
+    assert ws_routes._host_authority("[::1]") == "[::1]"
+    assert ws_routes._host_authority("[::443]") == "[::443]"
 
     monkeypatch.setenv("ALLOWED_ORIGINS", "https://a.example, *, https://b.example:8443")
     allowed = ws_routes._allowed_ws_origins()
