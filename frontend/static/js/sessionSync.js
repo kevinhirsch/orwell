@@ -23,6 +23,25 @@
     return sm && sm.getCurrentSessionId ? sm.getCurrentSessionId() : null;
   }
 
+  // WS Phase-1 (ADR 0017 §3/§4/§5): when the multiplexed socket is live it SUPERSEDES this module
+  // wholesale, so we stand the SSE chat mirror AND the canonical-session poll down entirely while
+  // it is active. Every leg this module carries has a verified WS carrier fed from the SAME server
+  // source (scout-confirmed, all off the canonical session):
+  //   • run-started / message-added (a peer's turn) → the `chat` channel's replay-then-tail
+  //     broadcast (agent_runs run buffer) → chat.js `_onWsChatFrame` (a peer mounts its own live
+  //     bubble, then softReloadHistory settles it — the two-window mirror);
+  //   • game-updated (board reconcile)             → the `state`/`hud` edge (session_events bus)
+  //     → platform.js `_bridgeWsStateFrames` → the ONE g15 dispatcher orwellGameChanged;
+  //   • layout-changed (per-device geometry)       → the `layout` channel → orwellLayoutSync.
+  // The socket ALSO resolves the canonical id itself (its hello/bind ack), so the
+  // /api/orwell/game-session poll is redundant too. Fail-soft: any doubt ⇒ false ⇒ the SSE/poll
+  // path below is byte-identical to pre-WS (the PERMANENT fallback). Robust to load order —
+  // OrwellWs may not have installed yet. Mirrors the HUD gadgets' _wsActive() helper (#1284).
+  function wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+
   // #985 (P2-C): are we in the reduced game build? The cross-device peer-resume fix is scoped to
   // the game build only — a non-game chat keeps byte-identical per-tab behavior.
   function gameBuildOn() {
@@ -52,6 +71,10 @@
   var _CANON_TTL_MS = 4000;
   var _CANON_UNBOUND_TTL_MS = 350;
   function refreshCanonical() {
+    // WS live ⇒ OrwellWs owns canonical-id resolution (its hello/bind ack); skip the poll entirely
+    // (covers the tick path AND the orwell:gamechanged re-resolve path below), so no
+    // /api/orwell/game-session request leaves this module while the socket carries the game.
+    if (wsActive()) { _canon = { id: null, at: 0, inflight: false }; return; }
     if (!gameBuildOn()) { _canon = { id: null, at: 0, inflight: false }; return; }
     var now = Date.now();
     var ttl = _canon.id ? _CANON_TTL_MS : _CANON_UNBOUND_TTL_MS;
@@ -247,6 +270,9 @@
   // build we keep the canonical id fresh (best-effort, short-TTL cached) so a freshly-bound game is
   // picked up within a tick.
   function tick() {
+    // WS live ⇒ the socket carries chat/state/hud/layout AND resolves the canonical id itself.
+    // Tear the SSE stream down and no-op the poll; both resume on ws-inactive (the fallback).
+    if (wsActive()) { disconnect(); return; }
     refreshCanonical();
     var id = desiredSession();
     if (id !== boundSession) {
@@ -258,6 +284,12 @@
     setInterval(tick, 1500);
     tick();
     window.addEventListener('beforeunload', disconnect);
+    // WS Phase-1 (§6): the instant the socket goes live, drop the SSE stream (the tick guard keeps
+    // it down while active); on a downgrade to SSE/poll fallback — or flag-off, which also emits
+    // ws-inactive at startup — re-establish immediately. These mirror the HUD gadgets'
+    // ws-active/ws-inactive edges (#1284); the SSE/poll leg is the PERMANENT fallback, never removed.
+    window.addEventListener('orwell:ws-active', function () { disconnect(); });
+    window.addEventListener('orwell:ws-inactive', function () { tick(); });
   }
 
   if (document.readyState === 'loading') {
