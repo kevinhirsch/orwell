@@ -31,6 +31,15 @@ routes that truth to three **player-facing** surfaces while keeping the house de
 
 ## 2. The wall (the non-negotiable) — what stays structural vs. prompt-guided
 
+> ⚠️ **KNOWN RISK — "POTENTIAL WALL LEAK" (owner-flagged, 2026-07-10).** The narration-grounding layer
+> (row 3 below) is **prompt-guided, not a hard code wall** — it is the deliberate, accepted price of the
+> GM knowing the player's real strategy. If a houseguest is ever seen *voicing or acting on* Diary-Room
+> content in the future, **start debugging at the `⚠️ POTENTIAL WALL LEAK` marker in
+> `src/engine/momentPrompts.ts` `renderGameContext`** (the one place DR is fed to the model), plus the FE
+> reasoning/`npc:`-leak scrub — NOT the structural wall (rows 1–2), which is proven clean by
+> `diaryRoomStrategic.test.ts` and the live sentinel sweep.
+
+
 | Layer | Sees DR? | Enforcement |
 |---|---|---|
 | **NPC knowledge** (what any houseguest knows) | **Never** | **Structural** — `deriveNpcKnowledge` strips every `NO_NPC_PATHWAY` fact (0013, unchanged); DR events witness the player alone. |

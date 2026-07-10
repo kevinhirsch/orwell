@@ -1231,6 +1231,12 @@ export function renderGameContext(view: GameStateView): string {
       (view.player.genderPresentation
         ? ` They present as ${genderPresentationPhrase(view.player.genderPresentation)} (use ${pronounsFor(view.player.genderPresentation)}) — never infer their gender/pronouns from their name.`
         : ""),
+    // ⚠️ POTENTIAL WALL LEAK (0115) — START DEBUGGING HERE. This is the ONE prompt-guided (NOT
+    // structural) Diary-Room surface: DR content is deliberately fed into the GM's context here. The
+    // structural walls hold everywhere else (NPC knowledge via `deriveNpcKnowledge`, NPC behavior/voice
+    // via the per-NPC projection — neither reads `playerDiaryRoom`), so if a HOUSEGUEST is ever observed
+    // voicing or acting on Diary-Room content, the model leaked it OUT OF THIS BLOCK — inspect the fence
+    // wording below + the FE reasoning/`npc:`-leak scrub, not the structural wall (which is proven clean).
     // 0115 — the player's DIARY ROOM: their REAL strategy, in their own words. YOU (the producer/GM)
     // know this; the HOUSEGUESTS DO NOT, and never will (it has no in-game pathway to anyone). Narrate
     // the player's scenes GROUNDED in this truth — the dramatic irony of a mask, the con behind the
