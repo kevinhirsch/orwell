@@ -282,6 +282,90 @@ def test_pre_game_path_keeps_unstamped_interview_when_not_live():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6. #1312 THE FINALIZE→PREMIERE TRANSITION TURN — the one turn build_chat_context's
+#    game_active exclusion cannot cover. apply_game_framing computes game_active at
+#    turn-START (False, pre-game), so build_chat_context keeps the casting interview;
+#    then createCharacter starts the season MID-TURN and the SAME turn narrates the
+#    move-in. The agent loop purges the OOC casting channel the instant the season goes
+#    live (_strip_pregame_context), so the premiere continuation is structurally unable
+#    to carry a casting disclosure into the houseguests' first impressions.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_finalize_turn_premiere_context_excludes_casting_after_purge(monkeypatch):
+    # Drive the REAL build_chat_context for the FINALIZE turn: game_active is still False
+    # (the engine had not started the season when framing ran), so the casting interview is
+    # LEGITIMATELY in the built context — the pre-game producer needs it.
+    from src.agent_loop import _strip_pregame_context
+
+    ctx, sess = _run(_drive_build_chat_context(
+        monkeypatch, started=False, new_user_text="lock me in, put me in the house"))
+    assert ctx.game_active is False
+    blob_before = " ".join(
+        (m["content"] if isinstance(m["content"], str) else str(m["content"]))
+        for m in ctx.messages
+    )
+    # Pre-finalize the interview is present (this is correct — pre-game is OOC producer channel).
+    assert CASTING_SENTINEL in blob_before, "sanity: the finalize turn holds the interview pre-purge"
+
+    # createCharacter fires mid-turn and the season goes live. The agent loop purges the OOC
+    # casting channel from the working context BEFORE the premiere continuation narrates the
+    # move-in. THE GATE: the context that produces the premiere narration carries no casting.
+    dropped = _strip_pregame_context(ctx.messages)
+    assert dropped >= 1
+    blob_after = " ".join(
+        (m["content"] if isinstance(m["content"], str) else str(m["content"]))
+        for m in ctx.messages
+    )
+    assert CASTING_SENTINEL not in blob_after, \
+        "the finalize→premiere transition leaked the casting interview into the in-game narrator"
+
+
+def test_strip_pregame_context_scrubs_the_engine_casting_status_disclosure():
+    # The SECOND carrier of the disclosures (besides the interview turns): the engine's
+    # "CASTING STATUS — already on file: …" block, which echoes the on-file intake — incl. the
+    # player's private strategy — into the pre-game SYSTEM preface (momentPrompts.ts). On the
+    # same-turn continuation that frame is still messages[0], so the purge must scrub it too.
+    from src.agent_loop import _strip_pregame_context
+
+    messages = [
+        {"role": "system", "content":
+            "You are the show's producer.\n"
+            f"- CASTING STATUS — already on file (do not re-ask): privateStrategy: \"{CASTING_SENTINEL}\"\n"
+            "- READY TO START: enough is on file to cast a real houseguest."},
+        {"role": "assistant", "content": "tool result: the house is cast"},  # createCharacter result — KEPT
+        {"role": "system", "content": "Narrate the premiere move-in now."},   # in-game note — KEPT
+    ]
+    _strip_pregame_context(messages)
+    blob = " ".join(m["content"] for m in messages)
+    assert CASTING_SENTINEL not in blob, "the CASTING STATUS disclosure leaked into the premiere frame"
+    # The premiere still has its in-game material (the season is cast; move-in note stands).
+    assert "the house is cast" in blob
+    assert "premiere move-in" in blob
+    # The producer frame itself survives (only the disclosure line is scrubbed).
+    assert "You are the show's producer." in blob
+
+
+def test_strip_pregame_context_is_idempotent_and_keeps_live_turns():
+    from src.agent_loop import _strip_pregame_context
+
+    messages = [
+        {"role": "system", "content": "GM frame"},
+        {"role": "user", "content": f"interview: {CASTING_SENTINEL}", "metadata": {"phase": "casting"}},
+        {"role": "assistant", "content": "producer reply", "metadata": {"phase": "casting"}},
+        {"role": "assistant", "content": "createCharacter → house cast"},           # tool result — KEPT
+        {"role": "user", "content": INGAME_TOKEN, "metadata": {"phase": "game"}},    # live turn — KEPT
+    ]
+    first = _strip_pregame_context(messages)
+    assert first == 2  # both casting turns dropped
+    second = _strip_pregame_context(messages)
+    assert second == 0  # idempotent — nothing left to drop
+    blob = " ".join(m["content"] for m in messages)
+    assert CASTING_SENTINEL not in blob
+    assert INGAME_TOKEN in blob
+    assert "house cast" in blob
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 4. DB durability — the phase marker lands on the persisted row, so it survives a
 #    reload (future turns reload from DB and still exclude the casting interview).
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1715,6 +1715,59 @@ _CASTING_FORCED_NOTE = (
     "back the player's casting card in your producer voice, then walk them through the front door into "
     "the house for the premiere. Voice ONLY what the game now shows — never invent it.")
 
+
+# Vault Wall — the finalize→premiere transition (issue #1312). On the ONE turn that finalizes
+# casting AND narrates the move-in, apply_game_framing computed game_active at turn-START, BEFORE
+# createCharacter started the season mid-turn — so build_chat_context could NOT exclude the casting
+# interview (game_active was still False), and the narrator held the ENTIRE casting transcript (the
+# player's private strategy/targets) while the houseguests formed their first impressions. The
+# pre-game casting interview (0050) is an OOC, producer-level channel with NO in-game pathway to any
+# NPC's knowledge — exactly like the Diary Room. The instant the season goes live IN THIS TURN, that
+# channel must be purged from the working narration context, so the premiere continuation cannot
+# blend a single casting disclosure into in-game narration. The model cannot leak what it never
+# receives. Defense-in-depth beside the prompt seal (momentPrompts.ts), the engine NO_NPC_PATHWAY
+# wall, and build_chat_context's phase-stamp exclusion (which owns every LATER turn).
+#
+# Two carriers of the disclosures, both scrubbed here:
+#   1. the casting HISTORY turns — the player's interview answers + producer replies, stamped
+#      `metadata.phase == "casting"` (build_chat_context / save_assistant_response);
+#   2. the engine's "CASTING STATUS — already on file: …" block, which echoes the on-file intake
+#      (incl. privateStrategy) into the pre-game SYSTEM preface (see momentPrompts.ts) — still
+#      present in messages[0] on the same-turn continuation because the frame was built pre-game.
+_CASTING_STATUS_DISCLOSURE_RE = re.compile(r"(?im)^.*CASTING STATUS.*$\n?")
+
+
+def _strip_pregame_context(messages: List[Dict]) -> int:
+    """Purge the pre-game casting interview from the in-game narration context, in place.
+
+    Drops every message stamped ``metadata.phase == "casting"`` (the interview turns) and scrubs the
+    engine's ``CASTING STATUS — already on file: …`` disclosure line (which embeds the player's
+    private strategy) out of any system frame. Returns the number of messages dropped. Idempotent and
+    fail-soft: a second call is a no-op, and any malformed entry is left untouched rather than raised.
+    Called at the finalize→premiere transition (#1312) so the premiere is structurally unable to
+    carry a casting disclosure."""
+    if not messages:
+        return 0
+    dropped = 0
+    kept: List[Dict] = []
+    for m in messages:
+        try:
+            if isinstance(m, dict):
+                md = m.get("metadata")
+                if isinstance(md, dict) and md.get("phase") == "casting":
+                    dropped += 1
+                    continue
+                if m.get("role") == "system":
+                    c = m.get("content")
+                    if isinstance(c, str) and "CASTING STATUS" in c:
+                        m["content"] = _CASTING_STATUS_DISCLOSURE_RE.sub("", c)
+        except Exception:
+            pass
+        kept.append(m)
+    if dropped:
+        messages[:] = kept
+    return dropped
+
 # 2026-06-21 (prod casting loop): when casting is READY (name on file) but NOT yet `finalizable`
 # (the engine still needs backstory + motivation + a persona/strategy answer), the finalize ladder
 # above is a TRAP — it tells the model casting is COMPLETE and to call createCharacter, but the
@@ -4680,6 +4733,11 @@ async def _stream_agent_loop_impl(
     _turn_casting_record_belt = 0  # _auto_record_casting fired (back-filled updateCasting)
     _turn_casting_force = 0        # FORCED createCharacter (the finalize fallback)
     _turn_casting_nudge = 0        # casting finalize/substance nudge fired
+    # #1312 (Vault Wall): on the finalize→premiere transition, purge the OOC casting interview from
+    # the working context BEFORE the premiere continuation narrates the move-in. Set when
+    # createCharacter starts the season THIS turn (model-driven OR FE-forced); the purge runs once.
+    _casting_finalized_this_turn = False
+    _pregame_purged = False
 
     # 0065 Part D — the per-turn sync-ledger baselines. Captured at turn START so the end-of-turn
     # entry records the beatSeq this turn moved (before→after) and the stale-beat 409s reconciled
@@ -6241,6 +6299,16 @@ async def _stream_agent_loop_impl(
                                     _turn_casting_force += 1  # FE forced the season start (finalize fallback)
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
+                                    # #1312 (Vault Wall): the season just went live THIS turn — purge the
+                                    # OOC casting interview before the premiere continuation narrates the
+                                    # move-in, so the houseguests' first impressions cannot carry a casting
+                                    # disclosure. game_active was False when build_chat_context ran, so this
+                                    # is the one turn its phase-exclusion could not cover.
+                                    _n_purged = _strip_pregame_context(messages)
+                                    _pregame_purged = True
+                                    if _n_purged:
+                                        logger.info("[orwell] #1312 purged %d casting turn(s) from the "
+                                                    "premiere context (forced finalize) user=%s", _n_purged, owner)
                                     messages.append({"role": "system", "content": _CASTING_FORCED_NOTE})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
@@ -6672,6 +6740,18 @@ async def _stream_agent_loop_impl(
             tool_events.append(tool_event)
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
+            # #1312 (Vault Wall): the MODEL called createCharacter itself and the engine started the
+            # season THIS turn. Flag it so the OOC casting interview is purged from the working context
+            # before the premiere continuation (the next round) narrates the move-in — the mirror of the
+            # FE-forced finalize purge above. game_active was False when build_chat_context ran (season
+            # not yet started), so this transition turn is the one build_chat_context could not cover.
+            if game_mode == "casting" and block.tool_type == "createCharacter":
+                try:
+                    _cc_view = json.loads(result.get("output") or "{}")
+                except Exception:
+                    _cc_view = {}
+                if isinstance(_cc_view, dict) and _cc_view.get("started") and not _cc_view.get("createRefused"):
+                    _casting_finalized_this_turn = True
             # The game advanced: clear any persisted stall escalation for this game so the
             # next stall (if any) starts gentle again. NAR-1: dropped the `and owner` gate + keyed
             # via _belt_key — this reset never fired single-tenant before (raw `owner=None` is a
@@ -6726,6 +6806,17 @@ async def _stream_agent_loop_impl(
         _append_tool_results(messages, round_response, native_tool_calls,
                              tool_results, tool_result_texts, used_native, round_num,
                              round_reasoning=round_reasoning)
+
+        # #1312 (Vault Wall): the model finalized casting THIS turn — purge the OOC casting interview
+        # from the working context NOW, before the next round narrates the premiere move-in, so no
+        # casting disclosure reaches the houseguests' first impressions. Runs once (the createCharacter
+        # tool result stays; only the pre-game interview turns + the CASTING STATUS block are dropped).
+        if _casting_finalized_this_turn and not _pregame_purged:
+            _n_purged = _strip_pregame_context(messages)
+            _pregame_purged = True
+            if _n_purged:
+                logger.info("[orwell] #1312 purged %d casting turn(s) from the premiere context "
+                            "(model finalize) user=%s", _n_purged, owner)
 
         # Emit agent_step event
         yield (
