@@ -371,6 +371,39 @@ def _roster_cards(state: dict, user: Optional[str]) -> list:
     return cards
 
 
+def roster_cards(state: dict, user: Optional[str]) -> list:
+    """#1313 — the PUBLIC accessor for the one roster-card derivation above. `orwell_cast_authoring`
+    derives authoring completeness (and the house-entry gate's readiness) from the SAME cards the
+    routes serve; exported here so callers stop importing the private `_roster_cards` helper."""
+    return _roster_cards(state, user)
+
+
+def _house_entry_overlay(user: Optional[str], st):
+    """#1313 — the house-entry gate's STATUS-READ latch. The engine season is already live the
+    instant createCharacter commits, so while the gate is HOLDING (or has refused) house entry, a
+    concurrent /status or /state poll would report a started game the player was told is still being
+    cast. Overlay the player-visible truth: `started: false` + a `castingHouse` phase (authored/total
+    progress), and no pending decision card. Engine untouched; pass-through when no hold is active
+    (byte-identical), fail-open on any hiccup."""
+    try:
+        from src.orwell_cast_authoring import house_entry_gate_status
+        hold = house_entry_gate_status(user)
+    except Exception:
+        return st
+    if not hold or not isinstance(st, dict) or st.get("started") is not True:
+        return st
+    out = dict(st)
+    out["started"] = False
+    out["pending"] = None  # no decision card may render while the house is still being cast
+    out["castingHouse"] = {
+        "state": hold.get("state") or "authoring",
+        "authored": hold.get("authored"),
+        "total": hold.get("total"),
+        "missing": hold.get("missing"),
+    }
+    return out
+
+
 def _roster_payload(user: Optional[str], cards: list, *, stale: bool) -> dict:
     """The /roster response body from a set of roster cards: the cards plus the portrait-set
     counters, whether an image provider is configured, the live generation progress (L15), and a
@@ -691,7 +724,9 @@ def setup_orwell_routes() -> APIRouter:
             st = await orwell_engine.get_game_state(
                 user=_current_user(request), timeout=orwell_engine._POLL_TIMEOUT)
             _clear_warn("state")
-            return st
+            # #1313: while the house-entry gate holds, report the casting/holding state, never a
+            # started game (the engine season is live internally; the overlay is the player truth).
+            return _house_entry_overlay(_current_user(request), st)
         except Exception as e:
             detail = _err_detail(e)
             _warn_throttled("state", f"[orwell] state failed: {detail}")
@@ -729,7 +764,9 @@ def setup_orwell_routes() -> APIRouter:
             if isinstance(st, dict) and "pending" not in st:
                 st["pending"] = orwell_engine.last_pending(_current_user(request))
             _clear_warn("status")
-            return st
+            # #1313: while the house-entry gate holds, report the casting/holding state, never a
+            # started game (the engine season is live internally; the overlay is the player truth).
+            return _house_entry_overlay(_current_user(request), st)
         except orwell_engine.EngineToolError as e:
             if e.no_game:
                 return {"started": False}

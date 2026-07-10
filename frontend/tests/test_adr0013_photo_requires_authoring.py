@@ -169,31 +169,31 @@ def _wire_fallback(monkeypatch, *, gate_on, authored_ids):
     return shot
 
 
-def test_fallback_zero_authored_shoots_zero_portraits(monkeypatch):
+def test_fallback_zero_authored_shoots_zero_portraits(monkeypatch, run):
     """#1313 — no-prewarm fallback, gate ON, ZERO NPCs authored ⇒ ZERO portraits shot (ADR 0013)."""
     monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
     shot = _wire_fallback(monkeypatch, gate_on=True, authored_ids=[])
-    res = _run(_ti.do_create_character('{"playerName":"P"}', owner="z1"))
+    res = run(_ti.do_create_character('{"playerName":"P"}', owner="z1"))
     assert res["exit_code"] == 0
     assert shot == [], f"no NPC authored ⇒ no photos (got {shot})"
 
 
-def test_fallback_shoots_only_authored_npcs(monkeypatch):
+def test_fallback_shoots_only_authored_npcs(monkeypatch, run):
     """#1313 — gate ON: a face shoots ONLY for a model-authored NPC (its per-NPC gate fired)."""
     monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
     shot = _wire_fallback(monkeypatch, gate_on=True, authored_ids=["npc:2", "npc:5"])
-    res = _run(_ti.do_create_character('{"playerName":"P"}', owner="z2"))
+    res = run(_ti.do_create_character('{"playerName":"P"}', owner="z2"))
     assert res["exit_code"] == 0
     assert set(shot) == {"npc:2", "npc:5"}, \
         f"only model-authored NPCs get a photo in the gated fallback (got {shot})"
 
 
-def test_fallback_gate_off_floor_shoots_immediately(monkeypatch):
+def test_fallback_gate_off_floor_shoots_immediately(monkeypatch, run):
     """Gate OFF (no model / escape hatch): the fallback floor-shoots immediately, as before — the
     deterministic floor IS the final cast, so a floor face can never mismatch an authored one."""
     monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
     shot = _wire_fallback(monkeypatch, gate_on=False, authored_ids=[])
-    res = _run(_ti.do_create_character('{"playerName":"P"}', owner="z3"))
+    res = run(_ti.do_create_character('{"playerName":"P"}', owner="z3"))
     assert res["exit_code"] == 0
     # every prompt (player + 15 NPCs) shot up front from the seeded facets
     assert "player" in shot and "npc:1" in shot and "npc:15" in shot

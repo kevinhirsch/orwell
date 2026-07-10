@@ -4825,6 +4825,10 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             _started = isinstance(res, dict) and res.get("started") and not res.get("createRefused")
             if _started and _gate_on:
                 from src import orwell_cast_authoring as _authoring_gate
+                # The engine season is already LIVE the instant create_character commits — mark the
+                # hold BEFORE waiting, so a concurrent /status or /state poll during the wait reports
+                # the authoring/holding state (routes/_house_entry_overlay), never a started game.
+                _authoring_gate.begin_house_entry_hold(owner)
                 ready = await _authoring_gate.await_house_ready(owner)
                 if ready.get("ready"):
                     _authoring_gate.clear_house_entry_gate_block(owner)
@@ -4835,6 +4839,16 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                         "(set ORWELL_ALLOW_FLOOR_START=1 to override).",
                         owner, ready.get("authored"), ready.get("total"))
                     _authoring_gate.record_house_entry_gate_block(owner, ready)
+                    # The early holding return below SKIPS the post-start block (the 0062 zeitgeist
+                    # capture). Arm the background gate-clear watch: it keeps polling authoring and,
+                    # the moment the cast is ready, clears the holding overlay, runs the deferred
+                    # zeitgeist kick EXACTLY ONCE (one watch per user; kickoff_capture is also
+                    # once-per-season idempotent), and pushes a game-updated so open pages reconcile.
+                    def _deferred_post_start():
+                        from src import orwell_zeitgeist
+                        orwell_zeitgeist.kickoff_capture(owner)
+                    _authoring_gate.kickoff_house_ready_watch(
+                        owner, on_ready=_deferred_post_start)
                     holding = {
                         "started": False,
                         "castingHouse": {
@@ -4854,8 +4868,14 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                     return {"output": json.dumps(holding, indent=2), "exit_code": 0}
         except Exception as e:
             # The gate is a guardrail, not a new failure mode: a hiccup in the gate itself must never
-            # strand a legitimately-started game. Log and fall through to the normal started result.
+            # strand a legitimately-started game. Log, drop any hold marker (a stuck overlay would
+            # mask the genuinely-started season), and fall through to the normal started result.
             logger.warning("[house-entry-gate] gate check failed for %s: %s", owner, e)
+            try:
+                from src import orwell_cast_authoring as _authoring_gate
+                _authoring_gate.clear_house_entry_gate_block(owner)
+            except Exception:
+                pass
         # 0062 — capture the REAL move-in zeitgeist (web_search) in the background, replacing the engine's
         # deterministic fallback ONCE per season. Best-effort: no model/search ⇒ the fallback stands. Gated
         # on a GENUINE start (never a no-op refusal of an already-running season), so it fires once per
