@@ -74,6 +74,16 @@ def test_resume_replays_incrementally_for_late_observer():
         r"_dup\.remove\(\);.{0,600}?renderDelta\(\);", src, re.S)
     assert m, ("resumeStream must REMOVE a from-history reconcile bubble and paint through the "
                "incremental renderer (the F5 late-observer live-mirror path), not abort")
+    # The from-history branch must FALL THROUGH to the shared ts/id stamping — it must NOT abort
+    # (no reader.cancel / cleanup / return) the way the sibling own-echo branch does. A stray
+    # return/cleanup here would strand a late observer on the static reconcile.
+    _branch = re.search(r"fromHistory === '1'\) \{(?P<body>.*?)\} else \{", src, re.S)
+    assert _branch, "resumeStream must keep a distinct from-history observer branch (vs the own-echo else)"
+    _body = _branch.group("body")
+    assert "renderDelta()" in _body, "the from-history branch must paint through the incremental renderer"
+    assert ("return" not in _body and "cleanup()" not in _body and "reader.cancel" not in _body), (
+        "the from-history observer branch must fall through to the shared ts/id stamping, not abort "
+        "like the own-echo branch (a stray return/cleanup would strand B non-incremental)")
     # the [DONE] terminal of a one-burst replay must flush the buffered paint before breaking,
     # so the incremental container mounts even when reply + [DONE] ride the same chunk.
     assert re.search(r"payload === '\[DONE\]'.{0,400}?if \(paintDirty\) \{ paintDirty = false; renderDelta\(\); \}",
@@ -95,13 +105,23 @@ def test_history_render_callers_always_tag_even_without_metadata():
     Every history-render caller must pass `_fromHistory: true` even when the persisted row has NO
     metadata — else `meta = null` yields an untagged static bubble, a late observer's resumeStream
     dup-check treats it as an own-echo and aborts, and that row strands non-incremental (F5 fails).
-    The `msg.metadata ? {...} : null` shape is the bug; the else branch MUST set `_fromHistory: true`."""
+    The `msg.metadata ? {...} : null` shape is the bug; the else branch MUST set `_fromHistory: true`.
+
+    Semantic, not formatting-bound: capture every history-render `msg.metadata ? {…_fromHistory…} : <else>`
+    ternary and assert the metadata-ABSENT branch also tags. Rejects `: null`, `:null`, multiline, and
+    `msg.metadata || null` variants alike — any of which reintroduce an untagged history bubble."""
+    tern = re.compile(
+        r"msg\.metadata\s*\?\s*\{[^{}]*_fromHistory:\s*true[^{}]*\}\s*:\s*(?P<else>[^;\n]+)", re.S)
     for fname in ("sessions.js", "chat.js"):
         with open(os.path.join(JS, fname), encoding="utf-8") as fh:
             src = fh.read()
-        # a history-render meta ternary must never fall back to a bare `null`/untagged else branch
-        assert "_fromHistory: true } : null" not in src, (
-            f"{fname}: a history-render caller falls back to `meta = null` when metadata is missing, "
-            "producing an UNTAGGED static bubble that strands a late observer non-incremental (F5). "
-            "Use `: { _fromHistory: true }` instead."
-        )
+        matches = list(tern.finditer(src))
+        assert matches, (
+            f"{fname}: expected a history-render `msg.metadata ? {{…_fromHistory: true…}} : …` ternary")
+        for mth in matches:
+            els = mth.group("else").strip()
+            assert "_fromHistory" in els and "true" in els, (
+                f"{fname}: a history-render ternary's metadata-absent branch (`{els}`) does not set "
+                "`_fromHistory: true` — an untagged static bubble strands a late observer "
+                "non-incremental (F5). Use `: {{ _fromHistory: true }}`."
+            )
