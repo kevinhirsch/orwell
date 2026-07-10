@@ -103,6 +103,23 @@ def _origin_netloc(origin: str) -> Optional[str]:
     return f"{host}:{port}"
 
 
+def _host_authority(host: str) -> str:
+    """Normalize a request ``Host`` header for a same-origin comparison against an ``Origin`` netloc.
+    Lowercases and strips a trailing default port (``:80`` / ``:443``) — the ``Host`` header carries no
+    scheme, so either default port is bare-host-equivalent (same hostname), matching how
+    ``_origin_netloc`` already strips the scheme's default port from the ``Origin`` (a proxy/edge
+    terminator may set an explicit ``Host: host:443`` where the browser's ``Origin`` is bare
+    ``https://host``). A browser cannot forge ``Host`` from page JS, so accepting either default port
+    here is no security loss. A non-default port (e.g. ``:7000`` for LAN) is preserved so it must still
+    match the Origin's port."""
+    h = (host or "").strip().lower()
+    if h.endswith(":80"):
+        return h[:-3]
+    if h.endswith(":443"):
+        return h[:-4]
+    return h
+
+
 def _allowed_ws_origins() -> set:
     """The explicit cross-origin allowlist for a WS upgrade — the SAME ``ALLOWED_ORIGINS`` the app's
     credentialed CORS layer trusts (``app.py`` / ``core.middleware``), normalized to
@@ -158,8 +175,11 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
     if origin_netloc is None:
         return False  # present but opaque/unparseable (e.g. "null") → foreign
     # 1) Same-origin: the Origin's host[:port] equals the request Host (the deploy's own host).
+    #    Normalize the Host authority the SAME way _origin_netloc normalizes the Origin (strip the
+    #    scheme's default port) so a proxy-set `Host: host:443` still matches a bare `https://host`
+    #    Origin (greptile P1) — a browser cannot forge Host, so this is no security loss.
     try:
-        host = (websocket.headers.get("host") or "").strip().lower()
+        host = _host_authority(websocket.headers.get("host") or "")
     except Exception:
         host = ""
     if host and origin_netloc == host:

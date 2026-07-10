@@ -120,6 +120,42 @@ def test_same_origin_with_explicit_default_port_is_accepted(run, monkeypatch):
     run(main())
 
 
+def test_same_origin_host_carries_default_port_is_accepted(run, monkeypatch):
+    """greptile P1 repro: a proxy/edge terminator sets an explicit ``Host: host:443`` while the browser
+    sends a bare ``Origin: https://host`` (no default port). The request Host authority is normalized
+    the same way as the Origin, so this is SAME-ORIGIN and accepted (not rejected before accept)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "https://my-house.example", "host": "my-house.example:443"})
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
+def test_same_origin_http_host_carries_default_port_is_accepted(run, monkeypatch):
+    """The ws/80 analog: ``Host: host:80`` + bare ``Origin: http://host`` is same-origin, accepted."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "http://my-house.example", "host": "my-house.example:80"})
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
 def test_lan_same_origin_with_port_is_accepted(run, monkeypatch):
     """LAN/dev exposure (feature 0074): the browser hits ``http://<lan-ip>:7000`` — Origin host:port
     equals Host, so it is same-origin and accepted with NO configured domain (no hard-coding)."""
@@ -207,6 +243,13 @@ def test_origin_helpers_unit(monkeypatch):
     assert ws_routes._origin_netloc("http://a.example:7000") == "a.example:7000"
     assert ws_routes._origin_netloc("null") is None
     assert ws_routes._origin_netloc("") is None
+
+    # _host_authority strips the scheme's default port (Host carries no scheme), preserves others.
+    assert ws_routes._host_authority("a.example:443") == "a.example"
+    assert ws_routes._host_authority("a.example:80") == "a.example"
+    assert ws_routes._host_authority("A.Example:7000") == "a.example:7000"
+    assert ws_routes._host_authority("a.example") == "a.example"
+    assert ws_routes._host_authority("") == ""
 
     monkeypatch.setenv("ALLOWED_ORIGINS", "https://a.example, *, https://b.example:8443")
     allowed = ws_routes._allowed_ws_origins()
