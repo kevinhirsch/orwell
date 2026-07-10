@@ -10,7 +10,7 @@ uvicorn
 # Install the `websockets` protocol library explicitly (uvicorn auto-detects it) so the
 # route is upgrade-capable. WS stays DORMANT — the ORWELL_WS_TRANSPORT flag is default
 # OFF — this only makes the transport flippable-by-env without a code change.
-websockets
+websockets==16.0
 python-multipart
 python-dotenv
 httpx
