@@ -54,7 +54,7 @@ No CRDT/OT — single-writer-per-turn has no concurrent-writer problem; layout i
 
 ### 1.1 Route
 
-```
+```text
 WS  /api/ws/session          (Starlette/FastAPI native WebSocket)
 ```
 
@@ -69,6 +69,13 @@ the handshake resolves the current user via the existing `get_current_user` / `_
 **every** `hello`/`bind`/`subscribe` is owner-guarded exactly as `chat_routes.py:1856`
 (`_verify_session_owner`) and `chat_events` are today. A socket may only ever bind/subscribe sessions
 the authenticated user owns. Cross-user isolation (0021) is structural: one socket ↔ one user.
+
+**Browser cross-site defense (WS-specific).** The HTTP CORS / security middleware does **not** cover a
+WebSocket upgrade, so cookie auth alone is not enough: the handshake **must** additionally enforce a
+cross-site check — an allowed-`Origin` allowlist (matching the deploy's own host per ADR 0007/0014) **or**
+a session-bound CSRF token presented in `hello` — **before** it processes any `hello`/`bind`/`subscribe`.
+A foreign-origin upgrade is refused at accept time (close, no `ack`). This sits alongside the
+`get_current_user`/`_current_user` auth + `_verify_session_owner` authorization above, not in place of it.
 
 **Reverse-proxy / exposure (ADR 0017 open #5, ADR 0007/0014).** The deploy terminates TLS and proxies
 to uvicorn; the WS route needs `Upgrade`/`Connection` headers passed through. Phase 1 **must** verify
@@ -95,7 +102,11 @@ type — kept terse because chat deltas are high-frequency). Envelope:
   `chat` channel carrying `seq` — one chat-token contract, so the replay-then-tail splice uses the same
   wire type on both sides (§3).
 - **`ch`** — the multiplex channel. Phase-1 channels: `chat`, `state`, `hud`, `layout`, `notice`.
-  (`hello`/`bind`/`ack`/`error`/`ping`/`pong` are socket-level and carry no `ch`.)
+  `hello`/`bind`/`ping`/`pong` are socket-level and carry no `ch`. **`ack` and `error` carry `ch` iff
+  the request they answer did** — the one rule, no path-specific parsing: a `hello`/`bind` ack (§2.3)
+  and a socket-level `error` omit `ch`, while a `subscribe` ack/error echo `ch:"chat"` (§3.1) so the
+  client routes the reply to the right channel. (A `turn`/`decision` ack/error rides `ch:"chat"` too —
+  §3.5 — since those are chat-channel frames.)
 - **`cid`** — correlation id for request/response pairs (`turn`, `decision`, `subscribe`→first `ack`).
   Echoed on the matching reply so the client resolves the right promise. **This includes NEGATIVE
   replies:** an `error` frame answering a `hello`, `bind`, `subscribe`, `turn`, or `decision` **MUST**
@@ -395,18 +406,27 @@ chat — the ADR's headline win.
 
 ADR 0017 supersedes 0064-F: layout is **per-device**, NOT synced cross-device. Only game state syncs.
 
+The `layout` frame carries **two distinct tokens**: `deviceId` (stable per-device — the persist/fan-out
+bucket) and `origin` (the per-tab id — self-echo suppression only). They are not interchangeable.
+
 ```jsonc
 // client → server (a window moved/resized/docked)
 { "t":"layout", "ch":"layout", "d":{ "windowId":"hud-roster", "state":{ "x":40,"y":120,"w":320,"open":true },
-                                     "origin":"dev_9x" } }
+                                     "deviceId":"dev_9x", "origin":"tab_3b" } }
 // server → client (echo to THIS device's OTHER tabs only — not other devices)
-{ "t":"layout", "ch":"layout", "d":{ "windowId":"hud-roster", "state":{...}, "origin":"dev_9x" } }
+{ "t":"layout", "ch":"layout", "d":{ "windowId":"hud-roster", "state":{...},
+                                     "deviceId":"dev_9x", "origin":"tab_3b" } }
 ```
 
-- **Persist scope is per-device.** The existing `orwell_layout.patch_layout` store
-  (`orwell_routes.py:1647`) is keyed **`(user, deviceId)`** in Phase 1 instead of `user` alone — a
+- **Persist scope is per-device — `deviceId` keys the bucket.** The existing `orwell_layout.patch_layout`
+  store (`orwell_routes.py:1647`) is keyed **`(user, deviceId)`** in Phase 1 instead of `user` alone — a
   desktop and a phone keep independent geometry. `deviceId` is a stable per-device token (localStorage,
-  survives reload; distinct from the per-tab id).
+  survives reload; distinct from the per-tab id). The server **echoes the store's CANONICAL `deviceId`**
+  (trimmed/normalized), never the raw client value, so a receiver's exact-id match cannot miss its own
+  device's update.
+- **`origin` is the per-tab token, used ONLY for self-echo suppression** — the originating tab drops the
+  echo carrying its own `origin`; it never selects the persist bucket. The server fans out to the same
+  `deviceId`'s other tabs and lets each drop the `origin` echo.
 - **LWW within a device's own windows** — last write per `windowId` field wins, as today.
 - **`origin` self-echo suppression** — the originating **tab** ignores its own echo by `origin`
   (`orwell_routes.py:1627` semantics), exactly as `sessionSync.dispatchLayoutChanged` +
