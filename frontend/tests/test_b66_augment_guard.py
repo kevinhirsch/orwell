@@ -28,7 +28,14 @@ PROGRESSING = [
 # conversation; it never replaces one (ADR 0003 §4 intact), and it never advances the week.
 # Its guard marker is the zero-engine-writes precondition set.
 SANCTIONED = {
-    "submit_decision": ("routes/orwell_routes.py", "orwell_decision", "_DECISION_KINDS"),
+    # submit_decision has TWO sanctioned confirm sites: the HTTP /decision route (the C20 confirm card)
+    # and the socket-native `decision` up-frame (WS Phase-1 §3.5). Both post the player's EXPLICIT
+    # selection engine-direct with the same `_DECISION_KINDS` legality gate, so prose can never bind
+    # through either — the WS just swaps the pipe under the identical confirm contract.
+    "submit_decision": [
+        ("routes/orwell_routes.py", "orwell_decision", "_DECISION_KINDS"),
+        ("routes/ws_routes.py", "_handle_decision", "_DECISION_KINDS"),
+    ],
     "create_character": ("routes/orwell_routes.py", "orwell_new_game", "409"),
     "record_interaction": ("routes/chat_helpers.py", "ensure_turn_recorded", "GAME_ENGINE_WRITE_TOOLS"),
     # C-02 (engine bypass): pre-resolving an NPC-driven ceremony is a sanctioned FE-side

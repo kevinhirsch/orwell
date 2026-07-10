@@ -90,6 +90,19 @@ def has_run(session_id: str) -> bool:
     return _RUNS.get(session_id) is not None
 
 
+def head_seq(session_id: str) -> int:
+    """The current buffer head index (the last replayable `seq`), or -1 when the run has no buffered
+    event yet / does not exist. This is the SAME index `_publish` binds each event to
+    (``seq = len(buffer) - 1``) — the WebSocket `chat` subscribe (WS Phase-1, §3.1) reports it as the
+    `ack`'s `headSeq` so the client knows the exact ``[fromSeq..headSeq]`` window the replay covers
+    before the live tail begins. Read once, right before subscribe; a live append after is fine — the
+    replay-then-tail contract stays contiguous regardless (headSeq is advisory)."""
+    run = _RUNS.get(session_id)
+    if run is None:
+        return -1
+    return len(run.buffer) - 1
+
+
 def get_status(session_id: str) -> Optional[str]:
     r = _RUNS.get(session_id)
     return r.status if r else None
@@ -176,9 +189,19 @@ def start(session_id: str, agen: AsyncGenerator[str, None], *, queue: bool = Fal
     return run
 
 
-async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
-    """Replay the run's buffer from the start, then stream live until it ends.
-    Safe to call repeatedly (reconnect) and from multiple clients at once."""
+async def subscribe(session_id: str, from_seq: int = 0) -> AsyncGenerator[str, None]:
+    """Replay the run's buffer from `from_seq`, then stream live until it ends.
+    Safe to call repeatedly (reconnect) and from multiple clients at once.
+
+    `from_seq` (WS Phase-1 §3.2 preferred path — back-compat: default 0 ⇒ byte-identical to the
+    historical replay-from-0 → live-tail behavior every SSE subscriber uses today). A late/reconnecting
+    client that already rendered through buffer index N passes `from_seq = N + 1` so the server replays
+    ONLY `buffer[from_seq..len)` — the "give me everything after what I have" cursor — then live-tails,
+    with no gap and no dup at the splice. It works because `next_seq` starts at `from_seq`: replay yields
+    the buffered tail from there, and the live drain's de-dup (`if seq >= next_seq`) + sentinel flush are
+    unchanged, so the yielded events stay contiguous buffer indices `from_seq, from_seq+1, …` regardless
+    of when the drop happened. A `from_seq` past the current head simply replays nothing and live-tails
+    from there (the caller is expected to clamp to the buffer; a negative value is floored to 0)."""
     run = _RUNS.get(session_id)
     if run is None:
         return
@@ -189,7 +212,7 @@ async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
     if run.evict_task and not run.evict_task.done():
         run.evict_task.cancel()
     try:
-        next_seq = 0
+        next_seq = from_seq if from_seq > 0 else 0
         while next_seq < len(run.buffer):
             yield run.buffer[next_seq]
             next_seq += 1

@@ -1,0 +1,553 @@
+"""WebSocket Phase-1 — the SERVER half (browser ↔ FE, Hop 1).
+
+One multiplexed WebSocket per canonical session, per ADR 0017 Phase 1 and the frozen wire spec
+``docs/design/websocket-phase1-protocol.md``. It **swaps the pipe** under the proven consistency
+model — it does not invent one. The load-bearing FE seams it re-hosts on the socket:
+
+  * the ``hello``→``bind``→``ack`` handshake (§2) that binds + liveness-validates the canonical
+    session BEFORE any subscribe — closing the #1085/#1086 window-collapse / reply-strip class by
+    construction (a socket is never ``ack``-bound to a dead id, so no channel is ever subscribed to a
+    404), reusing the EXACT existing helpers (``resolve_live_game_session`` / ``bind_game_session`` /
+    ``_is_live_chat_session``); the resolution BRANCH is server-derived from authenticated engine
+    state, never from anything the client sent (§2.2 forge guard);
+  * the ``chat`` channel (§3) — a thin socket adapter over ``agent_runs.subscribe(canonicalId,
+    from_seq)``: an ``ack{fromSeq, headSeq}`` first, then replay-from-``fromSeq`` → live-tail wrapped
+    as ``event`` frames, gated on ``has_run`` (terminal-but-buffered still mirrors, ADR 0012), the
+    reasoning split riding INSIDE the payload as a ``thinking`` flag (never a separate channel — the
+    reasoning-scrub contract, ADR 0015);
+  * the ``turn`` / ``decision`` up-frames (§3.5) relayed into the UNCHANGED ``agent_runs.start`` /
+    engine path with the ``expectedBeatSeq`` compare-and-swap (0065) — a stale token ⇒ an ``error``
+    frame ``{code:"stale-beat"}`` (the socket-native form of HTTP 409 ``stale-beat``), refused before
+    any write;
+  * the ``state`` / ``hud`` edge pings (§4) bridged from ``session_events`` — ids + ``beatSeq`` only,
+    never a state body, so the Vault Wall stays trivially intact (the client re-reads its own
+    Vault-free projection endpoint on the edge).
+
+**Invariants (hard):** never a byte of Vault data crosses the socket (only the Vault-free projections
+the SSE/poll surfaces already carry); every ``hello``/``bind``/``subscribe``/``turn``/``decision`` is
+owner-guarded (cross-user isolation 0021 — one socket ↔ one user); reasoning rides inside the ``chat``
+payload, never a second public channel; bind-before-subscribe.
+
+Scoped OUT of this SERVER-half PR (sibling / deferred, marked TODO below): the ``layout`` channel leg
+depends on another change's ``patch_layout(user, deviceId, …)`` per-device re-key — stubbed here; the
+client negotiation / feature-flag flip (``ORWELL_WS_TRANSPORT``) is the sibling client PR. The route is
+registered but the flag defaults **off**, so nothing ships to users from this PR alone.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from typing import Any, AsyncGenerator, Callable, Optional
+
+from fastapi import APIRouter, WebSocket
+from starlette.websockets import WebSocketDisconnect
+
+from src import agent_runs
+from src import session_events
+from src import orwell_game_session as ogs
+
+logger = logging.getLogger(__name__)
+
+# Socket-level heartbeat: mirror ``session_events._HEARTBEAT_S`` (§1.2). The server sends
+# ``{"t":"ping"}`` on this cadence; a live client replies ``{"t":"pong"}``.
+_HEARTBEAT_S = 20.0
+
+# The sanctioned binding-decision kinds — the socket-native ``decision`` up-frame is the C20 confirm
+# path over the WS (ADR 0003 §4): it posts the player's EXPLICIT selection engine-direct, so prose can
+# never bind through it, and every kind is validated before it reaches the engine (the same legality
+# gate the HTTP ``/decision`` route's local ``_DECISION_KINDS`` enforces — kept in lockstep with the
+# canonical set in ``routes/orwell_routes.py``). This is the guard that keeps the WS ``submit_decision``
+# call a sanctioned progression, not a UI-driven game bypass (test_b66_augment_guard).
+_DECISION_KINDS = {
+    "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
+    "replacement", "eviction-vote", "tie-break", "final-eviction",
+    "goodbye-message", "finale-statement", "finale-answer",
+    "juror-question", "juror-vote",
+    "self-evict",
+}
+
+
+# ── monkeypatchable seams (kept module-level so tests can swap them without a booted app) ──────────
+
+def _auth_disabled() -> bool:
+    """True when the operator turned auth off (``AUTH_ENABLED=false``). Mirrors the parse the rest of
+    the FE uses; single-tenant then, so every socket is the one ``default`` bucket."""
+    import os
+    return os.getenv("AUTH_ENABLED", "true").lower() == "false"
+
+
+def _ws_current_user(websocket: WebSocket) -> Optional[str]:
+    """Resolve the authenticated user for a WebSocket upgrade.
+
+    ``BaseHTTPMiddleware`` (the app's ``AuthMiddleware``) only wraps HTTP scope, so ``request.state``
+    is NOT populated for a socket — the WS route resolves the user itself from the SAME session cookie
+    every ``/api/*`` route reads (protocol spec §1.1). ``AUTH_ENABLED=false`` ⇒ the single-tenant
+    ``default`` bucket (``None``), identical to ``get_current_user`` returning ``None`` elsewhere."""
+    if _auth_disabled():
+        return None
+    try:
+        from routes.auth_routes import SESSION_COOKIE
+        token = websocket.cookies.get(SESSION_COOKIE)
+        am = getattr(websocket.app.state, "auth_manager", None)
+        if am is not None and am.validate_token(token):
+            return am.get_username_for_token(token)
+    except Exception:
+        logger.debug("[ws] cookie user resolution failed", exc_info=True)
+    return None
+
+
+def _is_live(session_id: str) -> bool:
+    """Is ``session_id`` a LIVE chat-session row? Delegates to the SAME predicate the HTTP canonical
+    resolver uses (``chat_helpers._is_live_chat_session``, GAP-1). Fail-soft: a lookup error resolves
+    True so a transient hiccup never unbinds a good id / refuses a good socket (only a CONFIRMED-dead
+    id is dropped, matching ``resolve_live_game_session``)."""
+    if not session_id:
+        return False
+    try:
+        from routes import chat_helpers
+        return bool(chat_helpers._is_live_chat_session(session_id))
+    except Exception:
+        logger.debug("[ws] liveness lookup failed for %s", session_id, exc_info=True)
+        return True
+
+
+def _ws_owns(user: Optional[str], session_id: str) -> bool:
+    """Owner guard for a WebSocket (cross-user isolation 0021). Mirrors ``_verify_session_owner``:
+    a persisted row's ``owner`` must match; an id with no DB row is an in-memory ghost / fresh per-tab
+    id the resolving user just created (it cannot name another user's row), so it is ownable. Auth-off
+    ⇒ single-tenant, always owned."""
+    if _auth_disabled():
+        return True
+    if not session_id:
+        return False
+    try:
+        from core.database import SessionLocal, Session as DBSession
+        db = SessionLocal()
+        try:
+            row = db.query(DBSession.owner).filter(DBSession.id == session_id).first()
+        finally:
+            db.close()
+    except Exception:
+        logger.debug("[ws] owner lookup failed for %s", session_id, exc_info=True)
+        return True  # fail-soft: a transient DB error must not lock a legitimate owner out
+    if row is None:
+        return True  # no persisted row — a ghost/pre-game id the user owns by construction
+    return row.owner == user
+
+
+async def _engine_state(user: Optional[str]) -> dict:
+    """The user's Vault-free game state (``started`` + ``beatSeq``), fail-soft to ``{}`` so a
+    handshake never crashes on an engine hiccup (it just resolves the pre-game / per-tab branch)."""
+    try:
+        from src import orwell_engine
+        st = await orwell_engine.get_game_state(user=user)
+        return st if isinstance(st, dict) else {}
+    except Exception:
+        logger.debug("[ws] engine state fetch failed for user=%s", user, exc_info=True)
+        return {}
+
+
+def _beat_seq_of(state: dict) -> Optional[int]:
+    bs = state.get("beatSeq")
+    return bs if (isinstance(bs, int) and not isinstance(bs, bool)) else None
+
+
+# ── the turn producer injection point (see module docstring — the FE chat pipeline lives in ──────────
+#    routes/chat_routes.py's inline chat_stream closure and cannot be reused without a shared refactor
+#    that change owns, exactly like the per-device layout leg). The WS ``turn`` relay carries the CAS +
+#    framing + ``agent_runs.start`` wiring; the content producer is injected here. Until wired, a
+#    ``turn`` up-frame answers with an explicit ``error{code:"turn-relay-unwired"}`` — NEVER a silent
+#    no-op (the four-place-wiring lesson: a silently-dropped relay is the worst failure).
+
+_TurnStreamFactory = Callable[[dict, str, Optional[str]], AsyncGenerator[str, None]]
+_turn_stream_factory: Optional[_TurnStreamFactory] = None
+
+
+def set_turn_stream_factory(fn: Optional[_TurnStreamFactory]) -> None:
+    """Register the producer that turns a ``turn`` up-frame ``d`` + canonical id + user into the SSE
+    event stream ``agent_runs.start`` drains (the same strings ``chat_stream`` produces). The default
+    (unset) relay refuses with ``turn-relay-unwired`` rather than silently dropping the turn."""
+    global _turn_stream_factory
+    _turn_stream_factory = fn
+
+
+# ── canonical resolution (server-derived branch — §2.2; the client NEVER picks it) ─────────────────
+
+def _resolve_canonical(user: Optional[str], per_tab_id: str, started: bool) -> tuple[str, bool, bool]:
+    """Return ``(canonicalId, adopted, live)`` exactly as ``_resolve_canonical_session`` +
+    ``resolve_live_game_session`` decide it, driven by SERVER-derived ``started`` (never a client flag):
+
+      * NOT started (casting / pre-game, GAP-2-b1) → strictly the per-tab id (two casting tabs never
+        mirror, by design).
+      * started → the first-writer-wins bound id IFF it still resolves live (a confirmed-dead binding
+        is unbound as a side effect and falls back); else first-writer bind THIS tab (only if the
+        per-tab id is itself a live row) and adopt; else the per-tab id, ``live=False`` (no live
+        fallback → the client shows the reconnect affordance rather than subscribing a dead channel).
+
+    ``adopted=True`` means this socket LOST the bind race and adopted a different id (the socket-native
+    replacement for the ``canonical_session`` re-point, done at handshake before any subscribe — so no
+    settle-time reload strips a just-streamed reply, #1086)."""
+    if not started:
+        return per_tab_id, False, _is_live(per_tab_id)
+    canonical = ogs.resolve_live_game_session(user, _is_live)  # live bound id, or None (+unbind dead)
+    if canonical:
+        return canonical, (canonical != per_tab_id), True
+    if _is_live(per_tab_id):
+        bound = ogs.bind_game_session(user, per_tab_id)  # first-writer-wins
+        return bound, (bound != per_tab_id), _is_live(bound)
+    return per_tab_id, False, False
+
+
+# ── the route ──────────────────────────────────────────────────────────────────────────────────────
+#
+# ``ws_session`` is module-level (not a route-closure) so the fe-unit tests can drive it directly with
+# an in-process fake WebSocket in ONE event loop — the repo's async idiom (``test_0064_turn_queue.py``)
+# — where the WS handler, ``agent_runs.start``, and the gate-controlled fake run all share the loop.
+# ``setup_ws_routes`` just binds it to the path.
+
+async def ws_session(websocket: WebSocket) -> None:
+        await websocket.accept()
+        user = _ws_current_user(websocket)
+
+        # One send lock: background channel tasks + the receive loop + the heartbeat all serialize
+        # their writes through it (Starlette's send is not concurrency-safe across tasks).
+        send_lock = asyncio.Lock()
+
+        async def send(frame: dict) -> None:
+            async with send_lock:
+                await websocket.send_text(json.dumps(frame))
+
+        # Per-socket binding + channel tasks.
+        sock: dict[str, Any] = {"canonical": None, "live": False, "beatSeq": None}
+        channel_tasks: dict[str, asyncio.Task] = {}
+
+        async def _heartbeat() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(_HEARTBEAT_S)
+                    await send({"t": "ping"})
+            except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                return
+            except Exception:
+                return
+
+        hb_task = asyncio.create_task(_heartbeat())
+
+        # ── channel adapters ──────────────────────────────────────────────────────────────────────
+
+        async def _run_chat_channel(cid: str, from_seq: int) -> None:
+            """§3 — ack-first, then replay-from-``from_seq`` → live-tail over the SHIPPED
+            ``agent_runs.subscribe`` generator (no replay logic re-implemented here — the socket is a
+            dumb frame-wrapper, per spec §10). The frame ``seq`` IS the buffer index: the generator
+            yields contiguous ``from_seq, from_seq+1, …`` (replay tail then de-duped live tail), so a
+            running counter from ``from_seq`` reproduces ``_publish``'s ``len(buffer)-1`` index exactly
+            — the identity the whole reconnect splice rests on (§10 "fromSeq seq identity")."""
+            canonical = sock["canonical"]
+            # Gate on has_run, NOT is_active: a short turn that finished before this peer attached is
+            # terminal-but-buffered (within the 180s evict grace) and MUST still replay the whole turn
+            # (ADR 0012 / the has_run fix). No run at all → nothing to mirror; tell the client so it can
+            # do a normal history load (spec §3.6).
+            if not agent_runs.has_run(canonical):
+                await send({"t": "ack", "ch": "chat", "cid": cid,
+                            "d": {"fromSeq": from_seq, "headSeq": -1, "hasRun": False}})
+                return
+            head = agent_runs.head_seq(canonical)
+            # Clamp an over-shot cursor to the buffer so a live event with a real seq < from_seq is not
+            # skipped by the de-dup (spec §3.1 "clamped to the buffer if it over-shot").
+            start = max(0, from_seq)
+            if start > head + 1:
+                start = head + 1
+            await send({"t": "ack", "ch": "chat", "cid": cid,
+                        "d": {"fromSeq": start, "headSeq": head, "hasRun": True}})
+            seq = start
+            try:
+                async for raw in agent_runs.subscribe(canonical, from_seq=start):
+                    await send({"t": "event", "ch": "chat", "seq": seq, "d": _sse_to_payload(raw)})
+                    seq += 1
+            except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                return
+            except Exception:
+                logger.debug("[ws] chat channel error for %s", canonical, exc_info=True)
+
+        async def _run_state_channel(ch: str) -> None:
+            """§4 — bridge ``session_events`` (game-updated / run-started / message-added) to ``state``/
+            ``hud`` EDGE PINGS keyed by ``beatSeq``. Payload is ids + beatSeq only — NEVER a state body
+            (Vault Wall trivially intact); the client re-reads its own Vault-free projection on the
+            edge, exactly as the deleted 20/25s poll did, now edge-triggered."""
+            canonical = sock["canonical"]
+            try:
+                async for raw in session_events.subscribe(canonical):
+                    reason = _sse_event_name(raw)
+                    if reason in (None, "connected", "keepalive"):
+                        continue
+                    st = await _engine_state(user)
+                    bs = _beat_seq_of(st)
+                    if bs is not None:
+                        sock["beatSeq"] = bs
+                    await send({"t": ch, "ch": ch, "d": {"beatSeq": sock["beatSeq"], "reason": reason}})
+            except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                return
+            except Exception:
+                logger.debug("[ws] %s channel error for %s", ch, canonical, exc_info=True)
+
+        def _spawn_channel(key: str, coro) -> None:
+            old = channel_tasks.pop(key, None)
+            if old is not None and not old.done():
+                old.cancel()
+            channel_tasks[key] = asyncio.create_task(coro)
+
+        # ── frame handlers ──────────────────────────────────────────────────────────────────────────
+
+        async def _handle_hello(frame: dict) -> bool:
+            """hello/bind: resolve + liveness-validate the canonical id, owner-guarded, BEFORE any
+            channel is subscribable. Returns False to close the socket (a non-owned refusal)."""
+            cid = frame.get("cid")
+            d = frame.get("d") or {}
+            per_tab = (d.get("perTabId") or "").strip()
+            if not per_tab:
+                await send({"t": "error", "cid": cid, "d": {"code": "bad-request"}})
+                return True
+            # Owner guard FIRST (cross-user isolation): a socket may only ever name a session its user
+            # owns. A non-owned hello/bind → error{forbidden} + close (mirrors _verify_session_owner
+            # raising); the cid echoes the refused request so the client rejects the right promise.
+            if not _ws_owns(user, per_tab):
+                await send({"t": "error", "cid": cid, "d": {"code": "forbidden"}})
+                return False
+            state = await _engine_state(user)
+            started = bool(state.get("started"))  # SERVER-derived; a forged framed/gameActive is ignored
+            canonical, adopted, live = _resolve_canonical(user, per_tab, started)
+            # The adopted id must ALSO be owned by this user (it can only ever be the user's own bound
+            # game session, but assert it structurally).
+            if not _ws_owns(user, canonical):
+                await send({"t": "error", "cid": cid, "d": {"code": "forbidden"}})
+                return False
+            sock["canonical"] = canonical
+            sock["live"] = live
+            sock["beatSeq"] = _beat_seq_of(state)
+            await send({"t": "ack", "cid": cid, "d": {
+                "canonicalId": canonical, "adopted": adopted,
+                "beatSeq": sock["beatSeq"], "live": live,
+            }})
+            return True
+
+        async def _handle_subscribe(frame: dict) -> None:
+            cid = frame.get("cid")
+            ch = frame.get("ch")
+            d = frame.get("d") or {}
+            if sock["canonical"] is None:
+                # No subscribe before a successful ack (spec §2.4) — enforced server-side.
+                await send({"t": "error", "ch": ch, "cid": cid, "d": {"code": "not-bound"}})
+                return
+            if not _ws_owns(user, sock["canonical"]):
+                await send({"t": "error", "ch": ch, "cid": cid, "d": {"code": "forbidden"}})
+                return
+            if ch == "chat":
+                from_seq = d.get("fromSeq", 0)
+                if not isinstance(from_seq, int) or isinstance(from_seq, bool) or from_seq < 0:
+                    await send({"t": "error", "ch": ch, "cid": cid, "d": {"code": "bad-cursor"}})
+                    return
+                _spawn_channel("chat", _run_chat_channel(cid, from_seq))
+            elif ch in ("state", "hud"):
+                _spawn_channel(ch, _run_state_channel(ch))
+            elif ch == "layout":
+                # TODO(ws-phase1 §5): the per-device layout leg depends on a sibling change's
+                # patch_layout(user, deviceId, …) per-device re-key. Stubbed until that lands so we
+                # never persist geometry under the wrong (user-only) key.
+                await send({"t": "ack", "ch": ch, "cid": cid, "d": {"deferred": True}})
+            else:
+                await send({"t": "error", "ch": ch, "cid": cid, "d": {"code": "unknown-channel"}})
+
+        async def _cas_stale_beat(cid: str, expected: Any) -> Optional[dict]:
+            """Pre-flight compare-and-swap (§3.5): refuse an up-frame whose ``expectedBeatSeq`` no longer
+            matches the engine's current ``beatSeq`` BEFORE any mutation. Returns the fresh state dict
+            when the frame may proceed, or None after sending an ``error{stale-beat}``. An engine that
+            advertises no ``beatSeq`` yet (pre-0065) simply skips the CAS."""
+            state = await _engine_state(user)
+            cur = _beat_seq_of(state)
+            if cur is not None:
+                sock["beatSeq"] = cur
+            if (expected is not None and cur is not None
+                    and isinstance(expected, int) and not isinstance(expected, bool)
+                    and expected != cur):
+                await send({"t": "error", "ch": "chat", "cid": cid,
+                            "d": {"code": "stale-beat", "beatSeq": cur}})
+                return None
+            return state
+
+        async def _handle_turn(frame: dict) -> None:
+            cid = frame.get("cid")
+            d = frame.get("d") or {}
+            if sock["canonical"] is None:
+                await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "not-bound"}})
+                return
+            if not _ws_owns(user, sock["canonical"]):
+                await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "forbidden"}})
+                return
+            if await _cas_stale_beat(cid, d.get("expectedBeatSeq")) is None:
+                return  # stale-beat error already sent, no write
+            if _turn_stream_factory is None:
+                await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "turn-relay-unwired"}})
+                return
+            try:
+                producer = _turn_stream_factory(d, sock["canonical"], user)
+                # queue-don't-cancel for GAME turns (ADR 0012 / 0064-C) — two windows serialize behind
+                # one canonical run; the result fans out as chat ``event`` frames (not inline on cid).
+                agent_runs.start(sock["canonical"], producer, queue=True)
+                session_events.publish(sock["canonical"], "run-started")
+                await send({"t": "ack", "ch": "chat", "cid": cid, "d": {"accepted": True}})
+            except Exception as e:
+                logger.warning("[ws] turn relay failed: %s", e)
+                await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "turn-failed"}})
+
+        async def _handle_decision(frame: dict) -> None:
+            cid = frame.get("cid")
+            d = frame.get("d") or {}
+            if sock["canonical"] is None:
+                await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "not-bound"}})
+                return
+            if not _ws_owns(user, sock["canonical"]):
+                await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "forbidden"}})
+                return
+            from src import orwell_engine
+            expected = d.get("expectedBeatSeq")
+            idem = d.get("idempotencyKey")
+            decision = {k: v for k, v in d.items()
+                        if k not in ("expectedBeatSeq", "idempotencyKey") and v is not None}
+            # C20 confirm-path legality gate (ADR 0003 §4): an unknown/unsanctioned kind is refused
+            # BEFORE any engine call — prose can never bind through this surface.
+            if decision.get("kind") not in _DECISION_KINDS:
+                await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "unknown-kind"}})
+                return
+            try:
+                res = await orwell_engine.submit_decision(
+                    decision,
+                    expected_beat_seq=expected if isinstance(expected, int) and not isinstance(expected, bool) else None,
+                    idempotency_key=idem if isinstance(idem, str) and idem.strip() else None,
+                    user=user,
+                )
+                bs = _beat_seq_of(res if isinstance(res, dict) else {})
+                if bs is not None:
+                    sock["beatSeq"] = bs
+                await send({"t": "ack", "ch": "chat", "cid": cid, "d": {"accepted": True}})
+                # Fan a state edge so every window re-reads the moved board (§4).
+                await send({"t": "state", "ch": "state", "d": {"beatSeq": sock["beatSeq"], "reason": "decision"}})
+                session_events.publish(sock["canonical"], "game-updated")
+            except orwell_engine.EngineToolError as e:
+                if _is_stale_beat(e):
+                    await send({"t": "error", "ch": "chat", "cid": cid,
+                                "d": {"code": "stale-beat", "beatSeq": getattr(e, "beat_seq", None)}})
+                elif getattr(e, "no_game", False):
+                    await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "no-game"}})
+                else:
+                    await send({"t": "error", "ch": "chat", "cid": cid,
+                                "d": {"code": "engine-error", "status": getattr(e, "status", None)}})
+            except Exception as e:
+                logger.warning("[ws] decision relay failed: %s", e)
+                await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "decision-failed"}})
+
+        # ── receive loop ──────────────────────────────────────────────────────────────────────────
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    frame = json.loads(raw)
+                except Exception:
+                    await send({"t": "error", "d": {"code": "bad-frame"}})  # unsolicited, no cid (§1.2)
+                    continue
+                if not isinstance(frame, dict):
+                    await send({"t": "error", "d": {"code": "bad-frame"}})
+                    continue
+                t = frame.get("t")
+                if t in ("hello", "bind"):
+                    keep = await _handle_hello(frame)
+                    if not keep:
+                        break
+                elif t == "subscribe":
+                    await _handle_subscribe(frame)
+                elif t == "turn":
+                    await _handle_turn(frame)
+                elif t == "decision":
+                    await _handle_decision(frame)
+                elif t == "layout":
+                    pass  # TODO(ws-phase1 §5): per-device layout leg (sibling patch_layout re-key)
+                elif t == "ping":
+                    await send({"t": "pong"})
+                elif t == "pong":
+                    pass  # liveness ack — nothing to do
+                else:
+                    await send({"t": "error", "cid": frame.get("cid"), "d": {"code": "unknown-frame"}})
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.debug("[ws] session loop ended", exc_info=True)
+        finally:
+            hb_task.cancel()
+            for task in channel_tasks.values():
+                if not task.done():
+                    task.cancel()
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
+
+def setup_ws_routes() -> APIRouter:
+    """The WS router — binds the module-level ``ws_session`` handler to ``/api/ws/session``."""
+    router = APIRouter()
+    router.add_api_websocket_route("/api/ws/session", ws_session)
+    return router
+
+
+# ── payload helpers ────────────────────────────────────────────────────────────────────────────────
+
+def _sse_to_payload(raw: str) -> dict:
+    """Parse one ``agent_runs`` SSE event string into the ``event.d`` body (spec §3.2). The bodies are
+    the EXISTING ``chat_stream`` event payloads, unchanged — ``{delta, thinking}`` (the reasoning split
+    rides INSIDE as the ``thinking`` flag, §3.4), ``{type:"message_saved", …}``, and ``data:[DONE]`` →
+    ``{done:true}``. An ``event: error`` line is tagged ``{event:"error", …}``. Vault-free: the same
+    bytes the SSE surface carries today."""
+    event_name: Optional[str] = None
+    data_str: Optional[str] = None
+    for line in raw.splitlines():
+        if line.startswith("event:"):
+            event_name = line[len("event:"):].strip()
+        elif line.startswith("data:"):
+            data_str = line[len("data:"):].strip()
+    if data_str is None:
+        return {"raw": raw}
+    if data_str == "[DONE]":
+        return {"done": True}
+    try:
+        payload = json.loads(data_str)
+    except Exception:
+        return {"text": data_str}
+    if not isinstance(payload, dict):
+        return {"value": payload}
+    if event_name == "error":
+        payload = {**payload, "event": "error"}
+    return payload
+
+
+def _sse_event_name(raw: str) -> Optional[str]:
+    """The ``event:`` name of a ``session_events`` SSE string (``run-started`` / ``message-added`` /
+    ``game-updated`` / ``connected``), or ``"keepalive"`` for the comment line, else None."""
+    if raw.startswith(":"):
+        return "keepalive"
+    for line in raw.splitlines():
+        if line.startswith("event:"):
+            return line[len("event:"):].strip()
+    return None
+
+
+def _is_stale_beat(exc: Any) -> bool:
+    """Is ``exc`` the engine's 409 ``stale-beat`` CAS refusal? Prefer the stable machine ``code`` the
+    thin client surfaces; fall back to ``chat_helpers._is_stale_beat_error`` (which also handles the
+    older message-marker) so the socket and the HTTP decision route agree byte-for-byte."""
+    if getattr(exc, "code", None) == "stale-beat":
+        return True
+    try:
+        from routes.chat_helpers import _is_stale_beat_error
+        return bool(_is_stale_beat_error(exc))
+    except Exception:
+        return False
