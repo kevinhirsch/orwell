@@ -38324,6 +38324,57 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   border-radius: var(--ow-glass-radius-inner) !important;
 }
 
+/* ── #738 item #9 · Chat transcript scroll-edge mask + recede-on-scroll banner ───
+   Apple "content scrolls under the chrome": the transcript's top/bottom edges fade
+   the CONTENT to transparent (revealing the glass/wallpaper behind) the moment content
+   runs off that edge, and the title banner steps back as the reader scrolls into the
+   conversation. Both are gated to the glass theme and are REDUCED-MOTION SAFE — the
+   mask itself is a static gradient (a legibility affordance, kept on), while the
+   intensify + recede TRANSITIONS are neutralized under Reduce Motion so the edges and
+   banner snap instead of animate. chat.js toggles the .edge-top / .edge-bottom state
+   classes on #chat-history and .chat-scrolled on #chat-container from a passive,
+   rAF-coalesced scroll handler (it never touches the streaming buffers or the
+   live-stream render path). */
+@property --chat-edge-top    { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --chat-edge-bottom { syntax: "<length>"; inherits: false; initial-value: 0px; }
+
+body.theme-frosted #chat-history {
+  --chat-edge-fade: 26px;      /* height of the soft fade at an active edge            */
+  --chat-edge-top: 0px;        /* 0 at the very top; grows to the fade once scrolled   */
+  --chat-edge-bottom: 0px;     /* 0 at the very bottom; grows to the fade otherwise    */
+  -webkit-mask-image: linear-gradient(to bottom,
+    transparent 0, #000 var(--chat-edge-top),
+    #000 calc(100% - var(--chat-edge-bottom)), transparent 100%);
+          mask-image: linear-gradient(to bottom,
+    transparent 0, #000 var(--chat-edge-top),
+    #000 calc(100% - var(--chat-edge-bottom)), transparent 100%);
+  transition: --chat-edge-top .2s ease, --chat-edge-bottom .2s ease;
+}
+body.theme-frosted #chat-history.edge-top    { --chat-edge-top: var(--chat-edge-fade); }
+body.theme-frosted #chat-history.edge-bottom { --chat-edge-bottom: var(--chat-edge-fade); }
+
+/* The title banner recedes (fades + lifts a hair) once the reader scrolls down into the
+   transcript, returning at the top. The conversation is the surface of record; its
+   chrome steps back so the content leads. */
+body.theme-frosted .chat-top-bar {
+  transition: opacity .2s ease, transform .2s ease;
+}
+body.theme-frosted #chat-container.chat-scrolled .chat-top-bar {
+  opacity: 0.55;
+  transform: translateY(-3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep the static edge fade (legibility, not motion) but drop the animated intensify
+     and the banner's motion — under Reduce Motion the banner also stops receding so the
+     chrome never shifts. */
+  body.theme-frosted #chat-history { transition: none; }
+  body.theme-frosted .chat-top-bar { transition: none; }
+  body.theme-frosted #chat-container.chat-scrolled .chat-top-bar {
+    opacity: 1; transform: none;
+  }
+}
+
 /* The notice/banner DISMISS (.on-dismiss) is NOT a glass button — it's a quiet,
    integrated inline ✕ that belongs to the banner (Apple notification/alert dismiss),
    not a floating glass puck. Undo the glass-chip morph the generic .on-card button
