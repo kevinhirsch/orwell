@@ -31,7 +31,7 @@ FE seams Phase 1 re-hosts on the socket:
 | Live token stream (+ reasoning split) | `POST /api/chat_stream` chunked SSE | `frontend/routes/chat_routes.py:685` | `event` frames on `chat` (§3.2) |
 | Detached run replay→live-tail (**the crown jewel**) | `agent_runs._Run` + `subscribe()` | `frontend/src/agent_runs.py:25,179` | `subscribe`/`event` frames |
 | Mirror resume (late-attach) | `GET /api/chat/resume/{id}` → `agent_runs.subscribe` | `chat_routes.py:1867` | `subscribe{fromSeq}` |
-| Cross-device invitation bus | `GET /api/chat/events/{id}` → `session_events` | `chat_routes.py:1851`, `frontend/src/session_events.py:103,126` | `event` frames (invitation-class) |
+| Cross-device invitation bus (`run-started`) | `GET /api/chat/events/{id}` → `session_events` | `chat_routes.py:1851`, `frontend/src/session_events.py:103,126` | `state` `run-started` edge (§4.1) |
 | Canonical binding + liveness | `_resolve_canonical_session`, `_is_live_chat_session`, `resolve_live_game_session` | `frontend/routes/chat_helpers.py:4106,4121`, `frontend/src/orwell_game_session.py:119` | `hello`/`bind` handshake |
 | HUD status | `GET /api/orwell/status` poll **20 s** | `frontend/static/js/orwellStatusPanel.js:19` | `state`/`hud` push |
 | Presence / locations | `GET /api/orwell/whereabouts` poll **25 s** | `frontend/static/js/orwellPresence.js:29` | `hud` push |
@@ -399,6 +399,30 @@ the dispatcher. (This is the same pattern `sessionSync.notifyGameUpdated` alread
 
 Because the poll timers were the 20–30 s HUD lag, this alone makes gadget/presence state as fresh as the
 chat — the ADR's headline win.
+
+### 4.1 The `run-started` invitation edge (the cross-device attach trigger — do NOT drop it)
+
+WS mode deletes `GET /api/chat/events/{id}` (§0 table, the persistent invitation bus), so it must carry
+that bus's one load-bearing push: **`run-started`**. An **idle** peer (a second window/device that is not
+currently streaming) has to learn a run began before it can `subscribe` to the `chat` run and mirror it —
+without this edge, WS-mode cross-device live mirror (F4/F5) would only recover on a poll or reload. It
+rides the **`state` channel** as a distinguished edge (the invitation class from the §0 table):
+
+```jsonc
+// server → client — a new run started on the socket's canonical session
+{ "t":"state", "ch":"state", "d":{ "beatSeq":119, "reason":"run-started", "runKey":"sess_ab12" } }
+```
+
+- **Client action:** on `reason:"run-started"` for a run it is not already tailing, the idle peer issues
+  `subscribe{ch:"chat", fromSeq:0}` (§3.1) and mirrors from the buffer — the same attach an SSE
+  `run-started` triggers today. A peer that already holds a standing `chat` subscription needs no action
+  (it is already registered and receives the run's `event` frames live — §3.3 register-before-replay).
+- **Source:** the FE bridges `session_events`' `run-started`/`message-added` (`session_events.py:92`) to
+  this `state` edge, exactly as it bridges `game-updated` (§4). Payload stays a **ping** (ids only — the
+  `runKey`, no body), Vault Wall intact.
+- **Not a new authority:** it is the socket form of the existing invitation push; the ring
+  (`_RING_REPLAY_EVENTS`) stays for fallback mode (§10). Deterministic handshake attach (§10) covers a
+  peer connecting *after* a run starts; this edge covers a peer already connected *when* it starts.
 
 ---
 
