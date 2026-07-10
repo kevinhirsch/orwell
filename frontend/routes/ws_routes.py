@@ -109,16 +109,35 @@ def _origin_netloc(origin: str) -> Optional[str]:
     return f"{host}:{port}"
 
 
-def _host_authority(host: str) -> str:
-    """Normalize a request ``Host`` header for a same-origin comparison against an ``Origin`` netloc.
-    Lowercases and strips a trailing default port (``:80`` / ``:443``) — the ``Host`` header carries no
-    scheme, so either default port is bare-host-equivalent (same hostname), matching how
-    ``_origin_netloc`` already strips the scheme's default port from the ``Origin`` (a proxy/edge
-    terminator may set an explicit ``Host: host:443`` where the browser's ``Origin`` is bare
-    ``https://host``). A browser cannot forge ``Host`` from page JS, so accepting either default port
-    here is no security loss. A non-default port (e.g. ``:7000`` for LAN) is preserved so it must still
-    match the Origin's port."""
+def _host_authority(host: str, expected_scheme: str = "") -> str:
+    """Normalize a request ``Host`` header for a same-origin comparison against an ``Origin`` netloc,
+    SCHEME-AWARE so the port leg stays internally consistent with the scheme leg of the guard.
+
+    The ``Host`` header carries no scheme, but the same-origin check now enforces scheme too — so only
+    the EXPECTED external scheme's default port is bare-host-equivalent: ``:443`` iff the deploy is
+    ``https``/``wss``, ``:80`` iff ``http``/``ws``. Stripping BOTH regardless of scheme (the old
+    behavior) was a real inconsistency (greptile P1): under ``X-Forwarded-Proto: https`` a
+    ``Host: victim:80`` would collapse to ``victim`` and falsely match ``https://victim`` even though
+    ``https://victim:80`` ≠ ``https://victim`` (the port IS part of the origin). Now:
+
+      * expected ``https``/``wss`` → strip only ``:443`` (``victim:443``→``victim``; ``victim:80`` stays
+        ``victim:80`` → will NOT match ``https://victim`` → correctly rejected).
+      * expected ``http``/``ws``   → strip only ``:80``.
+      * indeterminate ("" — no XFP and an unknowable request scheme, the case the caller ALSO skips the
+        scheme leg for) → best-effort strip either default port (we cannot know which applies, and the
+        scheme leg is skipped, so acceptance is not weakened — an unknowable-scheme deploy is not broken).
+
+    IPv6 bracket-safe: an address literal ending in ``]`` never matches a ``:80``/``:443`` suffix, so
+    ``[::1]:443``→``[::1]`` (only under https) while ``[::443]`` is untouched. A non-default port (e.g.
+    ``:7000`` for LAN) is always preserved so it must still match the Origin's port. A browser cannot
+    forge ``Host`` from page JS, so stripping the matching default port is no security loss."""
     h = (host or "").strip().lower()
+    es = (expected_scheme or "").lower()
+    if es in ("https", "wss"):
+        return h[:-4] if h.endswith(":443") else h
+    if es in ("http", "ws"):
+        return h[:-3] if h.endswith(":80") else h
+    # Indeterminate external scheme — best-effort (the caller skips the scheme leg in this case).
     if h.endswith(":80"):
         return h[:-3]
     if h.endswith(":443"):
@@ -232,12 +251,15 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
     #    terminate TLS then hop plaintext to the FE, so we cannot read it off `websocket.url` alone).
     #    When the external scheme is indeterminate (""), the scheme leg is skipped (host match alone) so
     #    an unknowable-scheme deploy is not broken.
+    #    The port normalization is SCHEME-AWARE (greptile P1): _host_authority strips ONLY the expected
+    #    scheme's default port, so under https a `Host: host:80` does NOT collapse to `host` (port is
+    #    part of the origin) — the port and scheme legs stay internally consistent.
+    expected_scheme = _expected_external_scheme(websocket)
     try:
-        host = _host_authority(websocket.headers.get("host") or "")
+        host = _host_authority(websocket.headers.get("host") or "", expected_scheme)
     except Exception:
         host = ""
     if host and origin_netloc == host:
-        expected_scheme = _expected_external_scheme(websocket)
         if (not expected_scheme) or (origin_scheme == expected_scheme):
             return True
         # host matches but scheme does not → same-host different-scheme; fall through (may still be

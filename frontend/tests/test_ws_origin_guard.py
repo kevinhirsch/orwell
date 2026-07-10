@@ -340,6 +340,90 @@ def test_foreign_ipv6_origin_is_rejected(run, monkeypatch):
     run(main())
 
 
+# ── scheme-aware Host port normalization: only the expected scheme's default port is stripped ──────
+
+def test_https_host_port80_wrong_default_port_is_rejected(run, monkeypatch):
+    """greptile P1 (port×scheme consistency): under XFP=https, ``Host: victim:80`` must NOT collapse to
+    ``victim`` and match ``https://victim`` — ``https://victim:80`` ≠ ``https://victim`` (the port is
+    part of the origin). Only the EXPECTED scheme's default port (``:443``) is bare-host-equivalent, so
+    a ``:80`` under https is a real port mismatch → refused (close 1008)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "https://victim.example", "host": "victim.example:80",
+                               "x-forwarded-proto": "https"})
+        t = H.spawn(ws)
+        await asyncio.wait_for(t, timeout=1.0)
+        assert ws.accepted is False
+        assert ws.closed is True
+        assert ws.close_code == 1008
+        assert ws.sent == []
+        await H.aclose_runs()
+
+    run(main())
+
+
+def test_https_host_port443_default_is_accepted(run, monkeypatch):
+    """Under XFP=https, ``Host: victim:443`` normalizes to ``victim`` and matches ``https://victim`` —
+    the expected scheme's own default port IS bare-host-equivalent → accepted."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "https://victim.example", "host": "victim.example:443",
+                               "x-forwarded-proto": "https"})
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
+def test_http_host_port80_default_is_accepted(run, monkeypatch):
+    """Direct-uvicorn / http deploy: ``Host: victim:80`` + ``Origin http://victim`` — the expected
+    scheme's default port (``:80``) IS stripped → same-origin, accepted."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "http://victim.example", "host": "victim.example:80"},
+                      scheme="ws")
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
+def test_ipv6_https_host_port80_not_stripped_is_rejected(run, monkeypatch):
+    """IPv6 consistency: under https, ``Host [::1]:80`` is NOT collapsed (only ``:443`` is), so it does
+    not match ``https://[::1]`` (netloc ``[::1]``) → refused. Bracket-safety preserved."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "https://[::1]", "host": "[::1]:80",
+                               "x-forwarded-proto": "https"})
+        t = H.spawn(ws)
+        await asyncio.wait_for(t, timeout=1.0)
+        assert ws.accepted is False
+        assert ws.closed is True
+        assert ws.close_code == 1008
+        assert ws.sent == []
+        await H.aclose_runs()
+
+    run(main())
+
+
 # ── absent Origin (non-browser / native / test) is ACCEPTED per spec §1.1 ──────────────────────────
 
 def test_absent_origin_is_accepted(run, monkeypatch):
@@ -417,17 +501,28 @@ def test_origin_helpers_unit(monkeypatch):
     assert ws_routes._origin_netloc("null") is None
     assert ws_routes._origin_netloc("") is None
 
-    # _host_authority strips the scheme's default port (Host carries no scheme), preserves others.
+    # _host_authority is SCHEME-AWARE: it strips ONLY the expected scheme's default port.
+    #  * indeterminate scheme ("" — the caller also skips the scheme leg) → best-effort strip either.
     assert ws_routes._host_authority("a.example:443") == "a.example"
     assert ws_routes._host_authority("a.example:80") == "a.example"
     assert ws_routes._host_authority("A.Example:7000") == "a.example:7000"
     assert ws_routes._host_authority("a.example") == "a.example"
     assert ws_routes._host_authority("") == ""
-    # IPv6 Host authority — bracket-safe: default port stripped, a literal ending in 443 untouched.
-    assert ws_routes._host_authority("[::1]:443") == "[::1]"
-    assert ws_routes._host_authority("[::1]:80") == "[::1]"
+    #  * expected https/wss → strip ONLY :443; a :80 stays (port mismatch under https).
+    assert ws_routes._host_authority("a.example:443", "https") == "a.example"
+    assert ws_routes._host_authority("a.example:80", "https") == "a.example:80"
+    assert ws_routes._host_authority("a.example:443", "wss") == "a.example"
+    #  * expected http/ws → strip ONLY :80; a :443 stays.
+    assert ws_routes._host_authority("a.example:80", "http") == "a.example"
+    assert ws_routes._host_authority("a.example:443", "http") == "a.example:443"
+    assert ws_routes._host_authority("a.example:80", "ws") == "a.example"
+    # IPv6 Host authority — bracket-safe + scheme-aware.
+    assert ws_routes._host_authority("[::1]:443") == "[::1]"          # indeterminate best-effort
+    assert ws_routes._host_authority("[::1]:80") == "[::1]"           # indeterminate best-effort
+    assert ws_routes._host_authority("[::1]:443", "https") == "[::1]"
+    assert ws_routes._host_authority("[::1]:80", "https") == "[::1]:80"   # NOT stripped under https
     assert ws_routes._host_authority("[::1]") == "[::1]"
-    assert ws_routes._host_authority("[::443]") == "[::443]"
+    assert ws_routes._host_authority("[::443]", "https") == "[::443]"    # literal, not a port
 
     monkeypatch.setenv("ALLOWED_ORIGINS", "https://a.example, *, https://b.example:8443")
     allowed = ws_routes._allowed_ws_origins()
