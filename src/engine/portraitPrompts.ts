@@ -46,7 +46,10 @@ export interface PublicAppearanceFacets {
   demeanor?: string;
 }
 
-import { EXPRESSION_VARIANTS, FRAMING_VARIANTS, BACKDROP_VARIANTS } from "./imageConstants";
+import {
+  EXPRESSION_VARIANTS, FRAMING_VARIANTS, BACKDROP_VARIANTS,
+  FACIAL_STRUCTURE_VARIANTS, LIGHTING_VARIANTS,
+} from "./imageConstants";
 
 /**
  * Compose the structured physical facet into a single rich appearance clause (L29). Skips a
@@ -58,6 +61,56 @@ export function physicalFacetToAppearance(p: PhysicalCharacteristics): string {
   if (p.distinguishingMark && !/^none\b/i.test(p.distinguishingMark.trim())) parts.push(p.distinguishingMark);
   parts.push(p.ageLook);
   return parts.join(", ");
+}
+
+// ── #1317 (cast portraits converge, root cause 3) — gender-aware BUILD/HAIR phrasing at
+// PROMPT-ASSEMBLY time only ──────────────────────────────────────────────────────────────────────
+// The STORED `physicalCharacteristics` facet (heightBuild/hair) is deliberately gender-NEUTRAL — it
+// never encodes `genderPresentation`, so the same pool serves every gender and the stored facet stays
+// byte-stable (0007/0031; never mutated here). Before this fix the ONLY gender cue an image model saw
+// was the repeated directive `genderPresentationPhrase` in the Subject line — the build/hair VOCABULARY
+// itself never shifted, so a man and a woman dealt the same stored build/hair phrase rendered near-
+// identically apart from the name/phrase cue. These pools map facet → a short, hash-seeded gendered
+// CLAUSE appended at prompt-assembly time (never replacing the stored phrase, never touching storage),
+// so the same stored facet now visibly reads differently across presentations.
+const BUILD_GENDER_CUES: Record<"man" | "woman" | "nonbinary", readonly string[]> = {
+  man: ["reads distinctly masculine", "carries a masculine presence", "a build that reads masculine"],
+  woman: ["reads distinctly feminine", "carries a feminine presence", "a build that reads feminine"],
+  nonbinary: ["reads androgynous", "carries a gender-neutral presence", "a build that resists easy gendering"],
+};
+const HAIR_GENDER_CUES: Record<"man" | "woman" | "nonbinary", readonly string[]> = {
+  man: ["styled with masculine grooming", "cut with a masculine edge", "groomed in a masculine style"],
+  woman: ["styled with feminine flair", "finished with feminine styling", "worn with a feminine touch"],
+  nonbinary: ["styled in a gender-neutral way", "cut with an androgynous edge", "styled without a strong gender cue"],
+};
+
+function genderCue(
+  pool: Record<"man" | "woman" | "nonbinary", readonly string[]>,
+  gender: "man" | "woman" | "nonbinary",
+  seed: number,
+): string {
+  const cues = pool[gender];
+  return cues[((seed % cues.length) + cues.length) % cues.length]!;
+}
+
+/**
+ * Compose a SEPARATE gendered build/hair clause for the prompt — deliberately NOT folded into the
+ * `Physical appearance:` line itself. `Physical appearance:` is `physicalFacetToAppearance(p)` verbatim,
+ * a load-bearing invariant (L29, `momentOrchestration.test.ts`): the narrator context and the portrait
+ * prompt must share the EXACT SAME appearance clause byte-for-byte, so words and picture can never
+ * diverge. Splicing a gender cue into heightBuild/hair before that call would break the shared-string
+ * containment check, so instead the cue rides as its own trailing clause — additive, portrait-only,
+ * and it never touches `p` (no mutation; the stored facet stays gender-neutral and byte-stable).
+ */
+function genderedBuildHairClause(
+  p: PhysicalCharacteristics,
+  gender: "man" | "woman" | "nonbinary" | undefined,
+  shot: number,
+): string | undefined {
+  if (!gender) return undefined;
+  const buildCue = genderCue(BUILD_GENDER_CUES, gender, shot);
+  const hairCue = genderCue(HAIR_GENDER_CUES, gender, shot >>> 20);
+  return `the build ${buildCue}, the hair ${hairCue}`;
 }
 
 /** A generated portrait prompt ready to hand to an image provider. */
@@ -106,14 +159,33 @@ export function buildPortraitPrompt(
   const expression = EXPRESSION_VARIANTS[shot % EXPRESSION_VARIANTS.length]!;
   const framing = FRAMING_VARIANTS[(shot >>> 8) % FRAMING_VARIANTS.length]!;
   const backdrop = BACKDROP_VARIANTS[(shot >>> 16) % BACKDROP_VARIANTS.length]!;
+  const facialStructure = FACIAL_STRUCTURE_VARIANTS[(shot >>> 24) % FACIAL_STRUCTURE_VARIANTS.length]!;
+  // #1317: a SECOND hash-seeded pick — same fnv1a discipline, salted off the first hash rather than a
+  // shared/external stream — so lighting draws from fresh bits instead of reusing the (already fully
+  // spoken-for) low 32 bits of `shot`. Still pure + deterministic per (houseguestId, styleAnchor); no
+  // rng is consumed from any shared stream.
+  const shot2 = fnv1a(`${shot}|v2`);
+  const lighting = LIGHTING_VARIANTS[shot2 % LIGHTING_VARIANTS.length]!;
   // L29: prefer the STRUCTURED facet (distinct faces, one source of truth with the narration); fall
-  // back to the prose `appearance` for pre-0058 saves that never seeded a facet.
-  // #1140 NOTE (deferred follow-up): the stored physicalCharacteristics (build/hair/etc.) are gender-
-  // AGNOSTIC pools today, so a re-picked / flipped facet keeps whatever build+hair were dealt. The directive
-  // gender phrase below is the load-bearing cue; gender-AWARE build/hair pools (so the described body+hair
-  // also lean with the presentation) are a larger, deliberately-deferred change — do NOT mutate the stored
-  // facets here (they are byte-stable, 0007/0031).
+  // back to the prose `appearance` for pre-0058 saves that never seeded a facet. This EXACT string
+  // (`physicalFacetToAppearance(physicalCharacteristics)`) is the one the narrator context ALSO voices
+  // verbatim (`momentOrchestration.test.ts` L29) — never altered here.
   const physical = physicalCharacteristics ? physicalFacetToAppearance(physicalCharacteristics) : appearance;
+  // #1317 Fix C (closes the #1140 deferral): a SEPARATE gendered build/hair clause, hash-seeded per
+  // subject — the stored facet itself stays gender-neutral and untouched (byte-stable, 0007/0031); this
+  // additive clause is the only place the extra cue rides (see `genderedBuildHairClause` above).
+  const genderedStyling = physicalCharacteristics
+    ? genderedBuildHairClause(physicalCharacteristics, genderPresentation, shot)
+    : undefined;
+  // #1317 (root cause 4) — the strongest per-subject differentiator, restated near the END of the
+  // prompt (the composition re-weight below leads with it too): most image models over-weight both
+  // the first AND the last tokens, so repeating the one clause that most distinguishes this face from
+  // the rest of the cast at the close counters the shared style anchor's dominance in the middle.
+  const distinguishingMark = physicalCharacteristics?.distinguishingMark;
+  const hasMark = distinguishingMark && !/^none\b/i.test(distinguishingMark.trim());
+  const distinctiveClose = physicalCharacteristics
+    ? `${facialStructure}${hasMark ? `, ${distinguishingMark}` : ""}`
+    : physical;
   const styleLine = physicalCharacteristics?.style
     ? `${presentation}, ${physicalCharacteristics.style}`
     : presentation;
@@ -138,14 +210,27 @@ export function buildPortraitPrompt(
   // 0063: the observable DEMEANOR colors the EXPRESSION line — the face matches the personality (a blunt
   // person reads guarded, a warm one reads open) instead of every portrait sharing one default affect.
   const expressionLine = demeanor ? `${expression}, ${demeanor}` : expression;
+  // #1317 (root cause 1 — composition re-weight): the ~24-word shared style anchor used to lead the
+  // prompt, dominating the token budget before any subject-specific content appeared. Distinguishing
+  // clauses (identity, then the physical facet, then presentation) now come FIRST; the shared anchor is
+  // KEPT (never trimmed — every anchor still appears in full, `buildPortraitPrompt`'s Vault-free-anchor
+  // callers still find it verbatim) but MOVED past them, and the strongest per-subject differentiator is
+  // restated once more at the very end (`distinctiveClose`) so it lands on both the primacy AND recency
+  // positions a subject-agnostic anchor used to monopolize alone.
   const prompt = [
-    styleAnchor,
     `Subject: ${subjectParts.join(", ")}`,
     `Physical appearance: ${physical}`,
+    // #1317 Fix C — additive only: present iff a gender + a structured facet are both available;
+    // absent entirely (byte-identical to pre-#1317) otherwise.
+    ...(genderedStyling ? [`Build & hair styling: ${genderedStyling}`] : []),
     `Presentation style: ${styleLine}`,
+    styleAnchor,
+    `Facial structure: ${facialStructure}`,
     `Expression: ${expressionLine}`,
+    `Lighting: ${lighting}`,
     `Framing: ${framing}`,
     `Setting: ${backdrop}`,
+    `Distinctive look: ${distinctiveClose}`,
   ].join(". ");
 
   return { houseguestId, name, prompt };

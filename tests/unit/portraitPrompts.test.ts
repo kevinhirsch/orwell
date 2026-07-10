@@ -108,7 +108,9 @@ describe("0051 — createCharacter portrait prompts (cast NPCs, Vault-free)", ()
       // The anchor is the shared photorealistic prefix every prompt carries; lift it from an NPC's
       // prompt (the player has no portrait — #529).
       const pp = a.getPortraitPrompt(v.house[0]!.id as EntityId)!;
-      return pp.prompt.split(". Subject:")[0]!;
+      // #1317: the anchor is no longer prompt-initial (distinguishing subject/physical facets now
+      // lead the composition) — find it by CONTENT rather than position.
+      return (STYLE_ANCHOR_VARIANTS as readonly string[]).find((v2) => pp.prompt.includes(v2))!;
     };
     // Same seed → identical anchor, every time.
     expect(anchorOf(100)).toBe(anchorOf(100));
@@ -182,8 +184,10 @@ describe("0051 — portraitStyleAnchor persistence (non-degradation)", () => {
   it("survives a save → load round-trip and keeps the same look", () => {
     const adapter = new GameSessionAdapter();
     const view = adapter.createCharacter({ playerName: "The Player", seed: 42 });
-    // Lift the anchor from an NPC prompt (the player has no portrait — #529).
-    const beforeAnchor = adapter.getPortraitPrompt(view.house[0]!.id as EntityId)!.prompt.split(". Subject:")[0]!;
+    // Lift the anchor from an NPC prompt by CONTENT (#1317 — no longer prompt-initial; the player has
+    // no portrait — #529).
+    const findAnchor = (prompt: string) => (STYLE_ANCHOR_VARIANTS as readonly string[]).find((v) => prompt.includes(v))!;
+    const beforeAnchor = findAnchor(adapter.getPortraitPrompt(view.house[0]!.id as EntityId)!.prompt);
 
     const snap = adapter.snapshot();
     expect(snap.portraitStyleAnchor).toBeTruthy();
@@ -191,7 +195,7 @@ describe("0051 — portraitStyleAnchor persistence (non-degradation)", () => {
 
     const restored = new GameSessionAdapter();
     restored.restore(snap);
-    const afterAnchor = restored.getPortraitPrompt(view.house[0]!.id as EntityId)!.prompt.split(". Subject:")[0]!;
+    const afterAnchor = findAnchor(restored.getPortraitPrompt(view.house[0]!.id as EntityId)!.prompt);
     expect(afterAnchor).toBe(beforeAnchor);
   });
 
@@ -205,10 +209,11 @@ describe("0051 — portraitStyleAnchor persistence (non-degradation)", () => {
 
     const restored = new GameSessionAdapter();
     restored.restore(snap);
-    // Lift the anchor from an NPC prompt (the player has no portrait — #529).
+    // Lift the anchor from an NPC prompt by CONTENT (#1317 — no longer prompt-initial; the player has
+    // no portrait — #529).
     const pp = restored.getPortraitPrompt(npcId)!;
     expect(pp).not.toBeNull();
-    const anchor = pp.prompt.split(". Subject:")[0]!;
+    const anchor = (STYLE_ANCHOR_VARIANTS as readonly string[]).find((v) => pp.prompt.includes(v))!;
     expect(STYLE_ANCHOR_VARIANTS as readonly string[]).toContain(anchor);
   });
 });

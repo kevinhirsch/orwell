@@ -194,6 +194,12 @@ const STYLE_DESC = [
 export const MAX_PER_HAIR = 2;
 export const MAX_PER_FACIAL = 2;
 export const MAX_PER_STYLE = 2;
+// #1317 (cast portraits converge, root cause 2): `heightBuild`/`skinTone` were drawn with a BARE
+// per-NPC `rng.pick()` — no cast-wide spread cap — while hair/facial/style already got the L28-style
+// cap above. Same discipline, same pool sizes (10 each): capped at 2 so a 15-cast comfortably spreads
+// across at least 5 distinct values per axis instead of risking the same build/tone piling up.
+export const MAX_PER_HEIGHT_BUILD = 2;
+export const MAX_PER_SKIN_TONE = 2;
 
 /** An age-look cue keyed off the houseguest's age band — keeps the look age-appropriate (0058 §3). */
 export function ageLookFor(age: number): string {
@@ -211,17 +217,28 @@ export function ageLookFor(age: number): string {
  * `characterFactory` deals `builds` over `BUILDS`.
  */
 export interface PhysicalSpread {
+  heightBuild: string;
+  skinTone: string;
   hair: string;
   facial: string;
   style: string;
 }
 
-/** Deal the salient look axes cast-wide with L28-style spread caps (#533). Deterministic per seed. */
+/**
+ * Deal the salient look axes cast-wide with L28-style spread caps (#533; #1317 extends the cap to
+ * `heightBuild`/`skinTone`). Deterministic per seed. This runs off a DEDICATED side rng, isolated
+ * from every other stream (the caller always constructs a fresh `SeededRandom` just for this call),
+ * so widening what it draws here can never perturb any other seeded outcome.
+ */
 export function dealCastPhysicalSpread(rng: RandomnessSource, count: number): PhysicalSpread[] {
+  const heightBuild = spreadFacet(rng, HEIGHT_BUILD, count, MAX_PER_HEIGHT_BUILD);
+  const skinTone = spreadFacet(rng, SKIN_TONE, count, MAX_PER_SKIN_TONE);
   const hair = spreadFacet(rng, HAIR_DESC, count, MAX_PER_HAIR);
   const facial = spreadFacet(rng, FACIAL, count, MAX_PER_FACIAL);
   const style = spreadFacet(rng, STYLE_DESC, count, MAX_PER_STYLE);
-  return Array.from({ length: count }, (_, i) => ({ hair: hair[i]!, facial: facial[i]!, style: style[i]! }));
+  return Array.from({ length: count }, (_, i) => ({
+    heightBuild: heightBuild[i]!, skinTone: skinTone[i]!, hair: hair[i]!, facial: facial[i]!, style: style[i]!,
+  }));
 }
 
 /**
@@ -235,8 +252,11 @@ export function generatePhysicalCharacteristics(
   rng: RandomnessSource, age: number, spread?: PhysicalSpread,
 ): PhysicalCharacteristics {
   return {
-    heightBuild: rng.pick(HEIGHT_BUILD),
-    skinTone: rng.pick(SKIN_TONE),
+    // #1317: heightBuild/skinTone now come from the cast-wide spread-capped deal when one is supplied
+    // (the live cast-generation path), matching hair/facial/style; a standalone call with no cast
+    // context falls back to the old independent per-NPC pick.
+    heightBuild: spread ? spread.heightBuild : rng.pick(HEIGHT_BUILD),
+    skinTone: spread ? spread.skinTone : rng.pick(SKIN_TONE),
     hair: spread ? spread.hair : rng.pick(HAIR_DESC),
     facialFeatures: spread ? spread.facial : rng.pick(FACIAL),
     distinguishingMark: rng.pick(MARKS),
