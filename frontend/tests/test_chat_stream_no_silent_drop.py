@@ -63,9 +63,12 @@ def test_sse_error_response_defaults_to_400():
 
 
 def _stream_endpoint_src():
-    """Body of the streaming `chat_stream` handler only (NOT the non-streaming
-    `/api/chat`, whose JSON 400s the client parses fine and which is not the bug)."""
-    start = CHAT_ROUTES_SRC.index("async def chat_stream(")
+    """Body of the streaming chat pipeline only (NOT the non-streaming `/api/chat`, whose JSON 400s
+    the client parses fine and which is not the bug). The pipeline was extracted into
+    `_prepare_chat_stream` (a producer builder the WS `turn` relay reuses, ADR 0017 §3.5); the
+    pre-stream model/endpoint guards live there now, and the `chat_stream` route below is a thin
+    wrapper. Slice from the pipeline start through `chat_events` to cover both."""
+    start = CHAT_ROUTES_SRC.index("async def _prepare_chat_stream(")
     end = CHAT_ROUTES_SRC.index("async def chat_events(", start)
     return CHAT_ROUTES_SRC[start:end]
 
