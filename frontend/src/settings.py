@@ -466,7 +466,7 @@ def ws_transport_enabled() -> bool:
     with a valid perTabId hello, the peer uses the live incremental renderer; #1349 CSWSH
     Origin guard in place). ORWELL_WS_TRANSPORT is read from the environment as the
     operator lever: unset ⇒ ON (default); an explicit off/0/false/no ⇒ OFF (rollback to
-    the SSE/poll stack with no code change or restart-editing files)."""
+    the SSE/poll stack — just an env edit + restart, no code change)."""
     raw = os.getenv("ORWELL_WS_TRANSPORT")
     if raw is None:
         return True
