@@ -524,8 +524,24 @@ def main() -> int:
             }""")
             check(hud_a11y.get("announcer") is True and hud_a11y.get("polite") is True,
                   f"status HUD has a polite delta announcer ({hud_a11y})")
-            check(page.evaluate("document.getElementById('chat-history').getAttribute('aria-live')") == "polite",
-                  "chat log is a polite live region (aria-busy gates it during streams)")
+            # F-A11Y-1 (#1270): the narrator streams token-by-token into #chat-history, so it must
+            # NOT be a polite live region (that re-announces every half-formed fragment). It carries
+            # aria-live="off" (role="log" kept); completed replies are announced ONCE per round into
+            # the dedicated visually-hidden #a11y-announcer polite/atomic region. Mirrors the pytest
+            # gate test_hig_a11y_p1.py; this browser-smoke assertion was left stale by #1270.
+            chat_a11y = page.evaluate("""() => {
+              const log = document.getElementById('chat-history');
+              const ann = document.getElementById('a11y-announcer');
+              return { logLive: log && log.getAttribute('aria-live'),
+                       hasAnnouncer: !!ann,
+                       announcerPolite: ann && ann.getAttribute('aria-live') === 'polite',
+                       announcerAtomic: ann && ann.getAttribute('aria-atomic') === 'true' };
+            }""")
+            check(chat_a11y.get("logLive") == "off",
+                  f"chat log is NOT a flooding live region — #chat-history is aria-live=off ({chat_a11y})")
+            check(chat_a11y.get("hasAnnouncer") is True and chat_a11y.get("announcerPolite") is True
+                  and chat_a11y.get("announcerAtomic") is True,
+                  f"a dedicated polite/atomic #a11y-announcer carries the once-per-round narration ({chat_a11y})")
 
             # C27: the game build ships no third-party CDN deps (KaTeX/Mermaid — no math or
             # diagrams in BB) and no workspace tour. Asserted on the SERVED page.

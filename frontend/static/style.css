@@ -12566,6 +12566,30 @@ textarea.memory-add-input {
   white-space: nowrap !important; border: 0 !important;
 }
 
+/* F-A11Y-2 (WCAG 2.4.1 Bypass Blocks): the "Skip to chat" link. Off-screen until it takes
+   keyboard focus, then pinned to the top-left so a keyboard / switch / AT user can jump straight
+   to the composer instead of tabbing the whole sidebar. z-index sits above the boot loader
+   (#app-loader is 99999) so it stays reachable. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100000;
+  padding: 10px 16px;
+  background: var(--bg, #282c34);
+  color: var(--fg, #e6e6e6);
+  border: 2px solid var(--accent-primary, var(--red, #e06c75));
+  border-radius: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  left: 0;
+  outline: none;
+}
+
 /* ── Custom language type picker (replaces visible chrome of native <select>
    — <option>s can't render SVG). Hidden select stays as the source of truth. */
 .doc-langpicker-native-hidden {
@@ -37643,6 +37667,14 @@ body.theme-frosted .modal {
   color: var(--red, #ff6b6b);
   display: none;
 }
+/* F-CONTRAST-2 (HIG Color / WCAG 1.4.1): red hue is NOT the only error channel — a
+   leading warning glyph carries the meaning for color-blind users and on low-contrast
+   glass. Text-presentation variation selector (FE0E) renders it as a mono glyph, not a
+   colored emoji. */
+.hwfit-sched-err::before {
+  content: "\26A0\FE0E";
+  margin-right: 4px;
+}
 .hwfit-sched-err.is-visible { display: block; }
 @media (max-width: 768px) {
   .hwfit-schedule-row { gap: 8px; }
@@ -37658,6 +37690,15 @@ body.theme-frosted .modal {
 @keyframes note-card-flash-anim {
   0%   { box-shadow: 0 0 0 2px var(--accent, var(--red)); }
   100% { box-shadow: 0 0 0 2px transparent; }
+}
+/* F-MOTION-1 (HIG Motion / WCAG 2.3.3): these non-kit decorative surfaces honor Reduce
+   Motion too — the kits (the .ow- / .og- / .on- families) already opt in per-surface, but
+   legacy/feature CSS animations slip through one by one. Neutralize the note-card flash and
+   the hwfit schedule-chip transition when the OS setting is on. Decorative only — never
+   functional state. */
+@media (prefers-reduced-motion: reduce) {
+  .note-card-flash { animation: none; }
+  .hwfit-sched-day-chip { transition: none; }
 }
 /* ── ask_user: multiple-choice question card ─────────────────────────────
    The agent posed a question and ended its turn. The user clicks an option,

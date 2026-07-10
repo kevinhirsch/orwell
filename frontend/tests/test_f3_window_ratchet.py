@@ -47,8 +47,12 @@ KIT = {"orwellWindow.js"}
 
 # Legacy windowDrag consumers (the build=0 workspace family). Post-Lane-F
 # work may MIGRATE these onto the kit (remove from this list); nothing may
-# be added.
-GRANDFATHERED_DRAG = {"planWindow.js", "settings.js", "theme.js", "workspace.js"}
+# be added. settings.js MIGRATED onto the kit (#553; 2026-06-23 window-kit
+# coverage audit §5 step 2): it composes OrwellWindowKit.create and no longer
+# calls makeWindowDraggable — shrink-only, removed here. theme.js still
+# hand-wires drag (a sibling migration, coverage audit §5 step 3); planWindow
+# / workspace are inherited-workspace, game-build-dropped.
+GRANDFATHERED_DRAG = {"planWindow.js", "theme.js", "workspace.js"}
 
 # Non-window slotted chrome (ruling-class strips/panels — placement only,
 # no window behavior). orwellRetrospective.js MIGRATED onto the kit (2026-06-19,
@@ -85,6 +89,87 @@ GEOMETRY_KEY_MARKERS = (
     # mirroring orwellCastPin's 'orwell-cast-pinned:<user>' precedent.
     "dockedKey",
 )
+
+# ── hand-rolled `.modal` window chrome (2026-06-23 coverage audit §7.1) ────
+# The kit's `modal:true` tier (scrim + focus-trap + inert + aria-modal, one
+# z-authority) is the ONE way to build a modal dialog. A module that mints a
+# `.modal` window ROOT — `element.className = 'modal…'` / `classList.add('modal')`
+# — is hand-rolling the chrome the kit exists to own. Freeze the current minters
+# to a shrink-only allowlist so no NEW surface regrows a bespoke `.modal` window;
+# the existing ones migrate onto `OrwellWindowKit.create({ modal: true, … })`
+# (coverage audit §5 steps 4/2/3) and drop off this list. This is the STATIC half
+# of the audit's convention gate; its runtime companion (every game-build floating
+# window carries [data-ow-window]) is the F-3+ rogue-chrome check in
+# browser_smoke.py.
+#
+# Game-build reachability (verified against src/settings.py GAME_DROP_SCRIPTS /
+# GAME_DROP_SET, coverage audit §1):
+#   • ui.js — styledConfirm/styledPrompt micro-dialogs: GAME-BUILD REACHABLE
+#     (the class-B holdout to migrate to kit `modal:true`, coverage audit §5 step 4).
+#   • assistant.js / group.js / planWindow.js / sessions.js / workspace.js —
+#     inherited-workspace surfaces, game-build-DROPPED (routers unmounted / scripts
+#     stripped). Listed so a NEW minter still fails; not game-build windows.
+# (settings.js / theme.js build modals from STATIC index.html nodes, not via this
+# construction signature — settings.js is already kit-composed (#553); they are
+# tracked by GRANDFATHERED_DRAG above, not here.)
+GRANDFATHERED_MODAL_BUILDERS = {
+    "ui.js",            # styledConfirm/styledPrompt — class-B, migrate to kit modal:true
+    "assistant.js", "group.js", "planWindow.js", "sessions.js", "workspace.js",  # build=0
+}
+# The construction signature: assigning/adding the bare `modal` CLASS TOKEN to an
+# element, in ANY class position (not just first) — so a bypass like
+# `className = 'foo modal'` or `classList.add('foo', 'modal')` is caught too (a
+# regression Greptile flagged on the first cut, which only matched the leading
+# position). The `(?<![\w-])modal(?![\w-])` boundaries keep it to the STANDALONE
+# `modal` token: the `modal-content`/`modal-header`/`modal-minimized`/
+# `settings-modal-content` compounds and camel `modalManager` are chrome PARTS the
+# kit + plumbing legitimately reference (incl. in comments) and must NOT false-match.
+_MODAL_ROOT_RX = (
+    r"""className\s*=\s*['"][^'"]*(?<![\w-])modal(?![\w-])[^'"]*['"]"""
+    r"""|classList\.add\([^)]*['"]modal['"][^)]*\)"""
+)
+
+
+def test_ratchet_no_new_hand_rolled_modal_window():
+    callers = _callers(_MODAL_ROOT_RX)
+    rogue = callers - KIT - GRANDFATHERED_MODAL_BUILDERS
+    assert not rogue, (
+        f"NEW hand-rolled `.modal` window chrome in {sorted(rogue)} — a modal "
+        "dialog composes OrwellWindowKit.create({ modal: true, … }) (scrim + "
+        "focus-trap + inert + one z-authority), never a bespoke `.modal` root "
+        "(2026-06-23 window-kit coverage audit §7.1)."
+    )
+
+
+def test_ratchet_modal_signature_catches_bypass_forms():
+    """The `.modal`-root signature must catch `modal` in ANY class position, not just
+    the leading one — otherwise `className = 'foo modal'` / `classList.add('foo',
+    'modal')` slip past and the convention gate is bypassable (Greptile P1 repro).
+    Compound/camel names (`modal-*`, `*-modal`, `modalFoo`) must NOT false-match, or the
+    shrink-only allowlist breaks on legitimate chrome-part references."""
+    rx = re.compile(_MODAL_ROOT_RX)
+    # both bypass forms + the canonical forms are CAUGHT
+    caught = (
+        "el.className = 'foo modal';",          # modal not first (the bypass)
+        "el.classList.add('foo', 'modal');",    # modal not first arg (the bypass)
+        "el.className = 'modal';",
+        "el.className = 'modal hidden';",
+        "el.classList.add('modal');",
+        'el.className = "panel modal open";',
+    )
+    for s in caught:
+        assert rx.search(s), f"bypass slipped past the gate: {s!r}"
+    # compound / camel class names are NOT the bare `modal` root — must NOT match
+    ignored = (
+        "el.className = 'modal-primary';",
+        "el.className = 'modalFoo';",
+        "el.className = 'settings-modal-content';",
+        "el.className = 'foo-modal-bar';",
+        "el.classList.add('modal-minimized');",
+        "el.classList.add('modalManager');",
+    )
+    for s in ignored:
+        assert not rx.search(s), f"false-matched a chrome-part compound: {s!r}"
 
 
 def test_ratchet_drag_engine_callers_are_frozen():

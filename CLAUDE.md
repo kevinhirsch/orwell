@@ -20,9 +20,10 @@ that the deterministic rules, the secret state, and the narration are cleanly se
 through **0110**, and the originally-drafted set is built and **green** — the spec ceiling and the
 *built* one are now nearly flush: **0075–0096, 0099–0102, 0104–0110** are built, while
 **0097/0098/0103** remain **frozen** (owner-parked "not planned," preserved not deleted, reopenable)
-— **0108** (the real-model golden-path gate) shipped 2026-07-07 as machinery + CI gates with the PR
-replay job **dormant until the first real-model fixture is recorded and committed** (an explicit CI
-notice; `frontend/INTEGRATION.md` §golden-path holds the one-command record). The 2026-07-06 closure session shipped
+— **0108** (the real-model golden-path gate) shipped 2026-07-07 as machinery + CI gates, and is now
+**armed** (2026-07-09: the first real-model fixture `frontend/tests/golden/golden_path_glm-5.2.jsonl` was
+committed and regenerated in #1251; the `golden-path` CI job replays it key-free — twice, comparing
+digests — and is blocking via `ci-gate`; `frontend/INTEGRATION.md` §golden-path holds the one-command record). The 2026-07-06 closure session shipped
 the last three spec-only files — 0094 (distorted-gossip consequences, shipped SCOPED as a new
 `confront(npcId, factId)` lever; deliberately did not retrofit nominate/vote, an owner-flagged design
 call), 0095 (pre-show ties as time-bombs), and 0096 (emergent nemesis) — alongside 0101 (NPC
@@ -53,7 +54,7 @@ MUST compose the kit.)* The game is **folded into the main chat**: the player-fa
 `docs/features/` (through **0110**; the 0067–0074 launch band is 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
 0070 off-screen texture enrichment, 0071 defensive hardening (redaction + URL/path guards), 0072 the
 multi-platform gateway, 0073 the structural anti-sycophancy game-build wall (a CI gate), and 0074 local &
-tunable HTTPS (ADR 0014); past the launch band, **0075–0096, 0099–0102, 0104–0110** are built and **0097/0098/0103** remain frozen (owner-parked, preserved not deleted) — 0108's PR replay gate ships dormant pending its first recorded fixture;
+tunable HTTPS (ADR 0014); past the launch band, **0075–0096, 0099–0102, 0104–0110** are built and **0097/0098/0103** remain frozen (owner-parked, preserved not deleted) — 0108's PR replay gate is now **armed** (fixture committed #1251; the `golden-path` CI job runs the replay and is blocking);
 0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
@@ -575,8 +576,9 @@ consequences 0094 (scoped: a new `confront` lever, not a nominate/vote retrofit 
 design call), pre-show ties as time-bombs 0095, and emergent nemesis 0096), while **0097/0098/0103**
 remain **frozen** (owner-parked "not planned" 2026-06-27, preserved not deleted, reopenable) and
 **0108** (the real-model golden-path gate) is **built 2026-07-07** — record/replay seam + `golden-path`
-PR job + `golden-nightly` re-record — with the PR gate dormant until the first real-model fixture is
-recorded and committed (`frontend/INTEGRATION.md` §golden-path).
+PR job + `golden-nightly` re-record — and **armed 2026-07-09**: the first real-model fixture
+`golden_path_glm-5.2.jsonl` is committed (regenerated #1251), so the `golden-path` PR job replays it
+key-free and is blocking via `ci-gate` (`frontend/INTEGRATION.md` §golden-path).
 **0022** (the rich game UI / MVP-2) was **removed** in the 2026-06-28 PO review — by ADR 0003 the chat *is*
 the UI, and its goals were delivered chat-forward via 0020/0051/0054, so the standalone dashboard spec was cut.
 
