@@ -1662,7 +1662,13 @@ def setup_orwell_routes() -> APIRouter:
         )
         if not result:
             return JSONResponse(status_code=400, content={"error": "no usable layout fields"})
+        # Publish the store's CANONICAL descriptor, never the raw request values: patch_layout
+        # normalizes windowId/deviceId (e.g. trims whitespace) before keying the write, so a
+        # `deviceId=" dev "` request stores under `dev`. Fanning out the raw " dev " would make
+        # same-device peers (which hold the canonical token) reject their own device's update.
         saved = result["state"]
+        canon_window = result.get("windowId", body.windowId)
+        canon_device = result.get("deviceId", "") or ""
         # Fan out to the SAME device's other tabs (best-effort): they view the canonical game
         # session, so its per-session SSE channel reaches every tab. The `deviceId` scopes the
         # apply to the originating device (cross-device geometry sync is dropped, ADR 0017); the
@@ -1671,11 +1677,12 @@ def setup_orwell_routes() -> APIRouter:
             sid = orwell_game_session.get_game_session(user)
             if sid:
                 session_events.publish(sid, "layout-changed",
-                                       {"windowId": body.windowId, "state": saved,
-                                        "origin": body.origin or "", "deviceId": body.deviceId or ""})
+                                       {"windowId": canon_window, "state": saved,
+                                        "origin": result.get("origin", body.origin or ""),
+                                        "deviceId": canon_device})
         except Exception:
             logger.debug("[orwell] layout-changed publish skipped", exc_info=True)
-        return {"windowId": body.windowId, "state": saved}
+        return {"windowId": canon_window, "state": saved}
 
     # ── 0057: seasons as levels — the per-user season number + the two restart actions ──────
     @router.get("/season")
