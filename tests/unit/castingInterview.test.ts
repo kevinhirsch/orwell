@@ -240,7 +240,7 @@ describe("the incremental casting intake (0050 — OOBE can be half-done)", () =
   it("a fully covered intake has no next step", () => {
     let intake = emptyIntake();
     intake = mergeCastingUpdate(intake, {
-      castPhoto: "uploaded", playerName: "P", backstory: "b", motivation: "m", personaArchetype: "pa",
+      castPhoto: "uploaded", playerName: "the player", backstory: "b", motivation: "m", personaArchetype: "pa",
       personaStrategyStyle: "ps", privateStrategy: "x", interviewNotes: ["n"],
       archetype: ARCHETYPES[0]!.archetype, strategyStyle: ARCHETYPES[0]!.styles[0]!,
       // #1326 — the newest (optional, never-gating) coverage field; it still counts toward "fully
@@ -257,7 +257,7 @@ describe("the incremental casting intake (0050 — OOBE can be half-done)", () =
   // and has everything else covered; the one open step is that lone optional question.
   it("genderPresentation is the ONLY thing missing from an otherwise-complete intake, and it never blocks finalize", () => {
     const intake = mergeCastingUpdate(emptyIntake(), {
-      castPhoto: "uploaded", playerName: "P", backstory: "b", motivation: "m", personaArchetype: "pa",
+      castPhoto: "uploaded", playerName: "the player", backstory: "b", motivation: "m", personaArchetype: "pa",
       personaStrategyStyle: "ps", privateStrategy: "x", interviewNotes: ["n"],
       archetype: ARCHETYPES[0]!.archetype, strategyStyle: ARCHETYPES[0]!.styles[0]!,
     });

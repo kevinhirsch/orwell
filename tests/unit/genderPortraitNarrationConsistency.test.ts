@@ -201,7 +201,9 @@ describe("#1326 — an unset genderPresentation is NEVER silently dropped", () =
       // Force the premiere moment to be present with at least one still-to-meet houseguest whose
       // facet we then strip, mirroring the roster-line doctoring above.
       const remaining = view.premiere?.remaining ?? [];
-      if (remaining.length === 0) return; // seed-dependent; the roster-line test already proves the core mechanism
+      // At creation the player has met nobody, so the still-to-meet list must be the full NPC cast —
+      // assert the precondition instead of silently skipping (review, PR #1346).
+      expect(remaining.length).toBeGreaterThan(0);
       const target = remaining[0]!;
       const doctored: GameStateView = {
         ...view,
@@ -252,15 +254,16 @@ describe("#1326 — a legacy save with an unset genderPresentation is backfilled
       const card = restored.getGameState().house.find((h) => h.id === targetId)!;
       expect(card.genderPresentation).toBeDefined();
       backfilled = card.genderPresentation;
-      expect(warn).toHaveBeenCalled();
-      expect(warn.mock.calls.some((c) => String(c[0]).includes(targetId))).toBe(true);
+      // Exactly ONE warning for the repaired houseguest — catches duplicate-warning regressions
+      // (review, PR #1346).
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes(targetId))).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }
 
     // Determinism: restoring the SAME stripped snapshot again yields the SAME backfilled value (keyed
-    // off the houseguest's own id, never the shared game-seed stream — so it never perturbs calibration
-    // and is reproducible).
+    // off a dedicated hash of the game seed + the houseguest's id + name, never the shared game-seed
+    // rng STREAM — so it never perturbs calibration and is reproducible).
     const restoredAgain = new GameSessionAdapter();
     restoredAgain.restore(JSON.parse(JSON.stringify(snap)));
     const cardAgain = restoredAgain.getGameState().house.find((h) => h.id === targetId)!;
@@ -273,7 +276,7 @@ describe("#1326 — a legacy save with an unset genderPresentation is backfilled
     // force-fill. A save where the player never answered must restore with it STILL unset, forever.
     const adapter = new GameSessionAdapter();
     adapter.createCharacter({
-      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "the watcher",
+      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "persona-role-fixture",
     });
     expect(adapter.getGameState().player!.genderPresentation).toBeUndefined();
     const snap = adapter.snapshot();
@@ -293,7 +296,7 @@ describe("#1326 — a legacy save with an unset genderPresentation is backfilled
     const adapter = new GameSessionAdapter();
     adapter.updateCasting({
       playerName: "The Player", backstory: "a life", motivation: "to win",
-      personaArchetype: "the watcher", genderPresentation: "woman",
+      personaArchetype: "persona-role-fixture", genderPresentation: "woman",
     });
     adapter.createCharacter({});
     const snap = adapter.snapshot();
@@ -328,7 +331,7 @@ describe("#1326 — the PLAYER's own pronouns, captured at casting, are voiced i
     const s = new GameSessionAdapter();
     s.updateCasting({
       playerName: "The Player", backstory: "a life", motivation: "to win",
-      personaArchetype: "the watcher", genderPresentation: "nonbinary",
+      personaArchetype: "persona-role-fixture", genderPresentation: "nonbinary",
     });
     const view = s.createCharacter({});
     expect(view.player!.genderPresentation).toBe("nonbinary");
@@ -341,7 +344,7 @@ describe("#1326 — the PLAYER's own pronouns, captured at casting, are voiced i
   it("an unanswered player pronoun question omits the clause entirely — no forced 'unconfirmed' fallback", () => {
     const s = new GameSessionAdapter();
     const view = s.createCharacter({
-      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "the watcher",
+      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "persona-role-fixture",
     });
     expect(view.player!.genderPresentation).toBeUndefined();
     const prompt = s.getMomentPrompt({}).systemPrompt;
@@ -357,7 +360,7 @@ describe("#1326 — the PLAYER's own pronouns, captured at casting, are voiced i
     const s = new GameSessionAdapter();
     s.updateCasting({
       playerName: "The Player", backstory: "a life", motivation: "to win",
-      personaArchetype: "the watcher",
+      personaArchetype: "persona-role-fixture",
     });
     const view = s.createCharacter({ genderPresentation: "not-a-real-value" });
     expect(view.player!.genderPresentation).toBeUndefined();
@@ -379,7 +382,7 @@ describe("#1326 — the PLAYER's own pronouns, captured at casting, are voiced i
     // A full, finalizable interview that never touches gender is still finalizable.
     const s2 = new GameSessionAdapter();
     const st2 = s2.updateCasting({
-      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "the watcher",
+      playerName: "The Player", backstory: "a life", motivation: "to win", personaArchetype: "persona-role-fixture",
     });
     expect(st2.finalizable).toBe(true);
     const view = s2.createCharacter({});
@@ -391,7 +394,7 @@ describe("#1326 — the PLAYER's own pronouns, captured at casting, are voiced i
     const s = new GameSessionAdapter();
     s.updateCasting({
       playerName: "The Player", backstory: "a life", motivation: "to win",
-      personaArchetype: "the watcher", genderPresentation: "woman",
+      personaArchetype: "persona-role-fixture", genderPresentation: "woman",
     });
     s.createCharacter({ seed: 5 });
     expect(s.getGameState().player!.genderPresentation).toBe("woman");

@@ -347,6 +347,10 @@ async def update_casting(fields: dict | None = None, user: str | None = None) ->
     allowed = {"playerName", "archetype", "strategyStyle", "personaArchetype",
                "personaStrategyStyle", "backstory", "motivation", "privateStrategy",
                "interviewNotes",
+               # #1326: the player's optional pronoun/presentation answer — the engine's intake
+               # normalizes synonyms (pronouns/gender/…) and validates the value; dropping it
+               # here silently severed the schema-advertised field from the engine (PR #1346).
+               "genderPresentation",
                # The cast photo is the FIRST casting step (optional/skippable): the FE records
                # how it was handled — "uploaded" (photo finalized) or "skipped". A plain string
                # scalar, so the generic `elif str(value).strip()` branch below carries it through.
@@ -385,7 +389,7 @@ async def create_character(player_name: str | None = None, *, archetype=None, st
                            user: str | None = None,
                            persona_archetype=None, persona_strategy_style=None,
                            backstory=None, motivation=None, private_strategy=None,
-                           interview_notes=None) -> dict:
+                           interview_notes=None, gender_presentation=None) -> dict:
     """Finalize the casting interview (0050) and start a new game in this user's sandbox.
     Returns the Vault-free game state (with the player's casting card).
 
@@ -412,6 +416,10 @@ async def create_character(player_name: str | None = None, *, archetype=None, st
         args["motivation"] = motivation
     if private_strategy:
         args["privateStrategy"] = private_strategy
+    if gender_presentation and str(gender_presentation).strip():
+        # #1326: optional by design — forwarded only when the player actually answered; the
+        # engine validates/normalizes the value (never force-filled).
+        args["genderPresentation"] = str(gender_presentation).strip()
     if interview_notes:
         if isinstance(interview_notes, str):  # a lone note arrives as a bare string sometimes
             interview_notes = [interview_notes]
