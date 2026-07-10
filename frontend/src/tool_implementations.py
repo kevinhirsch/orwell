@@ -4704,7 +4704,8 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         # ORWELL_ALLOW_FLOOR_START=1. When ON we (a) do NOT immediately floor-shoot portraits from
         # the seeded facets — that raced authoring and won every time, so authored identities never
         # reached the faces (ADR 0013 bypass); instead each face follows its own per-NPC authoring
-        # gate; and (b) HOLD house entry below until the cast is authored (>= 13/15). When OFF (no
+        # gate; and (b) HOLD house entry below until the cast is FULLY authored (15/15 — PO ruling
+        # 2026-07-10: the seeded floor is never a viable cast identity in prod). When OFF (no
         # model, or the escape hatch) authoring can never run, so the deterministic floor IS the cast
         # — floor-shoot immediately and start instantly, byte-identical to before.
         _gate_on = False
@@ -4816,9 +4817,10 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             pass  # authoring + portraits are augmentation — never let them affect game start
         # #1313 — THE HOUSE-ENTRY GATE (P0): the game must NEVER start on the deterministic FLOOR cast.
         # When the gate is ON (a real utility model resolves + no escape hatch), HOLD the started
-        # result until authoring lands >= 13/15, retrying via the backfill spine while we wait. The
-        # player sees the createCharacter tool "running" (and then the "Production is finalizing your
-        # casting…" card) — never a silent 0/15 start. The happy path returns the instant completeness
+        # result until authoring lands the FULL cast (15/15 — no floor identity may enter the house),
+        # retrying via the backfill spine while we wait. The player sees the createCharacter tool
+        # "running" (and then the "Production is finalizing your casting…" card) — never a silent
+        # 0/15 start. The happy path returns the instant completeness
         # clears the threshold; only a genuine failure waits out the window, and then we refuse entry
         # LOUDLY (error log + health marker) and return a NOT-started casting-in-progress holding
         # result rather than dropping the player into an unauthored house.

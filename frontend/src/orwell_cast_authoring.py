@@ -1166,7 +1166,11 @@ def kickoff_authoring_backfill(missing_ids: list, user: Optional[str], force: bo
 # always configured ⇒ gated) and CI deterministic (the suite stubs the LLM ⇒ no model ⇒ ungated, and
 # the golden driver sets the hatch explicitly).
 
-HOUSE_READY_MIN_AUTHORED = 13          # of the 15-NPC cast (task spec: >= 13/15)
+HOUSE_READY_MIN_AUTHORED = 15          # of the 15-NPC cast (PO ruling, 2026-07-10: the deterministic
+# seeded floor is NEVER a viable cast identity in prod — no NPC may enter the house un-authored, so the
+# gate is the FULL cast size, not a tolerance band. Tightened from the earlier >= 13/15 task-spec floor;
+# `tests/test_1313_house_entry_gate.py` pins this to the cast's NPC count so a future cast-size change
+# can't silently reopen the gap.
 _HOUSE_READY_TOTAL_DEFAULT = 15
 
 
