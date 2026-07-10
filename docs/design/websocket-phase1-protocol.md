@@ -13,11 +13,11 @@
 > gameplay changes.
 >
 > **Hard gate (do not hand-wave):** Phase 1 **cannot start until Phase 0 is green.** ADR 0017 §Phasing
-> records the F5 mirror-parity harness (`docs/audits/playtest-harness/mirror_live_parity.mjs` +
-> `run_mirror_gate.sh`) as **RED on `main` as of 2026-07-09** (`bUsesIncrementalRenderer` fails). Phase 0
-> = fix that race, turn the harness green, wire it as a required CI gate. **This spec is what you build
-> the moment that gate is green — not before.** Everything below is written assuming that precondition
-> is already satisfied.
+> makes the F5 mirror-parity harness (`docs/audits/playtest-harness/mirror_live_parity.mjs` +
+> `run_mirror_gate.sh`) the red/green oracle — **Phase 0 is now DONE on `main`:** #1276 fixed the
+> `bUsesIncrementalRenderer` race and wired `mirror-parity` as a **green, required CI gate** (blocking via
+> `ci-gate`). **This spec is what you build now that the gate is green** — and the same gate must stay
+> green after every Phase-1 change. Everything below is written assuming that precondition is satisfied.
 
 ---
 
@@ -503,9 +503,9 @@ cross-user isolation (0021); the full `frontend/` pytest suite; the ADR 0008 `se
 
 ## 9. Implementation order (build-ready sequence)
 
-1. **Phase 0 gate first.** Confirm `run_mirror_gate.sh` is **green** on `main` (fix the
-   `resumeStream`/`_renderLiveStream` race; wire the required CI gate). **Do not start step 2 until this
-   is green.** (ADR 0017 §Phasing.)
+1. **Phase 0 gate first.** `run_mirror_gate.sh` is **green** on `main` and wired as a required CI gate
+   (`mirror-parity`, blocking via `ci-gate`) — the race was fixed in #1276. Confirm it is still green before
+   starting, and keep it green through every step below. (ADR 0017 §Phasing.)
 2. **WS route + handshake** (§1–2). `@app.websocket("/api/ws/session")`, owner guard, `hello`→`ack`
    calling the *existing* `_resolve_canonical_session` / `resolve_live_game_session` / `bind_game_session`
    helpers. Add test (b).
