@@ -28,10 +28,12 @@ the SSE/poll surfaces already carry); every ``hello``/``bind``/``subscribe``/``t
 owner-guarded (cross-user isolation 0021 — one socket ↔ one user); reasoning rides inside the ``chat``
 payload, never a second public channel; bind-before-subscribe.
 
-Scoped OUT of this SERVER-half PR (sibling / deferred, marked TODO below): the ``layout`` channel leg
-depends on another change's ``patch_layout(user, deviceId, …)`` per-device re-key — stubbed here; the
-client negotiation / feature-flag flip (``ORWELL_WS_TRANSPORT``) is the sibling client PR. The route is
-registered but the flag defaults **off**, so nothing ships to users from this PR alone.
+The ``layout`` channel leg is now WIRED (#1293): it rides the same per-session ``session_events`` bus
+and its per-device ``patch_layout(user, deviceId, …)`` re-key has merged, so ``_run_layout_channel`` /
+``_handle_layout`` below are live (per-device LWW, ADR 0017 §5 — geometry is per-device, only game
+state syncs). The route is registered but the client only ATTEMPTS the upgrade when the
+``ORWELL_WS_TRANSPORT`` flag is on — **default off** in Phase 1 (owner-gated rollout), so nothing
+ships to users from this PR alone; flipping it on is the separate turn-on step.
 """
 from __future__ import annotations
 

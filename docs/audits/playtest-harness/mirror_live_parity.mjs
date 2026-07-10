@@ -38,9 +38,55 @@ const TURN = process.env.MIRROR_TURN || "(I drift into the kitchen, lean on the 
 const LAG_BUDGET_MS = parseInt(process.env.MIRROR_LAG_BUDGET_MS || '2500', 10);
 const B_SETTLE_MS = parseInt(process.env.MIRROR_B_SETTLE_MS || '30000', 10);
 
+// TRANSPORT MODE (the WS Phase-1 turn-on gate — protocol spec §6/§7 case f, ADR 0017 §Phasing):
+// the SAME two-window parity invariant must hold whether the windows mirror over the WebSocket
+// (`MIRROR_WS_TRANSPORT=1`) or the permanent SSE/poll fallback (`=0`/unset). The client reads the
+// `ORWELL_WS_TRANSPORT` flag off a window global (orwellWs.js `_flagOn`); we set it in an init
+// script that runs BEFORE any app JS, so we force WS mode WITHOUT touching app code or the server
+// env (the server-side default stays OFF). Absent/`0` ⇒ the flag is never set ⇒ pure fallback,
+// exactly the production default. This is the ONLY difference between the two gate invocations —
+// the bytes, the checks, and the acceptance are identical (spec §6 "Both modes must pass F5").
+const WS_TRANSPORT = process.env.MIRROR_WS_TRANSPORT === '1' || process.env.MIRROR_WS_TRANSPORT === 'true';
+const MODE = WS_TRANSPORT ? 'ws' : 'fallback';
+// Force the flag on before app scripts evaluate (null when fallback — nothing is set, so
+// `_flagOn()` stays false and the client never even attempts the upgrade, §6 zero-risk default).
+const WS_FLAG_INIT = WS_TRANSPORT
+  ? `(() => { try {
+      window.ORWELL_WS_TRANSPORT = true;
+      if (document.documentElement) document.documentElement.dataset.wsForced = '1';
+      // DIAG: wrap WebSocket to record every frame in/out on /api/ws/session (why a WS run fell back).
+      window.__wsFrames = [];
+      var _OWS = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        var s = protocols ? new _OWS(url, protocols) : new _OWS(url);
+        try {
+          if (/\\/api\\/ws\\/session/.test(String(url))) {
+            var _send = s.send.bind(s);
+            s.send = function (data) { try { window.__wsFrames.push({ dir: 'out', d: String(data).slice(0, 300), t: Date.now() }); } catch (_) {} return _send(data); };
+            s.addEventListener('message', function (ev) { try { window.__wsFrames.push({ dir: 'in', d: String(ev.data).slice(0, 300), t: Date.now() }); } catch (_) {} });
+            s.addEventListener('close', function (ev) { try { window.__wsFrames.push({ dir: 'close', code: ev.code, reason: String(ev.reason || '').slice(0, 120), t: Date.now() }); } catch (_) {} });
+            s.addEventListener('error', function () { try { window.__wsFrames.push({ dir: 'error', t: Date.now() }); } catch (_) {} });
+          }
+        } catch (_) {}
+        return s;
+      };
+      window.WebSocket.prototype = _OWS.prototype;
+      window.WebSocket.CONNECTING = _OWS.CONNECTING; window.WebSocket.OPEN = _OWS.OPEN;
+      window.WebSocket.CLOSING = _OWS.CLOSING; window.WebSocket.CLOSED = _OWS.CLOSED;
+      // Record the WS lifecycle edges so a WS-mode FAILURE is diagnosable (why it fell back).
+      window.__wsLife = [];
+      ['orwell:ws-ready','orwell:ws-active','orwell:ws-inactive','orwell:ws-dead','orwell:ws-adopted']
+        .forEach((n) => window.addEventListener(n, (e) => {
+          try { window.__wsLife.push({ n: n.replace('orwell:',''), d: (e && e.detail) || {}, t: Date.now() }); } catch (_) {}
+        }));
+    } catch (_) {} })()`
+  : null;
+
+console.log(`\nMIRROR LIVE-PARITY transport mode: ${MODE.toUpperCase()}${WS_TRANSPORT ? ' (ORWELL_WS_TRANSPORT forced ON via init script)' : ' (SSE/poll fallback — flag OFF, the production default)'}`);
+
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
-const A = await openMirrorWindow(browser, 'A');
-const B = await openMirrorWindow(browser, 'B');
+const A = await openMirrorWindow(browser, 'A', { extraInit: WS_FLAG_INIT });
+const B = await openMirrorWindow(browser, 'B', { extraInit: WS_FLAG_INIT });
 
 // SELF-TEST (opt-in): CPU-throttle window B via CDP to SIMULATE a contended CI runner where B's page
 // (canonical resolve → SSE subscribe → resume) runs far slower than A's stream, landing B's attach
@@ -159,6 +205,32 @@ const mirrorLagMs = bConvergeWall ? (bConvergeWall - aSettleWall) : null; // how
 await A.page.waitForTimeout(4000); await B.page.waitForTimeout(4000);
 const settledDiff = diffTranscripts(await transcriptOf(A.page), await transcriptOf(B.page));
 
+// Which transport each window ACTUALLY ended up on (orwellWs.js `mode()` — "ws" | "fallback" |
+// "negotiating" | "idle"). In WS mode this must be "ws" on BOTH windows: a forced-WS run that
+// silently fell back (blocked upgrade / dead route) would otherwise pass as a "fallback dressed as
+// WS" false green, proving nothing. We assert engagement below so that can never sneak through.
+const _wsProbe = (p) => p.evaluate(() => {
+  try {
+    const w = window.OrwellWs || {};
+    return {
+      mode: (w.mode && w.mode()) || 'none',
+      canonical: (w.canonicalId && w.canonicalId()) || null,
+      chatSub: (w.isChatSubscribed && w.isChatSubscribed()) || false,
+      perTab: (window.sessionModule && window.sessionModule.getCurrentSessionId && window.sessionModule.getCurrentSessionId()) || null,
+      life: window.__wsLife || [],
+      frames: window.__wsFrames || [],
+    };
+  } catch (_) { return { mode: 'err' }; }
+});
+const wsA = await _wsProbe(A.page), wsB = await _wsProbe(B.page);
+const wsModeA = wsA.mode, wsModeB = wsB.mode;
+if (WS_TRANSPORT) {
+  console.log(`WS diag A: mode=${wsA.mode} canonical=${wsA.canonical} chatSub=${wsA.chatSub} perTab=${wsA.perTab} life=${JSON.stringify(wsA.life)}`);
+  console.log(`  A frames: ${JSON.stringify(wsA.frames)}`);
+  console.log(`WS diag B: mode=${wsB.mode} canonical=${wsB.canonical} chatSub=${wsB.chatSub} perTab=${wsB.perTab} life=${JSON.stringify(wsB.life)}`);
+  console.log(`  B frames: ${JSON.stringify(wsB.frames)}`);
+}
+
 // ── the verdict: B must mirror A's LIVE stream — render DURING A's turn, through the SAME
 // incremental renderer, within a bounded lag — not sit blank then pop a late reconcile. ──
 const checks = {
@@ -166,11 +238,15 @@ const checks = {
   bStartsDuringAStream: sigB.firstAiRenderMs != null && sigB.firstAiRenderMs < aSettleMs, // live, not blank-then-pop
   bUsesIncrementalRenderer: sigA.liveStreamStructure && sigB.liveStreamStructure,     // same live render engine (R2)
   lagWithinBudget: mirrorLagMs != null && mirrorLagMs <= LAG_BUDGET_MS,
+  // WS-mode ONLY: both windows must be genuinely ON the socket (not a silent SSE fallback). In
+  // fallback mode this is vacuously true (the flag is off by design), so it never perturbs the SSE
+  // gate — it only closes the WS false-green hole (spec §6 "Both modes must pass F5", honestly).
+  wsTransportEngaged: !WS_TRANSPORT || (wsModeA === 'ws' && wsModeB === 'ws'),
 };
 const PASS = Object.values(checks).every(Boolean);
 
 const report = {
-  meta: { turn: TURN, sendWall, reasonA, reasonB, model: process.env.FAKE_MODEL_ID || 'fake/echo-stream', lagBudgetMs: LAG_BUDGET_MS },
+  meta: { turn: TURN, sendWall, reasonA, reasonB, model: process.env.FAKE_MODEL_ID || 'fake/echo-stream', lagBudgetMs: LAG_BUDGET_MS, transportMode: MODE, wsMode: { A: wsModeA, B: wsModeB } },
   engine: { converged: JSON.stringify(e1.A) === JSON.stringify(e1.B), beat: [e1.A.beatSeq, e1.B.beatSeq] },
   settledDiagnostic: { identicalAfterGrace: settledDiff.identical, atSettleDiff: domDiff.identical, firstDivergence: settledDiff.firstDivergence || null },
   liveBehaviour: { A: sigA, B: sigB, aSettleMs, mirrorLagMs },
@@ -182,7 +258,8 @@ writeJson(OUT + 'film-B.json', mB.film);
 await A.page.screenshot({ path: OUT + 'A.png', fullPage: true }).catch(() => {});
 await B.page.screenshot({ path: OUT + 'B.png', fullPage: true }).catch(() => {});
 
-console.log('\n──── MIRROR LIVE-PARITY GATE ────');
+console.log(`\n──── MIRROR LIVE-PARITY GATE (${MODE.toUpperCase()} transport) ────`);
+console.log(`transport engaged             : A=${wsModeA} · B=${wsModeB} → ${checks.wsTransportEngaged}${WS_TRANSPORT ? '  (WS mode: both must be "ws" or the run is a silent-fallback false green)' : '  (fallback mode: vacuously true — flag off by design)'}`);
 console.log(`B rendered the turn           : ${checks.bRenderedTheTurn}`);
 console.log(`B starts DURING A's stream    : A firstRender=${sigA.firstAiRenderMs}ms · A settled=${aSettleMs}ms · B firstRender=${sigB.firstAiRenderMs}ms → ${checks.bStartsDuringAStream}  (false ⇒ B sat blank, then popped a late reconcile)`);
 console.log(`B uses A's live renderer      : A incrementalStream=${sigA.liveStreamStructure} · B incrementalStream=${sigB.liveStreamStructure} → ${checks.bUsesIncrementalRenderer}  (false ⇒ B never mounts the streaming container — full-repaint/reconcile)`);

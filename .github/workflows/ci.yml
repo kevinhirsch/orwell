@@ -638,19 +638,48 @@ jobs:
           python3 -m venv frontend/.venv
           frontend/.venv/bin/pip install --upgrade pip
           frontend/.venv/bin/pip install -r frontend/requirements.txt
-      - name: mirror-parity gate (retried for the first-turn timing artifact)
+      - name: mirror-parity gate — SSE/poll transport (blocking, the production default)
         run: |
           set -uo pipefail
+          # The blocking F5 gate runs in the PRODUCTION-default transport (ORWELL_WS_TRANSPORT off ⇒
+          # SSE/poll fallback). Pinned explicitly so the WS turn-on work below never changes what this
+          # required leg proves. `MIRROR_WS_TRANSPORT=0` is a single-mode run of run_mirror_gate.sh.
           for attempt in 1 2 3 4; do
-            echo "──── mirror-parity attempt $attempt ────"
-            if bash docs/audits/playtest-harness/run_mirror_gate.sh; then
-              echo "mirror-parity: PASS on attempt $attempt"
+            echo "──── mirror-parity (SSE) attempt $attempt ────"
+            if MIRROR_WS_TRANSPORT=0 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-parity (SSE): PASS on attempt $attempt"
               exit 0
             fi
-            echo "mirror-parity: attempt $attempt did not pass; retrying"
+            echo "mirror-parity (SSE): attempt $attempt did not pass; retrying"
             sleep 3
           done
           echo "::error::mirror-parity gate failed all attempts (two windows diverged during streaming)"
+          exit 1
+      # ── WS Phase-1 turn-on gate — WebSocket transport (case f, protocol spec §6/§7) ──────────────
+      # The SAME F5 invariant under the WebSocket transport (`ORWELL_WS_TRANSPORT` forced on via an init
+      # script inside mirror_live_parity.mjs — the SERVER default stays off). This PROVES the socket path
+      # mirrors A→B live and closes the WS false-green hole (the `wsTransportEngaged` check fails a run
+      # that silently fell back). NON-BLOCKING (`continue-on-error`) until the two turn-on readiness items
+      # land: (1) the FE `requirements.txt` pins a WS library (`uvicorn[standard]`/`websockets`) — the
+      # gate's own step 0d bootstraps it here so the leg is exercised, but production needs the pin; and
+      # (2) the client WS connect (orwellWs.js `start()` on DOMContentLoaded) races async session
+      # establishment — a null `perTabId` ⇒ server `bad-request` ⇒ permanent SSE fallback, with no
+      # re-attempt on session-ready. When BOTH are fixed, drop `continue-on-error` to make WS blocking too
+      # (protocol spec §9 step 7 — flip `ORWELL_WS_TRANSPORT` default-on only when both modes are green).
+      - name: mirror-parity gate — WebSocket transport (turn-on readiness, non-blocking)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            echo "──── mirror-parity (WS) attempt $attempt ────"
+            if MIRROR_WS_TRANSPORT=1 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-parity (WS): PASS on attempt $attempt"
+              exit 0
+            fi
+            echo "mirror-parity (WS): attempt $attempt did not pass; retrying"
+            sleep 3
+          done
+          echo "::warning::mirror-parity WS-transport leg not yet green — see the two turn-on readiness items above (WS library pin + client connect/session race). Non-blocking by design until both land."
           exit 1
 
   # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────
