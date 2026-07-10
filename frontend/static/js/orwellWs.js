@@ -262,7 +262,14 @@
     if (_mode !== "ws") return Promise.reject(new Error("ws-not-active"));
     _canonicalId = null; _chatSubscribed = false;
     return _request("bind", null, { perTabId: _perTabId() }, "hello").then(function (ack) {
-      if (_live) return _subscribeChat(0);
+      if (_live) {
+        // Re-arm all three channels on a re-resolve (e.g. a season reset unbinds
+        // the canonical id) exactly as the fresh handshake does — chat AND the
+        // state/hud push edge, so the HUD keeps its push after a rebind.
+        var p = _subscribeChat(0);
+        _subscribeEdges();
+        return p;
+      }
       return ack;
     });
   }
@@ -274,6 +281,29 @@
     var from = (typeof fromSeq === "number") ? fromSeq : (_highestChatSeq + 1);
     if (from < 0) from = 0;
     return _request("subscribe", "chat", { fromSeq: from }, "subscribe");
+  }
+
+  // ── the state/hud EDGE channels (§4) — the HUD push keystone ─────────────
+  // These are the lightweight edge pings that make every WS HUD push reach the
+  // browser. A `subscribe{ch:"state"|"hud"}` is what ARMS the server's continuous
+  // `session_events → state/hud` bridge (`_run_state_channel`, ws_routes.py:273);
+  // without it that bridge is never spawned, the only `state` frame a client ever
+  // sees is the one-shot inline one from the decision handler, and platform.js's
+  // correct `state`/`hud` → `orwellGameChanged` bridge STARVES (no push edge).
+  //
+  // Unlike `chat`, the server answers a state/hud subscribe with NO success `ack`
+  // (only an `error{not-bound|forbidden}` on refusal — ws_routes.py:334), so these
+  // are FIRE-AND-FORGET, NOT a request/response promise: a `_request` here would
+  // register a pending that never resolves and leak forever. They carry no
+  // `fromSeq`/replay semantics — just an empty `d` (§4). A refusal still routes
+  // through `_onError`'s forbidden/not-bound → fallback leg (the socket is broken).
+  var EDGE_CHANNELS = ["state", "hud"];
+  function _subscribeEdges() {
+    for (var i = 0; i < EDGE_CHANNELS.length; i++) {
+      // A cid for the protocol shape (§3.1 `{t,ch,cid,...}`; echoed on a refusal
+      // error) but NO pending promise — success never acks.
+      _send({ t: "subscribe", ch: EDGE_CHANNELS[i], cid: _nextCid(), d: {} });
+    }
   }
 
   // ── public up-frames (§3.5) ─────────────────────────────────────────────
@@ -378,6 +408,10 @@
         // Fresh window ⇒ full replay from 0; a reconnect resumes from the gap.
         _subscribeChat(_reconnectFails > 0 || _highestChatSeq >= 0 ? _highestChatSeq + 1 : 0)
           .catch(function () { /* subscribe refused — chat stays on the SSE fallback */ });
+        // Arm the state/hud push edge too (§4). This runs on EVERY successful
+        // handshake — a fresh connect AND a reconnect (both re-enter this onopen) —
+        // so a dropped socket re-arms all three channels, not just chat.
+        _subscribeEdges();
       }).catch(function () { _clearHelloTimer(); _goFallback(); });
     };
 
