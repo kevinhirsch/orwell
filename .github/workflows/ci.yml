@@ -6,10 +6,14 @@ on:
   pull_request:
     branches: [main]
 
-# A single self-hosted runner serializes every job, so a superseded commit would
-# otherwise tie the runner up finishing a run nobody is waiting on. Cancel the
-# in-flight run for a ref the moment a newer commit arrives. Keyed per ref, so
-# main and each PR have independent groups.
+# Cancel the in-flight run for a ref the moment a newer commit arrives, so a
+# superseded commit doesn't burn runner minutes finishing a run nobody is waiting
+# on. Keyed per ref, so main and each PR have independent groups.
+# Least-privilege default token: every job only checks out code and runs read-only
+# tests (no pushes, PR comments, or releases). Artifact upload needs no repo write.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,7 +38,7 @@ jobs:
   # bottom (`if: always()`) is the ONE required check — it passes when no needed job FAILED/was
   # CANCELLED (a SKIP counts as a pass). Point branch protection at `ci-gate`, not the individual jobs.
   changes:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       engine: ${{ steps.filter.outputs.engine }}
@@ -125,7 +129,7 @@ jobs:
   test:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -168,7 +172,7 @@ jobs:
   heavy-sims:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -190,7 +194,7 @@ jobs:
   coverage:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -210,7 +214,7 @@ jobs:
   smoke:
     needs: changes
     if: needs.changes.outputs.deploy == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -249,7 +253,7 @@ jobs:
   golden-path:
     needs: changes
     if: needs.changes.outputs.golden == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -301,7 +305,7 @@ jobs:
   visual-regression:
     needs: changes
     if: needs.changes.outputs.visual == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -347,7 +351,7 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
         if: steps.fixture.outputs.present == 'true'
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: run the visual-regression matrix (Tier A + Tier B)
         id: run
         if: steps.fixture.outputs.present == 'true'
@@ -384,7 +388,7 @@ jobs:
   theme-consistency:
     needs: changes
     if: needs.changes.outputs.theme == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -429,7 +433,7 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
         if: steps.fixture.outputs.present == 'true'
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: run the theme-consistency sweep (light + dark)
         id: run
         if: steps.fixture.outputs.present == 'true'
@@ -464,7 +468,7 @@ jobs:
   fe-unit:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -496,12 +500,12 @@ jobs:
   # The headless-Chromium pytest tests (the `browser` marker). Serial (they bind fixed ports / drive a
   # real page) with `--reruns 1` so the known environmental onboarding-scrim flake (#925/#1148/#930)
   # self-recovers within the job instead of reddening the whole run. Needs the chromium binary, installed
-  # the same way as the `fe-browser` job (no `--with-deps`: the self-hosted box has the system libs baked
-  # in; a sudo apt install is not granted).
+  # the same way as the `fe-browser` job (`--with-deps` so the gh-hosted ubuntu image gets chromium's
+  # system libs via apt).
   fe-browser-tests:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -523,14 +527,14 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: pytest — headless-browser suite, serial + retry-once
         run: cd frontend && python3 -m pytest tests/ -m browser --reruns 1 -q
 
   fe-browser:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -554,11 +558,10 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
-      # NO `--with-deps` (it apt-installs via sudo, which the self-hosted runner does not grant);
-      # the runner box has the chromium system libs pre-installed once (the provisioning script
-      # bakes them in). Install only the browser binary into ~/.cache.
+      # `--with-deps` apt-installs chromium's system libs — the gh-hosted ubuntu-latest image grants
+      # sudo, and (unlike the old self-hosted box) does not have them pre-baked.
       - name: install playwright chromium
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: boot smoke — real app, game-build gating (feature 0032)
         run: cd frontend && python3 scripts/boot_smoke.py
       - name: browser smoke — keep-set UI loads, no broken modules (feature 0032)
@@ -567,7 +570,7 @@ jobs:
   fe-responsive:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -591,7 +594,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
-        run: python3 -m playwright install chromium
+        run: python3 -m playwright install --with-deps chromium
       - name: responsive matrix gate — viewports x surfaces (Stream S, ruling 16)
         run: cd frontend && python3 scripts/responsive_matrix.py
 
@@ -615,7 +618,7 @@ jobs:
   mirror-parity:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -707,7 +710,7 @@ jobs:
       - mirror-parity
       - heavy-sims
     if: always()
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: resolve overall CI status
         env:
