@@ -1883,18 +1883,17 @@ def _join_casting_labels(items: list) -> str:
 
 
 # Pacing is ENGAGEMENT, not a turn count (owner ruling): substantive social play runs as long
-# as it has juice — we only nudge progression when the scene LULLS (the player gives a short or
-# closing reply, or explicitly signals they're ready to move on) AND the model didn't seize it.
-# A rich, substantive player message is engagement — never nudged.
+# as it has juice — we only nudge progression when the player EXPLICITLY signals they're ready to
+# move on (a lull) AND the model didn't seize it. A rich, substantive player message is engagement —
+# never nudged; and (pacing rework 2026-07) an ordinary SHORT reply is no longer a lull either.
 #
 # J-3 fix (root c — runway-regex false-positives): this pattern is UNAMBIGUOUS "move the night
 # along" intent ONLY. Bare tokens that recur inside substantive BB strategy talk — "continue"
 # (continue bonding), "proceed" (proceed carefully), "come on", a bare "next" ("nominate me next
-# week") — were false-firing the advance-nudge mid-scheme and montaging the runway. They are gone:
-# a SHORT lull reply is still caught by the `_LULL_SHORT_CHARS` length gate in `_player_turn_is_lull`,
-# so dropping the ambiguous tokens only stops LONG substantive messages from being misread as lulls
-# (the safe direction — a missed readiness cue costs at most one extra social turn, never a montage).
-# `next` now REQUIRES a ceremony noun so board speculation ("next week", "next HOH") never matches.
+# week") — were false-firing the advance-nudge mid-scheme and montaging the runway. They are gone.
+# `next` REQUIRES a ceremony noun so board speculation ("next week", "next HOH") never matches. With
+# the char-count lull removed, a readiness cue is the ONLY way a non-empty message reads as a lull, so
+# the regex is the whole gate — a missed cue costs at most one extra social turn, never a montage.
 _LULL_READY_RE = re.compile(
     r"\b(what'?s next|let'?s (go|move on|do this|see it|roll)|move (on|it along|ahead)|"
     r"i'?m (ready|done|good)|bring it on|get on with it|run it|kick it off|on with it|"
@@ -1902,10 +1901,9 @@ _LULL_READY_RE = re.compile(
     r"that'?s? (it|all)|nothing else|no more|wrap (it )?up|enough( of)? (this|that))\b",
     re.IGNORECASE,
 )
-_LULL_SHORT_CHARS = 70  # a brief reply with no substance reads as a lull
 
 # #549: an explicit "finalize the casting" readiness signal that may appear in an otherwise
-# SUBSTANTIVE sentence (so it is NOT caught by the lull gate / _LULL_SHORT_CHARS). When the engine
+# SUBSTANTIVE sentence (so it is NOT caught by the readiness lull gate). When the engine
 # already reports casting ready+finalizable, this is enough to finalize without the model having to
 # emit a literal "lock it in" — we correct the model's omission, we do not author content.
 _CASTING_READY_RE = re.compile(
@@ -1950,8 +1948,12 @@ def _player_turn_is_lull(messages) -> bool:
         return False
     if _LULL_READY_RE.search(s):
         return True
-    # short and non-substantial: a stripped reply under the threshold with no question/scheme
-    return len(s) <= _LULL_SHORT_CHARS
+    # A lull is now an EXPLICIT readiness signal ONLY (owner ruling, pacing rework 2026-07). The old
+    # `len(s) <= 70` char-count heuristic mis-read ordinary brief social replies ("yeah, let's find her",
+    # "okay", "sounds good") as "ready to advance" and marched the game forward — a prime driver of the
+    # fast-forward feel. Only an empty message (handled above) or an explicit ready-cue is a lull now; a
+    # short substantive reply is engagement, so a scene runs until the player actually asks to move on.
+    return False
 
 
 def _peer_advanced_since_framing(progressed: bool, framed_beat_key, current_beat_key) -> bool:
