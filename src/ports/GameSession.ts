@@ -476,6 +476,15 @@ export interface MakeDealReq {
    * (HTTP 409, no state change). Absent ⇒ byte-identical to the pre-0065 path (opt-in).
    */
   expectedBeatSeq?: number;
+  /**
+   * A10 / #591 / R1c — OPTIONAL at-most-once idempotency key (0065 Part B), the sibling of
+   * `recordInteraction`'s. `makeDeal` creates a tracked promise AND folds consequence (a leverage
+   * squeeze / a traded-secret warmth), so a stale-409 re-drive under sustained two-window concurrency
+   * could double-apply (a duplicate deal + a doubled hidden-layer move). A REPEAT key returns the prior
+   * `DealView` WITHOUT re-creating the deal or re-folding — checked BEFORE the CAS guard, so a re-driven
+   * duplicate is a clean no-op even against a board that has since moved. Absent ⇒ byte-identical (opt-in).
+   */
+  idempotencyKey?: string;
 }
 
 /**
@@ -492,6 +501,14 @@ export interface ExposeSecretReq {
   subject?: EntityId;
   /** 0065 Part A — optional compare-and-swap token; stale ⇒ 409, no exposure. */
   expectedBeatSeq?: number;
+  /**
+   * A10 / #591 / R1c — OPTIONAL at-most-once idempotency key (0065 Part B), the `recordInteraction`
+   * sibling. `exposeSecret` folds the standing hit onto the whole house + the exposer backlash and spends
+   * the secret / increments the per-season cap, so a re-driven duplicate could double-apply. A REPEAT key
+   * returns the prior `ExposeResult` WITHOUT re-folding or re-spending — checked BEFORE the CAS guard.
+   * Absent ⇒ byte-identical (opt-in).
+   */
+  idempotencyKey?: string;
 }
 
 /**
@@ -528,6 +545,13 @@ export interface TradeSecretReq {
   askKind?: string;
   /** 0065 Part A — optional compare-and-swap token. */
   expectedBeatSeq?: number;
+  /**
+   * A10 / #591 / R1c — OPTIONAL at-most-once idempotency key (0065 Part B), the `recordInteraction`
+   * sibling. `tradeSecret` folds the recipient's warmth/sour, surfaces the secret, and increments the
+   * per-season trade cap, so a re-driven duplicate could double-apply. A REPEAT key returns the prior
+   * `TradeResult` WITHOUT re-folding or re-spending — checked BEFORE the CAS guard. Absent ⇒ byte-identical.
+   */
+  idempotencyKey?: string;
 }
 
 /** 0099 — the result of a `tradeSecret`. `accepted` is whether the recipient took it; no number crosses. */
@@ -1744,8 +1768,12 @@ export interface GameSession {
    * real secret of anyone). Monotonic: a true secret is never re-confided at a LOWER tier than
    * already reached. `null` pre-game / for an unknown or non-active houseguest.
    * 0065 Part A: optional `expectedBeatSeq` compare-and-swap (stale ⇒ 409, no disclosure).
+   * 0065 Part B / A10 / #591 / R1c: optional at-most-once `idempotencyKey` — `confide` folds the
+   * vulnerability bond bump (or a betrayal-grade lie-catch) and mutates the lie/disclosure ledger, so a
+   * stale-409 re-drive under two-window concurrency could double-apply. A REPEAT key returns the prior
+   * `ConfideResult` WITHOUT re-folding — checked BEFORE the CAS guard. Absent ⇒ byte-identical (opt-in).
    */
-  confide(npcId: EntityId, expectedBeatSeq?: number): ConfideResult | null;
+  confide(npcId: EntityId, expectedBeatSeq?: number, idempotencyKey?: string): ConfideResult | null;
 
   /**
    * Feature 0095 — press a suspicion that two houseguests knew each other before the show. The SINGLE
