@@ -107,8 +107,13 @@ GEOMETRY_KEY_MARKERS = (
 #
 # Game-build reachability (verified against src/settings.py GAME_DROP_SCRIPTS /
 # GAME_DROP_SET, coverage audit §1):
-#   • ui.js — styledConfirm/styledPrompt micro-dialogs: GAME-BUILD REACHABLE
-#     (the class-B holdout to migrate to kit `modal:true`, coverage audit §5 step 4).
+#   • ui.js — styledConfirm/styledPrompt micro-dialogs (the last GAME-BUILD-REACHABLE
+#     class-B holdout, coverage audit §5 step 4): MIGRATED onto the kit's `modal:true`
+#     tier (#1281 / #660; test_660_confirm_prompt_kit.py source-pins the recipe). They
+#     no longer construct a bare `.modal` root — ui.js is the Escape/z-order ARBITER +
+#     legacy-`.modal`-family plumbing now, never a `.modal` MINTER — so it drops off this
+#     shrink-only allowlist (a NEW `.modal` root regrowing in ui.js must fail this gate),
+#     mirroring how settings.js/theme.js left GRANDFATHERED_DRAG on migration.
 #   • assistant.js / group.js / planWindow.js / sessions.js / workspace.js —
 #     inherited-workspace surfaces, game-build-DROPPED (routers unmounted / scripts
 #     stripped). Listed so a NEW minter still fails; not game-build windows.
@@ -116,7 +121,6 @@ GEOMETRY_KEY_MARKERS = (
 # construction signature — settings.js is already kit-composed (#553); they are
 # tracked by GRANDFATHERED_DRAG above, not here.)
 GRANDFATHERED_MODAL_BUILDERS = {
-    "ui.js",            # styledConfirm/styledPrompt — class-B, migrate to kit modal:true
     "assistant.js", "group.js", "planWindow.js", "sessions.js", "workspace.js",  # build=0
 }
 # The construction signature: assigning/adding the bare `modal` CLASS TOKEN to an
@@ -141,6 +145,24 @@ def test_ratchet_no_new_hand_rolled_modal_window():
         "dialog composes OrwellWindowKit.create({ modal: true, … }) (scrim + "
         "focus-trap + inert + one z-authority), never a bespoke `.modal` root "
         "(2026-06-23 window-kit coverage audit §7.1)."
+    )
+
+
+def test_ratchet_ui_js_is_off_the_modal_builder_allowlist():
+    """ui.js's styledConfirm/styledPrompt were the last game-build-reachable class-B
+    `.modal` micro-dialogs; #1281/#660 migrated them onto the kit's `modal:true` tier.
+    Pin that ui.js is OFF the shrink-only allowlist (so a re-added bare `.modal` root
+    fails the gate) AND that it genuinely no longer mints one — mirroring how settings.js
+    / theme.js left GRANDFATHERED_DRAG on migration. Re-adding ui.js here is the ratchet
+    slipping back; if ui.js legitimately never mints a `.modal` root, it needs no grandfather."""
+    assert "ui.js" not in GRANDFATHERED_MODAL_BUILDERS, (
+        "ui.js is the Escape/z-order arbiter + legacy-`.modal` plumbing, not a `.modal` "
+        "MINTER (its confirm/prompt dialogs compose OrwellWindowKit.create({modal:true}) "
+        "since #1281/#660) — it must not be grandfathered back onto the modal-builder allowlist."
+    )
+    assert "ui.js" not in _callers(_MODAL_ROOT_RX), (
+        "ui.js regrew a bare `.modal` root — compose OrwellWindowKit.create({ modal:true }) "
+        "instead (2026-06-23 window-kit coverage audit §5 step 4)."
     )
 
 
