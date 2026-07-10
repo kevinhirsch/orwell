@@ -2896,7 +2896,11 @@ body.bg-pattern-perlin-flow {
       background: var(--input-bg, var(--panel));
       border: 1px solid var(--input-border, var(--border));
       border-radius: 16px;
-      padding: 10px 12px;
+      /* F-SAFE-1 (HIG Layout): the composer spans the viewport, so in landscape on a
+         notched phone its left/right edge can slide under the sensor housing. Floor the
+         horizontal padding at the base 12px, expanding to the safe-area inset only where
+         the notch intrudes (portrait / non-notched ⇒ max(12px, 0px) = 12px, no change). */
+      padding: 10px max(12px, var(--safe-right)) 10px max(12px, var(--safe-left));
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -37700,6 +37704,33 @@ body.theme-frosted .modal {
   .note-card-flash { animation: none; }
   .hwfit-sched-day-chip { transition: none; }
 }
+/* F-MOTION-1 (HIG Motion — "replace or remove animations app-wide" / WCAG 2.3.3): the DURABLE
+   net. The two rules above are per-surface opt-ins, exactly the fragile pattern the audit flags —
+   a NEW decorative `*-flash` / `*-pulse` / `*-glow` / `*-shimmer` / `*-blink` class ships and
+   silently slips the Reduce-Motion setting. This substring net catches the whole decorative-motion
+   family by class-name convention, so a new decorative surface is covered by construction. It kills
+   only the MOTION (animation/transition) — the element and its final state stay painted, so nothing
+   functional disappears (a completion flash still ends "done", a recording pulse stays visible, just
+   static). The `test_hig_fmotion1_reduced_motion_lint.py` gate pins that this net exists AND that its
+   family list stays a superset of the decorative suffixes actually used, so a future `*-sparkle`
+   forces an explicit decision instead of slipping through. `!important` so it wins over the existing
+   higher-specificity decorative rules regardless of source order; a surface that legitimately needs a
+   reduced-motion *replacement* animation opts back in with its own targeted `!important` rule. */
+@media (prefers-reduced-motion: reduce) {
+  [class*="-flash"],
+  [class*="-pulse"],
+  [class*="-glow"],
+  [class*="-shimmer"],
+  [class*="-blink"],
+  [class*="-shake"],
+  [class*="-wiggle"],
+  [class*="-bounce"],
+  [class*="-throb"],
+  [class*="-flare"] {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 /* ── ask_user: multiple-choice question card ─────────────────────────────
    The agent posed a question and ended its turn. The user clicks an option,
    types a free-text "Other" answer, or dismisses (×) to just type in the
@@ -38870,11 +38901,19 @@ body.theme-frosted .odec-opt.selected {
    behind them), so contrast holds regardless of backdrop. Measured: #d6d6d9 / #57575c ≈ 4.95:1. This
    also gives disabled buttons a real shape/fill distinction from the enabled tinted state (not just
    opacity), per the same UX-INTERACTION finding (INT-6) about the headshot studio's opacity-only
-   disabled cue — this shared rule covers those buttons too (they live in `.ow-window .ow-body`). */
+   disabled cue — this shared rule covers those buttons too (they live in `.ow-window .ow-body`).
+   F-STATE-1 (HIG Components): the SAME opaque treatment + `cursor: not-allowed` also applies to
+   controls disabled via `aria-disabled="true"` (a control kept in the tab order but announced
+   disabled by AT) — not only the native `:disabled` attribute — so the non-interactive state reads
+   the same to sighted and screen-reader users regardless of which disable mechanism the markup uses. */
 body.theme-frosted .send-btn:disabled,
+body.theme-frosted .send-btn[aria-disabled="true"],
 body.theme-frosted .odec-confirm:disabled,
+body.theme-frosted .odec-confirm[aria-disabled="true"],
 body.theme-frosted .odec-opt:disabled,
-body.theme-frosted .ow-window .ow-body button:disabled {
+body.theme-frosted .odec-opt[aria-disabled="true"],
+body.theme-frosted .ow-window .ow-body button:disabled,
+body.theme-frosted .ow-window .ow-body button[aria-disabled="true"] {
   opacity: 1 !important;
   filter: none !important;
   background: #d6d6d9 !important;
@@ -38883,6 +38922,14 @@ body.theme-frosted .ow-window .ow-body button:disabled {
   box-shadow: none !important;
   transform: none !important;
   cursor: not-allowed !important;
+}
+/* F-STATE-1 (HIG Components / WCAG 4.1.2): opacity alone is an ambiguous "disabled" cue over
+   glass — a faint control can read as merely dim, not inert. Any control marked non-interactive
+   via `aria-disabled="true"` (the ARIA equivalent of the native `:disabled` attribute, which AT
+   announces) gets the unambiguous `not-allowed` pointer app-wide, so the affordance matches the
+   announced state. Purely additive — cursor only; no color/layout change. */
+[aria-disabled="true"] {
+  cursor: not-allowed;
 }
 
 /* a11y fix (measured VM-16 / CA-11): the risk badge's color/fill (--color-error text on a ~12%
@@ -41432,4 +41479,33 @@ body.signin-entrance .chat-history {
   body.signin-entrance .chat-history {
     animation: none !important;
   }
+}
+
+/* ── F-SAFE-1 (HIG Layout) — sidebar left/right landscape safe-area floor ──────────
+   The sidebar is the leftmost fixed chrome; in landscape on a notched phone its edge can
+   slide under the sensor housing. Floor its inner horizontal padding at the safe inset.
+   Longhand + last-word source order so it augments (never resets) the base padding, and
+   max(0px, inset) ⇒ zero visible change in portrait / on non-notched screens. */
+#sidebar {
+  padding-left: max(0px, var(--safe-left));
+  padding-right: max(0px, var(--safe-right));
+}
+
+/* ── F-CONTRAST-1 (HIG Color / Materials; broadens #738 item 19) ───────────────────
+   Secondary UI text (`--fg-muted`, de-facto #888) over the ONE light glass can drop below
+   the APCA secondary-text floor where a dark backdrop shows through the 0.60 fill.
+   adaptiveGlass.js floors it DYNAMICALLY per sampled backdrop — promoting `--fg-muted`
+   toward `--fg` only when #888 misses the floor (see resolveMutedInk()), the same escalation
+   the received bubbles use, applied once at the token level so the fixed-light-glass chrome
+   keeps standing down. When that adaptive JS layer STANDS DOWN — Increase Contrast / Reduce
+   Transparency both drop the adaptive overrides — this static backstop keeps the guarantee:
+   pin a floored muted ink against the light glass. #2f323a on the ~white glass clears the
+   secondary-text floor even over the darkest backdrop-through-glass, and stays visibly muted
+   against the #16191f dark `--fg`. Scoped to the glass theme + these a11y media so the normal
+   path is untouched (JS owns it there). */
+@media (prefers-contrast: more) {
+  body.theme-frosted { --fg-muted: #2f323a; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted { --fg-muted: #2f323a; }
 }

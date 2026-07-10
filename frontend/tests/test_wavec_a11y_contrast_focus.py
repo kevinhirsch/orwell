@@ -75,12 +75,14 @@ def test_risk_badge_frosted_colors_clear_aa_small_text():
 
 def test_disabled_button_frosted_override_is_opaque_not_opacity_based():
     css = _read("static", "style.css")
+    # The selector list also carries the F-STATE-1 `[aria-disabled="true"]` counterparts interleaved
+    # with the `:disabled` variants; match from the first selector through the ow-body button
+    # selector (either form) to the rule body.
     m = re.search(
-        r"body\.theme-frosted \.send-btn:disabled,\s*"
-        r"body\.theme-frosted \.odec-confirm:disabled,\s*"
-        r"body\.theme-frosted \.odec-opt:disabled,\s*"
-        r"body\.theme-frosted \.ow-window \.ow-body button:disabled\s*\{([^}]*)\}",
+        r"body\.theme-frosted \.send-btn:disabled,.*?"
+        r"body\.theme-frosted \.ow-window \.ow-body button(?::disabled|\[aria-disabled=\"true\"\])\s*\{([^}]*)\}",
         css,
+        re.S,
     )
     assert m, "the shared frosted disabled-button rule has moved or been removed"
     body = m.group(1)
