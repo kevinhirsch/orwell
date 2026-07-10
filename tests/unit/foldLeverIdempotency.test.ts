@@ -183,6 +183,43 @@ describe("A10/#591 — exposeSecret is at-most-once per idempotencyKey", () => {
   });
 });
 
+describe("A10/#591 — the shared ledger is NAMESPACED by lever (no cross-lever key collision)", () => {
+  it("the SAME idempotencyKey on two DIFFERENT levers ⇒ BOTH mutate (the second is not skipped / not the first's result)", async () => {
+    const { server, session } = playerServer(14);
+    session.createCharacter({ playerName: "The Player", seed: 14 });
+    const npcId = session.livingIds().find((id) => id !== PLAYER)!;
+    earnFullConfidence(session, npcId);
+    const dealsBefore = openDeals(session);
+    const bondBefore = edge(session, PLAYER, npcId);
+
+    // Lever 1: makeDeal with the shared key — creates a deal, caches under `makeDeal:SHARED`.
+    const deal = (await server.callTool("makeDeal", { with: npcId, kind: "safety", terms: "keep me safe", idempotencyKey: "SHARED" })) as DealView;
+    expect(deal?.id).toBeTruthy();
+    expect(openDeals(session)).toBe(dealsBefore + 1);
+
+    // Lever 2: confide with the SAME key — MUST run its own mutation, not return the deal from the collision.
+    const confided = (await server.callTool("confide", { npcId, idempotencyKey: "SHARED" })) as ConfideResult;
+    expect(confided).toHaveProperty("disclosed"); // a ConfideResult, NOT the DealView that shared the key
+    expect((confided as unknown as DealView).id).toBeUndefined();
+    expect(confided.disclosed).toBe(true);
+    expect(edge(session, PLAYER, npcId)).not.toEqual(bondBefore); // the confide fold actually landed (not skipped)
+  });
+
+  it("a same-lever repeat under a key another lever also used still de-dupes (at-most-once preserved)", async () => {
+    const { server, session } = playerServer(14);
+    session.createCharacter({ playerName: "The Player", seed: 14 });
+    const npcId = session.livingIds().find((id) => id !== PLAYER)!;
+    earnFullConfidence(session, npcId);
+
+    await server.callTool("makeDeal", { with: npcId, kind: "safety", terms: "keep me safe", idempotencyKey: "K" });
+    const first = (await server.callTool("confide", { npcId, idempotencyKey: "K" })) as ConfideResult;
+    const afterConfide = edge(session, PLAYER, npcId);
+    const second = (await server.callTool("confide", { npcId, idempotencyKey: "K" })) as ConfideResult; // repeat confide+K
+    expect(second).toEqual(first);                             // de-duped
+    expect(edge(session, PLAYER, npcId)).toEqual(afterConfide); // folded exactly once
+  });
+});
+
 describe("A10/#591 — tradeSecret is at-most-once per idempotencyKey", () => {
   it("a REPEAT key trades exactly ONCE — the recipient's read of the player folds once", async () => {
     const { server, session, sb } = playerServer(2);
