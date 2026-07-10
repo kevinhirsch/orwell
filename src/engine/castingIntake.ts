@@ -70,6 +70,12 @@ export const CASTING_COVERAGE: ReadonlyArray<{ field: keyof CastingIntake; ask: 
   { field: "interviewNotes", ask: "get-to-know material worth remembering (record notes as they land)" },
   { field: "archetype", ask: "your canonical casting-sheet mapping of who they are" },
   { field: "strategyStyle", ask: "your canonical casting-sheet mapping of how they'll play" },
+  // #1326 — APPENDED at the end (never reorder the entries above it): the player's OWN pronouns/gender
+  // presentation, mirroring a houseguest's public `genderPresentation` facet. OPTIONAL by design — it
+  // does NOT gate `ready` (name-only) or `finalizable` (the floor above), so a player who declines to
+  // answer never blocks casting. Landing it LAST keeps it the lowest-priority ask, asked only once
+  // everything else the floor/finalize gate actually needs is already on file.
+  { field: "genderPresentation", ask: "their pronouns / how they present — man, woman, or nonbinary (optional; never re-ask if they'd rather skip it)" },
 ];
 
 /**
@@ -106,6 +112,10 @@ const CASTING_KEY_ALIASES: Readonly<Record<string, keyof UpdateCastingReq>> = {
   secret_strategy: "privateStrategy",
   photo: "castPhoto",
   cast_photo: "castPhoto",
+  // #1326 — the obvious synonyms a model reaches for instead of the canonical `genderPresentation`.
+  pronouns: "genderPresentation",
+  gender: "genderPresentation",
+  gender_presentation: "genderPresentation",
 } as const;
 
 /**

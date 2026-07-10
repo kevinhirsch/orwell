@@ -855,6 +855,13 @@ export interface OobeInput {
   motivation?: string;
   /** Distilled get-to-know answers from the casting interview (0050) — seed the Soul memory. */
   interviewNotes?: string[];
+  /**
+   * How the player presents (issue #1326) — OPTIONAL, player-authored counterpart of a houseguest's
+   * public `genderPresentation` facet (same enum, same `domain/gender` helpers) — so the narrator can
+   * voice the player's own recorded pronouns instead of guessing from their name. Absent ⇒ omitted
+   * from the Character entirely (never a fabricated default — mirrors every other OOBE field here).
+   */
+  genderPresentation?: "man" | "woman" | "nonbinary";
 }
 
 /** Per-disposition emotional volatility seed (the emotional-modifier baseline, decision 0001). */
@@ -940,6 +947,10 @@ export function runPlayerOOBE(input: OobeInput): PlayerCharacter {
       // The player authors their own hidden material (`privateStrategy`); the typed hidden-element pool
       // is for generated NPCs only, so the player's stays empty.
       hiddenElements: [],
+      // #1326: the player's own recorded pronouns, mirroring a houseguest's public `genderPresentation`
+      // facet — present ONLY when the player actually answered (never a fabricated default; mirrors the
+      // rest of this Character literal, which omits rather than invents an unauthored field).
+      ...(input.genderPresentation ? { genderPresentation: input.genderPresentation } : {}),
     },
     soul: { emotionalBaseline: 0.5, volatility: defaulted ? VOL_OF.neutral : VOL_OF[spec.disposition], emotionalState: 0.5, emotionalHistory: [], memory: interviewMemory },
     // Only the player's OWN words populate the persona; absent ⇒ omitted entirely (no canonical fallback).
@@ -960,6 +971,8 @@ export function startNewGame(
     personaArchetype?: string; personaStrategyStyle?: string;
     /** Casting-interview deepeners (0050): authored material that seeds Character/Soul. */
     backstory?: string; privateStrategy?: string; motivation?: string; interviewNotes?: string[];
+    /** How the player presents (issue #1326) — OPTIONAL, mirrors a houseguest's public facet. */
+    genderPresentation?: "man" | "woman" | "nonbinary";
     /** NAME-1 (#547): prior seasons' names this game's new cast should avoid (bounded, fail-soft). */
     priorCastNames?: readonly string[];
   },
@@ -976,6 +989,7 @@ export function startNewGame(
     ...(opts.privateStrategy ? { privateStrategy: opts.privateStrategy } : {}),
     ...(opts.motivation ? { motivation: opts.motivation } : {}),
     ...(opts.interviewNotes ? { interviewNotes: opts.interviewNotes } : {}),
+    ...(opts.genderPresentation ? { genderPresentation: opts.genderPresentation } : {}),
   });
   return { player, npcs };
 }

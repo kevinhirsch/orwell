@@ -177,7 +177,8 @@ import {
 import type { ProposedIdentityFacets } from "../../engine/diversity";
 import { nameGenderOf, pickGivenNameFor } from "../../engine/data/nameGender";
 import type { Orientation, GenderPresentation } from "../../engine/diversityConstants";
-import { ALL_ETHNICITIES } from "../../engine/diversityConstants";
+import { ALL_ETHNICITIES, GENDER_PRESENTATIONS } from "../../engine/diversityConstants";
+import { isGenderPresentation } from "../../domain/gender"; // #1326
 import { foldHiddenImpact } from "../../engine/consequence";
 import {
   decideConfidence, disclosureMotive, disclosureTier, discloseTrue, fabricate,
@@ -2508,6 +2509,33 @@ export class GameSessionAdapter implements GameSession {
     // refreshes rather than slicing against a window that no longer holds its checkpoint.
     this.beatCheckpoints.clear();
     this.house = core.house ? cloneSession(core.house) : null;
+    // #1326 — legacy-save backfill for NPCs ONLY: an NPC's `genderPresentation` is always dealt by the
+    // 0063 diversity floor at cast time, so an unset facet on a resumed NPC means a save that predates
+    // that floor (or a non-standard creation path that skipped it) — a genuine gap worth repairing.
+    // Left unset, the narration prompt (momentPrompts.ts) already falls back to an explicit
+    // "unconfirmed" guidance clause rather than silently dropping the pronoun line — but a RESUMED save
+    // can do better: repair it once, right here, deterministically, off a DEDICATED sub-stream keyed on
+    // the houseguest's own id (never the shared game-seed stream, so no seeded competition/vote roll is
+    // perturbed — mirrors the `portraitStyleAnchor` legacy-backfill precedent a few lines below). Logged
+    // once per repair (the `relationships.ts` `sanitize`-on-load precedent) so a legacy/non-standard
+    // save stays VISIBLE instead of silently self-healing. Purely descriptive (0063: "never a
+    // competition input"), so this can never perturb calibration, and it is not part of the 0007/0031
+    // byte-compared save surface (`genderPresentation` never rides `PersistedCharacter`), so it cannot
+    // trip the non-degradation gate.
+    //
+    // The PLAYER is deliberately EXCLUDED: their facet is player-authored and OPTIONAL BY DESIGN (a
+    // human may decline to answer at casting) — an absent player facet is a legitimate, permanent
+    // state, never a gap to force-fill. Backfilling it here would silently assign a player a gender
+    // they never chose. `momentPrompts.ts` mirrors this: the player's line simply omits the pronoun
+    // clause when unset, with no "unconfirmed" fallback either.
+    if (this.house) {
+      for (const npc of this.house.npcs) {
+        if (npc.character.genderPresentation !== undefined) continue;
+        const derived = GENDER_PRESENTATIONS[new SeededRandom(hashSeed(`${npc.id}:genderPresentation-backfill`)).int(GENDER_PRESENTATIONS.length)]!;
+        npc.character.genderPresentation = derived;
+        console.warn(`[orwell] ${npc.id} (${npc.name}) had no genderPresentation facet on load; backfilled to "${derived}" deterministically (#1326)`);
+      }
+    }
     this.week = core.week;
     this.phase = core.phase;
     this.ceremony = { ...core.ceremony, nominees: [...core.ceremony.nominees] };
@@ -3749,6 +3777,11 @@ export class GameSessionAdapter implements GameSession {
     this.worldSnapshot = buildWorldSnapshot({ seed, capturedFor: "move-in day" });
     const archetype = merged.archetype && isPlausibleArchetype(merged.archetype) ? merged.archetype : undefined;
     const strategyStyle = merged.strategyStyle as StrategyStyle | undefined;
+    // #1326 — the player's OWN pronouns/presentation, validated against the same enum a houseguest's
+    // public `genderPresentation` facet uses (an unrecognized/garbled value is dropped, never stored
+    // raw — mirrors the `archetype` validation immediately above).
+    const genderPresentation = merged.genderPresentation && isGenderPresentation(merged.genderPresentation)
+      ? merged.genderPresentation : undefined;
     // Keep the player's RAW typed words as their public persona (narrative/display), even when they
     // don't match a canonical archetype/style — so the game master voices them as they described
     // themselves. The canonical `archetype`/`strategyStyle` above still drive hidden stats (0006).
@@ -3764,6 +3797,7 @@ export class GameSessionAdapter implements GameSession {
       ...(merged.privateStrategy ? { privateStrategy: merged.privateStrategy } : {}),
       ...(merged.motivation ? { motivation: merged.motivation } : {}),
       ...(merged.interviewNotes.length ? { interviewNotes: merged.interviewNotes } : {}),
+      ...(genderPresentation ? { genderPresentation } : {}),
       // NAME-1 (#547): the corpus-sampled cast avoids prior seasons' names (bounded, fail-soft).
       ...(effReq.priorCastNames && effReq.priorCastNames.length ? { priorCastNames: effReq.priorCastNames } : {}),
     });
@@ -3914,6 +3948,9 @@ export class GameSessionAdapter implements GameSession {
       ...(p.privateStrategy ? { privateStrategy: p.privateStrategy } : {}),
       ...(p.motivation ? { motivation: p.motivation } : {}),
       ...(notes.length ? { interviewNotes: notes } : {}),
+      // #1326 — season-to-season continuity (0056): the returning player keeps their own recorded
+      // pronouns/presentation into the new season, exactly like the rest of their authored profile.
+      ...(p.character.genderPresentation ? { genderPresentation: p.character.genderPresentation } : {}),
     };
   }
 
@@ -8204,6 +8241,9 @@ export class GameSessionAdapter implements GameSession {
         // ADR 0006 §Principle 5: the player's OWN qualitative tiredness (their body is their knowledge) —
         // a cue, never a number, and never any NPC's sleep state. Present only once the clock is running.
         ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { restStatus: restStatusFor(this.live.lastSleepPhase ?? WAKE_HOUR) } : {}),
+        // #1326 — the player's OWN recorded pronouns/presentation (OPTIONAL; absent when never
+        // answered), so `getMomentPrompt` can voice the SAME facet instead of guessing from the name.
+        ...(p.character.genderPresentation !== undefined ? { genderPresentation: p.character.genderPresentation } : {}),
         // The casting card (0050): the interview's payoff, re-showable all season. Tier WORDS are
         // derived from the hidden balanced stats here, engine-side — the numbers never serialize out.
         castingCard: {
