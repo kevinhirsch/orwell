@@ -2528,6 +2528,18 @@ body.bg-pattern-perlin-flow {
       overflow: hidden;
       animation: msg-enter 0.3s ease-out both;
     }
+    /* PERF (#1315) — transcript containment. Isolate each prose bubble's INTERNAL layout/paint
+       so a streaming-token append or an adaptiveGlass inline-style write (background-color / ink)
+       invalidates only THAT bubble's box, not an O(n) reflow/repaint across the whole transcript.
+       `contain: layout paint` is used DELIBERATELY over `content-visibility: auto`: the bubble
+       keeps its real intrinsic height, so #chat-history scrollHeight/scrollTop stay byte-accurate —
+       scroll restore, jump-to-bottom, streaming autoscroll, and the F1–F5 "never eat a message"
+       math all read scrollHeight, and content-visibility's estimated off-screen sizing would
+       desync them. NO `contain: size` (that would collapse the bubble to zero). Scoped to the two
+       prose bubbles (the numerous, streaming ones); system toasts / decision cards are untouched. */
+    .msg-ai, .msg-user {
+      contain: layout paint;
+    }
     .msg-user {
       align-items: flex-end;
       margin-left: auto;
