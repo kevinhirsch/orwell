@@ -290,7 +290,19 @@ function ensureCss() {
        the blanket 44px floor (titlebar-dominating). The frosted theme keeps its own
        12px-disc + invisible 44px ::after hit region (style.css, higher specificity). */
     @media (pointer: coarse) {
-      .ow-controls button, .ow-dismiss { min-width: 32px; min-height: 32px; }
+      .ow-controls button, .ow-dismiss { min-width: 32px; min-height: 32px; position: relative; }
+      /* F-TOUCH-1 (HIG "Provide ample touch targets… at least 44×44 pt"): the VISIBLE
+         titlebar control stays a proportionate 32px (no giant buttons dominating a ~44px
+         titlebar — the #893 intent), but an invisible >=44px ::after extends the HIT area to
+         the 44pt floor on coarse pointers. This mirrors the frosted traffic-light disc's own
+         hit region (style.css body.theme-frosted .ow-controls button::after) into the
+         legacy/non-frosted chrome, where the hit box otherwise stayed 32px. The frosted
+         rule's higher specificity keeps owning the frosted theme; this closes the gap in the
+         non-frosted theme. Appearance unchanged — only the tap target grows. */
+      .ow-controls button::after, .ow-dismiss::after {
+        content: ""; position: absolute; top: 50%; left: 50%;
+        width: 44px; height: 44px; transform: translate(-50%, -50%);
+      }
     }
     /* R4 (audit resp-F2): dvh tracks the dynamic (keyboard/URL-bar-shrunk) mobile viewport so a
        window's lowest controls don't fall below the fold when the soft keyboard opens; vh first
@@ -612,6 +624,18 @@ export class OrwellWindow {
     // "Drag to move" — it would lie on touch (the cursor:move is suppressed by the matching media
     // query). A window born wide and resized narrow keeps the tooltip; the cursor still corrects.
     tb.title = (this.o.draggable && !docked && !isNarrow()) ? 'Drag to move · arrows to nudge' : '';
+    // F-A11Y-4 (HIG "don't rely on hover-only cues"): the keyboard-move ("arrows to nudge")
+    // affordance was carried ONLY by `title=`, which never surfaces on touch and is unreliable
+    // for AT. Expose the move keys through aria-keyshortcuts — the well-supported ARIA attribute
+    // built for exactly this (unlike draft aria-description; see orwellSeasonProgress.js J4-14) —
+    // so the affordance reaches the accessibility tree, not just a desktop hover tooltip. Gated
+    // on the same keyboard-move availability (floating + draggable) that _onTitlebarKey acts on;
+    // Home (restack) is only advertised when the window is slotted, matching that handler.
+    if (this.o.draggable && !docked) {
+      let keys = 'ArrowUp ArrowDown ArrowLeft ArrowRight';
+      if (this.o.slotKey) keys += ' Home';
+      tb.setAttribute('aria-keyshortcuts', keys);
+    }
     const title = document.createElement('span');
     title.className = 'ow-title';
     title.textContent = this.o.title;
