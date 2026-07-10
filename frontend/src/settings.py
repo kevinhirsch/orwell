@@ -457,16 +457,19 @@ _WS_TRANSPORT_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def ws_transport_enabled() -> bool:
-    """WebSocket Phase-1 transport (ADR 0017/0018) — default OFF (owner-gated rollout).
+    """WebSocket Phase-1 transport (ADR 0017/0018) — default ON (turned on 2026-07-10).
 
-    When ORWELL_WS_TRANSPORT is a truthy value (1/true/yes/on) the page emits
-    body[data-ws-transport="1"], which the client (orwellWs.js) reads to attempt the
-    WS upgrade. Unset/false ⇒ the attr is ABSENT ⇒ byte-identical page output ⇒ the
-    transport stays DORMANT on the existing SSE/poll stack. Read from the environment
-    so an operator flips it without a code change or a restart-editing files."""
+    When enabled the page emits body[data-ws-transport="1"], which the client
+    (orwellWs.js) reads to attempt the WS upgrade; a client that cannot upgrade falls
+    back to the existing SSE/poll stack automatically (permanent path). Turn-on gate:
+    the two-window mirror-parity WS leg was verified PASS end to end (#1353 — WS engages
+    with a valid perTabId hello, the peer uses the live incremental renderer; #1349 CSWSH
+    Origin guard in place). ORWELL_WS_TRANSPORT is read from the environment as the
+    operator lever: unset ⇒ ON (default); an explicit off/0/false/no ⇒ OFF (rollback to
+    the SSE/poll stack — just an env edit + restart, no code change)."""
     raw = os.getenv("ORWELL_WS_TRANSPORT")
     if raw is None:
-        return False
+        return True
     return raw.strip().lower() in _WS_TRANSPORT_TRUTHY
 
 
