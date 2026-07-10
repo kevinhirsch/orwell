@@ -17,8 +17,23 @@ ADMIN_USER=admin; ADMIN_PW="mirror-gate-pw"   # stable throwaway local admin (ne
 FE_DATA="$ROOT/frontend/data"                 # the dir the app actually reads (auth.json is hardcoded data/auth.json)
 LIVE="${MIRROR_LIVE:-}"                        # MIRROR_LIVE=1 → real OpenRouter model (env ORWELL_TEST_OPENROUTER_KEY); else the deterministic fake
 TOOLTURN="${MIRROR_TOOLTURN:-}"                 # MIRROR_TOOLTURN=1 → the tool-rich multi-round settled-parity gate (fake_model_server FAKE_SCRIPT=toolturn)
-export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-export PW_CHROMIUM=/opt/pw-browsers/chromium
+# Browser location — overridable so the same driver runs under CI (or any box) without editing it.
+# Defaults match this sandbox's provisioning (global npm playwright + chromium under /opt/pw-browsers);
+# a caller (e.g. the CI job) can point these elsewhere. Leave PW_CHROMIUM empty to let playwright
+# auto-resolve the browser from PLAYWRIGHT_BROWSERS_PATH.
+# This sandbox pre-provisions chromium at /opt/pw-browsers; a clean CI runner has none there and uses
+# playwright's default cache (~/.cache/ms-playwright). Respect a caller override; else use the sandbox
+# path ONLY if it exists; else leave unset so playwright auto-resolves its own installed chromium.
+if [ -z "${PLAYWRIGHT_BROWSERS_PATH:-}" ] && [ -d /opt/pw-browsers ]; then
+  export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+fi
+# PW_CHROMIUM: explicit binary for chromium.launch({executablePath}). Use a caller override; else the
+# sandbox binary if it really exists; else empty → the harness passes undefined and playwright
+# auto-resolves the browser it installed in step 0 (below).
+if [ -z "${PW_CHROMIUM+x}" ]; then
+  if [ -x /opt/pw-browsers/chromium ]; then PW_CHROMIUM=/opt/pw-browsers/chromium; else PW_CHROMIUM=""; fi
+fi
+export PW_CHROMIUM
 export BASE_URL="http://127.0.0.1:$FE_PORT"; export ENGINE_URL="http://127.0.0.1:$ENGINE_PORT"
 
 PIDS=()
@@ -35,12 +50,42 @@ pkill -9 -f 'fake_model_server.mjs' 2>/dev/null; pkill -9 -f "uvicorn app:app --
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 wait_http() { local url="$1" name="$2" n=0; until curl -sf -o /dev/null --max-time 3 "$url"; do n=$((n+1)); [ $n -ge 40 ] && { echo "!! $name never came up ($url)"; return 1; }; sleep 1; done; echo "ok: $name"; }
 
-# 0) playwright resolvable for the harness's `import 'playwright'` (global 1.56.1 + cached chromium).
-say "0) link playwright into node_modules"
-PW_GLOBAL="$(npm root -g)"   # global node_modules (playwright 1.56.1 bundles playwright-core)
-[ -d "$ROOT/node_modules/playwright" ] || ln -sfn "$PW_GLOBAL/playwright" "$ROOT/node_modules/playwright"
-[ -d "$ROOT/node_modules/playwright-core" ] || ln -sfn "$PW_GLOBAL/playwright-core" "$ROOT/node_modules/playwright-core" 2>/dev/null || true
+# 0) playwright resolvable for the harness's `import 'playwright'`. First the JS DRIVER, then (0c) a
+#    browser binary. Driver resolution order, most-portable first, so the SAME gate runs on this sandbox
+#    AND a clean CI runner: (a) already resolvable? done. (b) a GLOBAL npm playwright to symlink in.
+#    (c) neither — install it locally, no-save (the DRIVER download skips the browser; 0c fetches that).
+#    package.json intentionally does NOT carry playwright (it's not a runtime/engine dep); this keeps the
+#    gate self-contained regardless of host.
+PW_VER="${MIRROR_PW_VERSION:-1.56.1}"   # match the chromium provisioned under $PLAYWRIGHT_BROWSERS_PATH
+say "0) ensure playwright resolvable for the harness"
+mkdir -p "$ROOT/node_modules"
+pw_ok() { node -e "import('playwright').then(()=>process.exit(0)).catch(()=>process.exit(1))" >/dev/null 2>&1; }
+if ! pw_ok; then
+  PW_GLOBAL="$(npm root -g 2>/dev/null || true)"
+  if [ -n "$PW_GLOBAL" ] && [ -d "$PW_GLOBAL/playwright" ]; then
+    ln -sfn "$PW_GLOBAL/playwright" "$ROOT/node_modules/playwright"
+    [ -d "$PW_GLOBAL/playwright-core" ] && ln -sfn "$PW_GLOBAL/playwright-core" "$ROOT/node_modules/playwright-core" 2>/dev/null || true
+  fi
+fi
+if ! pw_ok; then
+  say "0b) no resolvable playwright (no global) — installing locally (no-save, browser download skipped)"
+  ( cd "$ROOT" && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --no-save --no-audit --no-fund "playwright@$PW_VER" >"$LOGS/pw-install.log" 2>&1 ) \
+    || { echo "!! playwright install failed"; tail -30 "$LOGS/pw-install.log" 2>/dev/null; exit 1; }
+fi
 node -e "import('playwright').then(()=>console.log('playwright import ok')).catch(e=>{console.error(e);process.exit(1)})" || exit 1
+
+# 0c) a chromium binary to launch. Trust an explicit, existing PW_CHROMIUM (the sandbox path); else the
+#     node driver installs ITS OWN revision-matched chromium (into $PLAYWRIGHT_BROWSERS_PATH or the
+#     default ~/.cache/ms-playwright cache) and we auto-resolve it. On CI /opt/pw-browsers is absent, so
+#     PW_CHROMIUM is empty here and this is the path that runs; it's idempotent (skips if already present).
+if [ -n "$PW_CHROMIUM" ] && [ -x "$PW_CHROMIUM" ]; then
+  echo "chromium: $PW_CHROMIUM (pre-provisioned)"
+else
+  say "0c) install the node driver's chromium (auto-resolve)"
+  ( cd "$ROOT" && npx --yes playwright install chromium >"$LOGS/pw-browser.log" 2>&1 ) \
+    || { echo "!! chromium install failed"; tail -30 "$LOGS/pw-browser.log" 2>/dev/null; exit 1; }
+  export PW_CHROMIUM=""   # empty → mirror_live_parity.mjs launches with executablePath undefined (auto-resolve)
+fi
 
 # secrets file the rig reads for admin login (gitignored — see .gitignore add).
 printf 'ADMIN_USER=%s\nADMIN_PW=%s\n' "$ADMIN_USER" "$ADMIN_PW" > "$HARNESS/.secrets.env"
@@ -54,8 +99,17 @@ wait_http "$ENGINE_URL/health" engine || { tail -20 "$LOGS/engine.log"; exit 1; 
 
 # 2) model: the deterministic fake (default) OR a real provider for the live pre-merge pass
 if [ -z "$LIVE" ]; then
-  say "2) fake model :$FAKE_PORT${TOOLTURN:+ (FAKE_SCRIPT=toolturn)}"
-  ( FAKE_MODEL_PORT=$FAKE_PORT FAKE_SCRIPT="${TOOLTURN:+toolturn}" exec node "$HARNESS/fake_model_server.mjs" >"$LOGS/fake.log" 2>&1 ) & PIDS+=($!)
+  # FAKE_TOKEN_DELAY_MS spaces the streamed tokens so A's stream has a DETERMINISTIC wall-clock WIDTH
+  # (default 300ms/token → a ~7-9s narration stream). A zero-width burst stream is impossible for a
+  # second window to mirror LIVE on a contended host — the F5 flake root cause — so the live-parity
+  # gate widens it; it changes PACING only, never the bytes (two windows still receive identical
+  # deltas). Override with MIRROR_TOKEN_DELAY_MS. The toolturn/HUD gates don't need it (0 there).
+  FAKE_TOKEN_DELAY_MS_DEFAULT=300
+  [ -n "$TOOLTURN" ] && FAKE_TOKEN_DELAY_MS_DEFAULT=0
+  TOKEN_DELAY="${MIRROR_TOKEN_DELAY_MS:-$FAKE_TOKEN_DELAY_MS_DEFAULT}"
+  say "2) fake model :$FAKE_PORT${TOOLTURN:+ (FAKE_SCRIPT=toolturn)} (token-delay ${TOKEN_DELAY}ms)"
+  ( FAKE_MODEL_PORT=$FAKE_PORT FAKE_SCRIPT="${TOOLTURN:+toolturn}" FAKE_TOKEN_DELAY_MS="$TOKEN_DELAY" \
+      exec node "$HARNESS/fake_model_server.mjs" >"$LOGS/fake.log" 2>&1 ) & PIDS+=($!)
   wait_http "http://127.0.0.1:$FAKE_PORT/v1/models" fake-model || { tail "$LOGS/fake.log"; exit 1; }
 else
   say "2) LIVE model (real provider; fake skipped)"

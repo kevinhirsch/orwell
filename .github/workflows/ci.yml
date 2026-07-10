@@ -595,6 +595,64 @@ jobs:
       - name: responsive matrix gate — viewports x surfaces (Stream S, ruling 16)
         run: cd frontend && python3 scripts/responsive_matrix.py
 
+  # ── F5 two-window live mirror-parity gate (ship-gate F5 / ADR 0012 §3.3 / ADR 0015) ──────────
+  #
+  # The executable, model-independent gate for the #1 release blocker — realtime two-window mirror
+  # parity. `run_mirror_gate.sh` boots the REAL stack (engine + the deterministic streamed fake model +
+  # the FE + a started game), opens two browser windows on the one canonical session, sends a turn from
+  # window A, and asserts window B mirrors A's LIVE stream through the SAME incremental renderer
+  # (`createStreamRenderer`) — not a settled-transcript diff. Key-free (deterministic narrator), like
+  # boot/browser smoke. See docs/audits/playtest-harness/README.md §10 and docs/decisions/0015.
+  #
+  # PATH-GATED (`changes.frontend`): the render path being proven lives in frontend/static/js/. A
+  # docs-only / engine-only PR skips it (the unified `ci-gate` reports green for the skip).
+  #
+  # DETERMINISTIC ON ANY HOST (PR #1276): the gate sends a WARM-UP turn so B is a pre-subscribed mirror
+  # (no first-turn cold-start discovery cost), widens A's reply stream (FAKE_TOKEN_DELAY_MS) so B's live
+  # attach lands mid-stream regardless of host speed, and waits for the observer to record the structural
+  # evidence before draining (README §10 "Timing model"). The small retry below is now belt-and-suspenders
+  # (a self-hosted-runner boot blip), not the mechanism the gate relies on to be green.
+  mirror-parity:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: build the engine (dist/main.js the gate boots)
+        run: |
+          npm ci
+          npm run build
+      - name: front-end venv (the gate runs frontend/.venv/bin/python)
+        run: |
+          python3 -m venv frontend/.venv
+          frontend/.venv/bin/pip install --upgrade pip
+          frontend/.venv/bin/pip install -r frontend/requirements.txt
+      - name: mirror-parity gate (retried for the first-turn timing artifact)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3 4; do
+            echo "──── mirror-parity attempt $attempt ────"
+            if bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-parity: PASS on attempt $attempt"
+              exit 0
+            fi
+            echo "mirror-parity: attempt $attempt did not pass; retrying"
+            sleep 3
+          done
+          echo "::error::mirror-parity gate failed all attempts (two windows diverged during streaming)"
+          exit 1
+
   # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────
   #
   # THE single required check — point branch protection HERE, not at the individual gated jobs. It
@@ -619,6 +677,7 @@ jobs:
       - fe-browser-tests
       - fe-browser
       - fe-responsive
+      - mirror-parity
       - heavy-sims
     if: always()
     runs-on: self-hosted
@@ -637,6 +696,7 @@ jobs:
             fe-browser-tests=${{ needs.fe-browser-tests.result }}
             fe-browser=${{ needs.fe-browser.result }}
             fe-responsive=${{ needs.fe-responsive.result }}
+            mirror-parity=${{ needs.mirror-parity.result }}
             heavy-sims=${{ needs.heavy-sims.result }}
         run: |
           set -euo pipefail

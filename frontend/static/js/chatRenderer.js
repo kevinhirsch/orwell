@@ -2035,6 +2035,7 @@ export function addMessage(role, content, modelName, metadata) {
           if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
           if (metadata?._seq != null) wrap.dataset.seq = String(metadata._seq);          // ADR 0008
           if (metadata?.client_msg_id) wrap.dataset.clientMsgId = metadata.client_msg_id; // ADR 0008
+          if (metadata?._fromHistory) wrap.dataset.fromHistory = '1';                     // F5: STATIC reconcile render (resumeStream's dup-check distinguishes this from an own-echo live bubble)
           box.appendChild(wrap);
           lastWrap = wrap;
           if (!firstMsgAi) firstMsgAi = wrap;
@@ -2280,6 +2281,7 @@ export function addMessage(role, content, modelName, metadata) {
     if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
     if (metadata?._seq != null) wrap.dataset.seq = String(metadata._seq);          // ADR 0008
     if (metadata?.client_msg_id) wrap.dataset.clientMsgId = metadata.client_msg_id; // ADR 0008
+    if (metadata?._fromHistory) wrap.dataset.fromHistory = '1';                     // F5: STATIC reconcile render (resumeStream's dup-check distinguishes this from an own-echo live bubble)
     // Prepend sources box if saved in metadata
     var sourcesPrefix = '';
     var findingsSuffix = '';
