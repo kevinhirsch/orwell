@@ -96,7 +96,7 @@ def test_auto_mark_marks_only_houseguests_named_in_the_narration(monkeypatch):
     async def fake_intros(user=None):
         return _premiere_intros_view(["Fiona Haynes", "Dawn Vega", "Quinn Mayer"])
 
-    async def fake_mark(hid, user=None):
+    async def fake_mark(hid, user=None, via=None):  # #1318: the belt now passes via="belt"
         marked.append(hid)
         return {"complete": False}
 
@@ -115,7 +115,7 @@ def test_auto_mark_matches_full_name_too(monkeypatch):
     monkeypatch.setattr(orwell_engine, "premiere_intros",
                         lambda user=None: _async(_premiere_intros_view(["Dawn Vega"])))
 
-    async def fake_mark(hid, user=None):
+    async def fake_mark(hid, user=None, via=None):  # #1318: the belt now passes via="belt"
         marked.append(hid)
     monkeypatch.setattr(orwell_engine, "mark_houseguest_met", fake_mark)
     n = _run(agent_loop._auto_mark_premiere_intros("Then Dawn Vega took the floor.", "p"))

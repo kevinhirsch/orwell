@@ -390,6 +390,16 @@ export interface SessionCore {
    */
   introducedNames?: EntityId[];
   /**
+   * #1318 — PREMIERE, the player-formed HOT-READ set: the subset of `premiereIntros` reached through
+   * GENUINE engagement (a model-driven introduction the player was part of, or a recorded player↔NPC
+   * scene) rather than the FE regex name-belt. ONLY this set unlocks the asymmetric first-power gate, so
+   * the first HOH no longer fires the moment two names are name-dropped. Premiere-scoped like
+   * `premiereIntros` (cleared once the first HOH begins); persisted so a half-done premiere resumes with
+   * its earned power state intact (0030). Absent on a pre-#1318 save ⇒ empty (no earned reads yet, so the
+   * gate simply waits for the first genuine one — safe, never a spurious early unlock). Public ids only.
+   */
+  premiereHotReads?: EntityId[];
+  /**
    * 0070 — the additive prose texture layer: model-voiced content indexed by event id. Only
    * applied when the underlying event is already hidden (never creates events, never alters the
    * closed set). Persisted so enriched scenes survive a restart byte-identical (0030). Absent on

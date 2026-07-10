@@ -180,8 +180,16 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       return;
     case "npcVoice":
     case "getPortraitPrompt":
+      if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
+      return;
     case "markHouseguestMet": // PREMIERE meet-everyone (#380) — takes a houseguest id
       if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
+      // #1318 — optional source: only the FE regex belt passes "belt" (meet-list only, not a hot read);
+      // any other/absent value is a genuine "player" read. Reject an unknown value rather than silently
+      // treating it as a hot read.
+      if (args["via"] !== undefined && args["via"] !== "belt" && args["via"] !== "player") {
+        refuse("via", 'either "player" or "belt" when present');
+      }
       return;
     case "recordImageBeat":
       guardSyncFields(false); // BE-5 — optional expectedBeatSeq (0065 Part A parity with the other write-backs)
@@ -404,7 +412,10 @@ export class McpServer {
       case "premiereIntros":
         return this.deps.session.premiereIntros();
       case "markHouseguestMet":
-        return this.deps.session.markHouseguestMet(args["id"] as EntityId);
+        return this.deps.session.markHouseguestMet(
+          args["id"] as EntityId,
+          args["via"] === "belt" ? { via: "belt" } : undefined,
+        );
       case "seasonRecap":
         return this.deps.session.seasonRecap();
       case "dailyRecap":

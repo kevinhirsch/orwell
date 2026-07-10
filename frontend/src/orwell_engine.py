@@ -884,11 +884,19 @@ async def premiere_intros(user: str | None = None):
     return await _call("premiereIntros", {}, user=user)
 
 
-async def mark_houseguest_met(houseguest_id: str, user: str | None = None):
+async def mark_houseguest_met(houseguest_id: str, user: str | None = None, via: str | None = None):
     """PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they've introduced their
     public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH.
-    Returns the updated meet-everyone progress (``None`` outside the premiere)."""
-    return await _call("markHouseguestMet", {"id": houseguest_id}, user=user)
+    Returns the updated meet-everyone progress (``None`` outside the premiere).
+
+    #1318 — ``via="belt"`` marks it as the FE regex auto-belt catching a bare name in narration: it fills
+    the meet-list (its anti-soft-lock job) but is NOT a genuine player-formed read, so it does NOT unlock
+    the asymmetric first-power gate. Omit ``via`` (the default) for a genuine model-driven introduction the
+    player was part of — that counts as a hot read. The engine defaults an absent value to ``player``."""
+    args: dict = {"id": houseguest_id}
+    if via is not None:
+        args["via"] = via
+    return await _call("markHouseguestMet", args, user=user)
 
 
 async def finale_view(user: str | None = None):
