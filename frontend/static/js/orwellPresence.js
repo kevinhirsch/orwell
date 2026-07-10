@@ -38,6 +38,16 @@
   let _lastAnnounced = null; // A11Y-1: last SR-announced header line, to announce only on change
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
 
+  // WS Phase-1 (§4): when the multiplexed socket is live, the server PUSHES a `hud`
+  // frame the instant whereabouts change; platform.js relays it to the one
+  // `orwell:gamechanged` dispatcher, which fires refreshNow() below. So we cancel the
+  // 25s periodic TIMER in WS mode and stay edge-triggered (fail-soft: any doubt ⇒
+  // keep polling). The fallback/SSE path is unchanged and still polls.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+
   async function getJSON(url) {
     const r = await fetch(url, { credentials: "same-origin" });
     if (!r.ok) throw new Error("HTTP " + r.status);
@@ -239,8 +249,10 @@
       if (window.OrwellReport) window.OrwellReport.fail("presence", "whereabouts-poll", _); // G11: fail open, never silent
       render(null); // fail OPEN: the gadget simply isn't there
     } finally {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(tick, _pollDelay());
+      if (timer) { clearTimeout(timer); timer = null; }
+      // In WS mode the `hud` push (via orwell:gamechanged → refreshNow) supersedes the
+      // periodic poll — don't re-arm the timer, just stay edge-triggered.
+      if (!_wsActive()) timer = setTimeout(tick, _pollDelay());
     }
   }
 
@@ -255,8 +267,14 @@
     if (document.body && document.body.dataset.gameBuild !== "1") return;
     tick();
     // Refresh on the shared game-changed signal (platform.js dispatches it after every
-    // engine-mutating turn) so the room/co-presence updates the moment the player moves.
+    // engine-mutating turn — AND on every WS `hud` push, §4) so the room/co-presence
+    // updates the moment the player moves.
     window.addEventListener("orwell:gamechanged", refreshNow);
+    // WS Phase-1 (§4/§6): cancel the periodic poll the instant the socket goes live;
+    // resume polling if it falls back to SSE. refreshNow re-arms the timer via tick()
+    // (which only re-schedules while !_wsActive()).
+    window.addEventListener("orwell:ws-active", () => { if (timer) { clearTimeout(timer); timer = null; } });
+    window.addEventListener("orwell:ws-inactive", refreshNow);
     window.addEventListener("beforeunload", () => timer && clearTimeout(timer));
   });
 })();

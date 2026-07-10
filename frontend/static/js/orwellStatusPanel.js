@@ -781,14 +781,26 @@ import { onNarrowChange } from './platform.js';
   // Seam for the headless browser gate: build + show the panel on demand.
   window._orwellStatusEnsure = () => { const el = ensurePanel(); el.style.display = "block"; return true; };
 
+  // WS Phase-1 (§4): when the multiplexed socket is live the server PUSHES a `state`
+  // frame on every board change; platform.js relays it to the one `orwell:gamechanged`
+  // dispatcher, which triggers an edge refresh below. So we cancel the 20s periodic
+  // TIMER in WS mode and stay edge-triggered (fail-soft: any doubt ⇒ keep polling).
+  // The fallback/SSE path is unchanged and still polls.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+
   function start(wantBeat) {
     refresh(wantBeat);
     if (timer) clearInterval(timer);
     const tick = async () => {
       if (!document.hidden) await refresh();  // C18: no polling in a hidden tab
-      timer = setTimeout(tick, _pollDelay());
+      // In WS mode the `state` push (via orwell:gamechanged) supersedes the poll —
+      // don't re-arm the periodic timer, just stay edge-triggered.
+      if (!_wsActive()) timer = setTimeout(tick, _pollDelay());
     };
-    timer = setTimeout(tick, _pollDelay());
+    if (!_wsActive()) timer = setTimeout(tick, _pollDelay());
   }
 
   // Let onboarding (or any flow that changes the game) trigger an immediate refresh.
@@ -808,6 +820,11 @@ import { onNarrowChange } from './platform.js';
     if (timer) { clearTimeout(timer); timer = null; }
     start(e && e.detail ? e.detail.beatSeq : undefined);
   });
+  // WS Phase-1 (§4/§6): cancel the periodic poll the instant the socket goes live;
+  // resume polling if it falls back to SSE. start() re-arms the timer only while
+  // !_wsActive(), so re-running it after a downgrade restores the cadence.
+  window.addEventListener("orwell:ws-active", () => { if (timer) { clearTimeout(timer); timer = null; } });
+  window.addEventListener("orwell:ws-inactive", () => { _failures = 0; if (timer) { clearTimeout(timer); timer = null; } start(); });
   // The sidebar drawer handles narrow layouts; nothing to repark (E64). Kept as a
   // no-op subscription so a future narrow-specific treatment has its hook.
   onNarrowChange(() => {});

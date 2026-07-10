@@ -1,0 +1,457 @@
+// ============================================================================
+// orwellWs.js — WebSocket Phase-1 CLIENT transport (ADR 0017 / docs/design/
+// websocket-phase1-protocol.md).  Browser ↔ FE, Hop 1 only.
+// ============================================================================
+//
+// ONE multiplexed socket per tab for the ONE canonical session it resolves to.
+// This module owns the WIRE: the hello/bind/ack handshake (§2), the `chat`
+// replay-then-tail `subscribe{fromSeq}` (§3), the `state`/`hud`/`layout`/`notice`
+// down-frames (§4/§5), the `turn`/`decision` up-frames (§3.5), the heartbeat
+// pong, reconnect with a gap cursor, and — critically — the PERMANENT SSE/poll
+// FALLBACK negotiation gated by the `ORWELL_WS_TRANSPORT` flag (§6).
+//
+// It does NOT render anything and it does NOT decide game state.  It is a dumb,
+// fail-soft frame pipe:
+//   • incoming `event` frames on `chat`      → handed to chat.js (the reasoning
+//     split + the ONE incremental renderer live there — §3.4, ADR 0015);
+//   • incoming `state`/`hud` frames          → handed to platform.js, which is
+//     the ONE caller of `window.orwellGameChanged('ws:state')` (§4, g15);
+//   • incoming `layout`/`notice` frames      → handed to the layout/notice code.
+// Strict `ch` routing (a `hud` frame NEVER reaches the chat buffers, a `chat`
+// delta NEVER reaches the layout store) is the whole point of the multiplex —
+// see test_ws_multiplex_isolation.py.
+//
+// Written as a plain IIFE (no import/export) so it is (a) executable as a
+// side-effect ES module — `import './orwellWs.js'` runs it — and (b) evaluable
+// directly in a Node harness with stubbed globals for the behavioral tests
+// (the same shape sessionSync.js uses).
+//
+// FAIL-SOFT IS LAW.  Any error, any blocked upgrade, the flag off, or the
+// non-game build ⇒ we stay/enter fallback mode and the EXISTING SSE + poll
+// stack (sessionSync.js, orwellStatusPanel.js, orwellPresence.js) carries the
+// game unchanged.  The socket is an optimization, never a dependency.
+(function () {
+  "use strict";
+
+  if (typeof window === "undefined") return;
+  if (window.OrwellWs) return; // idempotent — never double-install
+
+  // ── config / feature flag (§6) ──────────────────────────────────────────
+  var API_BASE = window.API_BASE || "";
+  var PROTOCOL = 1;
+  var HELLO_TIMEOUT_MS = 3000;   // ~3s to first `ack` (§6 negotiation)
+  var RECONNECT_BASE_MS = 500;
+  var RECONNECT_MAX_MS = 15000;
+  var RECONNECT_GIVEUP = 6;      // consecutive failed reconnects → permanent fallback
+
+  // `ORWELL_WS_TRANSPORT` (default OFF in Phase 1 — zero-risk default, §6). The
+  // server injects it; we read it defensively from either a global or a body
+  // data-attribute. Absent/false ⇒ the client never even attempts the upgrade.
+  function _flagOn() {
+    try {
+      if (window.ORWELL_WS_TRANSPORT === true || window.ORWELL_WS_TRANSPORT === 1 ||
+          window.ORWELL_WS_TRANSPORT === "1" || window.ORWELL_WS_TRANSPORT === "true") return true;
+      var b = window.document && window.document.body;
+      if (b && b.dataset && (b.dataset.wsTransport === "1" || b.dataset.wsTransport === "true")) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  // The transport is a GAME-build concern (the mirror/HUD it ports live only
+  // there). The full workspace build never attempts it.
+  function _gameBuild() {
+    try {
+      var b = window.document && window.document.body;
+      return !!(b && b.dataset && b.dataset.gameBuild === "1");
+    } catch (_) { return false; }
+  }
+
+  // The tab's own chat-session id — the id this tab would POST under today
+  // (§2.1 `perTabId`). It is only an INPUT to the server's bind target; the
+  // server DERIVES the resolution branch itself (§2.2), never from us.
+  function _perTabId() {
+    try {
+      var sm = window.sessionModule;
+      return (sm && sm.getCurrentSessionId && sm.getCurrentSessionId()) || null;
+    } catch (_) { return null; }
+  }
+
+  function _wsUrl() {
+    var loc = window.location;
+    var scheme = (loc && loc.protocol === "https:") ? "wss:" : "ws:";
+    var host = (loc && loc.host) || "";
+    // API_BASE may be an absolute http(s) origin in some embeds; normalize it.
+    if (/^https?:\/\//i.test(API_BASE)) {
+      return API_BASE.replace(/^http/i, "ws").replace(/\/$/, "") + "/api/ws/session";
+    }
+    return scheme + "//" + host + "/api/ws/session";
+  }
+
+  // ── state ───────────────────────────────────────────────────────────────
+  var _mode = "idle";            // idle | negotiating | ws | fallback
+  var _sock = null;
+  var _cid = 0;
+  var _pending = {};             // cid → { resolve, reject, t }
+  var _canonicalId = null;
+  var _live = false;
+  var _beatSeq = 0;              // last-seen engine beatSeq (0065)
+  var _highestChatSeq = -1;      // highest `chat` event.seq rendered (reconnect cursor)
+  var _chatSubscribed = false;
+  var _helloTimer = null;
+  var _reconnectFails = 0;
+  var _reconnectTimer = null;
+  var _closingForGood = false;
+
+  // per-channel handler registries — strict `ch` routing (§ multiplex).
+  var _handlers = { chat: [], state: [], hud: [], layout: [], notice: [] };
+
+  function _nextCid() { _cid += 1; return "c_" + _cid.toString(36); }
+
+  function _emitWindow(name, detail) {
+    try { window.dispatchEvent(new CustomEvent(name, { detail: detail || {} })); } catch (_) {}
+  }
+
+  // ── public: handler registration ────────────────────────────────────────
+  function onFrame(ch, fn) {
+    if (!_handlers[ch] || typeof fn !== "function") return;
+    if (_handlers[ch].indexOf(fn) === -1) _handlers[ch].push(fn);
+  }
+  function offFrame(ch, fn) {
+    if (!_handlers[ch]) return;
+    var i = _handlers[ch].indexOf(fn);
+    if (i !== -1) _handlers[ch].splice(i, 1);
+  }
+  function _emit(ch, frame) {
+    var list = _handlers[ch];
+    if (!list) return;
+    for (var i = 0; i < list.length; i++) {
+      try { list[i](frame); } catch (_) { /* one bad handler never wedges the pipe */ }
+    }
+  }
+
+  // ── the frame router — dispatch STRICTLY by `ch` (the multiplex wall) ────
+  // Exposed as `_handleFrame` so a test can feed an interleaved frame sequence
+  // straight in (case c) without a live socket.
+  function _handleFrame(frame) {
+    if (!frame || typeof frame !== "object") return;
+    switch (frame.t) {
+      case "ping":
+        _send({ t: "pong" });
+        return;
+      case "pong":
+        return;
+      case "ack":
+        _onAck(frame);
+        return;
+      case "error":
+        _onError(frame);
+        return;
+      case "event":
+        // `event` frames are the ONLY frames that carry `ch`-scoped stream data.
+        // Route by `ch`; a non-`chat` frame can never reach the chat buffers.
+        if (frame.ch === "chat") {
+          if (typeof frame.seq === "number" && frame.seq > _highestChatSeq) _highestChatSeq = frame.seq;
+          _emit("chat", frame);
+        } else if (_handlers[frame.ch]) {
+          _emit(frame.ch, frame);
+        }
+        return;
+      case "state":
+        if (frame.d && typeof frame.d.beatSeq === "number") _noteBeat(frame.d.beatSeq);
+        _emit("state", frame);
+        return;
+      case "hud":
+        if (frame.d && typeof frame.d.beatSeq === "number") _noteBeat(frame.d.beatSeq);
+        _emit("hud", frame);
+        return;
+      case "layout":
+        _emit("layout", frame);
+        return;
+      case "notice":
+        _emit("notice", frame);
+        return;
+      default:
+        return; // unknown frame type — ignore, never crash the pipe
+    }
+  }
+
+  function _noteBeat(b) { if (typeof b === "number" && b > _beatSeq) _beatSeq = b; }
+
+  function _onAck(frame) {
+    var cid = frame.cid;
+    var d = frame.d || {};
+    // Handshake ack (hello/bind): carries canonicalId/live/beatSeq (§2.3).
+    if (cid && _pending[cid] && _pending[cid].t === "hello") {
+      var p = _pending[cid]; delete _pending[cid];
+      _canonicalId = d.canonicalId || _canonicalId;
+      _live = d.live !== false;
+      _noteBeat(d.beatSeq);
+      if (d.adopted) {
+        // We lost the bind race and adopted a different canonical id (§2.3) —
+        // re-point the view WITHOUT a settle-time reload (that reload was #1086).
+        _emitWindow("orwell:ws-adopted", { canonicalId: _canonicalId });
+      }
+      try { p.resolve(frame); } catch (_) {}
+      return;
+    }
+    // Subscribe ack (§3.1): `ch:"chat"`, d:{fromSeq, headSeq} — sent BEFORE any
+    // `event` frame on the channel, so the client knows the [fromSeq..headSeq]
+    // replay window.
+    if (cid && _pending[cid]) {
+      var q = _pending[cid]; delete _pending[cid];
+      if (frame.ch === "chat") _chatSubscribed = true;
+      try { q.resolve(frame); } catch (_) {}
+      return;
+    }
+    // A generic up-frame ack (turn/decision accepted, §3.5) with an unmatched
+    // cid — nothing to resolve, ignore.
+  }
+
+  function _onError(frame) {
+    var cid = frame.cid;
+    var d = frame.d || {};
+    // A `cid`-tagged error rejects the matching pending promise (§1.2) so the
+    // caller (a turn/decision/subscribe/hello) fails the RIGHT request.
+    if (cid && _pending[cid]) {
+      var p = _pending[cid]; delete _pending[cid];
+      // stale-beat: the engine refused a 0065 CAS BEFORE any write. Surface the
+      // fresh beatSeq so the caller reconciles + retries (§3.5).
+      if (d.code === "stale-beat" && typeof d.beatSeq === "number") _noteBeat(d.beatSeq);
+      var err = new Error(d.code || "ws-error");
+      err.code = d.code; err.detail = d;
+      try { p.reject(err); } catch (_) {}
+    }
+    // forbidden / not-bound at the handshake ⇒ this socket can't serve the game;
+    // fail soft to the SSE stack rather than leaving the user stuck.
+    if (d.code === "forbidden" || d.code === "not-bound") {
+      _goFallback();
+    }
+  }
+
+  // ── send helpers ────────────────────────────────────────────────────────
+  function _send(frame) {
+    try {
+      if (_sock && _sock.readyState === 1) { _sock.send(JSON.stringify(frame)); return true; }
+    } catch (_) {}
+    return false;
+  }
+
+  // request/response: allocate a cid, register the pending promise, send. Gated on the
+  // socket being OPEN (not on `_mode`): the handshake `hello`/`subscribe` legitimately
+  // fire during `negotiating`, before we flip to `ws`. Callers of the up-frames
+  // (sendTurn/sendDecision) additionally gate on isActive() at their call site.
+  function _request(t, ch, d, tag) {
+    return new Promise(function (resolve, reject) {
+      if (!_sock || _sock.readyState !== 1) { reject(new Error("ws-not-open")); return; }
+      var cid = _nextCid();
+      _pending[cid] = { resolve: resolve, reject: reject, t: tag || t };
+      var frame = { t: t, cid: cid, d: d || {} };
+      if (ch) frame.ch = ch;
+      if (!_send(frame)) { delete _pending[cid]; reject(new Error("ws-send-failed")); }
+    });
+  }
+
+  // ── the handshake (§2) ──────────────────────────────────────────────────
+  function _hello(perTabId) {
+    return _request("hello", null, { perTabId: perTabId, protocol: PROTOCOL }, "hello");
+  }
+
+  // Re-resolve the canonical id (§2.3 `bind`) — e.g. after a season reset
+  // unbinds it (surfaced by orwell:gamechanged). Same shape as hello.
+  function rebind() {
+    if (_mode !== "ws") return Promise.reject(new Error("ws-not-active"));
+    _canonicalId = null; _chatSubscribed = false;
+    return _request("bind", null, { perTabId: _perTabId() }, "hello").then(function (ack) {
+      if (_live) return _subscribeChat(0);
+      return ack;
+    });
+  }
+
+  // ── the chat channel subscribe (§3.1) ───────────────────────────────────
+  // A fresh window sends fromSeq:0 (full replay); a reconnecting socket sends
+  // fromSeq = highest rendered seq + 1 (replay only the gap, then live-tail).
+  function _subscribeChat(fromSeq) {
+    var from = (typeof fromSeq === "number") ? fromSeq : (_highestChatSeq + 1);
+    if (from < 0) from = 0;
+    return _request("subscribe", "chat", { fromSeq: from }, "subscribe");
+  }
+
+  // ── public up-frames (§3.5) ─────────────────────────────────────────────
+  // Both ride the `chat` channel; both MUST carry expectedBeatSeq (0065 CAS) —
+  // default to the last-seen beatSeq when the caller didn't pin one.
+  function _beatFor(explicit) {
+    var b = (typeof explicit === "number") ? explicit : _beatSeq;
+    return (typeof b === "number" && b > 0) ? b : undefined;
+  }
+  function sendTurn(payload) {
+    payload = payload || {};
+    return _request("turn", "chat", {
+      message: payload.message,
+      clientMsgId: payload.clientMsgId,
+      expectedBeatSeq: _beatFor(payload.expectedBeatSeq),
+      attachments: payload.attachments || [],
+      mode: payload.mode || "agent"
+    }, "turn");
+  }
+  function sendDecision(payload) {
+    payload = payload || {};
+    return _request("decision", "chat", {
+      pendingId: payload.pendingId,
+      choice: payload.choice,
+      target: payload.target,
+      expectedBeatSeq: _beatFor(payload.expectedBeatSeq)
+    }, "decision");
+  }
+  // layout is fire-and-forget per-device LWW (§5) — no cid/ack.
+  function sendLayout(d) { return _send({ t: "layout", ch: "layout", d: d || {} }); }
+
+  // ── negotiation + lifecycle (§6) ────────────────────────────────────────
+  function _clearHelloTimer() { if (_helloTimer) { clearTimeout(_helloTimer); _helloTimer = null; } }
+
+  function _goFallback() {
+    if (_mode === "fallback") return;
+    _mode = "fallback";
+    _chatSubscribed = false;
+    _clearHelloTimer();
+    _closingForGood = true;
+    try { if (_sock) _sock.close(); } catch (_) {}
+    _sock = null;
+    // Hand the resume cursor forward for a mid-session WS→SSE downgrade (§6):
+    // the SSE resume path replays the run buffer from 0 and the client discards
+    // the already-rendered prefix up to `fromSeq`; `beatSeq` keeps the next
+    // turn's expectedBeatSeq CAS correct across the downgrade.
+    _emitWindow("orwell:ws-inactive", {
+      mode: "fallback",
+      fromSeq: _highestChatSeq + 1,
+      beatSeq: _beatSeq
+    });
+  }
+
+  function _activate() {
+    _mode = "ws";
+    _reconnectFails = 0;
+    _emitWindow("orwell:ws-active", { canonicalId: _canonicalId, beatSeq: _beatSeq });
+  }
+
+  function _connect() {
+    _mode = "negotiating";
+    _closingForGood = false;
+    var perTabId = _perTabId();
+    var sock;
+    try {
+      sock = new WebSocket(_wsUrl());
+    } catch (_) { _goFallback(); return; }
+    _sock = sock;
+
+    // ~3s upgrade budget: no `ack` in time ⇒ blocked proxy / dead route ⇒
+    // permanent fallback (§6). We never hang the player on a wedged upgrade.
+    _clearHelloTimer();
+    _helloTimer = setTimeout(function () {
+      if (_mode !== "ws") { try { sock.close(); } catch (_) {} _goFallback(); }
+    }, HELLO_TIMEOUT_MS);
+
+    sock.onopen = function () {
+      _hello(perTabId).then(function () {
+        _clearHelloTimer();
+        if (!_live) {
+          // Bound to a dead id with no live fallback (§2.4) — show the reconnect
+          // affordance by falling soft to SSE rather than subscribing a 404.
+          _emitWindow("orwell:ws-dead", { canonicalId: _canonicalId });
+          _goFallback();
+          return;
+        }
+        _activate();
+        // Fresh window ⇒ full replay from 0; a reconnect resumes from the gap.
+        _subscribeChat(_reconnectFails > 0 || _highestChatSeq >= 0 ? _highestChatSeq + 1 : 0)
+          .catch(function () { /* subscribe refused — chat stays on the SSE fallback */ });
+      }).catch(function () { _clearHelloTimer(); _goFallback(); });
+    };
+
+    sock.onmessage = function (ev) {
+      var frame;
+      try { frame = JSON.parse(ev.data); } catch (_) { return; }
+      _handleFrame(frame);
+    };
+
+    sock.onerror = function () { /* onclose drives the retry/fallback decision */ };
+
+    sock.onclose = function () {
+      _sock = null;
+      _chatSubscribed = false;
+      _clearHelloTimer();
+      if (_closingForGood) return;
+      if (_mode === "ws") {
+        // We were live — reconnect with the gap cursor (fromSeq = highest+1) and
+        // resume the buffered tail (§3.3 monotonicity). Bounded retries; past the
+        // cap we downgrade to SSE permanently (§6).
+        _mode = "negotiating";
+        _reconnectFails += 1;
+        if (_reconnectFails > RECONNECT_GIVEUP) { _goFallback(); return; }
+        var wait = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, _reconnectFails - 1));
+        if (_reconnectTimer) clearTimeout(_reconnectTimer);
+        _reconnectTimer = setTimeout(function () { if (!_closingForGood) _connect(); }, wait);
+      } else {
+        // Never got live (closed before ack) ⇒ fallback.
+        _goFallback();
+      }
+    };
+  }
+
+  function start() {
+    if (_mode !== "idle") return;
+    if (!_flagOn() || !_gameBuild()) {
+      // Flag off or non-game build ⇒ pure fallback, the zero-risk default (§6).
+      _mode = "fallback";
+      _emitWindow("orwell:ws-inactive", { mode: "fallback", reason: "flag-off" });
+      return;
+    }
+    _connect();
+  }
+
+  // Re-resolve on a game change (season reset unbinds the canonical id). We only
+  // LISTEN for the ONE g15 dispatcher's event — we never dispatch it (§4).
+  try {
+    window.addEventListener("orwell:gamechanged", function () {
+      if (_mode === "ws") { try { rebind(); } catch (_) {} }
+    });
+  } catch (_) {}
+
+  try {
+    window.addEventListener("beforeunload", function () {
+      _closingForGood = true;
+      try { if (_sock) _sock.close(); } catch (_) {}
+    });
+  } catch (_) {}
+
+  // ── public surface ──────────────────────────────────────────────────────
+  window.OrwellWs = {
+    onFrame: onFrame,
+    offFrame: offFrame,
+    sendTurn: sendTurn,
+    sendDecision: sendDecision,
+    sendLayout: sendLayout,
+    rebind: rebind,
+    isActive: function () { return _mode === "ws" && !!_sock && _sock.readyState === 1; },
+    isFallback: function () { return _mode === "fallback"; },
+    mode: function () { return _mode; },
+    isChatSubscribed: function () { return _chatSubscribed; },
+    canonicalId: function () { return _canonicalId; },
+    lastBeatSeq: function () { return _beatSeq; },
+    highestChatSeq: function () { return _highestChatSeq; },
+    // test seam: feed a frame straight through the router (no live socket).
+    _handleFrame: _handleFrame,
+    // test seam: force negotiation start (start() is auto-called on ready).
+    _start: start
+  };
+
+  // Announce availability so load-order-independent consumers (platform.js's
+  // state/hud bridge) can register even if they evaluated first.
+  _emitWindow("orwell:ws-ready", {});
+
+  // Auto-start once the DOM (and thus body[data-game-build]) is known.
+  if (window.document && window.document.readyState === "loading") {
+    window.document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+})();

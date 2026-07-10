@@ -1332,6 +1332,47 @@ import { isNarrow } from './platform.js';
         try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; }
         catch { return ''; }
       })();
+
+      // ── WebSocket Phase-1 up-frame (ADR 0017 §3.5) ──────────────────────────
+      // When the socket is live, the turn goes UP as a `turn` frame instead of the
+      // SSE POST. The engine hop, the queue-don't-cancel policy, and the casting
+      // single-flight guard all live server-side below the transport — the socket only
+      // carries the frame + the 0065 `expectedBeatSeq` CAS. The reply streams back as
+      // `chat` event frames into THIS already-created holder via the persistent consumer
+      // (_onWsChatFrame). We pin the holder + spinner as the render target and skip the
+      // fetch. Dormant when the flag is off (byte-identical SSE path preserved).
+      if (_wsChatActive() && streamSessionId) {
+        const _bodyDiv = holder.querySelector('.body');
+        let _sc = _bodyDiv && _bodyDiv.querySelector('.stream-content');
+        if (_bodyDiv && !_sc) { _sc = document.createElement('div'); _sc.className = 'stream-content'; _bodyDiv.appendChild(_sc); }
+        _wsRound = { holder: holder, contentDiv: _sc, state: {}, reply: '', reasoning: '',
+                     sessionId: streamSessionId, clientMsgId: _clientMsgId, _spinner: spinner };
+        try {
+          await window.OrwellWs.sendTurn({
+            message: _finalMsgWithInject,
+            clientMsgId: _clientMsgId,
+            mode: isAgentMode ? 'agent' : 'chat',
+            expectedBeatSeq: (window.OrwellWs.lastBeatSeq && window.OrwellWs.lastBeatSeq()) || undefined
+          });
+          // Accepted: the persistent consumer renders the reply frames and runs the
+          // settle on `done` (it releases _streamSessionId + reconciles). Keep the
+          // active-stream lock set until then so a racing reconcile defers past us.
+          if (clearResponseTimeout) clearResponseTimeout();
+          return;
+        } catch (err) {
+          // Pre-stream refusal (stale-beat / forbidden / not-bound, §3.5): fall soft —
+          // drop the pinned round, release the lock, and reconcile from history. A
+          // stale-beat reconcile lets the player retry with the fresh beatSeq (0065).
+          _wsResetRound();
+          if (clearResponseTimeout) clearResponseTimeout();
+          try { if (spinner) spinner.destroy(); } catch (_) {}
+          if (_streamSessionId === streamSessionId) _streamSessionId = null;
+          try { if (holder) holder.remove(); } catch (_) {}
+          try { await softReloadHistory(streamSessionId); } catch (_) {}
+          return;
+        }
+      }
+
       const res = await fetch(`${API_BASE}/api/chat_stream`, {
         method: 'POST',
         body: fd,
@@ -6416,6 +6457,99 @@ import { isNarrow } from './platform.js';
       import('./ui.js').then(m => m.showError && m.showError('Could not open attachment')).catch(() => {});
       window.open(url, '_blank');  // fallback so the file is still reachable
     }
+  }
+
+  // ── WebSocket Phase-1 chat splice (ADR 0017 / websocket-phase1-protocol.md §3) ──
+  //
+  // When OrwellWs is live, the player's turn goes UP as a `turn` frame (the reroute in
+  // handleChatSubmit) and the reply comes back as `chat` `event` frames — the SAME
+  // replay-then-tail broadcast both the sender and a peer window receive. We render
+  // those frames through the SAME shared incremental renderer the SSE path uses
+  // (`_renderLiveStream` → `createStreamRenderer`, ADR 0015) — NOT a second engine —
+  // and we keep the reasoning split VERBATIM (§3.4): a delta with `d.thinking` truthy
+  // lands in the reasoning accordion, never the public reply body.  This is the exact
+  // `roundReplyText`/`roundReasoningText` contract, socket-side.
+  //
+  // Dormant when the flag is off (`isActive()` false): the fetch/SSE path stays
+  // byte-identical, so F1–F5, g15, and the reasoning-scrub gate are untouched. Full
+  // live finalize/dedup runs after the server route (claude/ws-phase1-server) lands.
+  function _wsChatActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+
+  // The live WS round render target. When the sender fires a turn we pin its
+  // already-created streaming holder here (below) so the inbound consumer renders into
+  // it — the sender's own turn. A peer/observer window has no pinned holder and mounts
+  // its own live bubble, exactly as resumeStream does for the SSE mirror.
+  let _wsRound = null;   // { holder, contentDiv, state, reply, reasoning, sessionId, clientMsgId, _spinner }
+  const _wsLiveRender = (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t));
+  function _wsResetRound() { _wsRound = null; }
+
+  function _wsEnsureRound() {
+    if (_wsRound && _wsRound.holder && _wsRound.holder.isConnected) return _wsRound;
+    const box = document.getElementById('chat-history');
+    if (!box) return null;
+    const holder = document.createElement('div');
+    holder.className = 'msg msg-ai';
+    const roleLabel = _senderLabel(_shortModel(sessionModule.getCurrentModel && sessionModule.getCurrentModel()));
+    const roleTs = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    holder.innerHTML = '<div class="role">' + uiModule.esc(roleLabel) +
+      ' <span class="role-timestamp">' + roleTs + '</span></div>' +
+      '<div class="body"><div class="stream-content"></div></div>';
+    box.appendChild(holder);
+    _wsRound = { holder: holder, contentDiv: holder.querySelector('.stream-content'),
+                 state: {}, reply: '', reasoning: '',
+                 sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null };
+    uiModule.scrollHistory();
+    return _wsRound;
+  }
+
+  // The persistent inbound consumer — registered ONCE, drives every `chat` event frame.
+  function _onWsChatFrame(frame) {
+    const d = (frame && frame.d) || {};
+    if (typeof d.delta === 'string') {
+      const round = _wsEnsureRound();
+      if (!round) return;
+      if (round._spinner) { try { round._spinner.destroy(); } catch (_) {} round._spinner = null; }
+      // The reasoning CHANNEL SPLIT is sacred (§3.4): thinking → the accordion, the
+      // clean reply → the body. `_renderLiveStream` places reasoning in a default-
+      // collapsed `.thinking-section` and the reply in `.live-reply-content` — reasoning
+      // can NEVER paint in the public reply container, by construction.
+      if (d.thinking) round.reasoning += d.delta;
+      else            round.reply += d.delta;
+      _renderLiveStream(round.contentDiv, round.reply, round.reasoning, _wsLiveRender, round.state, round.holder);
+      return;
+    }
+    if (d.type === 'message_saved') {
+      // Stamp the server db id so the settle reconcile adopts THIS bubble with zero
+      // churn (mirrors resumeStream's savedDbId — no db-id-less duplicate).
+      if (_wsRound && _wsRound.holder && d.id != null) _wsRound.holder.dataset.dbId = String(d.id);
+      return;
+    }
+    if (d.done) {
+      // Terminal sentinel (maps `[DONE]`, §3.2). Release the live holder and run the
+      // settle reconcile from history — the SAME idempotent, seq-aware softReloadHistory
+      // the SSE path settles through; it adopts the streamed bubble by {id, seq}.
+      const round = _wsRound;
+      const sid = (round && round.sessionId) ||
+                  (window.OrwellWs && window.OrwellWs.canonicalId && window.OrwellWs.canonicalId()) ||
+                  (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
+      if (round && round._spinner) { try { round._spinner.destroy(); } catch (_) {} }
+      _wsResetRound();
+      if (sid && _streamSessionId === sid) _streamSessionId = null; // release the active-stream lock
+      if (sid) { try { softReloadHistory(sid); } catch (_) {} }
+      return;
+    }
+  }
+
+  function _wsRegisterChat() {
+    try { if (window.OrwellWs && window.OrwellWs.onFrame) window.OrwellWs.onFrame('chat', _onWsChatFrame); }
+    catch (_) {}
+  }
+  if (typeof window !== 'undefined') {
+    if (window.OrwellWs) _wsRegisterChat();
+    else window.addEventListener('orwell:ws-ready', _wsRegisterChat, { once: true });
   }
 
   // Public API
