@@ -33,13 +33,15 @@
 (function () {
   'use strict';
 
-  // key -> { apply, coerce, last }.  `last` is the merged state this tab has seen (seeds + local sets)
-  // so a late `register` (load-order race) and `handle.get()` both have the current value.
+  // key -> the LIVE entry { apply, coerce } for the currently-registered consumer. A FRESH object per
+  // register() (its identity is the dispose guard). dispose() removes the key here.
   var registry = {};
-  // Seeds that landed for a key BEFORE anyone registered it (orwellLayoutSync fires the initial GET
-  // seed early). Replayed into `apply` the moment that key registers, so no consumer misses its
-  // restore just because its script ran after the layout GET resolved.
-  var pending = {};
+  // key -> the last-known merged state for the key. This SURVIVES dispose and precedes registration,
+  // so it is the single source of "restore" state: a seed that lands before any consumer registers, a
+  // consumer's own set(), and — crucially — the state left behind by a disposed consumer so a REMOUNT
+  // (register → dispose → re-register) restores instead of falling back to defaults. handle.get()
+  // reads it; register() fires apply() from it.
+  var known = {};
 
   function _merge(a, b) {
     var out = {};
@@ -48,13 +50,17 @@
     return out;
   }
 
-  // Route an inbound seed/remote-change for `key` to its registered consumer (or cache it).
+  function _hasState(key) {
+    return known[key] && Object.keys(known[key]).length > 0;
+  }
+
+  // Route an inbound seed/remote-change for `key`: always fold it into the persistent known-state (so
+  // it survives even if no consumer is registered yet / right now), and apply it to a live consumer.
   function _route(key, state) {
+    known[key] = _merge(known[key], state);
     var entry = registry[key];
-    if (!entry) { pending[key] = _merge(pending[key], state); return; }
-    entry.last = _merge(entry.last, state);
-    if (typeof entry.apply === 'function') {
-      try { entry.apply(_merge(entry.last, null), { key: key }); } catch (_) {}
+    if (entry && typeof entry.apply === 'function') {
+      try { entry.apply(_merge(known[key], null), { key: key }); } catch (_) {}
     }
   }
 
@@ -81,34 +87,32 @@
   function register(key, opts) {
     if (typeof key !== 'string' || !key) throw new Error('OrwellSyncedState.register: a string key is required');
     opts = opts || {};
-    // A FRESH entry object per register() — carrying `last` forward from any prior registration so
-    // previously-known state survives a re-register. Reusing the prior object would make an OLD
-    // (disposed) handle and the NEW handle share one `entry`, so `registry[key] === entry` would be
-    // true for BOTH and the stale handle's dispose() would delete the LIVE registration (killing
-    // future seed routing to the new consumer). A distinct object makes the stale handle's guard
-    // (`registry[key] === entry`) false, so its dispose() is a no-op.
-    var prev = registry[key];
-    var entry = { last: (prev && prev.last) || {} };
-    entry.apply = opts.apply;
-    entry.coerce = (typeof opts.coerce === 'function') ? opts.coerce : null;
+    // A FRESH entry object per register(). Its identity is the dispose guard: reusing the prior object
+    // would make an OLD (disposed) handle and the NEW handle share one `entry`, so `registry[key] ===
+    // entry` would be true for BOTH and a stale handle's dispose() would delete the LIVE registration
+    // (killing future seed routing to the new consumer). A distinct object makes the stale handle's
+    // guard false, so its dispose() is a no-op. The persistent state lives in `known[key]`, not on the
+    // entry, so it survives dispose + re-register.
+    var entry = { apply: opts.apply, coerce: (typeof opts.coerce === 'function') ? opts.coerce : null };
     registry[key] = entry;
 
-    // Replay any seed that arrived before this registration (initial GET race).
-    if (Object.prototype.hasOwnProperty.call(pending, key)) {
-      var seeded = pending[key];
-      delete pending[key];
-      _route(key, seeded);
+    // RESTORE — the contract is "apply fires on initial restore." Fire it synchronously from the
+    // persistent known-state whenever there IS state to restore, covering BOTH:
+    //   (a) a seed that landed before this registration (initial GET race); AND
+    //   (b) state left behind by a PRIOR registration (a remount: register → dispose → re-register).
+    // Guarded against an empty {} so a first-ever registration of a never-seen key fires no no-op apply.
+    if (typeof entry.apply === 'function' && _hasState(key)) {
+      try { entry.apply(_merge(known[key], null), { key: key }); } catch (_) {}
     }
 
-    // A disposed handle is INERT: set()/get() close over `entry` directly, so without this flag a
-    // disposed handle would remain a zombie write path — still mutating entry.last and dispatching
-    // `orwell:window-layout` after it left the registry. Since this substrate gates the kits, that
-    // must not leak.
+    // A disposed handle is INERT: set()/get() must no-op so a stale handle cannot dispatch capture
+    // events or read state after it left the registry. Since this substrate gates the kits, that leak
+    // must not exist.
     var disposed = false;
     var handle = {
       key: key,
-      // The last state this tab has seen for the key (defensive copy). Inert once disposed.
-      get: function () { return disposed ? {} : _merge(entry.last, null); },
+      // The last-known state for the key (defensive copy). Inert once disposed.
+      get: function () { return disposed ? {} : _merge(known[key], null); },
       // Persist a partial + mirror it. Emits the EXACT event orwellLayoutSync captures, so this
       // inherits per-device persistence, LWW, and realtime two-window mirror with zero transport code.
       set: function (partial) {
@@ -116,14 +120,15 @@
         if (!partial || typeof partial !== 'object') return handle;
         var state = entry.coerce ? entry.coerce(partial) : partial;
         if (!state || typeof state !== 'object') return handle;
-        entry.last = _merge(entry.last, state);
+        known[key] = _merge(known[key], state);
         try {
           window.dispatchEvent(new CustomEvent('orwell:window-layout', { detail: { id: key, state: state } }));
         } catch (_) {}
         return handle;
       },
       // Idempotent: mark the handle inert BEFORE unregistering so no in-flight closure can revive it.
-      // Only drop the registry slot if it still points at OUR entry (a re-register may have replaced it).
+      // Only drop the registry slot if it still points at OUR entry (a re-register may have replaced
+      // it). `known[key]` deliberately survives so a later remount can restore.
       dispose: function () {
         if (disposed) return;
         disposed = true;

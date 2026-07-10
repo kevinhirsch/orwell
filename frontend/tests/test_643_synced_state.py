@@ -220,6 +220,26 @@ newHandle.set({ shown: true });
 assert(dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length === capBeforeLiveSet + 1,
   "the live re-registered handle can still set()");
 
+// ── 6c. a REMOUNT re-fires apply from carried-over last, with no peer change (Greptile P1) ──────
+// register(apply1) consuming a pending seed → dispose → re-register(apply2): apply2 must run
+// SYNCHRONOUSLY with the carried-over last (the "apply fires on initial restore" contract), even
+// though the pending seed was already consumed by the first registration.
+fire("orwell:layout-seed", { windowId: "settings:video", state: { shown: true } });   // pending seed
+const mount1 = [];
+const h1 = global.window.OrwellSyncedState.register("settings:video", { apply: function (s) { mount1.push(s); } });
+assert(mount1.length === 1, "the first mount consumes the pending seed via apply");
+h1.dispose();
+const mount2 = [];
+const h2 = global.window.OrwellSyncedState.register("settings:video", { apply: function (s) { mount2.push(s); } });
+assert(mount2.length === 1, "a REMOUNT must re-fire apply from the carried-over last (initial restore)");
+assert(mount2[0].shown === true, "the remounted consumer receives the carried-over state, not defaults");
+assert(h2.get().shown === true, "handle.get() reflects the carried-over last");
+
+// A first-ever registration for a never-seen key with NO state must NOT fire a no-op apply.
+const mountEmpty = [];
+global.window.OrwellSyncedState.register("settings:brandnew", { apply: function (s) { mountEmpty.push(s); } });
+assert(mountEmpty.length === 0, "a first registration with no known state must not fire a no-op apply");
+
 // ── 7. the substrate mints NO orwell:gamechanged (g15 single-dispatcher invariant) ──────────────
 assert(dispatched.filter(function (e) { return e.type === "orwell:gamechanged"; }).length === 0,
   "the substrate must never dispatch orwell:gamechanged");
