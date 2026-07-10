@@ -7,13 +7,18 @@ Source-pinned, JS/HTML-as-text like the sibling `test_739_glass_tint_toggle.py` 
 browser-smoke + responsive-matrix gates cover the live DOM).
 
 What shipped:
-  1. A NEW compact 2-way (Glass / Frosted — deliberately no "Off" at this level) segmented
-     control, `#theme-glass-tier-quick`, lives on the Browse/Presets tab (the FIRST tab you
-     see opening Theme), bound to the ACTIVE theme's tier. It reuses the EXACT SAME
-     `applyGlassTier` + `save()` persistence path as the existing Customize-tab
-     `#theme-glass-tier` 3-way control — no new storage shape, no parallel state. theme.js's
-     `_syncGlassTierControl` keeps BOTH controls in lockstep (`GLASS_TIER_CONTROL_IDS`), so
-     picking either one updates the other, and the click-binding loop wires both identically.
+  1. A NEW compact 3-way segmented control, `#theme-glass-tier-quick` (Glass / Frosted /
+     Flat — matching the Customize ladder's full | frosted | normal EXACTLY), lives on the
+     Browse/Presets tab (the FIRST tab you see opening Theme), bound to the ACTIVE theme's
+     tier. (It initially shipped 2-way; the Greptile P2 on PR #1343 caught that a 'normal'
+     tier set from the Customize control was then UNREPRESENTABLE here — the shared sync
+     wrote data-value="normal" but both segments rendered aria-pressed="false" — so the
+     quick control now carries the full ladder.) It reuses the EXACT SAME `applyGlassTier`
+     + `save()` persistence path as the existing Customize-tab `#theme-glass-tier` control
+     — no new storage shape, no parallel state. theme.js's `_syncGlassTierControl` keeps
+     BOTH controls in lockstep (`GLASS_TIER_CONTROL_IDS`) for EVERY tier in BOTH directions,
+     and the click-binding loop wires both identically. Frosted keeps the default visual
+     emphasis (the pressed default segment).
   2. `light` and `dark` (the two named base-identity presets) carry no `glass`/`glassTier`
      override in THEMES, so `defaultGlassTierFor` already resolves them to 'frosted' — the
      issue's "frosted default" requirement was already true for these two and this pins it
@@ -60,20 +65,42 @@ def test_quick_glass_control_exists_on_the_browse_tab():
     )
 
 
-def test_quick_control_is_two_way_glass_or_frosted_no_off():
+def test_quick_control_is_the_full_three_way_ladder():
+    """Greptile P2 (PR #1343): the quick control MUST offer every tier the Customize ladder
+    can set — with a 2-way cut, a 'normal' tier synced over from Customize had no matching
+    [data-tier] segment, so data-value said 'normal' while every button rendered
+    aria-pressed="false" (the prominent control showed NO active state)."""
     html = _read("static", "index.html")
     ctrl_m = re.search(
         r'<div id="theme-glass-tier-quick"[^>]*>(.*?)</div>\s*</div>', html, re.S)
     assert ctrl_m, "#theme-glass-tier-quick control body not found"
     body = ctrl_m.group(1)
-    assert 'data-tier="full"' in body and 'data-tier="frosted"' in body, (
-        "#1316: the quick control must offer both Glass (full) and Frosted"
-    )
-    # Deliberately no "Off"/normal option at the quick level (the full 3-way ladder,
-    # including Off, stays in Customize -> Font & Layout's #theme-glass-tier).
-    assert 'data-tier="normal"' not in body, (
-        "#1316: the quick picker-level control is 2-way (Glass/Frosted) by design — "
-        "'Off' stays behind the full Customize control"
+    for tier in ("full", "frosted", "normal"):
+        assert f'data-tier="{tier}"' in body, (
+            f"#1316/P2: the quick control must carry a data-tier=\"{tier}\" segment so "
+            "EVERY tier the shared sync can write is representable (a tier with no segment "
+            "renders as no-active-state)"
+        )
+
+
+def test_quick_control_tiers_exactly_match_the_customize_ladder():
+    """Both controls are driven by ONE sync writing ONE tier value — so their [data-tier]
+    vocabularies must be identical sets, or some synced value is unrepresentable on one of
+    them (the exact P2 failure shape, in either direction)."""
+    html = _read("static", "index.html")
+
+    def _tiers(ctrl_id):
+        m = re.search(
+            r'<div id="' + ctrl_id + r'"[^>]*>(.*?)</div>\s*</div>', html, re.S)
+        assert m, f"#{ctrl_id} control body not found"
+        return set(re.findall(r'data-tier="([a-z]+)"', m.group(1)))
+
+    quick = _tiers("theme-glass-tier-quick")
+    customize = _tiers("theme-glass-tier")
+    assert quick == customize == {"full", "frosted", "normal"}, (
+        f"#1316/P2: the two glass-tier controls must carry IDENTICAL tier sets "
+        f"(quick={sorted(quick)}, customize={sorted(customize)}) — a mismatch makes some "
+        "synced tier unrepresentable on one control"
     )
 
 
@@ -94,6 +121,11 @@ def test_quick_control_defaults_to_frosted():
     full_btn = re.search(r'data-tier="full"[^>]*>', body).group(0)
     assert 'aria-pressed="false"' in full_btn, (
         "#1316: Glass (full) must NOT be pressed by default"
+    )
+    normal_btn = re.search(r'data-tier="normal"[^>]*>', body).group(0)
+    assert 'aria-pressed="false"' in normal_btn, (
+        "#1316: Flat (normal) must NOT be pressed by default — frosted keeps the "
+        "default visual emphasis"
     )
 
 
@@ -125,6 +157,30 @@ def test_sync_glass_tier_control_updates_every_tracked_control():
     assert "for (const id of GLASS_TIER_CONTROL_IDS)" in body, (
         "#1316: _syncGlassTierControl must loop over GLASS_TIER_CONTROL_IDS so picking "
         "either control updates the other"
+    )
+
+
+def test_sync_carries_the_normal_tier_to_both_controls():
+    """The both-directions 'normal' round-trip (Greptile P2): the ONE sync accepts 'normal'
+    as a first-class value and stamps it onto EVERY tracked control's dataset + buttons.
+    Combined with the identical-tier-set pin above (both controls carry a
+    data-tier="normal" segment), this makes 'normal' representable regardless of which
+    control set it: Customize -> quick shows Flat pressed; quick's Flat -> Customize shows
+    Off pressed — the same loop, symmetric by construction."""
+    js = _read("static", "js", "theme.js")
+    m = re.search(r"function _syncGlassTierControl\(tier\)\s*\{(.*?)\n  \}", js, re.S)
+    assert m, "_syncGlassTierControl body not found"
+    body = m.group(1)
+    # 'normal' is a validated, accepted tier (not coerced away to the frosted fallback)...
+    assert "tier === 'normal'" in body, (
+        "#1316/P2: _syncGlassTierControl must accept 'normal' as a valid tier"
+    )
+    # ...and every tracked control gets its dataset.value + per-button aria-pressed stamped
+    # from that same accepted value inside the shared loop.
+    assert "ctrl.dataset.value = t;" in body
+    assert "b.dataset.tier === t" in body
+    assert re.search(r"setAttribute\('aria-pressed', on \? 'true' : 'false'\)", body), (
+        "#1316/P2: the sync must press exactly the matching segment on every control"
     )
 
 

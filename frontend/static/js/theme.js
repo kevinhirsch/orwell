@@ -2086,14 +2086,16 @@ export function initThemeUI() {
     });
   }
 
-  // ── Glass tier — TWO mirrored controls: the full 3-way ladder (id=theme-glass-tier,
-  // Customize -> Font & Layout: full | frosted | normal) and the #1316 picker-level quick
-  // control (id=theme-glass-tier-quick, Browse tab: full | frosted only — "Off" stays
-  // Customize-only). Each container holds one [data-tier] button per value; the active one
-  // carries .active + aria-pressed, and the chosen value is mirrored to the container's
-  // dataset.value so _getOpts can read it (it reads #theme-glass-tier specifically, which
-  // this function always keeps in lockstep with the quick control). (Function declarations
-  // below are hoisted, so the swatch handler can call these helpers.)
+  // ── Glass tier — TWO mirrored controls, BOTH the full 3-way ladder (full | frosted |
+  // normal): id=theme-glass-tier (Customize -> Font & Layout) and the #1316 picker-level
+  // quick control id=theme-glass-tier-quick (Browse tab, labeled Glass/Frosted/Flat).
+  // The quick control MUST carry all three tiers — a 2-way cut left it unable to render
+  // the active state when Customize picked 'normal' (Greptile P2, PR #1343). Each
+  // container holds one [data-tier] button per value; the active one carries .active +
+  // aria-pressed, and the chosen value is mirrored to the container's dataset.value so
+  // _getOpts can read it (it reads #theme-glass-tier specifically, which this function
+  // always keeps in lockstep with the quick control). (Function declarations below are
+  // hoisted, so the swatch handler can call these helpers.)
   const GLASS_TIER_CONTROL_IDS = ['theme-glass-tier', 'theme-glass-tier-quick'];
   function _syncGlassTierControl(tier) {
     const t = (tier === 'full' || tier === 'frosted' || tier === 'normal') ? tier : 'frosted';

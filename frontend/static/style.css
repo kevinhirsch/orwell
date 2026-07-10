@@ -40566,10 +40566,10 @@ body.theme-frosted .theme-seg > input:checked + label {
   color: #fff;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.30), 0 2px 8px rgba(0,0,0,0.22);
 }
-/* The quick control on the Browse tab sits directly under the tab strip, so give its card a
-   tighter bottom margin than the standard .admin-card stack and right-align the compact
-   control next to its label (mirrors the Customize row layout at a glance). */
-body.theme-frosted .theme-quick-glass-row,
+/* The quick control's label/control row on the Browse tab — theme-independent LAYOUT only
+   (flex placement, no material), so it is deliberately unscoped: one rule serves every
+   theme, frosted or not (CodeRabbit on #1343: the frosted-scoped duplicate selector was
+   redundant). */
 .theme-quick-glass-row {
   display: flex;
   align-items: center;
