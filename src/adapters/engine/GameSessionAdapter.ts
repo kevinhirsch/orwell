@@ -794,13 +794,16 @@ export class GameSessionAdapter implements GameSession {
   /** The stretch key the cooldown map above was last advanced for (see `advanceApproachCooldown`). */
   private approachStretchKey: string | undefined;
   /**
-   * Ephemeral (NOT persisted, like `producerCache`) — the top-3 initiators `socialInitiatives()`
-   * itself last computed, and the stretch key they were computed FOR. `socialInitiatives()` is a
-   * pure, poll-safe read (the SAME stretch always reproduces the SAME ranking, 0012), so the
-   * cooldown can only rotate at an ACTUAL stretch transition (`syncProjection`, once per committed
-   * beat via `commit()`) — and that rotation needs to know who was actually SHOWN to the player
-   * during the stretch that just ended. If the surface was never read during a stretch, no one is
-   * penalized for it (correct: nothing was ever shown). Recomputed fresh on restore/first read.
+   * The top-3 initiators `socialInitiatives()` itself last computed, and the stretch key they were
+   * computed FOR. `socialInitiatives()` is a pure, poll-safe read (the SAME stretch always
+   * reproduces the SAME ranking, 0012), so the cooldown can only rotate at an ACTUAL stretch
+   * transition (`syncProjection`, once per committed beat via `commit()`) — and that rotation needs
+   * to know who was actually SHOWN to the player during the stretch that just ended. If the surface
+   * was never read during a stretch, no one is penalized for it (correct: nothing was ever shown).
+   * PERSISTED (`sessionSnapshot.ts` `approachShown` — the #1322 P1 follow-up, Greptile/PR #1335): a
+   * save+restart between a read and the next committed beat previously cleared this (it was
+   * ephemeral), so the transition re-armed nobody and the just-shown NPCs could lead again
+   * immediately — the exact monopolization #1322 fixed, reopened through the restart door.
    */
   private lastApproachStretch: { key: string; initiators: EntityId[] } | undefined;
 
@@ -2357,6 +2360,12 @@ export class GameSessionAdapter implements GameSession {
        // ⇒ every NPC starts eligible (byte-identical to a pre-feature load).
        ...(this.approachCooldown.size > 0 ? { approachCooldown: Object.fromEntries(this.approachCooldown) as Record<EntityId, number> } : {}),
        ...(this.approachStretchKey !== undefined ? { approachStretchKey: this.approachStretchKey } : {}),
+       // #1322 P1 follow-up (Greptile/PR #1335): persist WHO the current stretch has already shown, so
+       // a save+restart between a `socialInitiatives()` read and the next committed beat still cools
+       // those NPCs down at the coming stretch transition. Absent ⇒ nothing was shown this stretch.
+       ...(this.lastApproachStretch !== undefined
+         ? { approachShown: { key: this.lastApproachStretch.key, initiators: [...this.lastApproachStretch.initiators] } }
+         : {}),
        ...(this.gameSeed !== null ? { seed: this.gameSeed } : {}),
       // The producer persona's seed (producer-persona feature) — persisted so the SAME off-camera casting
       // producer is voiced across turns and a restart (it is established pre-game, before any season seed).
@@ -2583,13 +2592,17 @@ export class GameSessionAdapter implements GameSession {
     // 0088: restore per-NPC current-read anchor bonds (absent on pre-0088 saves ⇒ empty ⇒ drift "steady").
     this.readAnchors = core.readAnchors ? new Map(Object.entries(core.readAnchors) as [EntityId, number][]) : new Map();
     // #1322: restore the approach-rotation cooldown bookkeeping (absent on a pre-feature save ⇒ every
-    // NPC starts eligible). `lastApproachStretch` is ephemeral (like `producerCache`) — recomputed
-    // fresh on the next `socialInitiatives()` read, so a restart never loses a stretch's rotation.
+    // NPC starts eligible). The P1 follow-up (Greptile/PR #1335): `approachShown` — whom the current
+    // stretch already showed — is restored too, so a save+restart BETWEEN a `socialInitiatives()`
+    // read and the next committed beat still re-arms the cooldown for those NPCs at the coming
+    // stretch transition (previously it was ephemeral and a mid-stretch restart re-armed nobody).
     this.approachCooldown = core.approachCooldown
       ? new Map(Object.entries(core.approachCooldown) as [EntityId, number][])
       : new Map();
     this.approachStretchKey = core.approachStretchKey;
-    this.lastApproachStretch = undefined;
+    this.lastApproachStretch = core.approachShown
+      ? { key: core.approachShown.key, initiators: [...core.approachShown.initiators] }
+      : undefined;
     this.gameSeed = core.seed ?? null; // pre-B60 saves: fall back to the legacy name-keyed streams
     // The producer persona's seed (producer-persona feature): restore so the SAME off-camera casting
     // producer is voiced after a restart. Persisted on feature+ saves; on a started game that predates

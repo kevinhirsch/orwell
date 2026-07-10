@@ -177,6 +177,45 @@ describe("issue #1322 — approach-cooldown persistence round-trip (0030 non-deg
     for (const id of first) expect(afterRestore).not.toContain(id);
   });
 
+  it("P1 (Greptile/PR #1335): a save+restart BETWEEN a socialInitiatives read and the next beat still cools down the shown NPCs", () => {
+    // Repro: previously the shown-initiators record (`lastApproachStretch`) was ephemeral, so a
+    // restore between the read and the next committed beat cleared it — the coming stretch
+    // transition then re-armed NOBODY and the just-shown NPCs could lead again immediately.
+    const rel = new RelationshipModel(0.5);
+    const s = new GameSessionAdapter(rel);
+    s.createCharacter({ playerName: "Player", seed: 13 });
+    advancePastFirstHoh(s);
+
+    // 1) Show initiatives — this stretch has now displayed its top-3 to the player.
+    const shown = s.socialInitiatives().map((a) => a.houseguest.id);
+    expect(shown.length).toBeGreaterThan(0);
+
+    // 2) Save MID-STRETCH (before any further committed beat) — the shown record must be persisted.
+    const core = s.snapshot();
+    expect(core.approachShown).toBeDefined();
+    expect(core.approachShown!.initiators.slice().sort()).toEqual([...shown].sort());
+
+    // 3) Restart: restore into a FRESH adapter (sharing the rel port the registry restores separately).
+    const restored = new GameSessionAdapter(rel);
+    restored.restore(core);
+
+    // 4) Advance until the stretch transitions — the transition must re-arm the cooldown for the
+    //    NPCs the pre-restart stretch actually showed.
+    const startKey = `${core.week}:${core.phase}`;
+    for (let i = 0; i < 200; i++) {
+      const v = restored.advanceGame();
+      if (v.pending) resolvePending(restored, v.pending);
+      const c = restored.snapshot();
+      if (`${c.week}:${c.phase}` !== startKey) break;
+    }
+    const after = restored.snapshot();
+    const cooling = Object.keys(after.approachCooldown ?? {});
+    expect(cooling.sort()).toEqual([...shown].sort());
+    // And the new stretch's surface excludes every one of them.
+    const next = restored.socialInitiatives().map((a) => a.houseguest.id);
+    for (const id of shown) expect(next).not.toContain(id);
+  });
+
   it("a season restart (createCharacter on a reused instance) clears any prior cooldown", () => {
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "Player", seed: 9 });
