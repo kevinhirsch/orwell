@@ -23,6 +23,12 @@ Fixes covered (see the audit's ux-content-a11y / ux-visual-motion / ux-interacti
 import os
 import re
 
+from a11y_helpers import (
+    native_headings_forced_to_aria_level,
+    strip_comments,
+    theme_dialog_fragment,
+)
+
 FE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -374,34 +380,46 @@ def test_axe8_tab_trap_precedes_escape_handler():
     assert tab_idx < escape_idx
 
 
-# ── AXE-9: the Theme window's nested h2 subsections must not outrank its own h4 title ──
+# ── AXE-9 / HIG F-A11Y-3: the Theme window's nested subsections must not outrank its ──
+# ── own h4 title, AND must be real heading elements (no element-vs-ARIA mismatch). ──
+# The original AXE-9 fix re-leveled the <h2>'s via role="heading" aria-level="5", but a
+# native <h2> forced to level 5 is self-contradictory (F-A11Y-3). The subsections are now
+# real <h5> elements — one level deeper than the h4 dialog title — keeping the outline
+# monotonic without any ARIA override.
 
-def test_axe9_theme_window_subsections_have_a_deeper_aria_level():
-    html = _read("static", "index.html")
-    start = html.index('<div id="theme-host"')
-    end = html.index('<div id="mobile-backdrop">', start)
-    section = html[start:end]
+def test_axe9_theme_window_subsections_are_real_deeper_headings():
+    # Reuse the shared, attribute-tolerant fragment boundary + comment stripping
+    # (from a11y_helpers, also used by test_hig_a11y_p2.py) so extra attributes on
+    # the boundary <div>s, or comment prose mentioning the old markup, can't trip
+    # the <h2>/aria-level checks below.
+    html = strip_comments(_read("static", "index.html"))
+    section = theme_dialog_fragment(html)
     # The dialog's own title stays h4 (untouched — no visual/CSS change).
     assert re.search(r"<h4>.*?Theme</h4>", section, re.S), "the dialog's own h4 title should be unchanged"
-    h2s = re.findall(r"<h2([^>]*)>", section)
-    assert len(h2s) >= 6, f"expected the six known Theme-window subsection h2's, found {len(h2s)}"
-    for attrs in h2s:
-        assert 'role="heading"' in attrs and 'aria-level="5"' in attrs, (
-            "every h2 nested inside the Theme window (whose own title is an h4) must be "
-            "re-leveled via role=heading/aria-level so the accessible heading OUTLINE stays "
-            "monotonic (a screen-reader 'by heading' navigator must not rank a subsection above "
-            "the dialog that contains it) — WCAG 1.3.1/2.4.6 best practice"
-        )
+    # The subsections are real <h5> elements (one deeper than the h4 title) — no <h2>
+    # nested inside the Theme window, and no role="heading"/aria-level override anywhere.
+    h5s = re.findall(r"<h5(?:\s[^>]*)?>", section)
+    assert len(h5s) >= 6, f"expected the six known Theme-window subsection h5's, found {len(h5s)}"
+    assert "<h2" not in section, (
+        "no <h2> may be nested inside the Theme window (whose own title is an h4) — the "
+        "subsections must be real <h5> elements, not <h2>'s (HIG F-A11Y-3)"
+    )
+    # Same syntax-tolerant predicate as F-A11Y-3: no native heading in the fragment
+    # may be forced to another ARIA level (single/double quotes + whitespace tolerated).
+    assert not native_headings_forced_to_aria_level(section), (
+        "the Theme window's subsection headings must be real heading elements, not native "
+        "headings forced to another level via role=heading/aria-level (HIG F-A11Y-3)"
+    )
 
 
-def test_axe9_admin_card_h2_css_styling_is_untouched():
-    # The fix must be ARIA-only (role/aria-level), not a tag rename — renaming would have
-    # silently dropped the shared `.admin-card h2` visual styling used by every OTHER admin
-    # card in the app (Documents/Library, Settings, etc.), which is keyed to the h2 tag.
+def test_axe9_admin_card_h5_shares_the_h2_visual_styling():
+    # The subsections are now real <h5> elements, so the shared .admin-card sizing must
+    # cover h5 too (matched alongside .admin-card h2) — otherwise the tag change would
+    # silently drop the visual styling keyed to the h2 tag. Visual appearance unchanged.
     css = _read("static", "style.css")
-    assert re.search(r"\.admin-card h2\s*\{", css), (
-        "the shared .admin-card h2 selector must still exist — the Theme window's headings "
-        "must still literally be <h2> elements (just re-leveled via ARIA), not renamed"
+    assert re.search(r"\.admin-card h2\s*,\s*(?:/\*.*?\*/\s*)?\.admin-card h5\s*\{", css, re.DOTALL), (
+        "the .admin-card h2 rule must also style .admin-card h5 so the Theme window's real "
+        "<h5> subsection headings keep the shared admin-card sizing (HIG F-A11Y-3)"
     )
 
 
