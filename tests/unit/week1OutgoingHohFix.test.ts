@@ -5,42 +5,43 @@ import { BASE_GAME_MASTER_PROMPT } from "../../src/engine/momentPrompts";
  * Issue #1321 — week-1 narration invents an "outgoing Head of Household"
  *
  * In week 1, the engine correctly has NO outgoing HOH and an EMPTY spectating list,
- * but the old prompt asserted the outgoing HOH unconditionally, so the model fabricated one.
+ * but the old prompt asserted the outgoing HOH unconditionally ("ALWAYS including the
+ * outgoing HOH"), so the model fabricated one and named a houseguest.
  *
- * The fix: make the whole-house-event guidance conditional on the `spectating` list.
- * When `spectating` is not empty, it includes the outgoing HOH. When empty (week 1),
- * the whole house competes and there is no outgoing HOH — never invent one.
+ * The fix: the whole-house-event guidance derives spectators from the `spectating`
+ * list, ties the outgoing HOH to that list's non-empty case, and explicitly covers
+ * the empty/first-HOH case — never inventing an outgoing HOH.
+ *
+ * These assertions pin the INVARIANTS, not exact phrasing (SOUL: pin the gate,
+ * not the string) — reword freely as long as each behavior stays instructed.
  */
 describe("#1321 — whole-house-event guidance handles empty spectating / week 1", () => {
-  const basePrompt = BASE_GAME_MASTER_PROMPT;
+  const prompt = BASE_GAME_MASTER_PROMPT;
+  const lower = prompt.toLowerCase();
 
-  it("the base prompt no longer unconditionally asserts an outgoing HOH in competitions", () => {
-    // The old problem: "ALWAYS including the outgoing HOH"
-    expect(basePrompt).not.toContain("ALWAYS including the outgoing HOH");
+  it("no longer unconditionally asserts an outgoing HOH spectator", () => {
+    expect(prompt).not.toContain("ALWAYS including the outgoing HOH");
   });
 
-  it("the whole-house-event guidance explicitly makes the outgoing HOH conditional on spectating", () => {
-    // The fix must instruct the model to derive spectators from the `spectating` list,
-    // not invent an outgoing HOH.
-    expect(basePrompt.toLowerCase()).toContain("spectating");
-    expect(basePrompt.toLowerCase()).toContain("when empty");
-    expect(basePrompt.toLowerCase()).toContain("whole house competes");
+  it("ties the outgoing HOH to the spectating list rather than asserting the category", () => {
+    // The outgoing-HOH mention must sit inside the spectating clause (within ~200 chars
+    // of naming the list), framed as conditional on one existing.
+    const tied = prompt.match(/spectating[\s\S]{0,200}outgoing HOH/i);
+    expect(tied).toBeTruthy();
+    // And the conditionality must be explicit.
+    expect(/outgoing HOH (whenever|when|only if|if) one exists/i.test(prompt)).toBe(true);
   });
 
-  it("the guidance explicitly addresses the week-1 case where spectating is empty", () => {
-    // Week 1: no outgoing HOH, empty spectating list, entire house competes.
-    expect(basePrompt.toLowerCase()).toContain("when empty");
-    expect(basePrompt.toLowerCase()).toContain("no outgoing hoh");
+  it("explicitly covers the empty-spectating / first-HOH case: whole house competes, no outgoing HOH", () => {
+    const emptyCase = prompt.match(/spectating[^.]{0,80}empty[\s\S]{0,220}/i);
+    expect(emptyCase).toBeTruthy();
+    const emptyClause = ((emptyCase && emptyCase[0].toLowerCase()) || "").replace(/\s+/g, " ");
+    expect(emptyClause).toContain("whole house competes");
+    expect(emptyClause).toContain("no outgoing hoh");
   });
 
-  it("the guidance frames the outgoing HOH as present only when spectating is not empty", () => {
-    // The model must understand the outgoing HOH exists only when there's a previous week.
-    expect(basePrompt.toLowerCase()).toContain("when not empty");
-    expect(basePrompt).toContain("outgoing HOH");
-    // The outgoing HOH must be paired with the conditional, not asserted unconditionally.
-    const conditionalMatch = basePrompt.match(
-      /when\s+(?:not\s+)?empty[\s\S]{0,150}outgoing\s+HOH/i
-    );
-    expect(conditionalMatch).toBeTruthy();
+  it("forbids inventing/naming an outgoing HOH when none exists", () => {
+    expect(/never name or invent one/i.test(prompt)).toBe(true);
+    expect(lower).toContain("first hoh");
   });
 });
