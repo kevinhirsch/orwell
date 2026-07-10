@@ -80,6 +80,197 @@ def _auth_disabled() -> bool:
     return os.getenv("AUTH_ENABLED", "true").lower() == "false"
 
 
+def _origin_netloc(origin: str) -> Optional[str]:
+    """The ``host[:port]`` authority of an ``Origin`` value (``scheme://host[:port]``), lowercased and
+    with the scheme's DEFAULT port stripped so an explicit ``:80``/``:443`` matches a bare ``Host``
+    header (browsers omit default ports in both, but normalize defensively). ``None`` if unparseable /
+    hostless (an opaque ``Origin`` like ``null`` — which a sandboxed/foreign context sends)."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit((origin or "").strip())
+    except Exception:
+        return None
+    host = (parts.hostname or "").lower()
+    if not host:
+        return None
+    if ":" in host:
+        # IPv6 literal — urlsplit STRIPS the brackets (``http://[::1]:7000`` → hostname ``::1``), while
+        # the browser's request ``Host`` keeps the bracketed authority (``[::1]:7000``). Restore the
+        # brackets so the composed authority matches the Host side (ADR 0074 LAN/local-HTTPS IPv6
+        # exposure) — otherwise a same-origin IPv6 client is falsely rejected.
+        host = f"[{host}]"
+    scheme = (parts.scheme or "").lower()
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    if port is None or (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        return host
+    return f"{host}:{port}"
+
+
+def _host_authority(host: str, expected_scheme: str = "") -> str:
+    """Normalize a request ``Host`` header for a same-origin comparison against an ``Origin`` netloc,
+    SCHEME-AWARE so the port leg stays internally consistent with the scheme leg of the guard.
+
+    The ``Host`` header carries no scheme, but the same-origin check now enforces scheme too — so only
+    the EXPECTED external scheme's default port is bare-host-equivalent: ``:443`` iff the deploy is
+    ``https``/``wss``, ``:80`` iff ``http``/``ws``. Stripping BOTH regardless of scheme (the old
+    behavior) was a real inconsistency (greptile P1): under ``X-Forwarded-Proto: https`` a
+    ``Host: victim:80`` would collapse to ``victim`` and falsely match ``https://victim`` even though
+    ``https://victim:80`` ≠ ``https://victim`` (the port IS part of the origin). Now:
+
+      * expected ``https``/``wss`` → strip only ``:443`` (``victim:443``→``victim``; ``victim:80`` stays
+        ``victim:80`` → will NOT match ``https://victim`` → correctly rejected).
+      * expected ``http``/``ws``   → strip only ``:80``.
+      * indeterminate ("" — no XFP and an unknowable request scheme, the case the caller ALSO skips the
+        scheme leg for) → best-effort strip either default port (we cannot know which applies, and the
+        scheme leg is skipped, so acceptance is not weakened — an unknowable-scheme deploy is not broken).
+
+    IPv6 bracket-safe: an address literal ending in ``]`` never matches a ``:80``/``:443`` suffix, so
+    ``[::1]:443``→``[::1]`` (only under https) while ``[::443]`` is untouched. A non-default port (e.g.
+    ``:7000`` for LAN) is always preserved so it must still match the Origin's port. A browser cannot
+    forge ``Host`` from page JS, so stripping the matching default port is no security loss."""
+    h = (host or "").strip().lower()
+    es = (expected_scheme or "").lower()
+    if es in ("https", "wss"):
+        return h[:-4] if h.endswith(":443") else h
+    if es in ("http", "ws"):
+        return h[:-3] if h.endswith(":80") else h
+    # Indeterminate external scheme — best-effort (the caller skips the scheme leg in this case).
+    if h.endswith(":80"):
+        return h[:-3]
+    if h.endswith(":443"):
+        return h[:-4]
+    return h
+
+
+def _expected_external_scheme(websocket: WebSocket) -> str:
+    """The scheme the BROWSER used to reach the deploy — the external, TLS-terminator-facing scheme,
+    used to complete the same-origin check (a web Origin is scheme+host+port, so ``host[:port]`` alone
+    is not a full same-origin match: ``http://host`` and ``https://host`` are DIFFERENT origins and a
+    same-host-plaintext page must stay outside the trust boundary).
+
+    Derivation, in order (handles the ADR 0074 TLS-terminated deploys — Caddy / Cloudflare / Newt /
+    bare local-HTTPS — where the browser speaks ``wss``/``https`` but the FE's OWN hop from the
+    terminator is plaintext ``ws``, so ``websocket.url.scheme`` is ``ws`` and a naive ws→http map would
+    wrongly reject a legitimate ``https`` Origin and break every tunnel/HTTPS deploy):
+
+      1. ``X-Forwarded-Proto`` (first value, lowercased) if the terminator set it — all four supported
+         terminators do, INCLUDING bare local-HTTPS (Caddy). This is the external scheme verbatim.
+      2. Else map the request's own scheme (``websocket.url.scheme``): ``wss``→``https``, ``ws``→``http``
+         (direct-uvicorn LAN plaintext ⇒ ``http``; a direct TLS uvicorn ⇒ ``https``).
+
+    Returns ``""`` when it cannot be determined (no XFP, unknown request scheme) — the caller then does
+    NOT enforce the scheme leg (accept on host match alone) rather than break a deploy whose scheme is
+    unknowable, per the coordinator's don't-break-the-deploy rule."""
+    try:
+        xfp = websocket.headers.get("x-forwarded-proto")
+    except Exception:
+        xfp = None
+    if xfp:
+        first = xfp.split(",")[0].strip().lower()
+        if first:
+            return first
+    try:
+        req_scheme = (websocket.url.scheme or "").lower()
+    except Exception:
+        req_scheme = ""
+    if req_scheme == "wss":
+        return "https"
+    if req_scheme == "ws":
+        return "http"
+    if req_scheme in ("http", "https"):
+        return req_scheme
+    return ""
+
+
+def _allowed_ws_origins() -> set:
+    """The explicit cross-origin allowlist for a WS upgrade — the SAME ``ALLOWED_ORIGINS`` the app's
+    credentialed CORS layer trusts (``app.py`` / ``core.middleware``), normalized to
+    ``scheme://host[:port]`` (default port stripped, lowercased). No new origin model: the WS guard
+    reuses exactly the origins the rest of the app already sanctions for cross-site credentialed
+    reads. An empty/unset value ⇒ empty set (the same-origin ``Host`` match below is the floor)."""
+    import os
+    raw = (os.getenv("ALLOWED_ORIGINS") or "").strip()
+    out = set()
+    for o in raw.split(","):
+        o = o.strip()
+        if not o or o == "*":
+            continue
+        netloc = _origin_netloc(o)
+        scheme = o.split("://", 1)[0].lower() if "://" in o else ""
+        if netloc and scheme:
+            out.add(f"{scheme}://{netloc}")
+    return out
+
+
+def _ws_origin_allowed(websocket: WebSocket) -> bool:
+    """Cross-Site WebSocket-Hijacking (CSWSH) defense — protocol spec §1.1. A browser attaches the
+    session cookie to a CROSS-SITE WS upgrade automatically, and the HTTP CORS / TrustedHost middleware
+    does NOT cover a WebSocket handshake, so cookie auth alone cannot stop a malicious page from opening
+    an authenticated socket to a victim's session. This enforces an ``Origin`` allowlist BEFORE any
+    ``hello``/``bind``/frame is processed — it sits ALONGSIDE the cookie auth (``_ws_current_user``) +
+    owner guard (``_ws_owns``), never in place of them.
+
+    The rule (spec §1.1 — reject a present-and-foreign Origin):
+
+      * **No ``Origin`` header → allow.** A browser ALWAYS sends ``Origin`` on a cross-site WS
+        handshake, so the CSWSH attack surface always carries one; the absent case is a non-browser /
+        native / same-origin server-side / test client (which also does not auto-attach the victim's
+        cookie), so refusing it would break legitimate non-browser paths for no security gain.
+      * **``Origin`` present → allow IFF** it is same-origin with the request — its **scheme + host[:port]**
+        match the deploy's own **external scheme** (X-Forwarded-Proto / request scheme, ADR 0074) + ``Host``
+        (so ``http://host`` is NOT accepted against an ``https``/``wss`` deploy; LAN + tunnel/HTTPS exposure
+        per ADR 0007/0014 still works with no hard-coded domain) **OR** it is in the configured
+        ``ALLOWED_ORIGINS`` allowlist (the same origins the credentialed CORS layer trusts).
+      * **Otherwise (present + foreign / opaque ``null``) → reject** (the upgrade is refused, no ack).
+
+    A browser cannot forge either ``Origin`` or ``Host`` from page JS, and in a public deployment
+    ``Host`` is additionally pinned by ``TrustedHostMiddleware`` — so the same-origin comparison is
+    robust against the browser-driven CSWSH attack even with ``ALLOWED_HOSTS`` unset."""
+    try:
+        origin = websocket.headers.get("origin")
+    except Exception:
+        # No header surface at all (a non-Starlette/test transport) — treat as the absent-Origin
+        # non-browser path (allow); cookie auth + owner guard still apply below.
+        return True
+    if not origin:
+        return True  # non-browser / same-origin native / test path — CSWSH always carries an Origin
+    origin_netloc = _origin_netloc(origin)
+    if origin_netloc is None:
+        return False  # present but opaque/unparseable (e.g. "null") → foreign
+    origin_scheme = origin.split("://", 1)[0].lower() if "://" in origin else ""
+    # 1) Same-origin: the Origin's SCHEME + host[:port] equal the deploy's own external scheme + Host.
+    #    Host authority is normalized the SAME way _origin_netloc normalizes the Origin (strip the
+    #    scheme's default port) so a proxy-set `Host: host:443` still matches a bare `https://host`
+    #    Origin (greptile P1) — a browser cannot forge Host, so this is no security loss. The SCHEME leg
+    #    (greptile P1): a web origin is scheme+host+port, so `http://host` must NOT be accepted against
+    #    an `https`/`wss` deploy (a same-host-plaintext page stays outside the trust boundary). The
+    #    expected external scheme comes from X-Forwarded-Proto / the request scheme (ADR 0074 tunnels
+    #    terminate TLS then hop plaintext to the FE, so we cannot read it off `websocket.url` alone).
+    #    When the external scheme is indeterminate (""), the scheme leg is skipped (host match alone) so
+    #    an unknowable-scheme deploy is not broken.
+    #    The port normalization is SCHEME-AWARE (greptile P1): _host_authority strips ONLY the expected
+    #    scheme's default port, so under https a `Host: host:80` does NOT collapse to `host` (port is
+    #    part of the origin) — the port and scheme legs stay internally consistent.
+    expected_scheme = _expected_external_scheme(websocket)
+    try:
+        host = _host_authority(websocket.headers.get("host") or "", expected_scheme)
+    except Exception:
+        host = ""
+    if host and origin_netloc == host:
+        if (not expected_scheme) or (origin_scheme == expected_scheme):
+            return True
+        # host matches but scheme does not → same-host different-scheme; fall through (may still be
+        # explicitly allowlisted below, else reject).
+    # 2) Explicit allowlist — the CORS ALLOWED_ORIGINS the app already sanctions (scheme+host+port).
+    scheme = origin_scheme
+    if scheme and f"{scheme}://{origin_netloc}" in _allowed_ws_origins():
+        return True
+    return False
+
+
 def _ws_current_user(websocket: WebSocket) -> Optional[str]:
     """Resolve the authenticated user for a WebSocket upgrade.
 
@@ -210,6 +401,16 @@ def _resolve_canonical(user: Optional[str], per_tab_id: str, started: bool) -> t
 # ``setup_ws_routes`` just binds it to the path.
 
 async def ws_session(websocket: WebSocket) -> None:
+        # CSWSH guard (protocol §1.1) — FIRST, before accept or any frame. A foreign-origin upgrade is
+        # refused at handshake time (policy-violation close 1008, no accept, no ack): a browser attaches
+        # the session cookie to a cross-site WS upgrade automatically, so cookie auth alone cannot stop a
+        # malicious page from opening an authenticated socket. Same-origin browser clients (matching
+        # Origin) and non-browser/native/test paths (no Origin header) are unaffected. This is IN
+        # ADDITION to the cookie auth + owner guard below.
+        if not _ws_origin_allowed(websocket):
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1008)  # 1008 = policy violation
+            return
         await websocket.accept()
         user = _ws_current_user(websocket)
 

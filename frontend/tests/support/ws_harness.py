@@ -41,17 +41,33 @@ class _FakeApp:
     state = _FakeState()
 
 
+class _FakeURL:
+    """Minimal stand-in for ``starlette.datastructures.URL`` — the origin guard reads only ``.scheme``."""
+
+    def __init__(self, scheme: str = "ws"):
+        self.scheme = scheme
+
+
 class FakeWebSocket:
     """An in-process duplex fake of a Starlette WebSocket. The test pushes client→server frames with
     ``client_send`` / ``client_disconnect`` and reads server→client frames with ``recv`` — both over
     asyncio queues, so the handler and the test cooperate in one loop."""
 
-    def __init__(self, cookies: Optional[dict] = None, app: Any = None):
+    def __init__(self, cookies: Optional[dict] = None, app: Any = None,
+                 headers: Optional[dict] = None, scheme: str = "ws"):
         self.cookies = cookies or {}
+        # Starlette's ``WebSocket.headers`` is a case-insensitive ``Headers`` with ``.get`` returning
+        # lowercased keys — the CSWSH origin guard reads ``origin``/``host``/``x-forwarded-proto``. Model
+        # that with a lowercase-keyed dict so a test can inject them (an absent map ⇒ the non-browser path).
+        self.headers = {str(k).lower(): v for k, v in (headers or {}).items()}
+        # ``WebSocket.url.scheme`` — ``ws`` (plaintext / direct-uvicorn LAN) or ``wss`` (direct TLS). The
+        # scheme leg of the same-origin guard maps it to the external http/https (or reads XFP first).
+        self.url = _FakeURL(scheme)
         self.app = app or _FakeApp()
         self.sent: list[dict] = []
         self.accepted = False
         self.closed = False
+        self.close_code: Optional[int] = None
         self._incoming: asyncio.Queue = asyncio.Queue()
         self._outgoing: asyncio.Queue = asyncio.Queue()
 
@@ -61,6 +77,7 @@ class FakeWebSocket:
 
     async def close(self, code: int = 1000) -> None:
         self.closed = True
+        self.close_code = code
 
     async def receive_text(self) -> str:
         item = await self._incoming.get()
@@ -100,8 +117,9 @@ class FakeWebSocket:
                 return out
 
 
-def new_ws(cookies: Optional[dict] = None) -> FakeWebSocket:
-    return FakeWebSocket(cookies=cookies)
+def new_ws(cookies: Optional[dict] = None, headers: Optional[dict] = None,
+           scheme: str = "ws") -> FakeWebSocket:
+    return FakeWebSocket(cookies=cookies, headers=headers, scheme=scheme)
 
 
 def spawn(ws: FakeWebSocket) -> asyncio.Task:
