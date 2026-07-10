@@ -4016,7 +4016,99 @@ def _detect_runaway_call(call_freq, threshold=15):
     return sig.split(":", 1)[0] if sig else None
 
 
-async def stream_agent_loop(
+def _set_turn_observability_context(owner, session_id, game_mode):
+    """0112: gather THIS turn's Vault-free correlation keys — call_class / phase / moment / session /
+    beatSeq / user — from state the loop already holds, and stash them on the ``llm_trace`` per-turn
+    context so the trace built at the single ``src/llm_core`` emit point can correlate a model call to
+    the game beat. Returns the reset token (or ``None``).
+
+    Every value is a closed-set / projection scalar (the 0064 canonical session, the 0065 framed
+    ``(week, phase, moment)`` + last-seen ``beatSeq``, the ADR-0010 call class, the owner) — NO
+    ``VaultStore`` / ``SoulProvider`` field is ever read (the FE holds no Vault handle). Cheap no-op
+    and byte-identical when observability is disabled: the enable gate defaults off, so nothing is set
+    and no request metadata is attached.
+
+    Only casting / live-season turns are game calls. A plain (non-game) workspace chat turn sets
+    NOTHING and returns ``None`` — so it can never inherit STALE game framing (phase/moment/beatSeq)
+    and be mis-correlated into the owner's game session. The emit point then keeps its own
+    ``session_id`` with no game fields (byte-identical, no bleed)."""
+    try:
+        from src import llm_trace
+        if not llm_trace.observability_enabled():
+            return None
+    except Exception:
+        return None
+    # Gate on the turn being a game call — casting interview or live-season narration.
+    is_casting = game_mode == "casting"
+    is_live = game_mode in (True, "game")
+    if not (is_casting or is_live):
+        return None
+    # call_class mirrors the ADR-0010 token-policy classing (casting interview vs live-season narration).
+    keys = {"user": owner, "call_class": "casting" if is_casting else "narration"}
+    # The 0064 canonical game session — every device's turns converge on it (the ledger keys on it too).
+    # This MUST win over the FE chat session_id at the emit point, else cross-device turns on one game
+    # (distinct chat ids, one canonical id) fail to correlate. `llm_trace` prefers the context session.
+    session = session_id
+    try:
+        from src import orwell_game_session as _gs
+        if owner:
+            session = _gs.get_game_session(owner) or session_id
+    except Exception:
+        session = session_id
+    keys["session"] = session
+    # The beat the route framed this turn on — apply_game_framing stashed it PRE-loop as
+    # (week, phase, moment[, pendingKind]) — plus the last-seen 0065 beatSeq. Both Vault-free.
+    try:
+        from routes import chat_helpers as _ch
+        fk = _ch._LAST_FRAMED_BEAT_KEY.get(_belt_key(owner))
+        if isinstance(fk, (tuple, list)):
+            if len(fk) >= 2 and fk[1]:
+                keys["phase"] = fk[1]
+            if len(fk) >= 3 and fk[2]:
+                keys["moment"] = fk[2]
+        bs = _ch.last_beat_seq(owner)
+        if bs is not None:
+            keys["beat_seq"] = bs
+    except Exception as _e:
+        logger.debug("0112: framing correlation lookup failed: %s", _e)
+    try:
+        return llm_trace.set_observability_context(**keys)
+    except Exception as _e:
+        logger.debug("0112: set_observability_context failed: %s", _e)
+        return None
+
+
+def _reset_turn_observability_context(token):
+    """Clear the per-turn observability context set by ``_set_turn_observability_context`` so a turn's
+    correlation keys never leak into the next. No-op when nothing was set."""
+    if token is None:
+        return
+    try:
+        from src import llm_trace
+        llm_trace.reset_observability_context(token)
+    except Exception as _e:
+        logger.debug("0112: reset_observability_context failed: %s", _e)
+
+
+async def stream_agent_loop(*args, **kwargs) -> AsyncGenerator[str, None]:
+    """Public entry point (0112 correlation wrap).
+
+    Sets THIS turn's Vault-free observability correlation context — so the LLM-call trace emitted at
+    the single ``src/llm_core`` chokepoint carries phase / moment / call_class / session / beatSeq /
+    user — then delegates to the loop implementation and RESETS the context in a ``finally`` at turn
+    end (even on early consumer close / exception) so keys never bleed across turns. Byte-identical and
+    a cheap no-op when observability is disabled (the default). See ``llm_trace.set_observability_context``."""
+    _obs_token = _set_turn_observability_context(
+        kwargs.get("owner"), kwargs.get("session_id"), kwargs.get("game_mode", False)
+    )
+    try:
+        async for _evt in _stream_agent_loop_impl(*args, **kwargs):
+            yield _evt
+    finally:
+        _reset_turn_observability_context(_obs_token)
+
+
+async def _stream_agent_loop_impl(
     endpoint_url: str,
     model: str,
     messages: List[Dict],
