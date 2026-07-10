@@ -25,6 +25,7 @@ is a UI preference, not season state).
 from __future__ import annotations
 
 import json
+import math
 import threading
 from pathlib import Path
 
@@ -54,6 +55,38 @@ _MAX_ID_LEN = 64
 # clamped so a malformed/hostile client can never write an unbounded blob into the store.
 _SIDE_VALUES = ("left", "right")
 _MAX_ORDER_LEN = 64        # never more ids than the window cap; each id is _MAX_ID_LEN-bounded
+# #658/#659: a bounded, GENERIC non-geometry `value` the DWE kit may persist per key — a single
+# scalar only (bool / finite number / length-capped string). NEVER a nested blob (dict/list) and
+# NEVER Vault/engine-sourced (this is a per-device UI projection the FE kit owns). Capped so a
+# malformed/hostile client can never write an unbounded blob.
+_MAX_VALUE_LEN = 512
+_MAX_ABS_INT = 2 ** 53     # a JS-safe integer magnitude bound (an int can't be NaN/inf, but a huge
+#                            arbitrary-precision int must be DROPPED — coercing it to a C double for
+#                            an isfinite check would raise OverflowError, breaking the never-raise
+#                            contract). Anything past this is dropped silently.
+_DROP = object()           # sentinel: "drop this field" (distinct from a valid falsy 0/False/"")
+
+
+def _clean_value(value):
+    """Coerce a bounded, generic non-geometry scalar (#658/#659). Accepts ONLY a bool, a
+    magnitude-bounded int, a finite float, or a ``_MAX_VALUE_LEN``-capped string. Anything else —
+    dict, list, ``None``, an oversized string, an out-of-bound int, or a non-finite float (NaN /
+    ±inf) — yields the ``_DROP`` sentinel (field dropped silently, **never raised**). A valid falsy
+    scalar (``0`` / ``False`` / ``""``) survives, so callers MUST test ``is _DROP`` rather than
+    truthiness.
+
+    Branch by EXACT type so ``math.isfinite`` is only ever called on a real ``float`` — never on an
+    int. A JSON ``value`` like ``10 ** 10000`` is an arbitrary-precision Python int; coercing it to a
+    C double (which ``isfinite`` does) raises ``OverflowError``, so ints take the bound path instead."""
+    if isinstance(value, bool):          # bool before int (bool is an int subclass)
+        return value
+    if isinstance(value, int):           # never isfinite() an int — a huge one overflows the double
+        return value if abs(value) <= _MAX_ABS_INT else _DROP
+    if isinstance(value, float):
+        return value if math.isfinite(value) else _DROP
+    if isinstance(value, str):
+        return value if len(value) <= _MAX_VALUE_LEN else _DROP
+    return _DROP
 
 
 def _load() -> dict:
@@ -130,6 +163,12 @@ def _clean_state(partial) -> dict:
         order = _clean_order(partial.get("order"))
         if order is not None:
             out["order"] = order
+    # #658/#659: a bounded, generic non-geometry scalar the kit owns (bool / finite number /
+    # capped string only — never a nested blob). Absent ⇒ untouched (byte-identical back-compat).
+    if "value" in partial:
+        cleaned = _clean_value(partial.get("value"))
+        if cleaned is not _DROP:
+            out["value"] = cleaned
     return out
 
 

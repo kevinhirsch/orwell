@@ -149,6 +149,80 @@ def test_gadget_collapse_is_a_bool():
     assert layout.get_layout("u", DEV)["windows"]["gadget:orwell-status"]["collapsed"] is False
 
 
+# ── #658/#659: the bounded, GENERIC non-geometry `value` scalar ────────────────────────────────
+
+def test_value_accepts_a_string_number_or_bool_scalar():
+    """A kit may persist a single non-geometry scalar per key — str / number / bool only, round-
+    tripped intact through the same per-field LWW store."""
+    saved = _patch("u", "gadget:filter", {"value": "trust-only"})
+    assert saved["state"] == {"value": "trust-only"}
+    assert layout.get_layout("u", DEV)["windows"]["gadget:filter"]["value"] == "trust-only"
+    # a finite number survives
+    _patch("u", "gadget:zoom", {"value": 1.5})
+    assert layout.get_layout("u", DEV)["windows"]["gadget:zoom"]["value"] == 1.5
+    # a bool survives as a bool (not coerced to a number)
+    _patch("u", "gadget:pinned", {"value": True})
+    assert layout.get_layout("u", DEV)["windows"]["gadget:pinned"]["value"] is True
+
+
+def test_value_falsy_scalars_survive_round_trip():
+    """0 / False / "" are VALID values — the drop path must key on a sentinel, not truthiness."""
+    for scalar in (0, False, ""):
+        _patch("u", "gadget:falsy", {"value": scalar})
+        assert layout.get_layout("u", DEV)["windows"]["gadget:falsy"]["value"] == scalar
+        # a bool must not be flattened into 0/1 (False is not 0 for our purposes)
+        stored = layout.get_layout("u", DEV)["windows"]["gadget:falsy"]["value"]
+        assert type(stored) is type(scalar)
+
+
+def test_value_can_coexist_with_geometry_and_lww_merges():
+    _patch("u", "cast", {"x": 10, "value": "a"})
+    _patch("u", "cast", {"value": "b"})  # only value moves; geometry preserved
+    win = layout.get_layout("u", DEV)["windows"]["cast"]
+    assert win == {"x": 10.0, "value": "b"}
+
+
+def test_value_drops_nested_blobs_none_oversized_and_non_finite():
+    """A dict / list / None / oversized string / NaN / inf `value` is dropped silently (never
+    raised); with no other field that leaves an empty state → nothing stored."""
+    assert _patch("u", "k", {"value": {"nested": 1}}) == {}
+    assert _patch("u", "k", {"value": [1, 2, 3]}) == {}
+    assert _patch("u", "k", {"value": None}) == {}
+    assert _patch("u", "k", {"value": "x" * (layout._MAX_VALUE_LEN + 1)}) == {}
+    assert _patch("u", "k", {"value": float("nan")}) == {}
+    assert _patch("u", "k", {"value": float("inf")}) == {}
+    assert _patch("u", "k", {"value": float("-inf")}) == {}
+    assert layout.get_layout("u", DEV)["windows"] == {}
+
+
+def test_value_huge_arbitrary_precision_int_is_dropped_never_raises():
+    """A JSON `value` of `10**10000` is an arbitrary-precision int; `math.isfinite` on it would
+    raise OverflowError (coercion to a C double). The bounded int path must DROP it cleanly — no
+    raise, empty state, nothing stored. (greptile P1 regression.)"""
+    huge = 10 ** 10000
+    assert layout._clean_state({"value": huge}) == {}          # direct _clean_state path — no raise
+    assert _patch("u", "k", {"value": huge}) == {}             # and through patch_layout
+    assert _patch("u", "k", {"value": -huge}) == {}
+    # a just-over-bound int is dropped; the bound itself survives
+    assert _patch("u", "k", {"value": layout._MAX_ABS_INT + 1}) == {}
+    at_bound = _patch("u", "at-bound", {"value": layout._MAX_ABS_INT})
+    assert at_bound["state"]["value"] == layout._MAX_ABS_INT
+    assert layout.get_layout("u", DEV)["windows"].get("k") is None
+
+
+def test_value_at_the_length_cap_survives():
+    at_cap = "y" * layout._MAX_VALUE_LEN
+    saved = _patch("u", "gadget:note", {"value": at_cap})
+    assert saved["state"]["value"] == at_cap
+
+
+def test_absent_value_is_byte_identical_backcompat():
+    """A geometry-only patch (no `value` key) is untouched — no spurious `value` appears."""
+    saved = _patch("u", "cast", {"open": True, "x": 5})
+    assert "value" not in saved["state"]
+    assert layout.get_layout("u", DEV)["windows"]["cast"] == {"open": True, "x": 5.0}
+
+
 def test_new_fields_publish_layout_changed_for_the_mirror(monkeypatch):
     """A PATCH to a synthetic id must fan `layout-changed` over the canonical session (the SAME
     device's other-tab mirror), carrying only the Vault-free field + the deviceId scope — never a
