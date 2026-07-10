@@ -4026,20 +4026,28 @@ def _set_turn_observability_context(owner, session_id, game_mode):
     ``(week, phase, moment)`` + last-seen ``beatSeq``, the ADR-0010 call class, the owner) — NO
     ``VaultStore`` / ``SoulProvider`` field is ever read (the FE holds no Vault handle). Cheap no-op
     and byte-identical when observability is disabled: the enable gate defaults off, so nothing is set
-    and no request metadata is attached."""
+    and no request metadata is attached.
+
+    Only casting / live-season turns are game calls. A plain (non-game) workspace chat turn sets
+    NOTHING and returns ``None`` — so it can never inherit STALE game framing (phase/moment/beatSeq)
+    and be mis-correlated into the owner's game session. The emit point then keeps its own
+    ``session_id`` with no game fields (byte-identical, no bleed)."""
     try:
         from src import llm_trace
         if not llm_trace.observability_enabled():
             return None
     except Exception:
         return None
-    keys = {"user": owner}
+    # Gate on the turn being a game call — casting interview or live-season narration.
+    is_casting = game_mode == "casting"
+    is_live = game_mode in (True, "game")
+    if not (is_casting or is_live):
+        return None
     # call_class mirrors the ADR-0010 token-policy classing (casting interview vs live-season narration).
-    if game_mode == "casting":
-        keys["call_class"] = "casting"
-    elif game_mode in (True, "game"):
-        keys["call_class"] = "narration"
+    keys = {"user": owner, "call_class": "casting" if is_casting else "narration"}
     # The 0064 canonical game session — every device's turns converge on it (the ledger keys on it too).
+    # This MUST win over the FE chat session_id at the emit point, else cross-device turns on one game
+    # (distinct chat ids, one canonical id) fail to correlate. `llm_trace` prefers the context session.
     session = session_id
     try:
         from src import orwell_game_session as _gs
@@ -4061,11 +4069,12 @@ def _set_turn_observability_context(owner, session_id, game_mode):
         bs = _ch.last_beat_seq(owner)
         if bs is not None:
             keys["beat_seq"] = bs
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug("0112: framing correlation lookup failed: %s", _e)
     try:
         return llm_trace.set_observability_context(**keys)
-    except Exception:
+    except Exception as _e:
+        logger.debug("0112: set_observability_context failed: %s", _e)
         return None
 
 
@@ -4077,8 +4086,8 @@ def _reset_turn_observability_context(token):
     try:
         from src import llm_trace
         llm_trace.reset_observability_context(token)
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug("0112: reset_observability_context failed: %s", _e)
 
 
 async def stream_agent_loop(*args, **kwargs) -> AsyncGenerator[str, None]:

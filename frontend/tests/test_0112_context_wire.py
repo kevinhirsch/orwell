@@ -244,3 +244,103 @@ def test_wrapper_resets_even_when_impl_raises(monkeypatch, run):
     raised, leaked_after = run(drive())
     assert raised                    # the error propagates unchanged
     assert leaked_after == {}         # the finally still reset the context
+
+
+def test_wrapper_resets_on_consumer_abandonment(monkeypatch, run):
+    # A consumer that stops early (`aclose()` mid-stream) must still trigger the wrapper's `finally`
+    # so the context is reset — otherwise an abandoned turn leaks its keys.
+    _patch_settings(monkeypatch, observability_enabled=True)
+    _set_framing(monkeypatch, "player-role",
+                 beat_key=(1, "hoh-competition", "hoh-comp"),
+                 beat_seq=7, canonical="canon-2")
+
+    async def many_events_impl(*args, **kwargs):
+        for i in range(10):
+            yield f"data: {i}\n\n"
+
+    monkeypatch.setattr(agent_loop, "_stream_agent_loop_impl", many_events_impl)
+
+    async def drive():
+        gen = agent_loop.stream_agent_loop(
+            "url", "model", [], owner="player-role", session_id="chat-2", game_mode="game")
+        first = await gen.__anext__()          # consume ONE event, then abandon
+        set_mid = dict(llm_trace._current_context())
+        await gen.aclose()                     # early close → GeneratorExit → the wrapper's finally
+        return first, set_mid, dict(llm_trace._current_context())
+
+    first, set_mid, leaked_after = run(drive())
+    assert first == "data: 0\n\n"
+    assert set_mid.get("session") == "canon-2"   # set while the turn was live
+    assert leaked_after == {}                     # reset even though the consumer bailed early
+
+
+# ── 6. non-game framing bleed guard: a plain chat turn inherits NO game framing ───────
+
+
+def test_non_game_turn_sets_nothing_despite_stale_framing(monkeypatch):
+    # Stale game framing sits in the belt (a prior game turn left it), but THIS turn is a plain
+    # non-game workspace chat (game_mode=False). It must inherit none of it.
+    _patch_settings(monkeypatch, observability_enabled=True)
+    _set_framing(monkeypatch, "player-role",
+                 beat_key=(3, "nominations", "nomination-ceremony"),
+                 beat_seq=42, canonical="canon-sess")
+    token = agent_loop._set_turn_observability_context("player-role", "chat-sess", False)
+    assert token is None                          # nothing set for a non-game turn
+    assert llm_trace._current_context() == {}     # no phase/moment/beat_seq/session bleed
+    agent_loop._reset_turn_observability_context(token)  # None token is a safe no-op
+
+
+def test_non_game_emit_keeps_session_id_and_omits_game_fields(monkeypatch, run):
+    # With no context set (non-game turn), the emit point keeps its own session_id and carries NO
+    # game correlation fields — byte-identical to pre-wire behavior.
+    _patch_settings(monkeypatch, observability_enabled=True, observability_sampling=1.0,
+                    observability_privacy_mode="metrics-only")
+    _set_framing(monkeypatch, "player-role",
+                 beat_key=(3, "nominations", "nomination-ceremony"),
+                 beat_seq=42, canonical="canon-sess")
+    agent_loop._set_turn_observability_context("player-role", "chat-sess", False)  # sets nothing
+    cap = _Capturing()
+    monkeypatch.setattr("src.trace_sink.resolve_trace_sink", lambda settings=None: cap)
+    run(llm_trace.emit_trace(session="fe-chat-id", model="m", usage={"output_tokens": 1}))
+    rec = cap.records[0]
+    assert rec["session"] == "fe-chat-id"         # the emit caller's own session is retained
+    assert rec["phase"] == ""                      # no game framing bled in
+    assert rec["moment"] == ""
+    assert rec["beatSeq"] is None
+
+
+# ── 7. fix #1 — the canonical (context) session WINS over the emit caller's explicit arg ──
+
+
+def test_context_session_wins_over_explicit_emit_arg(monkeypatch, run):
+    # The regression: llm_core calls emit_trace(session=<FE chat id>); the context holds the 0064
+    # canonical session for the game turn. The canonical MUST win so cross-device turns correlate.
+    _patch_settings(monkeypatch, observability_enabled=True, observability_sampling=1.0)
+    _set_framing(monkeypatch, "player-role",
+                 beat_key=(3, "nominations", "nomination-ceremony"),
+                 beat_seq=42, canonical="canon-sess")
+    cap = _Capturing()
+    monkeypatch.setattr("src.trace_sink.resolve_trace_sink", lambda settings=None: cap)
+    token = agent_loop._set_turn_observability_context("player-role", "chat-sess", "game")
+    try:
+        # Different device → different explicit FE chat id; the canonical context session wins.
+        run(llm_trace.emit_trace(session="other-device-chat-id", model="m",
+                                 usage={"output_tokens": 1}))
+    finally:
+        agent_loop._reset_turn_observability_context(token)
+    assert cap.records[0]["session"] == "canon-sess"
+
+
+def test_request_metadata_context_session_wins(monkeypatch):
+    # The outbound OpenRouter metadata tags the canonical session too (same precedence as the record).
+    _patch_settings(monkeypatch, observability_enabled=True)
+    _set_framing(monkeypatch, "player-role",
+                 beat_key=(3, "nominations", "nomination-ceremony"),
+                 beat_seq=42, canonical="canon-sess")
+    token = agent_loop._set_turn_observability_context("player-role", "chat-sess", "game")
+    try:
+        md = llm_trace.maybe_request_metadata(session="fe-chat-id")
+    finally:
+        agent_loop._reset_turn_observability_context(token)
+    assert md is not None
+    assert md["orwell_session"] == "canon-sess"

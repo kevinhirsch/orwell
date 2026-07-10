@@ -770,13 +770,19 @@ def maybe_request_metadata(*, session: Any = None, call_class: Any = None,
                            beat_seq: Any = None, phase: Any = None) -> Optional[dict]:
     """Return the request ``metadata`` object IFF observability is enabled, else ``None`` (so the
     caller omits the key entirely ⇒ byte-identical payload). Missing correlation keys are pulled
-    from the per-turn context set by the caller. Fail-open: any error ⇒ ``None`` (no metadata)."""
+    from the per-turn context set by the caller. Fail-open: any error ⇒ ``None`` (no metadata).
+
+    ``session`` precedence: the per-turn CONTEXT session wins when set. The agent loop stashes the
+    0064 canonical game session there; a caller (llm_core) may pass its own FE chat session_id, but on
+    a game turn the canonical must win so every device on one game correlates (distinct chat ids, one
+    canonical id). With no context session set, the explicit arg is used (byte-identical when off/idle)."""
     try:
         if not observability_enabled():
             return None
         ctx = _current_context()
+        _ctx_session = ctx.get("session")
         return request_metadata(
-            session=session if session is not None else ctx.get("session"),
+            session=_ctx_session if _ctx_session not in (None, "") else session,
             beat_seq=beat_seq if beat_seq is not None else ctx.get("beat_seq"),
             phase=phase if phase is not None else ctx.get("phase"),
             call_class=call_class if call_class is not None else ctx.get("call_class"),
@@ -919,12 +925,17 @@ async def emit_trace(
         never harms the turn — 0112 scenario "a failing sink never harms the turn").
 
     Missing correlation keys are pulled from the per-turn context; ``beat_seq`` additionally falls
-    back to the FE's last-seen 0065 beatSeq for the session's owner (best-effort)."""
+    back to the FE's last-seen 0065 beatSeq for the session's owner (best-effort).
+
+    ``session`` precedence: the per-turn CONTEXT session wins when set (the agent loop stashes the 0064
+    canonical game session there), so a game turn correlates to the canonical id even though the emit
+    caller passes its own FE chat session_id. With no context session, the explicit arg is used."""
     try:
         if not observability_enabled():
             return
         ctx = _current_context()
-        _session = session if session is not None else ctx.get("session")
+        _ctx_session = ctx.get("session")
+        _session = _ctx_session if _ctx_session not in (None, "") else session
         rate = observability_sampling()
         if not session_sampled(_session, rate):
             return
