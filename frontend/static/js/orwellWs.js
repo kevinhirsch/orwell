@@ -524,6 +524,10 @@
       if (_now() - _pertabWaitStart >= PERTAB_WAIT_MAX_MS) {
         // No session after the wait window (an idle no-game page). Fall soft to SSE, but mark the cause
         // RECOVERABLE: a later game-load's `orwell:gamechanged` re-runs start() → re-arms this wait.
+        // Reset the wait clock FIRST so recovery gets a FRESH full PERTAB_WAIT_MAX_MS budget — otherwise
+        // `_deferForPerTab` re-arming with a stale `_pertabWaitStart` would time out on its very first
+        // poll tick and immediately re-fall-back (the id never gets a real chance to resolve).
+        _pertabWaitStart = 0;
         _goFallback("pertab-pending");
         return;
       }

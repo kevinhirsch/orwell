@@ -156,6 +156,104 @@ def test_client_defers_connect_until_pertab_id_is_ready():
     assert "OK" in out
 
 
+# The `pertab-pending` RECOVERY must get a FRESH wait budget (CodeRabbit Major). When the deferral
+# times out into `pertab-pending` fallback, `_pertabWaitStart` must be reset — otherwise a later
+# `orwell:gamechanged` re-enters the deferral with a STALE start timestamp and re-falls-back on its very
+# first poll tick (the id never gets a real chance to resolve). Controllable timers + clock so the
+# time-out → recover → fresh-wait sequence is deterministic (no real 30s wait).
+_HARNESS_RECOVERY = r"""
+const fs = require("node:fs");
+const src = fs.readFileSync(process.argv[1], "utf8");
+function assert(c, m) { if (!c) { throw new Error("ASSERT: " + m); } }
+process.on("unhandledRejection", (e) => { console.error(e); process.exit(1); });
+const tick = () => new Promise((r) => setImmediate(r));
+
+let lastSock = null;
+let perTab = null;
+let nowMs = 1000000;
+let timers = [];
+let timerSeq = 0;
+
+// Controllable timers: capture scheduled callbacks; `flushTimers()` fires the currently-queued batch.
+global.setTimeout = (fn, delay) => { timers.push({ id: ++timerSeq, fn: fn }); return timerSeq; };
+global.clearTimeout = (id) => { timers = timers.filter((t) => t.id !== id); };
+function flushTimers() { const batch = timers; timers = []; batch.forEach((t) => { try { t.fn(); } catch (e) { console.error(e); } }); return batch.length; }
+
+function boot() {
+  global.CustomEvent = function (t, i) { this.type = t; this.detail = i && i.detail; };
+  Date.now = () => nowMs;
+  global.WebSocket = function (url) {
+    this.url = url; this.readyState = 0; this.sent = [];
+    this.send = (s) => this.sent.push(JSON.parse(s));
+    this.close = () => { this.readyState = 3; };
+    lastSock = this;
+  };
+  const listeners = {};
+  global.window = {
+    API_BASE: "", ORWELL_WS_TRANSPORT: true,
+    addEventListener(name, fn) { (listeners[name] = listeners[name] || []).push(fn); },
+    removeEventListener() {},
+    dispatchEvent(e) { (listeners[e.type] || []).forEach((fn) => { try { fn(e); } catch (_) {} }); return true; },
+    location: { protocol: "https:", host: "example.test" },
+    sessionModule: { getCurrentSessionId() { return perTab; } },
+  };
+  global.document = { readyState: "complete", body: { dataset: { gameBuild: "1" } }, addEventListener() {} };
+  global.window.document = global.document;
+  delete global.window.OrwellWs;
+  (0, eval)(src);
+  return global.window.OrwellWs;
+}
+function gamechanged() { global.window.dispatchEvent({ type: "orwell:gamechanged" }); }
+function helloFrames() { return lastSock ? lastSock.sent.filter((f) => f.t === "hello" || f.t === "bind") : []; }
+
+(async function main() {
+  const WS = boot();
+  await tick();  // start() auto-ran; perTabId null → deferral poll armed
+  assert(WS.mode() === "idle", "boot with null perTabId defers (idle)");
+  assert(timers.length === 1, "the deferral poll is armed; got " + timers.length);
+
+  // Advance the clock past the max wait so the FIRST poll tick times out into pertab-pending fallback.
+  nowMs += 40000;   // > PERTAB_WAIT_MAX_MS (30000)
+  flushTimers();
+  await tick();
+  assert(WS.isFallback() === true, "the deferral times out into a fallback");
+
+  // A later game-load fires the g15 dispatcher while the id is STILL null; advance past the backoff.
+  nowMs += 100000;
+  gamechanged();
+  await tick();
+  assert(WS.mode() === "idle", "recovery must RE-ENTER the deferral (idle), not immediately re-fall-back");
+  assert(timers.length === 1, "recovery re-arms the deferral poll; got " + timers.length);
+
+  // A poll tick only 1s later must NOT re-fall-back — the wait budget was RESET (the Major fix). With a
+  // STALE `_pertabWaitStart` this tick's elapsed would still exceed PERTAB_WAIT_MAX_MS → instant re-fallback.
+  nowMs += 1000;
+  flushTimers();
+  await tick();
+  assert(WS.mode() === "idle", "with a FRESH wait budget, a quick poll keeps deferring (the stale-clock bug is fixed)");
+  assert(WS.isFallback() === false, "must NOT have re-fallen-back immediately on a fresh wait");
+
+  // The id finally resolves; a gamechanged connects with a NON-null hello.
+  perTab = "sess_recovered";
+  gamechanged();
+  await tick();
+  assert(lastSock !== null, "once the id resolves, the deferring window connects");
+  lastSock.readyState = 1; lastSock.onopen();
+  const hellos = helloFrames();
+  assert(hellos.length === 1 && hellos[0].d.perTabId === "sess_recovered",
+         "the recovered hello carries the resolved (non-null) perTabId; got " + JSON.stringify(hellos.map((h) => h.d.perTabId)));
+
+  console.log("OK");
+  process.exit(0);
+})();
+"""
+
+
+def test_pertab_pending_recovery_gets_a_fresh_wait_budget():
+    out = _run_node(_HARNESS_RECOVERY, os.path.join(STATIC, "orwellWs.js"))
+    assert "OK" in out
+
+
 # ── STRUCTURAL — pin the deferral so a revert (hello-with-null at boot) fails ────
 
 WS = _read("static", "js", "orwellWs.js")
@@ -183,6 +281,16 @@ def test_pertab_pending_fallback_is_recoverable():
     assert '"pertab-pending"' in body, "recovery must attempt for the pertab-pending cause too"
     # The pre-existing pregame recovery cause is untouched.
     assert '_fallbackReason !== "pregame-not-live"' in body
+
+
+def test_pertab_pending_timeout_resets_the_wait_clock():
+    # CodeRabbit Major: the timeout must reset `_pertabWaitStart` BEFORE the fallback so recovery gets a
+    # fresh full wait budget (a stale start re-falls-back on the first recovery poll tick).
+    defer = WS.split("function _deferForPerTab")[1].split("\n  function ")[0]
+    idx_reset = defer.find("_pertabWaitStart = 0")
+    idx_fb = defer.find('_goFallback("pertab-pending")')
+    assert idx_reset != -1 and idx_fb != -1 and idx_reset < idx_fb, \
+        "the deferral timeout must reset _pertabWaitStart before falling back to pertab-pending"
 
 
 def test_gamechanged_connects_a_deferring_idle_window():
