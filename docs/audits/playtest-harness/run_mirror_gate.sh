@@ -21,8 +21,19 @@ TOOLTURN="${MIRROR_TOOLTURN:-}"                 # MIRROR_TOOLTURN=1 → the tool
 # Defaults match this sandbox's provisioning (global npm playwright + chromium under /opt/pw-browsers);
 # a caller (e.g. the CI job) can point these elsewhere. Leave PW_CHROMIUM empty to let playwright
 # auto-resolve the browser from PLAYWRIGHT_BROWSERS_PATH.
-export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}"
-export PW_CHROMIUM="${PW_CHROMIUM-/opt/pw-browsers/chromium}"
+# This sandbox pre-provisions chromium at /opt/pw-browsers; a clean CI runner has none there and uses
+# playwright's default cache (~/.cache/ms-playwright). Respect a caller override; else use the sandbox
+# path ONLY if it exists; else leave unset so playwright auto-resolves its own installed chromium.
+if [ -z "${PLAYWRIGHT_BROWSERS_PATH:-}" ] && [ -d /opt/pw-browsers ]; then
+  export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+fi
+# PW_CHROMIUM: explicit binary for chromium.launch({executablePath}). Use a caller override; else the
+# sandbox binary if it really exists; else empty → the harness passes undefined and playwright
+# auto-resolves the browser it installed in step 0 (below).
+if [ -z "${PW_CHROMIUM+x}" ]; then
+  if [ -x /opt/pw-browsers/chromium ]; then PW_CHROMIUM=/opt/pw-browsers/chromium; else PW_CHROMIUM=""; fi
+fi
+export PW_CHROMIUM
 export BASE_URL="http://127.0.0.1:$FE_PORT"; export ENGINE_URL="http://127.0.0.1:$ENGINE_PORT"
 
 PIDS=()
@@ -39,12 +50,12 @@ pkill -9 -f 'fake_model_server.mjs' 2>/dev/null; pkill -9 -f "uvicorn app:app --
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 wait_http() { local url="$1" name="$2" n=0; until curl -sf -o /dev/null --max-time 3 "$url"; do n=$((n+1)); [ $n -ge 40 ] && { echo "!! $name never came up ($url)"; return 1; }; sleep 1; done; echo "ok: $name"; }
 
-# 0) playwright resolvable for the harness's `import 'playwright'`. The rig only drives an EXISTING
-#    chromium (executablePath=$PW_CHROMIUM), so we need just the JS driver — never a browser download.
-#    Resolution order, most-portable first, so the SAME driver runs on this sandbox AND a clean CI
-#    runner: (a) already resolvable? done. (b) a GLOBAL npm playwright to symlink in. (c) neither —
-#    install it locally, no-save, browser-download skipped. package.json intentionally does NOT carry
-#    playwright (it's not a runtime/engine dep); this keeps the gate self-contained regardless of host.
+# 0) playwright resolvable for the harness's `import 'playwright'`. First the JS DRIVER, then (0c) a
+#    browser binary. Driver resolution order, most-portable first, so the SAME gate runs on this sandbox
+#    AND a clean CI runner: (a) already resolvable? done. (b) a GLOBAL npm playwright to symlink in.
+#    (c) neither — install it locally, no-save (the DRIVER download skips the browser; 0c fetches that).
+#    package.json intentionally does NOT carry playwright (it's not a runtime/engine dep); this keeps the
+#    gate self-contained regardless of host.
 PW_VER="${MIRROR_PW_VERSION:-1.56.1}"   # match the chromium provisioned under $PLAYWRIGHT_BROWSERS_PATH
 say "0) ensure playwright resolvable for the harness"
 mkdir -p "$ROOT/node_modules"
@@ -62,6 +73,19 @@ if ! pw_ok; then
     || { echo "!! playwright install failed"; tail -30 "$LOGS/pw-install.log" 2>/dev/null; exit 1; }
 fi
 node -e "import('playwright').then(()=>console.log('playwright import ok')).catch(e=>{console.error(e);process.exit(1)})" || exit 1
+
+# 0c) a chromium binary to launch. Trust an explicit, existing PW_CHROMIUM (the sandbox path); else the
+#     node driver installs ITS OWN revision-matched chromium (into $PLAYWRIGHT_BROWSERS_PATH or the
+#     default ~/.cache/ms-playwright cache) and we auto-resolve it. On CI /opt/pw-browsers is absent, so
+#     PW_CHROMIUM is empty here and this is the path that runs; it's idempotent (skips if already present).
+if [ -n "$PW_CHROMIUM" ] && [ -x "$PW_CHROMIUM" ]; then
+  echo "chromium: $PW_CHROMIUM (pre-provisioned)"
+else
+  say "0c) install the node driver's chromium (auto-resolve)"
+  ( cd "$ROOT" && npx --yes playwright install chromium >"$LOGS/pw-browser.log" 2>&1 ) \
+    || { echo "!! chromium install failed"; tail -30 "$LOGS/pw-browser.log" 2>/dev/null; exit 1; }
+  export PW_CHROMIUM=""   # empty → mirror_live_parity.mjs launches with executablePath undefined (auto-resolve)
+fi
 
 # secrets file the rig reads for admin login (gitignored — see .gitignore add).
 printf 'ADMIN_USER=%s\nADMIN_PW=%s\n' "$ADMIN_USER" "$ADMIN_PW" > "$HARNESS/.secrets.env"
