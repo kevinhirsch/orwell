@@ -195,6 +195,21 @@ def test_value_drops_nested_blobs_none_oversized_and_non_finite():
     assert layout.get_layout("u", DEV)["windows"] == {}
 
 
+def test_value_huge_arbitrary_precision_int_is_dropped_never_raises():
+    """A JSON `value` of `10**10000` is an arbitrary-precision int; `math.isfinite` on it would
+    raise OverflowError (coercion to a C double). The bounded int path must DROP it cleanly — no
+    raise, empty state, nothing stored. (greptile P1 regression.)"""
+    huge = 10 ** 10000
+    assert layout._clean_state({"value": huge}) == {}          # direct _clean_state path — no raise
+    assert _patch("u", "k", {"value": huge}) == {}             # and through patch_layout
+    assert _patch("u", "k", {"value": -huge}) == {}
+    # a just-over-bound int is dropped; the bound itself survives
+    assert _patch("u", "k", {"value": layout._MAX_ABS_INT + 1}) == {}
+    at_bound = _patch("u", "at-bound", {"value": layout._MAX_ABS_INT})
+    assert at_bound["state"]["value"] == layout._MAX_ABS_INT
+    assert layout.get_layout("u", DEV)["windows"].get("k") is None
+
+
 def test_value_at_the_length_cap_survives():
     at_cap = "y" * layout._MAX_VALUE_LEN
     saved = _patch("u", "gadget:note", {"value": at_cap})
