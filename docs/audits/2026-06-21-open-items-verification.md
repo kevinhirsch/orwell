@@ -15,14 +15,15 @@ aggregation. Each verdict carries file/test/commit evidence in the body (summari
 > (`docs/REFACTOR-ROADMAP.md` R1–R7), a low-severity UX-polish tail, and the one hardware-gated
 > Proxmox host smoke.
 >
-> **SUPERSEDED 2026-07-09 on F5 (one point only):** the "no launch-blockers left" headline predates
-> the F5 mirror-parity harness becoming the executable gate. On 2026-07-09 that harness
+> **F5 RE-FLAGGED THEN CLOSED (2026-07-09):** the "no launch-blockers left" headline briefly failed
+> on F5. On 2026-07-09 the F5 mirror-parity harness
 > (`docs/audits/playtest-harness/mirror_live_parity.mjs`) was **executed on current main and found
-> RED** — it exits 1 on `bUsesIncrementalRenderer` — so **F5 is now the sole launch-blocker**. The
-> "owed *verification runs* for the live mirror/concurrency" noted above resolved to a **failing**
-> gate, not a pass. A fix is in flight on branch `claude/f5-mirror-parity-fix`. The rest of this
-> doc stands; see `docs/audits/2026-07-09-ship-gate-reverification.md` for the full re-verification
-> (committed in PR #1269; this PR should merge after it, and the link resolves then).
+> RED** — it exited 1 on `bUsesIncrementalRenderer`, a render-race regression — so F5 was momentarily
+> the sole launch-blocker (re-verification `docs/audits/2026-07-09-ship-gate-reverification.md`, PR
+> #1269). **RESOLVED the same day by PR #1276 (`fa60f70c`):** the render race was fixed AND the harness
+> gate was **wired into CI as a required check** (runs in `ci-gate`), so F5 is now proven green on
+> every PR rather than by manual run. **F5 is no longer a launch-blocker** — the "no launch-blockers
+> left" headline stands again. (Reconciled 2026-07-10.)
 
 ## Tier 1 — Critical / launch-blocking → **CLOSED**
 
@@ -71,9 +72,9 @@ fatigue — PO review list) · 0059 organic pathway-surfacing depth follow-on.
 | Item | Verdict | Remains |
 |---|---|---|
 | 0007 #2 session TTL | 🟡 PARTIAL | logout revocation built; shorten the 7-day TTL (`auth.py:50` + cookie `max_age`). |
-| 0010 #1 per-class `max_tokens` runtime-editable | 🔴 OPEN | only reasoning budget is settings-backed (`token_policy.py:74`). |
+| 0010 #1 per-class `max_tokens` runtime-editable | ✅ DONE (2026-07-10) | shipped — `max_tokens_budget` (a `{call_class: value}` override) is admin-editable at runtime beside `reasoning_budget`, resolved from the settings dict in `frontend/src/token_policy.py` (`resolve_token_policy` + `max_tokens_bounds`). |
 | 0010 #2 model-aware reasoning sizing + fold Anthropic 8192 | 🔴 OPEN | effort-only; 8192 hardcoded `llm_core.py:718`. |
-| 0010 #3 `appliedMaxTokens` + `finishReason` in the ledger | 🟡 PARTIAL | `finishReason` in the I/O *trace* (#5aaf090), not the token *ledger*; `appliedMaxTokens` absent. |
+| 0010 #3 `appliedMaxTokens` + `finishReason` in the ledger | ✅ DONE (2026-07-10) | shipped — both fields are now recorded in the token *ledger* itself (`frontend/src/orwell_token_ledger.py`: the entry schema + `_clean_int(applied_max_tokens)` / `_clean_id(finish_reason)`), `appliedMaxTokens` = the OUTPUT cap actually sent on the wire (the ADR-0010 #1 per-class value). |
 | 0010 #4 `Continue ▸` in chat mode | 🔴 OPEN (non-blocking) | truncation event agent-mode only. |
 | 0008 #5 live two-tab real-model re-run | 🔴 OPEN | server-layer gated; live run owed; harness `s3raceloop.mjs` doc-only. |
 | 0012 #6 mid-gen-join splice pinned | 🟡 PARTIAL | mechanism dup/drop-safe `agent_runs.py:205`; only finished-run replay tested. |
@@ -162,9 +163,10 @@ TODOs, empty XFAIL registry, one opt-in test skip `fastembedReal.test.ts`).
 > 9. Deferred-by-design: ADR 0006 Phase-2 → [#604](https://github.com/kevinhirsch/orwell/issues/604); 0059 follow-on → [#605](https://github.com/kevinhirsch/orwell/issues/605); 0022 + Postgres+pgvector = **doc-only** (deferred).
 > 10. Doc hygiene → **doc-only**.
 
-1. **ADR 0010 token-economy (4):** per-class `max_tokens` runtime-editable · model-aware reasoning
-   sizing + fold the Anthropic 8192 stopgap · `appliedMaxTokens`+`finishReason` into the ledger ·
-   `Continue ▸` in chat mode.
+1. **ADR 0010 token-economy (4 → 2 remaining):** ~~per-class `max_tokens` runtime-editable~~ **DONE
+   (2026-07-10, `token_policy.py`)** · model-aware reasoning sizing + fold the Anthropic 8192 stopgap ·
+   ~~`appliedMaxTokens`+`finishReason` into the ledger~~ **DONE (2026-07-10, `orwell_token_ledger.py`)** ·
+   `Continue ▸` in chat mode. **Still open: #2 (model-aware reasoning sizing) + #4 (`Continue ▸`).**
 2. **Live-mirror/concurrency verification (mechanisms built; pins/manual runs owed):** ADR 0008 live
    two-tab real-model re-run · ADR 0012 mid-gen-join test pin + retention knob + CI-cadence decision ·
    ADR 0011 (a) loop-breaker total-cap + (b) bubble unmount.
