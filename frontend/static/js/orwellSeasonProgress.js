@@ -54,6 +54,15 @@
   let _timer = null;
   let _lastPct = 0; // monotone within a season — never let a transient read pull the fill backward
 
+  // WS Phase-1 (§4): when the multiplexed socket is live the server PUSHES a `state` frame on
+  // every board change; platform.js relays it to the one `orwell:gamechanged` dispatcher, which
+  // triggers an edge refresh below. So we cancel the 20s periodic TIMER in WS mode and stay
+  // edge-triggered (fail-soft: any doubt ⇒ keep polling). The fallback/SSE path still polls.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+
   async function jget(url) {
     const r = await fetch(url, { credentials: "same-origin" });
     if (!r.ok) throw new Error("HTTP " + r.status);
@@ -319,14 +328,21 @@
     if (_timer) clearInterval(_timer);
     const tick = async () => {
       if (!document.hidden) await refresh();
-      _timer = setTimeout(tick, POLL_MS);
+      // In WS mode the `state` push (via orwell:gamechanged) supersedes the poll —
+      // don't re-arm the periodic timer, just stay edge-triggered.
+      if (!_wsActive()) _timer = setTimeout(tick, POLL_MS);
     };
-    _timer = setTimeout(tick, POLL_MS);
+    if (!_wsActive()) _timer = setTimeout(tick, POLL_MS);
   }
 
   // Onboarding / any flow that changes the game triggers an immediate refresh.
   window.orwellRefreshSeasonProgress = refresh;
   window.addEventListener("orwell:gamechanged", refresh);
+  // WS Phase-1 (§4/§6): cancel the periodic poll the instant the socket goes live; resume
+  // polling if it falls back to SSE. start() re-arms the timer only while !_wsActive(), so
+  // re-running it after a downgrade restores the cadence.
+  window.addEventListener("orwell:ws-active", () => { if (_timer) { clearTimeout(_timer); _timer = null; } });
+  window.addEventListener("orwell:ws-inactive", () => { if (_timer) { clearTimeout(_timer); _timer = null; } start(); });
 
   // Seam for the headless gate.
   window._orwellSeasonProgressEnsure = () => { ensureBar(); ensureChip(); return true; };
