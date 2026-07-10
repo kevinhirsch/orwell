@@ -360,6 +360,47 @@ def test_eviction_kind_keeps_the_l16_grayscale_rule():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Regression pin for issue #1324 — ceremony-slate faces were PERMANENTLY starved of real
+# portraits: the DOM builder never passed `portrait` to OrwellMonogram.face() at all (deliberate
+# at the time — "ID-SEEDED mode… so live vs. reload can never visually diverge"), so a slate
+# rendered the monogram forever even once a generated portrait existed. The fix resolves the
+# portrait SYNCHRONOUSLY from OrwellMonogram's shared cache at render time — both render paths
+# still read whatever snapshot of the SAME cache is loaded in memory when they paint, so
+# determinism is preserved without starving the surface.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_slate_faces_resolve_a_real_portrait_from_the_shared_cache():
+    start = BEATS_JS.index("export function orwellRenderCeremonySlate")
+    end = BEATS_JS.index("\n}\n", start)
+    body = BEATS_JS[start:end]
+    assert "window.OrwellMonogram.portraitFor" in body, \
+        "slate faces must consult the shared portrait cache, not render monogram-only forever"
+    # the resolved portrait rides INTO face()'s own card — never a hardcoded null.
+    assert re.search(r"portrait:\s*cached\s*&&\s*cached\.portrait", body)
+
+
+def test_slate_faces_never_fetch_directly():
+    """The DOM builder stays synchronous — it reads the ALREADY-warm shared cache
+    (orwellMonogram.js owns the one out-of-band fetch), never fetches inline itself, so a
+    slate's paint never blocks on / races a network round-trip."""
+    start = BEATS_JS.index("export function orwellRenderCeremonySlate")
+    end = BEATS_JS.index("\n}\n", start)
+    body = BEATS_JS[start:end]
+    assert "fetch(" not in body
+
+
+def test_live_and_reload_read_the_same_cache_snapshot_by_construction():
+    """LIVE == RELOAD for faces too: both paths call the ONE shared orwellRenderCeremonySlate
+    (already proven above), and that function's only portrait source is
+    `window.OrwellMonogram.portraitFor` — there is no second, path-specific portrait lookup for
+    either render path to diverge through."""
+    for js, label in ((_read("static", "js", "chat.js"), "chat.js"),
+                       (_read("static", "js", "chatRenderer.js"), "chatRenderer.js")):
+        assert "portraitFor" not in js, \
+            f"{label} must not read the portrait cache itself — only orwellRenderCeremonySlate does"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Runtime — drive the REAL chatRenderer.addMessage reload path in headless chromium
 # (the LLM-stub-blind render path — the #822/#873/#834 lesson).
 # ─────────────────────────────────────────────────────────────────────────────

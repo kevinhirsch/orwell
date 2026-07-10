@@ -41,13 +41,88 @@ def test_badge_set_is_exactly_the_dor_four():
 
 
 def test_template_is_seeded_from_public_identity_only():
-    """Deterministic per id (hash → hue + pattern), no fetches, no hidden inputs —
-    the Vault-freedom of the component is structural: it can only render what it's handed."""
+    """Deterministic per id (hash → hue + pattern), no hidden inputs — the Vault-freedom of the
+    component is structural: svg()/face() can only render what they're handed (no data access
+    inside the pure render path). The shared portrait cache (issue #1324) DOES fetch, but in its
+    own out-of-band function — see test_portrait_cache_* below — never inside svg()/face()."""
     js = _read(KIT)
-    assert "fetch(" not in js, "the kit must be render-only (no data access)"
+    for fn in ("function svg(", "function face("):
+        start = js.index(fn)
+        i = js.index("{", start)
+        depth = 0
+        j = i
+        while True:
+            if js[j] == "{":
+                depth += 1
+            elif js[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        body = js[start : j + 1]
+        assert "fetch(" not in body, f"{fn} must stay render-only (no data access)"
     assert "hash(" in js and "hueFor" in js and "patternFor" in js
     # the avalanche finalizer: sequential ids must not cluster hues
     assert "0x85ebca6b" in js and "0xc2b2ae35" in js
+
+
+# ── SHARED PORTRAIT CACHE (issue #1324) ────────────────────────────────────────────────────── #
+#
+# Two `face()` consumers were permanently starved of real portraits: ceremony slates
+# (orwellToolBeats.js) never passed `portrait` at all, and the premiere cast strip
+# (orwellStatusPanel.js) hard-coded `portrait: null, forceMono: true`. orwellDecision.js and
+# orwellFinale.js each already solved this locally with their OWN private id->portrait cache;
+# this centralizes the SAME pattern in the shared kit so those two starved consumers (and any
+# future one) get real portraits for free instead of re-deriving a copy.
+
+def test_kit_exposes_a_shared_portrait_cache():
+    js = _read(KIT)
+    assert "function portraitFor(" in js
+    assert "function refreshPortraitCache(" in js
+    assert "portraitFor," in js and "refreshPortraitCache," in js  # exported on window.OrwellMonogram
+    assert "window.OrwellMonogram = {" in js
+
+
+def test_portrait_cache_reads_only_the_public_roster_route():
+    """Vault-free: the cache fetches ONLY the public roster projection (id/name/status/portrait —
+    the same public card every cast surface already renders), never a hidden/soul/vault field."""
+    js = _read(KIT)
+    start = js.index("function refreshPortraitCache(")
+    i = js.index("{", start)
+    depth = 0
+    j = i
+    while True:
+        if js[j] == "{":
+            depth += 1
+        elif js[j] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    body = js[start : j + 1]
+    assert '"/api/orwell/roster"' in body
+    for banned in ("vault", "soul", "trust", "affinity", "threat", "secret"):
+        assert banned not in body.lower(), f"portrait cache reads a hidden field ({banned!r})"
+
+
+def test_portrait_cache_refreshes_off_the_one_gamechanged_dispatcher_only():
+    """g15: the cache must refresh off the existing `orwell:gamechanged` dispatcher — never a
+    new ad-hoc poll (setInterval) or a second CustomEvent dispatch of its own."""
+    js = _read(KIT)
+    assert 'window.addEventListener("orwell:gamechanged"' in js
+    assert "refreshPortraitCache(true)" in js
+    assert "new CustomEvent(" not in js, "the kit must never dispatch its own gamechanged event"
+    assert "setInterval(" not in js, "the cache must ride the existing dispatcher, not a new poll"
+
+
+def test_portrait_cache_is_fail_open():
+    """An unfetched/failed roster read must never throw — every consumer just keeps rendering
+    the monogram fallback (the sanctioned default) until the cache self-heals."""
+    js = _read(KIT)
+    start = js.index("async function refreshPortraitCache(")
+    end = js.index("\n  }", start)
+    body = js[start:end]
+    assert "try {" in body and "catch (_)" in body
 
 
 def test_kit_loads_before_its_consumers():

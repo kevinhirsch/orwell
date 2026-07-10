@@ -270,10 +270,14 @@ export function orwellCeremonySlate(tool, output) {
 /**
  * The ONE shared DOM builder for a ceremony-slate card — chat.js (live) and chatRenderer.js
  * (reload) both call this with the descriptor from `orwellCeremonySlate` so the same input
- * always produces byte-identical markup. Faces render through OrwellMonogram in ID-SEEDED mode
- * (never a live portrait-image fetch) — deterministic and synchronous, so the card never depends
- * on a network round-trip landing before paint, and live vs. reload can never visually diverge
- * because a portrait loaded on one pass but not the other.
+ * always produces byte-identical markup. Faces render through OrwellMonogram, resolving a
+ * portrait SYNCHRONOUSLY from its shared portrait cache (issue #1324: id→portrait, kept warm
+ * off the ONE `orwell:gamechanged` dispatcher event, never fetched here) — deterministic per
+ * paint, so the card never depends on a network round-trip landing mid-render, and live vs.
+ * reload can never visually diverge because a portrait loaded on one pass but not the other:
+ * both passes read whatever snapshot of the SAME cache is already loaded when they paint. A
+ * cache miss (no portrait on file yet) falls back to the designed monogram and upgrades in
+ * place the next time this card's beat is repainted after the cache refreshes.
  */
 export function orwellRenderCeremonySlate(slate) {
   const card = document.createElement('div');
@@ -287,8 +291,11 @@ export function orwellRenderCeremonySlate(slate) {
     const holder = document.createElement('span');
     holder.className = 'ow-cslate-face-holder';
     if (typeof window !== 'undefined' && window.OrwellMonogram) {
+      const subjId = (subj && (subj.id || subj.name)) || '?';
+      const cached = window.OrwellMonogram.portraitFor ? window.OrwellMonogram.portraitFor(subjId) : null;
       holder.appendChild(window.OrwellMonogram.face(
-        { id: (subj && (subj.id || subj.name)) || '?', name: subj && subj.name, status: evicted ? 'evicted' : 'active' },
+        { id: subjId, name: subj && subj.name, status: evicted ? 'evicted' : 'active',
+          portrait: cached && cached.portrait },
         { role: slate.badge, alt: subj && subj.name }
       ));
     }

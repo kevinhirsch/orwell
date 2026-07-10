@@ -628,14 +628,19 @@ import { onNarrowChange } from './platform.js';
         tile.addEventListener("click", focusChat); // ADR 0003: focus chat, never replace it
         _stripTiles.set(key, tile);
       }
-      // Repaint only when identity/status/met changed — a loaded tile is never rebuilt (no flicker).
-      const sig = card.name + "|" + card.status + "|" + (met ? "1" : "0");
+      // #1324: a real persisted portrait when the shared OrwellMonogram cache (id→portrait,
+      // refreshed off the ONE `orwell:gamechanged` dispatcher) has one on file, the designed
+      // monogram otherwise (face()'s own sanctioned fallback) — never forced to monogram-only.
+      const cached = window.OrwellMonogram.portraitFor ? window.OrwellMonogram.portraitFor(card.id) : null;
+      // Repaint only when identity/status/met/portrait changed — a loaded tile is never rebuilt
+      // (no flicker), but a portrait landing mid-premiere DOES change the sig so the tile upgrades.
+      const sig = card.name + "|" + card.status + "|" + (met ? "1" : "0") + "|" + (cached && cached.portrait ? "1" : "0");
       if (tile._owSig !== sig) {
         tile._owSig = sig;
         tile.innerHTML = "";
         tile.appendChild(window.OrwellMonogram.face(
-          { id: card.id, name: card.name, status: card.status, portrait: null },
-          { alt: card.name, forceMono: true }));
+          { id: card.id, name: card.name, status: card.status, portrait: cached && cached.portrait },
+          { alt: card.name }));
         tile.classList.toggle("os-tile-unmet", !met);
         const you = card.isPlayer ? " (you)" : "";
         tile.setAttribute("aria-label", card.name + you + (met ? " — met" : " — not yet met") + ". Tap to talk in chat.");
