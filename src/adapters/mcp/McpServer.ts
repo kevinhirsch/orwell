@@ -124,7 +124,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["room"])) refuse("room", "a room name (string)");
       return;
     case "makeDeal":
-      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      guardSyncFields(true); // 0065 Part A CAS + Part B at-most-once idempotencyKey (A10/#591 — makeDeal folds a leverage/trade squeeze + creates a deal; the key makes a stale-409 re-drive at-most-once)
       if (!isStr(args["with"])) refuse("with", "a houseguest id (string)");
       if (!isStr(args["kind"])) refuse("kind", "a deal kind (string)");
       if (!isStr(args["terms"])) refuse("terms", "a non-empty string");
@@ -139,7 +139,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["allianceId"])) refuse("allianceId", "an alliance id (string)");
       return;
     case "confide":
-      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
+      guardSyncFields(true); // 0065 Part A CAS + Part B at-most-once idempotencyKey (A10/#591 — confide folds the bond bump / lie ledger; the key makes a stale-409 re-drive at-most-once)
       if (!isStr(args["npcId"])) refuse("npcId", "a houseguest id (string)");
       return;
     case "accuseTie": // 0095
@@ -155,7 +155,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
     case "exposeSecret":
       // 0093 — out a learned secret. EITHER a real `factId` (a string) OR a `bluff` (a boolean) with a
       // `subject`. The engine validates ownership / the season cap; this is the shape guard only.
-      guardSyncFields(false);
+      guardSyncFields(true); // 0065 Part A CAS + Part B at-most-once idempotencyKey (A10/#591 — exposeSecret folds a house-wide standing hit + spends the secret; the key makes a re-drive at-most-once)
       if (args["bluff"] === true) {
         if (!isStr(args["subject"])) refuse("subject", "a houseguest id (string) for a bluff");
       } else if (!isStr(args["factId"])) {
@@ -164,7 +164,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       return;
     case "tradeSecret":
       // 0099 — trade a held secret to a recipient. `toNpcId` required; EITHER a real `factId` OR a `bluff`.
-      guardSyncFields(false);
+      guardSyncFields(true); // 0065 Part A CAS + Part B at-most-once idempotencyKey (A10/#591 — tradeSecret folds the recipient warmth/sour + trade cap; the key makes a re-drive at-most-once)
       if (!isStr(args["toNpcId"])) refuse("toNpcId", "a recipient houseguest id (string)");
       if (args["bluff"] === true) {
         if (!isStr(args["subject"])) refuse("subject", "a houseguest id (string) for a bluff");
@@ -362,7 +362,13 @@ export class McpServer {
         return this.deps.session.joinAlliance(args as unknown as JoinAllianceReq);
       case "confide":
         // 0075 — the trust-gated confidence: the engine decides + records; the model voices the result.
-        return this.deps.session.confide(args["npcId"] as EntityId, args["expectedBeatSeq"] as number | undefined);
+        // A10/#591 — the optional at-most-once idempotencyKey rides positionally (makeDeal/expose/trade
+        // pick it up via their req cast; confide takes positional args, so thread it here).
+        return this.deps.session.confide(
+          args["npcId"] as EntityId,
+          args["expectedBeatSeq"] as number | undefined,
+          args["idempotencyKey"] as string | undefined,
+        );
       case "accuseTie":
         // 0095 — the pre-show-tie accusation: the engine checks the sealed layer + decides + records;
         // the model only voices the result (landed/missed).
