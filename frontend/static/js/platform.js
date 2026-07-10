@@ -130,6 +130,38 @@ if (typeof document !== 'undefined' && document.addEventListener) {
 }
 
 // ============================================
+// WebSocket transport (ADR 0017 / websocket-phase1-protocol.md §4)
+// ============================================
+// Side-effect import: orwellWs opens the multiplexed socket (flag-gated, fail-soft)
+// and hands us its `state`/`hud` DOWN-frames. This module is the ONE place that
+// turns a socket "the board changed" edge into a HUD refresh — by calling the ONE
+// debounced dispatcher `orwellGameChanged('ws:state')` above (§4). We delete the
+// 20/25s poll TIMERS, never the dispatcher: a `state`/`hud` frame is just one MORE
+// caller of the single g15 seam (test_g15_gamechanged.py stays green — no ad-hoc
+// CustomEvent here). Payloads are pings (ids + beatSeq), never state bodies, so the
+// Vault Wall is trivially intact; each HUD re-reads its own Vault-free projection.
+import './orwellWs.js';
+
+// Bridge the socket's board-changed edges to the single dispatcher. `state` (status
+// changed) and `hud` (presence/whereabouts changed) both mean "re-read your
+// projection now" — route both through `orwellGameChanged`, threading the frame's
+// beatSeq so a panel can verify its refetch caught the claimed commit (M1-3). Robust
+// to load order: register immediately if OrwellWs is present, else on ws-ready.
+function _bridgeWsStateFrames() {
+  if (!(typeof window !== 'undefined' && window.OrwellWs && typeof window.OrwellWs.onFrame === 'function')) return false;
+  const relay = (frame) => {
+    const beat = frame && frame.d && typeof frame.d.beatSeq === 'number' ? frame.d.beatSeq : undefined;
+    try { orwellGameChanged('ws:state', beat); } catch (_) { /* fail open */ }
+  };
+  window.OrwellWs.onFrame('state', relay);
+  window.OrwellWs.onFrame('hud', relay);
+  return true;
+}
+if (typeof window !== 'undefined' && !_bridgeWsStateFrames()) {
+  window.addEventListener('orwell:ws-ready', _bridgeWsStateFrames, { once: true });
+}
+
+// ============================================
 // Haptics + audio beat channel (issue #745)
 // ============================================
 // Side-effect import: orwellHaptics self-registers its window listeners and rides
