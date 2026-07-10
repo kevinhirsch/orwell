@@ -246,6 +246,24 @@ def test_gate_is_env_pinned(monkeypatch):
 import asyncio  # noqa: E402 — grouped with this section, matches file's late-import style
 
 
+def _run_async(coro):
+    """Run a coroutine on a PRIVATE, throwaway event loop.
+
+    Not `asyncio.run(...)`: its Runner sets the thread's current event loop to
+    None on close, which breaks every LATER test in the same (xdist) worker
+    process that still uses this suite's prevailing
+    `asyncio.get_event_loop().run_until_complete(...)` pattern — swapping this
+    file to asyncio.run produced 73 cross-file failures. Not
+    `asyncio.get_event_loop()` either: deprecated on newer Python. A fresh loop
+    that is never installed as current gives both properties — no deprecation
+    warning, no ambient-loop pollution."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 class _FakeToolBlock:
     """Minimal stand-in for tool_parsing.ToolBlock — avoids importing the real
     parser just to build a (tool_type, content) pair for dispatch tests."""
@@ -255,10 +273,12 @@ class _FakeToolBlock:
         self.content = content
 
 
-def _captured_tools_for_query(monkeypatch, query, *, game_mode=False, disabled_tools=None):
+def _captured_tools_for_query(monkeypatch, query, *, game_mode=False, disabled_tools=None,
+                              relevant_tools=None):
     """Drive stream_agent_loop with the RAG tool index forced OFF (so selection
-    falls back to the keyword path) and capture the tool schema array the loop
-    would hand to the model. Mirrors the harness in
+    falls back to the keyword path — or uses `relevant_tools` when the caller
+    provides one, mirroring the task_scheduler path) and capture the tool schema
+    array the loop would hand to the model. Mirrors the harness in
     test_a5_tool_manifest_and_machinery_leak.py."""
     from src import agent_loop as al
     import src.tool_index as ti
@@ -282,11 +302,12 @@ def _captured_tools_for_query(monkeypatch, query, *, game_mode=False, disabled_t
             [{"role": "user", "content": query}],
             disabled_tools=disabled_tools,
             game_mode=game_mode,
+            relevant_tools=relevant_tools,
         )
         async for _ in gen:
             pass
 
-    asyncio.get_event_loop().run_until_complete(drive())
+    _run_async(drive())
     return {s.get("function", {}).get("name") for s in captured.get("tools", []) if isinstance(s, dict)}
 
 
@@ -354,7 +375,7 @@ def test_1314_dispatch_refuses_non_keep_tool_with_disabled_tools_none(monkeypatc
         ("create_document", '{"title": "x", "content": "y"}'),
         ("manage_notes", '{"action": "list"}'),
     ):
-        desc, result = asyncio.get_event_loop().run_until_complete(
+        desc, result = _run_async(
             tool_execution.execute_tool_block(
                 _FakeToolBlock(tool_name, payload),
                 disabled_tools=None,
@@ -373,7 +394,7 @@ def test_1314_dispatch_unaffected_in_full_workspace_build(monkeypatch):
     monkeypatch.setenv("ORWELL_GAME_BUILD", "0")
     from src import tool_execution
 
-    desc, result = asyncio.get_event_loop().run_until_complete(
+    desc, result = _run_async(
         tool_execution.execute_tool_block(
             _FakeToolBlock("manage_notes", '{"action": "list"}'),
             disabled_tools=None,
@@ -388,7 +409,7 @@ def test_1314_dispatch_still_honors_explicit_disabled_tools(monkeypatch):
     blocked (with its original user-facing message) regardless of game build."""
     from src import tool_execution
 
-    desc, result = asyncio.get_event_loop().run_until_complete(
+    desc, result = _run_async(
         tool_execution.execute_tool_block(
             _FakeToolBlock("bash", "echo hi"),
             disabled_tools={"bash"},
@@ -397,3 +418,109 @@ def test_1314_dispatch_still_honors_explicit_disabled_tools(monkeypatch):
     )
     assert result.get("exit_code") == 1
     assert "disabled by user" in result.get("error", "")
+
+
+# ── 7b. CodeRabbit follow-ups on #1329 (both MAJOR) ──────────────────────────
+
+
+def test_1314_empty_intersection_never_falls_through_to_broad_schemas(monkeypatch):
+    """CodeRabbit MAJOR #1: when the game-build cap empties the candidate set
+    (every selected tool was non-keep), the later `if _relevant_tools:` schema
+    check treats an empty set as falsy and would fall through to the BROAD
+    FUNCTION_TOOL_SCHEMAS + mcp_schemas branch — undoing the wall for the turn.
+    Drive that exact shape via a caller-provided relevant_tools of ONLY non-keep
+    tools (the task_scheduler path): the offered schema set must be the keep-set
+    fallback — non-empty, all keep — never the broad manifest."""
+    from src.agent_tools import GAME_TOOL_KEEP
+
+    names = _captured_tools_for_query(
+        monkeypatch, "hello there", game_mode="game", disabled_tools=None,
+        relevant_tools={"create_document", "manage_notes", "manage_calendar"},
+    )
+    assert names, "schema set must not be empty — the keep-set fallback should be offered"
+    leaked = names - GAME_TOOL_KEEP
+    assert leaked == set(), f"broad-schema fall-through leaked non-keep tools: {sorted(leaked)}"
+    for must_drop in ("create_document", "manage_notes", "manage_calendar"):
+        assert must_drop not in names, f"{must_drop} survived the empty-intersection cap"
+    # A representative keep tool made it into the fallback offer.
+    assert "getGameState" in names
+
+
+# The four tools DISPATCHED in tool_execution.py but absent from TOOL_TAGS —
+# `game_build_disabled_additions()` never evaluates them, so a bare
+# `tool not in off` guard waves them through. NB: these vault_* are the
+# password-manager vertical, NOT the engine Vault; conceptually GAME_DROP_SET.
+_UNCLASSIFIED_DISPATCHABLE = (
+    ("tail_serve_output", '{"name": "x"}'),
+    ("vault_search", '{"query": "x"}'),
+    ("vault_get", '{"id": "x"}'),
+    ("vault_unlock", '{"password": "x"}'),
+)
+
+
+def test_1314_dispatch_refuses_unclassified_dispatchable_tools_under_game_build(monkeypatch):
+    """CodeRabbit MAJOR #2: tools dispatchable in tool_execution.py but ABSENT
+    from TOOL_TAGS must be refused under the game build (fail-closed on the
+    unknown class), and their implementations must never run."""
+    from src import tool_execution
+
+    async def _must_not_run(*_a, **_k):
+        raise AssertionError("unclassified tool implementation must never run under the game build")
+
+    for impl in ("do_tail_serve_output", "do_vault_search", "do_vault_get", "do_vault_unlock"):
+        monkeypatch.setattr(f"src.tool_implementations.{impl}", _must_not_run, raising=False)
+
+    for tool_name, payload in _UNCLASSIFIED_DISPATCHABLE:
+        desc, result = _run_async(
+            tool_execution.execute_tool_block(
+                _FakeToolBlock(tool_name, payload),
+                disabled_tools=None,
+                owner="someone",
+            )
+        )
+        assert result.get("exit_code") == 1, (tool_name, result)
+        assert "not available in the game build" in result.get("error", ""), (tool_name, result)
+        assert "BLOCKED" in desc, (tool_name, desc)
+
+
+def test_1314_dispatch_refuses_unknown_tool_under_game_build():
+    """The general fail-closed-unknown shape: ANY tool name outside TOOL_TAGS is
+    refused under the game build — this class of gap (a dispatch branch added
+    without a TOOL_TAGS entry) cannot recur."""
+    from src import tool_execution
+
+    desc, result = _run_async(
+        tool_execution.execute_tool_block(
+            _FakeToolBlock("some_future_unclassified_tool", "{}"),
+            disabled_tools=None,
+            owner="someone",
+        )
+    )
+    assert result.get("exit_code") == 1, result
+    assert "not available in the game build" in result.get("error", ""), result
+
+
+def test_1314_unclassified_tools_not_wall_refused_in_full_workspace_build(monkeypatch):
+    """Full-workspace counterpart: with ORWELL_GAME_BUILD=0 the unclassified
+    tools must NOT be refused by the game-build wall (any error must come from
+    the tool's own logic)."""
+    monkeypatch.setenv("ORWELL_GAME_BUILD", "0")
+    from src import tool_execution
+
+    async def _fake_ok(*_a, **_k):
+        return {"output": "ok", "exit_code": 0}
+
+    for impl in ("do_tail_serve_output", "do_vault_search", "do_vault_get", "do_vault_unlock"):
+        monkeypatch.setattr(f"src.tool_implementations.{impl}", _fake_ok, raising=False)
+
+    for tool_name, payload in _UNCLASSIFIED_DISPATCHABLE:
+        desc, result = _run_async(
+            tool_execution.execute_tool_block(
+                _FakeToolBlock(tool_name, payload),
+                disabled_tools=None,
+                owner="someone",
+            )
+        )
+        assert "not available in the game build" not in str(result.get("error", "")), (
+            tool_name, result,
+        )

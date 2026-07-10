@@ -1242,10 +1242,21 @@ async def execute_tool_block(
     try:
         from src.settings import game_build_enabled as _gbe_dispatch
         if _gbe_dispatch():
-            from src.agent_tools import game_build_disabled_additions
+            from src.agent_tools import TOOL_TAGS, game_build_disabled_additions
             from src.settings import get_setting as _get_setting_dispatch
             _off = game_build_disabled_additions(_get_setting_dispatch("game_tools_enabled", []))
-            _wall_ok = tool not in _off
+            # CodeRabbit on #1329 (MAJOR): `game_build_disabled_additions` only
+            # classifies TOOL_TAGS members, so a dispatchable tool ABSENT from
+            # TOOL_TAGS (tail_serve_output, and the password-manager vertical
+            # vault_search/vault_get/vault_unlock — NOT the engine Vault) sailed
+            # straight past a bare `tool not in _off` check. Fail closed on the
+            # whole unknown CLASS instead of chasing names: under the game build
+            # a tool must be positively classified in TOOL_TAGS *and* not in the
+            # off-set, or it is refused. This also covers external `mcp__*` tools
+            # (never TOOL_TAGS members) — consistent with the selection wall,
+            # which already excludes their schemas from the offered set under the
+            # game build. Full-workspace builds never enter this branch.
+            _wall_ok = tool in TOOL_TAGS and tool not in _off
     except Exception as e:
         logger.error(f"[game-build-wall] dispatch guard errored for tool={tool!r}, failing closed: {e}")
         _wall_ok = False

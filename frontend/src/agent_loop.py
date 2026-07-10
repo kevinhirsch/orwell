@@ -4323,6 +4323,19 @@ async def _stream_agent_loop_impl(
             else:
                 _dropped = sorted(_relevant_tools - _game_allowed)
                 _relevant_tools = _relevant_tools & _game_allowed
+                if not _relevant_tools:
+                    # CodeRabbit on #1329 (MAJOR): an EMPTY intersection must not
+                    # survive to the schema-build step — the `if _relevant_tools:`
+                    # check there treats an empty set as falsy and falls through to
+                    # the BROAD FUNCTION_TOOL_SCHEMAS + mcp_schemas branch, undoing
+                    # this cap for the turn. When every selected candidate was a
+                    # non-keep tool, offer the keep-set (never empty: GAME_TOOL_KEEP
+                    # is a non-empty frozenset) instead of nothing.
+                    _relevant_tools = set(_game_allowed)
+                    logger.info(
+                        "[tool-rag] game-build wall: selection emptied by the cap; "
+                        f"falling back to keep-set: {sorted(_relevant_tools)}"
+                    )
                 if _dropped:
                     logger.info(
                         f"[tool-rag] game-build wall: dropped non-keep tools from selection: {_dropped}"
