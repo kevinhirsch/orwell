@@ -210,4 +210,7 @@ def test_decision_poll_cadence_tightened():
     """The backstop poll that catches a pending the chat narrated past must be ~2-3s, not 15s, so
     the eviction card surfaces almost immediately."""
     assert "}, 15000);" not in DECISION_JS, "the slow 15s decision poll must be gone"
-    assert "}, 2500);" in DECISION_JS, "the decision poll must run on the tightened ~2.5s cadence"
+    # WS Phase-1 (#1284 pattern): the backstop body moved into a named `_backstopPending`, armed by a
+    # WS-guarded managed interval — still the tightened ~2.5s cadence (the permanent SSE/poll fallback).
+    assert "setInterval(_backstopPending, 2500)" in DECISION_JS, \
+        "the decision poll must run on the tightened ~2.5s cadence"

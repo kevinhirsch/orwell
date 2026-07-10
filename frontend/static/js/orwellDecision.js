@@ -1000,13 +1000,20 @@
   // cadence as a backstop. This deliberately does NOT call rearmFromStatus (which clears
   // _userDismissed) — it surfaces a pending ONLY when the player hasn't dismissed it and no card
   // is already up, so it never re-nags a waved-away card. Fail-open everywhere.
-  setInterval(async () => {
+  async function _backstopPending() {
     try {
+      // WS race guard: the interval is cleared on `orwell:ws-active`, but a `_backstopPending`
+      // call ALREADY awaiting the fetch keeps running — so re-check `_wsActive()` before we start
+      // AND after each await, BEFORE dispatching. Otherwise an in-flight status read could surface
+      // a STALE/duplicate card after the WS `state` push has already taken over. (`_wsActive` is a
+      // hoisted fn declaration below.)
+      if (_wsActive()) return;
       if (document.getElementById(CARD_ID)) return;    // a card is already showing
       if (!document.getElementById("chat-history")) return;
       const r = await fetch("/api/orwell/status", { credentials: "same-origin" });
-      if (!r.ok) return;
+      if (!r.ok || _wsActive()) return;                // WS took over while the fetch was in flight
       const st = await r.json();
+      if (_wsActive()) return;                          // …or while parsing the body — do not dispatch
       const pending = st && st.pending && st.pending.kind ? st.pending : null;
       // F-NEW-4: respect a dismissal PER SIGNATURE, not as a blanket flag — the old
       // unconditional `if (_userDismissed) return` let a dismissed low-stakes pending
@@ -1024,7 +1031,30 @@
     // seam never fires and only this poll catches it). Tighten to ~2.5s so a player-owned pending the
     // chat narrated past appears almost immediately. Still respects an explicit dismissal (the
     // per-signature guard above) and short-circuits when a card is already up — no extra nag, no churn.
-  }, 2500);
+  }
+  // WS Phase-1 (§4): when the multiplexed socket is LIVE the server PUSHES a `state` frame on every
+  // board change (a surfacing pending IS a board change); platform.js relays it to the ONE
+  // `orwell:gamechanged` dispatcher, which already runs `rearmFromStatus` above — and that surfaces
+  // the pending (respecting the same per-signature dismissal). So this 2.5s backstop STANDS DOWN in
+  // WS mode and stays edge-triggered. Off/fallback ⇒ it is the PERMANENT backstop (without WS,
+  // `orwell:gamechanged` fires only on a LOCAL mutating tool, so a narrated-past / cross-device
+  // pending would otherwise sit unreachable until a reload). Fail-soft: any doubt ⇒ keep polling.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+  let _backstopTimer = null;
+  function _startBackstop() {
+    if (_backstopTimer) { clearInterval(_backstopTimer); _backstopTimer = null; }
+    if (!_wsActive()) _backstopTimer = setInterval(_backstopPending, 2500);
+  }
+  _startBackstop();
+  // Cancel the poll the instant the socket goes live; resume it if it falls back to SSE
+  // (_startBackstop re-arms only while !_wsActive()).
+  window.addEventListener("orwell:ws-active", () => {
+    if (_backstopTimer) { clearInterval(_backstopTimer); _backstopTimer = null; }
+  });
+  window.addEventListener("orwell:ws-inactive", _startBackstop);
 
   window.addEventListener("orwell:pending", (e) => {
     try {

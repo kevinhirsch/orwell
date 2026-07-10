@@ -62,9 +62,11 @@ def test_leftBase_reads_the_live_sidebar_geometry():
 # ── S4-1: the decision card is reachable from the polled status ───────────────
 
 def _s4_poll_body(js):
-    # The S4-1 escape-hatch poll: a setInterval whose body fetches the status and can
-    # dispatch orwell:pending. Grab the interval body for assertions.
-    m = re.search(r"setInterval\(async \(\)\s*=>\s*\{(.*?)\}, \d+\);", js, re.DOTALL)
+    # The S4-1 escape-hatch poll. WS Phase-1 (#1284 pattern) moved the body into a named
+    # `_backstopPending` fn armed by a WS-guarded managed interval (`setInterval(_backstopPending, …)`);
+    # off/fallback it still fetches the status and can dispatch orwell:pending. Grab the fn body for
+    # assertions (the closing `\n  }` at 2-space indent ends the fn — inner braces are deeper).
+    m = re.search(r"async function _backstopPending\(\)\s*\{(.*?)\n  \}", js, re.DOTALL)
     return m.group(1) if m else None
 
 
@@ -73,6 +75,11 @@ def test_decision_card_has_a_periodic_status_backstop():
     body = _s4_poll_body(js)
     assert body is not None, (
         "orwellDecision.js must poll the status on an interval so a pending decision is reachable "
+        "WITHOUT the chat agent (the S4-1 escape hatch)."
+    )
+    # The body is armed on a periodic managed interval (the permanent SSE/poll fallback).
+    assert "setInterval(_backstopPending" in js, (
+        "the backstop must be armed on a periodic interval so a pending decision is reachable "
         "WITHOUT the chat agent (the S4-1 escape hatch)."
     )
     assert "/api/orwell/status" in body, "the backstop must read the engine's own pending from status."
