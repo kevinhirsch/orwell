@@ -68,6 +68,31 @@ describe("Phase 2 — feltMinutes drives the per-conversation clock", () => {
     expect(depth(session) - mid).toBeCloseTo(CLOCK.perConversationHours, 5);
   });
 
+  it("discards a duration stashed while gated — it never leaks into a later enabled turn", () => {
+    // Bug repro: a scene carries feltMinutes while the per-conversation clock is OFF, so the tick's clock
+    // gate is a no-op. The stash must be DISCARDED there — otherwise a later turn (once the clock is on)
+    // consumes the STALE duration instead of the floor.
+    GameSessionAdapter.setTimeOfDayEnabled(true);
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("felt-gated-leak");
+    sb.session.createCharacter({ playerName: "The Player", archetype: "floater", seed: SEED });
+    sb.session.setPerConversationClockEnabled(false); // per-conversation clock OFF ⇒ the tick self-gates to a no-op
+    sb.session.advanceGame(); // start the day (master clock initialized) but per-conversation clock still OFF
+    const npc = [...sb.session.livingIds()].find((id) => id !== PLAYER)!;
+
+    // Record a felt duration while the per-conversation clock is gated OFF, then tick (gated no-op).
+    sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc], content: "a long summit while gated", feltMinutes: 120 });
+    const beforeGatedTick = depth(sb.session);
+    sb.session.advanceClockPerConversation(); // gated no-op — must NOT advance AND must discard the stash
+    expect(depth(sb.session)).toBeCloseTo(beforeGatedTick, 5); // gated ⇒ nothing moved
+
+    // Now enable the clock and tick with NO new scene: the stale 2h must be gone ⇒ the floor, not 2h.
+    sb.session.setPerConversationClockEnabled(true);
+    const beforeEnabledTick = depth(sb.session);
+    sb.session.advanceClockPerConversation();
+    expect(depth(sb.session) - beforeEnabledTick).toBeCloseTo(CLOCK.perConversationHours, 5); // floor, NOT the stale 2h
+  });
+
   it("is INERT when the master clock is off (the calibration-spine guarantee)", () => {
     GameSessionAdapter.setTimeOfDayEnabled(false);
     const reg = new GameSessionRegistry();

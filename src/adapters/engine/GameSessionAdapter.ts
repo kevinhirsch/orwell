@@ -5697,8 +5697,12 @@ export class GameSessionAdapter implements GameSession {
    * the per-beat clock.)
    */
   advanceClockPerConversation(opts?: { kind?: ConversationKind; proposedHours?: number }): void {
-    if (!this.perConversationClockEnabled || !this.timeOfDayEnabled) return;
-    if (!this.live || this.live.timeOfDay === undefined) return; // dormant until the per-beat clock starts the day
+    // Gated no-op: the clock isn't active this turn (per-conversation clock disabled, master clock off, or
+    // the day hasn't started). A duration stashed this turn is DISCARDED here — consumed-or-discarded — so a
+    // felt duration recorded while gated can never leak into a later enabled turn (it would otherwise survive
+    // and be consumed as a stale advance). Absent/inert ⇒ byte-identical floor; nothing else changes.
+    if (!this.perConversationClockEnabled || !this.timeOfDayEnabled) { this.pendingFeltHours = undefined; return; }
+    if (!this.live || this.live.timeOfDay === undefined) { this.pendingFeltHours = undefined; return; } // dormant until the per-beat clock starts the day
     // Extension 5 (LOOSE conversation durations, ADR 0005 for time): the felt duration is the scene KIND's
     // type-bounded commit of the LLM-proposed hours; absent a kind/proposal ⇒ the small per-conversation
     // floor (byte-identical to "no proposal"). Never 0, never a day-skip; the clock still clamps + never wraps.
