@@ -694,9 +694,15 @@
   // O(changed bubbles), not O(all). `_allDirty` short-circuits the set (a full pass supersedes it).
   var _allDirty = true;   // the first pass is full (nothing sampled yet)
   var _dirtyEls = null;   // Set of specific adaptive elements when NOT _allDirty
-  function _markAllDirty() { _allDirty = true; }
+  function _markAllDirty() {
+    _allDirty = true;
+    _dirtyEls = null;   // the full pass supersedes any pending scoped set — DROP it. Without this,
+                        // elements marked before a full trigger would linger: the full pass consumes
+                        // _allDirty (covering them), then the NEXT scoped mutation would re-sample the
+                        // stale set on top of its own target (a silent partial re-walk regression).
+  }
   function _markElDirty(el) {
-    if (_allDirty || !el) return;
+    if (_allDirty || !el) return;   // short-circuit: a pending full pass already covers everything
     if (!_dirtyEls) _dirtyEls = new Set();
     _dirtyEls.add(el);
   }
@@ -892,6 +898,7 @@
       _allDirty = false;   // consume it up front — a mutation mid-pass re-schedules a fresh one
       var candidates;
       if (full) {
+        _dirtyEls = null;   // belt-and-braces: a full pass covers everything — no scoped leftovers
         // Chrome (+ anything non-adaptive) drops; bubbles + hero kept. Only a full pass needs this —
         // a scoped pass touches no chrome, and its dirty bubbles are re-applied in place below.
         _dropTagged(ADAPTIVE_SEL);      // uses `BUBBLE_ADAPTIVE + ", " + HERO_ADAPTIVE`

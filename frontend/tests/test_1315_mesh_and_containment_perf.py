@@ -31,6 +31,18 @@ THEME_JS = _read("static", "js", "theme.js")
 STYLE_CSS = _read("static", "style.css")
 
 
+def _strip_comments(css):
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+
+def _css_rules(css):
+    """Yield (selector_text, declarations) for every LEAF rule (innermost {} pair).
+    `[^{}]+\\{[^{}]*\\}` matches only blocks whose body holds no nested braces, so
+    @media headers are skipped and their inner rules surface individually."""
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", _strip_comments(css)):
+        yield m.group(1).strip(), m.group(2)
+
+
 # ── (2) mesh wallpaper pause ──────────────────────────────────────────────────
 
 def test_mesh_paused_by_default_in_app():
@@ -43,24 +55,39 @@ def test_mesh_paused_by_default_in_app():
 
 def test_mesh_runs_only_full_glass_and_visible():
     # … and only RUNS under the FULL glass tier (body.glass-full) AND while the tab is visible
-    # (body without .ow-bg-hidden). Both gates in the one selector.
-    m = re.search(
-        r"body\.glass-full:not\(\.ow-bg-hidden\) #__wp \.login-bg-gradient\.is-animated::before,\s*"
-        r"body\.glass-full:not\(\.ow-bg-hidden\) #__wp \.login-bg-gradient\.is-animated::after \{"
-        r"[^}]*animation-play-state:\s*running",
-        MESH_CSS, re.S)
-    assert m, "mesh may only RUN under body.glass-full AND a visible tab"
+    # (body without .ow-bg-hidden). EXHAUSTIVE: enumerate every animation-play-state rule in the
+    # file and reject ANY `running` whose selectors are not ALL behind the exact double gate —
+    # a later rule sneaking `running` in via a different selector must fail this gate.
+    gate = "body.glass-full:not(.ow-bg-hidden)"
+    running_rules = [
+        (sel, decls) for sel, decls in _css_rules(MESH_CSS)
+        if re.search(r"animation-play-state\s*:\s*running", decls)
+    ]
+    assert running_rules, "the gated `running` rule must exist"
+    for sel_text, _ in running_rules:
+        for sel in sel_text.split(","):
+            sel = sel.strip()
+            assert sel.startswith(gate), \
+                f"`running` outside the {gate} gate: {sel!r}"
+            assert "#__wp" in sel, f"`running` must stay scoped to the in-app #__wp mesh: {sel!r}"
 
 
 def test_mesh_pause_scoped_to_in_app_not_login():
-    # the pause/run rules are scoped to #__wp so the LOGIN mesh (its own host) keeps animating.
-    for sel in re.findall(r"[^\n{}]*animation-play-state:\s*(?:paused|running)", MESH_CSS):
-        pass  # (the block selectors are asserted above; this documents the intent)
-    # neither pause nor run rule may target the bare .login-bg-gradient (that would hit login).
+    # EVERY animation-play-state rule (paused AND running) must be scoped to the in-app #__wp
+    # host in EVERY selector of its list — parsed per-selector, not a bypassable lookbehind —
+    # so the LOGIN mesh (its own #login-bg-host, alone on screen) is never touched.
+    aps_rules = [
+        (sel, decls) for sel, decls in _css_rules(MESH_CSS)
+        if "animation-play-state" in decls
+    ]
+    assert aps_rules, "the pause/run play-state rules must exist"
+    for sel_text, _ in aps_rules:
+        for sel in sel_text.split(","):
+            sel = sel.strip()
+            assert "#__wp" in sel, \
+                f"play-state rule not scoped to #__wp (would hit the login mesh): {sel!r}"
+    # and the paused default targets the in-app mesh layer specifically.
     assert "#__wp .login-bg-gradient.is-animated::before" in MESH_CSS
-    assert not re.search(r"(?<!#__wp )(?<!\) )\.login-bg-gradient\.is-animated::before,?\s*\n?\s*"
-                         r"\.login-bg-gradient\.is-animated::after \{[^}]*animation-play-state",
-                         MESH_CSS, re.S)
 
 
 def test_reduced_motion_still_freezes_mesh_unchanged():
@@ -103,7 +130,16 @@ def test_prose_bubbles_carry_layout_paint_containment():
 def test_containment_never_uses_size_or_content_visibility_on_bubbles():
     # `contain: size` would collapse the bubble; `content-visibility: auto` would desync
     # #chat-history scrollHeight (scroll-restore / jump-to-bottom / never-eat-a-message math).
-    m = re.search(r"\.msg-ai,\s*\.msg-user \{([^}]*)\}", STYLE_CSS, re.S)
-    body = m.group(1)
-    assert "contain: size" not in body and "contain:size" not in body
-    assert "content-visibility" not in body
+    # EXHAUSTIVE: scan EVERY style.css rule whose selector targets .msg-ai / .msg-user (or the
+    # .msg base they inherit from), not just the containment block — a forbidden property added
+    # in ANY later bubble rule must fail here.
+    bubble_rules = [
+        (sel, decls) for sel, decls in _css_rules(STYLE_CSS)
+        if re.search(r"\.msg(?:-ai|-user)?(?![\w-])", sel)
+    ]
+    assert bubble_rules, "bubble rules must exist in style.css"
+    for sel, decls in bubble_rules:
+        assert not re.search(r"contain\s*:\s*[^;]*\bsize\b", decls), \
+            f"`contain: size` on a bubble rule would collapse it: {sel!r}"
+        assert "content-visibility" not in decls, \
+            f"content-visibility on a bubble rule would desync scrollHeight: {sel!r}"

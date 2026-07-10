@@ -84,6 +84,29 @@ def test_scoped_pass_consumes_dirty_set_and_filters_disconnected():
     assert "isConnected" in body and "matches(ADAPTIVE_SEL)" in body
 
 
+def test_mark_all_dirty_drops_the_pending_scoped_set():
+    # STALE-SET LEAK guard (CodeRabbit, PR #1332): _markAllDirty must ALSO reset _dirtyEls.
+    # Without it, elements marked dirty BEFORE a full trigger linger in the set: the full pass
+    # consumes _allDirty (covering them), and the NEXT scoped mutation then re-samples the stale
+    # leftovers on top of its own target — a silent partial re-walk. Pin the reset inside
+    # _markAllDirty, and the _allDirty short-circuit inside _markElDirty (no accumulation while
+    # a full pass is pending).
+    mark_all = JS[JS.index("function _markAllDirty("):JS.index("function _markElDirty(")]
+    assert "_allDirty = true;" in mark_all
+    assert "_dirtyEls = null;" in mark_all, \
+        "_markAllDirty must drop the pending scoped set (stale-set leak)"
+    mark_el = JS[JS.index("function _markElDirty("):JS.index("function _collectAdaptive(")]
+    first_stmt_region = mark_el[:mark_el.index("new Set()")]
+    assert re.search(r"if \(_allDirty \|\| !el\) return;", first_stmt_region), \
+        "_markElDirty must short-circuit while a full pass is pending"
+    # belt-and-braces: the full branch of pass() clears the set too (invariant holds however
+    # _allDirty was raised).
+    body = _pass_body()
+    full_branch = body[body.index("if (full) {"):body.index("} else {")]
+    assert "_dirtyEls = null;" in full_branch, \
+        "the full pass must clear _dirtyEls (no scoped leftovers)"
+
+
 # ── 2. batched reads-then-writes ──────────────────────────────────────────────
 
 def test_read_phase_precedes_write_phase():
