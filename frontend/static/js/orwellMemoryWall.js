@@ -44,6 +44,18 @@
   let _win = null;
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
 
+  // WS Phase-1 (§4): when the multiplexed socket is live the server PUSHES a `state`
+  // frame on every board change; platform.js relays it to the one `orwell:gamechanged`
+  // dispatcher, which drives the OPEN-panel edge refresh (the existing gamechanged
+  // listener). The BUTTON gate reconciles on the ws-active/ws-inactive transitions —
+  // WS binds only to a STARTED game, so its liveness tracks the same started-state the
+  // gate polls for. So we cancel BOTH periodic TIMERS in WS mode and stay edge-triggered
+  // (fail-soft: any doubt ⇒ keep polling). The fallback/SSE path is unchanged and still polls.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+
   async function getJSON(url) {
     const r = await fetch(url, { credentials: "same-origin" });
     if (!r.ok) throw new Error("HTTP " + r.status);
@@ -278,9 +290,11 @@
     if (_timer) clearTimeout(_timer);
     const tick = async () => {
       if (!document.hidden && _open) await refresh();
-      _timer = setTimeout(tick, _pollDelay());
+      // In WS mode the `state` push (via orwell:gamechanged) drives the open-panel edge
+      // refresh — don't re-arm the periodic timer, just stay edge-triggered.
+      if (!_wsActive()) _timer = setTimeout(tick, _pollDelay());
     };
-    _timer = setTimeout(tick, _pollDelay());
+    if (!_wsActive()) _timer = setTimeout(tick, _pollDelay());
   }
 
   function togglePanel(show) {
@@ -298,11 +312,33 @@
   window.orwellRefreshMemory = () => { if (_open) refresh(); };
   window.addEventListener("orwell:gamechanged", () => { if (_open) refresh(); });
 
+  // The button show/hide gate poll — armed only while NOT in WS mode (in WS mode the
+  // ws-active/ws-inactive transitions reconcile the button; see _wsActive above).
+  function startGate() {
+    if (_gateTimer) clearInterval(_gateTimer);
+    if (!_wsActive()) _gateTimer = setInterval(() => { if (!document.hidden) refreshGate(); }, GATE_POLL_MS);
+  }
+
   ready(() => {
     if (document.body && document.body.dataset.gameBuild !== "1") return; // game-build gated
     refreshGate();
-    if (_gateTimer) clearInterval(_gateTimer);
-    _gateTimer = setInterval(() => { if (!document.hidden) refreshGate(); }, GATE_POLL_MS);
+    startGate();
+    // WS Phase-1 (§4/§6): cancel the periodic polls the instant the socket goes live;
+    // resume polling if it falls back to SSE. reconcile the button once on each transition
+    // (the gate poll is suspended in WS mode), and resume the open-panel journal poll on
+    // downgrade. startGate/scheduleNextPoll only re-arm while !_wsActive(), so re-running
+    // them after a downgrade restores the cadence.
+    window.addEventListener("orwell:ws-active", () => {
+      refreshGate();
+      if (_gateTimer) { clearInterval(_gateTimer); _gateTimer = null; }
+      if (_timer) { clearTimeout(_timer); _timer = null; }
+    });
+    window.addEventListener("orwell:ws-inactive", () => {
+      _failures = 0;
+      refreshGate();
+      startGate();
+      if (_open) refresh().then(scheduleNextPoll);
+    });
     window.addEventListener("beforeunload", () => {
       if (_timer) clearTimeout(_timer);
       if (_gateTimer) clearInterval(_gateTimer);
