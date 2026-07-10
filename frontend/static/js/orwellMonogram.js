@@ -199,5 +199,64 @@
     return roles;
   }
 
-  window.OrwellMonogram = { face, svg, badgeSvg, rolesFrom, hueFor, patternFor, initialsFor, ensureCss };
+  // ── SHARED PORTRAIT CACHE (issue #1324) ───────────────────────────────────────────────
+  // Two `face()` consumers were permanently starved of real portraits: ceremony slates
+  // (orwellToolBeats.js) never passed `portrait` at all, and the premiere cast strip
+  // (orwellStatusPanel.js) hard-coded `portrait: null, forceMono: true`. orwellDecision.js and
+  // orwellFinale.js already solved this — each keeps its OWN private id→portrait cache, fetched
+  // from the public roster route and refreshed on the ONE `orwell:gamechanged` dispatcher event
+  // (platform.js — CLAUDE.md's g15 rule: exactly one dispatcher, no new poll, no ad-hoc
+  // CustomEvent). Centralizing that pattern here means every current AND future face-drawing
+  // surface gets real portraits for free instead of re-deriving its own copy.
+  //
+  // Vault-free by construction: reads ONLY the public roster projection (id/name/status/portrait
+  // — the same public card every cast surface already renders). Best-effort/fail-open: an
+  // unfetched or failed cache simply leaves `portraitFor()` returning null, so every face falls
+  // back to the designed monogram (the sanctioned default) and self-heals on the next refresh —
+  // it never blocks or delays a render. `svg()`/`face()` stay pure and synchronous; only this
+  // cache does I/O, and it does so out-of-band from any render call.
+  const _portraitById = Object.create(null);
+  let _rosterFetchedAt = 0;
+  let _rosterFetchSeq = 0; // out-of-order guard: only the LATEST in-flight refresh may apply
+  function portraitFor(id) {
+    if (id == null) return null;
+    return _portraitById[String(id)] || null;
+  }
+  async function refreshPortraitCache(force) {
+    if (typeof fetch !== "function") return; // non-browser eval (node-executed test harnesses)
+    const now = Date.now();
+    if (!force && now - _rosterFetchedAt < 8000) return; // /roster is already polled elsewhere too
+    _rosterFetchedAt = now;
+    const seq = ++_rosterFetchSeq;
+    try {
+      const r = await fetch("/api/orwell/roster", { credentials: "same-origin" });
+      if (seq !== _rosterFetchSeq) return; // a newer refresh superseded this one — drop the stale response
+      if (!r.ok) {
+        // The server answered and said no (no game / reset / unauthorized): clear so a NEW
+        // season with reused ids can never render the OLD game's faces (greptile P1 on #1328).
+        // A transient network REJECTION (catch below) deliberately keeps the cache — the true
+        // reset path always reaches here or the successful repopulate.
+        for (const k of Object.keys(_portraitById)) delete _portraitById[k];
+        return;
+      }
+      const data = await r.json();
+      if (seq !== _rosterFetchSeq) return; // (json() awaited too — re-check before applying)
+      const roster = Array.isArray(data && data.roster) ? data.roster : [];
+      for (const k of Object.keys(_portraitById)) delete _portraitById[k];
+      for (const hg of roster) {
+        if (hg && hg.id != null) {
+          _portraitById[String(hg.id)] = { portrait: hg.portrait || null, status: hg.status || "active" };
+        }
+      }
+    } catch (_) { /* fail open — every consumer keeps rendering the monogram fallback */ }
+  }
+  if (typeof window !== "undefined") {
+    refreshPortraitCache(true);
+    window.addEventListener("orwell:gamechanged", () => refreshPortraitCache(true));
+  }
+
+  window.OrwellMonogram = {
+    face, svg, badgeSvg, rolesFrom, hueFor, patternFor, initialsFor, ensureCss,
+    portraitFor, refreshPortraitCache,
+  };
 })();

@@ -77,9 +77,34 @@ def test_strip_tile_data_is_vault_free():
     leaky = {"trust", "affinity", "threat", "stats", "physical", "mental", "social",
              "soul", "emotional", "confidence", "vault", "secret"}
     assert not (accessed & leaky), f"strip render reads hidden fields: {accessed & leaky}"
-    # portrait is forced to the monogram (public id-seed) — no fetch, no data access in the render.
-    assert "portrait: null" in body
+    # #1324: the render itself never fetches — it consults the ALREADY-loaded shared
+    # OrwellMonogram portrait cache (orwellMonogram.js owns the one out-of-band fetch).
     assert "fetch(" not in body
+
+
+# ── #1324: the strip resolves REAL portraits from the shared cache, never monogram-only ── #
+
+def test_strip_no_longer_forces_the_monogram_only_fallback():
+    """Regression pin for issue #1324: the premiere strip used to hard-code
+    `portrait: null, forceMono: true`, so a tile could NEVER show a real portrait even after one
+    was generated mid-premiere. The fix consults OrwellMonogram's shared portrait cache and lets
+    face() pick a real portrait over the monogram fallback on its own (the sanctioned default)."""
+    src = _read(PANEL)
+    body = _fn_body(src, "renderPremiereStrip")
+    assert "forceMono" not in body, "the strip must be able to upgrade to a real portrait"
+    assert "portrait: null" not in body
+    assert "OrwellMonogram.portraitFor" in body
+
+
+def test_strip_tile_signature_includes_the_portrait_so_it_upgrades_mid_premiere():
+    """The keyed-upsert repaint-only-on-change `sig` must fold in whether a cached portrait is
+    present — otherwise a tile that loaded BEFORE the portrait landed would never repaint once
+    generation finishes mid-premiere (the 'stays a monogram forever' half of #1324)."""
+    src = _read(PANEL)
+    body = _fn_body(src, "renderPremiereStrip")
+    sig_line = next(ln for ln in body.splitlines() if ln.strip().startswith("const sig ="))
+    assert "cached" in sig_line and "portrait" in sig_line, \
+        f"tile sig must include the cached-portrait presence: {sig_line!r}"
 
 
 def test_premiere_unmet_helper_is_vault_free():
