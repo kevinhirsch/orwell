@@ -13,7 +13,7 @@ Findings covered here:
     global 44px floor, and only the FROSTED theme added the invisible 44px ::after hit
     region). The kit CSS now extends that same ::after hit region to the non-frosted chrome
     under `@media (pointer: coarse)`, so the VISIBLE control stays a proportionate 32px but
-    the HIT area meets the 44pt floor in both themes (HIG Layout: "at least 44×44 pt").
+    the HIT area meets the 44pt floor in both themes (HIG Layout: "at least 44x44 pt").
   • F-A11Y-4 (P3) — the titlebar's keyboard-move ("arrows to nudge") affordance was carried
     ONLY by `title=`, which never surfaces on touch and is unreliable for AT. It now also
     sets `aria-keyshortcuts`, so the move keys reach the accessibility tree (HIG
@@ -75,7 +75,7 @@ def test_titlebar_controls_have_44pt_hit_area_on_coarse_pointer():
     )
     body = after.group(1)
     assert "width: 44px" in body and "height: 44px" in body, (
-        "the ::after hit region must be >=44×44px to meet the touch floor (F-TOUCH-1)"
+        "the ::after hit region must be >=44x44px to meet the touch floor (F-TOUCH-1)"
     )
     assert 'position: absolute' in body, (
         "the ::after hit region must be absolutely positioned over the control (F-TOUCH-1)"
@@ -145,4 +145,41 @@ def test_window_controls_keep_accessible_names():
     )
     assert re.search(r"setAttribute\('aria-label',\s*'Close'\)", WINDOW_JS), (
         "the close control must carry an aria-label"
+    )
+
+
+# ── CodeRabbit follow-ups (2026-07-10) ────────────────────────────────────────
+def test_arrow_nudge_gated_on_draggable():
+    """The Arrow-key titlebar nudge is a MOVE affordance and must be gated on
+    `this.o.draggable` — a draggable:false dialog must not be nudgeable even though the
+    aria-keyshortcuts + tooltip only advertise the keys for draggable windows. The guard
+    sits in _onTitlebarKey, after the direction lookup and BEFORE the position mutation."""
+    handler = _balanced_block(WINDOW_JS, r"_onTitlebarKey\s*\([^)]*\)\s*\{")
+    m = re.search(r"const d = dirs\[e\.key\];\s*if \(!d\) return;(.*)", handler, re.DOTALL)
+    assert m, "the arrow-direction lookup must precede the draggable gate (_onTitlebarKey)"
+    tail = m.group(1)
+    # An early `if (!this.o.draggable) return;` must appear before the first el.style mutation.
+    guard = tail.find("if (!this.o.draggable) return")
+    move = tail.find("this.el.style")
+    assert guard != -1, (
+        "_onTitlebarKey must ignore the Arrow keys when this.o.draggable is false "
+        "(CodeRabbit MAJOR: a non-draggable dialog could be nudged)"
+    )
+    assert move == -1 or guard < move, (
+        "the draggable gate must short-circuit BEFORE any position mutation"
+    )
+
+
+def test_coarse_pointer_controls_gap_prevents_hit_region_overlap():
+    """Each 32px control's centered 44px ::after overhangs its box by 6px per edge, so the
+    coarse-pointer .ow-controls gap must be >=12px (2*6) or adjacent 44px hit regions overlap
+    and a boundary tap resolves to the later DOM control — close beating minimize (CodeRabbit
+    MAJOR)."""
+    block = _coarse_pointer_block()
+    m = re.search(r"\.ow-controls \{([^}]*)\}", block)
+    assert m, ".ow-controls gap rule missing under coarse pointer (hit-region overlap fix)"
+    gap = re.search(r"gap:\s*(\d+)px", m.group(1))
+    assert gap and int(gap.group(1)) >= 12, (
+        "the coarse-pointer .ow-controls gap must be >=12px so the 44px ::after hit "
+        "regions of adjacent controls don't intersect (CodeRabbit MAJOR)"
     )

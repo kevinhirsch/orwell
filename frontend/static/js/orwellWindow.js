@@ -303,6 +303,12 @@ function ensureCss() {
         content: ""; position: absolute; top: 50%; left: 50%;
         width: 44px; height: 44px; transform: translate(-50%, -50%);
       }
+      /* CodeRabbit: each 32px control's centered 44px ::after overhangs its box by (44-32)/2 = 6px
+         per edge. At the default 2px gap the adjacent 44px hit regions overlap by 10px, so a tap
+         near a shared boundary resolves to whichever control is later in the DOM (close beats
+         minimize → accidental close). Widen the coarse-pointer gap to >=12px (>= 2*6) so the 44px
+         regions abut without intersecting. Visible 32px buttons + the 44px ::after are unchanged. */
+      .ow-controls { gap: 12px; }
     }
     /* R4 (audit resp-F2): dvh tracks the dynamic (keyboard/URL-bar-shrunk) mobile viewport so a
        window's lowest controls don't fall below the fold when the soft keyboard opens; vh first
@@ -857,6 +863,11 @@ export class OrwellWindow {
     }
     const d = dirs[e.key];
     if (!d) return;
+    // CodeRabbit: the Arrow-key nudge is a MOVE affordance — only draggable windows may be moved.
+    // Gate it on `this.o.draggable` (the same flag that gates the aria-keyshortcuts + "arrows to
+    // nudge" tooltip), so a draggable:false dialog can't be nudged even though Home (restack) and
+    // other titlebar keys stay handled.
+    if (!this.o.draggable) return;
     e.preventDefault();
     const r = this.el.getBoundingClientRect();
     if (e.shiftKey && this.o.resizable) {
