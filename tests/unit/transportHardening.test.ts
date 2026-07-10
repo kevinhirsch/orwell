@@ -107,15 +107,13 @@ describe("E11 — saved users preload at boot", () => {
     try {
       const store = new FileSaveStore(dir);
       // Boot 1: two users start games (persisted on mutation).
-      const rt1 = composeRuntime({ saveStore: store, clock: new FakeClock(), watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 } });
+      const rt1 = composeRuntime({ saveStore: store, clock: new FakeClock() });
       rt1.registry.sandboxFor("resume-a").session.createCharacter({ playerName: "The Player", seed: 1 });
       rt1.registry.sandboxFor("resume-b").session.createCharacter({ playerName: "The Player", seed: 2 });
-      rt1.stop();
       // Boot 2 (a deploy): the same store — both users are LIVE at boot, no request needed.
-      const rt2 = composeRuntime({ saveStore: store, clock: new FakeClock(), watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 } });
+      const rt2 = composeRuntime({ saveStore: store, clock: new FakeClock() });
       expect(rt2.registry.usernames().sort()).toEqual(["resume-a", "resume-b"]);
       expect(rt2.knownUser("resume-a")).toBe(true);
-      rt2.stop();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

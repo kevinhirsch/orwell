@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import type { UserSandbox } from "../../src/composition/registry";
 import { Orchestrator } from "../../src/composition/orchestrator";
-import { GameWatcher } from "../../src/composition/gameWatcher";
 import { FakeClock } from "../../src/adapters/time/FakeClock";
 import { FileSaveStore } from "../../src/adapters/engine/FileSaveStore";
 import { PLAYER, npc } from "../../src/domain/ids";
@@ -21,7 +20,7 @@ function playerSweep(sb: UserSandbox): string {
   return [p.produce("player-visible log"), p.produce("scene narration"), JSON.stringify(p.getVisibleState())].join("\n");
 }
 
-describe("0031 — game orchestrator & integrity watcher", () => {
+describe("0031 — game orchestrator & integrity checkpoint", () => {
   it("a turn-driven advance runs off-screen life and passes the integrity checkpoint", () => {
     const dir = freshDir();
     const registry = new GameSessionRegistry(new FileSaveStore(dir));
@@ -43,9 +42,9 @@ describe("0031 — game orchestrator & integrity watcher", () => {
   });
 
   it("REGRESSION (comp-variety audit): the ambient house-event fires on the REAL production trigger, not only the test-only 'player-turn'", () => {
-    // Every real production path (the turn-driven tick fired from `commitPlayerTurn`, and the
-    // opt-in wall-clock watcher) calls `advance()`/`defaultApply` with trigger "offscreen-tick" —
-    // NEVER "player-turn" (that value is only ever passed directly by tests). The ambient
+    // Every real production path (the turn-driven tick fired from `commitPlayerTurn`) calls
+    // `advance()`/`defaultApply` with trigger "offscreen-tick" — NEVER "player-turn" (that value
+    // is only ever passed directly by tests; there is no wall-clock watcher). The ambient
     // house-event block used to gate on `trigger === "player-turn"`, so it was dead code for
     // every real game: the entire curated variety pool never reached a live player. This proves
     // the fix — the SAME trigger value real gameplay uses now records the ambient day event too.
@@ -63,19 +62,15 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     expect(dayEvents[0]!.hidden).toBe(false); // player-witnessed = not secret
   });
 
-  it("the house lives between turns: idle off-screen ticks, no numbers shown", () => {
+  it("the house lives between turns: a committed player turn runs one bounded off-screen tick, no numbers shown", () => {
     const registry = new GameSessionRegistry(new FileSaveStore(freshDir()));
-    const clock = new FakeClock();
-    const orch = new Orchestrator(registry, clock, { seed: 3 });
-    const watcher = new GameWatcher(registry, orch, clock, clock, {
-      tickEveryMs: 1000, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0,
-    });
+    const orch = new Orchestrator(registry, new FakeClock(), { seed: 3, turnDriven: true });
     registry.sandboxFor(U).session.createCharacter({ playerName: "Idle", seed: 3 });
-    orch.touch(U); // the player's last activity is now (t0)
     const before = hidden(registry.sandboxFor(U)).length;
 
-    watcher.start();
-    clock.advance(6000); // past the idle threshold — the watcher ticks fire
+    // The house lives ONLY on the player's play-clock (real-time purge 2026-07-10): one player-turn
+    // commit fires exactly one bounded off-screen tick — no wall-clock watcher, nothing on real time.
+    orch.commitPlayerTurn(U);
 
     const sb = registry.sandboxFor(U);
     expect(hidden(sb).length).toBeGreaterThan(before); // new off-screen consequences
@@ -149,7 +144,7 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     expect(faults.some((f) => f.kind === "degradation")).toBe(true);
   });
 
-  it("the watcher is deterministic and holds no game logic", () => {
+  it("off-screen life is deterministic and holds no game logic", () => {
     const runGame = (seed: number): string => {
       const registry = new GameSessionRegistry();
       const orch = new Orchestrator(registry, new FakeClock(), { seed });
@@ -160,35 +155,29 @@ describe("0031 — game orchestrator & integrity watcher", () => {
     };
     expect(runGame(42)).toBe(runGame(42)); // same seed + same ticks ⇒ identical state
 
-    // Disabling the watcher (cadence 0) ⇒ games never advance on their own.
+    // Turn-driven OFF (the default) ⇒ committing player turns never fires an off-screen tick, so a
+    // game never advances on its own. (There is NO wall-clock watcher — nothing runs on real time.)
     const registry = new GameSessionRegistry();
-    const clock = new FakeClock();
-    const orch = new Orchestrator(registry, clock, { seed: 1 });
-    const watcher = new GameWatcher(registry, orch, clock, clock, {
-      tickEveryMs: 0, idleTickAfterMs: 1, maxOffscreenTicksPerWake: 5, auditEveryMs: 0,
-    });
+    const orch = new Orchestrator(registry, new FakeClock(), { seed: 1 });
     registry.sandboxFor(U).session.createCharacter({ playerName: "Still", seed: 1 });
     const before = registry.sandboxFor(U).engine.events.queryAll().length;
-    watcher.start();
-    clock.advance(100_000);
+    orch.commitPlayerTurn(U);
+    orch.commitPlayerTurn(U);
     expect(registry.sandboxFor(U).engine.events.queryAll().length).toBe(before);
   });
 
-  it("isolation holds while the watcher audits many sandboxes", () => {
+  it("isolation holds while the house lives between turns across many sandboxes", () => {
     const registry = new GameSessionRegistry(new FileSaveStore(freshDir()));
-    const clock = new FakeClock();
-    const orch = new Orchestrator(registry, clock, { seed: 5 });
-    const watcher = new GameWatcher(registry, orch, clock, clock, {
-      tickEveryMs: 1000, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 2, auditEveryMs: 1000,
-    });
+    const orch = new Orchestrator(registry, new FakeClock(), { seed: 5, turnDriven: true });
     registry.sandboxFor("A").session.createCharacter({ playerName: "Alpha", seed: 11 });
     registry.sandboxFor("B").session.createCharacter({ playerName: "Bravo", seed: 22 });
     // A unique witnessed marker in each sandbox.
     registry.sandboxFor("A").engine.events.record({ id: "mk-a", ts: 0, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: "MARKER-A-7f3" });
     registry.sandboxFor("B").engine.events.record({ id: "mk-b", ts: 0, type: "house-event", initiator: PLAYER, witnessSet: [PLAYER], hidden: false, content: "MARKER-B-9k2" });
 
-    watcher.start();
-    clock.advance(3000); // ticks + audits across both sandboxes
+    // Each user's own play-clock drives their own off-screen life; no cross-user bleed.
+    orch.commitPlayerTurn("A");
+    orch.commitPlayerTurn("B");
 
     const aEvents = JSON.stringify(registry.sandboxFor("A").engine.events.queryAll());
     const bEvents = JSON.stringify(registry.sandboxFor("B").engine.events.queryAll());
@@ -235,7 +224,7 @@ describe("A9 — a supplementary turn-driven off-screen tick with an empty socie
       expect(supp.integrity).toBe("ok");
       expect(supp.faults).toEqual([]);
 
-      // A non-supplementary off-screen tick (the watcher/direct path) still flags the empty tick —
+      // A non-supplementary off-screen tick (the direct path) still flags the empty tick —
       // that daily-event guard is what opsHardening relies on to trip the circuit breaker.
       const direct = orch.advance(U, "offscreen-tick");
       expect(direct.integrity).toBe("fault");

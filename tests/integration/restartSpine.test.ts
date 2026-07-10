@@ -20,7 +20,6 @@ import { PLAYER, npc } from "../../src/domain/ids";
  * Roles only — no fixture names.
  */
 const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-restart-e2e-"));
-const TURN_OFF = { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 };
 
 interface Pending { kind: string; options: Array<{ id: string }>; appeals?: string[] }
 interface Adv { started: boolean; finished: boolean; pending: Pending | null; status: { week: number } }
@@ -72,7 +71,7 @@ describe("E1/D1/R1 end-to-end — season 2 survives an engine restart (the audit
     const user = "e2e";
 
     // ── Engine process #1: play season 1, restart through the FE's door, start season 2. ──
-    const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+    const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
     const { server, base } = await startHttp(r1);
     try {
       const created = await post(base, user, "createCharacter", { playerName: "The Player", seed: 101 });
@@ -99,7 +98,7 @@ describe("E1/D1/R1 end-to-end — season 2 survives an engine restart (the audit
     }
 
     // ── Engine process #2 (the restart): a fresh runtime over the SAME data dir. ──
-    const r2 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+    const r2 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
     const resumed = r2.registry.sandboxFor(user);
     // THE BUG (R1 step 4): the latest durable save used to still hold season 1 — a player who
     // finished a season, restarted, and played for hours got their finished season back.
@@ -119,7 +118,7 @@ describe("E1/D1/R1 end-to-end — season 2 survives an engine restart (the audit
 
 describe("E3 — a faulted commit surfaces as an ERROR to the caller (never 200-then-rollback)", () => {
   it("an integrity-refused advanceGame returns 409 over HTTP and the state is unchanged", async () => {
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ clock: new FakeClock() });
     const user = "fault-409";
     const { server, base } = await startHttp(runtime);
     const errSpy: Array<() => void> = [];
@@ -166,7 +165,7 @@ describe("E3 — a faulted commit surfaces as an ERROR to the caller (never 200-
       loadLatest(user: string): SessionSnapshot | null { return this.inner.get(user) ?? null; }
     }
     const store = new DoomedStore();
-    const runtime = composeRuntime({ saveStore: store, clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ saveStore: store, clock: new FakeClock() });
     const user = "disk-500";
     const { server, base } = await startHttp(runtime);
     const orig = console.error;
@@ -190,13 +189,13 @@ describe("T14 — restore into a FRESH registry, then tick (the B71 regression t
     const dir = freshDir();
     const user = "t14";
     {
-      const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+      const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
       const sb = r1.registry.sandboxFor(user);
       sb.session.createCharacter({ playerName: "The Player", seed: 77 });
       sb.session.advanceGame(); // mid-game: a beat + its off-screen tick are persisted
     }
     // A fresh process over the same save dir (the engine-restart shape).
-    const r2 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+    const r2 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
     for (let i = 0; i < 5; i++) {
       const res = r2.orchestrator.advance(user, "offscreen-tick");
       expect(res.integrity, `tick ${i}: ${JSON.stringify(res.faults)}`).toBe("ok");

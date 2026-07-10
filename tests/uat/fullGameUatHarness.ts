@@ -471,9 +471,9 @@ export interface UatHarness {
 }
 
 /**
- * Stands up the SAME runtime composition as main.ts (registry + orchestrator + watcher),
- * exactly as the former single UAT file's beforeAll did. FakeClock + tickEveryMs:0 disables
- * the background watcher (no real timers in tests). Each split test file calls this in its
+ * Stands up the SAME runtime composition as main.ts (registry + orchestrator), exactly as the
+ * former single UAT file's beforeAll did. Pure turn-driven — the only mode (real-time purge
+ * 2026-07-10: no wall-clock watcher, no real timers). Each split test file calls this in its
  * own beforeAll and tears it down in afterAll — the runtimes are independent, so the files
  * are free to run on separate CI runners.
  */
@@ -481,8 +481,7 @@ export async function startUatHarness(): Promise<UatHarness> {
   const clock = new FakeClock();
   const runtime = composeRuntime({
     clock,
-    watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 },
-    seed: 1,
+        seed: 1,
   });
   // Do NOT call runtime.start() — watcher is disabled; wiring is identical to production otherwise.
   const directResolver = runtime.registry.resolver();

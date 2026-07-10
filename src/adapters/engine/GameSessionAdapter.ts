@@ -4579,8 +4579,8 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * 0059 §5 — whether the organic pre-game-TIE surfacing scheduler runs. OPT-IN, default OFF — exactly
-   * like the ADR-0006 clock and the wall-clock watcher. When off (the default, and the state the seeded
+   * 0059 §5 — whether the organic pre-game-TIE surfacing scheduler runs. OPT-IN, default OFF — like
+   * the ADR-0006 in-game clock. When off (the default, and the state the seeded
    * juryReach / gradient / UAT sims run in) `advanceSeededTies` returns IMMEDIATELY: it draws nothing,
    * records nothing, and folds nothing, so the off-screen tick's draw count/order and every seeded
    * outcome are BYTE-IDENTICAL to the pre-feature build. The deploy turns it on for the texture; the
@@ -5259,10 +5259,10 @@ export class GameSessionAdapter implements GameSession {
   // --- Live weekly loop (0011) ---------------------------------------------------
 
   /**
-   * Whether the in-game time-of-day clock + sleep economy (ADR 0006) is engaged. OPT-IN, default OFF
-   * — exactly like the wall-clock watcher (`ORWELL_WATCHER_TICK_MS`): when off, the clock never
-   * advances, `timeOfDay` stays undefined, `restOf` returns 0, and every seeded outcome (the juryReach
-   * calibration spine, the UAT) is byte-identical to the pre-feature model. The deploy turns it on.
+   * Whether the in-game time-of-day clock + sleep economy (ADR 0006) is engaged. OPT-IN, default OFF:
+   * when off, the clock never advances, `timeOfDay` stays undefined, `restOf` returns 0, and every
+   * seeded outcome (the juryReach calibration spine, the UAT) is byte-identical to the pre-feature
+   * model. The deploy turns it on. (This is the in-game clock; the runtime play-clock is separate.)
    */
   /**
    * ADR 0006 runtime override for the in-game clock. The FE settings switch flips this through the admin

@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileSaveStore } from "../../src/adapters/engine/FileSaveStore";
 import { GameSessionRegistry } from "../../src/composition/registry";
-import { GameWatcher } from "../../src/composition/gameWatcher";
-import { Orchestrator } from "../../src/composition/orchestrator";
+import { composeRuntime } from "../../src/composition/runtime";
 import { FakeClock } from "../../src/adapters/time/FakeClock";
 import type { SessionSnapshot } from "../../src/engine/sessionSnapshot";
 
@@ -76,44 +75,24 @@ describe("B35 — crash-safe saves (FileSaveStore)", () => {
   });
 });
 
-describe("B35 — the watcher tick is guarded", () => {
-  it("a corrupt/failing sandbox is skipped, and other users still advance", () => {
-    const advanced: string[] = [];
-    const registry = {
-      usernames: () => ["boom", "ok"],
-      sandboxFor: (u: string) => {
-        if (u === "boom") throw new Error("unreadable save");
-        return { session: { snapshot: () => ({ started: true }) } };
-      },
-    } as unknown as GameSessionRegistry;
-    const orch = {
-      idleSince: () => -Infinity,
-      advance: (u: string) => { advanced.push(u); return { events: 1, integrity: "ok", faults: [] }; },
-    } as unknown as Orchestrator;
-    const clock = new FakeClock();
-    const watcher = new GameWatcher(registry, orch, clock, clock, {
-      tickEveryMs: 1000, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 1, auditEveryMs: 0,
-    });
-
-    watcher.start();
-    expect(() => clock.advance(1000)).not.toThrow(); // the throwing sandbox does not crash the tick
-    watcher.stop();
-
-    expect(advanced).toContain("ok");      // the healthy user still advanced
-    expect(advanced).not.toContain("boom"); // the failing one was isolated and skipped
-  });
-
-  it("a real registry over a corrupt-save user keeps living for everyone else", () => {
+describe("B35 — the boot resume is guarded (one corrupt save can't crash the engine for everyone)", () => {
+  it("an unresumable saved user is tolerated; the healthy user still boots (no crash-loop)", () => {
     const dir = freshDir();
-    const registry = new GameSessionRegistry(new FileSaveStore(dir));
-    registry.sandboxFor("ok").session.createCharacter({ playerName: "P", seed: 4 });
-    const clock = new FakeClock();
-    const orch = new Orchestrator(registry, clock, { seed: 4 });
-    const watcher = new GameWatcher(registry, orch, clock, clock, {
-      tickEveryMs: 1000, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 2, auditEveryMs: 0,
-    });
-    watcher.start();
-    expect(() => clock.advance(2000)).not.toThrow();
-    watcher.stop();
+    // Boot 1: two users start + persist games (real-time purge 2026-07-10 — no watcher; the runtime
+    // is purely turn-driven, and the boot RESUME is the surface B35 must keep crash-safe).
+    const r1 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
+    r1.registry.sandboxFor("ok").session.createCharacter({ playerName: "P", seed: 4 });
+    r1.registry.sandboxFor("boom").session.createCharacter({ playerName: "Q", seed: 5 });
+
+    // A crash corrupts every version of one user's save so it can never parse.
+    for (const f of versionFiles(dir, "boom")) {
+      writeFileSync(join(userDir(dir, "boom"), f), "{ truncated", "utf8");
+    }
+
+    // Boot 2 (a deploy): the corrupt save is tolerated (quarantine-and-step-down), the whole boot
+    // does not throw, and the healthy user still resumes a STARTED game.
+    let r2!: ReturnType<typeof composeRuntime>;
+    expect(() => { r2 = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() }); }).not.toThrow();
+    expect(r2.registry.sandboxFor("ok").session.snapshot().started).toBe(true);
   });
 });

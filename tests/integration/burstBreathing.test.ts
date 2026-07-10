@@ -29,7 +29,6 @@ import type { SessionSnapshot } from "../../src/engine/sessionSnapshot";
  * Roles only — no names.
  */
 
-const TURN_OFF = { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 };
 
 /** Per-call loop budget for the fake slow model: big enough that a back-to-back burst
  *  (≥5 embeds) would blow the health budget pre-fix; small enough that one spaced call
@@ -171,7 +170,7 @@ describe("G12 — /health answers during every soul-write burst (the G8 breathin
   it("eviction night: the fold+confessional+tick burst drains breathing — every probe answers <500ms", async () => {
     provider = flippableSlowProvider(EMBED_SLEEP_MS);
     setRuntimeEmbedding(provider);
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ clock: new FakeClock() });
     const base = await listen(runtime);
     const user = "g12-eviction";
 
@@ -240,7 +239,7 @@ describe("G12 — /health answers during every soul-write burst (the G8 breathin
     const user = "g12-restore";
 
     // Season process #1: play a few REAL weeks fast so the durable save carries a deep arc.
-    const first = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF, saveStore: store });
+    const first = composeRuntime({ clock: new FakeClock(), saveStore: store });
     const resolve = first.registry.resolver();
     const call = async <T>(name: string, args: Record<string, unknown> = {}): Promise<T> =>
       (await resolve("player", user).callTool(name, args)) as T;
@@ -266,7 +265,7 @@ describe("G12 — /health answers during every soul-write burst (the G8 breathin
     // The boot preload restores every saved user — `rebuildSoulIndex` replays the whole arc.
     provider.setSlow(true);
     const t0 = performance.now();
-    const second = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF, saveStore: store });
+    const second = composeRuntime({ clock: new FakeClock(), saveStore: store });
     const composeMs = performance.now() - t0;
     // The rebuild QUEUED its embeds instead of running them inline — boot is not pinned…
     expect(SoulStore.pendingTotal()).toBeGreaterThan(0);

@@ -35,7 +35,6 @@ function liveRuntime(dir = freshDir()) {
   return composeRuntime({
     saveStore: new FileSaveStore(dir),
     clock: new FakeClock(),
-    watcher: { tickEveryMs: 1000, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 },
   });
 }
 

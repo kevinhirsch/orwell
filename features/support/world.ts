@@ -220,9 +220,8 @@ export class BbWorld extends World {
   tempRolls?: number[];
   compResultObj?: import("../../src/domain/competitionOutcome").CompetitionResult;
 
-  // Game orchestrator & integrity watcher (0031) scratch state.
+  // Game orchestrator & integrity checkpoint (0031) scratch state.
   orchestrator?: import("../../src/composition/orchestrator").Orchestrator;
-  watcher?: import("../../src/composition/gameWatcher").GameWatcher;
   fakeClock?: import("../../src/adapters/time/FakeClock").FakeClock;
   advanceResult?: import("../../src/composition/orchestrator").AdvanceResult;
   hiddenBefore?: number;
@@ -449,12 +448,6 @@ export class BbWorld extends World {
   osFactOrigin?: Eid;
   osFactId?: string;
   osPlayerRumor?: import("../../src/domain/knowledge").KnowledgeFact;
-  osRuntime?: import("../../src/composition/runtime").Runtime;
-  osRuntime2?: import("../../src/composition/runtime").Runtime;
-  osClock?: import("../../src/adapters/time/FakeClock").FakeClock;
-  osHiddenBefore?: number;
-  /** T11: count of off-screen ticks the watcher actually fired in a wake (a TICK count, not an event bound). */
-  osTickCount?: { n: number };
   /** T11: per-user unique hidden sentinels for genuine cross-user content/knowledge-absence checks. */
   osSentinelA?: string;
   osSentinelB?: string;

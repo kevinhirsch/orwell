@@ -18,7 +18,6 @@ import type { AdvanceView, GameStateView } from "../../src/ports/GameSession";
 // warmed roster is engine ids + public facets. The active season must be UNCHANGED while the next warms.
 
 const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-0065ns-"));
-const TURN_OFF = { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 };
 
 function resolveLegally(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>): void {
   if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
@@ -97,7 +96,7 @@ describe("0065 advance-warm — the held cast is byte-identical to an un-warmed 
 
 describe("0065 advance-warm — NO EARLY CUTOVER (the active season is untouched while the next warms)", () => {
   it("getGameState (cast + season) is byte-identical before vs after a mid-season next-season warm", () => {
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ clock: new FakeClock() });
     const user = "no-early-cutover";
     const mcpPromise = runtime.registry.resolver()("player", user);
     mcpPromise.callTool("createCharacter", { playerName: "The Player", seed: 101 });
@@ -132,7 +131,7 @@ describe("0065 advance-warm — NO EARLY CUTOVER (the active season is untouched
 
 describe("0065 advance-warm — the held cast survives the cutover and IS the next season's cast", () => {
   it("a confirmed restart adopts the advance-warmed, FE-authored cast (it survives the sandbox rotation)", async () => {
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ clock: new FakeClock() });
     const user = "adopt";
     const mcp = runtime.registry.resolver()("player", user);
     await mcp.callTool("createCharacter", { playerName: "The Player", seed: 11 });
@@ -164,7 +163,7 @@ describe("0065 advance-warm — the held cast survives the cutover and IS the ne
 
   it("the adopted season is the SAME season an un-warmed restart on that seed would start (determinism)", async () => {
     // Path A: advance-warm seed S, then cutover with no explicit seed (adopts S).
-    const rt = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const rt = composeRuntime({ clock: new FakeClock() });
     const u = "det-adopt";
     const m = rt.registry.resolver()("player", u);
     await m.callTool("createCharacter", { playerName: "The Player", seed: 1 });
@@ -174,7 +173,7 @@ describe("0065 advance-warm — the held cast survives the cutover and IS the ne
     const adoptedHouse = rt.registry.sandboxFor(u).session.getGameState().house.map((h) => ({ id: h.id, name: h.name, biography: h.biography }));
 
     // Path B: a plain restart that explicitly starts seed S, NO advance-warm.
-    const rt2 = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const rt2 = composeRuntime({ clock: new FakeClock() });
     const u2 = "det-plain";
     const m2 = rt2.registry.resolver()("player", u2);
     await m2.callTool("createCharacter", { playerName: "The Player", seed: 1 });
@@ -191,7 +190,7 @@ describe("0065 advance-warm — the held cast survives the cutover and IS the ne
     // a plain (un-warmed) season started on the SAME seed — the engine-only deep layer is byte-equivalent.
     const seed = 6363;
     // Path A: advance-warm seed → cutover (adopts it).
-    const rtA = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const rtA = composeRuntime({ clock: new FakeClock() });
     const uA = "reseal-adopt";
     const mA = rtA.registry.resolver()("player", uA);
     await mA.callTool("createCharacter", { playerName: "The Player", seed: 1 });
@@ -203,7 +202,7 @@ describe("0065 advance-warm — the held cast survives the cutover and IS the ne
     const threadsA = vaultA.readHidden({ kind: STORY_THREAD_KIND }).length;
 
     // Path B: a plain restart that explicitly starts the SAME seed, NO advance-warm.
-    const rtB = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const rtB = composeRuntime({ clock: new FakeClock() });
     const uB = "reseal-plain";
     const mB = rtB.registry.resolver()("player", uB);
     await mB.callTool("createCharacter", { playerName: "The Player", seed: 1 });
@@ -220,7 +219,7 @@ describe("0065 advance-warm — the held cast survives the cutover and IS the ne
   });
 
   it("the buffer is consumed at the cutover — a SECOND restart starts a fresh (un-warmed) cast", async () => {
-    const rt = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const rt = composeRuntime({ clock: new FakeClock() });
     const u = "consume";
     const m = rt.registry.resolver()("player", u);
     await m.callTool("createCharacter", { playerName: "The Player", seed: 1 });
@@ -248,7 +247,7 @@ describe("0065 advance-warm — the held warm is durable (survives an engine res
     const nextSeed = 33033;
     // Process 1: start a season, advance-warm the next one, then "crash" (drop the runtime).
     {
-      const rt = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+      const rt = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
       const m = rt.registry.resolver()("player", user);
       await m.callTool("createCharacter", { playerName: "The Player", seed: 1 });
       playBeats(rt.registry.sandboxFor(user).session, 6);
@@ -258,7 +257,7 @@ describe("0065 advance-warm — the held warm is durable (survives an engine res
     }
     // Process 2: a fresh runtime over the SAME store. The cutover adopts the warm begun before the restart.
     {
-      const rt = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+      const rt = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
       const m = rt.registry.resolver()("player", user);
       const view = (await m.callTool("createCharacter", {
         playerName: "The Player", confirmRestart: true,
@@ -273,7 +272,7 @@ describe("0065 advance-warm — the held warm is durable (survives an engine res
 
 describe("0065 advance-warm — the Vault Wall holds end to end", () => {
   it("authored HIDDEN next-season content never crosses on the warm view, getGameState, or the adopted season", async () => {
-    const rt = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const rt = composeRuntime({ clock: new FakeClock() });
     const user = "vault";
     const mcp = rt.registry.resolver()("player", user);
     await mcp.callTool("createCharacter", { playerName: "The Player", seed: 1 });

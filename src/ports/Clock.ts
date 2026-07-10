@@ -1,21 +1,13 @@
 /**
- * Clock / Scheduler ports (feature 0031) — the seam the background game watcher
- * runs behind. The watcher holds NO game logic; it only asks the clock for the
- * time and the scheduler to call it back on a cadence. In production a real-timer
- * adapter backs these; in tests a FAKE clock advances time explicitly (no real
- * timers), so the whole supervised loop is deterministic and seed-reproducible.
+ * Clock port (feature 0031; real-time purge 2026-07-10, PO ruling). A monotonic
+ * counter the orchestrator uses to stamp off-screen event ids / timestamps and to
+ * gate one off-screen tick per player turn. It is NOT wall time: the game NEVER
+ * reads the real-world clock and NEVER advances on real-world time — the house
+ * lives only on the player's play-clock (the in-game time-of-day, 0066) and moves
+ * only between the player's own turns. The old wall-clock `Scheduler` + background
+ * watcher were deleted outright so no version can ever run the house in real time.
  */
 export interface Clock {
-  /** Monotonic-ish wall time in milliseconds. */
+  /** A monotonic, play-driven tick — never wall-clock time. */
   now(): number;
-}
-
-export interface SchedulerHandle {
-  readonly id: number;
-}
-
-export interface Scheduler {
-  /** Call `fn` every `ms`. Returns a handle to cancel it. A cadence of 0 means "never". */
-  every(ms: number, fn: () => void): SchedulerHandle;
-  cancel(handle: SchedulerHandle): void;
 }

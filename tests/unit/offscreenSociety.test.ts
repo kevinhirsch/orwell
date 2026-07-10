@@ -6,7 +6,8 @@ import { PLAYER } from "../../src/domain/ids";
 import type { InteractionType } from "../../src/engine/relationships";
 
 // Feature 0038 — the live off-screen society: the house lives in MORE than one way between turns,
-// run through the orchestrator's off-screen tick (the 0035 watcher trigger). Each scene carries its
+// run through the orchestrator's off-screen tick (fired once per committed player turn; no wall-clock
+// watcher — real-time purge 2026-07-10). Each scene carries its
 // real interaction nature and folds the matching hidden impact. (Gossip-to-player diffusion + soul
 // deepening are scoped follow-ups — see 0038 §scope.) Deterministic (FakeClock + per-user seeded RNG).
 

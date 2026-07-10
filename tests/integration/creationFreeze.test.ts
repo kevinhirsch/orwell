@@ -20,7 +20,6 @@ import { FakeClock } from "../../src/adapters/time/FakeClock";
  * (<500ms) WHILE the seeding batch is in flight and draining. Roles only — no names.
  */
 
-const TURN_OFF = { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 };
 
 /** Per-call loop budget for the fake slow model. Big enough that a back-to-back batch
  *  (~6+ embeds at creation) would blow the 500ms health budget pre-fix; small enough
@@ -54,7 +53,7 @@ describe("G8 — /health answers during the creation-time soul-seeding batch", (
   it("createCharacter with a slow sync embedder: every concurrent /health probe answers <500ms", async () => {
     const provider = slowSyncProvider(EMBED_SLEEP_MS);
     setRuntimeEmbedding(provider);
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ clock: new FakeClock() });
     server = createHttpMcpServer({ resolve: runtime.registry.resolver() });
     await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", () => resolve()));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

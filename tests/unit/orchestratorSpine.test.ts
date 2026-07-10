@@ -12,9 +12,9 @@ import { PLAYER, npc } from "../../src/domain/ids";
 
 /**
  * Feature B41 / audit E3 — the orchestrator is the real per-sandbox spine. Player mutations now
- * commit through the fail-closed checkpoint (a leak is rolled back, not saved), `touch` the user
- * (so the watcher stops flooding off-screen ticks mid-scene), and in turn-driven mode fire one
- * bounded off-screen tick per turn. HARD rule: roles only — no names.
+ * commit through the fail-closed checkpoint (a leak is rolled back, not saved), `touch` the user,
+ * and fire one bounded off-screen tick per turn so the house lives on the player's play-clock
+ * (real-time purge 2026-07-10 — no wall-clock watcher). HARD rule: roles only — no names.
  */
 const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-b41-"));
 const hidden = (sb: { engine: { events: { queryAll(): { hidden: boolean }[] } } }): number =>
@@ -33,7 +33,7 @@ function resolveLegally(s: GameSessionAdapter, p: NonNullable<AdvanceView["pendi
 describe("B41 — every player turn commits through the fail-closed checkpoint", () => {
   it("a leaky player-turn commit is rolled back and never persisted", () => {
     const dir = freshDir();
-    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: { tickEveryMs: 1000, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 } });
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
     const sb = runtime.registry.sandboxFor("u");
     sb.session.createCharacter({ playerName: "P", seed: 2 }); // first commit → clean baseline
 
@@ -54,33 +54,28 @@ describe("B41 — every player turn commits through the fail-closed checkpoint",
   });
 
   it("health shows lastTrigger='player-turn' after a real player call", async () => {
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: { tickEveryMs: 1000, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 } });
+    const runtime = composeRuntime({ clock: new FakeClock() });
     await runtime.registry.resolver()("player", "u").callTool("createCharacter", { playerName: "P", seed: 2 });
     expect((runtime.orchestrator.sandboxHealth("u") as HealthRecord).lastTrigger).toBe("player-turn");
   });
 });
 
-describe("B41 — the idle gate no longer floods", () => {
-  it("an actively-calling user accrues no off-screen ticks until idle, then the house lives", () => {
-    const clock = new FakeClock();
-    const runtime = composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock, watcher: { tickEveryMs: 1000, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 } });
+describe("B41 — the house lives ONLY on the player's play-clock", () => {
+  it("no player turn is committed ⇒ no off-screen life accrues (the house does not exist while away)", () => {
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock: new FakeClock() });
     const sb = runtime.registry.sandboxFor("u");
-    sb.session.createCharacter({ playerName: "P", seed: 2 }); // touch at t0 (commitPlayerTurn)
-    runtime.start();
+    sb.session.createCharacter({ playerName: "P", seed: 2 });
 
-    const afterCreate = hidden(sb);
-    clock.advance(1000); // a watcher wake while the user is ACTIVE (touched 1s ago < 5s idle gate)
-    expect(hidden(runtime.registry.sandboxFor("u"))).toBe(afterCreate); // no off-screen flood mid-scene
-
-    clock.advance(6000); // now well past the idle gate since the last call
-    expect(hidden(runtime.registry.sandboxFor("u"))).toBeGreaterThan(afterCreate); // the house lives while away
-    runtime.stop();
+    // With no wall-clock watcher and no real-world clock, nothing advances the house between the
+    // player's own turns — no time "passes", so the hidden off-screen life is frozen while away.
+    const afterCreate = hidden(runtime.registry.sandboxFor("u"));
+    expect(hidden(runtime.registry.sandboxFor("u"))).toBe(afterCreate);
   });
 });
 
 describe("B41 — pure turn-driven mode keeps the house alive", () => {
-  it("with the watcher disabled, N player turns still grow the hidden off-screen life", () => {
-    const runtime = composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock: new FakeClock(), watcher: { tickEveryMs: 0, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 } });
+  it("N player turns each fire one bounded off-screen tick, growing the hidden off-screen life", () => {
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock: new FakeClock() });
     const sb = runtime.registry.sandboxFor("u");
     sb.session.createCharacter({ playerName: "P", seed: 2 });
     const before = hidden(sb);

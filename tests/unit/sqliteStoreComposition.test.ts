@@ -50,17 +50,15 @@ describe("E63 — ORWELL_STORE=sqlite composition flag", () => {
 
   it("composeRuntime({durable:true}) builds a SqliteSaveStore under the flag, FileSaveStore by default", () => {
     process.env.ORWELL_STORE = "sqlite";
-    const rt = composeRuntime({ durable: true, watcher: { tickEveryMs: 0 } });
+    const rt = composeRuntime({ durable: true });
     // The registry's save store is the SQLite adapter (proved by a save/round-trip through it).
     rt.registry.sandboxFor("u1").session.createCharacter({ playerName: "Flagged", seed: 1 });
     expect(rt.registry.snapshot("u1").started).toBe(true);
-    rt.stop();
 
     delete process.env.ORWELL_STORE;
-    const rtDefault = composeRuntime({ durable: true, watcher: { tickEveryMs: 0 } });
+    const rtDefault = composeRuntime({ durable: true });
     rtDefault.registry.sandboxFor("u2").session.createCharacter({ playerName: "Default", seed: 1 });
     expect(rtDefault.registry.snapshot("u2").started).toBe(true);
-    rtDefault.stop();
   });
 
   it("an explicitly-injected save store is honored regardless of the flag (sqlite + file both compose)", () => {

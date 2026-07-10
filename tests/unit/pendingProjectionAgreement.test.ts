@@ -13,7 +13,6 @@ import { composeRuntime } from "../../src/composition/runtime";
  * Roles only — decisions key on option POSITIONS, never names.
  */
 
-const WATCHER_OFF = { tickEveryMs: 0, idleTickAfterMs: 5000, maxOffscreenTicksPerWake: 3, auditEveryMs: 0 };
 
 function decisionFor(p: any): Record<string, unknown> | null {
   const o = p.options ?? [];
@@ -34,8 +33,8 @@ function decisionFor(p: any): Record<string, unknown> | null {
 
 describe("pending projection agreement (M0-7)", () => {
   it("getGameState.pending === gameStatus.pending at every beat of a seeded week", async () => {
-    const runtime = composeRuntime({ watcher: WATCHER_OFF });
-    try {
+    const runtime = composeRuntime();
+    {
       const tools = runtime.registry.resolver()("player", "agree");
       await tools.callTool("createCharacter", { playerName: "P", seed: 424242 });
       let weekRolled = false;
@@ -57,8 +56,6 @@ describe("pending projection agreement (M0-7)", () => {
         }
       }
       expect(weekRolled).toBe(true);
-    } finally {
-      runtime.stop();
     }
   }, 120_000);
 });

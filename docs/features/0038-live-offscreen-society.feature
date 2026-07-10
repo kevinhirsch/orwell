@@ -41,7 +41,7 @@ Feature: Live off-screen society
     Given two games started from the same seed and left idle
     When the same number of off-screen ticks is applied to each
     Then their resulting societies are identical
-    And a long absence advances at most the configured number of ticks per wake
+    And a single committed turn fires at most one off-screen tick
 
   Scenario: The off-screen society is Vault-free and isolated
     Given two users each have their own idle game whose Vault holds hidden scheming

@@ -19,7 +19,6 @@ import type { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAd
  * forgotten, saves rotated, a clean sandbox. HARD rule: roles only — no fixture names.
  */
 const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-e1-"));
-const TURN_OFF = { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 };
 
 function resolveLegally(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>): void {
   if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
@@ -42,7 +41,7 @@ function playBeats(s: GameSessionAdapter, beats: number): void {
 describe("E1/D1/R1 — the one sanctioned restart door (player channel → registry.resetUser)", () => {
   it("a confirmed player-channel restart resets the orchestrator baseline: season 2 commits clean", async () => {
     const dir = freshDir();
-    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir), clock: new FakeClock() });
     const user = "restart-door";
     const mcp = runtime.registry.resolver()("player", user);
 
@@ -73,7 +72,7 @@ describe("E1/D1/R1 — the one sanctioned restart door (player channel → regis
   it("the restart rotates the dead season's saves off the live path (R1: no zombie resurrection)", async () => {
     const dir = freshDir();
     const store = new FileSaveStore(dir);
-    const runtime = composeRuntime({ saveStore: store, clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ saveStore: store, clock: new FakeClock() });
     const user = "rotate";
     const mcp = runtime.registry.resolver()("player", user);
 
@@ -89,7 +88,7 @@ describe("E1/D1/R1 — the one sanctioned restart door (player channel → regis
   });
 
   it("without confirmRestart a second createCharacter stays a no-op (B36 intact)", async () => {
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ clock: new FakeClock() });
     const user = "noop";
     const mcp = runtime.registry.resolver()("player", user);
     await mcp.callTool("createCharacter", { playerName: "The Player", seed: 3 });
@@ -103,7 +102,7 @@ describe("E1/D1/R1 — the one sanctioned restart door (player channel → regis
   it("the admin door (manageSandbox reset) goes through the SAME hinge — baseline forgotten too", async () => {
     const dir = freshDir();
     const store = new FileSaveStore(dir);
-    const runtime = composeRuntime({ saveStore: store, clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ saveStore: store, clock: new FakeClock() });
     const user = "admin-door";
     const sb = runtime.registry.sandboxFor(user);
     sb.session.createCharacter({ playerName: "The Player", seed: 9 });
@@ -121,7 +120,7 @@ describe("E1/D1/R1 — the one sanctioned restart door (player channel → regis
   });
 
   it("a stale pre-restart tool reference still lands in the fresh sandbox (no split-brain)", async () => {
-    const runtime = composeRuntime({ clock: new FakeClock(), watcher: TURN_OFF });
+    const runtime = composeRuntime({ clock: new FakeClock() });
     const user = "stale-ref";
     const staleMcp = runtime.registry.resolver()("player", user); // resolved BEFORE the restart
     await staleMcp.callTool("createCharacter", { playerName: "The Player", seed: 1 });

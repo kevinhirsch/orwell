@@ -186,16 +186,15 @@ async function runToEnd(
 }
 
 /**
- * Play one seed's passive+active pair through the production composition (`composeRuntime`, watcher
- * off ⇒ pure turn-driven, the deploy default) and return its public measurement. Per-seed seeded,
+ * Play one seed's passive+active pair through the production composition (`composeRuntime`, pure
+ * turn-driven — the only mode; no wall-clock watcher) and return its public measurement. Per-seed seeded,
  * so this is order-independent and runnable in any shard. Each call composes its OWN runtime so
  * shards never share registry state.
  */
 export async function playSeed(seed: number): Promise<GradientResult> {
   const runtime = composeRuntime({
     clock: new FakeClock(),
-    watcher: { tickEveryMs: 0, idleTickAfterMs: 0, maxOffscreenTicksPerWake: 0, auditEveryMs: 0 },
-    seed: 1,
+        seed: 1,
   });
   const resolver = runtime.registry.resolver();
   const passive = await playPassive(resolver, seed);
