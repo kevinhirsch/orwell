@@ -493,90 +493,97 @@ export function el(id) {
   return document.getElementById(id);
 }
 
+// ── #660 (DWE / HIG F-CHROME-1): styledConfirm + styledPrompt compose the
+// OrwellWindow kit's `modal:true` tier (backdrop scrim + focus-trap + inert
+// background + aria-modal + one z-authority + Escape via ui.js's single arbiter),
+// per the 2026-06-23 window-kit coverage audit §5 step 4. They no longer hand-roll
+// a bespoke `.modal` / `.modal-content` root (the class-B holdout). Behavior is
+// preserved exactly: the Promise<boolean> / Promise<string|null> shapes, the
+// button labels + danger styling, default→cancel, focus/scrim/Escape close, and
+// focus-return on close (the kit owns opener capture + return).
+//
+// The kit is loaded at module eval (orwellWindow.js sets window.OrwellWindowKit),
+// so it is present by the time any user gesture calls these; the native
+// confirm()/prompt() fallback below is a belt-and-braces fail-open only.
+
+// Small helper: attach a one-shot click-to-cancel handler to a kit modal's scrim
+// (the kit's scrim is non-dismissing by default; the legacy dialogs closed on a
+// backdrop click, so we preserve that "scrim close" affordance). The scrim carries
+// [data-ow-scrim="<id>"] and is torn down with the window, so the listener is GC'd.
+function _wireScrimClose(id, onScrim) {
+  const scrim = document.querySelector('[data-ow-scrim="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+  if (scrim) scrim.addEventListener('click', onScrim);
+}
+
 /**
  * Styled confirm dialog — replaces native browser confirm().
- * Returns a Promise<boolean>.
+ * Returns a Promise<boolean> (true on confirm; false on cancel / Escape / scrim / ×).
+ * Composes the OrwellWindow kit (`modal:true`) — see the #660 note above.
  */
 export function styledConfirm(message, { confirmText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
   return new Promise(resolve => {
-    // Reuse or create the modal
-    let overlay = document.getElementById('styled-confirm-overlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'styled-confirm-overlay';
-      overlay.className = 'modal';
-      overlay.innerHTML =
-        '<div class="modal-content styled-confirm-box" role="dialog" aria-modal="true" aria-labelledby="styled-confirm-title" aria-describedby="styled-confirm-msg">' +
-          '<div class="modal-header"><h4 id="styled-confirm-title">Confirm</h4></div>' +
-          '<div class="modal-body"><p id="styled-confirm-msg"></p></div>' +
-          '<div class="modal-footer">' +
-            '<button id="styled-confirm-cancel"></button>' +
-            '<button id="styled-confirm-ok"></button>' +
-          '</div>' +
-        '</div>';
-      document.body.appendChild(overlay);
-    }
+    const Kit = typeof window !== 'undefined' ? window.OrwellWindowKit : null;
+    if (!Kit || !Kit.create) { resolve(window.confirm(message)); return; }   // fail-open
 
-    const msgEl = document.getElementById('styled-confirm-msg');
-    const okBtn = document.getElementById('styled-confirm-ok');
-    const cancelBtn = document.getElementById('styled-confirm-cancel');
+    let settled = false;
+    const settle = (result) => { if (!settled) { settled = true; resolve(result); } };
 
-    msgEl.textContent = message;
-    okBtn.textContent = confirmText;
-    cancelBtn.textContent = cancelText;
-    okBtn.className = danger ? 'confirm-btn confirm-btn-danger' : 'confirm-btn confirm-btn-primary';
+    // Body: the message + a footer with the cancel/confirm buttons. The `.confirm-btn*`
+    // classes (ancestry-independent) keep the exact button styling; the message + footer
+    // layout is inlined so nothing depends on the retired `.modal-*` container styling.
+    const box = document.createElement('div');
+    const msg = document.createElement('p');
+    msg.id = 'styled-confirm-msg';
+    msg.textContent = message;
+    msg.style.cssText = 'margin:8px 0 14px;color:var(--fg);font-size:0.92rem;line-height:1.45;white-space:pre-line;';
+    const footer = document.createElement('div');
+    footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;padding-top:10px;margin-top:4px;border-top:1px solid var(--border);';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.id = 'styled-confirm-cancel';
     cancelBtn.className = 'confirm-btn confirm-btn-secondary';
+    cancelBtn.textContent = cancelText;
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button'; okBtn.id = 'styled-confirm-ok';
+    okBtn.className = danger ? 'confirm-btn confirm-btn-danger' : 'confirm-btn confirm-btn-primary';
+    okBtn.textContent = confirmText;
+    footer.appendChild(cancelBtn); footer.appendChild(okBtn);
+    box.appendChild(msg); box.appendChild(footer);
 
-    // Remember what had focus so we can restore it when the dialog closes.
-    const _prevFocus = document.activeElement;
-    overlay.classList.remove('hidden');
-    overlay.style.display = '';
+    // Compose the kit: a centered (top-center slot), non-resizable, non-minimizable
+    // modal micro-dialog that always re-centers (persistLayout:false). Escape is owned
+    // by ui.js's arbiter → OrwellWindowKit.dismissTop() (no bespoke handler); the ×
+    // (closable) and Escape both settle to `false` via onClose.
+    const win = Kit.create({
+      id: 'styled-confirm-overlay', title: 'Confirm',
+      modal: true, minimizable: false, resizable: false, closable: true,
+      draggable: false, persistLayout: false,
+      minWidth: 300, minHeight: 120,
+      content: box,
+      onClose: () => settle(false),
+    });
 
-    function cleanup(result) {
-      overlay.classList.add('hidden');
-      overlay.style.display = 'none';
-      okBtn.removeEventListener('click', onOk);
-      cancelBtn.removeEventListener('click', onCancel);
-      overlay.removeEventListener('click', onBackdrop);
-      document.removeEventListener('keydown', onKey);
-      try { _prevFocus && _prevFocus.focus && _prevFocus.focus(); } catch {}
-      resolve(result);
-    }
-    function onOk() { cleanup(true); }
-    function onCancel() { cleanup(false); }
-    function onBackdrop(e) { if (e.target === overlay) cleanup(false); }
-    function onKey(e) {
+    const cancel = () => { settle(false); win.close(); };
+    okBtn.addEventListener('click', () => { settle(true); win.close(); });
+    cancelBtn.addEventListener('click', cancel);
+    // ArrowLeft/ArrowRight toggle focus between the two buttons (preserved). Tab is
+    // trapped by the kit's modal focus-trap.
+    box.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
-        const active = document.activeElement;
-        if (active === okBtn) cancelBtn.focus();
-        else okBtn.focus();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        cleanup(false);
-      } else if (e.key === 'Tab') {
-        // Trap focus inside the dialog so Tab can't wander to the page behind.
-        e.preventDefault();
-        const f = [cancelBtn, okBtn];
-        const i = f.indexOf(document.activeElement);
-        const n = e.shiftKey ? (i <= 0 ? f.length - 1 : i - 1) : (i >= f.length - 1 ? 0 : i + 1);
-        f[n].focus();
+        (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
       }
-    }
+    });
 
-    okBtn.addEventListener('click', onOk);
-    cancelBtn.addEventListener('click', onCancel);
-    overlay.addEventListener('click', onBackdrop);
-    document.addEventListener('keydown', onKey);
-    okBtn.focus();
+    win.open();
+    _wireScrimClose('styled-confirm-overlay', cancel);   // backdrop click → cancel
+    try { okBtn.focus(); } catch {}
   });
 }
 
 /**
  * Styled text-input prompt — drop-in replacement for window.prompt().
- * Resolves to the trimmed string the user typed, or null on Cancel / Escape / backdrop.
+ * Resolves to the trimmed string the user typed, or null on Cancel / Escape / scrim / ×.
+ * Composes the OrwellWindow kit (`modal:true`) — see the #660 note above.
  */
 export function styledPrompt(message, {
   title = 'Name',
@@ -587,92 +594,63 @@ export function styledPrompt(message, {
   maxLength = 80,
 } = {}) {
   return new Promise(resolve => {
-    let overlay = document.getElementById('styled-prompt-overlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'styled-prompt-overlay';
-      overlay.className = 'modal';
-      overlay.innerHTML =
-        '<div class="modal-content styled-confirm-box styled-prompt-box" role="dialog" aria-modal="true" aria-labelledby="styled-prompt-title" aria-describedby="styled-prompt-msg">' +
-          '<div class="modal-header"><h4 id="styled-prompt-title"></h4></div>' +
-          '<div class="modal-body">' +
-            '<p id="styled-prompt-msg"></p>' +
-            '<input type="text" id="styled-prompt-input" class="styled-prompt-input" />' +
-          '</div>' +
-          '<div class="modal-footer">' +
-            '<button id="styled-prompt-cancel" class="confirm-btn confirm-btn-secondary"></button>' +
-            '<button id="styled-prompt-ok" class="confirm-btn confirm-btn-primary"></button>' +
-          '</div>' +
-        '</div>';
-      document.body.appendChild(overlay);
+    const Kit = typeof window !== 'undefined' ? window.OrwellWindowKit : null;
+    if (!Kit || !Kit.create) {   // fail-open to the native prompt (same value shape)
+      const r = window.prompt(message || title, defaultValue || '');
+      resolve(r === null ? null : r.trim()); return;
     }
 
-    const titleEl = document.getElementById('styled-prompt-title');
-    const msgEl = document.getElementById('styled-prompt-msg');
-    const input = document.getElementById('styled-prompt-input');
-    const okBtn = document.getElementById('styled-prompt-ok');
-    const cancelBtn = document.getElementById('styled-prompt-cancel');
+    let settled = false;
+    const settle = (result) => { if (!settled) { settled = true; resolve(result); } };
 
-    titleEl.textContent = title;
-    msgEl.textContent = message || '';
-    msgEl.style.display = message ? '' : 'none';
+    // Body: an optional message + the text input + a footer with cancel/confirm.
+    const box = document.createElement('div');
+    if (message) {
+      const msg = document.createElement('p');
+      msg.id = 'styled-prompt-msg';
+      msg.textContent = message;
+      msg.style.cssText = 'margin:2px 0 0;color:var(--fg);font-size:0.92rem;line-height:1.45;white-space:pre-line;';
+      box.appendChild(msg);
+    }
+    const input = document.createElement('input');
+    input.type = 'text'; input.id = 'styled-prompt-input';
+    input.className = 'styled-prompt-input';
     input.value = defaultValue || '';
     input.placeholder = placeholder || '';
     input.maxLength = maxLength;
-    okBtn.textContent = confirmText;
+    const footer = document.createElement('div');
+    footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid var(--border);';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.id = 'styled-prompt-cancel';
+    cancelBtn.className = 'confirm-btn confirm-btn-secondary';
     cancelBtn.textContent = cancelText;
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button'; okBtn.id = 'styled-prompt-ok';
+    okBtn.className = 'confirm-btn confirm-btn-primary';
+    okBtn.textContent = confirmText;
+    footer.appendChild(cancelBtn); footer.appendChild(okBtn);
+    box.appendChild(input); box.appendChild(footer);
 
-    // Remember what had focus so we can restore it when the dialog closes.
-    const _prevFocus = document.activeElement;
-    overlay.classList.remove('hidden');
-    overlay.style.display = '';
-
-    function cleanup(result) {
-      overlay.classList.add('hidden');
-      overlay.style.display = 'none';
-      okBtn.removeEventListener('click', onOk);
-      cancelBtn.removeEventListener('click', onCancel);
-      overlay.removeEventListener('click', onBackdrop);
-      document.removeEventListener('keydown', onKey);
-      input.removeEventListener('keydown', onInputKey);
-      try { _prevFocus && _prevFocus.focus && _prevFocus.focus(); } catch {}
-      resolve(result);
-    }
-    function onOk() { cleanup((input.value || '').trim()); }
-    function onCancel() { cleanup(null); }
-    function onBackdrop(e) { if (e.target === overlay) cleanup(null); }
-    function onKey(e) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        cleanup(null);
-      } else if (e.key === 'Tab') {
-        // Trap focus inside the dialog (input → Cancel → OK → input …).
-        e.preventDefault();
-        const f = [input, cancelBtn, okBtn];
-        const i = f.indexOf(document.activeElement);
-        const n = e.shiftKey ? (i <= 0 ? f.length - 1 : i - 1) : (i >= f.length - 1 ? 0 : i + 1);
-        f[n].focus();
-      }
-    }
-    function onInputKey(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        onOk();
-      }
-    }
-
-    okBtn.addEventListener('click', onOk);
-    cancelBtn.addEventListener('click', onCancel);
-    overlay.addEventListener('click', onBackdrop);
-    document.addEventListener('keydown', onKey);
-    input.addEventListener('keydown', onInputKey);
-
-    requestAnimationFrame(() => {
-      input.focus();
-      input.select();
+    const win = Kit.create({
+      id: 'styled-prompt-overlay', title: title || 'Name',
+      modal: true, minimizable: false, resizable: false, closable: true,
+      draggable: false, persistLayout: false,
+      minWidth: 320, minHeight: 140,
+      content: box,
+      onClose: () => settle(null),
     });
+
+    const ok = () => { settle((input.value || '').trim()); win.close(); };
+    const cancel = () => { settle(null); win.close(); };
+    okBtn.addEventListener('click', ok);
+    cancelBtn.addEventListener('click', cancel);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); ok(); }
+    });
+
+    win.open();
+    _wireScrimClose('styled-prompt-overlay', cancel);   // backdrop click → cancel
+    requestAnimationFrame(() => { try { input.focus(); input.select(); } catch {} });
   });
 }
 
