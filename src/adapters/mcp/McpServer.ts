@@ -48,8 +48,11 @@ function requireShape(name: string, args: Record<string, unknown>): void {
     if (args["expectedBeatSeq"] !== undefined && typeof args["expectedBeatSeq"] !== "number") {
       refuse("expectedBeatSeq", "a number when present");
     }
-    if (allowIdempotency && args["idempotencyKey"] !== undefined && typeof args["idempotencyKey"] !== "string") {
-      refuse("idempotencyKey", "a string when present");
+    if (allowIdempotency && args["idempotencyKey"] !== undefined
+      && (typeof args["idempotencyKey"] !== "string" || args["idempotencyKey"] === "")) {
+      // A non-empty string when present: an empty key identifies no operation, so accepting it would let
+      // unrelated calls falsely de-dup under one ledger entry (matches the `content` non-empty-string guard).
+      refuse("idempotencyKey", "a non-empty string when present");
     }
   };
   switch (name) {

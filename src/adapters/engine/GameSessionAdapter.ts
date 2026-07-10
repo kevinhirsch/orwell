@@ -982,24 +982,41 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * A10 / #591 / R1c — remember a fold-bearing lever's committed result under its idempotency key
-   * (bounded LRU; oldest evicts). The `recordIdempotency`/`rememberIdempotent` sibling for the
-   * `makeDeal`/`confide`/`exposeSecret`/`tradeSecret` port. In-memory only (not persisted) — the retry
-   * window is seconds and a restart drops the FE's in-flight deferred queue, so there is nothing to dedup
-   * across one. Returns the value so a caller can `return this.rememberFoldIdempotent(key, result)` inline.
-   */
-  /**
    * A10 / #591 / R1c — namespace a caller-minted `idempotencyKey` by the LEVER it was passed to, so the
    * SHARED `foldIdempotency` ledger can't COLLIDE across verbs. Without this, the same key reused on two
    * different levers (`makeDeal` then `confide`, say) would make the second lever return the FIRST's cached
    * result under its own type cast AND skip its own mutation — a real cross-lever bug. Prefixing with a
    * stable per-lever constant keeps same-lever+same-key de-dup (at-most-once) while cross-lever+same-key
-   * stays distinct. `undefined` key ⇒ `undefined` (opt-out; the call sites skip the ledger entirely).
+   * stays distinct. An `undefined` OR EMPTY key ⇒ `undefined` (opt-out; the call sites skip the ledger
+   * entirely). Empty is rejected as a dedup token: a `""` key identifies no operation, so treating it as
+   * one would falsely de-dup unrelated calls (the MCP arg-guard also refuses an empty key at the boundary).
    */
   private foldLedgerKey(verb: string, key: string | undefined): string | undefined {
-    return key === undefined ? undefined : `${verb}:${key}`;
+    return key ? `${verb}:${key}` : undefined;
   }
 
+  /**
+   * A10 / #591 / R1c — the at-most-once REPLAY lookup for the fold levers. On a HIT it REFRESHES the key's
+   * LRU recency (re-inserts at the tail, mirroring `EngineCommandsAdapter.recordInteraction`'s replay path)
+   * so a key that is actively being re-driven can't be evicted out from under its own retry window. Takes
+   * the already-namespaced key (or `undefined` to opt out). Vault-free (an opaque token, never secret state).
+   */
+  private foldReplay<T>(idemKey: string | undefined): { hit: true; value: T } | { hit: false } {
+    if (idemKey !== undefined && this.foldIdempotency.has(idemKey)) {
+      const value = this.foldIdempotency.get(idemKey) as T;
+      this.rememberFoldIdempotent(idemKey, value); // refresh LRU recency on replay
+      return { hit: true, value };
+    }
+    return { hit: false };
+  }
+
+  /**
+   * A10 / #591 / R1c — remember a fold-bearing lever's committed result under its (namespaced) idempotency
+   * key (bounded LRU; oldest evicts). The `recordIdempotency`/`rememberIdempotent` sibling for the
+   * `makeDeal`/`confide`/`exposeSecret`/`tradeSecret` port. In-memory only (not persisted) — the retry
+   * window is seconds and a restart drops the FE's in-flight deferred queue, so there is nothing to dedup
+   * across one. Returns the value so a caller can `return this.rememberFoldIdempotent(key, result)` inline.
+   */
   private rememberFoldIdempotent<T>(key: string, result: T): T {
     this.foldIdempotency.delete(key); // re-insert at the tail (insertion-ordered = LRU)
     this.foldIdempotency.set(key, result);
@@ -6623,8 +6640,9 @@ export class GameSessionAdapter implements GameSession {
     // The key is NAMESPACED by lever (`foldLedgerKey`) so the SAME idempotencyKey reused across two
     // different levers can't collide (returning one lever's cached result under another's type + skip).
     const idemKey = this.foldLedgerKey("makeDeal", req.idempotencyKey);
-    if (idemKey !== undefined && this.foldIdempotency.has(idemKey)) {
-      return this.foldIdempotency.get(idemKey) as DealView | null;
+    const replay = this.foldReplay<DealView | null>(idemKey);
+    if (replay.hit) {
+      return replay.value;
     }
     // 0065 Part A — refuse a deal computed against a superseded board BEFORE any mutation.
     this.guardBeatSeq(req.expectedBeatSeq);
@@ -6962,9 +6980,8 @@ export class GameSessionAdapter implements GameSession {
     // clean no-op even against a moved board (the double-apply case CAS cannot close). Key NAMESPACED by
     // lever so the same key on another verb can't collide.
     const idemKey = this.foldLedgerKey("confide", idempotencyKey);
-    if (idemKey !== undefined && this.foldIdempotency.has(idemKey)) {
-      return this.foldIdempotency.get(idemKey) as ConfideResult | null;
-    }
+    const replay = this.foldReplay<ConfideResult | null>(idemKey);
+    if (replay.hit) return replay.value;
     // 0065 Part A — refuse a confidence computed against a superseded board BEFORE any mutation.
     this.guardBeatSeq(expectedBeatSeq);
     if (!this.house || !this.live) return null;
@@ -7036,9 +7053,8 @@ export class GameSessionAdapter implements GameSession {
     // re-driven duplicate is a clean no-op even against a moved board (the double-apply CAS cannot close).
     // Key NAMESPACED by lever so the same key on another verb can't collide.
     const idemKey = this.foldLedgerKey("exposeSecret", req.idempotencyKey);
-    if (idemKey !== undefined && this.foldIdempotency.has(idemKey)) {
-      return this.foldIdempotency.get(idemKey) as ExposeResult | null;
-    }
+    const replay = this.foldReplay<ExposeResult | null>(idemKey);
+    if (replay.hit) return replay.value;
     this.guardBeatSeq(req.expectedBeatSeq);
     if (!this.house || !this.live) return null;
     // A real secret already exposed (public) can't be exposed again — checked BEFORE resolution (the
@@ -7111,9 +7127,8 @@ export class GameSessionAdapter implements GameSession {
     // a clean no-op even against a moved board (the double-apply case CAS cannot close). Key NAMESPACED by
     // lever so the same key on another verb can't collide.
     const idemKey = this.foldLedgerKey("tradeSecret", req.idempotencyKey);
-    if (idemKey !== undefined && this.foldIdempotency.has(idemKey)) {
-      return this.foldIdempotency.get(idemKey) as TradeResult | null;
-    }
+    const replay = this.foldReplay<TradeResult | null>(idemKey);
+    if (replay.hit) return replay.value;
     this.guardBeatSeq(req.expectedBeatSeq);
     if (!this.house || !this.live) return null;
     const out = this.resolveAndTrade(

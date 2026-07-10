@@ -72,6 +72,21 @@ function earnFullConfidence(session: GameSessionAdapter, npcId: EntityId): void 
   for (let i = 0; i < 3; i++) session.makeDeal({ with: npcId, kind: "final-two", terms: "ride or die" });
 }
 
+/** Set a houseguest up as a manipulator (high threat, no warmth) so `confide` fabricates a LIE (mirror
+ *  confideBoundary.setupLiar; seed 1 fires the lie roll). */
+function setupLiar(session: GameSessionAdapter, npcId: EntityId): void {
+  const house = (session as unknown as { house: { npcs: Array<{ id: EntityId; character: { archetype: string } }> } }).house;
+  house.npcs.find((n) => n.id === npcId)!.character.archetype = "mastermind";
+  const r = rel(session);
+  for (const [a, b] of [[npcId, PLAYER], [PLAYER, npcId]] as const) {
+    const e = r.edge(a, b); e.trust = 0; e.affinity = 0; e.threat = 0.95;
+  }
+}
+/** Test-only read of the engine-private lie counter (the Vault-sealed lie ledger). */
+function lieCount(session: GameSessionAdapter): number {
+  return (session as unknown as { lieCount: number }).lieCount;
+}
+
 /** Plant a learned secret about a subject into the player's knowledge; return the factId. */
 function learnSecretAbout(session: GameSessionAdapter, sb: ReturnType<typeof buildSandbox>, subject: EntityId): string {
   const factId = `learned:${subject}`;
@@ -236,5 +251,64 @@ describe("A10/#591 — tradeSecret is at-most-once per idempotencyKey", () => {
     const second = (await server.callTool("tradeSecret", { factId, toNpcId: recipient, askKind: "vote", idempotencyKey: "T1" })) as TradeResult;
     expect(second).toEqual(first);                    // the SAME trade replayed
     expect(edge(session, recipient, PLAYER)).toEqual(afterOne); // no second fold
+  });
+});
+
+describe("A10/#591 — the REAL relationship fold (not just record-creation) is at-most-once", () => {
+  it("makeDeal WITH leverage folds the squeeze on the partner exactly ONCE per key", async () => {
+    const { server, session, sb } = playerServer(1);
+    session.createCharacter({ playerName: "The Player", seed: 1 });
+    const partner = session.livingIds().find((id) => id !== PLAYER)!;
+    const factId = learnSecretAbout(session, sb, partner); // leverage is about the deal PARTNER
+    const before = edge(session, partner, PLAYER);         // the leverage fold moves the partner's read of the player
+
+    const first = (await server.callTool("makeDeal", { with: partner, kind: "safety", terms: "keep me safe", leverage: { factId }, idempotencyKey: "L1" })) as DealView;
+    expect(first?.id).toBeTruthy();
+    const afterOne = edge(session, partner, PLAYER);
+    expect(afterOne).not.toEqual(before);                  // the leverage squeeze actually folded (a REAL fold, not just the deal row)
+    const dealsAfterOne = openDeals(session);
+
+    const second = (await server.callTool("makeDeal", { with: partner, kind: "safety", terms: "keep me safe", leverage: { factId }, idempotencyKey: "L1" })) as DealView;
+    expect(second.id).toBe(first.id);
+    expect(edge(session, partner, PLAYER)).toEqual(afterOne); // the squeeze did NOT fold a second time
+    expect(openDeals(session)).toBe(dealsAfterOne);          // and no duplicate deal
+  });
+
+  it("a forced-LIE confide increments the lie ledger + folds exactly ONCE per key (the lie path, not just the bond bump)", async () => {
+    const { server, session } = playerServer(1);
+    session.createCharacter({ playerName: "The Player", seed: 1 });
+    const npcId = session.livingIds().find((id) => id !== PLAYER)!;
+    setupLiar(session, npcId);
+    const liesBefore = lieCount(session);
+
+    const first = (await server.callTool("confide", { npcId, idempotencyKey: "LIE1" })) as ConfideResult;
+    expect(first.disclosed).toBe(true);
+    expect(first.truthful).toBe(false);                    // the engine planted a LIE (the forced path)
+    expect(lieCount(session)).toBe(liesBefore + 1);        // the lie ledger moved once
+
+    const second = (await server.callTool("confide", { npcId, idempotencyKey: "LIE1" })) as ConfideResult;
+    expect(second).toEqual(first);                          // replayed
+    expect(lieCount(session)).toBe(liesBefore + 1);        // NOT incremented a second time (no double lie-count)
+  });
+});
+
+describe("A10/#591 — an EMPTY idempotencyKey is rejected (it identifies no operation)", () => {
+  it("the MCP arg-guard refuses an empty key with a field error (never a false de-dup token)", async () => {
+    const { server, session } = playerServer(1);
+    session.createCharacter({ playerName: "The Player", seed: 1 });
+    const npcId = session.livingIds().find((id) => id !== PLAYER)!;
+    await expect(server.callTool("makeDeal", { with: npcId, kind: "safety", terms: "x", idempotencyKey: "" })).rejects.toThrow(/idempotencyKey/);
+    await expect(server.callTool("confide", { npcId, idempotencyKey: "" })).rejects.toThrow(/idempotencyKey/);
+  });
+
+  it("at the port, an empty key OPTS OUT (folds every call — never collapses distinct calls into one)", async () => {
+    // Belt-and-suspenders below the boundary: a direct port call with "" must fold each time, not de-dup.
+    const { session } = playerServer(2);
+    session.createCharacter({ playerName: "The Player", seed: 2 });
+    const target = session.livingIds().find((id) => id !== PLAYER)!;
+    const before = openDeals(session);
+    session.makeDeal({ with: target, kind: "safety", terms: "a", idempotencyKey: "" });
+    session.makeDeal({ with: target, kind: "safety", terms: "b", idempotencyKey: "" });
+    expect(openDeals(session)).toBe(before + 2); // two distinct deals — the empty key never de-duped them
   });
 });
