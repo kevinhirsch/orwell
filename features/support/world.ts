@@ -220,6 +220,12 @@ export class BbWorld extends World {
   tempRolls?: number[];
   compResultObj?: import("../../src/domain/competitionOutcome").CompetitionResult;
 
+  // Strategic Diary Room (0115) scratch state.
+  drSandbox?: import("../../src/composition/registry").UserSandbox;
+  drContext?: string;
+  drSecret?: string;
+  drRetro?: import("../../src/ports/GameSession").RetrospectiveView | null;
+
   // Game orchestrator & integrity checkpoint (0031) scratch state.
   orchestrator?: import("../../src/composition/orchestrator").Orchestrator;
   fakeClock?: import("../../src/adapters/time/FakeClock").FakeClock;

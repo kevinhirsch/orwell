@@ -22,7 +22,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord, voiceFingerprint } from "../../engine/voice";
-import { NO_NPC_PATHWAY, beatForMoment, producerPrompt } from "../../engine/diaryRoom";
+import { NO_NPC_PATHWAY, beatForMoment, producerPrompt, playerDiaryStrategy } from "../../engine/diaryRoom";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, PLAN_FOR, advancePlayerCampaign,
@@ -2251,12 +2251,19 @@ export class GameSessionAdapter implements GameSession {
     // #841/#842 — a pure render-time coalesce: drop byte-identical rows and collapse a symmetric
     // off-screen pair (A↔B) into one. After the chronological sort, the kept row is the EARLIEST.
     // Never changes what was recorded — only what the operator sees.
+    // 0115 — the player's OWN Diary-Room confessionals, their side of the story, in the order they
+    // recorded them. NOT a Vault read: it is the player's own `NO_NPC_PATHWAY` knowledge (it never
+    // reached any NPC in life and does not now); surfaced here as the retrospective through-line.
+    const playerConfessionals = (this.playerKnowledgeReader?.() ?? [])
+      .filter((k) => k.pathway === NO_NPC_PATHWAY)
+      .map((k) => k.content);
     return {
       winner: this.live.winner ? this.named(this.live.winner) : null,
       hiddenStory: coalesceDumpRows(ordered),
       twists,
       evictionVotes,
       ...(juryVotes ? { juryVotes } : {}),
+      playerConfessionals,
     };
   }
 
@@ -8486,6 +8493,12 @@ export class GameSessionAdapter implements GameSession {
     // dramatic beats `beatForMoment` recognizes (nomination/veto-ceremony/eviction). An INVITATION
     // only — it changes no game state and is never forced.
     const drPrompt = producerPrompt(beatForMoment(moment));
+    // 0115 — the player's Diary-Room STRATEGY, projected as a PRIVATE steer for the narrator (their
+    // real read, in their own words). Vault-free by construction: reads ONLY the player's own
+    // `NO_NPC_PATHWAY` knowledge (never a Vault read, never any NPC's knowledge), and never feeds any
+    // NPC's knowledge or behavior — the DR wall (`deriveNpcKnowledge`) is untouched. `renderGameContext`
+    // fences it as GM-only / do-not-voice so the GM narrates the irony of the player's mask, never leaks it.
+    const drStrategy = playerDiaryStrategy(this.playerKnowledgeReader?.() ?? []);
     return {
       started: true,
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
@@ -8601,6 +8614,8 @@ export class GameSessionAdapter implements GameSession {
       ...(this.premiereIntros() ? { premiere: this.premiereIntros()! } : {}),
       // 0013 §5 / PG-14 / PS-4: the producer's Diary-Room invitation at the current dramatic beat.
       ...(drPrompt.invite ? { diaryRoomInvite: drPrompt as { invite: true; reason?: string } } : {}),
+      // 0115: the player's DR strategy as a PRIVATE narrator steer (present only when they've recorded one).
+      ...(drStrategy.length ? { playerDiaryRoom: drStrategy } : {}),
     };
   }
 }

@@ -1231,6 +1231,30 @@ export function renderGameContext(view: GameStateView): string {
       (view.player.genderPresentation
         ? ` They present as ${genderPresentationPhrase(view.player.genderPresentation)} (use ${pronounsFor(view.player.genderPresentation)}) — never infer their gender/pronouns from their name.`
         : ""),
+    // ⚠️ POTENTIAL WALL LEAK (0115) — START DEBUGGING HERE. This is the ONE prompt-guided (NOT
+    // structural) Diary-Room surface: DR content is deliberately fed into the GM's context here. The
+    // structural walls hold everywhere else (NPC knowledge via `deriveNpcKnowledge`, NPC behavior/voice
+    // via the per-NPC projection — neither reads `playerDiaryRoom`), so if a HOUSEGUEST is ever observed
+    // voicing or acting on Diary-Room content, the model leaked it OUT OF THIS BLOCK — inspect the fence
+    // wording below + the FE reasoning/`npc:`-leak scrub, not the structural wall (which is proven clean).
+    // 0115 — the player's DIARY ROOM: their REAL strategy, in their own words. YOU (the producer/GM)
+    // know this; the HOUSEGUESTS DO NOT, and never will (it has no in-game pathway to anyone). Narrate
+    // the player's scenes GROUNDED in this truth — the dramatic irony of a mask, the con behind the
+    // smile — instead of taking their public friendliness at face value. But it is a PRIVATE steer, NOT
+    // a fact to read aloud: NEVER voice it, never put it in a houseguest's mouth, never let anyone act on
+    // it. If the player says one thing to a houseguest and the opposite here, the houseguest still
+    // believes the public line (they were fooled) — only YOUR narration to the player carries the truth.
+    ...((view.playerDiaryRoom ?? []).length
+      ? [
+          "- THE PLAYER'S DIARY ROOM — their private, out-of-character strategy (you know it; the house does",
+          "  NOT — narrate the irony, but NEVER voice it to a houseguest and never let anyone act on it):",
+          // SECURITY (Greptile #1310): DR entries are PLAYER-AUTHORED, so they are the attack surface —
+          // a raw newline would let the player forge a new prompt line and break OUT of this fence
+          // ("… \n- THE HOUSE DOES KNOW THIS"). `neutralizeForPrompt` flattens newlines/control chars to
+          // single spaces + length-caps, so each entry can only ever be ONE bullet inside the fence.
+          ...(view.playerDiaryRoom ?? []).map((e) => `    · ${neutralizeForPrompt(e)}`),
+        ]
+      : []),
     `- The house (${view.house.length} other houseguests) — each line is THAT person's OWN self and YOUR`,
     "  PRIVATE voice cue for how to play THEM; it is NOT shared knowledge the rest of the cast has. A",
     "  houseguest knows only their OWN line plus whatever an in-game pathway has taught them about others",

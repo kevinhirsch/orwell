@@ -307,6 +307,16 @@ export interface GameStateView {
    */
   diaryRoomInvite?: { invite: true; reason?: string };
   /**
+   * 0115 — the player's recent Diary-Room STRATEGY, in their own words (most-recent-first, capped).
+   * Vault-free by construction: it is the player's OWN out-of-character `NO_NPC_PATHWAY` knowledge —
+   * never a Vault read, never any NPC's knowledge. Surfaced into the narrator's GAME CONTEXT as a
+   * PRIVATE steer (`renderGameContext` fences it as GM-only / do-not-voice) so the GM narrates the
+   * player's scenes grounded in their REAL strategy — the irony of a lie — instead of believing their
+   * public mask, while the house stays deceived. The DR wall is unchanged: this NEVER reaches an NPC's
+   * knowledge and NEVER drives NPC behavior (that stays structural). Absent when the player recorded none.
+   */
+  playerDiaryRoom?: string[];
+  /**
    * A `createCharacter` that was REFUSED rather than honored (audit R4-05): a game already exists
    * and no `confirmRestart` was given, so the prior season is intact and untouched (this view IS
    * that prior season, not a new one). `in-progress` (a season is live) or `over` (a winner is
@@ -1331,6 +1341,13 @@ export interface DailyRecapView {
  */
 export interface RetrospectiveView {
   winner: NamedRef | null;
+  /**
+   * 0115 — the player's OWN Diary-Room confessionals, in the order they recorded them: their side of
+   * the story, surfaced post-season alongside the unsealed hidden truth. NOT a Vault read — it is the
+   * player's own `NO_NPC_PATHWAY` knowledge (it never reached any NPC in life and does not now). Empty
+   * when the player kept no confessional.
+   */
+  playerConfessionals: string[];
   /**
    * The hidden story in CHRONOLOGICAL order (#852): pre-season setup first, then the live hidden
    * layer ordered by its time marker. Each row carries an optional `ts` (a monotonic marker — absent
