@@ -908,6 +908,24 @@ function _ensureGlassWp() {
   return wp;
 }
 
+// PERF (#1315): the in-app mesh wallpaper is a paint-triggering background-position
+// animation under the whole backdrop-filter stack. It is gated in CSS (meshGradient.css)
+// to only RUN under the FULL glass tier (body.glass-full) AND while the tab is visible —
+// the Frosted/Normal tiers and a hidden tab freeze it to a still frame (mirroring the
+// particle field's still-frame-when-hidden decision in _renderGlassParticles). The tier
+// gate is pure CSS; document.hidden has no CSS selector, so we mirror it into a body class
+// here. Bound once, module-wide, on first mesh render.
+let _meshVisBound = false;
+function _bindMeshVisibility() {
+  if (_meshVisBound) return;
+  _meshVisBound = true;
+  const sync = () => {
+    try { document.body.classList.toggle('ow-bg-hidden', document.hidden === true); } catch (_) { /* noop */ }
+  };
+  try { document.addEventListener('visibilitychange', sync); } catch (_) { /* noop */ }
+  sync();
+}
+
 // Paint the shared login mesh-gradient as the #__wp wallpaper. We do TWO things
 // so the layer is both visually rich AND legible under adaptiveGlass:
 //   1) set #__wp's OWN background-color to the preset BASE — adaptiveGlass samples
@@ -919,6 +937,7 @@ function _ensureGlassWp() {
 function _renderGlassMesh(cfg) {
   const g = (cfg && cfg.gradient) || {};
   const wp = _ensureGlassWp();
+  _bindMeshVisibility();   // #1315 — mirror tab-visibility into body.ow-bg-hidden for the CSS pause
   const animate = !_meshReducedMotion();
   const el = mountMeshGradient(wp, {
     animate, preset: g.preset, speed: g.speed, intensity: g.intensity,
@@ -977,6 +996,7 @@ function _renderGlassParticles(cfg) {
 // clear). Used as the photo's graceful base layer.
 function _renderGlassMeshBaseInto(wp, cfg) {
   const g = (cfg && cfg.gradient) || {};
+  _bindMeshVisibility();   // #1315 — the photo's mesh base also animates; keep it gated
   const animate = !_meshReducedMotion();
   const el = mountMeshGradient(wp, {
     animate, preset: g.preset, speed: g.speed, intensity: g.intensity,

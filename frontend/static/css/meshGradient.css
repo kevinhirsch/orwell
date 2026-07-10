@@ -113,6 +113,25 @@
   --lbg-base: #3a2c52; --lbg-ray: #ffffff;
 }
 
+/* PERF (#1315) — the IN-APP glass wallpaper (mounted into #__wp) is a paint-triggering
+   background-position animation on a huge heavily-blurred fixed layer sitting UNDER the whole
+   backdrop-filter stack, so running it continuously is expensive. Gate it to only ANIMATE when
+   it's worth the cost: under the FULL glass tier (body.glass-full — the tier that actually
+   lenses/refracts it) AND while the tab is visible. The Frosted / Normal tiers and a hidden tab
+   freeze it to a STILL frame (mirrors the particle-field still-frame perf decision in theme.js —
+   _renderGlassParticles). Reduced-motion behaviour is unchanged: .is-animated is never added then,
+   and the @media rule below force-kills any residual animation regardless of play-state.
+   Scoped to #__wp so the LOGIN mesh (its own #login-bg-host, alone on screen) keeps animating.
+   document.hidden has no CSS selector, so theme.js mirrors it into body.ow-bg-hidden. */
+#__wp .login-bg-gradient.is-animated::before,
+#__wp .login-bg-gradient.is-animated::after {
+  animation-play-state: paused;
+}
+body.glass-full:not(.ow-bg-hidden) #__wp .login-bg-gradient.is-animated::before,
+body.glass-full:not(.ow-bg-hidden) #__wp .login-bg-gradient.is-animated::after {
+  animation-play-state: running;
+}
+
 /* Reduced motion — freeze to the STATIC gradient (Apple: no peripheral /
    repetitive animation). The .is-animated class is never added when reduced
    motion is on (login_bg.js / theme.js), and this belt-and-braces rule kills

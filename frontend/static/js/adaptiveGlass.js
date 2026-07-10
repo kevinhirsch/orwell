@@ -65,6 +65,12 @@
   var BUBBLE_LIGHT_RGB = [245, 246, 248];   // near-white frost tint over a BRIGHT wall
   var BUBBLE_DARK_RGB = [56, 60, 68];       // neutral dark frost tint (matches style.css default)
 
+  // The adaptive surfaces under the glass theme (kept in ONE place so the hot pass, the
+  // scoped mutation collector, and the standdown drop all agree): the RECEIVED chat
+  // bubbles (#744) + the welcome HERO (#763). Everything else (fixed light glass chrome)
+  // stands down. (Kept as `BUBBLE_ADAPTIVE + ", " + HERO_ADAPTIVE` — the source-pinned form.)
+  var ADAPTIVE_SEL = BUBBLE_ADAPTIVE + ", " + HERO_ADAPTIVE;
+
   // ── F-CONTRAST-1 (HIG Color / Materials; broadens #738 item 19) ───────────────
   // Secondary UI text — the `--fg-muted` token (de-facto #888) used for captions / gadget rows /
   // settings sub-labels — sits over the SAME fixed light glass the chrome does. adaptiveGlass
@@ -474,6 +480,33 @@
     return null;
   }
 
+  // PERF (#1315) — sample the backdrop behind `rect` ONCE for BOTH the luminance (L) and the
+  // average colour (rgb). The bubble path needs both (L picks polarity, rgb feeds the APCA
+  // composite); computing them in two passes doubled the getImageData work per bubble. The
+  // canvas path here is byte-identical to calling backdropLuminance + backdropAvgColor
+  // separately (same grid, same math); only the RARE fallbacks defer to those originals.
+  function _sampleBackdrop(rect) {
+    var vw = window.innerWidth || 1280, vh = window.innerHeight || 800;
+    var bd = buildBackdrop();
+    if (bd && bd.cv && !bd.tainted) {
+      var sx = bd.w / vw, sy = bd.h / vh, total = 0, rs = 0, gs = 0, bs = 0, n = 0;
+      for (var gy = 0; gy < SAMPLE_GRID; gy++) {
+        for (var gx = 0; gx < SAMPLE_GRID; gx++) {
+          var vx = rect.left + (rect.width * (gx + 0.5)) / SAMPLE_GRID;
+          var vy = rect.top + (rect.height * (gy + 0.5)) / SAMPLE_GRID;
+          var ix = clamp(Math.round(vx * sx), 0, bd.w - 1), iy = clamp(Math.round(vy * sy), 0, bd.h - 1);
+          try {
+            var d = bd.ctx.getImageData(ix, iy, 1, 1).data;
+            total += relLum(d[0], d[1], d[2]); rs += d[0]; gs += d[1]; bs += d[2]; n++;
+          } catch (_) {}
+        }
+      }
+      if (n) return { L: total / n, rgb: [Math.round(rs / n), Math.round(gs / n), Math.round(bs / n)] };
+    }
+    // Rare fallbacks (tainted cross-origin / no canvas): reuse the originals so behaviour matches.
+    return { L: backdropLuminance(rect), rgb: backdropAvgColor(rect) };
+  }
+
   // #744 — for a received bubble over a sampled backdrop, pick the polarity (per the existing
   // linear-Y flip), then ESCALATE this bubble's scrim alpha until the APCA(ink↔composited-surface)
   // contrast clears APCA_FLOOR (or we hit SCRIM_MAX). Returns { ink, frostRgb, scrimAlpha, lc }.
@@ -653,10 +686,45 @@
   // ── apply ───────────────────────────────────────────────────────────────────
   function isFrosted() { return !!(document.body && document.body.classList.contains("theme-frosted")); }
 
-  function applyTo(el) {
+  // ── PERF (#1315): scoped-pass dirty tracking ──────────────────────────────────
+  // The old pass re-walked EVERY .msg-ai on every scheduled tick — O(transcript) per streamed
+  // delta, dozens of times per reply. Now a "full" trigger (scroll/resize/theme/backdrop change —
+  // anything that moves what's behind the bubbles) marks ALL dirty, while a chat DOM mutation marks
+  // only the AFFECTED bubbles dirty. A scoped pass then touches just those, so streaming costs
+  // O(changed bubbles), not O(all). `_allDirty` short-circuits the set (a full pass supersedes it).
+  var _allDirty = true;   // the first pass is full (nothing sampled yet)
+  var _dirtyEls = null;   // Set of specific adaptive elements when NOT _allDirty
+  function _markAllDirty() { _allDirty = true; }
+  function _markElDirty(el) {
+    if (_allDirty || !el) return;
+    if (!_dirtyEls) _dirtyEls = new Set();
+    _dirtyEls.add(el);
+  }
+  // Resolve the adaptive element(s) a mutation touched — the closest .msg-ai / hero ANCESTOR of the
+  // record target, plus any adaptive elements the added subtree CONTAINS (a freshly-rendered bubble).
+  function _collectAdaptive(node) {
+    if (_allDirty || !node || node.nodeType !== 1) return;
+    try {
+      if (node.closest) {
+        var b = node.closest(BUBBLE_ADAPTIVE); if (b) _markElDirty(b);
+        var h = node.closest(HERO_ADAPTIVE); if (h) _markElDirty(h);
+      }
+      if (node.matches && node.matches(ADAPTIVE_SEL)) _markElDirty(node);
+      if (node.querySelectorAll) {
+        var found = node.querySelectorAll(ADAPTIVE_SEL);
+        for (var i = 0; i < found.length; i++) _markElDirty(found[i]);
+      }
+    } catch (_) {}
+  }
+
+  // PERF (#1315): `cachedRect` lets the hot pass read EVERY bubble's getBoundingClientRect in a
+  // single batched read phase (no read↔write layout thrash), then apply here without a fresh
+  // layout read. `presampled` ({L, rgb}) is the one-shot backdrop sample taken in that same read
+  // phase. Both are OPTIONAL — called bare (no cache), applyTo is standalone-correct as before.
+  function applyTo(el, cachedRect, presampled) {
     try {
       if (el.id && EXCLUDE_IDS[el.id]) return;
-      var r = el.getBoundingClientRect();
+      var r = cachedRect || el.getBoundingClientRect();
       // The hero text (esp. the one-line subtitle) is a THIN strip — a flat 24px floor
       // skipped .welcome-sub entirely (it stayed at the dark CSS default, unreadable over
       // a dark/busy wallpaper). Hero elements are text, so a thin sample is fine; relax the
@@ -664,7 +732,8 @@
       var heroEl = false; try { heroEl = el.matches(HERO_ADAPTIVE); } catch (_) {}
       var minH = heroEl ? 10 : 24;
       if (r.width < 24 || r.height < minH) return;
-      var L = backdropLuminance({ left: r.left, top: r.top, width: r.width, height: r.height });
+      var L = presampled ? presampled.L
+        : backdropLuminance({ left: r.left, top: r.top, width: r.width, height: r.height });
       if (L == null) {
         el.style.removeProperty("background-color");
         el.style.removeProperty("color"); el.style.removeProperty("text-shadow");
@@ -681,7 +750,8 @@
         // #744 — guarantee the transcript clears the APCA floor over ANY wallpaper. Sample the
         // backdrop COLOUR (not just L), pick polarity, then escalate THIS bubble's scrim alpha
         // until APCA(ink↔composited-surface) ≥ APCA_FLOOR. Frost-only, local, Vault-free.
-        var bg = backdropAvgColor({ left: r.left, top: r.top, width: r.width, height: r.height });
+        var bg = presampled ? presampled.rgb
+          : backdropAvgColor({ left: r.left, top: r.top, width: r.width, height: r.height });
         if (!bg) { // no readable backdrop colour → fall back to the CSS default (already floored at SCRIM_BASE)
           el.style.removeProperty("background-color"); el.style.removeProperty("color");
           el.style.removeProperty("text-shadow"); el.style.removeProperty("--ai-scrim-alpha");
@@ -728,7 +798,8 @@
       // halo. The CSS default is dark-ink+light-halo; we restate or flip it per backdrop.
       var isHero = false; try { isHero = el.matches(HERO_ADAPTIVE); } catch (_) {}
       if (isHero) {
-        var hbg = backdropAvgColor({ left: r.left, top: r.top, width: r.width, height: r.height });
+        var hbg = presampled ? presampled.rgb
+          : backdropAvgColor({ left: r.left, top: r.top, width: r.width, height: r.height });
         if (!hbg) {  // no readable wallpaper colour → let the CSS default stand
           el.style.removeProperty("color");
           el.style.removeProperty("-webkit-text-fill-color");
@@ -810,21 +881,55 @@
     // (isGlassFull is retained as a named helper for the source-pinned tests; the standdown is
     // keyed on theme-frosted, which covers BOTH tiers, so glass-full is a subset of it.)
     if (isFrosted() || isGlassFull()) {
-      // The adaptive surfaces under the glass theme: the RECEIVED chat bubbles (#744) AND
-      // the welcome HERO over the bare wallpaper (#763). Both flip ink polarity with the
-      // backdrop; everything else (the fixed light glass chrome) stands down.
-      var ADAPTIVE_SEL = BUBBLE_ADAPTIVE + ", " + HERO_ADAPTIVE;
-      _dropTagged(ADAPTIVE_SEL);      // chrome (+ anything non-adaptive) drops; bubbles + hero kept
-      buildBackdrop();                // unified backdrop canvas; bubbles + hero sample it
-      var nodes = document.querySelectorAll(ADAPTIVE_SEL);
-      for (var j = 0; j < nodes.length; j++) {
-        var el = nodes[j];
-        if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue;
-        applyTo(el);
+      // The adaptive surfaces under the glass theme: the RECEIVED chat bubbles (#744) AND the
+      // welcome HERO over the bare wallpaper (#763). Both flip ink polarity with the backdrop;
+      // everything else (the fixed light glass chrome) stands down.
+      //
+      // PERF (#1315): a "full" trigger (scroll/resize/theme/backdrop change → the backdrop behind
+      // the bubbles moved) re-samples every VISIBLE bubble; a chat DOM mutation re-samples only the
+      // bubbles it touched. So a streamed reply costs O(changed bubbles), not O(whole transcript).
+      var full = _allDirty;
+      _allDirty = false;   // consume it up front — a mutation mid-pass re-schedules a fresh one
+      var candidates;
+      if (full) {
+        // Chrome (+ anything non-adaptive) drops; bubbles + hero kept. Only a full pass needs this —
+        // a scoped pass touches no chrome, and its dirty bubbles are re-applied in place below.
+        _dropTagged(ADAPTIVE_SEL);      // uses `BUBBLE_ADAPTIVE + ", " + HERO_ADAPTIVE`
+        candidates = document.querySelectorAll(ADAPTIVE_SEL);
+      } else {
+        var pend = _dirtyEls; _dirtyEls = null;
+        candidates = [];
+        if (pend) pend.forEach(function (el) {
+          try { if (el.isConnected && el.matches(ADAPTIVE_SEL)) candidates.push(el); } catch (_) {}
+        });
       }
-      // F-CONTRAST-1 — floor the shared `--fg-muted` token against the fixed light glass (once per
-      // pass; only overrides when #888 actually misses the secondary-text floor over this backdrop).
-      _floorMutedToken();
+      if (candidates.length) {
+        buildBackdrop();   // unified backdrop canvas (cached); the samples below read it
+        // ── READ PHASE — layout reads ONLY (visibility + rect + viewport cull + one backdrop sample
+        // per bubble). No style writes here, so the batched getBoundingClientRect calls never force a
+        // per-element reflow (the read↔write thrash the old interleaved loop caused).
+        var vh = window.innerHeight || 800, margin = vh;   // one viewport of look-ahead proximity
+        var work = [];
+        for (var j = 0; j < candidates.length; j++) {
+          var el = candidates[j];
+          if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue;
+          var r = el.getBoundingClientRect();
+          // Viewport-proximity cap: skip bubbles far off-screen — the wallpaper is fixed, so they
+          // get re-sampled on the scroll that brings them near (and unstyled bubbles show the CSS
+          // floor, which is legible by construction). The hero is never culled (welcome, in view).
+          var hero = false; try { hero = el.matches(HERO_ADAPTIVE); } catch (_) {}
+          if (!hero && (r.bottom < -margin || r.top > vh + margin)) continue;
+          work.push([el, r, _sampleBackdrop({ left: r.left, top: r.top, width: r.width, height: r.height })]);
+        }
+        // ── WRITE PHASE — canvas reads + style writes only (no layout reads → no thrash).
+        for (var k = 0; k < work.length; k++) applyTo(work[k][0], work[k][1], work[k][2]);
+      }
+      if (full) {
+        // F-CONTRAST-1 — floor the shared `--fg-muted` token against the fixed light glass (only
+        // overrides when #888 misses the secondary-text floor). It reads the WHOLE-viewport backdrop,
+        // which only moves on a full trigger — so a scoped streaming pass leaves it untouched.
+        _floorMutedToken();
+      }
       return;
     }
 
@@ -856,32 +961,45 @@
     if (_t) return;
     _t = setTimeout(function () { _t = 0; pass(); }, DEBOUNCE_MS);
   }
+  // A "full" schedule: the backdrop behind the bubbles moved (scroll/resize/theme/backdrop) — every
+  // visible bubble must be re-sampled. Chat DOM mutations use _collectAdaptive (scoped) instead.
+  function fullSchedule() { _markAllDirty(); schedule(); }
 
   function init() {
     try {
-      schedule();
-      window.addEventListener("resize", schedule);
-      window.addEventListener("scroll", schedule, { passive: true, capture: true });
-      // re-sample when the theme or the backdrop changes (no new event — observe body).
-      var mo = new MutationObserver(schedule);
+      schedule();   // the first pass is full (_allDirty starts true)
+      window.addEventListener("resize", fullSchedule);
+      window.addEventListener("scroll", fullSchedule, { passive: true, capture: true });
+      // re-sample when the theme or the backdrop changes (no new event — observe body). Class/style
+      // flips + wallpaper add/remove all move the backdrop → a FULL re-sample.
+      var mo = new MutationObserver(fullSchedule);
       mo.observe(document.body, { attributes: true, attributeFilter: ["class", "style"], childList: true, subtree: false });
-      // re-sample when CHAT MESSAGES are added/stream in — the body observer is subtree:false,
-      // so a freshly-rendered received bubble (.msg-ai) would keep its default light-on-dark ink
-      // over a BRIGHT wallpaper until an unrelated scroll/resize fired. Observe #chat-history so
-      // the adaptive polarity flip lands as the bubble appears. Debounced (schedule), so streaming
-      // text doesn't thrash. (chat-history is static in index.html, so it exists at init.)
+      // re-sample when CHAT MESSAGES are added/stream in — the body observer is subtree:false, so a
+      // freshly-rendered received bubble (.msg-ai) would keep its default light-on-dark ink over a
+      // BRIGHT wallpaper until an unrelated scroll/resize fired. Observe #chat-history and mark ONLY
+      // the affected bubbles dirty (#1315 scoped pass) so a streamed reply doesn't re-walk the whole
+      // transcript. Debounced (schedule). (chat-history is static in index.html, so it exists at init.)
       var _chat = document.getElementById("chat-history");
       if (_chat) {
-        var cmo = new MutationObserver(schedule);
+        var cmo = new MutationObserver(function (muts) {
+          for (var i = 0; i < muts.length; i++) {
+            var m = muts[i];
+            if (m.addedNodes) for (var a = 0; a < m.addedNodes.length; a++) _collectAdaptive(m.addedNodes[a]);
+            var t = m.target;
+            if (t && t.nodeType === 1) _collectAdaptive(t);
+            else if (t && t.parentNode) _collectAdaptive(t.parentNode);
+          }
+          schedule();
+        });
         cmo.observe(_chat, { childList: true, subtree: true });
       }
       ["(prefers-reduced-transparency: reduce)", "(prefers-contrast: more)"].forEach(function (q) {
-        try { var mq = window.matchMedia(q); (mq.addEventListener ? mq.addEventListener : mq.addListener).call(mq, "change", schedule); } catch (_) {}
+        try { var mq = window.matchMedia(q); (mq.addEventListener ? mq.addEventListener : mq.addListener).call(mq, "change", fullSchedule); } catch (_) {}
       });
       // #744 — expose the APCA helpers + the floor so the browser-smoke probe can MEASURE the
       // resolved fg/bg pair clears the floor (and the source-pinned test can assert their presence).
       window.OrwellAdaptiveGlass = {
-        refresh: schedule, _pass: pass,
+        refresh: fullSchedule, _pass: pass,   // external refresh ⇒ re-sample everything (backdrop may have changed)
         apcaContrast: apcaContrast, compositeOver: compositeOver,
         resolveBubbleScrim: resolveBubbleScrim, APCA_FLOOR: APCA_FLOOR,
         supportsContrastColor: supportsContrastColor,   // #738-19 — Safari contrast-color() PE probe
