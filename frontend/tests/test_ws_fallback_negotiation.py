@@ -210,6 +210,10 @@ def test_negotiation_flag_gate_handshake_and_downgrade_cursor():
 WS = _read("static", "js", "orwellWs.js")
 PRESENCE = _read("static", "js", "orwellPresence.js")
 STATUS = _read("static", "js", "orwellStatusPanel.js")
+NIGHT = _read("static", "js", "orwellNightStatus.js")
+ROOMSTRIP = _read("static", "js", "orwellRoomStrip.js")
+DEALS = _read("static", "js", "orwellDeals.js")
+SEASON = _read("static", "js", "orwellSeasonProgress.js")
 
 
 def test_flag_defaults_off_and_gates_the_upgrade_attempt():
@@ -243,3 +247,24 @@ def test_hud_gadgets_cancel_their_polls_when_ws_is_active():
     # The reschedule is guarded — the timer does not re-arm while WS is active.
     assert "if (!_wsActive()) timer = setTimeout(tick" in PRESENCE
     assert "if (!_wsActive()) timer = setTimeout(tick" in STATUS
+
+
+def test_ambient_hud_gadgets_cancel_their_polls_when_ws_is_active():
+    # Batch 1 (pollkill): the four one-poll ambient gadgets stand their poll down in WS mode and
+    # resume on fallback — same guard #1284 applied to presence/status. Each keeps its permanent
+    # SSE/poll fallback and its `orwell:gamechanged` push refresh intact.
+    for src, name in (
+        (NIGHT, "nightfall"),
+        (ROOMSTRIP, "room-strip"),
+        (DEALS, "deals"),
+        (SEASON, "season-progress"),
+    ):
+        assert "_wsActive()" in src, f"{name} must gate its poll on the WS-active check"
+        assert "orwell:ws-active" in src and "orwell:ws-inactive" in src, \
+            f"{name} must listen for the WS mode edges"
+    # The reschedule is guarded — the timer does not re-arm while WS is active (the two tick-in-
+    # finally gadgets re-arm `timer`; the two start()-loop gadgets re-arm `timer`/`_timer`).
+    assert "if (!_wsActive()) timer = setTimeout(tick" in NIGHT
+    assert "if (!_wsActive()) timer = setTimeout(tick" in ROOMSTRIP
+    assert "if (!_wsActive()) timer = setTimeout(tick" in DEALS
+    assert "if (!_wsActive()) _timer = setTimeout(tick" in SEASON

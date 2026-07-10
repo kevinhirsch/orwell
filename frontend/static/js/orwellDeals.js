@@ -29,6 +29,15 @@
   let _shown = false; // kept a real game's panel up through a transient hiccup (U5)
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
 
+  // WS Phase-1 (§4): when the multiplexed socket is live the server PUSHES a `state` frame on
+  // every board change; platform.js relays it to the one `orwell:gamechanged` dispatcher, which
+  // triggers an edge refresh below. So we cancel the 20s periodic TIMER in WS mode and stay
+  // edge-triggered (fail-soft: any doubt ⇒ keep polling). The fallback/SSE path still polls.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+
   // The engine's deal kinds (src/ports/GameSession.ts MakeDealReq.kind) → player-facing label.
   // No number, no lean — just what KIND of promise it is.
   // SG-12: "target-other" is a ONE-WAY spare-the-partner promise (`src/domain/deal.ts`
@@ -209,13 +218,20 @@
     if (timer) clearInterval(timer);
     const tick = async () => {
       if (!document.hidden) await refresh(); // C18: a hidden tab polls nothing
-      timer = setTimeout(tick, _pollDelay());
+      // In WS mode the `state` push (via orwell:gamechanged) supersedes the poll —
+      // don't re-arm the periodic timer, just stay edge-triggered.
+      if (!_wsActive()) timer = setTimeout(tick, _pollDelay());
     };
-    timer = setTimeout(tick, _pollDelay());
+    if (!_wsActive()) timer = setTimeout(tick, _pollDelay());
   }
 
   window.orwellRefreshDeals = refresh;
   window.addEventListener("orwell:gamechanged", refresh);
+  // WS Phase-1 (§4/§6): cancel the periodic poll the instant the socket goes live; resume
+  // polling if it falls back to SSE. start() re-arms the timer only while !_wsActive(), so
+  // re-running it after a downgrade restores the cadence.
+  window.addEventListener("orwell:ws-active", () => { if (timer) { clearTimeout(timer); timer = null; } });
+  window.addEventListener("orwell:ws-inactive", () => { _failures = 0; if (timer) { clearTimeout(timer); timer = null; } start(); });
   ready(() => {
     if (document.body && document.body.dataset.gameBuild !== "1") return; // game-build gated
     start();
