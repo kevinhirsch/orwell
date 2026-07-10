@@ -1000,7 +1000,7 @@
   // cadence as a backstop. This deliberately does NOT call rearmFromStatus (which clears
   // _userDismissed) — it surfaces a pending ONLY when the player hasn't dismissed it and no card
   // is already up, so it never re-nags a waved-away card. Fail-open everywhere.
-  setInterval(async () => {
+  async function _backstopPending() {
     try {
       if (document.getElementById(CARD_ID)) return;    // a card is already showing
       if (!document.getElementById("chat-history")) return;
@@ -1024,7 +1024,30 @@
     // seam never fires and only this poll catches it). Tighten to ~2.5s so a player-owned pending the
     // chat narrated past appears almost immediately. Still respects an explicit dismissal (the
     // per-signature guard above) and short-circuits when a card is already up — no extra nag, no churn.
-  }, 2500);
+  }
+  // WS Phase-1 (§4): when the multiplexed socket is LIVE the server PUSHES a `state` frame on every
+  // board change (a surfacing pending IS a board change); platform.js relays it to the ONE
+  // `orwell:gamechanged` dispatcher, which already runs `rearmFromStatus` above — and that surfaces
+  // the pending (respecting the same per-signature dismissal). So this 2.5s backstop STANDS DOWN in
+  // WS mode and stays edge-triggered. Off/fallback ⇒ it is the PERMANENT backstop (without WS,
+  // `orwell:gamechanged` fires only on a LOCAL mutating tool, so a narrated-past / cross-device
+  // pending would otherwise sit unreachable until a reload). Fail-soft: any doubt ⇒ keep polling.
+  function _wsActive() {
+    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
+    catch (_) { return false; }
+  }
+  let _backstopTimer = null;
+  function _startBackstop() {
+    if (_backstopTimer) { clearInterval(_backstopTimer); _backstopTimer = null; }
+    if (!_wsActive()) _backstopTimer = setInterval(_backstopPending, 2500);
+  }
+  _startBackstop();
+  // Cancel the poll the instant the socket goes live; resume it if it falls back to SSE
+  // (_startBackstop re-arms only while !_wsActive()).
+  window.addEventListener("orwell:ws-active", () => {
+    if (_backstopTimer) { clearInterval(_backstopTimer); _backstopTimer = null; }
+  });
+  window.addEventListener("orwell:ws-inactive", _startBackstop);
 
   window.addEventListener("orwell:pending", (e) => {
     try {
