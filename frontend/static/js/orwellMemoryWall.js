@@ -137,7 +137,8 @@
         border-bottom: 1px solid var(--border, #355a66);
       }
       body.theme-frosted #orwell-memory .omw-group-hd { border-bottom-color: rgba(255,255,255,.14); }
-      /* one fact line — my own plain markup (TODO(M3-6/M4 unify): adopt orwellFactLine.js) */
+      /* one fact line — the glyph + known/belief rail box wrapping a shared OrwellFactLine row
+         (the fact's text + qualitative source line + belief italic all come from that renderer). */
       #orwell-memory .omw-fact {
         display: flex; align-items: flex-start; gap: .4rem; margin: .28rem 0;
         background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
@@ -148,13 +149,8 @@
       #orwell-memory .omw-known  { border-left-color: color-mix(in srgb, #4caf50 55%, var(--border, #355a66)); }
       #orwell-memory .omw-belief { border-left-style: dashed; border-left-color: color-mix(in srgb, #d0a24a 60%, var(--border, #355a66)); }
       #orwell-memory .omw-glyph { flex: 0 0 auto; opacity: .8; font-size: .82rem; line-height: 1.4; }
-      #orwell-memory .omw-body { flex: 1; min-width: 0; }
-      #orwell-memory .omw-content { color: var(--fg, #9cdef2); white-space: normal; overflow-wrap: anywhere; }
-      #orwell-memory .omw-belief .omw-content { font-style: italic; }
-      #orwell-memory .omw-src {
-        display: block; font-size: .66rem; opacity: .62; text-transform: uppercase;
-        letter-spacing: .04em; margin-top: .12rem;
-      }
+      /* the shared row fills the box beside the glyph; it owns the text/source layout + belief italic. */
+      #orwell-memory .omw-fact .ofl-row { flex: 1; min-width: 0; padding: 0; border-bottom: none; }
       #orwell-memory .omw-empty { opacity: .7; font-size: .8rem; line-height: 1.5; padding: .4rem 0; }
       @media (max-width: 768px) { #orwell-memory { width: auto !important; max-width: none !important; } }
     `;
@@ -210,25 +206,25 @@
     return order.map((name) => ({ name, facts: byName.get(name) }));
   }
 
-  // Build ONE fact line as plain markup. Deliberately NOT a shared component yet —
-  // TODO(M3-6/M4 unify): adopt orwellFactLine.js (owned by the M4-1 dossier lane) once it lands.
+  // Build ONE fact line by composing the shared OrwellFactLine row (M4-1's renderer, owned by the
+  // dossier lane) — it owns the fact text + the qualitative source line + the belief italic. The
+  // Memory Wall wraps that row with its own glyph + the known/belief rail box, its scannability
+  // affordance. A belief is an attributed claim, never truth-flagged: the source label + the
+  // italic/dashed rail carry that it's "what you heard", with no verified/false marker and no number.
   function factLine(item) {
     const meta = sourceMeta(item.source);
     const row = document.createElement("div");
     row.className = "omw-fact " + (meta.firsthand ? "omw-known" : "omw-belief");
-    // A belief is an attributed claim, never truth-flagged — the source label + the italic/dashed
-    // treatment carry that it's "what you heard", with no verified/false marker and no number.
     row.title = meta.firsthand ? "Something you know firsthand" : "Something you were told — their word for it";
     const glyph = document.createElement("span");
     glyph.className = "omw-glyph"; glyph.setAttribute("aria-hidden", "true");
     glyph.textContent = meta.glyph;
-    const body = document.createElement("div");
-    body.className = "omw-body";
-    const c = document.createElement("span");
-    c.className = "omw-content"; c.textContent = String(item.content || "");
-    const src = document.createElement("span");
-    src.className = "omw-src"; src.textContent = meta.label;
-    body.appendChild(c); body.appendChild(src);
+    // meta.label is ALREADY qualitative ("You saw this yourself", "Nominee told you") — never a number.
+    const body = window.OrwellFactLine.row({
+      text: String(item.content || ""),
+      source: meta.label,
+      belief: !meta.firsthand,
+    });
     row.appendChild(glyph); row.appendChild(body);
     return row;
   }
