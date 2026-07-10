@@ -633,8 +633,10 @@ import { onNarrowChange } from './platform.js';
       // monogram otherwise (face()'s own sanctioned fallback) — never forced to monogram-only.
       const cached = window.OrwellMonogram.portraitFor ? window.OrwellMonogram.portraitFor(card.id) : null;
       // Repaint only when identity/status/met/portrait changed — a loaded tile is never rebuilt
-      // (no flicker), but a portrait landing mid-premiere DOES change the sig so the tile upgrades.
-      const sig = card.name + "|" + card.status + "|" + (met ? "1" : "0") + "|" + (cached && cached.portrait ? "1" : "0");
+      // (no flicker), but a portrait landing OR being regenerated mid-premiere DOES change the
+      // sig so the tile upgrades (the URL itself is in the sig — portrait_ref cache-busts with a
+      // per-cast epoch, so a re-shoot changes the URL; greptile review on #1328).
+      const sig = card.name + "|" + card.status + "|" + (met ? "1" : "0") + "|" + ((cached && cached.portrait) || "");
       if (tile._owSig !== sig) {
         tile._owSig = sig;
         tile.innerHTML = "";
