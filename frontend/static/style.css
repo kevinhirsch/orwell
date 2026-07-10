@@ -36940,8 +36940,11 @@ body.theme-frosted .og-card {
     color-mix(in srgb, var(--fg, #fff) 10%, transparent) 0%,
     color-mix(in srgb, var(--fg, #fff)  3%, transparent) 24%,
     transparent 58%) !important;
-  backdrop-filter: blur(32px) saturate(200%) brightness(1.05) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(200%) brightness(1.05) !important;
+  /* #1316 frosted tightening: 32px -> 28px. A crisper card face (still deeply frosted,
+     just less of the perf cost of a very wide blur radius) — the ONE-LIGHT-GLASS fill
+     that actually paints these cards is untouched (--ow-glass-opacity stays pinned). */
+  backdrop-filter: blur(28px) saturate(200%) brightness(1.05) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.05) !important;
   border-color: color-mix(in srgb, var(--fg) 28%, transparent) !important;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 18%, transparent),
               0 4px 14px rgba(0,0,0,0.18) !important;
@@ -36958,8 +36961,11 @@ body.theme-frosted .chat-input-bar {
     color-mix(in srgb, var(--fg, #fff)  9%, transparent) 0%,
     color-mix(in srgb, var(--fg, #fff)  3%, transparent) 26%,
     transparent 62%) !important;
-  backdrop-filter: blur(38px) saturate(200%) brightness(1.05) !important;
-  -webkit-backdrop-filter: blur(38px) saturate(200%) brightness(1.05) !important;
+  /* #1316 frosted tightening: 38px -> 34px, matching the .og-card trim above (still the
+     widest blur on-screen besides the pinned .ow-window 44px — the composer is the surface
+     the player reads most, so it keeps more blur than the cards). */
+  backdrop-filter: blur(34px) saturate(200%) brightness(1.05) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(200%) brightness(1.05) !important;
   border-color: color-mix(in srgb, var(--fg) 30%, transparent) !important;
   box-shadow: var(--win-shadow),
               inset 0 1px 0 color-mix(in srgb, var(--fg) 18%, transparent) !important;
@@ -40115,8 +40121,12 @@ body.theme-frosted .msg-ai {
      floor: dark frost + white ink clears APCA Lc 60 over a mid-tone wall, while a clear/dark wall
      still reads as glass (the wallpaper COLOR still blooms through the saturate). */
   --ai-scrim-alpha: 0.46;
-  -webkit-backdrop-filter: blur(22px) saturate(180%) !important;
-  backdrop-filter: blur(22px) saturate(180%) !important;
+  /* #1316 frosted tightening: 22px -> 18px. --ai-scrim-alpha (the legibility FLOOR) is left at
+     its pinned 0.46 default on purpose — adaptiveGlass.js's SCRIM_BASE mirrors that exact
+     number for its APCA escalation math (`frontend/static/js/adaptiveGlass.js`, out of this
+     change's scope), so only the blur radius moves, not the opacity floor. */
+  -webkit-backdrop-filter: blur(18px) saturate(180%) !important;
+  backdrop-filter: blur(18px) saturate(180%) !important;
   /* neutral translucent frost — the high saturate lets the wallpaper COLOR bloom
      through (Apple's bubbles pick up the wall), while the floored dark scrim keeps white
      text legible across any backdrop (over a DARK wall the wall does the work; over a
@@ -40127,11 +40137,16 @@ body.theme-frosted .msg-ai {
   box-shadow: none !important;
 }
 body.theme-frosted .msg-user {
-  -webkit-backdrop-filter: blur(22px) saturate(170%) !important;
-  backdrop-filter: blur(22px) saturate(170%) !important;
+  /* #1316 frosted tightening: 22px -> 18px blur (matches .msg-ai) + 0.80 -> 0.85 fill
+     (a touch more opaque — crisper sent-bubble edge, still translucent glass). Not JS-
+     coupled (adaptiveGlass.js never adapts .msg-user's scrim — sent bubbles are the fixed
+     blue+white pairing) and not pinned to an exact alpha (only the `rgba(10,132,255` hue
+     prefix is pinned — `test_0744_transcript_legibility.py` / `test_liquid_glass.py`). */
+  -webkit-backdrop-filter: blur(18px) saturate(170%) !important;
+  backdrop-filter: blur(18px) saturate(170%) !important;
   /* the iMessage system blue, translucent so the wallpaper still tints through — a flat
-     fill (slightly more opaque now that there's no depth gradient), no rim. */
-  background-color: rgba(10,132,255,0.80) !important;
+     fill, no rim. */
+  background-color: rgba(10,132,255,0.85) !important;
   background-image: none !important;
   border: none !important;
   box-shadow: none !important;
@@ -40518,25 +40533,33 @@ body.theme-frosted #welcome-screen .welcome-sub .setup-trigger-link {
    data-adaptive-ink attribute is the source of truth at runtime. */
 
 /* ── The new background-image controls (theme.js builds these ids) ────────────
-   #theme-glass-tier — a clean 3-way SEGMENTED control (Apple segmented_control_poster:
-   a translucent capsule TRACK with a bright glass SELECTED pill; active uses the
-   sanctioned system-blue). #theme-bg-source / -url / -file — standard glass form
-   controls consistent with the kit. Scoped to body.theme-frosted. */
-body.theme-frosted #theme-glass-tier {
+   .theme-seg — a clean SEGMENTED control (Apple segmented_control_poster: a translucent
+   capsule TRACK with a bright SELECTED pill; active uses the sanctioned system-blue).
+   Shared by every theme.js segmented control: #theme-glass-tier (Customize -> Font & Layout,
+   3-way full|frosted|normal), #theme-glass-tier-quick (#1316 — the Browse-tab picker-level
+   quick toggle, the same 3-way ladder), and #theme-glass-tint (Clear|Tinted). One rule set,
+   so a future segmented control on this window is styled by construction.
+
+   Greptile P1 (#1343): these BASE rules are deliberately theme-INDEPENDENT (NOT scoped to
+   body.theme-frosted). The control's own job is to switch the glass tier — under the
+   frosted scoping, clicking Flat/normal removed body.theme-frosted and instantly stripped
+   the layout/affordance off the very control that picked it (and off #theme-glass-tier +
+   #theme-glass-tint). The base is token-driven (var(--fg)/var(--border) washes — 0114-safe:
+   a subtle fg wash composites over the theme's own panel) and carries NO glass material;
+   the frosted-only glassy accent (backdrop-filter + luminous rim) layers on top below and
+   may come and go with the tier without ever costing the control its shape. */
+.theme-seg {
   display: inline-flex;
   align-items: stretch;
   gap: 2px;
   padding: 3px;
   border-radius: var(--ow-radius-pill, 999px);
   background-color: color-mix(in srgb, var(--fg) 10%, transparent);
-  border: 1px solid rgba(255,255,255,0.14);
-  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
-  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
+  border: 1px solid var(--border, rgba(128,128,128,0.35));
 }
-body.theme-frosted #theme-glass-tier > button,
-body.theme-frosted #theme-glass-tier > .seg,
-body.theme-frosted #theme-glass-tier > label {
+.theme-seg > button,
+.theme-seg > .seg,
+.theme-seg > label {
   flex: 1 1 0;
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 30px; padding: 4px 14px;
@@ -40547,18 +40570,38 @@ body.theme-frosted #theme-glass-tier > label {
   cursor: pointer; white-space: nowrap;
   transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
 }
-body.theme-frosted #theme-glass-tier > button:hover,
-body.theme-frosted #theme-glass-tier > .seg:hover {
+.theme-seg > button:hover,
+.theme-seg > .seg:hover {
   background-color: color-mix(in srgb, var(--fg) 8%, transparent);
 }
-/* the SELECTED segment = the bright glass pill, sanctioned system-blue (active state). */
-body.theme-frosted #theme-glass-tier > button[aria-pressed="true"],
-body.theme-frosted #theme-glass-tier > button.active,
-body.theme-frosted #theme-glass-tier > .seg.active,
-body.theme-frosted #theme-glass-tier > input:checked + label {
+/* the SELECTED segment = the bright pill, sanctioned system-blue (active state) — the
+   same non-text accent in every theme (it survives the frosted class coming and going). */
+.theme-seg > button[aria-pressed="true"],
+.theme-seg > button.active,
+.theme-seg > .seg.active,
+.theme-seg > input:checked + label {
   background: var(--ow-ios-blue, #0a84ff);
   color: #fff;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.30), 0 2px 8px rgba(0,0,0,0.22);
+}
+/* FROSTED-ONLY accent layer: the glass material + luminous rim on the capsule track.
+   Purely additive — dropping body.theme-frosted (the Flat tier) falls back to the
+   token-driven base above, never to an unstyled control. */
+body.theme-frosted .theme-seg {
+  border-color: rgba(255,255,255,0.14);
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%) brightness(1.12));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
+}
+/* The quick control's label/control row on the Browse tab — theme-independent LAYOUT only
+   (flex placement, no material), so it is deliberately unscoped: one rule serves every
+   theme, frosted or not (CodeRabbit on #1343: the frosted-scoped duplicate selector was
+   redundant). */
+.theme-quick-glass-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 /* the bg-source SELECT + the image URL INPUT — glass form controls (vibrant fills,
@@ -40629,7 +40672,7 @@ body.has-wallpaper {
    and the segmented control keeps its blue selected state (a sanctioned non-text
    accent, not glass) — so it stays legible when glass is stripped. */
 @media (prefers-reduced-transparency: reduce) {
-  body.theme-frosted #theme-glass-tier,
+  body.theme-frosted .theme-seg,
   body.theme-frosted #theme-bg-source,
   body.theme-frosted #theme-bg-image-url,
   body.theme-frosted #theme-bg-image-file::file-selector-button {

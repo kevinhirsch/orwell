@@ -656,6 +656,31 @@
 
     <!-- Tab: Browse themes -->
     <div id="theme-tab-browse" class="theme-tab-panel">
+      <!-- #1316 — a PROMINENT, picker-level glass/frosted control for the ACTIVE theme, so
+           Light/Dark (and every other preset) can flip material without a detour into
+           Customize -> Font & Layout. A compact 3-way matching the Customize ladder
+           (#theme-glass-tier) exactly — Glass (full) / Frosted / Flat (normal) — so EVERY
+           tier is representable here (Greptile P2 on PR #1343: a 2-way control couldn't
+           show the active state when Customize set 'normal'; both segments rendered
+           aria-pressed="false"). Bound to the SAME tier as #theme-glass-tier (theme.js
+           keeps both controls' dataset.value + aria-pressed in lockstep) and persists
+           through the identical applyGlassTier + save() path — no new storage shape.
+           Frosted is the default (the visual emphasis) for every preset except the
+           dedicated `glass` theme (defaultGlassTierFor). -->
+      <div class="admin-card theme-quick-glass-card">
+        <div class="theme-quick-glass-row">
+          <label class="theme-fd-label" for="theme-glass-tier-quick">Glass material</label>
+          <div id="theme-glass-tier-quick" class="theme-seg" role="group"
+               aria-label="Glass material for the active theme" data-value="frosted">
+            <button type="button" class="theme-seg-btn" data-tier="full" aria-pressed="false"
+                    title="Liquid Glass — material + refraction">Glass</button>
+            <button type="button" class="theme-seg-btn" data-tier="frosted" aria-pressed="true"
+                    title="Frosted — blur material only (default)">Frosted</button>
+            <button type="button" class="theme-seg-btn" data-tier="normal" aria-pressed="false"
+                    title="No glass — flat, solid chrome">Flat</button>
+          </div>
+        </div>
+      </div>
       <div class="admin-card">
         <!-- HIG F-A11Y-3: this window's own dialog title (the .modal-header h4 above)
              sits at level 4, so these nested section headings are real <h5> elements —
