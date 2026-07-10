@@ -153,7 +153,11 @@ function edgeSubs(sock) {
     // Socket drops while live → the client schedules a reconnect (bounded backoff).
     firstSock.readyState = 3; firstSock.onclose();
     assert(WS.mode() === "negotiating", "a live drop ⇒ reconnect (negotiating), got " + WS.mode());
-    await wait(700);   // first backoff is ~500ms → a NEW socket is constructed
+    // First backoff is ~500ms → a NEW socket is constructed. Poll to a bounded deadline
+    // instead of a fixed sleep, so a slow CI runner that delays the timer past a hard
+    // wait isn't flaky (the following assert still fails clearly if no new socket appears).
+    const deadline = Date.now() + 5000;
+    while (lastSock === firstSock && Date.now() < deadline) await wait(50);
     assert(lastSock !== firstSock, "reconnect must construct a NEW socket");
     await handshake(301);
     const re = edgeSubs(lastSock);
