@@ -1435,31 +1435,49 @@ async def _llm_call_async_traced(
         except Exception:
             pass
 
+    # 0112: the Vault-free observability metadata for the OpenRouter request (None ⇒ no key ⇒
+    # byte-identical when observability is disabled — the default). Built once, threaded to the impl.
+    _obs_md = llm_trace.maybe_request_metadata(session=session, call_class=call_class)
+
+    async def _emit_obs(status: str, latency_ms: int, text: str = "") -> None:
+        # 0112: the single emit point for the non-streaming path. Fail-soft / default-off inside.
+        try:
+            await llm_trace.emit_trace(
+                user=user, session=session, call_class=call_class, model=model,
+                usage=_usage, applied_max_tokens=max_tokens,
+                finish_reason=_meta.get("finish_reason"), tool_call_seen=False,
+                latency_ms=latency_ms, status=status, completion=text)
+        except Exception:
+            pass
+
+    started = time.time()
     if not llm_trace.enabled():
         text = await _llm_call_async_impl(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
             headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
-            policy=policy, usage_sink=_usage, meta_sink=_meta)
+            policy=policy, usage_sink=_usage, meta_sink=_meta, obs_metadata=_obs_md)
         _meter()
+        await _emit_obs("ok", int((time.time() - started) * 1000), text)
         return text
-    started = time.time()
     try:
         text = await _llm_call_async_impl(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
             headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
-            policy=policy, usage_sink=_usage, meta_sink=_meta)
+            policy=policy, usage_sink=_usage, meta_sink=_meta, obs_metadata=_obs_md)
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens, ok=True, duration_ms=int((time.time() - started) * 1000),
             response={"text": text, "reasoning": _meta.get("reasoning") or "",
                       "finishReason": _meta.get("finish_reason"), "usage": _usage or None})
         _meter()
+        await _emit_obs("ok", int((time.time() - started) * 1000), text)
         return text
     except Exception as e:
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens, ok=False, duration_ms=int((time.time() - started) * 1000),
             response={"error": {"type": type(e).__name__, "message": str(e)[:500]}})
+        await _emit_obs("error", int((time.time() - started) * 1000))
         raise
 
 
@@ -1476,12 +1494,17 @@ async def _llm_call_async_impl(
     policy: Optional[Dict] = None,
     usage_sink: Optional[Dict] = None,
     meta_sink: Optional[Dict] = None,
+    obs_metadata: Optional[Dict] = None,
 ) -> str:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging.
 
     ``meta_sink`` (optional): when provided, the parsed response's ``reasoning`` and terminal
     ``finish_reason`` are written into it so the caller can record them in the I/O trace (G2 —
-    "preserve ALL I/O"). Untouched when absent ⇒ byte-identical."""
+    "preserve ALL I/O"). Untouched when absent ⇒ byte-identical.
+
+    ``obs_metadata`` (optional, feature 0112): a Vault-free correlation object attached as the
+    OpenRouter/OpenAI ``metadata`` field so OpenRouter Broadcast forwards correlatable traces.
+    ``None`` (observability disabled — the default) ⇒ the key is never added ⇒ byte-identical."""
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
@@ -1536,6 +1559,10 @@ async def _llm_call_async_impl(
         _apply_reasoning_budget(payload, provider, model, policy)
         if provider == "openrouter" and usage_sink is not None:
             payload["usage"] = {"include": True}
+        # 0112: attach the Vault-free correlation metadata (only when observability is enabled;
+        # None ⇒ the key is never added ⇒ byte-identical). OpenRouter forwards it via Broadcast.
+        if obs_metadata:
+            payload["metadata"] = obs_metadata
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
@@ -1645,7 +1672,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                      session_id: Optional[str] = None, pin_provider: bool = False,
                      provider_opts: Optional[Dict] = None,
                      response_format: Optional[Dict] = None,
-                     tool_choice: Optional[object] = None):
+                     tool_choice: Optional[object] = None,
+                     metadata: Optional[Dict] = None):
     """Stream LLM responses with improved error handling.
 
     ``response_format`` (optional): an OpenAI/OpenRouter-style structured-output request
@@ -1735,6 +1763,10 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                 _prov["allow_fallbacks"] = False
             if _prov:
                 payload["provider"] = _prov
+        # 0112: attach the Vault-free correlation metadata (only when observability is enabled;
+        # None ⇒ the key is never added ⇒ byte-identical). OpenRouter forwards it via Broadcast.
+        if metadata:
+            payload["metadata"] = metadata
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
@@ -2364,12 +2396,41 @@ async def _stream_llm_with_fallback_traced(candidates, messages, **kwargs):
     bytes UNCHANGED. The trace is best-effort and never alters the stream; when the
     trace is disabled this is a near-zero passthrough."""
     from src import llm_trace
-    if not llm_trace.enabled():
-        async for chunk in _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
-            yield chunk
-        return
+    _obs_session = kwargs.get("session_id")
+    # 0112: attach the Vault-free correlation metadata to the OpenRouter request (only when
+    # observability is enabled; None ⇒ the key is never threaded ⇒ byte-identical). Independent of
+    # the I/O-trace gate below, so tagging works even with the I/O trace off.
+    _obs_md = llm_trace.maybe_request_metadata(session=_obs_session)
+    if _obs_md is not None and "metadata" not in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["metadata"] = _obs_md
     cands = _dedupe_candidates(candidates)
     requested = cands[0][1] if cands else "(none)"
+
+    async def _emit_obs_stream(resp: dict, latency_ms: int) -> None:
+        # 0112: the single emit point for the streaming (narration/agent) path. Fail-soft inside.
+        try:
+            await llm_trace.emit_trace(
+                session=_obs_session, model=resp.get("answeredBy") or requested,
+                usage=resp.get("usage"), applied_max_tokens=kwargs.get("max_tokens"),
+                finish_reason=resp.get("finishReason"),
+                tool_call_seen=bool(resp.get("toolCalls")),
+                latency_ms=latency_ms,
+                status="error" if resp.get("error") is not None else "ok",
+                completion=resp.get("text") or "")
+        except Exception:
+            pass
+
+    if not llm_trace.enabled():
+        acc0 = llm_trace.StreamAccumulator()
+        started0 = time.time()
+        try:
+            async for chunk in _stream_llm_with_fallback_impl(candidates, messages, **kwargs):
+                acc0.observe(chunk)
+                yield chunk
+        finally:
+            await _emit_obs_stream(acc0.response(), int((time.time() - started0) * 1000))
+        return
     acc = llm_trace.StreamAccumulator()
     started = time.time()
     try:
@@ -2385,6 +2446,7 @@ async def _stream_llm_with_fallback_traced(candidates, messages, **kwargs):
             response=resp, ok=resp.get("error") is None,
             duration_ms=int((time.time() - started) * 1000),
         )
+        await _emit_obs_stream(resp, int((time.time() - started) * 1000))
 
 
 async def _stream_llm_with_fallback_impl(candidates, messages, **kwargs):

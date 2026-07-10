@@ -54,7 +54,7 @@ function requireShape(name: string, args: Record<string, unknown>): void {
   };
   switch (name) {
     case "recordInteraction":
-      guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq (no idempotency key here)
+      guardSyncFields(true); // 0065 Part A CAS + Part B at-most-once idempotencyKey (A10/#591 — the FE re-drives a fold-bearing scene after a stale-409; the key makes that at-most-once, so a concurrent re-drive can't double-fold)
       if (!isStr(args["initiator"])) refuse("initiator", "a houseguest id (string)");
       if (!isStrArray(args["witnessSet"])) refuse("witnessSet", "an array of houseguest ids");
       if (!isStr(args["content"])) refuse("content", "a non-empty string");

@@ -2331,3 +2331,52 @@ companion `docs/audits/2026-07-06-closure-session.md` summary.
 - **Deferred POLISH waves** (the ~200 Minor/Polish residual-audit items across microcopy,
   prompt-craft, engine-texture, FE-python-sync lanes in `docs/audits/2026-07-03-final-pre-ship-audit/`)
   — parked pending owner go-ahead; not this session's job.
+
+## 2026-07-10 — doc reconciliation (what shipped since the 2026-07-06 tail)
+
+Docs-only pass. The 2026-07-06 owner-action tail above (written before this work landed) is
+superseded on two points, and several tracked open items closed between 2026-07-07 and 2026-07-10.
+
+**Closed / shipped since 2026-07-06:**
+- **0108 (real-model golden-path gate) — now BUILT (2026-07-07) + ARMED (2026-07-09).** The
+  "still spec-only" line in the tail above was true at 2026-07-06 only; the record/replay seam +
+  `golden-path` PR job + `golden-nightly` re-record shipped 2026-07-07, and the first real-model
+  fixture was committed/regenerated (#1251) so the `golden-path` job replays it key-free and is
+  blocking via `ci-gate`. (`docs/features/README.md` row 0108 is authoritative.)
+- **Ship-gate F5 (realtime two-window mirror parity) — CLOSED + CI-gated (#1276, 2026-07-09).** The
+  former #1 release blocker was briefly re-flagged RED (#1269) then fixed AND wired into `ci-gate`
+  as a required check the same day. No longer a launch-blocker.
+- **ADR-0010 token-economy #1 + #3 — DONE.** Per-class `max_tokens` runtime-editable
+  (`frontend/src/token_policy.py`, `max_tokens_budget`) and `appliedMaxTokens`/`finishReason` in the
+  token ledger (`frontend/src/orwell_token_ledger.py`). Still open: #2 (model-aware reasoning sizing)
+  and #4 (`Continue ▸` in chat mode).
+- **Real-time / real-world clock purge (#1282, 2026-07-10, PO ruling).** The wall-clock
+  `GameWatcher`/`SystemClock` surface is **deleted, not disabled**; the house lives only on the
+  player's play-clock (one bounded off-screen tick per committed turn, fixed-epoch `LogicalClock`).
+  Feature 0035 (live off-screen life / running watcher) is **removed** as a consequence.
+- **FE↔BE integration gap review (2026-07-07) — being executed via the M1–M4 build lanes.** The
+  DOC-ONLY gap review `docs/audits/2026-07-07-fe-be-integration-gap-review.md` (findings A1–A11 seam
+  bugs, plus the B "first five minutes look like television" and C "surface the invisible game" moves)
+  is landing through the `frontend/tests/test_m{1,2,3,4}_*.py` lanes (dossier, memory wall, ceremony
+  slates, room strip, speaker chips, decision faces, premiere strip, cold-open, etc.).
+- **WebSocket Phase-1 transport — landed DORMANT (ADR 0017/0018).** The full Phase-1 stack merged
+  behind `ORWELL_WS_TRANSPORT` (default off): #1283–#1287, #1293 + the poll-kill batches #1290/#1291/
+  #1294. **Turn-on is Phase-2 and still OPEN.**
+- **Apple-HIG audit (#694) + #660 window-kit migration + #738 Liquid-Glass batch — substantially
+  shipped.** HIG: all findings bar F-CHROME-1 (#1270/#1271/#1278/#1279/#1280). #660: the game-build
+  surface is on the OrwellWindow kit (Theme-window drag #1289 was the last game-build residual). #738:
+  a large glass legibility/a11y batch merged incrementally (#1259–#1264, #1275, #1292); item-level tail
+  tracked in issue #738.
+
+**Still genuinely OPEN (accurately, as of 2026-07-10):**
+- **A-S3 / #591** — the dropped-consequence-fold stale-409 class: #1218 (2026-07-06) added a bounded
+  double-409 `defer_fold` retry store (the acute loss path), but the fuller `REFACTOR-ROADMAP.md`
+  A-S3 rewrite remains post-launch open.
+- **WS Phase-1 turn-on** — flip `ORWELL_WS_TRANSPORT` on + the live two-window verification cadence.
+- **0111 / 0112** — in progress (being built now).
+- **HIG F-CHROME-1 / full-workspace legacy `.modal-content` migration**, the #738 residual tail, and
+  the ADR-0010 #2/#4 follow-ons.
+- Everything the 2026-07-06 tail left open that a human still owns: the SEC-1/3/5 review, 0094's
+  narrowed-scope design call, the 0010 Proxmox on-host smoke, the OpenRouter key rotation, and the
+  deferred POLISH waves — plus the frozen/parked set (0097/0098/0103) and the deferred-by-design
+  tier (Postgres+pgvector, ADR 0006 Phase-2).
