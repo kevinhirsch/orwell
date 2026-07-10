@@ -1122,7 +1122,15 @@ async def _startup_event():
             from src.settings import load_settings
             from src import orwell_engine
             enabled = bool(load_settings().get("time_of_day_enabled", True))
-            await orwell_engine.set_time_of_day(enabled)
+            # #1320: emit a greppable, bundle-verifiable confirmation of what the in-game clock (and the
+            # HOH→nominations night gating that rides it) was set to at boot. A non-raising call means the
+            # engine accepted setTimeOfDay; a pre-game "no active game" miss falls through to the deferred
+            # framed-turn apply (which logs its own APPLIED line once a sandbox exists).
+            ack = await orwell_engine.set_time_of_day(enabled)
+            logger.info(
+                "Time-of-day APPLIED to engine on boot: enabled=%s (night gating %s)%s",
+                enabled, "ON" if enabled else "OFF", "" if ack else " (no ack — deferred apply will retry)",
+            )
         except Exception as _e:
             # Pre-game this is EXPECTED ("no active game for this user") — the apply re-runs at the
             # two in-game seams (the framed-turn lazy apply + the new-game route, M1-2/audit A2),

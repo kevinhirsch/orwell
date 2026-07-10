@@ -5346,6 +5346,11 @@ export class GameSessionAdapter implements GameSession {
           : undefined;
         return hg ? dispositionOf(hg.character.archetype) : "neutral";
       },
+      // #1320 night-gate: the HOH→nominations day boundary is live ONLY when the clock pacing is running
+      // (the per-conversation clock AND the master clock) — it is the "deeper half" of the fast-forward
+      // fix and rides the same pair, so the golden replay (which pins `ORWELL_TIME_PER_CONVERSATION=0`)
+      // and the calibration harness (master clock off) both leave it inert ⇒ byte-identical.
+      nightGate: this.perConversationClockEnabled && this.timeOfDayEnabled,
       // Open deals binding the houseguest (0039 → 0044): the vote leans to honor; the ledger still
       // reconciles a break with its full betrayal consequence downstream.
       dealsOf: (id) => this.deals.open().filter((d) => d.condition.promisors.includes(id)),

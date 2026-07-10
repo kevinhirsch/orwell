@@ -94,8 +94,25 @@ async def _apply_persisted_time_of_day_once(user) -> None:
     try:
         from src.settings import get_setting
         from src import orwell_engine
-        await orwell_engine.set_time_of_day(bool(get_setting("time_of_day_enabled", True)), user=user)
-        _TIME_OF_DAY_APPLIED = True
+        enabled = bool(get_setting("time_of_day_enabled", True))
+        # #1320: VERIFY the push LANDED, don't just fire-and-latch. A successful (non-raising) admin call
+        # returns the engine's Vault-free admin state (a truthy dict) — the engine accepted setTimeOfDay
+        # and flipped its process-global clock flag. We latch ONLY on that acknowledgement, and emit ONE
+        # greppable, bundle-verifiable line recording exactly what the in-game clock (and therefore the
+        # night gating) was set to — so "was night gating on this run?" is answerable straight from the
+        # FE log. A falsy/empty ack leaves the latch DOWN so the next framed turn retries.
+        ack = await orwell_engine.set_time_of_day(enabled, user=user)
+        if ack:
+            _TIME_OF_DAY_APPLIED = True
+            logger.info(
+                "[orwell] time-of-day APPLIED to engine: enabled=%s (night gating %s) — ack ok",
+                enabled, "ON" if enabled else "OFF",
+            )
+        else:
+            logger.warning(
+                "[orwell] time-of-day push returned no ack (enabled=%s) — NOT latched, will retry next turn",
+                enabled,
+            )
     except Exception as _e:
         logger.info("[orwell] deferred time-of-day apply not yet applied (will retry next turn): %s", _e)
 
