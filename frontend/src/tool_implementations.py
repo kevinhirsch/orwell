@@ -4698,6 +4698,21 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         # facet is never re-shot, so the immediate pass wins for the fast ones and the authored
         # facet only fills the slower ones). Both paths are best-effort: a missing model (chat OR
         # image) is a silent no-op and the game start NEVER blocks on either.
+        # #1313 — is the HOUSE-ENTRY authoring gate active for this start? ON iff a real utility
+        # model resolves (cast authoring CAN run) and the operator hasn't set
+        # ORWELL_ALLOW_FLOOR_START=1. When ON we (a) do NOT immediately floor-shoot portraits from
+        # the seeded facets — that raced authoring and won every time, so authored identities never
+        # reached the faces (ADR 0013 bypass); instead each face follows its own per-NPC authoring
+        # gate; and (b) HOLD house entry below until the cast is authored (>= 13/15). When OFF (no
+        # model, or the escape hatch) authoring can never run, so the deterministic floor IS the cast
+        # — floor-shoot immediately and start instantly, byte-identical to before.
+        _gate_on = False
+        try:
+            from src import orwell_cast_authoring as _authoring_gate
+            _gate_on = await _authoring_gate.house_entry_gate_active(owner)
+        except Exception:
+            _gate_on = False
+        _floor_shoot_ok = not _gate_on
         try:
             prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
             cast = res.get("house") if isinstance(res, dict) else None
@@ -4741,9 +4756,13 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                         pass  # immediate kick is best-effort — never let it affect game start
             else:
                 # FALLBACK (no pre-warm — no model at casting open, or the trigger didn't fire): the
-                # original in-line pipeline. (a) start the move-in portraits NOW from the seeded facets,
-                # and (b) author the cast in the background, then top up any portrait not yet on disk.
-                if prompts:
+                # in-line pipeline. ADR 0013 (#1313): a face is shot ONLY from a MODEL-AUTHORED
+                # identity. So the immediate seeded-floor kick fires ONLY when the gate is OFF (no
+                # utility model / escape hatch ⇒ authoring can't run ⇒ the floor IS the final cast, so
+                # a floor face can never mismatch a later authored one). When the gate is ON, authoring
+                # WILL run, and each face follows its OWN per-NPC authoring gate (`on_authored`) — an
+                # un-authored NPC gets NO photo (the lazy backfill shoots it once authoring lands).
+                if prompts and _floor_shoot_ok:
                     from src import orwell_portraits
                     orwell_portraits.kickoff_generation(prompts, owner)
                 if cast:
@@ -4751,9 +4770,18 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                     from src import orwell_cast_identity
                     from src import orwell_portraits
 
+                    def _shoot_authored(hid):
+                        # ADR 0013: shoot THIS NPC's face the instant it is model-authored — refetch its
+                        # (now authored) prompt via the backfill (idempotent — skips a face on disk).
+                        try:
+                            orwell_portraits.kickoff_backfill([str(hid)], owner, force=True)
+                        except Exception:
+                            pass
+
                     def _refresh_authored_portraits():
-                        # The ids whose portrait is still missing after the immediate pass — refetch
-                        # their (now possibly authored) prompt and generate. Skips any already on disk.
+                        # GATE-OFF top-up only: the seeded floor IS the final cast here, so fill any
+                        # floor face not yet on disk after the immediate pass. (When the gate is ON this
+                        # is NOT wired — floor-shooting an un-authored NPC would violate ADR 0013.)
                         try:
                             ids = []
                             for entry in (prompts or []):
@@ -4769,9 +4797,15 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
 
                     def _author_then_refresh():
                         # Deep authoring runs AFTER the AI identity seed has folded (so the authored look +
-                        # secrets read the engine-validated heritage), then tops up any missing portrait.
-                        orwell_cast_authoring.kickoff_authoring(
-                            cast, owner, then=_refresh_authored_portraits)
+                        # secrets read the engine-validated heritage). Gate ON ⇒ per-NPC portrait gating
+                        # (`on_authored`), NO floor top-up. Gate OFF ⇒ the floor top-up fills the faces
+                        # (the original call shape, unchanged, so the seeded floor IS the final cast).
+                        if _gate_on:
+                            orwell_cast_authoring.kickoff_authoring(
+                                cast, owner, then=None, on_authored=_shoot_authored)
+                        else:
+                            orwell_cast_authoring.kickoff_authoring(
+                                cast, owner, then=_refresh_authored_portraits)
 
                     # #544 — AI-seed the cast's descriptive identity FIRST (engine validates/repairs/folds),
                     # THEN deep-author. Best-effort/fail-soft: no model ⇒ the engine's deterministic floor
@@ -4779,6 +4813,49 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                     orwell_cast_identity.kickoff_identity(cast, owner, then=_author_then_refresh)
         except Exception:
             pass  # authoring + portraits are augmentation — never let them affect game start
+        # #1313 — THE HOUSE-ENTRY GATE (P0): the game must NEVER start on the deterministic FLOOR cast.
+        # When the gate is ON (a real utility model resolves + no escape hatch), HOLD the started
+        # result until authoring lands >= 13/15, retrying via the backfill spine while we wait. The
+        # player sees the createCharacter tool "running" (and then the "Production is finalizing your
+        # casting…" card) — never a silent 0/15 start. The happy path returns the instant completeness
+        # clears the threshold; only a genuine failure waits out the window, and then we refuse entry
+        # LOUDLY (error log + health marker) and return a NOT-started casting-in-progress holding
+        # result rather than dropping the player into an unauthored house.
+        try:
+            _started = isinstance(res, dict) and res.get("started") and not res.get("createRefused")
+            if _started and _gate_on:
+                from src import orwell_cast_authoring as _authoring_gate
+                ready = await _authoring_gate.await_house_ready(owner)
+                if ready.get("ready"):
+                    _authoring_gate.clear_house_entry_gate_block(owner)
+                else:
+                    logger.error(
+                        "[house-entry-gate] REFUSING house entry for %s — cast only %s/%s authored "
+                        "after the readiness window; NOT starting on the deterministic floor "
+                        "(set ORWELL_ALLOW_FLOOR_START=1 to override).",
+                        owner, ready.get("authored"), ready.get("total"))
+                    _authoring_gate.record_house_entry_gate_block(owner, ready)
+                    holding = {
+                        "started": False,
+                        "castingHouse": {
+                            "state": "authoring",
+                            "authored": ready.get("authored"),
+                            "total": ready.get("total"),
+                            "missing": ready.get("missing"),
+                        },
+                        "message": (
+                            "Production is still casting the house — your houseguests are being "
+                            "written. Hang tight; the season opens the moment the cast is ready."),
+                    }
+                    try:
+                        orwell_engine.remember_pending(holding, user=owner)
+                    except Exception:
+                        pass
+                    return {"output": json.dumps(holding, indent=2), "exit_code": 0}
+        except Exception as e:
+            # The gate is a guardrail, not a new failure mode: a hiccup in the gate itself must never
+            # strand a legitimately-started game. Log and fall through to the normal started result.
+            logger.warning("[house-entry-gate] gate check failed for %s: %s", owner, e)
         # 0062 — capture the REAL move-in zeitgeist (web_search) in the background, replacing the engine's
         # deterministic fallback ONCE per season. Best-effort: no model/search ⇒ the fallback stands. Gated
         # on a GENUINE start (never a no-op refusal of an already-running season), so it fires once per

@@ -81,3 +81,120 @@ def test_declines_when_author_warm_never_started():
     res = _run(prewarm.warm_portraits(U, portraits=fake, timeout=2.0))
     assert res.get("started") is False and res.get("reason") == "author-warm-not-started"
     assert fake.shot == []
+
+
+# ── #1313: the no-prewarm FALLBACK branch of do_create_character must also respect ADR 0013 ──────
+#
+# Root cause of the bypass: the fallback branch immediately shot ALL portraits from the SEEDED-FLOOR
+# prompts before authoring even started, winning the race every time — so authored identities never
+# reached the faces. Under the house-entry gate (a real utility model resolves), the fallback must
+# NOT floor-shoot: each face follows its OWN per-NPC authoring gate, so an un-authored NPC gets NO
+# photo.
+import json  # noqa: E402
+import importlib as _il  # noqa: E402
+
+_ti = _il.import_module("src.tool_implementations")
+_oe = _il.import_module("src.orwell_engine")
+_ca = _il.import_module("src.orwell_cast_authoring")
+_cid = _il.import_module("src.orwell_cast_identity")
+_portraits = _il.import_module("src.orwell_portraits")
+
+
+def _fallback_res():
+    house = [{"id": "player", "name": "The Player"}]
+    prompts = [{"houseguestId": "player", "prompt": "headshot"}]
+    for i in range(1, 16):
+        house.append({"id": f"npc:{i}"})
+        prompts.append({"houseguestId": f"npc:{i}", "prompt": "headshot"})
+    return {"started": True, "house": house, "portraitPrompts": prompts}
+
+
+def _wire_fallback(monkeypatch, *, gate_on, authored_ids):
+    """Drive do_create_character's no-prewarm fallback: gate on/off, and a stubbed authoring pass
+    that fires `on_authored` for exactly `authored_ids`. Returns the record of shot ids."""
+    shot = []
+
+    async def fake_create(*a, **k):
+        return _fallback_res()
+    monkeypatch.setattr(_oe, "create_character", fake_create)
+
+    async def fake_state(*a, **k):
+        return {"started": False}
+    monkeypatch.setattr(_oe, "get_game_state", fake_state)
+
+    # No pre-warm → the fallback branch runs.
+    from src import orwell_prewarm as _pw
+    monkeypatch.setattr(_pw, "warm_state",
+                        lambda user=None: {"authorStarted": False, "portraitsStarted": False})
+
+    async def _gate(owner):
+        return gate_on
+    monkeypatch.setattr(_ca, "house_entry_gate_active", _gate)
+
+    # The gate's readiness wait is out of scope here — return immediately.
+    async def _ready(owner, **k):
+        return {"ready": True, "authored": len(authored_ids), "total": 15, "missing": 0}
+    monkeypatch.setattr(_ca, "await_house_ready", _ready)
+
+    # The immediate floor kick (gate OFF path) records under kickoff_generation …
+    def fake_gen(prompts, user):
+        for p in prompts:
+            shot.append(p.get("houseguestId") or p.get("id"))
+    monkeypatch.setattr(_portraits, "kickoff_generation", fake_gen)
+
+    # … and the per-NPC authored shoot (gate ON path) records under kickoff_backfill.
+    def fake_backfill(ids, user, force=False):
+        for i in ids:
+            shot.append(i)
+    monkeypatch.setattr(_portraits, "kickoff_backfill", fake_backfill)
+
+    # After the immediate gen (gate OFF), faces are on disk, so the authoring top-up finds nothing
+    # missing (real behaviour). Stub `portrait_file` truthy so the top-up doesn't re-shoot the floor.
+    monkeypatch.setattr(_portraits, "portrait_file", lambda user, hid: "onfile")
+
+    # identity seed → immediately chain its `then` (simulate the fold landing).
+    def fake_identity(cast, owner, then=None):
+        if then:
+            then()
+    monkeypatch.setattr(_cid, "kickoff_identity", fake_identity)
+
+    # authoring → fire on_authored for exactly the authored ids, then the whole-cast `then`.
+    def fake_authoring(cast, owner, then=None, on_authored=None, write=None):
+        if on_authored:
+            for hid in authored_ids:
+                on_authored(hid)
+        if then:
+            then()
+    monkeypatch.setattr(_ca, "kickoff_authoring", fake_authoring)
+    return shot
+
+
+def test_fallback_zero_authored_shoots_zero_portraits(monkeypatch):
+    """#1313 — no-prewarm fallback, gate ON, ZERO NPCs authored ⇒ ZERO portraits shot (ADR 0013)."""
+    monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
+    shot = _wire_fallback(monkeypatch, gate_on=True, authored_ids=[])
+    res = _run(_ti.do_create_character('{"playerName":"P"}', owner="z1"))
+    assert res["exit_code"] == 0
+    assert shot == [], f"no NPC authored ⇒ no photos (got {shot})"
+
+
+def test_fallback_shoots_only_authored_npcs(monkeypatch):
+    """#1313 — gate ON: a face shoots ONLY for a model-authored NPC (its per-NPC gate fired)."""
+    monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
+    shot = _wire_fallback(monkeypatch, gate_on=True, authored_ids=["npc:2", "npc:5"])
+    res = _run(_ti.do_create_character('{"playerName":"P"}', owner="z2"))
+    assert res["exit_code"] == 0
+    assert set(shot) == {"npc:2", "npc:5"}, \
+        f"only model-authored NPCs get a photo in the gated fallback (got {shot})"
+
+
+def test_fallback_gate_off_floor_shoots_immediately(monkeypatch):
+    """Gate OFF (no model / escape hatch): the fallback floor-shoots immediately, as before — the
+    deterministic floor IS the final cast, so a floor face can never mismatch an authored one."""
+    monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
+    shot = _wire_fallback(monkeypatch, gate_on=False, authored_ids=[])
+    res = _run(_ti.do_create_character('{"playerName":"P"}', owner="z3"))
+    assert res["exit_code"] == 0
+    # every prompt (player + 15 NPCs) shot up front from the seeded facets
+    assert "player" in shot and "npc:1" in shot and "npc:15" in shot
+    assert len([s for s in shot if s]) == 16

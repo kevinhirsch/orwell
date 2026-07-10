@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 from typing import Awaitable, Callable, Optional
@@ -30,6 +31,7 @@ except Exception:  # pragma: no cover
     class _L:  # minimal fallback
         def info(self, *a, **k): pass
         def warning(self, *a, **k): pass
+        def error(self, *a, **k): pass
         def debug(self, *a, **k): pass
     logger = _L()
 
@@ -1143,3 +1145,138 @@ def kickoff_authoring_backfill(missing_ids: list, user: Optional[str], force: bo
         except Exception as e:
             logger.warning("[cast-authoring] sync backfill error: %s", e)
     return True
+
+
+# ── #1313: the HOUSE-ENTRY authoring gate ────────────────────────────────────────────
+#
+# THE P0 fix: the game must never START on the deterministic FLOOR cast (0/15 authored). A real
+# playtest opened a season at 0/15 because authoring is fail-soft with NO runtime start gate — a
+# missing utility model, or a transient authoring failure, silently no-op'd and the floor stood.
+#
+# The gate HOLDS house entry (in `do_create_character`) until the cast is authored to a threshold,
+# but it engages ONLY when authoring can actually run — i.e. a REAL utility model resolves — and the
+# operator has not opted out. The reasoning:
+#   • No utility model ⇒ authoring can NEVER produce authored identities, so the deterministic floor
+#     is the ONLY possible cast; gating there would DEADLOCK game start forever. So the gate is OFF —
+#     byte-identical to today (every LLM-stubbed test + a genuinely model-less deploy start instantly).
+#   • A real utility model ⇒ authoring CAN and SHOULD run; the gate holds until it lands, retrying via
+#     the existing backfill spine, and NEVER silently floor-starts.
+# `ORWELL_ALLOW_FLOOR_START=1` is the operator/dev/CI escape hatch: it forces the gate OFF even with a
+# model configured (fast starts for record runs / manual dev). This design keeps PROD safe (a model is
+# always configured ⇒ gated) and CI deterministic (the suite stubs the LLM ⇒ no model ⇒ ungated, and
+# the golden driver sets the hatch explicitly).
+
+HOUSE_READY_MIN_AUTHORED = 13          # of the 15-NPC cast (task spec: >= 13/15)
+_HOUSE_READY_TOTAL_DEFAULT = 15
+# How long house entry may wait for authoring to land before we give up LOUDLY (env-tunable). The
+# happy path returns the instant completeness clears the threshold — only a genuine failure waits it
+# out. Kept generous because the no-prewarm path starts all 15 authoring calls at house entry.
+_HOUSE_READY_TIMEOUT_S = float(os.environ.get("ORWELL_HOUSE_READY_TIMEOUT_S", "180") or 180)
+_HOUSE_READY_POLL_S = float(os.environ.get("ORWELL_HOUSE_READY_POLL_S", "2") or 2)
+
+# A loud, in-process health signal: which users had house entry REFUSED because authoring never
+# reached the threshold (surfaced to operators; read by tests). Never a silent floor start.
+_HOUSE_ENTRY_GATE_BLOCKS: dict = {}
+
+
+def floor_start_allowed() -> bool:
+    """The operator/dev/CI escape hatch: ORWELL_ALLOW_FLOOR_START=1 forces the house-entry gate OFF
+    (immediate floor start) even when a utility model is configured. Default absent ⇒ gate governed by
+    whether authoring can actually run."""
+    return str(os.environ.get("ORWELL_ALLOW_FLOOR_START", "")).strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+async def _utility_model_available(owner: Optional[str]) -> bool:
+    """True when a real text/chat UTILITY model resolves for this user — i.e. cast authoring CAN run.
+    Mirrors exactly what `run_authoring` uses (`_resolve_llm_fn`), so the gate engages iff authoring
+    could actually produce authored identities. Fail-soft: any hiccup ⇒ False (ungated)."""
+    try:
+        fn = await _resolve_llm_fn(owner)
+    except Exception:
+        return False
+    return fn is not None
+
+
+async def house_entry_gate_active(owner: Optional[str]) -> bool:
+    """Whether house entry must be HELD until the cast is authored. ON iff a real utility model
+    resolves (authoring can run) AND the operator has not set ORWELL_ALLOW_FLOOR_START=1."""
+    if floor_start_allowed():
+        return False
+    return await _utility_model_available(owner)
+
+
+def record_house_entry_gate_block(user: Optional[str], info: dict) -> None:
+    """Record a LOUD health marker that house entry was refused for `user` (authoring below the
+    threshold after the readiness window). Operator-visible; never a silent floor start."""
+    try:
+        _HOUSE_ENTRY_GATE_BLOCKS[_safe_user(user)] = {**(info or {}), "at": time.time()}
+    except Exception:
+        pass
+
+
+def clear_house_entry_gate_block(user: Optional[str]) -> None:
+    """Clear the refused-entry health marker once the cast is ready / the game genuinely starts."""
+    _HOUSE_ENTRY_GATE_BLOCKS.pop(_safe_user(user), None)
+
+
+def house_entry_gate_status(user: Optional[str]) -> Optional[dict]:
+    """The last house-entry gate BLOCK for this user (health surface / tests), or None if entry
+    was never refused."""
+    return _HOUSE_ENTRY_GATE_BLOCKS.get(_safe_user(user))
+
+
+async def await_house_ready(owner: Optional[str], *, min_authored: int = HOUSE_READY_MIN_AUTHORED,
+                            timeout: Optional[float] = None,
+                            poll_interval: Optional[float] = None) -> dict:
+    """Poll authoring completeness until >= `min_authored` of the active NPC cast is deep-authored,
+    kicking the existing backfill spine for any stragglers, up to `timeout` seconds. Returns
+    ``{ready, authored, total, missing}``. NON-BLOCKING (``asyncio.sleep`` between polls) and never
+    raises — a read failure simply keeps polling until the deadline."""
+    timeout = _HOUSE_READY_TIMEOUT_S if timeout is None else timeout
+    poll_interval = _HOUSE_READY_POLL_S if poll_interval is None else poll_interval
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    last = {"ready": False, "authored": 0, "total": _HOUSE_READY_TOTAL_DEFAULT,
+            "missing": _HOUSE_READY_TOTAL_DEFAULT}
+    while True:
+        comp = None
+        try:
+            comp = await authoring_completeness_for(owner)
+        except Exception:
+            comp = None
+        if isinstance(comp, dict):
+            authored = int(comp.get("authored") or 0)
+            total = int(comp.get("total") or _HOUSE_READY_TOTAL_DEFAULT)
+            missing_n = int(comp.get("missing") if comp.get("missing") is not None
+                            else max(0, total - authored))
+            last = {"ready": authored >= min_authored, "authored": authored,
+                    "total": total, "missing": missing_n}
+            if authored >= min_authored:
+                return last
+            # Nudge the stragglers through the existing (debounced, fail-soft) backfill spine so a
+            # transient per-NPC authoring miss is re-attempted while we wait.
+            try:
+                await _kick_backfill_for_stragglers(owner)
+            except Exception:
+                pass
+        if time.monotonic() >= deadline:
+            return last
+        await asyncio.sleep(max(0.05, float(poll_interval)))
+
+
+async def _kick_backfill_for_stragglers(owner: Optional[str]) -> None:
+    """Best-effort: re-author the NPCs still on the floor via the existing backfill spine."""
+    from src import orwell_engine
+    try:
+        state = await orwell_engine.get_game_state(user=owner)
+    except Exception:
+        return
+    if not isinstance(state, dict) or state.get("started") is False:
+        return
+    try:
+        from routes.orwell_routes import _roster_cards
+        missing_ids = unauthored_ids(owner, _roster_cards(state, owner))
+    except Exception:
+        missing_ids = []
+    if missing_ids:
+        kickoff_authoring_backfill(missing_ids, owner)
