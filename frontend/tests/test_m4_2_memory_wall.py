@@ -325,16 +325,18 @@ def test_js_renders_no_raw_number():
         assert forbidden not in js, f"the window reads a hidden number ({forbidden}) — it must not"
 
 
-def test_js_marks_the_shared_factline_todo():
-    # Coordination: the M4-1 dossier lane OWNS orwellFactLine.js. Until it lands we use plain markup
-    # with an explicit unify marker (the lead reconciles after both merge).
-    assert "TODO(M3-6/M4 unify): adopt orwellFactLine.js" in _js()
+def test_js_consumes_the_shared_factline():
+    # The M4-1 dossier lane's shared renderer has landed; the Memory Wall now COMPOSES it (the
+    # M3-6/M4 unify TODO is resolved) instead of hand-rolling an equivalent fact row.
+    js = _js()
+    assert "OrwellFactLine.row(" in js, "the Memory Wall must render each fact through the shared OrwellFactLine row"
+    assert "TODO(M3-6/M4 unify)" not in js, "the unify TODO must be gone once the shared row is adopted"
 
 
 def test_js_does_not_define_the_shared_factline_module():
-    # We must not CREATE the shared renderer (owned by the parallel lane) — only reference it in a TODO.
+    # We CONSUME the shared renderer (owned by the M4-1 dossier lane) — we must never DEFINE it.
     js = _js()
-    assert "window.OrwellFactLine" not in js and "export function factLine" not in js
+    assert "window.OrwellFactLine =" not in js and "export function factLine" not in js
 
 
 # ── 7. sidebar / rail / index registration ───────────────────────────────────────────────────────── #
