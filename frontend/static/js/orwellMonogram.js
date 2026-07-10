@@ -217,6 +217,7 @@
   // cache does I/O, and it does so out-of-band from any render call.
   const _portraitById = Object.create(null);
   let _rosterFetchedAt = 0;
+  let _rosterFetchSeq = 0; // out-of-order guard: only the LATEST in-flight refresh may apply
   function portraitFor(id) {
     if (id == null) return null;
     return _portraitById[String(id)] || null;
@@ -226,10 +227,13 @@
     const now = Date.now();
     if (!force && now - _rosterFetchedAt < 8000) return; // /roster is already polled elsewhere too
     _rosterFetchedAt = now;
+    const seq = ++_rosterFetchSeq;
     try {
       const r = await fetch("/api/orwell/roster", { credentials: "same-origin" });
+      if (seq !== _rosterFetchSeq) return; // a newer refresh superseded this one — drop the stale response
       if (!r.ok) return;
       const data = await r.json();
+      if (seq !== _rosterFetchSeq) return; // (json() awaited too — re-check before applying)
       const roster = Array.isArray(data && data.roster) ? data.roster : [];
       for (const k of Object.keys(_portraitById)) delete _portraitById[k];
       for (const hg of roster) {
