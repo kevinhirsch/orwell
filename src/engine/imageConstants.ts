@@ -78,3 +78,35 @@ export const BACKDROP_VARIANTS = [
   "the gym corner blurred behind",
   "the hammock corner soft in the background",
 ] as const;
+
+/**
+ * #1317 (cast portraits converge) — per-subject FACIAL STRUCTURE + LIGHTING variant pools, the same
+ * G24 discipline as EXPRESSION/FRAMING/BACKDROP above: one hash-seeded pick per subject off
+ * (houseguestId + season anchor), so the cast doesn't ALSO share one generic bone structure and one
+ * flat lighting setup on top of the shared style anchor. Jawline/eye-set/nose/brow phrasing is the
+ * single strongest per-face differentiator an image model reads; lighting is the next strongest
+ * atmospheric one. Qualitative visual content only — same discipline as the pools above.
+ */
+export const FACIAL_STRUCTURE_VARIANTS = [
+  "a strong, square jawline and deep-set eyes",
+  "a soft, rounded jawline and wide-set eyes",
+  "high cheekbones and a narrow, straight nose",
+  "a pronounced brow line and close-set eyes",
+  "a heart-shaped face and a delicate, upturned nose",
+  "an angular jaw and hooded eyes",
+  "a broad forehead and thick, expressive eyebrows",
+  "a strong chin and almond-shaped eyes",
+  "soft full cheeks and a button nose",
+  "a chiseled jaw and a straight, defined brow",
+] as const;
+
+export const LIGHTING_VARIANTS = [
+  "warm late-afternoon light raking across the face",
+  "cool overcast light, even and soft",
+  "a single warm lamp casting gentle shadows",
+  "bright midday sun, slightly harsh",
+  "dim golden-hour light through a window",
+  "flat fluorescent house lighting",
+  "a soft key light with a subtle shadow side",
+  "mixed daylight and lamp light, slightly warm",
+] as const;
