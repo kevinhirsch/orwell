@@ -607,9 +607,11 @@ jobs:
   # PATH-GATED (`changes.frontend`): the render path being proven lives in frontend/static/js/. A
   # docs-only / engine-only PR skips it (the unified `ci-gate` reports green for the skip).
   #
-  # RETRIED: the gate's two TIMING checks are sensitive to a first-turn cold-start artifact (the
-  # canonical session binds mid-turn; a CPU-starved boot can slip window B's attach past A's settle) —
-  # so this retries a few times and passes on the first green, mirroring `fe-browser-tests`' `--reruns 1`.
+  # DETERMINISTIC ON ANY HOST (PR #1276): the gate sends a WARM-UP turn so B is a pre-subscribed mirror
+  # (no first-turn cold-start discovery cost), widens A's reply stream (FAKE_TOKEN_DELAY_MS) so B's live
+  # attach lands mid-stream regardless of host speed, and waits for the observer to record the structural
+  # evidence before draining (README §10 "Timing model"). The small retry below is now belt-and-suspenders
+  # (a self-hosted-runner boot blip), not the mechanism the gate relies on to be green.
   mirror-parity:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'

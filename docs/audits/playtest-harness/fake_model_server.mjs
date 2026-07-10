@@ -30,6 +30,16 @@ const PORT = parseInt(process.env.FAKE_MODEL_PORT || '8011', 10);
 const MODEL = process.env.FAKE_MODEL_ID || 'fake/echo-stream';
 const FINISH = process.env.FAKE_FINISH || 'stop'; // 'stop' | 'length' | 'tool_calls'
 const SCRIPT = process.env.FAKE_SCRIPT || 'echo'; // 'echo' | 'toolturn'
+// FAKE_TOKEN_DELAY_MS — space out the streamed REPLY chunks by this many ms EACH (reasoning streams
+// promptly), so the stream has a DETERMINISTIC wall-clock WIDTH instead of firing in one synchronous burst.
+// Default 0 (byte-identical to the original instant echo — every other harness is unaffected). The
+// mirror LIVE-parity gate sets it (run_mirror_gate.sh) so A's streaming window is wide enough that a
+// second window reliably attaches DURING the stream and mirrors it live even on a heavily-contended
+// host — the F5 invariant is about LIVE mirroring, and a zero-width stream is impossible to mirror
+// live on a slow box (the CI-flake root cause). It only changes PACING, never the bytes: two windows
+// on the same run still receive identical deltas, so the mirror byte-identity invariant is intact.
+const TOKEN_DELAY_MS = parseInt(process.env.FAKE_TOKEN_DELAY_MS || '0', 10);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
 
@@ -40,7 +50,7 @@ createServer((req, res) => {
   if (req.method === 'POST' && req.url.startsWith('/v1/chat/completions')) {
     let body = '';
     req.on('data', (c) => (body += c));
-    req.on('end', () => {
+    req.on('end', async () => {
       let stream = false; let lastUser = ''; let msgs = [];
       try { const j = JSON.parse(body); stream = !!j.stream; msgs = j.messages || []; for (const m of msgs) if (m.role === 'user') lastUser = typeof m.content === 'string' ? m.content : JSON.stringify(m.content); } catch (_) {}
       // A deterministic reply DERIVED from the prompt so both windows on the same game get identical
@@ -98,10 +108,15 @@ createServer((req, res) => {
       }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       const chunk = (delta, extra = {}) => res.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', model: MODEL, choices: [{ index: 0, delta, finish_reason: null }], ...extra })}\n\n`);
-      // reasoning preamble (channel: delta.reasoning)
+      // reasoning preamble (channel: delta.reasoning) — streamed PROMPTLY (no delay) so the live
+      // thinking accordion mounts right away and the REPLY phase (below) is what fills the widened
+      // window. Delaying reasoning instead would push the reply-container mount past the measurement
+      // window on a mirror that only mounts `.live-reply-content` when reply tokens arrive.
       for (const w of reasoning.split(' ')) chunk({ reasoning: w + ' ' });
-      // reply body (channel: delta.content)
-      for (const w of reply.split(' ')) chunk({ content: w + ' ' });
+      // reply body (channel: delta.content) — SPACED by TOKEN_DELAY_MS so A's reply streams over a
+      // deterministic wall-clock window wide enough for a second window to attach mid-stream and
+      // mirror it live (mount `.live-reply-content` + stream through the shared incremental renderer).
+      for (const w of reply.split(' ')) { chunk({ content: w + ' ' }); if (TOKEN_DELAY_MS) await sleep(TOKEN_DELAY_MS); }
       // usage chunk
       res.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', model: MODEL, choices: [], usage: { prompt_tokens: 40, completion_tokens: 16, total_tokens: 56 } })}\n\n`);
       // terminal finish_reason (the trace/stream signal the harness audits for completeness)

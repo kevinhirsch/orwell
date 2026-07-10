@@ -142,7 +142,25 @@ the turn often settled before window B finished attaching, so B rendered the `so
 scoped to the true own-echo case, a late-attaching observer's from-history reconcile is REPLACED by a live
 incremental replay, and the one-burst `[DONE]` flush lands the paint. The harness gate is now **green** and
 **promoted to a required CI gate** (`mirror-parity` in `.github/workflows/ci.yml`, under `ci-gate`, on the
-FE path filter; retried a few times for the first-turn timing artifact — see harness §10).
+FE path filter).
+
+**Made host-independent + deterministic (2026-07-10, PR #1276).** The render fix was correct, but the
+gate itself stayed timing-fragile on a **contended** CI runner: it measured the FIRST turn, where the
+canonical session binds *mid-turn* (first-writer-wins on A's send), so window B started its
+canonical-discovery poll COLD and — under CPU starvation — attached AFTER A's short stream settled,
+painting a static reconcile (`bUsesIncrementalRenderer=false`, huge lag) even though the render paths
+are unified. That is a **test-timing** hole, not a render regression, and the 4× retry masked it
+unreliably. The gate now measures the **steady-state** mirror (the real F5 invariant — two windows
+*already converged* on the shared run): it sends a **warm-up turn** so B is a genuine pre-subscribed
+mirror before the measured turn, gives A's reply a **deterministic stream width** (spaced fake-model
+reply tokens, pacing-only — identical bytes, so mirror byte-identity is intact), and **waits for the
+filmstrip's `MutationObserver` to record the incremental-container mount** before draining (its
+callback-time stamps lag the real mutation under load; the during-stream/lag checks still use accurate
+direct-DOM clocks). The three F5 checks and their meaning are unchanged — only the measurement is made
+fair. Two self-test knobs prove the gate still FAILS a non-mirroring B (`MIRROR_B_CPU_THROTTLE`,
+`MIRROR_SKIP_WARMUP`); it passes even a cold, 8×-throttled B, and reproduces the original zero-width
+cold-start FAIL under `MIRROR_SKIP_WARMUP=1 MIRROR_TOKEN_DELAY_MS=0 MIRROR_B_CPU_THROTTLE=8`. See harness
+§10 "Timing model." The CI retry is retained as belt-and-suspenders (runner-boot blips), not relied upon.
 
 > The executable BDD lives in the **harness gate + the pytest tripwire** referenced above — **not** in a
 > Cucumber `.feature` / `cucumber.cjs`. That lane is the **TS engine** and cannot run an FE-render

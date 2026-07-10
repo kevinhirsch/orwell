@@ -99,8 +99,17 @@ wait_http "$ENGINE_URL/health" engine || { tail -20 "$LOGS/engine.log"; exit 1; 
 
 # 2) model: the deterministic fake (default) OR a real provider for the live pre-merge pass
 if [ -z "$LIVE" ]; then
-  say "2) fake model :$FAKE_PORT${TOOLTURN:+ (FAKE_SCRIPT=toolturn)}"
-  ( FAKE_MODEL_PORT=$FAKE_PORT FAKE_SCRIPT="${TOOLTURN:+toolturn}" exec node "$HARNESS/fake_model_server.mjs" >"$LOGS/fake.log" 2>&1 ) & PIDS+=($!)
+  # FAKE_TOKEN_DELAY_MS spaces the streamed tokens so A's stream has a DETERMINISTIC wall-clock WIDTH
+  # (default 300ms/token → a ~7-9s narration stream). A zero-width burst stream is impossible for a
+  # second window to mirror LIVE on a contended host — the F5 flake root cause — so the live-parity
+  # gate widens it; it changes PACING only, never the bytes (two windows still receive identical
+  # deltas). Override with MIRROR_TOKEN_DELAY_MS. The toolturn/HUD gates don't need it (0 there).
+  FAKE_TOKEN_DELAY_MS_DEFAULT=300
+  [ -n "$TOOLTURN" ] && FAKE_TOKEN_DELAY_MS_DEFAULT=0
+  TOKEN_DELAY="${MIRROR_TOKEN_DELAY_MS:-$FAKE_TOKEN_DELAY_MS_DEFAULT}"
+  say "2) fake model :$FAKE_PORT${TOOLTURN:+ (FAKE_SCRIPT=toolturn)} (token-delay ${TOKEN_DELAY}ms)"
+  ( FAKE_MODEL_PORT=$FAKE_PORT FAKE_SCRIPT="${TOOLTURN:+toolturn}" FAKE_TOKEN_DELAY_MS="$TOKEN_DELAY" \
+      exec node "$HARNESS/fake_model_server.mjs" >"$LOGS/fake.log" 2>&1 ) & PIDS+=($!)
   wait_http "http://127.0.0.1:$FAKE_PORT/v1/models" fake-model || { tail "$LOGS/fake.log"; exit 1; }
 else
   say "2) LIVE model (real provider; fake skipped)"

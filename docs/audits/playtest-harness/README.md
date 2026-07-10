@@ -227,7 +227,7 @@ messages with the repo's required trailers.
 | `namesCheck.mjs` | single clean API turn that **forces a named scene** and checks GM names vs the engine roster. |
 | `coreScenes.mjs` / `gameScenes.mjs` / `state1.mjs` | scripted captures of login/home/settings/themes and the game windows (cast, finale, decision card, social, diary, status HUD). |
 | `gameLoopUI.mjs` | a *mechanical* through-the-UI driver (sends agent turns, answers cards/ask_user) — useful to confirm the engine integration works under explicit prompting, and to reach late states fast. **Not** a substitute for persona roleplay. |
-| `mirror_live_parity.mjs` + `run_mirror_gate.sh` | the **F5 two-window live-parity gate** (§10) — boots the stack + a deterministic streamed fake model and asserts window B mirrors window A's **LIVE** render (renders DURING A's stream, through the same incremental renderer), not just the settled transcript. Model-independent, no key. |
+| `mirror_live_parity.mjs` + `run_mirror_gate.sh` | the **F5 two-window live-parity gate** (§10) — boots the stack + a deterministic streamed fake model and asserts window B mirrors window A's **LIVE** render (renders DURING A's stream, through the same incremental renderer), not just the settled transcript. Model-independent, no key. Sends a **warm-up** turn first so B is a pre-subscribed mirror, and widens A's reply stream (`FAKE_TOKEN_DELAY_MS`, default 300 ms) so the gate is host-speed-independent (§10 "Timing model"). Self-test knobs: `MIRROR_B_CPU_THROTTLE=N`, `MIRROR_SKIP_WARMUP=1`. |
 | `mirror_hud_parity.mjs` (via `run_mirror_gate.sh MIRROR_HUD=1`) | the **F5 status/gadget-half gate** (§10a, 0064 §B/D) — same stack; after A sends a chat turn that **mutates** engine state (confirmed via engine `beatSeq` before/after), asserts window B's HUD reconciles off the **server push** (the `sync:game-updated` orwell:gamechanged event — never the poll) within `HUD_PARITY_BUDGET_MS`. Model-independent, no key. |
 
 All scripts read secrets from `.audit-telemetry/.secrets.env` (`ADMIN_USER/ADMIN_PW/OR_KEY/OR_BASE/OR_MODEL`) and
@@ -327,7 +327,8 @@ canonical session, sends a turn from A, and asserts B mirrors A's LIVE stream. E
   not a full-`innerHTML`-repaint reconcile (`renderDelta`).
 - `lagWithinBudget` — B converges within `MIRROR_LAG_BUDGET_MS` (default 2500) of A's settle.
 
-**Current verdict: GREEN** (fixed 2026-07-09, PR "F5 mirror-parity render-race"). R2 already unified the
+**Current verdict: GREEN** (render fix 2026-07-09, PR "F5 mirror-parity render-race"; made
+host-independent + deterministic 2026-07-10, PR #1276 — see "Timing model" below). R2 already unified the
 render PATHS (the source-pin tripwire `test_0012_mirror.py::test_chat_client_mirror_does_not_full_repaint_per_delta`
 is green), but the harness stayed RED because of a fast-settle RACE: under the deterministic fake model the
 turn often settles before window B finishes attaching, so B's visible bubble came from the
@@ -341,13 +342,49 @@ the buffered paint before the one-burst replay's trailing `[DONE]` breaks the re
 GREEN telemetry (deterministic fake, quiet host): A first-render ~1.9 s / settles ~4.1 s; **B first-render
 ~2.9 s** (DURING A's stream); **A & B `incrementalStream=true`**; mirror lag ~0.3 s.
 
-> **Timing sensitivity (host contention):** the three checks are all `true` when B attaches during A's
-> stream. On a CPU-starved host (5 heavy procs — engine + fake model + FE + two Chromium windows — on ≤4
-> cores) B's canonical-binding discovery + `/api/chat/resume` attach can slip PAST A's settle, failing the
-> two TIMING checks (`bStartsDuringAStream`, `lagWithinBudget`) even though `bUsesIncrementalRenderer` stays
-> green — this is a first-turn cold-start artifact (the canonical session binds mid-turn; the HUD gate §10a
-> warms up around it), not a render regression. The CI job therefore RETRIES the gate a few times and passes
-> on the first green (mirroring the `fe-browser-tests` `--reruns 1` policy).
+### Timing model (why the gate is deterministic on ANY host — 2026-07-10, PR #1276)
+
+The original gate measured the **FIRST** turn, where the canonical session binds *mid-turn*
+(first-writer-wins on A's send) — so window B starts its canonical-discovery poll COLD at send time.
+On a CPU-starved runner (5 heavy procs — engine + fake model + FE + two Chromium windows — on ≤4
+cores) that discovery + `/api/chat/resume` attach could slip PAST A's short settle, so B painted a
+static `softReloadHistory` reconcile and never mounted the incremental container. That flaked the CI
+gate (`bStartsDuringAStream` / `bUsesIncrementalRenderer` false, huge lag) even though the render
+PATHS are unified — a **test-timing** hole, not a render regression. The 4× retry masked it unreliably.
+
+The gate now removes that non-determinism by measuring the **STEADY-STATE** mirror (the actual F5
+invariant — two windows *already converged* on the shared run), on any host:
+
+1. **Warm-up turn (CP1).** A sends one turn first to BIND the canonical session; the gate then waits
+   until B has rendered that reply — proof B has discovered the binding, rebound its SSE channel, and
+   converged its view. B is now a genuine **pre-subscribed** live mirror. The measured turn (CP2)
+   therefore never pays the cold-start discovery cost. (The first-turn cold-start is a transient the
+   product handles by reconcile — B still gets the content, just not live — so it is out of scope for
+   the *realtime-mirror* invariant.)
+2. **Deterministic stream width.** `fake_model_server.mjs` spaces the REPLY tokens by
+   `FAKE_TOKEN_DELAY_MS` (default 300 ms, set by `run_mirror_gate.sh`) so A's reply streams over a
+   fixed wall-clock window WIDE enough for B's live `resume` to land mid-stream regardless of host
+   speed — a zero-width burst stream is impossible to mirror *live* on a slow box. It changes PACING
+   only, never the bytes: both windows still receive identical deltas (mirror byte-identity intact).
+3. **Observer-clock catch-up.** The filmstrip's `MutationObserver` stamps each record with
+   `Date.now()` *when its callback runs*, which lags the real mutation under load — so a
+   `.live-reply-content` mount that truly happened during the stream could be stamped just past a
+   tight window. Before draining, the gate WAITS until the film has actually recorded the
+   incremental-container mount, and bounds structure-membership by the drain wall. The during-stream
+   and lag CHECKS still use the ACCURATE direct-DOM-poll clocks (`aSettleMs` / `bConvergeWall`), so a
+   late-STAMPED mount is counted but a genuinely-late render can never sneak past the timing checks.
+
+The three checks and their meaning are UNCHANGED — this only makes the measurement fair. The gate is
+**not** gamed green: `.live-reply-content` / `.stream-content` / `.msg-ai.streaming` are mounted ONLY
+by the shared incremental renderer (the static reconcile builds a plain `.body`), and two self-test
+knobs prove the gate still FAILS a non-mirroring B — `MIRROR_B_CPU_THROTTLE=N` (CDP-throttle B N× to
+simulate a contended runner) and `MIRROR_SKIP_WARMUP=1` (measure the cold-start regime). With the
+default (widened) stream even a cold, 8×-throttled B mirrors live and PASSES; `MIRROR_SKIP_WARMUP=1
+MIRROR_TOKEN_DELAY_MS=0 MIRROR_B_CPU_THROTTLE=8` reproduces the original zero-width cold-start FAIL.
+The CI `mirror-parity` job keeps a small retry as belt-and-suspenders, but the gate no longer *relies*
+on it. Representative GREEN telemetry (deterministic fake, quiet host): A first-render ~1.5 s / settles
+~3.8 s; **B first-render ~2.2 s** (DURING A's stream); **A & B `incrementalStream=true`**; mirror lag
+~50 ms — and it stays GREEN under `MIRROR_B_CPU_THROTTLE=8`.
 
 Promoted to a CI gate (`mirror-parity` in `.github/workflows/ci.yml`, under the `ci-gate` required check,
 on the FE-changed path filter) — key-free against the deterministic narrator, like `browser_smoke.py` /
