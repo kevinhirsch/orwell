@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   record:
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 60
     continue-on-error: true
     steps:

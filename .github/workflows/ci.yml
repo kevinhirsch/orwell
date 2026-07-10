@@ -6,10 +6,9 @@ on:
   pull_request:
     branches: [main]
 
-# A single self-hosted runner serializes every job, so a superseded commit would
-# otherwise tie the runner up finishing a run nobody is waiting on. Cancel the
-# in-flight run for a ref the moment a newer commit arrives. Keyed per ref, so
-# main and each PR have independent groups.
+# Cancel the in-flight run for a ref the moment a newer commit arrives, so a
+# superseded commit doesn't burn runner minutes finishing a run nobody is waiting
+# on. Keyed per ref, so main and each PR have independent groups.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,7 +33,7 @@ jobs:
   # bottom (`if: always()`) is the ONE required check — it passes when no needed job FAILED/was
   # CANCELLED (a SKIP counts as a pass). Point branch protection at `ci-gate`, not the individual jobs.
   changes:
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 5
     outputs:
       engine: ${{ steps.filter.outputs.engine }}
@@ -125,7 +124,7 @@ jobs:
   test:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -168,7 +167,7 @@ jobs:
   heavy-sims:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -190,7 +189,7 @@ jobs:
   coverage:
     needs: changes
     if: needs.changes.outputs.engine == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -210,7 +209,7 @@ jobs:
   smoke:
     needs: changes
     if: needs.changes.outputs.deploy == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -249,7 +248,7 @@ jobs:
   golden-path:
     needs: changes
     if: needs.changes.outputs.golden == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -301,7 +300,7 @@ jobs:
   visual-regression:
     needs: changes
     if: needs.changes.outputs.visual == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -384,7 +383,7 @@ jobs:
   theme-consistency:
     needs: changes
     if: needs.changes.outputs.theme == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -464,7 +463,7 @@ jobs:
   fe-unit:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -501,7 +500,7 @@ jobs:
   fe-browser-tests:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -530,7 +529,7 @@ jobs:
   fe-browser:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -567,7 +566,7 @@ jobs:
   fe-responsive:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -615,7 +614,7 @@ jobs:
   mirror-parity:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -707,7 +706,7 @@ jobs:
       - mirror-parity
       - heavy-sims
     if: always()
-    runs-on: self-hosted
+    runs-on: namespace-profile-orwellrunner
     steps:
       - name: resolve overall CI status
         env:
