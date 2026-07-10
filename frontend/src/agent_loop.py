@@ -4286,6 +4286,49 @@ async def _stream_agent_loop_impl(
         _relevant_tools = set(CASTING_TOOLS)
         logger.info(f"[tool-rag] casting turn — restricted tool set: {sorted(_relevant_tools)}")
 
+    # Fix #1314 (P0): the SELECTION path above — RAG retrieval, the keyword
+    # fallback's hardcoded create_document/manage_memory/manage_notes union, the
+    # opt-in union, pinned_tools, and even the "no candidates -> send everything"
+    # None case — is entirely game-build-blind: nothing before this point
+    # intersects the candidate set with the game keep-set. Historically the ONLY
+    # thing filtering the final schema was the route-level `disabled_tools`
+    # (`game_build_disabled_additions`, wired in `chat_routes.py`), so any caller
+    # of `stream_agent_loop` that didn't build `disabled_tools` the same way (the
+    # scheduler/monitor background entrypoints did not) got zero protection.
+    # Enforce the wall at the SELECTION chokepoint itself — every caller funnels
+    # through here — so it holds regardless of what `disabled_tools` a caller
+    # passed. This mirrors the unconditional (not game_mode-gated) route-level
+    # check: under the game build, EVERY turn's candidate set is capped, not just
+    # in-fiction ones.
+    if not guide_only:
+        try:
+            from src.settings import game_build_enabled as _gbe_selection
+            _under_game_build = bool(_gbe_selection())
+        except Exception as e:
+            logger.warning(f"[tool-rag] game_build_enabled() check failed during selection: {e}")
+            _under_game_build = False
+        if _under_game_build:
+            from src.agent_tools import GAME_TOOL_KEEP, GAME_TOOL_OPTIONAL
+            try:
+                _opted_in = set(get_setting("game_tools_enabled", []) or []) & GAME_TOOL_OPTIONAL
+            except Exception:
+                _opted_in = set()
+            _game_allowed = GAME_TOOL_KEEP | _opted_in
+            if _relevant_tools is None:
+                _relevant_tools = set(_game_allowed)
+                logger.info(
+                    "[tool-rag] game-build wall: unfiltered selection (send-all) "
+                    f"collapsed to keep-set: {sorted(_relevant_tools)}"
+                )
+            else:
+                _dropped = sorted(_relevant_tools - _game_allowed)
+                _relevant_tools = _relevant_tools & _game_allowed
+                if _dropped:
+                    logger.info(
+                        f"[tool-rag] game-build wall: dropped non-keep tools from selection: {_dropped}"
+                    )
+                logger.info(f"[tool-rag] game-build wall: post-filter selection: {sorted(_relevant_tools)}")
+
     prep_timings["tool_selection"] = time.time() - _t1
 
     _t2 = time.time()

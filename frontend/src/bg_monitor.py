@@ -33,6 +33,22 @@ async def _drain_agent(sess, messages):
     full = ""
     tool_events = []
     round_num = 1
+    # Fix #1314 (P0): this is a BACKGROUND entrypoint (the bg-job follow-up
+    # monitor) — it never built a `disabled_tools` set at all, so a completed
+    # background job's follow-up turn got the unrestricted tool surface even
+    # under the game build. Union in the same additions the live chat route
+    # computes (`game_build_disabled_additions`). (agent_loop.py /
+    # tool_execution.py now also enforce this independently at the selection
+    # and dispatch chokepoints — this is belt-and-suspenders so the prompt's
+    # own tool listing agrees too.)
+    _disabled_tools = None
+    try:
+        from src.settings import game_build_enabled as _gbe_bg, get_setting as _get_setting_bg
+        if _gbe_bg():
+            from src.agent_tools import game_build_disabled_additions
+            _disabled_tools = game_build_disabled_additions(_get_setting_bg("game_tools_enabled", []))
+    except Exception as e:
+        logger.warning(f"[bg-monitor] game-build disabled-tools union failed: {e}")
     async for chunk in stream_agent_loop(
         sess.endpoint_url, sess.model, messages,
         headers=getattr(sess, "headers", None),
@@ -40,6 +56,7 @@ async def _drain_agent(sess, messages):
         session_id=sess.id,
         max_rounds=_FOLLOWUP_MAX_ROUNDS,
         owner=getattr(sess, "owner", None),
+        disabled_tools=_disabled_tools,
     ):
         if not chunk.startswith("data: "):
             continue

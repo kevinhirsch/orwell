@@ -1225,6 +1225,39 @@ async def execute_tool_block(
         logger.info(f"Tool blocked by user: {tool}")
         return desc, result
 
+    # Fix #1314 (P0) — dispatch-time backstop: refuse any tool outside the game
+    # keep-set / opted-in-optional set whenever the game build is on, REGARDLESS
+    # of what the caller passed for `disabled_tools`. The selection-time filter in
+    # agent_loop.py is the primary defense, but it is a "don't offer it" gate —
+    # a background entrypoint (task_scheduler, bg_monitor, teacher_escalation, the
+    # skills runner) can still construct a tool call some other way (a caller-
+    # provided `relevant_tools`, a stale cached schema, a model that free-hands a
+    # tool name outside its offered schema) and land here with `disabled_tools`
+    # unset. This is the single dispatch chokepoint for every one of those
+    # callers, so it is the correct place for the fail-closed floor: default to
+    # BLOCKED unless we can positively confirm the tool is allowed under the
+    # current build. Full-workspace builds (ORWELL_GAME_BUILD=0) are unaffected —
+    # `game_build_enabled()` is False there, so `_wall_ok` short-circuits True.
+    _wall_ok = True
+    try:
+        from src.settings import game_build_enabled as _gbe_dispatch
+        if _gbe_dispatch():
+            from src.agent_tools import game_build_disabled_additions
+            from src.settings import get_setting as _get_setting_dispatch
+            _off = game_build_disabled_additions(_get_setting_dispatch("game_tools_enabled", []))
+            _wall_ok = tool not in _off
+    except Exception as e:
+        logger.error(f"[game-build-wall] dispatch guard errored for tool={tool!r}, failing closed: {e}")
+        _wall_ok = False
+    if not _wall_ok:
+        desc = f"{tool}: BLOCKED"
+        result = {
+            "error": f"Tool '{tool}' is not available in the game build.",
+            "exit_code": 1,
+        }
+        logger.warning(f"[game-build-wall] dispatch refused non-keep tool under game build: {tool}")
+        return desc, result
+
     if tool in _ADMIN_TOOLS and not _owner_is_admin(owner):
         desc = f"{tool}: BLOCKED"
         result = {"error": f"Tool '{tool}' requires an admin user.", "exit_code": 1}

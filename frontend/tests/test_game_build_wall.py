@@ -228,3 +228,172 @@ def test_gate_is_env_pinned(monkeypatch):
     assert not is_feature_enabled("memory"), "memory must be off under game build"
     assert not is_feature_enabled("rag"), "rag must be off under game build"
     assert not is_feature_enabled("skills"), "skills must be off under game build"
+
+
+# ── 7. tool SELECTION + DISPATCH wall (#1314 — P0) ────────────────────────────
+#
+# The checks above prove the game build strips scripts/features. This section
+# proves the separate, previously-unguarded surface: which TOOLS the agent
+# offers the model (selection, in agent_loop.py) and which tools it will
+# actually RUN (dispatch, in tool_execution.py). Before this fix, neither path
+# intersected the candidate/executed set with the game keep-set — only the
+# route-level `disabled_tools` did, and background entrypoints
+# (task_scheduler.py, bg_monitor.py) called the loop with `disabled_tools=None`,
+# so a background game turn could select AND dispatch workspace tools
+# (create_document, manage_notes, manage_calendar, ...) that must never reach
+# the in-fiction narrator or its Vault-free surface.
+
+import asyncio  # noqa: E402 — grouped with this section, matches file's late-import style
+
+
+class _FakeToolBlock:
+    """Minimal stand-in for tool_parsing.ToolBlock — avoids importing the real
+    parser just to build a (tool_type, content) pair for dispatch tests."""
+
+    def __init__(self, tool_type, content):
+        self.tool_type = tool_type
+        self.content = content
+
+
+def _captured_tools_for_query(monkeypatch, query, *, game_mode=False, disabled_tools=None):
+    """Drive stream_agent_loop with the RAG tool index forced OFF (so selection
+    falls back to the keyword path) and capture the tool schema array the loop
+    would hand to the model. Mirrors the harness in
+    test_a5_tool_manifest_and_machinery_leak.py."""
+    from src import agent_loop as al
+    import src.tool_index as ti
+
+    monkeypatch.setattr(ti, "get_tool_index", lambda: None)  # force keyword-fallback selection
+    monkeypatch.setattr(al, "get_setting", lambda key, default=None: (
+        [] if key == "game_tools_enabled" else default))
+
+    captured = {}
+
+    async def fake_stream(candidates, messages, **kwargs):
+        captured["tools"] = kwargs.get("tools") or []
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "stream_llm_with_fallback", fake_stream)
+
+    async def drive():
+        gen = al.stream_agent_loop(
+            "https://api.openai.com/v1/chat/completions",  # API-model path -> schemas are sent
+            "gpt-4",
+            [{"role": "user", "content": query}],
+            disabled_tools=disabled_tools,
+            game_mode=game_mode,
+        )
+        async for _ in gen:
+            pass
+
+    asyncio.get_event_loop().run_until_complete(drive())
+    return {s.get("function", {}).get("name") for s in captured.get("tools", []) if isinstance(s, dict)}
+
+
+# A query that trips several keyword hints (calendar/event/meeting + note/remind)
+# PLUS the keyword-fallback's hardcoded create_document/manage_memory/manage_notes
+# union — none of which are in GAME_TOOL_KEEP.
+_WORKSPACE_LEANING_QUERY = "remind me to check the calendar meeting notes"
+
+
+def test_1314_keyword_fallback_selection_capped_to_keep_set_on_game_turn(monkeypatch):
+    """(a) Forced keyword fallback (no RAG index) on a game turn, with the exact
+    leak vector `disabled_tools=None`, must still only select keep-set /
+    opted-in-optional tools."""
+    from src.agent_tools import GAME_TOOL_KEEP
+
+    names = _captured_tools_for_query(
+        monkeypatch, _WORKSPACE_LEANING_QUERY, game_mode="game", disabled_tools=None,
+    )
+    leaked = names - GAME_TOOL_KEEP  # nothing opted in -> keep-set is the whole allowance
+    assert leaked == set(), f"Non-keep tools leaked into the schema: {sorted(leaked)}"
+    for must_drop in ("create_document", "manage_memory", "manage_notes", "manage_calendar"):
+        assert must_drop not in names, f"{must_drop} must not be selectable under the game build"
+
+
+def test_1314_keyword_fallback_capped_even_without_game_mode_flag(monkeypatch):
+    """The literal reported leak: a BACKGROUND caller (task_scheduler / bg_monitor)
+    never sets `game_mode` at all and passes `disabled_tools=None`. The wall is a
+    build-wide floor (mirrors the unconditional route-level check in
+    chat_routes.py), not scoped to explicit in-fiction turns, so it must still
+    hold here."""
+    from src.agent_tools import GAME_TOOL_KEEP
+
+    names = _captured_tools_for_query(
+        monkeypatch, _WORKSPACE_LEANING_QUERY, game_mode=False, disabled_tools=None,
+    )
+    leaked = names - GAME_TOOL_KEEP
+    assert leaked == set(), f"Non-keep tools leaked with no game_mode set: {sorted(leaked)}"
+
+
+def test_1314_full_workspace_build_selection_unaffected(monkeypatch):
+    """(c) ORWELL_GAME_BUILD=0 must leave tool SELECTION completely unrestricted —
+    the #1314 fix must never leak into a full-workspace build."""
+    monkeypatch.setenv("ORWELL_GAME_BUILD", "0")
+    names = _captured_tools_for_query(
+        monkeypatch, _WORKSPACE_LEANING_QUERY, game_mode=False, disabled_tools=None,
+    )
+    for must_have in ("create_document", "manage_memory", "manage_notes", "manage_calendar"):
+        assert must_have in names, f"{must_have} incorrectly dropped in a full-workspace build"
+
+
+def test_1314_dispatch_refuses_non_keep_tool_with_disabled_tools_none(monkeypatch):
+    """(b) Fail-closed dispatch backstop: even when a caller never builds a
+    disabled_tools set at all (the exact bg_monitor/task_scheduler bug), dispatch
+    refuses to actually RUN a non-keep tool under the game build — cleanly, not
+    with a crash — and never reaches the tool's implementation."""
+    from src import tool_execution
+
+    async def _must_not_run(*_a, **_k):
+        raise AssertionError("tool implementation must never run — the wall should refuse first")
+
+    monkeypatch.setattr("src.tool_implementations.do_create_document", _must_not_run, raising=False)
+    monkeypatch.setattr("src.tool_implementations.do_manage_notes", _must_not_run, raising=False)
+
+    for tool_name, payload in (
+        ("create_document", '{"title": "x", "content": "y"}'),
+        ("manage_notes", '{"action": "list"}'),
+    ):
+        desc, result = asyncio.get_event_loop().run_until_complete(
+            tool_execution.execute_tool_block(
+                _FakeToolBlock(tool_name, payload),
+                disabled_tools=None,
+                owner="someone",
+            )
+        )
+        assert result.get("exit_code") == 1, (tool_name, result)
+        assert "error" in result, (tool_name, result)
+        assert "BLOCKED" in desc, (tool_name, desc)
+
+
+def test_1314_dispatch_unaffected_in_full_workspace_build(monkeypatch):
+    """(c) Dispatch counterpart: ORWELL_GAME_BUILD=0 must never refuse a tool via
+    the #1314 wall (any failure must come from the tool's own logic, not the
+    game-build gate)."""
+    monkeypatch.setenv("ORWELL_GAME_BUILD", "0")
+    from src import tool_execution
+
+    desc, result = asyncio.get_event_loop().run_until_complete(
+        tool_execution.execute_tool_block(
+            _FakeToolBlock("manage_notes", '{"action": "list"}'),
+            disabled_tools=None,
+            owner="someone",
+        )
+    )
+    assert "not available in the game build" not in str(result.get("error", "")), result
+
+
+def test_1314_dispatch_still_honors_explicit_disabled_tools(monkeypatch):
+    """Sanity: the new wall is additive — an explicitly disabled tool stays
+    blocked (with its original user-facing message) regardless of game build."""
+    from src import tool_execution
+
+    desc, result = asyncio.get_event_loop().run_until_complete(
+        tool_execution.execute_tool_block(
+            _FakeToolBlock("bash", "echo hi"),
+            disabled_tools={"bash"},
+            owner="someone",
+        )
+    )
+    assert result.get("exit_code") == 1
+    assert "disabled by user" in result.get("error", "")
