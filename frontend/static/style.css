@@ -12566,6 +12566,30 @@ textarea.memory-add-input {
   white-space: nowrap !important; border: 0 !important;
 }
 
+/* F-A11Y-2 (WCAG 2.4.1 Bypass Blocks): the "Skip to chat" link. Off-screen until it takes
+   keyboard focus, then pinned to the top-left so a keyboard / switch / AT user can jump straight
+   to the composer instead of tabbing the whole sidebar. z-index sits above the boot loader
+   (#app-loader is 99999) so it stays reachable. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100000;
+  padding: 10px 16px;
+  background: var(--bg, #282c34);
+  color: var(--fg, #e6e6e6);
+  border: 2px solid var(--accent-primary, var(--red, #e06c75));
+  border-radius: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  left: 0;
+  outline: none;
+}
+
 /* ── Custom language type picker (replaces visible chrome of native <select>
    — <option>s can't render SVG). Hidden select stays as the source of truth. */
 .doc-langpicker-native-hidden {
@@ -37357,6 +37381,7 @@ body.theme-frosted .modal {
 @media (hover: none) and (pointer: coarse) {
   .gadget-rail-head button,
   .og-card .og-act,
+  .og-card.og-collapsible .og-head, /* #738 item 13: the collapse affordance is role=button — floor it */
   #gadget-rail-strip [data-grail-gadget],
   #gadget-rail-strip button {
     min-width: 44px !important;
@@ -37642,6 +37667,14 @@ body.theme-frosted .modal {
   color: var(--red, #ff6b6b);
   display: none;
 }
+/* F-CONTRAST-2 (HIG Color / WCAG 1.4.1): red hue is NOT the only error channel — a
+   leading warning glyph carries the meaning for color-blind users and on low-contrast
+   glass. Text-presentation variation selector (FE0E) renders it as a mono glyph, not a
+   colored emoji. */
+.hwfit-sched-err::before {
+  content: "\26A0\FE0E";
+  margin-right: 4px;
+}
 .hwfit-sched-err.is-visible { display: block; }
 @media (max-width: 768px) {
   .hwfit-schedule-row { gap: 8px; }
@@ -37657,6 +37690,15 @@ body.theme-frosted .modal {
 @keyframes note-card-flash-anim {
   0%   { box-shadow: 0 0 0 2px var(--accent, var(--red)); }
   100% { box-shadow: 0 0 0 2px transparent; }
+}
+/* F-MOTION-1 (HIG Motion / WCAG 2.3.3): these non-kit decorative surfaces honor Reduce
+   Motion too — the kits (the .ow- / .og- / .on- families) already opt in per-surface, but
+   legacy/feature CSS animations slip through one by one. Neutralize the note-card flash and
+   the hwfit schedule-chip transition when the OS setting is on. Decorative only — never
+   functional state. */
+@media (prefers-reduced-motion: reduce) {
+  .note-card-flash { animation: none; }
+  .hwfit-sched-day-chip { transition: none; }
 }
 /* ── ask_user: multiple-choice question card ─────────────────────────────
    The agent posed a question and ended its turn. The user clicks an option,
@@ -37808,11 +37850,33 @@ body.theme-frosted .sidebar-brand-title {
      refraction layer (Full = the SVG vector-field displacement via liquidGlass.js; Frosted =
      the CSS blur below). Cite: docs/design/liquid-glass/LIQUID_GLASS_REFERENCE.md §"Regular"
      (light, luminous, content-legible) + ADAPTIVE_LEGIBILITY_REFERENCE.md §4 (kube refraction). */
+  /* #739 — Clear vs Tinted (the iOS 26.1 "Liquid Glass → {Clear, Tinted}" opacity control).
+     --ow-glass-opacity is the base surface opacity of the ONE light glass, defaulting to the kube
+     0.60. Clear (the DEFAULT) keeps 0.60 — colorless, the #738 colorless-material default. Opting
+     into Tinted (body.theme-tinted, below) raises THIS ONE token, which re-flows through the two
+     fill tokens to every glass chrome surface from a single edit — a gentle opacity/contrast bump
+     that DAMPS BUT KEEPS the refraction. It is a NEUTRAL (white) opacity control, NOT an accent
+     hue: no colour is introduced, the fill just becomes more opaque (backdrop shows through less,
+     dark ink reads with more contrast). Orthogonal to the perf tier ladder (Full/Frosted/Off) and
+     to the a11y reduce-transparency kill-switch (which forces SOLID and outranks this). */
+  --ow-glass-opacity: 0.60;
+  /* Both fill tokens DERIVE from --ow-glass-opacity so Tinted is a one-edit flip. At the 0.60
+     default these resolve byte-equivalent to the prior literals (top 0.62 / bottom 0.52 / flat
+     0.60) — the calc() only diverges once body.theme-tinted raises --ow-glass-opacity. */
   --ow-glass-light-fill: linear-gradient(180deg,
-    rgba(255,255,255,0.62) 0%,
-    rgba(255,255,255,0.52) 100%);
-  --ow-glass-light-color: rgba(255,255,255,0.60);   /* the kube 0.60 white-ish translucent fill */
+    rgba(255,255,255,calc(var(--ow-glass-opacity) + 0.02)) 0%,
+    rgba(255,255,255,calc(var(--ow-glass-opacity) - 0.08)) 100%);
+  --ow-glass-light-color: rgba(255,255,255,var(--ow-glass-opacity));   /* the kube 0.60 white-ish translucent fill (Clear default) */
   --ow-glass-text-shadow: 0 1px 3px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.55);
+}
+/* #739 — TINTED opt-in. Raises the single --ow-glass-opacity token; because both fill tokens above
+   derive from it, every glass chrome surface (windows, chrome, popovers, sheets, the transient
+   pills — each already consuming --ow-glass-light-color/-fill) gets a gentle neutral opacity +
+   contrast bump from THIS ONE rule. Refraction is kept (liquidGlass.js still runs) but reads as
+   damped over the more-opaque fill. DEFAULT is Clear (this class absent). No accent hue, no ink
+   recolouring — opacity/neutral-tint only; a body-STATE class (not a per-element sweep). */
+body.theme-tinted {
+  --ow-glass-opacity: 0.80;
 }
 /* The glass FILL is the ONE LIGHT glass (kube.io music player — rgba(255,255,255,0.60)
    with a light top-down lift), painted identically for BOTH tiers (Full + Frosted). The
@@ -40639,6 +40703,68 @@ body.theme-frosted .cp-popover {
      muted DARK that's legible on the light glass and keeps the muted gradation (full vs.
      secondary), instead of the old light-on-light. */
   --fg: #16191f;
+}
+
+/* ── #738 item 8 — gadget-card ROW legibility (contrast floor) ─────────────────
+   The gadget-rail cards carry dense HUD status rows in DARK ink (--fg redefined to
+   #16191f above). Under the glass theme adaptiveGlass STANDS DOWN on chrome, so —
+   unlike the received chat bubble (.msg-ai), which escalates its scrim per-bubble in
+   JS — the gadget cards get NO runtime legibility backstop: they rely entirely on this
+   CSS-STATIC floor. So mirror the .msg-ai worst-case-scrim idea in the opposite polarity
+   (dark ink over LIGHT glass): floor the light-glass FILL opaque-enough that the small,
+   dense rows clear APCA over ANY wallpaper — a busy mid-tone wall blooming through a
+   too-thin fill is exactly what smears small text. It stays glass (the wallpaper still
+   tints through the sub-opaque alpha); the value sits between the 0.60 chrome fill and
+   opaque. The alpha is a var (cf. .msg-ai's --ai-scrim-alpha) so the intent reads the
+   same. Only RAISES opacity over the shared fill, so browser_smoke's light-on-light
+   contrast probe can only get stronger. */
+body.theme-frosted .og-card {
+  --og-scrim-alpha: 0.76;   /* worst-case row-legibility floor (cf. .msg-ai --ai-scrim-alpha) */
+  background-color: rgba(255, 255, 255, var(--og-scrim-alpha)) !important;
+  background-image: linear-gradient(180deg,
+    rgba(255, 255, 255, 0.80) 0%,
+    rgba(255, 255, 255, 0.74) 100%) !important;
+}
+/* This floor is LATER than the a11y reduced-transparency block above, so re-assert the
+   opaque panel fallback here (else a reduced-transparency user would get the translucent
+   floor back — the a11y opaque is a STRONGER legibility floor than this glass one). */
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .og-card {
+    background-color: var(--panel, var(--bg)) !important;
+    background-image: none !important;
+  }
+}
+
+/* ── #738 item 22 — Diary Room confessional pill (orwellDiaryRoom.js) ──────────
+   OWNER RULING "tone down to a hint": the confessional used to carry a full ROSE
+   chrome tint (a color-mix(var(--accent) 18%) fill + a solid rose border). Under
+   #738's colourless-material rule the BULK chrome is neutralised — the glass theme
+   swaps the fill to the ONE shared light-glass material like every other surface —
+   but a WHISPER of rose is deliberately KEPT as the confessional's diegetic identity:
+   a thin, bounded rose EDGE only (never a rose-washed fill). Layout stays inline in the
+   JS; fill/border/ink live here so the glass theme can carry the light-glass material. */
+#orwell-dr-pill {
+  background: color-mix(in srgb, var(--panel, #111) 82%, transparent);
+  border: 1px solid color-mix(in srgb, #e06c75 45%, transparent);  /* the rose whisper (bounded) */
+  color: var(--fg, #9cdef2);
+}
+body.theme-frosted #orwell-dr-pill {
+  /* BULK → the ONE colourless light-glass material (item-2 rule: no per-surface tint). */
+  background-color: var(--ow-glass-light-color) !important;
+  background-image: var(--ow-glass-light-fill) !important;
+  -webkit-backdrop-filter: var(--ow-glass-backdrop);
+  backdrop-filter: var(--ow-glass-backdrop);
+  color: #16191f;                                                   /* dark ink on light glass */
+  border-color: color-mix(in srgb, #e06c75 42%, transparent) !important;  /* the KEPT rose hint */
+}
+@media (prefers-reduced-transparency: reduce) {
+  /* a11y: the pill goes opaque like every other glass surface (it uses the light-glass token). */
+  body.theme-frosted #orwell-dr-pill {
+    background-color: var(--panel, var(--bg)) !important;
+    background-image: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
 }
 
 /* LIGHT-ON-LIGHT GUARD — some text controls inside the light-glass chrome set their

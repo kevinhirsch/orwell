@@ -369,6 +369,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content, viewport-fit=cover" />
 </head>
 <body>
+  <!-- F-A11Y-2 (WCAG 2.4.1 Bypass Blocks): skip-to-content link. MUST be the first focusable
+       child of <body> so keyboard / switch / screen-reader users can jump straight to the chat
+       composer instead of tabbing the entire sidebar (sessions, tools, model picker…) on every
+       load. Visually hidden until focused (see .skip-link in style.css), then revealed top-left. -->
+  <a class="skip-link" href="#message">Skip to chat</a>
+  <!-- F-A11Y-1: the dedicated, visually-hidden polite live region for streamed narration. The
+       transcript log (#chat-history) is aria-live="off" so a screen reader is NOT flooded with
+       partial token fragments as the reply streams; instead the finished reply text is announced
+       ONCE per completed round into here (window.orwellAnnounce in js/a11y.js). Public reply text
+       only — reasoning/tool machinery is stripped before it reaches this node. -->
+  <div id="a11y-announcer" class="a11y-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
   <!-- Loading overlay — hides all flashing until app is ready. role=status + aria-label so a
        screen reader announces the boot wait instead of silence (UX audit J1-29), with NO
        child text node (an injected SR span reflowed the page → 390px matrix regression). -->
@@ -785,6 +796,17 @@
               <button type="button" class="theme-seg-btn" data-tier="full" aria-pressed="true" title="Liquid Glass — material + refraction">Full</button>
               <button type="button" class="theme-seg-btn" data-tier="frosted" aria-pressed="false" title="Frosted — blur material only">Frosted</button>
               <button type="button" class="theme-seg-btn" data-tier="normal" aria-pressed="false" title="No glass — flat chrome">Off</button>
+            </div>
+          </div>
+          <div class="theme-fd-group" id="theme-glass-tint-group">
+            <label class="theme-fd-label">Glass tint</label>
+            <!-- #739 — Clear vs Tinted (the iOS 26.1 opacity control). Clear (DEFAULT)
+                 is the colorless glass; Tinted raises opacity + contrast while keeping
+                 the refraction. Flips body.theme-tinted via a single --glass-opacity
+                 token (theme.js applyGlassTint / _syncGlassTintControl). -->
+            <div id="theme-glass-tint" class="theme-seg" role="group" aria-label="Glass tint" data-value="clear">
+              <button type="button" class="theme-seg-btn" data-tint="clear" aria-pressed="true" title="Clear — colorless glass (default)">Clear</button>
+              <button type="button" class="theme-seg-btn" data-tint="tinted" aria-pressed="false" title="Tinted — more opaque, higher-contrast glass">Tinted</button>
             </div>
           </div>
         </div>
@@ -1229,7 +1251,11 @@
       }).catch(function(){});
     })();
     </script>
-    <div id="chat-history" class="chat-history" role="log" aria-live="polite"></div>
+    <!-- F-A11Y-1: role="log" (a chronological transcript) but aria-live="off" — the narrator
+         streams token-by-token into bubbles inside this node, and a live region re-announces on
+         EVERY DOM mutation, so a polite value would make a screen reader read half-formed token
+         fragments over and over. Completed replies are announced ONCE via #a11y-announcer instead. -->
+    <div id="chat-history" class="chat-history" role="log" aria-live="off"></div>
 
     <!-- Attachments strip -->
     <div id="attach-strip" class="attach-strip"></div>

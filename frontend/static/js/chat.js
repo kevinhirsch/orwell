@@ -3380,6 +3380,16 @@ import { isNarrow } from './platform.js';
         // Attach footer to the last visible bubble (roundHolder for multi-round agent, holder for single)
         const footerTarget = (roundHolder && roundHolder !== holder && roundHolder.style.display !== 'none') ? roundHolder : holder;
         footerTarget.appendChild(createMsgFooter(footerTarget));
+
+        // F-A11Y-1: announce the COMPLETED reply ONCE for screen readers, at the SETTLED render
+        // point. The transcript log is aria-live="off" (it streams token-by-token and would
+        // otherwise flood AT with fragments). Announce against footerTarget — the SAME
+        // last-visible-bubble resolution the footer uses — so a tool-only trailing round (empty
+        // roundHolder) still announces the earlier round's real narration, not an empty bubble.
+        // window.orwellAnnounce (js/a11y.js) reads the painted public reply and strips the reasoning
+        // accordion, so reasoning is never spoken, into the dedicated #a11y-announcer polite region.
+        // Fail-soft: absent helper ⇒ no-op.
+        try { if (window.orwellAnnounce) window.orwellAnnounce(footerTarget); } catch (_e) {}
         // Capture any checklist this message produced as the current plan — both
         // the initial proposal AND restated progress during execution. Keeps the
         // stored plan (and the docked plan window) in sync with the latest state.
