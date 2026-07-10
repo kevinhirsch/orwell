@@ -9,6 +9,11 @@ on:
 # Cancel the in-flight run for a ref the moment a newer commit arrives, so a
 # superseded commit doesn't burn runner minutes finishing a run nobody is waiting
 # on. Keyed per ref, so main and each PR have independent groups.
+# Least-privilege default token: every job only checks out code and runs read-only
+# tests (no pushes, PR comments, or releases). Artifact upload needs no repo write.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
