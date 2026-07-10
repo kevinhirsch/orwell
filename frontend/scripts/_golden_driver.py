@@ -260,7 +260,12 @@ class GoldenDriver:
 
         fe_env = dict(os.environ,
                       ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true",
-                      ORWELL_ENGINE_MCP_URL=self.engine)
+                      ORWELL_ENGINE_MCP_URL=self.engine,
+                      # #1313 — the golden path independently verifies cast authoring (invariant I4),
+                      # and replay pins a resolvable (dead-end) utility endpoint. Force the house-entry
+                      # authoring gate OFF so createCharacter returns without blocking on authoring —
+                      # keeping the record/replay timing deterministic and byte-identical to the seam.
+                      ORWELL_ALLOW_FLOOR_START="1")
         if self.mode == "record":
             fe_env["ORWELL_GOLDEN_RECORD"] = "1"
             fe_env["ORWELL_GOLDEN_FIXTURE"] = self.fixture

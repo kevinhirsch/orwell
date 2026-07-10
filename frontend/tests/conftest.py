@@ -54,6 +54,14 @@ if not _current_db_url or _AUTO_TEST_DB_MARKER in _current_db_url:
         tempfile.mkdtemp(prefix=_AUTO_TEST_DB_MARKER), "app.db"
     )
 
+# #1313 — the house-entry authoring gate (do_create_character) HOLDS game start until the cast is
+# authored, and engages ONLY when a real utility model resolves. The FE suite stubs the LLM and must
+# stay deterministic regardless of any ambient settings.json a dev may have locally, so default the
+# operator escape hatch ON for the whole suite (byte-identical to the pre-gate immediate start). The
+# dedicated gate tests `monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START")` + stub the model resolver to
+# exercise the gate explicitly.
+os.environ.setdefault("ORWELL_ALLOW_FLOOR_START", "1")
+
 # Replace `core` with a lightweight package stub pointing at the real core/ dir, so
 # `import core.auth` / `import core.middleware` load those files WITHOUT executing
 # `core/__init__.py`. Idempotent across the session.
