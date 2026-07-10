@@ -23,6 +23,12 @@ Fixes covered (see the audit's ux-content-a11y / ux-visual-motion / ux-interacti
 import os
 import re
 
+from a11y_helpers import (
+    native_headings_forced_to_aria_level,
+    strip_comments,
+    theme_dialog_fragment,
+)
+
 FE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -380,10 +386,12 @@ def test_axe8_tab_trap_precedes_escape_handler():
 # monotonic without any ARIA override.
 
 def test_axe9_theme_window_subsections_are_real_deeper_headings():
-    html = _read("static", "index.html")
-    start = html.index('<div id="theme-host"')
-    end = html.index('<div id="mobile-backdrop">', start)
-    section = html[start:end]
+    # Reuse the shared, attribute-tolerant fragment boundary + comment stripping
+    # (from a11y_helpers, also used by test_hig_a11y_p2.py) so extra attributes on
+    # the boundary <div>s, or comment prose mentioning the old markup, can't trip
+    # the <h2>/aria-level checks below.
+    html = strip_comments(_read("static", "index.html"))
+    section = theme_dialog_fragment(html)
     # The dialog's own title stays h4 (untouched — no visual/CSS change).
     assert re.search(r"<h4>.*?Theme</h4>", section, re.S), "the dialog's own h4 title should be unchanged"
     # The subsections are real <h5> elements (one deeper than the h4 title) — no <h2>
@@ -394,7 +402,9 @@ def test_axe9_theme_window_subsections_are_real_deeper_headings():
         "no <h2> may be nested inside the Theme window (whose own title is an h4) — the "
         "subsections must be real <h5> elements, not <h2>'s (HIG F-A11Y-3)"
     )
-    assert 'role="heading"' not in section and "aria-level" not in section, (
+    # Same syntax-tolerant predicate as F-A11Y-3: no native heading in the fragment
+    # may be forced to another ARIA level (single/double quotes + whitespace tolerated).
+    assert not native_headings_forced_to_aria_level(section), (
         "the Theme window's subsection headings must be real heading elements, not native "
         "headings forced to another level via role=heading/aria-level (HIG F-A11Y-3)"
     )

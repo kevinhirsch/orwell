@@ -16,18 +16,18 @@ preserves the original visual sizing.
 import os
 import re
 
+from a11y_helpers import (
+    native_headings_forced_to_aria_level,
+    strip_comments as _strip_comments,
+    theme_dialog_fragment as _theme_dialog_fragment,
+)
+
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _read(*rel):
     with open(os.path.join(FRONTEND, *rel), encoding="utf-8") as f:
         return f.read()
-
-
-def _strip_comments(html: str) -> str:
-    """Drop HTML comments so a comment that mentions the old markup as prose does
-    not count as a real occurrence."""
-    return re.sub(r"<!--.*?-->", "", html, flags=re.DOTALL)
 
 
 def _heading_levels(fragment: str):
@@ -40,8 +40,9 @@ def _heading_levels(fragment: str):
 def test_no_native_heading_carries_aria_level_or_role_heading_override():
     html = _strip_comments(_read("static", "index.html"))
     # A native <h1>..<h6> must never carry role="heading" or aria-level — that is
-    # the self-contradictory "element-vs-ARIA mismatch" F-A11Y-3 called out.
-    bad = re.findall(r"<h[1-6]\b[^>]*\b(?:role=\"heading\"|aria-level=)", html)
+    # the self-contradictory "element-vs-ARIA mismatch" F-A11Y-3 called out. The
+    # predicate is syntax-tolerant (single/double quotes + whitespace).
+    bad = native_headings_forced_to_aria_level(html)
     assert not bad, (
         "a native <hN> heading carries role=\"heading\"/aria-level — a self-contradictory "
         "level override; use a real heading element at the true level instead (F-A11Y-3): "
@@ -50,13 +51,6 @@ def test_no_native_heading_carries_aria_level_or_role_heading_override():
 
 
 # ── F-A11Y-3: the Theme dialog outline is monotonic (no skipped levels) ────────
-
-def _theme_dialog_fragment(html: str) -> str:
-    start = html.index('<div id="theme-host"')
-    # The theme host closes just before the mobile backdrop element.
-    end = html.index('<div id="mobile-backdrop"', start)
-    return html[start:end]
-
 
 def test_theme_dialog_heading_outline_is_monotonic():
     html = _strip_comments(_read("static", "index.html"))
