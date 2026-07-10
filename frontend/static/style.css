@@ -14414,7 +14414,11 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 #integrations-form .admin-card {
   background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
-.admin-card h2 {
+.admin-card h2,
+/* HIG F-A11Y-3: the Theme dialog's section headings are real <h5> (one level
+   deeper than its h4 dialog title) for a monotonic outline with no skipped
+   levels — style them like the shared .admin-card h2 so nothing changes visually. */
+.admin-card h5 {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.03em;

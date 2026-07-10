@@ -657,17 +657,17 @@
     <!-- Tab: Browse themes -->
     <div id="theme-tab-browse" class="theme-tab-panel">
       <div class="admin-card">
-        <!-- AXE-9: this window's own dialog title (:633) is an h4; these nested section
-             headings were plain h2's, so the heading OUTLINE ranked them ABOVE the dialog
-             that contains them (a screen-reader "by heading" navigator would read this as
-             MORE important than "Theme"). role="heading" aria-level keeps the existing
-             .admin-card h2 visual styling (shared across every other admin card in the app)
-             while exposing the correct, monotonic accessible level (one deeper than h4). -->
-        <h2 role="heading" aria-level="5">Default Themes</h2>
+        <!-- HIG F-A11Y-3: this window's own dialog title (the .modal-header h4 above)
+             sits at level 4, so these nested section headings are real <h5> elements —
+             one level deeper than the dialog title — for a logical, monotonic heading
+             outline with no skipped levels. (They were formerly native level-2 headings
+             forced to level 5 via ARIA, which is self-contradictory.) The .admin-card h5
+             CSS rule matches the shared .admin-card h2 sizing so nothing changes visually. -->
+        <h5>Default Themes</h5>
         <div class="theme-grid" id="themeGrid"></div>
       </div>
       <div class="admin-card" id="themeUserCard" style="display:none">
-        <h2 role="heading" aria-level="5">Your Themes</h2>
+        <h5>Your Themes</h5>
         <div class="theme-grid" id="themeUserGrid"></div>
       </div>
     </div>
@@ -675,7 +675,7 @@
     <!-- Tab: Customize -->
     <div id="theme-tab-customize" class="theme-tab-panel" style="display:none">
       <div class="admin-card">
-        <h2 role="heading" aria-level="5">Colors</h2>
+        <h5>Colors</h5>
         <div class="theme-custom" id="themeCustom">
           <div class="color-row"><label>Background</label><input type="color" id="clr-bg"><button class="color-reset-btn" data-reset="bg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
           <div class="color-row"><label>Text</label><input type="color" id="clr-fg"><button class="color-reset-btn" data-reset="fg" title="Reset this color" aria-label="Reset color">&#x21BA;</button></div>
@@ -734,7 +734,7 @@
       </div>
       <!-- Color Harmony Generator (its own card) -->
       <div class="admin-card" id="theme-harmony-card">
-        <h2 role="heading" aria-level="5"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="10" cy="20" r="2.5"/></svg>Color Harmony</h2>
+        <h5><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="10" cy="20" r="2.5"/></svg>Color Harmony</h5>
         <div class="theme-harmony-row">
           <div class="theme-fd-group">
             <label class="theme-fd-label">Accent Color</label>
@@ -768,7 +768,7 @@
         <div id="harmony-preview" class="harmony-preview"></div>
       </div>
       <div class="admin-card">
-        <h2 role="heading" aria-level="5">Font & Layout</h2>
+        <h5>Font & Layout</h5>
         <div class="theme-fd-row">
           <div class="theme-fd-group">
             <label class="theme-fd-label">Font</label>
@@ -888,7 +888,7 @@
         </div>
       </div>
       <div class="admin-card" style="margin-top:8px;">
-        <h2 role="heading" aria-level="5">Save / Share</h2>
+        <h5>Save / Share</h5>
         <div class="theme-save-row" id="theme-save-row">
           <input type="text" id="theme-save-name" placeholder="Theme name..." maxlength="32">
           <button id="theme-save-go">Save</button>
