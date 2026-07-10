@@ -1620,40 +1620,59 @@ def setup_orwell_routes() -> APIRouter:
         effective = orwell_game_session.bind_game_session(user, requested)
         return {"sessionId": effective, "bound": effective == requested}
 
-    # ── 0064 Part F: window / HUD layout, synced across the user's devices ──────────────────
+    # ── WS Phase-1 (ADR 0017): window / HUD layout — PER-DEVICE LWW ─────────────────────────
+    # ADR 0017 supersedes 0064-F: layout geometry is remembered PER DEVICE and is NOT synced
+    # cross-device (only game state syncs). The store is keyed by (user, deviceId); a legacy
+    # per-user record still resolves (migration). The `layout-changed` fan-out remains for the
+    # SAME device's other tabs (LWW mirror); it now carries `deviceId` so a receiver on a
+    # DIFFERENT device ignores it (geometry cross-device sync is intentionally dropped).
     class LayoutPatchRequest(BaseModel):
         windowId: str
         state: dict = {}
-        # An opaque per-tab token so the originating device can ignore its OWN broadcast echo
+        # An opaque per-tab token so the originating tab can ignore its OWN broadcast echo
         # (there is no stream to key self-echo on, unlike a chat run).
         origin: str = ""
+        # A stable per-device token (localStorage; survives reload; distinct from the per-tab id).
+        # Empty ⇒ the legacy per-user scope (backward compatible / migration).
+        deviceId: str = ""
 
     @router.get("/layout")
-    async def orwell_layout(request: Request):
-        """Feature 0064 (F): the user's synced window/HUD layout — open/minimized/docked + size +
-        position per window. Vault-free (geometry carries no secret); scoped to the caller. The kit
-        seeds from this on load so every device shows the same arrangement."""
+    async def orwell_layout(request: Request, deviceId: str = ""):
+        """WS Phase-1 (ADR 0017): the (user, device)'s window/HUD layout — open/minimized/docked +
+        size + position per window. Per-device (geometry is NOT synced cross-device); a legacy
+        per-user record still resolves. Vault-free (geometry carries no secret); scoped to the
+        caller. The kit seeds from this on load."""
         from src import orwell_layout
-        return orwell_layout.get_layout(_current_user(request))
+        return orwell_layout.get_layout(_current_user(request), deviceId or None)
 
     @router.patch("/layout")
     async def orwell_patch_layout(body: LayoutPatchRequest, request: Request):
-        """Feature 0064 (F): persist a window's state change (last-write-wins per field) and FAN it
-        out to the user's other devices over the canonical game session's SSE channel as a
-        `layout-changed` event (ids + geometry numbers only — never a message body or Vault). The
-        originating device ignores the echo via `origin`."""
+        """WS Phase-1 (ADR 0017): persist a window's state change PER DEVICE (last-write-wins per
+        field) and FAN it out over the canonical game session's SSE channel as a `layout-changed`
+        event (ids + geometry numbers only — never a message body or Vault). Per-device: geometry is
+        NOT synced cross-device — the event carries `deviceId` so only the SAME device's other tabs
+        apply it; a different device ignores it. The originating tab ignores its own echo via
+        `origin`."""
         from src import orwell_layout, orwell_game_session, session_events
         user = _current_user(request)
-        saved = orwell_layout.patch_layout(user, body.windowId, body.state)
-        if not saved:
+        result = orwell_layout.patch_layout(
+            user, body.deviceId or None,
+            {"windowId": body.windowId, "state": body.state},
+            origin=body.origin or "",
+        )
+        if not result:
             return JSONResponse(status_code=400, content={"error": "no usable layout fields"})
-        # Broadcast to the user's other devices (best-effort): they all view the canonical game
-        # session, so its existing per-session SSE channel reaches every one of them.
+        saved = result["state"]
+        # Fan out to the SAME device's other tabs (best-effort): they view the canonical game
+        # session, so its per-session SSE channel reaches every tab. The `deviceId` scopes the
+        # apply to the originating device (cross-device geometry sync is dropped, ADR 0017); the
+        # `origin` self-echoes back to the originating tab, which drops it.
         try:
             sid = orwell_game_session.get_game_session(user)
             if sid:
                 session_events.publish(sid, "layout-changed",
-                                       {"windowId": body.windowId, "state": saved, "origin": body.origin or ""})
+                                       {"windowId": body.windowId, "state": saved,
+                                        "origin": body.origin or "", "deviceId": body.deviceId or ""})
         except Exception:
             logger.debug("[orwell] layout-changed publish skipped", exc_info=True)
         return {"windowId": body.windowId, "state": saved}
