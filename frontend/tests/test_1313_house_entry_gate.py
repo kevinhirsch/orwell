@@ -1,8 +1,10 @@
 """#1313 (P0) — the house-entry authoring gate: the game must NEVER start on the deterministic
 FLOOR cast (0/15 authored).
 
-`do_create_character` must HOLD house entry until the cast is authored to a threshold (>= 13/15),
-but ONLY when authoring can actually run — a real utility model resolves — and the operator has not
+`do_create_character` must HOLD house entry until the cast is authored to the FULL cast size
+(`HOUSE_READY_MIN_AUTHORED == 15/15` — PO ruling 2026-07-10: the deterministic seeded floor is
+NEVER a viable cast identity in prod, so the gate is the whole cast, not a tolerance band), but
+ONLY when authoring can actually run — a real utility model resolves — and the operator has not
 set the `ORWELL_ALLOW_FLOOR_START=1` escape hatch. With no model (the whole LLM-stubbed test suite)
 the gate is OFF and start is instant, byte-identical to before.
 
@@ -100,11 +102,11 @@ def test_gate_holds_start_when_cast_underauthored(monkeypatch, run):
 
 
 def test_gate_allows_start_when_cast_authored(monkeypatch, run):
-    """Gate ON + authoring at/above the threshold ⇒ the game STARTS (normal started result)."""
+    """Gate ON + the FULL cast authored ⇒ the game STARTS (normal started result)."""
     monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
     ca.clear_house_entry_gate_block("carol")
     monkeypatch.setattr(ca, "house_entry_gate_active", _async_true)
-    monkeypatch.setattr(ca, "await_house_ready", _make_ready(ready=True, authored=14))
+    monkeypatch.setattr(ca, "await_house_ready", _make_ready(ready=True, authored=15))
 
     res = run(ti.do_create_character('{"playerName":"P"}', owner="carol"))
     assert res["exit_code"] == 0
@@ -194,23 +196,36 @@ def test_house_entry_gate_active_decision(monkeypatch, run):
     assert run(ca.house_entry_gate_active("u")) is False
 
 
+# ── the gate threshold IS the full cast (PO ruling 2026-07-10) ──────────────────────
+
+def test_house_ready_min_authored_equals_full_cast_size():
+    """PO ruling 2026-07-10: the deterministic seeded floor is NEVER a viable cast identity in
+    prod, so the gate threshold must equal the FULL NPC cast size — no tolerance band, no NPC may
+    enter the house un-authored. Pins the invariant (threshold == cast total) rather than a literal
+    number, so a future cast-size change can't silently reopen the gap this ruling closed."""
+    assert ca.HOUSE_READY_MIN_AUTHORED == ca._HOUSE_READY_TOTAL_DEFAULT == 15
+
+
 # ── await_house_ready poll semantics ─────────────────────────────────────────────────
 
 def test_await_house_ready_returns_on_threshold(monkeypatch, run):
-    """Polls completeness and returns ready the moment authored crosses the threshold."""
-    seq = iter([{"authored": 5, "total": 15, "missing": 10},
-                {"authored": 13, "total": 15, "missing": 2}])
+    """Polls completeness and returns ready the moment authored crosses the threshold — pinned to
+    the INVARIANT (`HOUSE_READY_MIN_AUTHORED`, the full cast size), never a literal number, so a
+    future cast-size change can't silently reopen the gap."""
+    threshold = ca.HOUSE_READY_MIN_AUTHORED
+    seq = iter([{"authored": threshold - 1, "total": 15, "missing": 15 - (threshold - 1)},
+                {"authored": threshold, "total": 15, "missing": 15 - threshold}])
 
     async def _comp(owner):
         try:
             return next(seq)
         except StopIteration:
-            return {"authored": 13, "total": 15, "missing": 2}
+            return {"authored": threshold, "total": 15, "missing": 15 - threshold}
     monkeypatch.setattr(ca, "authoring_completeness_for", _comp)
     monkeypatch.setattr(ca, "_kick_backfill_for_stragglers", lambda owner: _noop())
 
     out = run(ca.await_house_ready("u", timeout=5, poll_interval=0.01))
-    assert out["ready"] is True and out["authored"] == 13
+    assert out["ready"] is True and out["authored"] == threshold
 
 
 def test_await_house_ready_times_out_below_threshold(monkeypatch, run):
@@ -295,7 +310,7 @@ def test_watch_clears_marker_and_fires_post_start_exactly_once(monkeypatch, run)
     """A refused entry arms ONE watch; when authoring lands, the watch clears the holding overlay
     and runs the deferred post-start kick (the zeitgeist) exactly once."""
     async def _ready(owner, **k):
-        return {"ready": True, "authored": 14, "total": 15, "missing": 1}
+        return {"ready": True, "authored": 15, "total": 15, "missing": 0}
     monkeypatch.setattr(ca, "await_house_ready", _ready)
     gs = importlib.import_module("src.orwell_game_session")
     pushed = {"n": 0}
