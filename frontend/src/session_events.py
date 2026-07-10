@@ -55,7 +55,17 @@ def _cancel_ring_evict(session_id: str) -> None:
     """Cancel any armed ring teardown for `session_id` (a new subscriber arrived)."""
     task = _RING_EVICT_TASKS.pop(session_id, None)
     if task is not None and not task.done():
-        task.cancel()
+        # A ring-evict task can outlive the loop it was armed on (e.g. a per-test `_run` loop that
+        # closed with the 180s timer still pending). Cancelling such a cross-loop task calls into the
+        # dead loop and raises ``RuntimeError: Event loop is closed`` — which, bubbling through
+        # ``subscribe`` and the ws state/layout channels' ``except RuntimeError: return``, would
+        # silently kill an otherwise-healthy channel (a real fe-unit teardown flake). Popping the
+        # reference is what matters; the cancel is best-effort. In production the loop never closes,
+        # so this except never fires.
+        try:
+            task.cancel()
+        except RuntimeError:
+            pass
 
 
 def _schedule_ring_evict(session_id: str) -> None:

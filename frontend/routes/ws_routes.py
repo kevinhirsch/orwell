@@ -38,6 +38,7 @@ ships to users from this PR alone; flipping it on is the separate turn-on step.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any, AsyncGenerator, Callable, Optional
@@ -551,14 +552,35 @@ async def ws_session(websocket: WebSocket) -> None:
         except Exception:
             logger.debug("[ws] session loop ended", exc_info=True)
         finally:
-            hb_task.cancel()
+            # Tear down the socket's own background tasks. Cancel then AWAIT both the heartbeat AND the
+            # channel tasks so each is finalized here rather than left pending — a cancelled-but-
+            # unawaited task can survive to a per-test `_run` loop's close and surface as an unraisable
+            # "Event loop is closed" (a real fe-unit teardown flake). Awaiting the channel tasks also
+            # lets each one's `session_events.subscribe()` `finally` (subscriber discard, ring-evict
+            # arm) run IN-LOOP instead of racing the close (greptile P1 on #1338). `cancel()` is
+            # guarded because a task can outlive its loop (cross-loop cancel raises RuntimeError), and
+            # awaiting a just-cancelled task is instant (every channel/heartbeat coroutine swallows
+            # CancelledError and returns), so this never delays a live disconnect.
+            #
+            # Order is load-bearing: cancel everything, drain the heartbeat, close the socket, THEN
+            # finalize the channel tasks. Closing before the channel-drain keeps `websocket.close()`'s
+            # observable side effect from being pushed behind an extra scheduling hop.
+            with contextlib.suppress(RuntimeError):
+                hb_task.cancel()
             for task in channel_tasks.values():
                 if not task.done():
-                    task.cancel()
+                    with contextlib.suppress(RuntimeError):
+                        task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError, Exception):
+                await hb_task
             try:
                 await websocket.close()
             except Exception:
                 pass
+            channels = list(channel_tasks.values())
+            if channels:
+                with contextlib.suppress(RuntimeError):
+                    await asyncio.gather(*channels, return_exceptions=True)
 
 
 def setup_ws_routes() -> APIRouter:

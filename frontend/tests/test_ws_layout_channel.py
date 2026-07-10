@@ -161,3 +161,33 @@ def test_layout_changed_does_not_leak_into_the_state_channel(run):
         await H.stop(ws, t)
 
     run(main())
+
+
+def test_cancelled_channel_task_cleanup_runs_before_ws_session_returns(run):
+    """Greptile P1 on #1338 — the teardown race for the CHANNEL task set. ``ws_session``'s ``finally``
+    cancels the state/layout channel tasks; it must also AWAIT them so each one's
+    ``session_events.subscribe()`` ``finally`` (which discards its subscriber queue) runs IN-LOOP,
+    not be left pending as the loop closes (the same 'live channel task left behind' race the hb_task
+    fix closed). Proof: right after ``stop()`` returns — with NO further ``await`` to let a stray
+    cancelled task catch up — the session has zero lingering ``session_events`` subscribers."""
+    async def main():
+        import asyncio as _a
+        canon = H.seed_live_game(None, "live-canon")
+        ws = H.new_ws(); t = H.spawn(ws)
+        await H.hello(ws, canon)
+        ws.client_send({"t": "subscribe", "ch": "state", "cid": "c_state"})
+        # Wait until the state channel task has actually registered as a session_events subscriber.
+        for _ in range(100):
+            if session_events.subscriber_count(canon) >= 1:
+                break
+            await _a.sleep(0.005)
+        assert session_events.subscriber_count(canon) == 1, "state channel never subscribed"
+        await H.stop(ws, t)
+        # The handler returned; its finally awaited the channel task, so subscribe()'s finally already
+        # ran and discarded the subscriber. If the channel task were merely cancelled (not awaited),
+        # its finally would still be pending here and the count would read 1 — the greptile regression.
+        assert t.done()
+        assert session_events.subscriber_count(canon) == 0, \
+            "cancelled channel task's subscribe() cleanup did not run before ws_session returned"
+
+    run(main())
