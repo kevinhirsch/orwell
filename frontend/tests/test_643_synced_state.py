@@ -194,6 +194,32 @@ zh.set({ collapsed: false });
 assert(dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length === capAfterReuse,
   "the stale disposed handle stays inert even after the key is re-registered");
 
+// ── 6b. a STALE handle's dispose() must NOT kill a live re-registration (Greptile P1) ───────────
+// Re-register a key while the OLD handle is still around (NOT yet disposed), then dispose the OLD
+// handle. Because register() mints a FRESH entry, the stale handle's dispose() is a no-op and the
+// NEW registration stays live — a subsequent seed still reaches the new consumer's apply.
+fire("orwell:layout-seed", { windowId: "tab:main", state: { shown: true } });   // prior state
+const oldApplied = [];
+const oldHandle = global.window.OrwellSyncedState.register("tab:main", { apply: function (s) { oldApplied.push(s); } });
+const newApplied = [];
+const newHandle = global.window.OrwellSyncedState.register("tab:main", { apply: function (s) { newApplied.push(s); } });
+// re-register carries prior `last` forward (state is preserved across re-register).
+assert(newHandle.get().shown === true, "re-register must preserve the prior handle's last state");
+oldHandle.dispose();   // the STALE handle disposes — must NOT unregister the live re-registration.
+const beforeLiveSeed = newApplied.length;
+const oldAppliedBeforeLiveSeed = oldApplied.length;
+fire("orwell:layout-seed", { windowId: "tab:main", state: { shown: false } });
+assert(newApplied.length === beforeLiveSeed + 1,
+  "after a stale handle's dispose(), a seed must still reach the LIVE re-registered consumer");
+assert(newApplied[newApplied.length - 1].shown === false, "the live consumer receives the merged seed");
+assert(oldApplied.length === oldAppliedBeforeLiveSeed,
+  "the disposed stale handle must NOT receive the live seed (its dispose left the registry pointing at the new entry)");
+// the NEW handle can still write.
+const capBeforeLiveSet = dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length;
+newHandle.set({ shown: true });
+assert(dispatched.filter(function (e) { return e.type === "orwell:window-layout"; }).length === capBeforeLiveSet + 1,
+  "the live re-registered handle can still set()");
+
 // ── 7. the substrate mints NO orwell:gamechanged (g15 single-dispatcher invariant) ──────────────
 assert(dispatched.filter(function (e) { return e.type === "orwell:gamechanged"; }).length === 0,
   "the substrate must never dispatch orwell:gamechanged");

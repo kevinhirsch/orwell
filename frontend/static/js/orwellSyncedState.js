@@ -81,7 +81,14 @@
   function register(key, opts) {
     if (typeof key !== 'string' || !key) throw new Error('OrwellSyncedState.register: a string key is required');
     opts = opts || {};
-    var entry = registry[key] || { last: {} };
+    // A FRESH entry object per register() — carrying `last` forward from any prior registration so
+    // previously-known state survives a re-register. Reusing the prior object would make an OLD
+    // (disposed) handle and the NEW handle share one `entry`, so `registry[key] === entry` would be
+    // true for BOTH and the stale handle's dispose() would delete the LIVE registration (killing
+    // future seed routing to the new consumer). A distinct object makes the stale handle's guard
+    // (`registry[key] === entry`) false, so its dispose() is a no-op.
+    var prev = registry[key];
+    var entry = { last: (prev && prev.last) || {} };
     entry.apply = opts.apply;
     entry.coerce = (typeof opts.coerce === 'function') ? opts.coerce : null;
     registry[key] = entry;
