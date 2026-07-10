@@ -87,6 +87,26 @@ else
   export PW_CHROMIUM=""   # empty → mirror_live_parity.mjs launches with executablePath undefined (auto-resolve)
 fi
 
+# 0d) WebSocket library for the uvicorn upgrade (WS Phase-1 turn-on gate readiness).
+#     The WS transport rides FastAPI/Starlette's native WebSocket, which needs a WS library under
+#     uvicorn (`uvicorn[standard]` / `websockets` / `wsproto`). The FE `requirements.txt` currently
+#     pins PLAIN `uvicorn`, so a clean venv answers the `/api/ws/session` upgrade with a 404 ("No
+#     supported WebSocket library detected") — the client then correctly engages its PERMANENT SSE
+#     fallback (§6), and the WS-mode leg of this gate can prove nothing. Ensure one is present so WS
+#     mode is actually exercised — self-contained, exactly like the playwright bootstrap above. This
+#     does NOT flip the product default (the server `ORWELL_WS_TRANSPORT` flag stays off); it only lets
+#     the gate's force-ON path connect. PRODUCTION READINESS: pin `uvicorn[standard]` (or `websockets`)
+#     in `frontend/requirements.txt` before turning the flag on — that pin is out of this gate's scope.
+say "0d) ensure a WebSocket library for the uvicorn WS upgrade (FE venv)"
+if "$ROOT/frontend/.venv/bin/python" -c "import websockets" >/dev/null 2>&1 \
+   || "$ROOT/frontend/.venv/bin/python" -c "import wsproto" >/dev/null 2>&1; then
+  echo "ws library: already present"
+else
+  "$ROOT/frontend/.venv/bin/pip" install --disable-pip-version-check -q websockets >"$LOGS/ws-lib-install.log" 2>&1 \
+    && echo "ws library: installed websockets" \
+    || { echo "!! websockets install failed — the WS-mode leg will fall back to SSE"; tail -20 "$LOGS/ws-lib-install.log" 2>/dev/null; }
+fi
+
 # secrets file the rig reads for admin login (gitignored — see .gitignore add).
 printf 'ADMIN_USER=%s\nADMIN_PW=%s\n' "$ADMIN_USER" "$ADMIN_PW" > "$HARNESS/.secrets.env"
 
@@ -169,9 +189,38 @@ elif [ -n "$TOOLTURN" ]; then
   GATE=$?
   echo ""; echo "gate exit: $GATE  (0=PASS no dup/orphan across two windows on a tool-rich turn · 1=FAIL · 2=precondition unmet)"
 else
-  say "6) MIRROR LIVE-PARITY GATE"
-  cd "$ROOT" && node "$HARNESS/mirror_live_parity.mjs"
-  GATE=$?
-  echo ""; echo "gate exit: $GATE  (0=PASS windows mirror live · 1=FAIL diverge · 2=precondition unmet)"
+  # WS Phase-1 turn-on gate (protocol spec §6/§7 case f · ADR 0017 §Phasing): the F5 two-window
+  # live-parity invariant must hold under BOTH transports — the WebSocket (`ORWELL_WS_TRANSPORT` on)
+  # AND the permanent SSE/poll fallback (flag off, the production default). The gate forces the client
+  # flag per run via `MIRROR_WS_TRANSPORT` (an init script inside mirror_live_parity.mjs sets the
+  # window global before app JS — the SERVER env / product default is never touched). Acceptance is
+  # BYTE-IDENTICAL between modes: the same three checks + WS-engagement, either red fails the gate.
+  #
+  #   MIRROR_WS_TRANSPORT unset ⇒ run BOTH modes (fallback then WS); each must pass.
+  #   MIRROR_WS_TRANSPORT=0/1  ⇒ pin a single mode (used by the CI matrix leg + local diagnosis).
+  run_live_parity() {  # $1 = mode label · $2 = MIRROR_WS_TRANSPORT value
+    say "6) MIRROR LIVE-PARITY GATE — $1 transport"
+    ( cd "$ROOT" && MIRROR_WS_TRANSPORT="$2" exec node "$HARNESS/mirror_live_parity.mjs" )
+    local rc=$?
+    echo ""; echo "[$1] gate exit: $rc  (0=PASS windows mirror live · 1=FAIL diverge · 2=precondition unmet)"
+    return $rc
+  }
+  if [ -n "${MIRROR_WS_TRANSPORT+x}" ]; then
+    # Single pinned mode.
+    if [ "$MIRROR_WS_TRANSPORT" = "1" ] || [ "$MIRROR_WS_TRANSPORT" = "true" ]; then
+      run_live_parity ws 1; GATE=$?
+    else
+      run_live_parity fallback 0; GATE=$?
+    fi
+  else
+    # Both modes — each must pass for the gate to be green (spec §6 "Both modes must pass F5").
+    run_live_parity fallback 0; GATE_SSE=$?
+    run_live_parity ws 1;       GATE_WS=$?
+    echo ""
+    echo "──── BOTH-MODE SUMMARY (WS Phase-1 turn-on gate) ────"
+    echo "  SSE/fallback : $([ "$GATE_SSE" -eq 0 ] && echo PASS || echo FAIL)  (exit $GATE_SSE)"
+    echo "  WS transport : $([ "$GATE_WS" -eq 0 ] && echo PASS || echo FAIL)  (exit $GATE_WS)"
+    if [ "$GATE_SSE" -eq 0 ] && [ "$GATE_WS" -eq 0 ]; then GATE=0; else GATE=1; fi
+  fi
 fi
 exit $GATE
