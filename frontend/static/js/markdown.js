@@ -801,7 +801,12 @@ function ensureSpeakerCss() {
       '.ow-speaker-chip .ow-mono-face{width:100%;height:100%;}' +
       '.ow-speaker-chip-ini{display:flex;align-items:center;justify-content:center;' +
         'width:100%;height:100%;font:800 .62em/1 system-ui,-apple-system,sans-serif;' +
-        'background:#274a54;color:#e6f2f5;letter-spacing:-.02em;}';
+        'background:#274a54;color:#e6f2f5;letter-spacing:-.02em;}' +
+      // #1323 — a multi-paragraph speech: every sibling <p> that continues the same speaker's
+      // line (no re-tag needed — see _extendSpeakerContinuations) gets the SAME left padding as
+      // the dialogue column beside the gutter chip (chip width + the flex gap), so the whole
+      // speech reads as one person talking instead of just its opening line.
+      '.ow-speaker-cont{padding-left:calc(1.7em + .5rem);}';
     (document.head || document.documentElement).appendChild(s);
   } catch (_) { /* CSS is a nicety; never let it break the render */ }
 }
@@ -849,9 +854,109 @@ export function extractSpeakerTags(text) {
   return { text: out, chips };
 }
 
+// Void/self-closing elements a top-level scan may meet — no matching close tag to hunt for.
+const _SPEAKER_SCAN_VOID_TAGS = new Set(['hr', 'br', 'img', 'input', 'meta', 'link']);
+
+// #1323 — a lightweight, non-recursive top-level block scanner over an HTML string. It does NOT
+// parse the document tree; it only needs to answer, in order, "is the next top-level thing a
+// <p> (and does it already carry ow-speaker-line), or is it something else (a list, blockquote,
+// heading, rule, table, code block…)?" so restoreSpeakerChips can extend the gutter treatment to
+// a run of sibling <p>s without ever descending into e.g. a blockquote's OWN inner <p>s (which
+// are opaque relative to this pass — treated as one "other" block). Fails open: an unbalanced/
+// unrecognized tag just consumes to the end of the string as a single "other" block, which can
+// only ever under-apply the continuation treatment, never mis-attribute one speaker's chip to
+// another's text.
+function _scanTopLevelBlocks(html) {
+  const nodes = [];
+  const n = html.length;
+  let i = 0;
+  while (i < n) {
+    const wsMatch = /^\s+/.exec(html.slice(i));
+    if (wsMatch) { i += wsMatch[0].length; continue; }
+    const tagMatch = /^<([a-zA-Z][\w-]*)\b[^>]*>/.exec(html.slice(i));
+    if (!tagMatch) {
+      // Stray non-whitespace text with no leading tag (rare from mdToHtml output) — opaque, so
+      // it still correctly breaks a continuation run. Consume to the next '<' or end of string.
+      const rest = html.slice(i);
+      const nextLt = rest.indexOf('<', 1);
+      nodes.push({ kind: 'other' });
+      i += (nextLt === -1 ? rest.length : nextLt);
+      continue;
+    }
+    const tagName = tagMatch[1].toLowerCase();
+    const openTag = tagMatch[0];
+    const openStart = i;
+    const openEnd = i + openTag.length;
+    if (_SPEAKER_SCAN_VOID_TAGS.has(tagName) || openTag.endsWith('/>')) {
+      nodes.push({ kind: 'other' });
+      i = openEnd;
+      continue;
+    }
+    const closeIdx = html.toLowerCase().indexOf('</' + tagName, openEnd);
+    const blockEnd = closeIdx === -1 ? n : (html.indexOf('>', closeIdx) + 1);
+    if (tagName === 'p') {
+      nodes.push({
+        kind: 'p',
+        openStart,
+        openEnd,
+        isSpeakerLine: /class\s*=\s*"[^"]*\bow-speaker-line\b[^"]*"/.test(openTag),
+      });
+    } else {
+      nodes.push({ kind: 'other' });
+    }
+    i = blockEnd > openStart ? blockEnd : openEnd; // safety against zero-progress
+  }
+  return nodes;
+}
+
+// #1323 — the root cause: the narrator tags only the FIRST line of a speaker's speech (by
+// design — see momentPrompts.ts's SPEAKER TAGS rule, "ONE tag per line" bounds a single line's
+// tag, it does not require re-tagging every line of a continued quote). This extends the gutter
+// indent from an ow-speaker-line <p> to the run of immediately-following sibling <p>s so a
+// multi-paragraph speech reads as one person talking, not just its opening line.
+//
+// The run stops at, and does NOT cross:
+//   · another ow-speaker-line <p> (a new speaker's tag) — with one exception: the single
+//     untagged <p> immediately adjacent to that new tag is EXCLUDED from the run. Design
+//     choice: a plain paragraph that hands off directly into the next speaker's tag reads as
+//     narration BETWEEN speeches (e.g. "Across the room, Marcus scoffs." right before
+//     @[Marcus Chen] speaks) rather than a continuation of the speaker before it, so it renders
+//     flush-left/unindented like ordinary narration.
+//   · any non-<p> top-level block (a list, blockquote, heading, rule, table, code block…) — the
+//     indent deliberately does not reach into those; they degrade gracefully by rendering
+//     unindented, exactly as before this fix.
+//   · the end of the message.
+// Idempotent: only ow-speaker-line <p>s (already carrying the placeholder-derived class) start a
+// run, and a continuation <p> is only ever marked, never re-scanned as a fresh start — a second
+// pass over already-processed HTML finds the same speaker lines and produces the same runs.
+function _extendSpeakerContinuations(html) {
+  const nodes = _scanTopLevelBlocks(html);
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].kind !== 'p' || !nodes[i].isSpeakerLine) continue;
+    const run = [];
+    let j = i + 1;
+    while (j < nodes.length && nodes[j].kind === 'p' && !nodes[j].isSpeakerLine) {
+      run.push(j);
+      j++;
+    }
+    const stoppedByNewSpeaker = j < nodes.length && nodes[j].kind === 'p' && nodes[j].isSpeakerLine;
+    if (stoppedByNewSpeaker && run.length) run.pop(); // the hand-off paragraph stays unindented
+    for (const k of run) nodes[k].continuation = true;
+  }
+  let out = html;
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i];
+    if (node.kind === 'p' && node.continuation) {
+      out = out.slice(0, node.openStart) + '<p class="ow-speaker-cont">' + out.slice(node.openEnd);
+    }
+  }
+  return out;
+}
+
 // Restore `___OWSPK_N___` placeholders (from extractSpeakerTags) into face chips in a rendered
 // HTML string. A placeholder that mdToHtml wrapped as its own paragraph becomes a flex speaker
-// line (chip in the gutter, dialogue beside it); any other leftover placeholder gets an inline
+// line (chip in the gutter, dialogue beside it), and the treatment extends to the rest of that
+// same speech (see _extendSpeakerContinuations); any other leftover placeholder gets an inline
 // chip. Pure apart from the one-time CSS injection.
 export function restoreSpeakerChips(html, chips) {
   if (!html || !chips || !chips.length) return html;
@@ -863,6 +968,7 @@ export function restoreSpeakerChips(html, chips) {
   let out = String(html).replace(
     /<p>(\s*)___OWSPK_(\d+)___[ \t]*/g,
     (_m, _ws, i) => `<p class="ow-speaker-line">${chipFor(i)}`);
+  out = _extendSpeakerContinuations(out);
   // Fallback: any placeholder mdToHtml did NOT wrap in its own <p> (a list item, an inline
   // position) gets a bare inline chip so the tag never renders as raw text.
   out = out.replace(/___OWSPK_(\d+)___[ \t]*/g, (_m, i) => chipFor(i));
