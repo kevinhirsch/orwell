@@ -166,6 +166,55 @@ async function gamechangedRebind(ackCanon, beat) {
       "a later gamechanged rebinds again once the prior bind settled");
   }
 
+  // ── scenario 4: a re-entrant gamechanged DURING an in-flight rebind must not double-subscribe ──
+  // (CodeRabbit Major 1) `_rebinding` is held across the ENTIRE rebind — the bind AND the
+  // conditional `_subscribeChat(0)` — so a second gamechanged that arrives before the chat
+  // subscribe's ack (while `_chatSubscribed` is still false) cannot fire a SECOND full-history
+  // chat subscribe on the same canonical id (the double-replay this PR exists to prevent).
+  {
+    const { WS } = boot();
+    await handshake("sess_live", 400);
+    const chatBefore = chatSubs(lastSock).length;                            // 1
+    const bindsBefore = lastSock.sent.filter((f) => f.t === "bind").length;  // 0
+
+    // gamechanged #1 → bind sent; ack it with a CHANGED canonical so the rebind fires
+    // `_subscribeChat(0)` — but do NOT ack that chat subscribe, so `_chatSubscribed` stays false
+    // and the coalescing guard stays HELD across the in-flight subscribe.
+    global.window.dispatchEvent({ type: "orwell:gamechanged" });
+    await tick();
+    const bind1 = lastSock.sent.find((f) => f.t === "bind");
+    assert(bind1, "gamechanged should send a bind");
+    lastSock.onmessage({ data: JSON.stringify({ t: "ack", cid: bind1.cid,
+      d: { canonicalId: "sess_other", live: true, beatSeq: 401 } }) });
+    await tick(); await tick();
+    assert(chatSubs(lastSock).length === chatBefore + 1, "a changed-id rebind issues ONE chat re-subscribe");
+    assert(WS.isChatSubscribed() === false, "chat subscribe not yet acked => still not subscribed");
+
+    // A SECOND gamechanged re-enters WHILE the chat subscribe is in flight. Pre-fix (guard released
+    // at the bind ack) this fired another bind + another `_subscribeChat(0)` → double replay.
+    global.window.dispatchEvent({ type: "orwell:gamechanged" });
+    await tick(); await tick();
+    assert(lastSock.sent.filter((f) => f.t === "bind").length === bindsBefore + 1,
+      "a re-entrant gamechanged during an in-flight rebind must NOT send a second bind");
+    assert(chatSubs(lastSock).length === chatBefore + 1,
+      "a re-entrant gamechanged during an in-flight rebind must NOT double-subscribe chat");
+
+    // Ack the chat subscribe → subscribed + guard released; a later same-id gamechanged is quiet.
+    const lastChatSub = chatSubs(lastSock)[chatSubs(lastSock).length - 1];
+    lastSock.onmessage({ data: JSON.stringify({ t: "ack", ch: "chat", cid: lastChatSub.cid,
+      d: { fromSeq: 0, headSeq: -1 } }) });
+    await tick(); await tick();
+    assert(WS.isChatSubscribed() === true, "chat subscribe ack marks subscribed + releases the guard");
+    global.window.dispatchEvent({ type: "orwell:gamechanged" });
+    await tick();
+    const laterBind = lastSock.sent.filter((f) => f.t === "bind");
+    lastSock.onmessage({ data: JSON.stringify({ t: "ack", cid: laterBind[laterBind.length - 1].cid,
+      d: { canonicalId: "sess_other", live: true, beatSeq: 402 } }) });
+    await tick(); await tick();
+    assert(chatSubs(lastSock).length === chatBefore + 1,
+      "after settle, a same-id gamechanged still does not re-subscribe chat");
+  }
+
   console.log("OK");
   process.exit(0);
 })();
@@ -212,3 +261,19 @@ def test_rebind_coalesces_overlapping_binds():
     # The in-flight guard is cleared on teardown so a drop mid-bind never wedges future rebinds.
     assert WS.count("_rebinding = null") >= 3, \
         "_rebinding must be cleared on settle AND on onclose/_goFallback teardown"
+
+
+def test_rebind_guard_is_held_across_the_whole_operation_not_just_the_bind():
+    # CodeRabbit Major 1: the guard must be released only after the WHOLE chain settles (the bind
+    # AND the conditional _subscribeChat), never at the bind ack. The conditional branch RETURNS the
+    # subscribe promise (so `_rebinding` stays held until the chat ack), and the release is a
+    # post-settle handler guarded so a fresh rebind isn't clobbered.
+    body = WS.split("function rebind")[1].split("\n  function ")[0]
+    assert "return _subscribeChat(0)" in body, \
+        "the chat re-point must RETURN its subscribe promise so the guard is held until it settles"
+    assert "_rebinding === settled" in body, \
+        "the guard release must be gated so a stale settle can't clobber a fresh rebind"
+    # And it must NOT clear the guard synchronously inside the bind-ack .then (the pre-fix bug).
+    then_head = body.split(".then(function (ack)")[1].split("return")[0] if ".then(function (ack)" in body else ""
+    assert "_rebinding = null" not in then_head, \
+        "the guard must not be released at the bind ack (before the chat subscribe settles)"

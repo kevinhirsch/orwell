@@ -153,6 +153,27 @@ function gamechanged() { global.window.dispatchEvent({ type: "orwell:gamechanged
     assert(lastSock !== s1b, "past the backoff, a re-attempt is allowed again");
   }
 
+  // ── scenario 4: recovery is gated by CAUSE — a non-pregame fallback stays permanent ─
+  // (CodeRabbit Major 2) A window that fell back from a handshake/proxy/exhaustion cause must NOT
+  // re-attempt on gamechanged (it would just re-pay the hello timeout forever); only a
+  // pregame-not-live fallback recovers.
+  {
+    const { WS } = boot(true, true);
+    await tick();
+    const s0 = lastSock;
+    // Open + send hello, then the socket CLOSES before any ack → a "handshake"-cause fallback.
+    s0.readyState = 1; s0.onopen();
+    await tick();
+    s0.readyState = 3; s0.onclose();
+    assert(WS.isFallback() === true, "closed-before-ack ⇒ fallback (handshake cause)");
+    // The game is live now, but the cause is permanent ⇒ NO re-attempt.
+    lastSock = null;
+    nowMs += 500000;
+    gamechanged();
+    await tick();
+    assert(lastSock === null, "a handshake-cause fallback must NOT re-attempt on gamechanged (permanent)");
+  }
+
   console.log("OK");
   process.exit(0);
 })();
@@ -200,3 +221,18 @@ def test_recovery_is_flag_and_gamebuild_gated_and_backed_off():
     # A REAL connect, not a rebind no-op: it re-opens the start() gate.
     assert 'idle' in body and "start()" in body, \
         "recovery must re-run the full connect (start()), not rebind()"
+
+
+def test_recovery_is_gated_by_cause_only_pregame_recovers():
+    # CodeRabbit Major 2: recovery attempts ONLY for the pregame-not-live cause; a proxy/handshake/
+    # exhaustion fallback stays permanent.
+    body = WS.split("function _maybeUpgradeFromFallback")[1].split("\n  function ")[0]
+    assert '_fallbackReason !== "pregame-not-live"' in body, \
+        "recovery must attempt only for the pregame-not-live cause"
+    # The distinct causes are recorded at the _goFallback call sites.
+    assert '_goFallback("pregame-not-live")' in WS, "the live:false pre-game path is recoverable"
+    assert '_goFallback("proxy")' in WS, "a blocked-upgrade path is a proxy cause (permanent)"
+    assert '_goFallback("reconnect-exhausted")' in WS, "reconnect exhaustion is a permanent cause"
+    # A successful WS activation resets the cause so a future fallback records its own.
+    activate = WS.split("function _activate")[1].split("\n  function ")[0]
+    assert "_fallbackReason = null" in activate, "a live socket must clear the fallback cause"
