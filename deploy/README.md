@@ -24,6 +24,14 @@ fails clearly instead of half-installing). One Proxmox LXC runs both tiers as sy
 > Tunnel is the recommended option) — that path pins the FE to loopback. See [`expose/`](./expose/)
 > and `docs/INSTALL.md → Public deployment (any domain)`. Enabling local HTTPS (`orwell https`) also
 > re-pins `ORWELL_BIND_HOST=127.0.0.1` (the terminator becomes the only LAN entrypoint).
+>
+> **Turning on the WebSocket transport?** WS Phase-1 (ADR 0017, `GET /api/ws/session`) is dormant
+> until `ORWELL_WS_TRANSPORT=1` is set in `data/.env`. Every terminator here (direct uvicorn, Caddy,
+> Cloudflare Tunnel, Pangolin/Newt) passes the WebSocket `Upgrade` transparently — no extra config.
+> **LAN / loopback turn-on is safe today; PUBLIC turn-on is not yet** — the WS handshake lacks the
+> `Origin`/CSRF guard (a CSWSH surface on a public terminator; guard in flight on
+> `claude/ws-origin-guard`). The turn-on ops steps, the LAN-vs-public prerequisite, and a verify
+> one-liner are in [`expose/README.md`](./expose/README.md#websockets-through-the-perimeter-ws-phase-1-turn-on).
 
 ## Recommended specs
 
