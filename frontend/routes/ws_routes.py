@@ -126,6 +126,46 @@ def _host_authority(host: str) -> str:
     return h
 
 
+def _expected_external_scheme(websocket: WebSocket) -> str:
+    """The scheme the BROWSER used to reach the deploy — the external, TLS-terminator-facing scheme,
+    used to complete the same-origin check (a web Origin is scheme+host+port, so ``host[:port]`` alone
+    is not a full same-origin match: ``http://host`` and ``https://host`` are DIFFERENT origins and a
+    same-host-plaintext page must stay outside the trust boundary).
+
+    Derivation, in order (handles the ADR 0074 TLS-terminated deploys — Caddy / Cloudflare / Newt /
+    bare local-HTTPS — where the browser speaks ``wss``/``https`` but the FE's OWN hop from the
+    terminator is plaintext ``ws``, so ``websocket.url.scheme`` is ``ws`` and a naive ws→http map would
+    wrongly reject a legitimate ``https`` Origin and break every tunnel/HTTPS deploy):
+
+      1. ``X-Forwarded-Proto`` (first value, lowercased) if the terminator set it — all four supported
+         terminators do, INCLUDING bare local-HTTPS (Caddy). This is the external scheme verbatim.
+      2. Else map the request's own scheme (``websocket.url.scheme``): ``wss``→``https``, ``ws``→``http``
+         (direct-uvicorn LAN plaintext ⇒ ``http``; a direct TLS uvicorn ⇒ ``https``).
+
+    Returns ``""`` when it cannot be determined (no XFP, unknown request scheme) — the caller then does
+    NOT enforce the scheme leg (accept on host match alone) rather than break a deploy whose scheme is
+    unknowable, per the coordinator's don't-break-the-deploy rule."""
+    try:
+        xfp = websocket.headers.get("x-forwarded-proto")
+    except Exception:
+        xfp = None
+    if xfp:
+        first = xfp.split(",")[0].strip().lower()
+        if first:
+            return first
+    try:
+        req_scheme = (websocket.url.scheme or "").lower()
+    except Exception:
+        req_scheme = ""
+    if req_scheme == "wss":
+        return "https"
+    if req_scheme == "ws":
+        return "http"
+    if req_scheme in ("http", "https"):
+        return req_scheme
+    return ""
+
+
 def _allowed_ws_origins() -> set:
     """The explicit cross-origin allowlist for a WS upgrade — the SAME ``ALLOWED_ORIGINS`` the app's
     credentialed CORS layer trusts (``app.py`` / ``core.middleware``), normalized to
@@ -160,10 +200,11 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
         handshake, so the CSWSH attack surface always carries one; the absent case is a non-browser /
         native / same-origin server-side / test client (which also does not auto-attach the victim's
         cookie), so refusing it would break legitimate non-browser paths for no security gain.
-      * **``Origin`` present → allow IFF** it is same-origin with the request ``Host`` (``host[:port]``
-        match — the deploy's own host, so LAN + tunnel/HTTPS exposure per ADR 0007/0014 works with no
-        hard-coded domain) **OR** it is in the configured ``ALLOWED_ORIGINS`` allowlist (the same
-        origins the credentialed CORS layer trusts).
+      * **``Origin`` present → allow IFF** it is same-origin with the request — its **scheme + host[:port]**
+        match the deploy's own **external scheme** (X-Forwarded-Proto / request scheme, ADR 0074) + ``Host``
+        (so ``http://host`` is NOT accepted against an ``https``/``wss`` deploy; LAN + tunnel/HTTPS exposure
+        per ADR 0007/0014 still works with no hard-coded domain) **OR** it is in the configured
+        ``ALLOWED_ORIGINS`` allowlist (the same origins the credentialed CORS layer trusts).
       * **Otherwise (present + foreign / opaque ``null``) → reject** (the upgrade is refused, no ack).
 
     A browser cannot forge either ``Origin`` or ``Host`` from page JS, and in a public deployment
@@ -180,18 +221,29 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
     origin_netloc = _origin_netloc(origin)
     if origin_netloc is None:
         return False  # present but opaque/unparseable (e.g. "null") → foreign
-    # 1) Same-origin: the Origin's host[:port] equals the request Host (the deploy's own host).
-    #    Normalize the Host authority the SAME way _origin_netloc normalizes the Origin (strip the
+    origin_scheme = origin.split("://", 1)[0].lower() if "://" in origin else ""
+    # 1) Same-origin: the Origin's SCHEME + host[:port] equal the deploy's own external scheme + Host.
+    #    Host authority is normalized the SAME way _origin_netloc normalizes the Origin (strip the
     #    scheme's default port) so a proxy-set `Host: host:443` still matches a bare `https://host`
-    #    Origin (greptile P1) — a browser cannot forge Host, so this is no security loss.
+    #    Origin (greptile P1) — a browser cannot forge Host, so this is no security loss. The SCHEME leg
+    #    (greptile P1): a web origin is scheme+host+port, so `http://host` must NOT be accepted against
+    #    an `https`/`wss` deploy (a same-host-plaintext page stays outside the trust boundary). The
+    #    expected external scheme comes from X-Forwarded-Proto / the request scheme (ADR 0074 tunnels
+    #    terminate TLS then hop plaintext to the FE, so we cannot read it off `websocket.url` alone).
+    #    When the external scheme is indeterminate (""), the scheme leg is skipped (host match alone) so
+    #    an unknowable-scheme deploy is not broken.
     try:
         host = _host_authority(websocket.headers.get("host") or "")
     except Exception:
         host = ""
     if host and origin_netloc == host:
-        return True
+        expected_scheme = _expected_external_scheme(websocket)
+        if (not expected_scheme) or (origin_scheme == expected_scheme):
+            return True
+        # host matches but scheme does not → same-host different-scheme; fall through (may still be
+        # explicitly allowlisted below, else reject).
     # 2) Explicit allowlist — the CORS ALLOWED_ORIGINS the app already sanctions (scheme+host+port).
-    scheme = origin.split("://", 1)[0].lower() if "://" in origin else ""
+    scheme = origin_scheme
     if scheme and f"{scheme}://{origin_netloc}" in _allowed_ws_origins():
         return True
     return False

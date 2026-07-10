@@ -95,7 +95,9 @@ def test_same_origin_is_accepted(run, monkeypatch):
 
     async def main():
         # The real client connects to ``location.host`` (same-origin): Origin authority == Host.
-        ws = H.new_ws(headers={"origin": "https://my-house.example", "host": "my-house.example"})
+        # A TLS terminator (ADR 0074) sets X-Forwarded-Proto=https for the wss browser hop.
+        ws = H.new_ws(headers={"origin": "https://my-house.example", "host": "my-house.example",
+                               "x-forwarded-proto": "https"})
         t = H.spawn(ws)
         ack = await H.hello(ws, "per-tab-1")
         assert ack["t"] == "ack"
@@ -113,7 +115,8 @@ def test_same_origin_with_explicit_default_port_is_accepted(run, monkeypatch):
     monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
 
     async def main():
-        ws = H.new_ws(headers={"origin": "https://my-house.example:443", "host": "my-house.example"})
+        ws = H.new_ws(headers={"origin": "https://my-house.example:443", "host": "my-house.example",
+                               "x-forwarded-proto": "https"})
         t = H.spawn(ws)
         ack = await H.hello(ws, "per-tab-1")
         assert ack["t"] == "ack"
@@ -131,7 +134,8 @@ def test_same_origin_host_carries_default_port_is_accepted(run, monkeypatch):
     monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
 
     async def main():
-        ws = H.new_ws(headers={"origin": "https://my-house.example", "host": "my-house.example:443"})
+        ws = H.new_ws(headers={"origin": "https://my-house.example", "host": "my-house.example:443",
+                               "x-forwarded-proto": "https"})
         t = H.spawn(ws)
         ack = await H.hello(ws, "per-tab-1")
         assert ack["t"] == "ack"
@@ -204,12 +208,114 @@ def test_ipv6_same_origin_default_port_host_is_accepted(run, monkeypatch):
     monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
 
     async def main():
-        ws = H.new_ws(headers={"origin": "https://[::1]", "host": "[::1]:443"})
+        ws = H.new_ws(headers={"origin": "https://[::1]", "host": "[::1]:443",
+                               "x-forwarded-proto": "https"})
         t = H.spawn(ws)
         ack = await H.hello(ws, "per-tab-1")
         assert ack["t"] == "ack"
         assert ws.accepted is True
         await H.stop(ws, t)
+
+    run(main())
+
+
+# ── scheme leg: same-host WRONG-scheme rejected; each terminator/direct scheme path accepted ───────
+
+def test_same_host_wrong_scheme_is_rejected(run, monkeypatch):
+    """greptile P1 (scheme): a web origin is scheme+host+port. With XFP=https (a TLS deploy), a
+    same-HOST but plaintext ``Origin: http://host`` is a DIFFERENT origin — refused (close 1008), so a
+    same-host-plaintext page stays outside the CSWSH trust boundary."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "http://my-house.example", "host": "my-house.example",
+                               "x-forwarded-proto": "https"})
+        t = H.spawn(ws)
+        await asyncio.wait_for(t, timeout=1.0)
+        assert ws.accepted is False
+        assert ws.closed is True
+        assert ws.close_code == 1008
+        assert ws.sent == []
+        await H.aclose_runs()
+
+    run(main())
+
+
+def test_xfp_https_https_origin_is_accepted(run, monkeypatch):
+    """TLS terminator (ADR 0074): XFP=https + a matching ``https://host`` same-origin → accepted."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "https://my-house.example", "host": "my-house.example",
+                               "x-forwarded-proto": "https"})
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
+def test_direct_uvicorn_ws_http_origin_is_accepted(run, monkeypatch):
+    """Direct-uvicorn LAN plaintext: no XFP, request scheme ``ws`` → expected ``http``; a matching
+    ``http://host`` same-origin → accepted (the ws→http mapping path)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "http://my-house.example", "host": "my-house.example"},
+                      scheme="ws")
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
+def test_wss_request_no_xfp_https_origin_is_accepted(run, monkeypatch):
+    """Direct TLS uvicorn (no terminator, no XFP): request scheme ``wss`` → expected ``https``; a
+    matching ``https://host`` same-origin → accepted (the wss→https mapping path)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "https://my-house.example", "host": "my-house.example"},
+                      scheme="wss")
+        t = H.spawn(ws)
+        ack = await H.hello(ws, "per-tab-1")
+        assert ack["t"] == "ack"
+        assert ws.accepted is True
+        await H.stop(ws, t)
+
+    run(main())
+
+
+def test_direct_uvicorn_ws_https_origin_is_rejected(run, monkeypatch):
+    """Direct-uvicorn plaintext (ws, no XFP) but the Origin claims ``https://host`` — scheme mismatch
+    (expected ``http``), refused. The scheme leg is enforced whenever the external scheme is known."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _set_engine(monkeypatch, started=True)
+    monkeypatch.setattr(ws_routes, "_is_live", lambda sid: True)
+
+    async def main():
+        ws = H.new_ws(headers={"origin": "https://my-house.example", "host": "my-house.example"},
+                      scheme="ws")
+        t = H.spawn(ws)
+        await asyncio.wait_for(t, timeout=1.0)
+        assert ws.accepted is False
+        assert ws.closed is True
+        assert ws.close_code == 1008
+        assert ws.sent == []
+        await H.aclose_runs()
 
     run(main())
 
@@ -328,3 +434,22 @@ def test_origin_helpers_unit(monkeypatch):
     assert "https://a.example" in allowed
     assert "https://b.example:8443" in allowed
     assert "*" not in allowed
+
+
+def test_expected_external_scheme_unit():
+    from types import SimpleNamespace
+
+    class _FW:
+        def __init__(self, headers=None, scheme="ws"):
+            self.headers = {k.lower(): v for k, v in (headers or {}).items()}
+            self.url = SimpleNamespace(scheme=scheme)
+
+    # XFP wins over the request scheme, first value only, lowercased.
+    assert ws_routes._expected_external_scheme(_FW(headers={"x-forwarded-proto": "https"}, scheme="ws")) == "https"
+    assert ws_routes._expected_external_scheme(_FW(headers={"x-forwarded-proto": "HTTPS, http"})) == "https"
+    # No XFP → map the request scheme: ws→http, wss→https.
+    assert ws_routes._expected_external_scheme(_FW(scheme="ws")) == "http"
+    assert ws_routes._expected_external_scheme(_FW(scheme="wss")) == "https"
+    # Already http/https passes through; unknown → "" (scheme leg then skipped by the caller).
+    assert ws_routes._expected_external_scheme(_FW(scheme="https")) == "https"
+    assert ws_routes._expected_external_scheme(_FW(scheme="")) == ""
