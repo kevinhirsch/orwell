@@ -43,6 +43,11 @@
   var RECONNECT_BASE_MS = 500;
   var RECONNECT_MAX_MS = 15000;
   var RECONNECT_GIVEUP = 6;      // consecutive failed reconnects → permanent fallback
+  // Fallback→WS RECOVERY backoff (the turn-on gate — see `_maybeUpgradeFromFallback`). A window that
+  // booted before the game was live sits in fallback; it re-attempts the WS upgrade on
+  // `orwell:gamechanged`, spaced by a growing backoff so a genuinely-blocked upgrade never storms.
+  var UPGRADE_BACKOFF_MIN_MS = 8000;
+  var UPGRADE_BACKOFF_MAX_MS = 60000;
 
   // `ORWELL_WS_TRANSPORT` (default OFF in Phase 1 — zero-risk default, §6). The
   // server injects it; we read it defensively from either a global or a body
@@ -97,10 +102,13 @@
   var _beatSeq = 0;              // last-seen engine beatSeq (0065)
   var _highestChatSeq = -1;      // highest `chat` event.seq rendered (reconnect cursor)
   var _chatSubscribed = false;
+  var _fallbackReason = null;    // WHY we fell back — only "pregame-not-live" is recoverable (see _goFallback)
   var _helloTimer = null;
   var _reconnectFails = 0;
   var _reconnectTimer = null;
   var _closingForGood = false;
+  var _lastUpgradeAttempt = 0;                    // ms of the last fallback→WS upgrade attempt
+  var _upgradeBackoffMs = UPGRADE_BACKOFF_MIN_MS; // grows per failed upgrade, caps at MAX; reset on activate
 
   // per-channel handler registries — strict `ch` routing (§ multiplex).
   var _handlers = { chat: [], state: [], hud: [], layout: [], notice: [] };
@@ -222,9 +230,10 @@
       try { p.reject(err); } catch (_) {}
     }
     // forbidden / not-bound at the handshake ⇒ this socket can't serve the game;
-    // fail soft to the SSE stack rather than leaving the user stuck.
+    // fail soft to the SSE stack rather than leaving the user stuck. A refusal is a permanent
+    // cause (not pre-game) — recovery won't re-attempt it.
     if (d.code === "forbidden" || d.code === "not-bound") {
-      _goFallback();
+      _goFallback("handshake");
     }
   }
 
@@ -256,22 +265,57 @@
     return _request("hello", null, { perTabId: perTabId, protocol: PROTOCOL }, "hello");
   }
 
-  // Re-resolve the canonical id (§2.3 `bind`) — e.g. after a season reset
-  // unbinds it (surfaced by orwell:gamechanged). Same shape as hello.
+  // Re-resolve the canonical id (§2.3 `bind`) — dropped + re-issued on every
+  // `orwell:gamechanged` (the ONE g15 dispatcher). A rebind ALWAYS re-arms the
+  // lightweight state/hud push edges (fire-and-forget, idempotent — the server dedups per
+  // channel key), but it re-points the `chat` channel ONLY when the canonical id actually
+  // CHANGED (a genuine re-resolve: adoption, or a season-reset unbind).
+  //
+  // Why the guard is load-bearing: `orwell:gamechanged` fires on EVERY game mutation —
+  // including MID-TURN (each game-mutating tool result dispatches it). A blind
+  // `_subscribeChat(0)` here would, on every one of those, tear down the in-flight chat
+  // tail and full-replay the whole buffer from seq 0 — racing the live stream (a duplicate
+  // replay), and at the casting→started settle, a rebind that resolves onto a DIFFERENT/empty
+  // canonical would swap the subscription off the session carrying the just-streamed reply and
+  // strip it (the #1085/#1086 window-collapse / reply-strip class, now over WS). On a same-id
+  // gamechanged we keep the existing subscription + its cursor untouched, so the live tail is
+  // never interrupted. `_rebinding` coalesces overlapping gamechanged rebinds into one bind — and
+  // is held across the ENTIRE operation (the bind AND the conditional `_subscribeChat(0)`), released
+  // only once the whole chain settles. If it were released at the bind ack (before the chat
+  // subscribe's own ack sets `_chatSubscribed=true`), a second gamechanged could re-enter while
+  // `_chatSubscribed` is still false and fire a SECOND full-history chat subscribe on the same id —
+  // exactly the double-replay this fix prevents.
+  var _rebinding = null;
   function rebind() {
     if (_mode !== "ws") return Promise.reject(new Error("ws-not-active"));
-    _canonicalId = null; _chatSubscribed = false;
-    return _request("bind", null, { perTabId: _perTabId() }, "hello").then(function (ack) {
-      if (_live) {
-        // Re-arm all three channels on a re-resolve (e.g. a season reset unbinds
-        // the canonical id) exactly as the fresh handshake does — chat AND the
-        // state/hud push edge, so the HUD keeps its push after a rebind.
-        var p = _subscribeChat(0);
-        _subscribeEdges();
-        return p;
+    if (_rebinding) return _rebinding; // a rebind is already in flight — never stack a second
+    var prevCanonical = _canonicalId;
+    var prevChatSubscribed = _chatSubscribed;
+    var op = _request("bind", null, { perTabId: _perTabId() }, "hello").then(function (ack) {
+      // The socket dropped during the bind (onclose flipped us to negotiating) — the reconnect
+      // path re-arms every channel from its own onopen; don't subscribe a dead sock.
+      if (_mode !== "ws") return ack;
+      // Always re-arm the state/hud edges (the HUD push keystone — test_ws_statehud_subscribe).
+      _subscribeEdges();
+      if (!_live) return ack;
+      // Re-point chat ONLY on a genuine canonical change (or if it was never subscribed).
+      // `_onAck` has already updated `_canonicalId` from the bind ack by the time this runs.
+      // Returning the subscribe promise keeps `_rebinding` held until the chat `ack` lands
+      // (which sets `_chatSubscribed=true`), so a re-entrant gamechanged can't double-subscribe.
+      if (_canonicalId !== prevCanonical || !prevChatSubscribed) {
+        _chatSubscribed = false;
+        return _subscribeChat(0); // full history on the newly-resolved id (a real re-point)
       }
-      return ack;
+      return ack;                 // same id → the in-flight chat tail stays intact
     });
+    // Release the coalescing guard (success AND failure) only after the WHOLE chain settles —
+    // never mid-operation. Guarded so a teardown that already cleared `_rebinding` and started a
+    // fresh rebind isn't clobbered by this stale settle.
+    var release = function () { if (_rebinding === settled) _rebinding = null; };
+    var settled = op.then(function (v) { release(); return v; },
+                          function (e) { release(); throw e; });
+    _rebinding = settled;
+    return settled;
   }
 
   // ── the chat channel subscribe (§3.1) ───────────────────────────────────
@@ -352,10 +396,17 @@
   // ── negotiation + lifecycle (§6) ────────────────────────────────────────
   function _clearHelloTimer() { if (_helloTimer) { clearTimeout(_helloTimer); _helloTimer = null; } }
 
-  function _goFallback() {
+  // `reason` records WHY we fell back so recovery can be gated by CAUSE (see
+  // `_maybeUpgradeFromFallback`): only a `"pregame-not-live"` fallback (the canonical id wasn't a
+  // live game yet) is worth re-attempting on `orwell:gamechanged`. A `"proxy"` (blocked upgrade /
+  // dead route), `"handshake"` (refused / closed before ack), or `"reconnect-exhausted"` fallback is
+  // PERMANENT — retrying it would just re-pay the hello timeout on every eligible gamechanged.
+  function _goFallback(reason) {
     if (_mode === "fallback") return;
     _mode = "fallback";
+    _fallbackReason = reason || _fallbackReason || "handshake";
     _chatSubscribed = false;
+    _rebinding = null;
     _clearHelloTimer();
     _closingForGood = true;
     try { if (_sock) _sock.close(); } catch (_) {}
@@ -374,7 +425,37 @@
   function _activate() {
     _mode = "ws";
     _reconnectFails = 0;
+    // A live socket clears the fallback-recovery backoff so a FUTURE drop-to-fallback re-attempts
+    // promptly rather than inheriting a grown interval.
+    _upgradeBackoffMs = UPGRADE_BACKOFF_MIN_MS;
+    _lastUpgradeAttempt = 0;
+    _fallbackReason = null;   // live now — a future fallback records its own fresh cause
     _emitWindow("orwell:ws-active", { canonicalId: _canonicalId, beatSeq: _beatSeq });
+  }
+
+  // Fallback→WS RECOVERY (the turn-on gate). `_goFallback()` is otherwise PERMANENT: a window that
+  // booted pre-game (no live canonical yet ⇒ the hello ack returns `live:false` ⇒ `_goFallback`) would
+  // NEVER upgrade even after the season starts. Two windows opened at different lifecycle points would
+  // then sit on DIFFERENT transports (WS vs SSE) — the exact split that breaks two-window mirror parity
+  // and risks the #1085/#1086 reply-strip on turn-on. So on every `orwell:gamechanged` a fallback window
+  // re-attempts a REAL connect (not `rebind()`, which early-returns in fallback), gated on: the flag +
+  // game build being on (dormancy preserved — flag off ⇒ never attempt), and a growing backoff having
+  // elapsed (storm guard while a genuinely-blocked upgrade keeps failing). The full handshake resolves +
+  // liveness-validates the canonical id SERVER-SIDE before any subscribe (bind-before-subscribe), so a
+  // still-not-live game just returns `live:false` and falls back again until the next eligible change.
+  function _maybeUpgradeFromFallback() {
+    if (_mode !== "fallback") return;
+    if (!_flagOn() || !_gameBuild()) return;   // flag off / non-game build ⇒ stay in fallback (dormant)
+    // Gate by CAUSE: only a pre-game-not-live fallback recovers. A proxy/handshake/exhaustion
+    // fallback is permanent — retrying it just re-pays the hello timeout on every gamechanged.
+    if (_fallbackReason !== "pregame-not-live") return;
+    var now = (typeof Date !== "undefined" && Date.now) ? Date.now() : +new Date();
+    if (now - _lastUpgradeAttempt < _upgradeBackoffMs) return;  // within the backoff window — skip
+    _lastUpgradeAttempt = now;
+    _upgradeBackoffMs = Math.min(UPGRADE_BACKOFF_MAX_MS, _upgradeBackoffMs * 2);
+    _mode = "idle";            // re-open the start() gate for a genuine reconnect attempt
+    _closingForGood = false;
+    start();                   // resolves the canonical id LIVE before subscribing; live:false ⇒ back to fallback
   }
 
   function _connect() {
@@ -384,24 +465,25 @@
     var sock;
     try {
       sock = new WebSocket(_wsUrl());
-    } catch (_) { _goFallback(); return; }
+    } catch (_) { _goFallback("proxy"); return; }
     _sock = sock;
 
     // ~3s upgrade budget: no `ack` in time ⇒ blocked proxy / dead route ⇒
     // permanent fallback (§6). We never hang the player on a wedged upgrade.
     _clearHelloTimer();
     _helloTimer = setTimeout(function () {
-      if (_mode !== "ws") { try { sock.close(); } catch (_) {} _goFallback(); }
+      if (_mode !== "ws") { try { sock.close(); } catch (_) {} _goFallback("proxy"); }
     }, HELLO_TIMEOUT_MS);
 
     sock.onopen = function () {
       _hello(perTabId).then(function () {
         _clearHelloTimer();
         if (!_live) {
-          // Bound to a dead id with no live fallback (§2.4) — show the reconnect
-          // affordance by falling soft to SSE rather than subscribing a 404.
+          // Bound to a not-yet-live id (§2.4) — pre-game / casting hasn't produced a live
+          // canonical game yet. Fall soft to SSE, but mark the cause RECOVERABLE: once the
+          // season starts, the next `orwell:gamechanged` upgrades this window to WS (§6 turn-on).
           _emitWindow("orwell:ws-dead", { canonicalId: _canonicalId });
-          _goFallback();
+          _goFallback("pregame-not-live");
           return;
         }
         _activate();
@@ -412,7 +494,7 @@
         // handshake — a fresh connect AND a reconnect (both re-enter this onopen) —
         // so a dropped socket re-arms all three channels, not just chat.
         _subscribeEdges();
-      }).catch(function () { _clearHelloTimer(); _goFallback(); });
+      }).catch(function () { _clearHelloTimer(); _goFallback("handshake"); });
     };
 
     sock.onmessage = function (ev) {
@@ -426,6 +508,7 @@
     sock.onclose = function () {
       _sock = null;
       _chatSubscribed = false;
+      _rebinding = null;
       _clearHelloTimer();
       if (_closingForGood) return;
       if (_mode === "ws") {
@@ -434,13 +517,13 @@
         // cap we downgrade to SSE permanently (§6).
         _mode = "negotiating";
         _reconnectFails += 1;
-        if (_reconnectFails > RECONNECT_GIVEUP) { _goFallback(); return; }
+        if (_reconnectFails > RECONNECT_GIVEUP) { _goFallback("reconnect-exhausted"); return; }
         var wait = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, _reconnectFails - 1));
         if (_reconnectTimer) clearTimeout(_reconnectTimer);
         _reconnectTimer = setTimeout(function () { if (!_closingForGood) _connect(); }, wait);
       } else {
         // Never got live (closed before ack) ⇒ fallback.
-        _goFallback();
+        _goFallback("handshake");
       }
     };
   }
@@ -448,8 +531,10 @@
   function start() {
     if (_mode !== "idle") return;
     if (!_flagOn() || !_gameBuild()) {
-      // Flag off or non-game build ⇒ pure fallback, the zero-risk default (§6).
+      // Flag off or non-game build ⇒ pure fallback, the zero-risk default (§6). Not a recoverable
+      // cause — `_maybeUpgradeFromFallback`'s flag/gameBuild gate already blocks it, but record it.
       _mode = "fallback";
+      _fallbackReason = "flag-off";
       _emitWindow("orwell:ws-inactive", { mode: "fallback", reason: "flag-off" });
       return;
     }
@@ -461,6 +546,7 @@
   try {
     window.addEventListener("orwell:gamechanged", function () {
       if (_mode === "ws") { try { rebind(); } catch (_) {} }
+      else if (_mode === "fallback") { try { _maybeUpgradeFromFallback(); } catch (_) {} }
     });
   } catch (_) {}
 
