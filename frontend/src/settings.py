@@ -453,6 +453,23 @@ def game_build_enabled() -> bool:
     return raw.strip().lower() not in _GAME_BUILD_FALSEY
 
 
+_WS_TRANSPORT_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def ws_transport_enabled() -> bool:
+    """WebSocket Phase-1 transport (ADR 0017/0018) — default OFF (owner-gated rollout).
+
+    When ORWELL_WS_TRANSPORT is a truthy value (1/true/yes/on) the page emits
+    body[data-ws-transport="1"], which the client (orwellWs.js) reads to attempt the
+    WS upgrade. Unset/false ⇒ the attr is ABSENT ⇒ byte-identical page output ⇒ the
+    transport stays DORMANT on the existing SSE/poll stack. Read from the environment
+    so an operator flips it without a code change or a restart-editing files."""
+    raw = os.getenv("ORWELL_WS_TRANSPORT")
+    if raw is None:
+        return False
+    return raw.strip().lower() in _WS_TRANSPORT_TRUTHY
+
+
 def is_feature_enabled(name: str, *, features: dict | None = None) -> bool:
     """Single source of truth for 'should this capability be active?' — game-build aware.
 

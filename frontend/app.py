@@ -876,12 +876,20 @@ def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         html = f.read()
     nonce = getattr(request.state, "csp_nonce", "")
     html = html.replace("{{CSP_NONCE}}", nonce)
-    from src.settings import strip_dropped_scripts, game_build_enabled
+    from src.settings import strip_dropped_scripts, game_build_enabled, ws_transport_enabled
     html = strip_dropped_scripts(html)
     if game_build_enabled():
         # Let client JS/CSS branch on the build honestly (game-framed copy, tips, holding
         # states) instead of guessing from engine reachability.
         html = html.replace("<body", '<body data-game-build="1"', 1)
+        # WebSocket Phase-1 transport (ADR 0017/0018) server→client flag injection.
+        # orwellWs.js reads body[data-ws-transport] to decide whether to attempt the WS
+        # upgrade; it's a GAME-build concern (the mirror/HUD it ports live only here).
+        # DEFAULT OFF: emit the attr ONLY when ORWELL_WS_TRANSPORT is truthy — unset ⇒
+        # attr ABSENT ⇒ byte-identical page ⇒ WS stays dormant on the SSE/poll stack.
+        # This makes the owner-gated rollout flippable by env, no code change needed.
+        if ws_transport_enabled():
+            html = html.replace("<body", '<body data-ws-transport="1"', 1)
         # UX audit J1-02: the composer placeholder names the APP ("Message Orwell…"),
         # which is out-of-voice in an immersive house — the player speaks to the
         # houseguests / Big Brother, not "Orwell". Swap to an in-voice prompt that
