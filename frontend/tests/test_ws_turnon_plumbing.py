@@ -48,12 +48,13 @@ def test_websockets_is_pinned_in_both_requirement_files():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# BLOCKER 3a — the env flag helper: DEFAULT OFF
+# BLOCKER 3a — the env flag helper: DEFAULT ON (turned on 2026-07-10); an
+# explicit off/0/false/no is the rollback lever back to the SSE/poll stack.
 # ═══════════════════════════════════════════════════════════════════════════
 
-def test_ws_transport_default_off(monkeypatch):
+def test_ws_transport_default_on(monkeypatch):
     monkeypatch.delenv("ORWELL_WS_TRANSPORT", raising=False)
-    assert ws_transport_enabled() is False
+    assert ws_transport_enabled() is True
 
 
 @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "on", " On "])
@@ -63,7 +64,9 @@ def test_ws_transport_truthy_values_enable(monkeypatch, val):
 
 
 @pytest.mark.parametrize("val", ["0", "false", "no", "off", "", "nope"])
-def test_ws_transport_falsey_values_stay_off(monkeypatch, val):
+def test_ws_transport_explicit_falsey_values_disable(monkeypatch, val):
+    # The rollback lever: an explicit non-truthy value forces OFF even though the
+    # default is now ON.
     monkeypatch.setenv("ORWELL_WS_TRANSPORT", val)
     assert ws_transport_enabled() is False
 
@@ -88,7 +91,8 @@ def _render_index(monkeypatch, *, ws_on: bool) -> str:
     if ws_on:
         monkeypatch.setenv("ORWELL_WS_TRANSPORT", "1")
     else:
-        monkeypatch.delenv("ORWELL_WS_TRANSPORT", raising=False)
+        # Default is now ON, so "off" means an EXPLICIT non-truthy value (the rollback lever).
+        monkeypatch.setenv("ORWELL_WS_TRANSPORT", "0")
     from app import _serve_html_with_nonce, BASE_DIR
     from src.app_helpers import abs_join
 
@@ -96,11 +100,21 @@ def _render_index(monkeypatch, *, ws_on: bool) -> str:
     return resp.body.decode("utf-8")
 
 
-def test_ws_transport_attr_absent_when_env_unset(monkeypatch):
-    html = _render_index(monkeypatch, ws_on=False)
+def test_ws_transport_attr_absent_when_explicitly_off(monkeypatch):
+    html = _render_index(monkeypatch, ws_on=False)  # explicit ORWELL_WS_TRANSPORT=0
     assert "data-ws-transport" not in html
     # sanity: the game-build attr IS still emitted — proves we're in the injected path
     assert 'data-game-build="1"' in html
+
+
+def test_ws_transport_attr_present_when_env_unset(monkeypatch):
+    # Default is now ON: an unset env emits the ws hook so the client attempts the upgrade.
+    monkeypatch.setenv("ORWELL_GAME_BUILD", "1")
+    monkeypatch.delenv("ORWELL_WS_TRANSPORT", raising=False)
+    from app import _serve_html_with_nonce, BASE_DIR
+    from src.app_helpers import abs_join
+    html = _serve_html_with_nonce(_StubRequest(), abs_join(BASE_DIR, "static/index.html")).body.decode("utf-8")
+    assert 'data-ws-transport="1"' in html
 
 
 def test_ws_transport_attr_present_when_env_set(monkeypatch):
@@ -109,10 +123,10 @@ def test_ws_transport_attr_present_when_env_set(monkeypatch):
     assert 'data-game-build="1"' in html
 
 
-def test_ws_transport_attr_absent_off_matches_dormant_default(monkeypatch):
-    """The whole point of BLOCKER 3: default output carries NO ws hook, so the
-    client (orwellWs.js _flagOn) never even attempts the upgrade."""
+def test_ws_transport_attr_off_matches_on_but_for_the_attr(monkeypatch):
+    """Rollback (explicit off) carries NO ws hook, so the client (orwellWs.js _flagOn)
+    never attempts the upgrade — and the ONLY difference from the on output is that one
+    injected body attribute."""
     off = _render_index(monkeypatch, ws_on=False)
     on = _render_index(monkeypatch, ws_on=True)
-    # The ONLY difference is the single injected body attribute.
     assert off.replace("<body", '<body data-ws-transport="1"', 1) == on

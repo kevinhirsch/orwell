@@ -657,17 +657,15 @@ jobs:
           exit 1
       # ── WS Phase-1 turn-on gate — WebSocket transport (case f, protocol spec §6/§7) ──────────────
       # The SAME F5 invariant under the WebSocket transport (`ORWELL_WS_TRANSPORT` forced on via an init
-      # script inside mirror_live_parity.mjs — the SERVER default stays off). This PROVES the socket path
-      # mirrors A→B live and closes the WS false-green hole (the `wsTransportEngaged` check fails a run
-      # that silently fell back). NON-BLOCKING (`continue-on-error`) until the two turn-on readiness items
-      # land: (1) the FE `requirements.txt` pins a WS library (`uvicorn[standard]`/`websockets`) — the
-      # gate's own step 0d bootstraps it here so the leg is exercised, but production needs the pin; and
-      # (2) the client WS connect (orwellWs.js `start()` on DOMContentLoaded) races async session
-      # establishment — a null `perTabId` ⇒ server `bad-request` ⇒ permanent SSE fallback, with no
-      # re-attempt on session-ready. When BOTH are fixed, drop `continue-on-error` to make WS blocking too
-      # (protocol spec §9 step 7 — flip `ORWELL_WS_TRANSPORT` default-on only when both modes are green).
-      - name: mirror-parity gate — WebSocket transport (turn-on readiness, non-blocking)
-        continue-on-error: true
+      # script inside mirror_live_parity.mjs). This PROVES the socket path mirrors A→B live and closes the
+      # WS false-green hole (the `wsTransportEngaged` check fails a run that silently fell back). Now
+      # BLOCKING (turned on 2026-07-10): both turn-on readiness items landed — (1) the FE `requirements.txt`
+      # pins `websockets==16.0` so uvicorn serves the upgrade in production; and (2) the client WS connect
+      # (orwellWs.js) no longer races session establishment — it defers the hello until `perTabId` resolves
+      # (#1353), so no null-`perTabId` `bad-request` / permanent fallback. `ORWELL_WS_TRANSPORT` is now
+      # default-on (settings.py `ws_transport_enabled`); this leg keeps both modes honest (protocol spec §9
+      # step 7 — WS default-on only with both legs green).
+      - name: mirror-parity gate — WebSocket transport (blocking)
         run: |
           set -uo pipefail
           for attempt in 1 2 3; do
@@ -679,7 +677,7 @@ jobs:
             echo "mirror-parity (WS): attempt $attempt did not pass; retrying"
             sleep 3
           done
-          echo "::warning::mirror-parity WS-transport leg not yet green — see the two turn-on readiness items above (WS library pin + client connect/session race). Non-blocking by design until both land."
+          echo "::error::mirror-parity WS-transport leg failed all attempts (two windows diverged during streaming under WS, or the socket silently fell back)."
           exit 1
 
   # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────
