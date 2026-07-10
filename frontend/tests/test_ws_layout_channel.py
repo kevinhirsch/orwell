@@ -32,13 +32,17 @@ def _ws_env(tmp_path, monkeypatch):
         return {"started": True, "beatSeq": 7}
     monkeypatch.setattr(ws_routes, "_engine_state", _started)
     H.reset_runs()
-    # session_events is process-global — clear its subscriber/ring state between tests.
+    # session_events is process-global — clear its subscriber/ring state between tests, including
+    # any armed ring-eviction task (a stale task from a prior test's now-closed loop must never
+    # linger for the GC to finalize against it — issue #1339).
     session_events._SUBS.clear()
     session_events._RING.clear()
+    session_events.cancel_all_ring_evictions()
     yield
     H.reset_runs()
     session_events._SUBS.clear()
     session_events._RING.clear()
+    session_events.cancel_all_ring_evictions()
     ws_routes.set_turn_stream_factory(None)
 
 

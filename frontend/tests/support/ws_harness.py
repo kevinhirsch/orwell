@@ -22,6 +22,7 @@ every case that reads ``frame["seq"]`` asserts it against that buffer index, nev
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import json
 from typing import Any, Callable, Optional
@@ -111,13 +112,24 @@ def spawn(ws: FakeWebSocket) -> asyncio.Task:
 
 
 async def stop(ws: FakeWebSocket, task: asyncio.Task) -> None:
-    """Disconnect the client and let the handler unwind (cancel as a fallback)."""
+    """Disconnect the client and let the handler unwind (cancel as a fallback). ALWAYS leaves
+    ``task`` fully done before returning — a task still pending when this coroutine returns can
+    survive into the test harness's loop-close (``tests/conftest.py``'s ``_run`` closes the loop
+    immediately once the driving coroutine completes) and get GC-finalized against an already-CLOSED
+    loop later, producing the 'Task was destroyed but it is pending!' /
+    'RuntimeError: Event loop is closed' noise CI hit deterministically under Python 3.12's stricter
+    cancellation semantics (issue #1339). The prior version cancelled as a fallback but never
+    re-awaited, so the cancellation was only ever *requested*, not delivered, before this returned."""
     ws.client_disconnect()
     try:
         await asyncio.wait_for(task, timeout=1.0)
     except (asyncio.TimeoutError, asyncio.CancelledError, WebSocketDisconnect):
-        if not task.done():
-            task.cancel()
+        pass
+    if not task.done():
+        task.cancel()
+    if not task.done():
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await task
 
 
 async def hello(ws: FakeWebSocket, per_tab_id: str, cid: str = "c_hello", **extra) -> dict:
@@ -170,20 +182,32 @@ def push_run(canonical_id: str, events, gate: Optional[asyncio.Event] = None,
 def reset_runs() -> None:
     """Clear the process-global ``agent_runs`` registry between tests (they share module state) and
     cancel any dangling drain/evict tasks so the closing loop doesn't warn about pending timers. Use
-    ``aclose_runs`` from INSIDE a test's coroutine to also AWAIT the cancellations (the clean path)."""
+    ``aclose_runs`` from INSIDE a test's coroutine to also AWAIT the cancellations (the clean path).
+    Runs both inside and outside a live loop (fixture setup/teardown is sync) — a stale task bound to
+    an already-closed loop from a prior test can raise on ``.cancel()`` under 3.12's stricter checks,
+    so that path is defensively swallowed too."""
     for run in list(agent_runs._RUNS.values()):
         for attr in ("task", "evict_task"):
             t = getattr(run, attr, None)
             if t is not None and not t.done():
-                t.cancel()
+                with contextlib.suppress(Exception):
+                    t.cancel()
     agent_runs._RUNS.clear()
 
 
 async def aclose_runs() -> None:
     """Cancel AND await every dangling ``agent_runs`` drain/evict task, then clear the registry — call
     this at the end of a test's ``main()`` (inside the loop) so a detached run / its 180s evict timer
-    never survives to the loop close (which would raise ``Event loop is closed`` in teardown)."""
-    import contextlib
+    never survives to the loop close (which would raise ``Event loop is closed`` in teardown).
+
+    ``asyncio.CancelledError`` is a ``BaseException`` (since Python 3.8), NOT an ``Exception`` — so
+    ``contextlib.suppress(Exception)`` does not catch it. A task that is cancelled BEFORE it has ever
+    had a chance to run its first step (common for a just-created evict timer: `_schedule_evict`
+    creates it in the SAME tick this function then cancels it in) gets `CancelledError` thrown into it
+    before its own `try/except CancelledError` is ever installed, so the exception propagates straight
+    out of `await t` uncaught — cancelling the awaiting task in turn. Under Python 3.12 this reproduced
+    deterministically (issue #1339); explicitly suppressing `CancelledError` alongside `Exception` is
+    the correct fix (not a version-specific one — the prior code was always subtly wrong here)."""
     pending = []
     for run in list(agent_runs._RUNS.values()):
         for attr in ("task", "evict_task"):
@@ -192,6 +216,6 @@ async def aclose_runs() -> None:
                 t.cancel()
                 pending.append(t)
     for t in pending:
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception, asyncio.CancelledError):
             await t
     agent_runs._RUNS.clear()

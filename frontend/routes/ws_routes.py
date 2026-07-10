@@ -555,10 +555,33 @@ async def ws_session(websocket: WebSocket) -> None:
             for task in channel_tasks.values():
                 if not task.done():
                     task.cancel()
+            # Close FIRST (before draining sub-tasks below) — `websocket.close()` here performs no
+            # further await internally, so it never yields the loop to another task; ordering it
+            # before the drain preserves the pre-existing observable contract that a caller who is
+            # already waiting on a frame this coroutine just sent (e.g. a `hello` refusal's `error`
+            # frame) sees `websocket.closed` become true promptly, without a scheduling race against
+            # the drain loop below (which DOES yield — see next comment).
             try:
                 await websocket.close()
             except Exception:
                 pass
+            # Await every cancelled sub-task to completion HERE, inside this coroutine's own live
+            # execution, so none of them are still pending when this handler returns. A task left
+            # pending past this point can survive past the caller's event-loop teardown (the fe-unit
+            # harness's `_run` helper closes its loop immediately once the driving coroutine
+            # finishes — `tests/conftest.py`) and get GC-finalized against an already-CLOSED loop
+            # later, which is exactly the 'Task was destroyed but it is pending!' /
+            # 'RuntimeError: Event loop is closed' noise CI hit deterministically under Python
+            # 3.12's stricter cancellation/uncancel semantics (issue #1339). Harmless under the real
+            # ASGI server (that loop never closes mid-connection) but load-bearing for test-lane
+            # determinism.
+            for task in (hb_task, *channel_tasks.values()):
+                try:
+                    await task
+                except (asyncio.CancelledError, WebSocketDisconnect):
+                    pass
+                except Exception:
+                    logger.debug("[ws] sub-task teardown error", exc_info=True)
 
 
 def setup_ws_routes() -> APIRouter:

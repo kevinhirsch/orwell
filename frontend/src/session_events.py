@@ -160,6 +160,29 @@ async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
                 _schedule_ring_evict(session_id)
 
 
+def cancel_all_ring_evictions() -> None:
+    """Test/fixture-teardown helper: cancel every armed ring-eviction task and forget it. The module
+    keeps `_RING_EVICT_TASKS` as process-global state (like `_SUBS`/`_RING`) but, unlike those two, it
+    was not covered by any per-test reset — so a task armed by one test (bound to THAT test's event
+    loop) could still be sitting in the dict when the next test's fixture runs. Cancelling it there is
+    a no-op for production (armed tasks are always cancelled on the next re-subscribe or naturally
+    expire), but a test harness that closes its loop between tests needs an explicit drain point so a
+    stale task is never left for the GC to finalize against an already-closed loop.
+
+    Callable from either a live loop (the common in-test path) OR plain sync fixture teardown (no
+    running loop at all) — a task whose OWN loop already closed (e.g. a test's ``_run`` helper closes
+    its loop the instant the driving coroutine returns, before a same-tick-created task ever gets a
+    chance to run even once) raises ``RuntimeError: Event loop is closed`` from ``.cancel()`` itself
+    under Python 3.12's stricter ``call_soon`` guard; such a task is already unreachable/inert (its
+    loop will never run again) so dropping the reference is the correct outcome either way."""
+    import contextlib
+    for task in list(_RING_EVICT_TASKS.values()):
+        if not task.done():
+            with contextlib.suppress(RuntimeError):
+                task.cancel()
+    _RING_EVICT_TASKS.clear()
+
+
 def subscriber_count(session_id: str) -> int:
     return len(_SUBS.get(session_id, ()))
 

@@ -21,6 +21,7 @@ from tests.support import ws_harness as H
 ws_routes = importlib.import_module("routes.ws_routes")
 chat_routes = importlib.import_module("routes.chat_routes")
 ogs = importlib.import_module("src.orwell_game_session")
+session_events = importlib.import_module("src.session_events")
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +39,17 @@ def _ws_env(tmp_path, monkeypatch):
         return {"started": True, "beatSeq": 5}
     monkeypatch.setattr(ws_routes, "_engine_state", _state)
     H.reset_runs()
+    # `_handle_turn` fires `session_events.publish(..., "run-started")` — clear its process-global
+    # subscriber/ring state (incl. any armed ring-eviction task from a prior test's now-closed loop;
+    # issue #1339) so it never bleeds across tests/files.
+    session_events._SUBS.clear()
+    session_events._RING.clear()
+    session_events.cancel_all_ring_evictions()
     yield
     H.reset_runs()
+    session_events._SUBS.clear()
+    session_events._RING.clear()
+    session_events.cancel_all_ring_evictions()
     ws_routes.set_turn_stream_factory(None)
 
 
