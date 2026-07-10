@@ -158,21 +158,20 @@ living-house ADR would build on (§Phasing Phase 3).
 
 ## Phasing
 
-- **Phase 0 (prerequisite — and it surfaced a live launch-blocker).** Promote the F5 mirror-parity harness
+- **Phase 0 (prerequisite — DONE on `main`, #1276, 2026-07-09).** Promote the F5 mirror-parity harness
   (`mirror_live_parity.mjs` / `run_mirror_gate.sh`) to a **required CI gate** (ADR 0015's owed follow-on) —
   the **red/green oracle** for two-window parity; you do not change the launch-blocker's transport without
-  it. **Verified 2026-07-09 on `main`: the harness is RED.** Two of three checks pass
-  (`bStartsDuringAStream`, `lagWithinBudget` — B now first-renders *during* A's stream at ~18–163 ms lag, an
-  improvement over the README's earlier telemetry), but **`bUsesIncrementalRenderer` FAILS**: observer
-  window B reconciles via the `softReloadHistory` **reload** path (mounts `.body`) rather than mounting the
-  incremental `.live-reply-content` container, and `resumeStream`'s own-echo **dup-abort** removes its holder
-  before the incremental path paints — so under the fast deterministic fake model B renders near settle, not
-  as a live incremental mirror. **This means ADR 0015's "R2 landed, gate green" claim is stale; the harness
-  README's "Current verdict: RED" is correct.** Phase 0 therefore has a **precondition**: *fix the
-  `resumeStream`/`_renderLiveStream` race so B mounts the incremental renderer even when the run settles fast*
-  (the dup-abort short-circuiting the incremental paint, or `softReloadHistory` winning the race), re-run the
-  harness to green, **then** wire the CI gate. Do not wire a red required check; do not weaken the
-  `bUsesIncrementalRenderer` bar to force a pass (that is changing the launch-blocker's acceptance bar).
+  it. This is now **complete.** The harness was briefly RED: two of three checks passed
+  (`bStartsDuringAStream`, `lagWithinBudget`) but **`bUsesIncrementalRenderer` FAILED** — observer window B
+  reconciled via the `softReloadHistory` **reload** path (mounting `.body`) rather than the incremental
+  `.live-reply-content` container, and `resumeStream`'s own-echo **dup-abort** tore its holder down before the
+  incremental path painted, so under the fast deterministic fake model B rendered near settle rather than as
+  a live incremental mirror. **#1276 fixed that race** (it scoped the dup-abort to the true own-echo case; a
+  late-attaching observer's static from-history bubble is now removed and the terminal-buffered run replayed
+  through the SHARED incremental renderer) **and wired `mirror-parity` as a required CI gate — it is green
+  and blocking via `ci-gate` on `main`.** ADR 0015's "R2 landed" is now backed by a green behavioral gate;
+  the harness README's earlier "RED" verdict is superseded. **Do not weaken the `bUsesIncrementalRenderer`
+  bar** — it is the launch-blocker's acceptance bar and now guards every PR (before *and* after the WS swap).
 - **Phase 1 — browser↔FE multiplexed WS.** Stand up one WS per canonical session behind a **feature flag**,
   carrying `hello`/`stream`/`event`/`state`/`turn`/`decision`/`layout`/`notice`. Port the replay-then-tail
   splice first (highest-risk). Delete the 20–30 s polls. **Keep the SSE/poll path as a PERMANENT fallback**
@@ -207,8 +206,8 @@ living-house ADR would build on (§Phasing Phase 3).
 - **One shared per-user layout synced cross-device (0064-F).** Superseded (owner call 2026-07-09): layout is
   now **per-device**; only game state syncs cross-device.
 - **WS *without* Phase 0.** Rejected: changing the launch-blocker's transport with no required parity
-  oracle is flying blind — doubly so now that Phase 0 has shown the parity gate is **RED on main** (a real
-  F5 gap to fix first).
+  oracle is flying blind. Phase 0 is now satisfied — `mirror-parity` is a **green, required CI gate on
+  `main`** (#1276) — so the WS migration has its red/green oracle in place before it starts.
 
 ## Testability / Acceptance
 
@@ -266,4 +265,5 @@ living-house ADR would build on (§Phasing Phase 3).
   ADR 0015 (R2 one renderer), features 0064 (cross-device) / 0065 (beatSeq spine).
 - Gated by: the 2026-06-10 turn-driven ruling (`ORWELL_WATCHER_TICK_MS=0`) for the engine-push half; the
   Vault Wall (mandate #2) and cross-user isolation (0021) throughout.
-- Prerequisite: promote the F5 mirror-parity harness to a required CI gate (ADR 0015 owed follow-on).
+- Prerequisite: promote the F5 mirror-parity harness to a required CI gate (ADR 0015 owed follow-on) —
+  **satisfied on `main` by #1276** (`mirror-parity` is now green and blocking via `ci-gate`).
