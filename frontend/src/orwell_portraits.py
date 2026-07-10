@@ -180,6 +180,28 @@ def _progress_finish(user: Optional[str]) -> None:
         pass
 
 
+def _push_portrait_arrival(user: Optional[str]) -> None:
+    """WS Phase-1 push edge (DORMANT behind ORWELL_WS_TRANSPORT) — a portrait just landed on the
+    live roster, so fire the shared ``session_events`` "game-updated" ping the WS ``state``/``hud``
+    bridge relays to ``orwell:gamechanged``. The cast panel (orwellCast.js) already LISTENS for that
+    event and re-fetches the roster; under WS its adaptive roster poll STANDS DOWN (#1291), so this
+    push becomes its arrival signal — closing the loop that #1291 opened (the poll was cancelled but
+    portrait landing never published, unlike every sibling background write-back: cast-authoring /
+    zeitgeist / off-screen texture all publish).
+
+    Gated on ``ws_transport_enabled()``: when the flag is OFF this is a NO-OP, so production is
+    byte-identical and the fast roster poll stays the sole (unchanged) update path — the permanent
+    fallback. Best-effort/fail-soft: a publish failure must never perturb the generation run."""
+    try:
+        from src import settings
+        if not settings.ws_transport_enabled():
+            return  # flag off ⇒ zero production change; the roster poll is the permanent fallback
+        from src import orwell_game_session
+        orwell_game_session.publish_game_updated(user)
+    except Exception:  # best-effort/fail-soft — never perturb the run; surface at debug for diagnosis
+        logger.debug("[portraits] arrival push failed (best-effort)", exc_info=True)
+
+
 # A run whose heartbeat is older than this is considered dead (the process crashed / the task was
 # GC'd mid-flight) — `generation_progress` reports it as inactive so the panel never spins forever.
 _GEN_PROGRESS_STALE_S = 120.0
@@ -1403,6 +1425,8 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
         logger.info("[portraits] image generation unavailable — skipping cast portraits")
         if record_beats and newly_shown:
             await _record_image_beats(newly_shown, user)
+        if generated:  # a player-chosen headshot landed with NO provider — still fire the WS push edge
+            _push_portrait_arrival(user)
         total = len(prompts)
         return {"generated": generated, "skipped": total - generated, "total": total}
 
@@ -1519,6 +1543,7 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 log_attempt(str(hid), True, None, duration_ms)
                 generated += 1
                 _progress_tick(user)  # L15: one more face landed — the panel sees the live count move
+                _push_portrait_arrival(user)  # WS push edge: refresh the (poll-stood-down) cast panel now
                 newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
             except Exception as e:
                 logger.info("[portraits] failed to persist %s: %s", hid, e)
@@ -1543,6 +1568,8 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             logger.info("[portraits] L17 distinctness pass failed: %s", e)
 
     _progress_finish(user)  # L15: the run is done — the panel drops to the idle cadence
+    if generated:  # only when the run actually landed a face — no spurious cast-panel refetch
+        _push_portrait_arrival(user)  # WS push edge: final reconcile (dedupe regens + completion)
     # M1-9: stamp the run's honest verdict (a 0-of-N run flips the panel/admin to "failing").
     _note_last_run(user, generated=generated, skipped=skipped, total=len(prompts))
 
