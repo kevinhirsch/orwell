@@ -12,6 +12,11 @@
 
   const BTN_ID = "sidebar-diary-room-btn";
   const PILL_ID = "orwell-dr-pill";
+  // UX-7: the pill's `role="status"` live region only announces on a CONTENT mutation, not a
+  // display-style toggle — so entering DR mode (a consequential OOC-channel switch) was
+  // structurally silent to screen readers. This label text is (re-)injected into the pill's
+  // first child on every enterDRMode(), forcing the mutation the live region needs to fire.
+  const DR_ENTRY_LABEL = "\u{1F4D4} Diary Room — private & out-of-character; the house never hears this.";
   let drMode = false;
   let _returnPlaceholder = null;
 
@@ -88,7 +93,10 @@
     // only a WHISPER of rose as a thin edge. Only LAYOUT stays inline here (no rose fill).
     pill.style.cssText = "display:none;align-items:center;gap:6px;margin:0 0 4px;" +
       "padding:3px 10px;border-radius:999px;width:fit-content;font-size:var(--fs-xs);";
-    pill.innerHTML = `<span>📔 Diary Room — private &amp; out-of-character; the house never hears this.</span>
+    // UX-7: the label starts EMPTY — enterDRMode() injects DR_ENTRY_LABEL on every entry, which is
+    // the content mutation the role="status" live region needs to actually announce the mode switch
+    // (a pure display:none -> flex toggle never fires aria-live).
+    pill.innerHTML = `<span></span>
       <button type="button" id="orwell-dr-exit" class="ow-btn ow-btn-plain" aria-label="Leave the Diary Room" title="Leave the Diary Room"
         style="color:inherit;font-size:1em;min-width:44px;min-height:44px;padding:0 2px;">×</button>`;
     anchor.parentElement.insertBefore(pill, anchor);
@@ -134,6 +142,10 @@
       return;
     }
     drMode = true;
+    // UX-7: re-inject the label text (even if unchanged) so the role="status" live region
+    // mutates on EVERY entry, not just the first mount — this is the announcement itself.
+    const label = pill.firstElementChild;
+    if (label) label.textContent = DR_ENTRY_LABEL;
     pill.style.display = "flex";
     document.body.classList.add("orwell-dr-mode");
     closeMobileSidebar();
