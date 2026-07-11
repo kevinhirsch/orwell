@@ -99,6 +99,23 @@ import { isNarrow } from './platform.js';
   // layer before any byte arrived is classified (`_isNetworkSendFailure`) and re-queued instead of
   // surfacing as a raw error.
   const _outboxAwaitingConfirm = [];  // dispatched, not yet server-confirmed (persisted alongside the queue)
+  //
+  // ── #830 (optimistic-always + aggregated unsent queue): the AGGREGATION lane ──
+  // The owner's ruling: "aggregate what you send quickly … when it's time to send the payload it
+  // sends all messages in one turn." Items queued WHILE A TURN WAS STREAMING (the rapid-succession
+  // case — the player keeps talking while the model replies) carry `coalesce: true`; at drain time
+  // a same-lane run of such items FOLDS into ONE combined turn (`_foldOutboxBatch`): one payload
+  // (texts joined by a blank line), ONE clientMsgId (the head's), ONE bubble (the batch's separate
+  // pending bubbles collapse into a single combined bubble via the same render path), ONE server
+  // row. A single queued item dispatches byte-identical to the pre-#830 path (no fold, no marker).
+  // DELIBERATELY NOT aggregated: OFFLINE-queued, network-requeued and reload-RESTORED items — each
+  // is its own at-most-once idempotency unit (its POST may already have reached the server, so the
+  // per-item `needsDedupe` verification and per-item drain of #891/#1379 must stand; folding items
+  // with divergent delivery states could double- or half-send a batch). Aggregation therefore
+  // requires `coalesce && !needsDedupe`, and never crosses a same-lane item that can't join (order
+  // within a conversation is preserved). When ≥2 items sit queued, an aggregated status strip
+  // (`#send-queue-strip`, role="status" — real text, WCAG 4.1.3) shows the count + a manual
+  // "Send now" retry that resets the backoff and drains through the ONE normal flush.
   let _outboxRestoreDone = false;     // boot restore runs once per page
   let _outboxRetryTimer = null;
   let _outboxRetryDelayMs = 0;        // 0 → next arm starts at the base delay
@@ -918,6 +935,12 @@ import { isNarrow } from './platform.js';
     // --- API key guard: warn if message looks like an API key ---
     if (API_KEY_RE.test(msg.trim())) {
       if (!await window.styledConfirm('This looks like an API key. Sending it to the AI could expose it.\n\nDid you mean to use /setup instead?', { confirmText: 'Send anyway', danger: true })) {
+        // #830 (optimistic-always): the early bubble was painted BEFORE this guard. The player
+        // chose NOT to send — the text is still in the composer (never cleared on this path), so
+        // remove the now-stale pending bubble instead of stranding a ghost message that will never
+        // dispatch. (A flushed outbox send re-uses its queued bubble — that one is kept: its item
+        // sits in awaiting-confirm and the outbox machinery owns its lifecycle.)
+        if (_userMsgEl && !_queuedBubbleEl) { try { _userMsgEl.remove(); } catch (_) {} }
         _releaseSendFlag();
         return;
       }
@@ -4124,6 +4147,13 @@ import { isNarrow } from './platform.js';
       ts: Date.now(),
       retries: 0,
       needsDedupe: false,
+      // #830: an item queued WHILE A TURN STREAMS is the rapid-succession case — it aggregates
+      // with its same-lane siblings into ONE combined turn at drain time (_foldOutboxBatch). An
+      // OFFLINE-queued item keeps #891's per-item at-most-once drain — the offline branch (~L801)
+      // also routes here, and a device that dropped its link mid-stream must NOT fold (each offline
+      // item is its own idempotency unit whose eventual POST may land independently), so coalesce
+      // additionally requires a live link.
+      coalesce: isStreaming === true && _outboxOnline(),
       bubbleEl: null,
     };
     // Paint the optimistic bubble immediately (pending: clientMsgId, NO dbId/seq).
@@ -4166,6 +4196,9 @@ import { isNarrow } from './platform.js';
    *  (or the dedupe pass proving its row already exists) — never merely because it was dispatched. */
   function _persistOutbox() {
     try {
+      // #830: `coalesce` is deliberately NOT persisted — a restored item is its own at-most-once
+      // unit and re-enters the queue outside the aggregation lane (the restore forces it false),
+      // so a persisted copy of the flag would be dead weight the restore ignores.
       const items = _outboxAwaitingConfirm
         .map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'inflight' }))
         .concat(_sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })));
@@ -4181,6 +4214,21 @@ import { isNarrow } from './platform.js';
   function _restoreOutboxFromStorage() {
     if (_outboxRestoreDone) return 0;
     if (!document.getElementById('chat-history')) return 0; // too early — a later boot attempt retries
+    // #830 hardening (dual-instance page — found by the aggregation gate): chat.js is evaluated
+    // TWICE on this page (app.js imports './chat.js' bare while index.html script-tags
+    // 'chat.js?v=…' — two URLs ⇒ two module instances, each with its own queue state but SHARING
+    // one sessionStorage record). Only the instance registered as window.chatModule may restore:
+    // a shadow instance restoring the same record repaints duplicate pending bubbles and — once
+    // its own dedupe pass verifies clean — dispatches a SECOND time (a real double-send). The
+    // canonical handle is settled long before the first 600ms boot attempt (both instances finish
+    // evaluating at page load); fail-open when no handle exists (stripped test DOMs).
+    try {
+      if (window.chatModule && window.chatModule._restoreOutboxFromStorage &&
+          window.chatModule._restoreOutboxFromStorage !== _restoreOutboxFromStorage) {
+        _outboxRestoreDone = true; // this shadow instance never restores (nor re-attempts)
+        return 0;
+      }
+    } catch (_) { /* fail-open */ }
     let rec = null;
     try { rec = JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) {}
     _outboxRestoreDone = true;
@@ -4198,6 +4246,10 @@ import { isNarrow } from './platform.js';
         ts: it.ts || Date.now(),
         retries: it.retries || 0,
         needsDedupe: true, // EVERY restored item verifies against the server log before re-sending
+        // #830: a RESTORED item is its own at-most-once idempotency unit (its POST may already
+        // have reached the server), so it re-enters the queue OUTSIDE the aggregation lane —
+        // per-item drain, per-item dedupe, never folded (matches the design note at the top).
+        coalesce: false,
         bubbleEl: null,
       };
       _paintOutboxBubble(item);
@@ -4229,6 +4281,7 @@ import { isNarrow } from './platform.js';
     if (hit) {
       _outboxRetryDelayMs = 0; // a confirmed delivery proves the link — reset the backoff
       _persistOutbox();
+      _updateOutboxStrip(); // #830: the aggregate count just shrank
     }
   }
 
@@ -4261,6 +4314,10 @@ import { isNarrow } from './platform.js';
       return false;
     }
     item.needsDedupe = true;
+    // #830: a network-requeued item (like a restored one) is its own at-most-once unit — it never
+    // re-joins the aggregation lane, even when the failed dispatch was itself a folded batch (the
+    // batch already IS one item here; it must not fold AGAIN with newer streaming sends).
+    item.coalesce = false;
     if (bubbleEl) item.bubbleEl = bubbleEl;
     if (item.bubbleEl) {
       item.bubbleEl.classList.add('msg-pending');
@@ -4335,6 +4392,7 @@ import { isNarrow } from './platform.js';
       }
     }
     _persistOutbox();
+    _updateOutboxStrip(); // #830: proven-delivered drops may have shrunk the aggregate count
     return allVerified;
   }
 
@@ -4365,6 +4423,88 @@ import { isNarrow } from './platform.js';
   function _refreshOutboxStatusTags() {
     const mode = _outboxOnline() ? 'queued' : 'offline';
     for (const it of _sendOutbox) { if (it) _setQueuedTag(it.bubbleEl, mode); }
+    _updateOutboxStrip(); // #830: keep the aggregate affordance in lockstep with the per-bubble tags
+  }
+
+  // ── #830: the AGGREGATED unsent-queue affordance ──
+  // When ≥2 sends sit queued, the scattered per-bubble tags gain one aggregate status card above
+  // the composer: the count, whether the batch will send as ONE turn (the coalesce lane), the
+  // offline truth, and a manual "Send now" retry. The card COMPOSES window.OrwellNoticeKit — the
+  // ONE stacked above-composer zone (ruling 642; the anti-fragmentation gate in
+  // test_on_notice_kit.py forbids hand-rolled anchors) — kind 'continue' (a quiet ambient notice),
+  // role 'status' + real text nodes (WCAG 4.1.3, the .unsent-tag precedent). It is a PROJECTION of
+  // the #891 outbox: no queue state of its own, and its retry routes through the ONE normal flush
+  // (every guard re-checked; never a second send path).
+  let _outboxNotice = null;   // the kit notice handle (created lazily at ≥2 queued items)
+  let _outboxStripRow = null; // the body row (label + retry button) inside the kit card
+
+  /** #830: project the outbox onto the aggregate card. Visible only at ≥2 queued items (a single
+   *  item's per-bubble tag already tells the whole story); closed the moment the queue drains. */
+  function _updateOutboxStrip() {
+    try {
+      const n = _sendOutbox.length;
+      if (n < 2) {
+        if (_outboxNotice) {
+          try { _outboxNotice.hide(); } catch (_) {}
+          _outboxNotice = null;
+          _outboxStripRow = null;
+        }
+        return;
+      }
+      if (!window.OrwellNoticeKit) return; // fail-open: the per-bubble queued tags still speak
+      if (!_outboxNotice || !(_outboxNotice.isShown && _outboxNotice.isShown())) {
+        // Belt: a just-hidden card may still be animating out under the same id — clear it so the
+        // zone never briefly holds two.
+        const leftover = document.getElementById('send-queue-strip');
+        if (leftover && leftover.isConnected) { try { leftover.remove(); } catch (_) {} }
+        _outboxNotice = window.OrwellNoticeKit.create({
+          id: 'send-queue-strip',
+          kind: 'continue',    // a quiet ambient above-composer notice (polite live region)
+          role: 'status',      // WCAG 4.1.3 — announced without focus
+          title: '',           // single-line affordance: the row lives in the body
+          dismissible: false,  // its lifecycle is queue-driven, never a user dismissal
+          persistDismiss: false,
+        });
+        const row = document.createElement('span');
+        row.className = 'send-queue-row';
+        const label = document.createElement('span');
+        label.className = 'send-queue-label';
+        row.appendChild(label);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        // #775: kit-card buttons compose the element kit's chrome; .send-queue-retry is the hook.
+        btn.className = 'ow-btn ow-btn-plain send-queue-retry';
+        btn.textContent = 'Send now';
+        btn.addEventListener('click', () => {
+          // Manual retry (#830 "failed with Retry — retry re-sends the batch"): reset the backoff
+          // and drain through the ONE normal flush, which re-checks every guard (single-flight,
+          // streaming, offline, dedupe, session binding) and folds the coalesce batch exactly like
+          // an auto-drain.
+          _outboxRetryDelayMs = 0;
+          if (_outboxRetryTimer) { clearTimeout(_outboxRetryTimer); _outboxRetryTimer = null; }
+          try { _flushSendOutbox(); } catch (_) {}
+        });
+        row.appendChild(btn);
+        _outboxNotice.show();
+        _outboxNotice.setBody(row);
+        // Title-less single-line card: keep the empty head row from reserving space (the
+        // orwellChatHint precedent).
+        const head = _outboxNotice.el && _outboxNotice.el.querySelector('.on-head');
+        if (head) head.style.display = 'none';
+        _outboxStripRow = row;
+      }
+      const offline = !_outboxOnline();
+      const oneTurn = _sendOutbox.every((it) => it && it.coalesce && !it.needsDedupe);
+      const label = _outboxStripRow && _outboxStripRow.querySelector('.send-queue-label');
+      if (label) {
+        label.textContent = offline
+          ? (n + ' messages queued — offline')
+          : (oneTurn ? (n + ' messages queued — they will send as one turn')
+                     : (n + ' messages queued'));
+      }
+      const btn = _outboxStripRow && _outboxStripRow.querySelector('.send-queue-retry');
+      if (btn) btn.disabled = offline; // no link ⇒ a manual retry is a lie; the 'online' event drains
+    } catch (_) { /* the card is best-effort chrome — never let it break the queue */ }
   }
 
   /** #891: capped exponential backoff retry (2s → 60s) for a queue held by offline/network failure.
@@ -4381,13 +4521,44 @@ import { isNarrow } from './platform.js';
     }, _outboxRetryDelayMs);
   }
 
+  /** #830: fold a rapid-succession batch (all `coalesce`, all same-lane, none dedupe-pending) into
+   *  ONE turn. One combined payload (texts joined by a blank line, send order preserved), ONE
+   *  clientMsgId (the head's — the batch's single idempotency key), ONE bubble: the batch's separate
+   *  pending bubbles collapse into a single combined bubble painted through the SAME render path
+   *  every queued bubble uses, so the live view matches the one persisted user row a reload or a
+   *  peer window will show. The folded item is a normal outbox item — awaiting-confirm, persistence,
+   *  network-requeue ("retry re-sends the batch") and the adopt/confirm seams all apply unchanged. */
+  function _foldOutboxBatch(batch) {
+    const head = batch[0];
+    const folded = {
+      clientMsgId: head.clientMsgId,
+      text: batch.map((it) => it.text).join('\n\n'),
+      sessionId: batch.map((it) => it.sessionId).find(Boolean) || null,
+      ts: head.ts,
+      retries: Math.max.apply(null, batch.map((it) => it.retries || 0)),
+      needsDedupe: false,
+      coalesce: true,
+      bubbleEl: null,
+    };
+    try {
+      for (const it of batch) {
+        if (it && it.bubbleEl && it.bubbleEl.parentNode) it.bubbleEl.remove();
+      }
+    } catch (_) { /* a merge-paint hiccup must never lose the text — it lives in `folded` */ }
+    _paintOutboxBubble(folded);
+    return folded;
+  }
+
   /**
    * Flush the next queued send IN ORDER once the current turn has settled (called from the stream-end
    * finally). ONE in flight at a time: it dispatches a single headless send that re-uses the queued
    * item's already-painted bubble + its clientMsgId (idempotent / at-most-once), and the NEXT item is
    * picked up by that send's own stream-end finally — so the queue drains strictly FIFO, one turn per
-   * settle, with no double-send. Guards: never while a stream is live (would race the in-flight turn),
-   * never re-entrant. A no-op when the outbox is empty (the overwhelming common case).
+   * settle, with no double-send. #830: a run of `coalesce` items (queued in rapid succession while a
+   * turn streamed) folds into ONE combined turn here (`_foldOutboxBatch`); a single queued item — and
+   * every offline/requeued/restored item — dispatches byte-identical to the per-item path. Guards:
+   * never while a stream is live (would race the in-flight turn), never re-entrant. A no-op when the
+   * outbox is empty (the overwhelming common case).
    */
   // The flush dispatcher — defaults to a headless `handleChatSubmit`. Indirected through a swappable
   // ref so the FIFO/idempotency browser gate can spy the dispatch without a real LLM stream; in
@@ -4431,13 +4602,34 @@ import { isNarrow } from './platform.js';
       const _idx = _sendOutbox.findIndex((it) =>
         it && !it.needsDedupe && (!it.sessionId || it.sessionId === _cur));
       if (_idx === -1) { _flushingOutbox = false; _armOutboxRetry(); return; }
-      const item = _idx === 0 ? _sendOutbox.shift() : _sendOutbox.splice(_idx, 1)[0];
+      let item = _idx === 0 ? _sendOutbox.shift() : _sendOutbox.splice(_idx, 1)[0];
       if (!item) { _flushingOutbox = false; return; }
+      // #830: AGGREGATED drain — a rapid-succession run queued while a turn streamed sends as ONE
+      // combined turn ("aggregate what you send quickly … it sends all messages in one turn").
+      // Collect every later item that (a) opted into the coalesce lane at enqueue time, (b) has no
+      // at-most-once ambiguity (`!needsDedupe` — offline/requeued/restored items keep #891's
+      // per-item drain), and (c) targets the SAME lane as this dispatch. The collection stops at
+      // the first same-lane item that can't join, so conversation order is never shuffled; items
+      // held for ANOTHER session are skipped over (an independent lane, untouched). One item ⇒ no
+      // fold — byte-identical to the pre-#830 dispatch.
+      if (item.coalesce && !item.needsDedupe) {
+        const _batch = [item];
+        for (let i = 0; i < _sendOutbox.length; ) {
+          const it = _sendOutbox[i];
+          if (!it) { i++; continue; }
+          const _sameLane = !it.sessionId || it.sessionId === _cur;
+          if (!_sameLane) { i++; continue; }
+          if (it.coalesce && !it.needsDedupe) { _batch.push(_sendOutbox.splice(i, 1)[0]); continue; }
+          break;
+        }
+        if (_batch.length > 1) item = _foldOutboxBatch(_batch);
+      }
       // #891: the item stays in the PERSISTED record (awaiting-confirm) until a server row carrying
       // its clientMsgId is observed — a reload mid-flight restores it, and the pre-send dedupe above
       // keeps the re-send at-most-once.
       _outboxAwaitingConfirm.push(item);
       _persistOutbox();
+      _updateOutboxStrip(); // #830: the queue just shrank (dispatch and/or fold)
       _setQueuedTag(item.bubbleEl, null); // actually sending now — the queued status would be a lie
       // If the queued bubble was somehow removed from the DOM (a destructive reload before flush), fall
       // back to letting the send paint a fresh one — the text is never lost.
@@ -7074,6 +7266,7 @@ import { isNarrow } from './platform.js';
     _outboxPeekStorage: () => {  // #891: read the persisted record (browser gate)
       try { return JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) { return null; }
     },
+    _updateOutboxStrip,          // #830: re-project the aggregate queue strip (browser gate)
     _syncSubmitButtonState,  // #971: reconcile the composer button to the true streaming state (browser gate)
     _foregroundStreamLive,   // #971: "is a turn genuinely streaming in the foreground" predicate (browser gate)
     _inProgressLabel,        // #986: the unified in-progress spinner label helper (browser gate)

@@ -2721,6 +2721,26 @@ body.bg-pattern-perlin-flow {
       border-color: color-mix(in srgb, var(--accent-error, var(--red)) 30%, transparent);
     }
 
+    /* Issue 830 (aggregated unsent queue — theme tokens only, no hex; this block sits inside the
+       L36 token-pin slice): when ≥2 sends sit queued the per-bubble tags gain ONE aggregate
+       status card above the composer — the count, the one-turn/offline truth, and a manual
+       "Send now" retry. The card composes window.OrwellNoticeKit (the ONE stacked zone, ruling
+       642) with kind "continue" and role "status" (WCAG 4.1.3); the kit owns the card chrome and
+       the retry button composes the element kit (.ow-btn .ow-btn-plain) — these rules only lay
+       out the inner row chat.js (_updateOutboxStrip) fills with REAL text nodes. */
+    .send-queue-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      font-size: 0.85em;
+    }
+    .send-queue-row .send-queue-label {
+      color: color-mix(in srgb, var(--fg) 72%, transparent);
+    }
+    .send-queue-row .send-queue-retry { margin-left: auto; }
+    .send-queue-row .send-queue-retry:disabled { opacity: 0.5; cursor: default; }
+
     /* L36 follow-on — the MODEL's OOC answer (a producer/HUD aside): the GM wrapped its whole
        reply in ((...)), so render it as a quiet aside outside the fiction, not a spoken-in-room
        line. Mirrors the player-side aside treatment; theme-token driven. */
