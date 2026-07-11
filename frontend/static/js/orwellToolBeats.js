@@ -60,6 +60,9 @@ export const ORWELL_TOOL_BEATS = {
   'seasonRetrospective': '\u{1F513} The producers’ vault',
   // 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
   'dailyRecap': '\u{1F4C6} The day in review',
+  // ADR 0006 (#1385): the player turns in for the night — the house rolls to morning (the 0102 recap
+  // rides this beat's result). A real mutation, so it stays VISIBLE (never in ORWELL_SILENT_BEATS).
+  'turnIn': '\u{1F319} Lights out',
   'npcVoice': '\u{1F3AD} In their head',
   'inspectNonVaultState': '\u{1F50E} Control room',
   'overrideMechanic': '\u{1F39B} Control room',
