@@ -1,6 +1,7 @@
 import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { VoiceProfile } from "../domain/voiceProfile";
+import type { PullQuoteWeek } from "../engine/pullQuoteReel";
 
 /**
  * Vault-free game-session port (onboarding + per-moment prompt injection).
@@ -1348,6 +1349,16 @@ export interface RetrospectiveView {
    * when the player kept no confessional.
    */
   playerConfessionals: string[];
+  /**
+   * #1396 — the weekly Diary-Room PULL-QUOTE REEL: a curated montage of the season's most notable
+   * confessional lines, collected BY WEEK — the player's OWN Diary-Room lines (`player-diary`) AND the
+   * NPCs' confessionals (`npc-confessional`), each tagged with its source so the two channels stay
+   * explicit. The NPC lines are Vault content and reach this reel ONLY here, at the sanctioned unseal —
+   * exactly like `hiddenStory` / `evictionVotes` (mandate #2). Built ON `playerConfessionals` (0115),
+   * not replacing it: a pure, rng-free, calibration-neutral selection over already-recorded lines, so
+   * an empty reel leaves the rest of the retrospective byte-identical. Empty when no notable line exists.
+   */
+  pullQuoteReel: PullQuoteWeek[];
   /**
    * The hidden story in CHRONOLOGICAL order (#852): pre-season setup first, then the live hidden
    * layer ordered by its time marker. Each row carries an optional `ts` (a monotonic marker — absent
