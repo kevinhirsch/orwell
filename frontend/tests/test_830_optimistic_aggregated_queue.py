@@ -32,10 +32,14 @@ adds the AGGREGATION lane on top:
 Like #985/#891 this is an LLM-stub-blind seam, so the runtime gates drive the REAL chat.js in
 headless chromium.
 
-Run: cd frontend && .venv/bin/python -m pytest tests/test_830_optimistic_aggregated_queue.py
+Run: cd frontend && python3 -m pytest tests/
+(the CLAUDE.md rule — run the WHOLE FE suite before pushing FE changes: many gates are
+source-pinned convention checks that live outside obvious keywords. For fast iteration on just
+this gate: cd frontend && .venv/bin/python -m pytest tests/test_830_optimistic_aggregated_queue.py)
 """
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -116,20 +120,25 @@ def test_flush_folds_only_the_safe_run_after_every_gate():
     )
 
 
-def test_persistence_roundtrips_the_coalesce_lane():
-    """Best-effort across a reload: the lane survives persistence, so a restored rapid-succession
-    batch (once dedupe-verified clean) still sends as one turn — 'retry re-sends the batch'."""
+def test_restored_and_requeued_items_leave_the_aggregation_lane():
+    """A RESTORED or network-REQUEUED item is its own at-most-once idempotency unit (its POST may
+    already have reached the server), so it re-enters the queue OUTSIDE the aggregation lane:
+    per-item drain, per-item dedupe, never folded — comment and code agree (PR #1398 review)."""
     js = _read("static/js/chat.js")
-    persist = js[js.index("function _persistOutbox()"):]
-    persist = persist[:persist.index("function _restoreOutboxFromStorage")]
-    assert persist.count("coalesce: it.coalesce === true") == 2, (
-        "both the queued and the awaiting-confirm serializations must carry the lane"
-    )
     restore = js[js.index("function _restoreOutboxFromStorage()"):]
     restore = restore[:restore.index("function _outboxConfirmDelivery")]
-    assert "coalesce: it.coalesce === true" in restore, "the restore must rehydrate the lane"
-    # …but a restored item is STILL dedupe-armed first (the #891 at-most-once gate is untouched).
-    assert "needsDedupe: true" in restore
+    assert "coalesce: false" in restore, "the restore must force the item OUT of the aggregation lane"
+    assert "needsDedupe: true" in restore, "…and still arm the #891 per-item dedupe gate"
+    rq = js[js.index("function _requeueOutboxItem(clientMsgId, text, bubbleEl, sessionId)"):]
+    rq = rq[:rq.index("function _isNetworkSendFailure")]
+    assert "item.coalesce = false;" in rq, (
+        "a network-requeued item (incl. a failed folded batch) must never fold AGAIN"
+    )
+    # …and nothing persists the lane either: the restore ignores it, so a stored copy of the flag
+    # would be dead weight that invites exactly the comment/code drift this pin prevents.
+    persist = js[js.index("function _persistOutbox()"):]
+    persist = persist[:persist.index("function _restoreOutboxFromStorage")]
+    assert "coalesce: it.coalesce" not in persist, "the lane flag must not be serialized"
 
 
 def test_shadow_instance_never_restores_the_shared_outbox():
@@ -214,25 +223,27 @@ def _free_port():
     return port
 
 
-def _log_tail(port, lines=40):
+def _log_tail(log_path, lines=40):
     try:
-        with open(f"/tmp/fe-830-{port}.log", encoding="utf-8", errors="replace") as f:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
             return "\n".join(f.read().splitlines()[-lines:])
     except Exception as e:  # pragma: no cover - diagnostics only
         return f"<log unreadable: {e}>"
 
 
-def _boot(env, port):
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
-        cwd=FRONTEND, env=env,
-        stdout=open(f"/tmp/fe-830-{port}.log", "w"), stderr=subprocess.STDOUT,
-    )
+def _boot(env, port, log_path):
+    # The child gets its own copy of the log fd, so closing ours right after Popen lets the
+    # fixture teardown unlink the file cleanly (PR #1398 review: no leaked scratch files).
+    with open(log_path, "w") as log_f:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
+            cwd=FRONTEND, env=env, stdout=log_f, stderr=subprocess.STDOUT,
+        )
     base = f"http://127.0.0.1:{port}"
     for _ in range(120):
         if proc.poll() is not None:
             raise RuntimeError(
-                f"uvicorn exited early (exit status {proc.returncode}); log tail:\n{_log_tail(port)}"
+                f"uvicorn exited early (exit status {proc.returncode}); log tail:\n{_log_tail(log_path)}"
             )
         try:
             urllib.request.urlopen(base + "/openapi.json", timeout=2)
@@ -240,7 +251,7 @@ def _boot(env, port):
         except Exception:
             time.sleep(1)
     proc.terminate()
-    raise RuntimeError(f"server never became ready; log tail:\n{_log_tail(port)}")
+    raise RuntimeError(f"server never became ready; log tail:\n{_log_tail(log_path)}")
 
 
 @pytest.fixture(scope="module")
@@ -249,22 +260,41 @@ def _app():
         from playwright.sync_api import sync_playwright  # noqa: F401
     except Exception:
         pytest.skip("playwright not installed")
+    # PR #1398 review: the DB dir and the uvicorn log are per-run scratch — track them and clean
+    # them up in teardown (a boot FAILURE still surfaces the log TAIL inside the raised error
+    # before the cleanup runs, so no diagnostics are lost).
+    db_dir = tempfile.mkdtemp(prefix="orwell-830-")
+    log_fd, log_path = tempfile.mkstemp(prefix="fe-830-", suffix=".log")
+    os.close(log_fd)
+
+    def _cleanup_scratch():
+        shutil.rmtree(db_dir, ignore_errors=True)
+        try:
+            os.remove(log_path)
+        except OSError:
+            pass
+
     env = dict(
         os.environ,
         ORWELL_GAME_BUILD="1",
         AUTH_ENABLED="false",
         LOCALHOST_BYPASS="true",
         PLAYWRIGHT_BROWSERS_PATH=os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"),
-        DATABASE_URL="sqlite:///" + os.path.join(tempfile.mkdtemp(prefix="orwell-830-"), "app.db"),
+        DATABASE_URL="sqlite:///" + os.path.join(db_dir, "app.db"),
     )
     port = _free_port()
-    proc, base = _boot(env, port)  # raises (fails the gate) on any startup problem
+    try:
+        proc, base = _boot(env, port, log_path)  # raises (fails the gate) on any startup problem
+    except BaseException:
+        _cleanup_scratch()
+        raise
     yield base
     proc.terminate()
     try:
         proc.wait(timeout=10)
     except Exception:
         proc.kill()
+    _cleanup_scratch()
 
 
 def _new_page(pw, app):
@@ -335,7 +365,7 @@ def test_streaming_queued_batch_sends_as_one_turn(_app):
               sent,
               queueLen: chat._sendOutbox.length,
               awaiting: chat._outboxAwaitingConfirm.map(it => ({ id: it.clientMsgId, text: it.text })),
-              storedStates: rec && rec.items ? rec.items.map(it => ({ state: it.state, coalesce: it.coalesce })) : null,
+              storedStates: rec && rec.items ? rec.items.map(it => it.state) : null,
               bubbleCount: bubbles.length,
               bubbleId: bubbles[0] && bubbles[0].dataset.clientMsgId,
               bubbleText: bubbles[0] ? (bubbles[0].querySelector('.body') || bubbles[0]).textContent : null,
@@ -370,8 +400,10 @@ def test_streaming_queued_batch_sends_as_one_turn(_app):
         assert part in (result["bubbleText"] or ""), f"the combined bubble must show {part!r}"
     # Reload-durable as a BATCH: one awaiting item holding the combined payload.
     assert result["awaiting"] == [{"id": head_id, "text": "alpha one\n\nbeta two\n\ngamma three"}]
-    assert result["storedStates"] == [{"state": "inflight", "coalesce": True}], (
-        "the folded batch must stay reload-durable until its server row is observed"
+    assert result["storedStates"] == ["inflight"], (
+        "the folded batch must stay reload-durable (as ONE per-item record — the lane flag is "
+        "deliberately not serialized; a restored batch re-sends per-item semantics) until its "
+        "server row is observed"
     )
     assert result["awaitingAfterConfirm"] == 0 and result["recAfterConfirm"] is None, (
         "a confirmed delivery must release the folded batch's durable copy"

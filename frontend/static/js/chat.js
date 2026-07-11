@@ -4193,9 +4193,12 @@ import { isNarrow } from './platform.js';
    *  (or the dedupe pass proving its row already exists) — never merely because it was dispatched. */
   function _persistOutbox() {
     try {
+      // #830: `coalesce` is deliberately NOT persisted — a restored item is its own at-most-once
+      // unit and re-enters the queue outside the aggregation lane (the restore forces it false),
+      // so a persisted copy of the flag would be dead weight the restore ignores.
       const items = _outboxAwaitingConfirm
-        .map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, coalesce: it.coalesce === true, state: 'inflight' }))
-        .concat(_sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, coalesce: it.coalesce === true, state: 'queued' })));
+        .map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'inflight' }))
+        .concat(_sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })));
       if (!items.length) { sessionStorage.removeItem(_outboxKey()); return; }
       sessionStorage.setItem(_outboxKey(), JSON.stringify({ v: 1, items }));
     } catch (_) { /* storage unavailable — the in-memory queue still works for this page */ }
@@ -4240,7 +4243,10 @@ import { isNarrow } from './platform.js';
         ts: it.ts || Date.now(),
         retries: it.retries || 0,
         needsDedupe: true, // EVERY restored item verifies against the server log before re-sending
-        coalesce: it.coalesce === true, // #830: the aggregation lane survives a reload (best-effort)
+        // #830: a RESTORED item is its own at-most-once idempotency unit (its POST may already
+        // have reached the server), so it re-enters the queue OUTSIDE the aggregation lane —
+        // per-item drain, per-item dedupe, never folded (matches the design note at the top).
+        coalesce: false,
         bubbleEl: null,
       };
       _paintOutboxBubble(item);
@@ -4305,6 +4311,10 @@ import { isNarrow } from './platform.js';
       return false;
     }
     item.needsDedupe = true;
+    // #830: a network-requeued item (like a restored one) is its own at-most-once unit — it never
+    // re-joins the aggregation lane, even when the failed dispatch was itself a folded batch (the
+    // batch already IS one item here; it must not fold AGAIN with newer streaming sends).
+    item.coalesce = false;
     if (bubbleEl) item.bubbleEl = bubbleEl;
     if (item.bubbleEl) {
       item.bubbleEl.classList.add('msg-pending');
