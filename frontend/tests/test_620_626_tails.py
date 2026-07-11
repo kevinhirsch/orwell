@@ -28,7 +28,7 @@ it needed a code change:
     from its aria-label ("Dismiss the premiere guide") — a WCAG 2.5.3 Label-in-Name violation.
     ALREADY SHIPPED (structurally, via refactor): the tutorial no longer hand-rolls that
     button — it composes the shared OrwellNoticeKit dismiss control, which is a glyph-only
-    "×" (no visible text label to mismatch).
+    "x" (no visible text label to mismatch).
 
   UX-4 (#626) — retrospective vault headings/button carry a bare leading emoji with no
     aria-hidden wrap (WCAG 1.1.1: a screen reader reads "closed lock with key…"). ALREADY
@@ -126,10 +126,19 @@ def test_narr6_casting_max_tokens_seed_stays_absent():
     assert '"narration"' not in body, (
         "narration must stay out of the seed for the same reason (#620 NARR-5)."
     )
-    assert '"casting": None' in token_policy_src, (
-        "token_policy._DEFAULT_MAX_TOKENS['casting'] must stay None (model-aware cap) — this "
-        "is what actually closes the NARR-6 truncation vector, independent of reasoning effort."
-    )
+    # Bind the assertion to the _DEFAULT_MAX_TOKENS INITIALIZER itself (not a whole-file
+    # substring, which a comment or an unrelated dict could satisfy/spoof).
+    dm = re.search(r"_DEFAULT_MAX_TOKENS\s*=\s*\{(.*?)\n\}", token_policy_src, re.S)
+    assert dm, "_DEFAULT_MAX_TOKENS dict literal not found in token_policy.py"
+    default_body = dm.group(1)
+    casting_entries = re.findall(r'"casting"\s*:\s*([^,\n]+)', default_body)
+    assert casting_entries, "_DEFAULT_MAX_TOKENS must still carry an explicit 'casting' key"
+    for value in casting_entries:
+        assert value.strip() == "None", (
+            f"_DEFAULT_MAX_TOKENS['casting'] must stay None (model-aware cap), found "
+            f"{value.strip()!r} — a literal int here IS the #620 NARR-6 truncation vector, "
+            "independent of reasoning effort."
+        )
 
 
 # ── UX-2 (#626) — already shipped; pin it stays shipped ─────────────────────────────────────
@@ -163,16 +172,40 @@ def test_ux3_premiere_dismiss_has_no_labelinname_violation():
 # ── UX-4 (#626) — already shipped; pin it stays shipped ─────────────────────────────────────
 
 
+_UX4_EMOJI = ("\U0001F513", "\U0001F5F3", "\U0001F510")  # 🔓 🗳 🔐
+
+
 def test_ux4_retrospective_emoji_headings_have_explicit_aria_label():
-    for marker in ("🔓", "🗳", "🔐"):
-        idx = RETRO.find(marker)
-        assert idx != -1, f"expected retrospective marker {marker!r} not found"
-    # Every el(...) call whose text starts with one of these emoji must be followed (within a
-    # few lines) by an explicit aria-label override that strips the emoji.
-    assert RETRO.count('setAttribute("aria-label"') >= 4, (
-        "retrospective headings/button carrying a decorative leading emoji must set an "
-        "explicit aria-label that excludes it (#626 UX-4)."
+    # Every string literal that opens with one of the three decorative glyphs must be followed
+    # NEARBY (same element, next couple of lines) by an explicit aria-label whose text is the
+    # emoji-free remainder — per-site, not a global setter count (which any unrelated
+    # setAttribute call could satisfy).
+    emoji_alt = "".join(_UX4_EMOJI)
+    sites = list(re.finditer(
+        r'"([' + emoji_alt + r'])️?\s*([^"]+)"', RETRO))
+    assert len(sites) >= 4, (
+        f"expected the four retrospective emoji-led strings (headings + unseal CTA), found "
+        f"{len(sites)} — if they were removed/renamed, re-verify UX-4 (#626)."
     )
+    for m in sites:
+        glyph, text = m.group(1), m.group(2).strip()
+        nearby = RETRO[m.end():m.end() + 300]
+        lm = re.search(r'setAttribute\("aria-label",\s*"([^"]+)"\)', nearby)
+        assert lm, (
+            f"the element whose text starts with {glyph!r} ({text!r}) must set an explicit "
+            "aria-label right after it — the emoji is decorative and must not reach the "
+            "accessible name (#626 UX-4)."
+        )
+        label = lm.group(1)
+        for g in _UX4_EMOJI:
+            assert g not in label, (
+                f"the aria-label for {text!r} must EXCLUDE the decorative emoji, found "
+                f"{label!r} (#626 UX-4)."
+            )
+        assert label == text, (
+            f"the aria-label should be the emoji-free visible text: expected {text!r}, "
+            f"found {label!r} (#626 UX-4 / WCAG 2.5.3 label-in-name)."
+        )
 
 
 # ── UX-5 (#626) — FIXED HERE: aria-modal on the 4 still-legacy static dialogs ───────────────
@@ -201,8 +234,29 @@ def test_ux5_kit_migrated_dialogs_get_aria_modal_at_runtime_not_statically():
     # (that would create a nested/duplicate dialog once lifted into the kit's .ow-body).
     assert 'id="settings-host" hidden' in INDEX
     assert 'id="theme-host" style="display:none"' in INDEX
-    assert "el.setAttribute('aria-modal', 'true')" in UI_JS or 'setAttribute("aria-modal"' in UI_JS \
-        or "aria-modal" in _read_js("orwellWindow.js")
+    # Pin the EXACT runtime stamp — this line (modal:true branch of the kit's root builder) is
+    # what makes the Settings/Theme dialogs aria-modal at runtime.
+    ow = _read_js("orwellWindow.js")
+    assert "el.setAttribute('aria-modal', 'true')" in ow, (
+        "orwellWindow.js must stamp aria-modal='true' on its modal wrapper — the kit-migrated "
+        "dialogs (Settings/Theme) rely on this runtime stamp for their UX-5 fix (#626)."
+    )
+    # Negative: the static host CONTENT divs carry no aria-modal of their own (a static claim
+    # would duplicate the kit's runtime one on the outer wrapper).
+    settings_tag = re.search(
+        r'<div class="modal-content settings-modal-content"[^>]*>', INDEX)
+    assert settings_tag, "the settings-modal-content div not found in index.html"
+    assert "aria-modal" not in settings_tag.group(0), (
+        "the static settings-modal-content must NOT claim aria-modal — the OrwellWindow kit "
+        "stamps it on its own wrapper at runtime; a static duplicate nests two aria-modal "
+        "surfaces (#626 UX-5)."
+    )
+    theme_tag = re.search(r'<div id="theme-popup"[^>]*>', INDEX)
+    assert theme_tag, "the #theme-popup div not found in index.html"
+    assert "aria-modal" not in theme_tag.group(0), (
+        "the static #theme-popup must NOT claim aria-modal — same kit-runtime reasoning as "
+        "settings (#626 UX-5)."
+    )
 
 
 def test_ux5_legacy_modal_family_still_has_the_axe8_focus_trap():
@@ -261,7 +315,7 @@ def test_ux7_dr_entry_label_is_non_empty_and_mentions_diary_room():
     assert m, "DR_ENTRY_LABEL constant not found"
     label = m.group(1)
     assert "Diary Room" in label
-    assert "out-of-character" in label or "OOC" in label.lower()
+    assert "out-of-character" in label or "ooc" in label.lower()
 
 
 # ── UX-8 (#626) — already shipped; pin it stays shipped ─────────────────────────────────────
@@ -271,8 +325,23 @@ def test_ux8_finale_buttons_strip_leading_glyph_from_aria_label():
     m = re.search(r"const addBtn = \(label, text\) => \{.*?\n    \};", FINALE, re.S)
     assert m, "addBtn() not found"
     body = m.group(0)
-    assert "aria-label" in body
-    assert re.search(r"label\.replace\(", body), (
-        "addBtn() must strip the leading emoji/arrow glyph from the accessible name so a "
-        "screen reader doesn't read \"ballot box with ballot, Vote for X\" (#626 UX-8)."
+    # Pin the EXACT strip expression — /^[^\p{L}\p{N}]+/u removes every leading char that is
+    # neither a Unicode letter nor a digit (the emoji/arrow prefix + its trailing space), and
+    # the `|| label` keeps a glyph-only label from collapsing to an empty accessible name.
+    strip_expr = 'label.replace(/^[^\\p{L}\\p{N}]+/u, "").trim() || label'
+    assert strip_expr in body, (
+        "addBtn() must strip the leading emoji/arrow glyph from the accessible name with the "
+        f"exact expression {strip_expr!r} so a screen reader doesn't read "
+        '"ballot box with ballot, Vote for X" (#626 UX-8).'
     )
+    assert 'btn.setAttribute("aria-label"' in body, (
+        "the stripped name must be applied as the button's aria-label (#626 UX-8)."
+    )
+    # Prove the semantics on a representative label: emulate the JS pattern (strip leading
+    # non-letter/non-digit chars) on the exact shapes the finale renders.
+    def _strip(label: str) -> str:
+        stripped = re.sub(r"^[^\w]+", "", label, flags=re.UNICODE).strip()
+        return stripped or label
+    assert _strip("\U0001F5F3 Vote for X") == "Vote for X"
+    assert _strip("→ Own my game") == "Own my game"
+    assert _strip("✍ Give your opening statement") == "Give your opening statement"
