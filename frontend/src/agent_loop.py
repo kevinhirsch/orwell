@@ -2961,8 +2961,13 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
         # (the board moved under us mid-turn) is reconciled-and-RETRIED (#591); a SECOND consecutive one
         # is DEFERRED (CON-11, `defer_fold=True`) rather than dropped — a struck deal is the scene's
         # only record and must land eventually, never evaporate (mandate #4).
+        # A10 / #591 / R1c: mint ONE stable at-most-once key for THIS deal and thread it through EVERY
+        # attempt (it rides in kwargs, so the single retry AND the CON-11 deferred queue reuse it) —
+        # the engine dedups by it (#1305), so a concurrently re-driven deal can never fold twice.
+        from routes import chat_helpers as _ch_idem
         if await _backfill_with_cas(owner, _oe.make_deal, with_id, kind, terms,
-                                    user=owner, defer_fold=True) is None:
+                                    user=owner, defer_fold=True,
+                                    idempotency_key=_ch_idem._mint_idempotency_key()) is None:
             return False
         logger.info(f"[orwell] auto-recorded deal (kind={kind}, with={with_id}) user={owner}")
         return True
@@ -3068,7 +3073,11 @@ async def _auto_confide(narration, last_user, house, endpoint_url, model, header
         # DEFERRED (CON-11, `defer_fold=True`) rather than dropped — the press is the scene's only record
         # and must land eventually, never evaporate (mandate #4). The ENGINE decides the disclosure; a
         # `{disclosed:false}` is a perfectly good (and common) result — we only guarantee the lever FIRES.
-        res = await _backfill_with_cas(owner, _oe.confide, npc_id, user=owner, defer_fold=True)
+        # A10 / #591 / R1c: one stable at-most-once key threads through every attempt (retry + deferred
+        # queue reuse kwargs) — the engine dedups by it (#1305), so the bond fold can never double-apply.
+        from routes import chat_helpers as _ch_idem
+        res = await _backfill_with_cas(owner, _oe.confide, npc_id, user=owner, defer_fold=True,
+                                       idempotency_key=_ch_idem._mint_idempotency_key())
         if res is None:
             return False
         _disclosed = bool(res.get("disclosed")) if isinstance(res, dict) else False
@@ -3205,8 +3214,13 @@ async def _auto_expose_secret(narration, last_user, house, endpoint_url, model, 
             logger.info(f"[orwell] auto-expose: factId {fact_id!r} not a known fact — skipped user={owner}")
             return False
         # CON-11: defer (never drop) a double-stale-409 -- exposing a secret is a one-shot, consequence-
-        # bearing action (mandate #4).
-        res = await _backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner, defer_fold=True)
+        # bearing action (mandate #4). A10 / #591 / R1c: one stable at-most-once key threads through
+        # every attempt (retry + deferred queue reuse kwargs) — the engine dedups by it (#1305), so the
+        # standing fold / spent secret can never double-apply.
+        from routes import chat_helpers as _ch_idem
+        res = await _backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner,
+                                       defer_fold=True,
+                                       idempotency_key=_ch_idem._mint_idempotency_key())
         if res is None:
             return False
         _exposed = bool(res.get("exposed")) if isinstance(res, dict) else False
@@ -3292,9 +3306,13 @@ async def _auto_trade_secret(narration, last_user, house, endpoint_url, model, h
         ask_kind = obj.get("askKind")
         ask_kind = ask_kind.strip()[:80] if isinstance(ask_kind, str) and ask_kind.strip() else None
         # CON-11: defer (never drop) a double-stale-409 -- a struck secret trade is a one-shot,
-        # consequence-bearing action (mandate #4).
+        # consequence-bearing action (mandate #4). A10 / #591 / R1c: one stable at-most-once key threads
+        # through every attempt (retry + deferred queue reuse kwargs) — the engine dedups by it (#1305),
+        # so the recipient fold / trade cap can never double-apply.
+        from routes import chat_helpers as _ch_idem
         res = await _backfill_with_cas(owner, _oe.trade_secret, to_npc_id, fact_id=fact_id,
-                                       ask_kind=ask_kind, user=owner, defer_fold=True)
+                                       ask_kind=ask_kind, user=owner, defer_fold=True,
+                                       idempotency_key=_ch_idem._mint_idempotency_key())
         if res is None:
             return False
         _accepted = bool(res.get("accepted")) if isinstance(res, dict) else False
