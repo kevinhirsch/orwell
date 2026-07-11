@@ -2589,6 +2589,19 @@ import { isNarrow } from './platform.js';
                 // Track tool name for contextual spinner labels
                 _lastToolName = json.tool || '';
 
+                // #1336 (gate-wait UX): the #1313 house-entry gate can HOLD the createCharacter
+                // tool RETURN for a whole cast-authoring pass — the player used to stare at the
+                // generic tool-running node for the entire wait, because the "Production is
+                // finalizing your casting…" card only fired on the tool RESULT (tool_output).
+                // Paint it the moment the finalize STARTS so the hold shows the holding copy
+                // throughout. begin() is idempotent (the tool_output re-begin stays as the safety
+                // re-paint); cleared by the first narration token in the json.delta path, with the
+                // finally-block safety net. No new window (inline indicator, not an OrwellWindow),
+                // no ad-hoc events.
+                if (json.tool === 'createCharacter') {
+                  try { if (window._orwellFinalizing) { _orwellFinalizingActive = true; window._orwellFinalizing.begin(); } } catch (_) {}
+                }
+
                 // ADR 0011 — drop pure context-read beats in the game build (see orwellToolBeats):
                 // they change nothing the player witnessed and otherwise stack as a wall of identical
                 // "Production notes" chips on a long / concurrent-re-ground turn. No chip, no thread
