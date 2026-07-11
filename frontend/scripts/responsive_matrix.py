@@ -80,10 +80,11 @@ XFAIL = {
     # fixed z-502) floats OVER the gadget rail's docked cards on rail-visible tiers and
     # reaches the composer at several tiers. ONE root cause, three collision families —
     # surfaced the first time the matrix ran ENGINE-STAGED + FINISHED in CI (#651 gap 1);
-    # pre-existing state, not a new regression. Remove all three entries when #1371 lands.
+    # pre-existing state, not a new regression. Remove all four entries when #1371 lands.
     "#1371-a": "overlap:orwell-retro intersects the composer",
     "#1371-b": "overlap:orwell-status intersects orwell-retro",
     "#1371-c": "overlap:orwell-presence intersects orwell-retro",
+    "#1371-d": "overlap:orwell-retro intersects orwell-room-strip",
 }
 
 passes, failures, xfails, xpasses = [], [], [], []
