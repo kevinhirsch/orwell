@@ -194,6 +194,18 @@
           // everything else defaults to the frosted (material-only) baseline.
           _tier = (_name === 'glass' || t.glass) ? 'full' : 'frosted';
         }
+        // #777 — device ceiling at FIRST PAINT: never START at Full Glass on a constrained
+        // device (coarse pointer OR a low-end viewport ≤ 768px). Full's Chromium SVG refraction
+        // is GPU-heavy on small/touch devices, so painting it on the first frame flashes Full
+        // before theme.js settles it back to Frosted. Mirror theme.js's ceiling (LOWEND_VIEWPORT_W
+        // = 768) so first paint opens AT Frosted. Wrapped so an old/limited matchMedia can never
+        // throw and stall first paint (dependency-free — runs before any module loads).
+        try {
+          var _constrained =
+            (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+            ((window.innerWidth || document.documentElement.clientWidth || 0) <= 768);
+          if (_tier === 'full' && _constrained) _tier = 'frosted';
+        } catch (_e) {}
         var _house = !!t.house || !!(_name && _HOUSE[_name]);
         var _panel = (t.colors && t.colors.panel) || '';
         var _bgImage = t.bgImage || '';
