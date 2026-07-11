@@ -25,9 +25,21 @@ fix-ledger.md: "hard reload while a send is QUEUED loses it"). This change close
 No second send path exists: the drain dispatches through the one `_outboxDispatch` →
 `handleChatSubmit`, riding the existing clientMsgId adopt/reconcile seams (ADR 0008/0012).
 
+  P1 FIX (PR #1379 review — Greptile's EXECUTED cross-session repro; CodeRabbit flagged the same
+  gate): the first cut's drain only required that SOME session was selected, and the dedupe
+  PREFERRED the currently-selected session over the item's own — so a restored session-A item
+  could be "verified" against and DISPATCHED INTO session B if B became current first after the
+  reload. Now an item's recorded `sessionId` is BINDING: the drain dispatches an item only while
+  ITS session is the currently-selected one (others are HELD — kept in the queue, _flushingOutbox
+  reset, backoff armed, never shifted — draining via the sessions.js selectSession nudge or the
+  retry tick), and `_dedupeOutboxAgainstServer` verifies each item against ITS OWN session's
+  history, never the current session's. No-sessionId items (queued before any session existed)
+  keep current-session-at-dispatch-time semantics, documented at the eligibility check.
+
 Like #985/#836 this is an LLM-stub-blind seam, so the runtime gates drive the REAL chat.js in
 headless chromium — including the literal commissioned scenario: queue while offline
-(context.set_offline), reload, reconnect, exactly-once delivery with order preserved.
+(context.set_offline), reload, reconnect, exactly-once delivery with order preserved — and the
+Greptile repro: restored session-A item, session B current, nothing bleeds into B.
 
 Run: cd frontend && .venv/bin/python -m pytest tests/test_891_reload_durable_outbox.py
 """
@@ -91,7 +103,14 @@ def test_restore_exists_and_dedupes_before_resend():
     dd = dd[:dd.index("\n  // ──")]
     assert "metadata.client_msg_id" in dd.replace("m.metadata && m.metadata.client_msg_id", "metadata.client_msg_id"), \
         "dedupe must key on the server-stamped client_msg_id"
-    assert "return false" in dd, "dedupe must FAIL CLOSED when verification is unavailable"
+    assert "allVerified = false" in dd and "return allVerified" in dd, \
+        "dedupe must FAIL CLOSED when verification is unavailable"
+    # P1 fix (PR #1379): dedupe verifies each item against ITS OWN session's history — the
+    # currently-selected session must play NO part in choosing which log to consult.
+    assert "bySid" in dd and "it.sessionId" in dd, \
+        "dedupe must group/verify by each item's OWN recorded sessionId"
+    assert "getCurrentSessionId" not in dd, \
+        "dedupe must NEVER consult the currently-selected session (the cross-session bleed root cause)"
 
 
 def test_flush_gates_on_offline_and_dedupe_and_keeps_item_persisted_through_dispatch():
@@ -113,6 +132,30 @@ def test_flush_gates_on_offline_and_dedupe_and_keeps_item_persisted_through_disp
     # durability through the in-flight window: dispatch does NOT drop the persisted copy
     assert "_outboxAwaitingConfirm.push(item)" in fn and "_persistOutbox()" in fn, \
         "a dispatched item must stay in the persisted record until server-confirmed"
+
+
+def test_item_session_binding_gates_the_dispatch():
+    """P1 fix (PR #1379 — Greptile repro / CodeRabbit gate): an item with a recorded sessionId may
+    only dispatch while ITS session is currently selected; a non-matching item is HELD (queue kept,
+    _flushingOutbox reset, backoff armed) — never shifted into another session's send path."""
+    js = _read("static/js/chat.js")
+    fn = js[js.index("function _flushSendOutbox()"):]
+    fn = fn[:fn.index("// ── #891 P0: durability wiring")]
+    # the eligibility scan binds by session (and skips still-unverified items)
+    assert "!it.sessionId || it.sessionId === _cur" in fn, \
+        "dispatch eligibility must bind an item to ITS recorded session (null ⇒ pre-session semantics)"
+    assert "!it.needsDedupe" in fn, "a still-unverified item must never be eligible to dispatch"
+    # held path: reset the flush guard, arm the retry, and return BEFORE any item is consumed
+    held_at = fn.index("if (_idx === -1) { _flushingOutbox = false; _armOutboxRetry(); return; }")
+    shift_at = fn.index("_sendOutbox.shift()")
+    assert held_at < shift_at, "the hold must happen before an item is consumed"
+    # the selectSession nudge exists, so a held item drains the moment its session is selected
+    sess = _read("static/js/sessions.js")
+    assert "window.chatModule._flushSendOutbox" in sess, \
+        "sessions.js selectSession must nudge the outbox drain on session change"
+    # a network-requeued item binds to the session the failed send actually targeted
+    assert "_requeueOutboxItem(_clientMsgId, msg, _userMsgEl, streamSessionId)" in js, \
+        "the catch-hook requeue must bind to the turn's streamSessionId, not current-at-catch-time"
 
 
 def test_offline_send_goes_straight_to_outbox():
@@ -140,14 +183,14 @@ def test_network_failure_classification_and_requeue():
     assert "failed to fetch" in fn and "networkerror" in fn
     assert "_outboxOnline()" in fn
     # the catch hook re-queues BEFORE the auto-recover branch, only for a zero-byte real player turn
-    hook_at = js.index("_requeueOutboxItem(_clientMsgId, msg, _userMsgEl)")
+    hook_at = js.index("_requeueOutboxItem(_clientMsgId, msg, _userMsgEl, streamSessionId)")
     recover_at = js.index("_tryAutoRecover(holder, accumulated, streamSessionId)")
     assert hook_at < recover_at, "the requeue classification must precede auto-recover"
     hook_region = js[hook_at - 600:hook_at]
     assert "!accumulated && _userMsgEl && _isNetworkSendFailure(err)" in hook_region + js[hook_at - 120:hook_at + 120], \
         "requeue must be gated on zero bytes + a real user bubble + the network classifier"
     # the requeue helper: idempotent, dedupe-armed, capped
-    rq = js[js.index("function _requeueOutboxItem(clientMsgId, text, bubbleEl)"):]
+    rq = js[js.index("function _requeueOutboxItem(clientMsgId, text, bubbleEl, sessionId)"):]
     rq = rq[:rq.index("function _isNetworkSendFailure")]
     assert "item.needsDedupe = true;" in rq, "a requeued POST may have reached the server — must re-verify"
     assert "_OUTBOX_MAX_RETRIES" in rq, "requeue must be capped (a misclassified error can't loop forever)"
@@ -201,7 +244,17 @@ def _free_port():
     return port
 
 
+def _log_tail(port, lines=40):
+    try:
+        with open(f"/tmp/fe-891-{port}.log", encoding="utf-8", errors="replace") as f:
+            return "\n".join(f.read().splitlines()[-lines:])
+    except Exception as e:  # pragma: no cover - diagnostics only
+        return f"<log unreadable: {e}>"
+
+
 def _boot(env, port):
+    """Boot uvicorn. A startup failure is a REAL failure (raise with exit status + log tail) —
+    never a skip: a boot regression must red-x this gate, not silently deselect it."""
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
         cwd=FRONTEND, env=env,
@@ -210,18 +263,22 @@ def _boot(env, port):
     base = f"http://127.0.0.1:{port}"
     for _ in range(120):
         if proc.poll() is not None:
-            raise RuntimeError(f"uvicorn exited early; see /tmp/fe-891-{port}.log")
+            raise RuntimeError(
+                f"uvicorn exited early (exit status {proc.returncode}); log tail:\n{_log_tail(port)}"
+            )
         try:
             urllib.request.urlopen(base + "/openapi.json", timeout=2)
             return proc, base
         except Exception:
             time.sleep(1)
     proc.terminate()
-    raise RuntimeError("server never became ready")
+    raise RuntimeError(f"server never became ready; log tail:\n{_log_tail(port)}")
 
 
 @pytest.fixture(scope="module")
 def _app():
+    # Skip is reserved for a missing browser toolchain (playwright/chromium). A server-boot
+    # failure FAILS loudly instead — see _boot.
     try:
         from playwright.sync_api import sync_playwright  # noqa: F401
     except Exception:
@@ -235,16 +292,19 @@ def _app():
         DATABASE_URL="sqlite:///" + os.path.join(tempfile.mkdtemp(prefix="orwell-891-"), "app.db"),
     )
     port = _free_port()
-    try:
-        proc, base = _boot(env, port)
-    except RuntimeError as e:
-        pytest.skip(str(e))
+    proc, base = _boot(env, port)  # raises (fails the gate) on any startup problem
     yield base
     proc.terminate()
     try:
         proc.wait(timeout=10)
     except Exception:
         proc.kill()
+
+
+def _wait_ready(page):
+    # Condition-based readiness (never a fixed sleep): the module graph is up once chat.js has
+    # registered its public surface.
+    page.wait_for_function("() => !!window.chatModule", timeout=15000)
 
 
 def _new_context(pw, app, init_scripts=()):
@@ -257,7 +317,7 @@ def _new_context(pw, app, init_scripts=()):
         context.add_init_script(script)
     page = context.new_page()
     page.goto(app + "/", wait_until="load", timeout=30000)
-    page.wait_for_timeout(3500)  # module graph + async init
+    _wait_ready(page)
     return browser, context, page
 
 
@@ -464,7 +524,7 @@ def test_restored_item_already_on_server_never_double_sends(_app):
             ),
         )
         page.goto(_app + "/", wait_until="load", timeout=30000)
-        page.wait_for_timeout(3500)
+        _wait_ready(page)
         try:
             page.wait_for_function(
                 "() => window.chatModule && window.chatModule._sendOutbox.length >= 1",
@@ -552,3 +612,128 @@ def test_requeue_idempotent_capped_and_confirm_releases(_app):
     f = result["confirmed"]
     assert f["queueLen"] == 0 and f["rec"] is None, \
         "a confirmed delivery must release every durable copy"
+
+
+# ── P1 regression (PR #1379 — Greptile's executed repro): a restored session-A item with session B
+#    current must NOT be verified against B, must NOT dispatch into B, and must deliver exactly once
+#    into A the moment A is selected. ─────────────────────────────────────────────────────────────
+def test_restored_item_never_bleeds_into_another_session(_app):
+    from playwright.sync_api import sync_playwright
+    seed = json.dumps({
+        "v": 1,
+        "items": [
+            {"clientMsgId": "c-a-pending", "text": "turn for session A",
+             "sessionId": "sess-a-891", "ts": 1, "retries": 0, "state": "queued"},
+            {"clientMsgId": "c-a-delivered", "text": "already delivered in A",
+             "sessionId": "sess-a-891", "ts": 2, "retries": 0, "state": "inflight"},
+        ],
+    })
+    init = (
+        "window.__orwellOutboxHoldDrain = true;"
+        "try { sessionStorage.setItem('orwell-send-outbox:', %s); } catch (_) {}"
+        % json.dumps(seed)
+    )
+    a_hits, b_hits = [], []
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as e:
+            pytest.skip(f"chromium unavailable: {e}")
+        context = browser.new_context()
+        context.add_init_script(init)
+        page = context.new_page()
+        # Session A's log already carries c-a-delivered (its POST landed before the reload);
+        # session B's log is empty. Both stubs count their hits so we can prove which log the
+        # dedupe consulted (the page's own history loader also hits these on selectSession —
+        # the assertions therefore compare DELTAS across the isolated flush window).
+        page.route(
+            "**/api/history/sess-a-891",
+            lambda route: (a_hits.append(1), route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"history": [{
+                    "role": "user", "content": "already delivered in A",
+                    "metadata": {"client_msg_id": "c-a-delivered"},
+                }]}),
+            ))[-1],
+        )
+        page.route(
+            "**/api/history/sess-b-891",
+            lambda route: (b_hits.append(1), route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"history": []}),
+            ))[-1],
+        )
+        page.goto(_app + "/", wait_until="load", timeout=30000)
+        _wait_ready(page)
+        page.wait_for_function(
+            "() => window.chatModule && window.chatModule._sendOutbox.length >= 2",
+            timeout=20000,
+        )
+
+        # Make session B current BEFORE the drain (the exact repro ordering).
+        page.evaluate("() => { window.sessionModule.selectSession('sess-b-891'); }")
+        page.wait_for_function(
+            "() => window.sessionModule.getCurrentSessionId() === 'sess-b-891'",
+            timeout=15000,
+        )
+        page.wait_for_timeout(400)  # let selectSession's finally (incl. its drain nudge) settle
+
+        # Isolated flush window: spy installed, hit counters snapshotted, hold released.
+        page.evaluate(_INSTALL_SPY)
+        a0, b0 = len(a_hits), len(b_hits)
+        page.evaluate("() => { window.__orwellOutboxHoldDrain = false; window.chatModule._flushSendOutbox(); }")
+        try:
+            page.wait_for_function(
+                "() => window.chatModule._sendOutbox.length === 1",
+                timeout=15000,
+            )
+        except Exception as e:
+            state = page.evaluate("() => ({ n: window.chatModule._sendOutbox.length, spy: window.__durableSpy })")
+            browser.close()
+            pytest.fail(f"the dedupe pass never settled the seeded queue under session B: {state!r} — {e}")
+        page.wait_for_timeout(400)
+        under_b = page.evaluate(r"""
+          () => ({
+            dispatched: (window.__durableSpy || []).map(s => ({ text: s.text, id: s.clientMsgId })),
+            remaining: window.chatModule._sendOutbox.map(it => it.clientMsgId),
+            rec: window.chatModule._outboxPeekStorage(),
+          })
+        """)
+        # (1) NOTHING dispatched into B — the A-bound item is held, not re-targeted.
+        assert under_b["dispatched"] == [], (
+            f"cross-session bleed: a session-A item dispatched while session B was current — {under_b['dispatched']!r}"
+        )
+        # (2) The dedupe consulted A's log (dropping the already-delivered copy), never B's.
+        assert len(a_hits) - a0 >= 1, "the dedupe must verify against the item's OWN session (A)"
+        assert len(b_hits) - b0 == 0, (
+            "the dedupe/drain must not touch the CURRENT session's (B's) history — that was the bleed"
+        )
+        assert under_b["remaining"] == ["c-a-pending"], (
+            f"the delivered copy is released, the undelivered one HELD for its session: {under_b['remaining']!r}"
+        )
+        assert under_b["rec"] is not None and [i["clientMsgId"] for i in under_b["rec"]["items"]] == ["c-a-pending"], \
+            "the held item must stay reload-durable while it waits for its session"
+
+        # (3) Selecting A drains it — exactly once, into A, via the selectSession nudge.
+        page.evaluate("() => { window.sessionModule.selectSession('sess-a-891'); }")
+        try:
+            page.wait_for_function("() => (window.__durableSpy || []).length >= 1", timeout=15000)
+        except Exception as e:
+            state = page.evaluate("() => ({ cur: window.sessionModule.getCurrentSessionId(), n: window.chatModule._sendOutbox.length })")
+            browser.close()
+            pytest.fail(f"the held item never drained after its session was selected: {state!r} — {e}")
+        page.evaluate("() => window.chatModule._flushSendOutbox()")
+        page.wait_for_timeout(400)
+        final = page.evaluate(r"""
+          () => ({
+            dispatched: (window.__durableSpy || []).map(s => ({ text: s.text, id: s.clientMsgId })),
+            queueLen: window.chatModule._sendOutbox.length,
+            awaiting: window.chatModule._outboxAwaitingConfirm.map(it => it.clientMsgId),
+          })
+        """)
+        browser.close()
+    assert final["dispatched"] == [{"text": "turn for session A", "id": "c-a-pending"}], (
+        f"exactly-once delivery into the item's OWN session: {final['dispatched']!r}"
+    )
+    assert final["queueLen"] == 0
+    assert final["awaiting"] == ["c-a-pending"], "the delivered item awaits its server-row confirm"

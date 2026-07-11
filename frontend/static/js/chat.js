@@ -3874,7 +3874,7 @@ import { isNarrow } from './platform.js';
           // _requeueOutboxItem returns false and the existing error surface speaks.
           let _requeuedOffline = false;
           if (!accumulated && _userMsgEl && _isNetworkSendFailure(err)) {
-            _requeuedOffline = _requeueOutboxItem(_clientMsgId, msg, _userMsgEl);
+            _requeuedOffline = _requeueOutboxItem(_clientMsgId, msg, _userMsgEl, streamSessionId);
             if (_requeuedOffline) {
               // The empty reply shell (spinner holder) is noise for a turn that never left the device.
               try { if (holder && holder.parentNode) holder.remove(); } catch (_) {}
@@ -4236,7 +4236,7 @@ import { isNarrow } from './platform.js';
    *  outbox — front of the queue (it is the OLDEST turn), `needsDedupe` armed (the POST may still have
    *  reached the server), bubble kept with an honest queued tag. Idempotent per clientMsgId; capped at
    *  _OUTBOX_MAX_RETRIES so a non-network failure misclassified once can't retry silently forever. */
-  function _requeueOutboxItem(clientMsgId, text, bubbleEl) {
+  function _requeueOutboxItem(clientMsgId, text, bubbleEl, sessionId) {
     if (!clientMsgId || typeof text !== 'string' || !text) return false;
     const ai = _outboxAwaitingConfirm.findIndex((it) => it && it.clientMsgId === clientMsgId);
     let item = ai >= 0 ? _outboxAwaitingConfirm.splice(ai, 1)[0] : null;
@@ -4245,9 +4245,13 @@ import { isNarrow } from './platform.js';
       return true;
     }
     if (!item) {
+      // #891 P1 fix (cross-session bleed): bind the fresh item to the session the failed send was
+      // ACTUALLY targeting (the caller passes the turn's streamSessionId) — not whatever session is
+      // current at catch-time (the user may have switched mid-turn). Fallback: current, then null.
       item = {
         clientMsgId, text,
-        sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
+        sessionId: sessionId ||
+          (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
         ts: Date.now(), retries: 0, bubbleEl: null,
       };
     }
@@ -4279,45 +4283,59 @@ import { isNarrow } from './platform.js';
     return /failed to fetch|networkerror|network request failed|load failed|err_internet|err_network|err_connection/.test(m);
   }
 
-  /** #891: at-most-once across a reload — before dispatching any `needsDedupe` item, ONE history fetch
-   *  drops every queued item whose client_msg_id the server already persisted. FAIL-CLOSED: returns
-   *  false (drain deferred, backoff armed) when verification is needed but unavailable — never an
-   *  unverified re-send. A 404 session (never materialized / since deleted) verifies trivially clean. */
+  /** #891: at-most-once across a reload — before dispatching any `needsDedupe` item, verify it against
+   *  the server log and drop any item whose client_msg_id the server already persisted. FAIL-CLOSED:
+   *  returns false (drain deferred, backoff armed) when any needed verification is unavailable — never
+   *  an unverified re-send. A 404 session (never materialized / since deleted) verifies trivially clean.
+   *
+   *  #891 P1 fix (cross-session bleed — PR #1379 review): each item is verified against ITS OWN
+   *  recorded session's history, NEVER the currently-selected session's. The old code preferred the
+   *  current session id, so a restored session-A item was "verified" against session B's log whenever
+   *  B was current after the reload — vacuously clean, then dispatched into B by the old drain gate.
+   *  Items are grouped by their recorded sessionId (one fetch per distinct session, normally one). An
+   *  item with NO recorded sessionId was queued before any session existed — there is no server log it
+   *  could have written into, so it verifies trivially clean (current-session-at-queue-time semantics,
+   *  documented at the drain's eligibility check). */
   async function _dedupeOutboxAgainstServer() {
     const flagged = _sendOutbox.filter((it) => it && it.needsDedupe);
     if (!flagged.length) return true;
-    const sid = (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) ||
-      flagged[0].sessionId || null;
-    if (!sid) { flagged.forEach((it) => { it.needsDedupe = false; }); return true; }
-    let seen = null;
-    try {
-      // Bounded: a hung verification fetch must not wedge the drain (the flush holds _flushingOutbox
-      // across this await). On timeout it rejects → fail-closed below → backoff re-attempts.
-      const _dedupeOpts = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
-        ? { signal: AbortSignal.timeout(15000) } : {};
-      const res = await fetch(`${API_BASE}/api/history/${sid}`, _dedupeOpts);
-      if (res.status === 404) { flagged.forEach((it) => { it.needsDedupe = false; }); return true; }
-      if (res.ok) {
-        const data = await res.json();
-        seen = new Set((data.history || [])
-          .map((m) => m && m.metadata && m.metadata.client_msg_id)
-          .filter(Boolean));
-      }
-    } catch (_) { /* network hiccup — fail closed below */ }
-    if (!seen) return false;
-    for (let i = _sendOutbox.length - 1; i >= 0; i--) {
-      const it = _sendOutbox[i];
-      if (!it || !it.needsDedupe) continue;
-      it.needsDedupe = false;
-      if (seen.has(it.clientMsgId)) {
-        // Already delivered — drop the queued copy; the adopt pass claims its bubble when the
-        // authoritative row renders (same clientMsgId), so nothing is lost and nothing doubles.
-        _sendOutbox.splice(i, 1);
-        if (it.bubbleEl) _setQueuedTag(it.bubbleEl, null);
+    const bySid = new Map();
+    for (const it of flagged) {
+      if (!it.sessionId) { it.needsDedupe = false; continue; }
+      if (!bySid.has(it.sessionId)) bySid.set(it.sessionId, []);
+      bySid.get(it.sessionId).push(it);
+    }
+    let allVerified = true;
+    for (const [sid, items] of bySid) {
+      let seen = null;
+      try {
+        // Bounded: a hung verification fetch must not wedge the drain (the flush holds
+        // _flushingOutbox across this await). On timeout it rejects → fail-closed → backoff.
+        const _dedupeOpts = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+          ? { signal: AbortSignal.timeout(15000) } : {};
+        const res = await fetch(`${API_BASE}/api/history/${sid}`, _dedupeOpts);
+        if (res.status === 404) { items.forEach((it) => { it.needsDedupe = false; }); continue; }
+        if (res.ok) {
+          const data = await res.json();
+          seen = new Set((data.history || [])
+            .map((m) => m && m.metadata && m.metadata.client_msg_id)
+            .filter(Boolean));
+        }
+      } catch (_) { /* network hiccup — fail closed for this session's items */ }
+      if (!seen) { allVerified = false; continue; }
+      for (const it of items) {
+        it.needsDedupe = false;
+        if (seen.has(it.clientMsgId)) {
+          // Already delivered — drop the queued copy; the adopt pass claims its bubble when the
+          // authoritative row renders (same clientMsgId), so nothing is lost and nothing doubles.
+          const i = _sendOutbox.indexOf(it);
+          if (i >= 0) _sendOutbox.splice(i, 1);
+          if (it.bubbleEl) _setQueuedTag(it.bubbleEl, null);
+        }
       }
     }
     _persistOutbox();
-    return true;
+    return allVerified;
   }
 
   // ── #891 P0-2: honest queued/offline status on the message bubble ──
@@ -4397,16 +4415,23 @@ import { isNarrow } from './platform.js';
     _preflight.then((ok) => {
       if (ok === false) { _flushingOutbox = false; _armOutboxRetry(); return; }
       if (isStreaming || _sendOutbox.length === 0) { _flushingOutbox = false; return; }
-      // #891: a RESTORED item waits for the boot to re-select a session — dispatching into a null
-      // session would auto-create a FRESH one and strand the turn outside the game.
-      const _head = _sendOutbox[0];
-      if (_head && _head.sessionId &&
-          !(sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId())) {
-        _flushingOutbox = false;
-        _armOutboxRetry();
-        return;
-      }
-      const item = _sendOutbox.shift();
+      // #891 P1 fix (cross-session bleed — PR #1379 review, Greptile-executed repro): an item's
+      // recorded `sessionId` is BINDING — it may only dispatch while ITS session is the currently-
+      // selected one, because `_outboxDispatch` submits against current sessionModule state. The
+      // old guard only required that SOME session existed, so a restored session-A item dispatched
+      // into session B whenever B became current first after a reload. Items bound to a non-current
+      // session are HELD in the queue (kept, _flushingOutbox reset, backoff armed — never shifted);
+      // they drain when their session is selected (the sessions.js selectSession nudge) or on the
+      // retry tick. Earliest-eligible-first preserves per-session FIFO order. An item with NO
+      // recorded sessionId was queued before any session existed (pre-session send) — its semantics
+      // are current-session-at-dispatch-time: the normal send path materializes/auto-creates,
+      // exactly as the inline pre-session send it stands in for would have. A still-`needsDedupe`
+      // item (its verification fetch failed above) is never eligible.
+      const _cur = (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null;
+      const _idx = _sendOutbox.findIndex((it) =>
+        it && !it.needsDedupe && (!it.sessionId || it.sessionId === _cur));
+      if (_idx === -1) { _flushingOutbox = false; _armOutboxRetry(); return; }
+      const item = _idx === 0 ? _sendOutbox.shift() : _sendOutbox.splice(_idx, 1)[0];
       if (!item) { _flushingOutbox = false; return; }
       // #891: the item stays in the PERSISTED record (awaiting-confirm) until a server row carrying
       // its clientMsgId is observed — a reload mid-flight restores it, and the pre-send dedupe above
