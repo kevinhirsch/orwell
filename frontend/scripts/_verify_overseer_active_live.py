@@ -75,12 +75,21 @@ _VAULT_MARKERS = (
 )
 
 
-def _free_port() -> int:
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    p = s.getsockname()[1]
-    s.close()
-    return p
+def _free_ports(n: int) -> list[int]:
+    """Allocate ``n`` distinct free ports. Two sequential bind-:0-then-close calls can hand back the
+    SAME ephemeral port (the OS is free to re-lease a just-closed port), which would collide
+    engine_port with fe_port and fail a subprocess bind at boot — an intermittent nightly failure.
+    Hold every socket open until all ``n`` ports are chosen so they can't alias, then close them."""
+    socks = []
+    try:
+        for _ in range(n):
+            s = socket.socket()
+            s.bind(("127.0.0.1", 0))
+            socks.append(s)
+        return [s.getsockname()[1] for s in socks]
+    finally:
+        for s in socks:
+            s.close()
 
 
 def _get(base, path, timeout=20):
@@ -209,12 +218,14 @@ def main() -> int:
         except FileNotFoundError:
             pass
 
-    engine_port, fe_port = _free_port(), _free_port()
+    engine_port, fe_port = _free_ports(2)
+    engine_log = open(os.path.join(OUT, "engine.log"), "w")
+    fe_log = open(os.path.join(OUT, "fe.log"), "w")
     engine = subprocess.Popen(
         ["node", os.path.join(REPO, "dist", "main.js")], cwd=REPO,
         env=dict(os.environ, ORWELL_DATA_DIR=tempfile.mkdtemp(prefix="ov-live-engine-"),
                  ORWELL_ENGINE_PORT=str(engine_port)),
-        stdout=open(os.path.join(OUT, "engine.log"), "w"), stderr=subprocess.STDOUT)
+        stdout=engine_log, stderr=subprocess.STDOUT)
     ebase = f"http://127.0.0.1:{engine_port}"
     fe = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1",
@@ -226,7 +237,7 @@ def main() -> int:
                  ORWELL_OVERSEER_MODE="active",
                  DATABASE_URL="sqlite:///" + os.path.join(
                      tempfile.mkdtemp(prefix="ov-live-fe-"), "app.db")),
-        stdout=open(os.path.join(OUT, "fe.log"), "w"), stderr=subprocess.STDOUT)
+        stdout=fe_log, stderr=subprocess.STDOUT)
     fbase = f"http://127.0.0.1:{fe_port}"
 
     verdicts: list[tuple[str, bool, str]] = []          # the assertion rows (check, ok, detail)
@@ -398,7 +409,11 @@ def main() -> int:
                                          and beat_after > beat_before),
             })
             _flush()
-            acted = [e for e in assessments if e.get("overseerLevel") == "action"]
+            # STRICT filter — must match the `lever-dispatched` pass assertion exactly, or the walk
+            # could stop early on a non-ok / non-actionable entry and then spuriously FAIL.
+            acted = [e for e in assessments
+                     if e.get("overseerLevel") == "action" and e.get("ok")
+                     and e.get("lever") in ACTION_LEVERS]
             print(f"  turn {i+1:02d} [{ph}->{ph2}] {lat:.0f}s "
                   f"ring+{len(new_ring)} (assess={len(assessments)} action={len(acted)})", flush=True)
 
@@ -509,6 +524,12 @@ def main() -> int:
                     p.kill()
                 except Exception:
                     pass
+        # Close the subprocess log handles the parent opened (never left dangling).
+        for _h in (fe_log, engine_log):
+            try:
+                _h.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
