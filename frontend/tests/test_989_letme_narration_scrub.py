@@ -326,6 +326,10 @@ _PARITY_CASES = [
     # …and narration WITHOUT one (the #989 / #1369 false-positive class)
     ("Let me log that.", True),
     ("Let me note that for later.", True),
+    # "fact" is NOT an engine object noun — producer-voice narration plausibly says "note that
+    # fact"; the engine senses are covered by interaction/event/scene/beat/consequence/decision/
+    # vote/state/move (#1369 review, CodeRabbit Major).
+    ("Let me note that fact.", True),
     ("Let me check on the others.", True),
     ("Let me run to the door.", True),
     ("Let me show you the bedroom.", True),

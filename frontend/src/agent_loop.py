@@ -3359,7 +3359,7 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
       r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
       r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
       r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
-      r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b))\b"
+      r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\b))\b"
     r"|\bi(?:'ll|'d| will| should| need to| have to| am going to| must| can)\s+"
       r"(?:now\s+|first\s+|then\s+|also\s+|just\s+)?"
       r"(?:call|advance|record|resolve|use|pull|fetch|present|place|"
@@ -3367,7 +3367,7 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
       r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
       r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
       r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
-      r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b))\b"
+      r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\b))\b"
     r"|\b(?:advance|move|push) the game\b"
     r"|\brecord (?:this|the|that) (?:interaction|scene)\b"
     r"|\bthe (?:player|user)\b(?:,?\s+\w+,)?\s+(?:has|is|was|will|'ll|wants|said|finished|just|now|needs|should)\b",
@@ -3398,7 +3398,7 @@ _OPERATOR_VERBS = (
     r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
     r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
     r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
-    r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b)"
+    r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\b)"
 )
 _GAME_LEAK_START_RE = re.compile(
     r"^\s*(?:actually[,.!]?\s+)?(?:but\s+)?(?:wait[,.!]?\s+)?(?:ok(?:ay)?[,.!]?\s+)?(?:hold on[,.!]?\s+)?"

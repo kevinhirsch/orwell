@@ -351,7 +351,7 @@ const _MACHINERY_ASIDE_RE = new RegExp(
     + '|run(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\\b)'
     + '|check(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\\b)'
     + '|(?:log|note)(?=\\s+(?:down\\s+)?(?:th(?:e|is|at)\\s+)?'
-      + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\\b))\\b'
+      + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\\b))\\b'
   + '|\\bi(?:\'ll|\'d| will| should| need to| have to| am going to| must| can)\\s+'
     + '(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
     + '(?:call|advance|record|resolve|use|pull|fetch|present|place|'
@@ -359,7 +359,7 @@ const _MACHINERY_ASIDE_RE = new RegExp(
     + '|run(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\\b)'
     + '|check(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\\b)'
     + '|(?:log|note)(?=\\s+(?:down\\s+)?(?:th(?:e|is|at)\\s+)?'
-      + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\\b))\\b'
+      + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\\b))\\b'
   + '|\\b(?:advance|move|push) the game\\b',
   'i',
 );
