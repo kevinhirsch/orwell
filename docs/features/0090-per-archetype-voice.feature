@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 Feature: 0090 — Per-archetype voice (the cast reads as different people)
   The 0084 voice fingerprint already exists on every houseguest's static CHARACTER; 0090 makes it
   genuinely distinctive per archetype (and inflected per soul) AND threads it through the prose the

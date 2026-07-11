@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 # Executable spec — IMPLEMENTED (scripts + deploy/smoke.sh); the real-Proxmox-host smoke is
 # still owed (long-acknowledged deferral — see the README index). Not in cucumber.cjs.
 # Priority: MVP-1 (blocking). One-liner Proxmox deploy + update, containerized.

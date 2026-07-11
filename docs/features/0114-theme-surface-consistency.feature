@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 Feature: 0114 — Theme surface consistency (computed-style probe + XFAIL ratchet)
   A surface is correct iff its rendered background derives from the ACTIVE theme's own --bg or
   --panel token; it is wrong iff it renders a color far from both — stuck at a foreign polarity

@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 # Executable spec — PROVISIONAL; reflects the answered design (full faithfulness; hybrid detection;
 # judge on claim-bearing turns only; folded into the overseer's 3-state mode; correction split on
 # ADR 0005 — adopt the open set, reframe the closed set, backend re-ground the un-reframable) + the

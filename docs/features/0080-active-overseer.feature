@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 # Executable spec — PROVISIONAL; reflects the recommended Model D (§3) + the invariants that hold
 # regardless of the §10 owner rulings. NOT yet wired into cucumber.cjs; accepted scenarios are pinned
 # once §10 is ruled. HARD rule: roles only (player, NPC, HOH, nominee, admin). The overseer's inputs

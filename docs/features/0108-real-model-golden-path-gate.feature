@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 Feature: 0108 — Real-model golden-path gate (record-once / replay-in-CI)
   Every automated gate stubs the LLM, so the whole class of bugs in the model↔engine seam — tool
   under-calls, narration desyncs, cast-authoring truncation, an inert desync guard — ships green and

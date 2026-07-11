@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 Feature: 0103 — Edit-bay foreshadowing (the show is telling you something)
   Reality TV tells you something is coming before it does — the camera lingers on two
   houseguests in a corner, an aside is cut short, a glance is held — and a week or two later
