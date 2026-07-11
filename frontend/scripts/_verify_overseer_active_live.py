@@ -193,16 +193,46 @@ def _graceful_degradation_checks() -> list[tuple[str, bool, str]]:
     return rows
 
 
+# The body-shape bound (§ below). The overseer surfaces only SHORT structured tokens; anything a
+# free-form narration body / secret payload would look like (long, multi-line, many sentences) is a
+# shape violation even without a denylist marker — a marker scan alone under-tests the contract.
+_SHAPE_MAX_LEN = 600          # a single structured token/line never runs this long
+_SHAPE_MAX_SENTENCES = 4      # a one-line diagnosis is not a multi-sentence paragraph
+
+
 def _vault_scan(strings) -> tuple[bool, str]:
-    """Scan every string the overseer surfaced for a Vault-leak marker AND a body-shape violation.
-    The overseer surfaces only short structured tokens (a kind, a one-line diagnosis, a lever); a
-    long free-form paragraph would itself be a leak vector. Returns (clean, detail)."""
+    """Scan every string the overseer surfaced against TWO rules, and fail on either:
+
+      1. **Vault-leak marker** — any ``_VAULT_MARKERS`` substring (a hidden-layer scalar / secret
+         body token) must never appear.
+      2. **Body shape** — the overseer surfaces only short structured tokens (a kind, a one-line
+         diagnosis, a lever). A free-form paragraph is itself a leak vector, so a surfaced string is
+         a shape violation when it is too long (> ``_SHAPE_MAX_LEN`` chars), spans multiple lines
+         (contains a newline), or reads as many sentences (> ``_SHAPE_MAX_SENTENCES`` terminators) —
+         even with no denylist marker present.
+
+    Returns ``(clean, detail)``; on a violation ``clean`` is False and ``detail`` names the offending
+    string and which rule it broke (so a failure is actionable)."""
     for s in strings:
-        low = (s or "").lower()
+        s = s or ""
+        low = s.lower()
         for m in _VAULT_MARKERS:
             if m in low:
                 return False, f"vault marker {m!r} in surfaced string: {s[:80]!r}"
-    return True, f"{len(strings)} surfaced strings clean (no vault markers, structured tokens only)"
+        # Body-shape: a structured token is short, single-line, not a multi-sentence paragraph.
+        if len(s) > _SHAPE_MAX_LEN:
+            return False, (f"body-shape violation: surfaced string is {len(s)} chars "
+                           f"(> {_SHAPE_MAX_LEN} — a structured token, not a paragraph): {s[:80]!r}…")
+        if "\n" in s or "\r" in s:
+            return False, (f"body-shape violation: surfaced string spans multiple lines "
+                           f"(structured tokens are single-line): {s[:80]!r}")
+        sentences = sum(s.count(p) for p in (". ", "! ", "? ")) + s.rstrip().endswith((".", "!", "?"))
+        if sentences > _SHAPE_MAX_SENTENCES:
+            return False, (f"body-shape violation: surfaced string reads as ~{sentences} sentences "
+                           f"(> {_SHAPE_MAX_SENTENCES} — a one-line diagnosis, not prose): {s[:80]!r}")
+    return True, (f"{len(strings)} surfaced strings clean — no vault markers, and every string is a "
+                  f"short single-line structured token (≤{_SHAPE_MAX_LEN} chars, "
+                  f"≤{_SHAPE_MAX_SENTENCES} sentences)")
 
 
 def main() -> int:
@@ -219,26 +249,13 @@ def main() -> int:
             pass
 
     engine_port, fe_port = _free_ports(2)
-    engine_log = open(os.path.join(OUT, "engine.log"), "w")
-    fe_log = open(os.path.join(OUT, "fe.log"), "w")
-    engine = subprocess.Popen(
-        ["node", os.path.join(REPO, "dist", "main.js")], cwd=REPO,
-        env=dict(os.environ, ORWELL_DATA_DIR=tempfile.mkdtemp(prefix="ov-live-engine-"),
-                 ORWELL_ENGINE_PORT=str(engine_port)),
-        stdout=engine_log, stderr=subprocess.STDOUT)
     ebase = f"http://127.0.0.1:{engine_port}"
-    fe = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1",
-         "--port", str(fe_port)], cwd=FRONTEND,
-        env=dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false",
-                 LOCALHOST_BYPASS="true", ORWELL_ENGINE_MCP_URL=ebase,
-                 # Belt-and-suspenders: the settings.json write below is authoritative (read
-                 # per-request), but seed the env fallback too so 'active' is live from boot.
-                 ORWELL_OVERSEER_MODE="active",
-                 DATABASE_URL="sqlite:///" + os.path.join(
-                     tempfile.mkdtemp(prefix="ov-live-fe-"), "app.db")),
-        stdout=fe_log, stderr=subprocess.STDOUT)
     fbase = f"http://127.0.0.1:{fe_port}"
+    # Pre-init so the `finally` teardown is always safe: if the SECOND Popen raises (e.g. uvicorn
+    # missing), the already-started `engine` + its log handle must still be torn down, and the
+    # finally must not NameError on an unbound `fe` / `fe_log`. The launches move INSIDE the try.
+    engine = fe = None
+    engine_log = fe_log = None
 
     verdicts: list[tuple[str, bool, str]] = []          # the assertion rows (check, ok, detail)
     assessments: list[dict] = []                        # every OVERSEER-ring entry seen
@@ -255,6 +272,25 @@ def main() -> int:
             json.dump(turn_log, fh, indent=1)
 
     try:
+        engine_log = open(os.path.join(OUT, "engine.log"), "w")
+        fe_log = open(os.path.join(OUT, "fe.log"), "w")
+        engine = subprocess.Popen(
+            ["node", os.path.join(REPO, "dist", "main.js")], cwd=REPO,
+            env=dict(os.environ, ORWELL_DATA_DIR=tempfile.mkdtemp(prefix="ov-live-engine-"),
+                     ORWELL_ENGINE_PORT=str(engine_port)),
+            stdout=engine_log, stderr=subprocess.STDOUT)
+        fe = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1",
+             "--port", str(fe_port)], cwd=FRONTEND,
+            env=dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false",
+                     LOCALHOST_BYPASS="true", ORWELL_ENGINE_MCP_URL=ebase,
+                     # Belt-and-suspenders: the settings.json write below is authoritative (read
+                     # per-request), but seed the env fallback too so 'active' is live from boot.
+                     ORWELL_OVERSEER_MODE="active",
+                     DATABASE_URL="sqlite:///" + os.path.join(
+                         tempfile.mkdtemp(prefix="ov-live-fe-"), "app.db")),
+            stdout=fe_log, stderr=subprocess.STDOUT)
+
         _wait_http(ebase + "/player/tools", engine, "engine", 60)
         _wait_http(fbase + "/openapi.json", fe, "front-end", 120)
 
@@ -516,6 +552,8 @@ def main() -> int:
         return 0 if not failed else 1
     finally:
         for p in (fe, engine):
+            if p is None:  # a launch that never started (or raised) — nothing to tear down
+                continue
             try:
                 p.terminate()
                 p.wait(timeout=10)
@@ -526,6 +564,8 @@ def main() -> int:
                     pass
         # Close the subprocess log handles the parent opened (never left dangling).
         for _h in (fe_log, engine_log):
+            if _h is None:
+                continue
             try:
                 _h.close()
             except Exception:
