@@ -21,6 +21,11 @@ pypdf
 beautifulsoup4
 charset-normalizer
 numpy
+# Pillow decodes the Playwright screenshots the rendered a11y gate samples
+# (scripts/a11y_matrix.py, #1375) — it reads the true backdrop pixels behind each
+# text run to compute WCAG/APCA contrast through glass/scrims. Pinned to the lock
+# (requirements.lock.txt already carries 12.2.0) so CI == prod for the image stack.
+pillow==12.2.0
 # Vector store + local embeddings for RAG, semantic memory, and tool
 # selection. Used on core agent paths, so installed by default — the app
 # still degrades to keyword fallback if they're ever missing.
