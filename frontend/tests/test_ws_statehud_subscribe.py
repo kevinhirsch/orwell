@@ -9,7 +9,10 @@ the one-shot inline one from the decision handler, and platform.js's correct
 
 This was a genuine gap (poll-census audit): `orwellWs.js` `_connect`/`onopen`/`rebind`
 only issued `_subscribeChat(...)`. This gate proves the client now ALSO arms the two
-edge channels after every successful handshake, and re-arms them on reconnect / rebind.
+edge channels after every successful handshake, and re-arms them on reconnect and on a
+CHANGED-id rebind. A SAME-id rebind must NOT re-arm them (#1087: a same-id re-arm respawns
+the server's session_events bridge, whose fresh subscribe replays the event ring back into
+`orwell:gamechanged` — the rebind→ring-replay churn loop).
 
 Unlike `chat`, the server sends NO success `ack` for a state/hud subscribe (only an
 `error` on refusal — ws_routes.py `_handle_subscribe`), so these MUST be fire-and-forget
@@ -121,24 +124,39 @@ function edgeSubs(sock) {
     assert(bridged === 1, "an incoming state edge must route to the state handler");
   }
 
-  // ── scenario 2: rebind (season-reset re-resolve) re-arms both edge channels ──────
+  // ── scenario 2: a rebind re-arms the edges ONLY on a genuine canonical change (#1087) ──
+  // A SAME-id rebind must NOT re-arm: the live server bridge already serves this canonical, and a
+  // re-arm respawns it → a fresh session_events.subscribe() → the event ring REPLAYS back at a
+  // window that already consumed it → platform.js bridges the replayed frames into
+  // `orwell:gamechanged` → another rebind — the self-sustaining churn loop issue #1087 traced.
+  // A CHANGED-id rebind (adoption / season-reset re-resolve) DOES re-arm: the running bridge
+  // serves its spawn-time canonical, so the re-point needs a fresh subscribe.
   {
     const { WS, listeners } = boot();
     await handshake(200);
     const before = edgeSubs(lastSock);
     assert(before.state.length === 1 && before.hud.length === 1, "baseline: one each after handshake");
-    // A game change drops the cached canonical id and issues `bind` (same socket).
+    // SAME-id gamechanged rebind → no new edge subscribes.
     global.window.dispatchEvent({ type: "orwell:gamechanged" });
-    // The bind is a request/response; answer its ack so the .then re-subscribes.
     await tick();
     const bind = lastSock.sent.find((f) => f.t === "bind");
     assert(bind, "orwell:gamechanged should trigger a bind");
     lastSock.onmessage({ data: JSON.stringify({ t: "ack", cid: bind.cid,
       d: { canonicalId: "sess_live", live: true, beatSeq: 201 } }) });
     await tick(); await tick();
+    const same = edgeSubs(lastSock);
+    assert(same.state.length === 1, "a same-id rebind must NOT re-arm state (#1087 churn guard), got " + same.state.length);
+    assert(same.hud.length === 1, "a same-id rebind must NOT re-arm hud (#1087 churn guard), got " + same.hud.length);
+    // CHANGED-id rebind → both edges re-arm (the genuine re-point).
+    global.window.dispatchEvent({ type: "orwell:gamechanged" });
+    await tick();
+    const binds = lastSock.sent.filter((f) => f.t === "bind");
+    lastSock.onmessage({ data: JSON.stringify({ t: "ack", cid: binds[binds.length - 1].cid,
+      d: { canonicalId: "sess_other", live: true, beatSeq: 202 } }) });
+    await tick(); await tick();
     const after = edgeSubs(lastSock);
-    assert(after.state.length === 2, "rebind must RE-arm state (want 2), got " + after.state.length);
-    assert(after.hud.length === 2, "rebind must RE-arm hud (want 2), got " + after.hud.length);
+    assert(after.state.length === 2, "a changed-id rebind must RE-arm state (want 2), got " + after.state.length);
+    assert(after.hud.length === 2, "a changed-id rebind must RE-arm hud (want 2), got " + after.hud.length);
   }
 
   // ── scenario 3: a dropped socket reconnects and re-arms all three channels ───────

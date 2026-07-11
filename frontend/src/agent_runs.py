@@ -17,13 +17,27 @@ close / navigation / refresh). It does NOT survive a server restart.
 import asyncio
 import json
 import logging
+import time
 from typing import AsyncGenerator, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# Monotonic per-process suffix for run ids (the creation stamp alone could collide on a fast
+# double-start within one millisecond).
+_RUN_ID_COUNTER = 0
+
+
+def _next_run_id() -> str:
+    """A stable, per-run identity marker (#1087 reconcile-by-id). Creation stamp + counter so it is
+    unique within the process AND across a server restart (the counter alone would reset and let a
+    client's remembered id falsely match a new run). Opaque to clients — compared, never parsed."""
+    global _RUN_ID_COUNTER
+    _RUN_ID_COUNTER += 1
+    return f"{int(time.time() * 1000):x}-{_RUN_ID_COUNTER:x}"
+
 
 class _Run:
-    __slots__ = ("buffer", "subscribers", "status", "task", "evict_task")
+    __slots__ = ("buffer", "subscribers", "status", "task", "evict_task", "run_id")
 
     def __init__(self) -> None:
         self.buffer: list = []          # ordered SSE event strings (replay log)
@@ -31,6 +45,7 @@ class _Run:
         self.status: str = "running"    # running | done | error | stopped
         self.task: Optional[asyncio.Task] = None
         self.evict_task: Optional[asyncio.Task] = None
+        self.run_id: str = _next_run_id()  # #1087: reconcile-by-id for at-least-once run-started edges
 
 
 _RUNS: Dict[str, _Run] = {}
@@ -103,6 +118,16 @@ def has_run(session_id: str) -> bool:
     404s the very window that should be mirroring it. `subscribe()` replays the buffer then ends for
     a finished run, so resuming an existing-but-terminal run is safe and idempotent (reconcile-by-id)."""
     return _RUNS.get(session_id) is not None
+
+
+def run_id(session_id: str) -> Optional[str]:
+    """The current run's stable identity marker, or None when no run exists (evicted / never ran).
+    #1087: `session_events`' replay ring re-delivers a finished run's `run-started` invitation
+    at-least-once; the WS transport stamps this id onto the `run-started` state edge and the chat
+    subscribe ack so a client can reconcile-by-id and ignore an edge for a run it already rendered
+    (the `_chatTailActive` boolean alone cannot — the finished run's `done` cleared it)."""
+    run = _RUNS.get(session_id)
+    return run.run_id if run is not None else None
 
 
 def head_seq(session_id: str) -> int:

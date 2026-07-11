@@ -66,14 +66,17 @@ function boot() {
 function chatSubs() { return lastSock.sent.filter((f) => f.t === "subscribe" && f.ch === "chat"); }
 function down(frame) { lastSock.onmessage({ data: JSON.stringify(frame) }); }
 
-async function handshake(hasRunFirst) {
+async function handshake(hasRunFirst, runId) {
   lastSock.readyState = 1; lastSock.onopen();
   const hello = lastSock.sent.find((f) => f.t === "hello");
   down({ t: "ack", cid: hello.cid, d: { canonicalId: "sess_pertab", live: true, beatSeq: 1 } });
   await tick();
-  // The initial chat subscribe's ack: hasRun controls whether we're tailing a live run.
+  // The initial chat subscribe's ack: hasRun controls whether we're tailing a live run; runId
+  // (when the server knows it) names that run for the #1087 reconcile-by-id guard.
   const sub = chatSubs()[0];
-  down({ t: "ack", ch: "chat", cid: sub.cid, d: { fromSeq: 0, headSeq: hasRunFirst ? 0 : -1, hasRun: hasRunFirst } });
+  const d = { fromSeq: 0, headSeq: hasRunFirst ? 0 : -1, hasRun: hasRunFirst };
+  if (runId != null) d.runId = runId;
+  down({ t: "ack", ch: "chat", cid: sub.cid, d: d });
   await tick();
 }
 
@@ -139,6 +142,59 @@ async function handshake(hasRunFirst) {
     assert(chatSubs().length === before, "a non-run-started state edge must NOT re-subscribe chat");
   }
 
+  // ── scenario 5 (#1087 reconcile-by-id): a STALE replayed run-started for a run this window
+  // already fully rendered must be IGNORED. session_events is at-least-once — its replay ring
+  // re-delivers a finished run's run-started edge — and the boolean tail guard can't catch it
+  // (the run's `done` already cleared it). Pre-fix this reset the cursor and full-replayed the
+  // finished run: the repeating duplicate-bubble churn the toolturn gate failed on.
+  {
+    const WS = boot();
+    await tick();
+    await handshake(true, "r1");   // tailing run r1 (the ack names it)
+    down({ t: "event", ch: "chat", seq: 0, d: { delta: "hi" } });
+    down({ t: "event", ch: "chat", seq: 1, d: { done: true } });   // r1 finishes → tail cleared
+    await tick();
+    const before = chatSubs().length;   // 1 (the initial subscribe)
+    // The ring replays r1's stale invitation (same runId) — possibly repeatedly. All ignored.
+    down({ t: "state", ch: "state", d: { beatSeq: 4, reason: "run-started", runId: "r1" } });
+    down({ t: "state", ch: "state", d: { beatSeq: 4, reason: "run-started", runId: "r1" } });
+    await tick();
+    assert(chatSubs().length === before,
+      "a replayed run-started for an already-rendered run (same runId) must NOT re-subscribe; got " + chatSubs().length);
+    // A genuinely NEW run (fresh runId) still re-attaches.
+    down({ t: "state", ch: "state", d: { beatSeq: 5, reason: "run-started", runId: "r2" } });
+    await tick();
+    assert(chatSubs().length === before + 1,
+      "a run-started with a NEW runId must re-attach; got " + chatSubs().length);
+    assert(chatSubs()[before].d.fromSeq === 0, "the new run's re-attach subscribes from seq 0");
+    // …and once r2 is rendered to its done, r2's OWN stale replay is ignored too (the loop-breaker).
+    const sub2 = chatSubs()[before];
+    down({ t: "ack", ch: "chat", cid: sub2.cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: "r2" } });
+    down({ t: "event", ch: "chat", seq: 0, d: { delta: "next" } });
+    down({ t: "event", ch: "chat", seq: 1, d: { done: true } });
+    await tick();
+    down({ t: "state", ch: "state", d: { beatSeq: 6, reason: "run-started", runId: "r2" } });
+    await tick();
+    assert(chatSubs().length === before + 1,
+      "after rendering r2, a replayed r2 run-started must be ignored (no churn); got " + chatSubs().length);
+  }
+
+  // ── scenario 6 (#1087 back-compat): an id-less run-started (older server / evicted run) keeps
+  // the boolean-only behavior — it re-attaches when not tailing, exactly as before.
+  {
+    const WS = boot();
+    await tick();
+    await handshake(true, "r1");
+    down({ t: "event", ch: "chat", seq: 0, d: { delta: "hi" } });
+    down({ t: "event", ch: "chat", seq: 1, d: { done: true } });
+    await tick();
+    const before = chatSubs().length;
+    down({ t: "state", ch: "state", d: { beatSeq: 7, reason: "run-started" } });  // no runId
+    await tick();
+    assert(chatSubs().length === before + 1,
+      "an id-less run-started must fall back to the boolean guard (re-attach when not tailing)");
+  }
+
   console.log("OK");
   process.exit(0);
 })();
@@ -178,3 +234,14 @@ def test_reattach_is_guarded_by_active_tail():
     assert "_chatTailActive" in body, "the re-attach must be guarded on whether a run is already being tailed"
     assert "_subscribeChat(0)" in body, "the re-attach must subscribe the new run from seq 0"
     assert "_highestChatSeq = -1" in body, "the re-attach must reset the per-run cursor (new buffer starts at 0)"
+
+
+def test_reattach_reconciles_by_run_id():
+    # #1087: at-least-once run-started edges (the session_events replay ring) need an identity guard
+    # beyond the boolean tail flag — a stale replayed edge for an already-rendered run must be a no-op.
+    body = WS.split("function _onRunStarted")[1].split("\n  function ")[0]
+    assert "_lastRunId" in body, "the re-attach must reconcile-by-id (skip an already-rendered run's edge)"
+    # The authoritative id source is the chat subscribe ack (d.runId), recorded in _onAck.
+    on_ack = WS.split("function _onAck")[1].split("\n  function ")[0]
+    assert "runId" in on_ack and "_lastRunId" in on_ack, \
+        "the chat subscribe ack's runId must be recorded for the reconcile-by-id guard"
