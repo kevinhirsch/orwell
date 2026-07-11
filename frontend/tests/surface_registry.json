@@ -1,0 +1,103 @@
+{
+  "_doc": "THE PLAYER-TIER SURFACE REGISTRY (issue #737, part of the #660 'all UI into kits' epic). The single manifest that enumerates every player-tier surface FAMILY and the kit / shared component each MUST compose. It is the 'always-updated guarantee' the epic asks for: the per-kit convention gates (test_f3_window_ratchet.py for windows, test_og_gadget_kit.py for rail gadgets, test_on_notice_kit.py for above-composer notices, test_0753_sheet_kit.py for sheets, test_0773_element_kit.py for atomic controls) each pin ONE family; this registry unifies them into one index AND adds a drift guard so a NEW surface kit cannot be added without registering it here (mirroring how the F-3 ratchet refuses a new hand-rolled window). Enforced by tests/test_737_surface_registry.py. Purely additive: it does not change any runtime surface; it is a test-time coverage/drift contract.",
+  "_kinds": {
+    "kit": "A composite surface kit exposed through a `window.Orwell<Name>Kit` composition seam (a create()-style factory). These are the families the drift guard keeps in lock-step: the set of `window.Orwell*Kit = {` definitions across static/js MUST equal the set of `kind:'kit'` entries here.",
+    "component": "A shared render-only surface component exposed through a `window.Orwell<Name>` global (one canonical implementation reused by several surfaces — e.g. the monogram tile, the account avatar).",
+    "css": "A kit whose single source of truth is a CSS class family / region in style.css (the atomic-control / element kit), with an optional demo driver."
+  },
+  "_drift_guard": "The ratchet (test_drift_guard_kit_seams_stay_in_sync): every `window.Orwell*Kit = {` object defined anywhere in frontend/static/js/*.js MUST be registered here as a kind:'kit' family, and every registered kit seam MUST be defined in its declared file. A new kit (e.g. a stray orwellFoo.js exporting window.OrwellFooKit) that is not registered fails the gate; a registered kit whose definition disappears or moves file fails too. Never silent.",
+  "families": [
+    {
+      "id": "windows",
+      "family": "Floating windows / modals / popovers (the window band)",
+      "kit": "OrwellWindow",
+      "kind": "kit",
+      "seam": "window.OrwellWindowKit",
+      "seam_check": "window.OrwellWindowKit = {",
+      "file": "orwellWindow.js",
+      "css_family": ".ow-window",
+      "css_source": "orwellWindow.js",
+      "gate": "test_f3_window_ratchet.py",
+      "note": "The Lane-F kit. Cast / Finale / Retrospective / New-Season / headshot dialogs compose it; docked windows re-home into the gadget rail. The F-3 ratchet already pins that no new window hand-rolls chrome."
+    },
+    {
+      "id": "rail-gadgets",
+      "family": "Control-room rail gadgets (the sidebar gadget cards)",
+      "kit": "OrwellGadget",
+      "kind": "kit",
+      "seam": "window.OrwellGadgetKit",
+      "seam_check": "window.OrwellGadgetKit = {",
+      "file": "orwellGadget.js",
+      "css_family": ".og-card",
+      "css_source": "orwellGadget.js",
+      "gate": "test_og_gadget_kit.py",
+      "note": "The #640 sibling of the window kit. Status / Deals / Cast-pin / Nightfall / Presence gadgets compose it. Order/side/collapse sync through the 0064 layout store."
+    },
+    {
+      "id": "above-composer-notices",
+      "family": "Above-composer affordance zone (game guide, narrator-proposed decisions, system notices, Continue prompt, top banner, toasts)",
+      "kit": "OrwellNotice",
+      "kind": "kit",
+      "seam": "window.OrwellNoticeKit",
+      "seam_check": "window.OrwellNoticeKit = {",
+      "file": "orwellNotice.js",
+      "css_family": ".on-card",
+      "css_source": "orwellNotice.js",
+      "gate": "test_on_notice_kit.py",
+      "note": "The #642 kit. The decision card is its charter member (kind 'decision'); the premiere guide, the OOC chat hint, the engine-status banner (top-banner placement), and the unified toast system (#951) all compose it."
+    },
+    {
+      "id": "bottom-sheets",
+      "family": "iOS-style bottom sheets (casting sheet, anchored decision action-sheet, drawer)",
+      "kit": "OrwellSheet",
+      "kind": "kit",
+      "seam": "window.OrwellSheetKit",
+      "seam_check": "window.OrwellSheetKit = {",
+      "file": "orwellSheet.js",
+      "css_family": ".ow-sheet",
+      "css_source": "orwellSheet.js",
+      "gate": "test_0753_sheet_kit.py",
+      "note": "The #753 kit (UISheetPresentationController in CSS/JS): detents, opaque-up, grabber gestures, the a11y trio. Composes the shared --ow-glass-* material so it paints one visual language with the other kits."
+    },
+    {
+      "id": "atomic-controls",
+      "family": "Atomic HIG controls (button / field / check / radio / switch / select / slider)",
+      "kit": "OrwellElement",
+      "kind": "css",
+      "seam": null,
+      "seam_check": "── ELEMENT KIT ──",
+      "file": "style.css",
+      "css_family": ".ow-btn",
+      "css_source": "style.css",
+      "gate": "test_0773_element_kit.py",
+      "demo_driver": "orwellElements.js",
+      "note": "The #773 element kit — the CSS `── ELEMENT KIT ──` region in style.css is the single source for the atomic primitives every surface composes. orwellElements.js is a DEMO-ONLY driver (not shipped in the app shell)."
+    },
+    {
+      "id": "portrait-monogram",
+      "family": "Houseguest portrait / monogram tile + role badges (cast window, rail chips, decision cards)",
+      "kit": "OrwellMonogram",
+      "kind": "component",
+      "seam": "window.OrwellMonogram",
+      "seam_check": "window.OrwellMonogram = {",
+      "file": "orwellMonogram.js",
+      "css_family": ".ow-mono-face",
+      "css_source": "orwellMonogram.js",
+      "gate": "test_m2_2_monogram.py",
+      "note": "The M2-2 designed monogram system — ONE render-only, Vault-free component reused wherever a face renders, so a portrait-less roster reads as designed cast cards, never flat letter-rectangles."
+    },
+    {
+      "id": "account-avatar",
+      "family": "Account avatar circle (sidebar user bar, Settings account card)",
+      "kit": "OrwellAvatar",
+      "kind": "component",
+      "seam": "window.OrwellAvatar",
+      "seam_check": "window.OrwellAvatar = {",
+      "file": "orwellAvatar.js",
+      "css_family": ".ow-avatar-glyph",
+      "css_source": "orwellAvatar.js",
+      "gate": "test_g27_avatar_studio.py",
+      "note": "The G27 account avatar — paints the finalized casting headshot into the profile circle(s); default is the Apple-style monochrome person glyph. Fail-open, reads only the user's own /api/orwell/avatar."
+    }
+  ]
+}
