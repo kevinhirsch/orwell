@@ -40195,12 +40195,23 @@ body.theme-frosted .msg-ai {
      its pinned 0.46 default on purpose — adaptiveGlass.js's SCRIM_BASE mirrors that exact
      number for its APCA escalation math (`frontend/static/js/adaptiveGlass.js`, out of this
      change's scope), so only the blur radius moves, not the opacity floor. */
-  -webkit-backdrop-filter: blur(18px) saturate(180%) !important;
-  backdrop-filter: blur(18px) saturate(180%) !important;
-  /* neutral translucent frost — the high saturate lets the wallpaper COLOR bloom
-     through (Apple's bubbles pick up the wall), while the floored dark scrim keeps white
-     text legible across any backdrop (over a DARK wall the wall does the work; over a
-     BRIGHT or BUSY MID-TONE wall this opaque-enough scrim is the legibility backstop). */
+  /* #780-6 (busy-wallpaper backing uniformity): the saturate was 180% — a strong
+     amplifier that made a HOSTILE MULTICOLOR wallpaper bloom through each bubble at a
+     DIFFERENT hue, so the transcript backing read patchy/uneven bubble-to-bubble
+     (readable, but not a consistent plate). Dropped to 120% so the plate stays a NEUTRAL
+     translucent frost that picks up only a gentle hint of the wall — a consistent minimum
+     backing regardless of what's behind any one bubble. This is the polarity-neutral,
+     scrim-floor-preserving lever: adaptiveGlass.js drives the per-bubble ALPHA + INK
+     polarity (unchanged, out of scope) and never sets backdrop-filter, so this saturate
+     applies uniformly to every bubble and can't fight the adaptive scrim/ink. Chroma-only
+     (luminance ~unchanged) so it never perturbs the APCA legibility floor. */
+  -webkit-backdrop-filter: blur(18px) saturate(120%) !important;
+  backdrop-filter: blur(18px) saturate(120%) !important;
+  /* neutral translucent frost — a gentle saturate lets a HINT of the wallpaper COLOR bloom
+     through (Apple's bubbles pick up the wall) without amplifying a busy multicolor backdrop
+     into a patchy plate, while the floored dark scrim keeps white text legible across any
+     backdrop (over a DARK wall the wall does the work; over a BRIGHT or BUSY MID-TONE wall
+     this opaque-enough scrim is the legibility backstop). */
   background-color: rgba(56,60,68,var(--ai-scrim-alpha,0.46)) !important;
   background-image: none !important;
   border: none !important;
