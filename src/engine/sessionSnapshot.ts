@@ -135,6 +135,17 @@ export interface SessionCore {
   legendTickCount?: number;
   legendCount?: number;
   legendLastActTick?: number;
+  /**
+   * Feature 0099 (hidden half) — the off-screen NPC↔NPC secret barter. `secretBarterTickCount` is the
+   * DEDICATED barter-rng tick counter (forked off the game seed, NEVER the shared society/competition/vote
+   * stream — see `GameSessionAdapter.secretBarterTick`), persisted so the isolated stream stays
+   * reproducible across a restart. `secretBarterCount` is the monotonic count of secrets spent into the
+   * hidden economy this season (++ only — tracked in `SessionCoreCounts` below, sibling of
+   * `secretTradeCount` / `legendCount`; the knowledge layer only DEEPENS as secrets change hands, never
+   * thins — non-degradation #4). Both absent ⇒ 0 (byte-shaped as a pre-0099-barter save / the layer off).
+   */
+  secretBarterTickCount?: number;
+  secretBarterCount?: number;
   /** Every active houseguest's current DRIVE (0086) — sticky motivation+intensity, so an agenda survives a
    * restart instead of re-rolling. ENGINE-ONLY (hidden strategy). Absent on pre-0086 saves / when the
    * campaign layer is off. */
@@ -673,6 +684,8 @@ export interface SessionCoreCounts {
   legendTickCount: number;
   legendCount: number;
   legendLastActTick: number;
+  secretBarterTickCount: number;
+  secretBarterCount: number;
 }
 
 /** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100/0101) — each is
@@ -694,6 +707,8 @@ export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
     legendTickCount: snap.legendTickCount ?? 0,
     legendCount: snap.legendCount ?? 0,
     legendLastActTick: snap.legendLastActTick ?? 0,
+    secretBarterTickCount: snap.secretBarterTickCount ?? 0,
+    secretBarterCount: snap.secretBarterCount ?? 0,
     tieScheduleTickCount: snap.tieScheduleTickCount ?? 0,
     surfacedThreadCount: snap.surfacedThreadCount ?? 0,
     tieExposureCount: snap.tieExposureCount ?? 0,
