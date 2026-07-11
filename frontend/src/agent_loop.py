@@ -3345,15 +3345,27 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
     r"|\bfront[\s-]?end\b|\bthe app\b|\bthis (?:app|website|site)\b"
     r"|\bcomp-intent\b|\bpending (?:decision|binding)\b|\bbinding (?:choice|decision)\b"
     r"|\b(?:decision|choice) (?:card|cards|button|buttons)\b|\btool call\b|\bjumped ahead\b|\bnarratively\b"
-    # first-person operator asides (process talk). #989 — bare "log/note" over-fired on
-    # legitimate narration ("Let me log that."), so those two verbs are machinery only when
-    # followed by an ENGINE object noun ("log this interaction", "note the state"); the
-    # unambiguous tool-process verbs stay bare. (Parity with markdown.js _MACHINERY_ASIDE_RE.)
-    r"|\blet me\s+(?:record|advance|check|place|pull|fetch|resolve|use|call|see what|re-?read|re-?check|reconsider"
+    # first-person operator asides (process talk). #989 (+ #1369 review) — the AMBIGUOUS
+    # operator verbs over-fired on legitimate narration: bare "log/note" ate "Let me log that.",
+    # bare "check" ate "Let me check on the others.", bare "run" ate "Let me run to the door.".
+    # Those four are machinery only when followed by an ENGINE object noun ("log this
+    # interaction", "check the game state", "run the command"); the unambiguous tool-process
+    # verbs stay bare. The verb lists are PARITY-LOCKED, branch for branch, with the JS
+    # _MACHINERY_ASIDE_RE in static/js/markdown.js — tests/test_989_letme_narration_scrub.py
+    # drives BOTH scrubs over the same cases and fails on any behavioral drift.
+    r"|\blet me\s+(?:now\s+|first\s+|then\s+|also\s+|just\s+)?"
+      r"(?:call|advance|record|resolve|use|pull|fetch|place|see what|"
+      r"walk through|re-?read|re-?check|reconsider"
+      r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
+      r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
       r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
       r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b))\b"
     r"|\bi(?:'ll|'d| will| should| need to| have to| am going to| must| can)\s+"
-      r"(?:now\s+|first\s+|then\s+|also\s+)?(?:record|advance|resolve|call|use|pull|fetch|present|re-?read|reconsider"
+      r"(?:now\s+|first\s+|then\s+|also\s+|just\s+)?"
+      r"(?:call|advance|record|resolve|use|pull|fetch|present|place|"
+      r"walk through|re-?read|re-?check|reconsider"
+      r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
+      r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
       r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
       r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b))\b"
     r"|\b(?:advance|move|push) the game\b"
@@ -3376,11 +3388,15 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
 # engine plan) while leaving ordinary scene prose untouched. (Tool names + machinery nouns are still
 # caught anywhere in the sentence by _GAME_LEAK_SENTENCE_RE, independent of how the sentence opens.)
 _OPERATOR_VERBS = (
-    # #989 — "log/note" only count as operator verbs when followed by an ENGINE object noun
-    # ("log this interaction"); a bare "Let me log that." / "I'll note that" is legitimate
-    # narration and must survive (same narrowing as _GAME_LEAK_SENTENCE_RE above).
-    r"record|advance|resolve|call|use|pull|fetch|present|place|check|see what|"
+    # #989 (+ #1369 review) — the AMBIGUOUS verbs ("log/note/check/run") only count as operator
+    # verbs when followed by an ENGINE object noun ("log this interaction", "check the game
+    # state", "run the command"); bare "Let me log that." / "Let me check on the others." /
+    # "Let me run to the door." is legitimate narration and must survive (same narrowing as
+    # _GAME_LEAK_SENTENCE_RE above; parity-locked with the JS _MACHINERY_ASIDE_RE).
+    r"record|advance|resolve|call|use|pull|fetch|present|place|see what|walk through|"
     r"re-?read|re-?check|reconsider"
+    r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
+    r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
     r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
     r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b)"
 )

@@ -337,17 +337,27 @@ const _MACHINERY_ASIDE_RE = new RegExp(
   + '|\\bgod[\\s-]?mode\\b|\\bthe vault\\b|\\bproducer\'?s? vault\\b'
   + '|\\badmin(?:istrator)?[\\s-]+(?:panel|surface|console|mode|controls?|tools?)\\b'
   + '|\\bdeveloper (?:controls?|mode|console|tools?)\\b'
-  // #989 — bare "log/note" over-fired on legitimate narration ("Let me log that."), so those two
-  // verbs are machinery only when followed by an ENGINE object noun ("log this interaction",
-  // "note the state"); the unambiguous tool-process verbs stay bare.
+  // #989 (+ #1369 review) — the AMBIGUOUS operator verbs over-fired on legitimate narration:
+  // bare "log/note" ate "Let me log that.", bare "check" ate "Let me check on the others.",
+  // bare "run" ate "Let me run to the door.". Those four are machinery only when followed by an
+  // ENGINE object noun ("log this interaction", "check the game state", "run the command",
+  // "run the game"); the unambiguous tool-process verbs stay bare. The verb lists are
+  // PARITY-LOCKED, branch for branch, with the Python _GAME_LEAK_SENTENCE_RE in
+  // src/agent_loop.py — tests/test_989_letme_narration_scrub.py drives BOTH scrubs over the
+  // same cases and fails on any behavioral drift.
   + '|\\blet me\\s+(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
-    + '(?:call|advance|run|check|record|resolve|use|pull|fetch|see what|'
+    + '(?:call|advance|record|resolve|use|pull|fetch|place|see what|'
     + 'walk through|re-?read|re-?check|reconsider'
+    + '|run(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\\b)'
+    + '|check(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\\b)'
     + '|(?:log|note)(?=\\s+(?:down\\s+)?(?:th(?:e|is|at)\\s+)?'
       + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\\b))\\b'
   + '|\\bi(?:\'ll|\'d| will| should| need to| have to| am going to| must| can)\\s+'
     + '(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
-    + '(?:call|advance|run|record|resolve|use|pull|fetch|present|walk through'
+    + '(?:call|advance|record|resolve|use|pull|fetch|present|place|'
+    + 'walk through|re-?read|re-?check|reconsider'
+    + '|run(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\\b)'
+    + '|check(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\\b)'
     + '|(?:log|note)(?=\\s+(?:down\\s+)?(?:th(?:e|is|at)\\s+)?'
       + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\\b))\\b'
   + '|\\b(?:advance|move|push) the game\\b',

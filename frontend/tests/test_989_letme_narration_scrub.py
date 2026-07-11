@@ -42,7 +42,7 @@ def _read(*rel):
 
 def test_reasoning_line_re_no_longer_carries_a_bare_let_me():
     md = _read("static", "js", "markdown.js")
-    line = next(l for l in md.splitlines() if l.startswith("const _REASONING_LINE_RE"))
+    line = next(ln for ln in md.splitlines() if ln.startswith("const _REASONING_LINE_RE"))
     # the old over-broad shape (`let me\b` as a whole alternation branch) must not return
     assert "let me\\b" not in line, "bare `let me\\b` re-eats legitimate narration (#989)"
     # the branch still exists — narrowed to require a reasoning/meta verb
@@ -51,13 +51,17 @@ def test_reasoning_line_re_no_longer_carries_a_bare_let_me():
         assert verb in line, f"reasoning verb {verb!r} must stay scrubbed (pinned elsewhere)"
 
 
-def test_machinery_scrubs_gate_log_note_on_an_engine_object():
+def test_machinery_scrubs_gate_ambiguous_verbs_on_an_engine_object():
     md = _read("static", "js", "markdown.js")
     py = _read("src", "agent_loop.py")
     for src, name in ((md, "markdown.js"), (py, "agent_loop.py")):
         assert "(?:log|note)(?=" in src, (
             f"{name}: log/note must be object-gated (bare 'log that.' is narration, #989)"
         )
+        # #1369 review — check/run are the same ambiguous class ("Let me check on the
+        # others.", "Let me run to the door." are narration) and must be object-gated too.
+        assert "check(?=" in src, f"{name}: check must be object-gated (#1369 review)"
+        assert "run(?=" in src, f"{name}: run must be object-gated (#1369 review)"
 
 
 # ── Node round-trips: scrubReasoningPreamble (the #989 root cause) ─────────────────── #
@@ -214,6 +218,11 @@ def test_machinery_sentence_scrub_spares_bare_log_note_narration():
          "Let me log that. The medallion catches the light."],
         ["Let me note that you came in swinging. The room settles.",
          "Let me note that you came in swinging. The room settles."],
+        # #1369 review — the same ambiguous class: check/run in a SOCIAL/PHYSICAL sense
+        ["Let me check on the others. The room settles.",
+         "Let me check on the others. The room settles."],
+        ["Let me run to the door. The buzzer sounds.",
+         "Let me run to the door. The buzzer sounds."],
     ]
     res = _run_machinery(cases)
     assert "OK" in res.stdout, f"stdout={res.stdout!r} stderr={res.stderr!r}"
@@ -230,6 +239,13 @@ def test_machinery_sentence_scrub_still_kills_engine_object_log_note():
         # the unambiguous tool-process verbs stay bare (pinned in the #1047 gates too)
         ["Let me advance the game. Grab your bag and head for the door.",
          "Grab your bag and head for the door."],
+        # #1369 review — check/run WITH an engine object are still machinery
+        ["Let me check the game state. The kitchen hums.",
+         "The kitchen hums."],
+        ["Let me run the game. The house holds its breath.",
+         "The house holds its breath."],
+        ["I'll run the command now. The ceremony continues.",
+         "The ceremony continues."],
     ]
     res = _run_machinery(cases)
     assert "OK" in res.stdout, f"stdout={res.stdout!r} stderr={res.stderr!r}"
@@ -254,6 +270,9 @@ def test_python_stream_scrub_keeps_let_me_log_narration():
         "Let me log that. You settle into the casting chair.",
         "Actually, let me log that. The house waits.",
         "I'll note that for later. The kitchen empties out.",
+        # #1369 review — the same ambiguous class on the Python side
+        "Let me check on the others. The room settles.",
+        "Let me run to the door. The buzzer sounds.",
     ):
         assert scrub(legit) == legit, f"stream scrub ate legit narration: {legit!r}"
 
@@ -270,3 +289,68 @@ def test_python_stream_scrub_still_kills_operator_asides():
     # the pre-existing bare operator verbs keep their teeth (pinned in the audit gates too)
     assert scrub("Let me call whereabouts to see the room.").strip() == ""
     assert scrub("Let me record this interaction and advance the game.").strip() == ""
+
+
+# ── #1369 review (4): BEHAVIORAL JS↔Python parity — one case per operator verb ─────── #
+#
+# The substring pins above catch a missing lookahead, but not a verb list drifting between
+# the two languages. This drives ONE case per operator-verb family (plus the ambiguous-class
+# survivors) through BOTH scrubs — the JS scrubMachineryAsides (Node) and the Python
+# _scrub_game_leak — and requires the identical keep/drop outcome from each. Any future
+# one-sided list edit fails here behaviorally, not just textually.
+
+_TAIL = " The room settles."
+
+# (first sentence, first_sentence_survives)
+_PARITY_CASES = [
+    # one machinery case per bare operator verb, in both "let me" and "I'll" branch shapes
+    ("Let me call the tool first.", False),
+    ("Let me advance the game.", False),
+    ("Let me record this interaction.", False),
+    ("Let me resolve the competition.", False),
+    ("Let me use the tool.", False),
+    ("Let me pull the roster.", False),
+    ("Let me fetch the state.", False),
+    ("Let me place the marker.", False),
+    ("Let me see what surfaces.", False),
+    ("Let me walk through it.", False),
+    ("Let me re-read the beat.", False),
+    ("Let me re-check the votes.", False),
+    ("Let me reconsider the plan.", False),
+    ("I'll present the options now.", False),
+    # the object-gated ambiguous verbs — machinery WITH an engine object…
+    ("Let me run the game.", False),
+    ("Let me check the game state.", False),
+    ("Let me log this interaction.", False),
+    ("Let me note the state.", False),
+    # …and narration WITHOUT one (the #989 / #1369 false-positive class)
+    ("Let me log that.", True),
+    ("Let me note that for later.", True),
+    ("Let me check on the others.", True),
+    ("Let me run to the door.", True),
+    ("Let me show you the bedroom.", True),
+    ("Let me give you one piece of advice.", True),
+]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_js_python_operator_verb_lists_agree_behaviorally():
+    js_cases = []
+    for first, survives in _PARITY_CASES:
+        text = first + _TAIL
+        js_cases.append([text, text if survives else _TAIL.strip()])
+    res = _run_machinery(js_cases)
+    assert "OK" in res.stdout, (
+        f"JS scrubMachineryAsides drifted from the parity table: "
+        f"stdout={res.stdout!r} stderr={res.stderr!r}"
+    )
+
+    scrub = _scrub()
+    for first, survives in _PARITY_CASES:
+        text = first + _TAIL
+        got = scrub(text).strip()
+        want = text.strip() if survives else _TAIL.strip()
+        assert got == want, (
+            f"Python _scrub_game_leak drifted from the parity table for {first!r}: "
+            f"got {got!r}, want {want!r}"
+        )
