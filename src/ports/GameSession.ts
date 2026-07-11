@@ -237,6 +237,14 @@ export interface CompetitionStagingView {
   dropOrder: NamedRef[];
   /** The 0042 library scaffold the model riffs ON (and the deterministic floor when no fiction is authored). */
   library: { name: string; premise: string; beats: string[]; winReads: string };
+  /**
+   * Whether VALIDATED fiction is ALREADY stored for this competition — the FE's persistent "author exactly
+   * once per comp" guard. The staged comp stays surfaced across every reveal round until it crowns, so the
+   * FE fires its authoring kickoff after every advance/decision; it MUST no-op once this is true (a
+   * re-author is a wasted utility call + an overwrite that makes later rounds render different staging than
+   * earlier ones). True the moment a fiction write-back lands; false again only when the comp crowns.
+   */
+  alreadyAuthored: boolean;
 }
 
 /**

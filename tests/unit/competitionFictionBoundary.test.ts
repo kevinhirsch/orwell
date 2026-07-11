@@ -69,6 +69,9 @@ describe("#1400 — the competition staging READ + fiction WRITE-BACK reach the 
     // The library scaffold the model riffs ON is handed over too (the 0042 floor).
     expect(view!.library.premise.length).toBeGreaterThan(0);
 
+    // Before authoring: the staging view reports NO fiction stored yet (the FE's exactly-once guard).
+    expect(view!.alreadyAuthored).toBe(false);
+
     // Author fiction that names the SAME houseguests in the SAME order → accepted.
     const res = (await server.callTool("recordCompetitionFiction", {
       comp: view!.comp, week: view!.week, theme: "The Gauntlet of Whispers",
@@ -77,6 +80,12 @@ describe("#1400 — the competition staging READ + fiction WRITE-BACK reach the 
     })) as RecordCompetitionFictionResult;
     expect(res.accepted).toBe(true);
     expect(res.reason).toBeUndefined();
+
+    // AFTER authoring: the staging view now reports fiction is stored — the persistent "author exactly
+    // once per comp" signal the FE reads to no-op every subsequent round's kickoff (the idempotence fix).
+    const after = (await server.callTool("competitionStagingView", {})) as CompetitionStagingView | null;
+    expect(after).not.toBeNull();
+    expect(after!.alreadyAuthored).toBe(true);
   });
 
   it("end to end: a REORDERED fiction is REJECTED over the boundary (the 0042 floor stands)", async () => {

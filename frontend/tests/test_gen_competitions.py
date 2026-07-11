@@ -31,6 +31,7 @@ _STAGING = {
         {"id": "hg-3", "name": "runner up"},
     ],
     "library": {"name": "Hold the Wall", "premise": "grip a ledge over the yard", "beats": [], "winReads": "attrition"},
+    "alreadyAuthored": False,  # no fiction stored yet — the exactly-once guard is open
 }
 
 _GOOD_JSON = (
@@ -191,3 +192,110 @@ def test_author_relays_an_engine_rejection_without_raising():
 
     res = _run(G.author_competition(staging_fn, llm_fn, write_fn))
     assert res == {"accepted": False, "reason": "drop-order-mismatch"}
+
+
+# ── EXACTLY-ONCE per competition (the Greptile P1 idempotence fix) ───────────────
+
+def test_author_is_a_noop_when_fiction_is_already_stored():
+    # The engine reports alreadyAuthored=True (fiction already stored for this comp). The staged comp stays
+    # surfaced across every reveal round, so a per-round kickoff must NOT re-author: no utility call, no write.
+    called = {"llm": False, "write": False}
+
+    async def staging_fn():
+        return {**_STAGING, "alreadyAuthored": True}
+
+    async def llm_fn(messages):
+        called["llm"] = True
+        return _GOOD_JSON
+
+    async def write_fn(fiction):
+        called["write"] = True
+        return {"accepted": True}
+
+    res = _run(G.author_competition(staging_fn, llm_fn, write_fn))
+    assert res == {"accepted": False, "reason": "already-authored"}
+    assert called["llm"] is False  # ZERO extra utility calls
+    assert called["write"] is False
+
+
+def test_second_kickoff_for_the_same_comp_is_a_noop_exactly_once():
+    """The core contract: across a competition's many reveal rounds, authoring fires EXACTLY ONCE. Model
+    the engine's persistent guard — once fiction is written, the staging view reports alreadyAuthored=True
+    (until the comp crowns) — and prove the second pass makes zero extra utility calls and never overwrites."""
+    state = {"stored": None, "utility_calls": 0}
+
+    async def staging_fn():
+        # The engine surfaces the SAME staged comp every round, flagging whether fiction is already stored.
+        return {**_STAGING, "alreadyAuthored": state["stored"] is not None}
+
+    async def llm_fn(messages):
+        state["utility_calls"] += 1
+        return _GOOD_JSON
+
+    async def write_fn(fiction):
+        state["stored"] = fiction  # the engine now holds this comp's fiction
+        return {"accepted": True}
+
+    # Round 1 (comp just resolved): authors once, stores fiction.
+    first = _run(G.author_competition(staging_fn, llm_fn, write_fn))
+    assert first == {"accepted": True}
+    assert state["utility_calls"] == 1
+    stored_after_first = state["stored"]
+    assert stored_after_first is not None
+
+    # Round 2+ (a later reveal round, same comp): no-op — no utility call, stored fiction UNCHANGED.
+    second = _run(G.author_competition(staging_fn, llm_fn, write_fn))
+    assert second == {"accepted": False, "reason": "already-authored"}
+    assert state["utility_calls"] == 1  # still exactly one — no re-author
+    assert state["stored"] is stored_after_first  # the earlier staging was not overwritten
+
+
+def _drive_kickoff(owner):
+    """Drive kickoff_fiction inside a RUNNING loop so it uses the create_task branch (loop-safe) — never
+    the sync asyncio.run() fallback, which would close the shared test event loop and corrupt sibling
+    tests (the exact reason the zeitgeist/offscreen drivers never test their kickoff_* directly)."""
+    async def _drive():
+        G.kickoff_fiction(owner)          # running loop ⇒ loop.create_task(_runner())
+        await asyncio.sleep(0.1)          # let the fire-and-forget _runner complete
+    _run(_drive())
+
+
+def test_kickoff_fiction_noops_when_already_authored(monkeypatch):
+    """The live entry point: kickoff_fiction must no-op (never resolve a model / call run_author) when the
+    engine reports the comp is already authored — even though the staging view is still non-null."""
+    import src.orwell_engine as E
+
+    async def fake_staging(user=None):
+        return {**_STAGING, "alreadyAuthored": True}
+
+    ran = {"n": 0}
+
+    async def fake_run_author(owner, staging=None):
+        ran["n"] += 1
+        return {"accepted": True}
+
+    monkeypatch.setattr(E, "competition_staging_view", fake_staging)
+    monkeypatch.setattr(G, "run_author", fake_run_author)
+    G._IN_FLIGHT.clear()
+    _drive_kickoff("u1")
+    assert ran["n"] == 0  # never authored — the persistent guard held
+
+
+def test_kickoff_fiction_authors_when_not_yet_authored(monkeypatch):
+    """The complement: kickoff_fiction DOES author when the engine reports the comp is not yet authored."""
+    import src.orwell_engine as E
+
+    async def fake_staging(user=None):
+        return {**_STAGING, "alreadyAuthored": False}
+
+    ran = {"n": 0}
+
+    async def fake_run_author(owner, staging=None):
+        ran["n"] += 1
+        return {"accepted": True}
+
+    monkeypatch.setattr(E, "competition_staging_view", fake_staging)
+    monkeypatch.setattr(G, "run_author", fake_run_author)
+    G._IN_FLIGHT.clear()
+    _drive_kickoff("u2")
+    assert ran["n"] == 1  # authored exactly once

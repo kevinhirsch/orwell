@@ -8527,6 +8527,7 @@ export class GameSessionAdapter implements GameSession {
         beats: lib ? [...lib.beats] : [],
         winReads: lib?.winReads ?? "",
       },
+      alreadyAuthored: data.alreadyAuthored, // the FE's persistent "author exactly once per comp" guard
     };
   }
 

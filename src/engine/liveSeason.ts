@@ -1012,15 +1012,25 @@ export interface CompetitionStagingData {
   dropOrder: EntityId[];
   /** The drawn 0042 library def (name/format/narrative scaffold) — the deterministic floor + the model's muse. */
   def?: CompetitionDef;
+  /**
+   * Whether VALIDATED fiction is ALREADY stored for THIS (comp, week). This is the persistent, engine-owned
+   * "author exactly once" signal: the staged comp stays surfaced across every reveal round until it crowns,
+   * so the FE — which fires its kickoff after EVERY advance/decision — must no-op once this is true, or it
+   * would re-author (a fresh utility call + an overwrite) every round. True the moment a fiction write-back
+   * lands; back to false only when the comp crowns (which clears `s.competitionFiction`). Vault-free.
+   */
+  alreadyAuthored: boolean;
 }
 
 export function competitionStagingData(s: LiveSeasonState): CompetitionStagingData | null {
   const c = s.competition;
   if (!c || c.winner === undefined || c.dropOrder === undefined) return null;
   const def = competitionDefFor(s, c);
+  const f = s.competitionFiction;
+  const alreadyAuthored = !!(f && f.comp === c.comp && f.week === s.week);
   return {
     comp: c.comp, type: c.type, field: [...c.field], winner: c.winner,
-    dropOrder: [...c.dropOrder], ...(def ? { def } : {}),
+    dropOrder: [...c.dropOrder], alreadyAuthored, ...(def ? { def } : {}),
   };
 }
 

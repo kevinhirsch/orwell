@@ -139,6 +139,12 @@ async def author_competition(staging_fn: StagingFn, llm_fn: LlmFn, write_fn: Wri
         return {"accepted": False, "reason": "no-staging"}
     if not isinstance(staging, dict) or not staging.get("dropOrder"):
         return {"accepted": False, "reason": "no-staging"}  # generation off, or no comp resolved yet
+    # EXACTLY-ONCE guard: the staged comp stays surfaced across every reveal round until it crowns, and the
+    # kickoff fires after every advance/decision — so once the engine already holds VALIDATED fiction for
+    # this (week, comp), authoring again is a wasted utility call that would OVERWRITE the stored fiction
+    # (later rounds would then render different staging than earlier ones). No-op BEFORE any model call.
+    if staging.get("alreadyAuthored"):
+        return {"accepted": False, "reason": "already-authored"}
     try:
         text = await llm_fn(_synthesis_messages(staging))
     except Exception as e:
@@ -218,6 +224,11 @@ def kickoff_fiction(owner: Optional[str]) -> None:
             return
         if not isinstance(staging, dict) or not staging.get("dropOrder"):
             return  # generation off, or no comp has resolved its roll — nothing to dress
+        # EXACTLY-ONCE (the persistent, engine-owned guard): once VALIDATED fiction is already stored for
+        # this (week, comp), no-op — never resolve a model or re-author. This is what makes the kickoff
+        # idempotent across the comp's many reveal rounds; `_IN_FLIGHT` only guards CONCURRENT runs.
+        if staging.get("alreadyAuthored"):
+            return
         k = _key(owner, staging)
         if k in _IN_FLIGHT:
             return
