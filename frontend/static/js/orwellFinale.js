@@ -122,15 +122,19 @@ import * as modalManager from "./modalManager.js";
           justify-content: flex-start;
         }
         #orwell-finale .ofin-btn:hover { border-color: var(--accent, #e06c75); }
-        /* E67/C26 + F3: phones — a full-width top sheet whose POSITION the slot
-           engine's sheet host owns (no per-panel pins; two visible sheets stack,
-           never overlap). */
+        /* #894 (RESP-3/5, #780-3): the narrow-tier presentation is now the kit's #893
+           bottom sheet (sheet:true on the create() opts below) — bottom-pinned,
+           edge-to-edge, detent-sized, with a scroll-contained body. The old
+           slot-engine top-sheet overrides (border-radius / max-height / border) lived
+           here and fought the kit's sheet geometry, so they are retired — the kit owns
+           the bottom-pinning, height and radius now. The ONE thing the kit can't win by
+           itself is the WIDTH: the base #orwell-finale width:240px rule above out-ranks
+           the kit's class-based width:auto by #id specificity, so the sheet would render
+           a narrow 240px slab. Reset the width on the narrow tier (an #id rule of equal
+           specificity, later in source, wins when the query matches) so the kit sheet can
+           go edge-to-edge; the docked-narrow case is unaffected (auto fills the rail). */
         @media (max-width: 768px) {
-          #orwell-finale {
-            width: auto !important; max-width: none !important;
-            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
-            max-height: 42vh; overflow: auto;
-          }
+          #orwell-finale { width: auto !important; max-width: none !important; }
         }
         /* #725: soften the inner var(--border) strokes (finalist cards, move buttons) to the
            low-opacity WHITE hairline on the light glass — Apple defines glass by lensing, not a
@@ -161,6 +165,11 @@ import * as modalManager from "./modalManager.js";
       // line owner flip to defaultDocked:true). Docked, it rides the rail's single
       // mobile drawer + content-driven visibility (it self-hides when not staging).
       dockable: true, defaultDocked: false,
+      // #894 (RESP-3/5, #780-3): on the narrow tier present as a bottom SHEET (the
+      // proven Cast recipe — orwellCast.js) instead of a floating window that opens
+      // top-left/clipped over the chat + composer. Non-modal windows opt in
+      // explicitly; docked still wins (the rail owns docked placement).
+      sheet: true,
       content,
     });
     _win.open();

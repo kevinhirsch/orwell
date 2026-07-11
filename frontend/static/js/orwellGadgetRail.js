@@ -814,6 +814,28 @@
     if (w != null) { applyWidth(w); persistWidth(w); }
   });
 
+  // ── #894 (RESP-15): DRAWER-ONLY HUD on the narrow tier ──────────────────────
+  // On desktop the HUD lives in the docked rail, and a dockable kit window (The Cast /
+  // The Finale / Season Recap) can be pulled OUT of the rail into a floating window via
+  // its titlebar undock (⇱) toggle. On a phone that floating path is a second, confusing
+  // HUD entry that occludes the chat — so disable the undock-to-float affordance on the
+  // narrow tier: a HUD window docked in the drawer STAYS in the drawer, which makes the
+  // drawer the single HUD surface. The dock-IN direction (⇲ — a floating/sheet window
+  // docking INTO the rail) is deliberately left intact, since that only reduces surfaces.
+  // CSS-only + idempotent: no kit-JS change (the rail owns the presentation of its own
+  // docked children under #gadget-rail-body); the undock button is the kit's `.ow-dock`.
+  function ensureNarrowHudCss() {
+    if (document.getElementById("grail-narrow-hud-css")) return;
+    var st = document.createElement("style");
+    st.id = "grail-narrow-hud-css";
+    st.textContent =
+      "@media (max-width: 768px) {" +
+      "  #gadget-rail-body .ow-docked .ow-dock { display: none !important; }" +
+      "}";
+    document.head.appendChild(st);
+  }
+  ensureNarrowHudCss();
+
   // public seam (the headless gate + any future control surface)
   window.OrwellGadgetRail = {
     reorder: reorder,
