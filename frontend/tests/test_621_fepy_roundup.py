@@ -32,9 +32,11 @@ def test_midstream_error_emits_typed_error_sse_not_body_delta():
 # ── FEPY-2: empty body + reasoning → re-emit reasoning as a body delta ───────── #
 
 def test_empty_body_with_reasoning_reemits_body_delta():
-    # No model specified ⇒ historical DeepSeek shape (reasoning carries the answer) ⇒ re-emit.
+    # A DeepSeek-family model (the historical FEPY-2 shape: reasoning carries the answer) ⇒ re-emit.
+    # P2-16 (prompt audit): an ABSENT/unknown model no longer re-emits (the safe-False default —
+    # re-emitting an unknown reasoning channel risks a raw-CoT leak), so the known family is named.
     final, chunk, retry, from_reasoning = agent_loop._empty_response_fallback(
-        "", "Here is the actual answer.", [])
+        "", "Here is the actual answer.", [], model="deepseek-chat")
     assert final == "Here is the actual answer."
     assert chunk is not None and retry is False and from_reasoning is True
     payload = json.loads(chunk[len("data: "):].strip())

@@ -306,6 +306,27 @@ jobs:
     needs: changes
     if: needs.changes.outputs.visual == 'true'
     runs-on: ubuntu-latest
+    # SHARDED across 4 PARALLEL matrix legs (#1359 — the durable fix for the 40-min timeout).
+    # Tier A (~120 shots: 6 surfaces x 4 viewports x 5 themes) was one job capturing all 120; on a
+    # slow/contended hosted runner that exceeded even the 40-min cap and got cancelled, spuriously
+    # failing FE PRs. Now each leg replays the SAME golden walk but captures only its ~30 Tier-A
+    # slots (`--shard-index I --shard-count 4`, slot i owned by shard i%4); Tier B (~8 cheap,
+    # walk-coupled shots) is captured entirely on shard 0. The UNION of the 4 legs == the single-
+    # job shot set — no shot dropped or double-captured (proven browser-free in
+    # frontend/tests/test_0113_shard_partition.py). Mirrors the heavy-sims/jury/gradient shard
+    # pattern (now correct again: the hosted-parallel runners are back, #1360).
+    #
+    # `fail-fast: false` — one leg's geometry finding (or a runner blip) must not cancel the other
+    # legs; each leg still gates independently. The job stays NAMED `visual-regression`, so
+    # `needs.visual-regression.result` in ci-gate is the AND across all 4 legs — ci-gate needs NO
+    # change (a leg failure ⇒ the aggregate job result is `failure` ⇒ ci-gate fails).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    # 25 (down from the 40-min stopgap for the unsharded 120-shot run): each leg now does ~30
+    # Tier-A shots + the shared walk replay — roughly a quarter of the old capture work — which
+    # sits comfortably inside 25 min even on a 3–4x slow runner.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -352,14 +373,16 @@ jobs:
       - name: install playwright chromium
         if: steps.fixture.outputs.present == 'true'
         run: python3 -m playwright install --with-deps chromium
-      - name: run the visual-regression matrix (Tier A + Tier B)
+      - name: run the visual-regression matrix — shard ${{ matrix.shard }}/4 (Tier A sharded; Tier B on shard 0)
         id: run
         if: steps.fixture.outputs.present == 'true'
         working-directory: frontend
-        # Geometry findings make this step (and the job) fail via the script's own exit code;
+        # Geometry findings make this step (and the leg) fail via the script's own exit code;
         # a pixel diff never does. `continue-on-error` would also swallow a genuine crash, so
-        # instead the script's exit code IS the job's signal — no extra plumbing needed.
-        run: python3 scripts/visual_regression.py --tier all --out "$RUNNER_TEMP/visual-run"
+        # instead the script's exit code IS the leg's signal — no extra plumbing needed. This
+        # leg captures only its Tier-A slice (--shard-index/--shard-count); the geometry gate
+        # still fires per-shot on that slice, and the union of the 4 legs is the full matrix.
+        run: python3 scripts/visual_regression.py --tier all --shard-index ${{ matrix.shard }} --shard-count 4 --out "$RUNNER_TEMP/visual-run"
       - name: append the run summary to the job summary
         if: always() && steps.fixture.outputs.present == 'true'
         run: |
@@ -370,7 +393,9 @@ jobs:
         if: always() && steps.fixture.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: visual-regression-run
+          # Shard-unique so the 4 parallel legs don't collide on the artifact name (a duplicate
+          # name across matrix legs fails the upload). Each leg uploads its own ~30-shot slice.
+          name: visual-regression-run-${{ matrix.shard }}
           path: ${{ runner.temp }}/visual-run
           retention-days: 14
           if-no-files-found: ignore

@@ -1,6 +1,7 @@
 import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { VoiceProfile } from "../domain/voiceProfile";
+import type { PullQuoteWeek } from "../engine/pullQuoteReel";
 
 /**
  * Vault-free game-session port (onboarding + per-moment prompt injection).
@@ -1349,6 +1350,16 @@ export interface RetrospectiveView {
    */
   playerConfessionals: string[];
   /**
+   * #1396 — the weekly Diary-Room PULL-QUOTE REEL: a curated montage of the season's most notable
+   * confessional lines, collected BY WEEK — the player's OWN Diary-Room lines (`player-diary`) AND the
+   * NPCs' confessionals (`npc-confessional`), each tagged with its source so the two channels stay
+   * explicit. The NPC lines are Vault content and reach this reel ONLY here, at the sanctioned unseal —
+   * exactly like `hiddenStory` / `evictionVotes` (mandate #2). Built ON `playerConfessionals` (0115),
+   * not replacing it: a pure, rng-free, calibration-neutral selection over already-recorded lines, so
+   * an empty reel leaves the rest of the retrospective byte-identical. Empty when no notable line exists.
+   */
+  pullQuoteReel: PullQuoteWeek[];
+  /**
    * The hidden story in CHRONOLOGICAL order (#852): pre-season setup first, then the live hidden
    * layer ordered by its time marker. Each row carries an optional `ts` (a monotonic marker — absent
    * on pre-game setup rows, which sort first); names humanized, no raw ids/slugs.
@@ -1784,8 +1795,14 @@ export interface GameSession {
    * into late-night ⇒ running on empty) and rolls the house to the next morning. The player is never
    * auto-slept; only this call retires them. A no-op when the clock isn't running, the game is over, or
    * the player has left. Returns the Vault-free view (the new morning + the player's own rest cue).
+   *
+   * 0065 — a mutating progression tool, so it takes the SAME optional sync-spine fields as `advanceGame`
+   * (`AdvanceGameReq`): `expectedBeatSeq` (Part A CAS — a stale token ⇒ typed `stale-beat`/409, refused
+   * before any mutation) and `idempotencyKey` (Part B at-most-once — a retried/duplicate turnIn REPLAYS
+   * the original view instead of re-ending the night, which would re-stamp the rest penalty). Absent ⇒
+   * byte-identical to the pre-0065 path (opt-in).
    */
-  turnIn(): AdvanceView;
+  turnIn(req?: AdvanceGameReq): AdvanceView;
   /**
    * The player makes a deal with a houseguest (0039) — a first-class tracked promise. Recorded as
    * a player-witnessed event (their knowledge); the engine reconciles it against later binding

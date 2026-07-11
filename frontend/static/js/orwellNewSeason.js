@@ -270,6 +270,13 @@
       icon: evicted ? ICON_EVICTED : ICON_NEW,
       slot: "bottom-right",
       slotKey: "new-season",
+      // #894 (RESP-6): on the narrow tier present as a bottom SHEET (the proven Cast
+      // recipe) — bottom-pinned, edge-to-edge, scroll-contained. This retires the old
+      // RESP-6 defect (the window floated top-left with the live chat bleeding through
+      // on the right, and the portrait-picker dropdown clipped behind the window's right
+      // edge): a full-width sheet has no right edge to bleed past and the `<select>`
+      // opens within the sheet width. Desktop keeps the bottom-right slot window.
+      sheet: true,
       // Persistent: stays until the state moves on. Not closable; minimizable so the player can tuck
       // it away and keep lingering, then bring it back from the dock.
       closable: false,

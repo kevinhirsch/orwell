@@ -320,6 +320,18 @@
         color: #16191f;
         text-shadow: 0 1px 1px rgba(255,255,255,0.45);
       }
+      /* #1375-a (a11y contrast): the disabled-Confirm hint is the card's smallest, lowest text;
+         it sits at the bottom edge over the sheet's heavy blur, where the glass composites DARK
+         over the chat behind — the engine-staged a11y gate measures it at ~1.3:1 with the card's
+         light-glass dark ink (dark-on-dark, effectively invisible). Give this ONE secondary label
+         a LIGHT ink + a DARK legibility halo so it clears WCAG AA over the dark backdrop (the halo
+         also outlines it over any lighter glass frame). Scoped inside the no-preference block so
+         the reduced-transparency opaque fallback keeps the dark ink. */
+      body.theme-frosted #${CARD_ID} .odec-hint {
+        color: #fff;
+        opacity: 1;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.62), 0 0 2px rgba(0,0,0,0.5);
+      }
       /* When hosted inside the kit card the inner decision card stays flat (the kit IS the
          glass) — keep it transparent under theme-frosted so it never double-glasses. */
       body.theme-frosted .on-card.on-decision #${CARD_ID},

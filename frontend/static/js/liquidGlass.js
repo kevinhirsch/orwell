@@ -188,6 +188,17 @@
   var RESIZE_DEBOUNCE_MS = 140;      // coalesce a resize-drag burst into one re-map
   var MAP_RES_CAP = 1024;            // cap a map's canvas dimension (perf + the SVG res ceiling)
 
+  // #777-2 — CLEAN-DEGRADE circuit breaker. Building a displacement/specular map is a
+  // canvas + getImageData op; on a GPU-/memory-constrained device it can throw (canvas
+  // OOM, context loss). Each successful build resets the counter; MAX_BUILD_FAILURES
+  // CONSECUTIVE failures latch the whole refraction layer OFF (clearAll) so the CSS
+  // blur-glass baseline stands — no broken glass, no per-pass retry storm, no console
+  // spew. The tier is already dropped Full→Frosted on low-end by theme.js, so this only
+  // catches a device that reaches Full and then fails to render it.
+  var MAX_BUILD_FAILURES = 3;
+  var _buildFailures = 0;
+  var _refractionDisabled = false;   // latched after repeated filter-build failures
+
   // The surfaces that get refraction, in PRIORITY order (the cap fills from the top).
   // Same selectors CSS-glassed in style.css (body.theme-frosted …) so the aesthetic
   // is coherent across every glass surface. #orwell-headshot is a GATING dialog —
@@ -608,7 +619,19 @@
     var key = bucketKey(w, h, scale);
     if (filterCache[key]) return filterCache[key].id;
     var svg = ensureHost();
-    var map = buildMapDataUrl(w, h, RADIUS, scale);
+    // #777-2 CLEAN DEGRADE: the map build is the canvas/getImageData op that can throw
+    // on a GPU-/memory-constrained device. Guard it: a clean build resets the failure
+    // streak; MAX_BUILD_FAILURES consecutive failures latch the whole refraction layer
+    // OFF (clearAll) so the CSS blur-glass baseline stands — no broken glass, no retry
+    // storm. Returning null tells applyTo to leave this surface on its CSS glass.
+    var map;
+    try {
+      map = buildMapDataUrl(w, h, RADIUS, scale);
+      _buildFailures = 0;
+    } catch (_) {
+      if (++_buildFailures >= MAX_BUILD_FAILURES) { _refractionDisabled = true; clearAll(); }
+      return null;
+    }
     var id = "owlg-" + (filterCount++);
     var filter = document.createElementNS(SVG_NS, "filter");
     filter.setAttribute("id", id);
@@ -779,6 +802,7 @@
       var r = el.getBoundingClientRect();
       if (r.width < 24 || r.height < 24) return; // too small to bother
       var id = filterFor(r.width, r.height, activeScale());
+      if (!id) { clearFrom(el); return; } // #777-2: build failed / layer latched off → leave the CSS glass
       // The SVG filter already does blur + tint in-chain; the thin CSS blur is a
       // belt-and-suspenders softener, and saturate keeps the baseline's lively glass.
       var val =
@@ -877,8 +901,10 @@
   var _forceDisabled = false; // verification harness latch (_disable) — never set in prod
   function applyPass() {
     // Apple HIG: reduced-transparency ⇒ solid surfaces. Drop every override so the
-    // CSS solid fallback stands; do NOT refract.
-    if (_forceDisabled || !isFrosted() || reducedTransparency()) {
+    // CSS solid fallback stands; do NOT refract. #777-2: _refractionDisabled is the
+    // clean-degrade latch — once the filter build has failed repeatedly on a
+    // constrained device, the whole layer stays off and the CSS blur-glass stands.
+    if (_forceDisabled || _refractionDisabled || !isFrosted() || reducedTransparency()) {
       clearAll();
       return;
     }

@@ -13,6 +13,7 @@ import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
 import { PLAYER } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
+import type { VoiceProfile } from "../domain/voiceProfile";
 import { TurnRefusedError, PersistFailureError } from "../domain/errors";
 
 /**
@@ -731,6 +732,20 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   // knowledge layer changes, so the seeded competition/vote spine is untouched even while ON.
   sandbox.session.legendTick(sandbox.engine.events, sandbox.engine.knowledge);
 
+  // 0099 (hidden half) — the off-screen NPC↔NPC SECRET BARTER: once per bounded off-screen tick, an NPC
+  // holding a learned secret about a houseguest SPENDS it with the co-house recipient who values it most,
+  // so information becomes liquid in the hidden layer (secrets visibly move; a bond firms for no public
+  // reason). It REUSES the existing 0099 trade/value core (`npcBarterStep`), transferring the belief
+  // through the SAME NPC→NPC diffusion pathway the live gossip below uses (`transmitGossip`, witness set =
+  // {giver, recipient}, EXCLUDES the player). SELF-GATED: a no-op (ZERO draws, no counter advance) unless
+  // the layer is enabled (ORWELL_SECRET_BARTER=1) AND some holder holds a tradeable secret, so the
+  // calibration harness — which never enables it, and whose off-screen society mints only subject-LESS
+  // gossip/overhear beliefs — is byte-identical. Uses its OWN dedicated, isolated rng and folds NO
+  // relationship edge (only the hidden knowledge layer changes), so the seeded competition/vote/jury
+  // spine is untouched even while ON. The player learns a bartered secret only if a later pathway
+  // (overhear/gossip below, 0002/0094) terminates at them — never as a Vault read.
+  sandbox.session.secretBarterTick(sandbox.engine.events, sandbox.engine.knowledge);
+
   // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
   // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
   // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at
@@ -756,6 +771,15 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
       }
     }
     if (edges.length > 0) {
+      // Issue #1397 — when voice-mediated drift is enabled, hand `diffuseGossip` a resolver for each
+      // RETELLER's PUBLIC voice (0084 `character.voice`) so the reteller's own personality colors HOW the
+      // rumor warps as it passes through them. Absent (the default + the seeded calibration spine) ⇒ no
+      // `voiceOf` ⇒ byte-identical agnostic drift. PUBLIC dials only — never soul/Vault. The player is not
+      // in `npcs`, so a player retelling resolves `undefined` → the agnostic path (their voice is human).
+      const npcs = core.house.npcs;
+      const voiceOf = sandbox.session.gossipDriftEnabledNow()
+        ? (id: EntityId): VoiceProfile | undefined => npcs.find((n) => n.id === id)?.character.voice
+        : undefined;
       diffuseGossip({
         knowledge: sandbox.engine.knowledge,
         graph: makeSocialGraph(edges),
@@ -769,6 +793,7 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
         rel: sandbox.engine.relationships,
         subjects: [scene.initiator, scene.partner],
         sceneType: scene.type,
+        ...(voiceOf ? { voiceOf } : {}),
       });
     }
   }

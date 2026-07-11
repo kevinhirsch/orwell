@@ -24,6 +24,23 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 const searchModule = null, documentModule = null, emailInbox = null, createResearchSynapse = null;
 import { createStreamRenderer } from './streamingRenderer.js';
 import { isNarrow } from './platform.js';
+
+  // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
+  // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
+  // `<script src="chat.js?v=…">` — and two urls are two module records, so every module-level
+  // variable/timer/listener/cache below ran in DUPLICATE (PR #1398 fixed only the outbox-restore
+  // symptom of that). The versioned <script> tag is gone; chat.js now loads solely via the app.js
+  // import. This sentinel makes any regression that re-introduces a second load path LOUD instead
+  // of silent. (window-guarded so non-browser contexts are unaffected.)
+  if (typeof window !== 'undefined') {
+    if (window.__orwellChatEvaluated) {
+      console.warn('[orwell] #1399: chat.js evaluated more than once — the dual-load hazard has ' +
+        'regressed; every module-level timer/listener/cache is now duplicated. Check that nothing ' +
+        're-added a chat.js <script> tag alongside the app.js import.');
+    }
+    window.__orwellChatEvaluated = true;
+  }
+
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -4214,14 +4231,15 @@ import { isNarrow } from './platform.js';
   function _restoreOutboxFromStorage() {
     if (_outboxRestoreDone) return 0;
     if (!document.getElementById('chat-history')) return 0; // too early — a later boot attempt retries
-    // #830 hardening (dual-instance page — found by the aggregation gate): chat.js is evaluated
-    // TWICE on this page (app.js imports './chat.js' bare while index.html script-tags
-    // 'chat.js?v=…' — two URLs ⇒ two module instances, each with its own queue state but SHARING
-    // one sessionStorage record). Only the instance registered as window.chatModule may restore:
-    // a shadow instance restoring the same record repaints duplicate pending bubbles and — once
-    // its own dedupe pass verifies clean — dispatches a SECOND time (a real double-send). The
-    // canonical handle is settled long before the first 600ms boot attempt (both instances finish
-    // evaluating at page load); fail-open when no handle exists (stripped test DOMs).
+    // #830 hardening, retained as DEFENSE-IN-DEPTH. chat.js USED to be evaluated TWICE on this
+    // page (app.js imports './chat.js' bare while index.html ALSO script-tagged 'chat.js?v=…' —
+    // two URLs ⇒ two module instances, each with its own queue state but SHARING one sessionStorage
+    // record). #1399 removed the versioned <script> tag, so chat.js now evaluates ONCE and this
+    // guard is trivially satisfied — but it is kept so that if a second load path ever regresses,
+    // only the instance registered as window.chatModule restores: a shadow instance restoring the
+    // same record repaints duplicate pending bubbles and — once its own dedupe pass verifies clean
+    // — dispatches a SECOND time (a real double-send). Fail-open when no handle exists (stripped
+    // test DOMs).
     try {
       if (window.chatModule && window.chatModule._restoreOutboxFromStorage &&
           window.chatModule._restoreOutboxFromStorage !== _restoreOutboxFromStorage) {

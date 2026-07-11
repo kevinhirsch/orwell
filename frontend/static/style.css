@@ -3025,6 +3025,22 @@ body.bg-pattern-perlin-flow {
          player where to type. Lift to ~4.7:1 while staying visibly secondary. */
       color: color-mix(in srgb, var(--fg) 60%, transparent);
     }
+    /* RESP-4 (a11y responsive): the model-pill is absolutely positioned top-right OVER the
+       textarea and stays visible until ~10 chars are typed (app.js _syncModelPickerAutohide) —
+       so on a narrow composer it overlaps and clips the placeholder / short-input text. Reserve
+       a right gutter for the pill's slot, but ONLY while the pill is actually shown AND the bar
+       is narrow — so a wide composer keeps full width and a long message (pill already
+       autohidden) reflows edge-to-edge. The pill is hidden (a) ≤260px by the container query
+       below and (b) inline `display:none` when group chat is active / uninitialized — exclude
+       both so the gutter never over-reserves when there is no pill. Applies to the textarea + its
+       ghost autocomplete overlay so both stay clear of the pill. Below the 260 micro-tier the
+       pill is display:none (container query above), so the gutter is moot there. */
+    @container chatbar (max-width: 480px) {
+      .chat-input-top:has(> .model-picker-wrap:not(.model-picker-autohide):not([style*="display: none"])) textarea#message,
+      .chat-input-top:has(> .model-picker-wrap:not(.model-picker-autohide):not([style*="display: none"])) #message-ghost {
+        padding-right: 150px;
+      }
+    }
     .chat-input-bottom {
       display: flex;
       justify-content: space-between;
@@ -39052,19 +39068,22 @@ body.theme-frosted .ow-window .ow-body button[aria-disabled="true"] {
   cursor: not-allowed;
 }
 
-/* a11y fix (measured VM-16 / CA-11): the risk badge's color/fill (--color-error text on a ~12%
-   tint of the same color) is tuned for the DARK non-frosted panel; on the frosted card's ONE LIGHT
-   GLASS the same colors sample at ~2.25:1 (measured: text rgb(255,68,68) on fill rgb(222,206,209)),
-   well under the 4.5:1 small-text floor. Give the badge a SOLID system-red fill (the same `--ow-danger`
-   token the app's other destructive/warning fills already use) with the frosted card's own dark-ink
-   convention (matches `color:#16191f` used elsewhere on this exact card under frosted) rather than
-   white — the badge text is small/bold, so dark ink is the safer choice (measured ≈5.2:1 vs ≈3.4:1 for
-   white-on-this-red). Never color alone: the badge's TEXT ("⚠ Irreversible — binding") still carries
-   the meaning for colorblind/SR users. */
+/* a11y fix (measured VM-16 / CA-11; #1375 round-2 re-measure): the risk badge's color/fill
+   (--color-error text on a ~12% tint of the same color) is tuned for the DARK non-frosted panel; on
+   the frosted card's ONE LIGHT GLASS the same colors sample at ~2.25:1, well under the 4.5:1
+   small-text floor. The earlier fix gave it a SOLID `--ow-danger` (= --color-danger = #c0392b, a
+   DEEP red) with dark ink — but that samples only 3.15:1 (dark-on-deep-red fails). The engine-staged
+   a11y gate ALSO measures this small badge INTERMITTENTLY over the risk card's OWN light-red wash
+   (~rgb(255,221,217)) — the occluded badge's opaque fill is missed and the light card behind it is
+   sampled instead — so neither pure white (fails the light card, ~1.3:1) nor dark-on-deep-red (fails
+   the fill) clears AA on BOTH backdrops. Resolve it the way that passes either sample: DARK ink on a
+   LIGHTENED danger red — dark-on-light clears AA on the fill (~5.5:1) AND on the light card wash
+   (~16:1). Still an unmistakable red danger pill (a strong red border + the ⚠ icon + the
+   "Irreversible — binding" TEXT carry the meaning for colorblind/SR users — never color alone). */
 body.theme-frosted .odec-risk-badge {
   color: #16191f !important;
-  background: var(--ow-danger, #ff453a) !important;
-  border-color: color-mix(in srgb, #000 14%, var(--ow-danger, #ff453a)) !important;
+  background: color-mix(in srgb, var(--ow-danger, #ff453a) 64%, #fff) !important;
+  border-color: color-mix(in srgb, #000 8%, var(--ow-danger, #ff453a)) !important;
 }
 
 /* Labels at Medium/Semibold (Apple typography) on text buttons (not the icon discs). */
@@ -39168,7 +39187,11 @@ body.theme-frosted .settings-nav-item {
   border-radius: var(--ow-radius-inner, 12px);
 }
 body.theme-frosted .settings-nav-item.active {
-  background: var(--ow-ios-blue, #0a84ff) !important;
+  /* #1375-c: the ACTIVE nav pill painted #0a84ff (Apple system blue) under white text is only
+     3.29:1 (WCAG AA fail for the white label). Darken the pill to a deeper system blue so the
+     white label clears 4.5:1 (rendered ≈5:1 after the glass brightness lift) — still an
+     unmistakable iOS-blue selection, just AA-legible. */
+  background: #0a5cc4 !important;
   color: #fff !important;
 }
 body.theme-frosted .settings-nav-item.active svg { opacity: 1; color: #fff; }
@@ -40874,6 +40897,116 @@ body.theme-frosted #sidebar button,
 body.theme-frosted .icon-rail a,
 body.theme-frosted .icon-rail button {
   text-shadow: 0 1px 1px rgba(255,255,255,0.4) !important;
+}
+/* ── #1375 a11y contrast: light-glass labels that render DARK over dark game content ──────────
+   The sidebar's brand title, user-name, and New Chat label sit in TRANSPARENT sub-containers
+   (.sidebar-header / .sidebar-user-bar are `background: transparent`), so — exactly like the
+   gadget-rail header just above (a transparent-over-dark container) — they float over the
+   translucent sidebar glass, which composites DARK over the dark game content and refracts/blurs
+   the raw backdrop through. The engine-staged a11y gate measures them at 2.9–3.5:1 with the
+   blanket #sidebar dark ink (the light-glass tint the ink assumes is not guaranteed there). Flip
+   THESE nodes to the app's LIGHT ink + a DARK legibility halo (the rail-head treatment) so they
+   clear WCAG AA over the dark backdrop; the halo also outlines them over any lighter glass frame
+   a GPU browser paints. Polarity of the rest of the sidebar is unchanged.
+   Scoped to prefers-reduced-transparency:no-preference — under `reduce` the glass chrome falls
+   back to the SOLID dark --panel with its own ink handling, so we leave that a11y mode untouched. */
+@media (prefers-reduced-transparency: no-preference) {
+  body.theme-frosted #sidebar #user-bar-name,
+  body.theme-frosted #sidebar .sidebar-brand-title,
+  body.theme-frosted #sidebar #sidebar-new-chat-btn .grow {
+    color: #fff !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.62), 0 0 2px rgba(0,0,0,0.5) !important;
+  }
+  /* The user-bar footer sits at the sidebar's BOTTOM, where the backdrop behind the glass is the
+     most variable (it can render light OR dark depending on the game content below), so light ink
+     alone is not reliably AA there. Give the footer a bounded DARK glass backing that SURVIVES the
+     compositor (a container fill, unlike a per-glyph scrim) so the white label clears AA regardless
+     of what's behind — a subtle account-footer band, in keeping with the dark Control-Center dock. */
+  body.theme-frosted #sidebar .sidebar-user-bar {
+    background-color: rgba(14, 16, 22, 0.55) !important;
+    border-radius: 10px;
+  }
+  /* #1375-b: the status-gadget disclosure chevron '▾' is dark ink on the gadget card's light
+     glass, which the gate composites mid-tone (3.5–3.7:1). The card is a LIGHT tile, so keep the
+     dark-ink polarity but drive it to full black + drop the .55 dimming so it clears AA, with a
+     light halo (dark-ink-on-light legibility, matching the card's other ink). */
+  body.theme-frosted #orwell-status .og-chev {
+    color: #000 !important;
+    opacity: 1 !important;
+    text-shadow: 0 0 2px rgba(255,255,255,0.65) !important;
+  }
+}
+
+/* ── #1375 round-2 a11y contrast: light-glass HUD labels that fall below AA ──────────────────────
+   Siblings of the #1443 batch above. These live on the #725 ONE-LIGHT-GLASS chrome (the control-room
+   gadgets #orwell-status / #orwell-presence / #orwell-room-strip and the post-season retrospective
+   window), whose card face is `--ow-glass-light-color` (rgba(255,255,255,.6)). Dark ink is the
+   design-correct polarity there (white ink would be illegible on the light face for real users), but
+   three defects drop these specific labels below the 4.5:1 floor on the engine-staged sweep:
+     • an OPACITY fade (.55 / .82) thins the dark ink INTO the light fill (roster header → ~1.1:1,
+       room-strip name → ~2.3:1);
+     • a LIGHT accent color (the premiere count is var(--accent), a cyan) is light-on-light (~1.35:1);
+     • the translucent .6 white fill UNDER-composites over the dark mesh wallpaper in headless, so the
+       retrospective's dark title / kit controls / eviction list only reach ~2.8–3.6:1.
+   Fix WITHOUT flipping polarity: restore FULL-strength dark ink (drop the fades, pin the accent to
+   the card's #725 dark ink) + a LIGHT legibility halo (a dark shadow under dark ink reads as a smudge
+   — the #725 light-halo rule), and firm the retrospective window's OWN light backing so the dark ink
+   clears AA on any backdrop. Scoped to prefers-reduced-transparency:no-preference so the opaque
+   reduced-transparency fallback (solid dark panel + its own light-ink handling) is untouched. */
+@media (prefers-reduced-transparency: no-preference) {
+  /* os-prem-count — premiere "N of 15 met": var(--accent) is a LIGHT cyan → light-on-light on the
+     light glass (~1.35:1). Pin to the card's dark ink (the #725 convention) so it clears AA. */
+  body.theme-frosted #orwell-status .os-prem-count {
+    color: #16191f !important;
+  }
+  /* os-roster-h — "The House · N/16": opacity .55 thins the dark ink into the light fill (~1.1:1).
+     Full opacity restores dark-on-light AA; the light halo backstops the brightest backdrop frames.
+     (Font size is left to the injected rule — the wcag-polish gate pins its >=11px floor.) */
+  body.theme-frosted #orwell-status .os-roster-h {
+    opacity: 1 !important;
+    color: #16191f !important;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.5);
+  }
+  /* opres-r — presence room/tracked labels: a muted var(--fg) color-mix that samples ~3:1 over the
+     composited glass. Pin to full dark ink + the light halo. */
+  body.theme-frosted #orwell-presence .opres-r {
+    color: #16191f !important;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.5);
+  }
+  /* ors-name — room-strip houseguest name under each face: opacity .82 thins the dark ink
+     (~2.3–2.7:1). Full opacity + the light halo clears AA (the ≤480px display:none rule is untouched
+     — a higher-specificity id rule cannot revive a display:none element). */
+  body.theme-frosted #orwell-room-strip .ors-name {
+    opacity: 1 !important;
+    color: #16191f !important;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.5);
+  }
+  /* #1375-h — the post-season retrospective window (#orwell-retro): the #725 light glass
+     (rgba(255,255,255,.6)) composites to a mid-gray over the dark mesh wallpaper in headless, so its
+     dark title / kit controls (× – ⇲) / winner headline / eviction list only reach ~2.8–3.6:1. It is
+     a TERMINAL summary window, so mirror the sanctioned gating-dialog treatment used for
+     #orwell-headshot just above (opaque light fill + no backdrop blur): the dark ink then clears AA
+     on ANY backdrop while the light-glass dark-ink design is preserved (white ink would be illegible
+     on the light window for real users). Scoped to this ONE window by id; every other .ow-window
+     keeps the translucent .6 glass.
+     The kit ROOT carries the single backdrop-filter; the .ow-titlebar / .ow-body are transparent
+     children, so the reliable lever is to back the TEXT-BEARING layers directly — an opaque element
+     background paints OVER any backdrop-filter/position (the root fill alone is defeated when the
+     window re-mounts with the blur still live in a later sweep pass). Back the titlebar (title + × –
+     ⇲ controls) and the body (winner headline + highlights + eviction list) so every retro text run
+     samples the light plate no matter where it floats. */
+  body.theme-frosted #orwell-retro.ow-window {
+    background-color: rgba(248, 250, 252, 0.97) !important;
+    background-image: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  body.theme-frosted #orwell-retro.ow-window > .ow-titlebar,
+  body.theme-frosted #orwell-retro.ow-window > .ow-body {
+    background-color: rgba(248, 250, 252, 0.97) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
 }
 
 /* ── KIT-LEVEL dark-ink-on-glass for chrome panels (#725, not whack-a-mole) ────
