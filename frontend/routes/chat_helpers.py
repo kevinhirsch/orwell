@@ -17,6 +17,7 @@ from src.context_compactor import maybe_compact, trim_for_context
 from src.auth_helpers import get_current_user
 from src.prompt_security import untrusted_context_message
 from src.settings import front_end_context_sources
+from src.orwell_sync_ledger import note_belt as _note_belt  # gap #3 belt-fire telemetry (never raises)
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
 from fastapi import HTTPException
@@ -2820,11 +2821,8 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         # is indistinguishable from a true stall in the logs. Record the beat we just committed.
         _beat = ((adv or {}).get("event") or {}).get("content") if isinstance(adv, dict) else None
         logger.info("[orwell] pre-resolve advanced %s for user=%s -> beat=%r", phase, user, _beat)
-        try:  # gap #3 belt-fire telemetry (docs/design/undercall-seam-structural.md §5)
-            from src import orwell_sync_ledger as _led_belt
-            _led_belt.note_belt_fire(user, "pre-resolve-npc-ceremony")
-        except Exception:
-            pass
+        # gap #3 belt-fire telemetry (docs/design/undercall-seam-structural.md §5; never raises)
+        _note_belt(user, "pre-resolve-npc-ceremony")
         refreshed = await _fetch_game_state(user, retry=retry)
         _refresh_beat_seq(user, refreshed)  # 0065: the post-advance state read also carries beatSeq
         new_state = refreshed if isinstance(refreshed, dict) else game_state
@@ -3173,11 +3171,7 @@ async def apply_game_framing(
                     or bool(orwell_portraits.user_avatar_path(user))
                 if _has_photo:
                     pre_prompt = pre_prompt + "\n\n" + CASTING_HEADSHOT_ON_FILE_NOTE
-                    try:  # gap #3 belt-fire telemetry
-                        from src import orwell_sync_ledger as _led_belt
-                        _led_belt.note_belt_fire(user, "headshot-on-file-framing")
-                    except Exception:
-                        pass
+                    _note_belt(user, "headshot-on-file-framing")  # gap #3 telemetry (never raises)
             except Exception as e:
                 logger.warning("[orwell] casting headshot-status check skipped for user=%s: %s", _gkey, e)
             # The casting interview marks the session too: the premiere that follows

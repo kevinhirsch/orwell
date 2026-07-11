@@ -246,6 +246,17 @@ def note_belt_fire(user: str | None, belt: Any, n: Any = 1) -> None:
         pass
 
 
+def note_belt(user: str | None, belt: Any, n: Any = 1) -> None:
+    """The thin never-raises convenience wrapper over :func:`note_belt_fire` for belt call
+    sites OUTSIDE this module (chat_helpers / tool_implementations / the agent loop) — one
+    name to call instead of the 4x-duplicated inline try/except blocks. Identical semantics;
+    belt-fire telemetry must never hurt the app."""
+    try:
+        note_belt_fire(user, belt, n)
+    except Exception:  # pragma: no cover - defence in depth (note_belt_fire already swallows)
+        pass
+
+
 def _drain_pending_belts(user_key: str) -> dict[str, int]:
     """Pop (and return) the user's buffered belt fires. Caller holds no lock."""
     with _LOCK:

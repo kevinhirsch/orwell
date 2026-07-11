@@ -183,7 +183,12 @@ entry (the buffer holds them); under `AUTH_ENABLED=false` the ledger keys everyt
 `"default"` sentinel the rest of the belt stores use (the NAR-1 lesson), and `get_belt_totals`
 includes the pending buffer so single-tenant totals are readable even though per-turn entries
 require an owner. The 0079 overseer-debug verdicts remain the *rich* per-turn view; this is the
-cheap always-on counter.
+cheap always-on counter. **A count means an APPLIED correction, not an attempt**: the extraction-
+driven belts (`auto-record-scene`/`-deal`, `auto-confide`, `auto-expose/trade-secret`, both move
+belts) note their fire only AFTER the awaited helper reports a real applied update — a
+`room:null` / `withIds:[]` / `struck:false` extraction or a failed call is a no-op and never
+counts (counting attempts would poison exactly the measurement this exists to create; the pinned
+gate is `test_belt_telemetry.py::test_success_gated_belts_fire_only_after_the_helper_applied`).
 
 **Success criterion for the seam:** on a healthy model, `forced-tool-choice:*` counters may be hot
 (the guarantee doing its job, invisible to the player) while the *reactive* counters

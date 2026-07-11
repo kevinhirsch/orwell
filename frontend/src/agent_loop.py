@@ -1607,13 +1607,16 @@ def _forced_tool_choice_for_casting(turn_tool_names, *, ready: bool, finalizable
 
 def _note_belt(owner, belt: str, n: int = 1) -> None:
     """Gap #3 belt-fire telemetry: count a guardrail-belt firing in the Vault-free sync ledger
-    (`orwell_sync_ledger.note_belt_fire` — names + counts only, drained into the next recorded
-    turn's `beltsFired` map). Fail-soft by construction: telemetry must never hurt the turn.
-    Keyed by raw owner — the ledger maps None to the same "default" sentinel the belt stores use
-    (the NAR-1 lesson), so single-tenant fires are counted too."""
+    (`orwell_sync_ledger.note_belt` — names + counts only, drained into the next recorded
+    turn's `beltsFired` map). Fail-soft by construction (the wrapper never raises; the lazy
+    import is guarded too): telemetry must never hurt the turn. Keyed by raw owner — the ledger
+    maps None to the same "default" sentinel the belt stores use (the NAR-1 lesson), so
+    single-tenant fires are counted too. IMPORTANT: call this only AFTER a belt has actually
+    APPLIED a real correction (a no-op/failed extraction must never count as a belt fire —
+    that would poison the exact measurement this telemetry exists to create)."""
     try:
         from src import orwell_sync_ledger as _led
-        _led.note_belt_fire(owner, belt, n)
+        _led.note_belt(owner, belt, n)
     except Exception:
         pass
 
@@ -5784,9 +5787,11 @@ async def _stream_agent_loop_impl(
                     # always wins (`_moved` short-circuits `_want_move`). Vault-free (whereabouts).
                     if _want_move:
                         _turn_move_nudges += 1  # once per turn
-                        _note_belt(owner, "auto-move-player")  # gap #3 telemetry
-                        await _auto_move_player(_turn_narration, _last_user_for_move,
-                                                endpoint_url, model, headers, owner)
+                        if await _auto_move_player(_turn_narration, _last_user_for_move,
+                                                   endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — count only a REAL applied move (a room:null
+                            # extraction / failed call is a no-op, not a correction)
+                            _note_belt(owner, "auto-move-player")
                     # ── ADR 0009 NPC auto-move belt (also a pure persist side effect, never a re-prompt).
                     # The narration walked one or more houseguests to a room but the model never called
                     # moveHouseguest, so the engine's open presence would snap them back. A constrained
@@ -5796,9 +5801,13 @@ async def _stream_agent_loop_impl(
                     # that also advances a beat. Model-driven moveHouseguest wins (`_npc_moved` gate).
                     if _want_npc_move:
                         _turn_npc_move_nudges += 1  # once per turn
-                        _note_belt(owner, "auto-move-npc")  # gap #3 telemetry
-                        await _auto_move_npc(_turn_narration, _last_user_for_move,
-                                             _house, endpoint_url, model, headers, owner)
+                        _npc_moves_applied = int(await _auto_move_npc(_turn_narration, _last_user_for_move,
+                                                                      _house, endpoint_url, model,
+                                                                      headers, owner) or 0)
+                        if _npc_moves_applied:
+                            # gap #3 telemetry — count only ENGINE-APPLIED moves (the helper
+                            # returns the applied count; a moves:[] extraction is a no-op)
+                            _note_belt(owner, "auto-move-npc", _npc_moves_applied)
                     # ── Post-season re-approach (0057): the season is over and the player wandered
                     # off into free chat. Count their off-finale turns; once they've taken a couple,
                     # have the producer re-invite OUT OF FICTION to the next season (escalating,
@@ -6266,10 +6275,12 @@ async def _stream_agent_loop_impl(
                     _touched_deal = _scene_touched_houseguest(_turn_narration, messages, [h.get("name") for h in _house])
                     if _want_deal and _touched_deal:
                         _turn_deal_nudges += 1  # once per turn
-                        _note_belt(owner, "auto-record-deal")  # gap #3 telemetry
                         if await _auto_record_deal(_turn_narration, _extract_last_user_message(messages),
                                                    _house, endpoint_url, model, headers, owner):
                             _turn_record_nudges = max(_turn_record_nudges, 1)  # deal banked the fold
+                            # gap #3 telemetry — only a genuinely BANKED deal counts (struck=false
+                            # loose talk / a failed extraction is a no-op, not a correction)
+                            _note_belt(owner, "auto-record-deal")
                     # 0075: the player pressed an ally to open up but the model never called confide, so
                     # the trust-gated disclosure never fired. Back-fill it — the ENGINE adjudicates
                     # (whether they disclose, how much, truth-vs-lie); an unearned motive returns
@@ -6280,9 +6291,11 @@ async def _stream_agent_loop_impl(
                     # (_turn_confide_nudges is set to 1 on its tool call, which makes _want_confide False).
                     if _want_confide and _touched_deal:
                         _turn_confide_nudges += 1  # once per turn
-                        _note_belt(owner, "auto-confide")  # gap #3 telemetry
-                        await _auto_confide(_turn_narration, _last_user_for_confide,
-                                            _house, endpoint_url, model, headers, owner)
+                        if await _auto_confide(_turn_narration, _last_user_for_confide,
+                                               _house, endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — only a confide the belt actually FIRED counts
+                            # (npcId:null / off-roster / failed extraction is a no-op)
+                            _note_belt(owner, "auto-confide")
                     # 0093: the player outed a secret they already know but the model never called
                     # exposeSecret. Back-fill it — the ENGINE adjudicates (the standing fold + exposer
                     # backlash, or a bluff's belief roll); the extraction is grounded ONLY in the
@@ -6290,23 +6303,27 @@ async def _stream_agent_loop_impl(
                     # invented secret). Model-driven exposeSecret always wins (precedence set on tool use).
                     if _want_expose and _touched_deal:
                         _turn_expose_nudges += 1  # once per turn
-                        _note_belt(owner, "auto-expose-secret")  # gap #3 telemetry
-                        await _auto_expose_secret(_turn_narration, _last_user_for_confide,
-                                                  _house, endpoint_url, model, headers, owner)
+                        if await _auto_expose_secret(_turn_narration, _last_user_for_confide,
+                                                     _house, endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — only an exposeSecret the belt actually FIRED counts
+                            _note_belt(owner, "auto-expose-secret")
                     # 0099: the player traded a secret they already know to a specific houseguest but the
                     # model never called tradeSecret. Same shape — the ENGINE decides whether the
                     # recipient bites; the extraction is grounded in the player's known facts + the live
                     # roster only. Model-driven tradeSecret always wins.
                     if _want_trade and _touched_deal:
                         _turn_trade_nudges += 1  # once per turn
-                        _note_belt(owner, "auto-trade-secret")  # gap #3 telemetry
-                        await _auto_trade_secret(_turn_narration, _last_user_for_confide,
-                                                 _house, endpoint_url, model, headers, owner)
+                        if await _auto_trade_secret(_turn_narration, _last_user_for_confide,
+                                                    _house, endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — only a tradeSecret the belt actually FIRED counts
+                            _note_belt(owner, "auto-trade-secret")
                     if _want_record and _touched and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN:
                         _turn_record_nudges += 1  # once per turn
-                        _note_belt(owner, "auto-record-scene")  # gap #3 telemetry
-                        await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
-                                                 _house, endpoint_url, model, headers, owner)
+                        if await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
+                                                    _house, endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — only a recordInteraction the belt actually FIRED
+                            # counts (a withIds:[] extraction / failed call is a no-op)
+                            _note_belt(owner, "auto-record-scene")
                         # the scene is banked (or was genuinely solo) — end the turn normally.
                 # BLANK-TURN GUARD (audit 2026-06-18): the model sometimes emits only planning-as-
                 # content ("Let me get the lay of the land…") and stops with no tools — the scrub

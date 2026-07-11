@@ -13,6 +13,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from src.constants import MAX_OUTPUT_CHARS, MAX_READ_CHARS
+from src.orwell_sync_ledger import note_belt as _sync_ledger_note_belt  # gap #3 telemetry (never raises)
 from core.constants import internal_api_base
 
 
@@ -4891,11 +4892,9 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                         "(set ORWELL_ALLOW_FLOOR_START=1 to override).",
                         owner, ready.get("authored"), ready.get("total"))
                     _authoring_gate.record_house_entry_gate_block(owner, ready)
-                    try:  # gap #3 belt-fire telemetry (docs/design/undercall-seam-structural.md §5)
-                        from src import orwell_sync_ledger as _led_belt
-                        _led_belt.note_belt_fire(owner, "house-entry-gate-hold")
-                    except Exception:
-                        pass
+                    # gap #3 belt-fire telemetry (docs/design/undercall-seam-structural.md §5;
+                    # note_belt never raises)
+                    _sync_ledger_note_belt(owner, "house-entry-gate-hold")
                     # The early holding return below SKIPS the post-start block (the 0062 zeitgeist
                     # capture). Arm the background gate-clear watch: it keeps polling authoring and,
                     # the moment the cast is ready, clears the holding overlay, runs the deferred

@@ -164,6 +164,13 @@ def test_agent_loop_note_belt_counts_into_the_ledger():
 
 # ── source pins: every named belt call site notes its fire ──────────────────────────────────
 # The registry of stable belt tokens lives in docs/design/undercall-seam-structural.md §5.
+# Tightened (CodeRabbit, PR #1377): each token must appear as the BELT ARGUMENT of an actual
+# note-belt CALL expression — `…note_belt*(<user-ident>, "token"…)` — so a comment or docstring
+# mention can never satisfy the pin. Matches `_note_belt`, `note_belt_fire`, and the shared
+# `note_belt` wrapper (incl. the `_sync_ledger_note_belt` import alias), with `owner`/`user`/
+# `_force_owner` as the first argument.
+
+import re
 
 
 def _src(rel):
@@ -171,12 +178,20 @@ def _src(rel):
         return fh.read()
 
 
-def test_every_agent_loop_belt_notes_its_fire():
+def _assert_belt_call(src, token, where):
+    """Assert `token` (a belt-name string literal, opening quote included) appears as the
+    second argument of a real note-belt call — not merely anywhere in the file."""
+    pat = re.compile(
+        r'note_belt(?:_fire)?\(\s*(?:owner|user|_force_owner)\s*,\s*' + re.escape(token))
+    assert pat.search(src), f"belt telemetry CALL site missing in {where}: {token}"
+
+
+def test_every_agent_loop_belt_notes_its_fire_as_a_real_call():
     src = _src("src/agent_loop.py")
     for token in (
         '"advance-stall-nudge"',
         '"forced-advance:"',              # _commit_advance_silently (preview-commit / stall / forced-stall)
-        '"forced-tool-choice:"',          # #1154 live force
+        '"forced-tool-choice:"',          # #1154 live force (concat with the forced tool's name)
         '"forced-tool-choice:" + _CASTING_FINALIZE_TOOL',  # the gap-#3 casting force
         '"auto-record-scene"',
         '"auto-record-deal"',
@@ -192,12 +207,40 @@ def test_every_agent_loop_belt_notes_its_fire():
         '"eviction-reveal-steer"',
         '"ceremony-narration-steer"',
     ):
-        assert token in src, f"belt telemetry call site missing in agent_loop.py: {token}"
+        _assert_belt_call(src, token, "agent_loop.py")
 
 
-def test_framing_and_gate_belts_note_their_fire():
+def test_framing_and_gate_belts_note_their_fire_as_real_calls():
     ch = _src("routes/chat_helpers.py")
-    assert '"pre-resolve-npc-ceremony"' in ch
-    assert '"headshot-on-file-framing"' in ch
+    _assert_belt_call(ch, '"pre-resolve-npc-ceremony"', "chat_helpers.py")
+    _assert_belt_call(ch, '"headshot-on-file-framing"', "chat_helpers.py")
     ti = _src("src/tool_implementations.py")
-    assert '"house-entry-gate-hold"' in ti
+    _assert_belt_call(ti, '"house-entry-gate-hold"', "tool_implementations.py")
+
+
+def test_success_gated_belts_fire_only_after_the_helper_applied():
+    """CodeRabbit MAJOR (PR #1377): a no-op/failed extraction must never count as a belt fire —
+    that would poison the exact measurement this telemetry exists to create. Pin the shape:
+    each success-gated belt's note call sits AFTER its awaited helper in source order (inside
+    the success branch), never before it, and the once-per-turn counter still precedes the
+    helper call (cap behavior preserved)."""
+    src = _src("src/agent_loop.py")
+    for helper, token in (
+        ("_auto_move_player", '"auto-move-player"'),
+        ("_auto_move_npc", '"auto-move-npc"'),
+        ("_auto_record_deal", '"auto-record-deal"'),
+        ("_auto_confide", '"auto-confide"'),
+        ("_auto_expose_secret", '"auto-expose-secret"'),
+        ("_auto_trade_secret", '"auto-trade-secret"'),
+        ("_auto_record_scene", '"auto-record-scene"'),
+    ):
+        note_at = src.index("_note_belt(owner, " + token)
+        # The nearest awaited helper call BEFORE the note must be this belt's own helper —
+        # i.e. the note fires after (and therefore gated on) the helper's result.
+        call_at = src.rindex("await " + helper + "(", 0, note_at)
+        between = src[call_at:note_at].replace("await " + helper + "(", "", 1)
+        assert "await _auto_" not in between, (
+            f"{token}: note is not adjacent to its own helper's success branch")
+        # And the belt's once-per-turn counter increment still precedes the helper call.
+        assert re.search(r"_turn_\w+ \+= 1", src[max(0, call_at - 600):call_at]), (
+            f"{token}: once-per-turn counter increment missing before the helper call")
