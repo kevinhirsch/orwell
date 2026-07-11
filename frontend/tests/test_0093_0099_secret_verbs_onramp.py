@@ -128,7 +128,7 @@ class _FakeBlock:
 def test_expose_secret_dispatches_to_the_engine_not_unknown_tool(monkeypatch):
     seen = {}
 
-    async def fake_expose(fact_id=None, bluff=False, subject=None, expected_beat_seq=None, user=None):
+    async def fake_expose(fact_id=None, bluff=False, subject=None, expected_beat_seq=None, idempotency_key=None, user=None):
         seen.update(fact_id=fact_id, bluff=bluff, subject=subject, user=user)
         return {"exposed": True}
 
@@ -144,7 +144,7 @@ def test_trade_secret_dispatches_to_the_engine_not_unknown_tool(monkeypatch):
     seen = {}
 
     async def fake_trade(to_npc_id, fact_id=None, bluff=False, subject=None, ask_kind=None,
-                         expected_beat_seq=None, user=None):
+                         expected_beat_seq=None, idempotency_key=None, user=None):
         seen.update(to_npc_id=to_npc_id, fact_id=fact_id, ask_kind=ask_kind, user=user)
         return {"accepted": True}
 
@@ -213,7 +213,7 @@ def test_trade_secret_forwards_fact_id_and_ask_kind(monkeypatch):
 # ============================================================================================
 
 def test_do_expose_secret_forwards_fact_id(monkeypatch):
-    async def fake_expose(fact_id=None, bluff=False, subject=None, expected_beat_seq=None, user=None):
+    async def fake_expose(fact_id=None, bluff=False, subject=None, expected_beat_seq=None, idempotency_key=None, user=None):
         return {"exposed": True, "fact_id": fact_id}
 
     monkeypatch.setattr(orwell_engine, "expose_secret", fake_expose)
@@ -231,7 +231,7 @@ def test_do_trade_secret_forwards_all_fields(monkeypatch):
     seen = {}
 
     async def fake_trade(to_npc_id, fact_id=None, bluff=False, subject=None, ask_kind=None,
-                         expected_beat_seq=None, user=None):
+                         expected_beat_seq=None, idempotency_key=None, user=None):
         seen.update(to_npc_id=to_npc_id, fact_id=fact_id, ask_kind=ask_kind)
         return {"accepted": True}
 
@@ -282,7 +282,7 @@ def _wire_expose(monkeypatch, extraction_json, exposes, vis=None):
     async def fake_vis(user=None):
         return vis if vis is not None else KNOWN_FACTS_VIS
 
-    async def fake_expose(fact_id=None, bluff=False, subject=None, expected_beat_seq=None, user=None):
+    async def fake_expose(fact_id=None, bluff=False, subject=None, expected_beat_seq=None, idempotency_key=None, user=None):
         exposes.append({"factId": fact_id, "user": user})
         return {"exposed": True}
 
@@ -381,7 +381,7 @@ def _wire_trade(monkeypatch, extraction_json, trades, vis=None):
         return vis if vis is not None else KNOWN_FACTS_VIS
 
     async def fake_trade(to_npc_id, fact_id=None, bluff=False, subject=None, ask_kind=None,
-                         expected_beat_seq=None, user=None):
+                         expected_beat_seq=None, idempotency_key=None, user=None):
         trades.append({"toNpcId": to_npc_id, "factId": fact_id, "askKind": ask_kind, "user": user})
         return {"accepted": True}
 
@@ -485,7 +485,7 @@ def test_expose_and_trade_belts_are_wired_into_the_finishing_block():
     assert "async def _auto_expose_secret" in js
     assert "async def _auto_trade_secret" in js
     # routed through the CAS helper (0065 beatSeq compare-and-swap)
-    assert "_backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner, defer_fold=True)" in js
+    assert "_backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner,\n                                       defer_fold=True,\n                                       idempotency_key=_ch_idem._mint_idempotency_key())" in js
     assert "_backfill_with_cas(owner, _oe.trade_secret, to_npc_id, fact_id=fact_id," in js
     # gated on: model didn't call it itself (per-turn cap) + the cheap signal pre-filter
     assert "_want_expose = (_turn_expose_nudges < 1" in js
