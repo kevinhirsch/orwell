@@ -1,5 +1,6 @@
 import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
+  RecallSceneMemoriesReq, RecallSceneMemoriesView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
@@ -1157,6 +1158,19 @@ export class GameSessionAdapter implements GameSession {
   /** Wire the engine-only soul store (0041) so the live loop deepens souls + can recall (0024). */
   setSoul(soul: SoulProvider): void {
     this.soul = soul;
+  }
+
+  /**
+   * Feature #1394 — the Vault-free scene-memory recall closure, wired by the registry from the
+   * OUTWARD `VisibleStateService` (the player's witness-filtered projection) + the shared embedder.
+   * The provenance lives at the wiring site ON PURPOSE: this adapter never reaches the Vault or the
+   * raw event store for recall — it delegates to a closure that reads only the player projection.
+   * Unwired ⇒ recall returns `[]` (a standalone adapter / test with no live projection).
+   */
+  private sceneRecall?: (npcIds: readonly EntityId[], cue: string) => string[];
+
+  setSceneRecall(fn: (npcIds: readonly EntityId[], cue: string) => string[]): void {
+    this.sceneRecall = fn;
   }
 
   /** Reserve-twist slots for a new game (0016 knob: the admin sets the COUNT, never the content). */
@@ -8514,6 +8528,20 @@ export class GameSessionAdapter implements GameSession {
         this.freshSurfacedFacts(),
       ),
     };
+  }
+
+  /**
+   * Feature #1394 — recall the Vault-free witnessed moments involving the scene's houseguest(s),
+   * ranked by relevance to the cue. Delegates to the registry-wired `sceneRecall` closure, which reads
+   * ONLY the player's `VisibleStateService` projection — so nothing hidden can ever be returned. A pure
+   * READ (no beatSeq bump, no persist). Empty `withIds`/`cue`, no wired closure, or no relevant history
+   * ⇒ `{ moments: [] }` (the enrichment policy: recall absence is not a failure).
+   */
+  recallSceneMemories(req: RecallSceneMemoriesReq): RecallSceneMemoriesView {
+    const npcIds = (req.withIds ?? []).filter((id) => typeof id === "string" && id.length > 0);
+    const cue = typeof req.cue === "string" ? req.cue : "";
+    if (npcIds.length === 0 || cue.trim().length === 0 || !this.sceneRecall) return { moments: [] };
+    return { moments: this.sceneRecall(npcIds, cue) };
   }
 
   /**
