@@ -1782,7 +1782,11 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       // the following advance — Day 1 HOH → Day 2 noms (WEEKLY_CADENCE), never a fast-forward. GATED, so a
       // clock-off / calibration game skips this entirely ⇒ byte-identical. (ADR 0006: a diegetic day
       // boundary, not a curfew — it never interrupts an engaged scene, it just seats the ceremony a day on.)
-      if (ctx.nightGate && !s.preNomsNightPassed) {
+      // TWIST GUARD (all four cadence gates): a RUNNING double eviction is a single COMPRESSED night by
+      // design (`rollWeek` re-arms these flags before flipping the twist to "running"), so the re-armed
+      // gates must NOT fire during it — that would stretch the same-night second cycle across days. Skip
+      // every day-break while `s.twist?.phase === "running"`; the ordinary (non-twist) week is untouched.
+      if (ctx.nightGate && !s.preNomsNightPassed && s.twist?.phase !== "running") {
         s.preNomsNightPassed = true;
         crossToNextDay(s);
         return {
@@ -1810,7 +1814,7 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       // Phase 3a NIGHT-GATE: the veto comp is its own day (Day 3, after nominations on Day 2). The first
       // advance into it crosses the night as a one-shot diegetic day-break, before the chip draw. GATED on
       // the clock ⇒ a clock-off calibration game skips it ⇒ byte-identical.
-      if (ctx.nightGate && !s.preVetoNightPassed && !s.vetoField) {
+      if (ctx.nightGate && !s.preVetoNightPassed && !s.vetoField && s.twist?.phase !== "running") {
         s.preVetoNightPassed = true;
         crossToNextDay(s);
         return {
@@ -1828,7 +1832,7 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     }
     case "veto-ceremony": {
       // Phase 3a NIGHT-GATE: the veto ceremony is its own day (Day 4). One-shot day-break before it resolves.
-      if (ctx.nightGate && !s.preVetoCeremonyNightPassed) {
+      if (ctx.nightGate && !s.preVetoCeremonyNightPassed && s.twist?.phase !== "running") {
         s.preVetoCeremonyNightPassed = true;
         crossToNextDay(s);
         return {
@@ -1862,7 +1866,7 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     case "eviction": {
       // Phase 3a NIGHT-GATE: eviction is its own day (Day 5). One-shot day-break before the reveal begins —
       // guarded on `!s.eviction` so a mid-reveal re-entry never re-fires it. GATED on the clock (byte-identical off).
-      if (ctx.nightGate && !s.preEvictionNightPassed && !s.eviction) {
+      if (ctx.nightGate && !s.preEvictionNightPassed && !s.eviction && s.twist?.phase !== "running") {
         s.preEvictionNightPassed = true;
         crossToNextDay(s);
         return {
