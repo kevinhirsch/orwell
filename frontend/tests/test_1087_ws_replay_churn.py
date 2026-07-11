@@ -23,6 +23,9 @@ via the shared ws_harness. Roles only; no names.
 """
 import asyncio
 import importlib
+import os
+import shutil
+import subprocess
 
 import pytest
 
@@ -256,3 +259,120 @@ def test_run_ids_are_distinct_per_run(run):
         await H.aclose_runs()
 
     run(main())
+
+
+# ── #1087 CLIENT half — the QUEUED-RUN attach (orwellWs.js) ─────────────────────────────────────────
+#
+# A run queued behind the one a window is tailing publishes its ONLY `run-started` edge UP-FRONT:
+# `ws_routes._handle_turn` calls `agent_runs.start(..., queue=True)` (which replaces `_RUNS[canonical]`
+# with the queued run immediately, so `run_id()` already names IT) then `session_events.publish(
+# canonical, "run-started")` — but the queued run does not STREAM until the active run drains, and no
+# second edge ever follows. The tailing window can't attach mid-run (that tears the active tail down),
+# so it must REMEMBER the queued run's id and attach when the active run's `done` frees the tail.
+# Pre-fix the edge was dropped (`_chatTailActive` still true) and, with no later edge, every peer
+# window silently MISSED the queued turn. Driven against the REAL orwellWs.js in Node (stubbed WS) —
+# the same harness idiom as test_ws_run_started_reattach.py. Roles only; no names.
+
+_STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "js")
+
+_QUEUED_RUN_HARNESS = r"""
+const fs = require("node:fs");
+const src = fs.readFileSync(process.argv[1], "utf8");
+function assert(c, m) { if (!c) { throw new Error("ASSERT: " + m); } }
+process.on("unhandledRejection", (e) => { console.error(e); process.exit(1); });
+const tick = () => new Promise((r) => setImmediate(r));
+let lastSock = null;
+
+function boot() {
+  global.CustomEvent = function (t, i) { this.type = t; this.detail = i && i.detail; };
+  global.WebSocket = function (url) {
+    this.url = url; this.readyState = 0; this.sent = [];
+    this.send = (s) => this.sent.push(JSON.parse(s));
+    this.close = () => { this.readyState = 3; };
+    lastSock = this;
+  };
+  const listeners = {};
+  global.window = {
+    API_BASE: "", ORWELL_WS_TRANSPORT: true,
+    addEventListener(name, fn) { (listeners[name] = listeners[name] || []).push(fn); },
+    removeEventListener() {},
+    dispatchEvent(e) { (listeners[e.type] || []).forEach((fn) => { try { fn(e); } catch (_) {} }); return true; },
+    location: { protocol: "https:", host: "example.test" },
+    sessionModule: { getCurrentSessionId() { return "sess_pertab"; } },
+  };
+  global.document = { readyState: "complete", body: { dataset: { gameBuild: "1" } }, addEventListener() {} };
+  global.window.document = global.document;
+  delete global.window.OrwellWs;
+  (0, eval)(src);
+  return global.window.OrwellWs;
+}
+function chatSubs() { return lastSock.sent.filter((f) => f.t === "subscribe" && f.ch === "chat"); }
+function down(frame) { lastSock.onmessage({ data: JSON.stringify(frame) }); }
+async function handshake(runId) {
+  lastSock.readyState = 1; lastSock.onopen();
+  const hello = lastSock.sent.find((f) => f.t === "hello");
+  down({ t: "ack", cid: hello.cid, d: { canonicalId: "sess_pertab", live: true, beatSeq: 1 } });
+  await tick();
+  const sub = chatSubs()[0];   // the initial chat subscribe attached to the live run
+  down({ t: "ack", ch: "chat", cid: sub.cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: runId } });
+  await tick();
+}
+
+(async function main() {
+  const WS = boot();
+  await tick();
+  await handshake("rA");           // tailing the ACTIVE run rA
+  down({ t: "event", ch: "chat", seq: 0, d: { delta: "active..." } });   // rA is mid-stream
+  await tick();
+  const before = chatSubs().length;
+  assert(before === 1, "one initial chat subscribe before the queued run; got " + before);
+
+  // A SECOND turn queues behind rA — its run-started edge (the QUEUED run's id) arrives WHILE we tail rA.
+  down({ t: "state", ch: "state", d: { beatSeq: 2, reason: "run-started", runId: "rB" } });
+  await tick();
+  assert(chatSubs().length === before,
+    "a queued run's edge must NOT tear down the active tail (no immediate re-subscribe); got " + chatSubs().length);
+  assert(WS.pendingRunId() === "rB",
+    "the queued run's id must be REMEMBERED while the active run tails; got " + WS.pendingRunId());
+
+  // rA finishes — the remembered queued run attaches NOW (its single edge never repeats).
+  down({ t: "event", ch: "chat", seq: 1, d: { done: true } });
+  await tick();
+  assert(chatSubs().length === before + 1,
+    "the queued run must attach after the active run's done; got " + chatSubs().length);
+  assert(chatSubs()[before].d.fromSeq === 0, "the queued run attaches from seq 0 (fresh per-run buffer)");
+  assert(WS.pendingRunId() === null, "the pending slot is cleared once drained; got " + WS.pendingRunId());
+  assert(WS.lastRunId() === "rB", "the newly-attached run becomes the reconcile-by-id anchor; got " + WS.lastRunId());
+
+  // …and once the queued run renders to its `done`, its OWN stale replay is inert (no re-churn).
+  const sub2 = chatSubs()[before];
+  down({ t: "ack", ch: "chat", cid: sub2.cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: "rB" } });
+  down({ t: "event", ch: "chat", seq: 0, d: { delta: "queued..." } });
+  down({ t: "event", ch: "chat", seq: 1, d: { done: true } });
+  await tick();
+  down({ t: "state", ch: "state", d: { beatSeq: 3, reason: "run-started", runId: "rB" } });
+  await tick();
+  assert(chatSubs().length === before + 1,
+    "after rendering the queued run, its replayed edge must be ignored (no churn); got " + chatSubs().length);
+
+  console.log("OK");
+  process.exit(0);
+})();
+"""
+
+
+def test_client_remembers_and_attaches_a_queued_run_after_done():
+    """#1087 CLIENT half: a `run-started` edge for a run QUEUED behind the active one arrives while the
+    window is still tailing (ws_routes publishes it up-front, stamped with the queued run's id). The
+    client must REMEMBER it (not tear down the active tail, not drop it) and attach when the active
+    run's `done` frees the tail — otherwise every peer window silently misses the queued turn. Driven
+    against the REAL orwellWs.js in Node with a stubbed WebSocket (fail-before / pass-after)."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available for the behavioral queued-run attach check")
+    proc = subprocess.run(
+        [node, "-e", _QUEUED_RUN_HARNESS, os.path.join(_STATIC, "orwellWs.js")],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, f"node failed: {proc.stdout}\n{proc.stderr}"
+    assert "OK" in proc.stdout
