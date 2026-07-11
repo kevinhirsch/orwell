@@ -26,6 +26,21 @@ const REDUCED_MOTION = (() => {
 const VALID_SOURCES = new Set(['gradient', 'photo', 'particles', 'bundled']);
 const GRADIENT_PRESETS = new Set(['sunset', 'aurora', 'ocean', 'gold', 'lavender']);
 
+// #764 — particle-canvas PERF BUDGET. On a constrained device (a COARSE pointer or
+// a SMALL viewport — small GPUs, and the O(N²) neighbour-link pass is the cost) cap
+// the particle COUNT well below the configured density so the animated login stays
+// cheap. Mirrors theme.js LOWEND_VIEWPORT_W / liquidGlass.js MOBILE_W (one "small"
+// definition across the glass tier).
+const LOWEND_VIEWPORT_W = 768;
+const LOWEND_PARTICLE_CAP = 32;   // hard cap on particle COUNT for a low-end login
+function _isLowEndEnv() {
+  try {
+    const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    const small = (window.innerWidth || 1280) <= LOWEND_VIEWPORT_W;
+    return coarse || small;
+  } catch (_) { return false; }
+}
+
 function _clamp(n, lo, hi, dflt) {
   n = Number(n);
   if (!isFinite(n)) return dflt;
@@ -171,7 +186,13 @@ function _mountParticles(host, { animate, particles, gradient }) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
 
-  const N = Math.round(particles.density);
+  // #764: on a low-end / constrained environment, cap the particle COUNT well below
+  // the configured density (the O(N²) link pass is what bites); a capable device
+  // keeps the full field.
+  const _lowEnd = _isLowEndEnv();
+  const N = Math.max(1, Math.round(
+    _lowEnd ? Math.min(particles.density, LOWEND_PARTICLE_CAP) : particles.density
+  ));
   const SPEED = particles.speed;
   const COLOR = particles.color;
   let raf = 0, w = 0, h = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -214,6 +235,10 @@ function _mountParticles(host, { animate, particles, gradient }) {
     }
   }
   function step() {
+    // #764: PAUSE the render loop while the tab is hidden — a backgrounded login tab
+    // must never burn the O(N²) link pass every frame. raf=0 marks it stopped; the
+    // visibilitychange handler below re-schedules step() when the tab returns.
+    if (document.hidden) { raf = 0; return; }
     for (const p of pts) {
       p.x += p.vx; p.y += p.vy;
       if (p.x < 0 || p.x > w) p.vx *= -1;
@@ -224,6 +249,15 @@ function _mountParticles(host, { animate, particles, gradient }) {
   }
   reset(); seed();
   if (animate) { step(); } else { draw(); }
+  // #764: resume the animated loop when the tab becomes visible again (only the
+  // animated login field has a loop; the still in-app field never scheduled one).
+  if (animate) {
+    try {
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && !raf) { raf = requestAnimationFrame(step); }
+      });
+    } catch (_) { /* noop */ }
+  }
   let rt = 0;
   window.addEventListener('resize', () => {
     clearTimeout(rt);
