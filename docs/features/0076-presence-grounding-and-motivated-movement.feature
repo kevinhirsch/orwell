@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 Feature: 0076 — Presence grounding & motivated movement
   The narrator stops inventing the room. Who is present and who exists are closed-set facts the
   engine owns and feeds every turn; the model voices the scene but never authors the roster or the

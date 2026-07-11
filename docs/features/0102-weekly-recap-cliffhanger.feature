@@ -1,3 +1,4 @@
+# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
 # BUILT 2026-07-05 as the REDESIGNED daily recap (#884, PO ruling 2026-06-27) — the WEEKLY mechanic
 # below was superseded before it shipped and was never wired into cucumber.cjs. The shipped daily
 # analog fires at the player's own bedtime (`turnIn`) rather than the week-roll: same two Vault-free

@@ -197,10 +197,10 @@ describe("0070 — off-screen texture enrichment reaches the engine over the MCP
     if (skeletons.length === 0) return;
     // Write texture.
     sb.session.recordOffscreenSceneTexture({ eventId: skeletons[0]!.eventId, content: "EDGE-TEST" });
-    // Verify the non-texture, non-beatSeq parts are unchanged: the relationship store, house, and
-    // events are the same as before — only textureOverrides and beatSeq (commit counter) differ.
-    // The test checks the relationship store directly (not via JSON comparison of the whole snapshot,
-    // which would include the beatSeq bump from the texture persist() call).
+    // Verify the non-texture parts are unchanged: the relationship store, house, and events are the
+    // same as before — only textureOverrides differs. The texture write-back routes through the
+    // `backgroundPersist` seam (R-BND #628), so `beatSeq` does NOT move either — that invariant is
+    // pinned end-to-end in tests/unit/backgroundPersistBeatSeq.test.ts.
     const snapAfter = sb.session.snapshot();
     // textureOverrides is set.
     expect(snapAfter.textureOverrides).toBeDefined();
