@@ -122,14 +122,17 @@ def test_move_keys_gated_on_keyboard_move_availability():
     """aria-keyshortcuts must only be set when the window is actually keyboard-movable
     (draggable + floating), matching the _onTitlebarKey handler — no over-promising a
     shortcut on a docked/non-draggable window (F-A11Y-4)."""
-    # The set-call sits inside a `this.o.draggable && !docked` guard.
+    # The set-call sits inside a `this.o.draggable && !docked && !sheet` guard —
+    # #893 extended the gate: a sheet-presented window has no XY move either, so
+    # advertising arrow-move keys on it would over-promise exactly the same way.
     m = re.search(
-        r"if\s*\(\s*this\.o\.draggable\s*&&\s*!docked\s*\)\s*\{[^}]*aria-keyshortcuts",
+        r"if\s*\(\s*this\.o\.draggable\s*&&\s*!docked\s*&&\s*!sheet\s*\)\s*\{[^}]*aria-keyshortcuts",
         WINDOW_JS,
         re.DOTALL,
     )
     assert m, (
-        "aria-keyshortcuts must be gated on `this.o.draggable && !docked` (F-A11Y-4)"
+        "aria-keyshortcuts must be gated on `this.o.draggable && !docked && !sheet` "
+        "(F-A11Y-4; #893 — a sheet has no keyboard move to advertise)"
     )
 
 

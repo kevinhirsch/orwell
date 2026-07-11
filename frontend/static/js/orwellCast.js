@@ -293,6 +293,11 @@
       // pin" (two portraits) below stays a separate, lighter affordance. Default
       // floating; the poll keeps running across a dock re-home (onClose is suppressed).
       dockable: true, defaultDocked: false,
+      // #893: on phones the full roster presents as a bottom SHEET (grabber +
+      // medium/full detents + swipe-dismiss) via the kit's sheet presentation
+      // mode — non-modal windows opt in explicitly; docked still wins, and the
+      // desktop tier keeps the floating slot window.
+      sheet: true,
       content,
       onClose: () => {
         _win = null; _open = false;
