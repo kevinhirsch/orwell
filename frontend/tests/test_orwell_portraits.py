@@ -146,12 +146,32 @@ def test_portraits_start_immediately_not_chained_behind_authoring(tmp_portraits,
 # The fix: after the gated warm, if portraits still didn't start, fall through to the same
 # unconditional seeded-facet `kickoff_generation` the no-prewarm branch uses, so faces start at
 # season start, not on cast-window open.
+#
+# #1336 (deliberate update): the unconditional seeded-facet fall-through is the GATE-OFF path only
+# (no utility model resolves / ORWELL_ALLOW_FLOOR_START — the deterministic floor IS the final cast).
+# Under a resolvable model (house-entry gate ON) the fall-through must follow the SAME per-NPC
+# authoring gate as the no-prewarm fallback — no floor face for an un-authored NPC (ADR 0013); the
+# gate-ON half lives in test_adr0013_photo_requires_authoring.py. These three tests pin the gate-OFF
+# half explicitly (they also ran gate-OFF before — no model resolves in the test env — but the stub
+# makes the pinned branch unambiguous).
+
+
+def _gate_off(monkeypatch):
+    """Pin the house-entry gate OFF for the #976 gate-OFF-path tests (explicit, not incidental)."""
+    ca = importlib.import_module("src.orwell_cast_authoring")
+
+    async def _off(owner):
+        return False
+    monkeypatch.setattr(ca, "house_entry_gate_active", _off)
+
 
 def test_prewarmed_branch_falls_through_to_kickoff_when_warm_declines(tmp_portraits, monkeypatch):
     """#976 — prewarmed, but the gated portrait warm declines/no-ops (portraitsStarted stays false):
-    createCharacter must STILL kick `kickoff_generation` immediately, not defer to the backfill."""
+    with the house-entry gate OFF, createCharacter must STILL kick `kickoff_generation` immediately,
+    not defer to the backfill."""
     tool_impl = importlib.import_module("src.tool_implementations")
     prewarm = importlib.import_module("src.orwell_prewarm")
+    _gate_off(monkeypatch)
 
     async def fake_create(*a, **k):
         return {"started": True, "portraitPrompts": _PROMPTS}
@@ -191,6 +211,7 @@ def test_prewarmed_branch_does_not_double_shoot_when_warm_started_portraits(tmp_
     fall-through must NOT also fire `kickoff_generation` (no duplicate generation / double budget)."""
     tool_impl = importlib.import_module("src.tool_implementations")
     prewarm = importlib.import_module("src.orwell_prewarm")
+    _gate_off(monkeypatch)
 
     async def fake_create(*a, **k):
         return {"started": True, "portraitPrompts": _PROMPTS}
@@ -220,6 +241,7 @@ def test_prewarmed_fall_through_is_fail_soft_with_no_image_provider(tmp_portrait
     pipeline; with NO image provider it is a silent no-op that NEVER raises / blocks game start."""
     tool_impl = importlib.import_module("src.tool_implementations")
     prewarm = importlib.import_module("src.orwell_prewarm")
+    _gate_off(monkeypatch)
 
     async def fake_create(*a, **k):
         return {"started": True, "portraitPrompts": _PROMPTS}

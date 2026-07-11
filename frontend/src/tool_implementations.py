@@ -4649,6 +4649,20 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             confirm_restart = True          # post-season createCharacter IS the restart
     except Exception:
         pass  # state probe is best-effort; never block a legitimate first-time creation
+    # #1313 — is the HOUSE-ENTRY authoring gate active for this start? ON iff a real utility
+    # model resolves (cast authoring CAN run) and the operator hasn't set
+    # ORWELL_ALLOW_FLOOR_START=1. Computed BEFORE the create (#1336 residual 1): the gate
+    # decision only resolves the utility model — independent of the create result — and hoisting
+    # it lets the hold marker be stamped SYNCHRONOUSLY with the committed create result below
+    # (no await in between), so a concurrent /status or /state poll can never land in the gap
+    # between the engine flipping started=True and the overlay latch engaging.
+    _gate_on = False
+    try:
+        from src import orwell_cast_authoring as _authoring_gate
+        _gate_on = await _authoring_gate.house_entry_gate_active(owner)
+    except Exception:
+        _gate_on = False
+    _floor_shoot_ok = not _gate_on
     try:
         res = await orwell_engine.create_character(
             player_name,
@@ -4672,6 +4686,19 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             keep_character=keep_character,  # 0056: carry the same houseguest forward when asked
             user=owner,
         )
+        # #1336 residual (1) — the STATUS-POLL race latch. The engine season is live the instant
+        # the create above commits, but the gate hold used to be marked only inside the gate block
+        # further down — AFTER the portrait section's awaits — so a concurrent /status or /state
+        # poll could land in that gap and claim a started game the player was told is still being
+        # cast. Stamp the hold HERE, synchronously with receiving the committed result (zero awaits
+        # in between), so the routes' _house_entry_overlay engages from the first possible poll.
+        # The gate block below re-stamps it before the readiness wait (idempotent) and owns the
+        # clear/refuse; the exception handler there also clears a stuck marker.
+        if _gate_on and isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
+            try:
+                _authoring_gate.begin_house_entry_hold(owner)
+            except Exception:
+                pass
         # D3/E66 + restart-door hygiene: a NEW season must not inherit the finished season's
         # decision card. The casting card carries no `pending`, so this clears _LAST_PENDING for
         # the user — without it, the restart door (createCharacter → registry.resetUser) leaves a
@@ -4703,22 +4730,14 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         # facet is never re-shot, so the immediate pass wins for the fast ones and the authored
         # facet only fills the slower ones). Both paths are best-effort: a missing model (chat OR
         # image) is a silent no-op and the game start NEVER blocks on either.
-        # #1313 — is the HOUSE-ENTRY authoring gate active for this start? ON iff a real utility
-        # model resolves (cast authoring CAN run) and the operator hasn't set
-        # ORWELL_ALLOW_FLOOR_START=1. When ON we (a) do NOT immediately floor-shoot portraits from
-        # the seeded facets — that raced authoring and won every time, so authored identities never
-        # reached the faces (ADR 0013 bypass); instead each face follows its own per-NPC authoring
-        # gate; and (b) HOLD house entry below until the cast is FULLY authored (15/15 — PO ruling
-        # 2026-07-10: the seeded floor is never a viable cast identity in prod). When OFF (no
-        # model, or the escape hatch) authoring can never run, so the deterministic floor IS the cast
-        # — floor-shoot immediately and start instantly, byte-identical to before.
-        _gate_on = False
-        try:
-            from src import orwell_cast_authoring as _authoring_gate
-            _gate_on = await _authoring_gate.house_entry_gate_active(owner)
-        except Exception:
-            _gate_on = False
-        _floor_shoot_ok = not _gate_on
+        # #1313 — the house-entry gate (`_gate_on`, computed above the create). When ON we (a) do
+        # NOT immediately floor-shoot portraits from the seeded facets — that raced authoring and
+        # won every time, so authored identities never reached the faces (ADR 0013 bypass); instead
+        # each face follows its own per-NPC authoring gate; and (b) HOLD house entry below until the
+        # cast is FULLY authored (15/15 — PO ruling 2026-07-10: the seeded floor is never a viable
+        # cast identity in prod). When OFF (no model, or the escape hatch) authoring can never run,
+        # so the deterministic floor IS the cast — floor-shoot immediately and start instantly,
+        # byte-identical to before.
         try:
             prompts = res.get("portraitPrompts") if isinstance(res, dict) else None
             cast = res.get("house") if isinstance(res, dict) else None
@@ -4741,11 +4760,20 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 # DECLINES outright if author warm never actually started. #976: at unseal that left faces
                 # deferred to the lazy cast-window backfill whenever the warm-gate no-op'd. So always TRY
                 # the gated warm, then VERIFY it actually started portraits — if it declined / didn't
-                # (portraitsStarted still false), fall through to the same unconditional seeded-facet kick
-                # the no-prewarm branch uses, so generation begins immediately at season start. Idempotent
-                # (generate_and_store skips faces already on disk), budget-bounded (routes through the
-                # standard pipeline), fail-soft (no image provider ⇒ silent no-op), Vault-free (the same
-                # public-facet prompts). The background authored-portrait top-up below still runs.
+                # (portraitsStarted still false), fall through so generation begins at season start.
+                # #1336 (the #976 fall-through's ADR-0013 carve-out, same class as the #1313 fallback
+                # fix): the fall-through is SPLIT by the house-entry gate —
+                #   • gate OFF (no utility model resolves / escape hatch): the deterministic floor IS
+                #     the final cast, so the original unconditional seeded-facet kick fires (a floor
+                #     face can never mismatch a later authored one) — byte-identical to before;
+                #   • gate ON (a real utility model resolves): authoring CAN land richer identities,
+                #     so NO floor face may be shot — each face follows the SAME per-NPC authoring gate
+                #     (`on_authored`) the no-prewarm fallback uses. The decline means the prewarm's
+                #     author warm never truly started, so nothing else owns authoring: (re-)kick it
+                #     and shoot each face ONLY on its own authored write-back.
+                # Idempotent (generate_and_store skips faces already on disk), budget-bounded (routes
+                # through the standard pipeline), fail-soft (no image provider ⇒ silent no-op),
+                # Vault-free (the same public-facet prompts).
                 portraits_started = False
                 try:
                     from src import orwell_prewarm
@@ -4755,11 +4783,28 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 except Exception:
                     portraits_started = False
                 if not portraits_started and prompts:
-                    try:
-                        from src import orwell_portraits
-                        orwell_portraits.kickoff_generation(prompts, owner)
-                    except Exception:
-                        pass  # immediate kick is best-effort — never let it affect game start
+                    if _floor_shoot_ok:
+                        try:
+                            from src import orwell_portraits
+                            orwell_portraits.kickoff_generation(prompts, owner)
+                        except Exception:
+                            pass  # immediate kick is best-effort — never let it affect game start
+                    elif cast:
+                        try:
+                            from src import orwell_cast_authoring
+                            from src import orwell_portraits
+
+                            def _shoot_authored_prewarm(hid):
+                                # ADR 0013: shoot THIS NPC's face the instant it is model-authored —
+                                # refetch its (now authored) prompt via the backfill (idempotent).
+                                try:
+                                    orwell_portraits.kickoff_backfill([str(hid)], owner, force=True)
+                                except Exception:
+                                    pass
+                            orwell_cast_authoring.kickoff_authoring(
+                                cast, owner, then=None, on_authored=_shoot_authored_prewarm)
+                        except Exception:
+                            pass  # best-effort — never let it affect game start
             else:
                 # FALLBACK (no pre-warm — no model at casting open, or the trigger didn't fire): the
                 # in-line pipeline. ADR 0013 (#1313): a face is shot ONLY from a MODEL-AUTHORED
