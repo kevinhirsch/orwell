@@ -9,6 +9,24 @@ live ledger of owner calls as they happen.
 
 ---
 
+## 2026-07-11
+
+- **The Diary Room's thin rose chrome edge is a SANCTIONED DIEGETIC EXCEPTION to "no accent on
+  chrome" (#738).** The confessional pill (`#orwell-dr-pill`, orwellDiaryRoom.js) keeps a WHISPER of
+  rose as a thin, bounded EDGE only — never a rose-washed fill — as the confessional's in-world
+  signature (rose = "you're in the Diary Room, the private backstage"). This is the deliberate,
+  owner-ruled endpoint of the #738 item-22 tone-down ("tone down to a hint," not full-neutralise),
+  now recorded explicitly so it is not re-flagged as a leak of the general "no accent on chrome" rule
+  and mistakenly stripped in a future glass-legibility sweep. Scope: **this one surface only** — the
+  edge is bounded (a border, `color-mix(#e06c75 ~45%, transparent)`; ~42% under `body.theme-frosted`),
+  the bulk rides the ONE colourless light-glass material like every other chrome, and it goes opaque
+  under `prefers-reduced-transparency`. The pin is `frontend/tests/test_738_glass_polish_8_13_22.py`
+  (`test_dr_pill_keeps_a_bounded_rose_hint` — a rose EDGE is KEPT; a rose background fill is
+  forbidden). Rationale: the Vault Wall / immersion mandate values a legible "you are backstage"
+  affordance; a single bounded diegetic edge is not the accent-on-chrome defect class the rule targets
+  (opaque tinted menu bulk / accent ink on text). Do NOT widen it to a fill, and do NOT extend the
+  exception to any other surface.
+
 ## 2026-06-27
 
 **PO-review board cleared — all nine flagged specs resolved this session** (the "PO review / owner
