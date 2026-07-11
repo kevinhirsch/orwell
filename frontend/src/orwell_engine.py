@@ -706,13 +706,24 @@ async def cancel_self_eviction(user: str | None = None) -> dict:
     return await _call("cancelSelfEviction", {}, user=user)
 
 
-async def turn_in(user: str | None = None) -> dict:
+async def turn_in(expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
     """ADR 0006 — the player's bedtime lever: the player CHOOSES to turn in for the night. The ENGINE
     ends their night (folding the hidden, bounded rest penalty — never a number crosses the wall),
     rolls the house to the next morning, and returns an AdvanceView that MAY carry a Vault-free
-    ``dailyRecap`` (0102) for the day that just closed. No args (the engine ignores any). A no-op
-    AdvanceView when the in-game clock isn't running, the game is over, or the player has left."""
-    return await _call("turnIn", {}, user=user)
+    ``dailyRecap`` (0102) for the day that just closed. A no-op AdvanceView when the in-game clock
+    isn't running, the game is over, or the player has left.
+
+    0065 — a mutating PROGRESSION, so it threads the SAME optional sync-spine fields as ``advance_game``:
+    ``expected_beat_seq`` (Part A CAS; a stale token ⇒ 409 ``stale-beat``, refused before any mutation)
+    and ``idempotency_key`` (Part B at-most-once; a replayed key returns the original view WITHOUT
+    re-ending the night — so a retried/duplicate model call can't re-stamp the rest penalty). Both are
+    merged in ONLY when provided; absent ⇒ byte-identical to the pre-0065 call (the engine ignores any)."""
+    args: dict = {}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        args["idempotencyKey"] = idempotency_key
+    return await _call("turnIn", args, user=user)
 
 
 async def player_tagline(user: str | None = None) -> dict:

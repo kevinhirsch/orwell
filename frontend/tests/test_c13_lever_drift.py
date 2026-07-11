@@ -173,7 +173,9 @@ def test_turn_in_forwards_and_surfaces_daily_recap(monkeypatch):
     # the AdvanceView (incl. the Vault-free dailyRecap 0102) verbatim so the narrator can voice it.
     seen = {}
 
-    async def fake(user=None):
+    # #1385 guard: turnIn is a mutating progression, so do_turn_in threads the 0065 sync-spine fields
+    # (expected_beat_seq CAS + at-most-once idempotency_key) — the mock must accept them like the engine tool.
+    async def fake(expected_beat_seq=None, idempotency_key=None, user=None):
         seen["called"] = True
         return {"event": None, "dailyRecap": {"day": 1, "highlights": ["a quiet day"], "surfaced": []}}
 

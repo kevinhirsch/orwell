@@ -6980,11 +6980,25 @@ export class GameSessionAdapter implements GameSession {
    * `materializeDailyRecap` always returns one once the clock is running, so this is present on every
    * turn-in that actually fires; absent only when the whole call was a dormant no-op above).
    */
-  turnIn(): AdvanceView {
-    if (!this.house || !this.live) return this.advanceView(null);
-    if (!this.timeOfDayEnabled) return this.advanceView(null); // dormant unless the clock is running
-    if (this.live.finished || playerHasLeft(this.live, PLAYER)) return this.advanceView(null);
-    return this.inOneCommit(() => {
+  turnIn(req: { expectedBeatSeq?: number; idempotencyKey?: string } = {}): AdvanceView {
+    // 0065 Part B — replay an already-ended night verbatim (wins even if beatSeq has since moved), so a
+    // retried/duplicate turnIn is REPLAYED, not re-executed: `playerTurnIn` never re-stamps `lastSleepDepth`
+    // from the reset wake hour (which would ERASE the earned late-night rest penalty). Checked before the
+    // CAS guard so a retry of a now-stale key still returns the cached success, not a spurious conflict.
+    if (req.idempotencyKey !== undefined) {
+      const cached = this.idempotencyCache.get(req.idempotencyKey);
+      if (cached) return cached;
+    }
+    // 0065 Part A — refuse a bedtime computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
+    // Every path below (the commit AND the no-op early returns) caches its view under the key, so a retry
+    // replays it verbatim and never re-ends the night.
+    const remember = (v: AdvanceView): AdvanceView =>
+      req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
+    if (!this.house || !this.live) return remember(this.advanceView(null));
+    if (!this.timeOfDayEnabled) return remember(this.advanceView(null)); // dormant unless the clock is running
+    if (this.live.finished || playerHasLeft(this.live, PLAYER)) return remember(this.advanceView(null));
+    return remember(this.inOneCommit(() => {
       const recap = this.materializeDailyRecap();
       playerTurnIn(this.live!, PLAYER);
       this.accrueNightFatigue(); // the player chose bed — a genuine night-end; accrue before clearing conflicts
@@ -6992,7 +7006,7 @@ export class GameSessionAdapter implements GameSession {
       this.persist();
       const view = this.advanceView(null);
       return recap ? { ...view, dailyRecap: recap } : view;
-    });
+    }));
   }
 
   /**
