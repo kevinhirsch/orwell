@@ -176,16 +176,30 @@ async def _live_research_fn(owner: Optional[str]) -> ResearchFn:
 
 
 async def run_capture(owner: Optional[str]) -> dict:
-    """Resolve the live deps and capture the zeitgeist. Silent no-op (not accepted) when no model
-    resolves — the engine's deterministic fallback then stands. The capture is player-INDEPENDENT
+    """Resolve the live deps and capture the zeitgeist. Under the `soft` enrichment policy a missing
+    model / failed capture is the legacy silent no-op (not accepted) — the engine's deterministic
+    fallback stands byte-identically. Under the DEFAULT `strict` policy (owner directive 2026-07-11)
+    the failure is LOUD: a missing model records an ERROR + a failure-ledger entry, and a failed /
+    unusable capture is RETRIED once before being ledgered. The capture is player-INDEPENDENT
     (the real world is the same for everyone); the player's identity is never threaded in."""
+    strict = False
+    try:
+        from src import enrichment_policy
+        strict = enrichment_policy.is_strict()
+    except Exception:
+        strict = False
     try:
         from src.orwell_cast_authoring import _resolve_llm_fn  # the shared background-utility completion
     except Exception:
         return {"accepted": False, "reason": "no-model"}
     llm_fn = await _resolve_llm_fn(owner)
     if llm_fn is None:
-        logger.debug("[zeitgeist] no utility model — keeping the deterministic snapshot")
+        if strict:
+            enrichment_policy.record_failure(
+                owner, "zeitgeist", "no model resolved for the zeitgeist call class",
+                detail="the deterministic snapshot must not stand silently under the strict policy")
+        else:
+            logger.debug("[zeitgeist] no utility model — keeping the deterministic snapshot")
         return {"accepted": False, "reason": "no-model"}
     research_fn = await _live_research_fn(owner)
     captured_for, captured_at = captured_dates()
@@ -196,6 +210,18 @@ async def run_capture(owner: Optional[str]) -> dict:
 
     result = await capture_zeitgeist(research_fn, llm_fn, _write,
                                      captured_for=captured_for, captured_at=captured_at)
+    # STRICT: one bounded retry on a failed/unusable capture (llm failure, no parseable slices, or a
+    # refused write-back), then a LOUD ledger entry. Soft keeps the legacy single attempt untouched.
+    if strict and not (isinstance(result, dict) and result.get("accepted")):
+        logger.warning("[zeitgeist] capture failed (%s) — retrying once (strict policy)",
+                       (result or {}).get("reason"))
+        result = await capture_zeitgeist(research_fn, llm_fn, _write,
+                                         captured_for=captured_for, captured_at=captured_at)
+        if not (isinstance(result, dict) and result.get("accepted")):
+            enrichment_policy.record_failure(
+                owner, "zeitgeist",
+                f"zeitgeist capture failed after retry ({(result or {}).get('reason', 'unknown')})",
+                detail="the deterministic snapshot stands, but the failure is loud + ledgered")
     # #617: the zeitgeist landed on the live game — push a server-side "game-updated" so open
     # pages reconcile now instead of waiting for the next poll. Best-effort/fail-soft.
     if isinstance(result, dict) and result.get("accepted"):

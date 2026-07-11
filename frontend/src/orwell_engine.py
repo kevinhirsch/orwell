@@ -472,7 +472,8 @@ async def pre_seed_next_season(seed: int | None = None, profile: dict | None = N
 async def record_cast_profile(profile: dict, user: str | None = None) -> dict:
     """Feature 0058 / L28b: write an LLM-AUTHORED houseguest profile BACK to the engine, which
     becomes the airtight source of truth. ``profile`` carries ``houseguestId`` plus any of the
-    PUBLIC fields (``biography``, ``vocation``, ``physicalCharacteristics``) and HIDDEN fields
+    PUBLIC fields (``biography``, ``vocation``, ``physicalCharacteristics``, ``voice`` — the 0084
+    idiolect fingerprint, folded whole-or-nothing) and HIDDEN fields
     (``secrets``, ``trueGoals``, ``weakness``, ``dayOnePerception``). The engine validates
     (non-player-mirroring), keeps ``vocation`` in lockstep with the biography and re-grounds the
     hidden stakes off it (#849), splits across the Vault Wall, re-derives threads, and re-seals —

@@ -4664,6 +4664,24 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
     except Exception:
         _gate_on = False
     _floor_shoot_ok = not _gate_on
+    # STRICT enrichment policy (owner directive 2026-07-11): game creation is REFUSED loudly when an
+    # enrichment call class has no model wired — a clear, player-visible error naming the unwired
+    # class(es), surfaced the way every other creation error surfaces (the tool error path), plus an
+    # admin-log/ledger entry per class. NEVER a silent deterministic-floor season. Under `soft` (the
+    # test lanes, the golden driver, the smokes — all env-pinned) this block is inert, byte-identical
+    # to the legacy fail-soft start. The check itself is fail-open: a policy-machinery hiccup must
+    # never block a legitimate creation (strict is a guardrail, not a new failure mode).
+    try:
+        from src import enrichment_policy as _enrichment
+        if _enrichment.is_strict():
+            _unwired = await _enrichment.preflight_unwired(owner)
+            if _unwired:
+                for _cls in _unwired:
+                    _enrichment.record_failure(
+                        owner, _cls, "game creation refused — no model wired for this class at creation time")
+                return {"error": _enrichment.creation_refusal_message(_unwired), "exit_code": 1}
+    except Exception as e:
+        logger.warning("[enrichment] strict creation preflight failed open for %s: %s", owner, e)
     try:
         res = await orwell_engine.create_character(
             player_name,
@@ -4892,6 +4910,18 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                         "(set ORWELL_ALLOW_FLOOR_START=1 to override).",
                         owner, ready.get("authored"), ready.get("total"))
                     _authoring_gate.record_house_entry_gate_block(owner, ready)
+                    # STRICT enrichment policy (owner directive 2026-07-11): the refused house entry
+                    # is the "flow blocked" arm of a failing authoring run — ledger it loudly on the
+                    # admin surface beside the gate marker. Soft: the gate marker alone (legacy).
+                    try:
+                        from src import enrichment_policy as _enrichment2
+                        if _enrichment2.is_strict():
+                            _enrichment2.record_failure(
+                                owner, "cast-authoring",
+                                f"house entry refused — cast only {ready.get('authored')}/"
+                                f"{ready.get('total')} authored after the readiness window")
+                    except Exception:
+                        pass
                     # gap #3 belt-fire telemetry (docs/design/undercall-seam-structural.md §5;
                     # note_belt never raises)
                     _sync_ledger_note_belt(owner, "house-entry-gate-hold")

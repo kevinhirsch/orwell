@@ -216,6 +216,29 @@ DEFAULT_SETTINGS = {
         # concern, so a literal cap here is safe — unlike narration/casting above.)
         "background-authoring": 3000,
     },
+    # Owner directive 2026-07-11 — the cast-authoring MODEL ROUTING knob (sibling of the per-class
+    # budgets above): which model class serves the cast-authoring call class. "narration" (default)
+    # routes deep character authoring to the BETTER narrator model (`default_model`) with the utility
+    # chain appended as the EXPLICIT fallback (logged, never silent); "utility" restores the legacy
+    # utility-first routing. Runtime-editable (Token Economy card / POST /api/settings); read per-run
+    # via orwell_cast_authoring.cast_authoring_model_source() — garbage falls back to the default.
+    "cast_authoring_model_source": "narration",
+    # Owner directive 2026-07-11 — the cast-authoring SAMPLING TEMPERATURE (per-class: applied to the
+    # cast-authoring calls ONLY). Default 1.1 (owner ruling: hot character generation out of the box —
+    # "1.1 or 1.2 at default"); clamped at read time to 0.0–2.0, so ≥1.5 stays admin-reachable and a
+    # fat-fingered 40 can never become the live temperature. Runtime-editable like the sibling
+    # per-class knobs; read per-run via orwell_cast_authoring.cast_authoring_temperature(). The other
+    # background-utility lanes (zeitgeist / off-screen texture / identity) keep their own moderate
+    # default — this knob never touches them.
+    "cast_authoring_temperature": 1.1,
+    # Owner directive 2026-07-11 — the ENRICHMENT runtime policy: "strict" (failures are LOUD: an
+    # unwired class refuses game creation with a clear class-naming error; failed calls are retried
+    # then ledgered on /api/admin/status) or "soft" (the legacy fail-soft behavior, byte-for-byte:
+    # silent skip ⇒ deterministic floor). "" (the seed default) = unset ⇒ resolve from the env seed
+    # ORWELL_ENRICHMENT_POLICY, else "strict". The FE test suite, the golden driver, and the smoke /
+    # browser / responsive harnesses pin the env to "soft" so every stubbed lane keeps the legacy
+    # contracts. Resolution lives in src/enrichment_policy.py (read per-request — no restart).
+    "enrichment_policy": "",
     # ADR 0010 / feature 0069 — the soft per-game spend-alert threshold in USD.
     # 0.0 = alert off. Compared against the running per-session cost total via
     # orwell_token_ledger.check_soft_alert (strictly-over semantics).

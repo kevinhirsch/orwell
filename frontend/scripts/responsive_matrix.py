@@ -104,7 +104,10 @@ def report(kind, line):
 
 
 def boot_fe():
-    env = dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true")
+    env = dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true",
+               # 2026-07-11: pin the legacy soft enrichment policy — the matrix wires no model, and
+               # strict (the prod default) would refuse the /new-game creation it drives.
+               ORWELL_ENRICHMENT_POLICY="soft")
     if ENGINE_URL:
         env["ORWELL_ENGINE_MCP_URL"] = ENGINE_URL
     proc = subprocess.Popen(

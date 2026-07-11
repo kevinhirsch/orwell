@@ -9,9 +9,12 @@ to the engine (the airtight source of truth). Mirrors the 0051 portrait handshak
 
 Design: the orchestrator (`author_cast`) takes INJECTED `llm_fn` + `write_fn`, so the whole
 pipeline is unit-testable without a live model or engine. `kickoff_authoring` wires the real
-deps (a resolved utility model + the engine client) and runs it in the BACKGROUND — game start
-never blocks on it, and a missing/failed model is a silent no-op (the seeded floor stays
-authoritative, exactly like portraits degrade gracefully).
+deps (the AUTHORING model — narration-first by default since the 2026-07-11 owner directive, with
+the utility chain as the explicit fallback; see `resolve_authoring_llm_fn`) and runs it in the
+BACKGROUND — game start never blocks on it. Under the `soft` enrichment policy a missing/failed
+model is a silent no-op (the seeded floor stays authoritative, exactly like portraits degrade
+gracefully); under the DEFAULT `strict` policy the failure is LOUD (see `src.enrichment_policy`:
+game creation refuses on an unwired class, and every failure lands in the admin failure ledger).
 
 The HARD guarantees are the engine's (it validates non-player-mirroring, splits PUBLIC↔HIDDEN,
 never echoes a hidden value). This module only authors + forwards; it never seals anything.
@@ -63,6 +66,13 @@ _SYSTEM = (
     "the portrait and the narration read, so make it concrete and distinctive. The look must COHERE "
     "with the houseguest's heritage/ethnicity in the skeleton (skin tone, hair, features that fit that "
     "background) — never a generic default; vary it widely across the cast,\n"
+    '  "voice": the houseguest\'s IDIOLECT — how THIS person talks, all season: { "register", '
+    '"rhythm", "energy", "directness", "humor", "stressTell", "signature", "lexicon" }. The first six '
+    'are SHORT dial phrases (e.g. register "folksy", rhythm "rambling", humor "dry", stressTell '
+    '"over-explains"); "signature" is ONE prose sentence capturing the texture of their talk; '
+    '"lexicon" is an array of 2-3 habitual filler words/phrases. Ground the voice in the archetype, '
+    "age, and backstory — sixteen mouths, not one; never a generic warm podcast voice. If the "
+    "skeleton shows a seeded voice, treat it as the brief to sharpen, not a script to copy,\n"
     '  "secrets": an array of 2-3 real secrets that could play out,\n'
     '  "trueGoals": an array of 2 true strategic goals (distinct from any public game),\n'
     '  "weakness": one named blind spot the game can exploit on a delay.\n'
@@ -86,12 +96,95 @@ _SYSTEM = (
 # ignores it is harmless: the prompt reinforcement above + the one-shot retry below still apply.
 _RESPONSE_FORMAT = {"type": "json_object"}
 
-# #1044: the authoring sampling temperature. This is a STRUCTURED-OUTPUT task (emit one JSON object),
-# not a creative free-write — the variety lives in WHAT each houseguest is, which the per-NPC skeleton +
-# the rich prompt already drive. A high temperature (the old 0.9) measurably hurts strict-JSON adherence
-# on reasoning models (deepseek-v4-pro) for the complex deep-profile prompt; a moderate value keeps ample
-# persona variety while improving the odds the reply is a clean, parseable object on the first pass.
+# #1044: the SHARED background-utility sampling temperature. This module's `_resolve_llm_fn` is the
+# common resolver for several background lanes (zeitgeist / off-screen texture / identity / the gateway
+# narrator fallback), and THOSE calls keep this moderate value — a high temperature measurably hurt
+# strict-JSON adherence on reasoning models (deepseek-v4-pro) for complex structured prompts.
+# CAST AUTHORING ITSELF no longer uses this default: it reads the runtime-editable
+# `cast_authoring_temperature` knob below (owner directive 2026-07-11 — hot character generation out of
+# the box on the narration model), passed per-run through `resolve_authoring_llm_fn`.
 _AUTHOR_TEMPERATURE = 0.6
+
+# ── owner directive 2026-07-11: cast-authoring MODEL ROUTING + sampling temperature ──────────────
+#
+# Cast authoring is EXPRESSIVE end-to-end character work, so by default it now routes to the
+# NARRATION model (the better model — the same one that voices the season; settings `default_model`)
+# at a HOT sampling temperature, with the UTILITY model chain appended as the EXPLICIT fallback
+# (visible in the candidate list + logged — never a silent substitution). Both knobs are
+# runtime-editable in settings like the sibling per-class knobs (`reasoning_budget` /
+# `max_tokens_budget`, ADR 0010 #1) and read per-run — no restart:
+#   * `cast_authoring_model_source` — "narration" (default) | "utility" (the legacy routing).
+#   * `cast_authoring_temperature` — default 1.1 (owner ruling: hot character generation out of the
+#     box; "1.1 or 1.2 at default"), validated/clamped to 0.0–2.0 so ≥1.5 stays admin-reachable.
+#     Applied to the CAST-AUTHORING call class ONLY — the other `_resolve_llm_fn` consumers keep
+#     `_AUTHOR_TEMPERATURE`.
+# The #1044/#1002 strict-JSON protections stay in force regardless of routing: reasoning OFF, the
+# roomy output floor, `response_format`, and the balanced-brace reparse + retry ladder — a hotter
+# temperature varies WHAT is authored; a malformed reply is still caught and retried.
+_CAST_MODEL_SOURCES = ("narration", "utility")
+_CAST_MODEL_SOURCE_DEFAULT = "narration"
+_CAST_TEMPERATURE_DEFAULT = 1.1
+_CAST_TEMPERATURE_MIN = 0.0
+_CAST_TEMPERATURE_MAX = 2.0
+
+
+def cast_authoring_model_source() -> str:
+    """Which model class serves the cast-authoring call class: "narration" (the default — the better
+    model authors characters end-to-end) or "utility" (the legacy routing). Defensive read of the
+    runtime-editable `cast_authoring_model_source` setting; garbage/absent ⇒ the default."""
+    try:
+        from src.settings import get_setting
+        v = str(get_setting("cast_authoring_model_source", "") or "").strip().lower()
+        if v in _CAST_MODEL_SOURCES:
+            return v
+    except Exception:
+        pass
+    return _CAST_MODEL_SOURCE_DEFAULT
+
+
+def cast_authoring_temperature() -> float:
+    """The cast-authoring sampling temperature — default 1.1 (owner: hot out of the box),
+    runtime-editable via the `cast_authoring_temperature` setting, clamped to 0.0–2.0 (an admin can
+    push to 1.5+; a fat-fingered 40 can never become the live temperature). Garbage ⇒ the default."""
+    try:
+        from src.settings import get_setting
+        raw = get_setting("cast_authoring_temperature", None)
+        if raw is not None and not isinstance(raw, bool):
+            v = float(raw)
+            if v == v:  # reject NaN
+                return min(_CAST_TEMPERATURE_MAX, max(_CAST_TEMPERATURE_MIN, v))
+    except Exception:
+        pass
+    return _CAST_TEMPERATURE_DEFAULT
+
+
+def _accepts_routing_kwargs(fn) -> bool:
+    """True when `fn` (possibly a test's monkeypatched stand-in for `_resolve_llm_fn`) accepts the
+    2026-07-11 routing kwargs. MANY existing tests monkeypatch `_resolve_llm_fn` with a bare
+    `(owner)` fake — those must keep intercepting the authoring path unchanged, so the router falls
+    back to the bare legacy call when the stand-in doesn't take the new keywords."""
+    try:
+        import inspect
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "temperature" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
+async def resolve_authoring_llm_fn(owner: Optional[str]) -> "Optional[LlmFn]":
+    """The CAST-AUTHORING class resolver (owner directive 2026-07-11): route to the NARRATION model
+    by default at the runtime-editable authoring temperature, with the utility chain appended as the
+    EXPLICIT fallback; `cast_authoring_model_source="utility"` restores the legacy utility-first
+    routing (still at the authoring temperature). Every call flows through the module-level
+    `_resolve_llm_fn`, so tests that stub it keep intercepting the authoring path."""
+    if not _accepts_routing_kwargs(_resolve_llm_fn):
+        return await _resolve_llm_fn(owner)  # a legacy-signature stub (tests) — bare call
+    temperature = cast_authoring_temperature()
+    if cast_authoring_model_source() == "utility":
+        return await _resolve_llm_fn(owner, temperature=temperature)
+    return await _resolve_llm_fn(owner, prefix="default", fallbacks_key="default",
+                                 include_utility_fallback=True, temperature=temperature)
 
 # #1044: the floor visible-output budget for an authoring call. With reasoning forced OFF (below) the
 # whole cap is the answer; a full deep-profile JSON object is ~500-800 tokens, so this leaves generous
@@ -170,9 +263,15 @@ def reset_attempts(user) -> None:
 # seeded, balanced Day-1 read. We never send it, so the authoring path carries zero player coupling.
 # `vocation` (#849): the PUBLIC occupation — forwarded so it stays in lockstep with an authored
 # biography and the engine re-grounds the hidden stakes off the job the player will infer.
-_PUBLIC_KEYS = ("name", "biography", "vocation", "physicalCharacteristics")
+_PUBLIC_KEYS = ("name", "biography", "vocation", "physicalCharacteristics", "voice")
 _HIDDEN_KEYS = ("secrets", "trueGoals", "weakness")
 _PHYS_KEYS = ("heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style")
+# The authored VOICE fingerprint (0084 / the 2026-07-11 expressive-e2e widening): six dials + the prose
+# signature, plus a small `lexicon` list. Voice is IDENTITY — it is forwarded WHOLE or not at all (the
+# engine also enforces whole-or-nothing + bounds in `sanitizeAuthoredVoice`), so a partial/malformed
+# voice is omitted and the engine's seeded deterministic voice simply stands.
+_VOICE_DIAL_KEYS = ("register", "rhythm", "energy", "directness", "humor", "stressTell", "signature")
+_VOICE_LEXICON_MAX = 3
 
 # Bounded concurrency for `author_cast` (#5): author NPCs in parallel but never flood the utility
 # endpoint — at most this many authoring LLM calls are in flight at once.
@@ -244,9 +343,11 @@ def build_authoring_messages(npc: dict) -> list[dict]:
     # without it the model invents complexion/features unmoored from the seeded identity and reliably
     # defaults skin tone to a generic "olive". (The engine RE-GROUNDS skinTone to the heritage on
     # write-back regardless, so this is for the surrounding facets — hair, features, style.)
+    # `voice` (the 2026-07-11 expressive-e2e widening): the engine's seeded voice-fingerprint clause —
+    # included as the BRIEF the model sharpens into a full authored idiolect (never a script to copy).
     skeleton = {
         k: npc.get(k)
-        for k in ("name", "age", "vocation", "hometown", "archetype", "demeanor", "presentation", "appearance", "ethnicity")
+        for k in ("name", "age", "vocation", "hometown", "archetype", "demeanor", "presentation", "appearance", "ethnicity", "voice")
         if npc.get(k) is not None
     }
     user = (
@@ -369,6 +470,25 @@ def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
         facet = {k: str(phys[k]).strip() for k in _PHYS_KEYS if isinstance(phys.get(k), (str, int)) and str(phys.get(k)).strip()}
         if len(facet) == len(_PHYS_KEYS):  # the facet is the text↔image source of truth — only write it whole
             out["physicalCharacteristics"] = facet
+
+    # The authored VOICE fingerprint (0084 / the 2026-07-11 expressive-e2e widening): forwarded WHOLE
+    # or not at all — voice is identity (never spliced over the seeded floor field-by-field). All six
+    # dials + the signature must be non-empty strings and the lexicon must clean to >=1 short entry;
+    # anything less is omitted so the engine's seeded deterministic voice stands (the engine enforces
+    # the same whole-or-nothing rule + bounds again in `sanitizeAuthoredVoice`).
+    voice = obj.get("voice")
+    if isinstance(voice, dict):
+        dials = {k: str(voice[k]).strip() for k in _VOICE_DIAL_KEYS
+                 if isinstance(voice.get(k), str) and str(voice.get(k)).strip()}
+        lex = voice.get("lexicon")
+        lex_clean = ([str(x).strip() for x in lex if str(x).strip()][:_VOICE_LEXICON_MAX]
+                     if isinstance(lex, list) else [])
+        if len(dials) == len(_VOICE_DIAL_KEYS) and lex_clean:
+            out["voice"] = {**dials, "lexicon": lex_clean}
+        else:
+            logger.warning(
+                f"[cast-authoring] incomplete authored voice for {houseguest_id} — "
+                "omitting whole (the seeded voice stands)")
 
     secrets = obj.get("secrets")
     if isinstance(secrets, list):
@@ -653,6 +773,16 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                     f"[cast-authoring] give-up cap reached for {hid} "
                     f"({_ATTEMPT_CAP} provider calls this season) — keeping the seeded floor; "
                     "re-authoring resumes next season or after a provider fix + manual lever")
+                # STRICT enrichment policy: a per-NPC give-up is a loud, ledgered failure (once per
+                # season per houseguest — the same cadence as the warning above). Soft: unchanged.
+                try:
+                    from src import enrichment_policy
+                    if enrichment_policy.is_strict():
+                        enrichment_policy.record_failure(
+                            user, "cast-authoring",
+                            f"authoring gave up for houseguest {hid} after {_ATTEMPT_CAP} provider calls")
+                except Exception:
+                    pass
             return 0
         async with sem:
             profile, text = await _call_with_retries(npc, hid)
@@ -713,20 +843,45 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         f"(floor fallback for {floor}: {floor_no_json} no-JSON, {floor_empty} empty, "
         f"{floor_truncated} truncated, {floor_degradation} degradation, {floor_below} below-floor, "
         f"{floor_gaveup} given-up)")
+    # STRICT enrichment policy (owner directive 2026-07-11): any houseguest left on the deterministic
+    # floor after the bounded retry ladder is a LOUD failure — an ERROR + an admin-visible ledger
+    # entry (the #1313 house-entry gate is what blocks the flow itself). Under `soft` the tally above
+    # stays the only trace, byte-identical to the legacy behavior.
+    if floor > 0:
+        try:
+            from src import enrichment_policy
+            if enrichment_policy.is_strict():
+                enrichment_policy.record_failure(
+                    user, "cast-authoring",
+                    f"{floor}/{total} houseguest(s) fell back to the deterministic floor after retries",
+                    detail=(f"{floor_no_json} no-JSON, {floor_empty} empty, {floor_truncated} truncated, "
+                            f"{floor_degradation} degradation, {floor_below} below-floor, "
+                            f"{floor_gaveup} given-up"))
+        except Exception:
+            pass
     return written
 
 
 # ── the live wiring (best-effort, background; graceful no-op when no model) ────
 
 async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
-                          fallbacks_key: str = "utility") -> Optional[LlmFn]:
+                          fallbacks_key: str = "utility",
+                          include_utility_fallback: bool = False,
+                          temperature: Optional[float] = None) -> Optional[LlmFn]:
     """Build a one-shot completion fn over the user's UTILITY model (background-safe, like the email
     triage path). Returns None when no usable endpoint resolves — authoring then silently no-ops.
 
     Feature 0081: pass ``prefix='faithfulness', fallbacks_key='faithfulness'`` to resolve the DEDICATED
     faithfulness-judge model (settings ``faithfulness_*``) instead — ``resolve_endpoint`` itself chains
     faithfulness → utility → default. The default call ``_resolve_llm_fn(owner)`` is byte-identical to
-    before (same utility resolution, same utility fallback chain, same image-filter + streaming tail)."""
+    before (same utility resolution, same utility fallback chain, same image-filter + streaming tail).
+
+    Owner directive 2026-07-11 (the cast-authoring narration routing — see
+    ``resolve_authoring_llm_fn``): ``include_utility_fallback=True`` appends the UTILITY endpoint +
+    its configured fallback chain to the candidates as the EXPLICIT fallback (de-duped, logged —
+    never a silent substitution), and ``temperature`` overrides the shared ``_AUTHOR_TEMPERATURE``
+    for THIS resolved fn only (``None`` ⇒ unchanged). Both default OFF, so every existing caller is
+    byte-identical."""
     try:
         from src.endpoint_resolver import (resolve_endpoint, resolve_utility_fallback_candidates,
                                            _resolve_fallback_candidates)
@@ -743,6 +898,27 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
     else:
         _extra = _resolve_fallback_candidates(f"{fallbacks_key}_model_fallbacks", owner=owner) or []
     candidates = [(url, model, headers)] + _extra
+
+    if include_utility_fallback:
+        # The EXPLICIT utility fallback (owner directive 2026-07-11): when cast authoring routes to
+        # the narration model, the utility endpoint + its configured fallback chain are APPENDED as
+        # visible fallback candidates — configured, de-duped, and logged, never a silent
+        # substitution. A narration outage therefore degrades to the utility tier deliberately.
+        _u_url, _u_model, _u_headers = resolve_endpoint("utility", owner=owner)
+        _tail = ([(_u_url, _u_model, _u_headers)] if _u_url and _u_model else []) \
+            + (resolve_utility_fallback_candidates(owner=owner) or [])
+        _seen = {(u, m) for (u, m, _h) in candidates}
+        _added = []
+        for (_tu, _tm, _th) in _tail:
+            if _tu and _tm and (_tu, _tm) not in _seen:
+                _seen.add((_tu, _tm))
+                _added.append((_tu, _tm, _th))
+        if _added:
+            logger.info(
+                "[cast-authoring] narration-first routing: primary %s; explicit utility fallback %s",
+                model, [m for (_u2, m, _h2) in _added])
+            candidates = candidates + _added
+    _temperature = _AUTHOR_TEMPERATURE if temperature is None else float(temperature)
 
     # #546: an image-only model (dall-e / flux / gpt-image / …) resolves fine as an endpoint but can
     # NOT do JSON/chat authoring — POSTing prose messages to it degrades silently (empty/garbage text
@@ -817,7 +993,7 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
         # OpenAI-style payload; a provider that ignores it is harmless (the strict prompt + the one-shot
         # retry in author_cast still apply). The policy already supplies the (raised, #1002) token budget.
         async for chunk in stream_llm_with_fallback(
-            candidates, messages, temperature=_AUTHOR_TEMPERATURE, policy=_policy,
+            candidates, messages, temperature=_temperature, policy=_policy,
             max_tokens=_max_tokens, response_format=_RESPONSE_FORMAT):
             # stream_llm yields SSE-ish data lines; keep only the assistant text deltas.
             piece = _delta_text(chunk)
@@ -919,10 +1095,26 @@ async def run_authoring(cast: list[dict], owner: Optional[str],
     `write` overrides the write-back sink (default: `record_cast_profile` onto the active/pre-game cast).
     The 0065 advance-warm passes a sink that routes through `pre_seed_next_season(profile=…)` so the
     authored profile lands on the NEXT-season HOLDING store — NEVER the live cast (mid-season,
-    `record_cast_profile` would author the running house, the wrong cast)."""
-    llm_fn = await _resolve_llm_fn(owner)
+    `record_cast_profile` would author the running house, the wrong cast).
+
+    Routing (owner directive 2026-07-11): the calls resolve through `resolve_authoring_llm_fn` —
+    narration-model-first at the runtime `cast_authoring_temperature`, explicit utility fallback.
+    Under the STRICT enrichment policy a missing model is LOUD (an ERROR + a failure-ledger entry,
+    never a silent floor); under `soft` the legacy silent no-op stands byte-identical."""
+    llm_fn = await resolve_authoring_llm_fn(owner)
     if llm_fn is None:
-        logger.debug("[cast-authoring] no utility model — keeping the seeded floor")
+        try:
+            from src import enrichment_policy
+            strict = enrichment_policy.is_strict()
+        except Exception:
+            strict = False
+        if strict:
+            enrichment_policy.record_failure(
+                owner, "cast-authoring",
+                "no model resolved for the cast-authoring call class — authoring cannot run",
+                detail="the deterministic floor must not stand silently under the strict policy")
+        else:
+            logger.debug("[cast-authoring] no authoring model — keeping the seeded floor")
         return 0
     from src import orwell_engine
 
@@ -1217,11 +1409,12 @@ def floor_start_allowed() -> bool:
 
 
 async def _utility_model_available(owner: Optional[str]) -> bool:
-    """True when a real text/chat UTILITY model resolves for this user — i.e. cast authoring CAN run.
-    Mirrors exactly what `run_authoring` uses (`_resolve_llm_fn`), so the gate engages iff authoring
-    could actually produce authored identities. Fail-soft: any hiccup ⇒ False (ungated)."""
+    """True when a real text/chat AUTHORING model resolves for this user — i.e. cast authoring CAN
+    run. Mirrors exactly what `run_authoring` uses (`resolve_authoring_llm_fn` — narration-first with
+    the explicit utility fallback, 2026-07-11), so the gate engages iff authoring could actually
+    produce authored identities. Fail-soft: any hiccup ⇒ False (ungated)."""
     try:
-        fn = await _resolve_llm_fn(owner)
+        fn = await resolve_authoring_llm_fn(owner)
     except Exception:
         return False
     return fn is not None

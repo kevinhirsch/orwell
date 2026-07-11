@@ -216,8 +216,10 @@ if python3 -c "import uvicorn, httpx, fastapi" >/dev/null 2>&1; then
   mkdir -p frontend/data  # a fresh checkout has none
   # AUTH_ENABLED=false + LOCALHOST_BYPASS=true (the boot_smoke convention): this stage proves the
   # FE<->engine seam under engine auth — the FE's own account system has its own tests.
+  # ORWELL_ENRICHMENT_POLICY=soft (2026-07-11): the smoke wires no LLM, and the strict enrichment
+  # policy (the prod default) would refuse the /new-game creation this stage drives — pin legacy soft.
   ( cd frontend && env ORWELL_ENGINE_MCP_URL="$BASE" ORWELL_ENGINE_TOKEN="$SMOKE_TOKEN" \
-      AUTH_ENABLED=false LOCALHOST_BYPASS=true \
+      AUTH_ENABLED=false LOCALHOST_BYPASS=true ORWELL_ENRICHMENT_POLICY=soft \
       python3 -m uvicorn app:app --host 127.0.0.1 --port "$FE_PORT" >/tmp/orwell-smoke-fe.log 2>&1 & echo $! > /tmp/orwell-smoke-fe.pid )
   FE_PID="$(cat /tmp/orwell-smoke-fe.pid)"
   fe_up=0

@@ -1577,6 +1577,26 @@ def setup_orwell_routes() -> APIRouter:
                         "started": True,
                     },
                 )
+            # STRICT enrichment policy (owner directive 2026-07-11): this debug/ops creation door
+            # refuses too when an enrichment call class has no model wired — same loud, class-naming
+            # error as the chat createCharacter path (the smoke/matrix harnesses that drive this
+            # route pin ORWELL_ENRICHMENT_POLICY=soft). Fail-open on policy-machinery hiccups: strict
+            # is a guardrail, never a new failure mode.
+            try:
+                from src import enrichment_policy as _enrichment
+                if _enrichment.is_strict():
+                    _unwired = await _enrichment.preflight_unwired(user)
+                    if _unwired:
+                        for _cls in _unwired:
+                            _enrichment.record_failure(
+                                user, _cls,
+                                "game creation refused — no model wired for this class at creation time")
+                        return JSONResponse(
+                            status_code=503,
+                            content={"error": _enrichment.creation_refusal_message(_unwired),
+                                     "unwiredClasses": list(_unwired)})
+            except Exception as e:
+                logger.warning(f"[enrichment] strict new-game preflight failed open: {e}")
             # A new season = a new cast: scrub portraits, the authoring ledger, and the pre-warm gate.
             from src import orwell_prewarm
             orwell_prewarm.reset_user_season(user)

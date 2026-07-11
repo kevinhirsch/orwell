@@ -48,7 +48,10 @@ def boot(game_build: int, port: int):
     """Start uvicorn and wait until /openapi.json answers; returns (process, base_url)."""
     os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)  # fresh checkout has none
     env = dict(os.environ, ORWELL_GAME_BUILD=str(game_build),
-               AUTH_ENABLED="false", LOCALHOST_BYPASS="true")
+               AUTH_ENABLED="false", LOCALHOST_BYPASS="true",
+               # 2026-07-11: the strict enrichment policy refuses game creation with no model wired;
+               # the smoke stubs no model, so pin the legacy soft policy (see tests/conftest.py).
+               ORWELL_ENRICHMENT_POLICY="soft")
     log = open(f"/tmp/fe-boot-{port}.log", "w")
     proc = subprocess.Popen(
         [PY, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
