@@ -14,7 +14,7 @@ const searchModule = null;
 // Nothing here re-anchors/recenters the window after it opens; the kit centers it BEFORE the open
 // animation (see orwellWindow.js open()), which is what kills the "fly right then jump to center".
 import { sortModelIds } from './modelSort.js';
-import { isAltGrEvent } from './platform.js';
+import { isAltGrEvent, isNarrow, onNarrowChange } from './platform.js';
 import { DEFAULT_KEYBINDS } from './keyboard-shortcuts.js';
 
 let initialized = false;
@@ -2114,6 +2114,16 @@ function initAppearance() {
         }
       });
     });
+    // RESP-10 (#894): on the narrow tier every kit window is a docked sheet with no
+    // draggable geometry, so "Reset window positions" has no referent — hide it (the
+    // sibling "Reset All" stays; it still applies on every tier). Kept in sync across
+    // device rotation via onNarrowChange; the gate lives here (initAppearance runs once,
+    // inside the initialized-guarded initAll) so the listener is added exactly once.
+    var _syncResetWinVis = function () {
+      resetWinBtn.style.display = isNarrow() ? 'none' : '';
+    };
+    _syncResetWinVis();
+    onNarrowChange(_syncResetWinVis);
   }
 }
 
