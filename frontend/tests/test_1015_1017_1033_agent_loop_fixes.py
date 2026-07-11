@@ -78,7 +78,9 @@ def test_fepy2_reasoning_recovery_unchanged_even_in_game_mode():
     and must be untouched: an empty body WITH reasoning re-emits the reasoning as a body delta,
     regardless of game_mode — never the producer line, never a retry affordance."""
     final, chunk, retry, _fr = agent_loop._empty_response_fallback(
-        "", "Here is the real answer.", [], game_mode=True)  # no model ⇒ DeepSeek shape ⇒ re-emit
+        # DeepSeek/Flash named explicitly: P2-16 flipped the UNKNOWN-model default to the safe
+        # False (no re-emit), so the load-bearing FEPY-2 shape is asserted on its known family.
+        "", "Here is the real answer.", [], game_mode=True, model="deepseek/deepseek-v4-flash")
     assert final == "Here is the real answer."
     assert _frame(chunk)["delta"] == "Here is the real answer."
     assert retry is False
