@@ -22,10 +22,14 @@ function wiredPaths(): string[] {
   return [...cjs.matchAll(/docs\/features\/[^"']+\.feature/g)].map((m) => m[0]);
 }
 
-function allFeatureFiles(): string[] {
-  return readdirSync(FEATURES_DIR)
-    .filter((f) => f.endsWith(".feature"))
-    .map((f) => `docs/features/${f}`);
+function allFeatureFiles(dir = FEATURES_DIR, prefix = "docs/features"): string[] {
+  // Recursive: the contract covers docs/features/**/*.feature, not just the top level.
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) out.push(...allFeatureFiles(join(dir, entry.name), `${prefix}/${entry.name}`));
+    else if (entry.name.endsWith(".feature")) out.push(`${prefix}/${entry.name}`);
+  }
+  return out;
 }
 
 function hasMarker(rel: string): boolean {

@@ -3,6 +3,8 @@ import { McpServer } from "../../src/adapters/mcp/McpServer";
 import { Orchestrator } from "../../src/composition/orchestrator";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import type { UserSandbox } from "../../src/composition/registry";
+import type { UserSaveStore } from "../../src/ports/UserSaveStore";
+import type { SessionSnapshot } from "../../src/engine/sessionSnapshot";
 import { PLAYER, npc } from "../../src/domain/ids";
 
 // R-BND-1 / R-BND-2 (#628) — the background-write-back beatSeq invariant, pinned as a boundary gate
@@ -14,16 +16,41 @@ import { PLAYER, npc } from "../../src/domain/ids";
 // concurrent board mutation to the FE's CAS layer and trip a phantom single-tab stale-409 (the A-S3
 // fold-drop — a player scene's only consequence fold reconciled-and-skipped). The correct channel is
 // the registry's `setOnBackgroundPersist` seam (syncAdmin + invalidateSnapshot + blind save — never
-// `commit`). These tests drive the REAL registry-wired sandbox through the REAL MCP boundary, so a
-// regression that reroutes either tool back through the commit funnel (or forgets to wire the
-// background seam, which falls back to `onPersist` = commit) fails here deterministically. Roles only.
+// `commit`). These tests drive the REAL registry-wired sandbox through the REAL MCP boundary, and
+// assert durability through the REAL durable path: the registry's canonical R3-cached export
+// (`reg.snapshot(user)`, primed before the write so a broken `invalidateSnapshot` would serve stale)
+// and an instrumented `UserSaveStore` (what the blind `saveUser` actually wrote, plus a fresh-registry
+// resume over the same store — "a restart is a fresh process over the SAME durable store", 0030).
+// A regression that reroutes either tool back through the commit funnel, forgets to wire the
+// background seam (which falls back to `onPersist` = commit), breaks `invalidateSnapshot`, or drops
+// the blind save fails here deterministically. Roles only.
 
-function wiredSandbox(user: string, seed: number): { sb: UserSandbox; server: McpServer; orch: Orchestrator; reg: GameSessionRegistry } {
-  const reg = new GameSessionRegistry();
+/** An instrumented in-memory UserSaveStore: captures every saveFor, serves loadLatest for a resume. */
+class CapturingSaveStore implements UserSaveStore {
+  readonly saved = new Map<string, SessionSnapshot[]>();
+  saveFor(user: string, snapshot: SessionSnapshot): void {
+    const list = this.saved.get(user) ?? [];
+    list.push(snapshot);
+    this.saved.set(user, list);
+  }
+  hasSave(user: string): boolean {
+    return (this.saved.get(user)?.length ?? 0) > 0;
+  }
+  loadLatest(user: string): SessionSnapshot | null {
+    const list = this.saved.get(user);
+    return list && list.length > 0 ? list[list.length - 1]! : null;
+  }
+}
+
+function wiredSandbox(user: string, seed: number): {
+  sb: UserSandbox; server: McpServer; orch: Orchestrator; reg: GameSessionRegistry; store: CapturingSaveStore;
+} {
+  const store = new CapturingSaveStore();
+  const reg = new GameSessionRegistry(store);
   const orch = new Orchestrator(reg, { now: () => seed }, { seed });
   const sb = reg.sandboxFor(user); // registry-wired: onPersist=commit(bump), onBackgroundPersist=blind save
   sb.session.createCharacter({ playerName: "The Player", seed });
-  return { sb, server: sb.mcp.player, orch, reg };
+  return { sb, server: sb.mcp.player, orch, reg, store };
 }
 
 describe("R-BND (#628) — background write-backs persist durably WITHOUT bumping beatSeq", () => {
@@ -36,15 +63,18 @@ describe("R-BND (#628) — background write-backs persist durably WITHOUT bumpin
   });
 
   it("R-BND-1: recordOffscreenSceneTexture (0070) leaves beatSeq unchanged and persists the texture", async () => {
-    const { sb, server, orch } = wiredSandbox("bg-texture", 9102);
+    const user = "bg-texture";
+    const { sb, server, orch, reg, store } = wiredSandbox(user, 9102);
     // Generate off-screen skeletons (up to a few ticks — a tick may yield none in edge phases).
     let skeletons: { eventId: string }[] = [];
     for (let i = 0; i < 4 && skeletons.length === 0; i++) {
-      orch.advance("bg-texture", "offscreen-tick");
+      orch.advance(user, "offscreen-tick");
       skeletons = (await server.callTool("getOffscreenSceneSkeletons", {})) as { eventId: string }[];
     }
     expect(skeletons.length).toBeGreaterThan(0); // seeds above are known-good; roles only
     const before = sb.session.gameStatus().beatSeq;
+    reg.snapshot(user); // prime the R3 cache: a broken invalidateSnapshot would serve this STALE copy below
+    const savesBefore = store.saved.get(user)?.length ?? 0;
 
     const res = (await server.callTool("recordOffscreenSceneTexture", {
       eventId: skeletons[0]!.eventId,
@@ -54,15 +84,25 @@ describe("R-BND (#628) — background write-backs persist durably WITHOUT bumpin
 
     // The closed-set counter did not move — a background prose enrichment is NOT a board beat.
     expect(sb.session.gameStatus().beatSeq).toBe(before);
-    // But the write is DURABLE: it landed in the persisted snapshot (blind save, not dropped).
-    const snap = sb.session.snapshot();
-    expect(snap.textureOverrides?.[skeletons[0]!.eventId]).toBeDefined();
-    expect(snap.beatSeq).toBe(before); // the persisted counter matches the live one — no hidden bump
+    // The registry's CANONICAL export reflects the write: the texture write records no event, so the
+    // R3 cache key (rev + event count) only recomputes because the seam ran `invalidateSnapshot`.
+    const regSnap = reg.snapshot(user);
+    expect(regSnap.textureOverrides?.[skeletons[0]!.eventId]).toBeDefined();
+    expect(regSnap.beatSeq).toBe(before);
+    // And the blind save actually REACHED the durable store (saveUser ran — the write is not pending
+    // on some later unrelated commit).
+    expect(store.saved.get(user)!.length).toBeGreaterThan(savesBefore);
+    const durable = store.loadLatest(user)!;
+    expect(durable.textureOverrides?.[skeletons[0]!.eventId]).toBeDefined();
+    expect(durable.beatSeq).toBe(before); // the durably-saved counter matches the live one — no hidden bump
   });
 
   it("R-BND-2: recordWorldSnapshot (0062 zeitgeist) leaves beatSeq unchanged and freezes the capture", async () => {
-    const { sb, server } = wiredSandbox("bg-zeitgeist", 9103);
+    const user = "bg-zeitgeist";
+    const { sb, server, reg, store } = wiredSandbox(user, 9103);
     const before = sb.session.gameStatus().beatSeq;
+    reg.snapshot(user); // prime the R3 cache (see R-BND-1 above)
+    const savesBefore = store.saved.get(user)?.length ?? 0;
 
     const res = (await server.callTool("recordWorldSnapshot", {
       slices: { news: ["a headline the house half-remembers"], mood: "restless" },
@@ -72,25 +112,31 @@ describe("R-BND (#628) — background write-backs persist durably WITHOUT bumpin
 
     // No closed-set movement…
     expect(sb.session.gameStatus().beatSeq).toBe(before);
-    // …but the capture is durably frozen onto the season (non-degradation: persisted, not pending).
-    const snap = sb.session.snapshot();
-    expect(snap.worldSnapshot?.source).toBe("web_search");
-    expect(snap.beatSeq).toBe(before);
+    // …but the capture is durably frozen onto the season: visible through the registry's canonical
+    // export AND written through to the durable store (non-degradation: persisted, not pending).
+    const regSnap = reg.snapshot(user);
+    expect(regSnap.worldSnapshot?.source).toBe("web_search");
+    expect(regSnap.beatSeq).toBe(before);
+    expect(store.saved.get(user)!.length).toBeGreaterThan(savesBefore);
+    const durable = store.loadLatest(user)!;
+    expect(durable.worldSnapshot?.source).toBe("web_search");
+    expect(durable.beatSeq).toBe(before);
   });
 
-  it("the background persist survives a save/restore round-trip (durable, not a lost write)", async () => {
+  it("the background persist survives a RESTART — a fresh registry resumes it from the durable store", async () => {
     const user = "bg-roundtrip";
-    const { sb, server } = wiredSandbox(user, 9104);
+    const { sb, server, store } = wiredSandbox(user, 9104);
     const before = sb.session.gameStatus().beatSeq;
     await server.callTool("recordWorldSnapshot", { slices: { mood: "electric" } });
     expect(sb.session.gameStatus().beatSeq).toBe(before);
 
-    // Restore the persisted snapshot into a FRESH session: the enrichment is there, at the same beatSeq.
-    const snap = sb.session.snapshot();
-    const reg2 = new GameSessionRegistry();
+    // A restart is a fresh process (NEW registry) over the SAME durable store (0030): the resume must
+    // rehydrate from what the blind saveUser wrote — the enrichment is there, at the same beatSeq.
+    // This exercises the real durable reload path (hasSave → loadLatest → importSnapshot), not an
+    // in-memory copy handed straight to restore().
+    const reg2 = new GameSessionRegistry(store);
     const sb2 = reg2.sandboxFor(user);
-    sb2.session.restore(snap);
-    expect(sb2.session.snapshot().worldSnapshot?.slices.mood).toBe("electric");
     expect(sb2.session.gameStatus().beatSeq).toBe(before);
+    expect(reg2.snapshot(user).worldSnapshot?.slices.mood).toBe("electric");
   });
 });
