@@ -732,6 +732,20 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   // knowledge layer changes, so the seeded competition/vote spine is untouched even while ON.
   sandbox.session.legendTick(sandbox.engine.events, sandbox.engine.knowledge);
 
+  // 0099 (hidden half) — the off-screen NPC↔NPC SECRET BARTER: once per bounded off-screen tick, an NPC
+  // holding a learned secret about a houseguest SPENDS it with the co-house recipient who values it most,
+  // so information becomes liquid in the hidden layer (secrets visibly move; a bond firms for no public
+  // reason). It REUSES the existing 0099 trade/value core (`npcBarterStep`), transferring the belief
+  // through the SAME NPC→NPC diffusion pathway the live gossip below uses (`transmitGossip`, witness set =
+  // {giver, recipient}, EXCLUDES the player). SELF-GATED: a no-op (ZERO draws, no counter advance) unless
+  // the layer is enabled (ORWELL_SECRET_BARTER=1) AND some holder holds a tradeable secret, so the
+  // calibration harness — which never enables it, and whose off-screen society mints only subject-LESS
+  // gossip/overhear beliefs — is byte-identical. Uses its OWN dedicated, isolated rng and folds NO
+  // relationship edge (only the hidden knowledge layer changes), so the seeded competition/vote/jury
+  // spine is untouched even while ON. The player learns a bartered secret only if a later pathway
+  // (overhear/gossip below, 0002/0094) terminates at them — never as a Vault read.
+  sandbox.session.secretBarterTick(sandbox.engine.events, sandbox.engine.knowledge);
+
   // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
   // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
   // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at

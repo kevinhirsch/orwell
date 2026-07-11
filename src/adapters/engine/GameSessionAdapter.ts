@@ -188,9 +188,10 @@ import {
 import { CONFIDENCE, type DisclosureTier } from "../../engine/confidenceConstants";
 import {
   severityOf, leverageStrength, leverageDealBoost, dealAcceptance, exposeOutcome,
-  tradeValue, tradeDealBoost, tradeOutcome, bluffBelieved,
-  type LeverageSignals, type TradeSignals,
+  tradeValue, tradeDealBoost, tradeOutcome, bluffBelieved, npcBarterStep,
+  type LeverageSignals, type TradeSignals, type BarterCandidate,
 } from "../../engine/leverage";
+import { SECRET_BARTER } from "../../engine/secretBarterConstants";
 import { LEVERAGE, SECRET_TRADE } from "../../engine/leverageConstants";
 import {
   rankPlayerBoundThreads, dripBudget, recencyFromAge, relationshipReads,
@@ -435,6 +436,17 @@ const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 const MYTH_MAKING_ENABLED_DEFAULT = process.env.ORWELL_MYTH_MAKING === "1";
 
 /**
+ * 0099 (hidden half) — whether the off-screen NPC↔NPC SECRET BARTER runs by DEFAULT. OFF unless
+ * `ORWELL_SECRET_BARTER=1`. A DEDICATED flag (sibling to `ORWELL_JURY_HOUSE`/`ORWELL_MYTH_MAKING`) so
+ * calibration neutrality is provable in isolation: with it unset, `secretBarterTick` returns before
+ * drawing anything (the dedicated barter-rng stream never advances) and no secret changes hands ⇒ the
+ * seeded `juryReach`/gradient/UAT spine is byte-identical to today. The calibration/UAT harness never
+ * sets it; the live deploy may. Read once at module load (like the sibling flags); a test overrides
+ * per-session via `setSecretBarterEnabled`.
+ */
+const SECRET_BARTER_ENABLED_DEFAULT = process.env.ORWELL_SECRET_BARTER === "1";
+
+/**
  * Issue #1397 — whether CHARACTER-MEDIATED gossip drift runs by DEFAULT. OFF unless `ORWELL_GOSSIP_DRIFT=1`.
  * A DEDICATED flag (sibling of `ORWELL_MYTH_MAKING`) so calibration neutrality is provable in isolation:
  * with it unset the orchestrator passes NO `voiceOf` to `diffuseGossip`, so the gossip distortion stays
@@ -653,6 +665,21 @@ export class GameSessionAdapter implements GameSession {
   /** The watermark — the highest consumed notable-act's `GameEvent.ts` — so a used act is never
    *  re-selected into a second legend (0101). Monotonic (non-decreasing). */
   private legendLastActTick = 0;
+  /**
+   * 0099 (hidden half) — whether the off-screen NPC↔NPC SECRET BARTER runs. DEFAULT OFF: the
+   * calibration/UAT harness never enables it, so with it unset `secretBarterTick` returns before drawing
+   * anything and no secret changes hands ⇒ every seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL;
+   * the live deploy may enable it. A test flips it via `setSecretBarterEnabled`.
+   */
+  private secretBarterEnabled = SECRET_BARTER_ENABLED_DEFAULT;
+  /** The DEDICATED secret-barter rng tick counter — barter draws fork off the game seed + this, NEVER the
+   *  orchestrator's shared society/competition/vote stream (the same isolation `legendTickCount` uses), so
+   *  even with the layer ON the main house's seeded outcomes stay in phase. Persisted so the stream is
+   *  restart-stable. */
+  private secretBarterTickCount = 0;
+  /** The monotonic count of secrets SPENT into the hidden economy this season (0099, sibling of
+   *  `legendCount`/`tradeCount`) — the knowledge layer only deepens as secrets change hands (++ only). */
+  private secretBarterCount = 0;
   /**
    * 0086 — every active houseguest's current DRIVE (motivation + intensity), keyed by id. Computed each
    * campaignTick (sticky — carried from the prior tick), engine-only + Vault-sealed, never projected. The
@@ -2443,6 +2470,11 @@ export class GameSessionAdapter implements GameSession {
       ...(this.legendTickCount > 0 ? { legendTickCount: this.legendTickCount } : {}),
       ...(this.legendCount > 0 ? { legendCount: this.legendCount } : {}),
       ...(this.legendLastActTick > 0 ? { legendLastActTick: this.legendLastActTick } : {}),
+      // 0099 (hidden half) — the DEDICATED secret-barter rng tick counter + the monotonic count of secrets
+      // spent into the hidden economy, persisted so the isolated barter stream + the non-degradation count
+      // survive a restart (0007/0030). Absent ⇒ 0 on restore (byte-shaped as a pre-0099-barter save / off).
+      ...(this.secretBarterTickCount > 0 ? { secretBarterTickCount: this.secretBarterTickCount } : {}),
+      ...(this.secretBarterCount > 0 ? { secretBarterCount: this.secretBarterCount } : {}),
       // 0087: persist the hidden relationship-trajectory momentum + its recent-fold ring buffers, so a
       // multi-week arc RESUMES mid-curdle (0007/0030) and ACCUMULATES, never thins. Vault-class hidden state
       // (no player/admin-visible number) — already inside the never-outward snapshot. Absent ⇒ byte-shaped
@@ -2715,6 +2747,10 @@ export class GameSessionAdapter implements GameSession {
     this.legendTickCount = core.legendTickCount ?? 0;
     this.legendCount = core.legendCount ?? 0;
     this.legendLastActTick = core.legendLastActTick ?? 0;
+    // 0099 (hidden half): restore the dedicated secret-barter rng counter + the spent-secret count
+    // (absent on pre-0099-barter saves ⇒ 0).
+    this.secretBarterTickCount = core.secretBarterTickCount ?? 0;
+    this.secretBarterCount = core.secretBarterCount ?? 0;
     // 0086: restore live drives (absent on pre-0086 saves ⇒ none ⇒ re-derived on the next campaign tick).
     this.drives = core.drives ? new Map(Object.entries(core.drives) as [EntityId, Drive][]) : new Map();
     // 0096: restore the emergent-nemesis arc + its sustain history (absent on a pre-0096 save / when the
@@ -4085,6 +4121,7 @@ export class GameSessionAdapter implements GameSession {
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
+      this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -4351,6 +4388,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
+    this.resetSecretBarter(); // 0099 — a warmed/fresh cast has bartered no secret off-screen
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -4714,6 +4752,7 @@ export class GameSessionAdapter implements GameSession {
     // 0092 — a fresh season: the secret-pacing weekly cadence + anti-spam start clean.
     this.resetSecretPacing();
     this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
+    this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
     // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
@@ -4817,6 +4856,13 @@ export class GameSessionAdapter implements GameSession {
     this.legendTickCount = 0;
     this.legendCount = 0;
     this.legendLastActTick = 0;
+  }
+
+  /** 0099 (hidden half) — clear the off-screen secret-barter bookkeeping (a fresh season: no secret
+   *  spent, the dedicated barter stream starts from zero). */
+  private resetSecretBarter(): void {
+    this.secretBarterTickCount = 0;
+    this.secretBarterCount = 0;
   }
 
   private seedSeededRelationships(seed: number): void {
@@ -6361,6 +6407,125 @@ export class GameSessionAdapter implements GameSession {
 
   /** Whether the myth-making layer is live (0101) — exposed for the orchestrator's wiring symmetry/tests. */
   mythMakingEnabledNow(): boolean { return this.mythMakingEnabled; }
+
+  /**
+   * 0099 (hidden half) — the off-screen NPC↔NPC SECRET BARTER: once per bounded off-screen tick, an NPC
+   * holding a learned secret ABOUT a houseguest SPENDS it with the co-house recipient who values it MOST,
+   * so information becomes liquid in the hidden layer (secrets visibly move; a bond firms for no public
+   * reason; the player can be outmaneuvered in the economy). It REUSES the existing 0099 trade/value core
+   * verbatim — `npcBarterStep` → `tradeValue` (`src/engine/leverage.ts`, tuned by `SECRET_TRADE`) — driven
+   * on a tick; it is NOT a new secrets system. The traded belief enters the recipient's HIDDEN knowledge
+   * through the existing NPC→NPC diffusion pathway (`transmitGossip` — a recorded `told-by:` event whose
+   * witness set is {giver, recipient} and EXCLUDES the player), and reaches the player ONLY if a later
+   * pathway (overhear/gossip, 0002/0094) terminates at them. Called once per off-screen tick by the
+   * orchestrator, AFTER the main-house society/gossip pass, passing the live `events`/`knowledge`.
+   *
+   * SELF-GATED (the `juryHouseTick`/`legendTick` discipline): a STRUCTURAL no-op (ZERO draws, no counter
+   * advance) unless the layer is enabled AND some holder actually holds a tradeable secret — so the
+   * calibration/UAT harness (which never enables it, and whose off-screen society mints only subject-LESS
+   * gossip/overhear beliefs) is byte-identical. Runs on a DEDICATED, isolated rng (forked off the game
+   * seed + this tick's OWN counter, NEVER the orchestrator's shared society/competition/vote stream), and —
+   * exactly like `legendTick` — folds NO relationship edge (only the hidden KNOWLEDGE layer changes), so
+   * the seeded competition/vote/jury spine is byte-identical whether the layer is OFF or ON. Bounded:
+   * ≤ `SECRET_BARTER.maxBartersPerTick` transfers over ≤ `SECRET_BARTER.maxHoldersPerTick` holders, in
+   * deterministic sorted order.
+   *
+   * Vault Wall (mandate #2): the barter is off-screen NPC content — the transfer event's witness set
+   * excludes the player, so it never lands on any player OR admin projection; it surfaces to the player
+   * only via an existing modeled pathway, never as a Vault read (`tests/unit/secretBarter.test.ts` sentinel).
+   */
+  secretBarterTick(events: EventStore, knowledge: KnowledgeService): void {
+    if (!this.secretBarterEnabled || !this.house) return;
+    void events; // the transfer records THROUGH `knowledge` (transmitGossip) — the store is the caller's contract
+    const npcs = this.livingIds().filter((id) => id !== PLAYER);
+    if (npcs.length < 2) return; // nobody to trade between
+    // A holder's TRADEABLE secrets: a learned belief ABOUT a still-active NPC houseguest (never themselves,
+    // never the player — a player-subject belief rides the ordinary PV1/gossip path, not a barter). Stable
+    // key order so the dedicated draw sequence is reproducible.
+    const tradeableOf = (holder: EntityId) =>
+      knowledge.knownTo(holder)
+        .filter((k) => {
+          const subj = k.subject;
+          return subj !== undefined && subj !== holder && subj !== PLAYER && this.isActiveNpc(subj);
+        })
+        .sort((a, b) => (a.factId ?? a.id).localeCompare(b.factId ?? b.id));
+    // Holders with something to spend, in deterministic order, capped for work. A tick with NOTHING to
+    // trade returns BEFORE advancing the dedicated stream — a true no-op (the byte-identity spine).
+    const holders = [...npcs].sort()
+      .filter((h) => tradeableOf(h).length > 0)
+      .slice(0, SECRET_BARTER.maxHoldersPerTick);
+    if (holders.length === 0) return;
+    // DEDICATED stream — zero touch to the orchestrator's shared per-user rng (the calibration spine).
+    this.secretBarterTickCount += 1;
+    const rng = new SeededRandom(hashSeed(`secret-barter:${this.gameSeed ?? ""}:${this.secretBarterTickCount}`));
+    let barters = 0;
+    for (const holder of holders) {
+      if (barters >= SECRET_BARTER.maxBartersPerTick) break;
+      const secret = tradeableOf(holder)[0]!; // the holder's first tradeable secret (stable order)
+      const key = secret.factId ?? secret.id;
+      const subject = secret.subject!;
+      // Severity is the SUBJECT's PUBLIC headline-secret class (never its sealed text) — the SAME
+      // resolution the player-side trade uses (`resolveWieldedSecret`), reused, not re-invented.
+      const subjectNpc = this.house.npcs.find((n) => n.id === subject);
+      const severity = severityOf(subjectNpc ? this.headlineSecretOf(subjectNpc)?.kind : undefined);
+      // Candidate recipients: still-active NPCs, not the holder, not the secret's own subject, who do NOT
+      // already hold this belief (a barter WIDENS who knows). Deterministic order.
+      const candidates: BarterCandidate[] = npcs
+        .filter((r) => r !== holder && r !== subject
+          && !knowledge.knownTo(r).some((k) => (k.factId ?? k.id) === key))
+        .sort()
+        .map((r) => ({ recipient: r, signals: this.barterSignalsFor(r, subject, holder, severity) }));
+      if (candidates.length === 0) continue;
+      // The EXISTING 0099 decision core: the seeded rate roll (`SECRET_TRADE.barterRate`) + the
+      // best-valuing recipient over the floor (`SECRET_TRADE.barterValueFloor`). No new value math.
+      const move = npcBarterStep(candidates, rng);
+      if (!move) continue;
+      // Transfer the secret NPC→NPC through the EXISTING diffusion pathway (0002/0094): a recorded
+      // `told-by:` gossip event witnessed by {giver, recipient} — hidden (the player is not a witness),
+      // reaching the player only if a later pathway terminates at them. The belief keeps its lineage
+      // (`factId`), gains a hop, and carries the giver's own (bounded) certainty forward.
+      knowledge.transmitGossip(
+        holder, move.recipient,
+        {
+          content: secret.content,
+          factId: key,
+          originalContent: secret.originalContent ?? secret.content,
+          confidence: secret.confidence ?? 1,
+          source: holder,
+          hops: (secret.hops ?? 0) + 1,
+          ...(subject !== undefined ? { subject } : {}),
+        },
+        `told-by:${holder}`,
+      );
+      this.secretBarterCount += 1; // monotonic — a secret has been spent into the hidden economy (non-degradation #4)
+      barters += 1;
+    }
+  }
+
+  /**
+   * 0099 (hidden half) — assemble the Vault-hidden `tradeValue` signals for an NPC↔NPC barter: the
+   * RECIPIENT's reads of the secret's SUBJECT (do they want leverage on / are they threatened by them?)
+   * plus the recipient's trust of the GIVER as the source (a distrusted source's offer is discounted —
+   * the `recipientTrustOfPlayer` field is the source-trust slot, which for a barter is the giver, not the
+   * player). Reuses the SAME `TradeSignals` shape the player-side trade fills — no new value math.
+   */
+  private barterSignalsFor(recipient: EntityId, subject: EntityId, giver: EntityId, severity: number): TradeSignals {
+    const toSubject = this.rel.edge(recipient, subject);
+    return {
+      severity,
+      recipientThreatOfSubject: toSubject.threat,
+      recipientAffinityForSubject: toSubject.affinity,
+      recipientTrustOfPlayer: this.rel.edge(recipient, giver).trust, // source-trust slot — the giver, for a barter
+    };
+  }
+
+  /** Turn the off-screen SECRET BARTER on/off (0099). Off by default — the calibration harness leaves it
+   *  off (with it off `secretBarterTick` returns before any draw ⇒ the seeded spine is byte-identical). */
+  setSecretBarterEnabled(on: boolean): void { this.secretBarterEnabled = on; }
+
+  /** Whether the off-screen secret-barter layer is live (0099) — exposed for the orchestrator's wiring
+   *  symmetry/tests. */
+  secretBarterEnabledNow(): boolean { return this.secretBarterEnabled; }
 
   /** Turn CHARACTER-MEDIATED gossip drift on/off (issue #1397). Off by default — the calibration harness
    *  leaves it off; even ON the drift rides a per-hop fork, so the seeded outcome draw stream is byte-
