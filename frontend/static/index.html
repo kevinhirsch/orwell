@@ -432,7 +432,7 @@
   </script>
   <!-- Memory Management Modal -->
   <div id="memory-modal" class="modal hidden">
-    <div class="modal-content memory-modal-content" role="dialog" aria-label="Brain" style="background:var(--bg)">
+    <div class="modal-content memory-modal-content" role="dialog" aria-modal="true" aria-label="Brain" style="background:var(--bg)">
       <div class="modal-header">
         <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg>Brain</h4>
         <button class="close-btn" id="close-memory-modal" aria-label="Close memory modal">✖</button>
@@ -1417,7 +1417,7 @@
 
     <!-- Character (custom preset) modal -->
     <div id="custom-preset-modal" class="modal hidden">
-      <div class="modal-content preset-modal-content" role="dialog" aria-label="Prompt" style="background:var(--bg)">
+      <div class="modal-content preset-modal-content" role="dialog" aria-modal="true" aria-label="Prompt" style="background:var(--bg)">
         <div class="modal-header">
           <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>Prompt</h4>
           <button class="close-btn" id="close-custom-preset" aria-label="Close prompt">✖</button>
@@ -1530,7 +1530,7 @@
 
   <!-- Rename Session Modal -->
   <div id="rename-session-modal" class="modal hidden">
-    <div class="modal-content" role="dialog" aria-label="Rename session" style="width: 400px;">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-label="Rename session" style="width: 400px;">
       <div class="modal-header">
         <h4>Rename Session</h4>
         <button class="close-btn" id="close-rename-session" aria-label="Close rename session modal">✖</button>
@@ -1556,7 +1556,7 @@
 
   <!-- Cookbook Modal -->
   <div id="cookbook-modal" class="modal hidden">
-    <div class="modal-content" role="dialog" aria-label="Cookbook" style="width: min(780px, 92vw); height: 94vh; max-height: 94vh; background: var(--bg);">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-label="Cookbook" style="width: min(780px, 92vw); height: 94vh; max-height: 94vh; background: var(--bg);">
       <div class="modal-header">
         <h4 style="margin:0;margin-right:auto"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>Cookbook</h4>
         <button class="close-btn" id="close-cookbook-modal" aria-label="Close cookbook">✖</button>

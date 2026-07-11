@@ -193,9 +193,12 @@ def test_sourcepin_kit_reclamps_open_windows_on_viewport_resize():
     # the per-window re-clamp method exists and is driven over the open-window stack
     assert "_reclamp()" in js
     assert "reclampOpenWindows" in js
-    # it skips docked + minimized windows (the rail owns docked; minimized are hidden)
-    reclamp = js[js.index("_reclamp() {"):js.index("_reclamp() {") + 1600]
+    # it skips docked + sheet + minimized windows (the rail owns docked; a sheet's
+    # geometry is CSS-owned — #893; minimized are hidden). Window widened for the
+    # #893 skip-comment lines; the pinned jobs below are unchanged.
+    reclamp = js[js.index("_reclamp() {"):js.index("_reclamp() {") + 1800]
     assert "this._docked" in reclamp and "isMinimized()" in reclamp
+    assert "this._sheet" in reclamp, "#893: _reclamp must skip sheet-presented windows"
     # all three jobs: slot re-clamp (restack), position clamp into the viewport (full
     # containment when it fits), and shrink-to-fit respecting the window's own minimums.
     assert "this._slot.restack()" in reclamp

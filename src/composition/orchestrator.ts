@@ -49,9 +49,14 @@ export interface HealthRecord {
   lastIntegrity: "ok" | "fault";
   faults: Fault[];
   /**
-   * The circuit breaker (B58/audit E6): true after `BREAKER_THRESHOLD` consecutive faults — the
-   * turn-driven off-screen tick SKIPS this sandbox (no identical blind retries) until a successful
-   * player-turn commit closes the circuit again.
+   * The circuit breaker (B58/audit E6): true after `BREAKER_THRESHOLD` consecutive STATE-INTEGRITY
+   * faults (degradation / vault-leak / no-daily-event) — the turn-driven off-screen tick SKIPS this
+   * sandbox (no identical blind retries) until a successful player-turn commit closes the circuit
+   * again. `persist-failure` NEVER opens it (#1106 follow-through of audit E7): a disk blip is
+   * environmental, not corruption — the breaker is God Mode's "state integrity broke repeatedly"
+   * alarm, and E7's whole point was that an I/O failure must never be misread as degradation. A
+   * persist-failure is still fail-closed (rolled back, typed, recorded in `faults`) — it just
+   * neither advances nor resets the corruption streak.
    */
   circuitOpen: boolean;
 }
@@ -98,7 +103,11 @@ export interface OrchestratorConfig {
 }
 
 export class Orchestrator {
-  /** Consecutive faults that OPEN the circuit (off-screen ticks skip the sandbox). B58/E6. */
+  /** Consecutive STATE-INTEGRITY faults that OPEN the circuit (off-screen ticks skip the sandbox).
+   *  B58/E6; #1106: `persist-failure` is excluded — see `isStateFault`. The threshold is CONFIRMED
+   *  safe for a contested beat (#1106 ask (a)): the circuit only ever gates off-screen enrichment
+   *  ticks — `commitPlayerTurn` NEVER skips on an open circuit, so a contested eviction can always
+   *  commit the moment a clean turn lands (tests/unit/contestedEvictionIntegrity.test.ts). */
   private static readonly BREAKER_THRESHOLD = 3;
   /** Stored-fault cap per sandbox — health keeps the most recent, never an unbounded log. */
   private static readonly MAX_STORED_FAULTS = 20;
@@ -209,6 +218,25 @@ export class Orchestrator {
     return (this.consecutiveFaults.get(user) ?? 0) >= Orchestrator.BREAKER_THRESHOLD;
   }
 
+  /**
+   * Is this fault kind a STATE-INTEGRITY fault (#1106 / audit E7)? Degradation, vault-leak and
+   * no-daily-event are deterministic functions of game state — a blind retry reproduces them, which
+   * is exactly what the circuit exists to stop. `persist-failure` is ENVIRONMENTAL (a disk blip):
+   * the state itself passed the checkpoint, so it must neither advance nor reset the corruption
+   * streak — E7 split the fault class so an I/O failure is never misread as degradation, and the
+   * breaker (God Mode's corruption alarm) honors the same split.
+   */
+  private static isStateFault(kind: Fault["kind"]): boolean {
+    return kind !== "persist-failure";
+  }
+
+  /** Advance the consecutive-STATE-fault streak for a fault batch (persist-failures don't move it). */
+  private countFaults(user: string, faults: Fault[]): void {
+    if (faults.some((f) => Orchestrator.isStateFault(f.kind))) {
+      this.consecutiveFaults.set(user, (this.consecutiveFaults.get(user) ?? 0) + 1);
+    }
+  }
+
   /** How many LIVING NPCs the off-screen society can draw on (B52: evictees stop living).
    *  No started game ⇒ ZERO (audit E2): the pre-game interview has no house to scheme in — an
    *  off-screen tick before move-in would fabricate hidden history with houseguests that don't
@@ -272,8 +300,38 @@ export class Orchestrator {
     const when = this.clock.now();
 
     if (faults.length === 0) {
-      this.consecutiveFaults.set(user, 0); // any clean advance closes the circuit
-      if (trigger !== "audit") { this.registry.saveUser(user, candidate); this.baselines.set(user, candidate); }
+      if (trigger !== "audit") {
+        try {
+          this.registry.saveUser(user, candidate);
+        } catch {
+          // #1106/E7 — the TICK's durable save failed (disk). Before this guard the raw error (path
+          // and all) escaped PAST the caller's already-committed player turn: the whole request
+          // failed unclassified AFTER the turn durably saved (inviting an FE retry/double-apply),
+          // memory silently held tick state the disk didn't, and health recorded nothing. Fail the
+          // TICK closed instead: roll the enrichment back to the baseline (memory matches the last
+          // durable save again), record its persist-failure fault (E7's own class — it never opens
+          // the state circuit), and return a fault result — the committed player turn STANDS (the
+          // supplementary tick is enrichment, not the turn).
+          const f: Fault[] = [{ when, kind: "persist-failure" }];
+          this.registry.restore(user, baseline);
+          this.countFaults(user, f);
+          this.logFaults(user, trigger, f);
+          const failPrior = this.health.get(user);
+          this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "fault",
+            [...(failPrior?.faults ?? []), ...f].slice(-Orchestrator.MAX_STORED_FAULTS));
+          return { events: 0, integrity: "fault", faults: f };
+        }
+        this.baselines.set(user, candidate);
+      }
+      // Only a clean STATE-CHANGING advance closes the circuit (#1380 review): an `audit` is a
+      // read-only verification — after a fault's rollback it compares the healthy baseline to
+      // itself, so letting it reset the streak would silently re-enable off-screen ticks without
+      // any successful commit having happened. A clean player-turn (also via `commitPlayerTurn`)
+      // or a clean DIRECT off-screen tick (which ran the full checkpoint AND persisted) is real
+      // evidence of health — and a tick can only run while the circuit is still CLOSED (open ⇒
+      // skipped above), so once OPEN the only closer is a successful player-turn commit, exactly
+      // what the `HealthRecord.circuitOpen` contract promises.
+      if (trigger !== "audit") this.consecutiveFaults.set(user, 0);
       if (trigger === "player-turn") this.touch(user);
       this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "ok");
       return { events: produced, integrity: "ok", faults: [] };
@@ -282,7 +340,7 @@ export class Orchestrator {
     // Fail-closed: roll the in-memory sandbox back to the baseline (clean rebuild,
     // no aborted events left behind) and DO NOT persist. The prior save is intact.
     if (trigger !== "audit") this.registry.restore(user, baseline);
-    this.consecutiveFaults.set(user, (this.consecutiveFaults.get(user) ?? 0) + 1);
+    this.countFaults(user, faults); // state faults only — a persist blip never opens the circuit
     this.logFaults(user, trigger, faults);
     const prior = this.health.get(user);
     const allFaults = [...(prior?.faults ?? []), ...faults].slice(-Orchestrator.MAX_STORED_FAULTS);
@@ -348,7 +406,7 @@ export class Orchestrator {
     baseline: SessionSnapshot | undefined,
   ): void {
     if (baseline) this.registry.restore(user, baseline);
-    this.consecutiveFaults.set(user, (this.consecutiveFaults.get(user) ?? 0) + 1);
+    this.countFaults(user, faults); // state faults only (#1106/E7) — a disk blip never opens the circuit
     this.logFaults(user, trigger, faults);
     const prior = this.health.get(user);
     this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "fault",
@@ -479,7 +537,14 @@ export class Orchestrator {
     trigger: Trigger,
     when: number,
     integrity: "ok" | "fault",
-    faults: Fault[] = [],
+    /**
+     * #1106 forensics — when omitted (the clean-commit paths), the RECENT-FAULT RING is RETAINED, not
+     * wiped: `lastIntegrity`/`circuitOpen` already say the sandbox recovered, and keeping the capped
+     * ring (MAX_STORED_FAULTS) is what lets God Mode reconstruct a burst like #1106's six-fault storm
+     * AFTER the next clean turn closes the circuit — previously that evidence survived only in stderr.
+     * Fault paths pass the merged ring explicitly; `forgetUser` (the season door) still clears it.
+     */
+    faults?: Fault[],
   ): void {
     const core = sandbox.session.snapshot();
     this.health.set(user, {
@@ -491,7 +556,7 @@ export class Orchestrator {
       lastTrigger: trigger,
       eventCount: sandbox.engine.events.count(),
       lastIntegrity: integrity,
-      faults,
+      faults: faults ?? this.health.get(user)?.faults ?? [],
       circuitOpen: this.circuitOpen(user),
     });
   }

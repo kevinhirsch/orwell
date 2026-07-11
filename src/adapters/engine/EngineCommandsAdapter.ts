@@ -16,6 +16,7 @@ import { PRESENCE } from "../../engine/presenceConstants";
 import { isPrivateRoom, zonesSameEarshot, type Occupancy, type Zone } from "../../domain/house";
 import { StaleBeatError, EngineRefusal } from "../../domain/errors";
 import { IMAGE_BUDGET } from "../../engine/imageConstants";
+import { feltHoursFromMinutes } from "../../engine/sleepConstants";
 
 const INTERACTION_KINDS: ReadonlySet<string> = new Set<InteractionType>([
   "alliance", "gossip", "conflict", "bonding", "strategy", "showmance", "betrayal",
@@ -49,6 +50,9 @@ export class EngineCommandsAdapter implements EngineCommands {
   private onPersist?: () => void;
   /** The living houseguests an interaction may name (B39); when unset, validation is skipped (standalone). */
   private livingProvider?: () => Iterable<EntityId>;
+  /** Phase 2 — where a recorded scene's LLM-proposed felt duration (hours, clamped) is handed to the session
+   *  to advance the day clock on the next per-turn tick. Unwired ⇒ inert (standalone / no clock). */
+  private feltDurationSink?: (hours: number) => void;
   /** The live occupancy ground truth (0049); when unset, scenes are placeless (standalone — prior behavior). */
   private presenceProvider?: () => Occupancy | null;
   /**
@@ -150,6 +154,12 @@ export class EngineCommandsAdapter implements EngineCommands {
   /** Wire the house occupancy (0049) so recorded scenes gain co-present witnesses + adjacent overhears. */
   setPresenceProvider(fn: () => Occupancy | null): void {
     this.presenceProvider = fn;
+  }
+
+  /** Phase 2 — wire the day-clock advance so a scene carrying `feltMinutes` moves the in-game clock by its
+   *  bounded felt duration (the session self-gates on the running clock). Unwired ⇒ inert. */
+  setFeltDurationSink(fn: (hours: number) => void): void {
+    this.feltDurationSink = fn;
   }
 
   /** Wire the live zone reader (0077) so co-presence witnessing is earshot-scoped within a big room. */
@@ -426,6 +436,12 @@ export class EngineCommandsAdapter implements EngineCommands {
     // persist failure (which rolls the whole commit back, including this in-memory event) leaves no key
     // behind — a later retry then correctly re-attempts rather than short-circuiting to a rolled-back id.
     if (req.idempotencyKey !== undefined) this.rememberRecordIdempotent(req.idempotencyKey, eventId);
+    // Phase 2 (duration-based clock) — a scene that proposed how long it FELT stashes that bounded
+    // duration for the orchestrator's next per-turn clock advance to consume (instead of the flat floor),
+    // so the day's clock tracks the play the player actually did. Only when the caller proposed it; the
+    // sink self-gates on the running clock, so this is inert in the seeded sims (clock off). No fold, no
+    // number crosses to the player — it moves only the Vault-free day clock.
+    if (req.feltMinutes !== undefined) this.feltDurationSink?.(feltHoursFromMinutes(req.feltMinutes));
     return { eventId };
   }
 

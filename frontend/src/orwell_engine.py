@@ -555,7 +555,7 @@ async def run_competition(comp_type: str | None = None, participant_ids: list | 
     return await _call("runCompetition", args, user=user)
 
 
-async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
+async def record_interaction(content: str, with_ids: list | None = None, initiator: str = "player", kind: str | None = None, consequence: dict | None = None, expected_beat_seq: int | None = None, idempotency_key: str | None = None, felt_minutes: int | None = None, user: str | None = None) -> dict:
     """Record a player-present scene as an engine event (player-witnessed → the player's
     knowledge, never the Vault). An optional `kind` folds the hidden relationship impact (0023);
     an optional Vault-free `consequence` descriptor (ADR 0005) lets the caller PROPOSE which
@@ -585,6 +585,10 @@ async def record_interaction(content: str, with_ids: list | None = None, initiat
         req["expectedBeatSeq"] = expected_beat_seq
     if idempotency_key is not None:
         req["idempotencyKey"] = idempotency_key
+    # Phase 2 (duration-based clock): the LLM's proposal for how long this scene FELT, in in-game minutes.
+    # The engine clamps it and advances the day clock by that bounded duration (pacing-only; clock-gated).
+    if isinstance(felt_minutes, (int, float)) and felt_minutes > 0:
+        req["feltMinutes"] = felt_minutes
     return await _call("recordInteraction", req, user=user)
 
 
@@ -715,24 +719,39 @@ async def social_initiatives(user: str | None = None) -> dict:
     return await _call("socialInitiatives", {}, user=user)
 
 
-async def make_deal(with_id: str, kind: str, terms: str, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+async def make_deal(with_id: str, kind: str, terms: str, expected_beat_seq: int | None = None,
+                    idempotency_key: str | None = None, user: str | None = None) -> dict:
     """Record a player<->NPC deal (0039). The engine tracks and adjudicates it. 0065 Part A — an
     optional `expected_beat_seq` CAS token is threaded in only when provided (absent ⇒ identical to
-    today)."""
+    today).
+
+    A10 / #591 / R1c — an optional `idempotency_key` (0065 Part B, the fold-lever sibling of
+    `record_interaction`'s) threads in ONLY when provided: a deal folds a hidden relationship impact AND
+    creates state, so a stale-409 re-drive (the #591 retry + the CON-11 deferred-fold queue) must be
+    at-most-once at the ENGINE — a repeat key returns the prior result without re-folding (#1305)."""
     args: dict = {"with": with_id, "kind": kind, "terms": terms}
     if expected_beat_seq is not None:
         args["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        args["idempotencyKey"] = idempotency_key
     return await _call("makeDeal", args, user=user)
 
 
-async def confide(npc_id: str, expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+async def confide(npc_id: str, expected_beat_seq: int | None = None,
+                  idempotency_key: str | None = None, user: str | None = None) -> dict:
     """Feature 0075 — the player presses an ally to confide. The engine is the single authority: it
     decides whether/how much they disclose and whether it's true or a lie, and records the disclosure
     as the player's knowledge via an in-game pathway. 0065 Part A — the optional `expected_beat_seq`
-    CAS token threads in only when provided (absent ⇒ identical to today)."""
+    CAS token threads in only when provided (absent ⇒ identical to today).
+
+    A10 / #591 / R1c — the optional `idempotency_key` (0065 Part B) threads in only when provided: a
+    confide folds the bond bump / lie ledger, so a stale-409 re-drive must be at-most-once at the
+    ENGINE (#1305 — a repeat key returns the prior result without re-folding)."""
     args: dict = {"npcId": npc_id}
     if expected_beat_seq is not None:
         args["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        args["idempotencyKey"] = idempotency_key
     return await _call("confide", args, user=user)
 
 
@@ -760,13 +779,19 @@ async def join_alliance(alliance_id: str, expected_beat_seq: int | None = None, 
 
 
 async def expose_secret(fact_id: str | None = None, bluff: bool = False, subject: str | None = None,
-                        expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+                        expected_beat_seq: int | None = None, idempotency_key: str | None = None,
+                        user: str | None = None) -> dict:
     """Feature 0093 — the player OUTS a secret they LEARNED to the house. The engine is the single
     authority: it validates the player actually holds `fact_id` (I3/Vault Wall — a non-learned fact is
     REJECTED, never invented here), resolves the bounded standing fold + exposer backlash, and records
     the exposure as a witnessed pathway event. A `bluff` (outing a secret the player does NOT hold, with
     `subject` naming who it's about) never reads the Vault — it's a pure gamble the engine adjudicates.
-    0065 Part A — the optional `expected_beat_seq` CAS token threads in only when provided."""
+    0065 Part A — the optional `expected_beat_seq` CAS token threads in only when provided.
+
+    A10 / #591 / R1c — the optional `idempotency_key` (0065 Part B) threads in only when provided: an
+    exposure folds a house-wide standing hit AND spends the secret (one-shot), so a stale-409 re-drive
+    (the #591 retry + the CON-11 deferred-fold queue) must be at-most-once at the ENGINE (#1305 — a
+    repeat key returns the prior result without re-folding)."""
     args: dict = {}
     if bluff:
         args["bluff"] = True
@@ -776,18 +801,26 @@ async def expose_secret(fact_id: str | None = None, bluff: bool = False, subject
         args["factId"] = fact_id
     if expected_beat_seq is not None:
         args["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        args["idempotencyKey"] = idempotency_key
     return await _call("exposeSecret", args, user=user)
 
 
 async def trade_secret(to_npc_id: str, fact_id: str | None = None, bluff: bool = False,
                        subject: str | None = None, ask_kind: str | None = None,
-                       expected_beat_seq: int | None = None, user: str | None = None) -> dict:
+                       expected_beat_seq: int | None = None, idempotency_key: str | None = None,
+                       user: str | None = None) -> dict:
     """Feature 0099 — the player TRADES a secret they LEARNED about a THIRD party to a recipient for a
     one-off concession. The engine is the single authority: it validates the player actually holds
     `fact_id` (I3/Vault Wall — a non-learned fact is REJECTED), values the secret TO THE RECIPIENT, and
     decides whether they bite. A `bluff` (offering a fabricated secret, `subject` naming who it's about)
     never reads the Vault. 0065 Part A — the optional `expected_beat_seq` CAS token threads in only when
-    provided."""
+    provided.
+
+    A10 / #591 / R1c — the optional `idempotency_key` (0065 Part B) threads in only when provided: a
+    struck trade folds the recipient warmth/sour AND burns the one-shot trade cap, so a stale-409
+    re-drive (the #591 retry + the CON-11 deferred-fold queue) must be at-most-once at the ENGINE
+    (#1305 — a repeat key returns the prior result without re-folding)."""
     args: dict = {"toNpcId": to_npc_id}
     if bluff:
         args["bluff"] = True
@@ -799,6 +832,8 @@ async def trade_secret(to_npc_id: str, fact_id: str | None = None, bluff: bool =
         args["askKind"] = ask_kind
     if expected_beat_seq is not None:
         args["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        args["idempotencyKey"] = idempotency_key
     return await _call("tradeSecret", args, user=user)
 
 

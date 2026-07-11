@@ -121,3 +121,49 @@ def test_zero_beat_seq_is_threaded_not_dropped():
     # beatSeq 0 is a legitimate token (a brand-new sandbox); `is not None` must keep it.
     _run(orwell_engine.advance_game(expected_beat_seq=0, user="u"))
     assert _args() == {"expectedBeatSeq": 0}
+
+
+# --- A10 / #591 / R1c — the fold-lever at-most-once key threads through the thin client ---------
+# The engine dedups a re-driven fold-bearing lever (makeDeal/confide/exposeSecret/tradeSecret) by a
+# caller-minted `idempotencyKey` (#1305, mirroring recordInteraction #1297). These pin the FE half:
+# the wrapper actually SENDS the key when provided (the silent-no-op class: engine accepts the field,
+# FE never sends it) and stays byte-identical when absent.
+
+def test_make_deal_threads_idempotency_key():
+    _run(orwell_engine.make_deal("npc:1", "vote", "t", expected_beat_seq=3,
+                                 idempotency_key="fd-1", user="u"))
+    assert _args() == {"with": "npc:1", "kind": "vote", "terms": "t",
+                       "expectedBeatSeq": 3, "idempotencyKey": "fd-1"}
+
+
+def test_confide_threads_idempotency_key():
+    _run(orwell_engine.confide("npc:2", expected_beat_seq=5, idempotency_key="fc-1", user="u"))
+    assert _args() == {"npcId": "npc:2", "expectedBeatSeq": 5, "idempotencyKey": "fc-1"}
+
+
+def test_confide_without_sync_fields_is_unchanged():
+    _run(orwell_engine.confide("npc:2", user="u"))
+    assert _args() == {"npcId": "npc:2"}
+
+
+def test_expose_secret_threads_idempotency_key():
+    _run(orwell_engine.expose_secret(fact_id="fact:1", expected_beat_seq=6,
+                                     idempotency_key="fe-1", user="u"))
+    assert _args() == {"factId": "fact:1", "expectedBeatSeq": 6, "idempotencyKey": "fe-1"}
+
+
+def test_expose_secret_without_sync_fields_is_unchanged():
+    _run(orwell_engine.expose_secret(fact_id="fact:1", user="u"))
+    assert _args() == {"factId": "fact:1"}
+
+
+def test_trade_secret_threads_idempotency_key():
+    _run(orwell_engine.trade_secret("npc:3", fact_id="fact:2", ask_kind="a vote",
+                                    expected_beat_seq=7, idempotency_key="ft-1", user="u"))
+    assert _args() == {"toNpcId": "npc:3", "factId": "fact:2", "askKind": "a vote",
+                       "expectedBeatSeq": 7, "idempotencyKey": "ft-1"}
+
+
+def test_trade_secret_without_sync_fields_is_unchanged():
+    _run(orwell_engine.trade_secret("npc:3", fact_id="fact:2", user="u"))
+    assert _args() == {"toNpcId": "npc:3", "factId": "fact:2"}

@@ -143,6 +143,85 @@ def test_dwell_neutralization_is_scoped_to_presence_lines(golden):
         golden.request_key("stream", word_c, TOOLS, PARAMS)
 
 
+def test_gossip_drift_hedge_never_drifts_the_key(golden):
+    """A surfaced fact carries src/engine/gossip.ts `distort`'s hedge suffix
+    " · <phrase>#<0-999>" — a random word + a random id, re-rolled every retelling (and a
+    retelling can fire ±1 more time between the slow record and the instant replay). It
+    reaches the key verbatim (the adapter's id-only humanize does NOT run tidyPathwaySlugs),
+    so it is neutralized key-side; a real change to the fact body still drifts the key."""
+    gossip_a = [{"role": "system", "content":
+                 "WHAT YOU'VE LEARNED:\n  - word around the house is that A and B are "
+                 "plotting something · roughly#742"},
+                {"role": "user", "content": "hello"}]
+    gossip_b = [{"role": "system", "content":
+                 "WHAT YOU'VE LEARNED:\n  - word around the house is that A and B are "
+                 "plotting something · supposedly#8"},
+                {"role": "user", "content": "hello"}]
+    overheard_a = [{"role": "system", "content":
+                    "WHAT YOU'VE LEARNED:\n  - (overheard, muffled) they were talking… "
+                    "· or so I heard#301"},
+                   {"role": "user", "content": "hello"}]
+    overheard_b = [{"role": "system", "content":
+                    "WHAT YOU'VE LEARNED:\n  - (overheard, muffled) they were talking… "
+                    "· more or less#977"},
+                   {"role": "user", "content": "hello"}]
+    # The hedge id/phrase is invisible to the key…
+    assert golden.request_key("stream", gossip_a, TOOLS, PARAMS) == \
+        golden.request_key("stream", gossip_b, TOOLS, PARAMS)
+    assert golden.request_key("stream", overheard_a, TOOLS, PARAMS) == \
+        golden.request_key("stream", overheard_b, TOOLS, PARAMS)
+    # …but a real change to WHAT the fact says still misses (coverage isn't gutted).
+    changed = [{"role": "system", "content":
+                "WHAT YOU'VE LEARNED:\n  - word around the house is that A and C are "
+                "plotting something · roughly#742"},
+               {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", gossip_a, TOOLS, PARAMS) != \
+        golden.request_key("stream", changed, TOOLS, PARAMS)
+
+
+def test_movement_in_the_room_cue_never_drifts_the_key(golden):
+    """The FE's MOVEMENT IN THE ROOM cue (routes/chat_helpers.py _render_presence_movement)
+    names the per-turn presence diff — who came/went — which varies ±1 with tick timing. The
+    who/where between the em-dash and the fixed ". Voice it as a natural beat" is neutralized;
+    the stable instruction around it, and any OTHER prompt change, still drifts the key."""
+    tail = (". Voice it as a natural beat — show them heading out or arriving — never let a "
+            "houseguest simply vanish from or appear in the scene without a beat. (The engine "
+            "moves the houseguests; you only narrate it.)")
+    left = [{"role": "system", "content":
+             "MOVEMENT IN THE ROOM (engine truth) — A has left the kitchen" + tail},
+            {"role": "user", "content": "hello"}]
+    came = [{"role": "system", "content":
+             "MOVEMENT IN THE ROOM (engine truth) — B and C have come into the kitchen" + tail},
+            {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", left, TOOLS, PARAMS) == \
+        golden.request_key("stream", came, TOOLS, PARAMS)
+    # A change to the STABLE framing (not the volatile who/where) still misses.
+    changed = [{"role": "system", "content":
+                "MOVEMENT IN THE ROOM (engine truth) — A has left the kitchen" + tail + " NEW."},
+               {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", left, TOOLS, PARAMS) != \
+        golden.request_key("stream", changed, TOOLS, PARAMS)
+
+
+def test_offscreen_neutralization_is_scoped(golden):
+    """Both subs are narrow: the gossip-hedge shape ` · <phrase>#<n>` and the anchored
+    MOVEMENT line only. Unrelated prompt prose that merely resembles a fragment still keys."""
+    # A bare "#<n>" without the " · <phrase>" hedge shape is ordinary content — must still drift.
+    hash_a = [{"role": "system", "content": "The vote was 5#1 in the diary room."},
+              {"role": "user", "content": "hello"}]
+    hash_b = [{"role": "system", "content": "The vote was 5#2 in the diary room."},
+              {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", hash_a, TOOLS, PARAMS) != \
+        golden.request_key("stream", hash_b, TOOLS, PARAMS)
+    # "movement" prose that is NOT the anchored cue line must still drift on its content.
+    prose_a = [{"role": "system", "content": "There was movement in the room as A walked past."},
+               {"role": "user", "content": "hello"}]
+    prose_b = [{"role": "system", "content": "There was movement in the room as B walked past."},
+               {"role": "user", "content": "hello"}]
+    assert golden.request_key("stream", prose_a, TOOLS, PARAMS) != \
+        golden.request_key("stream", prose_b, TOOLS, PARAMS)
+
+
 def test_tool_schema_order_does_not_drift_the_key(golden):
     two = TOOLS + [{"type": "function", "function": {"name": "getGameState",
                                                       "parameters": {"type": "object"}}}]

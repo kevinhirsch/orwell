@@ -39,7 +39,7 @@ def _wire(monkeypatch, extraction_json, confides):
     async def fake_llm(*a, **k):
         return extraction_json
 
-    async def fake_confide(npc_id, expected_beat_seq=None, user=None):
+    async def fake_confide(npc_id, expected_beat_seq=None, idempotency_key=None, user=None):
         confides.append({"npcId": npc_id, "user": user})
         # The engine decides — default to a no-op disclosure unless a test wants otherwise.
         return {"disclosed": False}
@@ -70,7 +70,7 @@ def test_engine_decides_disclosure_fe_never_authors_it(monkeypatch):
     async def fake_llm(*a, **k):
         return '{"npcId":"npc:7"}'
 
-    async def fake_confide(npc_id, expected_beat_seq=None, user=None):
+    async def fake_confide(npc_id, expected_beat_seq=None, idempotency_key=None, user=None):
         confides.append({"npcId": npc_id, "user": user})
         return {"disclosed": True, "tier": "full", "content": "the engine-authored secret text"}
 
@@ -174,7 +174,7 @@ def test_engine_confide_error_is_fail_closed(monkeypatch):
     async def fake_llm(*a, **k):
         return '{"npcId":"npc:3"}'
 
-    async def boom_confide(npc_id, expected_beat_seq=None, user=None):
+    async def boom_confide(npc_id, expected_beat_seq=None, idempotency_key=None, user=None):
         raise RuntimeError("engine 500")
 
     monkeypatch.setattr(llm_core, "llm_call_async", fake_llm)
@@ -209,7 +209,7 @@ def test_confide_belt_is_wired_into_the_finishing_block():
                            "src", "agent_loop.py"), encoding="utf-8").read()
     assert "async def _auto_confide" in js
     # 0065: routed through the CAS helper so the back-fill carries the compare-and-swap beatSeq token.
-    assert "_backfill_with_cas(owner, _oe.confide, npc_id, user=owner, defer_fold=True)" in js
+    assert "_backfill_with_cas(owner, _oe.confide, npc_id, user=owner, defer_fold=True,\n                                       idempotency_key=_ch_idem._mint_idempotency_key())" in js
     # gated on: model didn't confide (per-turn cap) + the cheap press pre-filter over the player's OWN line
     assert "_want_confide = (_turn_confide_nudges < 1" in js
     assert "_CONFIDE_PRESS_RE.search(_last_user_for_confide)" in js

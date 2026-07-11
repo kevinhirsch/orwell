@@ -1833,6 +1833,16 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
     console.error('Error in selectSession:', error);
     uiModule.showError('Failed to load session: ' + error.message);
   } finally {
+    // #891 P1 fix (cross-session bleed): a queued/restored send-outbox item is BOUND to its own
+    // session and HELD while any other session is current (chat.js _flushSendOutbox eligibility).
+    // Nudge the drain now that the selection changed, so an item bound to THIS session dispatches
+    // immediately instead of waiting out the backoff timer. Deferred so the select fully settles
+    // first; the flush re-checks every guard (streaming/offline/binding), so this is always safe.
+    try {
+      if (window.chatModule && window.chatModule._flushSendOutbox) {
+        setTimeout(() => { try { window.chatModule._flushSendOutbox(); } catch (_) {} }, 0);
+      }
+    } catch (_) {}
     // Ensure memories are loaded after session selection
     if (window.memoryModule && window.memoryModule.loadMemories) {
       await window.memoryModule.loadMemories();

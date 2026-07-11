@@ -92,6 +92,16 @@ _INT_FIELDS = (
 _BOOL_FIELDS = ("desyncDetected",)
 _ID_FIELDS = ("turnId", "session")  # short identifiers (never a body)
 _NAME_LIST_FIELDS = ("toolsCalled",)  # lists of tool/event NAMES only
+_NAME_MAP_FIELDS = ("beltsFired",)  # {beltName: count} maps — names + small ints only
+
+# ── Belt-fire telemetry (product gap #3 — docs/design/undercall-seam-structural.md §5) ──
+# Every FE guardrail belt that error-corrects a model under-call calls `note_belt_fire`
+# when it FIRES. Fires buffer in memory per user and are drained into the next
+# `record_turn` entry's `beltsFired` map, so playtests can MEASURE belt reliance
+# (`get_belt_totals`) instead of feeling it. Belt names are short FE-authored tokens
+# (the registry lives in the design doc); the same coercion floor applies — a body can
+# never pass through a belt name.
+_PENDING_BELTS: dict[str, dict[str, int]] = {}
 
 
 def _key(user: str | None) -> str:
@@ -156,6 +166,25 @@ def _clean_names(v: Any) -> list[str]:
     return out
 
 
+def _clean_belt_map(v: Any) -> dict[str, int]:
+    """A {beltName: count} map — short name tokens to positive ints only, bounded.
+    Anything unusable ⇒ {}. The Vault-free floor: a body can never ride a belt name."""
+    if not isinstance(v, dict):
+        return {}
+    out: dict[str, int] = {}
+    for name, count in v.items():
+        if len(out) >= _MAX_NAMES:
+            break
+        try:
+            s = str(name).strip()
+        except Exception:
+            continue
+        n = _clean_int(count)
+        if s and n > 0:
+            out[s[:_MAX_NAME_LEN]] = n
+    return out
+
+
 def _entry(
     *,
     session: Any,
@@ -168,6 +197,7 @@ def _entry(
     desync_detected: Any,
     stale_rejections: Any,
     idempotency_hits: Any,
+    belts_fired: Any = None,
 ) -> dict:
     """Build the bounded, Vault-free entry. Every field is coerced to a scalar / id /
     name; there is no path for a free-form body to land in the stored shape."""
@@ -183,10 +213,74 @@ def _entry(
         "desyncDetected": bool(desync_detected),
         "staleRejections": _clean_int(stale_rejections),
         "idempotencyHits": _clean_int(idempotency_hits),
+        "beltsFired": _clean_belt_map(belts_fired),
     }
 
 
 # ── public API ───────────────────────────────────────────────────────────────────
+
+
+def note_belt_fire(user: str | None, belt: Any, n: Any = 1) -> None:
+    """Count one guardrail-belt firing for ``user`` (gap #3 belt-fire telemetry).
+
+    Fail-soft and cheap: the fire lands in an in-memory per-user buffer (belt NAMES +
+    small counts only — the same Vault-free coercion floor as every ledger field) and is
+    drained into the next ``record_turn`` entry's ``beltsFired`` map. ``get_belt_totals``
+    reads buffered fires too, so pre-turn / pre-game belts are measurable even before a
+    live turn records. Never raises; telemetry must never hurt the app."""
+    try:
+        try:
+            name = str(belt).strip()[:_MAX_NAME_LEN]
+        except Exception:
+            return
+        count = _clean_int(n)
+        if not name or count <= 0:
+            return
+        k = _key(user)
+        with _LOCK:
+            bucket = _PENDING_BELTS.setdefault(k, {})
+            if name not in bucket and len(bucket) >= _MAX_NAMES:
+                return  # bounded: never grow past the name cap
+            bucket[name] = bucket.get(name, 0) + count
+    except Exception:  # pragma: no cover - defence in depth
+        pass
+
+
+def note_belt(user: str | None, belt: Any, n: Any = 1) -> None:
+    """The thin never-raises convenience wrapper over :func:`note_belt_fire` for belt call
+    sites OUTSIDE this module (chat_helpers / tool_implementations / the agent loop) — one
+    name to call instead of the 4x-duplicated inline try/except blocks. Identical semantics;
+    belt-fire telemetry must never hurt the app."""
+    try:
+        note_belt_fire(user, belt, n)
+    except Exception:  # pragma: no cover - defence in depth (note_belt_fire already swallows)
+        pass
+
+
+def _drain_pending_belts(user_key: str) -> dict[str, int]:
+    """Pop (and return) the user's buffered belt fires. Caller holds no lock."""
+    with _LOCK:
+        return _PENDING_BELTS.pop(user_key, {}) or {}
+
+
+def get_belt_totals(user: str | None) -> dict[str, int]:
+    """Aggregate belt-fire counts for ``user``: the sum of ``beltsFired`` across the
+    retained ring PLUS any still-buffered fires — the playtest-facing "how belt-reliant
+    was this session" read. Per-user scoped; a missing/corrupt store answers {}."""
+    k = _key(user)
+    totals: dict[str, int] = {}
+    with _LOCK:
+        bucket = _load().get(k)
+        pending = dict(_PENDING_BELTS.get(k) or {})
+    if isinstance(bucket, list):
+        for e in bucket:
+            if not isinstance(e, dict):
+                continue
+            for name, count in _clean_belt_map(e.get("beltsFired")).items():
+                totals[name] = totals.get(name, 0) + count
+    for name, count in _clean_belt_map(pending).items():
+        totals[name] = totals.get(name, 0) + count
+    return totals
 
 
 def record_turn(
@@ -202,6 +296,7 @@ def record_turn(
     desync_detected: Any = False,
     stale_rejections: Any = 0,
     idempotency_hits: Any = 0,
+    belts_fired: Any = None,
 ) -> None:
     """Append one Vault-free per-turn sync record for ``user`` (``_current_user``-scoped),
     bounded by a per-user ring, and emit one structured ``[orwell]`` log line.
@@ -209,8 +304,14 @@ def record_turn(
     Every argument is coerced to a small scalar / id / tool-name; message bodies,
     narration, casting answers, and any engine secret CANNOT be stored — that is a hard
     invariant, enforced by the coercion in ``_entry`` rather than by careful callers.
+    Buffered ``note_belt_fire`` counts for the user are drained into the entry's
+    ``beltsFired`` map (merged with any explicit ``belts_fired`` argument).
     Errors are swallowed: ledgering must never hurt the app."""
     try:
+        k = _key(user)
+        merged_belts = _clean_belt_map(belts_fired)
+        for name, count in _drain_pending_belts(k).items():
+            merged_belts[name] = merged_belts.get(name, 0) + count
         entry = _entry(
             session=session,
             turn_id=turn_id,
@@ -222,8 +323,8 @@ def record_turn(
             desync_detected=desync_detected,
             stale_rejections=stale_rejections,
             idempotency_hits=idempotency_hits,
+            belts_fired=merged_belts,
         )
-        k = _key(user)
         with _LOCK:
             data = _load()
             bucket = data.get(k)
@@ -263,6 +364,7 @@ def clear(user: str | None) -> None:
     """Drop the user's ledger (used by a full account/factory reset). Per-user scoped."""
     k = _key(user)
     with _LOCK:
+        _PENDING_BELTS.pop(k, None)
         data = _load()
         if k in data:
             del data[k]
@@ -274,9 +376,10 @@ def _log_line(user_key: str, entry: dict) -> None:
     ring for the admin viewer. Counts + ids + tool names only (no body)."""
     try:
         tools = ",".join(entry.get("toolsCalled") or []) or "-"
+        belts = ",".join(f"{n}:{c}" for n, c in (entry.get("beltsFired") or {}).items()) or "-"
         logger.info(
             "[orwell] sync-ledger turn user=%s session=%s turn=%s beat=%s→%s "
-            "tools=[%s] nudges=%s backfills=%s desync=%s stale=%s idem=%s",
+            "tools=[%s] nudges=%s backfills=%s desync=%s stale=%s idem=%s belts=[%s]",
             user_key,
             entry.get("session") or "-",
             entry.get("turnId") or "-",
@@ -288,6 +391,7 @@ def _log_line(user_key: str, entry: dict) -> None:
             entry.get("desyncDetected"),
             entry.get("staleRejections"),
             entry.get("idempotencyHits"),
+            belts,
         )
     except Exception:  # pragma: no cover
         pass

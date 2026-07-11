@@ -195,6 +195,21 @@ export function conversationHours(kind: ConversationKind, proposedHours?: number
   return clamp(proposedHours, CONVERSATION_DURATION.minHours[kind], CONVERSATION_DURATION.maxHours[kind]);
 }
 
+/**
+ * Phase 2 (duration-based clock) — the LLM's per-scene felt-time proposal, in MINUTES, bounded to a sane
+ * envelope in HOURS. The narrator sizes each social scene ("a quick word ~15–30 min, a long strategy
+ * summit ~2–3 h") and the engine keeps the bounded value (ADR 0005 for time): the clamp stops the model
+ * moving the clock absurdly (anti-abuse) and keeps the day realistic — a scene is at least a short beat
+ * and at most a long summit, mirroring the CONVERSATION_DURATION envelope (passing.min … summit.max). A
+ * non-finite / ≤0 proposal ⇒ the small per-conversation floor (byte-identical to "no proposal").
+ */
+export const SCENE_FELT_MINUTES = { min: 15, max: 240 };
+
+export function feltHoursFromMinutes(minutes: number | undefined): number {
+  if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0) return CLOCK.perConversationHours;
+  return clamp(minutes, SCENE_FELT_MINUTES.min, SCENE_FELT_MINUTES.max) / 60;
+}
+
 // --- Event durations + seeded start-within-period (deterministic, no shared-stream rng) -----------
 //
 // A ceremony/comp/eviction has a typical DURATION and starts at a SEEDED offset WITHIN its period (not

@@ -19,7 +19,9 @@ When a finding lands, its xfail flips to a hard assertion by REMOVING the entry
 Engine-staged surfaces (status HUD, decision card, …) are exercised when an
 engine is reachable (ORWELL_MATRIX_ENGINE=url) or buildable; otherwise the run
 covers the page chrome (composer, sidebar, settings, theme modal) — still the
-S1/S5/S9 regression net. Usage:  python3 scripts/responsive_matrix.py
+S1/S5/S9 regression net. CI's fe-responsive job runs ENGINE-STAGED with
+ORWELL_MATRIX_FINISH=1 (#651 gap 1), so the game + endgame surfaces are
+measured on every FE PR. Usage:  python3 scripts/responsive_matrix.py
 
 J5-19 — the ENDGAME mobile sweep (opt-in). stage_game() only creates a fresh
 (turn-0) game, so the endgame surfaces (#orwell-retro self-gates on
@@ -71,8 +73,18 @@ FS_FLOOR_PX = 10.5  # the --fs-2xs floor (~11px) with sub-pixel slack
 # finding-ID → substring the failure line must contain. Remove an entry when its
 # finding lands; the failure then breaks the gate for real.
 XFAIL = {
-    # (empty — the chrome PR's anchor slots + sidebar moves made the D2 collision
-    # rule structural; add ONLY with a finding ID, remove when the finding lands.)
+    # Add ONLY with a finding ID (a filed issue), remove when the finding lands — the
+    # gate then ratchets the family to a hard assertion.
+    #
+    # #1371 — the finished-season retrospective window (#orwell-retro, kit slot top-right,
+    # fixed z-502) floats OVER the gadget rail's docked cards on rail-visible tiers and
+    # reaches the composer at several tiers. ONE root cause, four collision families (#1371-a..d) —
+    # surfaced the first time the matrix ran ENGINE-STAGED + FINISHED in CI (#651 gap 1);
+    # pre-existing state, not a new regression. Remove all four entries when #1371 lands.
+    "#1371-a": "overlap:orwell-retro intersects the composer",
+    "#1371-b": "overlap:orwell-status intersects orwell-retro",
+    "#1371-c": "overlap:orwell-presence intersects orwell-retro",
+    "#1371-d": "overlap:orwell-retro intersects orwell-room-strip",
 }
 
 passes, failures, xfails, xpasses = [], [], [], []
@@ -251,6 +263,33 @@ GAME_SURFACES = ["#orwell-status", "#orwell-presence",
                  "#orwell-room-strip"]
 CHROME = {"composer": "#chat-form", "sidebar": "#sidebar"}
 
+# #651 Gap 2: the crowding scan used to cover only settings + status + composer — a sub-floor font
+# in the docked gadgets (presence/deals/cast), the decision/finale cards, or the retro shipped
+# green even in a staged run. Scan EVERY registered game surface (reuse GAME_SURFACES so a newly
+# registered surface is crowding-covered automatically) plus the page chrome.
+CROWD_SELECTOR = ", ".join(
+    ["#settings-modal *", ".settings-layout *", "#chat-form *"]
+    + [f"{sel} *" for sel in GAME_SURFACES])
+
+
+# #651: several sweeps OPEN the gadget-rail drawer (the touch sweep so its panel controls are in
+# view; the banner sweep to measure the rail under the inset) — and audit_page runs several times
+# on the SAME page (base, +endgame-card, +face-grid, +retro, +settings). A drawer left open bleeds
+# the modal slide-over (with its docked #orwell-status/#orwell-presence cards) into every LATER
+# sub-pass's D2 overlap sweep, manufacturing false "status intersects decision-card" collisions no
+# real player state produces (the open drawer is a deliberate overlay — the #740 sweep exempts it
+# for the same reason). Every sweep that opens the drawer must close it back down. Fail-soft.
+def _close_drawer(page):
+    try:
+        page.evaluate(
+            "(() => { const r = document.getElementById('gadget-rail');"
+            " if (r) r.classList.remove('grail-open');"
+            " document.querySelectorAll('.grail-scrim-on')"
+            "  .forEach(e => e.classList.remove('grail-scrim-on')); })()")
+        page.wait_for_timeout(200)
+    except Exception:
+        pass
+
 
 def audit_page(page, vp_name, width, height, coarse, with_game):
     page.wait_for_timeout(2500)
@@ -370,24 +409,25 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
             report("pass", f"{vp_name} rail/cast-pin clears composer")
 
     # --- crowding: visible text at or above the floor; nowrap overflow -------
-    crowd = page.evaluate(f"""
-      (() => {{
-        const out = [];
-        const els = document.querySelectorAll('#settings-modal *, .settings-layout *, #orwell-status *, #chat-form *');
-        let i = 0;
-        for (const el of els) {{
-          if (i++ > 2500) break;
-          if (!el.offsetParent || !el.textContent || !el.textContent.trim()) continue;
-          if (el.children.length > 0) continue;
-          const cs = getComputedStyle(el);
-          const fs = parseFloat(cs.fontSize);
-          if (fs && fs < {FS_FLOOR_PX}) out.push('font ' + fs.toFixed(1) + 'px: ' + el.textContent.trim().slice(0, 30));
-          if (cs.whiteSpace === 'nowrap' && cs.overflow === 'visible' && el.scrollWidth > el.clientWidth + 2)
-            out.push('nowrap-overflow: ' + el.textContent.trim().slice(0, 30));
-        }}
-        return out.slice(0, 6);
-      }})()
-    """)
+    crowd = page.evaluate(
+        """(args) => {
+          const out = [];
+          const els = document.querySelectorAll(args.selector);
+          let i = 0;
+          for (const el of els) {
+            if (i++ > 2500) break;
+            if (!el.offsetParent || !el.textContent || !el.textContent.trim()) continue;
+            if (el.children.length > 0) continue;
+            const cs = getComputedStyle(el);
+            const fs = parseFloat(cs.fontSize);
+            if (fs && fs < args.floor) out.push('font ' + fs.toFixed(1) + 'px: ' + el.textContent.trim().slice(0, 30));
+            if (cs.whiteSpace === 'nowrap' && cs.overflow === 'visible' && el.scrollWidth > el.clientWidth + 2)
+              out.push('nowrap-overflow: ' + el.textContent.trim().slice(0, 30));
+          }
+          return out.slice(0, 6);
+        }""",
+        {"selector": CROWD_SELECTOR, "floor": FS_FLOOR_PX},
+    )
     scope = "settings" if page.evaluate("!!document.querySelector('#settings-modal,[class*=settings-layout]')") else "page"
     for c in crowd:
         report("fail", f"{vp_name} crowding:{scope} {c}")
@@ -422,6 +462,7 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
             report("fail", f"{vp_name} touch: {s['t']!r} {s['w']:.0f}x{s['h']:.0f}")
         if not small:
             report("pass", f"{vp_name} touch floors")
+        _close_drawer(page)  # #651: never leak the opened drawer into the next sub-pass
 
 
 def _intersects(a, b):
@@ -554,6 +595,7 @@ def audit_banner(page, vp_name, width, height):
     if bb <= 1:
         report("pass", f"{vp_name} banner-inset (banner did not render)")
         page.evaluate("['matrix-banner','matrix-banner-2'].forEach(id=>{const e=document.getElementById(id);if(e)e.remove();})")
+        _close_drawer(page)
         return
     # #766: ONLY ONE top banner may EVER be present — after firing two banners the host must hold
     # EXACTLY ≤1 .on-card (the 2nd replaced the 1st), never a stack.
@@ -591,6 +633,7 @@ def audit_banner(page, vp_name, width, height):
             try { document.body.style.removeProperty('--on-banner-inset'); document.body.style.paddingTop = ''; } catch (_) {}
         }"""
     )
+    _close_drawer(page)  # #651: this sweep opened the rail drawer too — see _close_drawer
     page.wait_for_timeout(150)
 
 
@@ -726,7 +769,14 @@ def main():
                 # the phone profile" regardless of whether a live game is staged.
                 if vp_name in ("phone-390", "tiny-320"):
                     if mount_face_grid_card(page):
+                        # #651: same isolation rule as the endgame-card pass above — on a FINISHED
+                        # season (ORWELL_MATRIX_FINISH) the retro panel is self-visible from its own
+                        # poll, but a live decision card and the post-season retro never co-exist in
+                        # a real game; hide the retro for THIS pass so the synthetic card's layout is
+                        # measured alone, then restore it.
+                        page.evaluate("(document.getElementById('orwell-retro')||{}).style&&(document.getElementById('orwell-retro').style.display='none')")
                         audit_page(page, vp_name + "+face-grid", w, h, coarse, with_game)
+                        page.evaluate("(document.getElementById('orwell-retro')||{}).style&&(document.getElementById('orwell-retro').style.display='')")
                     remove_endgame_card(page)
 
                 # G6: the settings tab rail keeps its LEFT orientation in any

@@ -156,7 +156,7 @@ def test_deferred_fold_carries_the_key_and_drain_reuses_it(monkeypatch):
     async def fake_llm_deal(*a, **k):
         return '{"struck":true,"withId":"npc:7","kind":"safety","terms":"x"}'
 
-    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, user=None):
+    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, idempotency_key=None, user=None):
         return {"deal": True, "beatSeq": 13}
 
     monkeypatch.setattr(llm_core, "llm_call_async", fake_llm_deal)
@@ -185,3 +185,154 @@ def test_wiring_source_pins():
     # the wrapper forwards the key into the engine payload as idempotencyKey (at-most-once)
     assert "idempotency_key: str | None = None" in oe_src
     assert 'req["idempotencyKey"] = idempotency_key' in oe_src
+
+
+# ── 5. the fold-bearing SIBLING LEVERS (A10 follow-up — the FE half of #1305) ───────────────────── #
+#
+# The engine dedups makeDeal/confide/exposeSecret/tradeSecret by a caller-minted idempotencyKey
+# (tests/unit/foldLeverIdempotency.test.ts). These pin the FE half for each lever's belt: the belt
+# mints ONE stable key and threads it through EVERY attempt (initial call, the #591 retry, and the
+# CON-11 deferred-queue drain) — without it the engine ledgers are dead at runtime and the deferred-
+# fold double-apply latent (#1297's bug) stays open for these levers.
+
+_LEVER_CASES = [
+    # (belt, engine fn name, extraction JSON, success result, needs get_visible_state knowledge)
+    ("_auto_record_deal", "make_deal",
+     '{"struck":true,"withId":"npc:7","kind":"safety","terms":"x"}', {"deal": True}, False),
+    ("_auto_confide", "confide",
+     '{"npcId":"npc:3"}', {"disclosed": False}, False),
+    ("_auto_expose_secret", "expose_secret",
+     '{"factId":"fact:1"}', {"exposed": True}, True),
+    ("_auto_trade_secret", "trade_secret",
+     '{"factId":"fact:1","toNpcId":"npc:3","askKind":"a vote"}', {"accepted": True}, True),
+]
+
+
+def _patch_vis(monkeypatch):
+    """The player legitimately knows ONE fact about npc:7 (roles only) — what the expose/trade belts
+    ground their extraction in (never invented)."""
+    async def fake_vis(user=None, **k):
+        return {"knowledge": [{"id": "fact:1", "content": "a hidden past", "subject": "npc:7"}]}
+    monkeypatch.setattr(orwell_engine, "get_visible_state", fake_vis)
+
+
+@pytest.mark.parametrize("belt,fn_name,llm_json,ok,needs_vis", _LEVER_CASES)
+def test_lever_backfill_attaches_a_stable_idempotency_key(monkeypatch, belt, fn_name, llm_json, ok, needs_vis):
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 11
+    keys = []
+
+    async def fake_llm(*a, **k):
+        return llm_json
+
+    async def fake_lever(*a, expected_beat_seq=None, idempotency_key=None, user=None, **k):
+        keys.append(idempotency_key)
+        return {**ok, "beatSeq": 12}
+
+    monkeypatch.setattr(llm_core, "llm_call_async", fake_llm)
+    monkeypatch.setattr(orwell_engine, fn_name, fake_lever)
+    if needs_vis:
+        _patch_vis(monkeypatch)
+
+    out = _run(getattr(al, belt)("what happened", "the player's move", HOUSE, "url", "m", {}, "owner"))
+    assert out is True
+    assert len(keys) == 1
+    assert isinstance(keys[0], str) and keys[0], f"{fn_name}: a stable at-most-once key is attached"
+
+
+@pytest.mark.parametrize("belt,fn_name,llm_json,ok,needs_vis", _LEVER_CASES)
+def test_lever_stale_once_retry_reuses_the_same_key(monkeypatch, belt, fn_name, llm_json, ok, needs_vis):
+    """A stale-409 reconcile+re-attempt (#591) must carry the SAME key on both attempts for every
+    fold-bearing lever — otherwise the engine cannot recognize the retry as the same action and the
+    hidden fold applies twice."""
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 4
+    keys = []
+
+    async def fake_llm(*a, **k):
+        return llm_json
+
+    async def fake_lever(*a, expected_beat_seq=None, idempotency_key=None, user=None, **k):
+        keys.append(idempotency_key)
+        if expected_beat_seq != 9:
+            raise _stale_409(9)                 # board moved on to 9 under the stale write
+        return {**ok, "beatSeq": 10}
+
+    async def fake_status(user=None):
+        return {"week": 3, "phase": "veto", "pending": None, "veto": {}, "beatSeq": 9}
+
+    async def fake_state(user=None, **kw):
+        return {"week": 3, "phase": "veto", "finished": False, "house": [], "beatSeq": 9}
+
+    monkeypatch.setattr(llm_core, "llm_call_async", fake_llm)
+    monkeypatch.setattr(orwell_engine, fn_name, fake_lever)
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    if needs_vis:
+        _patch_vis(monkeypatch)
+
+    out = _run(getattr(al, belt)("what happened", "the player's move", HOUSE, "url", "m", {}, "owner"))
+    assert out is True
+    assert len(keys) == 2, f"{fn_name}: stale once, then re-attempted once"
+    assert keys[0] is not None and keys[0] == keys[1], \
+        f"{fn_name}: the retry reuses the SAME key (at-most-once)"
+
+
+def test_lever_deferred_fold_carries_the_key_and_drain_reuses_it(monkeypatch):
+    """A double stale-409 on a fold-bearing LEVER defers it (CON-11). The queued entry must carry the
+    key, and the drain must re-drive with the SAME key — so two turns draining the same deferred deal
+    can never fold it twice at the engine (the exact #1297 latent, closed for the levers)."""
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 4
+    keys = []
+
+    async def fake_llm(*a, **k):
+        return '{"struck":true,"withId":"npc:7","kind":"safety","terms":"x"}'
+
+    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None,
+                             idempotency_key=None, user=None):
+        keys.append(idempotency_key)
+        if expected_beat_seq == 11:
+            return {"deal": True, "beatSeq": 12}   # board settled at 11 — it lands
+        raise _stale_409(5)                        # keeps moving — both in-turn attempts stay stale
+
+    async def fake_status(user=None):
+        return {"week": 3, "phase": "veto", "pending": None, "veto": {}, "beatSeq": 5}
+
+    async def fake_state(user=None, **kw):
+        return {"week": 3, "phase": "veto", "finished": False, "house": [], "beatSeq": 5}
+
+    monkeypatch.setattr(llm_core, "llm_call_async", fake_llm)
+    monkeypatch.setattr(orwell_engine, "make_deal", fake_make_deal)
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+    out = _run(al._auto_record_deal("we shake on it", "deal", HOUSE, "url", "m", {}, "owner"))
+    assert out is False                             # nothing landed yet — deferred
+    assert chat_helpers.deferred_fold_count("owner") == 1
+    assert len(keys) == 2 and keys[0] is not None and keys[0] == keys[1]
+    deal_key = keys[0]
+
+    # The queued entry carries the SAME key in its stored kwargs (the crux under concurrency).
+    queued = chat_helpers._DEFERRED_FOLDS[chat_helpers._beat_seq_key("owner")]
+    assert queued[0]["kwargs"].get("idempotency_key") == deal_key
+
+    # The board settles at 11; the opportunistic drain re-drives the deal with the SAME key.
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 11
+    _run(chat_helpers._drain_deferred_folds("owner"))
+    assert chat_helpers.deferred_fold_count("owner") == 0, "the deferred deal drained and landed"
+    assert len(keys) == 3 and keys[2] == deal_key, \
+        "the drain re-drove with the SAME key — the engine dedups it"
+
+
+def test_lever_wiring_source_pins():
+    import os
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(base, "src", "agent_loop.py"), encoding="utf-8") as fh:
+        al_src = fh.read()
+    # each fold-bearing lever belt mints a stable key and threads it into the CAS back-fill
+    assert al_src.count("idempotency_key=_ch_idem._mint_idempotency_key()") >= 4, \
+        "the deal/confide/expose/trade belts each mint + thread an at-most-once key"
+
+    with open(os.path.join(base, "src", "orwell_engine.py"), encoding="utf-8") as fh:
+        oe_src = fh.read()
+    # each lever wrapper forwards the key into the engine payload as idempotencyKey (at-most-once)
+    assert oe_src.count('args["idempotencyKey"] = idempotency_key') >= 4, \
+        "make_deal/confide/expose_secret/trade_secret each thread idempotencyKey when provided"

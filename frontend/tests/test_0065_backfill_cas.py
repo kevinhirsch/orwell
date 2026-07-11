@@ -88,7 +88,7 @@ def test_make_deal_backfill_attaches_token_and_refreshes(monkeypatch):
     async def fake_llm(*a, **k):
         return '{"struck":true,"withId":"npc:3","kind":"safety","terms":"no noms"}'
 
-    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, user=None):
+    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, idempotency_key=None, user=None):
         captured["expected_beat_seq"] = expected_beat_seq
         return {"deal": {"kind": kind}, "beatSeq": 21}
 
@@ -202,7 +202,7 @@ def test_normal_turn_make_deal_never_self_409s(monkeypatch):
     async def fake_state(user=None, **kw):
         return {"phase": "social", "week": 1, "finished": False, "house": [], "beatSeq": seq["v"]}
 
-    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, user=None):
+    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, idempotency_key=None, user=None):
         if expected_beat_seq is not None and expected_beat_seq != seq["v"]:
             raise _stale_409(seq["v"])
         seq["v"] += 1
@@ -409,7 +409,7 @@ def test_deferred_fold_lands_on_next_backfill_opportunity(monkeypatch):
     async def fake_llm_deal(*a, **k):
         return '{"struck":true,"withId":"npc:7","kind":"safety","terms":"x"}'
 
-    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, user=None):
+    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, idempotency_key=None, user=None):
         deal_calls["n"] += 1
         return {"deal": True, "beatSeq": 13}
 
@@ -444,7 +444,7 @@ def test_make_deal_backfill_stale_409_is_reattempted(monkeypatch):
     async def fake_llm(*a, **k):
         return '{"struck":true,"withId":"npc:3","kind":"safety","terms":"x"}'
 
-    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, user=None):
+    async def fake_make_deal(with_id, kind, terms, expected_beat_seq=None, idempotency_key=None, user=None):
         calls["n"] += 1
         if expected_beat_seq != 15:
             raise _stale_409(15)

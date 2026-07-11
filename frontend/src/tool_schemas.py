@@ -1275,6 +1275,10 @@ FUNCTION_TOOL_SCHEMAS = [
                             "rationale": {"type": "string", "description": "Optional free text — why these shifts, grounded in the scene."},
                         },
                     },
+                    "feltMinutes": {
+                        "type": "integer",
+                        "description": "About how long this scene FELT, in in-game minutes — a quick word ~15–30, a real conversation ~60, a long strategy summit ~120–180. The in-game clock advances by this (bounded), so time tracks the play you narrated; a busy day fills with your scenes instead of racing to the next ceremony. Optional but encouraged on substantive scenes.",
+                    },
                 },
                 "required": ["content"],
             },

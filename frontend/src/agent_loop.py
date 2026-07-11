@@ -1572,6 +1572,55 @@ def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_op
     return None
 
 
+# ── Gap #3 — the CASTING-FINALIZE forced tool_choice (the #1154 pattern generalized to the one
+# pre-game closed-set beat with exactly one legal lever). The reactive finalize fallback below
+# (`_CASTING_STALL_LEVEL` → forced `do_create_character`) fires AFTER the model has already burned a
+# turn (or several) not finalizing; this forces the createCharacter call ON THE WIRE, under the SAME
+# gates the reactive terminal already requires — the engine says casting is `ready` AND `finalizable`
+# (createCharacter would succeed; never mints a floater) and the PLAYER explicitly signalled
+# readiness (a hidden production cue never counts). No new authority is created: only WHEN the
+# guaranteed call happens moves — proactive, so the model finalizes itself and narrates the premiere
+# from the real returned result. The reactive ladder stays as the net; the #1312 pre-game context
+# purge rides the existing model-called-createCharacter path. We still NEVER force submitDecision
+# (the player's binding pick) — createCharacter carries no player choice the player has not already
+# explicitly given (intake on file + an explicit "start the season" signal).
+# Design + belt inventory: docs/design/undercall-seam-structural.md.
+_CASTING_FINALIZE_TOOL = "createCharacter"
+
+
+def _forced_tool_choice_for_casting(turn_tool_names, *, ready: bool, finalizable: bool,
+                                    started: bool, player_signalled: bool):
+    """Return the `tool_choice` that FORCES the casting finalize this round, or None.
+
+    Pure + side-effect-free (the #1154 `_forced_tool_choice_for_beat` sibling). Forces ONLY when
+    every reactive-terminal gate already holds: pre-game (`started` False), the engine reports the
+    intake `ready` AND `finalizable` (createCharacter will be accepted — never a floater), the
+    player explicitly signalled readiness this turn (`_player_signals_casting_ready` — production
+    cues excluded there), and the model has not already called createCharacter this turn (the
+    guarantee is met ⇒ never re-force on a later round)."""
+    if started or not (ready and finalizable) or not player_signalled:
+        return None
+    if _CASTING_FINALIZE_TOOL in (turn_tool_names or set()):
+        return None
+    return {"type": "function", "function": {"name": _CASTING_FINALIZE_TOOL}}
+
+
+def _note_belt(owner, belt: str, n: int = 1) -> None:
+    """Gap #3 belt-fire telemetry: count a guardrail-belt firing in the Vault-free sync ledger
+    (`orwell_sync_ledger.note_belt` — names + counts only, drained into the next recorded
+    turn's `beltsFired` map). Fail-soft by construction (the wrapper never raises; the lazy
+    import is guarded too): telemetry must never hurt the turn. Keyed by raw owner — the ledger
+    maps None to the same "default" sentinel the belt stores use (the NAR-1 lesson), so
+    single-tenant fires are counted too. IMPORTANT: call this only AFTER a belt has actually
+    APPLIED a real correction (a no-op/failed extraction must never count as a belt fire —
+    that would poison the exact measurement this telemetry exists to create)."""
+    try:
+        from src import orwell_sync_ledger as _led
+        _led.note_belt(owner, belt, n)
+    except Exception:
+        pass
+
+
 # DeepSeek-V4 (the prior OOB narrator) returned HTTP 400 on `tool_choice` in always-thinking mode (the
 # 2026-06-21 conformance audit) — so forcing must NEVER be sent to it. GLM-4.7 (the current OOB model)
 # honors it. We gate forcing to models NOT on this known-rejecter list rather than allow-listing one
@@ -2961,8 +3010,13 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
         # (the board moved under us mid-turn) is reconciled-and-RETRIED (#591); a SECOND consecutive one
         # is DEFERRED (CON-11, `defer_fold=True`) rather than dropped — a struck deal is the scene's
         # only record and must land eventually, never evaporate (mandate #4).
+        # A10 / #591 / R1c: mint ONE stable at-most-once key for THIS deal and thread it through EVERY
+        # attempt (it rides in kwargs, so the single retry AND the CON-11 deferred queue reuse it) —
+        # the engine dedups by it (#1305), so a concurrently re-driven deal can never fold twice.
+        from routes import chat_helpers as _ch_idem
         if await _backfill_with_cas(owner, _oe.make_deal, with_id, kind, terms,
-                                    user=owner, defer_fold=True) is None:
+                                    user=owner, defer_fold=True,
+                                    idempotency_key=_ch_idem._mint_idempotency_key()) is None:
             return False
         logger.info(f"[orwell] auto-recorded deal (kind={kind}, with={with_id}) user={owner}")
         return True
@@ -3068,7 +3122,11 @@ async def _auto_confide(narration, last_user, house, endpoint_url, model, header
         # DEFERRED (CON-11, `defer_fold=True`) rather than dropped — the press is the scene's only record
         # and must land eventually, never evaporate (mandate #4). The ENGINE decides the disclosure; a
         # `{disclosed:false}` is a perfectly good (and common) result — we only guarantee the lever FIRES.
-        res = await _backfill_with_cas(owner, _oe.confide, npc_id, user=owner, defer_fold=True)
+        # A10 / #591 / R1c: one stable at-most-once key threads through every attempt (retry + deferred
+        # queue reuse kwargs) — the engine dedups by it (#1305), so the bond fold can never double-apply.
+        from routes import chat_helpers as _ch_idem
+        res = await _backfill_with_cas(owner, _oe.confide, npc_id, user=owner, defer_fold=True,
+                                       idempotency_key=_ch_idem._mint_idempotency_key())
         if res is None:
             return False
         _disclosed = bool(res.get("disclosed")) if isinstance(res, dict) else False
@@ -3205,8 +3263,13 @@ async def _auto_expose_secret(narration, last_user, house, endpoint_url, model, 
             logger.info(f"[orwell] auto-expose: factId {fact_id!r} not a known fact — skipped user={owner}")
             return False
         # CON-11: defer (never drop) a double-stale-409 -- exposing a secret is a one-shot, consequence-
-        # bearing action (mandate #4).
-        res = await _backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner, defer_fold=True)
+        # bearing action (mandate #4). A10 / #591 / R1c: one stable at-most-once key threads through
+        # every attempt (retry + deferred queue reuse kwargs) — the engine dedups by it (#1305), so the
+        # standing fold / spent secret can never double-apply.
+        from routes import chat_helpers as _ch_idem
+        res = await _backfill_with_cas(owner, _oe.expose_secret, fact_id=fact_id, user=owner,
+                                       defer_fold=True,
+                                       idempotency_key=_ch_idem._mint_idempotency_key())
         if res is None:
             return False
         _exposed = bool(res.get("exposed")) if isinstance(res, dict) else False
@@ -3292,9 +3355,13 @@ async def _auto_trade_secret(narration, last_user, house, endpoint_url, model, h
         ask_kind = obj.get("askKind")
         ask_kind = ask_kind.strip()[:80] if isinstance(ask_kind, str) and ask_kind.strip() else None
         # CON-11: defer (never drop) a double-stale-409 -- a struck secret trade is a one-shot,
-        # consequence-bearing action (mandate #4).
+        # consequence-bearing action (mandate #4). A10 / #591 / R1c: one stable at-most-once key threads
+        # through every attempt (retry + deferred queue reuse kwargs) — the engine dedups by it (#1305),
+        # so the recipient fold / trade cap can never double-apply.
+        from routes import chat_helpers as _ch_idem
         res = await _backfill_with_cas(owner, _oe.trade_secret, to_npc_id, fact_id=fact_id,
-                                       ask_kind=ask_kind, user=owner, defer_fold=True)
+                                       ask_kind=ask_kind, user=owner, defer_fold=True,
+                                       idempotency_key=_ch_idem._mint_idempotency_key())
         if res is None:
             return False
         _accepted = bool(res.get("accepted")) if isinstance(res, dict) else False
@@ -3345,10 +3412,29 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
     r"|\bfront[\s-]?end\b|\bthe app\b|\bthis (?:app|website|site)\b"
     r"|\bcomp-intent\b|\bpending (?:decision|binding)\b|\bbinding (?:choice|decision)\b"
     r"|\b(?:decision|choice) (?:card|cards|button|buttons)\b|\btool call\b|\bjumped ahead\b|\bnarratively\b"
-    # first-person operator asides (process talk)
-    r"|\blet me\s+(?:record|advance|note|log|check|place|pull|fetch|resolve|use|call|see what|re-?read|re-?check|reconsider)\b"
+    # first-person operator asides (process talk). #989 (+ #1369 review) — the AMBIGUOUS
+    # operator verbs over-fired on legitimate narration: bare "log/note" ate "Let me log that.",
+    # bare "check" ate "Let me check on the others.", bare "run" ate "Let me run to the door.".
+    # Those four are machinery only when followed by an ENGINE object noun ("log this
+    # interaction", "check the game state", "run the command"); the unambiguous tool-process
+    # verbs stay bare. The verb lists are PARITY-LOCKED, branch for branch, with the JS
+    # _MACHINERY_ASIDE_RE in static/js/markdown.js — tests/test_989_letme_narration_scrub.py
+    # drives BOTH scrubs over the same cases and fails on any behavioral drift.
+    r"|\blet me\s+(?:now\s+|first\s+|then\s+|also\s+|just\s+)?"
+      r"(?:call|advance|record|resolve|use|pull|fetch|place|see what|"
+      r"walk through|re-?read|re-?check|reconsider"
+      r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
+      r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
+      r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
+      r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\b))\b"
     r"|\bi(?:'ll|'d| will| should| need to| have to| am going to| must| can)\s+"
-      r"(?:now\s+|first\s+|then\s+|also\s+)?(?:record|advance|log|note|resolve|call|use|pull|fetch|present|re-?read|reconsider)\b"
+      r"(?:now\s+|first\s+|then\s+|also\s+|just\s+)?"
+      r"(?:call|advance|record|resolve|use|pull|fetch|present|place|"
+      r"walk through|re-?read|re-?check|reconsider"
+      r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
+      r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
+      r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
+      r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\b))\b"
     r"|\b(?:advance|move|push) the game\b"
     r"|\brecord (?:this|the|that) (?:interaction|scene)\b"
     r"|\bthe (?:player|user)\b(?:,?\s+\w+,)?\s+(?:has|is|was|will|'ll|wants|said|finished|just|now|needs|should)\b",
@@ -3369,8 +3455,17 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
 # engine plan) while leaving ordinary scene prose untouched. (Tool names + machinery nouns are still
 # caught anywhere in the sentence by _GAME_LEAK_SENTENCE_RE, independent of how the sentence opens.)
 _OPERATOR_VERBS = (
-    r"record|advance|log|note|resolve|call|use|pull|fetch|present|place|check|see what|"
+    # #989 (+ #1369 review) — the AMBIGUOUS verbs ("log/note/check/run") only count as operator
+    # verbs when followed by an ENGINE object noun ("log this interaction", "check the game
+    # state", "run the command"); bare "Let me log that." / "Let me check on the others." /
+    # "Let me run to the door." is legitimate narration and must survive (same narrowing as
+    # _GAME_LEAK_SENTENCE_RE above; parity-locked with the JS _MACHINERY_ASIDE_RE).
+    r"record|advance|resolve|call|use|pull|fetch|present|place|see what|walk through|"
     r"re-?read|re-?check|reconsider"
+    r"|run(?=\s+(?:th(?:e|is|at)\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\b)"
+    r"|check(?=\s+(?:th(?:e|is|at)\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\b)"
+    r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
+    r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\b)"
 )
 _GAME_LEAK_START_RE = re.compile(
     r"^\s*(?:actually[,.!]?\s+)?(?:but\s+)?(?:wait[,.!]?\s+)?(?:ok(?:ay)?[,.!]?\s+)?(?:hold on[,.!]?\s+)?"
@@ -4889,6 +4984,12 @@ async def _stream_agent_loop_impl(
         # advanceGame, _auto_record_scene), which remain the other nets; this just guarantees the call
         # PROACTIVELY so the model can't narrate an outcome it never read.
         _forced_tool_choice = None
+        # Greptile P1 (PR #1377): the forced-tool-choice BELT NOTE is deferred until the forced call
+        # actually lands as a tool event this round (§5 contract: a count means an APPLIED correction,
+        # never an attempt — selecting the wire directive is the attempt; a provider/stream failure
+        # after selection must not drain as a belt fire). The selection sites below stash the forced
+        # tool's name here; the tool-execution loop notes the belt when the matching call is observed.
+        _forced_belt_tool = None
         # #1154 no-auth fix: under AUTH_ENABLED=false `owner` is None, but the live game lives under the
         # engine's "default" sandbox (the FE↔engine anon→default mapping), and apply_game_framing now
         # stashes the framed beat key under that same "default" fallback — so resolve to it. Previously
@@ -4921,11 +5022,48 @@ async def _stream_agent_loop_impl(
                     _forced_tool_choice = _forced_tool_choice_for_beat(
                         _framed_key, _turn_tool_names_force, pending_open=_pending_open)
                     if _forced_tool_choice is not None:
+                        # Belt note DEFERRED until the forced call lands (Greptile P1 — see
+                        # _forced_belt_tool above); stash the required tool's name only.
+                        _forced_belt_tool = str(_forced_tool_choice["function"]["name"])
                         logger.info(
                             f"[orwell] #1154 forcing tool_choice={_forced_tool_choice} at "
                             f"phase={_framed_phase_force} round={round_num} user={_force_owner}")
             except Exception as _force_err:
                 logger.warning(f"[orwell] #1154 tool_choice force skipped: {_force_err}")
+                _forced_tool_choice = None
+        elif (game_mode == "casting" and all_tool_schemas
+                and _model_honors_forced_tool_choice(model)
+                and bool(get_setting("force_tool_choice_at_beats", True))):
+            # ── Gap #3 — the CASTING-FINALIZE force (the one pre-game closed-set beat). Gates,
+            # cheapest first so an ordinary interview turn does NO extra work: the PLAYER explicitly
+            # signalled readiness this turn (regex — production cues excluded), createCharacter is
+            # actually on the wire (a named tool_choice for an absent tool 400s), and only then one
+            # engine state read to confirm the SAME terminal the reactive fallback requires: intake
+            # `ready` AND `finalizable`, season not started. Fail-open: any hiccup ⇒ no forcing.
+            try:
+                if (_player_signals_casting_ready(messages)
+                        and _CASTING_FINALIZE_TOOL in set(_tool_names_sent)):
+                    _turn_tool_names_force = {ev.get("tool") for ev in (tool_events or [])
+                                              if isinstance(ev, dict) and ev.get("tool")}
+                    from src import orwell_engine as _oe_force
+                    _cast_state = await _oe_force.get_game_state(owner)
+                    _cast_view = (_cast_state or {}).get("casting") \
+                        if isinstance(_cast_state, dict) else None
+                    _forced_tool_choice = _forced_tool_choice_for_casting(
+                        _turn_tool_names_force,
+                        ready=bool(_cast_view and _cast_view.get("ready")),
+                        finalizable=bool(_cast_view and _cast_view.get("finalizable")),
+                        started=bool((_cast_state or {}).get("started")),
+                        player_signalled=True)
+                    if _forced_tool_choice is not None:
+                        # Belt note DEFERRED until the forced call lands (Greptile P1 — same
+                        # marker as the live beat-force above; one gated note site).
+                        _forced_belt_tool = _CASTING_FINALIZE_TOOL
+                        logger.info(
+                            f"[orwell] gap#3 forcing tool_choice={_forced_tool_choice} at the "
+                            f"casting finalize round={round_num} user={_force_owner}")
+            except Exception as _force_err:
+                logger.warning(f"[orwell] casting tool_choice force skipped: {_force_err}")
                 _forced_tool_choice = None
 
         # Primary target + any configured fallback models. stream_llm_with_fallback
@@ -5669,8 +5807,11 @@ async def _stream_agent_loop_impl(
                     # introduced by name — keeps the designed gate, guarantees the intros register.
                     # Pure persist side effect (never a re-prompt); runs before the other belts.
                     if _moment == "premiere":
-                        _turn_premiere_marks += int(
+                        _marks_now = int(
                             await _auto_mark_premiere_intros(_turn_narration, owner) or 0)
+                        _turn_premiere_marks += _marks_now
+                        if _marks_now:
+                            _note_belt(owner, "premiere-meet-belt", _marks_now)  # gap #3 telemetry
                     # ── L21/L24 auto-move belt (FIRST — a pure persist side effect, never a re-prompt).
                     # The player walked to a room this turn but the model never called moveTo, so the
                     # engine still has them in the OLD room and next turn's whereabouts would snap back.
@@ -5683,8 +5824,11 @@ async def _stream_agent_loop_impl(
                     # always wins (`_moved` short-circuits `_want_move`). Vault-free (whereabouts).
                     if _want_move:
                         _turn_move_nudges += 1  # once per turn
-                        await _auto_move_player(_turn_narration, _last_user_for_move,
-                                                endpoint_url, model, headers, owner)
+                        if await _auto_move_player(_turn_narration, _last_user_for_move,
+                                                   endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — count only a REAL applied move (a room:null
+                            # extraction / failed call is a no-op, not a correction)
+                            _note_belt(owner, "auto-move-player")
                     # ── ADR 0009 NPC auto-move belt (also a pure persist side effect, never a re-prompt).
                     # The narration walked one or more houseguests to a room but the model never called
                     # moveHouseguest, so the engine's open presence would snap them back. A constrained
@@ -5694,8 +5838,13 @@ async def _stream_agent_loop_impl(
                     # that also advances a beat. Model-driven moveHouseguest wins (`_npc_moved` gate).
                     if _want_npc_move:
                         _turn_npc_move_nudges += 1  # once per turn
-                        await _auto_move_npc(_turn_narration, _last_user_for_move,
-                                             _house, endpoint_url, model, headers, owner)
+                        _npc_moves_applied = int(await _auto_move_npc(_turn_narration, _last_user_for_move,
+                                                                      _house, endpoint_url, model,
+                                                                      headers, owner) or 0)
+                        if _npc_moves_applied:
+                            # gap #3 telemetry — count only ENGINE-APPLIED moves (the helper
+                            # returns the applied count; a moves:[] extraction is a no-op)
+                            _note_belt(owner, "auto-move-npc", _npc_moves_applied)
                     # ── Post-season re-approach (0057): the season is over and the player wandered
                     # off into free chat. Count their off-finale turns; once they've taken a couple,
                     # have the producer re-invite OUT OF FICTION to the next season (escalating,
@@ -5745,6 +5894,7 @@ async def _stream_agent_loop_impl(
                         _sl_key = _belt_key(owner)
                         _level = _ADVANCE_STALL_LEVEL.get(_sl_key, 0)
                         _turn_advance_nudges += 1
+                        _note_belt(owner, "advance-stall-nudge")  # gap #3 telemetry
                         _ADVANCE_STALL_LEVEL[_sl_key] = _level + 1
 
                         async def _commit_advance_silently(_why: str) -> bool:
@@ -5781,6 +5931,10 @@ async def _stream_agent_loop_impl(
                                 # never reset the belt state that single-tenant reads actually see).
                                 _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0
                                 _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
+                                # Gap #3 telemetry: one stable token per silent-commit family
+                                # ("stall L2" → "stall"; "forced stall L3" → "forced-stall").
+                                _note_belt(owner, "forced-advance:"
+                                           + (_why or "").split(" L")[0].strip().replace(" ", "-"))
                                 logger.info(f"[orwell] committed advanceGame silently ({_why}, "
                                             f"phase={_phase}) round {round_num} user={owner}")
                                 return True
@@ -6161,6 +6315,9 @@ async def _stream_agent_loop_impl(
                         if await _auto_record_deal(_turn_narration, _extract_last_user_message(messages),
                                                    _house, endpoint_url, model, headers, owner):
                             _turn_record_nudges = max(_turn_record_nudges, 1)  # deal banked the fold
+                            # gap #3 telemetry — only a genuinely BANKED deal counts (struck=false
+                            # loose talk / a failed extraction is a no-op, not a correction)
+                            _note_belt(owner, "auto-record-deal")
                     # 0075: the player pressed an ally to open up but the model never called confide, so
                     # the trust-gated disclosure never fired. Back-fill it — the ENGINE adjudicates
                     # (whether they disclose, how much, truth-vs-lie); an unearned motive returns
@@ -6171,8 +6328,11 @@ async def _stream_agent_loop_impl(
                     # (_turn_confide_nudges is set to 1 on its tool call, which makes _want_confide False).
                     if _want_confide and _touched_deal:
                         _turn_confide_nudges += 1  # once per turn
-                        await _auto_confide(_turn_narration, _last_user_for_confide,
-                                            _house, endpoint_url, model, headers, owner)
+                        if await _auto_confide(_turn_narration, _last_user_for_confide,
+                                               _house, endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — only a confide the belt actually FIRED counts
+                            # (npcId:null / off-roster / failed extraction is a no-op)
+                            _note_belt(owner, "auto-confide")
                     # 0093: the player outed a secret they already know but the model never called
                     # exposeSecret. Back-fill it — the ENGINE adjudicates (the standing fold + exposer
                     # backlash, or a bluff's belief roll); the extraction is grounded ONLY in the
@@ -6180,20 +6340,27 @@ async def _stream_agent_loop_impl(
                     # invented secret). Model-driven exposeSecret always wins (precedence set on tool use).
                     if _want_expose and _touched_deal:
                         _turn_expose_nudges += 1  # once per turn
-                        await _auto_expose_secret(_turn_narration, _last_user_for_confide,
-                                                  _house, endpoint_url, model, headers, owner)
+                        if await _auto_expose_secret(_turn_narration, _last_user_for_confide,
+                                                     _house, endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — only an exposeSecret the belt actually FIRED counts
+                            _note_belt(owner, "auto-expose-secret")
                     # 0099: the player traded a secret they already know to a specific houseguest but the
                     # model never called tradeSecret. Same shape — the ENGINE decides whether the
                     # recipient bites; the extraction is grounded in the player's known facts + the live
                     # roster only. Model-driven tradeSecret always wins.
                     if _want_trade and _touched_deal:
                         _turn_trade_nudges += 1  # once per turn
-                        await _auto_trade_secret(_turn_narration, _last_user_for_confide,
-                                                 _house, endpoint_url, model, headers, owner)
+                        if await _auto_trade_secret(_turn_narration, _last_user_for_confide,
+                                                    _house, endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — only a tradeSecret the belt actually FIRED counts
+                            _note_belt(owner, "auto-trade-secret")
                     if _want_record and _touched and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN:
                         _turn_record_nudges += 1  # once per turn
-                        await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
-                                                 _house, endpoint_url, model, headers, owner)
+                        if await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
+                                                    _house, endpoint_url, model, headers, owner):
+                            # gap #3 telemetry — only a recordInteraction the belt actually FIRED
+                            # counts (a withIds:[] extraction / failed call is a no-op)
+                            _note_belt(owner, "auto-record-scene")
                         # the scene is banked (or was genuinely solo) — end the turn normally.
                 # BLANK-TURN GUARD (audit 2026-06-18): the model sometimes emits only planning-as-
                 # content ("Let me get the lay of the land…") and stops with no tools — the scrub
@@ -6249,6 +6416,7 @@ async def _stream_agent_loop_impl(
                             _extract_last_user_message(messages), cleaned_round,
                             endpoint_url, model, headers, owner):
                         _turn_casting_record_belt += 1  # FE back-filled the player's casting answer
+                        _note_belt(owner, "casting-record-belt")  # gap #3 telemetry
                 # ── Casting finalize fallback (the game won't START): the model under-calls
                 # createCharacter. If casting is finalizable (engine ready) AND the player signalled
                 # readiness but the model didn't finalize this turn, nudge — then, past the rungs,
@@ -6319,6 +6487,7 @@ async def _stream_agent_loop_impl(
                                     _CASTING_STALL_LEVEL.pop(owner, None)
                                     _CASTING_SUBSTANCE_LEVEL.pop(owner, None)
                                     _turn_casting_force += 1  # FE forced the season start (finalize fallback)
+                                    _note_belt(owner, "casting-finalize-force")  # gap #3 telemetry
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
                                     # #1312 (Vault Wall): the season just went live THIS turn — purge the
@@ -6365,6 +6534,7 @@ async def _stream_agent_loop_impl(
                                                f"{type(_e).__name__}: {_e}".rstrip(': '))
                         _cn = _CASTING_NUDGES[min(_clv, len(_CASTING_NUDGES) - 1)]
                         _turn_casting_nudge += 1  # casting finalize nudge fired
+                        _note_belt(owner, "casting-nudge")  # gap #3 telemetry
                         logger.info(f"[orwell] casting finalize nudge (L{_clv}) round {round_num} user={owner}")
                         messages.append({"role": "system", "content": _cn})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
@@ -6393,6 +6563,7 @@ async def _stream_agent_loop_impl(
                             _gap = _casting.get("next") or ""
                             _missing = _casting.get("missing") or []
                             _turn_casting_nudge += 1  # casting substance steer fired
+                            _note_belt(owner, "casting-nudge")  # gap #3 telemetry
                             messages.append({"role": "system",
                                              "content": _casting_substance_nudge(_gap, _missing)})
                             logger.info(f"[orwell] casting substance steer (turn {_slv + 1}, "
@@ -6760,6 +6931,13 @@ async def _stream_agent_loop_impl(
             if result.get("diff"):
                 tool_event["diff"] = result["diff"]
             tool_events.append(tool_event)
+            # Gap #3 / Greptile P1: the forced-tool-choice belt counts ONLY here — when the round's
+            # FORCED call actually landed as a tool event (§5: a count means an applied correction,
+            # never an attempt; a provider/stream failure after the wire directive was selected must
+            # not drain as a belt fire). Cleared after one note so a repeat call never double-counts.
+            if _forced_belt_tool and block.tool_type == _forced_belt_tool:
+                _note_belt(owner, "forced-tool-choice:" + _forced_belt_tool)
+                _forced_belt_tool = None
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
             # #1312 (Vault Wall): the MODEL called createCharacter itself and the engine started the
@@ -6806,10 +6984,12 @@ async def _stream_agent_loop_impl(
                     _ev_content = str(_ev.get("content") or "")
                     if _ev_beat in _EVICTION_STAGE_BEATS:
                         formatted += _eviction_reveal_steer(_ev_beat, _ev_content)
+                        _note_belt(owner, "eviction-reveal-steer")  # gap #3 telemetry
                     # F8 (#1015): the same belt for the nomination / veto ceremony the model breezes
                     # past (NPC-HOH self-advances the phase, so the moment fragment never surfaces).
                     elif _ev_beat in _CEREMONY_NARRATE_BEATS:
                         formatted += _ceremony_narration_steer(_ev_beat, _ev_content)
+                        _note_belt(owner, "ceremony-narration-steer")  # gap #3 telemetry
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
 

@@ -216,6 +216,29 @@ many parallel agents, not typing every edit myself.
     delegate reports done (tell it to leave the stack up + dirs intact for exactly that). This sharpens #20:
     not just "paste evidence inline" but "produce the bundle artifact."
 
+23. **GitHub REST quota is ONE shared pool — treat API calls as a scarce resource (2026-07-10; the
+    limit exhausted 4+ times in one day).** Every Claude session, the GitHub MCP tools, and every
+    bot-retrigger all draw from the SAME per-user 5,000/h REST budget (the owner's account) — a
+    `403 "API rate limit exceeded for user ID …"` is quota, NOT an auth failure, and it resets at
+    the top of the hour. Discipline that keeps you working through it: (a) **git protocol does not
+    consume REST quota** — `git fetch`/`ls-remote`/`log`/`push` (GitHub can still throttle abusive
+    traffic, but ordinary use never touches the REST pool), so do ALL verification
+    (which PR merged, what landed on main, branch state) from local git, never the API; (b)
+    **webhook-wake, never tight-poll** — PR events arrive as messages; sparse fallback checks are
+    fine (webhooks don't deliver CI success — lesson 8), a tight status-poll loop is pure burn;
+    (c) **batch API work at the window reset, PACED** (list once, act N times with small gaps, cache
+    locally — an unpaced burst can trip GitHub's SECONDARY limits: ~100 concurrent, ~900 REST
+    points/min; on any 403/429 honor `Retry-After` / `x-ratelimit-reset` instead of assuming the
+    hourly window); (d) evidence sweeps for issue-closing are 100% local (`git log --grep`, docs)
+    — the API is only for the final read-confirm + close. Escalation paths when quota still binds:
+    a GitHub App installation token (its OWN pool — the real fix), a machine-user account's PAT
+    (second user pool), or GraphQL (separate PRIMARY quota only — secondary/concurrency/abuse limits are SHARED with
+    REST). VERIFIED TRAP (2026-07-11): a
+    fine-grained PAT on the SAME user does NOT help — it draws from the same user pool (a fresh
+    one read `core: 0/15000` mid-exhaustion); only a different principal gets a different pool. Related trap: commits that
+    name an issue in the SUBJECT but carry no `Fixes #` keyword do NOT auto-close it — sweep for
+    these locally and close manually with the fixing sha as evidence.
+
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,
   `ORWELL_GAME_BUILD=1`). The chat *is* the game; plain turns auto-escalate to the agent loop.

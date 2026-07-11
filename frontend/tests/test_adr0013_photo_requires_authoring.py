@@ -198,3 +198,100 @@ def test_fallback_gate_off_floor_shoots_immediately(monkeypatch, run):
     # every prompt (player + 15 NPCs) shot up front from the seeded facets
     assert "player" in shot and "npc:1" in shot and "npc:15" in shot
     assert len([s for s in shot if s]) == 16
+
+
+# ── #1336: the PREWARMED branch's #976 fall-through must also respect ADR 0013 ──────────────
+#
+# Same class as the fallback fix above, separate region: when author warm ran during the interview
+# (authorStarted=True) but the gated portrait warm DECLINES (portraitsStarted stays false), the #976
+# fall-through used to floor-shoot EVERY face from the seeded prompts — even under a resolvable
+# utility model (house-entry gate ON), where authoring can and will land richer identities. The
+# prewarmed fall-through must now follow the SAME per-NPC authoring gate (`on_authored`): no floor
+# face may be shot for an un-authored NPC while a utility model resolves. (The gate-OFF half — the
+# original unconditional floor kick — stays pinned in test_orwell_portraits.py's #976 tests.)
+
+
+def _wire_prewarmed(monkeypatch, *, gate_on, authored_ids):
+    """Drive do_create_character's PREWARMED branch with the gated portrait warm DECLINING
+    (portraitsStarted stays false): gate on/off, and a stubbed authoring pass that fires
+    `on_authored` for exactly `authored_ids`. Returns the record of shot ids."""
+    shot = []
+
+    async def fake_create(*a, **k):
+        return _fallback_res()
+    monkeypatch.setattr(_oe, "create_character", fake_create)
+
+    async def fake_state(*a, **k):
+        return {"started": False}
+    monkeypatch.setattr(_oe, "get_game_state", fake_state)
+
+    # Author warm ran during the interview → the PREWARMED branch; the gated warm DECLINES.
+    from src import orwell_prewarm as _pw
+    monkeypatch.setattr(_pw, "warm_state",
+                        lambda user=None: {"authorStarted": True, "portraitsStarted": False})
+
+    async def fake_warm(user=None):
+        return {"started": False, "reason": "author-warm-not-started"}
+    monkeypatch.setattr(_pw, "warm_portraits", fake_warm)
+
+    async def _gate(owner):
+        return gate_on
+    monkeypatch.setattr(_ca, "house_entry_gate_active", _gate)
+
+    async def _ready(owner, **k):
+        return {"ready": True, "authored": len(authored_ids), "total": 15, "missing": 0}
+    monkeypatch.setattr(_ca, "await_house_ready", _ready)
+
+    # The floor kick (gate OFF path) records under kickoff_generation …
+    def fake_gen(prompts, user):
+        for p in prompts:
+            shot.append(p.get("houseguestId") or p.get("id"))
+    monkeypatch.setattr(_portraits, "kickoff_generation", fake_gen)
+
+    # … and the per-NPC authored shoot (gate ON path) records under kickoff_backfill.
+    def fake_backfill(ids, user, force=False):
+        for i in ids:
+            shot.append(i)
+    monkeypatch.setattr(_portraits, "kickoff_backfill", fake_backfill)
+
+    # authoring → fire on_authored for exactly the authored ids, then the whole-cast `then`.
+    def fake_authoring(cast, owner, then=None, on_authored=None, write=None):
+        if on_authored:
+            for hid in authored_ids:
+                on_authored(hid)
+        if then:
+            then()
+    monkeypatch.setattr(_ca, "kickoff_authoring", fake_authoring)
+    return shot
+
+
+def test_prewarmed_declined_warm_gate_on_zero_authored_shoots_zero(monkeypatch, run):
+    """#1336 — prewarmed branch, gated warm declined, gate ON, ZERO NPCs authored ⇒ ZERO portraits
+    shot (ADR 0013: an un-authored NPC gets NO floor face while a utility model resolves)."""
+    monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
+    shot = _wire_prewarmed(monkeypatch, gate_on=True, authored_ids=[])
+    res = run(_ti.do_create_character('{"playerName":"P"}', owner="pw1"))
+    assert res["exit_code"] == 0
+    assert shot == [], f"no NPC authored ⇒ no photos in the gated prewarmed fall-through (got {shot})"
+
+
+def test_prewarmed_declined_warm_gate_on_shoots_only_authored(monkeypatch, run):
+    """#1336 — gate ON: the prewarmed fall-through shoots a face ONLY for a model-authored NPC
+    (its per-NPC gate fired), exactly like the no-prewarm fallback branch."""
+    monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
+    shot = _wire_prewarmed(monkeypatch, gate_on=True, authored_ids=["npc:3", "npc:7"])
+    res = run(_ti.do_create_character('{"playerName":"P"}', owner="pw2"))
+    assert res["exit_code"] == 0
+    assert set(shot) == {"npc:3", "npc:7"}, \
+        f"only model-authored NPCs get a photo in the gated prewarmed fall-through (got {shot})"
+
+
+def test_prewarmed_declined_warm_gate_off_still_floor_shoots(monkeypatch, run):
+    """#1336 — gate OFF (no model / escape hatch): the prewarmed fall-through keeps the original
+    #976 behavior — the unconditional seeded-facet kick (the floor IS the final cast)."""
+    monkeypatch.delenv("ORWELL_ALLOW_FLOOR_START", raising=False)
+    shot = _wire_prewarmed(monkeypatch, gate_on=False, authored_ids=[])
+    res = run(_ti.do_create_character('{"playerName":"P"}', owner="pw3"))
+    assert res["exit_code"] == 0
+    assert "player" in shot and "npc:1" in shot and "npc:15" in shot
+    assert len([s for s in shot if s]) == 16

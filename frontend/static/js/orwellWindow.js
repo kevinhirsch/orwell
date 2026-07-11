@@ -29,7 +29,7 @@
 import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { makeWindowResizable, windowMaxWidth } from './windowResize.js';
-import { isNarrow } from './platform.js';
+import { isNarrow, onNarrowChange } from './platform.js';
 
 // A2 (#573, DWE audit F9): the kit no longer owns a PRIVATE z counter. The kit's
 // non-modal band (the old `_zTop` 500–980) is now allocated by THE single window
@@ -399,6 +399,84 @@ function ensureCss() {
         max-width: none; min-width: 0;
       }
     }
+    /* ── #893 / #753: SHEET presentation mode (the phone tier) ────────────────
+       On narrow viewports a kit window PRESENTS as an iOS-style bottom sheet —
+       the same OrwellWindow instance, chrome, focus/aria semantics (modal scrim
+       + stack + trap + focus-return all unchanged), with sheet GEOMETRY instead
+       of the floating slot geometry: bottom-pinned, edge-to-edge, a grabber,
+       medium/full detents, drag-between-detents and drag-to-dismiss. This is a
+       PRESENTATION MODE of the ONE window kit (F-3 ratchet; avoid F-CHROME-1 II:
+       never a parallel window family) — the visual/gesture language is kept in
+       lock-step with the sibling OrwellSheet kit (orwellSheet.js, the non-window
+       action-sheet surface). Sheet mode opts OUT of the slot/drag/resize
+       geometry system entirely (F5: sheet = detent classes, never a second
+       persisted-position scheme — no geometry key is ever written). */
+    .ow-window.ow-sheet-mode {
+      left: 0; right: 0; top: auto; bottom: 0;
+      width: auto; max-width: none; min-width: 0;
+      border-radius: var(--win-radius, 10px) var(--win-radius, 10px) 0 0;
+      border-left: none; border-right: none; border-bottom: none;
+      display: flex; flex-direction: column;
+      box-shadow: 0 -10px 40px rgba(0,0,0,.5);
+      /* safe-area: the home-indicator inset pads the sheet's own bottom so the
+         lowest controls stay reachable above the gesture bar (#893). */
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      overflow: hidden;
+    }
+    /* Detents — class-owned heights (dvh tracks the keyboard/URL-bar-shrunk mobile
+       viewport; vh first as the fallback). Kept in lock-step with sheetDetentPx()
+       below and with orwellSheet.js's DETENT_FRACTION (medium = 0.52 — the SAME
+       fraction, so the window-sheet and the action-sheet rise to the same height;
+       CodeRabbit #1378). The full detent clears the notch (safe-area-inset-top). */
+    .ow-window.ow-sheet-mode.ow-detent-medium { height: min(52vh, 640px); height: min(52dvh, 640px); }
+    .ow-window.ow-sheet-mode.ow-detent-full {
+      height: calc(100vh - 16px);
+      height: calc(100dvh - max(env(safe-area-inset-top, 0px), 16px));
+    }
+    /* Scroll containment: the body scrolls INSIDE the sheet; overscroll never
+       chains into (or rubber-bands) the page behind it. */
+    .ow-window.ow-sheet-mode > .ow-body {
+      flex: 1 1 auto; max-height: none; overflow: auto;
+      overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    }
+    /* The grabber — the iOS pill. A small visible pill inside a 44px invisible
+       hit region (WCAG 2.5.5), the primary detent-drag handle. aria-hidden: it is
+       a touch affordance; keyboard/AT users dismiss via the titlebar × / Escape. */
+    .ow-window.ow-sheet-mode > .ow-grabber {
+      flex: 0 0 auto; position: relative; min-height: 22px; padding-top: 8px;
+      display: flex; align-items: flex-start; justify-content: center;
+      cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+    }
+    .ow-window.ow-sheet-mode > .ow-grabber:active { cursor: grabbing; }
+    .ow-window.ow-sheet-mode > .ow-grabber span {
+      display: block; width: 38px; height: 5px; border-radius: 3px;
+      background: color-mix(in srgb, var(--fg, #9cdef2) 38%, transparent);
+    }
+    .ow-window.ow-sheet-mode > .ow-grabber::after {
+      content: ""; position: absolute; left: 0; right: 0; top: 0; height: 44px;
+    }
+    /* The titlebar doubles as a drag handle (touch-action:none so the gesture is
+       ours); no move cursor — the sheet has no XY drag. Square its bottom radius
+       against the sheet's flat body. */
+    .ow-window.ow-sheet-mode > .ow-titlebar { cursor: default; touch-action: none; }
+    /* 1:1 with the finger while dragging (kills every transition), then a short
+       height glide on release to the settled detent. The settle rule must out-rank
+       the base .ow-window transition-property pin (#794) — two classes + !important. */
+    .ow-window.ow-sheet-mode.ow-sheet-dragging { transition: none !important; }
+    .ow-window.ow-sheet-mode.ow-sheet-settling {
+      transition-property: height !important;
+      transition-duration: .26s; transition-timing-function: cubic-bezier(.32,.72,0,1);
+    }
+    /* Entrance/exit: the slide-up rise + slide-down dismiss (reduced-motion strips
+       both in the shared @media block below — instant mount/unmount). */
+    @keyframes ow-sheet-mode-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    @keyframes ow-sheet-mode-out { from { transform: translateY(0); } to { transform: translateY(100%); } }
+    .ow-anim-sheet-in { animation: ow-sheet-mode-in .32s cubic-bezier(.32,.72,0,1); }
+    .ow-anim-sheet-out { animation: ow-sheet-mode-out .24s cubic-bezier(.4,0,1,1) forwards; }
+    @media (prefers-reduced-motion: reduce) {
+      .ow-anim-sheet-in, .ow-anim-sheet-out { animation: none; }
+      .ow-window.ow-sheet-mode.ow-sheet-settling { transition: none !important; }
+    }
     /* the dock/undock toggle reads as a quieter control than min/close */
     .ow-controls .ow-dock { font-size: .9rem; }
     /* ── loading affordance (perf/resilience) ─────────────────────────────────
@@ -464,6 +542,56 @@ function flyTargetRect() {
   if (sb) { const r = sb.getBoundingClientRect(); return { left: r.left + 16, top: r.bottom - 48, width: 32, height: 24 }; }
   return { left: 16, top: window.innerHeight - 48, width: 32, height: 24 };
 }
+
+// ── #893: sheet-mode detent geometry (the phone tier) ──────────────────────
+// The px height a named detent resolves to RIGHT NOW — used by the drag-release
+// settle logic; the resting heights are class-owned in ensureCss() (dvh-based)
+// and these MUST stay in lock-step with those rules (and with orwellSheet.js's
+// DETENT_FRACTION, so the window-sheet and the action-sheet feel identical).
+// visualViewport tracks the keyboard/URL-bar-shrunk mobile viewport when present.
+function sheetVh() {
+  try {
+    if (window.visualViewport && window.visualViewport.height) return window.visualViewport.height;
+  } catch (_) {}
+  return window.innerHeight || document.documentElement.clientHeight || 600;
+}
+// The resolved top safe-area inset (notch), so the JS settle target for the FULL
+// detent lands exactly where the class-owned CSS height (100dvh − max(inset, 16px))
+// will rest — a flat 16px would OVERSHOOT on notched phones and visibly snap back
+// when the class takes over (CodeRabbit #1378). env() is only resolvable through
+// the style system, so read it off a hidden probe once and cache; the cache is
+// invalidated on viewport resize (rotation moves the notch).
+let _safeTopPx = -1;
+function safeAreaTopPx() {
+  if (_safeTopPx >= 0) return _safeTopPx;
+  let v = 0;
+  try {
+    const p = document.createElement('div');
+    p.style.position = 'fixed';
+    p.style.top = '0';
+    p.style.left = '0';
+    p.style.width = '0';
+    p.style.pointerEvents = 'none';
+    p.style.visibility = 'hidden';
+    p.style.height = 'env(safe-area-inset-top, 0px)';
+    document.documentElement.appendChild(p);
+    v = p.getBoundingClientRect().height || 0;
+    p.remove();
+  } catch (_) { v = 0; }
+  _safeTopPx = v;
+  return v;
+}
+function sheetDetentPx(name) {
+  const h = sheetVh();
+  // full: 100dvh − max(safe-area-inset-top, 16px) — mirrors the .ow-detent-full rule.
+  if (name === 'full') return Math.max(220, h - Math.max(16, safeAreaTopPx()));
+  // medium: the SAME 0.52 fraction as orwellSheet.js's DETENT_FRACTION.medium (lock-step),
+  // capped at the CSS rule's 640px.
+  return Math.max(220, Math.min(Math.round(h * 0.52), 640));
+}
+// Drag-to-dismiss: released below (1 - this fraction) of the medium detent →
+// dismiss instead of snapping back (same threshold as orwellSheet.js).
+const SHEET_DISMISS_FRACTION = 0.4;
 
 // ── parked-state persistence (G5 refresh-persistence audit F2 / Lane G16) ──
 // Parked means parked: modalManager's minimized registry is in-memory, so a
@@ -575,6 +703,20 @@ export class OrwellWindow {
    * `winsize-<id>` key (the same clamped scheme the settings/tool modals use).
    * Mobile (≤768px, the sheet/drawer tier) skips edge-resize by design — the
    * sheet host owns the geometry there. Opt a window out with resizable:false.
+   *
+   * #893 / #753 — SHEET presentation mode (`sheet: 'auto'|true|false`, default
+   * 'auto'). On the narrow tier a kit window PRESENTS as an iOS-style bottom
+   * sheet: bottom-pinned + edge-to-edge, a grabber, medium/full detents
+   * (drag-between, `setDetent()`/`currentDetent()`), drag-to-dismiss (closable
+   * windows only), safe-area insets, slide-up/-down motion, and scroll
+   * containment on the body — while the window SEMANTICS are unchanged (the
+   * same modal scrim/stack/focus-trap/aria-modal, Escape via the ui.js arbiter,
+   * focus-return, minimize-to-dock, onClose). 'auto' sheets exactly the
+   * modal:true dialogs; `sheet:true` opts a non-modal window in (the Cast
+   * roster); `sheet:false` forbids it. Sheet mode opts OUT of slot/drag/resize
+   * geometry entirely (F5: the detent classes own the height — no geometry key
+   * is ever minted), and crossing the breakpoint re-homes the window through
+   * the same teardown+rebuild hinge the dock toggle uses.
    */
   constructor(opts) {
     // A modal:true dialog (settings, etc.) must CENTER, not pin to the top-right HUD
@@ -590,6 +732,10 @@ export class OrwellWindow {
       // box, audit D1) sets it false so it ALWAYS re-centers — never carrying a dragged offset
       // across reloads or devices for the season.
       persistLayout: true,
+      // #893: SHEET presentation on the narrow tier. 'auto' (default) → a modal:true
+      // dialog presents as a bottom sheet on phones; true → this window sheets on
+      // narrow even when non-modal (the Cast window opts in); false → never sheets.
+      sheet: 'auto',
       dockable: false, defaultDocked: false, modal: false }, opts);
     if (!this.o.id || !this.o.title) throw new Error('OrwellWindow needs id + title');
     this.ac = new AbortController();
@@ -599,19 +745,40 @@ export class OrwellWindow {
     // 0054 Phase 2: docked-vs-floating is resolved per OPEN (the toggle close()s
     // then open()s, so the kit rebuilds in the chosen mode). Seed from persistence.
     this._docked = this.o.dockable && loadDocked(this.o.id, this.o.defaultDocked);
+    // #893: sheet-vs-floating is ALSO resolved per open (open() re-resolves, and the
+    // narrow-breakpoint listener re-homes a live window when the tier flips).
+    this._sheet = this._resolveSheet();
+  }
+
+  /** #893: does THIS window present as a bottom sheet right now? A per-open
+   *  decision, like docked-vs-floating — never a live geometry mutation. Docked
+   *  wins (the rail owns docked placement); otherwise sheet mode requires the
+   *  narrow tier, then: `sheet:true` forces it, `sheet:false` forbids it, and
+   *  the 'auto' default sheets exactly the modal dialogs (Settings/Theme/the
+   *  casting box), leaving non-modal HUD panels on the slot engine's existing
+   *  narrow sheet host (orwellSlots.js restackNarrowSheets) unless they opt in. */
+  _resolveSheet() {
+    if (this._docked) return false;
+    if (!isNarrow()) return false;
+    if (this.o.sheet === true) return true;
+    if (this.o.sheet === false) return false;
+    return !!this.o.modal;
   }
 
   _build() {
     ensureCss();
     const docked = this._docked;
+    const sheet = !docked && this._sheet;   // #893: sheet presentation (phone tier)
     const el = document.createElement('div');
     el.id = this.o.id;
     // #871: a non-draggable, non-docked window (e.g. a centered modal:true dialog) carries
     // .ow-no-drag so its titlebar drops the grab/move cursor (a docked window is already covered
     // by .ow-docked). Gated on the same `draggable` flag that suppresses the "Drag to move" tooltip.
-    el.className = 'ow-window' + (docked ? ' ow-docked' : '') + (this.o.draggable ? '' : ' ow-no-drag');
+    el.className = 'ow-window' + (docked ? ' ow-docked' : '') + (this.o.draggable ? '' : ' ow-no-drag')
+      + (sheet ? ' ow-sheet-mode ow-detent-medium' : '');
     el.setAttribute('data-ow-window', '');
     if (docked) el.setAttribute('data-ow-docked', '');
+    if (sheet) { el.setAttribute('data-ow-sheet-mode', ''); el.dataset.owDetent = 'medium'; }
     // J1-25: a modal window is a dialog whose background it PROMISES is inert (the
     // aria-modal contract) — default the role up to 'dialog' and stamp aria-modal.
     const role = (this.o.modal && this.o.role === 'complementary') ? 'dialog' : this.o.role;
@@ -637,7 +804,8 @@ export class OrwellWindow {
     // so the affordance reaches the accessibility tree, not just a desktop hover tooltip. Gated
     // on the same keyboard-move availability (floating + draggable) that _onTitlebarKey acts on;
     // Home (restack) is only advertised when the window is slotted, matching that handler.
-    if (this.o.draggable && !docked) {
+    // (#893: a sheet has no XY move — no keyboard-move affordance to advertise.)
+    if (this.o.draggable && !docked && !sheet) {
       let keys = 'ArrowUp ArrowDown ArrowLeft ArrowRight';
       if (this.o.slotKey) keys += ' Home';
       tb.setAttribute('aria-keyshortcuts', keys);
@@ -702,6 +870,17 @@ export class OrwellWindow {
     body.className = 'ow-body';
     if (this.o.content instanceof Node) body.appendChild(this.o.content);
     else if (typeof this.o.content === 'string') body.innerHTML = this.o.content;
+    // #893: the sheet grabber — the iOS pill above the titlebar (44px hit region in
+    // CSS). aria-hidden: it is the TOUCH detent handle; keyboard/AT flows keep the
+    // titlebar ×/Escape. Both the grabber and the titlebar drive the detent drag.
+    let grab = null;
+    if (sheet) {
+      grab = document.createElement('div');
+      grab.className = 'ow-grabber';
+      grab.setAttribute('aria-hidden', 'true');
+      grab.innerHTML = '<span></span>';
+      el.appendChild(grab);
+    }
     el.appendChild(tb); el.appendChild(body);
     this.el = el; this.titlebar = tb; this.body = body;
 
@@ -716,6 +895,14 @@ export class OrwellWindow {
     // keyboard move / resize / re-dock on the titlebar — audit F10
     tb.addEventListener('keydown', (e) => this._onTitlebarKey(e), { signal: this.ac.signal });
 
+    // #893: sheet mode wires the DETENT drag (grabber + titlebar) and opts OUT of
+    // the floating XY drag + edge-resize entirely — the sheet owns its geometry
+    // (F5: no slot, no persisted offset, no winsize write in sheet mode).
+    if (sheet) {
+      this._wireSheetDrag(grab);
+      this._wireSheetDrag(tb);
+      return el;
+    }
     if (this.o.draggable) {
       makeWindowDraggable(el, {
         content: el, header: tb,
@@ -784,7 +971,9 @@ export class OrwellWindow {
       // Don't yank geometry out from under an ACTIVE local resize (spec F: defer during a live
       // gesture). min/dock still apply; the geometry re-syncs on the gesture's own end-emit.
       const gestureActive = document.body.classList.contains('window-resizing-active');
-      if (this.el && !this._docked && !gestureActive) {
+      // #893: a sheet-presented window has no floating geometry to apply — a remote
+      // x/y/w/h is a DESKTOP layout fact; min/dock state above still applies.
+      if (this.el && !this._docked && !this._sheet && !gestureActive) {
         if (typeof state.w === 'number' && typeof state.h === 'number') {
           // #896: a width synced from another device clamps to the SAME max cap as a local resize —
           // min(content, viewport−margin). Clear maxWidth FIRST so windowMaxWidth reads the true
@@ -817,7 +1006,9 @@ export class OrwellWindow {
   //   3. a window now LARGER than the viewport shrinks to fit (viewport − 8),
   //      respecting its own minWidth/minHeight, then re-clamps its position.
   _reclamp() {
-    if (!this.el || this._docked || this.isMinimized()) return;
+    // #893: sheet geometry is CSS-owned (bottom-pinned, dvh detent heights track the
+    // viewport natively) — nothing to re-clamp.
+    if (!this.el || this._docked || this._sheet || this.isMinimized()) return;
     if (this.el.style.display === 'none') return;
     // 3. Shrink-to-fit FIRST so the post-shrink size drives the position clamp.
     const r0 = this.el.getBoundingClientRect();
@@ -863,6 +1054,9 @@ export class OrwellWindow {
     }
     const d = dirs[e.key];
     if (!d) return;
+    // #893: a sheet has no XY position or free size — its geometry is the detent
+    // classes. Arrow move/resize are floating-only affordances.
+    if (this._sheet) return;
     // CodeRabbit: the Arrow-key nudge is a MOVE affordance — only draggable windows may be moved.
     // Gate it on `this.o.draggable` (the same flag that gates the aria-keyshortcuts + "arrows to
     // nudge" tooltip), so a draggable:false dialog can't be nudged even though Home (restack) and
@@ -885,6 +1079,118 @@ export class OrwellWindow {
     this.el.style.left = c.left + 'px'; this.el.style.top = c.top + 'px';
     this.el.style.right = 'auto'; this.el.style.bottom = 'auto'; this.el.style.transform = 'none';
     this._persist(this.el.getBoundingClientRect());
+  }
+
+  // ── #893: sheet-mode gestures (detent drag + drag-to-dismiss) ──────────────
+  // Mirrors orwellSheet.js's _wireDrag/_settle contract so the window-sheet and
+  // the action-sheet feel identical: 1:1 height follow while dragging (the
+  // .ow-sheet-dragging class kills transitions), release snaps to the nearest
+  // detent (a short height glide via .ow-sheet-settling), and a deep downward
+  // drag DISMISSES — gated on `closable` (the casting box, closable:false, can
+  // re-detent but never be swiped away; its in-body exits stay the only way out).
+  _wireSheetDrag(handle) {
+    if (!handle) return;
+    const sig = { signal: this.ac.signal };
+    const sigP = { signal: this.ac.signal, passive: false };
+    const onMove = (e) => {
+      if (!this._sheetDrag || !this.el) return;
+      const y = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+      if (y == null) return;
+      const dy = y - this._sheetDrag.startY;
+      if (Math.abs(dy) > 3) this._sheetDrag.moved = true;
+      // Down (positive dy) shrinks the sheet; up grows it. Clamp to [0, full].
+      const h = Math.max(0, Math.min(sheetDetentPx('full'), this._sheetDrag.startH - dy));
+      this.el.style.height = h + 'px';
+      if (e.cancelable) { try { e.preventDefault(); } catch (_) {} }  // own the gesture — no page scroll
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('touchend', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      if (this.el) this.el.classList.remove('ow-sheet-dragging');
+      const drag = this._sheetDrag; this._sheetDrag = null;
+      if (!drag || !drag.moved || !this.el) return;   // a tap, not a drag — keep the detent
+      this._settleSheet(this.el.getBoundingClientRect().height);
+    };
+    const onDown = (e) => {
+      // Never start a drag from an interactive control (the titlebar ×/– have their own clicks).
+      if (e.target && e.target.closest && e.target.closest('button, input, select, textarea, a, [role="button"]')) return;
+      const y = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY;
+      if (y == null || !this.el) return;
+      this._sheetDrag = { startY: y, startH: this.el.getBoundingClientRect().height, moved: false };
+      this.el.classList.add('ow-sheet-dragging');
+      window.addEventListener('pointermove', onMove, sigP);
+      window.addEventListener('touchmove', onMove, sigP);
+      window.addEventListener('pointerup', onUp, sig);
+      window.addEventListener('touchend', onUp, sig);
+      window.addEventListener('pointercancel', onUp, sig);
+    };
+    handle.addEventListener('pointerdown', onDown, sig);
+    handle.addEventListener('touchstart', onDown, sigP);
+  }
+
+  // Where a released drag lands: dismiss (dragged well below the medium floor,
+  // closable windows only), else snap to the nearest detent by px distance.
+  _settleSheet(h) {
+    const medium = sheetDetentPx('medium');
+    if (this.o.closable && h < medium * (1 - SHEET_DISMISS_FRACTION)) {
+      this.el.style.height = '';   // the exit slide owns the motion, not the drag height
+      this.close();
+      return;
+    }
+    const full = sheetDetentPx('full');
+    this.setDetent(Math.abs(full - h) < Math.abs(medium - h) ? 'full' : 'medium');
+  }
+
+  /** #893: snap a sheet-presented window to a named detent ('medium'|'full').
+   *  The resting height is CLASS-owned (ensureCss detent rules); a release glide
+   *  bridges from the drag's inline height to the target, then hands the height
+   *  back to the class. No-op for floating/docked presentation. */
+  setDetent(name) {
+    if (!this.el || !this._sheet) return this;
+    const n = name === 'full' ? 'full' : 'medium';
+    this.el.classList.toggle('ow-detent-full', n === 'full');
+    this.el.classList.toggle('ow-detent-medium', n !== 'full');
+    this.el.dataset.owDetent = n;
+    if (!REDUCED() && this.el.style.height) {
+      const target = sheetDetentPx(n);
+      this.el.classList.add('ow-sheet-settling');
+      requestAnimationFrame(() => { if (this.el) this.el.style.height = target + 'px'; });
+      setTimeout(() => {
+        if (!this.el) return;
+        this.el.classList.remove('ow-sheet-settling');
+        this.el.style.height = '';   // the detent class owns the resting height
+      }, 300);
+    } else {
+      this.el.style.height = '';
+    }
+    return this;
+  }
+
+  /** The active detent name while sheet-presented, else null. */
+  currentDetent() {
+    return (this._sheet && this.el) ? (this.el.dataset.owDetent || 'medium') : null;
+  }
+
+  /** True while this window is presented as a bottom sheet (#893, phone tier). */
+  isSheet() { return !!this._sheet; }
+
+  // #893: crossing the narrow breakpoint re-homes an open window into the
+  // presentation the new tier resolves (floating ↔ sheet) — a teardown + rebuild
+  // through the SAME _rehoming hinge the dock toggle uses (one position system,
+  // never a live geometry mutation). Minimized windows are left alone (hidden;
+  // they re-resolve on their next real open) and a mid-close fade is respected.
+  _rehomeForViewport() {
+    if (!this.el || !this.el.isConnected || this._docked || this._closeTimer) return;
+    if (this.isMinimized()) return;
+    const want = this._resolveSheet();
+    if (want === !!this._sheet) return;
+    const opener = this.opener;
+    this._rehoming = true;
+    try { Modals.close(this.o.id); } finally { this._rehoming = false; }
+    this.open(opener);
   }
 
   // ── J1-25 modal chrome (the per-window `modal` option) ─────────────────────
@@ -967,7 +1273,7 @@ export class OrwellWindow {
     // latched close-animation class — otherwise finish() would tear THIS window down and the
     // .ow-anim-close end-state would leave it invisible.
     if (this._closeTimer) { clearTimeout(this._closeTimer); this._closeTimer = null; }
-    if (this.el) this.el.classList.remove('ow-anim-close');
+    if (this.el) this.el.classList.remove('ow-anim-close', 'ow-anim-sheet-out');
     if (this.el && this.el.isConnected) { this.restore(); return this; }
     // #925: same-id collision guard. modalManager._state and this kit's _byId/getElementById are
     // ALL keyed by window id, so two DIFFERENT live instances sharing an id desync the registry:
@@ -983,6 +1289,9 @@ export class OrwellWindow {
     // A prior _teardown() aborted this.ac; a fresh open (incl. the dock toggle's
     // re-open) needs a live controller so _build's listeners actually attach.
     if (this.ac.signal.aborted) this.ac = new AbortController();
+    // #893: sheet-vs-floating is a per-OPEN resolution (like docked) — the viewport
+    // tier may have changed since construction / the last open.
+    this._sheet = this._resolveSheet();
     const el = this._build();
     _byId.set(this.o.id, this);                                            // 0064: live registry for remote apply
     this._emit({ open: true }); // 0064/D1: capture open state (gated)
@@ -998,7 +1307,10 @@ export class OrwellWindow {
       return this;
     }
     document.body.appendChild(el);
-    if (window.OrwellSlots) {
+    // #893: a sheet-presented window opts OUT of the slot geometry system entirely
+    // (bottom-pinned, class-owned detent heights — F5: sheet = no slot, no offset,
+    // never a second persisted-position scheme).
+    if (window.OrwellSlots && !this._sheet) {
       this._slot = window.OrwellSlots.register(el, this.o.slot,
         { key: this.o.slotKey || null, draggable: this.o.draggable });
       // FLY-IN FIX (#794) belt-and-braces: register() runs ONE synchronous restackSlot that
@@ -1031,7 +1343,13 @@ export class OrwellWindow {
       el.style.display = 'none';
       return this;
     }
-    if (!REDUCED()) { el.classList.add('ow-anim-open'); setTimeout(() => el.classList.remove('ow-anim-open'), 220); }
+    if (!REDUCED()) {
+      // #893: a sheet RISES from the bottom edge (the slide-up entrance); a floating
+      // window keeps the E97 fade+scale. reduced-motion strips both.
+      const animCls = this._sheet ? 'ow-anim-sheet-in' : 'ow-anim-open';
+      el.classList.add(animCls);
+      setTimeout(() => el.classList.remove(animCls), this._sheet ? 360 : 220);
+    }
     // J1-25: a modal window mounts its backdrop scrim + inerts the background + traps
     // focus BEFORE the raise (which pins it to the modal tier above the scrim).
     if (this.o.modal) this._mountModalChrome();
@@ -1234,6 +1552,12 @@ export class OrwellWindow {
     if (this._docked) { this._teardown(); return; }
     const finish = () => { this._closeTimer = null; Modals.close(this.o.id); };   // closeFn → _teardown()
     if (REDUCED()) { finish(); return; }
+    // #893: a sheet SLIDES back down off the bottom edge (mirror of the rise-in).
+    if (this._sheet) {
+      this.el.classList.add('ow-anim-sheet-out');
+      this._closeTimer = setTimeout(finish, 260);
+      return;
+    }
     // A7 [ruling #19]: scale+fade fly-away on close (the dedicated ow-close keyframe).
     this.el.classList.add('ow-anim-close');
     // TX-1: track the fade timer so a re-open() during the ~190ms fade can cancel it —
@@ -1327,10 +1651,20 @@ function reclampOpenWindows() {
   }
 }
 function onViewportResize() {
+  // #893 (CodeRabbit #1378): a viewport change can be a rotation — the notch moves,
+  // so the cached safe-area-inset-top must be re-probed on the next detent settle.
+  _safeTopPx = -1;
   if (_reclampRaf) return;
   _reclampRaf = (window.requestAnimationFrame || ((fn) => setTimeout(fn, 120)))(reclampOpenWindows);
 }
 window.addEventListener('resize', onViewportResize);
+// #893: crossing the narrow breakpoint re-homes every open kit window into the
+// presentation the new tier resolves (floating ↔ bottom sheet) — a teardown +
+// rebuild through the same _rehoming hinge the dock toggle uses, so there is
+// never a live geometry mutation between the two systems (F5).
+onNarrowChange(() => {
+  for (const w of Array.from(_byId.values())) { try { w._rehomeForViewport(); } catch (_) {} }
+});
 // #758: a top system-banner show/hide/copy-change shifts the available top band — re-clamp every
 // open window through the SAME rAF-debounced pass (so a banner appearing pushes a top-slotted
 // window below it and compresses the stack; disappearing lets it climb back). The banner

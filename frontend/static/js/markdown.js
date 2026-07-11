@@ -165,7 +165,16 @@ export function startsWithReasoningPrefix(text) {
 // The application-itself meta-leak (audit 2026-06-26): the model mirrors a player's OOC software
 // complaint into the fiction ("the front end is having a day", "the app froze"). Narrow alternation
 // (no bare "front"/"app"/"site") so ordinary in-character prose stays untouched.
-const _REASONING_LINE_RE = /^\s*(?:let me\b|looking at\b|the game state\b|i need\b|i should\b|i'll\b|i will\b|i can\b|i'm going to\b|first,? i\b|now,? i\b|the (?:roster|cast|state) (?:shows|is)\b|let's (?:see|stay)\b|okay,? (?:so|let)\b|alright,? (?:so|let)\b|so,? i\b|based on the\b|front[\s-]?end\b|the app\b|this (?:app|website|site)\b)/i;
+// #989 — "let me" is NOT a reasoning marker on its own: legitimate producer/GM narration opens
+// with it ("Let me log that.", "Let me show you the bedroom.", "Let me give you one piece of
+// advice."). A leading "let me" line is a reasoning line only when the verb that follows is a
+// reasoning/meta verb ("think/check/see/look/verify/review/analyze/re-read/rewind/figure/plan/
+// stay in character/…" — thinking-aloud shapes that never occur in in-character BB narration).
+// Tool-PROCESS "let me" clauses ("let me call advanceGame", "let me record this interaction") are
+// the SENTENCE-level scrub's jurisdiction (_MACHINERY_ASIDE_RE below), which drops only the
+// offending sentence instead of the whole line. Narrow lookaheads keep social uses of the meta
+// verbs alive ("let me see you out", "let me check on the others").
+const _REASONING_LINE_RE = /^\s*(?:let me\s+(?:now\s+|first\s+|then\s+|also\s+|just\s+|quickly\s+)?(?:think|see(?!\s+you\b)|look|check(?!\s+(?:on|in)\b)|verify|confirm|review|analy[sz]e|assess|recall|reconsider|re-?read|re-?check|double-?check|make sure|rewind|start over|try (?:that\s+)?again|figure|parse|plan|draft|work (?:out|through)|map out|sort out|stay in character|get back in(?:to)? character)\b|looking at\b|the game state\b|i need\b|i should\b|i'll\b|i will\b|i can\b|i'm going to\b|first,? i\b|now,? i\b|the (?:roster|cast|state) (?:shows|is)\b|let's (?:see|stay)\b|okay,? (?:so|let)\b|alright,? (?:so|let)\b|so,? i\b|based on the\b|front[\s-]?end\b|the app\b|this (?:app|website|site)\b)/i;
 const _RAW_NPC_ID_RE = /\bnpc:\d+\b/i;
 
 export function scrubReasoningPreamble(text) {
@@ -328,12 +337,29 @@ const _MACHINERY_ASIDE_RE = new RegExp(
   + '|\\bgod[\\s-]?mode\\b|\\bthe vault\\b|\\bproducer\'?s? vault\\b'
   + '|\\badmin(?:istrator)?[\\s-]+(?:panel|surface|console|mode|controls?|tools?)\\b'
   + '|\\bdeveloper (?:controls?|mode|console|tools?)\\b'
+  // #989 (+ #1369 review) — the AMBIGUOUS operator verbs over-fired on legitimate narration:
+  // bare "log/note" ate "Let me log that.", bare "check" ate "Let me check on the others.",
+  // bare "run" ate "Let me run to the door.". Those four are machinery only when followed by an
+  // ENGINE object noun ("log this interaction", "check the game state", "run the command",
+  // "run the game"); the unambiguous tool-process verbs stay bare. The verb lists are
+  // PARITY-LOCKED, branch for branch, with the Python _GAME_LEAK_SENTENCE_RE in
+  // src/agent_loop.py — tests/test_989_letme_narration_scrub.py drives BOTH scrubs over the
+  // same cases and fails on any behavioral drift.
   + '|\\blet me\\s+(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
-    + '(?:call|advance|run|check|record|log|note|resolve|use|pull|fetch|see what|'
-    + 'walk through|re-?read|re-?check|reconsider)\\b'
+    + '(?:call|advance|record|resolve|use|pull|fetch|place|see what|'
+    + 'walk through|re-?read|re-?check|reconsider'
+    + '|run(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\\b)'
+    + '|check(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\\b)'
+    + '|(?:log|note)(?=\\s+(?:down\\s+)?(?:th(?:e|is|at)\\s+)?'
+      + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\\b))\\b'
   + '|\\bi(?:\'ll|\'d| will| should| need to| have to| am going to| must| can)\\s+'
     + '(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
-    + '(?:call|advance|run|record|log|note|resolve|use|pull|fetch|present|walk through)\\b'
+    + '(?:call|advance|record|resolve|use|pull|fetch|present|place|'
+    + 'walk through|re-?read|re-?check|reconsider'
+    + '|run(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\\b)'
+    + '|check(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\\b)'
+    + '|(?:log|note)(?=\\s+(?:down\\s+)?(?:th(?:e|is|at)\\s+)?'
+      + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\\b))\\b'
   + '|\\b(?:advance|move|push) the game\\b',
   'i',
 );

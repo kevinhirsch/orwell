@@ -120,12 +120,22 @@ def test_layout_channel_forwards_layout_changed_as_layout_frames(run):
         ws.client_send({"t": "subscribe", "ch": "layout", "cid": "c_lay"})
         ack = await ws.recv_where(lambda f: f.get("t") == "ack" and f.get("cid") == "c_lay")
         assert ack["ch"] == "layout"
+        # The layout channel sends its ack BEFORE it enters `session_events.subscribe`, and a
+        # `layout-changed` edge is NOT ring-replayed — so a publish that races ahead of the channel's
+        # bus registration is simply LOST and the recv below hangs to timeout (a CI-runner flake). Wait
+        # deterministically for the subscriber to register, never a fixed sleep.
+        import asyncio as _a
+        for _ in range(200):
+            if session_events.subscriber_count(canon) >= 1:
+                break
+            await _a.sleep(0.005)
+        assert session_events.subscriber_count(canon) == 1, "layout channel never subscribed"
         # A peer (another tab/device) publishes a layout change onto the same session bus — the socket
         # must forward it as a `layout` frame carrying the descriptor (client does device/origin filter).
         session_events.publish(canon, "layout-changed",
                                {"windowId": "cast", "state": {"x": 9, "open": True},
                                 "deviceId": "phone", "origin": "tab-Z"})
-        frame = await ws.recv_where(lambda f: f.get("t") == "layout")
+        frame = await ws.recv_where(lambda f: f.get("t") == "layout", timeout=5.0)
         assert frame["ch"] == "layout"
         assert frame["d"]["windowId"] == "cast"
         assert frame["d"]["deviceId"] == "phone"
@@ -145,15 +155,22 @@ def test_layout_changed_does_not_leak_into_the_state_channel(run):
         ws = H.new_ws(); t = H.spawn(ws)
         await H.hello(ws, canon)
         ws.client_send({"t": "subscribe", "ch": "state", "cid": "c_state"})
-        # subscribe to state has no explicit ack in the merged server; give the channel task a beat.
+        # The state channel has no explicit subscribe-ack, so wait DETERMINISTICALLY until it has
+        # registered on the session bus before publishing — a fixed sleep races a contended CI runner,
+        # letting the publishes below fire before the subscriber exists (the recv then hangs to
+        # timeout, the observed flake). Mirrors the sibling channel-cleanup test's readiness poll.
         import asyncio as _a
-        await _a.sleep(0.05)
+        for _ in range(200):
+            if session_events.subscriber_count(canon) >= 1:
+                break
+            await _a.sleep(0.005)
+        assert session_events.subscriber_count(canon) == 1, "state channel never subscribed"
         session_events.publish(canon, "layout-changed",
                                {"windowId": "cast", "state": {"x": 1}, "deviceId": "d", "origin": "o"})
         # A real game edge SHOULD produce a state frame — prove the channel is live and only filters
         # layout-changed (not everything).
         session_events.publish(canon, "game-updated")
-        st = await ws.recv_where(lambda f: f.get("t") == "state")
+        st = await ws.recv_where(lambda f: f.get("t") == "state", timeout=5.0)
         assert st["d"]["reason"] == "game-updated"     # the game edge, NOT "layout-changed"
         # And no state frame ever carried reason "layout-changed".
         assert all(not (f.get("t") == "state" and f.get("d", {}).get("reason") == "layout-changed")
@@ -189,5 +206,39 @@ def test_cancelled_channel_task_cleanup_runs_before_ws_session_returns(run):
         assert t.done()
         assert session_events.subscriber_count(canon) == 0, \
             "cancelled channel task's subscribe() cleanup did not run before ws_session returned"
+
+    run(main())
+
+
+def test_ring_evict_timer_is_drained_in_loop_by_stop(run):
+    """#1339 residual — the ``session_events`` ring-evict timer. When ``ws_session``'s teardown runs
+    the state channel's ``subscribe()`` ``finally`` as the session's LAST subscriber, it arms a 180s
+    ``_schedule_ring_evict`` task on the CURRENT (per-test) loop. The harness ``stop()`` must cancel
+    AND await that timer in-loop; otherwise it survives to the ``_run`` loop close as
+    "Task was destroyed but it is pending!" and lingers cross-loop in the process-global
+    ``_RING_EVICT_TASKS`` (the CI teardown noise this issue tracked). Proof: right after ``stop()``
+    returns — no further ``await`` — the registry is empty, and the ring itself is KEPT (cancel
+    mirrors a re-subscribe; it never pops the replay ring)."""
+    async def main():
+        import asyncio as _a
+        canon = H.seed_live_game(None, "live-canon")
+        ws = H.new_ws()
+        t = H.spawn(ws)
+        await H.hello(ws, canon)
+        ws.client_send({"t": "subscribe", "ch": "state", "cid": "c_state"})
+        for _ in range(100):
+            if session_events.subscriber_count(canon) >= 1:
+                break
+            await _a.sleep(0.005)
+        assert session_events.subscriber_count(canon) == 1, "state channel never subscribed"
+        # Seed a replayable invitation so the ring exists when the evict timer is armed.
+        session_events.publish(canon, "game-updated")
+        await H.stop(ws, t)
+        assert t.done()
+        # The last subscriber left during stop(), so the evict timer WAS armed — and stop() drained it.
+        assert session_events._RING_EVICT_TASKS == {}, \
+            "stop() left an armed ring-evict timer to be destroyed pending at loop close"
+        # Draining cancels the timer without popping the ring (re-subscribe semantics).
+        assert session_events._ring_snapshot(canon), "the drain must keep the replay ring intact"
 
     run(main())

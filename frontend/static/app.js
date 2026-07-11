@@ -3937,6 +3937,14 @@ function startOrwellApp() {
         return;
       }
 
+      // Block an empty send at the affordance level: an empty, attachment-less composer has nothing
+      // to send, and post-#1352 an empty player turn reads server-side as a "lull" readiness cue
+      // that can advance the game — so a stray empty send is not just a no-op, it can silently move
+      // the season on. Every legitimate empty-composer mode (recording, attach-picker, new-chat,
+      // mic) has already returned above; a live stream keeps its own Stop affordance
+      // (dataset.mode === 'streaming'), so this guard leaves Stop untouched.
+      if (!hasText && !hasFiles && sendBtn.dataset.mode !== 'streaming') return;
+
       // Otherwise, send message
       handleSubmit(e);
     });
@@ -3973,6 +3981,12 @@ function startOrwellApp() {
           if (railNew) railNew.click();
           return;
         }
+        // Same empty-affordance block as the click handler: Enter on an empty, attachment-less
+        // composer must not submit (post-#1352 an empty turn can read as a lull "continue" cue and
+        // advance the game). A live stream still Stops on empty-Enter (dataset.mode 'streaming').
+        const _hasText = messageInput && messageInput.value.trim().length > 0;
+        const _hasFiles = _hasAttachments();
+        if (!_hasText && !_hasFiles && sendBtn && sendBtn.dataset.mode !== 'streaming') return;
         handleSubmit(e);
       }
     });
