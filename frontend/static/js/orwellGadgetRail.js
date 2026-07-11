@@ -258,7 +258,17 @@
   // while the rail itself is hidden), and hides when the rail is empty. This is what the
   // browser-smoke keep-set drives (it injects chips, then expects the rail visible).
   function _isNarrow() { return window.matchMedia("(max-width: 768px)").matches; }
+  // #573 B — RAIL UNIFICATION: the "Windows" chip dock (modalManager) is homed into #gadget-rail
+  // in the game build, as a SIBLING of #gadget-rail-body. A minimized window's chip must keep the
+  // control room open (or a parked window would be stranded behind the content-driven hide when no
+  // gadget has content), so the dock's presence counts as content. It is a rail CHILD but NOT a
+  // body child, so it never enters the gadget order/drag/strip machinery below.
+  function _dockHasParkedChips() {
+    var d = document.getElementById("minimized-dock");
+    return !!(d && rail.contains(d) && d.classList.contains("ow-has-rows"));
+  }
   function _hasContent() {
+    if (_dockHasParkedChips()) return true;   // #573 B: a parked window's chip keeps the rail open
     if (!body) return false;
     return Array.prototype.some.call(body.children, function (c) {
       return _elVisible(c);
@@ -333,6 +343,9 @@
       attributeFilter: ["style", "class", "hidden"] });
   }
   window.addEventListener("orwell:gamechanged", syncVisibility);
+  // #573 B: modalManager fires this when the parked-chip set changes (a window minimized/restored/
+  // closed) so the control room reveals a freshly-parked chip and re-hides once the last one clears.
+  window.addEventListener("orwell:dock-changed", syncVisibility);
   window.addEventListener("resize", function () { _refreshOpener(); guardComposerOverlap(); });
   setInterval(syncVisibility, 4000);  // belt-and-suspenders fallback
   if (document.readyState === "loading") {
