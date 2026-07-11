@@ -2704,7 +2704,12 @@
 <script type="module" src="/static/js/chatRenderer.js"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=20260604s"></script>
+<!-- #1399: chat.js is loaded EXACTLY ONCE, via app.js's ES `import chatModule from './js/chat.js'`
+     (see /static/app.js) + the modulepreload above. It intentionally carries NO <script> tag here:
+     a tag at a DIFFERENT url (the old `chat.js?v=…`) is a SECOND module record ⇒ chat.js evaluates
+     TWICE ⇒ every module-level timer/listener/cache runs in duplicate. Do NOT re-add a chat.js
+     <script> tag. Cache-busting rides on the service worker (sw.js: /static/*.js is network-first
+     and chat.js is precached), NOT a `?v=` query — same as every other module in the app.js graph. -->
 <script type="module" src="/static/js/search-chat.js"></script>
 <script type="module" src="/static/js/theme.js"></script>
 <script type="module" src="/static/js/censor.js"></script>
