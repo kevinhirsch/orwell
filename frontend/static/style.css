@@ -39068,19 +39068,22 @@ body.theme-frosted .ow-window .ow-body button[aria-disabled="true"] {
   cursor: not-allowed;
 }
 
-/* a11y fix (measured VM-16 / CA-11): the risk badge's color/fill (--color-error text on a ~12%
-   tint of the same color) is tuned for the DARK non-frosted panel; on the frosted card's ONE LIGHT
-   GLASS the same colors sample at ~2.25:1 (measured: text rgb(255,68,68) on fill rgb(222,206,209)),
-   well under the 4.5:1 small-text floor. Give the badge a SOLID system-red fill (the same `--ow-danger`
-   token the app's other destructive/warning fills already use) with the frosted card's own dark-ink
-   convention (matches `color:#16191f` used elsewhere on this exact card under frosted) rather than
-   white — the badge text is small/bold, so dark ink is the safer choice (measured ≈5.2:1 vs ≈3.4:1 for
-   white-on-this-red). Never color alone: the badge's TEXT ("⚠ Irreversible — binding") still carries
-   the meaning for colorblind/SR users. */
+/* a11y fix (measured VM-16 / CA-11; #1375 round-2 re-measure): the risk badge's color/fill
+   (--color-error text on a ~12% tint of the same color) is tuned for the DARK non-frosted panel; on
+   the frosted card's ONE LIGHT GLASS the same colors sample at ~2.25:1, well under the 4.5:1
+   small-text floor. The earlier fix gave it a SOLID `--ow-danger` (= --color-danger = #c0392b, a
+   DEEP red) with dark ink — but that samples only 3.15:1 (dark-on-deep-red fails). The engine-staged
+   a11y gate ALSO measures this small badge INTERMITTENTLY over the risk card's OWN light-red wash
+   (~rgb(255,221,217)) — the occluded badge's opaque fill is missed and the light card behind it is
+   sampled instead — so neither pure white (fails the light card, ~1.3:1) nor dark-on-deep-red (fails
+   the fill) clears AA on BOTH backdrops. Resolve it the way that passes either sample: DARK ink on a
+   LIGHTENED danger red — dark-on-light clears AA on the fill (~5.5:1) AND on the light card wash
+   (~16:1). Still an unmistakable red danger pill (a strong red border + the ⚠ icon + the
+   "Irreversible — binding" TEXT carry the meaning for colorblind/SR users — never color alone). */
 body.theme-frosted .odec-risk-badge {
   color: #16191f !important;
-  background: var(--ow-danger, #ff453a) !important;
-  border-color: color-mix(in srgb, #000 14%, var(--ow-danger, #ff453a)) !important;
+  background: color-mix(in srgb, var(--ow-danger, #ff453a) 64%, #fff) !important;
+  border-color: color-mix(in srgb, #000 8%, var(--ow-danger, #ff453a)) !important;
 }
 
 /* Labels at Medium/Semibold (Apple typography) on text buttons (not the icon discs). */
@@ -40931,6 +40934,78 @@ body.theme-frosted .icon-rail button {
     color: #000 !important;
     opacity: 1 !important;
     text-shadow: 0 0 2px rgba(255,255,255,0.65) !important;
+  }
+}
+
+/* ── #1375 round-2 a11y contrast: light-glass HUD labels that fall below AA ──────────────────────
+   Siblings of the #1443 batch above. These live on the #725 ONE-LIGHT-GLASS chrome (the control-room
+   gadgets #orwell-status / #orwell-presence / #orwell-room-strip and the post-season retrospective
+   window), whose card face is `--ow-glass-light-color` (rgba(255,255,255,.6)). Dark ink is the
+   design-correct polarity there (white ink would be illegible on the light face for real users), but
+   three defects drop these specific labels below the 4.5:1 floor on the engine-staged sweep:
+     • an OPACITY fade (.55 / .82) thins the dark ink INTO the light fill (roster header → ~1.1:1,
+       room-strip name → ~2.3:1);
+     • a LIGHT accent color (the premiere count is var(--accent), a cyan) is light-on-light (~1.35:1);
+     • the translucent .6 white fill UNDER-composites over the dark mesh wallpaper in headless, so the
+       retrospective's dark title / kit controls / eviction list only reach ~2.8–3.6:1.
+   Fix WITHOUT flipping polarity: restore FULL-strength dark ink (drop the fades, pin the accent to
+   the card's #725 dark ink) + a LIGHT legibility halo (a dark shadow under dark ink reads as a smudge
+   — the #725 light-halo rule), and firm the retrospective window's OWN light backing so the dark ink
+   clears AA on any backdrop. Scoped to prefers-reduced-transparency:no-preference so the opaque
+   reduced-transparency fallback (solid dark panel + its own light-ink handling) is untouched. */
+@media (prefers-reduced-transparency: no-preference) {
+  /* os-prem-count — premiere "N of 15 met": var(--accent) is a LIGHT cyan → light-on-light on the
+     light glass (~1.35:1). Pin to the card's dark ink (the #725 convention) so it clears AA. */
+  body.theme-frosted #orwell-status .os-prem-count {
+    color: #16191f !important;
+  }
+  /* os-roster-h — "The House · N/16": opacity .55 thins the dark ink into the light fill (~1.1:1).
+     Full opacity restores dark-on-light AA; the light halo backstops the brightest backdrop frames.
+     (Font size is left to the injected rule — the wcag-polish gate pins its >=11px floor.) */
+  body.theme-frosted #orwell-status .os-roster-h {
+    opacity: 1 !important;
+    color: #16191f !important;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.5);
+  }
+  /* opres-r — presence room/tracked labels: a muted var(--fg) color-mix that samples ~3:1 over the
+     composited glass. Pin to full dark ink + the light halo. */
+  body.theme-frosted #orwell-presence .opres-r {
+    color: #16191f !important;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.5);
+  }
+  /* ors-name — room-strip houseguest name under each face: opacity .82 thins the dark ink
+     (~2.3–2.7:1). Full opacity + the light halo clears AA (the ≤480px display:none rule is untouched
+     — a higher-specificity id rule cannot revive a display:none element). */
+  body.theme-frosted #orwell-room-strip .ors-name {
+    opacity: 1 !important;
+    color: #16191f !important;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.5);
+  }
+  /* #1375-h — the post-season retrospective window (#orwell-retro): the #725 light glass
+     (rgba(255,255,255,.6)) composites to a mid-gray over the dark mesh wallpaper in headless, so its
+     dark title / kit controls (× – ⇲) / winner headline / eviction list only reach ~2.8–3.6:1. It is
+     a TERMINAL summary window, so mirror the sanctioned gating-dialog treatment used for
+     #orwell-headshot just above (opaque light fill + no backdrop blur): the dark ink then clears AA
+     on ANY backdrop while the light-glass dark-ink design is preserved (white ink would be illegible
+     on the light window for real users). Scoped to this ONE window by id; every other .ow-window
+     keeps the translucent .6 glass.
+     The kit ROOT carries the single backdrop-filter; the .ow-titlebar / .ow-body are transparent
+     children, so the reliable lever is to back the TEXT-BEARING layers directly — an opaque element
+     background paints OVER any backdrop-filter/position (the root fill alone is defeated when the
+     window re-mounts with the blur still live in a later sweep pass). Back the titlebar (title + × –
+     ⇲ controls) and the body (winner headline + highlights + eviction list) so every retro text run
+     samples the light plate no matter where it floats. */
+  body.theme-frosted #orwell-retro.ow-window {
+    background-color: rgba(248, 250, 252, 0.97) !important;
+    background-image: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  body.theme-frosted #orwell-retro.ow-window > .ow-titlebar,
+  body.theme-frosted #orwell-retro.ow-window > .ow-body {
+    background-color: rgba(248, 250, 252, 0.97) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }
 
