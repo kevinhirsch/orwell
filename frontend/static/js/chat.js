@@ -6944,8 +6944,15 @@ import { isNarrow } from './platform.js';
   // it — the sender's own turn. A peer/observer window has no pinned holder and mounts
   // its own live bubble, exactly as resumeStream does for the SSE mirror.
   let _wsRound = null;   // { holder, contentDiv, state, reply, reasoning, sessionId, clientMsgId, _spinner }
+  // Is the CURRENT run tool-rich (multi-round)? A rich run's narration spans N rounds that history
+  // reconstructs as N bubbles (chatRenderer "Agent multi-bubble reconstruction"), so its ONE live WS
+  // holder must never be adopted at settle — it would keep round 1..N merged in a single bubble
+  // beside (or in place of) the reconstruction, the mirror-toolturn divergence. Same contract as the
+  // SSE observer's rich resume (resumeStream rich=true: discard the live holder, reload). Reset per
+  // run at `done` (frames arrive in run order, `done` last).
+  let _wsRichRun = false;
   const _wsLiveRender = (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t));
-  function _wsResetRound() { _wsRound = null; }
+  function _wsResetRound() { _wsRound = null; _wsRichRun = false; }
 
   function _wsEnsureRound() {
     if (_wsRound && _wsRound.holder && _wsRound.holder.isConnected) return _wsRound;
@@ -6969,6 +6976,13 @@ import { isNarrow } from './platform.js';
   // The persistent inbound consumer — registered ONCE, drives every `chat` event frame.
   function _onWsChatFrame(frame) {
     const d = (frame && frame.d) || {};
+    // A tool/agent-round marker ⇒ this run is RICH (multi-round). The WS splice renders the whole
+    // run into one holder (it has no per-round bubble machinery), so flag it — the `done` branch
+    // discards the merged holder and lets softReloadHistory rebuild the N-bubble reconstruction.
+    if (d.type === 'agent_step' || d.type === 'tool_start' || d.type === 'tool_output' || d.type === 'tool_progress') {
+      _wsRichRun = true;
+      return;
+    }
     if (typeof d.delta === 'string') {
       const round = _wsEnsureRound();
       if (!round) return;
@@ -6993,10 +7007,15 @@ import { isNarrow } from './platform.js';
       // settle reconcile from history — the SAME idempotent, seq-aware softReloadHistory
       // the SSE path settles through; it adopts the streamed bubble by {id, seq}.
       const round = _wsRound;
+      const rich = _wsRichRun;
       const sid = (round && round.sessionId) ||
                   (window.OrwellWs && window.OrwellWs.canonicalId && window.OrwellWs.canonicalId()) ||
                   (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
       if (round && round._spinner) { try { round._spinner.destroy(); } catch (_) {} }
+      // A RICH (multi-round) run's live holder holds rounds 1..N MERGED — never adoptable (history
+      // reconstructs the turn as N bubbles). Discard it; the reload below rebuilds the real shape.
+      // Mirrors the SSE observer's rich resume contract (mirror-toolturn parity, #1087).
+      if (rich && round && round.holder) { try { round.holder.remove(); } catch (_) {} }
       _wsResetRound();
       if (sid && _streamSessionId === sid) _streamSessionId = null; // release the active-stream lock
       if (sid) { try { softReloadHistory(sid); } catch (_) {} }

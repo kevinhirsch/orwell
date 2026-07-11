@@ -9,11 +9,14 @@ DIFFERENT/empty canonical — swaps the subscription off the session carrying th
 and STRIPS it (the #1085/#1086 window-collapse / reply-strip class, now over WS). That is exactly the
 regression the two-window parity turn-on cannot ship with.
 
-The contract, pinned here:
-  • a SAME-id gamechanged rebind → NO new `chat` subscribe (the live tail is left intact),
-    but the state/hud edges ARE re-armed (the HUD push keystone stays live);
+The contract, pinned here (tightened by #1087 — the rebind→ring-replay churn loop):
+  • a SAME-id gamechanged rebind → NO new `chat` subscribe (the live tail is left intact) AND NO
+    state/hud edge re-arm (the live server bridge already serves this canonical; a same-id re-arm
+    respawns it and replays the session_events ring back into `orwell:gamechanged` — the
+    self-sustaining churn that failed the toolturn parity gate);
   • a CHANGED-id rebind (adoption / season-reset re-resolve) → a `chat` subscribe from `fromSeq:0`
-    IS sent (a genuine re-point onto the new session's history).
+    IS sent (a genuine re-point onto the new session's history) and the state/hud edges ARE
+    re-armed (the running bridge serves its spawn-time canonical, so the re-point needs it).
 
 BEHAVIORAL — the REAL orwellWs.js in Node against a stubbed WebSocket. Plus a STRUCTURAL pin so a
 revert to the unconditional `_subscribeChat(0)` fails. Roles only; no names.
@@ -121,10 +124,15 @@ async function gamechangedRebind(ackCanon, beat) {
       "a same-id gamechanged must NOT re-subscribe chat (no full-replay restart mid-turn); got "
       + chatSubs(lastSock).length + " want " + chatBefore);
     assert(WS.isChatSubscribed() === true, "chat stays subscribed across a same-id rebind");
-    // ...but the HUD push edges are re-armed (the keystone stays live).
+    // ...and the HUD push edges are NOT re-armed either (#1087): the live server bridge already
+    // serves this canonical — a same-id re-arm would respawn it and replay the session_events ring
+    // back into `orwell:gamechanged` (the rebind→ring-replay churn loop). The keystone stays live
+    // because the EXISTING bridge keeps pushing.
     const edgeAfter = edgeSubs(lastSock);
-    assert(edgeAfter.state.length === edgeBefore.state.length + 1, "rebind re-arms the state edge");
-    assert(edgeAfter.hud.length === edgeBefore.hud.length + 1, "rebind re-arms the hud edge");
+    assert(edgeAfter.state.length === edgeBefore.state.length,
+      "a same-id rebind must NOT re-arm the state edge (the #1087 churn guard)");
+    assert(edgeAfter.hud.length === edgeBefore.hud.length,
+      "a same-id rebind must NOT re-arm the hud edge (the #1087 churn guard)");
     assert(WS.canonicalId() === "sess_live", "canonical id preserved on a same-id rebind");
   }
 
@@ -133,6 +141,7 @@ async function gamechangedRebind(ackCanon, beat) {
     const { WS } = boot();
     await handshake("sess_live", 200);
     const chatBefore = chatSubs(lastSock).length;      // 1
+    const edgeBefore = edgeSubs(lastSock);
     // The bind resolves onto a DIFFERENT canonical (first-writer-wins adoption / reset).
     await gamechangedRebind("sess_other", 201);
     const after = chatSubs(lastSock);
@@ -142,6 +151,11 @@ async function gamechangedRebind(ackCanon, beat) {
     assert(after[after.length - 1].d.fromSeq === 0,
       "a changed-id re-point subscribes from fromSeq 0 (new session history)");
     assert(WS.canonicalId() === "sess_other", "canonical id adopts the new id");
+    // The edges re-arm on the genuine change: the running server bridge serves its SPAWN-TIME
+    // canonical, so re-pointing it needs a fresh subscribe (the server respawns on the new id).
+    const edgeAfter = edgeSubs(lastSock);
+    assert(edgeAfter.state.length === edgeBefore.state.length + 1, "a changed-id rebind re-arms the state edge");
+    assert(edgeAfter.hud.length === edgeBefore.hud.length + 1, "a changed-id rebind re-arms the hud edge");
   }
 
   // ── scenario 3: overlapping gamechanged rebinds coalesce into ONE bind ─────────────
@@ -251,8 +265,12 @@ def test_rebind_gates_the_chat_resubscribe_on_a_canonical_change():
     assert "prevCanonical" in body, "rebind must capture the prior canonical id to compare"
     assert "_canonicalId !== prevCanonical" in body, \
         "rebind must guard the chat re-subscribe on an actual canonical change"
-    # Edges are still re-armed every rebind (the HUD push keystone).
-    assert "_subscribeEdges()" in body, "rebind must still re-arm the state/hud edges"
+    # Edges re-arm on a genuine canonical change (or first arm) — NOT unconditionally (#1087: a
+    # same-id re-arm respawns the server bridge and replays the session_events ring back into
+    # gamechanged, the churn loop).
+    assert "_subscribeEdges()" in body, "rebind must still re-arm the state/hud edges on a genuine re-point"
+    assert "_edgesSubscribed" in body, \
+        "rebind must gate the edge re-arm on already-armed edges (the #1087 same-id churn guard)"
 
 
 def test_rebind_coalesces_overlapping_binds():
