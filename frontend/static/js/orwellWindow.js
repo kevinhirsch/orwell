@@ -425,9 +425,10 @@ function ensureCss() {
     }
     /* Detents — class-owned heights (dvh tracks the keyboard/URL-bar-shrunk mobile
        viewport; vh first as the fallback). Kept in lock-step with sheetDetentPx()
-       below and with orwellSheet.js's DETENT_FRACTION so both sheet surfaces feel
-       the same. The full detent clears the notch (safe-area-inset-top). */
-    .ow-window.ow-sheet-mode.ow-detent-medium { height: min(62vh, 640px); height: min(62dvh, 640px); }
+       below and with orwellSheet.js's DETENT_FRACTION (medium = 0.52 — the SAME
+       fraction, so the window-sheet and the action-sheet rise to the same height;
+       CodeRabbit #1378). The full detent clears the notch (safe-area-inset-top). */
+    .ow-window.ow-sheet-mode.ow-detent-medium { height: min(52vh, 640px); height: min(52dvh, 640px); }
     .ow-window.ow-sheet-mode.ow-detent-full {
       height: calc(100vh - 16px);
       height: calc(100dvh - max(env(safe-area-inset-top, 0px), 16px));
@@ -554,10 +555,39 @@ function sheetVh() {
   } catch (_) {}
   return window.innerHeight || document.documentElement.clientHeight || 600;
 }
+// The resolved top safe-area inset (notch), so the JS settle target for the FULL
+// detent lands exactly where the class-owned CSS height (100dvh − max(inset, 16px))
+// will rest — a flat 16px would OVERSHOOT on notched phones and visibly snap back
+// when the class takes over (CodeRabbit #1378). env() is only resolvable through
+// the style system, so read it off a hidden probe once and cache; the cache is
+// invalidated on viewport resize (rotation moves the notch).
+let _safeTopPx = -1;
+function safeAreaTopPx() {
+  if (_safeTopPx >= 0) return _safeTopPx;
+  let v = 0;
+  try {
+    const p = document.createElement('div');
+    p.style.position = 'fixed';
+    p.style.top = '0';
+    p.style.left = '0';
+    p.style.width = '0';
+    p.style.pointerEvents = 'none';
+    p.style.visibility = 'hidden';
+    p.style.height = 'env(safe-area-inset-top, 0px)';
+    document.documentElement.appendChild(p);
+    v = p.getBoundingClientRect().height || 0;
+    p.remove();
+  } catch (_) { v = 0; }
+  _safeTopPx = v;
+  return v;
+}
 function sheetDetentPx(name) {
   const h = sheetVh();
-  if (name === 'full') return Math.max(220, h - 16);
-  return Math.max(220, Math.min(Math.round(h * 0.62), 640));
+  // full: 100dvh − max(safe-area-inset-top, 16px) — mirrors the .ow-detent-full rule.
+  if (name === 'full') return Math.max(220, h - Math.max(16, safeAreaTopPx()));
+  // medium: the SAME 0.52 fraction as orwellSheet.js's DETENT_FRACTION.medium (lock-step),
+  // capped at the CSS rule's 640px.
+  return Math.max(220, Math.min(Math.round(h * 0.52), 640));
 }
 // Drag-to-dismiss: released below (1 - this fraction) of the medium detent →
 // dismiss instead of snapping back (same threshold as orwellSheet.js).
@@ -1621,6 +1651,9 @@ function reclampOpenWindows() {
   }
 }
 function onViewportResize() {
+  // #893 (CodeRabbit #1378): a viewport change can be a rotation — the notch moves,
+  // so the cached safe-area-inset-top must be re-probed on the next detent settle.
+  _safeTopPx = -1;
   if (_reclampRaf) return;
   _reclampRaf = (window.requestAnimationFrame || ((fn) => setTimeout(fn, 120)))(reclampOpenWindows);
 }

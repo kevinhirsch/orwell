@@ -88,6 +88,34 @@ def test_sheet_has_medium_and_full_detents_in_lockstep():
     assert "sheetDetentPx" in KIT
     assert "_settleSheet" in KIT
     assert "setDetent(" in KIT and "currentDetent(" in KIT
+    # LOCK-STEP with the sibling OrwellSheet kit (CodeRabbit #1378): the medium
+    # detent uses the SAME fraction as orwellSheet.js's DETENT_FRACTION.medium —
+    # read the sibling's value and pin both the JS settle math and the CSS class
+    # height to it, so the two sheet surfaces can never drift apart silently.
+    sibling = _read("static", "js", "orwellSheet.js")
+    m = re.search(r"DETENT_FRACTION\s*=\s*\{\s*medium:\s*0\.(\d+)", sibling)
+    assert m, "orwellSheet.js DETENT_FRACTION.medium must be readable"
+    frac = m.group(1)                                   # e.g. "52"
+    assert f"h * 0.{frac}" in KIT, (
+        f"sheetDetentPx medium must use the sibling kit's 0.{frac} fraction (lock-step)"
+    )
+    assert f"min({frac}dvh" in KIT, (
+        f"the .ow-detent-medium class height must be {frac}dvh (lock-step with the sibling kit)"
+    )
+
+
+def test_full_detent_js_settle_mirrors_the_css_safe_area_math():
+    # The CSS full detent is 100dvh − max(env(safe-area-inset-top), 16px); the JS
+    # settle target must subtract the SAME resolved inset (a flat 16px overshoots
+    # on notched phones and snaps back when the class height takes over —
+    # CodeRabbit #1378). The inset is probed through the style system and cached,
+    # with the cache invalidated on viewport resize (rotation moves the notch).
+    assert "safeAreaTopPx" in KIT
+    assert "env(safe-area-inset-top, 0px)" in KIT
+    assert re.search(r"h - Math\.max\(16, safeAreaTopPx\(\)\)", KIT), (
+        "sheetDetentPx('full') must subtract max(16, resolved safe-area-inset-top)"
+    )
+    assert re.search(r"_safeTopPx = -1", KIT), "the inset cache must invalidate on resize"
 
 
 def test_sheet_drag_dismiss_is_gated_on_closable():
@@ -134,8 +162,14 @@ def test_sheet_mode_opts_out_of_slot_geometry_and_mints_no_key():
         "sheet mode must opt OUT of the slot geometry system (F5: one position system)"
     )
     # …and the sheet machinery writes NO localStorage geometry (detent heights are
-    # class-owned; the F-3 geometry-key ratchet stays the backstop).
-    sheet_region = KIT[KIT.find("_wireSheetDrag(handle)"):KIT.find("_rehomeForViewport()")]
+    # class-owned; the F-3 geometry-key ratchet stays the backstop). Guard both
+    # anchors first — a missing anchor would make the slice empty and the
+    # "localStorage not in ''" check vacuously green (CodeRabbit #1378).
+    start = KIT.find("_wireSheetDrag(handle)")
+    end = KIT.find("_rehomeForViewport()")
+    assert start != -1, "_wireSheetDrag(handle) anchor missing from the kit"
+    assert end != -1 and end > start, "_rehomeForViewport() anchor missing/misordered"
+    sheet_region = KIT[start:end]
     assert "localStorage" not in sheet_region, "sheet gestures must not persist geometry"
 
 
