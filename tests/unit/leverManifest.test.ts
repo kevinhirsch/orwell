@@ -94,7 +94,10 @@ describe("lever manifest ↔ registry (0018 drift guard)", () => {
     // and the conspicuousness read are part of the contract; anyone in NONE of the lists is off-scene.
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/`tracked` list is exactly that/);
     expect(BASE_GAME_MASTER_PROMPT).toMatch(/is elsewhere and NOT visible/i);
-    expect(BASE_GAME_MASTER_PROMPT).toMatch(/Never move a `present` person|pull a `nearby` person/);
+    // Finding 9 (2026-07-11 prompt audit): narrated movement is now PERMITTED (a `present`/`nearby`
+    // person MAY move between rooms when the narration says so — the barrier + ADR 0009 belts allow it);
+    // the anti-scramble contract is enforced by forbidding only the IMPOSSIBLE — a SILENT teleport.
+    expect(BASE_GAME_MASTER_PROMPT).toMatch(/never SILENTLY teleport/i);
   });
 
   it("player knowledge must come through a recorded pathway (#5)", () => {

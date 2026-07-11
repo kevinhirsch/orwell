@@ -478,12 +478,14 @@ _PENDING_KIND_HINTS = {
         "submit them via submitDecision."
     ),
     "comp-round": (
-        "The competition is playing out in ELIMINATION ROUNDS (0006 staged-rounds). Voice WHO IS "
-        "STILL IN this round (the engine supplies the still-in field), then take the player's "
-        "approach for THIS ROUND ONLY — compete (keep going), throw (drop out), or play it safe — "
-        "and submit it via submitDecision (kind 'comp-round', intent=...). Their pick is committed "
-        "BEFORE the round resolves and is locked once it does; they will choose again as the field "
-        "narrows. Never resolve a winner yourself and never re-label a finished round."
+        "The competition is playing out in VISIBLE elimination rounds (0006 staged-rounds). Voice WHO IS "
+        "STILL IN (the engine supplies the still-in field), then take the player's approach for the "
+        "COMPETITION — compete (go for the win), throw (drop out), or play it safe — and submit it via "
+        "submitDecision (kind 'comp-round', intent=...). This approach is declared ONCE, up front, and "
+        "covers the whole comp: it is committed before the round resolves and locked once it does. The "
+        "later elimination rounds narrow the field as DRAMA over an already-decided result — they are "
+        "NOT a fresh choice each round, so never re-ask the player's approach as the field thins. Never "
+        "resolve a winner yourself and never re-label a finished round."
     ),
 }
 
@@ -541,7 +543,15 @@ def _pending_barrier_directive(pending) -> Optional[str]:
         "the next week, or skip ahead in time in ANY way. Narrating anything past this decision is "
         "a DESYNC from the engine and is not allowed.\n"
         f"Your ONLY job this turn is to bring the player to THIS decision in the fiction and take "
-        f"their explicit choice. {hint}"
+        f"their explicit choice. {hint}\n"
+        # Finding 13 (2026-07-11 prompt audit): the ONE decision-channel precedence rule, stated
+        # IDENTICALLY here and in BASE_GAME_MASTER_PROMPT so "WAIT for the card" / "take their explicit
+        # choice and submit" / "never infer from prose" can never read as three conflicting instructions.
+        "DECISION PRECEDENCE: a pending binding decision is settled ONLY by the player's OWN explicit "
+        "choice among its legal options — when they pick it on their decision card, or state one "
+        "unambiguously, take THAT choice and submit it with submitDecision; until they do, WAIT (never "
+        "narrate past the open decision) and never infer, guess, or invent a binding choice from "
+        "ambiguous prose."
     )
 
 
@@ -598,25 +608,31 @@ def _whereabouts_barrier_directive(whereabouts) -> Optional[str]:
 
 def _premiere_progress_directive(premiere) -> Optional[str]:
     """J3-13 (wayfinding) — surface the engine's meet-everyone progress as a CONSISTENT framing fact
-    during the premiere, so every redirect that gates the player at the HOH names the actual gap.
+    during the premiere, so a redirect toward power names the actual gap and a concrete next step.
 
-    The audit found the premiere redirect was INCONSISTENT: the best redirect ("Eleven met, five left:
-    …") named the count, but the veto/eviction redirects described a nearby scene without it, leaving
-    the player no action plan. The count never relied on the model REMEMBERING — `getGameState` already
-    carries the engine-tracked `premiere` progress (PremiereIntrosView). This hands the model that fact
-    every premiere turn so it can always answer "why hasn't HOH started, and who's left to meet".
+    #1387 / feature 0111 (finding 3, 2026-07-11 prompt audit): the first HOH is REACHABLE before every
+    formal introduction — a couple of GENUINE hot reads + nobody left invisible — so this NO LONGER
+    stonewalls a ready player behind an all-15 roll-call. It returns None the moment power is reachable
+    (or the meet-list is fully complete), and while power is NOT yet reachable it frames the gap
+    ASYMMETRICALLY: keep the player forming real reads, never grind through every introduction.
 
-    Vault-free by construction: only the public met/total counts + the still-to-meet NAMES (the same
-    observable roster facets `premiereIntros` exposes) — never a number about a houseguest, a soul, or a
-    standing. Returns None outside the premiere (no `premiere` field, or it is already complete), leaving
-    the turn framed exactly as before."""
+    The counts never rely on the model REMEMBERING — `getGameState` already carries the engine-tracked
+    `premiere` progress (PremiereIntrosView: metCount/total/hotReads/powerReachable). Vault-free by
+    construction: only public counts + the still-to-meet NAMES (the same observable facets
+    `premiereIntros` exposes) — never a number about a houseguest, a soul, or a standing. Returns None
+    outside the premiere (no `premiere` field) or once power is reachable, leaving the turn framed
+    exactly as before."""
     if not isinstance(premiere, dict):
         return None
-    if premiere.get("complete"):
+    # 0111 asymmetric gate: once the first HOH is REACHABLE (a couple of hot reads + nobody invisible),
+    # or the whole meet-list is complete, STOP redirecting — the model is free to start the game the
+    # instant the player is ready. This is the fix for the stonewalled-ready-player half of #1387.
+    if premiere.get("complete") or premiere.get("powerReachable"):
         return None
     try:
         total = int(premiere.get("total") or 0)
         met = int(premiere.get("metCount") or 0)
+        hot = int(premiere.get("hotReads") or 0)
     except (TypeError, ValueError):
         return None
     # Both counts include the player (they ARE met); the player's mental model is "of the 15 OTHERS,
@@ -633,15 +649,18 @@ def _premiere_progress_directive(premiere) -> Optional[str]:
             nm = str((hg or {}).get("name") or "").strip() if isinstance(hg, dict) else ""
             if nm:
                 names.append(nm)
-    names_clause = (" Still to meet: " + _join_names(names) + "."
+    names_clause = (" Still to meet in motion: " + _join_names(names) + "."
                     if names else "")
     return (
-        "PREMIERE GATE (state this CONSISTENTLY whenever the player drifts toward HOH/nominations/veto/"
-        f"eviction): the first HOH cannot begin until the player has met all {npc_total} other "
-        f"houseguests. So far they have met {npc_met} of {npc_total}; {remaining} still to go.{names_clause} "
-        "If the player reaches for a ceremony beat, redirect them WARMLY back to meeting the house and "
-        "ALWAYS name how many are left (and who) so they have a concrete next step — never gate them "
-        "with a vague 'not yet'."
+        "PREMIERE PROGRESS (frame this WARMLY, never a hard gate, when the player drifts toward "
+        "HOH/nominations/veto/eviction before the house is ready): the first HOH is not reachable YET — "
+        "a couple of GENUINE hot reads still need to form through real engagement (a one-on-one, a beat "
+        "over the champagne toast or the bedroom pick), not by merely naming people. So far the player "
+        f"has met {npc_met} of {npc_total} and formed {hot} genuine read{'s' if hot != 1 else ''}; "
+        f"{remaining} still to meet in motion.{names_clause} If the player reaches for a ceremony beat, "
+        "don't hard-gate them — steer them warmly into actually engaging a couple more people (that is "
+        "what makes power reachable). You do NOT need every one of the 15 formally introduced first: the "
+        "stragglers get met in motion, during the mingle and the comp itself."
     )
 
 

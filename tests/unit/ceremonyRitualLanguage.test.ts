@@ -41,13 +41,17 @@ describe("ceremony moment-prompt fragments carry the show's ritual-language cues
     expect(p).toMatch(/ONLY from the game's recorded pick|never invent or guess/i);
   });
 
-  it("eviction: cues the 'by a vote of…' crowning-of-the-reveal cadence + the goodbye countdown", () => {
+  // Finding 5 (2026-07-11 prompt audit): the `eviction-result` beat carries NO tally, and the fragment
+  // elsewhere bans inventing a running count — so the cadence must name the evictee PLAINLY and never
+  // DEMAND a "by a vote of <count>" the model does not hold; a count rides ONLY when the read-out
+  // ballots add up to it (consistent with the anti-fabrication rules later in the same fragment).
+  it("eviction: cues the plain-name crowning cadence (no fabricated tally) + the goodbye countdown", () => {
     const p = MOMENT_PROMPTS.eviction;
-    expect(p).toMatch(/by a vote of/i);
+    expect(p).toMatch(/WITHOUT inventing a vote count|deliver the eviction with NO number/i);
     expect(p).toMatch(/you are evicted from the Big Brother house/i);
     expect(p).toMatch(/seconds to say your goodbyes/i);
-    // Grounded in the actual tally read out this turn, never invented.
-    expect(p).toMatch(/ONLY the tally you actually read out/i);
+    // A numeric split may be voiced ONLY when the anonymized ballots add up to it, never invented.
+    expect(p).toMatch(/ballots add up to EXACTLY that split/i);
   });
 
   it("jury-finale: cues the crowning cadence, grounded in the game's real tally", () => {

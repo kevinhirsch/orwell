@@ -1469,7 +1469,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "whereabouts",
-            "description": "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only. Call when the player lingers, mills around, or asks who's nearby; presence is engine ground truth, never invented.",
+            "description": "Where the player stands in the house (0049): their room, who is in it, and who is in each room within SIGHTLINE (eyeshot — the open great room/yard or a hallway mouth; 0077 Phase 2) — names only. Call when the player lingers, mills around, or asks who's nearby; presence is engine ground truth, never invented.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -1491,7 +1491,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "premiereIntros",
-            "description": "PREMIERE ONLY (#380): the meet-everyone progress — who the player has met and who is STILL to introduce before the first HOH, each with their OBSERVABLE public persona (archetype/strategy/background/age/presentation/demeanor — never the soul, a number, or how the player feels). Drive the introductions from this so nobody is skipped; returns null outside the premiere.",
+            "description": "PREMIERE ONLY (#380): the meet-everyone progress — who the player has met and who is STILL to introduce (the stragglers are met in motion), each with their OBSERVABLE public persona (archetype/strategy/background/age/presentation/demeanor — never the soul, a number, or how the player feels). Drive the introductions from this so nobody is skipped — but first power is REACHABLE once a couple of hot reads form and nobody is invisible, WITHOUT every formal introduction first (0111); returns null outside the premiere.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -1499,7 +1499,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "markHouseguestMet",
-            "description": "PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they have introduced their public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH. Returns the updated meet-everyone progress (null outside the premiere).",
+            "description": "PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they have introduced their public self. Idempotent; the engine tracks who's met. First power becomes REACHABLE once a couple of genuine hot reads form and nobody is left invisible (0111) — you do NOT need every one of the 15 formally introduced first; the stragglers get met in motion. Returns the updated meet-everyone progress (null outside the premiere).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1721,7 +1721,7 @@ FUNCTION_TOOL_SCHEMAS = [
                 "rejects creation without one). This is ALSO the restart door: to start a NEW season "
                 "after one has ENDED (a winner crowned) or that the player wants to abandon, call it "
                 "again with confirmRestart=true and the new player's details — that flag is REQUIRED "
-                "to play again; without it the call silently no-ops on any started season."
+                "to play again; without it the call is REFUSED with a reason (createRefused) on any started season."
             ),
             "parameters": {
                 "type": "object",
