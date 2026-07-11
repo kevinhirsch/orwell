@@ -127,8 +127,13 @@
   function badgeSvg(role) {
     const b = BADGES[role];
     if (!b) return "";
+    // role="img" so the accessible name (aria-label) is PERMITTED: a bare <span> defaults to
+    // the `generic` role, which prohibits naming — axe flags `aria-prohibited-attr` (#1375-g).
+    // The badge is a single labeled icon; its inner <svg> stays aria-hidden, so the span is the
+    // one exposed image, named "Winner" / "Head of Household" / … for assistive tech. Visual
+    // is untouched (role/aria attrs paint nothing).
     return (
-      `<span class="ow-mono-badge ow-mono-badge-${role}" title="${b.label}" aria-label="${b.label}"` +
+      `<span class="ow-mono-badge ow-mono-badge-${role}" role="img" title="${b.label}" aria-label="${b.label}"` +
       ` style="background:${b.tint}">` +
       `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${b.glyph}</svg></span>`
     );
