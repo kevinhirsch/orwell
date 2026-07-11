@@ -76,6 +76,7 @@ import { maybeFireTwist, triggeredTwist } from "./reserveTwists";
 import type { ReserveTwist, TwistEvent, TwistKind, TwistPlan, TwistSignals } from "./reserveTwists";
 import { drawCompetition, competitionById } from "./competitionLibrary";
 import type { CompetitionDef, CompetitionFormat, CompetitionPhase } from "./competitionLibrary";
+import { GEN_COMPETITION_BOUNDS } from "./genCompetitionConstants";
 import {
   phaseForHour, bedtimeDepthFor, restDeficitForDepth, DAY_START, WAKE_HOUR, DAY_END_HOUR, type TimeOfDay,
 } from "./timeOfDay";
@@ -267,6 +268,35 @@ export interface CompetitionProgress {
   dropOrder?: EntityId[];
 }
 
+/**
+ * Feature #1400 — GENERATIVE COMPETITION DESIGN. The MODEL-AUTHORED presentation for the current
+ * staged competition, validated against the engine's ALREADY-FIXED `dropOrder` and stored so it can
+ * be re-told round by round. This is PRESENTATION ONLY — it dresses a decided result and can never
+ * touch it: the winner + drop order were fixed up front by the single calibrated `resolveCompetition`
+ * roll (`beginStaged`), and every id in `eliminations` is validated to equal `dropOrder` EXACTLY
+ * (`validateCompetitionFiction`) before this is ever stored. Absent ⇒ the deterministic 0042 library
+ * floor stands, byte-identical to the pre-feature model. Cleared when the comp crowns. Vault-free by
+ * construction (ids + public flavor only; no score/lean/number). Persisted with the season (0030).
+ */
+export interface CompetitionFiction {
+  /** Which staged comp this dresses (matched against `s.competition.comp` at render time). */
+  comp: "hoh-competition" | "veto-competition";
+  /** The week it was authored for (a staleness guard so a late write-back never dresses the wrong comp). */
+  week: number;
+  /** The invented competition theme/name (e.g. "The Gauntlet of Whispers"). */
+  theme: string;
+  /** The staging premise — how the comp is set up + played (overrides the 0042 library premise). */
+  premise: string;
+  /** Optional "how a win reads" line (overrides the library's `winReads`). */
+  winReads?: string;
+  /**
+   * The per-elimination fiction, ORDERED, one entry per `dropOrder` entry — validated to name the SAME
+   * ids in the SAME order as the engine's fixed drop order. The reveal loop looks each dropped id up
+   * here (by id) to compose that round's `comp-elimination` content; a batched round joins its lines.
+   */
+  eliminations: Array<{ id: EntityId; fiction: string }>;
+}
+
 export interface LiveSeasonState {
   week: number;                 // 1-based HOH reign
   beat: Beat;                   // the next beat to resolve
@@ -330,6 +360,14 @@ export interface LiveSeasonState {
    * endurance-style HOH/veto comp plays out its elimination rounds, cleared when a winner remains.
    */
   competition?: CompetitionProgress;
+  /**
+   * Feature #1400 — the MODEL-AUTHORED presentation for the CURRENT staged competition (theme +
+   * premise + per-round elimination fiction), validated against the fixed `dropOrder` before storage
+   * and cleared when the comp crowns. PRESENTATION ONLY: dresses the decided result, never touches it.
+   * Absent (the default; the flag is OFF, or no fiction was authored/validated) ⇒ the deterministic
+   * 0042 library floor stands, byte-identical to the pre-feature model. Persisted with the season (0030).
+   */
+  competitionFiction?: CompetitionFiction;
   /** The in-progress live finale sub-loop (0037); set when the finale begins. */
   finale?: FinaleProgress;
   /** The in-progress live eviction sub-loop (0047); set while a weekly eviction stages its reveal. */
@@ -795,9 +833,37 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
     // `comp-elimination` falls through every commit side-effect switch (no fold, no soul inflection, no
     // confessional, no rng) — so a reveal is inert to the game state, keeping the trajectory unchanged.
     beat: "comp-elimination",
-    content: eliminationContent(droppedThisRound, c.stillIn.length, competitionDefFor(s, c)?.format),
+    // #1400: when the model authored + the engine VALIDATED fiction for THIS comp, tell the drop as the
+    // model's per-round fiction (looked up by the exact dropped ids) instead of the deterministic 0042
+    // template. PRESENTATION ONLY — `droppedThisRound` and its order come straight from the fixed
+    // `dropOrder`, so this can never rename who goes or reorder them (`comp-elimination` is NOT a
+    // TRAJECTORY_BEAT; the winner/order/rng are untouched). Absent/mismatched fiction ⇒ the template.
+    content: fictionalDropContent(s, c, droppedThisRound)
+      ?? eliminationContent(droppedThisRound, c.stillIn.length, competitionDefFor(s, c)?.format),
     participants: [...droppedThisRound, ...c.stillIn],
   };
+}
+
+/**
+ * #1400 — the authored fiction line(s) for the ids dropped THIS round, or `undefined` when no VALIDATED
+ * fiction is stored for the current comp. PRESENTATION ONLY: the engine looks each dropped id up in the
+ * stored, drop-order-validated `eliminations` map — so the fiction it tells is exactly the fiction the
+ * model wrote for the houseguest the ENGINE decided drops here. Every dropped id is guaranteed present
+ * (validation covered all of `dropOrder`), but a defensive miss falls back to the template.
+ */
+function fictionalDropContent(
+  s: LiveSeasonState, c: CompetitionProgress, droppedThisRound: readonly EntityId[],
+): string | undefined {
+  const f = s.competitionFiction;
+  if (!f || f.comp !== c.comp || f.week !== s.week) return undefined;
+  const lineOf = new Map(f.eliminations.map((e) => [e.id, e.fiction]));
+  const parts: string[] = [];
+  for (const id of droppedThisRound) {
+    const line = lineOf.get(id);
+    if (!line) return undefined; // a gap in the authored fiction ⇒ fall back to the deterministic template
+    parts.push(line);
+  }
+  return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
 /** The crowned winner stands alone (HOH / veto holder); the beat transitions + the resume is credited. */
@@ -808,6 +874,7 @@ function crownCompetition(s: LiveSeasonState): BeatEvent {
   const winner = c.winner ?? c.stillIn[0]!;
   s.competition = undefined;
   s.compIntent = undefined;
+  s.competitionFiction = undefined; // #1400: the authored fiction is per-comp — clear it as the comp crowns
   creditResume(s, winner); // a broadcast win — the jury's gameRespect read counts it (2026-06-11)
   // NOTE (COMP-13, audit 2026-07-03): we deliberately do NOT append the drawn def's name to this
   // beat's content — `hoh-competition`/`veto-competition` are TRAJECTORY_BEATS in
@@ -923,6 +990,102 @@ function competitionDefFor(s: LiveSeasonState, c: CompetitionProgress): Competit
   const recent = s.compHistory?.[phase] ?? [];
   const last = recent[recent.length - 1];
   return last ? competitionById(last) : undefined;
+}
+
+// --- Feature #1400: generative competition design (the model DRESSES the fixed roll) -----------------
+
+/**
+ * #1400 — the pure engine's "what to hand the model" data for the CURRENTLY-STAGING competition: the
+ * comp + type + the FULL field + the ALREADY-FIXED winner + the ALREADY-FIXED drop order + the drawn
+ * 0042 library def (the scaffold the model riffs ON). `null` unless a staged comp has RESOLVED its roll
+ * (winner + dropOrder set) — the model dresses a decided result, so there is nothing to hand it before
+ * the roll commits (the structural "no outcome-adjacent text before the roll" ordering). Vault-free by
+ * construction (ids + the public drop ORDER + public flavor only — never a score/lean/number). The
+ * adapter projects the ids to names for the outward view.
+ */
+export interface CompetitionStagingData {
+  comp: "hoh-competition" | "veto-competition";
+  type: CompetitionType;
+  field: EntityId[];
+  winner: EntityId;
+  /** The fixed elimination order of the losers (earliest-out first) — the model authors one line per entry. */
+  dropOrder: EntityId[];
+  /** The drawn 0042 library def (name/format/narrative scaffold) — the deterministic floor + the model's muse. */
+  def?: CompetitionDef;
+}
+
+export function competitionStagingData(s: LiveSeasonState): CompetitionStagingData | null {
+  const c = s.competition;
+  if (!c || c.winner === undefined || c.dropOrder === undefined) return null;
+  const def = competitionDefFor(s, c);
+  return {
+    comp: c.comp, type: c.type, field: [...c.field], winner: c.winner,
+    dropOrder: [...c.dropOrder], ...(def ? { def } : {}),
+  };
+}
+
+/** #1400 — the model-authored fiction the FE writes back (structurally compatible with the port's req). */
+export interface CompetitionFictionInput {
+  comp?: string;
+  week?: number;
+  theme?: string;
+  premise?: string;
+  winReads?: string;
+  eliminations?: Array<{ id?: string; fiction?: string }>;
+}
+
+/** #1400 — a validation outcome: the sanitized fiction to store, or a Vault-free reason it was rejected. */
+export type CompetitionFictionValidation =
+  | { ok: true; fiction: CompetitionFiction }
+  | { ok: false; reason: "no-competition" | "not-resolved" | "comp-mismatch" | "week-mismatch" | "drop-order-mismatch" | "empty-fiction" };
+
+const clampLen = (v: string, max: number): string => (v.length > max ? v.slice(0, max).trimEnd() : v);
+
+/**
+ * #1400 — the HARD validation gate (pure, unit-testable): the model-authored fiction is accepted ONLY
+ * when every elimination it names maps to the engine's ALREADY-FIXED `dropOrder` EXACTLY — same ids, in
+ * the same order. Any divergence (a renamed houseguest, a reordering, a wrong count, a comp/week that no
+ * longer matches, a resolved comp missing) is REJECTED, so the generated fiction can never rename who
+ * goes or in what order — on a reject the caller stores nothing and the deterministic 0042 library floor
+ * stands. On success returns the sanitized (trimmed-to-bounds), storable `CompetitionFiction`. This never
+ * reads or exposes a score/lean/number — only the public drop ORDER the reveal already tells round by round.
+ */
+export function validateCompetitionFiction(
+  s: LiveSeasonState, req: CompetitionFictionInput,
+): CompetitionFictionValidation {
+  const c = s.competition;
+  if (!c) return { ok: false, reason: "no-competition" };
+  if (c.winner === undefined || c.dropOrder === undefined) return { ok: false, reason: "not-resolved" };
+  if (req.comp !== c.comp) return { ok: false, reason: "comp-mismatch" };
+  if (req.week !== s.week) return { ok: false, reason: "week-mismatch" };
+
+  const named = req.eliminations ?? [];
+  // THE DROP-ORDER BRIGHT LINE: same length, same ids, same order as the fixed drop order. Exact map.
+  if (named.length !== c.dropOrder.length) return { ok: false, reason: "drop-order-mismatch" };
+  const eliminations: Array<{ id: EntityId; fiction: string }> = [];
+  for (let i = 0; i < c.dropOrder.length; i++) {
+    const entry = named[i];
+    const fiction = typeof entry?.fiction === "string" ? entry.fiction.trim() : "";
+    if (entry?.id !== c.dropOrder[i]) return { ok: false, reason: "drop-order-mismatch" };
+    if (!fiction) return { ok: false, reason: "empty-fiction" };
+    eliminations.push({ id: c.dropOrder[i]!, fiction: clampLen(fiction, GEN_COMPETITION_BOUNDS.maxFictionLen) });
+  }
+
+  const theme = (req.theme ?? "").trim();
+  const premise = (req.premise ?? "").trim();
+  if (!theme || !premise) return { ok: false, reason: "empty-fiction" };
+  const winReads = (req.winReads ?? "").trim();
+
+  return {
+    ok: true,
+    fiction: {
+      comp: c.comp, week: s.week,
+      theme: clampLen(theme, GEN_COMPETITION_BOUNDS.maxThemeLen),
+      premise: clampLen(premise, GEN_COMPETITION_BOUNDS.maxPremiseLen),
+      ...(winReads ? { winReads: clampLen(winReads, GEN_COMPETITION_BOUNDS.maxWinReadsLen) } : {}),
+      eliminations,
+    },
+  };
 }
 
 export function newLiveSeason(active: EntityId[]): LiveSeasonState {

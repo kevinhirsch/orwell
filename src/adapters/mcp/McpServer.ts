@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, RecordImageBeatReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, RecordCompetitionFictionReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -254,6 +254,21 @@ function requireShape(name: string, args: Record<string, unknown>): void {
         if (typeof s !== "object" || s === null || Array.isArray(s)) refuse("slices", "an object when present");
       }
       return;
+    case "recordCompetitionFiction":
+      // #1400: the FE competition-fiction write-back. `comp`/`week` identify the staging comp (staleness
+      // guards); `theme`/`premise` are the authored flavor; `eliminations` is the ORDERED per-drop
+      // fiction the engine validates against the fixed drop order. Shape-guard the required fields so a
+      // malformed value refuses by name (E31/R6) rather than casting blindly into the adapter; the HARD
+      // drop-order match itself is the adapter's `validateCompetitionFiction` gate, not here.
+      if (!isStr(args["comp"])) refuse("comp", "a competition kind (string)");
+      if (typeof args["week"] !== "number") refuse("week", "a number");
+      if (!isStr(args["theme"])) refuse("theme", "a non-empty string");
+      if (!isStr(args["premise"])) refuse("premise", "a non-empty string");
+      if (!Array.isArray(args["eliminations"])) refuse("eliminations", "an array of { id, fiction } entries");
+      return;
+    case "competitionStagingView":
+      // #1400: read-only projection with no required args — no shape guard needed.
+      return;
     case "getOffscreenSceneSkeletons":
       // 0070: read-only call with no required args — no shape guard needed.
       return;
@@ -332,6 +347,15 @@ export class McpServer {
         // port + adapter but never wired here, so it was a dead endpoint (no registry entry, no dispatch
         // case). No args; null pre-game or when no snapshot was ever captured.
         return this.deps.session.worldSnapshotView();
+      case "competitionStagingView":
+        // #1400: the Vault-free "what to hand the model" staging read (flag-gated; null unless a comp
+        // has resolved its roll). Not a model lever; drives the FE competition-fiction author.
+        return this.deps.session.competitionStagingView();
+      case "recordCompetitionFiction":
+        // #1400: freeze the FE-authored competition fiction over the engine's fixed roll. The adapter's
+        // `validateCompetitionFiction` HARD-validates every elimination against the fixed drop order;
+        // a mismatch is rejected and the 0042 library floor stands. Presentation-only; no beatSeq bump.
+        return this.deps.session.recordCompetitionFiction(args as unknown as RecordCompetitionFictionReq);
       case "getOffscreenSceneSkeletons":
         // 0070: return the Vault-free skeletons of the most-recent tick's off-screen scenes (ids + nature; no hidden content).
         return this.deps.session.getOffscreenSceneSkeletons();

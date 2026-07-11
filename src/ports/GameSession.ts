@@ -213,6 +213,66 @@ export interface RecordWorldSnapshotResult {
   source: string;
 }
 
+/**
+ * Feature #1400 — the "what to hand the model" projection for the CURRENTLY-STAGING competition, so the
+ * FE can author a theme + premise + per-round fiction MATCHED to the engine's ALREADY-FIXED outcome. The
+ * winner and the full drop order are FIXED before this is ever non-null (the model dresses a decided
+ * result — it can never touch it). Vault-free by construction: names + the PUBLIC drop ORDER (the same
+ * order the reveal already tells the player round by round) + the public 0042 library scaffold — never a
+ * score, lean, or number. `null` unless generation is enabled AND a staged comp has resolved its roll.
+ */
+export interface CompetitionStagingView {
+  /** Which comp is staging: "hoh-competition" | "veto-competition". */
+  comp: string;
+  /** The governing competition type (endurance/memory/…). */
+  type: string;
+  week: number;
+  /** The drawn 0042 library format (endurance/puzzle/quiz/skill/crapshoot/social), when known. */
+  format?: string;
+  /** The full field that competed (names). */
+  participants: NamedRef[];
+  /** The FIXED winner (name) — decided up front; the fiction dresses this, it can never change it. */
+  winner: NamedRef;
+  /** The FIXED elimination order of the losers, earliest-out first (names) — author one line per entry, IN ORDER. */
+  dropOrder: NamedRef[];
+  /** The 0042 library scaffold the model riffs ON (and the deterministic floor when no fiction is authored). */
+  library: { name: string; premise: string; beats: string[]; winReads: string };
+}
+
+/**
+ * Feature #1400 — the FE-driven write-back of the model-authored competition fiction. The engine
+ * VALIDATES (hard) that `eliminations` names the SAME houseguests in the SAME order as the fixed drop
+ * order; on any mismatch it is REJECTED and the deterministic 0042 library floor stands (the model can
+ * never rename who goes or in what order). PRESENTATION ONLY — recorded AFTER the roll commits.
+ */
+export interface RecordCompetitionFictionReq {
+  /** Which comp this dresses — must match the currently-staging comp ("hoh-competition" | "veto-competition"). */
+  comp: string;
+  /** The week it was authored for — must match the live week (a staleness guard). */
+  week: number;
+  /** The invented competition theme/name. */
+  theme: string;
+  /** The staging premise (how it's set up + played). */
+  premise: string;
+  /** Optional "how a win reads" line. */
+  winReads?: string;
+  /** The per-elimination fiction, ORDERED — one entry per drop-order entry, naming the SAME ids in the SAME order. */
+  eliminations: Array<{ id: EntityId; fiction: string }>;
+}
+
+/** Whether the competition-fiction write-back was accepted; a Vault-free reason when it was not. */
+export interface RecordCompetitionFictionResult {
+  /** True iff the fiction validated against the fixed drop order and was stored (else the 0042 floor stands). */
+  accepted: boolean;
+  /**
+   * Why a write-back was refused (Vault-free): "disabled" (flag off) | "no-game" | "no-competition"
+   * (no comp staging) | "not-resolved" (the roll has not committed yet) | "comp-mismatch" |
+   * "week-mismatch" | "drop-order-mismatch" (the named eliminations did NOT match the fixed order —
+   * the core safety reject) | "empty-fiction". Absent on acceptance.
+   */
+  reason?: string;
+}
+
 /** The Vault-free projection of the running game the front-end may render. */
 export interface GameStateView {
   started: boolean;
@@ -2032,6 +2092,26 @@ export interface GameSession {
    * the fallback's value (a partial capture never thins the snapshot — non-degradation).
    */
   recordWorldSnapshot(req: RecordWorldSnapshotReq): RecordWorldSnapshotResult;
+
+  /**
+   * Feature #1400 (READ) — the Vault-free "what to hand the model" projection for the currently-staging
+   * competition (comp/type/field/FIXED winner/FIXED drop order/0042 scaffold), so the FE can author a
+   * theme + per-round fiction MATCHED to the already-decided outcome. `null` unless generative
+   * competitions are enabled AND a staged comp has resolved its roll (the model dresses a decided
+   * result — there is nothing to hand it before the roll commits). Not a model lever (FE-driven infra).
+   */
+  competitionStagingView(): CompetitionStagingView | null;
+
+  /**
+   * Feature #1400 (WRITE-BACK) — the FE-driven write-back of the model-authored competition fiction
+   * (theme + premise + per-round elimination fiction). The engine VALIDATES (hard) that every
+   * elimination named maps to the fixed drop order EXACTLY; on any mismatch it is REJECTED and the
+   * deterministic 0042 library floor stands. On success the fiction is stored (Vault-free, persisted)
+   * and the reveal tells it round by round — PRESENTATION ONLY, so it can never perturb the winner, the
+   * drop order, or any seeded roll. Refused (accepted:false) when the flag is off, no comp is staging,
+   * the roll has not committed, or the drop order does not match. Not a model lever (FE-driven infra).
+   */
+  recordCompetitionFiction(req: RecordCompetitionFictionReq): RecordCompetitionFictionResult;
 
   /**
    * The deep-profile write-back seam (feature 0058 / L28b) — the FE-authored §3 profile is recorded
