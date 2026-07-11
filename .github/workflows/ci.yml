@@ -753,6 +753,75 @@ jobs:
           echo "::error::mirror-toolturn WS leg failed all attempts (the #1087 rebind→ring-replay churn class: dup bubbles / subscribe churn on a tool-rich turn under WS)."
           exit 1
 
+  # ── #1375 rendered a11y gate — axe-core + WCAG/APCA contrast over the staged matrix ──────────
+  #
+  # The sibling of fe-responsive (gap 3 of #651): boots the SAME engine-staged responsive matrix
+  # (ORWELL_MATRIX_ENGINE + ORWELL_MATRIX_FINISH=1 — chrome + game + endgame surfaces) but runs
+  # scripts/a11y_matrix.py, which injects the VENDORED axe-core (frontend/tests/vendor/axe.min.js —
+  # no CDN, no network) into each rendered surface and runs a rendered WCAG(4.5:1/3:1)+APCA contrast
+  # sweep that samples the true backdrop pixels behind text (glass/scrim/blur the source-pinned
+  # checks can't see). KNOWN violations are XFAIL'd (ratchet); an UNKNOWN one FAILS. PATH-GATED on
+  # `changes.frontend` (same as fe-responsive); folded into ci-gate below so it BLOCKS. On a skip it
+  # doesn't run and ci-gate reports the required green status.
+  a11y-matrix:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install front-end deps
+        run: pip install -r frontend/requirements.txt
+      - name: resolve playwright version (cache key)
+        id: pw
+        run: |
+          pip install playwright
+          echo "version=$(pip show playwright | awk '/^Version:/ {print $2}')" >> "$GITHUB_OUTPUT"
+      - name: cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - name: install playwright chromium
+        run: python3 -m playwright install --with-deps chromium
+      # Stage a REAL engine (deterministic Echo narrator, key-free — same as fe-responsive) so the
+      # game + endgame surfaces are actually rendered + audited.
+      - name: build the engine (dist/main.js the matrix stages against)
+        run: |
+          npm ci
+          npm run build
+      - name: boot the engine
+        run: |
+          ORWELL_ENGINE_PORT=8765 ORWELL_DATA_DIR="$RUNNER_TEMP/orwell-a11y-data" \
+            node dist/main.js > "$RUNNER_TEMP/orwell-a11y-engine.log" 2>&1 &
+          for i in $(seq 60); do
+            if curl -fsS http://127.0.0.1:8765/health > /dev/null 2>&1; then
+              echo "engine healthy"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::engine did not become healthy"
+          cat "$RUNNER_TEMP/orwell-a11y-engine.log"
+          exit 1
+      - name: a11y matrix gate — axe + WCAG/APCA contrast, ENGINE-STAGED (#1375, gap 3 of #651)
+        env:
+          ORWELL_MATRIX_ENGINE: http://127.0.0.1:8765
+          ORWELL_MATRIX_FINISH: "1"
+        run: cd frontend && python3 scripts/a11y_matrix.py
+      - name: engine log (on failure)
+        if: failure()
+        run: cat "$RUNNER_TEMP/orwell-a11y-engine.log" || true
+
   # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────
   #
   # THE single required check — point branch protection HERE, not at the individual gated jobs. It
@@ -779,6 +848,7 @@ jobs:
       - fe-responsive
       - mirror-parity
       - heavy-sims
+      - a11y-matrix
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -798,6 +868,7 @@ jobs:
             fe-responsive=${{ needs.fe-responsive.result }}
             mirror-parity=${{ needs.mirror-parity.result }}
             heavy-sims=${{ needs.heavy-sims.result }}
+            a11y-matrix=${{ needs.a11y-matrix.result }}
         run: |
           set -euo pipefail
           echo "Needed job results: $RESULTS"
