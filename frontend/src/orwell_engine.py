@@ -706,6 +706,15 @@ async def cancel_self_eviction(user: str | None = None) -> dict:
     return await _call("cancelSelfEviction", {}, user=user)
 
 
+async def turn_in(user: str | None = None) -> dict:
+    """ADR 0006 — the player's bedtime lever: the player CHOOSES to turn in for the night. The ENGINE
+    ends their night (folding the hidden, bounded rest penalty — never a number crosses the wall),
+    rolls the house to the next morning, and returns an AdvanceView that MAY carry a Vault-free
+    ``dailyRecap`` (0102) for the day that just closed. No args (the engine ignores any). A no-op
+    AdvanceView when the in-game clock isn't running, the game is over, or the player has left."""
+    return await _call("turnIn", {}, user=user)
+
+
 async def player_tagline(user: str | None = None) -> dict:
     """A snarky, state-aware Big Brother one-liner for the homepage hero (0033). Vault-free;
     reflects the player's current public standing. Returns ``{"text": "..."}``."""

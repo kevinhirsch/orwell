@@ -5093,6 +5093,23 @@ async def do_request_self_eviction(content: str, owner: Optional[str] = None) ->
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_turn_in(content: str, owner: Optional[str] = None) -> Dict:
+    # ADR 0006 (#1385): the player's bedtime lever. The ENGINE ends the night and folds the hidden,
+    # bounded rest penalty (the FE never authors the sleep effect — the Vault Wall + the
+    # never-a-number-crosses invariant hold); we only surface the call. The result is an AdvanceView
+    # that MAY carry a Vault-free dailyRecap (0102) for the day that just closed — returned inline
+    # (the whole view, verbatim) so the narrator voices it, mirroring how the ceremony/eviction beats
+    # return their content on the advance result. A no-op AdvanceView when the in-game clock isn't running.
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.turn_in(user=owner)
+        await _refresh_after_model_progression(owner, res)  # CON-3: keep last-seen beatSeq fresh (turnIn mutates)
+        orwell_engine.remember_pending(res, user=owner)     # D3/E66: any pending survives a reload (no-op if none)
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 # --- God Mode / admin (0016) — execution is gated to admins by _ADMIN_TOOLS in tool_execution ---
 
 async def do_inspect_non_vault_state(content: str, owner: Optional[str] = None) -> Dict:
