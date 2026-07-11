@@ -1989,6 +1989,18 @@ async function initAgentSettings() {
    APPEARANCE TAB
    ═══════════════════════════════════════════ */
 function initAppearance() {
+  // #658: compose every section of the Appearance tab from the OrwellSettingsCard primitive —
+  // ONE source of truth for card chrome / heading / spacing, replacing the hand-rolled
+  // `.admin-card` + `<h2>` + inline-padding markup. This is the FIRST tab migrated onto the kit
+  // (the #660 epic proof); the remaining tabs follow in a later increment. Fail-open + run-once
+  // (initAppearance is guarded to init once, and upgrade() is idempotent).
+  try {
+    var _appPanel = modalEl && modalEl.querySelector('[data-settings-panel="appearance"]');
+    if (_appPanel && window.OrwellSettingsCardKit && window.OrwellSettingsCardKit.upgradePanel) {
+      window.OrwellSettingsCardKit.upgradePanel(_appPanel);
+    }
+  } catch (_) {}
+
   syncAppearanceCheckboxes();
   syncPrivacyCheckboxes();
 
