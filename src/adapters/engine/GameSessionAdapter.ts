@@ -48,6 +48,7 @@ import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAll
 import type { Alliance } from "../../engine/alliances";
 import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
 import type { ConfessionalContext } from "../../engine/confessionals";
+import { buildPullQuoteReel } from "../../engine/pullQuoteReel";
 import { rankApproaches, applyApproachCooldown } from "../../engine/conversation";
 import { DECISION } from "../../engine/decisionConstants";
 import type { EvictionManner } from "../../engine/jury";
@@ -2257,6 +2258,14 @@ export class GameSessionAdapter implements GameSession {
     const playerConfessionals = (this.playerKnowledgeReader?.() ?? [])
       .filter((k) => k.pathway === NO_NPC_PATHWAY)
       .map((k) => k.content);
+    // #1396 — the weekly pull-quote reel: a curated, BY-WEEK montage of the most notable Diary-Room lines
+    // (the player's own AND the NPCs' confessionals). A PURE read-time selection over the SAME `events`
+    // log the hidden story above reads — it draws no rng, records nothing, and mutates no state, so the
+    // seeded spine is byte-identical whether or not it runs (`pullQuoteReelNeutral.test.ts`). It reaches
+    // the player ONLY here, at this one sanctioned unseal seam — the NPC lines never touch a per-turn
+    // surface (the Vault Wall, mandate #2; `pullQuoteReel.test.ts` sentinel). Names/ids resolved through
+    // the same `retroScrub` the rest of the unseal uses, so no raw id crosses.
+    const pullQuoteReel = buildPullQuoteReel(events, { nameOf, scrub: (c) => this.retroScrub(c) });
     return {
       winner: this.live.winner ? this.named(this.live.winner) : null,
       hiddenStory: coalesceDumpRows(ordered),
@@ -2264,6 +2273,7 @@ export class GameSessionAdapter implements GameSession {
       evictionVotes,
       ...(juryVotes ? { juryVotes } : {}),
       playerConfessionals,
+      pullQuoteReel,
     };
   }
 
