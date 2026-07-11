@@ -323,7 +323,15 @@ export class Orchestrator {
         }
         this.baselines.set(user, candidate);
       }
-      this.consecutiveFaults.set(user, 0); // any clean advance closes the circuit
+      // Only a clean STATE-CHANGING advance closes the circuit (#1380 review): an `audit` is a
+      // read-only verification — after a fault's rollback it compares the healthy baseline to
+      // itself, so letting it reset the streak would silently re-enable off-screen ticks without
+      // any successful commit having happened. A clean player-turn (also via `commitPlayerTurn`)
+      // or a clean DIRECT off-screen tick (which ran the full checkpoint AND persisted) is real
+      // evidence of health — and a tick can only run while the circuit is still CLOSED (open ⇒
+      // skipped above), so once OPEN the only closer is a successful player-turn commit, exactly
+      // what the `HealthRecord.circuitOpen` contract promises.
+      if (trigger !== "audit") this.consecutiveFaults.set(user, 0);
       if (trigger === "player-turn") this.touch(user);
       this.recordHealth(user, this.registry.sandboxFor(user), trigger, when, "ok");
       return { events: produced, integrity: "ok", faults: [] };

@@ -143,16 +143,28 @@ describe("#1106 — the contested-eviction integrity fault sequence (correctly c
 });
 
 /** Resolve ANY pending with a legal default (roles only) — the local full-drive variant of
- *  `resolveLegally` above, covering the endgame/nightly kinds a long drive can hit. */
+ *  `resolveLegally` above, covering the endgame/nightly kinds a long drive can hit. Every kind is
+ *  handled with its CORRECT payload shape (no cast — a shape mismatch must fail the test, #1380). */
 function resolveAnyLegally(s: GameSessionAdapter, p: PendingDecisionView): void {
-  if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
-  else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
-  else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
-  else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
-  else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
-  else if (p.kind === "juror-question") s.submitDecision({ kind: "juror-question", statement: "q" });
-  else if (p.kind === "goodbye-message") s.submitDecision({ kind: "goodbye-message", vote: p.options?.[0]?.id ?? "", statement: "bye" });
-  else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id } as never);
+  switch (p.kind) {
+    case "nominations": s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] }); return;
+    case "veto-decision": s.submitDecision({ kind: "veto-decision", use: false }); return;
+    case "secret-veto": s.submitDecision({ kind: "secret-veto", use: false }); return;
+    case "replacement": s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id }); return;
+    case "comp-intent":
+    case "comp-round": s.submitDecision({ kind: p.kind, intent: "compete" }); return;
+    case "finale-statement": s.submitDecision({ kind: "finale-statement", statement: "x" }); return;
+    case "finale-answer": s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! }); return;
+    case "juror-question": s.submitDecision({ kind: "juror-question", statement: "q" }); return;
+    case "goodbye-message": s.submitDecision({ kind: "goodbye-message", vote: p.options[0]!.id, statement: "bye" }); return;
+    // The single-pick kinds share the `vote` payload (audit A10: `vote`/1-element `choice` interchangeable).
+    case "houseguests-choice":
+    case "eviction-vote":
+    case "tie-break":
+    case "final-eviction":
+    case "juror-vote": s.submitDecision({ kind: p.kind, vote: p.options[0]!.id }); return;
+    default: throw new Error(`unsupported pending kind in test driver: ${p.kind as string}`);
+  }
 }
 
 describe("#1106 — a REAL contested eviction (player-HOH TIE) through the production runtime", () => {
