@@ -45,9 +45,13 @@ def test_retro_and_new_season_use_different_slots():
 
 def test_retrospective_keeps_dockable_behaviour():
     # 0054 Phase 2: moving slots must not disturb the dock opt-in.
+    # #1371: the retrospective now defaults DOCKED on a rail-visible (wide) tier — its top-right
+    # float sat over the in-flow rail + composer — and floating (height-capped) on the narrow /
+    # no-rail tier: a tier-aware railTier() default. It stays dockable, and a user's own dock/undock
+    # choice persists and wins (loadDocked).
     retro = _read("static", "js", "orwellRetrospective.js")
     assert "dockable: true" in retro
-    assert "defaultDocked: false" in retro
+    assert "defaultDocked: railTier()" in retro
 
 
 # ── Root cause 2: the stacking offset runs through clampPos ──────────────────
