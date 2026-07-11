@@ -4442,15 +4442,32 @@ import { isNarrow } from './platform.js';
       // If the queued bubble was somehow removed from the DOM (a destructive reload before flush), fall
       // back to letting the send paint a fresh one — the text is never lost.
       const bubbleAttached = item.bubbleEl && item.bubbleEl.isConnected;
+      // #891 P1 fix (drain starvation — PR #1379 review): the drain is SELF-CONTINUING. A flush
+      // attempt that lands while this dispatch is still in flight is swallowed by the
+      // `_flushingOutbox` guard (single-flight, correct), and some dispatch paths dead-end WITHOUT
+      // ever reaching the stream-end finally that normally re-kicks the drain (an early-return
+      // handleChatSubmit — e.g. a failed session materialize / `_abortSendKeepMessage` — schedules
+      // no flush and arms no backoff). Either way, a SECOND queued item could sit stuck until some
+      // unrelated event (online, session select, an armed timer) happened to nudge the outbox. So:
+      // when the dispatch settles and the guard clears, re-invoke the flush ourselves whenever
+      // items remain. The re-run re-checks EVERY guard (single-flight, streaming, offline, dedupe,
+      // session binding) and either dispatches the next eligible item or parks on the backoff —
+      // one hop per settle, so it can never spin.
+      const _continueDrain = () => {
+        _flushingOutbox = false;
+        if (_sendOutbox.length > 0) {
+          setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 0);
+        }
+      };
       try {
         Promise.resolve(
           _outboxDispatch(item.text, {
             queuedClientMsgId: item.clientMsgId,
             queuedBubbleEl: bubbleAttached ? item.bubbleEl : null,
           })
-        ).catch(() => {}).finally(() => { _flushingOutbox = false; });
+        ).catch(() => {}).finally(_continueDrain);
       } catch (_) {
-        _flushingOutbox = false;
+        _continueDrain();
       }
     }).catch(() => { _flushingOutbox = false; _armOutboxRetry(); });
   }

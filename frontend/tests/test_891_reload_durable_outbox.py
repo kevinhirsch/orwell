@@ -158,6 +158,25 @@ def test_item_session_binding_gates_the_dispatch():
         "the catch-hook requeue must bind to the turn's streamSessionId, not current-at-catch-time"
 
 
+def test_drain_is_self_continuing():
+    """P1 fix (PR #1379 — drain starvation): a flush attempt landing while a dispatch is in flight
+    is swallowed by the single-flight guard, and early-return dispatch paths never reach the
+    stream-end finally that re-kicks the drain — so after each dispatch settles, the flush must
+    re-invoke ITSELF while items remain (one hop per settle; every guard re-checked)."""
+    js = _read("static/js/chat.js")
+    fn = js[js.index("function _flushSendOutbox()"):]
+    fn = fn[:fn.index("// ── #891 P0: durability wiring")]
+    assert "const _continueDrain = () => {" in fn, "the settle continuation must exist"
+    cont = fn[fn.index("const _continueDrain = () => {"):]
+    cont_body = cont[:cont.index("};") + 2]
+    assert "_flushingOutbox = false;" in cont_body, "the continuation must clear the single-flight guard"
+    assert "_sendOutbox.length > 0" in cont_body and "_flushSendOutbox()" in cont_body, \
+        "the continuation must re-run the flush while items remain (self-continuing drain)"
+    # BOTH settle paths route through it: the dispatch promise's finally AND the sync-throw catch.
+    assert ".finally(_continueDrain)" in fn, "the dispatch settle must continue the drain"
+    assert cont.count("_continueDrain()") >= 1, "the sync-throw path must continue the drain too"
+
+
 def test_offline_send_goes_straight_to_outbox():
     """A non-headless send while navigator.onLine === false must enqueue (honest 'queued — offline')
     instead of firing a doomed POST — placed AFTER the slash dispatch, BEFORE the BUG-1 early bubble
@@ -737,3 +756,89 @@ def test_restored_item_never_bleeds_into_another_session(_app):
     )
     assert final["queueLen"] == 0
     assert final["awaiting"] == ["c-a-pending"], "the delivered item awaits its server-row confirm"
+
+
+# ── P1 regression (PR #1379 — drain starvation): with TWO items queued, one recovery cycle must
+#    drain BOTH, with no external nudge between them. The dispatch spy here deliberately does NOT
+#    mimic the stream-end finally's re-kick (unlike _INSTALL_SPY): on pre-fix code the guard
+#    swallowed any flush attempt made while a dispatch was in flight, and the settle only cleared
+#    the guard — so the second item sat stuck until some unrelated event nudged the outbox. The
+#    drain must be SELF-CONTINUING. ─────────────────────────────────────────────────────────────
+def test_drain_self_continues_both_items_in_one_recovery_cycle(_app):
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        browser, context, page = _new_context(pw, _app)
+
+        # Queue TWO real sends while offline (same session — both carry the same null/current
+        # binding), exactly the commissioned shape.
+        context.set_offline(True)
+        seeded = page.evaluate(r"""
+          async () => {
+            const chat = window.chatModule;
+            if (!chat || !chat.handleChatSubmit) return { error: 'helpers missing' };
+            const box = document.getElementById('chat-history');
+            if (box) box.innerHTML = '';
+            chat._sendOutbox.length = 0;
+            chat._outboxAwaitingConfirm.length = 0;
+            const mi = document.getElementById('message');
+            mi.value = 'starve check one';
+            await chat.handleChatSubmit(null);
+            mi.value = 'starve check two';
+            await chat.handleChatSubmit(null);
+            // NON-KICKING spy: records and resolves — schedules NOTHING. Any second delivery must
+            // come from the drain continuing itself.
+            const sent = [];
+            window.__starveSpy = sent;
+            chat._setOutboxDispatch((text, opts) => {
+              sent.push({ text, clientMsgId: opts && opts.queuedClientMsgId });
+              return Promise.resolve();
+            });
+            return { queueLen: chat._sendOutbox.length, ids: chat._sendOutbox.map(it => it.clientMsgId) };
+          }
+        """)
+        assert "error" not in seeded, seeded.get("error")
+        assert seeded["queueLen"] == 2, f"both offline sends must queue: {seeded!r}"
+
+        # ONE recovery cycle: reconnect. The 'online' handler fires a single flush (and clears any
+        # armed backoff timer) — the second item may only arrive via the self-continuing drain.
+        context.set_offline(False)
+        try:
+            page.wait_for_function("() => (window.__starveSpy || []).length >= 2", timeout=15000)
+        except Exception as e:
+            state = page.evaluate(r"""
+              () => ({
+                dispatched: (window.__starveSpy || []).map(s => s.text),
+                queued: window.chatModule._sendOutbox.map(it => it.text),
+              })
+            """)
+            browser.close()
+            pytest.fail(
+                "drain starvation: the second queued item never delivered in the same recovery "
+                f"cycle (dispatched {state['dispatched']!r}, still queued {state['queued']!r}) — {e}"
+            )
+        # Exactly-once: settle window + a redundant flush must not re-dispatch anything.
+        page.evaluate("() => window.chatModule._flushSendOutbox()")
+        page.wait_for_timeout(400)
+        result = page.evaluate(r"""
+          () => {
+            const chat = window.chatModule;
+            const sent = window.__starveSpy || [];
+            chat._setOutboxDispatch((text, opts) => chat.handleChatSubmit(null, text, opts));
+            const ids = sent.map(s => s.clientMsgId);
+            return {
+              order: sent.map(s => s.text),
+              sentCount: sent.length,
+              uniqueIds: new Set(ids).size === ids.length,
+              ids,
+              queueDrained: chat._sendOutbox.length === 0,
+            };
+          }
+        """)
+        browser.close()
+    assert result["order"] == ["starve check one", "starve check two"], (
+        f"both items must deliver IN ORDER through one recovery cycle: {result['order']!r}"
+    )
+    assert result["sentCount"] == 2, f"exactly-once: got {result['sentCount']} dispatches"
+    assert result["uniqueIds"], "each delivery must carry its own clientMsgId (no double-send)"
+    assert result["ids"] == seeded["ids"], "the dispatched sends must be the queued items themselves"
+    assert result["queueDrained"], "the queue must be empty after the drain"
