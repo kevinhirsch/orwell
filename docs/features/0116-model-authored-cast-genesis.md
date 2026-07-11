@@ -65,8 +65,10 @@ rule, now a validator instead of a construction property).
 generates a short **casting brief** for the sketch call — a demographic skew, a regional flavor, an
 ensemble vibe ("skew older this season; a heavy Gulf-coast contingent; a house built for slow-burn
 grudges") — drawn from engine-owned dimensions on a dedicated side-stream. Same seed ⇒ same brief, so
-replayability keeps its lever and **cross-season drift is guaranteed** (different seed ⇒ a genuinely
-different casting direction, not the same pool re-shuffled). The brief is derived only from the seed —
+the brief is **seed-dependent and replayable**, and different seeds **steer different casting
+directions** (the brief-dimension space is finite, so distinct seeds can occasionally deal similar
+briefs — the brief steers variety; the model's open-ended generation on top of it is what breaks
+pool-sameness, not a brief-uniqueness guarantee). The brief is derived only from the seed —
 player-blind like everything else in genesis.
 
 **Scope (DECIDED #7): skeletons + the tie graph.** The sketch call proposes, per NPC and cast-wide:
@@ -183,7 +185,8 @@ test rule intact.
 ## 6. Cost & call classes
 
 The decided shape adds **one** cast-level sketch call per game start (~1–2k in / ~3–6k out ≈
-$0.01–0.05 at the current GLM-4.7-class defaults, ADR 0016) plus bounded re-roll attempts, on top of
+$0.01–0.05 at the current ADR 0016 defaults — `z-ai/glm-5.2` narrator / Qwen 3.6 Flash utility, per
+its 2026 amendment) plus bounded re-roll attempts, on top of
 the fifteen already-budgeted phase-1 deep calls. The sketch joins the 0069 token-policy table as its
 own call class (admin-editable `max_tokens_budget`, metered + ledgered like every LLM boundary
 crossing). The rejected alternative — one combined skeleton+depth mega-call — was declined by the
