@@ -120,6 +120,9 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       if (!isStr(args["kind"])) refuse("kind", "a decision kind (string)");
       if (args["choice"] !== undefined && !isStrArray(args["choice"])) refuse("choice", "an array of houseguest ids when present");
       return;
+    case "turnIn":
+      guardSyncFields(true); // 0065 Parts A+B — optional expectedBeatSeq + idempotencyKey (a mutating progression tool)
+      return;
     case "moveTo":
       guardSyncFields(false); // 0065 Part A — optional expectedBeatSeq
       return;
@@ -366,7 +369,9 @@ export class McpServer {
         return this.deps.session.cancelSelfEviction();
       case "turnIn":
         // ADR 0006: the player's bedtime lever — ends their night, rolls to the next morning.
-        return this.deps.session.turnIn();
+        // 0065 — optional expectedBeatSeq (CAS) + idempotencyKey (at-most-once) ride the args, so a
+        // retried/duplicate turnIn replays verbatim instead of re-stamping the rest penalty.
+        return this.deps.session.turnIn(args as { expectedBeatSeq?: number; idempotencyKey?: string });
       case "makeDeal":
         return this.deps.session.makeDeal(args as unknown as MakeDealReq);
       case "formAlliance": // 0107

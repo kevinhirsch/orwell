@@ -1438,6 +1438,14 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "turnIn",
+            "description": "The player's bedtime lever (ADR 0006): the player CHOOSES to turn in for the night. Call it whenever the player says they are heading to bed / turning in / calling it a night — the player is NEVER auto-slept, so only this ends their night for real. It ends their night where it stands (an early night ⇒ rested for tomorrow's comp; outlasting the house into late-night ⇒ running on empty — a hidden, bounded rest effect the ENGINE folds, never a number) and rolls the house to the next morning. The result may carry a Vault-free dailyRecap (0102) — the day that just closed, plus an optional non-committal forward tease: voice it as a short in-fiction 'day in review' beat when present, and invent nothing when absent. Never narrate the player waking to a new morning without calling this. A no-op when the in-game clock isn't running.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "seasonRetrospective",
             "description": "POST-SEASON ONLY (0048): opens the Producer's Vault for the FINISHED season — off-screen scheming, confessionals, the twist that never fired. Returns nothing while a season is live; after the winner it is the payoff.",
             "parameters": {"type": "object", "properties": {}},
@@ -1931,6 +1939,9 @@ ORWELL_GAME_TOOLS = frozenset({
     "seasonRecap", "seasonRetrospective",
     # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
     "dailyRecap",
+    # ADR 0006 (#1385): the player's bedtime lever — ends their night, rolls the house to morning,
+    # folds the hidden rest penalty in the ENGINE, and delivers the dailyRecap (0102) inline on its result.
+    "turnIn",
     # B65: the knowledge-bounded per-NPC voicing projection.
     "npcVoice",
 })

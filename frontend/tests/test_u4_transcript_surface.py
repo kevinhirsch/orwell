@@ -69,12 +69,13 @@ def test_d3_pending_cache_round_trips():
 
 
 def test_d3_every_advanceview_chokepoint_feeds_the_cache():
-    # Four chokepoints now: do_advance_game + do_submit_decision RECORD the pending, do_create_character
+    # Five chokepoints now: do_advance_game + do_submit_decision RECORD the pending, do_create_character
     # CLEARS it (a casting card carries no `pending`) — the restart-door hygiene that stops a finished
-    # season's decision card bleeding into season 2 — and do_request_self_eviction (0061) records the
-    # raised self-evict confirmation so the confirm card survives a reload too.
-    assert TOOLS.count("orwell_engine.remember_pending(res") == 4, \
-        "advance + submit + self-evict request record the pending; createCharacter clears it on a new season"
+    # season's decision card bleeding into season 2 — do_request_self_eviction (0061) records the raised
+    # self-evict confirmation so the confirm card survives a reload too, and do_turn_in (ADR 0006 / #1385,
+    # the bedtime lever) returns an AdvanceView, so it feeds the cache on the same contract.
+    assert TOOLS.count("orwell_engine.remember_pending(res") == 5, \
+        "advance + submit + self-evict request + turnIn record the pending; createCharacter clears it on a new season"
     assert "orwell_engine.remember_pending(res" in ROUTES, "the decision route + new-game route too"
 
 

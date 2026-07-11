@@ -1797,8 +1797,14 @@ export interface GameSession {
    * into late-night ⇒ running on empty) and rolls the house to the next morning. The player is never
    * auto-slept; only this call retires them. A no-op when the clock isn't running, the game is over, or
    * the player has left. Returns the Vault-free view (the new morning + the player's own rest cue).
+   *
+   * 0065 — a mutating progression tool, so it takes the SAME optional sync-spine fields as `advanceGame`
+   * (`AdvanceGameReq`): `expectedBeatSeq` (Part A CAS — a stale token ⇒ typed `stale-beat`/409, refused
+   * before any mutation) and `idempotencyKey` (Part B at-most-once — a retried/duplicate turnIn REPLAYS
+   * the original view instead of re-ending the night, which would re-stamp the rest penalty). Absent ⇒
+   * byte-identical to the pre-0065 path (opt-in).
    */
-  turnIn(): AdvanceView;
+  turnIn(req?: AdvanceGameReq): AdvanceView;
   /**
    * The player makes a deal with a houseguest (0039) — a first-class tracked promise. Recorded as
    * a player-witnessed event (their knowledge); the engine reconciles it against later binding

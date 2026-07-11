@@ -96,6 +96,50 @@ def test_con2_advance_key_is_stable_across_a_lost_response_retry(monkeypatch):
     assert seen[0] == seen[1]                       # SAME key ⇒ the engine replays, never double-advances
 
 
+def test_con2_do_turn_in_attaches_idempotency_key_and_expected_beat_seq_and_refreshes(monkeypatch):
+    # #1385 / ADR 0006: turnIn is a mutating PROGRESSION, so — like advanceGame/submitDecision — it must
+    # attach the CAS token + an at-most-once key and refresh last-seen, or a retried/duplicate model call
+    # re-ends the night and re-stamps the rest penalty.
+    from src import tool_implementations as ti
+    from src import orwell_engine
+    captured = {}
+
+    async def fake_turn_in(expected_beat_seq=None, idempotency_key=None, user=None):
+        captured["expected_beat_seq"] = expected_beat_seq
+        captured["idempotency_key"] = idempotency_key
+        return {"beatSeq": 51, "phase": "hoh-competition"}
+
+    monkeypatch.setattr(orwell_engine, "turn_in", fake_turn_in)
+    monkeypatch.setattr(orwell_engine, "remember_pending", lambda *a, **k: None)
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 50
+
+    out = _run(ti.do_turn_in("", owner="owner"))
+    assert out["exit_code"] == 0
+    assert captured["expected_beat_seq"] == 50                 # the current last-seen token (CON-2)
+    assert isinstance(captured["idempotency_key"], str) and captured["idempotency_key"]  # a key is attached
+    assert chat_helpers.last_beat_seq("owner") == 51           # refreshed from the response (CON-3)
+
+
+def test_con2_turn_in_key_is_stable_across_a_lost_response_retry(monkeypatch):
+    """The exact erased-rest-penalty guard: when the engine committed the night-end but the FE never saw
+    the response (last-seen unchanged), a re-invocation mints the SAME key, so the engine REPLAYS the first
+    result instead of re-ending the night (which would re-stamp lastSleepDepth from the reset wake hour)."""
+    from src import tool_implementations as ti
+    from src import orwell_engine
+    seen = []
+
+    async def fake_turn_in(expected_beat_seq=None, idempotency_key=None, user=None):
+        seen.append(idempotency_key)
+        raise RuntimeError("socket timeout")  # response lost — do_turn_in must NOT refresh
+
+    monkeypatch.setattr(orwell_engine, "turn_in", fake_turn_in)
+    monkeypatch.setattr(orwell_engine, "remember_pending", lambda *a, **k: None)
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 50
+    _run(ti.do_turn_in("", owner="owner"))  # first attempt (lost)
+    _run(ti.do_turn_in("", owner="owner"))  # the retry (last-seen still 50)
+    assert seen[0] == seen[1]                # SAME key ⇒ the engine replays, never re-ends the night twice
+
+
 def test_con2_do_submit_decision_attaches_tokens_and_refreshes(monkeypatch):
     from src import tool_implementations as ti
     from src import orwell_engine
