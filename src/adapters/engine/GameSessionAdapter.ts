@@ -188,7 +188,7 @@ import {
 import { CONFIDENCE, type DisclosureTier } from "../../engine/confidenceConstants";
 import {
   severityOf, leverageStrength, leverageDealBoost, dealAcceptance, exposeOutcome,
-  tradeValue, tradeDealBoost, tradeOutcome, bluffBelieved, npcBarterStep,
+  tradeValue, tradeDealBoost, tradeOutcome, bluffBelieved,
   type LeverageSignals, type TradeSignals, type BarterCandidate,
 } from "../../engine/leverage";
 import { SECRET_BARTER } from "../../engine/secretBarterConstants";
@@ -6410,10 +6410,11 @@ export class GameSessionAdapter implements GameSession {
 
   /**
    * 0099 (hidden half) — the off-screen NPC↔NPC SECRET BARTER: once per bounded off-screen tick, an NPC
-   * holding a learned secret ABOUT a houseguest SPENDS it with the co-house recipient who values it MOST,
-   * so information becomes liquid in the hidden layer (secrets visibly move; a bond firms for no public
-   * reason; the player can be outmaneuvered in the economy). It REUSES the existing 0099 trade/value core
-   * verbatim — `npcBarterStep` → `tradeValue` (`src/engine/leverage.ts`, tuned by `SECRET_TRADE`) — driven
+   * holding learned secret(s) ABOUT houseguests SPENDS its TOP one — the (secret, recipient) pair a
+   * co-house recipient values MOST (issue #1438: the top-valued secret, never the lexicographically-first
+   * `factId`), so information becomes liquid in the hidden layer (secrets visibly move; a bond firms for no
+   * public reason; the player can be outmaneuvered in the economy). It REUSES the existing 0099 value core
+   * verbatim — `tradeValue` + the `SECRET_TRADE` rate/floor (`src/engine/leverage.ts`) — driven
    * on a tick; it is NOT a new secrets system. The traded belief enters the recipient's HIDDEN knowledge
    * through the existing NPC→NPC diffusion pathway (`transmitGossip` — a recorded `told-by:` event whose
    * witness set is {giver, recipient} and EXCLUDES the player), and reaches the player ONLY if a later
@@ -6461,39 +6462,52 @@ export class GameSessionAdapter implements GameSession {
     let barters = 0;
     for (const holder of holders) {
       if (barters >= SECRET_BARTER.maxBartersPerTick) break;
-      const secret = tradeableOf(holder)[0]!; // the holder's first tradeable secret (stable order)
-      const key = secret.factId ?? secret.id;
-      const subject = secret.subject!;
-      // Severity is the SUBJECT's PUBLIC headline-secret class (never its sealed text) — the SAME
-      // resolution the player-side trade uses (`resolveWieldedSecret`), reused, not re-invented.
-      const subjectNpc = this.house.npcs.find((n) => n.id === subject);
-      const severity = severityOf(subjectNpc ? this.headlineSecretOf(subjectNpc)?.kind : undefined);
-      // Candidate recipients: still-active NPCs, not the holder, not the secret's own subject, who do NOT
-      // already hold this belief (a barter WIDENS who knows). Deterministic order.
-      const candidates: BarterCandidate[] = npcs
-        .filter((r) => r !== holder && r !== subject
-          && !knowledge.knownTo(r).some((k) => (k.factId ?? k.id) === key))
-        .sort()
-        .map((r) => ({ recipient: r, signals: this.barterSignalsFor(r, subject, holder, severity) }));
-      if (candidates.length === 0) continue;
-      // The EXISTING 0099 decision core: the seeded rate roll (`SECRET_TRADE.barterRate`) + the
-      // best-valuing recipient over the floor (`SECRET_TRADE.barterValueFloor`). No new value math.
-      const move = npcBarterStep(candidates, rng);
-      if (!move) continue;
-      // Transfer the secret NPC→NPC through the EXISTING diffusion pathway (0002/0094): a recorded
+      // ONE seeded rate roll gates the holder this tick (the existing per-holder decision — drawn FIRST so
+      // the dedicated stream advances identically whether or not any secret qualifies). Then, over EVERY
+      // tradeable secret × its candidate recipients, keep the STRICT argmax of `tradeValue` above the floor
+      // (issue #1438): the holder spends its TOP-valued (secret, recipient), NOT the lexicographically-first
+      // `factId`. A holder with a single tradeable secret is byte-identical to the prior single-scan path.
+      const fires = rng.next() < SECRET_TRADE.barterRate;
+      let bestValue: number = SECRET_TRADE.barterValueFloor;
+      let bestSecret: ReturnType<typeof tradeableOf>[number] | undefined;
+      let bestRecipient: EntityId | undefined;
+      for (const secret of tradeableOf(holder)) {
+        const key = secret.factId ?? secret.id;
+        const subject = secret.subject!;
+        // Severity is the SUBJECT's PUBLIC headline-secret class (never its sealed text) — the SAME
+        // resolution the player-side trade uses (`resolveWieldedSecret`), reused, not re-invented.
+        const subjectNpc = this.house.npcs.find((n) => n.id === subject);
+        const severity = severityOf(subjectNpc ? this.headlineSecretOf(subjectNpc)?.kind : undefined);
+        // Candidate recipients: still-active NPCs, not the holder, not the secret's own subject, who do NOT
+        // already hold this belief (a barter WIDENS who knows). Deterministic order.
+        const candidates: BarterCandidate[] = npcs
+          .filter((r) => r !== holder && r !== subject
+            && !knowledge.knownTo(r).some((k) => (k.factId ?? k.id) === key))
+          .sort()
+          .map((r) => ({ recipient: r, signals: this.barterSignalsFor(r, subject, holder, severity) }));
+        // Score each candidate with the EXISTING 0099 `tradeValue` (no new value math); carry the running
+        // best over the floor across ALL of the holder's secrets, not just the first secret's recipients.
+        for (const c of candidates) {
+          const v = tradeValue(c.signals, rng);
+          if (v > bestValue) { bestValue = v; bestSecret = secret; bestRecipient = c.recipient; }
+        }
+      }
+      if (!fires || bestSecret === undefined || bestRecipient === undefined) continue;
+      // Transfer the chosen secret NPC→NPC through the EXISTING diffusion pathway (0002/0094): a recorded
       // `told-by:` gossip event witnessed by {giver, recipient} — hidden (the player is not a witness),
       // reaching the player only if a later pathway terminates at them. The belief keeps its lineage
       // (`factId`), gains a hop, and carries the giver's own (bounded) certainty forward.
+      const chosenSubject = bestSecret.subject!;
       knowledge.transmitGossip(
-        holder, move.recipient,
+        holder, bestRecipient,
         {
-          content: secret.content,
-          factId: key,
-          originalContent: secret.originalContent ?? secret.content,
-          confidence: secret.confidence ?? 1,
+          content: bestSecret.content,
+          factId: bestSecret.factId ?? bestSecret.id,
+          originalContent: bestSecret.originalContent ?? bestSecret.content,
+          confidence: bestSecret.confidence ?? 1,
           source: holder,
-          hops: (secret.hops ?? 0) + 1,
-          ...(subject !== undefined ? { subject } : {}),
+          hops: (bestSecret.hops ?? 0) + 1,
+          ...(chosenSubject !== undefined ? { subject: chosenSubject } : {}),
         },
         `told-by:${holder}`,
       );

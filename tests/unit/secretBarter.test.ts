@@ -188,3 +188,72 @@ describe("0099 — persistence: the barter state survives a restart intact (non-
     expect(holds(revived, WANTER, SECRET_FACT), "the bartered secret survives the restart — the knowledge layer deepens").toBe(true);
   });
 });
+
+describe("0099 (#1438) — a holder barters its TOP-valued secret, not the lexicographically-first factId", () => {
+  const SUBJECT_LOW = npc(4);              // a well-liked houseguest NOBODY fears ⇒ a secret about them is worthless
+  const FACT_WORTHLESS = "sb-a-worthless"; // sorts FIRST ⇒ the OLD code's `[0]` pick — the whole bug
+  const FACT_VALUED = "sb-z-valued";       // sorts LAST ⇒ the OLD code never reached it, so it never moved
+
+  /**
+   * GIVER holds BOTH secrets. WANTER fears SUBJECT (so VALUES the valued secret) but likes SUBJECT_LOW (so
+   * the worthless secret is worthless to them too); everyone else likes both subjects / distrusts GIVER ⇒
+   * they sit below the barter floor. WANTER's giver-trust is kept MODEST (0.2) so the worthless secret
+   * stays below the floor for WANTER as well — independent of the generated subjects' headline severities —
+   * so it is NEVER the one bartered, while the valued secret clears the floor comfortably (interest 1.0).
+   */
+  function twoSecretEdges(): EdgeRecord[] {
+    const edges: EdgeRecord[] = [];
+    const e = (from: EntityId, to: EntityId, o: Partial<EdgeRecord>): void => {
+      edges.push({ from, to, trust: 0.3, affinity: 0.3, threat: 0.3, alignment: 0.3, confidence: 0.5, reliability: 0.3, ...o });
+    };
+    e(WANTER, SUBJECT, { threat: 0.9, affinity: 0.05 });    // fears SUBJECT ⇒ VALUES the valued secret (interest 1.0)
+    e(WANTER, SUBJECT_LOW, { threat: 0.0, affinity: 0.9 }); // likes SUBJECT_LOW ⇒ the worthless secret is worthless
+    e(WANTER, GIVER, { trust: 0.2 });                       // modest trust ⇒ the worthless secret stays below the floor
+    for (const n of ALL_NPCS) {
+      if (n === WANTER || n === GIVER) continue;
+      if (n !== SUBJECT) e(n, SUBJECT, { threat: 0.0, affinity: 0.9 });         // likes SUBJECT ⇒ valued secret worthless to them
+      if (n !== SUBJECT_LOW) e(n, SUBJECT_LOW, { threat: 0.0, affinity: 0.9 }); // likes SUBJECT_LOW too
+      e(n, GIVER, { trust: 0.0 });                                             // distrusts GIVER ⇒ any offer discounted
+    }
+    return edges;
+  }
+
+  function twoSecretGame(user: string, seed: number): {
+    reg: GameSessionRegistry; sb: ReturnType<GameSessionRegistry["sandboxFor"]>;
+  } {
+    const reg = new GameSessionRegistry();
+    reg.sandboxFor(user).session.createCharacter({ playerName: "The Player", seed });
+    const snap = reg.snapshot(user) as SessionSnapshot;
+    snap.live = midGameLive();
+    snap.relationships = twoSecretEdges();
+    reg.restore(user, snap);
+    const sb = reg.sandboxFor(user);
+    // GIVER holds BOTH — the worthless one (sorts first) AND the valued one (sorts last), seeded AFTER
+    // restore so they survive the rebuild. The OLD code keyed on the first factId ⇒ it re-weighed ONLY the
+    // worthless `sb-a` every tick and NEVER bartered the valued `sb-z`.
+    sb.engine.knowledge.seedBelief(GIVER, { content: "a dull, worthless detail about a well-liked houseguest", factId: FACT_WORTHLESS, subject: SUBJECT_LOW, confidence: 1 }, "origin");
+    sb.engine.knowledge.seedBelief(GIVER, { content: "a juicy secret about a feared houseguest", factId: FACT_VALUED, subject: SUBJECT, confidence: 1 }, "origin");
+    return { reg, sb };
+  }
+
+  it("spends the top-valued secret (fail-before / pass-after) and never the worthless first-sorted one", () => {
+    const { sb } = twoSecretGame("top-secret", 7);
+    // Fail-before: the wanter holds NEITHER secret.
+    expect(holds(sb, WANTER, FACT_VALUED), "wanter has not learned the valued secret yet").toBe(false);
+    expect(holds(sb, WANTER, FACT_WORTHLESS), "wanter has not learned the worthless secret yet").toBe(false);
+
+    sb.session.setSecretBarterEnabled(true);
+    for (let t = 0; t < 30; t++) sb.session.secretBarterTick(sb.engine.events, sb.engine.knowledge);
+
+    // Pass-after: the holder bartered its TOP-valued secret to the valuing recipient — THE FIX. Under the
+    // OLD lexicographically-first selection the giver only ever re-weighed the worthless `sb-a`, so the
+    // valued `sb-z` NEVER moved — this assertion fails on the bug (#1438).
+    expect(holds(sb, WANTER, FACT_VALUED), "the valued (top) secret reached its wanter").toBe(true);
+    // …and the worthless first-sorted secret sits below the barter floor for everyone ⇒ it never changes hands.
+    expect(holds(sb, WANTER, FACT_WORTHLESS), "the worthless first-sorted secret is never the one bartered").toBe(false);
+    for (const n of [npc(5), npc(6), SUBJECT]) {
+      expect(holds(sb, n, FACT_WORTHLESS), "the worthless secret stays with only the giver").toBe(false);
+    }
+    expect(sb.session.snapshot().secretBarterCount ?? 0, "a secret was spent into the hidden economy").toBeGreaterThan(0);
+  });
+});

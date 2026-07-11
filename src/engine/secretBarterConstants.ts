@@ -5,8 +5,8 @@
  * (`GameSessionAdapter.secretBarterTick`) reads lives HERE — no magic number at the call site.
  *
  * IMPORTANT — this module bounds only the TICK, not the trade math. The barter REUSES the existing 0099
- * trade/value core verbatim: `npcBarterStep` → `tradeValue` in `src/engine/leverage.ts`, whose value
- * threshold + firing rate + bond fold live in `SECRET_TRADE` (`leverageConstants.ts`,
+ * value core verbatim: `tradeValue` in `src/engine/leverage.ts` (the same function `npcBarterStep`
+ * wraps), whose value threshold + firing rate + bond fold live in `SECRET_TRADE` (`leverageConstants.ts`,
  * `barterValueFloor` / `barterRate` / `barterBondFold`). This feature adds NO new secrets system and no
  * new value math — it only DRIVES the existing core on a bounded off-screen tick. So the only knobs here
  * are how much of the knowledge economy one tick may churn.
