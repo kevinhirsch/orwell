@@ -3345,10 +3345,17 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
     r"|\bfront[\s-]?end\b|\bthe app\b|\bthis (?:app|website|site)\b"
     r"|\bcomp-intent\b|\bpending (?:decision|binding)\b|\bbinding (?:choice|decision)\b"
     r"|\b(?:decision|choice) (?:card|cards|button|buttons)\b|\btool call\b|\bjumped ahead\b|\bnarratively\b"
-    # first-person operator asides (process talk)
-    r"|\blet me\s+(?:record|advance|note|log|check|place|pull|fetch|resolve|use|call|see what|re-?read|re-?check|reconsider)\b"
+    # first-person operator asides (process talk). #989 — bare "log/note" over-fired on
+    # legitimate narration ("Let me log that."), so those two verbs are machinery only when
+    # followed by an ENGINE object noun ("log this interaction", "note the state"); the
+    # unambiguous tool-process verbs stay bare. (Parity with markdown.js _MACHINERY_ASIDE_RE.)
+    r"|\blet me\s+(?:record|advance|check|place|pull|fetch|resolve|use|call|see what|re-?read|re-?check|reconsider"
+      r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
+      r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b))\b"
     r"|\bi(?:'ll|'d| will| should| need to| have to| am going to| must| can)\s+"
-      r"(?:now\s+|first\s+|then\s+|also\s+)?(?:record|advance|log|note|resolve|call|use|pull|fetch|present|re-?read|reconsider)\b"
+      r"(?:now\s+|first\s+|then\s+|also\s+)?(?:record|advance|resolve|call|use|pull|fetch|present|re-?read|reconsider"
+      r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
+      r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b))\b"
     r"|\b(?:advance|move|push) the game\b"
     r"|\brecord (?:this|the|that) (?:interaction|scene)\b"
     r"|\bthe (?:player|user)\b(?:,?\s+\w+,)?\s+(?:has|is|was|will|'ll|wants|said|finished|just|now|needs|should)\b",
@@ -3369,8 +3376,13 @@ _GAME_LEAK_SENTENCE_RE = re.compile(
 # engine plan) while leaving ordinary scene prose untouched. (Tool names + machinery nouns are still
 # caught anywhere in the sentence by _GAME_LEAK_SENTENCE_RE, independent of how the sentence opens.)
 _OPERATOR_VERBS = (
-    r"record|advance|log|note|resolve|call|use|pull|fetch|present|place|check|see what|"
+    # #989 — "log/note" only count as operator verbs when followed by an ENGINE object noun
+    # ("log this interaction"); a bare "Let me log that." / "I'll note that" is legitimate
+    # narration and must survive (same narrowing as _GAME_LEAK_SENTENCE_RE above).
+    r"record|advance|resolve|call|use|pull|fetch|present|place|check|see what|"
     r"re-?read|re-?check|reconsider"
+    r"|(?:log|note)(?=\s+(?:down\s+)?(?:th(?:e|is|at)\s+)?"
+    r"(?:interaction|event|scene|beat|consequence|decision|vote|state|move|fact)s?\b)"
 )
 _GAME_LEAK_START_RE = re.compile(
     r"^\s*(?:actually[,.!]?\s+)?(?:but\s+)?(?:wait[,.!]?\s+)?(?:ok(?:ay)?[,.!]?\s+)?(?:hold on[,.!]?\s+)?"
