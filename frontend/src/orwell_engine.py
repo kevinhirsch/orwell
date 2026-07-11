@@ -544,6 +544,23 @@ async def get_moment_prompt(moment: str | None = None, user: str | None = None, 
     return await _call("getMomentPrompt", args, user=user, timeout=timeout if timeout is not None else _FRAMING_TIMEOUT)
 
 
+async def recall_scene_memories(with_ids: list | None = None, cue: str | None = None,
+                                user: str | None = None, timeout: float | None = None) -> dict:
+    """Feature #1394 — the Vault-free WITNESSED past moments involving the houseguest(s) the player is
+    in a scene with ({with_ids}), ranked against the scene cue ({cue}), for the narrator to reference
+    ('you told me on day 3 you'd never write my name down'). The engine reads ONLY the player's visible
+    projection — witnessed/journal-visible events, NEVER the Vault. Returns { moments: [...] } — [] when
+    there is no relevant history (recall absence is not a failure). Framing-timeout by default, like
+    get_moment_prompt (it rides the same per-turn framing budget)."""
+    args: dict = {}
+    if with_ids:
+        args["withIds"] = list(with_ids)
+    if cue:
+        args["cue"] = cue
+    return await _call("recallSceneMemories", args, user=user,
+                       timeout=timeout if timeout is not None else _FRAMING_TIMEOUT)
+
+
 async def run_competition(comp_type: str | None = None, participant_ids: list | None = None, user: str | None = None) -> dict:
     """Ask the engine to resolve a competition over this user's LIVE house. Engine-owned
     stats decide it; we receive only the winner (name) — no stats/scores."""

@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, RecordImageBeatReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, MomentPromptReq, RecallSceneMemoriesReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -186,6 +186,14 @@ function requireShape(name: string, args: Record<string, unknown>): void {
         refuse("participantIds", "an array of houseguest ids when present");
       }
       return;
+    case "recallSceneMemories":
+      // Feature #1394 — both fields optional (absent ⇒ the adapter returns { moments: [] }); shape-guard
+      // only so a malformed value can't cast blindly into the recall closure.
+      if (args["withIds"] !== undefined && !isStrArray(args["withIds"])) {
+        refuse("withIds", "an array of houseguest ids when present");
+      }
+      if (args["cue"] !== undefined && typeof args["cue"] !== "string") refuse("cue", "a string when present");
+      return;
     case "npcVoice":
     case "getPortraitPrompt":
       if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
@@ -354,6 +362,10 @@ export class McpServer {
         return this.deps.session.finaleView();
       case "getMomentPrompt":
         return this.deps.session.getMomentPrompt(args as unknown as MomentPromptReq);
+      case "recallSceneMemories":
+        // Feature #1394 — the Vault-free scene-memory recall (witnessed moments only; reads the player
+        // projection). A pure read; the adapter returns { moments: [] } when there is nothing relevant.
+        return this.deps.session.recallSceneMemories(args as unknown as RecallSceneMemoriesReq);
       case "runCompetition":
         return this.deps.session.runCompetition(args as unknown as RunCompetitionReq);
       case "advanceGame":

@@ -31,6 +31,13 @@ export interface EngineCore {
    * no outward module may depend on it (dependency-cruiser).
    */
   soul: SoulProvider;
+  /**
+   * The LIVE process-wide embedder (ADR 0004) — read fresh per call (fastembed at runtime, the
+   * deterministic fake otherwise). A plain `(text) => number[]`, NOT the `EmbeddingProvider` port, so
+   * exposing it here crosses no Vault-listed type. The registry uses it to rank the Vault-free
+   * memory-callback recall (#1394) in the SAME vector space the soul index uses.
+   */
+  embed: (text: string) => number[];
 }
 
 /**
@@ -94,7 +101,7 @@ export function buildEngineCore(): EngineCore {
       ? sqliteVectorIndexFactory(vectorDbPath())
       : undefined;
   const soul = makeIndex ? new SoulStore(currentEmbedding, makeIndex) : new SoulStore(currentEmbedding);
-  return { events, vault, knowledge, relationships, soul };
+  return { events, vault, knowledge, relationships, soul, embed: currentEmbedding };
 }
 
 /** The on-disk path for the durable (sqlite-vec) recall store, derived from `ORWELL_DATA_DIR` exactly
