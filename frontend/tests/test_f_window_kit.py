@@ -307,8 +307,15 @@ def test_three_windows_are_dockable():
     for f in DOCKABLE_WINDOWS:
         js = _read("static", "js", f)
         assert "dockable: true" in js, f
-        # default FLOATING (the documented owner-flippable choice) — a one-line flip
-        assert "defaultDocked: false" in js, f
+        if f == "orwellRetrospective.js":
+            # #1371: the retrospective defaults DOCKED on a rail-visible (wide) tier — its top-right
+            # float sat OVER the in-flow rail cards + reached the composer — and floating (height-
+            # capped) on the narrow / no-rail tier. Tier-aware default via railTier(); a user's own
+            # dock/undock choice still persists and wins (loadDocked).
+            assert "defaultDocked: railTier()" in js, f
+        else:
+            # default FLOATING (the documented owner-flippable choice) — a one-line flip
+            assert "defaultDocked: false" in js, f
 
 
 def test_docked_windows_have_canonical_rail_order():

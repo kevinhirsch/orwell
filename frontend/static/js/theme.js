@@ -715,6 +715,98 @@ export function applyBgEffectSize(v) {
   document.documentElement.style.setProperty('--bg-effect-size', String(n));
 }
 
+// ── #777-3: mobile / low-end glass-tier AUTO-DOWNGRADE (an automatic CEILING) ──
+// The Full-glass tier runs the Chromium SVG refraction (liquidGlass.js) PLUS a
+// large concurrent backdrop-filter stack — by far the most expensive thing on the
+// page. On a constrained environment (a COARSE pointer, a SMALL viewport, or a
+// sustained LOW frame-rate) that cost tanks scrolling/streaming, so we compute an
+// automatic CEILING on the glass tier and CLAMP the applied tier DOWN to it. This
+// is a RUNTIME cap, NOT a preference change: the user's saved tier is untouched
+// (getSaved()/save() keep their explicit choice), the DOM just renders the capped
+// tier — and the cap LIFTS again the moment the environment is capable (a desktop
+// window, a larger viewport). It only ever LOWERS a tier, never raises one the user
+// set lower. We cap Full→Frosted (drop the GPU-heavy refraction, KEEP the CSS glass
+// material) — never down to Flat, so the glass look survives on mobile/low-end.
+const _TIER_RANK = { normal: 0, frosted: 1, full: 2 };
+// ≤ this viewport width ⇒ small-screen (mirrors liquidGlass.js MOBILE_W so the
+// tier-drop and the SVG-refraction cap agree on what "small" means).
+const LOWEND_VIEWPORT_W = 768;
+let _lowFps = false;             // latched true after a sustained low-FPS sample
+let _lastRequestedTier = null;   // the last UN-clamped tier requested (for a live re-apply)
+let _lowEndWatchBound = false;
+
+function _coarsePointer() {
+  try { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); }
+  catch (_) { return false; }
+}
+function _smallViewport() {
+  try { return (window.innerWidth || 1280) <= LOWEND_VIEWPORT_W; }
+  catch (_) { return false; }
+}
+function _constrainedEnvironment() {
+  return _lowFps || _coarsePointer() || _smallViewport();
+}
+
+/** The highest glass tier this environment should render. A constrained device
+ *  (coarse pointer OR small viewport OR sustained low FPS) is capped at 'frosted'
+ *  (no Full-glass refraction); an unconstrained one has no ceiling ('full'). */
+export function glassTierCeiling() {
+  return _constrainedEnvironment() ? 'frosted' : 'full';
+}
+
+/** Clamp a requested tier DOWN to the environment ceiling — never UP. */
+function _clampTierToCeiling(tier) {
+  const t = (tier === 'full' || tier === 'frosted' || tier === 'normal') ? tier : 'frosted';
+  const ceil = glassTierCeiling();
+  return (_TIER_RANK[t] > _TIER_RANK[ceil]) ? ceil : t;
+}
+
+// Re-apply the last requested tier when the environment changes (viewport crosses
+// the small-screen threshold, pointer type flips, or a low-FPS sample lands) so the
+// ceiling stays LIVE. Bound LAZILY on the first applyGlassTier so importing this
+// module for its mesh-gradient helpers never spawns listeners.
+function _bindLowEndWatch() {
+  if (_lowEndWatchBound) return;
+  _lowEndWatchBound = true;
+  const reapply = () => { if (_lastRequestedTier) applyGlassTier(_lastRequestedTier); };
+  let _rt = 0;
+  const reeval = () => { clearTimeout(_rt); _rt = setTimeout(reapply, 150); };
+  try { window.addEventListener('resize', reeval, { passive: true }); } catch (_) {}
+  try {
+    const mq = window.matchMedia('(pointer: coarse)');
+    if (mq.addEventListener) mq.addEventListener('change', reeval);
+    else if (mq.addListener) mq.addListener(reeval);
+  } catch (_) {}
+  try { _sampleLowFps(); } catch (_) {}
+}
+
+// Dynamic signal: sample a short rAF window ONCE, only while Full-glass is actually
+// live (the expensive path — nothing to gain otherwise). If the sustained frame-rate
+// is badly under budget, latch _lowFps and re-apply so the device drops Full→Frosted.
+// One-shot, cheap, fully fail-soft; it can only ever DOWNGRADE.
+const _FPS_SAMPLE_FRAMES = 40;
+const _FPS_LOWEND_THRESHOLD = 32;   // sustained fps below this ⇒ treat as constrained
+let _fpsSampled = false;
+function _sampleLowFps() {
+  if (_fpsSampled || _lowFps) return;
+  if (!(window.requestAnimationFrame && window.performance && performance.now)) return;
+  // Only worth measuring when the Full-glass refraction is on screen.
+  if (!document.body || !document.body.classList.contains('glass-full')) return;
+  _fpsSampled = true;
+  let frames = 0;
+  const t0 = performance.now();
+  const tick = () => {
+    if (++frames < _FPS_SAMPLE_FRAMES) { requestAnimationFrame(tick); return; }
+    const elapsed = performance.now() - t0;
+    const fps = elapsed > 0 ? (frames * 1000) / elapsed : 60;
+    if (fps < _FPS_LOWEND_THRESHOLD) {
+      _lowFps = true;
+      if (_lastRequestedTier) applyGlassTier(_lastRequestedTier);
+    }
+  };
+  try { requestAnimationFrame(tick); } catch (_) {}
+}
+
 /** Apply the global glass TIER — the Apple "Liquid Glass" material ladder.
  *  Drives two body classes (the shared contract; style.css + the glass JS
  *  modules key off them):
@@ -724,13 +816,21 @@ export function applyBgEffectSize(v) {
  *                  (CSS blur-glass baseline — the documented graceful fallback).
  *    • 'normal'  → neither class (flat, solid chrome).
  *  `theme-frosted` is the material (both glass tiers); `glass-full` gates the
- *  refraction (Full only). Any unrecognized value falls back to 'frosted'. */
+ *  refraction (Full only). Any unrecognized value falls back to 'frosted'.
+ *  #777-3: the requested tier is CLAMPED to glassTierCeiling() so a constrained
+ *  device (coarse pointer / small viewport / low FPS) never runs Full-glass — the
+ *  saved preference is untouched; only the rendered tier is capped. Returns the
+ *  EFFECTIVE (clamped) tier. */
 export function applyGlassTier(tier) {
-  const t = (tier === 'full' || tier === 'frosted' || tier === 'normal') ? tier : 'frosted';
+  const requested = (tier === 'full' || tier === 'frosted' || tier === 'normal') ? tier : 'frosted';
+  _lastRequestedTier = requested;             // remember the raw request for a live re-apply
+  const t = _clampTierToCeiling(requested);   // #777-3: cap down on a constrained device
   const frosted = (t === 'full' || t === 'frosted');
   const full = (t === 'full');
   document.body.classList.toggle('theme-frosted', frosted);
   document.body.classList.toggle('glass-full', full);
+  _bindLowEndWatch();                          // arm the live-ceiling watch once (lazy)
+  return t;
 }
 
 /** Back-compat shim for any stray caller (e.g. the cross-device sync seam in
@@ -3156,7 +3256,7 @@ function _initEmbers() {
 const themeModule = { initThemeUI, togglePopup, closePopup, openPopup, makeDraggable,
                        THEMES, applyColors, applyFontDensity, applyBgPattern,
                        applyBgEffectColor, applyBgEffectIntensity, applyBgEffectSize,
-                       applyGlassTier, applyFrostedGlass, applyGlassTint, applyBgImage, applyGlassMeshBackground,
+                       applyGlassTier, glassTierCeiling, applyFrostedGlass, applyGlassTint, applyBgImage, applyGlassMeshBackground,
                        save, getSaved, saveCustomTheme, deleteCustomTheme,
                        getCustomThemes };
 

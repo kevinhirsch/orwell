@@ -196,6 +196,15 @@
            same card. Vault-free: seeded from the public id/name only. */
         #orwell-cast .oc-ph.oc-monogram { width: 100%; height: 100%; opacity: 1; display: block; }
         #orwell-cast .oc-portrait { position: relative; } /* M2-2: anchors the role badge */
+        /* RESP-20 (#894): a portrait-LESS card must not dominate the mobile viewport. On the
+           narrow tier the designed-monogram placeholder is capped to a compact, centered
+           thumbnail — the docked rail can render a ≤240px 1-column tile, i.e. a viewport-filling
+           gradient block. Real generated portraits are NOT capped (they lack .oc-portrait-ph):
+           audit RESP-20 — "smaller placeholder tiles on narrow; reserve large tiles for real
+           images". The flag rides setPortrait, so a card that streams in its face un-caps itself. */
+        @media (max-width: 768px) {
+          #orwell-cast .oc-portrait.oc-portrait-ph { max-width: min(88px, 26vw); margin-inline: auto; }
+        }
         #orwell-cast .oc-name { margin-top: .35rem; font-size: .78rem; line-height: 1.25; word-break: break-word; }
         #orwell-cast .oc-name b { color: var(--fg, #9cdef2); }
         #orwell-cast .oc-status {
@@ -410,6 +419,11 @@
     entry.portrait = url || null;
     entry.holder.textContent = "";
     if (!url) {
+      // RESP-20 (#894): flag the holder as portrait-LESS so the narrow tier can cap it
+      // to a compact thumbnail (a docked ≤240px rail otherwise gives a 1-column, ~240px
+      // viewport-filling gradient block). A real face (the img branch below) drops the
+      // flag, so a card that streams in its portrait snaps back to the full tile.
+      entry.holder.classList.add("oc-portrait-ph");
       // J2-15: until a portrait (0051) backfills, a single shared 👤 silhouette made the
       // "meet 15 distinct people" payoff read as interchangeable placeholders. Render a
       // per-houseguest monogram instead — the name's initial over a deterministic tint
@@ -443,6 +457,8 @@
     // transient miss (the file landing a beat after the manifest) heals next poll.
     img.onerror = () => setPortrait(entry, null, false);
     img.src = url;
+    // RESP-20 (#894): a real face keeps the FULL tile — drop the portrait-less cap flag.
+    entry.holder.classList.remove("oc-portrait-ph");
     entry.holder.appendChild(img);
     syncBadge(entry); // M2-2: the role badge composites on portraits and monograms alike
   }

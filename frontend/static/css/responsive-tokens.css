@@ -60,9 +60,13 @@ html {
 
 /* --- The one coarse-pointer tap floor (S9). Interactive controls get a
        minimum hit box on touch devices; dense desktop layouts are untouched.
-       Height floors at the full --tap-min; width floors at 36px so text-flow
-       buttons aren't blown wide (the matrix gate asserts ≥36px boxes).
-       `.tap-exempt` opts out a control whose hit area is provided by a parent. */
+       BOTH axes floor at the full --tap-min (44px — WCAG 2.5.5, the matrix's
+       RESP-4 floor). RSP-8 (#894): the old 36px width floor let icon-only
+       controls sit at 36–43px — a matrix fail reconciled only by accreting
+       per-control 44px `!important` patches; raising the token to --tap-min is
+       the single fix (a text button is already wider, so only narrow icon
+       controls change). `.tap-exempt` opts out a control whose hit area is
+       provided by a parent. */
 @media (pointer: coarse) {
   button:not(.tap-exempt),
   [role="button"]:not(.tap-exempt),
@@ -70,18 +74,19 @@ html {
   .settings-nav-item:not(.tap-exempt),
   .thinking-header {
     min-height: var(--tap-min);
-    min-width: max(36px, 2.25rem);
+    min-width: var(--tap-min);
   }
   input[type="checkbox"]:not(.tap-exempt),
   input[type="radio"]:not(.tap-exempt) {
     min-height: 1.5rem;
     min-width: 1.5rem;
   }
-  /* Icon-only buttons carry no text to widen them, so the generic 36px width
-     floor above leaves them ~41px — under the 44px WCAG 2.5.5 target the
-     responsive matrix asserts (RESP-4/#625). The section-collapse chevron
-     (`all: unset` + a 10px SVG) is the one such control the matrix reaches in
-     the chrome-only run; floor its width to the full tap target too. */
+  /* The generic width floor above is now the full --tap-min (RSP-8/#894), so
+     icon-only buttons already clear the 44px WCAG 2.5.5 target the responsive
+     matrix asserts (RESP-4/#625). The section-collapse chevron (`all: unset` +
+     a 10px SVG) keeps an explicit floor as belt-and-suspenders — `all: unset`
+     can shed the generic `button` match, and this control is the one the matrix
+     reaches in the chrome-only run. */
   .section-collapse-btn:not(.tap-exempt) {
     min-width: var(--tap-min);
   }

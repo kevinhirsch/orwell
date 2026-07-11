@@ -91,6 +91,11 @@
     // chrome is neutralised — its fill/border/ink live in style.css (#orwell-dr-pill) so the
     // glass theme can swap the bulk to the ONE shared colourless light-glass material, keeping
     // only a WHISPER of rose as a thin edge. Only LAYOUT stays inline here (no rose fill).
+    // NOTE: that thin rose EDGE is a SANCTIONED DIEGETIC EXCEPTION to the general "no accent on
+    // chrome" rule — the confessional's in-world signature, owner-ruled and recorded in
+    // docs/decisions/PO-DECISIONS-LOG.md (2026-07-11). It is NOT a leak: it stays a bounded edge
+    // (never a fill), scoped to this one surface. Do not strip it in a glass-legibility sweep, and
+    // do not widen it. Pin: tests/test_738_glass_polish_8_13_22.py::test_dr_pill_keeps_a_bounded_rose_hint.
     pill.style.cssText = "display:none;align-items:center;gap:6px;margin:0 0 4px;" +
       "padding:3px 10px;border-radius:999px;width:fit-content;font-size:var(--fs-xs);";
     // UX-7: the label starts EMPTY — enterDRMode() injects DR_ENTRY_LABEL on every entry, which is
