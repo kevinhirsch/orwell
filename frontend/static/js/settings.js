@@ -57,6 +57,38 @@ function _animatePanelEntrance(tab) {
 // (WAI-ARIA APG vertical tabs) get synced — every activation path (click, arrow-key
 // nav, or open(tab) landing on a tab) funnels through here, so aria-selected/tabIndex
 // can never drift out of sync with the visible `.active` state.
+// #658 (part of the #660 kit epic): compose a Settings tab's sections from the OrwellSettingsCard
+// primitive. The kit's upgrade() is in-place + idempotent — it KEEPS `.admin-card` (so the peek
+// pass, the empty-admin-tab auto-hide, and every `.closest('.admin-card')` still resolve), lifts
+// the section heading into `.osc-head` > `.osc-title` (its leading svg → `.osc-icon`), and wraps the
+// remaining body into `.osc-body`. It dispatches nothing (g15-safe) and touches no game state
+// (Vault-free). Fail-open: no kit ⇒ the raw `.admin-card` markup stands.
+//
+// We upgrade only sections that have a DIRECT-child heading to standardize. A headingless card —
+// e.g. the Shortcuts tab's flex header bar (its <h2> is nested inside a flex wrapper, so it is not a
+// direct-child heading) or its bare shortcuts-list card — has no `.osc-head` to lift, and wrapping
+// it would only risk a body reflow (the flex header's reset button would drop below the title) with
+// no chrome benefit. So those stay on the raw `.admin-card`, which already shares the card chrome.
+// This gate is a superset-safe replacement for upgradePanel(): for every standard section (all of
+// which lead with a direct <h2>) it composes the primitive identically.
+function _upgradeSettingsCards(panel) {
+  try {
+    var Kit = window.OrwellSettingsCardKit;
+    if (!panel || !Kit || typeof Kit.upgrade !== 'function') return;
+    var kids = Array.prototype.slice.call(panel.children);
+    for (var i = 0; i < kids.length; i++) {
+      var c = kids[i];
+      if (!c || !c.classList || !c.classList.contains('admin-card')) continue;
+      if (c.classList.contains(Kit.CARD_CLASS || 'osc-card')) continue; // already composed — idempotent
+      var hasHeading = false;
+      for (var j = 0; j < c.children.length; j++) {
+        if (/^H[2-5]$/.test(c.children[j].tagName)) { hasHeading = true; break; }
+      }
+      if (hasHeading) Kit.upgrade(c);
+    }
+  } catch (_) {}
+}
+
 function _swapToPanel(tab) {
   modalEl.querySelectorAll('[data-settings-tab]').forEach(b => {
     const isActive = b.dataset.settingsTab === tab;
@@ -64,7 +96,14 @@ function _swapToPanel(tab) {
     b.setAttribute('aria-selected', isActive ? 'true' : 'false');
     b.tabIndex = isActive ? 0 : -1;
   });
-  modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== tab));
+  // #658: as each tab is shown, compose its sections from the OrwellSettingsCard primitive. Running
+  // on the ACTIVE panel every activation (idempotent) also composes sections the admin module builds
+  // lazily — e.g. the services "Login background" card admin.js appends before the panel first shows.
+  modalEl.querySelectorAll('[data-settings-panel]').forEach(p => {
+    const isActive = p.dataset.settingsPanel === tab;
+    p.classList.toggle('hidden', !isActive);
+    if (isActive) _upgradeSettingsCards(p);
+  });
   // Mark when the Appearance tab is open so the modal can go
   // semi-transparent — lets the user see the rest of the UI react as
   // they flip toggles instead of having to close + reopen the modal.

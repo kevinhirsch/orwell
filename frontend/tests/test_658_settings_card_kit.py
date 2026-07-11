@@ -127,6 +127,57 @@ def test_appearance_tab_is_migrated_onto_the_primitive():
     assert "if (_appPanel && window.OrwellSettingsCardKit" in fn
 
 
+# ── STRUCTURAL: the REMAINING tabs are migrated onto the primitive (the #658 follow-on) ───────
+# Appearance was the first tab (above); the rest of the Settings tabs (account, the admin panels,
+# the JS-built verticals) compose the primitive through the single `_swapToPanel` seam: every tab
+# activation upgrades the shown panel's sections in place. One funnel covers every tab — including
+# sections the admin module builds lazily (e.g. the services "Login background" card).
+
+def test_swap_to_panel_upgrades_the_shown_tab_onto_the_primitive():
+    """Every tab activation funnels through `_swapToPanel`; that seam composes the shown panel's
+    sections from the kit, so account / the admin panels / the JS-built verticals all migrate
+    without touching index.html or admin.js."""
+    js = _read(SETTINGS)
+    assert "function _upgradeSettingsCards(" in js, "the migration helper must exist"
+    start = js.index("function _swapToPanel(")
+    end = js.index("function activateTab(", start)
+    swap = js[start:end]
+    # the shown panel is composed from the primitive on activation.
+    assert "_upgradeSettingsCards(" in swap, "_swapToPanel must upgrade the shown panel"
+
+
+def test_migration_helper_keeps_admin_card_and_is_g15_safe():
+    """The helper delegates to the kit's upgrade() (which KEEPS `.admin-card`) — it never removes
+    `.admin-card` itself and dispatches NO event (the g15 single-dispatcher rule), so peek /
+    empty-tab auto-hide / `.closest('.admin-card')` and game-freshness are all untouched."""
+    js = _read(SETTINGS)
+    start = js.index("function _upgradeSettingsCards(")
+    end = js.index("function _swapToPanel(", start)
+    fn = js[start:end]
+    assert "window.OrwellSettingsCardKit" in fn
+    assert ".upgrade" in fn, "the helper composes via the kit's upgrade seam"
+    # never removes the legacy class (the kit keeps it; the helper must not undo that).
+    assert "remove('admin-card')" not in fn and 'remove("admin-card")' not in fn
+    # g15: pure presentation — the migration seam dispatches nothing.
+    assert "dispatchEvent" not in fn and "new CustomEvent(" not in fn
+    # fail-open: a missing kit is a no-op, never a throw.
+    assert "typeof Kit.upgrade !== 'function'" in fn or "!Kit" in fn
+
+
+def test_migration_helper_only_composes_sections_with_a_heading():
+    """A headingless card (the Shortcuts flex header bar / its bare list card) has no `.osc-head`
+    to lift and upgrading it would only risk a body reflow — so the helper gates on a DIRECT-child
+    heading. For every standard section (all lead with a direct <h2>) it composes identically; the
+    Shortcuts tab is left on the raw `.admin-card` on purpose."""
+    js = _read(SETTINGS)
+    start = js.index("function _upgradeSettingsCards(")
+    end = js.index("function _swapToPanel(", start)
+    fn = js[start:end]
+    # the heading gate — pin the invariant (a direct-child heading is required), not exact prose.
+    assert "H[2-5]" in fn, "the helper must gate on a direct-child heading"
+    assert "hasHeading" in fn
+
+
 # ── BEHAVIORAL (Node): run the REAL kit against a fake DOM ────────────────────────────────────
 
 _HARNESS = r"""
