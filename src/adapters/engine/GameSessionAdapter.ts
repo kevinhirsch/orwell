@@ -198,6 +198,11 @@ import {
   type PlayerBoundThread, type RankedThread,
 } from "../../engine/secretPacing";
 import { SECRET_PACING } from "../../engine/secretPacingConstants";
+import {
+  composeShowrunnerNote, emphasisForThread, showrunnerNoteToProse,
+  type ShowrunnerNote, type ThreadSignal,
+} from "../../engine/showrunner";
+import { SHOWRUNNER } from "../../engine/showrunnerConstants";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore, TrackedSighting } from "../../engine/sessionSnapshot";
@@ -436,6 +441,19 @@ const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 const MYTH_MAKING_ENABLED_DEFAULT = process.env.ORWELL_MYTH_MAKING === "1";
 
 /**
+ * 0101 (#1401) — whether the AI SHOWRUNNER runs by DEFAULT. OFF unless `ORWELL_SHOWRUNNER=1`. A DEDICATED
+ * flag (sibling to `ORWELL_MYTH_MAKING`/`ORWELL_SECRET_PACING`) so calibration neutrality is provable in
+ * isolation: with it unset, `showrunnerTick` no-ops before composing anything (no note is stored) and
+ * `scheduleStoryThreads` sees no note ⇒ it iterates in the unchanged derive order at the unchanged
+ * `THREAD.surfaceProb` ⇒ the seeded `juryReach`/gradient/UAT spine is byte-identical to today. The
+ * showrunner is doubly-neutral BY CONSTRUCTION: it composes on a PURE scoring pass (no rng at all) and the
+ * scheduler it biases runs entirely on per-thread SIDE rngs (keyed by thread id, never the shared stream),
+ * so even the layer ON cannot perturb any competition/vote/eligibility roll. The calibration/UAT harness
+ * never sets it; the live deploy may. A test overrides per-session via `setShowrunnerEnabled`.
+ */
+const SHOWRUNNER_ENABLED_DEFAULT = process.env.ORWELL_SHOWRUNNER === "1";
+
+/**
  * 0099 (hidden half) — whether the off-screen NPC↔NPC SECRET BARTER runs by DEFAULT. OFF unless
  * `ORWELL_SECRET_BARTER=1`. A DEDICATED flag (sibling to `ORWELL_JURY_HOUSE`/`ORWELL_MYTH_MAKING`) so
  * calibration neutrality is provable in isolation: with it unset, `secretBarterTick` returns before
@@ -665,6 +683,17 @@ export class GameSessionAdapter implements GameSession {
   /** The watermark — the highest consumed notable-act's `GameEvent.ts` — so a used act is never
    *  re-selected into a second legend (0101). Monotonic (non-decreasing). */
   private legendLastActTick = 0;
+  /**
+   * 0101 (#1401) — the AI SHOWRUNNER. `showrunnerEnabled` gates the whole layer (DEFAULT OFF ⇒
+   * calibration byte-identical). `showrunnerNotes` is the Vault-held, APPEND-ONLY production bible (one
+   * note per (week, phase) beat — the once-per-beat dedupe mirrors the scheduler's own cadence);
+   * `showrunnerNoteCount` is its monotonic per-season count (a `SessionCoreCounts` dimension). Both reset
+   * only at a season boundary. ENGINE-ONLY / Vault-held — a note reaches NO player/admin projection and
+   * unseals only in the 0048 retrospective. NB: a note is composed on a PURE pass (no rng) and consumed by
+   * the scheduler's own side rngs, so the shared society/competition/vote stream is untouched ON or OFF. */
+  private showrunnerEnabled = SHOWRUNNER_ENABLED_DEFAULT;
+  private showrunnerNotes: ShowrunnerNote[] = [];
+  private showrunnerNoteCount = 0;
   /**
    * 0099 (hidden half) — whether the off-screen NPC↔NPC SECRET BARTER runs. DEFAULT OFF: the
    * calibration/UAT harness never enables it, so with it unset `secretBarterTick` returns before drawing
@@ -2224,6 +2253,18 @@ export class GameSessionAdapter implements GameSession {
       // already class-naturalized by `storyThreadToRetrospectiveProse`.
       hiddenStory.push({ type: storyThreadLabel(t.premise), content: storyThreadToRetrospectiveProse(t, nameOf) });
     }
+    // 0101/#1401 — the SHOWRUNNER's production bible unseals HERE (0048), the same Wall exception as the
+    // threads above: each beat's producer note rendered readably from the IN-MEMORY notes — source NAMES
+    // (public facts) + the class/position rationale, emphasis described qualitatively (never a premise,
+    // never a raw number). Pre-finale this is unreachable (the retrospective gate returns null), so a note
+    // never crosses to a live player/admin surface (the Vault-held boundary test proves it).
+    const threadSourceName = (threadId: string): string => {
+      const t = this.storyThreads.find((x) => x.id === threadId);
+      return t ? nameOf(t.sourceId) : "a houseguest";
+    };
+    for (const snote of this.showrunnerNotes) {
+      hiddenStory.push({ type: "Producer's note", content: showrunnerNoteToProse(snote, threadSourceName) });
+    }
     // #847 — the deep profile's secrets / true-goals / weakness are ALSO the source of the secret
     // threads above (each thread is derived from one of them), so re-rendering the deep-profile blob would
     // print the same secret TWICE. The threads are the canonical, live (status-bearing) representation of
@@ -2550,6 +2591,10 @@ export class GameSessionAdapter implements GameSession {
       // persisted so a driven thread stays driven and the cap is never re-opened by a reload.
       ...(Object.keys(this.nominationWeeks).length ? { nominationWeeks: cloneSession(this.nominationWeeks) } : {}),
       ...(this.surfacedThreadCount > 0 ? { surfacedThreadCount: this.surfacedThreadCount } : {}),
+      // 0101/#1401 — the showrunner's Vault-held production bible (append-only per beat) + its monotonic
+      // count, persisted so the season's producer notes survive a restart and only ever deepen (#4).
+      ...(this.showrunnerNotes.length ? { showrunnerNotes: cloneSession(this.showrunnerNotes) } : {}),
+      ...(this.showrunnerNoteCount > 0 ? { showrunnerNoteCount: this.showrunnerNoteCount } : {}),
       // 0091 — the per-season trigger-eruption count (the hard cap) + the dedicated trigger-rng tick counter,
       // persisted so the cap is never re-opened by a reload and the dedicated stream stays reproducible
       // (0007/0030). The per-trigger fired/lastFiredWeek flags ride on the byte-stable house above. Absent ⇒
@@ -2747,6 +2792,10 @@ export class GameSessionAdapter implements GameSession {
     this.legendTickCount = core.legendTickCount ?? 0;
     this.legendCount = core.legendCount ?? 0;
     this.legendLastActTick = core.legendLastActTick ?? 0;
+    // 0101/#1401: restore the showrunner's production bible + its monotonic count (absent on a pre-0101
+    // save / when the layer is off ⇒ []/0 — byte-identical to a pre-feature load).
+    this.showrunnerNotes = core.showrunnerNotes ? cloneSession(core.showrunnerNotes) : [];
+    this.showrunnerNoteCount = core.showrunnerNoteCount ?? 0;
     // 0099 (hidden half): restore the dedicated secret-barter rng counter + the spent-secret count
     // (absent on pre-0099-barter saves ⇒ 0).
     this.secretBarterTickCount = core.secretBarterTickCount ?? 0;
@@ -4122,6 +4171,7 @@ export class GameSessionAdapter implements GameSession {
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
       this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
+      this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -4389,6 +4439,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
     this.resetSecretBarter(); // 0099 — a warmed/fresh cast has bartered no secret off-screen
+    this.resetShowrunner(); // 0101/#1401 — a warmed/fresh cast carries no producer notes yet
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -4753,6 +4804,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetSecretPacing();
     this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
     this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
+    this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
     // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
@@ -4856,6 +4908,13 @@ export class GameSessionAdapter implements GameSession {
     this.legendTickCount = 0;
     this.legendCount = 0;
     this.legendLastActTick = 0;
+  }
+
+  /** 0101/#1401 — clear the showrunner's production bible + its monotonic count (a fresh season starts
+   *  with no producer notes). Reset only at a season boundary, never mid-season (non-degradation #4). */
+  private resetShowrunner(): void {
+    this.showrunnerNotes = [];
+    this.showrunnerNoteCount = 0;
   }
 
   /** 0099 (hidden half) — clear the off-screen secret-barter bookkeeping (a fresh season: no secret
@@ -5378,11 +5437,20 @@ export class GameSessionAdapter implements GameSession {
 
     let activations = 0;
     let surfaces = 0;
-    // Seed-stable iteration order is the derive order (the array order); never re-sort. The per-thread
-    // side rng keys off the game seed + thread id + the live (week, phase) — so the roll is deterministic
-    // AND advances as the game's POSITION advances (a thread gets a fresh chance each beat the house
-    // moves to), never perturbing the main house stream (0007 §4.5). Within one (week, phase) repeated
-    // ticks reuse the same roll — natural restraint: a thread fires at most once per beat, not per tick.
+    // 0101/#1401 — the AI SHOWRUNNER note (if the layer is on and one was composed this beat). CRITICAL
+    // (closed-set neutrality): the scheduler's FOLD-PRODUCING transitions — dormant→active, active→
+    // resolved (both call `foldHiddenImpact`, moving the hidden relationship layer that FEEDS the
+    // competition/vote spine) and active→surfaced (surfacing makes a thread inert, changing which threads
+    // later resolve-and-fold) — MUST stay byte-identical whether the showrunner is on or off, or the note
+    // would perturb outcomes (it does not: `showrunnerOutcomeNeutral` SHA256-pins a full season). So the
+    // note NEVER re-orders this loop and NEVER changes a surface/activate roll. Its ONLY effect is on the
+    // OPEN-SET, FOLD-FREE knowledge layer — routing a surfaced emphasized thread's belief TO THE PLAYER
+    // (inside `surfaceThread`), which moves no relationship edge and no outcome. Iteration is the fixed
+    // derive order (never re-sorted); the per-thread side rng keys off the game seed + thread id + the
+    // live (week, phase), so the roll is deterministic AND advances as the game's POSITION advances (a
+    // thread gets a fresh chance each beat the house moves to), never perturbing the main house stream
+    // (0007 §4.5). Within one (week, phase) repeated ticks reuse the same roll — a thread fires at most
+    // once per beat.
     for (const thread of this.storyThreads) {
       const side = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:thread-scheduler:${thread.id}:${this.week}:${this.phase}`));
       if (thread.status === "dormant") {
@@ -5413,6 +5481,9 @@ export class GameSessionAdapter implements GameSession {
         }
         // §4.2 / §5 — surface this tick (bounded roll, the season cap not yet spent, under the per-tick
         // surface cap). Surfacing is belief-level: NPC↔NPC gossip the common path, to-the-player rarer.
+        // The WHICH-thread + WHETHER-to-surface decision is byte-identical to the pre-showrunner scheduler
+        // (the roll is exactly `THREAD.surfaceProb`); the showrunner only re-weights the FOLD-FREE routing
+        // INSIDE `surfaceThread` (whether an emphasized surfaced thread reaches the PLAYER).
         if (surfaces < THREAD.maxSurfacesPerTick
           && this.surfacedThreadCount < THREAD.maxSurfacedPerSeason
           && side.next() < THREAD.surfaceProb) {
@@ -5485,10 +5556,32 @@ export class GameSessionAdapter implements GameSession {
       // The common case: hand the paraphrase to the 0038 gossip engine to diffuse NPC↔NPC.
       const origin = livingNpcs[rng.int(livingNpcs.length)]!;
       this.onThreadGossip(origin, rumor, thread.sourceId);
+      // 0101/#1401 — the SHOWRUNNER's ONE consumption effect: it makes sure the PLAYER catches the
+      // storylines the producers are leaning on. An EMPHASIZED thread that surfaced NPC-only ALSO reaches
+      // the player — an ADDITIVE, Vault-safe belief through the SAME anchored `surfaceInformationTo` seam,
+      // ON TOP of the byte-identical NPC gossip above. This is the pure OPEN-SET effect (which surfaced
+      // storyline the player hears): it seeds a player BELIEF only — it moves NO relationship edge, folds
+      // NOTHING, consumes NO rng, and leaves the NPC gossip / the WHICH-thread-surfaces decision / every
+      // activation+resolution FOLD byte-identical. So the closed set (competition / eligibility / vote) is
+      // byte-identical whether the showrunner is on or off (proven end-to-end by showrunnerOutcomeNeutral),
+      // while the player genuinely catches the season's emphasized arcs. Absent note / off ⇒ no-op.
+      if (this.showrunnerEmphasizes(thread.id) && this.onThreadSurfaceToPlayer) {
+        const belief = this.isPlayerConfidant(thread.sourceId)
+          ? this.confidantThreadRumor(thread, name)
+          : rumor;
+        this.onThreadSurfaceToPlayer(thread.sourceId, belief);
+      }
     }
     thread.status = "surfaced";
     thread.lifecycleWeek = this.week;
     this.surfacedThreadCount++;
+  }
+
+  /** 0101/#1401 — does the CURRENT showrunner note emphasize this thread (above the baseline multiplier)?
+   *  Used ONLY to route an emphasized surfaced thread's belief additionally TO THE PLAYER (open-set
+   *  knowledge; no fold, no rng, no outcome). False when the layer is off / no note / not on the shortlist. */
+  private showrunnerEmphasizes(threadId: string): boolean {
+    return emphasisForThread(this.currentShowrunnerNote(), threadId) > SHOWRUNNER.minEmphasis;
   }
 
   /**
@@ -5702,6 +5795,7 @@ export class GameSessionAdapter implements GameSession {
     if (flags.secretPacing !== undefined) GameSessionAdapter.secretPacingOverride = flags.secretPacing;
     if (flags.seededTieSurfacing !== undefined) GameSessionAdapter.seededTieSurfacingOverride = flags.seededTieSurfacing;
     if (flags.mythMaking !== undefined) this.mythMakingEnabled = flags.mythMaking;
+    if (flags.showrunner !== undefined) this.showrunnerEnabled = flags.showrunner;
   }
 
   /** The CURRENT resolved state of every B2 behavioral flag (env default or override) — Vault-free,
@@ -5715,6 +5809,7 @@ export class GameSessionAdapter implements GameSession {
       juryHouse: this.juryHouseEnabled,
       seededTieSurfacing: this.seededTieSurfacingEnabled,
       mythMaking: this.mythMakingEnabled,
+      showrunner: this.showrunnerEnabled,
     };
   }
 
@@ -6407,6 +6502,68 @@ export class GameSessionAdapter implements GameSession {
 
   /** Whether the myth-making layer is live (0101) — exposed for the orchestrator's wiring symmetry/tests. */
   mythMakingEnabledNow(): boolean { return this.mythMakingEnabled; }
+
+  /**
+   * Feature 0101 (#1401) — the AI SHOWRUNNER pass. Runs ONCE per bounded off-screen tick, BEFORE
+   * `scheduleStoryThreads`, and writes a Vault-held "producer note" proposing which SIMMERING hidden story
+   * threads the next tick's 0060 surfacing should EMPHASIZE. It is the "the season has an arc" layer: a
+   * short shortlist of the most dramatic / most overdue / most board-topical threads, each with a bounded,
+   * boost-only `emphasis` multiplier (ADR 0005 — SHAPE only; the schema makes an outcome directive
+   * inexpressible; the engine keeps every magnitude and the hard 0060 caps still bind).
+   *
+   * MANDATE (both proven by the boundary tests):
+   *  • VAULT-HELD — the note is stored in `showrunnerNotes` (this engine-only session core, like
+   *    `storyThreads`), so it reaches NO player/admin projection; it unseals only in the 0048
+   *    retrospective (`buildVaultUnseal`).
+   *  • CLOSED-SET NEUTRAL — this pass draws NO rng at all (pure scoring), and the scheduler it biases runs
+   *    on per-thread SIDE rngs (keyed by thread id, never the shared stream). So with the flag ON *or* OFF
+   *    the seeded competition / eligibility / vote stream is BYTE-IDENTICAL. DEFAULT OFF ⇒ nothing composed.
+   *
+   * ONCE-PER-BEAT: a note already composed for the current (week, phase) is reused — the same cadence the
+   * scheduler rolls at — so the bible stays bounded (~one per ceremony beat), append-only, and stable
+   * within a beat (consumption is stable across the beat's aux ticks). NO `persist()` here: it rides the
+   * orchestrator's bounded tick, whose own commit exports + persists the snapshot (R3/spineHardening).
+   */
+  showrunnerTick(): void {
+    if (!this.showrunnerEnabled || !this.house || this.storyThreads.length === 0) return;
+    const last = this.showrunnerNotes[this.showrunnerNotes.length - 1];
+    if (last && last.week === this.week && last.phase === this.phase) return; // one note per beat
+    const pos = this.seasonPosition();
+    // Score every SIMMERING (dormant/active) thread. Signals are all VAULT-FREE: `tension` from the
+    // engine's own both-way player↔source edges, `staleness` from the thread's `active`/`dormant` age,
+    // `salience` from the Vault-free board position (nominated / cornered / holding power) — NEVER a
+    // premise, NEVER a raw hidden number crosses into the note. Pure: this loop draws no rng.
+    const signals: ThreadSignal[] = [];
+    for (const t of this.storyThreads) {
+      if (t.status !== "dormant" && t.status !== "active") continue;
+      const reads = relationshipReads(this.rel.edge(PLAYER, t.sourceId), this.rel.edge(t.sourceId, PLAYER));
+      const weeksSince = Math.max(0, this.week - (t.lifecycleWeek ?? this.week));
+      const staleness = Math.min(1, weeksSince / SHOWRUNNER.stalenessSpanWeeks);
+      const salience = pos.nominees.has(t.sourceId) || pos.cornered.has(t.sourceId) || pos.powerHolders.has(t.sourceId) ? 1 : 0;
+      signals.push({ threadId: t.id, tension: reads.tension, staleness, salience });
+    }
+    if (signals.length === 0) return;
+    this.showrunnerNoteCount += 1;
+    this.showrunnerNotes.push(composeShowrunnerNote(signals, this.week, this.phase, this.showrunnerNoteCount));
+  }
+
+  /** The freshest producer note the scheduler should consult — or `undefined` when the layer is off / no
+   *  note yet (⇒ the scheduler falls back to the unchanged derive order + baseline `surfaceProb`). */
+  private currentShowrunnerNote(): ShowrunnerNote | undefined {
+    if (!this.showrunnerEnabled) return undefined;
+    return this.showrunnerNotes[this.showrunnerNotes.length - 1];
+  }
+
+  /** Turn the AI showrunner on/off (0101/#1401). Off by default — the calibration harness leaves it off
+   *  (with it off `showrunnerTick` composes nothing and the scheduler is byte-identical). */
+  setShowrunnerEnabled(on: boolean): void { this.showrunnerEnabled = on; }
+
+  /** Whether the showrunner layer is live — exposed for the orchestrator's wiring symmetry / tests. */
+  showrunnerEnabledNow(): boolean { return this.showrunnerEnabled; }
+
+  /** The Vault-held production bible so far (0101/#1401) — engine-only; exposed for the boundary tests
+   *  and the 0048 render. NEVER call from a player/admin projection (it IS the sealed producer notes). */
+  showrunnerNotesForUnseal(): readonly ShowrunnerNote[] { return this.showrunnerNotes; }
 
   /**
    * 0099 (hidden half) — the off-screen NPC↔NPC SECRET BARTER: once per bounded off-screen tick, an NPC

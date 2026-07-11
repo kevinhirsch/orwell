@@ -1435,6 +1435,9 @@ export interface BehavioralFlags {
   seededTieSurfacing?: boolean;
   /** 0101 — NPC myth-making (the house turns a rare, notable player act into a spreading legend). */
   mythMaking?: boolean;
+  /** 0101/#1401 — the AI showrunner (Vault-held producer notes that pace which simmering threads the
+   *  off-screen tick emphasizes; open-set only — never an outcome). */
+  showrunner?: boolean;
 }
 
 /** A player's answer to the current `PendingDecisionView`. */

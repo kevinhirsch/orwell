@@ -926,6 +926,14 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   // stream), and the only thing it changes is which already-Wall-safe surface 0060 picks + whether the
   // weekly budget allows it ⇒ the seeded comp/vote/jury spine is untouched (the load-bearing guarantee).
   sandbox.session.pacingDrip();
+  // 0101/#1401 — the AI SHOWRUNNER composes its Vault-held "producer note" for THIS beat BEFORE the
+  // scheduler runs, so the scheduler can consult it. It scores the simmering hidden threads (tension /
+  // staleness / board salience) on a PURE pass (no rng) and stores a note proposing which threads to
+  // EMPHASIZE — a clamped, boost-only re-weight of 0060's OPEN-SET surfacing selection, never an outcome
+  // (ADR 0005). SELF-GATED (default-OFF `ORWELL_SHOWRUNNER`): off ⇒ no note composed ⇒ the scheduler below
+  // is byte-identical, and the note-composition pass draws ZERO from this shared `rng` either way, so the
+  // seeded competition/vote/jury spine is untouched ON or OFF (the load-bearing calibration guarantee).
+  sandbox.session.showrunnerTick();
   // 0060 — the story-thread scheduler rides THIS bounded tick (after society/gossip/confessional, so it
   // reads the freshly-moved house). It walks each seeded thread's lifecycle — dormant→active (reusing
   // the 0023 fold), active→surfaced (reusing 0038 gossip / 0002 pathways, capped per §5), and →resolved
