@@ -204,7 +204,10 @@
       #${CARD_ID}.odec-risk .odec-confirm { background: var(--color-error, var(--red, #e06c75)); }
       #${CARD_ID} .odec-risk-badge {
         display: inline-flex; align-items: center; gap: .3rem; margin-left: .4rem;
-        padding: .08rem .45rem; border-radius: 999px; font-size: .68rem; font-weight: 700;
+        /* #651: .68rem sat BELOW the --fs-2xs text floor once the fluid root shrinks at the
+           phone tiers (10.3px at tiny-320) — caught by the widened crowding sweep. The --fs-xs
+           caption token clears the floor at every tier. */
+        padding: .08rem .45rem; border-radius: 999px; font-size: var(--fs-xs, .75rem); font-weight: 700;
         letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
         color: var(--color-error, var(--red, #e06c75));
         border: 1px solid color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 60%, transparent);

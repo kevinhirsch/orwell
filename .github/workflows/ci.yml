@@ -571,12 +571,18 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 min: the engine-staged run adds npm ci + build (~2 min) and the ORWELL_MATRIX_FINISH
+    # season fast-forward (~2 min of Echo-narrator advance calls) to the ~2-min sweep itself.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
           # Self-hosted runner: don't leave the job GITHUB_TOKEN in .git/config for later steps.
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -595,8 +601,38 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
       - name: install playwright chromium
         run: python3 -m playwright install --with-deps chromium
-      - name: responsive matrix gate — viewports x surfaces (Stream S, ruling 16)
+      # ── #651 gap 1: stage a REAL engine so the game surfaces are actually measured ──────────
+      # Without ORWELL_MATRIX_ENGINE the gate runs CHROME-ONLY (no game staged), so the game
+      # surfaces (#orwell-status, #orwell-presence, the decision card, #orwell-retro, …) were
+      # NEVER measured for overflow/overlap/crowding/touch in CI — a whole class of UI
+      # regressions shipped green. Boot the engine (deterministic Echo narrator, key-free —
+      # same as deploy-smoke/mirror-parity) and run the matrix engine-staged, with
+      # ORWELL_MATRIX_FINISH=1 so the endgame surfaces (retro, finale card) render too (J5-19).
+      - name: build the engine (dist/main.js the matrix stages against)
+        run: |
+          npm ci
+          npm run build
+      - name: boot the engine
+        run: |
+          ORWELL_ENGINE_PORT=8765 ORWELL_DATA_DIR="$RUNNER_TEMP/orwell-matrix-data" \
+            node dist/main.js > "$RUNNER_TEMP/orwell-matrix-engine.log" 2>&1 &
+          for i in $(seq 60); do
+            if curl -fsS http://127.0.0.1:8765/health > /dev/null 2>&1; then
+              echo "engine healthy"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::engine did not become healthy"
+          cat "$RUNNER_TEMP/orwell-matrix-engine.log"
+          exit 1
+      - name: responsive matrix gate — viewports x surfaces, ENGINE-STAGED (Stream S, ruling 16; #651)
+        env:
+          ORWELL_MATRIX_ENGINE: http://127.0.0.1:8765
+          ORWELL_MATRIX_FINISH: "1"
         run: cd frontend && python3 scripts/responsive_matrix.py
+      - name: engine log (on failure)
+        if: failure()
+        run: cat "$RUNNER_TEMP/orwell-matrix-engine.log" || true
 
   # ── F5 two-window live mirror-parity gate (ship-gate F5 / ADR 0012 §3.3 / ADR 0015) ──────────
   #
