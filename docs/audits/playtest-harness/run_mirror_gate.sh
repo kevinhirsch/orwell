@@ -143,7 +143,12 @@ rm -f "$FE_DATA/auth.json" "$FE_DATA/sessions.json" "$FE_DATA/app.db" "$FE_DATA/
 ( cd "$ROOT/frontend" && ORWELL_ADMIN_USER=$ADMIN_USER ORWELL_ADMIN_PASSWORD="$ADMIN_PW" \
     ORWELL_SKIP_ADMIN_PROMPT=1 ORWELL_SKIP_RUN_HINT=1 ORWELL_DATA_DIR="$FE_DATA" \
     .venv/bin/python setup.py >"$LOGS/fe-setup.log" 2>&1 )
+# Pin the deterministic-floor enrichment policy (like the golden driver): this gate seeds a game
+# against a FAKE model that wires no per-class enrichment provider, so the runtime `strict` default
+# would (correctly) refuse game creation and the mirror could never start. "Floor for tests, loud
+# for production" — the SERVER/product default stays strict; only this automated gate opts to soft.
 ( cd "$ROOT/frontend" && ORWELL_GAME_BUILD=1 AUTH_ENABLED=true LOCALHOST_BYPASS=false \
+    ORWELL_ENRICHMENT_POLICY=soft \
     ORWELL_ENGINE_MCP_URL="$ENGINE_URL" ORWELL_DATA_DIR="$FE_DATA" \
     exec .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port $FE_PORT >"$LOGS/fe.log" 2>&1 ) & PIDS+=($!)
 wait_http "$BASE_URL/login" frontend || { tail -30 "$LOGS/fe.log"; exit 1; }
