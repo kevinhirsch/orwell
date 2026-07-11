@@ -4956,6 +4956,12 @@ async def _stream_agent_loop_impl(
         # advanceGame, _auto_record_scene), which remain the other nets; this just guarantees the call
         # PROACTIVELY so the model can't narrate an outcome it never read.
         _forced_tool_choice = None
+        # Greptile P1 (PR #1377): the forced-tool-choice BELT NOTE is deferred until the forced call
+        # actually lands as a tool event this round (§5 contract: a count means an APPLIED correction,
+        # never an attempt — selecting the wire directive is the attempt; a provider/stream failure
+        # after selection must not drain as a belt fire). The selection sites below stash the forced
+        # tool's name here; the tool-execution loop notes the belt when the matching call is observed.
+        _forced_belt_tool = None
         # #1154 no-auth fix: under AUTH_ENABLED=false `owner` is None, but the live game lives under the
         # engine's "default" sandbox (the FE↔engine anon→default mapping), and apply_game_framing now
         # stashes the framed beat key under that same "default" fallback — so resolve to it. Previously
@@ -4988,8 +4994,9 @@ async def _stream_agent_loop_impl(
                     _forced_tool_choice = _forced_tool_choice_for_beat(
                         _framed_key, _turn_tool_names_force, pending_open=_pending_open)
                     if _forced_tool_choice is not None:
-                        _note_belt(owner, "forced-tool-choice:"
-                                   + str(_forced_tool_choice["function"]["name"]))
+                        # Belt note DEFERRED until the forced call lands (Greptile P1 — see
+                        # _forced_belt_tool above); stash the required tool's name only.
+                        _forced_belt_tool = str(_forced_tool_choice["function"]["name"])
                         logger.info(
                             f"[orwell] #1154 forcing tool_choice={_forced_tool_choice} at "
                             f"phase={_framed_phase_force} round={round_num} user={_force_owner}")
@@ -5021,7 +5028,9 @@ async def _stream_agent_loop_impl(
                         started=bool((_cast_state or {}).get("started")),
                         player_signalled=True)
                     if _forced_tool_choice is not None:
-                        _note_belt(owner, "forced-tool-choice:" + _CASTING_FINALIZE_TOOL)
+                        # Belt note DEFERRED until the forced call lands (Greptile P1 — same
+                        # marker as the live beat-force above; one gated note site).
+                        _forced_belt_tool = _CASTING_FINALIZE_TOOL
                         logger.info(
                             f"[orwell] gap#3 forcing tool_choice={_forced_tool_choice} at the "
                             f"casting finalize round={round_num} user={_force_owner}")
@@ -6894,6 +6903,13 @@ async def _stream_agent_loop_impl(
             if result.get("diff"):
                 tool_event["diff"] = result["diff"]
             tool_events.append(tool_event)
+            # Gap #3 / Greptile P1: the forced-tool-choice belt counts ONLY here — when the round's
+            # FORCED call actually landed as a tool event (§5: a count means an applied correction,
+            # never an attempt; a provider/stream failure after the wire directive was selected must
+            # not drain as a belt fire). Cleared after one note so a repeat call never double-counts.
+            if _forced_belt_tool and block.tool_type == _forced_belt_tool:
+                _note_belt(owner, "forced-tool-choice:" + _forced_belt_tool)
+                _forced_belt_tool = None
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
             # #1312 (Vault Wall): the MODEL called createCharacter itself and the engine started the

@@ -191,8 +191,7 @@ def test_every_agent_loop_belt_notes_its_fire_as_a_real_call():
     for token in (
         '"advance-stall-nudge"',
         '"forced-advance:"',              # _commit_advance_silently (preview-commit / stall / forced-stall)
-        '"forced-tool-choice:"',          # #1154 live force (concat with the forced tool's name)
-        '"forced-tool-choice:" + _CASTING_FINALIZE_TOOL',  # the gap-#3 casting force
+        '"forced-tool-choice:"',          # the ONE gated note site (live beat-force + casting force)
         '"auto-record-scene"',
         '"auto-record-deal"',
         '"auto-confide"',
@@ -241,6 +240,31 @@ def test_success_gated_belts_fire_only_after_the_helper_applied():
         between = src[call_at:note_at].replace("await " + helper + "(", "", 1)
         assert "await _auto_" not in between, (
             f"{token}: note is not adjacent to its own helper's success branch")
-        # And the belt's once-per-turn counter increment still precedes the helper call.
-        assert re.search(r"_turn_\w+ \+= 1", src[max(0, call_at - 600):call_at]), (
-            f"{token}: once-per-turn counter increment missing before the helper call")
+        # And the belt's once-per-turn counter increment still precedes the helper call —
+        # scoped to the belt's own `if _want_*` gate (not a fixed-width lookback), so the
+        # increment asserted is the one inside THIS belt's branch.
+        gate_at = src.rindex("if _want_", 0, call_at)
+        assert re.search(r"_turn_\w+ \+= 1", src[gate_at:call_at]), (
+            f"{token}: once-per-turn counter increment missing inside the belt's gate")
+
+
+def test_forced_tool_choice_notes_only_after_the_forced_call_landed():
+    """Greptile P1 (PR #1377) — the forcing-path twin of the success-gating pin above: selecting
+    the `tool_choice` wire directive is an ATTEMPT; the belt counts only when the forced call
+    actually LANDED as a tool event this round (a provider/stream failure after selection must
+    never drain as a belt fire — §5: a count means an applied correction, never an attempt)."""
+    src = _src("src/agent_loop.py")
+    # Exactly ONE note site for the forcing belts (both the live beat-force and the casting
+    # force funnel through it) …
+    assert src.count('_note_belt(owner, "forced-tool-choice:"') == 1
+    note_at = src.index('_note_belt(owner, "forced-tool-choice:"')
+    # … sitting AFTER the round's tool event is appended and guarded on the MATCHING tool.
+    append_at = src.rindex("tool_events.append(tool_event)", 0, note_at)
+    guard = src[append_at:note_at]
+    assert "if _forced_belt_tool and block.tool_type == _forced_belt_tool" in guard, (
+        "the forced-tool-choice note must be gated on the forced tool actually landing")
+    # Both SELECTION sites stash the pending marker instead of noting directly.
+    assert '_forced_belt_tool = str(_forced_tool_choice["function"]["name"])' in src  # live force
+    assert "_forced_belt_tool = _CASTING_FINALIZE_TOOL" in src                        # casting force
+    # And the marker is cleared after one note (a repeat call never double-counts).
+    assert "_forced_belt_tool = None" in src[note_at:note_at + 300]

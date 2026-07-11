@@ -187,8 +187,12 @@ cheap always-on counter. **A count means an APPLIED correction, not an attempt**
 driven belts (`auto-record-scene`/`-deal`, `auto-confide`, `auto-expose/trade-secret`, both move
 belts) note their fire only AFTER the awaited helper reports a real applied update — a
 `room:null` / `withIds:[]` / `struck:false` extraction or a failed call is a no-op and never
-counts (counting attempts would poison exactly the measurement this exists to create; the pinned
-gate is `test_belt_telemetry.py::test_success_gated_belts_fire_only_after_the_helper_applied`).
+counts — and the **forcing paths** (`forced-tool-choice:*`) note only when the forced call
+actually LANDS as a tool event in the round (selecting the wire directive is the attempt; a
+provider/stream failure after selection never counts). Counting attempts would poison exactly
+the measurement this exists to create; the pinned gates are
+`test_belt_telemetry.py::test_success_gated_belts_fire_only_after_the_helper_applied` and
+`::test_forced_tool_choice_notes_only_after_the_forced_call_landed`.
 
 **Success criterion for the seam:** on a healthy model, `forced-tool-choice:*` counters may be hot
 (the guarantee doing its job, invisible to the player) while the *reactive* counters
