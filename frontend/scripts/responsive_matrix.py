@@ -78,7 +78,7 @@ XFAIL = {
     #
     # #1371 — the finished-season retrospective window (#orwell-retro, kit slot top-right,
     # fixed z-502) floats OVER the gadget rail's docked cards on rail-visible tiers and
-    # reaches the composer at several tiers. ONE root cause, three collision families —
+    # reaches the composer at several tiers. ONE root cause, four collision families (#1371-a..d) —
     # surfaced the first time the matrix ran ENGINE-STAGED + FINISHED in CI (#651 gap 1);
     # pre-existing state, not a new regression. Remove all four entries when #1371 lands.
     "#1371-a": "overlap:orwell-retro intersects the composer",
