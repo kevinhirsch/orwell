@@ -145,3 +145,107 @@ def test_appearance_sections_compose_the_primitive_mobile(_app):
         result = _land_on_appearance(page, _app, {"width": 390, "height": 844})
         browser.close()
     _assert_composed(result)
+
+
+# ── #658 follow-on: the REMAINING tabs compose the primitive, proven in a REAL browser ────────
+# Appearance was the first tab (above). The rest migrate through the single `_swapToPanel` seam —
+# every tab activation composes the shown panel's sections. This lane drives each tab in a real FE
+# and asserts the same `.osc-card` > `.osc-head` (`.osc-title`) + `.osc-body` contract, KEEPING
+# `.admin-card` and dropping the inline padding leak — for a player-facing tab (account), the
+# intentional skip (shortcuts), and the admin panels (including the services "Login background"
+# card admin.js appends dynamically).
+
+_DESKTOP = {"width": 1280, "height": 900}
+_MOBILE = {"width": 390, "height": 844}
+
+_PROBE = r"""
+(tabName) => {
+  const panel = document.querySelector(`[data-settings-panel="${tabName}"]`);
+  if (!panel) return { error: 'no panel: ' + tabName };
+  const cards = Array.from(panel.children).filter(
+    c => c.classList && (c.classList.contains('osc-card') || c.classList.contains('admin-card')));
+  return { count: cards.length, rows: cards.map(c => ({
+    osc: c.classList.contains('osc-card'),
+    admin: c.classList.contains('admin-card'),
+    head: !!c.querySelector(':scope > .osc-head > .osc-title'),
+    body: !!c.querySelector(':scope > .osc-body'),
+    inlinePad: c.style.paddingBottom || '',
+  })) };
+}
+"""
+
+
+def _land_on_tab(page, base, viewport, tab, force_admin=False):
+    page.set_viewport_size(viewport)
+    page.goto(base + "/", wait_until="load", timeout=30000)
+    page.wait_for_timeout(1500)
+    open_settings_deterministically(page)
+    if force_admin:
+        # The admin panels (services/ai/users/system/…) are `.admin-only` + built lazily by the
+        # admin module. This no-engine boot has no admin session, so reveal + build them the same
+        # way an admin session would, then let `_swapToPanel` compose them on click. Vault-free,
+        # purely to exercise the render path.
+        page.evaluate(
+            """() => { try { window._isAdmin = true;
+                document.querySelectorAll('.admin-only').forEach(e => { e.style.display = ''; });
+                if (window.adminModule && window.adminModule._initData) window.adminModule._initData();
+            } catch (_) {} }""")
+        page.wait_for_timeout(500)
+    page.evaluate("(t) => { const b = document.getElementById('settings-tab-' + t); if (b) b.click(); }", tab)
+    page.wait_for_timeout(400)
+    return page.evaluate(_PROBE, tab)
+
+
+def _run_tab(app, viewport, tab, force_admin=False):
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as e:
+            pytest.skip(f"chromium unavailable: {e}")
+        page = browser.new_page()
+        result = _land_on_tab(page, app, viewport, tab, force_admin)
+        browser.close()
+    return result
+
+
+def _assert_tab_composed(result, tab, min_cards=1):
+    assert "error" not in result, result.get("error")
+    rows = result["rows"]
+    assert len(rows) >= min_cards, f"{tab}: expected >= {min_cards} sections; got {len(rows)}"
+    for r in rows:
+        assert r["osc"], f"{tab}: each section is upgraded to .osc-card"
+        assert r["admin"], f"{tab}: upgrade KEEPS .admin-card (peek / empty-tab / closest still work)"
+        assert r["head"], f"{tab}: each section has an .osc-head > .osc-title"
+        assert r["body"], f"{tab}: each section wraps its content in .osc-body"
+        assert not r["inlinePad"], f"{tab}: the per-card inline padding leak is dropped"
+
+
+def test_account_sections_compose_the_primitive_desktop(_app):
+    _assert_tab_composed(_run_tab(_app, _DESKTOP, "account"), "account", min_cards=3)
+
+
+def test_account_sections_compose_the_primitive_mobile(_app):
+    _assert_tab_composed(_run_tab(_app, _MOBILE, "account"), "account", min_cards=3)
+
+
+def test_shortcuts_tab_stays_on_raw_admin_card(_app):
+    """The Shortcuts tab is intentionally NOT migrated: its header bar is a flex row whose <h2> is
+    nested in a wrapper (no direct-child heading → upgrading would drop the reset button below the
+    title) and its list card is headingless. Both stay on the raw `.admin-card`. This pins the skip
+    as deliberate + stable (a future change that upgrades it must be a conscious choice)."""
+    result = _run_tab(_app, _DESKTOP, "shortcuts")
+    assert "error" not in result, result.get("error")
+    rows = result["rows"]
+    assert len(rows) >= 1, "the shortcuts panel has sections"
+    for r in rows:
+        assert r["admin"], "shortcuts sections keep .admin-card"
+        assert not r["osc"], "shortcuts sections are intentionally left un-upgraded (no clean .osc-head)"
+
+
+@pytest.mark.parametrize("tab", ["services", "ai", "search", "users", "tools", "system"])
+def test_admin_panels_compose_the_primitive(_app, tab):
+    """The admin panels migrate through the same `_swapToPanel` seam once shown — including the
+    services 'Login background' card admin.js appends dynamically (it composes on first activation
+    because the admin build runs before the panel is shown)."""
+    _assert_tab_composed(_run_tab(_app, _DESKTOP, tab, force_admin=True), tab, min_cards=1)
