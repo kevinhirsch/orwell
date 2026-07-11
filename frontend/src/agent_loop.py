@@ -1572,6 +1572,52 @@ def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_op
     return None
 
 
+# ── Gap #3 — the CASTING-FINALIZE forced tool_choice (the #1154 pattern generalized to the one
+# pre-game closed-set beat with exactly one legal lever). The reactive finalize fallback below
+# (`_CASTING_STALL_LEVEL` → forced `do_create_character`) fires AFTER the model has already burned a
+# turn (or several) not finalizing; this forces the createCharacter call ON THE WIRE, under the SAME
+# gates the reactive terminal already requires — the engine says casting is `ready` AND `finalizable`
+# (createCharacter would succeed; never mints a floater) and the PLAYER explicitly signalled
+# readiness (a hidden production cue never counts). No new authority is created: only WHEN the
+# guaranteed call happens moves — proactive, so the model finalizes itself and narrates the premiere
+# from the real returned result. The reactive ladder stays as the net; the #1312 pre-game context
+# purge rides the existing model-called-createCharacter path. We still NEVER force submitDecision
+# (the player's binding pick) — createCharacter carries no player choice the player has not already
+# explicitly given (intake on file + an explicit "start the season" signal).
+# Design + belt inventory: docs/design/undercall-seam-structural.md.
+_CASTING_FINALIZE_TOOL = "createCharacter"
+
+
+def _forced_tool_choice_for_casting(turn_tool_names, *, ready: bool, finalizable: bool,
+                                    started: bool, player_signalled: bool):
+    """Return the `tool_choice` that FORCES the casting finalize this round, or None.
+
+    Pure + side-effect-free (the #1154 `_forced_tool_choice_for_beat` sibling). Forces ONLY when
+    every reactive-terminal gate already holds: pre-game (`started` False), the engine reports the
+    intake `ready` AND `finalizable` (createCharacter will be accepted — never a floater), the
+    player explicitly signalled readiness this turn (`_player_signals_casting_ready` — production
+    cues excluded there), and the model has not already called createCharacter this turn (the
+    guarantee is met ⇒ never re-force on a later round)."""
+    if started or not (ready and finalizable) or not player_signalled:
+        return None
+    if _CASTING_FINALIZE_TOOL in (turn_tool_names or set()):
+        return None
+    return {"type": "function", "function": {"name": _CASTING_FINALIZE_TOOL}}
+
+
+def _note_belt(owner, belt: str, n: int = 1) -> None:
+    """Gap #3 belt-fire telemetry: count a guardrail-belt firing in the Vault-free sync ledger
+    (`orwell_sync_ledger.note_belt_fire` — names + counts only, drained into the next recorded
+    turn's `beltsFired` map). Fail-soft by construction: telemetry must never hurt the turn.
+    Keyed by raw owner — the ledger maps None to the same "default" sentinel the belt stores use
+    (the NAR-1 lesson), so single-tenant fires are counted too."""
+    try:
+        from src import orwell_sync_ledger as _led
+        _led.note_belt_fire(owner, belt, n)
+    except Exception:
+        pass
+
+
 # DeepSeek-V4 (the prior OOB narrator) returned HTTP 400 on `tool_choice` in always-thinking mode (the
 # 2026-06-21 conformance audit) — so forcing must NEVER be sent to it. GLM-4.7 (the current OOB model)
 # honors it. We gate forcing to models NOT on this known-rejecter list rather than allow-listing one
@@ -4939,11 +4985,45 @@ async def _stream_agent_loop_impl(
                     _forced_tool_choice = _forced_tool_choice_for_beat(
                         _framed_key, _turn_tool_names_force, pending_open=_pending_open)
                     if _forced_tool_choice is not None:
+                        _note_belt(owner, "forced-tool-choice:"
+                                   + str(_forced_tool_choice["function"]["name"]))
                         logger.info(
                             f"[orwell] #1154 forcing tool_choice={_forced_tool_choice} at "
                             f"phase={_framed_phase_force} round={round_num} user={_force_owner}")
             except Exception as _force_err:
                 logger.warning(f"[orwell] #1154 tool_choice force skipped: {_force_err}")
+                _forced_tool_choice = None
+        elif (game_mode == "casting" and all_tool_schemas
+                and _model_honors_forced_tool_choice(model)
+                and bool(get_setting("force_tool_choice_at_beats", True))):
+            # ── Gap #3 — the CASTING-FINALIZE force (the one pre-game closed-set beat). Gates,
+            # cheapest first so an ordinary interview turn does NO extra work: the PLAYER explicitly
+            # signalled readiness this turn (regex — production cues excluded), createCharacter is
+            # actually on the wire (a named tool_choice for an absent tool 400s), and only then one
+            # engine state read to confirm the SAME terminal the reactive fallback requires: intake
+            # `ready` AND `finalizable`, season not started. Fail-open: any hiccup ⇒ no forcing.
+            try:
+                if (_player_signals_casting_ready(messages)
+                        and _CASTING_FINALIZE_TOOL in set(_tool_names_sent)):
+                    _turn_tool_names_force = {ev.get("tool") for ev in (tool_events or [])
+                                              if isinstance(ev, dict) and ev.get("tool")}
+                    from src import orwell_engine as _oe_force
+                    _cast_state = await _oe_force.get_game_state(owner)
+                    _cast_view = (_cast_state or {}).get("casting") \
+                        if isinstance(_cast_state, dict) else None
+                    _forced_tool_choice = _forced_tool_choice_for_casting(
+                        _turn_tool_names_force,
+                        ready=bool(_cast_view and _cast_view.get("ready")),
+                        finalizable=bool(_cast_view and _cast_view.get("finalizable")),
+                        started=bool((_cast_state or {}).get("started")),
+                        player_signalled=True)
+                    if _forced_tool_choice is not None:
+                        _note_belt(owner, "forced-tool-choice:" + _CASTING_FINALIZE_TOOL)
+                        logger.info(
+                            f"[orwell] gap#3 forcing tool_choice={_forced_tool_choice} at the "
+                            f"casting finalize round={round_num} user={_force_owner}")
+            except Exception as _force_err:
+                logger.warning(f"[orwell] casting tool_choice force skipped: {_force_err}")
                 _forced_tool_choice = None
 
         # Primary target + any configured fallback models. stream_llm_with_fallback
@@ -5687,8 +5767,11 @@ async def _stream_agent_loop_impl(
                     # introduced by name — keeps the designed gate, guarantees the intros register.
                     # Pure persist side effect (never a re-prompt); runs before the other belts.
                     if _moment == "premiere":
-                        _turn_premiere_marks += int(
+                        _marks_now = int(
                             await _auto_mark_premiere_intros(_turn_narration, owner) or 0)
+                        _turn_premiere_marks += _marks_now
+                        if _marks_now:
+                            _note_belt(owner, "premiere-meet-belt", _marks_now)  # gap #3 telemetry
                     # ── L21/L24 auto-move belt (FIRST — a pure persist side effect, never a re-prompt).
                     # The player walked to a room this turn but the model never called moveTo, so the
                     # engine still has them in the OLD room and next turn's whereabouts would snap back.
@@ -5701,6 +5784,7 @@ async def _stream_agent_loop_impl(
                     # always wins (`_moved` short-circuits `_want_move`). Vault-free (whereabouts).
                     if _want_move:
                         _turn_move_nudges += 1  # once per turn
+                        _note_belt(owner, "auto-move-player")  # gap #3 telemetry
                         await _auto_move_player(_turn_narration, _last_user_for_move,
                                                 endpoint_url, model, headers, owner)
                     # ── ADR 0009 NPC auto-move belt (also a pure persist side effect, never a re-prompt).
@@ -5712,6 +5796,7 @@ async def _stream_agent_loop_impl(
                     # that also advances a beat. Model-driven moveHouseguest wins (`_npc_moved` gate).
                     if _want_npc_move:
                         _turn_npc_move_nudges += 1  # once per turn
+                        _note_belt(owner, "auto-move-npc")  # gap #3 telemetry
                         await _auto_move_npc(_turn_narration, _last_user_for_move,
                                              _house, endpoint_url, model, headers, owner)
                     # ── Post-season re-approach (0057): the season is over and the player wandered
@@ -5763,6 +5848,7 @@ async def _stream_agent_loop_impl(
                         _sl_key = _belt_key(owner)
                         _level = _ADVANCE_STALL_LEVEL.get(_sl_key, 0)
                         _turn_advance_nudges += 1
+                        _note_belt(owner, "advance-stall-nudge")  # gap #3 telemetry
                         _ADVANCE_STALL_LEVEL[_sl_key] = _level + 1
 
                         async def _commit_advance_silently(_why: str) -> bool:
@@ -5799,6 +5885,10 @@ async def _stream_agent_loop_impl(
                                 # never reset the belt state that single-tenant reads actually see).
                                 _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0
                                 _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
+                                # Gap #3 telemetry: one stable token per silent-commit family
+                                # ("stall L2" → "stall"; "forced stall L3" → "forced-stall").
+                                _note_belt(owner, "forced-advance:"
+                                           + (_why or "").split(" L")[0].strip().replace(" ", "-"))
                                 logger.info(f"[orwell] committed advanceGame silently ({_why}, "
                                             f"phase={_phase}) round {round_num} user={owner}")
                                 return True
@@ -6176,6 +6266,7 @@ async def _stream_agent_loop_impl(
                     _touched_deal = _scene_touched_houseguest(_turn_narration, messages, [h.get("name") for h in _house])
                     if _want_deal and _touched_deal:
                         _turn_deal_nudges += 1  # once per turn
+                        _note_belt(owner, "auto-record-deal")  # gap #3 telemetry
                         if await _auto_record_deal(_turn_narration, _extract_last_user_message(messages),
                                                    _house, endpoint_url, model, headers, owner):
                             _turn_record_nudges = max(_turn_record_nudges, 1)  # deal banked the fold
@@ -6189,6 +6280,7 @@ async def _stream_agent_loop_impl(
                     # (_turn_confide_nudges is set to 1 on its tool call, which makes _want_confide False).
                     if _want_confide and _touched_deal:
                         _turn_confide_nudges += 1  # once per turn
+                        _note_belt(owner, "auto-confide")  # gap #3 telemetry
                         await _auto_confide(_turn_narration, _last_user_for_confide,
                                             _house, endpoint_url, model, headers, owner)
                     # 0093: the player outed a secret they already know but the model never called
@@ -6198,6 +6290,7 @@ async def _stream_agent_loop_impl(
                     # invented secret). Model-driven exposeSecret always wins (precedence set on tool use).
                     if _want_expose and _touched_deal:
                         _turn_expose_nudges += 1  # once per turn
+                        _note_belt(owner, "auto-expose-secret")  # gap #3 telemetry
                         await _auto_expose_secret(_turn_narration, _last_user_for_confide,
                                                   _house, endpoint_url, model, headers, owner)
                     # 0099: the player traded a secret they already know to a specific houseguest but the
@@ -6206,10 +6299,12 @@ async def _stream_agent_loop_impl(
                     # roster only. Model-driven tradeSecret always wins.
                     if _want_trade and _touched_deal:
                         _turn_trade_nudges += 1  # once per turn
+                        _note_belt(owner, "auto-trade-secret")  # gap #3 telemetry
                         await _auto_trade_secret(_turn_narration, _last_user_for_confide,
                                                  _house, endpoint_url, model, headers, owner)
                     if _want_record and _touched and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN:
                         _turn_record_nudges += 1  # once per turn
+                        _note_belt(owner, "auto-record-scene")  # gap #3 telemetry
                         await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
                                                  _house, endpoint_url, model, headers, owner)
                         # the scene is banked (or was genuinely solo) — end the turn normally.
@@ -6267,6 +6362,7 @@ async def _stream_agent_loop_impl(
                             _extract_last_user_message(messages), cleaned_round,
                             endpoint_url, model, headers, owner):
                         _turn_casting_record_belt += 1  # FE back-filled the player's casting answer
+                        _note_belt(owner, "casting-record-belt")  # gap #3 telemetry
                 # ── Casting finalize fallback (the game won't START): the model under-calls
                 # createCharacter. If casting is finalizable (engine ready) AND the player signalled
                 # readiness but the model didn't finalize this turn, nudge — then, past the rungs,
@@ -6337,6 +6433,7 @@ async def _stream_agent_loop_impl(
                                     _CASTING_STALL_LEVEL.pop(owner, None)
                                     _CASTING_SUBSTANCE_LEVEL.pop(owner, None)
                                     _turn_casting_force += 1  # FE forced the season start (finalize fallback)
+                                    _note_belt(owner, "casting-finalize-force")  # gap #3 telemetry
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
                                     # #1312 (Vault Wall): the season just went live THIS turn — purge the
@@ -6383,6 +6480,7 @@ async def _stream_agent_loop_impl(
                                                f"{type(_e).__name__}: {_e}".rstrip(': '))
                         _cn = _CASTING_NUDGES[min(_clv, len(_CASTING_NUDGES) - 1)]
                         _turn_casting_nudge += 1  # casting finalize nudge fired
+                        _note_belt(owner, "casting-nudge")  # gap #3 telemetry
                         logger.info(f"[orwell] casting finalize nudge (L{_clv}) round {round_num} user={owner}")
                         messages.append({"role": "system", "content": _cn})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
@@ -6411,6 +6509,7 @@ async def _stream_agent_loop_impl(
                             _gap = _casting.get("next") or ""
                             _missing = _casting.get("missing") or []
                             _turn_casting_nudge += 1  # casting substance steer fired
+                            _note_belt(owner, "casting-nudge")  # gap #3 telemetry
                             messages.append({"role": "system",
                                              "content": _casting_substance_nudge(_gap, _missing)})
                             logger.info(f"[orwell] casting substance steer (turn {_slv + 1}, "
@@ -6824,10 +6923,12 @@ async def _stream_agent_loop_impl(
                     _ev_content = str(_ev.get("content") or "")
                     if _ev_beat in _EVICTION_STAGE_BEATS:
                         formatted += _eviction_reveal_steer(_ev_beat, _ev_content)
+                        _note_belt(owner, "eviction-reveal-steer")  # gap #3 telemetry
                     # F8 (#1015): the same belt for the nomination / veto ceremony the model breezes
                     # past (NPC-HOH self-advances the phase, so the moment fragment never surfaces).
                     elif _ev_beat in _CEREMONY_NARRATE_BEATS:
                         formatted += _ceremony_narration_steer(_ev_beat, _ev_content)
+                        _note_belt(owner, "ceremony-narration-steer")  # gap #3 telemetry
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
 

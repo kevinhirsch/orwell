@@ -446,3 +446,162 @@ def test_loop_non_game_chat_never_forces(monkeypatch):
         monkeypatch, model="z-ai/glm-4.7", framed_key=("w1", "hoh-competition", "hoh-competition"),
         game_mode=None)
     assert cap.get("tool_choice") is None, cap.get("tool_choice")
+
+
+# ── Gap #3: the CASTING-FINALIZE force (docs/design/undercall-seam-structural.md §4) ────────────────
+# The one pre-game closed-set beat with exactly one legal lever: casting engine-`ready` AND
+# `finalizable`, the season not started, the PLAYER explicitly signalled readiness — the same gates
+# the reactive finalize fallback already requires, so no new authority: only WHEN the guaranteed
+# createCharacter happens moves (proactive, on the wire). We still NEVER force submitDecision.
+
+_CREATE = {"type": "function", "function": {"name": "createCharacter"}}
+
+
+def _casting_gate(fired, *, ready=True, finalizable=True, started=False, signalled=True):
+    from src.agent_loop import _forced_tool_choice_for_casting
+    return _forced_tool_choice_for_casting(
+        set(fired), ready=ready, finalizable=finalizable, started=started,
+        player_signalled=signalled)
+
+
+def test_casting_gate_forces_when_every_reactive_terminal_gate_holds():
+    assert _casting_gate([]) == _CREATE
+
+
+def test_casting_gate_requires_the_engine_terminal():
+    # `ready` alone (name-only intake) must NEVER force — that would mint the floater the reactive
+    # belt's `finalizable` gate exists to prevent. Neither may an un-ready intake.
+    assert _casting_gate([], finalizable=False) is None
+    assert _casting_gate([], ready=False) is None
+    assert _casting_gate([], ready=False, finalizable=False) is None
+
+
+def test_casting_gate_requires_the_player_signal():
+    # The player never asked to start ⇒ never force (the interview keeps its own pace; the engine
+    # never starts a game the player did not ask for).
+    assert _casting_gate([], signalled=False) is None
+
+
+def test_casting_gate_never_forces_once_started():
+    assert _casting_gate([], started=True) is None
+
+
+def test_casting_gate_met_guarantee_does_not_reforce():
+    # createCharacter already fired this turn ⇒ the guarantee is met ⇒ no re-force on later rounds.
+    assert _casting_gate(["createCharacter"]) is None
+    assert _casting_gate(["updateCasting", "createCharacter"]) is None
+
+
+def test_casting_gate_never_forces_submit_decision():
+    got = _casting_gate([])
+    assert got is None or got["function"]["name"] != "submitDecision"
+
+
+# ── END-TO-END: the casting turn computes the force and passes tool_choice to the wire ──────────────
+
+
+def _drive_casting_capture_tool_choice(monkeypatch, *, model="z-ai/glm-4.7", last_user,
+                                       casting=None, started=False, force_setting=True,
+                                       owner="tester-casting"):
+    from src import agent_loop as al
+    from src import orwell_engine as oe
+    import src.tool_index as ti
+    import src.tool_implementations as timpl
+
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
+
+    _real_get_setting = al.get_setting
+
+    def fake_get_setting(key, default=None):
+        if key == "force_tool_choice_at_beats":
+            return force_setting
+        return _real_get_setting(key, default)
+
+    monkeypatch.setattr(al, "get_setting", fake_get_setting)
+    monkeypatch.setattr(ti, "get_tool_index", lambda: None)
+
+    # The engine casting view BOTH the pre-stream force and the post-turn reactive belt read.
+    async def fake_gs(user=None):
+        return {"started": started, "casting": casting}
+
+    monkeypatch.setattr(oe, "get_game_state", fake_gs)
+
+    # Keep the post-turn reactive casting belts hermetic (no network, no engine): the record belt
+    # stands down and the reactive finalize's engine call is stubbed to a refused no-op.
+    async def _no_record(*_a, **_k):
+        return False
+
+    monkeypatch.setattr(al, "_auto_record_casting", _no_record)
+
+    async def _no_create(*_a, **_k):
+        return {"error": "stubbed engine"}
+
+    monkeypatch.setattr(timpl, "do_create_character", _no_create)
+    # Fresh reactive-ladder state per drive (the stubbed refused create marches it otherwise).
+    al._CASTING_STALL_LEVEL.pop(owner, None)
+    al._CASTING_SUBSTANCE_LEVEL.pop(owner, None)
+
+    cap: dict = {}
+
+    async def fake_stream(candidates, messages, **kwargs):
+        if "tool_choice" not in cap:
+            cap.update(kwargs)
+        yield 'data: {"delta": "hi"}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "stream_llm_with_fallback", fake_stream)
+
+    async def drive():
+        async for _ in al.stream_agent_loop(
+            OR_URL, model,
+            [{"role": "system", "content": "producer"}, {"role": "user", "content": last_user}],
+            max_rounds=1, game_mode="casting", owner=owner,
+        ):
+            pass
+
+    try:
+        asyncio.get_event_loop().run_until_complete(drive())
+    finally:
+        al._CASTING_STALL_LEVEL.pop(owner, None)
+        al._CASTING_SUBSTANCE_LEVEL.pop(owner, None)
+    return cap
+
+
+def test_casting_loop_forces_create_character_when_finalizable_and_player_ready(monkeypatch):
+    cap = _drive_casting_capture_tool_choice(
+        monkeypatch, last_user="Lock it in — put me in the house.",
+        casting={"ready": True, "finalizable": True})
+    assert cap.get("tools"), "tools must be on the wire for forcing to be legal"
+    assert any((t.get("function") or {}).get("name") == "createCharacter"
+               for t in cap.get("tools") or []), "createCharacter must be among the wire tools"
+    assert cap.get("tool_choice") == _CREATE, cap.get("tool_choice")
+
+
+def test_casting_loop_does_not_force_on_a_substantive_interview_answer(monkeypatch):
+    # An ordinary interview turn (no readiness signal) is byte-identical: tool_choice=None. The
+    # cheap regex gate rejects BEFORE any engine read — the common casting turn costs nothing.
+    cap = _drive_casting_capture_tool_choice(
+        monkeypatch,
+        last_user="I grew up on a farm and I plan to build real bonds before I ever scheme.",
+        casting={"ready": True, "finalizable": True})
+    assert cap.get("tool_choice") is None, cap.get("tool_choice")
+
+
+def test_casting_loop_does_not_force_before_the_interview_is_finalizable(monkeypatch):
+    # Player asks to start but the intake is name-only (ready, NOT finalizable): never force — the
+    # engine would refuse, and the substance ladder owns this case.
+    cap = _drive_casting_capture_tool_choice(
+        monkeypatch, last_user="put me in the house",
+        casting={"ready": True, "finalizable": False})
+    assert cap.get("tool_choice") is None, cap.get("tool_choice")
+
+
+def test_casting_loop_kill_switch_and_rejecter_gate_apply(monkeypatch):
+    cap = _drive_casting_capture_tool_choice(
+        monkeypatch, last_user="put me in the house",
+        casting={"ready": True, "finalizable": True}, force_setting=False)
+    assert cap.get("tool_choice") is None
+    cap = _drive_casting_capture_tool_choice(
+        monkeypatch, model="deepseek/deepseek-v4-pro", last_user="put me in the house",
+        casting={"ready": True, "finalizable": True})
+    assert cap.get("tool_choice") is None
