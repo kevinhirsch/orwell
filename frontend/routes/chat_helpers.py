@@ -400,6 +400,49 @@ def clear_social_runway(user) -> None:
     _RUNWAY_LEFT.pop(key, None)
     _RUNWAY_SIG.pop(key, None)
     _RUNWAY_LAST_DONE.pop(key, None)  # #1127: forget the lingered-through marker on reset/end
+    _DAY_BREAK_STEER.pop(key, None)   # P1-2: a reset also drops a pending day-break steer
+
+
+# ── P1-2 (#1361, the machinery half) — DAY-BREAK FE awareness ─────────────────────────────── #
+#
+# The engine's night-gate (#1320 / Phase 3a) emits a diegetic `day-break` beat between the weekly
+# ceremonies ("The house turns in for the night, and a new day dawns …"). The FE used to SWALLOW
+# it: `_pre_resolve_npc_ceremony` consumed the beat pre-framing, but a day-break never changes the
+# `(week:phase)` signature, so no runway was armed, no moment changed, and the beat's content was
+# simply lost — the model narrated straight past the night into the ceremony (the exact
+# fast-forward the night-gate exists to prevent). Two repairs, both steer-based (never
+# engine-authoring — the content voiced is the ENGINE's own `event.content`):
+#   (a) the consumed beat arms a NARRATION STEER (the `_ceremony_narration_steer` sibling in the
+#       agent loop) quoting the engine's transition line, appended to this turn's framing so the
+#       model voices the night→morning crossing as a real beat;
+#   (b) the turn is HELD on the engine's `social` moment and a ONE-TURN runway is armed for the
+#       same signature — so the new day gets one genuine social turn (the J-3 "social" moment
+#       suppression in `_forced_tool_choice_for_beat` keeps the wire force off it too) instead of
+#       being force-marched into the ceremony the same morning. Readiness cuts it short exactly
+#       like every other runway.
+# Stash keyed via `_runway_key` (auth-off safe); consumed (popped) by `apply_game_framing` on the
+# same turn; cleared by `clear_social_runway`. GOLDEN-NEUTRAL: the golden driver pins
+# `ORWELL_TIME_PER_CONVERSATION=0`, so the night-gate never fires under record/replay and this
+# framing never renders there.
+_DAY_BREAK_STEER: dict = {}
+_DAY_BREAK_SOCIAL_TURNS = 1  # held social turns after a consumed day-break (the new day's morning)
+
+
+def _day_break_narration_steer(content: str) -> str:
+    """The focused production note that makes the model VOICE the engine's `day-break` beat (the
+    night→morning crossing) instead of silently skipping to the next ceremony. Never authors the
+    transition — it quotes the engine's own `event.content` and steers the model to narrate THAT."""
+    line = (content or "").strip()
+    quoted = f' The engine transition you must voice: "{line}".' if line else ""
+    return (
+        "(Production note, not for the player.) The engine just crossed the night into a NEW DAY — "
+        "voice this transition as a real beat FIRST (the house winding down, lights out, the next "
+        "morning coming to life) before any other scene." + quoted + " Then play the new morning as "
+        "social texture — who is up first, the mood over coffee — and let the player act. Do not rush "
+        "into the day's ceremony or competition yourself unless the player asks to move on (the "
+        "engine drives it when the moment comes), and never invent an outcome the engine has not "
+        "returned."
+    )
 
 
 # ── The pending-decision BARRIER (a chat↔engine DESYNC class) ──────────── #
@@ -2673,9 +2716,31 @@ def _render_presence_movement(prev: Optional[dict], cur: Optional[dict]) -> Opti
 async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
     """Fetch the engine delta since `last_seen_beat_seq` and render the additive 'Since your last
     turn' line — or None when there is no last-seen token (a fresh context — the full block stands),
-    a `fullRefresh`, an empty delta, or any hiccup. Fail-open by construction."""
-    if user is None or not isinstance(last_seen_beat_seq, int) or isinstance(last_seen_beat_seq, bool):
+    a `fullRefresh`, an empty delta, or any hiccup. Fail-open by construction.
+
+    P2-11 (prompt audit): this used to ALSO bail on `user is None`, which made the delta line DEAD
+    in the single-tenant posture (`AUTH_ENABLED=false` — the posture the owner actually runs): the
+    caller's last-seen token is keyed via `_beat_key`/`_desync_key` (the NAR-1/#1045 stable-key
+    family), so it resolves fine with no user, and `state_delta(user=None)` routes to the engine's
+    one "default" sandbox exactly like every sibling read. Every other belt got the stable-key fix;
+    this line was missed. Cross-user isolation is unweakened: a real user still passes their own
+    identity through unchanged."""
+    if not isinstance(last_seen_beat_seq, int) or isinstance(last_seen_beat_seq, bool):
         return None  # no prior turn to diff against → leave today's full context untouched
+    # 0108: quiesce under the golden record/replay seam. The committed fixture was recorded while
+    # this line was dead (the old `user is None` bail — golden runs are AUTH_ENABLED=false), so its
+    # request keys hold framing WITHOUT any delta line; rendering one under replay would drift every
+    # later key off the recording (a hard GoldenReplayMiss). The delta content is also beatSeq-paced
+    # (the same tick-timing ±1 class as the dwell counters / movement cue that needed key-side
+    # neutralization, #1355), so keeping it out of BOTH record and replay keeps the seam
+    # deterministic. Drop this gate (plus a key-side neutralization mirroring _MOVEMENT_LINE_RE) at
+    # a deliberate re-record if fixture coverage of the delta line is wanted.
+    try:
+        from src import golden_path as _gp
+        if _gp.active():
+            return None
+    except Exception:
+        pass
     try:
         from src import orwell_engine
         delta = await orwell_engine.state_delta(last_seen_beat_seq, user=user)
@@ -2819,13 +2884,36 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
         # pre-resolve is otherwise silent on success, so a staged eviction walking one beat per turn
         # is indistinguishable from a true stall in the logs. Record the beat we just committed.
-        _beat = ((adv or {}).get("event") or {}).get("content") if isinstance(adv, dict) else None
+        _adv_event = (adv or {}).get("event") if isinstance(adv, dict) else None
+        _beat_kind = str((_adv_event or {}).get("beat") or "") if isinstance(_adv_event, dict) else ""
+        _beat = (_adv_event or {}).get("content") if isinstance(_adv_event, dict) else None
         logger.info("[orwell] pre-resolve advanced %s for user=%s -> beat=%r", phase, user, _beat)
         # gap #3 belt-fire telemetry (docs/design/undercall-seam-structural.md §5; never raises)
         _note_belt(user, "pre-resolve-npc-ceremony")
         refreshed = await _fetch_game_state(user, retry=retry)
         _refresh_beat_seq(user, refreshed)  # 0065: the post-advance state read also carries beatSeq
         new_state = refreshed if isinstance(refreshed, dict) else game_state
+
+        # P1-2 (#1361, the machinery half): the consumed beat was the night-gate's diegetic
+        # `day-break`. It never changes the `(week:phase)` signature, so without this branch the
+        # transition was silently SWALLOWED (no runway, no steer — the content lost) and the very
+        # next framing/force marched straight into the ceremony. Arm the narration steer quoting the
+        # engine's own transition line, and — unless the player explicitly asked to move on — hold
+        # THIS turn on the `social` moment and arm a ONE-TURN runway for the same signature, so the
+        # new day gets one genuine social turn before the ceremony is driven (see the module note at
+        # `_DAY_BREAK_STEER`). The "social" moment also suppresses the wire tool_choice force (J-3).
+        if _beat_kind == "day-break":
+            _DAY_BREAK_STEER[rkey] = _day_break_narration_steer(str(_beat or ""))
+            _note_belt(user, "day-break-steer")  # gap #3 telemetry (never raises)
+            if ready:
+                # The player asked to move the day along — voice the crossing, then let the normal
+                # framing (and the beat force, where live) drive the ceremony this same turn.
+                return new_state
+            _arm_runway(user, sig)  # same signature — a day-break never moves (week:phase)
+            _RUNWAY_LEFT[rkey] = _DAY_BREAK_SOCIAL_TURNS
+            logger.info("[orwell] day-break consumed at %s for user=%s — holding one social morning "
+                        "turn (P1-2 #1361)", phase, user)
+            return _hold_for_social(new_state)
 
         # ARM a fresh runway when the resolved beat landed the player in a NEW spectator ceremony
         # beat (a different week:phase, no new pending) — so the NEXT turns are theirs to socialize
@@ -3129,6 +3217,16 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _move_line
         except Exception as e:
             logger.warning("[orwell] presence-movement framing skipped for user=%s: %s", _gkey, e)
+        # P1-2 (#1361): the pre-resolve consumed a diegetic `day-break` beat THIS turn — append the
+        # armed narration steer so the model voices the night→morning crossing (the beat's content
+        # never changes the (week:phase) signature, so nothing else would surface it). Popped: the
+        # steer rides exactly one turn. Best-effort / fail-open like every framing line above.
+        try:
+            _db_steer = _DAY_BREAK_STEER.pop(_runway_key(user), None)
+            if _db_steer:
+                gm_prompt = gm_prompt + "\n\n" + _db_steer
+        except Exception as e:
+            logger.warning("[orwell] day-break steer framing skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING
