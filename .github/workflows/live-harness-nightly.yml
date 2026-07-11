@@ -1,0 +1,138 @@
+# Nightly real-model live-harness runs (scheduled, key-gated, NON-BLOCKING).
+#
+# The automated gates all STUB the LLM, so the live player journey — realtime two-window
+# mirror parity, the active runtime overseer, and turn-coalescing — is only ever exercised by
+# wiring a real model into the FE. These validations were owed as ONE-OFF manual runs; this
+# turns them into a standing nightly so a prompt/model drift that breaks a live-only path
+# surfaces the next morning instead of inside a player's season.
+#
+# It never blocks a merge (continue-on-error) and is a clean skip when no provider key is
+# present (forks / a missing secret). Each leg uploads its own evidence artifact.
+#
+# Owed live-runs covered:
+#   - ADR 0008 / 0012 two-window realtime mirror + mid-generation join  (leg: two-window-live, LIVE today)
+#   - 0080 active-overseer live validation (#766)                       (leg: overseer-live, auto-arms when the driver lands)
+#   - #829 turn-coalescing live-verify                                  (leg: coalesce-live, auto-arms when the driver lands)
+#
+# Secret: OPENROUTER_API_KEY (repo secret). Sibling of golden-nightly.yml.
+name: live-harness-nightly
+
+on:
+  schedule:
+    - cron: "33 7 * * *"   # offset from golden-nightly (06:17) to spread OpenRouter spend / runner load
+  workflow_dispatch: {}
+
+# Minimal token scope: the job only checks out the repo and uploads artifacts (no repo write-back).
+permissions:
+  contents: read
+
+concurrency:
+  group: live-harness-nightly
+  cancel-in-progress: true
+
+jobs:
+  live-harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - name: provider key gate
+        id: key
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$OPENROUTER_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=live-harness-nightly skipped::no OPENROUTER_API_KEY secret — the nightly live-harness is a clean skip."
+          fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.key.outputs.present == 'true'
+        run: npm ci
+      - if: steps.key.outputs.present == 'true'
+        run: npm run build
+      - if: steps.key.outputs.present == 'true'
+        run: pip install -r frontend/requirements.txt
+      - name: install Playwright chromium (+ system deps for the hosted runner)
+        if: steps.key.outputs.present == 'true'
+        working-directory: frontend
+        run: python3 -m playwright install --with-deps chromium
+
+      # ── leg (2): ADR 0008/0012 two-window realtime mirror + mid-generation join — LIVE today ──
+      - name: two-window live parity + mid-gen join (ADR 0008/0012)
+        if: steps.key.outputs.present == 'true'
+        working-directory: frontend
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python3 scripts/_verify_two_window_live.py \
+            || echo "::warning title=two-window-live::live two-window parity / mid-gen-join regressed — download the two-window-live-evidence artifact and inspect the per-beat table."
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          name: two-window-live-evidence
+          path: frontend/data/_m03_live/
+          retention-days: 14
+          if-no-files-found: warn
+
+      # ── leg (1): 0080 active-overseer live validation (#766) — auto-arms when the driver lands ──
+      # The `active` overseer dispatch is LIVE-ONLY by design (ruling D4): the seeded lanes never
+      # resolve a real model, so no automated gate can see it. This leg runs the driver iff it exists,
+      # so the workflow is valid today and this leg activates the night after the driver merges.
+      - name: active-overseer live validation (#766)
+        if: steps.key.outputs.present == 'true'
+        working-directory: frontend
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -f scripts/_verify_overseer_active_live.py ]; then
+            python3 scripts/_verify_overseer_active_live.py \
+              || echo "::warning title=overseer-live::active-overseer live validation regressed — inspect the overseer-live-evidence artifact."
+          else
+            echo "::notice title=overseer-live pending::scripts/_verify_overseer_active_live.py not present yet (#766 driver) — leg skipped."
+          fi
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          name: overseer-live-evidence
+          path: frontend/data/_overseer_live/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # ── leg (3): #829 turn-coalescing live-verify — auto-arms when the driver lands ──
+      # The coalescing feature is currently reverted/unshipped (#825 reverted #822); this leg is a
+      # placeholder that arms only once BOTH the redo and its live-verify driver exist, so the
+      # "not just the stubbed browser_smoke" acceptance gate is enforced continuously thereafter.
+      - name: turn-coalescing live-verify (#829)
+        if: steps.key.outputs.present == 'true'
+        working-directory: frontend
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -f scripts/_verify_coalesce_live.py ]; then
+            python3 scripts/_verify_coalesce_live.py \
+              || echo "::warning title=coalesce-live::turn-coalescing live-verify regressed — inspect the coalesce-live-evidence artifact."
+          else
+            echo "::notice title=coalesce-live pending::scripts/_verify_coalesce_live.py not present yet (#829 redo owed) — leg skipped."
+          fi
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          name: coalesce-live-evidence
+          path: frontend/data/_coalesce_live/
+          retention-days: 14
+          if-no-files-found: ignore
