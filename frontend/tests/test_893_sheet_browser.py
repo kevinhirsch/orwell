@@ -73,10 +73,11 @@ _HARNESS = """
 # Open a kit window the way the real consumers do. Content carries two buttons so
 # the focus-trap assertion has tab stops, and enough text to need body scrolling.
 _OPEN_JS = """
-({ id, title, modal, sheet, closable }) => {
+({ id, title, modal, sheet, scrim, closable }) => {
     const opts = { id, title, closable: closable !== false };
     if (modal) opts.modal = true;
     if (sheet !== undefined) opts.sheet = sheet;
+    if (scrim) opts.scrim = true;
     const c = document.createElement('div');
     c.innerHTML = '<button id="' + id + '-b1">one</button>'
       + '<p>' + 'role text '.repeat(400) + '</p>'
@@ -325,3 +326,72 @@ def test_kit_css_carries_safe_area_and_containment(_static_server):
     assert "env(safe-area-inset-bottom" in css
     assert "env(safe-area-inset-top" in css
     assert contain == "contain", "the sheet body must contain overscroll"
+
+
+def test_non_modal_sheet_mounts_scrim_only_with_scrim_opt(_static_server):
+    """The `scrim` option (kit-core): a NON-modal sheet:true window opts into the sheet's
+    dimming backdrop (the shared .ow-scrim) with scrim:true — the scrim mounts, but the
+    window STAYS non-modal: no aria-modal promise, and the page behind is NOT inerted (a
+    modal would inert it). A plain non-modal sheet (no scrim) mounts NO scrim. The backdrop
+    rides one z BELOW the sheet window (so the sheet is never covered by its own dim) and
+    tears down cleanly on close (no orphan scrim, #925). Roles only; Vault-free chrome."""
+    _require_browser()
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        browser, page = _new_page(pw, PHONE)
+        errs = []
+        page.on("pageerror", lambda e: errs.append(str(e)))
+        try:
+            _load(page, _static_server)
+            # a plain non-modal sheet — no scrim opt → no backdrop.
+            plain = _open_and_measure(page, {"id": "ns-plain", "title": "Plain sheet",
+                                             "modal": False, "sheet": True, "closable": True})
+            page.evaluate("() => window.__wins['ns-plain'].close()")
+            page.wait_for_timeout(400)
+            # the scrim opt-in on a non-modal sheet.
+            scrimmed = _open_and_measure(page, {"id": "ns-scrim", "title": "Scrimmed sheet",
+                                                "modal": False, "sheet": True, "scrim": True,
+                                                "closable": True})
+            layering = page.evaluate(
+                """() => {
+                    const el = document.getElementById('ns-scrim');
+                    const scrim = document.querySelector('.ow-scrim[data-ow-scrim="ns-scrim"]');
+                    const wz = parseInt(getComputedStyle(el).zIndex, 10);
+                    const sz = scrim ? parseInt(getComputedStyle(scrim).zIndex, 10) : null;
+                    const sb = document.getElementById('sidebar');
+                    const b = scrim ? scrim.getBoundingClientRect() : null;
+                    return {
+                        winZ: wz, scrimZ: sz,
+                        scrimBelowWindow: (sz !== null && sz < wz),
+                        scrimCoversViewport: b ? (b.left <= 0 && b.top <= 0
+                            && b.right >= window.innerWidth && b.bottom >= window.innerHeight) : false,
+                        // a NON-modal scrim'd sheet must NOT inert the page (that is a modal-only act).
+                        pageInert: !!(sb && sb.inert === true),
+                    };
+                }""")
+            # close it and confirm the scrim tears down with the window (no orphan).
+            page.evaluate("() => window.__wins['ns-scrim'].close()")
+            page.wait_for_timeout(500)
+            teardown = page.evaluate(
+                "() => ({ winGone: !document.getElementById('ns-scrim'),"
+                "        scrimGone: !document.querySelector('.ow-scrim[data-ow-scrim=\\'ns-scrim\\']') })")
+        finally:
+            browser.close()
+    assert not errs, f"no page errors ({errs})"
+    # a plain non-modal sheet presents as a sheet but mounts NO scrim (unchanged behavior).
+    assert "ow-sheet-mode" in plain["classes"], "sheet:true still presents as a bottom sheet"
+    assert not plain["hasScrim"], "a plain non-modal sheet (no scrim opt) must mount no backdrop"
+    # scrim:true → the backdrop mounts, but the window stays non-modal.
+    assert "ow-sheet-mode" in scrimmed["classes"], "scrim:true still presents as a bottom sheet"
+    assert scrimmed["hasScrim"], "scrim:true must mount the dimming backdrop for a non-modal sheet"
+    assert scrimmed["ariaModal"] is None, "the scrim'd sheet must stay non-modal (no aria-modal)"
+    # layering + non-modality: scrim sits UNDER the sheet, spans the viewport, page not inerted.
+    assert layering["scrimBelowWindow"], (
+        f"the non-modal scrim must ride below the sheet window (winZ={layering['winZ']}, "
+        f"scrimZ={layering['scrimZ']}) so the sheet is never covered by its own dim"
+    )
+    assert layering["scrimCoversViewport"], "the backdrop must span the full viewport"
+    assert not layering["pageInert"], "a NON-modal scrim'd sheet must not inert the page (modal-only)"
+    # clean teardown — the scrim never outlives its window (#925 orphan-scrim class).
+    assert teardown["winGone"], "the sheet tears down on close"
+    assert teardown["scrimGone"], "the scrim tears down with the sheet (no orphan backdrop)"
