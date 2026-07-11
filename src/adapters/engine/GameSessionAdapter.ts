@@ -434,6 +434,17 @@ const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 const MYTH_MAKING_ENABLED_DEFAULT = process.env.ORWELL_MYTH_MAKING === "1";
 
 /**
+ * Issue #1397 — whether CHARACTER-MEDIATED gossip drift runs by DEFAULT. OFF unless `ORWELL_GOSSIP_DRIFT=1`.
+ * A DEDICATED flag (sibling of `ORWELL_MYTH_MAKING`) so calibration neutrality is provable in isolation:
+ * with it unset the orchestrator passes NO `voiceOf` to `diffuseGossip`, so the gossip distortion stays
+ * personality-AGNOSTIC — byte-identical to the pre-feature drift, and the seeded juryReach/gradient/UAT
+ * spine is unchanged. Read once at module load (like the sibling flags); a test overrides per-session via
+ * `setGossipDriftEnabled`. (Drift is re-weighted on a per-hop FORK regardless, so even ON the parent
+ * competition/vote/jury draw stream is byte-identical — the flag gates only whether VOICE colors the drift.)
+ */
+const GOSSIP_DRIFT_ENABLED_DEFAULT = process.env.ORWELL_GOSSIP_DRIFT === "1";
+
+/**
  * 0066 Phase-2 (#1125) — the three sleep-economy EXTENSIONS, each behind its OWN dedicated opt-in flag
  * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`/`ORWELL_JURY_HOUSE`), default OFF, so calibration
  * neutrality is provable for EACH in isolation (the brief: "each behind its own opt-in flag, byte-identical
@@ -628,6 +639,9 @@ export class GameSessionAdapter implements GameSession {
    * UAT) is BYTE-IDENTICAL; the live deploy may enable it. A test flips it via `setMythMakingEnabled`.
    */
   private mythMakingEnabled = MYTH_MAKING_ENABLED_DEFAULT;
+  /** Issue #1397 — whether the RETELLER's public voice colors gossip drift (character-mediated distortion).
+   *  OFF by default; the orchestrator reads this to decide whether to hand `diffuseGossip` a `voiceOf`. */
+  private gossipDriftEnabled = GOSSIP_DRIFT_ENABLED_DEFAULT;
   /** The DEDICATED legend-rng tick counter — legend draws fork off the game seed + this, NEVER the
    *  orchestrator's shared society/competition/vote stream (the same isolation `juryHouseTickCount`
    *  uses), so even with the layer ON the main house's seeded outcomes stay in phase. Persisted so the
@@ -6337,6 +6351,15 @@ export class GameSessionAdapter implements GameSession {
 
   /** Whether the myth-making layer is live (0101) — exposed for the orchestrator's wiring symmetry/tests. */
   mythMakingEnabledNow(): boolean { return this.mythMakingEnabled; }
+
+  /** Turn CHARACTER-MEDIATED gossip drift on/off (issue #1397). Off by default — the calibration harness
+   *  leaves it off; even ON the drift rides a per-hop fork, so the seeded outcome draw stream is byte-
+   *  identical either way (the flag gates only whether the reteller's voice colors the belief content). */
+  setGossipDriftEnabled(on: boolean): void { this.gossipDriftEnabled = on; }
+
+  /** Whether voice-mediated gossip drift is live (issue #1397) — the orchestrator reads this to decide
+   *  whether to hand `diffuseGossip` a `voiceOf` resolver. */
+  gossipDriftEnabledNow(): boolean { return this.gossipDriftEnabled; }
 
   private archetypeOf(id: EntityId): string {
     return this.house?.npcs.find((n) => n.id === id)?.character.archetype ?? "floater";
