@@ -326,5 +326,81 @@
     restackAll();
   });
 
+  // ── RESP-7 (2026-07-03 pre-ship audit) — a live hard-stop DECISION card SUPPRESSES the stale
+  // premiere WELCOME card ───────────────────────────────────────────────────────────────────────
+  // The premiere welcome guide (#orwell-premiere-tutorial, orwellPremiereTutorial.js) and a binding
+  // decision card (#orwell-decision-card, orwellDecision.js — a HARD STOP) are two INDEPENDENT
+  // above-composer surfaces (the decision rides an OrwellSheet, the guide the OrwellNotice zone), so
+  // nothing coordinated them: on a narrow phone both mount at once and bury the composer (audit
+  // RESP-7 — welcome ~85→353 + decision ~361→735 of an 844px viewport). A binding decision OWNS the
+  // moment, so while one is live the stale welcome card must stand down. We toggle a body flag and
+  // hide the welcome card by CSS — fully REVERSIBLE: the instant the decision clears the flag drops
+  // and the guide returns (the premiere module's own mount/remove lifecycle is untouched; its
+  // element is merely display:none while suppressed). Mirrors the #933/#948 fab-vs-decision
+  // mutual-exclusion precedent (orwellScrollBottom.js). Fail-open: any error ⇒ not suppressed.
+  (function () {
+    function ensureDecisionCss() {
+      if (!document.createElement || !document.getElementById) return; // minimal DOM ⇒ no-op
+      if (document.getElementById("orwell-slots-decision-css")) return;
+      const st = document.createElement("style");
+      st.id = "orwell-slots-decision-css";
+      // While a binding decision (hard stop) is live, the premiere welcome guide stands down so the
+      // two never co-mount and bury the composer on a narrow phone (RESP-7). The kit wrapper is
+      // hidden too so no empty zone band lingers where the card was.
+      st.textContent =
+        "body.ow-decision-active #orwell-premiere-tutorial," +
+        "body.ow-decision-active .on-card.on-guide.orwell-premiere-tutorial{display:none !important;}";
+      (document.head || document.documentElement).appendChild(st);
+    }
+    // A decision card is "live" when it is mounted and actually shown — mirrors orwellScrollBottom's
+    // decisionCardVisible() (the #948 mutual-exclusion). Fail-open ⇒ an error reads as "no decision".
+    function decisionActive() {
+      try {
+        const card = document.getElementById("orwell-decision-card");
+        if (!card || !document.body || !document.body.contains(card)) return false;
+        if (card.hidden) return false;
+        const cs = window.getComputedStyle ? window.getComputedStyle(card) : null;
+        if (cs && (cs.display === "none" || cs.visibility === "hidden")) return false;
+        const r = card.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return false; // mid-removal collapse ⇒ not shown
+        return true;
+      } catch (_) { return false; }
+    }
+    let _decOn = null, _decRaf = 0;
+    function applyDecisionState() {
+      _decRaf = 0;
+      try {
+        if (!document.body || !document.body.classList) return;
+        ensureDecisionCss();
+        const on = decisionActive();
+        if (on === _decOn) return; // toggle the class only on a real flip
+        _decOn = on;
+        document.body.classList.toggle("ow-decision-active", on);
+      } catch (_) { /* fail-open: no suppression if the DOM APIs aren't available (e.g. test stub) */ }
+    }
+    // The card mounts/unmounts on the same body-mutation cadence as streamed tokens, so coalesce to
+    // one check per frame (the #933 rAF-coalescing lesson); the class toggle still fires only on a flip.
+    function scheduleDecisionCheck() {
+      if (_decRaf) return;
+      _decRaf = (window.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(applyDecisionState);
+    }
+    function startDecisionWatch() {
+      applyDecisionState();
+      // The decision card lives OUTSIDE any slot (an OrwellSheet above the composer) and is .remove()'d
+      // on dismiss / after a 4s "locked in", so watch the whole body subtree for its mount/unmount;
+      // orwell:pending is the explicit fast signal, orwell:gamechanged a belt.
+      try {
+        if (typeof MutationObserver !== "undefined") {
+          new MutationObserver(scheduleDecisionCheck)
+            .observe(document.body, { childList: true, subtree: true });
+        }
+      } catch (_) {}
+      window.addEventListener("orwell:pending", scheduleDecisionCheck);
+      window.addEventListener("orwell:gamechanged", scheduleDecisionCheck);
+    }
+    if (document.body) startDecisionWatch();
+    else document.addEventListener("DOMContentLoaded", startDecisionWatch, { once: true });
+  })();
+
   window.OrwellSlots = { register, restackAll };
 })();
