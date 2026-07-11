@@ -6,6 +6,13 @@ import { scaleImpact } from "./relationshipConstants";
 import type { EdgeSignals } from "./relationshipConstants";
 import type { RelationshipModel } from "./relationships";
 import type { NotableActClass } from "./legends";
+import type { VoiceProfile } from "../domain/voiceProfile";
+import {
+  GOSSIP_DRIFT,
+  HEDGE_POOLS,
+  escalationBias as voiceEscalationBias,
+  hedgePool as voiceHedgePool,
+} from "./gossipDriftConstants";
 
 /**
  * The social graph gossip travels along. Minimal here (undirected adjacency); the
@@ -135,10 +142,12 @@ export function legendFrom(actClass: NotableActClass): string {
 
 /** Each retelling appends a hedge — a cosmetic "how sure are they" marker (stripped at display by
  * `humanize.ts tidyPathwaySlugs`). This alone is NOT the distortion the design mandate means by
- * "drift" (audit SG-6) — see `driftSeverity`/`swapSubject` below for the CONTENT-level mutation. */
-function distort(content: string, rng: RandomnessSource): string {
-  const drift = ["roughly", "or so I heard", "supposedly", "more or less", "the way I heard it"];
-  return `${content} · ${rng.pick(drift)}#${rng.int(1000)}`;
+ * "drift" (audit SG-6) — see `driftSeverity`/`swapSubject` below for the CONTENT-level mutation.
+ * The reteller's PUBLIC voice may select which hedge `pool` colors THEIR phrasing (issue #1397); the
+ * default (`HEDGE_POOLS.base`) is the pre-feature agnostic pool, and the single `rng.pick` draw is
+ * unchanged whatever the pool — so the drift draw stream stays calibration-neutral. */
+function distort(content: string, rng: RandomnessSource, pool: readonly string[] = HEDGE_POOLS.base): string {
+  return `${content} · ${rng.pick(pool)}#${rng.int(1000)}`;
 }
 
 /**
@@ -161,18 +170,20 @@ const SEVERITY_LADDER: readonly string[] = [
  * the nature of what was actually seen; the story only starts to warp on the SECOND retelling
  * onward (real telephone-game behavior, and it keeps the direct-hearsay case minimally changed). */
 const CONTENT_DRIFT_MIN_HOPS = 2;
-/** Chance a hop past the floor nudges the claimed nature one rung on the ladder. */
-const TYPE_DRIFT_PROB = 0.3;
-/** Chance a hop past the floor swaps ONE subject for a socially-adjacent houseguest (mistaken identity). */
-const SUBJECT_SWAP_PROB = 0.15;
+/** The base per-hop drift probabilities (nature nudge / subject swap) live in the single-tunable
+ * `gossipDriftConstants` module beside the voice-mediation weights — `GOSSIP_DRIFT.baseTypeDriftProb`
+ * (0.3) and `GOSSIP_DRIFT.baseSubjectSwapProb` (0.15), byte-identical to the pre-feature constants. */
 
-/** Nudge a scene-rumor's claimed nature one rung on the severity ladder, a random direction each
- * time (a rumor can escalate OR soften). A type outside the ladder (a non-scene-rumor caller) is
- * returned unchanged. */
-function driftSeverity(type: string, rng: RandomnessSource): string {
+/** Nudge a scene-rumor's claimed nature one rung on the severity ladder. The single `rng.next()` draw sets
+ * the DIRECTION against `escalationBias` (default `0.5` = the pre-feature 50/50 — `1 - 0.5 = 0.5`, so the
+ * off/no-voice path is byte-identical): a rumor can escalate OR soften, and the RETELLER's PUBLIC voice may
+ * bias which way (issue #1397 — a dramatic voice > 0.5 amplifies toward "alarming", a blunt voice < 0.5
+ * flattens toward "mild"). The draw COUNT is unchanged whatever the bias, so the drift stream stays
+ * calibration-neutral. A type outside the ladder (a non-scene-rumor caller) is returned unchanged (no draw). */
+function driftSeverity(type: string, rng: RandomnessSource, escalationBias: number = GOSSIP_DRIFT.baseEscalationBias): string {
   const idx = SEVERITY_LADDER.indexOf(type);
   if (idx < 0) return type;
-  const step = rng.next() < 0.5 ? -1 : 1;
+  const step = rng.next() < 1 - escalationBias ? -1 : 1;
   const next = Math.min(SEVERITY_LADDER.length - 1, Math.max(0, idx + step));
   return SEVERITY_LADDER[next]!;
 }
@@ -212,6 +223,18 @@ function swapSubject(
  * which by construction never advances the parent `rng`'s own sequence — so this cannot perturb any
  * other seeded draw (competition, votes, jury) sharing that parent stream this tick.
  *
+ * Issue #1397 — CHARACTER-MEDIATED drift (opt-in `voiceOf`): the base drift above is personality-
+ * AGNOSTIC (a fixed 50/50 severity step, a fixed hedge pool). When `voiceOf` is supplied, the RETELLER's
+ * own PUBLIC voice (feature 0084 — register/rhythm/energy/directness/humor) biases HOW the claim mutates
+ * through THAT mouth: a dramatic/high-energy voice AMPLIFIES (biases the severity step UP the ladder) and
+ * embellishes the hedge; a blunt/flat voice FLATTENS (biases it DOWN) with a curt hedge; a strategic/
+ * evasive voice hedges the phrasing toward ambiguity (`gossipDriftConstants`). It reads ONLY the public
+ * voice dials — never soul/Vault (mandates #2/#3) — and re-weights ONLY the severity DIRECTION threshold +
+ * the hedge POOL: the forked-rng draw COUNT/POSITION and the (voice-independent) subject-swap decision are
+ * unchanged, so the seeded competition/vote/jury draw stream is byte-identical off vs on (absent `voiceOf`
+ * ⇒ byte-identical to the agnostic path). It re-shapes the OPEN-SET belief content only (ADR 0005), never
+ * the closed set (factId lineage, confidence/decay, which edges move, or any seeded magnitude).
+ *
  * With `rel` + `subjects` (audit E44), each NPC RECEIPT also folds a small, confidence-scaled move
  * toward the rumor's CURRENTLY BELIEVED subjects (`GOSSIP_HEARD`, keyed by the currently believed
  * nature) — hearsay finally shifts third-party reads, so a betrayal-rumor reaching a future HOH
@@ -234,6 +257,17 @@ export function diffuseGossip(deps: {
   subjects?: readonly EntityId[];
   /** The originating scene's nature — keys the `GOSSIP_HEARD` impact and seeds content drift. */
   sceneType?: string;
+  /**
+   * Issue #1397 — CHARACTER-MEDIATED drift. When present, the RETELLER's own PUBLIC voice (feature 0084)
+   * biases HOW the claim mutates as it passes through them: a dramatic voice AMPLIFIES the severity, a
+   * blunt voice FLATTENS it, an evasive voice HEDGES the phrasing (`gossipDriftConstants`). Reads ONLY
+   * public voice dials — never soul / Vault (mandates #2 / #3). ABSENT (the default, and every non-scene
+   * caller — position whispers, legends) ⇒ byte-identical AGNOSTIC drift. The mediation re-weights ONLY
+   * the severity DIRECTION threshold + the hedge POOL (existing forked-rng draws whose count & position are
+   * unchanged), and holds the subject-swap decision voice-independent, so the seeded competition / vote /
+   * jury draw stream is byte-identical off vs on (the drift already rides a per-hop FORK of the parent).
+   */
+  voiceOf?: (id: EntityId) => VoiceProfile | undefined;
 }): { factId: string; original: string } {
   const { knowledge, graph, rng, origin, fact, rounds, rel, sceneType } = deps;
   const transmitProb = deps.transmitProb ?? GOSSIP.transmitProb;
@@ -284,6 +318,12 @@ export function diffuseGossip(deps: {
       const belief = beliefOf(from)!;
       const fromType = believedType.get(from);
       const fromSubjects = believedSubjects.get(from);
+      // Issue #1397 — read the RETELLER's PUBLIC voice ONCE (a rumor mutates the same way through the same
+      // mouth this round). Absent `voiceOf`, or a reteller with no voice (e.g. the player), falls back to
+      // the agnostic BASE — byte-identical to before. PUBLIC dials only; no soul / Vault crosses.
+      const voice = deps.voiceOf?.(from);
+      const escalation = voice ? voiceEscalationBias(voice) : GOSSIP_DRIFT.baseEscalationBias;
+      const hedge = voice ? voiceHedgePool(voice) : HEDGE_POOLS.base;
       for (const to of graph.neighbors(from)) {
         if (holds(to)) continue;
         if (rng.next() >= transmitProb) continue;
@@ -298,8 +338,12 @@ export function diffuseGossip(deps: {
         let toSubjects = fromSubjects;
         let believedContent = belief.content;
         if (hops >= CONTENT_DRIFT_MIN_HOPS) {
-          if (fromType && driftRng.next() < TYPE_DRIFT_PROB) toType = driftSeverity(fromType, driftRng);
-          if (fromSubjects && driftRng.next() < SUBJECT_SWAP_PROB) {
+          // The nature drifts as OFTEN as before (base prob, VOICE-INDEPENDENT — this keeps the forked-rng
+          // draw sequence, hence the subject-swap decision below AND the E44 fold's parent-rng draw count,
+          // byte-identical off vs on); the reteller's voice biases only WHICH WAY it drifts (`escalation`):
+          // a dramatic voice amplifies toward "alarming", a blunt voice flattens toward "mild" (issue #1397).
+          if (fromType && driftRng.next() < GOSSIP_DRIFT.baseTypeDriftProb) toType = driftSeverity(fromType, driftRng, escalation);
+          if (fromSubjects && driftRng.next() < GOSSIP_DRIFT.baseSubjectSwapProb) {
             toSubjects = swapSubject(fromSubjects, from, graph, driftRng);
           }
           if (toType && toSubjects) believedContent = rumorFrom(toSubjects[0], toSubjects[1], toType);
@@ -308,7 +352,7 @@ export function diffuseGossip(deps: {
           from,
           to,
           {
-            content: distort(believedContent, driftRng),
+            content: distort(believedContent, driftRng, hedge),
             originalContent: original,
             factId,
             confidence,

@@ -13,6 +13,7 @@ import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
 import { PLAYER } from "../domain/ids";
 import type { EntityId } from "../domain/ids";
+import type { VoiceProfile } from "../domain/voiceProfile";
 import { TurnRefusedError, PersistFailureError } from "../domain/errors";
 
 /**
@@ -756,6 +757,15 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
       }
     }
     if (edges.length > 0) {
+      // Issue #1397 — when voice-mediated drift is enabled, hand `diffuseGossip` a resolver for each
+      // RETELLER's PUBLIC voice (0084 `character.voice`) so the reteller's own personality colors HOW the
+      // rumor warps as it passes through them. Absent (the default + the seeded calibration spine) ⇒ no
+      // `voiceOf` ⇒ byte-identical agnostic drift. PUBLIC dials only — never soul/Vault. The player is not
+      // in `npcs`, so a player retelling resolves `undefined` → the agnostic path (their voice is human).
+      const npcs = core.house.npcs;
+      const voiceOf = sandbox.session.gossipDriftEnabledNow()
+        ? (id: EntityId): VoiceProfile | undefined => npcs.find((n) => n.id === id)?.character.voice
+        : undefined;
       diffuseGossip({
         knowledge: sandbox.engine.knowledge,
         graph: makeSocialGraph(edges),
@@ -769,6 +779,7 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
         rel: sandbox.engine.relationships,
         subjects: [scene.initiator, scene.partner],
         sceneType: scene.type,
+        ...(voiceOf ? { voiceOf } : {}),
       });
     }
   }
