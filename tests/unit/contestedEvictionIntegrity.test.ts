@@ -12,6 +12,7 @@ import type { AdvanceView, PendingDecisionView } from "../../src/ports/GameSessi
 import type { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import type { SessionSnapshot } from "../../src/engine/sessionSnapshot";
 import { PLAYER, npc } from "../../src/domain/ids";
+import { StaleBeatError } from "../../src/domain/errors";
 
 /**
  * #1106 — the engine integrity circuit OPENED during a contested eviction (and recovered).
@@ -135,6 +136,143 @@ describe("#1106 — the contested-eviction integrity fault sequence (correctly c
       // game (the recovered turn recorded its events), and the game can keep advancing to the finale.
       const afterSave = new FileSaveStore(dir).loadLatest(user)!;
       expect(afterSave.events.length).toBeGreaterThan(goodEventCount);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+});
+
+/** Resolve ANY pending with a legal default (roles only) — the local full-drive variant of
+ *  `resolveLegally` above, covering the endgame/nightly kinds a long drive can hit. Every kind is
+ *  handled with its CORRECT payload shape (no cast — a shape mismatch must fail the test, #1380). */
+function resolveAnyLegally(s: GameSessionAdapter, p: PendingDecisionView): void {
+  switch (p.kind) {
+    case "nominations": s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] }); return;
+    case "veto-decision": s.submitDecision({ kind: "veto-decision", use: false }); return;
+    case "secret-veto": s.submitDecision({ kind: "secret-veto", use: false }); return;
+    case "replacement": s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id }); return;
+    case "comp-intent":
+    case "comp-round": s.submitDecision({ kind: p.kind, intent: "compete" }); return;
+    case "finale-statement": s.submitDecision({ kind: "finale-statement", statement: "x" }); return;
+    case "finale-answer": s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! }); return;
+    case "juror-question": s.submitDecision({ kind: "juror-question", statement: "q" }); return;
+    case "goodbye-message": s.submitDecision({ kind: "goodbye-message", vote: p.options[0]!.id, statement: "bye" }); return;
+    // The single-pick kinds share the `vote` payload (audit A10: `vote`/1-element `choice` interchangeable).
+    case "houseguests-choice":
+    case "eviction-vote":
+    case "tie-break":
+    case "final-eviction":
+    case "juror-vote": s.submitDecision({ kind: p.kind, vote: p.options[0]!.id }); return;
+    default: throw new Error(`unsupported pending kind in test driver: ${p.kind as string}`);
+  }
+}
+
+describe("#1106 — a REAL contested eviction (player-HOH TIE) through the production runtime", () => {
+  /**
+   * The mission-critical empirical fact behind the #1106 diagnosis: the ENGINE's contested-eviction
+   * path — the staged secret-ballot reveal in batched rounds, a genuinely TIED vote, the player-HOH
+   * tie-break pending, the goodbye stage, the week rollover — commits CLEAN through the production
+   * spine (composeRuntime: LogicalClock, turn-driven ticks, the checkpointed commit funnel). Seed 45
+   * deterministically produces a tied eviction vote with the player as HOH. Zero integrity faults on
+   * the whole drive proves the #1106 faults were EXTERNALLY-induced degrading candidates (the
+   * narrate-ahead writes), not an eviction-path bug and not a checkpoint false-positive on mid-stage
+   * eviction state. The storm/recovery/stale/duplicate arms then re-run the #1106 sequence AT the
+   * live tie-break beat — the commit spine's worst-case moment.
+   */
+  it("tie-break fires; a 3-fault storm at the beat opens the circuit; the tie still resolves clean; no data loss; stale/duplicate submits are inert", () => {
+    const dir = freshDir();
+    // NOTE: the off-screen society's rng stream is seeded per (orchestrator seed, USER) — the tie is
+    // deterministic for THIS (seed, user, driving-pattern) triple; changing the user id re-rolls the
+    // season and loses the contested beat.
+    const user = "u";
+    const runtime = composeRuntime({ saveStore: new FileSaveStore(dir) }); // the PRODUCTION clock/wiring
+    const reg = runtime.registry;
+    const orch = runtime.orchestrator;
+    reg.sandboxFor(user).session.createCharacter({ playerName: "The Player", seed: 45 });
+
+    // Drive the real game to the CONTESTED beat: a tied eviction vote with the player holding HOH.
+    let view: AdvanceView = reg.sandboxFor(user).session.advanceGame();
+    let tie: PendingDecisionView | null = null;
+    for (let i = 0; i < 2000 && !view.finished; i++) {
+      if (view.pending?.kind === "tie-break") { tie = view.pending; break; }
+      if (view.pending) resolveAnyLegally(reg.sandboxFor(user).session, view.pending);
+      view = reg.sandboxFor(user).session.advanceGame();
+    }
+    expect(tie).not.toBeNull();
+    expect(tie!.by.id).toBe(PLAYER); // the player-HOH breaks the tie — the contested case
+    expect(tie!.options.length).toBe(2);
+
+    // The whole drive TO the contested beat committed clean: zero integrity faults, circuit closed.
+    const atTie = orch.sandboxHealth(user) as HealthRecord;
+    expect(atTie.faults).toEqual([]);
+    expect(atTie.circuitOpen).toBe(false);
+
+    const store = new FileSaveStore(dir);
+    const goodSave: SessionSnapshot = store.loadLatest(user)!;
+    const goodBlob = JSON.stringify(goodSave);
+    const goodEventCount = goodSave.events.length;
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // THE #1106 STORM AT THE CONTESTED BEAT: repeated narrate-ahead degrading candidates. Each is
+      // refused fail-closed (typed, rolled back); the third opens the circuit; the durable save —
+      // the tied board, the pending tie-break, every ballot — stays byte-for-byte intact throughout.
+      const degraded: SessionSnapshot = { ...goodSave, events: goodSave.events.slice(0, goodEventCount - 2) };
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        reg.restore(user, degraded);
+        expect(() => orch.commitPlayerTurn(user)).toThrowError(/turn refused/);
+        expect((orch.sandboxHealth(user) as HealthRecord).circuitOpen).toBe(attempt >= 3);
+        expect(JSON.stringify(store.loadLatest(user)!)).toBe(goodBlob);
+      }
+
+      // A STALE-BOARD submission (the two-window / narrate-ahead concurrency shape, 0065 Part A) is
+      // refused BEFORE any write — typed StaleBeatError, no integrity fault, durable save untouched.
+      const live = reg.sandboxFor(user);
+      const faultsBefore = (orch.sandboxHealth(user) as HealthRecord).faults.length;
+      expect(() => live.session.submitDecision({
+        kind: "tie-break", vote: tie!.options[0]!.id, expectedBeatSeq: live.session.beatSeqNow() - 1,
+      })).toThrowError(StaleBeatError);
+      expect((orch.sandboxHealth(user) as HealthRecord).faults.length).toBe(faultsBefore);
+      expect(JSON.stringify(store.loadLatest(user)!)).toBe(goodBlob);
+
+      // RECOVERY AT THE CONTESTED BEAT: `commitPlayerTurn` never skips on an open circuit, so the
+      // player's legal tie-break commits IMMEDIATELY — the circuit closes, the eviction lands, and
+      // the durable save advances past the pre-storm game (the beat was recorded, not just narrated).
+      const resolved = live.session.submitDecision({ kind: "tie-break", vote: tie!.options[0]!.id });
+      expect(resolved.pending?.kind ?? null).not.toBe("tie-break");
+      const recovered = orch.sandboxHealth(user) as HealthRecord;
+      expect(recovered.circuitOpen).toBe(false);
+      expect(recovered.lastIntegrity).toBe("ok");
+      const evictionOrder = live.session.snapshot().live?.evictionOrder ?? [];
+      expect(evictionOrder).toContain(tie!.options[0]!.id);
+      expect(store.loadLatest(user)!.events.length).toBeGreaterThan(goodEventCount);
+
+      // #1106 FORENSICS SURVIVE RECOVERY: the recent-fault ring still shows the storm's degradation
+      // kinds AFTER the clean commit (God Mode can reconstruct the burst without log mining), capped.
+      expect(recovered.faults.filter((f) => f.kind === "degradation").length).toBeGreaterThanOrEqual(3);
+      expect(recovered.faults.length).toBeLessThanOrEqual(20);
+
+      // A DUPLICATE tie-break submission (second window, replayed turn) is an inert no-op: no second
+      // eviction, no fault, the board unchanged.
+      const savedAfter = JSON.stringify(store.loadLatest(user)!);
+      live.session.submitDecision({ kind: "tie-break", vote: tie!.options[1]!.id });
+      expect(reg.sandboxFor(user).session.snapshot().live?.evictionOrder ?? []).toEqual(evictionOrder);
+      expect((orch.sandboxHealth(user) as HealthRecord).lastIntegrity).toBe("ok");
+      expect(JSON.stringify(store.loadLatest(user)!)).toBe(savedAfter);
+
+      // The house keeps playing clean past the contested night (a bounded stretch — the UAT lane
+      // owns full-game drives): goodbyes → eviction-result → the next week's beats, zero new faults.
+      let after: AdvanceView = reg.sandboxFor(user).session.advanceGame();
+      for (let i = 0; i < 40 && !after.finished; i++) {
+        if (after.pending) resolveAnyLegally(reg.sandboxFor(user).session, after.pending);
+        after = reg.sandboxFor(user).session.advanceGame();
+      }
+      const settled = orch.sandboxHealth(user) as HealthRecord;
+      expect(settled.circuitOpen).toBe(false);
+      expect(settled.lastIntegrity).toBe("ok");
+      // No state fault was added after recovery (the retained ring is exactly the storm's).
+      expect(settled.faults.filter((f) => f.kind === "degradation").length)
+        .toBe(recovered.faults.filter((f) => f.kind === "degradation").length);
     } finally {
       errSpy.mockRestore();
     }
