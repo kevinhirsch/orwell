@@ -306,7 +306,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.visual == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 40 (was 25): the ~120-shot Playwright matrix runs 12–25 min on gh-hosted runners; the slower
+    # ones were timing out mid-matrix (~67/120 shots) and failing every FE PR spuriously — an
+    # infrastructure timeout, not a real geometry regression. 40 absorbs the slow runs. Durable
+    # follow-ups (#1359): shard the matrix like the heavy-sims lanes + cache the setup/browser.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
