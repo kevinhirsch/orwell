@@ -6,8 +6,9 @@
 # turns them into a standing nightly so a prompt/model drift that breaks a live-only path
 # surfaces the next morning instead of inside a player's season.
 #
-# It never blocks a merge (continue-on-error) and is a clean skip when no provider key is
-# present (forks / a missing secret). Each leg uploads its own evidence artifact.
+# It never blocks a merge (scheduled workflow, not a PR gate; each live leg is individually
+# non-blocking) and is a clean skip when no provider key is present (forks / a missing secret).
+# Each leg uploads its own evidence artifact.
 #
 # Owed live-runs covered:
 #   - ADR 0008 / 0012 two-window realtime mirror + mid-generation join  (leg: two-window-live, LIVE today)
