@@ -3025,6 +3025,22 @@ body.bg-pattern-perlin-flow {
          player where to type. Lift to ~4.7:1 while staying visibly secondary. */
       color: color-mix(in srgb, var(--fg) 60%, transparent);
     }
+    /* RESP-4 (a11y responsive): the model-pill is absolutely positioned top-right OVER the
+       textarea and stays visible until ~10 chars are typed (app.js _syncModelPickerAutohide) —
+       so on a narrow composer it overlaps and clips the placeholder / short-input text. Reserve
+       a right gutter for the pill's slot, but ONLY while the pill is actually shown AND the bar
+       is narrow — so a wide composer keeps full width and a long message (pill already
+       autohidden) reflows edge-to-edge. The pill is hidden (a) ≤260px by the container query
+       below and (b) inline `display:none` when group chat is active / uninitialized — exclude
+       both so the gutter never over-reserves when there is no pill. Applies to the textarea + its
+       ghost autocomplete overlay so both stay clear of the pill. Below the 260 micro-tier the
+       pill is display:none (container query above), so the gutter is moot there. */
+    @container chatbar (max-width: 480px) {
+      .chat-input-top:has(> .model-picker-wrap:not(.model-picker-autohide):not([style*="display: none"])) textarea#message,
+      .chat-input-top:has(> .model-picker-wrap:not(.model-picker-autohide):not([style*="display: none"])) #message-ghost {
+        padding-right: 150px;
+      }
+    }
     .chat-input-bottom {
       display: flex;
       justify-content: space-between;
@@ -39168,7 +39184,11 @@ body.theme-frosted .settings-nav-item {
   border-radius: var(--ow-radius-inner, 12px);
 }
 body.theme-frosted .settings-nav-item.active {
-  background: var(--ow-ios-blue, #0a84ff) !important;
+  /* #1375-c: the ACTIVE nav pill painted #0a84ff (Apple system blue) under white text is only
+     3.29:1 (WCAG AA fail for the white label). Darken the pill to a deeper system blue so the
+     white label clears 4.5:1 (rendered ≈5:1 after the glass brightness lift) — still an
+     unmistakable iOS-blue selection, just AA-legible. */
+  background: #0a5cc4 !important;
   color: #fff !important;
 }
 body.theme-frosted .settings-nav-item.active svg { opacity: 1; color: #fff; }
@@ -40874,6 +40894,44 @@ body.theme-frosted #sidebar button,
 body.theme-frosted .icon-rail a,
 body.theme-frosted .icon-rail button {
   text-shadow: 0 1px 1px rgba(255,255,255,0.4) !important;
+}
+/* ── #1375 a11y contrast: light-glass labels that render DARK over dark game content ──────────
+   The sidebar's brand title, user-name, and New Chat label sit in TRANSPARENT sub-containers
+   (.sidebar-header / .sidebar-user-bar are `background: transparent`), so — exactly like the
+   gadget-rail header just above (a transparent-over-dark container) — they float over the
+   translucent sidebar glass, which composites DARK over the dark game content and refracts/blurs
+   the raw backdrop through. The engine-staged a11y gate measures them at 2.9–3.5:1 with the
+   blanket #sidebar dark ink (the light-glass tint the ink assumes is not guaranteed there). Flip
+   THESE nodes to the app's LIGHT ink + a DARK legibility halo (the rail-head treatment) so they
+   clear WCAG AA over the dark backdrop; the halo also outlines them over any lighter glass frame
+   a GPU browser paints. Polarity of the rest of the sidebar is unchanged.
+   Scoped to prefers-reduced-transparency:no-preference — under `reduce` the glass chrome falls
+   back to the SOLID dark --panel with its own ink handling, so we leave that a11y mode untouched. */
+@media (prefers-reduced-transparency: no-preference) {
+  body.theme-frosted #sidebar #user-bar-name,
+  body.theme-frosted #sidebar .sidebar-brand-title,
+  body.theme-frosted #sidebar #sidebar-new-chat-btn .grow {
+    color: #fff !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.62), 0 0 2px rgba(0,0,0,0.5) !important;
+  }
+  /* The user-bar footer sits at the sidebar's BOTTOM, where the backdrop behind the glass is the
+     most variable (it can render light OR dark depending on the game content below), so light ink
+     alone is not reliably AA there. Give the footer a bounded DARK glass backing that SURVIVES the
+     compositor (a container fill, unlike a per-glyph scrim) so the white label clears AA regardless
+     of what's behind — a subtle account-footer band, in keeping with the dark Control-Center dock. */
+  body.theme-frosted #sidebar .sidebar-user-bar {
+    background-color: rgba(14, 16, 22, 0.55) !important;
+    border-radius: 10px;
+  }
+  /* #1375-b: the status-gadget disclosure chevron '▾' is dark ink on the gadget card's light
+     glass, which the gate composites mid-tone (3.5–3.7:1). The card is a LIGHT tile, so keep the
+     dark-ink polarity but drive it to full black + drop the .55 dimming so it clears AA, with a
+     light halo (dark-ink-on-light legibility, matching the card's other ink). */
+  body.theme-frosted #orwell-status .og-chev {
+    color: #000 !important;
+    opacity: 1 !important;
+    text-shadow: 0 0 2px rgba(255,255,255,0.65) !important;
+  }
 }
 
 /* ── KIT-LEVEL dark-ink-on-glass for chrome panels (#725, not whack-a-mole) ────
