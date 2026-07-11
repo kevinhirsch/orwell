@@ -786,8 +786,9 @@ jobs:
   # no CDN, no network) into each rendered surface and runs a rendered WCAG(4.5:1/3:1)+APCA contrast
   # sweep that samples the true backdrop pixels behind text (glass/scrim/blur the source-pinned
   # checks can't see). KNOWN violations are XFAIL'd (ratchet); an UNKNOWN one FAILS. PATH-GATED on
-  # `changes.frontend` (same as fe-responsive); folded into ci-gate below so it BLOCKS. On a skip it
-  # doesn't run and ci-gate reports the required green status.
+  # `changes.frontend` (same as fe-responsive). NON-BLOCKING while it bakes (owner ruling): it still
+  # RUNS + reports its own status on FE PRs, but is deliberately NOT in `ci-gate`'s `needs`/results,
+  # so it never gates a merge. Fold it into ci-gate to flip it blocking once the ratchet is trusted.
   a11y-matrix:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
@@ -873,7 +874,6 @@ jobs:
       - fe-responsive
       - mirror-parity
       - heavy-sims
-      - a11y-matrix
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -893,7 +893,6 @@ jobs:
             fe-responsive=${{ needs.fe-responsive.result }}
             mirror-parity=${{ needs.mirror-parity.result }}
             heavy-sims=${{ needs.heavy-sims.result }}
-            a11y-matrix=${{ needs.a11y-matrix.result }}
         run: |
           set -euo pipefail
           echo "Needed job results: $RESULTS"
