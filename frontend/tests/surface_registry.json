@@ -98,6 +98,19 @@
       "css_source": "orwellAvatar.js",
       "gate": "test_g27_avatar_studio.py",
       "note": "The G27 account avatar — paints the finalized casting headshot into the profile circle(s); default is the Apple-style monochrome person glyph. Fail-open, reads only the user's own /api/orwell/avatar."
+    },
+    {
+      "id": "settings-cards",
+      "family": "Settings sections (the settings-card band)",
+      "kit": "OrwellSettingsCard",
+      "kind": "kit",
+      "seam": "window.OrwellSettingsCardKit",
+      "seam_check": "window.OrwellSettingsCardKit = {",
+      "file": "orwellSettingsCard.js",
+      "css_family": ".osc-card",
+      "css_source": "../css/orwellSettingsCard.css",
+      "gate": "test_658_settings_card_kit.py",
+      "note": "The #658 kit (part of the #660 epic). Sibling to OrwellWindow/OrwellGadget/OrwellNotice. Every Settings section composes it — create() a fresh card, or upgrade() an existing .admin-card in place (keeping .admin-card so peek / empty-tab / .closest still work). First adoption: the Appearance tab (initAppearance -> upgradePanel)."
     }
   ]
 }
