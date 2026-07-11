@@ -2694,6 +2694,33 @@ body.bg-pattern-perlin-flow {
       border: 1px solid color-mix(in srgb, var(--accent-error, var(--red)) 30%, transparent);
     }
 
+    /* Issue 891 P0-2 (honest send status — no hex here, the L36 token pin covers this block):
+       a message HELD in the reload-durable send outbox
+       (send-while-streaming, an offline send, or a network-failed send awaiting its retry)
+       says so — 'queued' / 'queued — offline' — instead of silently spinning. Same a11y
+       reasoning as .unsent-tag above: chat.js (_setQueuedTag) inserts a REAL
+       <span class="queued-tag"> text node; this rule only styles it. Neutral while merely
+       queued; the offline variant borrows the error accent so "this device has no link
+       right now" reads at a glance. Cleared the moment the send actually dispatches. */
+    .msg-user .role .queued-tag {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    }
+    .msg-user.msg-queued-offline .role .queued-tag {
+      color: color-mix(in srgb, var(--accent-error, var(--red)) 80%, var(--fg));
+      background: color-mix(in srgb, var(--accent-error, var(--red)) 12%, transparent);
+      border-color: color-mix(in srgb, var(--accent-error, var(--red)) 30%, transparent);
+    }
+
     /* L36 follow-on — the MODEL's OOC answer (a producer/HUD aside): the GM wrapped its whole
        reply in ((...)), so render it as a quiet aside outside the fiction, not a spoken-in-room
        line. Mirrors the player-side aside treatment; theme-token driven. */
