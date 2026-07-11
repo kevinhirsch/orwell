@@ -1071,15 +1071,21 @@ def main() -> int:
             min_state = page.evaluate("""() => {
               const el = document.getElementById('orwell-finale');
               const dock = document.getElementById('minimized-dock');
+              const rail = document.getElementById('gadget-rail');
               const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-finale"]');
               const dr = dock ? dock.getBoundingClientRect() : null;
               return { hidden: !el || getComputedStyle(el).display === 'none', chip: !!chip,
-                       dockVisible: !!dock && getComputedStyle(dock).display !== 'none' && dr.height > 0 };
+                       dockVisible: !!dock && getComputedStyle(dock).display !== 'none' && dr.height > 0,
+                       // #573 B — RAIL UNIFICATION: the parked chip's dock is homed INTO the
+                       // control-room rail (one destination for minimized + docked windows).
+                       dockInRail: !!(dock && rail && rail.contains(dock)) };
             }""")
             check(min_state.get("hidden") is True, f"finale panel: minimize HIDES the panel ({min_state})")
             check(min_state.get("chip") is True, f"finale panel: minimize parks a chip in the shared dock ({min_state})")
             check(min_state.get("dockVisible") is True,
                   f"F1: the Windows dock is VISIBLE while holding a chip ({min_state})")
+            check(min_state.get("dockInRail") is True,
+                  f"#573 B: the parked-window dock is homed INTO the control-room rail ({min_state})")
             page.click("#minimized-dock .minimized-dock-chip[data-modal-id='orwell-finale']")
             page.wait_for_timeout(250)
             restored = page.evaluate(
